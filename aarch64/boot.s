@@ -1,9 +1,19 @@
-// boot.S — drop to EL1; keep IRQ/FIQ masked; call C main(); vectors set in C.
+// boot.S - Multi-core aware bootloader for RPi3
 
     .section .text.boot, "ax"
     .align  7
     .global _start
 _start:
+    // Get CPU ID first
+    mrs     x0, mpidr_el1
+    and     x0, x0, #0xFF        // Extract CPU ID (0-3)
+    cbz     x0, bsp_boot         // CPU0 = BSP, continue normal boot
+
+    // Secondary CPUs go to holding pen
+    b       secondary_psci_entry
+
+//============= BSP (CPU0) Boot Path =============
+bsp_boot:
     // Mask during early bring-up
     msr     daifset, #0b1111
     isb
@@ -51,7 +61,7 @@ el2_entry_from_el3:
     msr     hcr_el2, x1
     isb
 
-    // Prepare EL1 stack so we can ERET into it
+    // Prepare EL1 stack
     ldr     x1, =el1_stack_top
     msr     sp_el1, x1
 
@@ -63,16 +73,11 @@ el2_entry_from_el3:
     msr     sctlr_el1, x1
     isb
 
-    // (Optional) You may preinstall EL1 vectors here from EL2:
-    //   ldr x1, =vbar_el1_vector
-    //   msr vbar_el1, x1
-    //   isb
-
-    // Drop to EL1h at el1_start (DAIF masked on entry)
+    // Drop to EL1h at el1_start
     ldr     x1, =el1_start
     msr     elr_el2, x1
     mov     x1, #0b0101             // SPSR_EL2 M[3:0]=EL1h
-    orr     x1, x1, #(0b1111 << 6)  // keep masked until EL1 code unmasks
+    orr     x1, x1, #(0b1111 << 6)  // keep masked
     msr     spsr_el2, x1
     eret
 
@@ -83,7 +88,7 @@ el1_entry_direct:
 
 //---------------- common EL1 entry ----------------
 el1_start:
-    // Clear .bss
+    // Clear .bss (only BSP should do this)
     ldr     x0, =__bss_start
     ldr     x1, =__bss_end
     mov     x2, #0
@@ -92,10 +97,7 @@ el1_start:
     str     x2, [x0], #8
     b       1b
 2:
-    // *** Do NOT unmask here. ***
-    // Install VBAR_EL1 in C (main) first, then unmask IRQs in C.
-
-    // Call C main() with DAIF still masked
+    // Call C main
     bl      main
 
 hang:

@@ -1,4 +1,7 @@
 #ifndef __AARCH64_MEM_H
 #define __AARCH64_MEM_H
-void setup_mmu(void);
+
+void mmu_init(void);
+void mmu_secondary_init(void);
+
 #endif

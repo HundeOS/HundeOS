@@ -9,6 +9,10 @@
 #define MMIO_BASE       0xFE000000
 #endif
 
+#ifdef BSP_VIRT
+#define MMIO_BASE     0x09000000  // virt machine UART
+#endif
+
 #define GPFSEL0         ((volatile unsigned int*)(MMIO_BASE+0x00200000))
 #define GPFSEL1         ((volatile unsigned int*)(MMIO_BASE+0x00200004))
 #define GPFSEL2         ((volatile unsigned int*)(MMIO_BASE+0x00200008))

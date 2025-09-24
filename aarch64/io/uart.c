@@ -1,5 +1,5 @@
 #include "uart.h"
-#include "../../../kernel/spin.h"
+#include "../../kernel/kernel.h"
 
 
 static volatile uint32_t _check_ready() {
@@ -8,7 +8,6 @@ static volatile uint32_t _check_ready() {
 
 static void _send(unsigned int c) {
     __asm__ volatile("dsb sy");
-
     spin_wait(&_check_ready);
     *UART0_DR = c;
     __asm__ volatile("dsb sy");

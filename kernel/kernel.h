@@ -6,5 +6,9 @@
 #include "halt.h"
 #include "context.h"
 #include "print.h"
+#include "process.h"
+#include "cpu.h"
+#include "mutex.h"
+#include "debug.h"
 
 #endif

@@ -12,20 +12,38 @@ void spin(uint32_t count) {
     }
 }
 
-void spin_wait(spin_check check) {
-    spin_wait_max(check, MAX);
+WaitResult spin_wait(spin_check check) {
+    return spin_wait_max(check, MAX);
 }
 
-void spin_wait_max(spin_check check, const uint32_t max) {
+WaitResult spin_wait_max(spin_check check, const uint32_t max) {
     uint32_t count = 0;
     while (check())
     {
         if (count > max) {
-            break;
+            return ABORT;
         }
         noop();
         count++;
     }
-        
+    return OK;
 }
 
+WaitResult spin_wait_context(spin_context_check check, void * context, const uint32_t max) {
+    uint32_t count = 0;
+    while (check(context))
+    {
+        if (count > max) {
+            return ABORT;
+        }
+        noop();
+        count++;
+    }
+    return OK;
+}
+
+void wait_for_interrupts() {
+    while (1) {
+        wait_for_interrupt();
+    }
+}

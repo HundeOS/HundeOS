@@ -1,12 +1,17 @@
 #include "print.h"
 #include <stdint.h>
+#include "mutex.h"
+
+static mutex_t print_lock = MUTEX_INIT;
 
 extern void puts(const char* str);
 extern void put_int(int num);
 
 void k_println(const char * str) {
+    mutex_lock(&print_lock);
     puts(str);
     puts("\n");
+    mutex_unlock(&print_lock);
 }
 
 // Helper function to output a single character using puts
@@ -92,7 +97,7 @@ int k_printf(const char* format, ...) {
     int count = 0;
     char buffer[256];  // Buffer for building output strings
     int buf_idx = 0;
-    
+    mutex_lock(&print_lock);
     for (int i = 0; format[i] != '\0'; i++) {
         if (format[i] != '%') {
             // Regular character - add to buffer
@@ -275,6 +280,7 @@ int k_printf(const char* format, ...) {
     }
     
     va_end(args);
+    mutex_unlock(&print_lock);
     return count;
 }
 

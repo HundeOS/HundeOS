@@ -4,8 +4,12 @@
 #ifndef __IO_UART_H
 #define __IO_UART_H
 
+#ifdef BSP_VIRT
+#define UART0_BASE     0x09000000  // virt machine UART
+#else
 #define UART0_OFFSET    0x00201000
 #define UART0_BASE      (MMIO_BASE + UART0_OFFSET)  // 0x3F201000
+#endif
 
 #define UART0_DR        ((volatile unsigned int*)UART0_BASE + 0x00)  // 0x3F201000 - Data Register
 #define UART0_FR        ((volatile unsigned int*)UART0_BASE + 0x18)  // 0x3F201018 - Flag Register

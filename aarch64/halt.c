@@ -1,5 +1,5 @@
 void halt() {
     while(1) {
-        asm volatile("wfi");
+        __asm__ __volatile__("wfi");
     }
 }

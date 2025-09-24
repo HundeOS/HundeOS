@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include "../kernel/kernel.h"
 
 // Structure to hold saved register context
@@ -11,7 +12,7 @@ typedef struct {
 
 static inline uint64_t get_current_el(void) {
     uint64_t el;
-    asm volatile("mrs %0, CurrentEL" : "=r" (el));
+    __asm__ __volatile__("mrs %0, CurrentEL" : "=r" (el));
     return (el >> 2) & 3;
 }
 
@@ -25,13 +26,13 @@ void dump_state(void) {
     
     uint32_t ec = (esr >> 26) & 0x3F;
     
-    k_printf("Exception Class: %x\n", ec);
-    k_printf("ESR: %x\n", esr);
-    k_printf("Fault Address (FAR): %x\n", far);
-    k_printf("Exception Link Register (ELR): %x\n", elr);
+    __d_printf(FAULT, "Exception Class: %x\n", ec);
+    __d_printf(FAULT, "ESR: %x\n", esr);
+    __d_printf(FAULT, "Fault Address (FAR): %x\n", far);
+    __d_printf(FAULT, "Exception Link Register (ELR): %x\n", elr);
     
     if (ec == 0x21) {
-        k_println("Instruction Abort from current EL");
+        __d_println(FAULT, "Instruction Abort from current EL");
     }
 }
 
@@ -63,26 +64,24 @@ static inline uint64_t get_elr_el1(void) {
     return elr;
 }
 
-
 uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
     uint64_t esr = get_esr_el1();
     uint64_t ec = (esr >> 26) & 0x3F;  // Exception class
 
-    k_printf("sync call: %i\n", ec);
-    // k_printf("Args: arg0=%i, arg1=%i, arg2=%i\n", (int)ctx->x[0], (int)ctx->x[1], (int)ctx->x[2]);
-        
+    __d_printf(DEBUG, "sync call: %i\n", ec);
+
     // Handle synchronous exceptions (e.g., undefined instruction, SVC, data abort)
     switch(ec) {
         case 0x15: // SVC instruction execution
-            k_printf("system call: %i\n", ctx->x[8]);
+            __d_printf(DEBUG, "system call: %i\n", ctx->x[8]);
             return 1;
             break;
         case 0x24: // Data abort from current EL
-            k_println("data abort: ");
+            __d_println(FAULT, "data abort: ");
             return 0;
             break;
         case 0x25: // Instruction abort from current EL
-            k_println("instruction abort call: ");
+            __d_println(PANIC, "instruction abort call: ");
             if (hcf) {
                 panic("instruction abort call: ");
             }
@@ -90,99 +89,97 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
             break;
         default:
             // Handle other synchronous exceptions
-            k_printf("unhandled call: %i\n", ec);
+            __d_printf(UNHANDLED, "unhandled call: %i\n", ec);
             return 0;
             break;
     }
-    
-
 }
 
 // Current EL with SP0 handlers
 uint64_t c_sync_handler_current_el_sp0(exception_context_t *ctx) {
-    k_println("c_sync_handler_current_el_sp0");
+    __d_println(DEBUG, "c_sync_handler_current_el_sp0");
     return handle_sync(ctx, 0);
 }
 
 void c_irq_handler_current_el_sp0(exception_context_t *ctx) {
     // Handle IRQ interrupt
     // Process pending interrupts from interrupt controller
-    k_println("c_irq_handler_current_el_sp0");
+    __d_println(DEBUG, "c_irq_handler_current_el_sp0");
 }
 
 void c_fiq_handler_current_el_sp0(exception_context_t *ctx) {
     // Handle FIQ (fast interrupt)
-    k_println("c_fiq_handler_current_el_sp0");
+    __d_println(DEBUG, "c_fiq_handler_current_el_sp0");
 }
 
 void c_serror_handler_current_el_sp0(exception_context_t *ctx) {
     // Handle system error (SError)
     // This is typically fatal
-    k_println("c_serror_handler_current_el_sp0");    
+    __d_println(DEBUG, "c_serror_handler_current_el_sp0");
 }
 
 // Current EL with SPx handlers
 uint64_t c_sync_handler_current_el_spx(exception_context_t *ctx) {
-    k_println("c_sync_handler_current_el_spx");
+    __d_println(DEBUG, "c_sync_handler_current_el_spx");
     return handle_sync(ctx, 1);
     // Handle synchronous exceptions from current EL
 }
 
 void c_irq_handler_current_el_spx(exception_context_t *ctx) {
     // Handle IRQ from current EL with SPx
-    k_println("c_irq_handler_current_el_spx");
+    __d_println(DEBUG, "c_irq_handler_current_el_spx");
 }
 
 void c_fiq_handler_current_el_spx(exception_context_t *ctx) {
     // Handle FIQ from current EL with SPx
-    k_println("c_fiq_handler_current_el_spx");
+    __d_println(DEBUG, "c_fiq_handler_current_el_spx");
 }
 
 void c_serror_handler_current_el_spx(exception_context_t *ctx) {
     // Handle SError from current EL with SPx
-    k_println("c_serror_handler_current_el_spx");
+    __d_println(DEBUG, "c_serror_handler_current_el_spx");
 }
 
 // Lower EL using AArch64 handlers
 void c_sync_handler_lower_el_aarch64(exception_context_t *ctx) {
-    k_println("c_sync_handler_lower_el_aarch64");
+    __d_println(DEBUG, "c_sync_handler_lower_el_aarch64");
     handle_sync(ctx, 0);
 }
 
 void c_irq_handler_lower_el_aarch64(exception_context_t *ctx) {
     // Handle IRQ from lower EL (AArch64)
-    k_println("c_irq_handler_current_el_aarch64");
+    __d_println(DEBUG, "c_irq_handler_current_el_aarch64");
 }
 
 void c_fiq_handler_lower_el_aarch64(exception_context_t *ctx) {
     // Handle FIQ from lower EL (AArch64)
-    k_println("c_fiq_handler_current_el_aarch64");
+    __d_println(DEBUG, "c_fiq_handler_current_el_aarch64");
 }
 
 void c_serror_handler_lower_el_aarch64(exception_context_t *ctx) {
     // Handle SError from lower EL (AArch64)
-    k_println("c_serror_handler_current_el_aarch64");
+    __d_println(DEBUG, "c_serror_handler_current_el_aarch64");
 }
 
 // Lower EL using AArch32 handlers
 void c_sync_handler_lower_el_aarch32(exception_context_t *ctx) {
     // Handle synchronous exceptions from AArch32 lower EL
-    k_println("c_sync_handler_lower_el_aarch32");
+    __d_println(DEBUG, "c_sync_handler_lower_el_aarch32");
 }
 
 void c_irq_handler_lower_el_aarch32(exception_context_t *ctx) {
     // Handle IRQ from lower EL (AArch32)
-    k_println("c_irq_handler_lower_el_aarch32");
+    __d_println(DEBUG, "c_irq_handler_lower_el_aarch32");
 }
 
 void c_fiq_handler_lower_el_aarch32(exception_context_t *ctx) {
     // Handle FIQ from lower EL (AArch32)
-    k_println("c_fiq_handler_lower_el_aarch32");
+    __d_println(DEBUG, "c_fiq_handler_lower_el_aarch32");
 }
 
 void c_serror_handler_lower_el_aarch32(exception_context_t *ctx) {
     // Handle SError from lower EL (AArch32)
-    k_println("c_serror_handler_lower_el_aarch32");
+    __d_println(DEBUG, "c_serror_handler_lower_el_aarch32");
 }
 
 // Initialize vector table

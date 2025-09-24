@@ -1,7 +1,10 @@
 #include <stdint.h>
-#include "rasppi/io/uart.h"
+#include "../kernel/kernel.h"
+#include "io/uart.h"
 #include "exception.h"
 #include "mem.h"
+#include "cpu.h"
+#include "debug.h"
 
 static void enable_fp_simd(void) {
     uint64_t cpacr;
@@ -19,8 +22,15 @@ static void enable_fp_simd(void) {
 
 
 void arch_init() {
+    __d_println(PROGRESS, "Initialising aarch64 system");
     enable_fp_simd();
+    __d_println(DEBUG, "SIMD enabled");
     uart_init();
+    __d_println(DEBUG, "UART initialised");
     vectors_init();
-    setup_mmu();
+    __d_println(DEBUG, "Vectors initialised");
+    mmu_init();
+    __d_println(DEBUG, "MMU initialised");
+    start_secondary_cpus(4);
+    __d_println(PROGRESS, "SMP initialised");
 }

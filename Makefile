@@ -6,7 +6,7 @@ LD = $(CROSS_COMPILE)ld
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
 # Compiler flags
-CFLAGS = -nostdlib -nostartfiles -ffreestanding -O2 -Wall -Wextra -DBSP_RPI3
+CFLAGS = -nostdlib -std=c11 -nostartfiles -ffreestanding -latomic -mno-outline-atomics -O2 -Wall -Wextra -DBSP_VIRT
 
 # Assembler flags
 ASFLAGS = 
@@ -46,22 +46,22 @@ build/%.o: %.s
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $< $@
 
-
 # Link object files to create ELF
 $(ELF): $(ASM_OBJECTS) $(OBJECTS)
 	$(LD) $(LDFLAGS) $^ -o $@
 
 # Clean build artifacts
 clean:
-	find . -name '*.o' -exec rm -r {} \;
-	rm *.img *.elf
+	rm -rf build
 
-# Run semihosting version in QEMU (RECOMMENDED)
-qemu: $(BIN)
+qemu-virt: $(BIN)
 	qemu-system-aarch64 \
-		-M raspi3b \
-		-kernel $(BIN) \
+		-M virt \
+		-smp cpus=8 -cpu max -m 4G \
 		-serial stdio \
-		-monitor none
-# 	qemu-system-aarch64 -M raspi4b -kernel $(BIN) -serial stdio -d mmu,guest_errors,unimp -D qemu.log
+		-cpu cortex-a57 \
+		-kernel $(BIN) \
+		-nographic \
+		-monitor telnet::4444,server,nowait
+
 .PHONY: all clean qemu

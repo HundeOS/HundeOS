@@ -1,8 +1,8 @@
 #ifndef __KERNEL_HALT_H
 #define __KERNEL_HALT_H
 
-void halt();
+extern void halt();
 void panic(const char * error);
-void dump_state();
+extern void dump_state();
 
 #endif

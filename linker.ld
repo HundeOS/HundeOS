@@ -13,8 +13,8 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* Pi firmware / many emulators load kernel8 at 0x80000 */
-    . = 0x80000;
+    /* virt bootload puts kernel here */
+    . = 0x40080000;
 
     /* Early boot (reset path) */
     .text.boot : ALIGN(64) {

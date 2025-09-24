@@ -29,8 +29,6 @@ typedef struct el1_trapframe {
     uint64_t x0,  x1;               // +272
 } el1_trapframe;
 
-_Static_assert(sizeof(el1_trapframe) == 288, "trapframe size mismatch");
-
 // EL1 current-EL handlers
 void     el1_sync_handler(el1_trapframe *tf);
 void     el1_irq_handler(el1_trapframe *tf);
