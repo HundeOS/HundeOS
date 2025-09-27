@@ -12,7 +12,7 @@ typedef enum {
 } cpu_state;
 
 typedef struct cpu {
-    process* current_process;
+    Process* current_process;
     uint32_t cpu_id;
     void* kernel_stack;
     struct cpu* self;  // Pointer to itself
@@ -22,6 +22,7 @@ typedef struct cpu {
 
 void smp_init();
 int start_secondary_cpus(uint64_t total_cpus);
+void start_primary_cpu();
 
 uint64_t cpu_count();
 uint64_t cpu_id();

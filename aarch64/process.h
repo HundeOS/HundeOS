@@ -3,8 +3,9 @@
 
 #include <stdint.h>
 #include "../kernel/kernel.h"
+#define MAX_PROCESSES 32
 
-typedef struct process_context {
+typedef struct ProcessContext {
     // General purpose registers
     uint64_t x0,  x1,  x2,  x3,  x4,  x5,  x6,  x7;
     uint64_t x8,  x9,  x10, x11, x12, x13, x14, x15;
@@ -23,23 +24,7 @@ typedef struct process_context {
     __uint128_t v24, v25, v26, v27, v28, v29, v30, v31;
     uint64_t fpsr;          // Floating-point status register
     uint64_t fpcr;          // Floating-point control register
-} process_context;
+} ProcessContext;
 
-
-typedef struct process {
-    // 1. Separate memory space (page tables)
-    uint64_t* page_table;     // Each process gets its own L1 table
-
-    // 2. Saved CPU state
-    process_context context; // Registers saved on context switch
-
-    // 3. Stack
-    void* stack;       // Each process has its own stack
-    uint64_t stack_size;
-
-    // 4. Process info
-    uint32_t pid;
-    process_state state;
-} process;
 
 #endif

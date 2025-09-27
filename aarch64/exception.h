@@ -1,7 +1,5 @@
-/* exception.h - Exception handling definitions */
-
-#ifndef _EXCEPTION_H_
-#define _EXCEPTION_H_
+#ifndef __AARCH64_EXCEPTION_H_
+#define __AARCH64_EXCEPTION_H_
 
 #include <stdint.h>
 

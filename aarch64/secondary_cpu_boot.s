@@ -7,6 +7,6 @@ secondary_psci_entry:
     mov     sp, x0
     mrs     x1, mpidr_el1
     and     x1, x1, #0xFF     // cpu_id = Aff0
-    bl      start_cpu
+    bl      start_secondary_cpu
 1:  wfe
     b       1b

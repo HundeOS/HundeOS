@@ -8,7 +8,10 @@
 #include "print.h"
 #include "process.h"
 #include "cpu.h"
+#include "cpu_timer.h"
 #include "mutex.h"
 #include "debug.h"
+#include "smp_main.h"
+#include "kernel.h"
 
 #endif

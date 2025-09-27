@@ -6,13 +6,13 @@ LD = $(CROSS_COMPILE)ld
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
 # Compiler flags
-CFLAGS = -nostdlib -std=c11 -nostartfiles -ffreestanding -latomic -mno-outline-atomics -O2 -Wall -Wextra -DBSP_VIRT
+CFLAGS = -mcmodel=large -nostdlib -std=c11 -nostartfiles -ffreestanding -latomic -mno-outline-atomics -O2 -Wall -Wextra -DBSP_VIRT
 
 # Assembler flags
-ASFLAGS = 
+ASFLAGS =
 
 # Linker flags
-LDFLAGS = -T linker.ld 
+LDFLAGS = -T linker.ld
 
 # Output files
 ELF = build/kernel.elf
@@ -56,8 +56,9 @@ clean:
 
 qemu-virt: $(BIN)
 	qemu-system-aarch64 \
-		-M virt \
-		-smp cpus=8 -cpu max -m 4G \
+		-M virt,gic-version=3 \
+		-smp cpus=2 -cpu max \
+		-m 4G  \
 		-serial stdio \
 		-cpu cortex-a57 \
 		-kernel $(BIN) \

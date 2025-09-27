@@ -9,8 +9,10 @@
 
 #include "../kernel/kernel.h"
 #include "debug.h"
+#include "exception.h"
 
 static uint8_t __attribute__((aligned(16))) cpu_stacks[MAX_CPUS][STACK_SIZE];
+static inline void wr_vbar_el1(uint64_t v){ __asm__ __volatile__("msr VBAR_EL1, %0"::"r"(v)); __asm__ __volatile__("isb"); }
 
 // we count the primary
 volatile uint64_t cpus_online = 1;
@@ -18,7 +20,6 @@ volatile uint64_t cpus_online = 1;
 static mutex_t startup_lock = MUTEX_INIT;
 
 extern void secondary_psci_entry(void);
-extern void secondary_main(uint64_t cpu_id);
 
 
 uint64_t cpu_id() {
@@ -36,7 +37,7 @@ static inline void cpu_set_this_id(unsigned id){
 }
 
 // Called on each secondary by the assembly entry
-void start_cpu()
+void start_secondary_cpu()
 {
     // Turn MMU on with the same tables the boot core installed
     mmu_secondary_init();
@@ -46,9 +47,23 @@ void start_cpu()
     __d_printf(INFO, "CPU starting: %i\n", cpus_online);
     cpu_set_this_id(cpus_online);
     mutex_unlock(&startup_lock);
-
+    vectors_init();
     // Jump to your per-CPU code
-    secondary_main(cpu_id());
+    cpu_main(cpu_id());
+
+    // If it returns, park
+    halt();
+}
+
+// Called on each secondary by the assembly entry
+void start_primary_cpu()
+{
+    mutex_lock(&startup_lock);
+    __d_printf(INFO, "CPU starting: %i\n", cpus_online);
+    cpu_set_this_id(1);
+    mutex_unlock(&startup_lock);
+
+    cpu_main(cpu_id());
 
     // If it returns, park
     halt();

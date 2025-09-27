@@ -44,6 +44,6 @@ WaitResult spin_wait_context(spin_context_check check, void * context, const uin
 
 void wait_for_interrupts() {
     while (1) {
-        wait_for_interrupt();
+        cpu_wait();
     }
 }

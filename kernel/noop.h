@@ -2,7 +2,7 @@
 #define __KERNEL_NOOP_H
 
 extern void noop();
-extern void wait_for_interrupt();
-extern void cpu_relax();
+extern void cpu_wait();
+extern void cpu_yield();
 
 #endif

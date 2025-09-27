@@ -1,68 +1,85 @@
-/* linker.ld — Raspberry Pi 3/4 (AArch64) style, image at 0x80000
- *
- * Layout:
- *   0x80000: .text.boot (contains _start)
- *            .text.vectors (2 KiB aligned; KEEP)
- *            .text / .rodata
- *            .data
- *            .bss (NOLOAD)  -> __bss_start/__bss_end/__bss_size
- *            .bss.stack (NOLOAD; KEEP) -> EL3/EL2/EL1 stacks
- */
+/* kernel.ld — AArch64, 4 KiB pages, image @ 0x40080000
+   Simple: 2 PT_LOAD segments (RX and RW), 4 KiB alignment throughout. */
 
 ENTRY(_start)
 
+PHDRS {
+  text PT_LOAD FLAGS(5);  /* R X */
+  data PT_LOAD FLAGS(6);  /* R W */
+}
+
 SECTIONS
 {
-    /* virt bootload puts kernel here */
-    . = 0x40080000;
+  . = 0x40080000;
+  __kernel_start = .;
 
-    /* Early boot (reset path) */
-    .text.boot : ALIGN(64) {
-        KEEP(*(.text.boot))
-    }
+  /* ----- TEXT & RODATA (RX) ----- */
+  . = ALIGN(0x1000);
 
-    /* Exception vectors: must be 2 KiB aligned and kept */
-    . = ALIGN(2048);
-    .text.vectors : {
-        KEEP(*(.text.vectors))
-    }
+  __text_start = .;
+  .text.boot : ALIGN(0x1000) {
+    KEEP(*(.text.boot))
+  } :text
 
-    /* Normal code, then read-only data */
-    .text : ALIGN(64) {
-        *(.text .text.* .gnu.linkonce.t*)
-    }
+  /* Exception vectors: keep on a 4 KiB boundary (your MMU maps RX here) */
+  . = ALIGN(0x1000);
+  __vectors_start = .;
+  .text.vectors : {
+    KEEP(*(.text.vectors))
+  } :text
+  __vectors_end = .;
 
-    .rodata : ALIGN(64) {
-        *(.rodata .rodata.* .gnu.linkonce.r*)
-    }
+  .text : ALIGN(0x1000) {
+    *(.text .text.* .gnu.linkonce.t*)
+  } :text
+  __text_end = .;
 
-    /* Writable data */
-    PROVIDE(_data = .);
-    .data : ALIGN(64) {
-        *(.data .data.* .gnu.linkonce.d*)
-        *(.init_array .init_array.*)
-        *(.fini_array .fini_array.*)
-        *(.got .got.*)
-    }
+  .rodata : ALIGN(0x1000) {
+    *(.rodata .rodata.* .gnu.linkonce.r*)
+  } :text
+  __rodata_end = .;
 
-    /* Zero-init (not stored in the image) */
-    .bss (NOLOAD) : ALIGN(16) {
-        __bss_start = .;
-        *(.bss .bss.*)
-        *(COMMON)
-        __bss_end = .;
-        __bss_size = (__bss_end - __bss_start) >> 3;  /* words = 8-byte stores */
-    }
+  /* ----- DATA (RW) ----- */
+  . = ALIGN(0x1000);
+  _data = .;
 
-    /* Stacks for EL3/EL2/EL1 (from boot.S): keep but don’t bloat file */
-    .bss.stack (NOLOAD) : ALIGN(16) {
-        KEEP(*(.bss.stack))
-    }
+  __data_start = .;
+  .data : ALIGN(0x1000) {
+    *(.data .data.* .gnu.linkonce.d*)
+    *(.init_array .init_array.*)
+    *(.fini_array .fini_array.*)
+    *(.got .got.*)
+  } :data
+  __data_end = .;
 
-    _end = .;
+  /* ----- BSS (RW, no load) ----- */
+  . = ALIGN(0x1000);
+  __bss_start = .;
+  .bss (NOLOAD) : ALIGN(0x1000) {
+    *(.bss .bss.*)
+    *(COMMON)
+  } :data
+  __bss_end = .;
+  __bss_size = (__bss_end - __bss_start);
 
-    /* Toss toolchain noise */
-    /DISCARD/ : {
-        *(.comment) *(.gnu*) *(.note*) *(.eh_frame*) *(.eh_frame_hdr*)
-    }
+  /* Stacks (no load) */
+  . = ALIGN(0x1000);
+  .bss.stack (NOLOAD) : ALIGN(0x1000) {
+    KEEP(*(.bss.stack))
+  } :data
+
+  /* Page allocator pool (no load) — still needs RW mapping at runtime */
+  . = ALIGN(0x1000);
+  __page_pool_start = .;
+  .page_pool (NOLOAD) : ALIGN(0x1000) {
+    . += 4M;
+  } :data
+  __page_pool_end = .;
+
+  _end = .;
+  __kernel_end = .;
+
+  /DISCARD/ : {
+    *(.comment) *(.gnu*) *(.note*) *(.eh_frame*) *(.eh_frame_hdr*)
+  }
 }

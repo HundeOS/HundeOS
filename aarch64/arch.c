@@ -33,4 +33,5 @@ void arch_init() {
     __d_println(DEBUG, "MMU initialised");
     start_secondary_cpus(4);
     __d_println(PROGRESS, "SMP initialised");
+    start_primary_cpu();
 }

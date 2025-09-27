@@ -1,7 +1,7 @@
 #include <stdint.h>
 
-uint32_t syscall(uint32_t num, uint32_t arg1, uint32_t arg2, uint32_t arg3) {
-    uint32_t result;
+uint64_t syscall(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
+    uint64_t result;
 
     register uint64_t x0 __asm__("x0") = arg1;
     register uint64_t x1 __asm__("x1") = arg2;
