@@ -2,14 +2,21 @@
 #define __AARCH64_PAGE_TABLE_H
 
 #include <stdint.h>
-#include <stdint.h>
 
 #include "../kernel/kernel.h"
-#include "process.h"
+#include "page_alloc.h"
 
-// Bits (same as you’ve been using)
-#define TABLE_SIZE 4096 // 4KB
-#define PAGE_SIZE 0x1000UL
+typedef uint64_t PageTableEntry;
+#if !defined(__BYTE_ORDER__) || (__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__)
+# error "This PTE bitfield layout assumes little-endian (AArch64 Linux/QEMU style)."
+#endif
+
+#define TABLE_SIZE (PAGE_SIZE / sizeof(PageTableEntry))
+
+typedef struct PageTable {
+    PageTableEntry entries[TABLE_SIZE];
+} PageTable;
+
 
 typedef enum {
     ATTR_INDEX_NORMAL = 0,   // MAIR slot for Normal WBWA
@@ -74,29 +81,20 @@ typedef struct {
 } MappingPermissions;
 
 void PageTable__grant(Process * self);
-PageTable PageTable__new();
-PageTable PageTable__ensure_next_level_table(PageTable parent_level_table,
-                                                    uint64_t child_index);
-PageTable PageTable__kensure_next_level_table(PageTable parent_level_table,
-                                                    uint64_t child_index);
-PageTableEntry PageTable__make_table_desc(PageTableEntry next_level_page);
-PageTableEntry PageTable__make_page_desc_4k(uint64_t phys_addr,
-                                              AccessAttribute access,
-                                              ShareAttribute shareability,   // already shifted
-                                              AccessAttribute access_perms,   // already shifted
-                                              int uxn_enable,
-                                              int pxn_enable);
-// PageTableEntry PageTable__make_page_desc_4k_l3(uint64_t phys_addr,
-//                                   unsigned attr_index,
-//                                   ShareAttribute shareability,   // already shifted
-//                                   AccessAttribute access_perms,   // already shifted
-//                                   int uxn_enable,
-//                                   int pxn_enable);
-//
-PageTableEntry PageTable__make_block_desc_l3(uint64_t phys_addr,
-                                  Mair type,
-                                  ShareAttribute shareability,   // already shifted
-                                  AccessAttribute access_perms,   // already shifted
-                                  int uxn_enable,
-                                  int pxn_enable);
+PageTable * PageTable__new();
+PageTable * PageTable__ensure_next_level_table(PageTable * parent_level_table,
+                                               uint64_t child_index);
+
+PageTableEntry PageTable__make_table_desc(PageTable * next_level_page);
+
+int PageTable__map_2M_block(PageTable * self,
+                            uint64_t virtual_address,
+                            uint64_t phys_addr,
+                            MappingPermissions perms);
+
+int PageTable__map_4k_page(PageTable * self,
+                           uint64_t virtual_address,
+                           uint64_t phys_addr,
+                           MappingPermissions perms);
+
 #endif

@@ -40,7 +40,7 @@ static inline void cpu_set_this_id(unsigned id){
 void start_secondary_cpu()
 {
     // Turn MMU on with the same tables the boot core installed
-    mmu_secondary_init();
+    MMU__secondary_init();
 
     mutex_lock(&startup_lock);
     cpus_online++;
@@ -70,7 +70,7 @@ void start_primary_cpu()
 }
 
 // Simple helper: on QEMU virt, MPIDR.AFF0 == logical cpu#
-static inline uint64_t mpidr_for_cpu(unsigned cpu) { return (uint64_t)cpu; }
+inline uint64_t mpidr_for_cpu(unsigned cpu) { return (uint64_t)cpu; }
 
 uint32_t check_cpus_online(void * num) {
     unsigned messaged = *(unsigned *)num;

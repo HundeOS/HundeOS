@@ -71,10 +71,13 @@ SECTIONS
   /* Page allocator pool (no load) — still needs RW mapping at runtime */
   . = ALIGN(0x1000);
   __page_pool_start = .;
-  .page_pool (NOLOAD) : ALIGN(0x1000) {
-    . += 4M;
-  } :data
-  __page_pool_end = .;
+/*  .page_pool (NOLOAD) : ALIGN(0x1000) {*/
+/*    . += 4M;*/
+/*  } :data*/
+/*  __page_pool_end = .;*/
+
+  . = ALIGN(0x1000);
+  __heap_start = .;
 
   _end = .;
   __kernel_end = .;

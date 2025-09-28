@@ -23,7 +23,7 @@ typedef void (*ProcessEntryPoint)();
 
 typedef struct Process {
     // 1. Separate memory space (page tables)
-    PageTable page_table;     // Each process gets its own L1 table
+    PageTable* page_table;     // Each process gets its own L1 table
 
     // 2. Saved CPU state
     void* context; // Registers saved on context switch

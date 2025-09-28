@@ -29,7 +29,7 @@ void arch_init() {
     __d_println(DEBUG, "UART initialised");
     vectors_init();
     __d_println(DEBUG, "Vectors initialised");
-    mmu_init();
+    MMU__init();
     __d_println(DEBUG, "MMU initialised");
     start_secondary_cpus(4);
     __d_println(PROGRESS, "SMP initialised");

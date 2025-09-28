@@ -2,8 +2,8 @@
 #define __KERNEL_MEM_H
 #include <stdint.h>
 
-typedef uint64_t PageTableEntry;
-typedef PageTableEntry* PageTable;
+#define PAGE_SIZE (4096 / sizeof(uint64_t))
+typedef struct PageTable PageTable;
 
 typedef struct {
     void* base;

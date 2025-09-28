@@ -7,63 +7,43 @@
 #include <stdint.h>
 
 #include "cpu.h"
-
-#define GICD_BASE   0x08000000UL
-#define GICR_BASE   0x080A0000UL   // per-CPU redistributor frames, stride 0x20000
-#define GICR_STRIDE 0x20000UL
-
-#define GICD_CTLR   0x0000
+#include "asm_helpers.h"
+#include "gicr.h"
 
 
-// GICR offsets we need (RD_base + SGI_base 0x10000)
-#define GICR_CTLR           0x0000
-#define GICR_WAKER          0x0014
-#define GICR_IGROUPR0       0x10080
-#define GICR_ISENABLER0     0x10100
-#define GICR_ICFGR1         0x10C04      // PPIs [31:16] config (edge/level)
-#define GICR_IPRIORITYR(n) (0x10400 + (n)) // byte-per-int
-
-static inline void writel(uint32_t v, volatile void *a){ *(volatile uint32_t*)a = v; }
-static inline uint32_t readl(volatile void *a){ return *(volatile uint32_t*)a; }
-
-static inline uint64_t rd_mpidr(void){ uint64_t x; __asm__ volatile("mrs %0, mpidr_el1":"=r"(x)); return x; }
-static inline uint64_t rd_cntfrq(void){ uint64_t x; __asm__ volatile("mrs %0, cntfrq_el0":"=r"(x)); return x; }
-static inline void     wr_cntv_tval(uint64_t v){ __asm__ volatile("msr cntv_tval_el0, %0" :: "r"(v)); }
-static inline void     wr_cntv_ctl(uint64_t v){  __asm__ volatile("msr cntv_ctl_el0,  %0" :: "r"(v)); }
-static inline void     wr_cntp_tval(uint64_t v){ __asm__ volatile("msr cntp_tval_el0, %0" :: "r"(v)); }
-static inline void     wr_cntp_ctl(uint64_t v){  __asm__ volatile("msr cntp_ctl_el0,  %0" :: "r"(v)); }
-
-static inline void     wr_icc_pmr(uint64_t v){   __asm__ volatile("msr ICC_PMR_EL1, %0" :: "r"(v)); }
-static inline void     wr_icc_igrpen1(uint64_t v){__asm__ volatile("msr ICC_IGRPEN1_EL1, %0" :: "r"(v)); }
-static inline void     wr_icc_sre(uint64_t v){   __asm__ volatile("msr ICC_SRE_EL1, %0" :: "r"(v)); __asm__ volatile("isb"); }
-static inline void     enable_irq(void){         __asm__ volatile("msr daifclr, #2"); }  // clear I-bit
-static inline unsigned cpu_aff0(void){ return (unsigned)(rd_mpidr() & 0xff); }
-
-
-static inline uint32_t mmio_read32(const volatile void *addr) {
+inline uint32_t mmio_read32(const volatile void *addr)
+{
     return *(const volatile uint32_t *)addr;
 }
-static inline void mmio_write32(uint32_t v, volatile void *addr) {
+
+inline void mmio_write32(uint32_t v, volatile void *addr)
+{
     *(volatile uint32_t *)addr = v;
 }
 
-static inline void dmb_ish(void){ __asm__ __volatile__("dmb ish" ::: "memory"); }
-static inline void dsb_ish(void){ __asm__ __volatile__("dsb ish" ::: "memory"); }
-static inline void isb(void){     __asm__ __volatile__("isb" ::: "memory"); }
+inline uint32_t r32(uintptr_t a)
+{
+    return *(volatile uint32_t*)a;
+}
 
-static inline uint32_t r32(uintptr_t a){ return *(volatile uint32_t*)a; }
-static inline void     w32(uintptr_t a, uint32_t v){ *(volatile uint32_t*)a = v; }
+inline void w32(uintptr_t a, uint32_t v)
+{
+    *(volatile uint32_t*)a = v;
+}
 
-void gicv3_dist_enable_grp1ns(void){
+void gicv3_dist_enable_grp1ns(void)
+{
     // Enable ARE_NS (bit 4) and EnableGrp1NS (bit 1). Leave grp0 off.
     uint32_t ctlr = r32(GICD_BASE + GICD_CTLR);
     ctlr |= (1u<<4) /*ARE_NS*/ | (1u<<1) /*EnableGrp1NS*/;
     w32(GICD_BASE + GICD_CTLR, ctlr);
-    __asm__ __volatile__("dsb ish; isb");
+    dsb_ish();
+    isb();
 }
 
 // Map: redistributor base for this CPU (QEMU virt packs by Aff0)
-inline volatile uint8_t* gicr_base_this_cpu(void){
+inline volatile uint8_t* gicr_base_this_cpu(void)
+{
     return (volatile uint8_t*)(GICR_BASE + (uint64_t)cpu_aff0() * GICR_STRIDE);
 }
 
@@ -152,25 +132,7 @@ static void per_cpu_enable_timer_irq_and_gic(unsigned use_virtual_timer, uint32_
     __d_printf(DEBUG, "Timer IRQ armed on cpu=%u\n", cpu_id());
 }
 
-static inline uint64_t rd_cntv_ctl(void){ uint64_t x; __asm__ __volatile__("mrs %0, cntv_ctl_el0":"=r"(x)); return x; }
-
-void timer_probe_pending(uint32_t hz){
-    uint64_t frq; __asm__ __volatile__("mrs %0, cntfrq_el0":"=r"(frq));
-    uint64_t tval = frq / (hz ? hz : 1000);
-
-    __asm__ __volatile__("msr cntv_ctl_el0, %0" :: "r"(0));   // disable
-    __asm__ __volatile__("msr cntv_tval_el0, %0":: "r"(tval)); // arm
-    __asm__ __volatile__("msr cntv_ctl_el0, %0" :: "r"(1));   // ENABLE=1, IMASK=0
-
-    for (int i=0;i<1000000;i++){
-        if (rd_cntv_ctl() & (1u<<2)) {        // ISTATUS set?
-            __d_println(DEBUG, "CNTV ISTATUS=1 (timer pending)");
-            break;
-        }
-    }
-}
-
-void start_cpu_timer(uint32_t hz) {
-    // timer_probe_pending(hz);
+void start_cpu_timer(uint32_t hz)
+{
     per_cpu_enable_timer_irq_and_gic(1, hz);
 }

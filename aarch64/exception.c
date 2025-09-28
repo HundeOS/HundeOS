@@ -165,7 +165,12 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
             break;
         default:
             // Handle other synchronous exceptions
-            __d_printf(UNHANDLED, "unhandled call: %i\n", ec);
+            uint64_t esr = read_esr_el1();
+            unsigned code  = (esr >> 26) & 0x3F;        // 0x3C == BRK A64
+            unsigned iss = esr & 0xFFFFFF;
+            unsigned imm16 = iss & 0xFFFF;
+            __d_printf(UNHANDLED, "EC=0x%x (BRK), imm16=0x%x ELR=0x%x\n", code, imm16, read_elr_el1());
+            __d_printf(UNHANDLED, "unhandled exception: 0x%x\n", ec);
             return 0;
             break;
     }
