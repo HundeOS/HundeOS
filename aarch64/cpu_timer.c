@@ -7,8 +7,14 @@
 #include <stdint.h>
 
 #include "cpu.h"
+
+#include <stdint.h>
+
+#include "cpu.h"
 #include "asm_helpers.h"
 #include "gicr.h"
+#include "boot/boot_debug.h"
+#include "io/uart.h"
 
 
 inline uint32_t mmio_read32(const volatile void *addr)
@@ -41,6 +47,10 @@ void gicv3_dist_enable_grp1ns(void)
     isb();
 }
 
+void x() {
+    return;
+}
+
 // Map: redistributor base for this CPU (QEMU virt packs by Aff0)
 inline volatile uint8_t* gicr_base_this_cpu(void)
 {
@@ -53,14 +63,14 @@ static void per_cpu_enable_timer_irq_and_gic(unsigned use_virtual_timer, uint32_
 {
     __d_printf(DEBUG, "per_cpu_enable_timer_irq_and_gic: cpu=%u\n", cpu_id());
     gicv3_dist_enable_grp1ns();
-    volatile uint8_t *gicr = gicr_base_this_cpu();
-    __d_printf(DEBUG, "GICR base=%x cpu=%u\n", gicr, cpu_id());
+    volatile uint8_t * gicr = gicr_base_this_cpu();
+    __d_printf(DEBUG, "GICR base=%p cpu=%u\n", gicr, cpu_id());
 
     // --- Wake up this redistributor ---
-    __d_printf(DEBUG, "mmio_read32 base=%x cpu=%u\n", gicr + GICR_WAKER, cpu_id());
+    __d_printf(DEBUG, "mmio_read32 base=%p cpu=%u\n", gicr + GICR_WAKER, cpu_id());
     uint32_t waker = mmio_read32(gicr + GICR_WAKER);
 
-    __d_printf(DEBUG, "waker=%x cpu=%u\n", waker, cpu_id());
+    __d_printf(DEBUG, "waker=%p cpu=%u\n", waker, cpu_id());
     if (waker & (1u << 1)) {                // ProcessorSleep
         mmio_write32(waker & ~(1u << 1), gicr + GICR_WAKER);
         do {
@@ -68,7 +78,7 @@ static void per_cpu_enable_timer_irq_and_gic(unsigned use_virtual_timer, uint32_
         } while (waker & (1u << 2));        // wait ChildrenAsleep==0
     }
 
-    __d_printf(DEBUG, "write base=%x cpu=%u\n", gicr + GICR_IGROUPR0, cpu_id());
+    __d_printf(DEBUG, "grp1 write base=%p cpu=%u\n", gicr + GICR_IGROUPR0, cpu_id());
     // All non-secure interrupts to Group1
     mmio_write32(0xFFFFFFFFu, gicr + GICR_IGROUPR0);
 
@@ -76,17 +86,19 @@ static void per_cpu_enable_timer_irq_and_gic(unsigned use_virtual_timer, uint32_
     unsigned ppi  = use_virtual_timer ? PPI_CNTV : PPI_CNTP;
     unsigned bit1 = ((ppi - 16u) * 2u) + 1u; // ICFGR1: bit[1]=1 => edge
 
-    __d_printf(DEBUG, "read base=%x cpu=%u\n", gicr + GICR_ICFGR1, cpu_id());
+    __d_printf(DEBUG, "read base=%p cpu=%u\n", gicr + GICR_ICFGR1, cpu_id());
     uint32_t icfgr1 = mmio_read32(gicr + GICR_ICFGR1);
     icfgr1 |= (1u << bit1);
-    __d_printf(DEBUG, "write base=%x cpu=%u\n", gicr + GICR_ICFGR1, cpu_id());
+    __d_printf(DEBUG, "write base=%p cpu=%u\n", gicr + GICR_ICFGR1, cpu_id());
     mmio_write32(icfgr1, gicr + GICR_ICFGR1);
 
+    uint8_t * priority_reg = (gicr + GICR_IPRIORITYR(ppi));
+    __d_printf(DEBUG, "priority write base=%p cpu=%u\n",priority_reg, cpu_id());
     // Priority (byte-per-interrupt). Lower = higher prio; 0x80 is mid.
-    *(volatile uint8_t *)(gicr + GICR_IPRIORITYR(ppi)) = 0x80;
+    *(volatile uint8_t *)(priority_reg) = 0x80;
 
     // Enable the timer PPI
-    __d_printf(DEBUG, "read base=%x cpu=%u\n", gicr + GICR_ISENABLER0, cpu_id());
+    __d_printf(DEBUG, "read base=%p cpu=%u\n", gicr + GICR_ISENABLER0, cpu_id());
     mmio_write32(1u << ppi, gicr + GICR_ISENABLER0);
 
     // Ensure GICR writes land before we enable the CPU interface

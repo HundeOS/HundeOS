@@ -4,84 +4,159 @@
 ENTRY(_start)
 
 PHDRS {
-  text PT_LOAD FLAGS(5);  /* R X */
-  data PT_LOAD FLAGS(6);  /* R W */
+  boot  PT_LOAD FLAGS(5);            /* R X: low boot code (VMA=LMA low)   */
+  bootdata PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
+  ktext PT_LOAD FLAGS(5);            /* R X: high .text/.rodata (VMA high, LMA low via AT) */
+  kdata PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
+  kio PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
 }
 
+KERNEL_HIGH_BASE = 0xFFFF000000000000;
+KERNEL_HEAP_BASE = 0xFFFFF00000000000;
+KERNEL_BASE = 0x40080000;
+
+HEAP_END = 2 * 1024 * 1024 * 1024; /* 2 GB */
+
+KERNEL_HIGH_PHYS = 0x80000000;
+BLOCK_2MB = 0x200000;
+PAGE_4KB = 0x1000;
+PAGE_2KB = 0x800;
 SECTIONS
 {
-  . = 0x40080000;
+  . = KERNEL_BASE;
+
   __kernel_start = .;
 
   /* ----- TEXT & RODATA (RX) ----- */
-  . = ALIGN(0x1000);
+  . = ALIGN(PAGE_4KB);
 
-  __text_start = .;
-  .text.boot : ALIGN(0x1000) {
-    KEEP(*(.text.boot))
-  } :text
+  __boot_start = .;
+  .boot.text : ALIGN(PAGE_4KB) {
+    KEEP(*(.boot))
+    KEEP(*(.boot.text))
+  } :boot
 
-  /* Exception vectors: keep on a 4 KiB boundary (your MMU maps RX here) */
-  . = ALIGN(0x1000);
-  __vectors_start = .;
-  .text.vectors : {
+  . = ALIGN(PAGE_4KB);
+  .boot.vectors : ALIGN(PAGE_4KB) {
+    KEEP(*(.boot.vectors))
+  }: boot
+
+  .boot.data : ALIGN(PAGE_4KB) {
+    KEEP(*(.boot.data))
+    KEEP(*(.boot.data.*))
+  } :bootdata
+
+  .boot.rodata : ALIGN(PAGE_4KB) {
+    KEEP(*(.boot.rodata))
+    KEEP(*(.boot.rodata.*))
+  } :bootdata
+
+  /* Stacks (no load) */
+  . = ALIGN(PAGE_4KB);
+  __boot_bss_start = .;
+  .boot.bss.stack (NOLOAD) : ALIGN(PAGE_4KB) {
+    KEEP(*(.boot.bss.stack))
+  } :bootdata
+  __boot_bss_end = .;
+  __boot_end = ALIGN(__boot_bss_end, PAGE_4KB);
+
+
+   /** MMIO first **/
+  /* Hi memory kernel */
+  . = KERNEL_HIGH_BASE;
+  . = ALIGN(PAGE_4KB);
+    .bss.mmio (NOLOAD):
+    {
+      KEEP(*(.bss.mmio))
+    } : kio
+    __mmio_start = .;
+    . += 2M;
+    __mmio_end = .;
+    . += 2M;
+
+    . = ALIGN(BLOCK_2MB);
+    .bss.gicd (NOLOAD):
+    {
+      KEEP(*(.bss.gicd))
+    } : kio
+    __gicd_start = .;
+    . += 2M;
+    __gicd_end = .;
+
+  __lma_cursor = ALIGN(LOADADDR(.boot.rodata) + SIZEOF(.boot.rodata), BLOCK_2MB);
+  __lma_start = __lma_cursor;
+  __high_phys_base = __lma_cursor;
+
+  .text : AT(ALIGN(__lma_cursor, BLOCK_2MB)) ALIGN(PAGE_4KB) {
+    *(.text .text.*)
+  } :ktext
+  __text_virt = . - SIZEOF(.text);
+  __text_phys = LOADADDR(.text);
+
+  __lma_cursor = ALIGN(LOADADDR(.text) + SIZEOF(.text), PAGE_4KB);
+
+  .text.vectors : AT(ALIGN(__lma_cursor, PAGE_2KB)) ALIGN(PAGE_2KB) {
     KEEP(*(.text.vectors))
-  } :text
-  __vectors_end = .;
+  } :ktext
+  __vectors_pa = LOADADDR(.text.vectors);
+  __lma_cursor = ALIGN(LOADADDR(.text.vectors) + SIZEOF(.text.vectors), PAGE_4KB);
 
-  .text : ALIGN(0x1000) {
-    *(.text .text.* .gnu.linkonce.t*)
-  } :text
-  __text_end = .;
-
-  .rodata : ALIGN(0x1000) {
+  .rodata : AT(ALIGN(__lma_cursor, PAGE_4KB)) ALIGN(PAGE_4KB) {
     *(.rodata .rodata.* .gnu.linkonce.r*)
-  } :text
-  __rodata_end = .;
+  } :ktext
 
+  __lma_cursor = ALIGN(LOADADDR(.rodata) + SIZEOF(.rodata), PAGE_4KB);
   /* ----- DATA (RW) ----- */
-  . = ALIGN(0x1000);
-  _data = .;
 
-  __data_start = .;
-  .data : ALIGN(0x1000) {
+  .data : AT(ALIGN(__lma_cursor, PAGE_4KB)) ALIGN(PAGE_4KB)
+  {
     *(.data .data.* .gnu.linkonce.d*)
     *(.init_array .init_array.*)
     *(.fini_array .fini_array.*)
     *(.got .got.*)
-  } :data
-  __data_end = .;
+  } :kdata
+  __lma_cursor = ALIGN(LOADADDR(.data) + SIZEOF(.data), PAGE_4KB);
 
-  /* ----- BSS (RW, no load) ----- */
-  . = ALIGN(0x1000);
-  __bss_start = .;
-  .bss (NOLOAD) : ALIGN(0x1000) {
+/* ----- BSS (RW, no load) ----- */
+  . = ALIGN(PAGE_4KB);
+  .bss (NOLOAD):
+  {
     *(.bss .bss.*)
     *(COMMON)
-  } :data
-  __bss_end = .;
-  __bss_size = (__bss_end - __bss_start);
+  } :kdata
+  __lma_cursor = ALIGN(__lma_cursor + SIZEOF(.data), PAGE_4KB);
 
-  /* Stacks (no load) */
-  . = ALIGN(0x1000);
-  .bss.stack (NOLOAD) : ALIGN(0x1000) {
+   /* reset of system memory*/
+  .bss.stack (NOLOAD):
+  {
     KEEP(*(.bss.stack))
-  } :data
+  } :kdata
 
-  /* Page allocator pool (no load) — still needs RW mapping at runtime */
-  . = ALIGN(0x1000);
-  __page_pool_start = .;
-/*  .page_pool (NOLOAD) : ALIGN(0x1000) {*/
-/*    . += 4M;*/
-/*  } :data*/
-/*  __page_pool_end = .;*/
+  .kstack (NOLOAD) : ALIGN(PAGE_4KB) {
+      __k_stack_start = .;
+      . += 2M;                 /* pick a size */
+      __k_stack_end   = .;
+      __k_stack_high  = __k_stack_end;  /* top of stack grows down */
+  } :kdata
 
-  . = ALIGN(0x1000);
-  __heap_start = .;
+  __lma_cursor = ALIGN(__lma_cursor + SIZEOF(.kstack), PAGE_4KB);
+  . += 4M;
+  __lma_kernel_end = __text_phys + . - KERNEL_HIGH_BASE;
+  __lma_end = __lma_kernel_end;
 
-  _end = .;
-  __kernel_end = .;
+  . = KERNEL_HEAP_BASE;
+  __lma_cursor = ALIGN(__lma_cursor + 4M, BLOCK_2MB);
 
+  .bss.heap : AT(ALIGN(__lma_cursor, BLOCK_2MB)) ALIGN(BLOCK_2MB)
+  {
+    __heap_start = .;
+    KEEP(*(.bss.heap))
+  } : kdata
+  __heap_start_phys = LOADADDR(.bss.heap);
+  __lma_heap_bootstrap_end = __heap_start_phys + . - KERNEL_HEAP_BASE;
+  . += HEAP_END;
+  __heap_end = .;
+  __heap_end_phys = __heap_start_phys + HEAP_END;
   /DISCARD/ : {
     *(.comment) *(.gnu*) *(.note*) *(.eh_frame*) *(.eh_frame_hdr*)
   }

@@ -7,11 +7,13 @@
 #include "page_alloc.h"
 
 typedef uint64_t PageTableEntry;
-#if !defined(__BYTE_ORDER__) || (__BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__)
-# error "This PTE bitfield layout assumes little-endian (AArch64 Linux/QEMU style)."
-#endif
 
 #define TABLE_SIZE (PAGE_SIZE / sizeof(PageTableEntry))
+#define L0_IDX(va)  (((uint64_t)(va) >> 39) & 0x1FF) // L0 is the top 9 bits of OUTPUT_ADDR
+#define L1_IDX(va)  (((uint64_t)(va) >> 30) & 0x1FF) // L1 is the next 9 bits of OUTPUT_ADDR
+#define L2_IDX(va)  (((uint64_t)(va) >> 21) & 0x1FF) // L2 is the next 9 bits of OUTPUT_ADDR
+#define L3_IDX(va)  (((uint64_t)(va) >> 12) & 0x1FF) // L3 is the next 9 bits of OUTPUT_ADDR
+
 
 typedef struct PageTable {
     PageTableEntry entries[TABLE_SIZE];
@@ -85,8 +87,6 @@ PageTable * PageTable__new();
 PageTable * PageTable__ensure_next_level_table(PageTable * parent_level_table,
                                                uint64_t child_index);
 
-PageTableEntry PageTable__make_table_desc(PageTable * next_level_page);
-
 int PageTable__map_2M_block(PageTable * self,
                             uint64_t virtual_address,
                             uint64_t phys_addr,
@@ -96,5 +96,89 @@ int PageTable__map_4k_page(PageTable * self,
                            uint64_t virtual_address,
                            uint64_t phys_addr,
                            MappingPermissions perms);
+
+/**
+ * make_page_desc_4k - Build a 4 KiB leaf PTE (VA→PA) with given attributes.
+ *
+ * @phys_addr:      Physical address of the 4 KiB frame (low 12 bits ignored)
+ * @attr_index:     MAIR slot index (0..7) selecting the memory type
+ * @shareability:   Pre-shifted SH field (e.g., PTE_SH_IS / PTE_SH_OS / PTE_SH_NONE)
+ * @access_perms:   Pre-shifted AP field (e.g., PTE_AP_EL1_RW_EL0_RW, _RO, etc.)
+ * @uxn_enable:     1 to set UXN (EL0 cannot execute), 0 to allow EL0 execute
+ * @pxn_enable:     1 to set PXN (EL1 cannot execute), 0 to allow EL1 execute
+ */
+
+inline PageTableEntry PageTable__make_page_desc_4k(uint64_t phys_addr,
+                                  MairAttribute mair_attribute,
+                                  ShareAttribute shareability,   // already shifted
+                                  AccessAttribute access_perms,   // already shifted
+                                  int uxn_enable,
+                                  int pxn_enable)
+{
+    uint64_t desc = FLAG_PTE_VALID | FLAG_PTE_ACCESS | FLAG_PTE_ACCESS
+                  | (mair_attribute << SHIFT_PTE_ATTR_INDEX)
+                  | (uint64_t)shareability
+                  | (uint64_t)access_perms;
+
+    if (uxn_enable) desc |= FLAG_PTE_UNPRIV_EXECUTE_NEVER;
+    if (pxn_enable) desc |= FLAG_PTE_PAGE;
+
+    desc |= (phys_addr & MASK_PTE_NEXTADDR);
+    return desc;
+}
+
+
+inline PageTableEntry PageTable__make_page_desc_4k_l3(uint64_t phys_addr,
+                                  MairAttribute mair_index,
+                                  ShareAttribute shareability,   // already shifted
+                                  AccessAttribute access_perms,   // already shifted
+                                  int uxn_enable,
+                                  int pxn_enable)
+{
+    uint64_t desc = FLAG_PTE_VALID | FLAG_PTE_ACCESS | FLAG_PTE_PAGE
+                  | (mair_index << SHIFT_PTE_ATTR_INDEX)
+                  | (uint64_t)shareability
+                  | (uint64_t)access_perms
+                  | (phys_addr & MASK_PTE_NEXTADDR);
+
+    if (uxn_enable) desc |= FLAG_PTE_UNPRIV_EXECUTE_NEVER;
+    if (pxn_enable) desc |= FLAG_PTE_PRIV_EXECUTE_NEVER;
+
+    return desc;
+}
+
+inline PageTableEntry PageTable__l2_block_desc(uint64_t pa,
+                                               MairAttribute attridx,
+                                               ShareAttribute sh,
+                                               AccessAttribute access,
+                                               int uxn,
+                                               int pxn)
+{
+    uint64_t desc = FLAG_PTE_VALID
+                    | FLAG_PTE_ACCESS
+                    | sh
+                    | access
+                    | (attridx << SHIFT_PTE_ATTR_INDEX);
+    // Execute-never flags if not executable
+    if (uxn) desc |= FLAG_PTE_UNPRIV_EXECUTE_NEVER;
+    if (pxn) desc |= FLAG_PTE_PRIV_EXECUTE_NEVER;
+
+    // PA[47:21] go into [47:21] of descriptor (block aligned at 2MiB)
+    desc |= (pa & MASK_PTE_ENSURE_2MB_ALIGNED);
+    return desc;
+}
+
+
+inline PageTable * PageTable__zero(PageTable * self)
+{
+    return (PageTable *) MemoryPage__zero((MemoryPage *) self);
+}
+
+
+inline PageTableEntry PageTable__make_table_desc(PageTable * next_level_page)
+{
+    return FLAG_PTE_VALID | FLAG_PTE_TABLE | ((uint64_t)next_level_page & MASK_PTE_NEXTADDR);
+}
+
 
 #endif

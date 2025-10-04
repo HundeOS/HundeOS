@@ -1,14 +1,27 @@
 #include "page_alloc.h"
 #include "../kernel/kernel.h"
+#include "page_alloc.h"
 #include <stdint.h>
 #include <stddef.h>
 
+#include "page_table.h"
+
 const uint64_t _4GB = 4294967296;
 
-static MemoryPage *g_page_cursor = NULL;
-static MemoryPage *g_page_limit  = NULL;
 
-static FreeMemoryPage * free = NULL;
+extern char __heap_start[];
+extern char __heap_end[];
+extern char __heap_start_phys[];
+
+__BOOTSTRAP__(char) bootstrap[_2MB];
+static MemoryBlock current_block = {
+    .start = {
+        .phys_addr = 0,
+        .virtual_addr = 0
+    },
+    .pages_allocated = 0,
+    .bootstrapped = false
+};
 
 inline MemoryPage * align_up(MemoryPage * page, uint64_t a){
     uint64_t x = (uint64_t)page;
@@ -16,86 +29,64 @@ inline MemoryPage * align_up(MemoryPage * page, uint64_t a){
 }
 
 static mutex_t alloc_lock;
-static mutex_t free_lock;
 
-inline MemoryPage * MemoryPage__zero(MemoryPage * self){
-    for (int i = 0; i < PAGE_SIZE; i++) {
-        self->page[i] = 0;
-    }
-
-    __asm__ __volatile__("dsb ish" ::: "memory");
-    return self;
-}
 
 static void MemoryPage__init(){
-    g_page_cursor = align_up((MemoryPage *)__heap_start, PAGE_SIZE);
-    g_page_limit = align_up((MemoryPage *)(__heap_start + _4GB), PAGE_SIZE);
-    __d_printf(DEBUG, "g_page_cursor=0x%x, g_page_limit=0x%x, unaligned=0x%x\n", g_page_cursor, g_page_limit, _4GB);
+    __d_println(FOCUS, "MemoryPage__init");
+    // we need to allocate the first block
+    uint64_t phys = (Address) &__heap_start_phys;
+    uint64_t virtual = (Address) &__heap_start;
+
+    current_block.start.phys_addr = phys + ((Address)&bootstrap - virtual); // work out if there is an offset
+    current_block.start.virtual_addr = (Address) &bootstrap;
+    current_block.pages_allocated = 0;
+    current_block.bootstrapped = true;
+
+    __d_printf(FOCUS, "start_phys=0x%x, start_virt=0x%x\n",
+        current_block.start.phys_addr, current_block.start.virtual_addr);
 }
 
-MemoryPage * MemoryPage__next_free()
-{
-    __d_println(DEBUG, "MemoryPage__next_free");
-    FreeMemoryPage * page = NULL;
-    mutex_lock(&free_lock);
-    __d_println(DEBUG, "mutex");
-    if (free) {
-        page = free;
-        free = free->next;
+static void MemoryPage__advance_block() {
+    Address next_phys_addr = current_block.start.phys_addr + COARSE_BLOCK_SIZE;
+    Address next_virtual_addr = current_block.start.phys_addr + COARSE_BLOCK_SIZE;
+    if (next_virtual_addr > (Address) &__heap_end) {
+        panic("out of heap", NULL);
     }
-    mutex_unlock(&free_lock);
-    // zero the free pointer
-    if (page) {
-        page->next = NULL;
+    current_block.pages_allocated = 0;
+    current_block.start.phys_addr = next_phys_addr;
+    current_block.start.virtual_addr = next_virtual_addr;
+}
+
+static MemoryPage * MemoryPage__next() {
+    uint64_t page_index = current_block.pages_allocated;
+    if (page_index >= PAGES_PER_BLOCK) {
+        MemoryPage__advance_block();
     }
-    return (MemoryPage *) page;
+    current_block.pages_allocated++;
+    return (MemoryPage *)current_block.start.virtual_addr + (page_index * PAGE_SIZE);
 }
 
-void MemoryPage__free(MemoryPage * page)
-{
-    // Serialize access to the simple bump-pointer allocator.
-    mutex_lock(&free_lock);
-
-    FreeMemoryPage * freed = (FreeMemoryPage *) MemoryPage__zero(page);
-    freed->next = free;
-    free = freed;
-    mutex_unlock(&free_lock);
-}
-
-MemoryPage * MemoryPage_alloc_fresh() {
+MemoryPage * MemoryPage__alloc_fresh() {
     MemoryPage * page = NULL;
     // Serialize access to the simple bump-pointer allocator.
     mutex_lock(&alloc_lock);
 
     // Lazy-initialize the allocator state on first use.
-    if (!g_page_cursor) {
+    if (!current_block.bootstrapped) {
         MemoryPage__init();  // sets g_page_cursor/limit to pool bounds (4 KiB aligned)
     }
-    page = align_up(g_page_cursor, PAGE_SIZE);
+
+    page = MemoryPage__next();
     __d_printf(DEBUG, "MemoryPage_alloc_fresh 0x%x\n", page);
-    // Out-of-memory check: would advancing by one page exceed the pool?
-    if (page + PAGE_SIZE > g_page_limit) {
-        mutex_unlock(&alloc_lock);
-        return NULL;
-    }
-    // Advance the bump pointer to the next free position.
-    g_page_cursor = page + PAGE_SIZE;
     mutex_unlock(&alloc_lock);
-    MemoryPage__zero(page);             // 4096 bytes of zero; includes a DSB for visibility if your impl does
+
     __d_printf(DEBUG, "MemoryPage_alloc_fresh 0x%x\n", page);
-    return page;
+    return MemoryPage__zero(page);;
 }
 
 MemoryPage * MemoryPage__alloc(void)
 {
     __d_println(DEBUG, "alloc");
-    MemoryPage * page = MemoryPage__next_free();
-    __d_println(DEBUG, "free");
-    // Grab the next 4 KiB slot, rounding the cursor up to a page boundary.
-    if (!page) {
-        __d_println(DEBUG, "fresh");
-        page = MemoryPage_alloc_fresh();
-    }
+    return MemoryPage__alloc_fresh();
     __d_println(DEBUG, "alloc complete");
-    return page;
 }

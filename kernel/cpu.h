@@ -4,7 +4,7 @@
 // architecture specific
 typedef struct cpu cpu;
 
-extern uint64_t cpu_id();
-extern uint64_t cpu_count();
+extern uint64_t CPU__id();
+extern uint64_t CPU__count();
 
 #endif

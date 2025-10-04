@@ -4,5 +4,5 @@
 #include "cpu.h"
 
 void timer_handler() {
-    __d_printf(DEBUG, "timer_handler for %i\n", cpu_id());
+    __d_printf(DEBUG, "timer_handler for %i\n", CPU__id());
 }

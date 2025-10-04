@@ -1,70 +1,63 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdint.h>
+#include <stdint.h>
+#include <stdint.h>
+#include <stdint.h>
+#include <stdint.h>
 
 #include "../kernel/kernel.h"
 #include "cpu_timer.h"
-
-inline uint32_t icc_iar1(void){ uint64_t x; __asm__ volatile("mrs %0, ICC_IAR1_EL1":"=r"(x)); return (uint32_t)x; }
-inline void icc_eoir1(uint32_t id){ __asm__ volatile("msr ICC_EOIR1_EL1, %0" :: "r"((uint64_t)id)); }
-inline void icc_dir(uint32_t id){   __asm__ volatile("msr ICC_DIR_EL1,   %0" :: "r"((uint64_t)id)); }
+#include "cpu.h"
+#include "asm_helpers.h"
 
 // Structure to hold saved register context
-typedef struct {
+typedef struct exception_context_t {
     uint64_t x[31];  // x0-x30
     uint64_t sp;
     uint64_t pc;     // ELR
     uint64_t pstate; // SPSR
 } exception_context_t;
 
-inline uint64_t get_current_el(void) {
-    uint64_t el;
-    __asm__ __volatile__("mrs %0, CurrentEL" : "=r" (el));
-    return (el >> 2) & 3;
-}
+void dump_state(exception_context_t * ctx) {
+    uint64_t esr = read_esr_el1();
+    uint64_t elr = read_elr_el1();
+    uint64_t far = read_far_el1();
+    uint64_t sctlr = read_sctlr_el1();
 
-inline uint64_t read_esr_el1(void) {
-    uint64_t x;
-    __asm__ __volatile__("mrs %0, esr_el1" : "=r"(x));
-    return x;
-}
-
-inline uint64_t read_elr_el1(void) {
-    uint64_t x;
-    __asm__ __volatile__("mrs %0, elr_el1" : "=r"(x));
-    return x;
-}
-
-inline uint64_t read_far_el1(void) {
-    uint64_t x;
-    __asm__ __volatile__("mrs %0, far_el1" : "=r"(x));
-    return x;
-}
-
-inline uint64_t read_spsr_el1(void) {
-    uint64_t x;
-    __asm__ __volatile__("mrs %0, spsr_el1" : "=r"(x));
-    return x;
-}
-
-void dump_state(void) {
-    uint64_t esr, elr, far, sctlr;
-    
-    __asm__ volatile("mrs %0, esr_el1" : "=r" (esr));
-    __asm__ volatile("mrs %0, elr_el1" : "=r" (elr));
-    __asm__ volatile("mrs %0, far_el1" : "=r" (far));
-    __asm__ volatile("mrs %0, sctlr_el1" : "=r" (sctlr));
-    
     uint32_t ec = (esr >> 26) & 0x3F;
     
-    __d_printf(FAULT, "Exception Class: %x\n", ec);
-    __d_printf(FAULT, "ESR: %x\n", esr);
-    __d_printf(FAULT, "Fault Address (FAR): %x\n", far);
-    __d_printf(FAULT, "Exception Link Register (ELR): %x\n", elr);
-    
-    if (ec == 0x21) {
-        __d_println(FAULT, "Instruction Abort from current EL");
+    __d_printf(FAULT, "Exception Class: %p\n", ec);
+    __d_printf(FAULT, "ESR: %p\n", read_esr_el1());
+    __d_printf(FAULT, "Fault Address (FAR): %p\n", read_far_el1());
+    __d_printf(FAULT, "Exception Link Register (ELR): %p\n", read_elr_el1());
+    __d_printf(FAULT, "SCTLR: %p\n", read_sctlr_el1());
+    __d_printf(FAULT, "MAIR: %p\n", read_mair_el1());
+    __d_printf(FAULT, "TCR: %p\n", read_tcr_el1());
+    __d_printf(FAULT, "TBBR0: %p\n", read_ttbr0_el1());
+    __d_printf(FAULT, "TBBR1: %p\n", read_ttbr1_el1());
+
+    if (ctx) {
+        __d_printf(FAULT, "PC: %p\n", ctx->pc);
+        __d_printf(FAULT, "SP: %p\n", ctx->sp);
+        __d_printf(FAULT, "PSTATE: %p\n", ctx->pstate);
+        int width = 6;
+        for (int i = 0; i < 31; i++) {
+            if (i % width == 0) {
+                __d_println(FAULT, "");
+            }
+            __d_printf(FAULT, "X[%i]: %p  ", i, ctx->x[i]);
+        }
+
+        if (ec == 0x21) {
+            __d_println(FAULT, "Instruction Abort from current EL");
+        }
     }
+    else {
+        __d_println(FAULT, "No context provided");
+    }
+
 }
 
 void vectors_init(void) {
@@ -116,20 +109,6 @@ void irq_handler(exception_context_t *ctx)
     icc_dir(id);
 }
 
-void __panic(exception_context_t *ctx, const char *error) {
-    uint64_t esr = read_esr_el1();
-    uint64_t elr = read_elr_el1();
-    uint64_t far = read_far_el1();
-    uint64_t spsr = read_spsr_el1();
-    uint64_t lr = ctx->x[30];     // link register saved in your trap frame
-
-    __d_printf(PANIC,
-      "IABT: ESR=0x%x EC=0x%x ISS=0x%x ELR=0x%x LR=0x%x FAR=0x%x\n",
-      esr, (esr>>26)&0x3f, esr&0x01ffffff, elr, lr, far);
-
-    panic(error);
-}
-
 uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
     uint64_t esr = get_esr_el1();
     uint64_t ec = (esr >> 26) & 0x3F;  // Exception class
@@ -149,28 +128,22 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
             __d_println(FAULT, "data abort: 0x%x");
             if (hcf) {
                 char buf[128];
-                k_sprintf(buf, "data abort call: cpu=%i", cpu_id());
-                __panic(ctx, buf);
+                k_sprintf(buf, "data abort call: cpu=%i", CPU__id());
+                panic(buf, ctx);
             }
             return 0;
             break;
         case 0x25: // Instruction abort from current EL
-            __d_println(PANIC, "instruction abort call: ");
             if (hcf) {
                 char buf[128];
-                k_sprintf(buf, "instruction abort call: cpu=%i", cpu_id());
-                __panic(ctx, buf);
+                k_sprintf(buf, "instruction abort call: cpu=%i", CPU__id());
+                panic(buf, ctx);
             }
             return 0;
             break;
         default:
             // Handle other synchronous exceptions
-            uint64_t esr = read_esr_el1();
-            unsigned code  = (esr >> 26) & 0x3F;        // 0x3C == BRK A64
-            unsigned iss = esr & 0xFFFFFF;
-            unsigned imm16 = iss & 0xFFFF;
-            __d_printf(UNHANDLED, "EC=0x%x (BRK), imm16=0x%x ELR=0x%x\n", code, imm16, read_elr_el1());
-            __d_printf(UNHANDLED, "unhandled exception: 0x%x\n", ec);
+            panic("Unhandled CPU exception", ctx);
             return 0;
             break;
     }
@@ -178,93 +151,93 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
 
 // Current EL with SP0 handlers
 uint64_t c_sync_handler_current_el_sp0(exception_context_t *ctx) {
-    __d_println(DEBUG, "c_sync_handler_current_el_sp0");
+    __d_println(DEBUG, "\nc_sync_handler_current_el_sp0");
     return handle_sync(ctx, 0);
 }
 
 void c_irq_handler_current_el_sp0(exception_context_t *ctx) {
     // Handle IRQ interrupt
     // Process pending interrupts from interrupt controller
-    __d_println(DEBUG, "c_irq_handler_current_el_sp0");
+    __d_println(DEBUG, "\nc_irq_handler_current_el_sp0");
     irq_handler(ctx);
 }
 
 void c_fiq_handler_current_el_sp0(exception_context_t *ctx) {
     // Handle FIQ (fast interrupt)
-    __d_println(DEBUG, "c_fiq_handler_current_el_sp0");
+    __d_println(DEBUG, "\nc_fiq_handler_current_el_sp0");
 }
 
 void c_serror_handler_current_el_sp0(exception_context_t *ctx) {
     // Handle system error (SError)
     // This is typically fatal
-    __d_println(DEBUG, "c_serror_handler_current_el_sp0");
+    __d_println(DEBUG, "\nc_serror_handler_current_el_sp0");
 }
 
 // Current EL with SPx handlers
 uint64_t c_sync_handler_current_el_spx(exception_context_t *ctx) {
-    __d_println(DEBUG, "c_sync_handler_current_el_spx");
+    __d_println(DEBUG, "\nc_sync_handler_current_el_spx");
     return handle_sync(ctx, 1);
     // Handle synchronous exceptions from current EL
 }
 
 void c_irq_handler_current_el_spx(exception_context_t *ctx) {
     // Handle IRQ from current EL with SPx
-    __d_println(DEBUG, "c_irq_handler_current_el_spx");
+    __d_println(DEBUG, "\nc_irq_handler_current_el_spx");
     irq_handler(ctx);
 }
 
 void c_fiq_handler_current_el_spx(exception_context_t *ctx) {
     // Handle FIQ from current EL with SPx
-    __d_println(DEBUG, "c_fiq_handler_current_el_spx");
+    __d_println(DEBUG, "\nc_fiq_handler_current_el_spx");
 }
 
 void c_serror_handler_current_el_spx(exception_context_t *ctx) {
     // Handle SError from current EL with SPx
-    __d_println(DEBUG, "c_serror_handler_current_el_spx");
+    __d_println(DEBUG, "\nc_serror_handler_current_el_spx");
 }
 
 // Lower EL using AArch64 handlers
 void c_sync_handler_lower_el_aarch64(exception_context_t *ctx) {
-    __d_println(DEBUG, "c_sync_handler_lower_el_aarch64");
+    __d_println(DEBUG, "\nc_sync_handler_lower_el_aarch64");
     handle_sync(ctx, 0);
 }
 
 void c_irq_handler_lower_el_aarch64(exception_context_t *ctx) {
     // Handle IRQ from lower EL (AArch64)
-    __d_println(DEBUG, "c_irq_handler_current_el_aarch64");
+    __d_println(DEBUG, "\nc_irq_handler_current_el_aarch64");
     irq_handler(ctx);
 }
 
 void c_fiq_handler_lower_el_aarch64(exception_context_t *ctx) {
     // Handle FIQ from lower EL (AArch64)
-    __d_println(DEBUG, "c_fiq_handler_current_el_aarch64");
+    __d_println(DEBUG, "\nc_fiq_handler_current_el_aarch64");
 }
 
 void c_serror_handler_lower_el_aarch64(exception_context_t *ctx) {
     // Handle SError from lower EL (AArch64)
-    __d_println(DEBUG, "c_serror_handler_current_el_aarch64");
+    __d_println(DEBUG, "\nc_serror_handler_current_el_aarch64");
 }
 
 // Lower EL using AArch32 handlers
 void c_sync_handler_lower_el_aarch32(exception_context_t *ctx) {
     // Handle synchronous exceptions from AArch32 lower EL
-    __d_println(DEBUG, "c_sync_handler_lower_el_aarch32");
+    __d_println(DEBUG, "\nc_sync_handler_lower_el_aarch32");
 }
 
 void c_irq_handler_lower_el_aarch32(exception_context_t *ctx) {
     // Handle IRQ from lower EL (AArch32)
-    __d_println(DEBUG, "c_irq_handler_lower_el_aarch32");
+    __d_println(DEBUG, "\nc_irq_handler_lower_el_aarch32");
     irq_handler(ctx);
 }
 
 void c_fiq_handler_lower_el_aarch32(exception_context_t *ctx) {
     // Handle FIQ from lower EL (AArch32)
-    __d_println(DEBUG, "c_fiq_handler_lower_el_aarch32");
+    __d_println(DEBUG, "\nc_fiq_handler_lower_el_aarch32");
 }
 
 void c_serror_handler_lower_el_aarch32(exception_context_t *ctx) {
     // Handle SError from lower EL (AArch32)
-    __d_println(DEBUG, "c_serror_handler_lower_el_aarch32");
+    __d_println(DEBUG, "\nc_serror_handler_lower_el_aarch32");
 }
 
 // Initialize vector table

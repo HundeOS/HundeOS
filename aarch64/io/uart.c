@@ -1,7 +1,6 @@
 #include "uart.h"
 #include "../../kernel/kernel.h"
 
-
 static volatile uint32_t _check_ready() {
     return *UART0_FR & 0x20;
 }

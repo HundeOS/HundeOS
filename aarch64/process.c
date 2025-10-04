@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <stdint.h>
 
+#include "asm_helpers.h"
+
 #define STACK_SIZE 1024 * 512 // 512 k words
 
 Process process_table[2048];
@@ -78,12 +80,15 @@ inline uint64_t Process__spsr_for_el0(unsigned daif_mask /*bits [9:6]*/) {
  *   SP_EL0 = user_stack_top_va
  *   x0 = arg0 (you can extend to x1..x7 similarly)
  */
-__attribute__((noreturn))
-inline void Process__enter_el0(Process * proc,
+// __attribute__((noreturn))
+void Process__enter_el0(Process * self,
                                int mask_irqs_on_entry)  // 1 => keep IRQs masked at EL0
 {
     register uint64_t x0 __asm__("x0") = 0;
     uint64_t spsr = Process__spsr_for_el0(mask_irqs_on_entry ? 0b0111 : 0); // mask D,A,I if desired
+    write_ttbr0_el1((uint64_t)self->page_table);
+    write_sp_el0((uint64_t)self->stack.base);
+    write_elr_el1((uint64_t)self->entry_point);
 
     __asm__ __volatile__(
         // Set user stack pointer (EL0)
@@ -96,7 +101,7 @@ inline void Process__enter_el0(Process * proc,
         // x0 is already loaded
         "eret\n"
         :
-        : "r"(x0), "r"(proc->stack.base), "r"(proc->entry_point), "r"(spsr)
+        : "r"(x0), "r"(self->stack.base), "r"(self->entry_point), "r"(spsr)
         : "memory");
     __builtin_unreachable();
 }

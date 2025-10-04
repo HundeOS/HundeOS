@@ -1,18 +1,24 @@
 # Cross-compilation tools
 CROSS_COMPILE = aarch64-elf-
-AS = $(CROSS_COMPILE)as
+#AS = $(CROSS_COMPILE)as
+AS = $(CROSS_COMPILE)gcc
 CC = $(CROSS_COMPILE)gcc
-LD = $(CROSS_COMPILE)ld
+#LD = $(CROSS_COMPILE)ld
+LD = $(CROSS_COMPILE)gcc
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
 # Compiler flags
-CFLAGS = -mcmodel=large -nostdlib -std=c11 -nostartfiles -ffreestanding -latomic -mno-outline-atomics -O2 -Wall -Wextra -DBSP_VIRT
+CFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra \
+           -nostdlib -nostartfiles -mcmodel=large -DBSP_VIRT \
+           -march=armv8-a -mno-outline-atomics
+
 
 # Assembler flags
-ASFLAGS =
+ASFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra \
+            -nostdlib -nostartfiles -mcmodel=small -latomic
 
 # Linker flags
-LDFLAGS = -T linker.ld
+LDFLAGS = -nostdlib -T linker.ld
 
 # Output files
 ELF = build/kernel.elf
@@ -29,6 +35,7 @@ ASM_OBJECTS := $(patsubst %.s,build/%.o,$(ASM_SOURCES))
 all: $(BIN)
 
 # Semihosting version (better for QEMU debugging)
+elf: $(ELF)
 kernel: $(BIN)
 
 setup:
@@ -54,15 +61,26 @@ $(ELF): $(ASM_OBJECTS) $(OBJECTS)
 clean:
 	rm -rf build
 
-qemu-virt: $(BIN)
+qemu-virt: $(ELF)
+	qemu-system-aarch64 \
+		-M virt,gic-version=3 \
+		-smp cpus=4 -cpu max \
+		-m 4G  \
+		-serial stdio \
+		-cpu cortex-a57 \
+		-kernel $(ELF) \
+		-nographic \
+		-monitor telnet::4444,server,nowait
+
+qemu-virt-gdb: clean $(ELF)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
 		-smp cpus=2 -cpu max \
 		-m 4G  \
-		-serial stdio \
 		-cpu cortex-a57 \
-		-kernel $(BIN) \
+		-kernel $(ELF) \
 		-nographic \
-		-monitor telnet::4444,server,nowait
+		-S \
+		-gdb tcp::1234
 
 .PHONY: all clean qemu

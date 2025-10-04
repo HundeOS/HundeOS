@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "process.h"
+#include "cpu_common.h"
 
 typedef enum {
     CPU_OFFLINE = 0,
@@ -21,12 +22,18 @@ typedef struct cpu {
 } cpu;
 
 void smp_init();
-int start_secondary_cpus(uint64_t total_cpus);
+uint64_t start_secondary_cpus();
 void start_primary_cpu();
 
-uint64_t cpu_count();
-uint64_t cpu_id();
+uint64_t CPU__count();
+uint64_t CPU__id();
 
-uint64_t get_current_el();
+inline uint64_t get_current_el(void) {
+    uint64_t el;
+    __asm__ __volatile__("mrs %0, CurrentEL" : "=r" (el));
+    return (el >> 2) & 3;
+}
+
+inline unsigned cpu_aff0(void){ return (unsigned)(rd_mpidr() & 0xff); }
 
 #endif
