@@ -1,19 +1,22 @@
 #ifndef __KERNEL_SPIN_H
 #define __KERNEL_SPIN_H
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef enum {
     ABORT = -1,
     OK = 0,
 } WaitResult;
 
-typedef volatile uint32_t (*spin_check)();
-typedef volatile uint32_t (*spin_context_check)(void *);
+typedef void * SpinContext;
 
-void spin(uint32_t count);
-WaitResult spin_wait(spin_check check);
-WaitResult spin_wait_max(spin_check check, uint32_t max);
-WaitResult spin_wait_context(spin_context_check check, void * context, uint32_t max);
-void wait_for_interrupts();
+typedef volatile bool (*SpinCheck)();
+typedef volatile bool (*SpinContextCheck)(SpinContext ctx);
+
+
+void Spin__spin(uint64_t count);
+WaitResult Spin__wait(SpinCheck check);
+WaitResult Spin__wait_max(SpinCheck check, uint64_t max);
+WaitResult Spin__wait_context(SpinContextCheck check, SpinContext context, uint64_t max);
 
 #endif

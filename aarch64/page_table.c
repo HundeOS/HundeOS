@@ -1,8 +1,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../kernel/kernel.h"
 #include "page_table.h"
-#include "page_alloc.h"
 
 #define PAGE_MASK   (~(PAGE_SIZE - 1ULL))
 #define PAGE_OFF(x) ((uint64_t)(x) & (PAGE_SIZE - 1ULL))
@@ -31,6 +31,15 @@ PageTable * PageTable__new() {
     return table;
 }
 
+PageTable * PageTable__empty() {
+    return PageTable__new();
+}
+
+Address PageTable__physical_address(PageTable * self) {
+    KernelAddress address = MemoryPage__address((MemoryPage *) self);
+    return address.phys_addr;
+}
+
 /* ---- VA→PA using AT+PAR: translate an EL1 (kernel) VA to a physical address ---- */
 inline int PageTable__el1_va_to_phys(uint64_t kernel_va) {
     uint64_t par;
@@ -41,7 +50,7 @@ inline int PageTable__el1_va_to_phys(uint64_t kernel_va) {
         : "=r"(par) : "r"(kernel_va) : "memory");
 
     if (par & 1) {
-        panic("failed to determine physical address", NULL);
+        Kernel__panic("failed to determine physical address", NULL);
     }
     return (par & MASK_PTE_NEXTADDR) | (kernel_va & 0xFFF);
 }
@@ -101,11 +110,6 @@ PageTable * PageTable__ensure_next_level_table(PageTable * parent_level_table,
 
     __asm__ __volatile__("dsb ishst; isb" ::: "memory");
     return next_level_table;
-}
-
-PageTable * kernel_pagetable()
-{
-    uint64_t table_phys_addr = read_ttbr1_el1();
 }
 
 int PageTable__map_2M_block(PageTable * self,

@@ -12,6 +12,7 @@ __BOOT_STRING__(new_line) = "\n";
 __BOOT_STRING__(sep) = "\n0x";
 
 __BOOT_STRING__(new_table_message) = "new table\n";
+__BOOT_STRING__(existing_table) = "existing table\n";
 __BOOT_STRING__(new_table_init) = "new table initialised\n";
 __BOOT_STRING__(bad_descriptor) = "table descriptor is wrong\n";
 __BOOT_STRING__(out_of_pages) = "out of table pages\n";

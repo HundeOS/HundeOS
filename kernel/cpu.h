@@ -1,10 +1,9 @@
 #ifndef __KERNEL_CPU_H
 #define __KERNEL_CPU_H
+#include "arch/cpu.h"
 
-// architecture specific
-typedef struct cpu cpu;
+uint64_t CPU__count();
+void CPU__enter_kernel();
 
-extern uint64_t CPU__id();
-extern uint64_t CPU__count();
 
 #endif

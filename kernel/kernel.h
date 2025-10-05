@@ -3,7 +3,7 @@
 
 #include "arch.h"
 #include "spin.h"
-#include "halt.h"
+#include "panic.h"
 #include "context.h"
 #include "print.h"
 #include "process.h"
@@ -11,7 +11,8 @@
 #include "cpu_timer.h"
 #include "mutex.h"
 #include "debug.h"
-#include "smp_main.h"
+#include "main.h"
 #include "kernel.h"
+#include "page_alloc.h"
 
 #endif

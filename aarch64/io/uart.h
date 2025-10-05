@@ -39,4 +39,7 @@ extern const uint64_t __mmio_start[];
 
 void uart_init();
 
+void put_int(int c);
+void puts(const char *s);
+
 #endif

@@ -1,49 +1,44 @@
 #include <stdint.h>
 #include "spin.h"
-#include "noop.h"
+#include "../aarch64/boot/boot_debug.h"
 
-const uint32_t MAX = 100000000;
+#include "arch/cpu.h"
+
+const uint64_t MAX = 100000000;
 
 // Simple delay function
-void spin(uint32_t count) {
-    volatile uint32_t i;
+void Spin__spin(uint64_t count) {
+    volatile uint64_t i;
     for (i = 0; i < count; i++) {
-        noop();
+        CPU__noop();
     }
 }
 
-WaitResult spin_wait(spin_check check) {
-    return spin_wait_max(check, MAX);
+WaitResult Spin__wait(SpinCheck check) {
+    return Spin__wait_max(check, MAX);
 }
 
-WaitResult spin_wait_max(spin_check check, const uint32_t max) {
-    uint32_t count = 0;
-    while (check())
+WaitResult Spin__wait_max(SpinCheck check, const uint64_t max) {
+
+    for (uint64_t count = 0; check() && count < max; count++)
     {
         if (count > max) {
             return ABORT;
         }
-        noop();
-        count++;
+        CPU__noop();
     }
     return OK;
 }
 
-WaitResult spin_wait_context(spin_context_check check, void * context, const uint32_t max) {
-    uint32_t count = 0;
+WaitResult Spin__wait_context(SpinContextCheck check, SpinContext context, const uint64_t max) {
+    uint64_t count = 0;
     while (check(context))
     {
         if (count > max) {
             return ABORT;
         }
-        noop();
+        CPU__noop();
         count++;
     }
     return OK;
-}
-
-void wait_for_interrupts() {
-    while (1) {
-        cpu_wait();
-    }
 }

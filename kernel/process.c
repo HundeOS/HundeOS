@@ -1,4 +1,5 @@
 #include "process.h"
+#include "arch/page_table.h"
 
 extern Process * Process__new(ProcessEntryPoint entry);
 extern uint64_t Process__start(Process * self);

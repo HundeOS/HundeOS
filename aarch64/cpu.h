@@ -27,13 +27,14 @@ void start_primary_cpu();
 
 uint64_t CPU__count();
 uint64_t CPU__id();
+void CPU__noop();
+void CPU__wait_for_interrupts();
+void CPU__yield();
 
 inline uint64_t get_current_el(void) {
     uint64_t el;
     __asm__ __volatile__("mrs %0, CurrentEL" : "=r" (el));
     return (el >> 2) & 3;
 }
-
-inline unsigned cpu_aff0(void){ return (unsigned)(rd_mpidr() & 0xff); }
 
 #endif

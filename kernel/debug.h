@@ -14,7 +14,7 @@ typedef enum {
     FOCUS
 } Level;
 
-#define MIN_LEVEL DEBUG
+#define MIN_LEVEL PROGRESS
 
 #define __d_printf(level, str, ...) \
 if (level >= MIN_LEVEL) { k_printf(str, __VA_ARGS__); }

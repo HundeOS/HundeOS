@@ -14,6 +14,7 @@
 #define __BOOT__(a) a __attribute__((section(".boot.text")))
 #define __BOOT_RODATA__(a) a __attribute__((section(".boot.rodata")))
 #define __BOOT_DATA__(a) a __attribute__((section(".boot.data"))) __attribute__(( aligned(4096)))
+#define __BOOT_PAGE_TABLE__(a) a __attribute__((section(".boot.data.table"))) __attribute__(( aligned(4096)))
 #define __BOOT_BSS__(a) a __attribute__((section(".boot.bss")))
 #define __BOOT_STRING__(name) __BOOT_RODATA__(static const char name[])
 

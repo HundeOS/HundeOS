@@ -1,73 +1,10 @@
 #include <stdint.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdint.h>
-#include <stdint.h>
-#include <stdint.h>
-#include <stdint.h>
-#include <stdint.h>
 
 #include "../kernel/kernel.h"
 #include "cpu_timer.h"
-#include "cpu.h"
+#include "exception.h"
 #include "asm_helpers.h"
 
-// Structure to hold saved register context
-typedef struct exception_context_t {
-    uint64_t x[31];  // x0-x30
-    uint64_t sp;
-    uint64_t pc;     // ELR
-    uint64_t pstate; // SPSR
-} exception_context_t;
-
-void dump_state(exception_context_t * ctx) {
-    uint64_t esr = read_esr_el1();
-    uint64_t elr = read_elr_el1();
-    uint64_t far = read_far_el1();
-    uint64_t sctlr = read_sctlr_el1();
-
-    uint32_t ec = (esr >> 26) & 0x3F;
-    
-    __d_printf(FAULT, "Exception Class: %p\n", ec);
-    __d_printf(FAULT, "ESR: %p\n", read_esr_el1());
-    __d_printf(FAULT, "Fault Address (FAR): %p\n", read_far_el1());
-    __d_printf(FAULT, "Exception Link Register (ELR): %p\n", read_elr_el1());
-    __d_printf(FAULT, "SCTLR: %p\n", read_sctlr_el1());
-    __d_printf(FAULT, "MAIR: %p\n", read_mair_el1());
-    __d_printf(FAULT, "TCR: %p\n", read_tcr_el1());
-    __d_printf(FAULT, "TBBR0: %p\n", read_ttbr0_el1());
-    __d_printf(FAULT, "TBBR1: %p\n", read_ttbr1_el1());
-
-    if (ctx) {
-        __d_printf(FAULT, "PC: %p\n", ctx->pc);
-        __d_printf(FAULT, "SP: %p\n", ctx->sp);
-        __d_printf(FAULT, "PSTATE: %p\n", ctx->pstate);
-        int width = 6;
-        for (int i = 0; i < 31; i++) {
-            if (i % width == 0) {
-                __d_println(FAULT, "");
-            }
-            __d_printf(FAULT, "X[%i]: %p  ", i, ctx->x[i]);
-        }
-
-        if (ec == 0x21) {
-            __d_println(FAULT, "Instruction Abort from current EL");
-        }
-    }
-    else {
-        __d_println(FAULT, "No context provided");
-    }
-
-}
-
-void vectors_init(void) {
-    extern void *vector_table;
-    uint64_t vbar = (uint64_t)&vector_table;
-    
-    // Set VBAR_EL1 (or appropriate EL)
-    __asm__ volatile("msr vbar_el1, %0" : : "r" (vbar));
-    __asm__ volatile("isb");
-}
 
 // Helper function to get exception syndrome
 inline uint64_t get_esr_el1(void) {
@@ -129,7 +66,7 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
             if (hcf) {
                 char buf[128];
                 k_sprintf(buf, "data abort call: cpu=%i", CPU__id());
-                panic(buf, ctx);
+                Kernel__panic(buf, ctx);
             }
             return 0;
             break;
@@ -137,13 +74,13 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
             if (hcf) {
                 char buf[128];
                 k_sprintf(buf, "instruction abort call: cpu=%i", CPU__id());
-                panic(buf, ctx);
+                Kernel__panic(buf, ctx);
             }
             return 0;
             break;
         default:
             // Handle other synchronous exceptions
-            panic("Unhandled CPU exception", ctx);
+            Kernel__panic("Unhandled CPU exception", ctx);
             return 0;
             break;
     }

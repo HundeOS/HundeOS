@@ -4,11 +4,12 @@
 #include "mmu.h"
 
 #include "boot.h"
+#include "boot_debug.h"
 #include "../asm_helpers.h"
 #include "../page_table.h"
 #include "../gicr.h"
 #include "../io/uart.h"
-#include "../mem.h"
+#include "../mmu.h"
 #include "print.h"
 #include "boot_strings.h"
 #include "exceptions.h"
@@ -23,12 +24,18 @@ extern char __heap_start[];
 extern char __heap_start_phys[];
 extern char __heap_end_phys[];
 
-static __BOOT_DATA__(PageTable) low_mem_l0_table;
-static __BOOT_DATA__(PageTable) high_mem_l0_table;
-static __BOOT_DATA__(PageTable) table_pool[PAGE_POOL_SIZE];
-static __BOOT_DATA__(uint64_t) cursor = 0;
+static __BOOT_PAGE_TABLE__(PageTable) low_mem_l0_table;
+static __BOOT_PAGE_TABLE__(PageTable) high_mem_l0_table;
+static __BOOT_PAGE_TABLE__(PageTable) table_pool[PAGE_POOL_SIZE];
+static __BOOT_DATA__(uint64_t) table_cursor = 0;
 
-static const __BOOT_DATA__(uint64_t) _2M = (1ULL << 21);
+#define _2M (1ULL << 21)
+
+extern char __table_phys_start[];
+extern char __table_phys_end[];
+
+extern char __table_virt_start[];
+extern char __table_virt_end[];
 
 static __BOOT_DATA__(MappingPermissions) heap_perms = {
     .access = ACCESS_EL1_RW_EL0_NO,
@@ -44,6 +51,14 @@ static __BOOT_DATA__(MappingPermissions) kernel_perms = {
     .memory_type = ATTR_INDEX_NORMAL,
     .uxn = 1,
     .pxn = 0
+};
+
+static __BOOT_DATA__(MappingPermissions) kernel_rw_perms = {
+    .access = ACCESS_EL1_RW_EL0_NO,
+    .shareability = SHARE_INNER,
+    .memory_type = ATTR_INDEX_NORMAL,
+    .uxn = 1,
+    .pxn = 1
 };
 
 static __BOOT_DATA__(MappingPermissions) device_perms = {
@@ -69,40 +84,23 @@ __BOOT__(PageTable *) ensure_next_level_table(PageTable * parent_level_table, ui
         return NULL;  // leaf present; cannot "ensure" a table without a split
     }
 
-    PageTable * next_level_table = &table_pool[cursor++];
-    if (cursor == PAGE_POOL_SIZE) {
+    PageTable * next_level_table = &table_pool[table_cursor++];
+
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        next_level_table->entries[i] = 0;
+    }
+    if (table_cursor == PAGE_POOL_SIZE) {
         boot_panic(out_of_pages);
     }
     if (descriptor != 0) {
         boot_panic(bad_descriptor);
     }
-
     parent_level_table->entries[child_index] = PageTable__make_table_desc(next_level_table);
     dsb_ishst();
     return next_level_table;
 }
 
-inline void map_2M_block(PageTable * table, uint64_t virtual_address, uint64_t phys_addr, MappingPermissions * perms)
-{
-    PageTable * l1_tbl = ensure_next_level_table(table, L0_IDX(virtual_address));
-    PageTable * l2_tbl = ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
-
-    if (l2_tbl->entries[L2_IDX(virtual_address)] & FLAG_PTE_VALID) {
-        _print(block_mapped);
-    }
-    else {
-        l2_tbl->entries[L2_IDX(virtual_address)] = PageTable__l2_block_desc(phys_addr,
-                                                                            perms->memory_type,
-                                                                            perms->shareability,
-                                                                            perms->access,
-                                                                            perms->uxn,
-                                                                            perms->pxn);
-
-    }
-
-}
-
-inline void map_L0_block(PageTable * table, uint64_t virtual_address, uint64_t phys_addr, MappingPermissions * perms)
+__BOOT__(void) map_2M_block(PageTable * table, uint64_t virtual_address, uint64_t phys_addr, MappingPermissions * perms)
 {
     PageTable * l1_tbl = ensure_next_level_table(table, L0_IDX(virtual_address));
     PageTable * l2_tbl = ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
@@ -117,9 +115,7 @@ inline void map_L0_block(PageTable * table, uint64_t virtual_address, uint64_t p
                                                                             perms->access,
                                                                             perms->uxn,
                                                                             perms->pxn);
-
     }
-
 }
 
 __BOOT__(void) map_range_2M(PageTable * table,
@@ -131,8 +127,9 @@ __BOOT__(void) map_range_2M(PageTable * table,
     uint64_t from = align_down_2m(phys_start);
     uint64_t to = align_up_2m(phys_end);
     uint64_t dest = align_down_2m(target);
+    uint64_t _2_megs = 1024 * 1024 * 2;
 
-    for (uint64_t pa = from, va = dest; pa <= to; pa += _2M, va += _2M) {
+    for (uint64_t pa = from, va = dest; pa <= to; pa += _2_megs, va += _2_megs) {
         map_2M_block(table, va, pa, perms);
     }
 }
@@ -154,17 +151,17 @@ __BOOT__(void) map_kernel_all_normal_rwx(uint64_t phys_start,
     map_range_2M(table, phys_start, phys_end, target, &kernel_perms);
 }
 
-inline void map_uart(PageTable * table, uint64_t virt_addr) {
+__BOOT__(void) map_uart(PageTable * table, uint64_t virt_addr) {
     map_2M_block(table, virt_addr, UART0_PHYS_BASE, &device_perms);
 }
 
-inline void map_gicd_gicr(PageTable * table) {
+__BOOT__(void) map_gicd_gicr(PageTable * table) {
     uint64_t gicd_phys = GICD_PHYS_BASE;
     uint64_t gicd_virt = GICD_BASE;
     map_2M_block(table, gicd_virt, gicd_phys, &device_perms);
 }
 
-inline void map_kernel()
+__BOOT__(void) map_kernel()
 {
     uint64_t k_low_phys = KERNEL_LOW_PHYS_BASE;
     uint64_t k_low_phys_max = (uintptr_t)&__boot_end[0];
@@ -189,21 +186,26 @@ inline void map_kernel()
     map_kernel_heap_rw();
 }
 
-inline void zero_table(PageTable * table)
+__BOOT__(void) map_tables_high()
+{
+    map_2M_block(&high_mem_l0_table, (uint64_t)&__table_virt_start, (uint64_t)&__table_phys_start, &kernel_rw_perms);
+}
+
+__BOOT__(void) zero_table(PageTable * table)
 {
     for (int i = 0; i < TABLE_SIZE; i++) {
         table->entries[i] = 0;
     }
 }
 
-inline void zero_l0_tables()
+__BOOT__(void) zero_l0_tables()
 {
     _print(message_zero);
     zero_table(&low_mem_l0_table);
     zero_table(&high_mem_l0_table);
 }
 
-inline void zero_table_pool()
+__BOOT__(void) zero_table_pool()
 {
     _print(message_zero);
 
@@ -262,6 +264,7 @@ __BOOT__(void) setup_boot_mappings() {
     zero_table_pool();
     _print(mapping_kernel);
     map_kernel();
+    map_tables_high();
     _print(mapping_uart_low);
     map_uart(&low_mem_l0_table, UART0_PHYS_BASE);
     _print(mapping_uart_high);

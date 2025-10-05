@@ -12,6 +12,7 @@ PHDRS {
 }
 
 KERNEL_HIGH_BASE = 0xFFFF000000000000;
+KERNEL_TABLE_BASE = 0xFFFF800000000000;
 KERNEL_HEAP_BASE = 0xFFFFF00000000000;
 KERNEL_BASE = 0x40080000;
 
@@ -45,6 +46,16 @@ SECTIONS
     KEEP(*(.boot.data))
     KEEP(*(.boot.data.*))
   } :bootdata
+
+
+  .boot.data.table : ALIGN(2M) {
+    __table_phys_start = .;
+    KEEP(*(.boot.data.table))
+    KEEP(*(.boot.data.table.*))
+  } :bootdata
+
+  __table_phys_end = .;
+
 
   .boot.rodata : ALIGN(PAGE_4KB) {
     KEEP(*(.boot.rodata))
@@ -143,6 +154,11 @@ SECTIONS
   . += 4M;
   __lma_kernel_end = __text_phys + . - KERNEL_HIGH_BASE;
   __lma_end = __lma_kernel_end;
+
+  . = KERNEL_TABLE_BASE;
+  __table_virt_start = ALIGN(BLOCK_2MB);
+  . += 2M;
+  __table_virt_end = .;
 
   . = KERNEL_HEAP_BASE;
   __lma_cursor = ALIGN(__lma_cursor + 4M, BLOCK_2MB);

@@ -1,32 +1,30 @@
 #include "print.h"
 #include <stdint.h>
 #include "mutex.h"
+#include "arch/basic_io.h"
 
 static mutex_t print_lock = MUTEX_INIT;
 
-extern void puts(const char* str);
-extern void put_int(int num);
-
 void k_println(const char * str) {
     mutex_lock(&print_lock);
-    puts(str);
-    puts("\n");
+    BasicIO__puts(str);
+    BasicIO__puts("\n");
     mutex_unlock(&print_lock);
 }
 
 // Helper function to output a single character using puts
 static void putchar(char c) {
     char str[2] = {c, '\0'};
-    puts(str);
+    BasicIO__puts(str);
 }
 
 // Helper function to output a string character by character
 static void print_string(const char* str) {
     if (!str) {
-        puts("(null)");
+        BasicIO__puts("(null)");
         return;
     }
-    puts(str);
+    BasicIO__puts(str);
 }
 
 // Helper function to convert and print unsigned integer
@@ -46,12 +44,12 @@ static void print_unsigned(unsigned int value, int base, bool uppercase) {
         }
     }
     
-    puts(&buffer[i]);
+    BasicIO__puts(&buffer[i]);
 }
 
 // Helper function to print pointer
 static void print_pointer(void* ptr) {
-    puts("0x");
+    BasicIO__puts("0x");
     uintptr_t value = (uintptr_t)ptr;
     
     char buffer[17];  // 64-bit pointer = 16 hex chars + null
@@ -67,7 +65,7 @@ static void print_pointer(void* ptr) {
     i = 0;
     while (i < 15 && buffer[i] == '0') i++;
     
-    puts(&buffer[i]);
+    BasicIO__puts(&buffer[i]);
 }
 
 // Helper to get string length
@@ -106,7 +104,7 @@ int k_printf(const char* format, ...) {
             // Flush buffer if it's getting full or we hit a newline
             if (buf_idx >= 255 || format[i] == '\n') {
                 buffer[buf_idx] = '\0';
-                puts(buffer);
+                BasicIO__puts(buffer);
                 count += buf_idx;
                 buf_idx = 0;
             }
@@ -114,7 +112,7 @@ int k_printf(const char* format, ...) {
             // Flush any pending regular text
             if (buf_idx > 0) {
                 buffer[buf_idx] = '\0';
-                puts(buffer);
+                BasicIO__puts(buffer);
                 count += buf_idx;
                 buf_idx = 0;
             }
@@ -145,7 +143,7 @@ int k_printf(const char* format, ...) {
                 case 'd':
                 case 'i': {
                     int value = va_arg(args, int);
-                    put_int(value);
+                    BasicIO__put_int(value);
                     
                     // Estimate digits for count (simplified)
                     if (value < 0) count++;  // minus sign
@@ -275,7 +273,7 @@ int k_printf(const char* format, ...) {
     // Flush any remaining buffer content
     if (buf_idx > 0) {
         buffer[buf_idx] = '\0';
-        puts(buffer);
+        BasicIO__puts(buffer);
         count += buf_idx;
     }
     

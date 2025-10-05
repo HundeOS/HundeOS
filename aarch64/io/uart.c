@@ -1,13 +1,13 @@
 #include "uart.h"
 #include "../../kernel/kernel.h"
 
-static volatile uint32_t _check_ready() {
-    return *UART0_FR & 0x20;
+static volatile bool _check_ready() {
+    return (bool) (*UART0_FR & 0x20);
 }
 
 static void _send(unsigned int c) {
     __asm__ volatile("dsb sy");
-    spin_wait(&_check_ready);
+    Spin__wait(&_check_ready);
     *UART0_DR = c;
     __asm__ volatile("dsb sy");
 

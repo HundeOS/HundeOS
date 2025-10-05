@@ -1,6 +1,8 @@
 #ifndef __AARCH64_MEM_H
 #define __AARCH64_MEM_H
 
+#include "../kernel/arch/mmu.h"
+
 // MAIR index meanings we set:
 //  AttrIdx 0 = Normal, Inner/Outer WB WA, non-transient (0xFF)
 //  AttrIdx 1 = Device-nGnRE (0x04)
@@ -79,9 +81,5 @@ inline uint64_t align_up_2m(uint64_t x)
 {
     return (x + ((1ULL<<21)-1)) & ~((1ULL<<21)-1);
 }
-
-
-void MMU__init(void);
-void MMU__secondary_init(void);
 
 #endif

@@ -1,6 +1,11 @@
 #ifndef __KERNEL_PROCESS_H
 #define __KERNEL_PROCESS_H
+
+#include <stdint.h>
+
 #include "mem.h"
+#include "arch/page_table.h"
+
 // architecture specific
 typedef struct ProcessContext ProcessContext;
 

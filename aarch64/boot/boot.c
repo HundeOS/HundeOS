@@ -8,13 +8,12 @@
 #include "exceptions.h"
 #include "mmu.h"
 
-#include "../asm_helpers.h"
 #include "../io/uart.h"
 
 extern const uint64_t __k_stack_high[];
 extern const uint64_t vector_table;
 
-extern void (*cpu_enter_kernel)();
+//extern void (*CPU__enter_kernel)();
 
 inline void enable_fp_simd(void) {
     uint64_t cpacr;
@@ -61,7 +60,7 @@ __BOOT__(void) jump_to_kernel(uint64_t cpu)
 
     uint64_t stack = (uint64_t)&__k_stack_high[cpu * STACK_SIZE];
 
-    enter_kernel(stack, (uint64_t)&vector_table, (uint64_t)&cpu_enter_kernel);
+    enter_kernel(stack, (uint64_t)&vector_table, (uint64_t)&CPU__enter_kernel);
 }
 
 __BOOT__(void) common_init(void)

@@ -4,5 +4,8 @@
 // PPI numbers
 #define PPI_CNTV   27  // virtual timer IRQ
 #define PPI_CNTP   30  // physical non-secure timer IRQ
+#include <stdint.h>
+
+void CPUTimer__start(uint64_t hz);
 
 #endif

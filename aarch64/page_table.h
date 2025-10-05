@@ -4,9 +4,6 @@
 #include <stdint.h>
 
 #include "../kernel/kernel.h"
-#include "page_alloc.h"
-
-typedef uint64_t PageTableEntry;
 
 #define TABLE_SIZE (PAGE_SIZE / sizeof(PageTableEntry))
 #define L0_IDX(va)  (((uint64_t)(va) >> 39) & 0x1FF) // L0 is the top 9 bits of OUTPUT_ADDR
@@ -14,11 +11,11 @@ typedef uint64_t PageTableEntry;
 #define L2_IDX(va)  (((uint64_t)(va) >> 21) & 0x1FF) // L2 is the next 9 bits of OUTPUT_ADDR
 #define L3_IDX(va)  (((uint64_t)(va) >> 12) & 0x1FF) // L3 is the next 9 bits of OUTPUT_ADDR
 
+typedef uint64_t PageTableEntry;
 
 typedef struct PageTable {
     PageTableEntry entries[TABLE_SIZE];
 } PageTable;
-
 
 typedef enum {
     ATTR_INDEX_NORMAL = 0,   // MAIR slot for Normal WBWA
@@ -84,8 +81,7 @@ typedef struct {
 
 void PageTable__grant(Process * self);
 PageTable * PageTable__new();
-PageTable * PageTable__ensure_next_level_table(PageTable * parent_level_table,
-                                               uint64_t child_index);
+Address PageTable__physical_address(PageTable * self);
 
 int PageTable__map_2M_block(PageTable * self,
                             uint64_t virtual_address,
@@ -180,5 +176,6 @@ inline PageTableEntry PageTable__make_table_desc(PageTable * next_level_page)
     return FLAG_PTE_VALID | FLAG_PTE_TABLE | ((uint64_t)next_level_page & MASK_PTE_NEXTADDR);
 }
 
+Address PageTable__physical_address(PageTable * self);
 
 #endif

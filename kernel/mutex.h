@@ -2,7 +2,7 @@
 #define  __KERNEL_MUTEX_H
 #include <stdatomic.h>
 #include <stdbool.h>
-#include "noop.h"
+#include "arch/cpu.h"
 
 typedef struct {
     volatile uint32_t v;
@@ -16,7 +16,7 @@ inline int mutex_trylock(mutex_t *m){
 
 inline void mutex_lock(mutex_t *m){
     while (__atomic_exchange_n(&m->v, 1u, __ATOMIC_ACQUIRE) != 0u)
-        cpu_yield();
+        CPU__yield();
 }
 
 inline void mutex_unlock(mutex_t *m){
