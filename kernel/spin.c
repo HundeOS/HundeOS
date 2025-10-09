@@ -1,7 +1,5 @@
 #include <stdint.h>
 #include "spin.h"
-#include "../aarch64/boot/boot_debug.h"
-
 #include "arch/cpu.h"
 
 const uint64_t MAX = 100000000;

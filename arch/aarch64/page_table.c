@@ -1,7 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../kernel/kernel.h"
+#include <kernel.h>
 #include "page_table.h"
 
 #define PAGE_MASK   (~(PAGE_SIZE - 1ULL))

@@ -5,4 +5,5 @@
 
 void timer_handler() {
     __d_printf(DEBUG, "timer_handler for %i\n", CPU__id());
+    CPU__check_halt();
 }

@@ -1,4 +1,6 @@
+#include <stdint.h>
 #include "cpu.h"
+
 #include "mutex.h"
 #include "debug.h"
 #include "main.h"
@@ -20,12 +22,12 @@ void CPU__enter_kernel()
     mutex_lock(&startup_lock);
     cpus_online++;
     CPU__assign_id(cpus_online);
-    __d_printf(INFO, "CPU %i starting: %i\n", CPU__id(), cpus_online);
+    __d_printf(PROGRESS, "CPU %i starting: %i\n", CPU__id(), cpus_online);
     mutex_unlock(&startup_lock);
+
     // remove the low memory mappings used to bootstrap
     MMU__install_null_low_mem_table();
     Kernel_main(CPU__id());
-
     // If it returns, park
     Kernel__halt();
 }

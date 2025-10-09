@@ -1,4 +1,4 @@
-#include "../kernel/kernel.h"
+#include <kernel.h>
 
 #define _disable_mmu() \
     uint64_t saved_sctlr; \

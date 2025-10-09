@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include "process.h"
-#include "cpu_common.h"
+#include "../kernel/arch/cpu.h"
 
 typedef enum {
     CPU_OFFLINE = 0,
@@ -12,24 +12,20 @@ typedef enum {
     CPU_IDLE
 } cpu_state;
 
-typedef struct cpu {
+typedef struct CPU CPU;
+
+typedef struct CPU {
     Process* current_process;
-    uint32_t cpu_id;
+    uint64_t cpu_id;
     void* kernel_stack;
-    struct cpu* self;  // Pointer to itself
+    CPU* self;
     cpu_state state;
-    uint32_t mpidr;
-} cpu;
+    uint64_t mpidr;
+} CPU;
 
 void smp_init();
 uint64_t start_secondary_cpus();
 void start_primary_cpu();
-
-uint64_t CPU__count();
-uint64_t CPU__id();
-void CPU__noop();
-void CPU__wait_for_interrupts();
-void CPU__yield();
 
 inline uint64_t get_current_el(void) {
     uint64_t el;

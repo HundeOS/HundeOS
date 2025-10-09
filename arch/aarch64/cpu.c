@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "cpu.h"
 #include "../kernel/arch/cpu.h"
+#include "cpu_common.h"
 
 static uint8_t __attribute__((aligned(16))) cpu_stacks[MAX_CPUS][STACK_SIZE];
 
@@ -27,8 +28,32 @@ void CPU__yield(void) {
 }
 
 void CPU__wait_for_interrupts() {
-    while (1) {
+    while (true) {
         CPU__wait();
+    }
+}
+
+inline void CPU__halt_forever() {
+    __asm__ volatile(
+        "msr daifset, #0xf\n"   // mask IRQ, FIQ, SError, Debug
+        "dsb sy\n"
+        "isb\n"
+        "1: wfi\n"              // or wfe; we’re not coming back
+        "b 1b\n"
+        ::: "memory");
+}
+
+static _Atomic int halt = 0;
+
+void CPU__halt_all() {
+    halt = 1;
+    CPU__halt_forever();
+}
+
+void CPU__check_halt() {
+    if (halt) {
+        __d_printf(PANIC, "\n\nCPU %i is halting\n", CPU__id());
+        CPU__halt_forever();
     }
 }
 

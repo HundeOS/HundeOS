@@ -2,6 +2,7 @@
 #define __KERNEL_PAGE_ALLOC_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "mem.h"
 
 typedef uint64_t Address;

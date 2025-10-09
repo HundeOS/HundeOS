@@ -1,6 +1,7 @@
 #include <stdint.h>
+#include "syscall.h"
 
-uint64_t syscall(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
+SystemCallResult syscall(SystemCall num, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
     uint64_t result;
 
     register uint64_t x0 __asm__("x0") = arg1;

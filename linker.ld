@@ -143,6 +143,11 @@ SECTIONS
     KEEP(*(.bss.stack))
   } :kdata
 
+  .binaries : ALIGN(BLOCK_2MB)
+  {
+    KEEP(*(.binaries))
+  } :kdata
+
   .kstack (NOLOAD) : ALIGN(PAGE_4KB) {
       __k_stack_start = .;
       . += 2M;                 /* pick a size */

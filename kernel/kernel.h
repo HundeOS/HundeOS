@@ -12,7 +12,6 @@
 #include "mutex.h"
 #include "debug.h"
 #include "main.h"
-#include "kernel.h"
 #include "page_alloc.h"
 
 #endif

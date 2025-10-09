@@ -46,5 +46,4 @@ void Kernel__dump_state(exception_context_t * ctx) {
     else {
         __d_println(FAULT, "No context provided");
     }
-
 }

@@ -2,7 +2,7 @@
 #define __AARCH64_PROCESS_H
 
 #include <stdint.h>
-#include "../kernel/kernel.h"
+#include <kernel.h>
 #define MAX_PROCESSES 32
 
 typedef struct ProcessContext {

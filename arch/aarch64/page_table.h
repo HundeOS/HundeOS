@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "../kernel/kernel.h"
+#include <kernel.h>
 
 #define TABLE_SIZE (PAGE_SIZE / sizeof(PageTableEntry))
 #define L0_IDX(va)  (((uint64_t)(va) >> 39) & 0x1FF) // L0 is the top 9 bits of OUTPUT_ADDR

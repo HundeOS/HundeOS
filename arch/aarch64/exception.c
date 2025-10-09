@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include "../kernel/kernel.h"
+#include <kernel.h>
 #include "cpu_timer.h"
 #include "exception.h"
 #include "asm_helpers.h"

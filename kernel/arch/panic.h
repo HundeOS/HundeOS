@@ -4,6 +4,7 @@
 typedef struct exception_context_t exception_context_t;
 
 extern void Kernel__halt();
+extern void Kernel__halt_all();
 extern void Kernel__dump_state(exception_context_t * ctx);
 
 #endif
