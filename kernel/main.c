@@ -12,13 +12,7 @@
 extern void dummy();
 // static inline uint64_t rdsp(void){ uint64_t sp; __asm__ volatile("mov %0, sp":"=r"(sp)); return sp; }
 void Kernel_main(uint64_t cpu_id) {
-    uint64_t * pointer = (uint64_t *)rdsp();
-
     __d_printf(FOCUS, "CPU entering main: %i\n", cpu_id);
-    __d_printf(FOCUS, "SP: %p\n", pointer);
-    *pointer = 0x12345678;
-    __d_printf(FOCUS, "SP: %p\n", *(pointer--));
-    __d_printf(FOCUS, "SP: %p\n", *(pointer--));
     CPUTimer__start(10000);
     __d_printf(DEBUG, "Timer started: %i\n", cpu_id);
 

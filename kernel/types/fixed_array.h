@@ -59,19 +59,11 @@ inline OptionalV None()
         T##Optional(type) typed, \
         OptionalV untyped \
     } Optional(type);
-//            .max = alias_name##__max_size, \
 
-#include "../print.h"
-static inline uint64_t rdsp(void){ uint64_t sp; __asm__ volatile("mov %0, sp":"=r"(sp)); return sp; }
-// alias_name result = (alias_name) { \
-//     .len = 0, \
-//     .max = 128 \
-// }; \
 
 #define ConstructorDefine(alias_name) \
     alias_name alias_name##__new() \
     { \
-        k_printf("in new sp=%p\n", rdsp());\
         alias_name result = { \
             .len = 0, \
             .max = alias_name##__max_size, \
