@@ -68,7 +68,6 @@ inline OptionalV None()
             .len = 0, \
             .max = alias_name##__max_size, \
         }; \
-        k_printf("in new returning %i\n", alias_name##__max_size); \
         return result; \
     }; \
 

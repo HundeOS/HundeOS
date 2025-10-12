@@ -30,13 +30,13 @@ void test_spawning_from_elf(void)
     printf("here\n");
     Process * process = Process__spawn_from_elf(elf);
     printf("here\n");
-    TEST_ASSERT(check_address_mapped(vaddr_ptr(process->page_table, PageTable),
+    TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
         0x400000,
         true,
         false,
         true,
         101));
-    TEST_ASSERT(check_address_mapped(vaddr_ptr(process->page_table, PageTable),
+    TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
         BASE_STACK,
         true,
         true,

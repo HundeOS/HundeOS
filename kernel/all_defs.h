@@ -3,7 +3,7 @@
 
 #define PAGE_SIZE 4096
 #define MAX_CPUS 16
-#define STACK_SIZE 1024 * 1024 * 2
+#define STACK_SIZE (1024 * 1024 * 2)
 #define BASE_STACK 0x10000000
 #define MAX_PROCESSES 65536
 
