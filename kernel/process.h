@@ -3,14 +3,14 @@
 
 #include <stdint.h>
 
-#include "mem.h"
 #include "arch/page_table.h"
+#include "bin/elf.h"
+#include "all_defs.h"
+#include "stack.h"
 
-// architecture specific
 typedef struct ProcessContext ProcessContext;
 
-
-typedef uint64_t ProcessId;
+typedef uint64_t ProcessID;
 
 typedef enum {
     PROC_STATE_NEW,         // Being created
@@ -24,24 +24,23 @@ typedef enum {
     PROC_STATE_UNALLOCATED         // Being destroyed
 } ProcessState;
 
-typedef void (*ProcessEntryPoint)();
-
 typedef struct Process {
-    // 1. Separate memory space (page tables)
-    PageTable* page_table;     // Each process gets its own L1 table
+    KernelAddress page_table;
 
-    // 2. Saved CPU state
-    void* context; // Registers saved on context switch
+    ProcessContext * context;
+    Stack stack;
 
-    // 3. Stack
-    Stack stack;       // Each process has its own stack
-
-    // 4. Process info
-    ProcessId pid;
+    ProcessID pid;
     ProcessState state;
-    ProcessEntryPoint entry_point;
+    UserAddress entry_point;
 } Process;
 
-ProcessId Process__spawn(ProcessEntryPoint entry);
+Process * Process__spawn_from_elf(Elf * elf);
+Process * Process__new(KernelAddress page_table, UserAddress entry, Stack stack);
+
+typedef Process * ProcessPtr;
+
+FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable);
+FixedArrayDefine(ProcessTable, MAX_CPUS, CPUProcesses);
 
 #endif

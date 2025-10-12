@@ -1,0 +1,16 @@
+#ifndef __KERNEL_STACK_H
+#define __KERNEL_STACK_H
+
+#include "address.h"
+#include "arch/page_table.h"
+
+typedef struct Stack
+{
+    UserAddress base;
+    UserAddress top;
+} Stack;
+
+Stack Stack__new();
+void Stack__map(Stack * self, PageTable * page_table);
+
+#endif

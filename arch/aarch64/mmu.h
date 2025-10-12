@@ -1,7 +1,7 @@
 #ifndef __AARCH64_MEM_H
 #define __AARCH64_MEM_H
 
-#include "../kernel/arch/mmu.h"
+#include "../../kernel/arch/mmu.h"
 
 // MAIR index meanings we set:
 //  AttrIdx 0 = Normal, Inner/Outer WB WA, non-transient (0xFF)
@@ -72,14 +72,24 @@ inline uint64_t boot_tcr_el1(void) {
          | TCR_T0SZ(16) | TCR_T1SZ(16);
 }
 
-inline uint64_t align_down_2m(uint64_t x)
+inline Address align_down_2m(Address x)
 {
     return x & ~((1ULL<<21)-1);
 }
 
-inline uint64_t align_up_2m(uint64_t x)
+inline Address align_up_2m(Address x)
 {
     return (x + ((1ULL<<21)-1)) & ~((1ULL<<21)-1);
+}
+
+inline Address align_down_4k(Address x)
+{
+    return x & ~((1ULL<<21)-1);
+}
+
+inline Address align_up_4k(Address x)
+{
+    return (x + ((1ULL<<12)-1)) & ~((1ULL<<12)-1);
 }
 
 #endif

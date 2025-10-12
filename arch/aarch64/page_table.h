@@ -3,7 +3,10 @@
 
 #include <stdint.h>
 
-#include <kernel.h>
+#include "../../kernel/arch/page_table.h"
+#include "../../kernel/page_alloc.h"
+#include "../../kernel/address.h"
+#include "../../kernel/all_defs.h"
 
 #define TABLE_SIZE (PAGE_SIZE / sizeof(PageTableEntry))
 #define L0_IDX(va)  (((uint64_t)(va) >> 39) & 0x1FF) // L0 is the top 9 bits of OUTPUT_ADDR
@@ -64,6 +67,16 @@ typedef enum {
     SHARE_INNER   = (3u << SHIFT_PTE_SHARE),   // Inner Shareable
 } ShareAttribute;
 
+
+// AP encodings (RW for EL1/EL0)
+//
+// AP[2:1] = bits 7:6
+//
+// AP[2:1]  EL1 EL0
+//      00  RW	—
+//      01  RW  RW
+//      10  RO  —
+//      11  RO  RO
 typedef enum {
     ACCESS_EL1_RW_EL0_NO = (0u << SHIFT_PTE_ACCESS_PERMISSION),
     ACCESS_EL1_RW_EL0_RW = (1u << SHIFT_PTE_ACCESS_PERMISSION),
@@ -79,9 +92,6 @@ typedef struct {
     int pxn;           // 1 => EL1 cannot execute this page
 } MappingPermissions;
 
-void PageTable__grant(Process * self);
-PageTable * PageTable__new();
-Address PageTable__physical_address(PageTable * self);
 
 int PageTable__map_2M_block(PageTable * self,
                             uint64_t virtual_address,
@@ -104,7 +114,7 @@ int PageTable__map_4k_page(PageTable * self,
  * @pxn_enable:     1 to set PXN (EL1 cannot execute), 0 to allow EL1 execute
  */
 
-inline PageTableEntry PageTable__make_page_desc_4k(uint64_t phys_addr,
+inline PageTableEntry PageTable__make_page_desc_4k(Address phys_addr,
                                   MairAttribute mair_attribute,
                                   ShareAttribute shareability,   // already shifted
                                   AccessAttribute access_perms,   // already shifted
@@ -124,7 +134,7 @@ inline PageTableEntry PageTable__make_page_desc_4k(uint64_t phys_addr,
 }
 
 
-inline PageTableEntry PageTable__make_page_desc_4k_l3(uint64_t phys_addr,
+inline PageTableEntry PageTable__make_page_desc_4k_l3(Address phys_addr,
                                   MairAttribute mair_index,
                                   ShareAttribute shareability,   // already shifted
                                   AccessAttribute access_perms,   // already shifted
@@ -143,7 +153,7 @@ inline PageTableEntry PageTable__make_page_desc_4k_l3(uint64_t phys_addr,
     return desc;
 }
 
-inline PageTableEntry PageTable__l2_block_desc(uint64_t pa,
+inline PageTableEntry PageTable__l2_block_desc(Address pa,
                                                MairAttribute attridx,
                                                ShareAttribute sh,
                                                AccessAttribute access,
@@ -176,6 +186,6 @@ inline PageTableEntry PageTable__make_table_desc(PageTable * next_level_page)
     return FLAG_PTE_VALID | FLAG_PTE_TABLE | ((uint64_t)next_level_page & MASK_PTE_NEXTADDR);
 }
 
-Address PageTable__physical_address(PageTable * self);
+KernelAddress PageTable__from_virtual_address(Address virtual_addr);
 
 #endif

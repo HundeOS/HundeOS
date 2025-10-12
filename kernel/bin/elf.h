@@ -1,33 +1,34 @@
 #ifndef __KERNEL_BIN_ELF_H_
 #define __KERNEL_BIN_ELF_H_
 
-#include <stddef.h>
-#include <stdint.h>
-#include <stdint.h>
-#include <stdint.h>
-#include <stdint.h>
-#include <stdint.h>
-#include <stdint.h>
 #include <stdint.h>
 #include <stdint.h>
 
-#include "../kernel.h"
+#include "../address.h"
+#include "../types/fixed_array.h"
+
 typedef uint8_t byte;
 
 typedef byte TargetOS;
 typedef uint64_t Offset;
 typedef uint64_t Alignment;
 typedef uint16_t Size;
+typedef uint64_t ProgramHeaderSize;
 typedef uint16_t EntrySize;
 typedef uint32_t ElfVersion;
 typedef uint16_t ElfType;
 typedef uint16_t ElfMachine;
 typedef uint64_t SectionFlags;
+typedef uint32_t ProgramHeaderFlags;
+typedef uint64_t Alignment;
 typedef uint32_t ElfFlags;
 typedef uint16_t HeaderEntries;
 typedef uint32_t SectionType;
 typedef uint32_t SectionIndex;
+typedef uint32_t ProgramHeaderType;
 typedef uint16_t NameIndex;
+typedef uint32_t SectionInfo;
+typedef uint32_t NameOffset;
 
 typedef enum ElfTypeVals {
     Unknown=0x00,
@@ -66,6 +67,29 @@ typedef enum ElfSectionTypeVals {
     Num=0x13,
     LoOS=0x60000000,
 } ElfSectionTypeVals;
+
+typedef enum ProgramHeaderFlagsVals
+{
+    Execute=0x1,
+    Write=0x2,
+    Read=0x4,
+} ProgramHeaderFlagsVals;
+
+typedef enum ElfProgramHeaderTypeVals
+{
+    TypeNull=0x00000000,
+    Load=0x00000001,
+    Dynamic=0x00000002,
+    Interpreter=0x00000003,
+    AuxiliaryInfo=0x00000004,
+    ShLib=0x00000005,
+    ProgramHeaderSegment=0x00000006,
+    ThreadlocalTemplate=0x00000007,
+    OSReservedLow=0x60000000,
+    OSReservedHigh=0x6FFFFFFF,
+    ProcessorReservedLow=0x70000000,
+    ProcessorReservedHigh=0x7FFFFFFF,
+} ProgramHeaderTypeVals;
 
 typedef enum SectionFlagsVals {
     Writable=0x1,
@@ -115,26 +139,26 @@ typedef struct Elf64Header
 } Elf64Header;
 
 typedef struct ProgramHeader {
-    SectionType type;
-    SectionFlags flags;
+    ProgramHeaderType type;
+    ProgramHeaderFlags flags;
     Offset segment_offset;
     Address virtual_address;
-    Size file_size;
-    Size memory_size;
-    uint64_t alignment;
+    Address physical_address;
+    ProgramHeaderSize file_size;
+    ProgramHeaderSize memory_size;
+    Alignment alignment;
 } ProgramHeader;
 
-
 typedef struct SectionHeader {
-    uint32_t name_offset;
+    NameOffset name_offset;
     SectionType type;
     SectionFlags flags;
     Address virtual_address;
     Offset offset;
     Size size;
     SectionIndex link;
-    uint32_t info;
-    uint64_t alignment;
+    SectionInfo info;
+    Alignment alignment;
     Size entry_size;
 } SectionHeader;
 
@@ -147,6 +171,30 @@ typedef struct {
     Alignment align;    // usually 0x1000
 } LoadSeg;
 
-int elf_load_binary(const char *path, LoadSeg *segs, int nsegs);
+typedef struct Elf {
+    const Address start;
+    const Address end;
+    const char *name;
+} Elf;
+
+typedef struct ExpandedSegment
+{
+    UserAddress address;
+    size_t size;
+} ExpandedSegment;
+
+typedef SectionHeader * SectionHeaderPtr;
+typedef ProgramHeader * ProgramHeaderPtr;
+
+FixedArrayDefine(SectionHeaderPtr, 64, SectionHeaderArray);
+FixedArrayDefine(ProgramHeaderPtr, 64, ProgramHeaderArray);
+
+SectionHeaderArray Elf__read_section_headers(const Elf * self);
+ProgramHeaderArray Elf__read_program_headers(const Elf * self);
+Elf64Header * Elf__read_header(const Elf * self);
+
+FixedArrayDefine(ExpandedSegment, 64, ExpandedSegmentArray);
+
+ExpandedSegmentArray Elf__map(const Elf * self);
 
 #endif

@@ -1,0 +1,9 @@
+manifest:
+  source_files:
+    - kernel/process.c
+    - kernel/address.c
+    - kernel/kalloc.c
+    - kernel/print.c
+    - kernel/page_alloc.c
+    - kernel/stack.c
+    - kernel/bin/*.c

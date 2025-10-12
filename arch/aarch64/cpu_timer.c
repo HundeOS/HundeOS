@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "../kernel/debug.h"
+#include "../../kernel/arch/cpu.h"
 #include "cpu_timer.h"
 
 #include "asm_helpers.h"

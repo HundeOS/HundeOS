@@ -2,8 +2,8 @@
 #define __AARCH64_CPU_H
 
 #include <stdint.h>
-#include "process.h"
-#include "../kernel/arch/cpu.h"
+#include "../../kernel/process.h"
+#include "../../kernel/arch/cpu.h"
 
 typedef enum {
     CPU_OFFLINE = 0,
@@ -12,13 +12,10 @@ typedef enum {
     CPU_IDLE
 } cpu_state;
 
-typedef struct CPU CPU;
-
 typedef struct CPU {
     Process* current_process;
     uint64_t cpu_id;
-    void* kernel_stack;
-    CPU* self;
+    Address kernel_stack;
     cpu_state state;
     uint64_t mpidr;
 } CPU;

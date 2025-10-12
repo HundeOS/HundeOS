@@ -1,7 +1,8 @@
 // smp_boot.c
 #include <stdint.h>
 #include "cpu.h"
-#include "../kernel/arch/cpu.h"
+#include "../../kernel/arch/cpu.h"
+#include "../../kernel/debug.h"
 #include "cpu_common.h"
 
 static uint8_t __attribute__((aligned(16))) cpu_stacks[MAX_CPUS][STACK_SIZE];

@@ -2,8 +2,7 @@
 #define __AARCH64_PROCESS_H
 
 #include <stdint.h>
-#include <kernel.h>
-#define MAX_PROCESSES 32
+#include "../../kernel/kernel.h"
 
 typedef struct ProcessContext {
     // General purpose registers

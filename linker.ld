@@ -8,16 +8,22 @@ PHDRS {
   bootdata PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
   ktext PT_LOAD FLAGS(5);            /* R X: high .text/.rodata (VMA high, LMA low via AT) */
   kdata PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
+  kstack PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
+  kbinaries PT_LOAD FLAGS(6);       /* R W: high .data/.bss (VMA high, LMA low via AT)   */
+  kheap PT_LOAD FLAGS(6);       /* R W: high .data/.bss (VMA high, LMA low via AT)   */
   kio PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
 }
 
 KERNEL_HIGH_BASE = 0xFFFF000000000000;
-KERNEL_TABLE_BASE = 0xFFFF800000000000;
+KERNEL_BIN_BASE = 0xFFFFA00000000000;
+KERNEL_STACK_BASE = 0xFFFF800000000000;
+KERNEL_TABLE_BASE = 0xFFFFC00000000000;
 KERNEL_HEAP_BASE = 0xFFFFF00000000000;
 KERNEL_BASE = 0x40080000;
 
 HEAP_END = 2 * 1024 * 1024 * 1024; /* 2 GB */
 
+KERNEL_STACK_PHYS = 0xC0000000;
 KERNEL_HIGH_PHYS = 0x80000000;
 BLOCK_2MB = 0x200000;
 PAGE_4KB = 0x1000;
@@ -98,6 +104,7 @@ SECTIONS
   __lma_start = __lma_cursor;
   __high_phys_base = __lma_cursor;
 
+  /** Start of kernel code and data **/
   .text : AT(ALIGN(__lma_cursor, BLOCK_2MB)) ALIGN(PAGE_4KB) {
     *(.text .text.*)
   } :ktext
@@ -136,6 +143,8 @@ SECTIONS
     *(COMMON)
   } :kdata
   __lma_cursor = ALIGN(__lma_cursor + SIZEOF(.data), PAGE_4KB);
+  __lma_kernel_end = __text_phys + . - KERNEL_HIGH_BASE;
+  __lma_end = __lma_kernel_end;
 
    /* reset of system memory*/
   .bss.stack (NOLOAD):
@@ -143,22 +152,34 @@ SECTIONS
     KEEP(*(.bss.stack))
   } :kdata
 
-  .binaries : ALIGN(BLOCK_2MB)
-  {
-    KEEP(*(.binaries))
-  } :kdata
 
-  .kstack (NOLOAD) : ALIGN(PAGE_4KB) {
+  __lma_cursor = ALIGN(__lma_cursor + SIZEOF(.bss.stack), PAGE_4KB);
+  . = KERNEL_BIN_BASE;
+
+  .binaries : AT(ALIGN(__lma_cursor, BLOCK_2MB)) ALIGN(BLOCK_2MB)
+  {
+    __embedded_binaries_start = .;
+
+    KEEP(*(.binaries))
+  } :kbinaries
+  __embedded_binaries_end = .;
+  __embedded_binaries_phys_start = LOADADDR(.binaries);
+  __embedded_binaries_phys_end = LOADADDR(.binaries) + SIZEOF(.binaries);
+
+  __lma_cursor = ALIGN(__lma_cursor + SIZEOF(.binaries), PAGE_4KB);
+
+  . = KERNEL_STACK_BASE;
+  .kstack :AT(ALIGN(__lma_cursor, BLOCK_2MB)) ALIGN(BLOCK_2MB) {
       __k_stack_start = .;
-      . += 2M;                 /* pick a size */
+      . += 200M;                 /* pick a size */
       __k_stack_end   = .;
       __k_stack_high  = __k_stack_end;  /* top of stack grows down */
-  } :kdata
+  } :kstack
+  __k_stack_phys_start = LOADADDR(.kstack);
+  __k_stack_phys_end = LOADADDR(.kstack) + SIZEOF(.kstack);
 
   __lma_cursor = ALIGN(__lma_cursor + SIZEOF(.kstack), PAGE_4KB);
   . += 4M;
-  __lma_kernel_end = __text_phys + . - KERNEL_HIGH_BASE;
-  __lma_end = __lma_kernel_end;
 
   . = KERNEL_TABLE_BASE;
   __table_virt_start = ALIGN(BLOCK_2MB);
@@ -172,7 +193,7 @@ SECTIONS
   {
     __heap_start = .;
     KEEP(*(.bss.heap))
-  } : kdata
+  } : kheap
   __heap_start_phys = LOADADDR(.bss.heap);
   __lma_heap_bootstrap_end = __heap_start_phys + . - KERNEL_HEAP_BASE;
   . += HEAP_END;

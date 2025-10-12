@@ -10,6 +10,7 @@
 #include "../gicr.h"
 #include "../io/uart.h"
 #include "../mmu.h"
+
 #include "print.h"
 #include "boot_strings.h"
 #include "exceptions.h"
@@ -18,6 +19,16 @@ extern const uint64_t __lma_start;
 extern const uint64_t __lma_end;
 extern const uint64_t __text_virt;
 extern const uint64_t __text_phys;
+
+extern const uint64_t __k_stack_high[];
+extern const uint64_t __k_stack_start[];
+extern const uint64_t __k_stack_phys_start[];
+extern const uint64_t __k_stack_phys_end[];
+
+extern const uint64_t __embedded_binaries_start[];
+extern const uint64_t __embedded_binaries_end[];
+extern const uint64_t __embedded_binaries_phys_start[];
+extern const uint64_t __embedded_binaries_phys_end[];
 
 extern char __boot_end[];
 extern char __heap_start[];
@@ -37,7 +48,7 @@ extern char __table_phys_end[];
 extern char __table_virt_start[];
 extern char __table_virt_end[];
 
-static __BOOT_DATA__(MappingPermissions) heap_perms = {
+static __BOOT_DATA__(MappingPermissions) stack_heap_perms = {
     .access = ACCESS_EL1_RW_EL0_NO,
     .shareability = SHARE_INNER,
     .memory_type = ATTR_INDEX_NORMAL,
@@ -67,6 +78,14 @@ static __BOOT_DATA__(MappingPermissions) device_perms = {
     .shareability = SHARE_OUTER,
     .uxn = 1,
     .pxn = 1
+};
+
+static __BOOT_DATA__(MappingPermissions) embedded_binaries_perms = {
+    .memory_type = ATTR_INDEX_NORMAL,
+    .access = ACCESS_EL1_RO_EL0_NO,
+    .shareability = SHARE_INNER,
+    .uxn = 1,
+    .pxn = 1,
 };
 
 
@@ -140,7 +159,29 @@ __BOOT__(void) map_kernel_heap_rw() {
     uint64_t phys_start = (uint64_t)&__heap_start_phys;
     uint64_t phys_end = (uint64_t)&__heap_end_phys;
 
-    map_range_2M(&high_mem_l0_table, phys_start, phys_end, target, &heap_perms);
+    map_range_2M(&high_mem_l0_table, phys_start, phys_end, target, &stack_heap_perms);
+}
+
+__BOOT__(void) map_kernel_stack_rw() {
+    uint64_t target = (uint64_t)&__k_stack_start;
+    uint64_t phys_start = (uint64_t)&__k_stack_phys_start;
+    uint64_t phys_end = (uint64_t)&__k_stack_phys_end;
+
+    map_range_2M(&high_mem_l0_table, phys_start, phys_end, target, &stack_heap_perms);
+}
+
+__BOOT__(void) map_embedded_binaries_ro() {
+    uint64_t target = (uint64_t)&__embedded_binaries_start;
+    uint64_t phys_start = (uint64_t)&__embedded_binaries_phys_start;
+    uint64_t phys_end = (uint64_t)&__embedded_binaries_phys_end;
+
+    _print_unsigned(target);
+    _print(new_line);
+    _print_unsigned(phys_start);
+    _print(new_line);
+    _print_unsigned(phys_end);
+    _print(new_line);
+    map_range_2M(&high_mem_l0_table, phys_start, phys_end, target, &embedded_binaries_perms);
 }
 
 __BOOT__(void) map_kernel_all_normal_rwx(uint64_t phys_start,
@@ -188,7 +229,10 @@ __BOOT__(void) map_kernel()
 
 __BOOT__(void) map_tables_high()
 {
-    map_2M_block(&high_mem_l0_table, (uint64_t)&__table_virt_start, (uint64_t)&__table_phys_start, &kernel_rw_perms);
+    map_2M_block(&high_mem_l0_table,
+        (uint64_t)&__table_virt_start,
+        (uint64_t)&__table_phys_start,
+        &kernel_rw_perms);
 }
 
 __BOOT__(void) zero_table(PageTable * table)
@@ -265,6 +309,8 @@ __BOOT__(void) setup_boot_mappings() {
     _print(mapping_kernel);
     map_kernel();
     map_tables_high();
+    map_embedded_binaries_ro();
+    map_kernel_stack_rw();
     _print(mapping_uart_low);
     map_uart(&low_mem_l0_table, UART0_PHYS_BASE);
     _print(mapping_uart_high);

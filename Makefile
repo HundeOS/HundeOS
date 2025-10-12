@@ -99,6 +99,12 @@ $(ELF): $(ASM_OBJECTS) $(OBJECTS) $(ARCH_ASM_OBJECTS) $(ARCH_OBJECTS)
 clean:
 	rm -rf build
 
+test:
+	make test -C test
+
+test_clean:
+	make clean -C test
+
 define make-user-prog
 $(1)_SRCS := $$(wildcard user/$(1)/*.c)
 $(1)_ASM_SRCS := $$(wildcard user/$(1)/*.s)
@@ -125,6 +131,17 @@ qemu-virt: $(ELF)
 		-nographic \
 		-monitor telnet::4444,server,nowait
 
+qemu-virt-1cpu: $(ELF)
+	qemu-system-aarch64 \
+		-M virt,gic-version=3 \
+		-smp cpus=1 -cpu max \
+		-m 4G  \
+		-serial stdio \
+		-cpu cortex-a57 \
+		-kernel $(ELF) \
+		-nographic \
+		-monitor telnet::4444,server,nowait
+
 qemu-virt-gdb: clean $(ELF)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
@@ -136,4 +153,4 @@ qemu-virt-gdb: clean $(ELF)
 		-S \
 		-gdb tcp::1234
 
-.PHONY: all clean qemu
+.PHONY: all clean qemu test test_clean

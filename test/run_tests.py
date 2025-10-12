@@ -1,6 +1,5 @@
 import glob
 import os
-import argparse
 import subprocess
 from typing import LiteralString, Any
 
@@ -9,6 +8,8 @@ import yaml
 BASE_DIR = os.path.dirname(__file__)
 
 TEMPLATE = """
+PLATFORM_INCLUDE=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include
+
 CROSS_COMPILE =
 AS = gcc
 CC = gcc
@@ -16,10 +17,10 @@ LD = gcc
 
 UNITY = {unity_path}
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -mno-outline-atomics -I{kernel_dir} -I$(UNITY)/src
+CFLAGS = -c -O2 -Wall -Wextra -mno-outline-atomics -I{kernel_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE)
 
 # Assembler flags
-ASFLAGS = -c -O2 -Wall -Wextra -nostdlib -latomic
+ASFLAGS = -c -O2 -Wall -Wextra -nostdlib -latomic -I{stubs_dir}
 
 # Linker flags
 LDFLAGS =
@@ -119,11 +120,14 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
     project_dir = os.path.join(relative_base, "..")
     kernel_dir = os.path.join(project_dir, "kernel")
     build_dir = os.path.join(relative_base, "build", test_dir)
+    kernel_obj_build_dir = os.path.join(relative_base, "build")
 
     with open(manifest, "r") as manifest_file:
         manifest = yaml.load(manifest_file, Loader=yaml.FullLoader)
         source_files = manifest["manifest"]["source_files"]
         test_dir_relative_script = os.path.join(test_dir, project_dir)
+        stubs_dir = os.path.join("kernel", "stubs")
+        stubs_dir_relative = os.path.join(relative_base, stubs_dir)
 
         source_expanded = [f"{project_dir}/{expand[len(test_dir_relative_script) + 1:]}"
                            for file in source_files
@@ -132,30 +136,42 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                             for file
                             in source_expanded
                             if file.endswith(".s")]
+        stubs_c_files = [f"{relative_base}/{expand}"
+                         for expand in glob.glob(os.path.join(stubs_dir, "*.c"))]
+        stubs_asm_files = [f"{relative_base}/{expand}"
+                           for expand in glob.glob(os.path.join(stubs_dir, "*.s"))]
+
         source_c_files = [file
                           for file
                           in source_expanded
-                          if file.endswith(".c") and not file.endswith("_Runner.c")]
+                          if file.endswith(".c")]
 
-        asm_objects = [os.path.join(build_dir, os.path.basename(file.replace(".s", ".o")))
+        asm_objects = [os.path.join(kernel_obj_build_dir, file.replace(".s", ".o").replace("../", ""))
                        for file
                        in source_asm_files]
 
-        c_objects = [os.path.join(build_dir, os.path.basename(file.replace(".c", ".o")))
+        c_objects = [os.path.join(kernel_obj_build_dir, file.replace(".c", ".o").replace("../", ""))
                      for file
                      in source_c_files]
 
         test_dir_c_files = [os.path.basename(file) for file in glob.glob(os.path.join(test_dir, "*.c"))]
         test_dir_asm_files = [os.path.basename(file) for file in glob.glob(os.path.join(test_dir, "*.s"))]
 
+        stubs_dir_c_objects = [os.path.join(build_dir, file.replace(".c", ".o"))
+                               for file
+                               in stubs_c_files]
+        stubs_dir_asm_objects = [os.path.join(build_dir, file.replace(".s", ".o"))
+                                 for file
+                                 in stubs_asm_files]
+
         test_dep_c_objects = [os.path.join(build_dir, file.replace(".c", ".o"))
-                          for file
-                          in test_dir_c_files
-                          if not os.path.basename(file).startswith("test_")]
+                              for file
+                              in test_dir_c_files
+                              if not os.path.basename(file).startswith("test_")]
 
         test_dep_asm_objects = [os.path.join(build_dir, file.replace(".s", ".o"))
-                            for file
-                            in test_dir_asm_files]
+                                for file
+                                in test_dir_asm_files]
 
         with open(os.path.join(test_dir, "Makefile.gen"), "w", encoding="utf-8") as makefile:
             runner_tasks =[_task_template(build_dir, runner) for runner in test_runners]
@@ -163,18 +179,19 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
 
             makefile.write(TEMPLATE.format(c_sources=join(test_dir_c_files),
                                            asm_sources=join(test_dir_asm_files),
-                                           kernel_sources=join(source_c_files),
-                                           kernel_asm_sources=join(source_asm_files),
+                                           kernel_sources=join([*source_c_files, *stubs_c_files]),
+                                           kernel_asm_sources=join([*source_asm_files, *stubs_asm_files]),
                                            c_objects=join(test_dep_c_objects),
                                            asm_objects=join(test_dep_asm_objects),
-                                           kernel_objects=join(c_objects),
-                                           kernel_asm_objects=join(asm_objects),
+                                           kernel_objects=join([*c_objects, *stubs_dir_c_objects]),
+                                           kernel_asm_objects=join([*asm_objects, *stubs_dir_asm_objects]),
                                            unity_path=unity_path,
                                            test=os.path.basename(test_dir),
                                            kernel_dir=kernel_dir,
                                            project_base=project_dir,
                                            build_dir=build_dir,
                                            test_base=relative_base,
+                                           stubs_dir=stubs_dir_relative,
                                            runner_bins=join(runner_bins),
                                            runner_tasks="\n".join(runner_tasks)))
 

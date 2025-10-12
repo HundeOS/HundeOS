@@ -21,6 +21,7 @@ inline void write_elr_el1(uint64_t v){ __asm__ volatile("msr elr_el1, %0" :: "r"
 
 inline void write_sp_el0(uint64_t v) { __asm__ volatile("msr sp_el0, %0" :: "r"(v)); }
 inline void write_spsr_el1(uint64_t v) { __asm__ volatile("msr spsr_el1, %0" :: "r"(v)); }
+inline void write_spsr_el0(uint64_t v) { __asm__ volatile("msr spsr_el0, %0" :: "r"(v)); }
 
 
 inline void eret(void){ __asm__ volatile("eret"); }

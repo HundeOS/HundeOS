@@ -3,17 +3,14 @@
 #include <stdbool.h>
 
 #include "page_alloc.h"
+
 #include "debug.h"
 #include "mutex.h"
 #include "panic.h"
+#include "all_defs.h"
 
-#define _1MB (1024 * 1024)
-#define _2MB (2 * 1024 * 1024)
-#define _1GB (1024 * _1MB)
-#define COARSE_BLOCK_SIZE (4 * _1MB)
+#define COARSE_BLOCK_SIZE _4MB
 #define PAGES_PER_BLOCK (COARSE_BLOCK_SIZE / PAGE_SIZE)
-
-#define _4GB = 4 * _1GB;
 
 extern char __heap_start[];
 extern char __heap_end[];
@@ -21,7 +18,6 @@ extern char __heap_start_phys[];
 
 // later we can avoid most locks by having different blocks per cpu
 static mutex_t block_lock = MUTEX_INIT;
-static mutex_t alloc_lock;
 
 typedef struct MemoryBlock {
     KernelAddress start;
@@ -30,9 +26,11 @@ typedef struct MemoryBlock {
 } MemoryBlock;
 
 MemoryPage * MemoryPage__zero(MemoryPage * self){
+    __d_printf(FOCUS, "MemoryPage__zero %p\n", self);
     for (uint64_t i = 0; i < PAGE_SIZE; i++) {
         self->page[i] = 0;
     }
+    __d_printf(FOCUS, "MemoryPage__zero done %p\n", self);
     return self;
 }
 
@@ -46,8 +44,8 @@ static MemoryBlock current_block = {
     .bootstrapped = false
 };
 
-inline MemoryPage * align_up(MemoryPage * page, uint64_t a){
-    uint64_t x = (uint64_t)page;
+inline MemoryPage * align_up(MemoryPage * page, Address a){
+    Address x = (Address)page;
     return (MemoryPage *)((x + (a - 1)) & ~(a - 1));
 }
 
@@ -76,7 +74,7 @@ static void MemoryBlock__bootstrap(){
 }
 
 
-static MemoryPage * MemoryBlock__next_page() {
+static KernelAddress MemoryBlock__next_page() {
     mutex_lock(&block_lock);
     if (!current_block.bootstrapped) {
         MemoryBlock__bootstrap();
@@ -89,34 +87,125 @@ static MemoryPage * MemoryBlock__next_page() {
     }
     current_block.pages_allocated++;
     mutex_unlock(&block_lock);
-    MemoryPage * page = (MemoryPage *)current_block.start.virtual_addr + (page_index * PAGE_SIZE);
-    __d_printf(DEBUG, "MemoryBlock__next_page 0x%x\n", page);
+    Address virtual_addr = current_block.start.virtual_addr + (page_index * PAGE_SIZE);
+    Address physical_addr = current_block.start.phys_addr + (page_index * PAGE_SIZE);
 
-    return page;
+    __d_printf(DEBUG, "MemoryBlock__next_page %p %p \n", virtual_addr, physical_addr);
+
+    return (KernelAddress) {
+        .virtual_addr = virtual_addr,
+        .phys_addr = physical_addr,
+        .valid = true
+    };
 }
 
-static MemoryPage * MemoryPage__next() {
+static KernelAddress MemoryBlock__next_pages(size_t num_pages) {
+    __d_printf(FOCUS, "MemoryBlock__next_pages -- %i\n", num_pages);
+    mutex_lock(&block_lock);
+    if (!current_block.bootstrapped) {
+        __d_printf(FOCUS, "Bootstrapping -- %i\n", num_pages);
+        MemoryBlock__bootstrap();
+    }
+    __d_printf(FOCUS, "Allocated -- %i %p\n", current_block.pages_allocated, current_block.start.virtual_addr);
+
+    KernelAddress first = (KernelAddress) {
+        .virtual_addr = 0,
+        .phys_addr = 0,
+        .valid = false
+    };
+    // assumption is the blocks and pages are sequential
+    for (uint64_t i = 0; i < num_pages; i++)
+    {
+        if (current_block.pages_allocated >= PAGES_PER_BLOCK)
+        {
+            __d_printf(FOCUS, "Advancing -- %i\n", num_pages);
+            MemoryBlock__advance();
+        }
+        Address virtual_addr = current_block.start.virtual_addr + (current_block.pages_allocated * PAGE_SIZE);
+        Address physical_addr = current_block.start.phys_addr + (current_block.pages_allocated * PAGE_SIZE);
+
+        current_block.pages_allocated++;
+        if (!first.valid)
+        {
+            first = (KernelAddress) {
+                .virtual_addr = virtual_addr,
+                .phys_addr = physical_addr,
+                .valid = true
+            };
+        }
+    }
+    mutex_unlock(&block_lock);
+    return first;
+}
+
+static KernelAddress MemoryPage__next()
+{
     return MemoryBlock__next_page();
 }
 
-MemoryPage * MemoryPage__alloc_fresh() {
-    MemoryPage * page = MemoryPage__next();
-    return MemoryPage__zero(page);;
+static KernelAddress MemoryPage__next_pages(size_t num_pages)
+{
+    return MemoryBlock__next_pages(num_pages);
 }
 
-MemoryPage * MemoryPage__alloc(void)
+KernelAddress MemoryPage__alloc_fresh() {
+    KernelAddress page = MemoryPage__next();
+    MemoryPage__zero((MemoryPage *)page.virtual_addr);;
+    return page;
+}
+
+KernelAddress MemoryPage__alloc_fresh_size(size_t size) {
+    uint64_t pages = size / PAGE_SIZE;
+    pages += (size % PAGE_SIZE) ? 1 : 0;
+
+    __d_printf(FOCUS, "MemoryPage__next_pages(pages) pages=%i\n", pages);
+    KernelAddress page = MemoryPage__next_pages(pages);
+    __d_println(FOCUS, "MemoryPage__zero(page)");
+    MemoryPage__zero((MemoryPage *)page.virtual_addr);
+    return page;
+}
+
+KernelAddress MemoryPage__alloc(void)
 {
     __d_println(DEBUG, "alloc");
     return MemoryPage__alloc_fresh();
 }
 
-KernelAddress MemoryPage__address(MemoryPage * self)
+KernelAddress MemoryPage__alloc_size(size_t size)
 {
-    Address virtual = addr(self);
+    __d_println(FOCUS, "alloc");
+    return MemoryPage__alloc_fresh_size(size);
+}
+
+KernelAddress MemoryPage__from_virtual_address(Address virtual)
+{
     Address offset = virtual - addr_of(__heap_start);
     Address physical = offset + addr_of(__heap_start_phys);
 
-    if (addr(self) < addr_of(__heap_start)) {
+    if (virtual < addr_of(__heap_start)) {
+        // is it one of our allocated addresses?
+        __d_printf(FOCUS, "virtual=%p is not from managed heap %p (phys=%p)\n",
+            virtual, addr_of(__heap_start), addr_of(__heap_start_phys));
+        return (KernelAddress) {
+            .virtual_addr = 0,
+            .phys_addr = 0,
+            .valid = false
+        };
+    }
+
+    return (KernelAddress) {
+        .virtual_addr = virtual,
+        .phys_addr = physical,
+        .valid = true
+    };
+}
+
+KernelAddress MemoryPage__from_physical_address(Address physical)
+{
+    Address offset = physical - addr_of(__heap_start_phys);
+    Address virtual = offset + addr_of(__heap_start);
+
+    if (physical < addr_of(__heap_start_phys)) {
         // is it one of our allocated addresses?
         return (KernelAddress) {
             .virtual_addr = 0,

@@ -1,4 +1,6 @@
-#include <kernel.h>
+#include "../../kernel/address.h"
+#include "../../kernel/mutex.h"
+#include "../../kernel/address.h"
 #include "asm_helpers.h"
 #include "mmu.h"
 
@@ -6,17 +8,17 @@
 
 #include "page_table.h"
 
-static PageTable * null_table_low_mem_table = NULL;
+static PageTable null_table = (PageTable){
+};
 
 mutex_t init_mutex = MUTEX_INIT;
 
 PageTable * MMU__init_null() {
     mutex_lock(&init_mutex);
-    if (null_table_low_mem_table == NULL) {
-        null_table_low_mem_table = PageTable__new();
-    }
+
+    PageTable__zero(&null_table);
     mutex_unlock(&init_mutex);
-    return null_table_low_mem_table;
+    return &null_table;
 }
 
 #define GUARD_ASID  0xFFu  // reserved, never used by real processes
@@ -40,9 +42,9 @@ void MMU__park_ttbr0(uint64_t guard_L0_pa, uint16_t guard_asid, bool disable_wal
 void MMU__install_null_low_mem_table()
 {
     PageTable * table = MMU__init_null();
-    Address addr = PageTable__physical_address(table);
+    KernelAddress address = PageTable__from_virtual_address(addr(table));
 
-    MMU__park_ttbr0((uint64_t)addr, (GUARD_ASID << 48), false);
+    MMU__park_ttbr0(address.phys_addr, (GUARD_ASID << 48), false);
     __asm__ volatile("tlbi vmalle1");  // invalidate all EL1 stage-1 TLBs
 
 }

@@ -1,9 +1,7 @@
 #ifndef __AARCH64_CPU_COMMON_H_
 #define __AARCH64_CPU_COMMON_H_
 #include "asm_helpers.h"
-
-#define MAX_CPUS 16
-#define STACK_SIZE (16*1024)
+#include "../../kernel/cpu.h"
 
 inline uint64_t cpu_id() {
     return read_tpidr_el1();
@@ -21,7 +19,7 @@ inline uint64_t mpidr_for_cpu(unsigned cpu_index)
     return mpidr_pack(0, 0, 0, cpu_index & 0xFFu);
 }
 
-inline void cpu_set_this_id(uint64_t id){
+inline void cpu_set_this_id(CPUID id){
     write_tpidr_el1(id);
 }
 

@@ -1,3 +1,8 @@
 manifest:
   source_files:
     - kernel/bin/*.c
+    - kernel/print.c
+    - kernel/debug.c
+    - kernel/address.c
+    - kernel/kalloc.c
+    - kernel/page_alloc.c

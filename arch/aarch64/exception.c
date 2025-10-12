@@ -1,9 +1,10 @@
 #include <stdint.h>
 
-#include <kernel.h>
+#include "../../kernel/kernel.h"
 #include "cpu_timer.h"
 #include "exception.h"
 #include "asm_helpers.h"
+#include "../../kernel/debug.h"
 
 
 // Helper function to get exception syndrome
@@ -76,6 +77,10 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
                 k_sprintf(buf, "instruction abort call: cpu=%i", CPU__id());
                 Kernel__panic(buf, ctx);
             }
+            return 0;
+            break;
+        case 0x20:
+            // __d_printf(PROGRESS, "BRK encountered cpu=%i\n", CPU__id())
             return 0;
             break;
         default:

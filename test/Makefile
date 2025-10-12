@@ -1,4 +1,6 @@
 # Cross-compilation tools
+PLATFORM_INCLUDE = /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include
+
 CROSS_COMPILE =
 AS = gcc
 CC = gcc
@@ -6,7 +8,7 @@ LD = gcc
 
 UNITY = ../../../tools/Unity/libunity.a
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -mno-outline-atomics -I../ -I../../../tools/Unity/src
+CFLAGS = -c -O2 -Wall -Wextra -ffreestanding -mno-outline-atomics -I../ -I../../../tools/Unity/ -I$(PLATFORM_INCLUDE)
 
 # Assembler flags
 ASFLAGS = -c -O2 -Wall -Wextra -nostdlib -latomic
@@ -39,4 +41,7 @@ setup:
 test:
 	python run_tests.py
 
-.PHONY: all clean qemu
+clean:
+	rm -rf build
+
+.PHONY: all test clean

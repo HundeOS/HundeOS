@@ -1,8 +1,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <kernel.h>
 #include "page_table.h"
+
+#include "mmu.h"
+#include "../../kernel/debug.h"
 
 #define PAGE_MASK   (~(PAGE_SIZE - 1ULL))
 #define PAGE_OFF(x) ((uint64_t)(x) & (PAGE_SIZE - 1ULL))
@@ -25,34 +27,83 @@
 //                                                                                  +------------- NS (non-secure, usually 0)
 //
 
-PageTable * PageTable__new() {
-    PageTable * table = (PageTable *) MemoryPage__alloc();
+// 63                                                             0
+// +-- … --+--UXN--+--PXN--+ DBM  Contig  |         Output address         |nG|AF| SH | AP |  AttrIndx |T|V
+//          54      53      51     52            [for page: PA[47:12]]     11 10 [9:8][7:6]   [4:2]    1 0
+//
+// Legend
+//  V (bit 0)          : Valid (1 = valid)
+//  T (bit 1)          : 0 = Block (L1/L2), 1 = Page (L3)
+//  AttrIndx[4:2]      : Memory attribute index (MAIR_EL1 slot 0..7)
+//  AP[2:1]  (bits 7:6): Access permission (EL1/EL0 read/write)
+//  SH[9:8]            : Shareability (00 NS, 10 Outer, 11 Inner)
+//  AF (bit 10)        : Access flag (must be 1 or you’ll fault on access)
+//  nG (bit 11)        : Non-global (usually 0 for kernel global mappings)
+//  Output address     : Physical address (aligned; low 12 bits zero for 4 KiB pages)
+//  Contig (bit 52)    : “Contiguous” hint (optional, usually 0)
+//  DBM (bit 51)       : Dirty Bit Modifier (if you use hardware dirty/write-protect)
+//  PXN (bit 53)       : Privileged eXecute-Never (blocks EL1 execute)
+//  UXN (bit 54)       : Unprivileged eXecute-Never (blocks EL0 execute)
+
+
+KernelAddress PageTable__new() {
+    KernelAddress table = MemoryPage__alloc();
     __d_printf(DEBUG, "new table 0x%x", table);
     return table;
 }
 
-PageTable * PageTable__empty() {
+KernelAddress PageTable__empty()
+{
     return PageTable__new();
 }
 
-Address PageTable__physical_address(PageTable * self) {
-    KernelAddress address = MemoryPage__address((MemoryPage *) self);
-    return address.phys_addr;
+KernelAddress PageTable__from_physical_address(Address physical)
+{
+    KernelAddress address = MemoryPage__from_physical_address(physical);
+    return address;
 }
 
-/* ---- VA→PA using AT+PAR: translate an EL1 (kernel) VA to a physical address ---- */
-inline int PageTable__el1_va_to_phys(uint64_t kernel_va) {
-    uint64_t par;
-    __asm__ __volatile__(
-        "at s1e1r, %1\n"
-        "isb\n"
-        "mrs %0, par_el1\n"
-        : "=r"(par) : "r"(kernel_va) : "memory");
+KernelAddress PageTable__from_virtual_address(Address virtual_addr)
+{
+    KernelAddress address = MemoryPage__from_virtual_address(virtual_addr);
+    return address;
+}
 
-    if (par & 1) {
-        Kernel__panic("failed to determine physical address", NULL);
+void PageTable__map(PageTable * self, UserAddress address, size_t size)
+{
+    Address user_start = align_down_4k(vaddr(address));
+    Address phys_start = align_down_4k(u_kpaddr(address));
+
+    Address user_end = align_up_4k(user_start + size);
+
+    size_t adjusted_range = user_end - user_start;
+
+    uint64_t pages = adjusted_range / PAGE_SIZE;
+    pages += adjusted_range % PAGE_SIZE ? 1 : 0;
+
+    AccessAttribute access = ACCESS_EL1_RO_EL0_RO;
+
+    if (address.write)
+    {
+        access = ACCESS_EL1_RW_EL0_RW;
     }
-    return (par & MASK_PTE_NEXTADDR) | (kernel_va & 0xFFF);
+
+    MappingPermissions perms = (MappingPermissions) {
+        .memory_type = ATTR_INDEX_NORMAL,
+        .shareability = SHARE_INNER,
+        .access = access,
+        .uxn = !address.execute,
+        .pxn = 0
+    };
+
+    for (int page = 0; page < pages; page++)
+    {
+        Address user_addr = offset_addr(user_start, page * PAGE_SIZE);
+        Address phys_addr = offset_addr(phys_start, page * PAGE_SIZE);
+        __d_printf(FOCUS, "Mapping %p\n", user_addr);
+
+        PageTable__map_4k_page(self, user_addr, phys_addr, perms);
+    }
 }
 
 /**
@@ -75,35 +126,43 @@ inline int PageTable__el1_va_to_phys(uint64_t kernel_va) {
  *     should ensure appropriate barriers/TLB maintenance before relying on HW walks
  *     (e.g., dsb ishst; isb; and invalidate if replacing something).
  */
-PageTable * PageTable__ensure_next_level_table(PageTable * parent_level_table,
-                                               uint64_t child_index)
+KernelAddress PageTable__ensure_next_level_table(KernelAddress parent_level_table,
+                                                 uint64_t child_index)
 {
     // Defensive: table has 512 entries at 4 KiB granule.
     // (Optional) if you have an assertion macro, enable it:
     // assert(child_index < 512);
+    __d_printf(FOCUS, "ensure_next_level_table %p %i\n", parent_level_table.virtual_addr, parent_level_table.valid);
+    PageTable * parent_level_table_ptr = v_ptr(parent_level_table, PageTable);
 
-    uint64_t descriptor = parent_level_table->entries[child_index];
+    __d_println(FOCUS, "descriptor");
+    uint64_t descriptor = parent_level_table_ptr->entries[child_index];
 
     // Case 1: already a valid TABLE descriptor → return its next-level base.
     if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE)) {
-        return (PageTable *)(descriptor & MASK_PTE_NEXTADDR);
+        __d_println(FOCUS, "found table");
+        return PageTable__from_physical_address(descriptor & MASK_PTE_NEXTADDR);
     }
 
     // Case 2: slot holds a valid LEAF (block/page) → caller must split it.
     // We do not overwrite it here to avoid silent semantic changes.
     if ((descriptor & FLAG_PTE_VALID) && !(descriptor & FLAG_PTE_TABLE)) {
-        return NULL;  // leaf present; cannot "ensure" a table without a split
+        __d_println(FOCUS, "null table");
+        return NULL_KERNEL_ADDRESS;  // leaf present; cannot "ensure" a table without a split
     }
 
+    __d_println(FOCUS, "allocate new table");
     // Case 3: slot is invalid → allocate a fresh zeroed table page.
-    PageTable * next_level_table = (PageTable *) MemoryPage__alloc();
+    KernelAddress next_level_table = MemoryPage__alloc();
 
-    if (!next_level_table) {
-        return NULL;  // we should probably cause a fault
+    if (!next_level_table.valid) {
+        __d_println(FOCUS, "failed to allocate");
+        return NULL_KERNEL_ADDRESS;  // we should probably cause a fault
     }
 
+    __d_println(FOCUS, "ref new table");
     // Install a TABLE descriptor that points to the new page.
-    parent_level_table->entries[child_index] = PageTable__make_table_desc(next_level_table);
+    parent_level_table_ptr->entries[child_index] = PageTable__make_table_desc(p_ptr(next_level_table, PageTable));
 
     // If the parent table is already visible to hardware walks (i.e., live),
     // consider a store-release or an explicit barrier before returning:
@@ -122,172 +181,35 @@ int PageTable__map_2M_block(PageTable * self,
         return -1;
     }
     __d_println(DEBUG, "Mapping 2M");
-    PageTable * l1_tbl = PageTable__ensure_next_level_table(self, L0_IDX(virtual_address));
-    PageTable * l2_tbl = PageTable__ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
+    KernelAddress table = PageTable__from_virtual_address(addr(self));
+    KernelAddress l1_tbl = PageTable__ensure_next_level_table(table, L0_IDX(virtual_address));
+    KernelAddress l2_tbl = PageTable__ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
 
     __d_printf(DEBUG, "Mapping 2M 0x%x\n", l2_tbl);
-    l2_tbl->entries[L2_IDX(virtual_address)] = PageTable__l2_block_desc(phys_addr,
-                                                                        perms.memory_type,
-                                                                        perms.shareability,
-                                                                        perms.access,
-                                                                        perms.uxn,
-                                                                        perms.pxn);
+    v_ptr(l2_tbl, PageTable)->entries[L2_IDX(virtual_address)] =
+        PageTable__l2_block_desc(phys_addr, perms.memory_type, perms.shareability, perms.access, perms.uxn, perms.pxn);
 
     return 0;
 }
 
 int PageTable__map_4k_page(PageTable * self,
-                           uint64_t virtual_address,
-                           uint64_t phys_addr,
+                           Address virtual_address,
+                           Address phys_addr,
                            MappingPermissions perms)
 {
     if (!self) {
         return -1;
     }
 
-    PageTable * l1_tbl = PageTable__ensure_next_level_table(self, L0_IDX(virtual_address));
-    PageTable * l2_tbl = PageTable__ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
-    PageTable * l3_tbl = PageTable__ensure_next_level_table(l2_tbl, L2_IDX(virtual_address));
+    KernelAddress table = PageTable__from_virtual_address(addr(self));
+    __d_printf(FOCUS, "Mapping 4K phys=%p virt=%p\n", table.phys_addr, table.virtual_addr);
+    KernelAddress l1_tbl = PageTable__ensure_next_level_table(table, L0_IDX(virtual_address));
+    KernelAddress l2_tbl = PageTable__ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
+    KernelAddress l3_tbl = PageTable__ensure_next_level_table(l2_tbl, L2_IDX(virtual_address));
 
-    l3_tbl->entries[L3_IDX(virtual_address)] = PageTable__make_page_desc_4k_l3(phys_addr,
-                                                                               perms.memory_type,
-                                                                               perms.shareability,
-                                                                               perms.access,
-                                                                               perms.uxn,
-                                                                               perms.pxn);
+    v_ptr(l3_tbl, PageTable)->entries[L3_IDX(virtual_address)] =
+        PageTable__make_page_desc_4k_l3(
+            phys_addr, perms.memory_type, perms.shareability, perms.access, perms.uxn, perms.pxn
+        );
     return 0;
-}
-
-
-/* ---- Convenience: map an existing kernel VA into a process at a chosen EL0 VA ---- */
-inline int PageTable__map_kernel_va_into_process(PageTable * process_l0_root,
-                                                 uint64_t kernel_va_el1,  // source VA in kernel space
-                                                 uint64_t user_va_el0,    // destination VA in user space
-                                                 MappingPermissions perms,
-                                                 uint16_t asid_for_tlb)   // process ASID (for TLB shootdown)
-{
-    uint64_t phys = PageTable__el1_va_to_phys(kernel_va_el1);
-
-    if (PageTable__map_4k_page(process_l0_root, user_va_el0, phys, perms) != 0)
-        return -1;
-
-    // If the process might already be running, invalidate its TLB entries for this ASID.
-    __asm__ __volatile__("tlbi aside1, %0" :: "r"((uint64_t)asid_for_tlb) : "memory");
-    __asm__ __volatile__("dsb ish; isb");
-    return 0;
-}
-
-/* VA→PA translation (EL1) using AT+PAR. Returns 0 on success. */
-inline int PageTable__el1_va_to_phys_pagebase(const void *kva_page_base, uint64_t *out_pa_page_base) {
-    uint64_t par;
-    __asm__ __volatile__(
-        "at s1e1r, %1\n"
-        "isb\n"
-        "mrs %0, par_el1\n"
-        : "=r"(par) : "r"(kva_page_base) : "memory");
-    if (par & 1) return -1;  // translation fault
-    *out_pa_page_base = par & 0x0000FFFFFFFFF000ULL; // PA[51:12]
-    return 0;
-}
-
-/**
- * map_kernel_range_into_process - map a kernel VA range into a process at EL0.
- *
- * @process_l0_root:  process TTBR0 L0 root (512-entry table)
- * @kernel_base_el1:  starting EL1 (kernel) VA of the source range
- * @user_base_el0:    starting EL0 VA where the range should appear in the process
- * @word_count64:     length of the range in 64-bit words (bytes = words*8)
- * @perms:            mapping attributes (MAIR index / SH / AP / UXN / PXN)
- * @asid_for_tlb:     process ASID for TLB maintenance
- *
- * Requirements:
- *   - kernel_base_el1 and user_base_el0 must have the **same 4 KiB offset**
- *     (PAGE_OFF(kernel_base_el1) == PAGE_OFF(user_base_el0)).
- *
- * Returns 0 on success, <0 on error.
- */
-inline int PageTable__map_kernel_range_into_process(PageTable * process_l0_root,
-                                                    const void * kernel_base_el1,
-                                                    size_t size,
-                                                    uint64_t user_base_el0,
-                                                    MappingPermissions perms,
-                                                    uint16_t asid_for_tlb)
-{
-    if (!process_l0_root || !kernel_base_el1) return -1;
-    uint64_t bytes = size * 8ULL;
-    if (bytes == 0) {
-        return 0;
-    }
-
-    uint64_t k_off = PAGE_OFF(kernel_base_el1);
-    uint64_t u_off = PAGE_OFF(user_base_el0);
-    if (k_off != u_off) {
-        // We require offsets to match so intra-page addresses line up 1:1.
-        return -2;
-    }
-
-    // Compute page-aligned bases and number of 4 KiB pages to cover the range.
-    uint64_t k_base_page = ((uint64_t)kernel_base_el1) & PAGE_MASK;
-    uint64_t u_base_page =  user_base_el0              & PAGE_MASK;
-
-    uint64_t span = k_off + bytes;                    // bytes from first page base to end
-    uint64_t page_count = (span + PAGE_SIZE - 1) / PAGE_SIZE;
-
-    for (uint64_t i = 0; i < page_count; ++i) {
-        const void *kva_page = (const void *)(k_base_page + i * PAGE_SIZE);
-        uint64_t    uva_page =  u_base_page + i * PAGE_SIZE;
-
-        // 1) Translate the kernel VA page base → PA page base.
-        uint64_t pa_page;
-        if (PageTable__el1_va_to_phys_pagebase(kva_page, &pa_page) != 0) {
-            return -3; // source page not mapped at EL1
-        }
-
-        // 2) Install a 4 KiB leaf into the process tables for this page.
-        int rc = PageTable__map_4k_page(process_l0_root,
-                                          uva_page,
-                                          pa_page,
-                                          perms);
-        if (rc != 0) {
-            return -4;
-        }
-    }
-
-    // 3) One TLB shootdown for the ASID (covers the whole updated range).
-    __asm__ __volatile__("tlbi aside1, %0" :: "r"((uint64_t)asid_for_tlb) : "memory");
-    __asm__ __volatile__("dsb ish; isb");
-
-    return 0;
-}
-
-void PageTable__grant(Process * self) {
-    // grant stack access
-    PageTable * table = self->page_table;
-    Stack stack = self->stack;
-    size_t stack_size = stack.size;
-    uint64_t stack_virt = 0xFFFFFFFF;
-
-    void * entry = self->entry_point;
-    // code wont relocate so we need it mapped to the same address
-    uint64_t virt_code = (uint64_t) entry;
-
-    MappingPermissions stack_perms = {
-        .memory_type = ATTR_INDEX_NORMAL,
-        .shareability = SHARE_INNER,
-        .access = ACCESS_EL1_RW_EL0_RW,
-        .uxn = 1,  // non-exec at EL0
-        .pxn = 1   // non-exec at EL1
-    };
-
-    MappingPermissions execute_perms = {
-        .memory_type = ATTR_INDEX_NORMAL,
-        .shareability = SHARE_INNER,
-        .access = ACCESS_EL1_RO_EL0_RO,
-        .uxn = 0,  // non-exec at EL0
-        .pxn = 0   // non-exec at EL1
-    };
-
-    PageTable__map_kernel_range_into_process(table, stack.base, stack_size, stack_virt, stack_perms, 1);
-    PageTable__map_kernel_range_into_process(table, entry, 2048, (uint64_t) entry, execute_perms, 1);
-
 }

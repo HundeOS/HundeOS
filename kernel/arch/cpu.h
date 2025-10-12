@@ -3,9 +3,10 @@
 
 #include <stdint.h>
 
-typedef struct cpu cpu;
+typedef uint64_t CPUID;
+typedef struct CPU CPU;
 
-extern uint64_t CPU__id();
+extern CPUID CPU__id();
 
 extern void CPU__noop();
 extern void CPU__wait();
@@ -14,6 +15,6 @@ extern void CPU__wait_for_interrupts();
 extern void CPU__check_halt();
 extern void CPU__halt_all();
 
-extern void CPU__assign_id(uint64_t id);
+extern void CPU__assign_id(CPUID id);
 
 #endif
