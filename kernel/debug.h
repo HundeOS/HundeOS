@@ -2,6 +2,7 @@
 #define __KERNEL_DEBUG_H
 
 #include "print.h"
+#include "cpu.h"
 #include <stdint.h>
 
 typedef enum {
@@ -15,11 +16,12 @@ typedef enum {
 } Level;
 
 #define MIN_LEVEL PROGRESS
+#define CPU_ID 1
 
 #define __d_printf(level, str, ...) \
-if (level >= MIN_LEVEL) { k_printf(str, __VA_ARGS__); }
+if (level >= MIN_LEVEL && CPU__id() == CPU_ID) { k_printf("cpu=%i - ", CPU__id()); k_printf(str, __VA_ARGS__); }
 
 #define __d_println(level, str) \
-if (level >= MIN_LEVEL) { k_println(str); }
+if (level >= MIN_LEVEL && CPU__id() == CPU_ID) { k_printf("cpu=%i - ", CPU__id()); k_println(str); }
 
 #endif

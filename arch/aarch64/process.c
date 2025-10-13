@@ -18,32 +18,94 @@ inline uint64_t Process__spsr_for_el0(unsigned daif_mask /*bits [9:6]*/) {
     return M_EL0t | ((uint64_t)(daif_mask & 0xF) << 6);
 }
 
-/* Enter EL0 with:
- *   PC = user_entry_va
- *   SP_EL0 = user_stack_top_va
- *   x0 = arg0 (you can extend to x1..x7 similarly)
- */
-// __attribute__((noreturn))
+extern char __el0_entry[];
+extern char __user_jump_start[];
+extern char __user_jump_end[];
+extern char __user_jump_phys_start[];
+extern char __user_jump_phys_end[];
+
+const Address TRAMP_ADDR = 0x10000;
+
+static UserAddress Process__el1_trampoline()
+{
+    Offset tramp_offset = addr_of(__el0_entry) - addr_of(__user_jump_start);
+    __d_printf(DEBUG, "Trampoline v=%p u=%p off=%p\n", addr_of(__el0_entry), addr_of(__user_jump_start), tramp_offset);
+
+    // we need to map the trampoline
+    return (UserAddress) {
+        .virtual_addr = TRAMP_ADDR,
+        .kernel_addr = (KernelAddress) {
+            .virtual_addr = addr_of(__user_jump_start),
+            .phys_addr = addr_of(__user_jump_phys_start),
+            .valid = true,
+        },
+        .read = true,
+        .write = false,
+        .execute = true,
+        .valid = true,
+    };
+}
+
+__attribute__((noreturn))
 void Process__enter_el0(Process * self,
                         bool mask_irqs_on_entry)  // 1 => keep IRQs masked at EL0
 {
-    uint64_t spsr = Process__spsr_for_el0(mask_irqs_on_entry ? 0b0111 : 0); // mask D,A,I if desired
-    __d_println(FOCUS, "setting pagetable");
-    write_ttbr0_el1(self->page_table.phys_addr);
-    __d_println(FOCUS, "setting el0 sp");
-    write_sp_el0(self->stack.top.virtual_addr);
-    __d_println(FOCUS, "setting el0 entrypoint");
-    write_elr_el1(self->entry_point.virtual_addr);
-    __d_println(FOCUS, "switch to el0");
-    write_spsr_el1(spsr);
-    isb();
-    eret();
+    UserAddress trampoline = Process__el1_trampoline();
+    PageTable__map(v_ptr(self->page_table, PageTable),
+        trampoline,
+        PAGE_SIZE * 4);
 
+    uint64_t spsr = Process__spsr_for_el0(mask_irqs_on_entry ? 0b0111 : 0); // mask D,A,I if desired
+    uint64_t argc = 0;
+    char ** argv = NULL;
+
+    __d_printf(DEBUG,
+        "Process entering el0 sp=%p ep=%p pt=%p\n",
+        self->stack.top.virtual_addr,
+        self->entry_point.virtual_addr,
+        self->page_table.phys_addr);
+
+    __asm__ volatile(
+            "msr sp_el0, %0          \n"
+
+            // 2) install TTBR0_EL1 (process page table) + TLB maintenance
+            "dsb ishst               \n"
+            "msr ttbr0_el1, %1       \n"
+            "dsb ish                 \n"
+            "isb                     \n"
+            "tlbi vmalle1            \n"
+            "dsb ish                 \n"
+            "isb                     \n"
+
+            // 3) program ELR_EL1 with trampoline user entry VA
+            "msr elr_el1, %2         \n"
+
+            // 4) program SPSR_EL1 for EL0t
+            "msr spsr_el1, %3        \n"
+            "isb                     \n"
+
+            // 5) preload argument registers that EL0 code expects
+            "mov x8, %4              \n"
+            "mov x0, %5              \n"
+            "mov x1, %6              \n"
+
+            // 6) transition EL1->EL0t and start executing at ELR_EL1
+            "eret                    \n"
+            ::
+           "r"(vaddr(self->stack.top)),
+           "r"(paddr(self->page_table)),
+           "r"(vaddr(trampoline)),
+           "r"(spsr),
+           "r"(vaddr(self->entry_point)),
+           "r"(argc),
+           "r"(argv)
+           : "memory");
+    __d_println(PANIC, "Process exited");
     __builtin_unreachable();
 }
 
 uint64_t Process__start(Process * self) {
     self->state = PROC_STATE_RUNNING;
-    __d_println(FOCUS, "Process entering el0");
-    Process__enter_el0(self, 0);
+    __d_println(DEBUG, "Process entering el0");
+    Process__enter_el0(self, 1);
 }

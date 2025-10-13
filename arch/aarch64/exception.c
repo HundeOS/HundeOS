@@ -60,7 +60,13 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
             if (ctx->x[8] == 0x21) {
                 k_println((const char *)ctx->x[0]);
             }
-            return 1;
+            if (ctx->x[8] == 0xFF) {
+                k_println("Ping!");
+            }
+            if (ctx->x[8] == 0x00) {
+                k_println("Process exit");
+            }
+            return 0;
             break;
         case 0x24: // Data abort from current EL
             __d_println(FAULT, "data abort: 0x%x");
@@ -80,7 +86,8 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
             return 0;
             break;
         case 0x20:
-            // __d_printf(PROGRESS, "BRK encountered cpu=%i\n", CPU__id())
+            __d_printf(PROGRESS, "Abort encountered cpu=%i\n", CPU__id());
+            Kernel__panic("Unhandled CPU exception", ctx);
             return 0;
             break;
         default:

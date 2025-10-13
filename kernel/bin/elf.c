@@ -40,15 +40,11 @@ SectionHeaderArray Elf__read_section_headers(const Elf * self)
 ProgramHeaderArray Elf__read_program_headers(const Elf * self)
 {
     Elf64Header * header = Elf__read_header(self);
-    __d_println(FOCUS, "ELF headers read");
     Offset program_header_offset = header->program_header_offset;
-    __d_println(FOCUS, "ELF headers read - PH offset");
     uint64_t num_headers = header->program_header_entries;
     Size program_header_size = header->program_header_entry_size;
-    __d_println(FOCUS, "Prepare to read program headers");
 
     ProgramHeaderArray headers = ProgramHeaderArray__new();
-    __d_println(FOCUS, "Array init");
     Offset start = self->start + program_header_offset;
     for (int i = 0; i < num_headers; i++)
     {
@@ -59,7 +55,6 @@ ProgramHeaderArray Elf__read_program_headers(const Elf * self)
 
 static UserAddress Elf__explode(const Elf * self, ProgramHeader * header)
 {
-    __d_printf(FOCUS, "Elf__explode %p", header->memory_size);
     UserAddress address = Kernel__alloc_user(
         header->virtual_address,
         header->memory_size,
@@ -67,24 +62,18 @@ static UserAddress Elf__explode(const Elf * self, ProgramHeader * header)
         header->flags & Write,
         header->flags & Execute);
 
-    __d_println(FOCUS, "Elf__explode");
     Kernel__memcopy(offset_addr(self->start, header->segment_offset),
         address.kernel_addr.virtual_addr,
         header->file_size);
-    __d_println(FOCUS, "Elf__explode - done");
     return address;
 }
 
 ExpandedSegmentArray Elf__map(const Elf * self) {
-    __d_printf(FOCUS, "Reading elf %p\n", self);
     ProgramHeaderArray headers = Elf__read_program_headers(self);
-    __d_println(FOCUS, "Headers loaded");
     ExpandedSegmentArray expanded_segments = ExpandedSegmentArray__new();
 
-    __d_println(FOCUS, "Expanded segments");
     for (int i = 0; i < headers.len; i++)
     {
-        __d_println(FOCUS, "Elf__map");
         ProgramHeader * header = ProgramHeaderArray__at(&headers, i);
         if (header->type == Load)
         {
@@ -98,6 +87,5 @@ ExpandedSegmentArray Elf__map(const Elf * self) {
             ExpandedSegmentArray__push(&expanded_segments, segment);
         }
     }
-    __d_println(FOCUS, "Elf__done");
     return expanded_segments;
 }

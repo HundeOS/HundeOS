@@ -2,6 +2,7 @@
 
 #include "address.h"
 #include "all_defs.h"
+#include "debug.h"
 #include "kalloc.h"
 #include "arch/page_table.h"
 
@@ -18,5 +19,7 @@ Stack Stack__new()
 
 void Stack__map(Stack * self, PageTable * page_table)
 {
+    __d_printf(DEBUG, "Mapping stack %p\n", self->base);
+    __d_printf(DEBUG, "Pagetable %p\n", page_table);
     PageTable__map(page_table, self->base, STACK_SIZE);
 }

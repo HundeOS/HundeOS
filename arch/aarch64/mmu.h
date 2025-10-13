@@ -84,7 +84,7 @@ inline Address align_up_2m(Address x)
 
 inline Address align_down_4k(Address x)
 {
-    return x & ~((1ULL<<21)-1);
+    return x & ~((1ULL<<12)-1);
 }
 
 inline Address align_up_4k(Address x)

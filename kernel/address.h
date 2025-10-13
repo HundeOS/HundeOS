@@ -10,7 +10,7 @@ typedef uint64_t Offset;
 
 #define addr_of(p) addr(&p)
 #define vaddr(ka) ka.virtual_addr
-#define paddr(ka) ka.physical_addr
+#define paddr(ka) ka.phys_addr
 #define u_kpaddr(ua) ua.kernel_addr.phys_addr
 #define u_kvaddr(ua) ua.kernel_addr.virtual_addr
 #define offset_addr(a, b) a + b

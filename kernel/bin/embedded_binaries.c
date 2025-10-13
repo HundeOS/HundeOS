@@ -16,12 +16,10 @@ static const Elf embedded_binaries[] = {
 
 Elf * EmbeddedElf__load(const char * name)
 {
-    __d_printf(FOCUS, "Loading embedded elf: %s\n", name);
     for (int i = 0; i < sizeof(embedded_binaries) / sizeof(Elf); i++)
     {
         if (compare(embedded_binaries[i].name, name))
         {
-            __d_printf(FOCUS, "Found embedded elf: %s\n", name);
             return &embedded_binaries[i];
         }
     }

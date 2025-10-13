@@ -142,6 +142,17 @@ qemu-virt-1cpu: $(ELF)
 		-nographic \
 		-monitor telnet::4444,server,nowait
 
+qemu-virt-2cpus: $(ELF)
+	qemu-system-aarch64 \
+		-M virt,gic-version=3 \
+		-smp cpus=2 -cpu max \
+		-m 4G  \
+		-serial stdio \
+		-cpu cortex-a57 \
+		-kernel $(ELF) \
+		-nographic \
+		-monitor telnet::4444,server,nowait
+
 qemu-virt-gdb: clean $(ELF)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \

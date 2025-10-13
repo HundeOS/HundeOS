@@ -14,8 +14,6 @@ extern const uint64_t __k_stack_high[];
 extern const uint64_t __k_stack_start[];
 extern const uint64_t vector_table;
 
-//extern void (*CPU__enter_kernel)();
-
 inline void enable_fp_simd(void) {
     uint64_t cpacr;
 
@@ -58,10 +56,10 @@ __BOOT__(void) jump_to_kernel(uint64_t cpu)
     _print(new_line);
     _print(entering_hi_mem);
     _print_base(cpu, 10);
+    _print(new_line);
 
     uint64_t base = (uint64_t)&__k_stack_high;
     uint64_t stack_top = (uint64_t)&__k_stack_start + (cpu * STACK_SIZE);
-
     enter_kernel(stack_top, (uint64_t)&vector_table, (uint64_t)&CPU__enter_kernel);
 }
 

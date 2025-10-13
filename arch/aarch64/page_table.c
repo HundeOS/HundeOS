@@ -73,8 +73,10 @@ void PageTable__map(PageTable * self, UserAddress address, size_t size)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address phys_start = align_down_4k(u_kpaddr(address));
-
     Address user_end = align_up_4k(user_start + size);
+    __d_printf(DEBUG, "Pagetable map uvirt=%p\n", vaddr(address));
+    __d_printf(DEBUG, "Pagetable map start=%p phys=%p end=%p\n", user_start, phys_start, user_end);
+
 
     size_t adjusted_range = user_end - user_start;
 
@@ -95,15 +97,15 @@ void PageTable__map(PageTable * self, UserAddress address, size_t size)
         .uxn = !address.execute,
         .pxn = 0
     };
-
+    __d_printf(DEBUG, "Mapping pages = %i\n", pages);
     for (int page = 0; page < pages; page++)
     {
         Address user_addr = offset_addr(user_start, page * PAGE_SIZE);
         Address phys_addr = offset_addr(phys_start, page * PAGE_SIZE);
-        __d_printf(FOCUS, "Mapping %p\n", user_addr);
 
         PageTable__map_4k_page(self, user_addr, phys_addr, perms);
     }
+    __d_println(DEBUG, "Mapped");
 }
 
 /**
@@ -132,35 +134,30 @@ KernelAddress PageTable__ensure_next_level_table(KernelAddress parent_level_tabl
     // Defensive: table has 512 entries at 4 KiB granule.
     // (Optional) if you have an assertion macro, enable it:
     // assert(child_index < 512);
-    __d_printf(FOCUS, "ensure_next_level_table %p %i\n", parent_level_table.virtual_addr, parent_level_table.valid);
     PageTable * parent_level_table_ptr = v_ptr(parent_level_table, PageTable);
 
-    __d_println(FOCUS, "descriptor");
     uint64_t descriptor = parent_level_table_ptr->entries[child_index];
 
     // Case 1: already a valid TABLE descriptor → return its next-level base.
     if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE)) {
-        __d_println(FOCUS, "found table");
         return PageTable__from_physical_address(descriptor & MASK_PTE_NEXTADDR);
     }
 
     // Case 2: slot holds a valid LEAF (block/page) → caller must split it.
     // We do not overwrite it here to avoid silent semantic changes.
     if ((descriptor & FLAG_PTE_VALID) && !(descriptor & FLAG_PTE_TABLE)) {
-        __d_println(FOCUS, "null table");
+        __d_println(PANIC, "null table");
         return NULL_KERNEL_ADDRESS;  // leaf present; cannot "ensure" a table without a split
     }
 
-    __d_println(FOCUS, "allocate new table");
     // Case 3: slot is invalid → allocate a fresh zeroed table page.
     KernelAddress next_level_table = MemoryPage__alloc();
 
     if (!next_level_table.valid) {
-        __d_println(FOCUS, "failed to allocate");
+        __d_println(PANIC, "failed to allocate");
         return NULL_KERNEL_ADDRESS;  // we should probably cause a fault
     }
 
-    __d_println(FOCUS, "ref new table");
     // Install a TABLE descriptor that points to the new page.
     parent_level_table_ptr->entries[child_index] = PageTable__make_table_desc(p_ptr(next_level_table, PageTable));
 
@@ -202,7 +199,6 @@ int PageTable__map_4k_page(PageTable * self,
     }
 
     KernelAddress table = PageTable__from_virtual_address(addr(self));
-    __d_printf(FOCUS, "Mapping 4K phys=%p virt=%p\n", table.phys_addr, table.virtual_addr);
     KernelAddress l1_tbl = PageTable__ensure_next_level_table(table, L0_IDX(virtual_address));
     KernelAddress l2_tbl = PageTable__ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
     KernelAddress l3_tbl = PageTable__ensure_next_level_table(l2_tbl, L2_IDX(virtual_address));

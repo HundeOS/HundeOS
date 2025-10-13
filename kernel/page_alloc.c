@@ -26,11 +26,9 @@ typedef struct MemoryBlock {
 } MemoryBlock;
 
 MemoryPage * MemoryPage__zero(MemoryPage * self){
-    __d_printf(FOCUS, "MemoryPage__zero %p\n", self);
     for (uint64_t i = 0; i < PAGE_SIZE; i++) {
         self->page[i] = 0;
     }
-    __d_printf(FOCUS, "MemoryPage__zero done %p\n", self);
     return self;
 }
 
@@ -51,8 +49,8 @@ inline MemoryPage * align_up(MemoryPage * page, Address a){
 
 static void MemoryBlock__advance() {
     Address next_phys_addr = current_block.start.phys_addr + COARSE_BLOCK_SIZE;
-    Address next_virtual_addr = current_block.start.phys_addr + COARSE_BLOCK_SIZE;
-
+    Address next_virtual_addr = current_block.start.virtual_addr + COARSE_BLOCK_SIZE;
+    __d_printf(DEBUG, "advancing block to %p\n", next_virtual_addr);
     if (next_virtual_addr > addr_of(__heap_end)) {
         Kernel__panic("out of heap", NULL);
     }
@@ -63,14 +61,13 @@ static void MemoryBlock__advance() {
 }
 
 static void MemoryBlock__bootstrap(){
-    __d_println(FOCUS, "MemoryBlock__bootstrap");
     // we need to allocate the first block
     current_block.start.phys_addr = addr_of(__heap_start_phys); // work out if there is an offset
     current_block.start.virtual_addr = addr_of(__heap_start);
     current_block.pages_allocated = 0;
     current_block.bootstrapped = true;
 
-    __d_printf(FOCUS, "start_phys=%p, start_virt=%p\n",current_block.start.phys_addr, current_block.start.virtual_addr);
+    __d_printf(DEBUG, "start_phys=%p, start_virt=%p\n",current_block.start.phys_addr, current_block.start.virtual_addr);
 }
 
 
@@ -90,8 +87,6 @@ static KernelAddress MemoryBlock__next_page() {
     Address virtual_addr = current_block.start.virtual_addr + (page_index * PAGE_SIZE);
     Address physical_addr = current_block.start.phys_addr + (page_index * PAGE_SIZE);
 
-    __d_printf(DEBUG, "MemoryBlock__next_page %p %p \n", virtual_addr, physical_addr);
-
     return (KernelAddress) {
         .virtual_addr = virtual_addr,
         .phys_addr = physical_addr,
@@ -100,14 +95,10 @@ static KernelAddress MemoryBlock__next_page() {
 }
 
 static KernelAddress MemoryBlock__next_pages(size_t num_pages) {
-    __d_printf(FOCUS, "MemoryBlock__next_pages -- %i\n", num_pages);
     mutex_lock(&block_lock);
     if (!current_block.bootstrapped) {
-        __d_printf(FOCUS, "Bootstrapping -- %i\n", num_pages);
         MemoryBlock__bootstrap();
     }
-    __d_printf(FOCUS, "Allocated -- %i %p\n", current_block.pages_allocated, current_block.start.virtual_addr);
-
     KernelAddress first = (KernelAddress) {
         .virtual_addr = 0,
         .phys_addr = 0,
@@ -118,7 +109,6 @@ static KernelAddress MemoryBlock__next_pages(size_t num_pages) {
     {
         if (current_block.pages_allocated >= PAGES_PER_BLOCK)
         {
-            __d_printf(FOCUS, "Advancing -- %i\n", num_pages);
             MemoryBlock__advance();
         }
         Address virtual_addr = current_block.start.virtual_addr + (current_block.pages_allocated * PAGE_SIZE);
@@ -150,7 +140,8 @@ static KernelAddress MemoryPage__next_pages(size_t num_pages)
 
 KernelAddress MemoryPage__alloc_fresh() {
     KernelAddress page = MemoryPage__next();
-    MemoryPage__zero((MemoryPage *)page.virtual_addr);;
+
+    MemoryPage__zero(v_ptr(page, MemoryPage));;
     return page;
 }
 
@@ -158,22 +149,19 @@ KernelAddress MemoryPage__alloc_fresh_size(size_t size) {
     uint64_t pages = size / PAGE_SIZE;
     pages += (size % PAGE_SIZE) ? 1 : 0;
 
-    __d_printf(FOCUS, "MemoryPage__next_pages(pages) pages=%i\n", pages);
     KernelAddress page = MemoryPage__next_pages(pages);
-    __d_println(FOCUS, "MemoryPage__zero(page)");
     MemoryPage__zero((MemoryPage *)page.virtual_addr);
     return page;
 }
 
 KernelAddress MemoryPage__alloc(void)
 {
-    __d_println(DEBUG, "alloc");
+
     return MemoryPage__alloc_fresh();
 }
 
 KernelAddress MemoryPage__alloc_size(size_t size)
 {
-    __d_println(FOCUS, "alloc");
     return MemoryPage__alloc_fresh_size(size);
 }
 
@@ -184,7 +172,7 @@ KernelAddress MemoryPage__from_virtual_address(Address virtual)
 
     if (virtual < addr_of(__heap_start)) {
         // is it one of our allocated addresses?
-        __d_printf(FOCUS, "virtual=%p is not from managed heap %p (phys=%p)\n",
+        __d_printf(PANIC, "virtual=%p is not from managed heap %p (phys=%p)\n",
             virtual, addr_of(__heap_start), addr_of(__heap_start_phys));
         return (KernelAddress) {
             .virtual_addr = 0,
@@ -206,6 +194,7 @@ KernelAddress MemoryPage__from_physical_address(Address physical)
     Address virtual = offset + addr_of(__heap_start);
 
     if (physical < addr_of(__heap_start_phys)) {
+        __d_printf(PANIC, "Unknown physical addr=%p", physical);
         // is it one of our allocated addresses?
         return (KernelAddress) {
             .virtual_addr = 0,

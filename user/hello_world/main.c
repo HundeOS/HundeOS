@@ -1,7 +1,8 @@
 #include "../user.h"
 
 void main() {
-    const char * hello = "Hello World! Farts!";
-    println(hello);
-
+    for(int i = 0; i < 100000000; i++)
+    {
+        println("Hello World!");
+    }
 }

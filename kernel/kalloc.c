@@ -7,7 +7,7 @@
 
 KernelAddress Kernel__alloc(size_t size)
 {
-    __d_println(FOCUS, "MemoryPage__alloc_size(size)");
+    __d_println(DEBUG, "MemoryPage__alloc_size(size)");
     return MemoryPage__alloc_size(size);
 }
 
@@ -24,7 +24,7 @@ UserAddress Kernel__alloc_user(Address virtual_address,
                                bool write,
                                bool execute)
 {
-    __d_println(FOCUS, "Kernel__alloc(size)");
+    __d_println(DEBUG, "Kernel__alloc(size)");
     KernelAddress address = Kernel__alloc(size);
     UserAddress allocated = (UserAddress) {
         .virtual_addr = virtual_address,
@@ -36,17 +36,6 @@ UserAddress Kernel__alloc_user(Address virtual_address,
     return allocated;
 }
 
-// void * memset(void * ptr, int value, size_t size)
-// {
-//     // __d_printf(FOCUS, "memset %p %p %i\n", ptr, value, size);
-//     return __builtin_memset(ptr, value, size);
-// }
-
-// void * memcpy(void * dest, const void * src, size_t size)
-// {
-//     // __d_printf(FOCUS, "memcpy %p %p %i\n", dest, src, size);
-//     return __builtin_memcpy(dest, src, size);
-// }
 void *memcpy(void *dst, const void *src, size_t n) {
     uint8_t *d = dst;
     const uint8_t *s = src;

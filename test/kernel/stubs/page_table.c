@@ -39,7 +39,6 @@ void PageTable__map(PageTable * self, UserAddress address, size_t size)
 
 bool check_address_mapped(PageTable *page_table, Address virtual_address, bool read, bool write, bool execute, size_t size)
 {
-    __d_printf(FOCUS, "Checking %i mapped address calls vaddr=%p \n", page_table->mapped_addresses.len, virtual_address);
     for (int i = 0; i < page_table->mapped_addresses.len; i++)
     {
         MapRequest mapped_address = MapRequestArray__at(&page_table->mapped_addresses, i);

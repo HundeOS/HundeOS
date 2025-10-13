@@ -10,6 +10,7 @@ PHDRS {
   kdata PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
   kstack PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
   kbinaries PT_LOAD FLAGS(6);       /* R W: high .data/.bss (VMA high, LMA low via AT)   */
+  utext PT_LOAD FLAGS(6);       /* R W: high .data/.bss (VMA high, LMA low via AT)   */
   kheap PT_LOAD FLAGS(6);       /* R W: high .data/.bss (VMA high, LMA low via AT)   */
   kio PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
 }
@@ -165,8 +166,19 @@ SECTIONS
   __embedded_binaries_end = .;
   __embedded_binaries_phys_start = LOADADDR(.binaries);
   __embedded_binaries_phys_end = LOADADDR(.binaries) + SIZEOF(.binaries);
-
   __lma_cursor = ALIGN(__lma_cursor + SIZEOF(.binaries), PAGE_4KB);
+
+  .user.text : AT(ALIGN(__lma_cursor, PAGE_4KB))
+  {
+    __user_jump_start = .;
+    KEEP(*(.user.text));
+  } :utext
+  __user_jump_end = .;
+  __user_jump_phys_start = LOADADDR(.user.text);
+  __user_jump_phys_end = LOADADDR(.user.text) + SIZEOF(.user.text);
+
+  __lma_cursor = LOADADDR(.user.text) + SIZEOF(.user.text);
+
 
   . = KERNEL_STACK_BASE;
   .kstack :AT(ALIGN(__lma_cursor, BLOCK_2MB)) ALIGN(BLOCK_2MB) {

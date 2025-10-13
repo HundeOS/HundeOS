@@ -12,13 +12,13 @@
 extern void dummy();
 // static inline uint64_t rdsp(void){ uint64_t sp; __asm__ volatile("mov %0, sp":"=r"(sp)); return sp; }
 void Kernel_main(uint64_t cpu_id) {
-    __d_printf(FOCUS, "CPU entering main: %i\n", cpu_id);
+    __d_printf(PROGRESS, "CPU entering main: %i\n", cpu_id);
     CPUTimer__start(10000);
-    __d_printf(DEBUG, "Timer started: %i\n", cpu_id);
+    __d_printf(PROGRESS, "Timer started: %i\n", cpu_id);
 
-    __d_printf(FOCUS, "Kernel starting loading program: %i\n", cpu_id);
+    __d_printf(DEBUG, "Kernel starting loading program: %i\n", cpu_id);
     Elf * program = EmbeddedElf__load("hello_world");
-    __d_printf(FOCUS, "Kernel starting program: %i\n", cpu_id);
+    __d_printf(DEBUG, "Kernel starting program: %i\n", cpu_id);
     Process__spawn_from_elf(program);
     __d_printf(DEBUG, "Timer started: %i\n", cpu_id);
     CPU__wait_for_interrupts();
