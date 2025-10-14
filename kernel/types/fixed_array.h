@@ -4,63 +4,28 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "../panic.h"
+#include "optional.h"
+#include "result.h"
 
-typedef struct OptionalV {
-    bool present;
-    void * value;
-} OptionalV;
+ResultDef(int, IntResult)
+extern const char * ARRAY_FULL_ERROR;
+extern const char * ARRAY_EMPTY_ERROR;
 
-inline OptionalV Some(void * value)
+typedef enum ArrayError
 {
-    return (OptionalV) {
-        .present = true,
-        .value = value
-    };
-}
+    E_FULL = 1,
+    E_EMPTY = -1,
+} ArrayError;
 
-inline OptionalV None()
-{
-    return (OptionalV) {
-        .present = false,
-        .value = NULL
-    };
-}
-
-#define something true
-#define nothing false
-
-#define unwrap(type, self, a, b) \
-    switch (self.present) { \
-        case something: a; break\
-        case nothing: b; break;\
-    }
-
-#define unwrapSome(type, self) \
-    type * ___unwrapped = (type) self.value; \
-    if (self.present) \
-
-#define unwrapNone(self) \
-    if (!self.present) \
-
-
+#define _opt_name(alias_name) alias_name##__optional
 
 #define FixedArray(type, size) type##Array_##size
-#define Optional(type) type##Optional
 
-#define OptionalDefine(type) \
-    typedef struct T##Optional(type) \
-    { \
-        bool present; \
-        type value; \
-    } T##Optional(type); \
-    typedef union Optional(type) \
-    { \
-        T##Optional(type) typed, \
-        OptionalV untyped \
-    } Optional(type);
+#define ArrayOptional(alias) \
+    _Optional(alias##__optional)
 
-
+#define ConstructorPreDefine(alias_name) \
+    alias_name alias_name##__new();
 #define ConstructorDefine(alias_name) \
     alias_name alias_name##__new() \
     { \
@@ -71,34 +36,38 @@ inline OptionalV None()
         return result; \
     }; \
 
-#define ConstructorPreDefine(alias_name) alias_name alias_name##__new();
-
+#define PushPreDefine(alias_name) IntResult alias_name##__push(alias_name * self, alias_name##__type value);
 #define PushDefine(alias_name) \
-    void alias_name##__push(alias_name * self, alias_name##__type value) \
+    IntResult alias_name##__push(alias_name * self, alias_name##__type value) \
     { \
         if (self->len >= self->max) \
         { \
-            Kernel__panic("Array is full", NULL); \
+            return Error(IntResult, ARRAY_FULL_ERROR, E_FULL); \
         } \
         else \
         { \
             self->data[self->len++] = value; \
+            return Success(IntResult, self->len); \
         } \
     };
-#define PushPreDefine(alias_name) void alias_name##__push(alias_name * self, alias_name##__type value);
 
+
+#define AtPreDefine(alias_name) ArrayOptional(alias_name) alias_name##__at(alias_name * self, uint64_t index);
 #define AtDefine(alias_name) \
-    alias_name##__type alias_name##__at(alias_name * self, uint64_t index) \
+    ArrayOptional(alias_name) alias_name##__at(alias_name * self, uint64_t index) \
     { \
-        if (index >= self->len || index < 0) \
+        if (index >= self->len) \
         { \
-            return alias_name##__EMPTY; \
+            return None(alias_name##__optional); \
         } \
-        return self->data[index]; \
+        return Some(alias_name##__optional, self->data[index]); \
     };
-#define AtPreDefine(alias_name) alias_name##__type alias_name##__at(alias_name * self, uint64_t index);
+
+#define Optional(alias) \
+    _Optional(alias)
 
 #define FixedArrayDefine(type, size, alias_name) \
+    OptionalDef(type, alias_name##__optional) \
     static const uint64_t alias_name##__max_size = size; \
     typedef type alias_name##__type; \
     static const type alias_name##__EMPTY; \
@@ -110,7 +79,7 @@ inline OptionalV None()
     typedef FixedArray(type, size) alias_name; \
     ConstructorPreDefine(alias_name) \
     AtPreDefine(alias_name) \
-    PushPreDefine(alias_name)
+    PushPreDefine(alias_name) \
 
 #define FixedArrayBodyDefine(alias_name) \
     ConstructorDefine(alias_name) \

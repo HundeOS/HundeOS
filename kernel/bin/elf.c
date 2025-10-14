@@ -32,7 +32,7 @@ SectionHeaderArray Elf__read_section_headers(const Elf * self)
         //0x10358:
         SectionHeader * header = offset_ptr(start, i * section_header_size, SectionHeader);
         k_printf("header=%i %p %p \n", i, header, header->name_offset);
-        SectionHeaderArray__push(&headers, header);
+        IntResult res = SectionHeaderArray__push(&headers, header);
     }
     return headers;
 }
@@ -48,7 +48,11 @@ ProgramHeaderArray Elf__read_program_headers(const Elf * self)
     Offset start = self->start + program_header_offset;
     for (int i = 0; i < num_headers; i++)
     {
-        ProgramHeaderArray__push(&headers, offset_ptr(start, i * program_header_size, ProgramHeader));
+        ProgramHeader * header = offset_ptr(start, i * program_header_size, ProgramHeader);
+
+        ResultMatch(IntResult, ProgramHeaderArray__push(&headers, header) );
+            IsError(code, message, __d_println(PANIC, message.data);)
+        End
     }
     return headers;
 }
@@ -68,24 +72,34 @@ static UserAddress Elf__explode(const Elf * self, ProgramHeader * header)
     return address;
 }
 
+static ExpandedSegment Elf__expand_segment(Elf * self,
+                                           ProgramHeader * header,
+                                           ExpandedSegmentArray * expanded_segments)
+{
+    __d_println(FOCUS, "Expanding segment");
+    if (header->type == Load)
+    {
+        UserAddress address = Elf__explode(self, header);
+        ExpandedSegment segment = (ExpandedSegment) {
+            .address = address,
+            .size = header->memory_size,
+        };
+        ExpandedSegmentArray__push(expanded_segments, segment);
+    }
+
+}
+
 ExpandedSegmentArray Elf__map(const Elf * self) {
     ProgramHeaderArray headers = Elf__read_program_headers(self);
     ExpandedSegmentArray expanded_segments = ExpandedSegmentArray__new();
+    __d_printf(FOCUS, "Mapping segments %i\n", headers.len);
 
     for (int i = 0; i < headers.len; i++)
     {
-        ProgramHeader * header = ProgramHeaderArray__at(&headers, i);
-        if (header->type == Load)
-        {
-            UserAddress address = Elf__explode(self, header);
-
-            ExpandedSegment segment = (ExpandedSegment) {
-                .address = address,
-                .size = header->memory_size,
-            };
-
-            ExpandedSegmentArray__push(&expanded_segments, segment);
-        }
+        Match(ProgramHeaderPtr, ProgramHeaderArray__at(&headers, i))
+            IsNone(__d_println(PANIC, "No header");)
+            IsSome(header, Elf__expand_segment(self, header, &expanded_segments);)
+        End
     }
     return expanded_segments;
 }

@@ -31,8 +31,11 @@ Process * Process__spawn_from_elf(Elf * elf) {
     __d_println(DEBUG, "Page table created");
     for (int i = 0; i < expanded_elf.len; i++)
     {
-        ExpandedSegment segment = ExpandedSegmentArray__at(&expanded_elf, i);
-        PageTable__map(v_ptr(page_table, PageTable), segment.address, segment.size);
+        Optional(ExpandedSegment) segment_optional = ExpandedSegmentArray__at(&expanded_elf, i);
+        Match(ExpandedSegment, segment_optional)
+            IsSome(segment, PageTable__map(v_ptr(page_table, PageTable), segment.address, segment.size);)
+            IsNone(__d_println(PANIC, "Segment not mapped"););
+        End
     }
     __d_println(DEBUG, "Code mapped");
 
@@ -40,10 +43,19 @@ Process * Process__spawn_from_elf(Elf * elf) {
     Stack__map(&stack, v_ptr(page_table, PageTable));
     __d_println(DEBUG, "Stack mapped");
 
-    ExpandedSegment entry_point = ExpandedSegmentArray__at(&expanded_elf, 0);
-    Process * proc = Process__new(page_table, entry_point.address, stack);
-    __d_println(DEBUG, "Process created");
-    Process__start(proc);
+    Match(ExpandedSegment, ExpandedSegmentArray__at(&expanded_elf, 0))
+        IsNone(__d_println(PANIC, "No entry point"););
+        IsSome(entry_point,
+            {
+                Process * proc = Process__new(page_table, entry_point.address, stack);
+                Process__start(proc);
 
-    return proc;
+                return proc;
+            }
+        )
+    End
+
+
+
+    __d_println(DEBUG, "Process created");
 }

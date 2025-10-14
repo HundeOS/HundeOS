@@ -1,0 +1,3 @@
+manifest:
+  source_files:
+    - kernel/syscall_handler.c

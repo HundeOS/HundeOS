@@ -1,5 +1,5 @@
 #include "uart.h"
-#include <kernel.h>
+#include "../../../kernel/kernel.h"
 
 static volatile bool _check_ready() {
     return (bool) (*UART0_FR & 0x20);
