@@ -59,7 +59,7 @@ ResultDef(ResCode);
     { \
         if (self->len >= self->max) \
         { \
-            return Error(ResCode, ARRAY_FULL_ERROR, E_FULL); \
+            return Error(ResCode, KString__new(ARRAY_FULL_ERROR), E_FULL); \
         } \
         else \
         { \
@@ -86,7 +86,7 @@ ResultDef(ResCode);
     { \
         if (index < 0 || index >= self->max) \
         { \
-            return Error(ResCode, ARRAY_INDEX_OUT_OF_BOUNDS, E_OUT_OF_BOUNDS); \
+            return Error(ResCode, KString__new(ARRAY_INDEX_OUT_OF_BOUNDS), E_OUT_OF_BOUNDS); \
         } \
         self->data[index] = value;\
         if (index >= self->len)\

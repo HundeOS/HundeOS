@@ -41,7 +41,7 @@ typedef uint64_t Code;
         .error = (Error_##T) { \
             .success = false, \
             .code = error_code, \
-            .error = kstring(error_message), \
+            .error = error_message, \
         } \
     } \
 
@@ -49,23 +49,23 @@ typedef uint64_t Code;
 #define ResultMatch(T, res) \
 { \
     typedef Result_##T##_type __ResultValueType;\
-    Result_##T result = res; \
+    Result_##T ___result = res; \
 
 #define End \
 } \
 
 #define IsSuccess(val_name, block) \
-    if (result.error.success) \
+    if (___result.error.success) \
     { \
-        __ResultValueType val_name = result.success.val; \
+        __ResultValueType val_name = ___result.success.val; \
         block; \
     } \
 
 #define IsError(code_name, message_name, block) \
-    if (!result.error.success) \
+    if (!___result.error.success) \
     { \
-        KString message_name = result.error.error; \
-        Code code = result.error.code; \
+        KString message_name = ___result.error.error; \
+        Code code = ___result.error.code; \
         block; \
     } \
 

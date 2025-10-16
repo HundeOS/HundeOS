@@ -1,20 +1,22 @@
 #include "uart.h"
 #include "../../../kernel/kernel.h"
 
-static volatile bool _check_ready() {
+static volatile bool _check_ready()
+{
     return (bool) (*UART0_FR & 0x20);
 }
 
-static void _send(unsigned int c) {
+static void _send(unsigned int c)
+{
     __asm__ volatile("dsb sy");
     Spin__wait(&_check_ready);
     *UART0_DR = c;
     __asm__ volatile("dsb sy");
-
 }
 
 // Very simple putchar that tries to write to common UART addresses
-static void _putchar(char c) {
+static void _putchar(char c)
+{
     _send(c);
 }
 
@@ -31,12 +33,14 @@ void puts(const char* str) {
 
 // Convert integer to string and print
 void put_int(int num) {
-    if (num == 0) {
+    if (num == 0)
+    {
         _putchar('0');
         return;
     }
     
-    if (num < 0) {
+    if (num < 0)
+    {
         _putchar('-');
         num = -num;
     }
@@ -44,13 +48,15 @@ void put_int(int num) {
     char digits[10];
     int count = 0;
     
-    while (num > 0 && count < 10) {
+    while (num > 0 && count < 10)
+    {
         digits[count++] = '0' + (num % 10);
         num /= 10;
     }
     
     // Print in reverse order
-    while (count > 0) {
+    while (count > 0)
+    {
         _putchar(digits[--count]);
     }
 }

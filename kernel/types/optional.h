@@ -59,7 +59,6 @@
 #define Match(alias, opt) \
 { \
     typedef alias##__type value_type; \
-    __d_println(FOCUS, "Match"); \
     _Optional(alias) optional = opt; \
 
 #define End \
@@ -68,7 +67,6 @@
 #define IsSome(val_name, block) \
     if (optional.some.present) \
     { \
-        __d_println(FOCUS, "Got something"); \
         value_type val_name = optional.some.val; \
         block; \
     } \
@@ -76,7 +74,6 @@
 #define IsNone(block) \
     if (!optional.none.present) \
     { \
-        __d_println(FOCUS, "Got nothing"); \
         block; \
     } \
 

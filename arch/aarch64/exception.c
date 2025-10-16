@@ -5,7 +5,7 @@
 #include "exception.h"
 #include "asm_helpers.h"
 #include "../../kernel/debug.h"
-
+#include "../../kernel/syscall/syscall_handler.h"
 
 // Helper function to get exception syndrome
 inline uint64_t get_esr_el1(void) {
@@ -57,16 +57,18 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
     switch(ec) {
         case 0x15: // SVC instruction execution
             __d_printf(DEBUG, "system call: 0x%x\n", ctx->x[8]);
-            if (ctx->x[8] == 0x21) {
-                k_println((const char *)ctx->x[0]);
-            }
-            if (ctx->x[8] == 0xFF) {
-                k_println("Ping!");
-            }
-            if (ctx->x[8] == 0x00) {
-                k_println("Process exit");
-            }
-            return 0;
+            ResultMatch(SystemCallResult,
+                    SyscallHandler__dispatch(ctx->x[8], ctx->x[0], ctx->x[1], ctx->x[2]));
+                IsSuccess(call_result,
+                {
+                    return call_result;
+                });
+                IsError(code, message,
+                {
+                    __d_printf(PANIC, "syscall error: %s code=%i\n", KString__cstr(&message), code);
+                    return code;
+                });
+            End
             break;
         case 0x24: // Data abort from current EL
             __d_println(FAULT, "data abort: 0x%x");
