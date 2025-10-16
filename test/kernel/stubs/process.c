@@ -3,7 +3,6 @@
 #include "../../../kernel/process.h"
 #include "../../../kernel/types/fixed_array.h"
 
-typedef Process * ProcessPtr;
 
 FixedArrayDefine(ProcessPtr, 1024, ProcessArray);
 FixedArrayBodyDefine(ProcessArray);
@@ -25,10 +24,15 @@ bool process_is_started(Process * proc)
 {
     for (int i = 0; i < started_processes.len; i++)
     {
-        if (ProcessArray__at(&started_processes, i) == proc)
-        {
-            return true;
-        }
+        Match(ProcessPtr, ProcessArray__at(&started_processes, i))
+            IsSome(process,
+                if (process == proc)
+                {
+                    return true;
+                }
+            )
+            IsNone();
+        End
     }
 
     return false;

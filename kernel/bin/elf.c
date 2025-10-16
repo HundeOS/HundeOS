@@ -8,7 +8,7 @@
 
 FixedArrayBodyDefine(SectionHeaderArray);
 FixedArrayBodyDefine(ProgramHeaderArray);
-FixedArrayBodyDefine(ExpandedSegmentArray)
+FixedArrayBodyDefine(ExpandedSegmentArray);
 
 Elf64Header * Elf__read_header(const Elf * self)
 {
@@ -25,14 +25,16 @@ SectionHeaderArray Elf__read_section_headers(const Elf * self)
     Offset section_header_offset = header->section_header_offset;
     Offset section_names = header->section_name_index;
 
-    SectionHeader * start = offset_ptr(self->start, section_header_offset, SectionHeader);
+    SectionHeaderPtr start = offset_ptr(self->start, section_header_offset, SectionHeader);
     k_printf("header offset=%p size=%i names=%p\n", section_header_offset, section_header_size, section_names);
     for (int i = 0; i < section_header_entries; i++)
     {
-        //0x10358:
-        SectionHeader * header = offset_ptr(start, i * section_header_size, SectionHeader);
-        k_printf("header=%i %p %p \n", i, header, header->name_offset);
-        IntResult res = SectionHeaderArray__push(&headers, header);
+        SectionHeaderPtr header = offset_ptr(start, i * section_header_size, SectionHeader);
+
+        ResultMatch(ResCode, SectionHeaderArray__push(&headers, header) );
+            IsError(code, message, __d_println(PANIC, message.data);)
+        End
+
     }
     return headers;
 }
@@ -50,7 +52,7 @@ ProgramHeaderArray Elf__read_program_headers(const Elf * self)
     {
         ProgramHeader * header = offset_ptr(start, i * program_header_size, ProgramHeader);
 
-        ResultMatch(IntResult, ProgramHeaderArray__push(&headers, header) );
+        ResultMatch(ResCode, ProgramHeaderArray__push(&headers, header));
             IsError(code, message, __d_println(PANIC, message.data);)
         End
     }
@@ -96,7 +98,7 @@ ExpandedSegmentArray Elf__map(const Elf * self) {
 
     for (int i = 0; i < headers.len; i++)
     {
-        Match(ProgramHeaderPtr, ProgramHeaderArray__at(&headers, i))
+        Match(ProgramHeaderPtr, ProgramHeaderArray__at(&headers, i));
             IsNone(__d_println(PANIC, "No header");)
             IsSome(header, Elf__expand_segment(self, header, &expanded_segments);)
         End

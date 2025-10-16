@@ -183,8 +183,9 @@ typedef struct ExpandedSegment
     size_t size;
 } ExpandedSegment;
 
-typedef SectionHeader * SectionHeaderPtr;
-typedef ProgramHeader * ProgramHeaderPtr;
+OptionalType(SectionHeader *, SectionHeaderPtr);
+OptionalType(ProgramHeader *, ProgramHeaderPtr);
+OptionalDef(ExpandedSegment);
 
 FixedArrayDefine(SectionHeaderPtr, 64, SectionHeaderArray);
 FixedArrayDefine(ProgramHeaderPtr, 64, ProgramHeaderArray);

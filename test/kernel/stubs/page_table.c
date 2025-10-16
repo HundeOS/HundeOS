@@ -2,6 +2,8 @@
 #include "../../../kernel/address.h"
 #include "../../../kernel/page_alloc.h"
 #include "../../../kernel/arch/page_table.h"
+#include "../../../kernel/types/optional.h"
+#include "../../../kernel/types/fixed_array.h"
 
 #include "../../../kernel/debug.h"
 
@@ -10,6 +12,7 @@ typedef struct MapRequest {
     size_t size;
 } MapRequest;
 
+OptionalDef(MapRequest);
 FixedArrayDefine(MapRequest, 1024, MapRequestArray);
 FixedArrayBodyDefine(MapRequestArray);
 
@@ -41,21 +44,27 @@ bool check_address_mapped(PageTable *page_table, Address virtual_address, bool r
 {
     for (int i = 0; i < page_table->mapped_addresses.len; i++)
     {
-        MapRequest mapped_address = MapRequestArray__at(&page_table->mapped_addresses, i);
-        UserAddress mapped = mapped_address.address;
-        __d_printf(FOCUS,
-            "Checking %i mapped address calls vaddr=%p mapped=%p size=%i expected_size=%i rwx=%i%i%i expected rwx=%i%i%i\n",
-            i, virtual_address, mapped.virtual_addr, mapped_address.size, size,
-            mapped_address.address.read, mapped_address.address.write, mapped_address.address.execute,
-            read, write, execute);
-        bool match = mapped.virtual_addr == virtual_address;
-        match &= mapped.read == read;
-        match &= mapped.write == write;
-        match &= mapped.execute == execute;
-        match &= mapped_address.size == size;
-        if (match) {
-            return true;
-        }
+        Optional(MapRequest) mapped_address_opt = MapRequestArray__at(&page_table->mapped_addresses, i);
+        Match(MapRequest, mapped_address_opt);
+            IsNone();
+            IsSome(mapped_address,
+                {
+                    UserAddress mapped = mapped_address.address;
+                    __d_printf(FOCUS,
+                        "Checking %i mapped address calls vaddr=%p mapped=%p size=%i expected_size=%i rwx=%i%i%i expected rwx=%i%i%i\n",
+                        i, virtual_address, mapped.virtual_addr, mapped_address.size, size,
+                        mapped_address.address.read, mapped_address.address.write, mapped_address.address.execute,
+                        read, write, execute);
+                    bool match = mapped.virtual_addr == virtual_address;
+                    match &= mapped.read == read;
+                    match &= mapped.write == write;
+                    match &= mapped.execute == execute;
+                    match &= mapped_address.size == size;
+                    if (match) {
+                        return true;
+                    }
+                })
+        End
     }
     return false;
 }

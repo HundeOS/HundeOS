@@ -14,4 +14,6 @@ typedef struct KString {
 KString KString__new(const char * str);
 KString kstring(const char * str);
 
+const char * KString__cstr(KString * str);
+
 #endif

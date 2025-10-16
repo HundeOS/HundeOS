@@ -4,6 +4,7 @@
 
 #include "debug.h"
 #include "page_alloc.h"
+#include "address.h"
 
 KernelAddress Kernel__alloc(size_t size)
 {
@@ -36,14 +37,14 @@ UserAddress Kernel__alloc_user(Address virtual_address,
     return allocated;
 }
 
-void *memcpy(void *dst, const void *src, size_t n) {
+void * memcpy(void *dst, const void *src, size_t n) {
     uint8_t *d = dst;
     const uint8_t *s = src;
     while (n--) *d++ = *s++;
     return dst;
 }
 
-void *memset(void *dst, int c, size_t n) {
+void * memset(void *dst, int c, size_t n) {
     uint8_t *d = (uint8_t *)dst;
     uint8_t v = (uint8_t)c;
     while (n--) { *d++ = v; }
@@ -54,7 +55,6 @@ void Kernel__memcopy(Address src, Address target, size_t size)
 {
     void * v_src = (void *)src;
     void * v_target = (void *)target;
-    // memcpy(v_target, v_src, size);
 
     for (int i = 0; i < size; i++) {
         ((char *)v_target)[i] = ((char *)v_src)[i];
@@ -63,6 +63,6 @@ void Kernel__memcopy(Address src, Address target, size_t size)
 
 void Kernel__memset(Address addr, int val, size_t size)
 {
-    // memset((void *) addr, val, size);
+    memset(void_ptr(addr), val, size);
 }
 

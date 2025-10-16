@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "types/fixed_array.h"
 
 typedef uint64_t Address;
 typedef uint64_t Offset;
@@ -83,7 +82,5 @@ inline UserAddress UserAddress__relative(UserAddress * self, Offset offset)
         .valid = self->valid,
     };
 }
-
-FixedArrayDefine(UserAddress, 1024, UserAddressArray);
 
 #endif

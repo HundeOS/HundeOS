@@ -1,6 +1,7 @@
 #ifndef __KERNEL_ARCH_PAGE_TABLE_H_
 #define __KERNEL_ARCH_PAGE_TABLE_H_
 #include "../address.h"
+#include <stddef.h>
 
 typedef struct PageTable PageTable;
 

@@ -1,5 +1,10 @@
 #include "kstring.h"
 
+const char * KString__cstr(KString * self)
+{
+    return self->data;
+}
+
 KString KString__new(const char * str)
 {
     KString res = (KString){

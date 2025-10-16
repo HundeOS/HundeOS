@@ -6,40 +6,39 @@
 
 typedef uint64_t Code;
 
-#define ResultDef(T, alias) \
+#define Result(T) \
+    Result_##T \
+
+#define ResultDef(T) \
     typedef struct Success_##T { \
         bool success; \
         T val; \
     } Success_##T; \
-    typedef Success_##T Success_##alias;\
     \
     typedef struct Error_##T { \
         bool success; \
         Code code; \
         KString error; \
     } Error_##T; \
-    typedef Error_##T Error_##alias;\
     \
     typedef union Result_##T { \
         Success_##T success;\
         Error_##T error;\
     } Result_##T;\
     \
-    typedef Result_##T alias;\
-    typedef Result_##T Result_##alias;\
-    typedef T Result_##alias##_type;
+    typedef T Result_##T##_type;
 
-#define Success(alias, value) \
-    ( Result_##alias ) { \
-        .success = (Success_##alias) { \
+#define Success(T, value) \
+    ( Result_##T ) { \
+        .success = (Success_##T) { \
             .success = true, \
             .val = value, \
         } \
     } \
 
-#define Error(alias, error_message, error_code) \
-    ( Result_##alias ) { \
-        .error = (Error_##alias) { \
+#define Error(T, error_message, error_code) \
+    ( Result_##T ) { \
+        .error = (Error_##T) { \
             .success = false, \
             .code = error_code, \
             .error = kstring(error_message), \
@@ -47,9 +46,10 @@ typedef uint64_t Code;
     } \
 
 
-#define ResultMatch(alias, res) \
+#define ResultMatch(T, res) \
 { \
-    Result_##alias result = res; \
+    typedef Result_##T##_type __ResultValueType;\
+    Result_##T result = res; \
 
 #define End \
 } \
@@ -57,7 +57,7 @@ typedef uint64_t Code;
 #define IsSuccess(val_name, block) \
     if (result.error.success) \
     { \
-        Result_##alias##_type val_name = optional.val; \
+        __ResultValueType val_name = result.success.val; \
         block; \
     } \
 

@@ -38,9 +38,17 @@ typedef struct Process {
 Process * Process__spawn_from_elf(Elf * elf);
 Process * Process__new(KernelAddress page_table, UserAddress entry, Stack stack);
 
-typedef Process * ProcessPtr;
+OptionalType(Process *, ProcessPtr);
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable);
-FixedArrayDefine(ProcessTable, MAX_CPUS, CPUProcesses);
+// FixedArrayDefine(ProcessTable, MAX_CPUS, CPUProcesses);
+FixedArrayDefine(ProcessPtr, MAX_CPUS, CPUProcesses);
+
+OptionalType(ProcessTable *, ProcessTablePtr);
+
+FixedArrayDefine(ProcessTablePtr, MAX_CPUS, CPUProcessTables);
+
+Optional(ProcessPtr) Process__current_for_cpu(int cpu);
+Optional(ProcessTablePtr) Process__all_for_cpu(int cpu);
 
 #endif

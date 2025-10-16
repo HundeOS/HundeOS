@@ -7,3 +7,4 @@ manifest:
     - kernel/page_alloc.c
     - kernel/stack.c
     - kernel/bin/*.c
+    - kernel/types/*.c

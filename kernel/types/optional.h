@@ -1,5 +1,6 @@
 #ifndef __KERNEL_TYPES_OPTIONAL_H
 #define __KERNEL_TYPES_OPTIONAL_H
+#include "../debug.h"
 
 #define _Optional(alias) \
     Optional__##alias
@@ -10,25 +11,34 @@
 #define _Type(alias) \
     alias##__type
 
-#define OptionalDef(T, alias) \
+#define Optional(alias) \
+    _Optional(alias)
+
+#define AliasOptional(T, alias) \
+    typedef _Optional(T) _Optional(alias); \
+    typedef _Some(T) _Some(alias); \
+    typedef _None(T) _None(alias); \
+    typedef T _Type(alias); \
+
+#define OptionalDef(T) \
     typedef struct _None(T) { \
         bool present; \
     } _None(T); \
-    typedef _None(T) _None(alias);\
     \
     typedef struct _Some(T) { \
         bool present; \
         T val; \
     } _Some(T); \
-    typedef _Some(T) _Some(alias);\
     \
     typedef union _Optional(T) { \
         _Some(T) some; \
         _None(T) none;\
     } _Optional(T); \
-    typedef _Optional(T) alias; \
-    typedef _Optional(T) _Optional(alias); \
-    typedef T _Type(alias); \
+    typedef T _Type(T); \
+
+#define OptionalType(T, alias) \
+    typedef T alias; \
+    OptionalDef(alias);
 
 
 #define Some(alias, value) \
@@ -46,11 +56,11 @@
         } \
     }; \
 
-#define Match(T, opt) \
+#define Match(alias, opt) \
 { \
-    _Optional(T) optional = opt; \
-    typedef T value_type; \
+    typedef alias##__type value_type; \
     __d_println(FOCUS, "Match"); \
+    _Optional(alias) optional = opt; \
 
 #define End \
 } \

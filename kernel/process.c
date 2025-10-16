@@ -2,13 +2,25 @@
 #include "bin/elf.h"
 #include "arch/page_table.h"
 #include "arch/process.h"
+#include "types/kstring.h"
+#include "types/result.h"
+#include "types/optional.h"
 
 #include "debug.h"
 #include "kalloc.h"
 #include "stack.h"
+#include "mutex.h"
 
 FixedArrayBodyDefine(ProcessTable);
 FixedArrayBodyDefine(CPUProcesses);
+FixedArrayBodyDefine(CPUProcessTables);
+
+static CPUProcessTables cpu_process_tables = EmptyArray(CPUProcessTables);
+static ProcessTable processes = EmptyArray(ProcessTable);
+static CPUProcesses cpu_processes = EmptyArray(CPUProcesses);
+
+static mutex_t table_lock = MUTEX_INIT;
+static mutex_t cpu_lock = MUTEX_INIT;
 
 
 Process * Process__new(KernelAddress page_table, UserAddress entry, Stack stack)
@@ -22,13 +34,57 @@ Process * Process__new(KernelAddress page_table, UserAddress entry, Stack stack)
     return proc;
 }
 
-Process * Process__spawn_from_elf(Elf * elf) {
+ProcessTablePtr Process__cpu_table()
+{
+    ProcessTablePtr result;
+
+    Match(ProcessTablePtr, CPUProcessTables__at(&cpu_process_tables, CPU__id()));
+    IsSome(process_table_ptr,
+    {
+        result = process_table_ptr;
+    });
+    IsNone(
+    {
+        result = ProcessTable__heap_new();
+        CPUProcessTables__set(&cpu_process_tables, CPU__id(), result);
+    });
+    End
+
+    return result;
+}
+
+ProcessPtr Process__setup_and_start(KernelAddress page_table, ExpandedSegment entry_point, Stack stack)
+{
+    ProcessPtr proc = Process__new(page_table, entry_point.address, stack);
+
+    mutex_lock(&table_lock);
+    ProcessTable__push(&processes, proc);
+    mutex_unlock(&table_lock);
+
+    mutex_lock(&cpu_lock);
+    __d_printf(FOCUS, "current cpu = %i\n", CPU__id());
+    ProcessTablePtr cpu_process_table = Process__cpu_table();
+    ProcessTable__push(cpu_process_table, proc);
+    mutex_unlock(&cpu_lock);
+
+    ResultMatch(ResCode, CPUProcesses__set(&cpu_processes,CPU__id(), proc));
+        IsSuccess(_, { Process__start(proc); });
+        IsError(code, error, __d_println(PANIC, KString__cstr(&error)));
+    End
+
+    Process__start(proc);
+    return proc;
+}
+
+ProcessPtr Process__spawn_from_elf(Elf * elf) {
     __d_println(DEBUG, "Process__spawn_from_elf");
     ExpandedSegmentArray expanded_elf = Elf__map(elf);
+
     __d_println(DEBUG, "Creating page table");
     KernelAddress page_table = PageTable__new();
 
     __d_println(DEBUG, "Page table created");
+
     for (int i = 0; i < expanded_elf.len; i++)
     {
         Optional(ExpandedSegment) segment_optional = ExpandedSegmentArray__at(&expanded_elf, i);
@@ -45,17 +101,24 @@ Process * Process__spawn_from_elf(Elf * elf) {
 
     Match(ExpandedSegment, ExpandedSegmentArray__at(&expanded_elf, 0))
         IsNone(__d_println(PANIC, "No entry point"););
-        IsSome(entry_point,
-            {
-                Process * proc = Process__new(page_table, entry_point.address, stack);
-                Process__start(proc);
-
-                return proc;
-            }
-        )
+        IsSome(entry_point, {return Process__setup_and_start(page_table, entry_point, stack);})
     End
 
-
-
     __d_println(DEBUG, "Process created");
+}
+
+Optional(ProcessPtr) Process__current_for_cpu(int cpu)
+{
+    mutex_lock(&cpu_lock);
+    Optional(ProcessPtr) result = CPUProcesses__at(&cpu_processes, cpu);
+    mutex_unlock(&cpu_lock);
+    return result;
+}
+
+Optional(ProcessTablePtr) Process__all_for_cpu(int cpu)
+{
+    mutex_lock(&cpu_lock);
+    Optional(ProcessTablePtr) result = CPUProcessTables__at(&cpu_process_tables, cpu);
+    mutex_unlock(&cpu_lock);
+    return result;
 }

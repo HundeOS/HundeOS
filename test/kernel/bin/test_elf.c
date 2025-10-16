@@ -2,6 +2,7 @@
 
 #include "unity.h"
 
+#include "../../../kernel/types/optional.h"
 #include "../../../kernel/bin/elf.h"
 #include "../../../kernel/bin/embedded_binaries.h"
 #include "../stubs/panic.h"
@@ -25,7 +26,7 @@ static Elf * load_test_elf()
 }
 
 static void check_section(
-    SectionHeader * section,
+    Optional(SectionHeaderPtr) opt_section,
     const char * name,
     SectionType type,
     Address virtual_address,
@@ -37,16 +38,22 @@ static void check_section(
     SectionIndex link,
     Alignment alignment)
 {
-    TEST_ASSERT_NOT_NULL(section);
-    TEST_ASSERT_EQUAL_UINT(offset, section->offset);
-    TEST_ASSERT_EQUAL_UINT(flags, section->flags);
-    TEST_ASSERT_EQUAL_UINT(info, section->info);
-    TEST_ASSERT_EQUAL_UINT(link, section->link);
-    TEST_ASSERT_EQUAL_UINT(virtual_address, section->virtual_address);
-    TEST_ASSERT_EQUAL_UINT(size, section->size);
-    TEST_ASSERT_EQUAL_UINT(entry_size, section->entry_size);
-    TEST_ASSERT_EQUAL_UINT(alignment, section->alignment);
-    TEST_ASSERT_EQUAL_UINT(type, section->type);
+    Match(SectionHeaderPtr, opt_section);
+        IsNone(TEST_FAIL())
+        IsSome(section,
+            {
+                TEST_ASSERT_NOT_NULL(section);
+                TEST_ASSERT_EQUAL_UINT(offset, section->offset);
+                TEST_ASSERT_EQUAL_UINT(flags, section->flags);
+                TEST_ASSERT_EQUAL_UINT(info, section->info);
+                TEST_ASSERT_EQUAL_UINT(link, section->link);
+                TEST_ASSERT_EQUAL_UINT(virtual_address, section->virtual_address);
+                TEST_ASSERT_EQUAL_UINT(size, section->size);
+                TEST_ASSERT_EQUAL_UINT(entry_size, section->entry_size);
+                TEST_ASSERT_EQUAL_UINT(alignment, section->alignment);
+                TEST_ASSERT_EQUAL_UINT(type, section->type);
+            });
+    End;
 }
 
 void __test__sections(void)
@@ -56,9 +63,9 @@ void __test__sections(void)
     SectionHeaderArray sections = Elf__read_section_headers(elf);
 
     TEST_ASSERT_EQUAL_UINT(7, sections.len);
-    SectionHeader * section_0 = SectionHeaderArray__at(&sections, 0);
-    SectionHeader * section_1 = SectionHeaderArray__at(&sections, 1);
-    SectionHeader * section_6 = SectionHeaderArray__at(&sections, 6);
+    Optional(SectionHeaderPtr) section_0 = SectionHeaderArray__at(&sections, 0);
+    Optional(SectionHeaderPtr) section_1 = SectionHeaderArray__at(&sections, 1);
+    Optional(SectionHeaderPtr) section_6 = SectionHeaderArray__at(&sections, 6);
 
     check_section(
         section_0, "", 0x0,
@@ -85,12 +92,19 @@ void test__map_binary_runnable(void)
     ExpandedSegmentArray addresses = Elf__map(elf);
 
     TEST_ASSERT_EQUAL_UINT(1, addresses.len);
-    ExpandedSegment segment = ExpandedSegmentArray__at(&addresses, 0);
-    TEST_ASSERT(segment.address.execute);
-    TEST_ASSERT(segment.address.read);
-    TEST_ASSERT_FALSE(segment.address.write);
-    TEST_ASSERT_EQUAL_UINT(0x400000, segment.address.virtual_addr);
-    TEST_ASSERT_EQUAL_UINT(101, segment.size);
+    Optional(ExpandedSegment) segment_opt = ExpandedSegmentArray__at(&addresses, 0);
+    Match(ExpandedSegment, segment_opt);
+        IsNone(TEST_FAIL())
+        IsSome(segment,
+            {
+                TEST_ASSERT(segment.address.execute);
+                TEST_ASSERT(segment.address.read);
+                TEST_ASSERT_FALSE(segment.address.write);
+                TEST_ASSERT_EQUAL_UINT(0x400000, segment.address.virtual_addr);
+                TEST_ASSERT_EQUAL_UINT(101, segment.size);
+            }
+        )
+    End;
 }
 
 void test__program_header(void)
@@ -101,17 +115,24 @@ void test__program_header(void)
 
     TEST_ASSERT_EQUAL_UINT(1, headers.len);
 
-    ProgramHeader * header = ProgramHeaderArray__at(&headers, 0);
-    TEST_ASSERT_NOT_NULL(header);
-    TEST_ASSERT_EQUAL_UINT(Load, header->type);
-    TEST_ASSERT(header->flags & Read);
-    TEST_ASSERT(header->flags & Execute);
-    TEST_ASSERT_EQUAL_UINT(0x10000, header->segment_offset);
-    TEST_ASSERT_EQUAL_UINT(0x400000, header->virtual_address);
-    TEST_ASSERT_EQUAL_UINT(0x400000, header->physical_address);
-    TEST_ASSERT_EQUAL_UINT(0x65, header->file_size);
-    TEST_ASSERT_EQUAL_UINT(0x65, header->memory_size);
-    TEST_ASSERT_EQUAL_UINT(0x10000, header->alignment);
+    Optional(ProgramHeaderPtr) opt_header = ProgramHeaderArray__at(&headers, 0);
+
+    Match(ProgramHeaderPtr, opt_header);
+        IsNone(TEST_FAIL())
+        IsSome(header,
+            {
+                TEST_ASSERT_NOT_NULL(header);
+                TEST_ASSERT_EQUAL_UINT(Load, header->type);
+                TEST_ASSERT(header->flags & Read);
+                TEST_ASSERT(header->flags & Execute);
+                TEST_ASSERT_EQUAL_UINT(0x10000, header->segment_offset);
+                TEST_ASSERT_EQUAL_UINT(0x400000, header->virtual_address);
+                TEST_ASSERT_EQUAL_UINT(0x400000, header->physical_address);
+                TEST_ASSERT_EQUAL_UINT(0x65, header->file_size);
+                TEST_ASSERT_EQUAL_UINT(0x65, header->memory_size);
+                TEST_ASSERT_EQUAL_UINT(0x10000, header->alignment);
+            })
+    End
 }
 
 void test_parse_elf_header(void)

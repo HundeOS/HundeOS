@@ -2,7 +2,7 @@
 #define __KERN_KALLOC_H__
 #include <stddef.h>
 
-#include "page_alloc.h"
+#include "address.h"
 
 Address Kernel__alloc_kernel(size_t size);
 UserAddress Kernel__alloc_user(Address virtual_address,

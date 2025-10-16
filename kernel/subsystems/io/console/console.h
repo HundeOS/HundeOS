@@ -1,4 +1,7 @@
-typedef struct Console
-{
+#ifndef __KERNEL_SUBSYSTEMS_IO_CONSOLE_CONSOLE_H
+#define __KERNEL_SUBSYSTEMS_IO_CONSOLE_CONSOLE_H
+#include "../io.h"
 
-} Console;
+extern const IO Console;
+
+#endif

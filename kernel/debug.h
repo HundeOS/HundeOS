@@ -16,12 +16,12 @@ typedef enum {
 } Level;
 
 #define MIN_LEVEL PROGRESS
-#define CPU_ID 1
+#define CPU_IDS 100
 
 #define __d_printf(level, str, ...) \
-if (level >= MIN_LEVEL && CPU__id() == CPU_ID) { k_printf("cpu=%i - ", CPU__id()); k_printf(str, __VA_ARGS__); }
+if (level >= MIN_LEVEL && CPU__id() <= CPU_IDS) { k_printf("cpu=%i - ", CPU__id()); k_printf(str, __VA_ARGS__); }
 
 #define __d_println(level, str) \
-if (level >= MIN_LEVEL && CPU__id() == CPU_ID) { k_printf("cpu=%i - ", CPU__id()); k_println(str); }
+if (level >= MIN_LEVEL && CPU__id() <= CPU_IDS) { k_printf("cpu=%i - ", CPU__id()); k_println(str); }
 
 #endif
