@@ -1,7 +1,8 @@
 #include <stdint.h>
-#include "../kernel/debug.h"
+#include "../../kernel/debug.h"
 #include "asm_helpers.h"
 #include "exception.h"
+#include "process.h"
 
 void Kernel__halt() {
     while(1) {
@@ -9,7 +10,7 @@ void Kernel__halt() {
     }
 }
 
-void Kernel__dump_state(exception_context_t * ctx) {
+void Kernel__dump_state(ProcessContext * ctx) {
     uint64_t esr = read_esr_el1();
     uint64_t elr = read_elr_el1();
     uint64_t far = read_far_el1();

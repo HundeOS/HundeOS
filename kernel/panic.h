@@ -2,6 +2,6 @@
 #define __KERNEL_HALT_H
 
 #include "arch/panic.h"
-void Kernel__panic(const char * error, exception_context_t * ctx);
+void Kernel__panic(const char * error, ProcessContext * ctx);
 
 #endif

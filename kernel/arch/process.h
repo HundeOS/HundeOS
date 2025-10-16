@@ -1,6 +1,8 @@
 #ifndef __KERNEL_ARCH_PROCESS_H
 #define __KERNEL_ARCH_PROCESS_H
 
+#include <stdint.h>
+
 typedef struct ProcessContext ProcessContext;
 typedef struct Process Process;
 

@@ -1,14 +1,8 @@
 #ifndef __AARCH64_EXCEPTION_H_
 #define __AARCH64_EXCEPTION_H_
+#include "process.h"
 
-// Structure to hold saved register context
-typedef struct exception_context_t {
-    uint64_t x[31];  // x0-x30
-    uint64_t sp;
-    uint64_t pc;     // ELR
-    uint64_t pstate; // SPSR
-} exception_context_t;
-
+typedef ProcessContext exception_context_t;
 
 // Matches the push order in vectors_el1.S (top == current SP)
 typedef struct el1_trapframe {

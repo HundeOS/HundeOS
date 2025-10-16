@@ -52,7 +52,12 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
     uint64_t ec = (esr >> 26) & 0x3F;  // Exception class
 
     __d_printf(DEBUG, "sync call: 0x%x\n", ec);
-
+    Match(ProcessPtr, Process__current_for_cpu(CPU__id()));
+        IsSome(process_ptr,
+        {
+            process_ptr->context = ctx;
+        });
+    End
     // Handle synchronous exceptions (e.g., undefined instruction, SVC, data abort)
     switch(ec) {
         case 0x15: // SVC instruction execution

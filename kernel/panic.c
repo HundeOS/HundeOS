@@ -2,7 +2,7 @@
 #include "print.h"
 #include "arch/cpu.h"
 
-void Kernel__panic(const char * message, exception_context_t * context) {
+void Kernel__panic(const char * message, ProcessContext * context) {
     k_printf("Kernel panic: %s\n", message);
     k_println("System halted");
 
