@@ -5,7 +5,8 @@
 #include "exception.h"
 #include "asm_helpers.h"
 #include "../../kernel/debug.h"
-#include "../../kernel/syscall/syscall_handler.h"
+#include "../../kernel/kernel_init.h"
+#include "../../kernel/syscall/syscall_dispatcher.h"
 
 // Helper function to get exception syndrome
 inline uint64_t get_esr_el1(void) {
@@ -51,6 +52,8 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
     uint64_t esr = get_esr_el1();
     uint64_t ec = (esr >> 26) & 0x3F;  // Exception class
 
+    KernelPtr kernel = Kernel__instance();
+
     __d_printf(DEBUG, "sync call: 0x%x\n", ec);
     Match(ProcessPtr, Process__current_for_cpu(CPU__id()));
         IsSome(process_ptr,
@@ -62,8 +65,16 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
     switch(ec) {
         case 0x15: // SVC instruction execution
             __d_printf(DEBUG, "system call: 0x%x\n", ctx->x[8]);
-            ResultMatch(SystemCallResult,
-                    SyscallHandler__dispatch(ctx->x[8], ctx->x[0], ctx->x[1], ctx->x[2]));
+            Result(SystemCallResult) syscall_result =
+                SyscallDispatcher__dispatch(
+                    &kernel->syscall_dispatcher,
+                    Process__current_for_cpu(CPU__id()),
+                    ctx->x[8],
+                    ctx->x[0],
+                    ctx->x[1],
+                    ctx->x[2]);
+
+            ResultMatch(SystemCallResult, syscall_result);
                 IsSuccess(call_result,
                 {
                     return call_result;

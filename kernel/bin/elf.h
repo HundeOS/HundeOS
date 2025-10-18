@@ -183,6 +183,8 @@ typedef struct ExpandedSegment
     size_t size;
 } ExpandedSegment;
 
+typedef Elf * ElfPtr;
+
 OptionalType(SectionHeader *, SectionHeaderPtr);
 OptionalType(ProgramHeader *, ProgramHeaderPtr);
 OptionalDef(ExpandedSegment);
@@ -190,12 +192,14 @@ OptionalDef(ExpandedSegment);
 FixedArrayDefine(SectionHeaderPtr, 64, SectionHeaderArray);
 FixedArrayDefine(ProgramHeaderPtr, 64, ProgramHeaderArray);
 
-SectionHeaderArray Elf__read_section_headers(const Elf * self);
-ProgramHeaderArray Elf__read_program_headers(const Elf * self);
-Elf64Header * Elf__read_header(const Elf * self);
+SectionHeaderArray Elf__read_section_headers(const ElfPtr self);
+ProgramHeaderArray Elf__read_program_headers(const ElfPtr self);
+Elf64Header * Elf__read_header(const ElfPtr self);
 
 FixedArrayDefine(ExpandedSegment, 64, ExpandedSegmentArray);
 
-ExpandedSegmentArray Elf__map(const Elf * self);
+typedef ExpandedSegmentArray * ExpandedSegmentArrayPtr;
+
+ExpandedSegmentArray Elf__map(const ElfPtr self);
 
 #endif

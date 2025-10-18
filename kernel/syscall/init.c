@@ -1,34 +1,39 @@
 #include "init.h"
 #include "../mutex.h"
-#include "syscall_handler.h"
+#include "syscall_dispatcher.h"
 #include "../types/result.h"
 #include "print_handler.h"
 #include "ping_handler.h"
 #include "exit_handler.h"
+#include "../debug.h"
+#include "../print.h"
 
-static mutex_t init_lock = MUTEX_INIT;
-static bool init_done = false;
-
-#define REGISTER(syscall, handler) \
-    ResultMatch(RegisterResult, SyscallHandler__register(syscall, handler);); \
+#define REGISTER(self, syscall, handler) \
+    __d_printf(DEBUG, "Init__syscalls() - %p", syscall); \
+    ResultMatch(RegisterResult, SyscallDispatcher__register(self, syscall, handler);); \
         IsError(code, message, \
             {  \
-                mutex_unlock(&init_lock); \
+                mutex_unlock(&self->init_lock); \
+                __d_println(DEBUG, "Init__syscalls() - error"); \
                 return Error(RegisterResult, message, code); \
             }); \
+        IsSuccess(_, __d_printf(DEBUG, "Init__syscalls() - %p - reg success", syscall);)\
     End \
 
 
-Result(RegisterResult) Init__syscalls()
+Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
 {
-    mutex_lock(&init_lock);
-    if (!init_done)
+    __d_println(DEBUG, "Init__syscalls()");
+    mutex_lock(&self->init_lock);
+    __d_println(DEBUG, "Init__syscalls() - doing");
+    if (!self->init_done)
     {
-        REGISTER(PRINT, &Print__handler);
-        REGISTER(PING, &Ping__handler);
-        REGISTER(PROC_EXIT, &Exit__handler);
-        init_done = true;
+        REGISTER(self, PRINT, &Print__handler);
+        REGISTER(self, PING, &Ping__handler);
+        REGISTER(self, PROC_EXIT, &Exit__handler);
+        self->init_done = true;
+        __d_println(DEBUG, "Init__syscalls() - done ok");
     }
-    mutex_unlock(&init_lock);
+    mutex_unlock(&self->init_lock);
     return Success(RegisterResult, REGISTER_OK);
 }

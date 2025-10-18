@@ -4,14 +4,15 @@
 #include "embedded_binaries.h"
 
 #include <stddef.h>
-#include <stdint.h>
 
 #include "../debug.h"
 
-extern const unsigned char _bin_hello_world_start[], _bin_hello_world_end[];
+__extern_binary(_bin_hello_world);
+__extern_binary(_bin_idle);
 
 static const Elf embedded_binaries[] = {
     EMBED("hello_world", _bin_hello_world),
+    EMBED("idle", _bin_idle),
 };
 
 Elf * EmbeddedElf__load(const char * name)

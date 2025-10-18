@@ -7,6 +7,8 @@
 #define BASE_STACK 0x10000000
 #define MAX_PROCESSES 65536
 
+#define MAX_SPINS 100000000
+
 #define _1MB (1024 * 1024)
 #define _2MB (2 * 1024 * 1024)
 #define _4MB (4 * 1024 * 1024)

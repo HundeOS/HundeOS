@@ -2,6 +2,9 @@
 #define __KERNEL_TYPES_H
 #include <stdint.h>
 #include "result.h"
+#include "optional.h"
+#include "fixed_array.h"
+#include "kstring.h"
 
 typedef uint64_t Anything;
 

@@ -1,7 +1,6 @@
-#include "syscall_handler.h"
+#include "syscall_dispatcher.h"
 #include <stdint.h>
 
-#include "init.h"
 #include "../debug.h"
 #include "../print.h"
 #include "../types/fixed_array.h"
@@ -11,17 +10,24 @@
 #include "../process.h"
 #include "../cpu.h"
 
-FixedArrayDefine(SyscallHandler, 256, Handlers);
 FixedArrayBodyDefine(Handlers);
 
-static Handlers handlers = EmptyArray(Handlers);
+static SyscallDispatcher syscall_handler = (SyscallDispatcher) {
+    .handlers = EmptyArray(Handlers),
+};
 
 const char * UNHANDLED_SYSCALL = "Unhandled syscall";
 const char * FAILED_TO_DETERMINE_PROCESS = "Failed to determine current process";
 
-Result(RegisterResult) SyscallHandler__register(SystemCall syscall, SyscallHandler handler)
+
+SyscallDispatcherPtr SyscallHandler__instance()
 {
-    ResultMatch(ResCode, Handlers__set(&handlers, syscall, handler));
+    return &syscall_handler;
+}
+
+Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler)
+{
+    ResultMatch(ResCode, Handlers__set(&self->handlers, syscall, handler));
         IsError(code, message,
             {
                 return Error(RegisterResult, message, REGISTER_FAILURE);
@@ -33,21 +39,17 @@ Result(RegisterResult) SyscallHandler__register(SystemCall syscall, SyscallHandl
     End
 }
 
-Result(SystemCallResult) SyscallHandler__dispatch(
-    SystemCall syscall_id, Anything arg1, Anything arg2, Anything arg3
-    )
+Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
+                                                  Optional(ProcessPtr) process_opt,
+                                                  SystemCall syscall_id,
+                                                  Anything arg1,
+                                                  Anything arg2,
+                                                  Anything arg3)
 {
     __d_printf(DEBUG, "SyscallHandler__handle(syscall_id=%i, arg1=%i, arg2=%i, arg3=%i)", syscall_id, arg1, arg2, arg3);
 
-    ResultMatch(RegisterResult, Init__syscalls());
-        IsError(code, message,
-        {
-            return Error(SystemCallResult, message, code);
-        });
-    End
-
     ProcessPtr proc = NULL;
-    Match(ProcessPtr, Process__current_for_cpu(CPU__id()));
+    Match(ProcessPtr, process_opt);
         IsSome(process,
         {
             proc = process;
@@ -58,7 +60,7 @@ Result(SystemCallResult) SyscallHandler__dispatch(
         });
     End
 
-    Match(SyscallHandler, Handlers__at(&handlers, syscall_id));
+    Match(Handler, Handlers__at(&self->handlers, syscall_id));
         IsSome(handler,
             {
                 return handler(proc, arg1, arg2, arg3);
