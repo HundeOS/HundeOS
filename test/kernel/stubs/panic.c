@@ -5,7 +5,7 @@
 
 static bool panic_state = false;
 
-void Kernel__panic(const char * message, exception_context_t * ctx)
+void Kernel__panic(const char * message, ProcessContext * ctx)
 {
     panic_state = true;
     printf(message);
