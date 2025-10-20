@@ -4,5 +4,3 @@ manifest:
     - kernel/subsystems/io/**/*.c
     - kernel/types/*.c
     - kernel/print.c
-    - kernel/kalloc.c
-    - kernel/page_alloc.c

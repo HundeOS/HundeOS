@@ -12,6 +12,7 @@ static Kernel instance = {
     .init_lock = MUTEX_INIT,
     .syscall_dispatcher = NEW_SYSCALL_DISPATCHER,
     .io_subsystem = NEW_IO_SUBSYSTEM,
+    .heap = NEW_HEAP,
 };
 
 
@@ -49,12 +50,23 @@ void Kernel__init_syscall_handlers(KernelPtr self)
     End
 }
 
+void Kernel__init_heap(KernelPtr self)
+{
+    ResultMatch(HeapCode, Heap__init(&self->heap);)
+        IsError(code, message,
+        {
+            __kernel_panic(self, message);
+        });
+    End
+}
+
 void Kernel__init(KernelPtr self)
 {
     __d_println(DEBUG, "Kernel__init");
     mutex_lock(&self->init_lock);
     self->status = INIT_IN_PROGRESS;
 
+    Kernel__init_heap(self);
     Kernel__init_syscall_handlers(self);
     Kernel__io_subsystem_init(self);
 
@@ -73,7 +85,7 @@ InitStatus Kernel__init_status(KernelPtr self)
 
 const char * FAILED_TO_INIT_MSG = "Kernel failed to initialize";;
 
-bool Kernel__ready(void * data)
+volatile bool Kernel__ready(void * data)
 {
     KernelPtr self = data;
     return Kernel__init_status(self) != INIT_DONE && Kernel__init_status(self) != INIT_FAILED_AND_PANICKED;

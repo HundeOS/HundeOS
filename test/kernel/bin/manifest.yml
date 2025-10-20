@@ -5,5 +5,3 @@ manifest:
     - kernel/print.c
     - kernel/debug.c
     - kernel/address.c
-    - kernel/kalloc.c
-    - kernel/page_alloc.c

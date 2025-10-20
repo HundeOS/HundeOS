@@ -2,5 +2,3 @@ manifest:
   source_files:
     - kernel/types/*.c
     - kernel/print.c
-    - kernel/kalloc.c
-    - kernel/page_alloc.c

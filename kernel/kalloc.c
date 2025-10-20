@@ -3,13 +3,28 @@
 #include <stdint.h>
 
 #include "debug.h"
-#include "page_alloc.h"
 #include "address.h"
+#include "kernel_init.h"
+
+inline HeapPtr heap_ptr()
+{
+    KernelPtr kernel = Kernel__instance();
+    return &kernel->heap;
+}
+
+KernelAddress Kernel__from_physical_address(Address physical)
+{
+    return Heap__from_physical_address(heap_ptr(), physical);
+}
+
+KernelAddress Kernel__from_virtual_address(Address virtual_addr)
+{
+    return Heap__from_virtual_address(heap_ptr(), virtual_addr);
+}
 
 KernelAddress Kernel__alloc(size_t size)
 {
-    __d_println(DEBUG, "MemoryPage__alloc_size(size)");
-    return MemoryPage__alloc_size(size);
+    return Heap__alloc_size(heap_ptr(), size);
 }
 
 Address Kernel__alloc_kernel(size_t size)

@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "../../kernel/arch/page_table.h"
-#include "../../kernel/page_alloc.h"
+#include "../../kernel/memory_page.h"
 #include "../../kernel/address.h"
 #include "../../kernel/all_defs.h"
 

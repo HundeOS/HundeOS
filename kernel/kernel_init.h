@@ -5,6 +5,7 @@
 #include "subsystems/io/io_subsystem.h"
 #include "syscall/syscall_dispatcher.h"
 #include "types/types.h"
+#include "heap.h"
 
 typedef enum InitStatus
 {
@@ -21,6 +22,7 @@ typedef struct Kernel
 
     SyscallDispatcher syscall_dispatcher;
     IOSubsystem io_subsystem;
+    Heap heap;
 } Kernel;
 
 typedef Kernel * KernelPtr;

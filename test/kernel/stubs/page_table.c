@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include "../../../kernel/address.h"
-#include "../../../kernel/page_alloc.h"
+#include "../../../kernel/memory_page.h"
 #include "../../../kernel/arch/page_table.h"
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/types/fixed_array.h"

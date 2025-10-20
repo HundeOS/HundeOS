@@ -5,6 +5,7 @@
 
 #include "mmu.h"
 #include "../../kernel/debug.h"
+#include "../../kernel/kalloc.h"
 
 #define PAGE_MASK   (~(PAGE_SIZE - 1ULL))
 #define PAGE_OFF(x) ((uint64_t)(x) & (PAGE_SIZE - 1ULL))
@@ -47,7 +48,7 @@
 
 
 KernelAddress PageTable__new() {
-    KernelAddress table = MemoryPage__alloc();
+    KernelAddress table = Kernel__alloc(PAGE_SIZE);
     __d_printf(DEBUG, "new table 0x%x", table);
     return table;
 }
@@ -59,14 +60,12 @@ KernelAddress PageTable__empty()
 
 KernelAddress PageTable__from_physical_address(Address physical)
 {
-    KernelAddress address = MemoryPage__from_physical_address(physical);
-    return address;
+    return Kernel__from_physical_address(physical);
 }
 
 KernelAddress PageTable__from_virtual_address(Address virtual_addr)
 {
-    KernelAddress address = MemoryPage__from_virtual_address(virtual_addr);
-    return address;
+    return Kernel__from_virtual_address(virtual_addr);
 }
 
 void PageTable__map(PageTable * self, UserAddress address, size_t size)
@@ -74,9 +73,9 @@ void PageTable__map(PageTable * self, UserAddress address, size_t size)
     Address user_start = align_down_4k(vaddr(address));
     Address phys_start = align_down_4k(u_kpaddr(address));
     Address user_end = align_up_4k(user_start + size);
+
     __d_printf(DEBUG, "Pagetable map uvirt=%p\n", vaddr(address));
     __d_printf(DEBUG, "Pagetable map start=%p phys=%p end=%p\n", user_start, phys_start, user_end);
-
 
     size_t adjusted_range = user_end - user_start;
 
@@ -151,7 +150,7 @@ KernelAddress PageTable__ensure_next_level_table(KernelAddress parent_level_tabl
     }
 
     // Case 3: slot is invalid → allocate a fresh zeroed table page.
-    KernelAddress next_level_table = MemoryPage__alloc();
+    KernelAddress next_level_table = Kernel__alloc(PAGE_SIZE);
 
     if (!next_level_table.valid) {
         __d_println(PANIC, "failed to allocate");

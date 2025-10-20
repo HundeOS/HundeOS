@@ -14,7 +14,22 @@ typedef uint64_t Offset;
 #define u_kvaddr(ua) ua.kernel_addr.virtual_addr
 #define offset_addr(a, b) a + b
 
-inline Address addr(void * p) {
+#define KERNEL_ADDR(virt, phys) \
+    (KernelAddress) { \
+        .virtual_addr = virt, \
+        .phys_addr = phys, \
+        .valid = true, \
+    } \
+
+#define INVALID_KERNEL_ADDR \
+    (KernelAddress) { \
+        .virtual_addr = 0, \
+        .phys_addr = 0, \
+        .valid = false, \
+    } \
+
+inline Address addr(void * p)
+{
     return (Address) p;
 }
 
