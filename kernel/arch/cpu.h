@@ -11,7 +11,8 @@ extern CPUID CPU__id();
 extern void CPU__noop();
 extern void CPU__wait();
 extern void CPU__yield();
-extern void CPU__wait_for_interrupts();
+extern void CPU__wait_for_interrupt();
+extern void CPU__wait_for_event();
 extern void CPU__check_halt();
 extern void CPU__halt_all();
 

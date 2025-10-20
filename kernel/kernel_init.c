@@ -2,13 +2,16 @@
 #include "mutex.h"
 #include "panic.h"
 #include "spin.h"
+#include "subsystems/io/register.h"
 #include "syscall/init.h"
 #include "syscall/syscall_dispatcher.h"
+#include "subsystems/io/register.h"
 
 static Kernel instance = {
     .status = INIT_NOT_STARTED,
     .init_lock = MUTEX_INIT,
     .syscall_dispatcher = NEW_SYSCALL_DISPATCHER,
+    .io_subsystem = NEW_IO_SUBSYSTEM,
 };
 
 
@@ -17,6 +20,34 @@ KernelPtr Kernel__instance()
     return &instance;
 }
 
+void __kernel_panic(KernelPtr self, KString message)
+{
+    self->status = INIT_FAILED_AND_PANICKED;
+    mutex_unlock(&self->init_lock);
+    Kernel__panic(KString__cstr(&message), NULL);
+}
+
+
+void Kernel__io_subsystem_init(KernelPtr self)
+{
+    __d_println(DEBUG, "Kernel__io_subsystem_init");
+    ResultMatch(RegisterCode, IOSubsystem__register_devices(&self->io_subsystem));
+        IsError(code, message,
+        {
+            __kernel_panic(self, message);
+        });
+    End
+}
+
+void Kernel__init_syscall_handlers(KernelPtr self)
+{
+    ResultMatch(RegisterResult, Init__syscalls(&self->syscall_dispatcher);)
+        IsError(code, message,
+        {
+            __kernel_panic(self, message);
+        });
+    End
+}
 
 void Kernel__init(KernelPtr self)
 {
@@ -24,17 +55,9 @@ void Kernel__init(KernelPtr self)
     mutex_lock(&self->init_lock);
     self->status = INIT_IN_PROGRESS;
 
-    // setup the syscall handlers
-    ResultMatch(RegisterResult, Init__syscalls(&self->syscall_dispatcher);)
-        IsError(code, message,
-        {
-            self->status = INIT_FAILED_AND_PANICKED;
-            mutex_unlock(&self->init_lock);
-            __d_println(DEBUG, "Kernel__panic expected");
-            Kernel__panic(KString__cstr(&message), NULL);
-        });
-    End
-    __d_println(DEBUG, "Kernel__init - OK?");
+    Kernel__init_syscall_handlers(self);
+    Kernel__io_subsystem_init(self);
+
     self->status = INIT_DONE;
     mutex_unlock(&self->init_lock);
 }

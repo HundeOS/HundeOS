@@ -8,7 +8,7 @@ const uint64_t MAX = 100000000;
 void Spin__spin(uint64_t count) {
     volatile uint64_t i;
     for (i = 0; i < count; i++) {
-        CPU__noop();
+        CPU__wait_for_interrupt();
     }
 }
 
@@ -21,11 +21,11 @@ WaitResult Spin__wait_max(SpinCheck check, const uint64_t max) {
     for (uint64_t count = 0; check() && count < max; count++)
     {
         if (count > max) {
-            return ABORT;
+            return WAIT_ABORT;
         }
-        CPU__noop();
+        CPU__wait();
     }
-    return OK;
+    return WAIT_OK;
 }
 
 WaitResult Spin__wait_context(SpinContextCheck check, SpinContext context, const uint64_t max) {
@@ -33,10 +33,10 @@ WaitResult Spin__wait_context(SpinContextCheck check, SpinContext context, const
     while (check(context))
     {
         if (count > max) {
-            return ABORT;
+            return WAIT_ABORT;
         }
         CPU__noop();
         count++;
     }
-    return OK;
+    return WAIT_OK;
 }

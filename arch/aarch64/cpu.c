@@ -20,18 +20,22 @@ void CPU__noop()
     __asm__ __volatile__("nop");
 }
 
-void CPU__wait() {
+void CPU__wait_for_event() {
     __asm__ __volatile__("wfe");
+}
+
+void CPU__wait_for_interrupt() {
+    __asm__ __volatile__("wfi");
+}
+
+void CPU__wait() {
+    while (true) {
+        CPU__wait_for_interrupt();
+    }
 }
 
 void CPU__yield(void) {
     __asm__ __volatile__("yield");
-}
-
-void CPU__wait_for_interrupts() {
-    while (true) {
-        CPU__wait();
-    }
 }
 
 inline void CPU__halt_forever() {

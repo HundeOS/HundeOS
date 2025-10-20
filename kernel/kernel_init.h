@@ -2,6 +2,7 @@
 #define __KERNEL_KERNEL_INIT_H
 
 #include "mutex.h"
+#include "subsystems/io/io_subsystem.h"
 #include "syscall/syscall_dispatcher.h"
 #include "types/types.h"
 
@@ -19,6 +20,7 @@ typedef struct Kernel
     mutex_t init_lock;
 
     SyscallDispatcher syscall_dispatcher;
+    IOSubsystem io_subsystem;
 } Kernel;
 
 typedef Kernel * KernelPtr;

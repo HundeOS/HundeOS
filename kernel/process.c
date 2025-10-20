@@ -67,7 +67,7 @@ ProcessPtr Process__setup_and_start(KernelAddress page_table, ExpandedSegment en
     ProcessTable__push(cpu_process_table, proc);
     mutex_unlock(&cpu_lock);
 
-    ResultMatch(ResCode, CPUProcesses__set(&cpu_processes,CPU__id(), proc));
+    ResultMatch(ArrayCode, CPUProcesses__set(&cpu_processes,CPU__id(), proc));
         IsSuccess(_, { Process__start(proc); });
         IsError(code, error, __d_println(PANIC, KString__cstr(&error)));
     End

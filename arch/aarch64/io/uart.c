@@ -1,5 +1,8 @@
 #include "uart.h"
 #include "../../../kernel/kernel.h"
+#include "../../../kernel/subsystems/io/io.h"
+#include "../../../kernel/types/result.h"
+#include "../../../kernel/types/optional.h"
 
 static volatile bool _check_ready()
 {
@@ -29,6 +32,66 @@ void puts(const char* str) {
         }
         str++;
     }
+}
+
+static volatile bool _check_read_ready()
+{
+    return (bool) (*UART0_FR & FR_RXFE);
+}
+
+Optional(Char) _readchar()
+{
+    Optional(Char) res = None(Char);
+    __asm__ volatile("dsb sy");
+    WaitResult wait_res = Spin__wait(&_check_read_ready);
+    if (wait_res == WAIT_OK)
+    {
+        res = Some(Char, (Char) (*UART0_DR & 0xFF));
+    }
+
+    __asm__ volatile("dsb sy");
+    return res;
+}
+
+void echo(Char c)
+{
+    _send(c);
+}
+
+// Simple string input
+Result(ByteCount) read_line(BufferPtr buffer) {
+    ByteCount written = 0;
+    bool complete = false;
+    for (Optional(Char) ch = _readchar(); complete; ch = _readchar())
+    {
+        Char read = 0;
+        Match(Char, ch);
+            IsNone(
+            {
+                continue;
+            });
+            IsSome(val,
+            {
+                read = val;
+            })
+        End
+        ResultMatch(ArrayCode, Buffer__push(buffer, read));
+            IsSuccess(code,
+            {
+                echo(read);
+                if (read == '\n' || read == '\r')
+                {
+                    complete = true;
+                }
+            });
+            IsError(code, message,
+            {
+                return Error(ByteCount, message, code);
+            });
+        End
+        written++;
+    }
+    return Success(ByteCount, written);
 }
 
 // Convert integer to string and print

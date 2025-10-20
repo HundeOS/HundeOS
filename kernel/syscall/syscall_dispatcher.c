@@ -27,7 +27,7 @@ SyscallDispatcherPtr SyscallHandler__instance()
 
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler)
 {
-    ResultMatch(ResCode, Handlers__set(&self->handlers, syscall, handler));
+    ResultMatch(ArrayCode, Handlers__set(&self->handlers, syscall, handler));
         IsError(code, message,
             {
                 return Error(RegisterResult, message, REGISTER_FAILURE);

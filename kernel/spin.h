@@ -4,8 +4,8 @@
 #include <stdbool.h>
 
 typedef enum {
-    ABORT = -1,
-    OK = 0,
+    WAIT_ABORT = -1,
+    WAIT_OK = 0,
 } WaitResult;
 
 typedef void * SpinContext;

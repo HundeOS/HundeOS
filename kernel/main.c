@@ -39,6 +39,6 @@ void Kernel_main(CPUID cpu_id) {
     __d_printf(DEBUG, "Kernel starting program: %i\n", cpu_id);
     Process__spawn_from_elf(program);
     __d_printf(DEBUG, "Timer started: %i\n", cpu_id);
-    CPU__wait_for_interrupts();
+    CPU__wait();
     Kernel__halt();
 }

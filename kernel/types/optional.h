@@ -3,16 +3,19 @@
 #include "../debug.h"
 
 #define _Optional(alias) \
-    Optional__##alias
+    Optional__##alias \
+
 #define _Some(alias) \
-    Some__##alias
+    Some__##alias \
+
 #define _None(alias) \
-    None__##alias
+    None__##alias \
+
 #define _Type(alias) \
-    alias##__type
+    alias##__type \
 
 #define Optional(alias) \
-    _Optional(alias)
+    _Optional(alias) \
 
 #define AliasOptional(T, alias) \
     typedef _Optional(T) _Optional(alias); \
@@ -38,7 +41,7 @@
 
 #define OptionalType(T, alias) \
     typedef T alias; \
-    OptionalDef(alias);
+    OptionalDef(alias); \
 
 
 #define Some(alias, value) \

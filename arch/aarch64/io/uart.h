@@ -1,10 +1,12 @@
-#include <stdint.h>
-
-#include "gpio.h"
-#include <stdint.h>
-
 #ifndef __IO_UART_H
 #define __IO_UART_H
+
+#include <stdint.h>
+#include "gpio.h"
+#include <stdint.h>
+#include "../../../kernel/subsystems/io/io.h"
+#include "../../../kernel/types/result.h"
+
 
 #ifdef BSP_VIRT
 #define UART0_PHYS_BASE     0x09000000  // virt machine UART
@@ -37,9 +39,17 @@ extern const uint64_t __mmio_start[];
 #define UART0_IMSC      ((volatile unsigned int*)UART0_BASE + 0x38)  // 0x3F201038 - Interrupt Mask
 #define UART0_ICR       ((volatile unsigned int*)UART0_BASE + 0x44)  // 0x3F201044 - Interrupt Clear
 
+#define FR_RXFE      (1u << 4)
+#define DR_OE        (1u << 11)
+#define DR_BE        (1u << 10)
+#define DR_PE        (1u << 9)
+#define DR_FE        (1u << 8)
+
 void uart_init();
 
 void put_int(int c);
 void puts(const char *s);
+
+Result(ByteCount) read_line(BufferPtr buffer);
 
 #endif
