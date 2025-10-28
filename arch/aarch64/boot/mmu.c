@@ -93,25 +93,30 @@ __BOOT__(PageTable *) ensure_next_level_table(PageTable * parent_level_table, ui
 {
     uint64_t descriptor = parent_level_table->entries[child_index];
     // Case 1: already a valid TABLE descriptor → return its next-level base.
-    if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE)) {
+    if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE))
+    {
         return (PageTable *)(descriptor & MASK_PTE_NEXTADDR);
     }
 
     // Case 2: slot holds a valid LEAF (block/page) → caller must split it.
     // We do not overwrite it here to avoid silent semantic changes.
-    if ((descriptor & FLAG_PTE_VALID) && !(descriptor & FLAG_PTE_TABLE)) {
+    if ((descriptor & FLAG_PTE_VALID) && !(descriptor & FLAG_PTE_TABLE))
+    {
         return NULL;  // leaf present; cannot "ensure" a table without a split
     }
 
     PageTable * next_level_table = &table_pool[table_cursor++];
 
-    for (int i = 0; i < TABLE_SIZE; i++) {
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
         next_level_table->entries[i] = 0;
     }
-    if (table_cursor == PAGE_POOL_SIZE) {
+    if (table_cursor == PAGE_POOL_SIZE)
+    {
         boot_panic(out_of_pages);
     }
-    if (descriptor != 0) {
+    if (descriptor != 0)
+    {
         boot_panic(bad_descriptor);
     }
     parent_level_table->entries[child_index] = PageTable__make_table_desc(next_level_table);
@@ -124,7 +129,8 @@ __BOOT__(void) map_2M_block(PageTable * table, uint64_t virtual_address, uint64_
     PageTable * l1_tbl = ensure_next_level_table(table, L0_IDX(virtual_address));
     PageTable * l2_tbl = ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
 
-    if (l2_tbl->entries[L2_IDX(virtual_address)] & FLAG_PTE_VALID) {
+    if (l2_tbl->entries[L2_IDX(virtual_address)] & FLAG_PTE_VALID)
+    {
         boot_panic(block_mapped);
     }
     else {
@@ -148,13 +154,15 @@ __BOOT__(void) map_range_2M(PageTable * table,
     uint64_t dest = align_down_2m(target);
     uint64_t _2_megs = 1024 * 1024 * 2;
 
-    for (uint64_t pa = from, va = dest; pa <= to; pa += _2_megs, va += _2_megs) {
+    for (uint64_t pa = from, va = dest; pa <= to; pa += _2_megs, va += _2_megs)
+    {
         map_2M_block(table, va, pa, perms);
     }
 }
 
 
-__BOOT__(void) map_kernel_heap_rw() {
+__BOOT__(void) map_kernel_heap_rw()
+{
     uint64_t target = (uint64_t)&__heap_start;
     uint64_t phys_start = (uint64_t)&__heap_start_phys;
     uint64_t phys_end = (uint64_t)&__heap_end_phys;
@@ -162,7 +170,8 @@ __BOOT__(void) map_kernel_heap_rw() {
     map_range_2M(&high_mem_l0_table, phys_start, phys_end, target, &stack_heap_perms);
 }
 
-__BOOT__(void) map_kernel_stack_rw() {
+__BOOT__(void) map_kernel_stack_rw()
+{
     uint64_t target = (uint64_t)&__k_stack_start;
     uint64_t phys_start = (uint64_t)&__k_stack_phys_start;
     uint64_t phys_end = (uint64_t)&__k_stack_phys_end;
@@ -170,7 +179,8 @@ __BOOT__(void) map_kernel_stack_rw() {
     map_range_2M(&high_mem_l0_table, phys_start, phys_end, target, &stack_heap_perms);
 }
 
-__BOOT__(void) map_embedded_binaries_ro() {
+__BOOT__(void) map_embedded_binaries_ro()
+{
     uint64_t target = (uint64_t)&__embedded_binaries_start;
     uint64_t phys_start = (uint64_t)&__embedded_binaries_phys_start;
     uint64_t phys_end = (uint64_t)&__embedded_binaries_phys_end;
@@ -192,11 +202,13 @@ __BOOT__(void) map_kernel_all_normal_rwx(uint64_t phys_start,
     map_range_2M(table, phys_start, phys_end, target, &kernel_perms);
 }
 
-__BOOT__(void) map_uart(PageTable * table, uint64_t virt_addr) {
+__BOOT__(void) map_uart(PageTable * table, uint64_t virt_addr)
+{
     map_2M_block(table, virt_addr, UART0_PHYS_BASE, &device_perms);
 }
 
-__BOOT__(void) map_gicd_gicr(PageTable * table) {
+__BOOT__(void) map_gicd_gicr(PageTable * table)
+{
     uint64_t gicd_phys = GICD_PHYS_BASE;
     uint64_t gicd_virt = GICD_BASE;
     map_2M_block(table, gicd_virt, gicd_phys, &device_perms);
@@ -237,7 +249,8 @@ __BOOT__(void) map_tables_high()
 
 __BOOT__(void) zero_table(PageTable * table)
 {
-    for (int i = 0; i < TABLE_SIZE; i++) {
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
         table->entries[i] = 0;
     }
 }
@@ -253,7 +266,8 @@ __BOOT__(void) zero_table_pool()
 {
     _print(message_zero);
 
-    for (int i = 0; i < PAGE_POOL_SIZE; i++) {
+    for (int i = 0; i < PAGE_POOL_SIZE; i++)
+    {
         zero_table(&table_pool[i]);
     }
 }
@@ -303,7 +317,8 @@ __BOOT__(void) enable_mmu()
     _print(mmu_enabled);
 }
 
-__BOOT__(void) setup_boot_mappings() {
+__BOOT__(void) setup_boot_mappings()
+{
     zero_l0_tables();
     zero_table_pool();
     _print(mapping_kernel);

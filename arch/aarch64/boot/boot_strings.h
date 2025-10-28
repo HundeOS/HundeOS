@@ -7,6 +7,9 @@ __BOOT_STRING__(secondary_booting) = "Kernel booting cpu: ";
 __BOOT_STRING__(secondary_boot) = "Secondary is online: ";
 __BOOT_STRING__(enabling_mmu) = "Enabling MMU\n";
 __BOOT_STRING__(mmu_enabled) = "MMU is enabled\n";
+__BOOT_STRING__(hypervisor_call) = "Calling hypervisor\n";
+__BOOT_STRING__(post_hypervisor_call) = "Finished calling hypervisor\n";
+__BOOT_STRING__(current_el) = "CurrentEL=";
 
 __BOOT_STRING__(new_line) = "\n";
 __BOOT_STRING__(sep) = "\n0x";

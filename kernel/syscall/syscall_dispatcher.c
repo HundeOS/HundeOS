@@ -12,18 +12,9 @@
 
 FixedArrayBodyDefine(Handlers);
 
-static SyscallDispatcher syscall_handler = (SyscallDispatcher) {
-    .handlers = EmptyArray(Handlers),
-};
-
 const char * UNHANDLED_SYSCALL = "Unhandled syscall";
 const char * FAILED_TO_DETERMINE_PROCESS = "Failed to determine current process";
 
-
-SyscallDispatcherPtr SyscallHandler__instance()
-{
-    return &syscall_handler;
-}
 
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler)
 {
@@ -40,13 +31,17 @@ Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, Sy
 }
 
 Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
-                                                  Optional(ProcessPtr) process_opt,
-                                                  SystemCall syscall_id,
-                                                  Anything arg1,
-                                                  Anything arg2,
-                                                  Anything arg3)
+                                                     KernelPtr kernel,
+                                                     Optional(ProcessPtr) process_opt,
+                                                     SystemCall syscall_id,
+                                                     Anything arg1,
+                                                     Anything arg2,
+                                                     Anything arg3,
+                                                     Anything arg4,
+                                                     Anything arg5)
 {
-    __d_printf(DEBUG, "SyscallHandler__handle(syscall_id=%i, arg1=%i, arg2=%i, arg3=%i)", syscall_id, arg1, arg2, arg3);
+    __d_printf(DEBUG, "SyscallHandler__handle(syscall_id=%i, arg1=%i, arg2=%i, arg3=%i, arg4=%i, arg5=%i)",
+               syscall_id, arg1, arg2, arg3, arg4, arg5);
 
     ProcessPtr proc = NULL;
     Match(ProcessPtr, process_opt);
@@ -63,7 +58,7 @@ Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
     Match(Handler, Handlers__at(&self->handlers, syscall_id));
         IsSome(handler,
             {
-                return handler(proc, arg1, arg2, arg3);
+                return handler(kernel, proc, arg1, arg2, arg3, arg4, arg5);
             });
         IsNone(
             {

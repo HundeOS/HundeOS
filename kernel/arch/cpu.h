@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+#include "init.h"
+#include "../types/result.h"
+
 typedef uint64_t CPUID;
 typedef struct CPU CPU;
 
@@ -15,6 +18,8 @@ extern void CPU__wait_for_interrupt();
 extern void CPU__wait_for_event();
 extern void CPU__check_halt();
 extern void CPU__halt_all();
+
+extern Result(InitCode) CPU__init();
 
 extern void CPU__assign_id(CPUID id);
 

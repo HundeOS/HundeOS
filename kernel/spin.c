@@ -8,7 +8,8 @@ const uint64_t MAX = 100000000;
 void Spin__spin(uint64_t count) {
     volatile uint64_t i;
     for (i = 0; i < count; i++) {
-        CPU__wait_for_interrupt();
+        CPU__noop();
+        // CPU__wait_for_interrupt();
     }
 }
 

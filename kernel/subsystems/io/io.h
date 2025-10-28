@@ -2,7 +2,7 @@
 #define __KERNEL_SUBSYSTEMS_IO_IO_H
 #include <stdint.h>
 
-#include "../../address.h"
+#include "../../types/ring_buffer.h"
 
 #include "../../types/fixed_array.h"
 #include "../../types/comparison.h"
@@ -11,15 +11,11 @@
 #include "../../types/kstring.h"
 #include "../../all_defs.h"
 
-typedef uint8_t Char;
-typedef Char * CharPtr;
 
 #define _4_MEGS 4194304
 
-OptionalDef(Char);
-FixedArrayDefine(Char, _4_MEGS, Buffer);
-
-typedef Buffer * BufferPtr;
+typedef uint8_t Data;
+typedef Data * DataPtr;
 
 typedef uint64_t IOHandle;
 typedef uint64_t DeviceHandle;
@@ -32,19 +28,20 @@ typedef IO * IOPtr;
 ResultDef(IOHandle);
 ResultDef(DeviceHandle);
 ResultDef(ByteCount);
-ResultDef(BufferPtr);
 
 OptionalDef(IOHandle);
 OptionalDef(DeviceHandle);
 OptionalDef(IOPtr);
-OptionalDef(BufferPtr);
 
 FixedArrayDefine(IOHandle, MAX_HANDLES_PER_DEVICE, IOHandleArray);
+RingBufferDefine(_4_MEGS, IOBuffer);
+
+typedef IOBuffer * IOBufferPtr;
+ResultDef(IOBufferPtr);
 
 typedef struct IOState
 {
     IOHandleArray handles;
-    BufferPtr buffer;
 } IOState;
 
 typedef IOState * IOStatePtr;
@@ -52,8 +49,8 @@ typedef IOState * IOStatePtr;
 
 typedef Result(IOHandle) (* IO_open)(IOStatePtr state, KString path, Flags flags);
 typedef Result(IOHandle) (* IO_close)(IOStatePtr state, IOHandle handle);
-typedef Result(BufferPtr) (* IO_read)(IOStatePtr state, IOHandle handle, size_t size);
-typedef Result(ByteCount) (* IO_write)(IOStatePtr state, IOHandle handle, BufferPtr buffer, size_t size);
+typedef Result(IOBufferPtr) (* IO_read)(IOStatePtr state, IOHandle handle, size_t size);
+typedef Result(ByteCount) (* IO_write)(IOStatePtr state, IOHandle handle, DataPtr data, size_t size);
 
 typedef struct IO
 {
@@ -94,6 +91,11 @@ FixedArrayDefine(DeviceRegistration, IO_MAX_DEVICES, IODevicesArray);
     (Buffer) { \
         .len = 0, \
         .max = _4_MEGS, \
-    }
+    } \
+
+#define NEW_IO_STATE \
+    (IOState) {\
+        .handles = EmptyArray(IOHandleArray),\
+    } \
 
 #endif

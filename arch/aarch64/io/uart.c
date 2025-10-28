@@ -1,8 +1,17 @@
 #include "uart.h"
+
+#include <stdint.h>
+
+#include "../gicr.h"
 #include "../../../kernel/kernel.h"
 #include "../../../kernel/subsystems/io/io.h"
+#include "../../../kernel/subsystems/io/console/console.h"
 #include "../../../kernel/types/result.h"
 #include "../../../kernel/types/optional.h"
+#include "../../../kernel/arch/init.h"
+#include <stdint.h>
+#include "../asm_helpers.h"
+
 
 static volatile bool _check_ready()
 {
@@ -58,41 +67,6 @@ void echo(Char c)
     _send(c);
 }
 
-// Simple string input
-Result(ByteCount) read_line(BufferPtr buffer) {
-    ByteCount written = 0;
-    bool complete = false;
-    for (Optional(Char) ch = _readchar(); complete; ch = _readchar())
-    {
-        Char read = 0;
-        Match(Char, ch);
-            IsNone(
-            {
-                continue;
-            });
-            IsSome(val,
-            {
-                read = val;
-            })
-        End
-        ResultMatch(ArrayCode, Buffer__push(buffer, read));
-            IsSuccess(code,
-            {
-                echo(read);
-                if (read == '\n' || read == '\r')
-                {
-                    complete = true;
-                }
-            });
-            IsError(code, message,
-            {
-                return Error(ByteCount, message, code);
-            });
-        End
-        written++;
-    }
-    return Success(ByteCount, written);
-}
 
 // Convert integer to string and print
 void put_int(int num) {
@@ -124,7 +98,7 @@ void put_int(int num) {
     }
 }
 
-void uart_init()
+Result(InitCode) uart_init()
 {
     register unsigned int r;
 
@@ -136,4 +110,69 @@ void uart_init()
     *UART0_FBRD = 0xB;
     *UART0_LCRH = 0b11 << 5; // 8n1
     *UART0_CR = 0x301;       // enable Tx, Rx, FIFO
+
+    return Success(InitCode, ARCH_INIT_OK);
+}
+
+Result(InitCode) uart_enable_irqs()
+{
+    *UART0_CR = 0;            // disable UART
+    *UART0_ICR = 0x7FF;       // clear all interrupts
+    *UART0_IMSC = (1 << 4);   // enable RX interrupt
+    *UART0_CR = (1 << 9) | (1 << 8) | (1 << 0); // enable UART, TX, RX
+
+    __d_println(IRQ2, "Vals");
+    __d_printf(IRQ2, "IMSC=%x MIS=%x CR=%x\n", *UART0_IMSC, UARTMIS, *UART0_CR);
+
+    return Success(InitCode, ARCH_INIT_OK);
+}
+
+ConsoleState console_state = (ConsoleState) {
+    .state = NEW_IO_STATE,
+    .write_buffer = EmptyRingBuffer(IOBuffer),
+    .read_buffer = EmptyRingBuffer(IOBuffer),
+};
+
+void uart_irq_handler()
+{
+    __d_println(IRQ, "UART IRQ");
+    uint32_t mis = UARTMIS;
+
+    if (mis & (I_RX | I_RT))
+    {
+        // Drain RX FIFO
+        while (!(*UART0_FR & FR_RXFE))
+        {
+            Char ch = (Char) *UART0_DR & 0xFF;
+            __d_printf(IRQ, "Read char: %i\n", ch);
+            __d_printf(IRQ, "Read char: %c\n", ch);
+            IOBuffer__push(&console_state.read_buffer, ch);
+        }
+        // Clear RX + timeout
+        UARTICR = I_RX | I_RT;
+    }
+
+    if (mis & I_TX)
+    {
+        // Fill TX FIFO until full or nothing left to send
+        while (!(*UART0_FR & FR_TXFF))
+        {
+            ResultMatch(Char, IOBuffer__pop(&console_state.write_buffer))
+                IsSuccess(val,
+                {
+                    *UART0_DR = val;
+                });
+            End
+
+        }
+        // Clear TX
+        UARTICR = I_TX;
+    }
+
+    if (mis & I_ERR)
+    {
+        // Read & clear errors
+        UART0_RSR_ECR = 0xFF;
+        UARTICR = I_ERR;
+    }
 }

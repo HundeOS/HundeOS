@@ -5,6 +5,8 @@
 
 #include "../../types/result.h"
 #include "../../types/optional.h"
+#include "../../address.h"
+#include "../../process.h"
 
 #include "io.h"
 
@@ -23,10 +25,13 @@ ResultDef(IOSubsystemPtr);
 
 Result(DeviceHandle) IOSubsystem__register_device(IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state);
 
-Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, KString path, Flags flags);
-Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOHandle device);
-Result(BufferPtr) IOSubsystem__read(IOSubsystemPtr self, IOHandle device, size_t size);
-Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOHandle device, BufferPtr buffer, size_t size);
+Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, ProcessPtr proc, KString path, Flags flags);
+Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, ProcessPtr proc, IOHandle device);
+Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, ProcessPtr proc, IOHandle device, DataPtr buffer, size_t size);
+Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, ProcessPtr proc, IOHandle device, DataPtr data, size_t size);
+
+// called by IRQs
+Result(IOHandle) IOSubsystem__async_receive(IOSubsystemPtr self, KString path, Flags flags);
 
 #define NEW_IO_SUBSYSTEM \
     (IOSubsystem) { \

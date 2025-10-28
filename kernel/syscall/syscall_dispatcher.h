@@ -6,14 +6,14 @@
 #include "../types/types.h"
 #include "../types/result.h"
 #include "../mutex.h"
+#include "../kernel_init.h"
 
 
 typedef enum SystemCall
 {
     PRINT = 0x21,
-    IO_READ_SYNC = 0x22,
-    IO_WRITE_SYNC = 0x23,
     PROC_EXIT = 0x00,
+    IO_CALL = 0x80,
     PING = 0xFF,
 } SystemCall;
 
@@ -33,7 +33,9 @@ typedef enum RegisterResult
 ResultDef(SystemCallResult);
 ResultDef(RegisterResult);
 
-typedef Result(SystemCallResult)(* Handler)(ProcessPtr proc, Anything arg1, Anything arg2, Anything arg3);
+typedef Result(SystemCallResult)(* Handler)(
+        KernelPtr kernel, ProcessPtr proc, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5
+    );
 
 OptionalDef(Handler);
 ResultDef(Handler);
@@ -50,11 +52,14 @@ typedef struct SyscallDispatcher
 typedef SyscallDispatcher * SyscallDispatcherPtr;
 
 Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
-                                                  Optional(ProcessPtr) process,
-                                                  SystemCall syscall_id,
-                                                  Anything arg1,
-                                                  Anything arg2,
-                                                  Anything arg3);
+                                                     KernelPtr kernel,
+                                                     Optional(ProcessPtr) process_opt,
+                                                     SystemCall syscall_id,
+                                                     Anything arg1,
+                                                     Anything arg2,
+                                                     Anything arg3,
+                                                     Anything arg4,
+                                                     Anything arg5);
 
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler);
 

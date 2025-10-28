@@ -7,6 +7,8 @@
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/types/result.h"
 #include "../../../kernel/types/comparison.h"
+#include "../../../kernel/types/kstring.h"
+#include "../../../kernel/types/kstring_optionals.h"
 
 typedef uint64_t TestInt;
 

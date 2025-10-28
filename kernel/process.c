@@ -68,7 +68,10 @@ ProcessPtr Process__setup_and_start(KernelAddress page_table, ExpandedSegment en
     mutex_unlock(&cpu_lock);
 
     ResultMatch(ArrayCode, CPUProcesses__set(&cpu_processes,CPU__id(), proc));
-        IsSuccess(_, { Process__start(proc); });
+        IsSuccess(_,
+        {
+            Process__start(proc);
+        });
         IsError(code, error, __d_println(PANIC, KString__cstr(&error)));
     End
 
@@ -77,13 +80,13 @@ ProcessPtr Process__setup_and_start(KernelAddress page_table, ExpandedSegment en
 }
 
 ProcessPtr Process__spawn_from_elf(Elf * elf) {
-    __d_println(DEBUG, "Process__spawn_from_elf");
+    __d_println(FOCUS, "Process__spawn_from_elf");
     ExpandedSegmentArray expanded_elf = Elf__map(elf);
 
-    __d_println(DEBUG, "Creating page table");
+    __d_println(FOCUS, "Creating page table");
     KernelAddress page_table = PageTable__new();
 
-    __d_println(DEBUG, "Page table created");
+    __d_println(FOCUS, "Page table created");
 
     for (int i = 0; i < expanded_elf.len; i++)
     {
@@ -93,18 +96,21 @@ ProcessPtr Process__spawn_from_elf(Elf * elf) {
             IsNone(__d_println(PANIC, "Segment not mapped"););
         End
     }
-    __d_println(DEBUG, "Code mapped");
+    __d_println(FOCUS, "Code mapped");
 
     Stack stack = Stack__new();
     Stack__map(&stack, v_ptr(page_table, PageTable));
-    __d_println(DEBUG, "Stack mapped");
+    __d_println(FOCUS, "Stack mapped");
 
     Match(ExpandedSegment, ExpandedSegmentArray__at(&expanded_elf, 0))
         IsNone(__d_println(PANIC, "No entry point"););
-        IsSome(entry_point, {return Process__setup_and_start(page_table, entry_point, stack);})
+        IsSome(entry_point,
+        {
+            return Process__setup_and_start(page_table, entry_point, stack);
+        })
     End
 
-    __d_println(DEBUG, "Process created");
+    __d_println(FOCUS, "Process created");
 }
 
 Optional(ProcessPtr) Process__current_for_cpu(int cpu)

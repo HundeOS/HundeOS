@@ -3,6 +3,11 @@
 void main() {
     for(int i = 0; i < 5; i++)
     {
-        println("Hello World!");
+        print("Hello World!\n");
     }
+    while(1)
+    {
+        __asm__("nop");
+    };
+
 }

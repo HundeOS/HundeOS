@@ -4,7 +4,7 @@
 
 #include "debug.h"
 #include "address.h"
-#include "kernel_init.h"
+#include "kernel_core.h"
 
 inline HeapPtr heap_ptr()
 {

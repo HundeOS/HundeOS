@@ -5,12 +5,15 @@
 typedef struct ConsoleState
 {
     IOState state; // must be the first member as we rely on this for inheritance
-    Buffer console_buffer;
+    IOBuffer read_buffer;
+    IOBuffer write_buffer;
 } ConsoleState;
 
 typedef ConsoleState * ConsoleStatePtr;
 
-ConsoleStatePtr ConsoleState__heap_new();
+ConsoleStatePtr ConsoleState__instance();
 IOPtr Console__heap_new();
+
+void Console__IRQ_handler(ConsoleStatePtr self, Char data);
 
 #endif

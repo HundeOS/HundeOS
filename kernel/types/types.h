@@ -6,6 +6,11 @@
 #include "fixed_array.h"
 #include "kstring.h"
 
+typedef uint8_t Char;
+typedef Char * CharPtr;
+OptionalDef(Char);
+ResultDef(Char);
+
 typedef uint64_t Anything;
 
 inline const char * str(Anything a)

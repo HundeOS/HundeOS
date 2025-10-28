@@ -7,7 +7,9 @@
 
 typedef enum {
     DEBUG = -1,
-    INFO = 0,
+    IRQ = 0,
+    IRQ2 = 1,
+    INFO = 1,
     PROGRESS,
     UNHANDLED,
     FAULT,

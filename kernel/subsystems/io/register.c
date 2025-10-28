@@ -4,12 +4,11 @@
 
 #include "console/console.h"
 
-#define IO_REGISTER(io_subsystem, path, io_type, state_type) \
+#define IO_REGISTER(io_subsystem, path, io_type, io_state) \
     { \
-        IOStatePtr state_ptr = (IOStatePtr) state_type##__heap_new(); \
         IOPtr io_ptr = io_type##__heap_new(); \
         \
-        Result(DeviceHandle) register_res = IOSubsystem__register_device(io_subsystem, path, io_ptr, state_ptr); \
+        Result(DeviceHandle) register_res = IOSubsystem__register_device(io_subsystem, path, io_ptr, io_state); \
         \
         ResultMatch(DeviceHandle, register_res); \
             IsError(code, message, \
@@ -25,7 +24,7 @@ static const char * CONSOLE = "/dev/console";
 Result(RegisterCode) IOSubsystem__register_devices(IOSubsystemPtr self)
 {
     KString console_path = kstring(CONSOLE);
-    IO_REGISTER(self, console_path, Console, ConsoleState);
+    IO_REGISTER(self, console_path, Console, (IOStatePtr) ConsoleState__instance());
 
     return Success(RegisterCode, IO_OK);
 }

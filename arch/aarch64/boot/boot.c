@@ -69,8 +69,29 @@ __BOOT__(void) common_init(void)
     _print(booting);
 }
 
+__BOOT_STRING__(daif_) = "DAIF=";
+__BOOT_STRING__(pmr_) = "PMR=";
+__BOOT_STRING__(igrp_) = "IGRPEN1=";
 __BOOT__(void) primary_booted()
 {
+    uint64_t daif, pmr, igrp;
+    asm volatile("mrs %0, DAIF" : "=r"(daif));
+    asm volatile("mrs %0, ICC_PMR_EL1" : "=r"(pmr));
+    asm volatile("mrs %0, ICC_IGRPEN1_EL1" : "=r"(igrp));
+
+    _print(daif_);
+    _print_base(daif, 16);
+    _print(new_line);
+    _print(pmr_);
+    _print_base(pmr, 16);
+    _print(new_line);
+    _print(igrp_);
+    _print_base(igrp, 16);
+    _print(new_line);
+    _print(current_el);
+    _print_base((read_current_el() >> 2), 10);
+    _print(new_line);
+
     boot_uart_init();
     _print(new_line);
     _print(booting);

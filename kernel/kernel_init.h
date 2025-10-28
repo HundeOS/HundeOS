@@ -1,11 +1,7 @@
 #ifndef __KERNEL_KERNEL_INIT_H
 #define __KERNEL_KERNEL_INIT_H
 
-#include "mutex.h"
 #include "subsystems/io/io_subsystem.h"
-#include "syscall/syscall_dispatcher.h"
-#include "types/types.h"
-#include "heap.h"
 
 typedef enum InitStatus
 {
@@ -15,16 +11,7 @@ typedef enum InitStatus
     INIT_FAILED_AND_PANICKED,
 } InitStatus;
 
-typedef struct Kernel
-{
-    InitStatus status;
-    mutex_t init_lock;
-
-    SyscallDispatcher syscall_dispatcher;
-    IOSubsystem io_subsystem;
-    Heap heap;
-} Kernel;
-
+typedef struct Kernel Kernel;
 typedef Kernel * KernelPtr;
 
 ResultDef(InitStatus);

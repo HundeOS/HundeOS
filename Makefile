@@ -133,13 +133,15 @@ qemu-virt: $(ELF)
 
 qemu-virt-1cpu: $(ELF)
 	qemu-system-aarch64 \
-		-M virt,gic-version=3 \
+		-M virt,gic-version=3,virtualization=off,secure=off \
 		-smp cpus=1 -cpu max \
 		-m 4G  \
 		-serial stdio \
 		-cpu cortex-a57 \
-		-kernel $(ELF) \
-		-nographic \
+  		-kernel $(ELF) \
+  		-nographic \
+  		-d int,unimp \
+		-D qemu-1cpu.log \
 		-monitor telnet::4444,server,nowait
 
 qemu-virt-2cpus: $(ELF)

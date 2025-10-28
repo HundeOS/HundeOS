@@ -5,8 +5,6 @@
 #include <stdbool.h>
 #define MAX_SIZE 1024
 
-#include "optional.h"
-
 
 typedef struct KString {
     uint64_t len;
@@ -14,10 +12,7 @@ typedef struct KString {
     char data[MAX_SIZE];
 } KString;
 
-OptionalDef(KString);
-
 typedef KString * KStringPtr;
-OptionalDef(KStringPtr);
 
 KString KString__new(const char * str);
 KString kstring(const char * str);

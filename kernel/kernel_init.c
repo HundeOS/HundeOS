@@ -2,10 +2,11 @@
 #include "mutex.h"
 #include "panic.h"
 #include "spin.h"
+#include "arch/init.h"
 #include "subsystems/io/register.h"
 #include "syscall/init.h"
 #include "syscall/syscall_dispatcher.h"
-#include "subsystems/io/register.h"
+#include "kernel_core.h"
 
 static Kernel instance = {
     .status = INIT_NOT_STARTED,
@@ -69,6 +70,8 @@ void Kernel__init(KernelPtr self)
     Kernel__init_heap(self);
     Kernel__init_syscall_handlers(self);
     Kernel__io_subsystem_init(self);
+
+    Arch__init();
 
     self->status = INIT_DONE;
     mutex_unlock(&self->init_lock);

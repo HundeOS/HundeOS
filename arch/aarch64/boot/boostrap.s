@@ -15,6 +15,9 @@ _start:
     b       hold
 //============= BSP (CPU0) Boot Path =============
 bsp_boot:
+    mov     w3, #'3'
+    bl      print_crumb_w3
+
     // Mask during early bring-up
     msr     daifset, #0b1111
     isb
@@ -31,6 +34,9 @@ bsp_boot:
 
 //---------------- EL3 -> EL2 ----------------
 el3_enter:
+    mov     w3, #'3'
+    bl      print_crumb_w3
+
     // EL3 stack
     ldr     x1, =el3_stack_top
     mov     sp, x1
@@ -53,13 +59,26 @@ el3_enter:
 
 //---------------- enter / run at EL2 ----------------
 el2_enter:
+    mov     w3, #'2'
+    bl      print_crumb_w3
+
     ldr     x1, =el2_stack_top
     mov     sp, x1
 el2_entry_from_el3:
     // Make EL1 AArch64
+    mov     w3, #'2'
+    bl      print_crumb_w3
+
     mrs     x1, hcr_el2
     orr     x1, x1, #(1 << 31)      // HCR_EL2.RW=1
+    bic     x0, x0, #(1 << 30)
+    bic     x0, x0, #(1 << 31)
     msr     hcr_el2, x1
+
+    // Allow EL1 access to timer registers
+    mov x0, #(1 << 31)
+    msr CNTHCTL_EL2, x0
+    msr CNTVOFF_EL2, xzr
     isb
 
     // Prepare EL1 stack
@@ -80,18 +99,45 @@ el2_entry_from_el3:
     // Drop to EL1h at el1_start
     ldr     x1, =el1_start
     msr     elr_el2, x1
-    mov     x1, #0b0101             // SPSR_EL2 M[3:0]=EL1h
-    orr     x1, x1, #(0b1111 << 6)  // keep masked
+    mov     x1, #0x3c5              // SPSR_EL2 M[3:0]=EL1h
+//    orr     x1, x1, #(0b1111 << 6)  // keep masked
     msr     spsr_el2, x1
+    mov     w3, #'a'
+    bl      print_crumb_w3
+    mov     w3, #'b'
+    bl      print_crumb
+    mov     w3, #'c'
+    bl      print_crumb
     eret
+
 
 //---------------- if we already started at EL1 ----------------
 el1_entry_direct:
+    mov     w3, #'1'
+    bl      print_crumb_w3
     ldr     x1, =el1_stack_top
     mov     sp, x1
 
 //---------------- common EL1 entry ----------------
 el1_start:
+    mov     w3, #'1'
+    bl      print_crumb_w3
+    mrs x0, ICC_SRE_EL1
+    orr x0, x0, #1
+    msr ICC_SRE_EL1, x0
+
+    // 2. Enable priority mask register for all priorities
+    mov x0, #0xFF
+    msr ICC_PMR_EL1, x0
+
+    // 3. Enable Group 1 interrupts
+    mov x0, #1
+    msr ICC_IGRPEN1_EL1, x0
+
+    // 4. Clear the IRQ mask bit in PSTATE
+    msr DAIFClr, #0xf
+    mov x0, #0xff
+
     // Clear .bss (only BSP should do this)
     ldr     x0, =__boot_bss_start
     ldr     x1, =__boot_bss_end
@@ -102,11 +148,28 @@ el1_start:
     b       1b
 2:
     // Call C main
+    mov     w3, #'b'
+    bl      print_crumb_w3
+    bl      print_crumb_w3
+    bl      print_crumb_w3
+
     bl primary_booted
 
 hang:
     wfe
     b       hang
+
+print_crumb:
+    mov     w3, #'x'
+    mov     x10, #0x09000000       // PL011 base (virt==phys for low map)
+    strb    w3, [x10]              // best-effort breadcrumb
+    ret
+
+print_crumb_w3:
+    mov     x10, #0x09000000       // PL011 base (virt==phys for low map)
+    strb    w3, [x10]              // best-effort breadcrumb
+    ret
+
 
 //---------------- stacks ----------------
     .section .boot.bss.stack, "aw", %nobits

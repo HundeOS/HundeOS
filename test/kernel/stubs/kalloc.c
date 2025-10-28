@@ -2,10 +2,12 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "../../../kernel/address.h"
+#include "../../../kernel/debug.h"
 
 KernelAddress Kernel__alloc(size_t size)
 {
     Address addr = (Address) malloc(size);
+    __d_printf(DEBUG, "Kernel__alloc(size) = %p\n", addr);
     return KERNEL_ADDR(addr, addr);
 }
 

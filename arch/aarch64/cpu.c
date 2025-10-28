@@ -55,13 +55,28 @@ void CPU__halt_all() {
     CPU__halt_forever();
 }
 
+Result(InitCode) CPU__init()
+{
+    __asm__ __volatile__(
+    "mov x0, #0xff            \n"
+    "msr ICC_PMR_EL1, x0      \n"        // accept all priorities
+    "mov x0, #1               \n"
+    "msr ICC_IGRPEN1_EL1, x0  \n"    // enable Group 1 interrupts
+    "isb                      \n"
+    :: : "memory");
+
+    return Success(InitCode, ARCH_INIT_OK);
+}
+
 void CPU__check_halt() {
-    if (halt) {
+    if (halt)
+    {
         __d_printf(PANIC, "\n\nCPU %i is halting\n", CPU__id());
         CPU__halt_forever();
     }
 }
 
-void CPU__assign_id(uint64_t id){
+void CPU__assign_id(uint64_t id)
+{
     write_tpidr_el1(id);
 }

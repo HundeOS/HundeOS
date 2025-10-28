@@ -1,7 +1,6 @@
 #ifndef __KERNEL_TYPES_RESULT_H
 #define __KERNEL_TYPES_RESULT_H
 #include <stdint.h>
-
 #include "kstring.h"
 
 typedef uint64_t Code;

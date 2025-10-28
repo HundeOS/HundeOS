@@ -1,11 +1,8 @@
 #include "console.h"
 #include "../io.h"
-#include "../../../types/optional.h"
 #include "../../../types/result.h"
 #include "../../../types/kstring.h"
 #include "subsystems/io/io_subsystem.h"
-
-static Buffer buffer = NEW_BUFFER;
 
 static Result(IOHandle) Console__open(IOStatePtr state, KString path, Flags flags)
 {
@@ -17,12 +14,14 @@ static Result(IOHandle) Console__close(IOStatePtr state, IOHandle handle)
     return Success(IOHandle, 1);
 }
 
-static Result(BufferPtr) Console__read(IOStatePtr state, IOHandle handle, size_t size)
+static Result(IOBufferPtr) Console__read(IOStatePtr state, IOHandle handle, size_t size)
 {
-    return Success(BufferPtr, &buffer);
+    ConsoleStatePtr self = (ConsoleStatePtr) state;
+
+    return Success(IOBufferPtr, &self->read_buffer);
 }
 
-static Result(ByteCount) Console__write(IOStatePtr state, IOHandle handle, BufferPtr buffer, size_t size)
+static Result(ByteCount) Console__write(IOStatePtr state, IOHandle handle, DataPtr data, size_t size)
 {
     return Success(ByteCount, 0);
 }
@@ -41,13 +40,14 @@ IOPtr Console__heap_new()
     return result;
 }
 
-ConsoleStatePtr ConsoleState__heap_new()
-{
-    ConsoleStatePtr state_ptr = v_ptr(Kernel__alloc(sizeof(ConsoleState)), ConsoleState);
+extern ConsoleState console_state;
 
-    *state_ptr = (ConsoleState){
-        .state = NEW_IO_STATE,
-        .console_buffer = NEW_BUFFER,
-    };
-    return state_ptr;
+ConsoleStatePtr ConsoleState__instance()
+{
+    return &console_state;
+}
+
+void Console__IRQ_handler(ConsoleStatePtr self, Char data)
+{
+
 }

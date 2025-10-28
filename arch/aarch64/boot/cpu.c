@@ -36,11 +36,16 @@ __BOOT__(void) boot_secondary_cpus() {
         _print(new_line);
 
         uintptr_t sp_top = (uintptr_t)&boot_cpu_stacks[cpu][STACK_SIZE];
-
+        _print(hypervisor_call);
         SMCCCRes r = smccc_hvc(PSCI_0_2_FN64_CPU_ON,
                                mpidr_for_cpu(cpu),  // target MPIDR
                                entry_pa,            // entry PA
                                sp_top);             // context_id -> SP
+        // SMCCCRes r = smc_call(PSCI_0_2_FN64_CPU_ON,
+        //                        mpidr_for_cpu(cpu),  // target MPIDR
+        //                        entry_pa,            // entry PA
+        //                        sp_top);             // context_id -> SP
+        _print(post_hypervisor_call);
 
         if ((int64_t)r.x0 == PSCI_RET_SUCCESS || (int64_t)r.x0 == PSCI_RET_ALREADY_ON) {
             _print(messaged_cpu);

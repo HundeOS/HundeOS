@@ -3,6 +3,8 @@
 
 #include "syscall_dispatcher.h"
 
-Result(SystemCallResult) Exit__handler(ProcessPtr proc, Anything arg1, Anything arg2, Anything arg3);
+Result(SystemCallResult) Exit__handler(
+        KernelPtr kernel, ProcessPtr proc, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5
+    );
 
 #endif

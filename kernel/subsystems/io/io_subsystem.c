@@ -1,9 +1,14 @@
 #include "io_subsystem.h"
+
+#include "process.h"
 #include "../../types/result.h"
 #include "../../types/fixed_array.h"
 #include "../../types/optional.h"
+#include "../../debug.h"
 
-Result(DeviceHandle) IOSubsystem__register_device(IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state)
+Result(DeviceHandle) IOSubsystem__register_device(
+        IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state
+    )
 {
     DeviceRegistration reg = (DeviceRegistration) {
         .device = device,
@@ -41,7 +46,7 @@ static FAPtrOptional(IODevicesArray) IOSubsystem__find_device(IOSubsystemPtr sel
     return IODevicesArray__find(&self->devices, path_match, path);
 }
 
-Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, KString path, Flags flags)
+Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, ProcessPtr proc, KString path, Flags flags)
 {
     KString format = kstring(NO_DEVICE_FOUND);
     KString error_msg = KString__sprintf(&format, &path);
@@ -57,6 +62,7 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, KString path, Flags flag
                 IsSuccess(handle,
                 {
                     IOHandlesMap__set(&self->handles, handle, device);
+                    __d_printf(DEBUG, "Opened handle %i\n", handle);
                     return Success(IOHandle, handle);
                 });
             End
@@ -71,8 +77,9 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, KString path, Flags flag
     return error;
 }
 
-Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOHandle handle)
+Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, ProcessPtr proc, IOHandle handle)
 {
+    __d_printf(DEBUG, "Closing handle %i\n", handle);
     Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
         IsSome(registration,
         {
@@ -84,24 +91,47 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOHandle handle)
     return Error(IOHandle, kstring("Unknown handle"), IO_NOT_OPEN);
 }
 
-Result(BufferPtr) IOSubsystem__read(IOSubsystemPtr self, IOHandle handle, size_t size)
+Result(ByteCount) IOSubsystem__transfer(IOBufferPtr buffer, DataPtr result, size_t size)
 {
-    Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
-        IsSome(registration,
-        {
-            Result(BufferPtr) read_res = registration->device->read(registration->state, handle, size);
-            return read_res;
-        });
+    __d_printf(DEBUG, "reading %i %i\n", buffer->read_pos, buffer->write_pos);
+    ResultMatch(ItemCount, IOBuffer__drain(buffer, result, size))
+        IsSuccess(num, return Success(ByteCount, num));
+        IsError(code, message, return Error(ByteCount, message, code));
     End
-    return Error(BufferPtr, kstring("Unknown handle"), IO_NOT_OPEN);
 }
 
-Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOHandle handle, BufferPtr buffer, size_t size)
+Result(ByteCount) IOSubsystem__read(
+        IOSubsystemPtr self, ProcessPtr proc, IOHandle handle, DataPtr result_buffer, size_t size
+    )
 {
+    __d_printf(DEBUG, "Read handle %i\n", handle);
     Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
         IsSome(registration,
         {
-            return registration->device->write(registration->state, handle, buffer, size);
+            Result(IOBufferPtr) read_res = registration->device->read(registration->state, handle, size);
+            ResultMatch(IOBufferPtr, read_res)
+                IsSuccess(buffer,
+                {
+                    __d_printf(DEBUG, "reading %p %p\n", result_buffer, buffer);
+                    return IOSubsystem__transfer(buffer, result_buffer, size);
+                })
+                IsError(code, message,
+                {
+                    return Error(ByteCount, message, code);
+                })
+            End
+        });
+    End
+    return Error(ByteCount, kstring("Unknown handle"), IO_NOT_OPEN);
+}
+
+Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, ProcessPtr proc, IOHandle handle, DataPtr data, size_t size)
+{
+    __d_printf(DEBUG, "Writing handle %i\n", handle);
+    Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
+        IsSome(registration,
+        {
+            return registration->device->write(registration->state, handle, data, size);
         });
     End
     return Error(ByteCount, kstring("Unknown handle"), IO_NOT_OPEN);

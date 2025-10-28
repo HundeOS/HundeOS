@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "types/result.h"
+
 typedef uint64_t Address;
 typedef uint64_t Offset;
 
@@ -48,6 +50,8 @@ typedef struct UserAddress
     bool execute;
     bool valid;
 } UserAddress;
+
+ResultDef(UserAddress);
 
 #define NULL_KERNEL_ADDRESS (KernelAddress) { \
     .virtual_addr = 0, \

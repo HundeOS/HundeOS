@@ -15,7 +15,7 @@
  */
 inline uint64_t Process__spsr_for_el0(unsigned daif_mask /*bits [9:6]*/) {
     const uint64_t M_EL0t = 0x0ull;
-    return M_EL0t | ((uint64_t)(daif_mask & 0xF) << 6);
+    return (0b000 << 6) | (0b00 << 2) | 0b0000 | M_EL0t | ((uint64_t)(daif_mask & 0xF) << 6);
 }
 
 extern char __el0_entry[];
@@ -88,7 +88,7 @@ void Process__enter_el0(Process * self,
             "mov x8, %4              \n"
             "mov x0, %5              \n"
             "mov x1, %6              \n"
-
+            "msr daifclr, #0xf       \n" // unmask all exceptions
             // 6) transition EL1->EL0t and start executing at ELR_EL1
             "eret                    \n"
             ::
@@ -107,5 +107,5 @@ void Process__enter_el0(Process * self,
 uint64_t Process__start(Process * self) {
     self->state = PROC_STATE_RUNNING;
     __d_println(DEBUG, "Process entering el0");
-    Process__enter_el0(self, 1);
+    Process__enter_el0(self, 0);
 }
