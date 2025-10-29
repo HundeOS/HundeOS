@@ -13,8 +13,7 @@ ByteCount console_input(char * buf, size_t size)
     {
         console_handle = open("/dev/console", 0);
     }
-    // uint64_t res = syscall(IO_CALL, IO_OPEN, any(buf), any(size), 0, 0);
-    if (console_handle == -1)
+    if (console_handle < 0)
     {
         return -1;
     }

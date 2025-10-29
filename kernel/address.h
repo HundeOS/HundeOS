@@ -51,6 +51,9 @@ typedef struct UserAddress
     bool valid;
 } UserAddress;
 
+typedef KernelAddress * KernelAddressPtr;
+typedef UserAddress * UserAddressPtr;
+
 ResultDef(UserAddress);
 
 #define NULL_KERNEL_ADDRESS (KernelAddress) { \
@@ -101,5 +104,8 @@ inline UserAddress UserAddress__relative(UserAddress * self, Offset offset)
         .valid = self->valid,
     };
 }
+
+bool UserAddress__equals(UserAddressPtr self, UserAddressPtr other);
+bool KernelAddress__equals(KernelAddressPtr self, KernelAddressPtr other);
 
 #endif

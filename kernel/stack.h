@@ -13,4 +13,9 @@ typedef struct Stack
 Stack Stack__new();
 void Stack__map(Stack * self, PageTable * page_table);
 
+#define NULL_STACK (Stack) { \
+    .base = NULL_USER_ADDRESS, \
+    .top = NULL_USER_ADDRESS, \
+} \
+
 #endif

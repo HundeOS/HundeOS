@@ -16,13 +16,13 @@ OptionalDef(TestType);
 
 #define TEST_ARRAY_SIZE 32
 
-FixedArrayDefine(TestType, TEST_ARRAY_SIZE, TestArray);
+FixedArrayDefine(TestType, TEST_ARRAY_SIZE, TestArray, SimpleEquals(uint64_t));
 FixedArrayBodyDefine(TestArray);
 
-FixedArrayDefine(KString, TEST_ARRAY_SIZE, TestStringArray);
+FixedArrayDefine(KString, TEST_ARRAY_SIZE, TestStringArray, kstring_equals);
 FixedArrayBodyDefine(TestStringArray);
 
-FixedArrayDefine(TestType, 1, TinyTestArray);
+FixedArrayDefine(TestType, 1, TinyTestArray, SimpleEquals(uint64_t));
 FixedArrayBodyDefine(TinyTestArray);
 
 
@@ -60,7 +60,7 @@ bool predicate_str(KStringPtr value, void * context)
     return KString__equals(value, (KStringPtr) context);
 }
 
-void test__fixed_array_find(void)
+void test_fixed_array_find(void)
 {
     TestType val = 10;
     TestStringArray array = TestStringArray__new();
@@ -72,13 +72,33 @@ void test__fixed_array_find(void)
 
     KString match = kstring("hello 10");
 
-    FAPtrMatch(TestStringArray, TestStringArray__find(&array, &predicate_str, &match));
+    FindResultMatch(TestStringArray, TestStringArray__find(&array, &predicate_str, &match));
         IsNone(TEST_FAIL());
-        IsSome(value, TEST_ASSERT_TRUE(KString__equals(&match, value)));
+        IsSome(found,
+        {
+            TEST_ASSERT_EQUAL(10, found.index);
+            TEST_ASSERT_TRUE(KString__equals(&match, found.value));
+        });
     End
 }
 
-void test__fixed_array_find_item_when_exists(void)
+void test_fixed_array_find_when_not_found(void)
+{
+    TestStringArray array = TestStringArray__new();
+    KString format = kstring("hello %i");
+    for (int i = 0; i < TEST_ARRAY_SIZE; i++)
+    {
+        TestStringArray__push(&array, KString__sprintf(&format, i));
+    }
+
+    KString match = kstring("not there");
+
+    FindResultMatch(TestStringArray, TestStringArray__find(&array, &predicate_str, &match));
+        IsSome(res, TEST_FAIL());
+    End
+}
+
+void test_fixed_array_find_item_when_exists(void)
 {
     TestArray array = TestArray__new();
     for (int i = 0; i < TEST_ARRAY_SIZE; i++)
@@ -86,9 +106,30 @@ void test__fixed_array_find_item_when_exists(void)
         TestArray__push(&array, i + 100);
     }
 
-    Match(ArrayIndex, TestArray__find_item(&array, 107, SimpleEquals(uint64_t)));
+    Match(ArrayIndex, TestArray__find_item(&array, 107));
         IsNone(TEST_FAIL());
         IsSome(value, TEST_ASSERT_EQUAL_INT(7, value));
+    End
+}
+
+void test_fixed_array_remove(void)
+{
+    TestArray array = TestArray__new();
+    for (int i = 0; i < TEST_ARRAY_SIZE; i++)
+    {
+        TestArray__push(&array, i + 100);
+    }
+
+    ResultMatch(ArrayCode, TestArray__remove(&array, 107));
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(code,
+        {
+            TEST_ASSERT_EQUAL_INT(TEST_ARRAY_SIZE - 1, array.len);
+        });
+    End
+
+    Match(ArrayIndex, TestArray__find_item(&array, 27))
+        IsSome(value, TEST_FAIL());
     End
 }
 
@@ -100,7 +141,7 @@ void test__fixed_array_find_item_doesnt_exist(void)
         TestArray__push(&array, i + 100);
     }
 
-    Match(ArrayIndex, TestArray__find_item(&array, 27, SimpleEquals(uint64_t)));
+    Match(ArrayIndex, TestArray__find_item(&array, 27));
         IsSome(value, TEST_FAIL());
     End
 }

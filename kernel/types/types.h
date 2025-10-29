@@ -8,6 +8,14 @@
 
 typedef uint8_t Char;
 typedef Char * CharPtr;
+
+typedef void * NoType;
+
+#define Nothing ((NoType)0)
+
+OptionalDef(NoType);
+ResultDef(NoType);
+
 OptionalDef(Char);
 ResultDef(Char);
 

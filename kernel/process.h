@@ -7,6 +7,11 @@
 #include "bin/elf.h"
 #include "all_defs.h"
 #include "stack.h"
+#include "subsystems/io/io.h"
+#include "types/comparison.h"
+
+
+FixedArrayDefine(IOHandle, MAX_HANDLES_PER_PROCESS, ProcessHandles, SimpleEquals(uint64_t));
 
 typedef struct ProcessContext ProcessContext;
 
@@ -33,20 +38,23 @@ typedef struct Process {
     ProcessID pid;
     ProcessState state;
     UserAddress entry_point;
+    ProcessHandles handles;
 } Process;
 
-Process * Process__spawn_from_elf(Elf * elf);
-Process * Process__new(KernelAddress page_table, UserAddress entry, Stack stack);
+typedef Process * ProcessPtr;
 
-OptionalType(Process *, ProcessPtr);
+ProcessPtr Process__spawn_from_elf(Elf * elf);
+ProcessPtr Process__new(KernelAddress page_table, UserAddress entry, Stack stack);
 
-FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable);
-// FixedArrayDefine(ProcessTable, MAX_CPUS, CPUProcesses);
-FixedArrayDefine(ProcessPtr, MAX_CPUS, CPUProcesses);
+OptionalDef(ProcessPtr);
+
+FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
+FixedArrayDefine(ProcessPtr, MAX_CPUS, CPUProcesses, &Ptr__equals);
 
 OptionalType(ProcessTable *, ProcessTablePtr);
+SimpleEqualsPreDef(ProcessTablePtr);
 
-FixedArrayDefine(ProcessTablePtr, MAX_CPUS, CPUProcessTables);
+FixedArrayDefine(ProcessTablePtr, MAX_CPUS, CPUProcessTables, &Ptr__equals);
 
 Optional(ProcessPtr) Process__current_for_cpu(int cpu);
 Optional(ProcessTablePtr) Process__all_for_cpu(int cpu);

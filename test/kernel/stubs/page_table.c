@@ -1,8 +1,8 @@
 #include <stdlib.h>
 #include "../../../kernel/address.h"
-#include "../../../kernel/memory_page.h"
 #include "../../../kernel/arch/page_table.h"
 #include "../../../kernel/types/optional.h"
+#include "../../../kernel/types/comparison.h"
 #include "../../../kernel/types/fixed_array.h"
 
 #include "../../../kernel/debug.h"
@@ -13,7 +13,7 @@ typedef struct MapRequest {
 } MapRequest;
 
 OptionalDef(MapRequest);
-FixedArrayDefine(MapRequest, 1024, MapRequestArray);
+FixedArrayDefine(MapRequest, 1024, MapRequestArray, &Ptr__equals);
 FixedArrayBodyDefine(MapRequestArray);
 
 typedef struct PageTable

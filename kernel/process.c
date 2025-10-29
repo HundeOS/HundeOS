@@ -14,6 +14,7 @@
 FixedArrayBodyDefine(ProcessTable);
 FixedArrayBodyDefine(CPUProcesses);
 FixedArrayBodyDefine(CPUProcessTables);
+FixedArrayBodyDefine(ProcessHandles);
 
 static CPUProcessTables cpu_process_tables = EmptyArray(CPUProcessTables);
 static ProcessTable processes = EmptyArray(ProcessTable);
@@ -23,7 +24,7 @@ static mutex_t table_lock = MUTEX_INIT;
 static mutex_t cpu_lock = MUTEX_INIT;
 
 
-Process * Process__new(KernelAddress page_table, UserAddress entry, Stack stack)
+ProcessPtr Process__new(KernelAddress page_table, UserAddress entry, Stack stack)
 {
     Process * proc = (Process *) Kernel__alloc_kernel(sizeof(Process));
     proc->entry_point = entry;
@@ -31,6 +32,7 @@ Process * Process__new(KernelAddress page_table, UserAddress entry, Stack stack)
     proc->state = PROC_STATE_NEW;
     proc->pid = 0;
     proc->stack = stack;
+    proc->handles = EmptyArray(ProcessHandles);
     return proc;
 }
 

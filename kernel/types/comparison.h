@@ -9,6 +9,19 @@ typedef bool(* EqualFunction)(void * a, void * b);
 #define SimpleEquals(T) \
     T##_equals
 
+#define SimpleEqualsWrapper(E) \
+    E##__wrap
+
+#define SimpleEqualsWrapperDef(E) \
+    bool E##__wrap(void * a, void * b); \
+
+#define SimpleEqualsWrapperBody(T, E) \
+    bool E##__wrap(void * a, void * b) \
+    { \
+        E((T) a, (T) b);\
+    } \
+
+
 #define SimpleEqualsPreDef(T) \
     bool T##_equals(void * a, void * b);
 
@@ -30,7 +43,7 @@ SimpleEqualsPreDef(int16_t)
 SimpleEqualsPreDef(int8_t)
 SimpleEqualsPreDef(char)
 
-bool ptr_equals(void * a, void * b);
+bool Ptr__equals(void * a, void * b);
 bool kstring_equals(void * a, void * b);
 
 

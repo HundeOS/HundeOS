@@ -16,9 +16,10 @@ SimpleEqualsBody(int16_t)
 SimpleEqualsBody(int8_t)
 SimpleEqualsBody(char)
 
-bool ptr_equals(void * a, void * b) \
-{ \
-    return a == b;\
+// wil be a pointer to an element which is a pointer
+bool Ptr__equals(void * a, void * b)
+{
+    return *(void **)a == *(void **)b;
 }
 
 bool kstring_equals(void * a, void * b)

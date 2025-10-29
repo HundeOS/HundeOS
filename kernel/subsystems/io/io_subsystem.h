@@ -10,8 +10,6 @@
 
 #include "io.h"
 
-typedef uint64_t DeviceHandle;
-
 typedef struct IOSubsystem
 {
     IODevicesArray devices;

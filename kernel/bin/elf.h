@@ -189,14 +189,14 @@ OptionalType(SectionHeader *, SectionHeaderPtr);
 OptionalType(ProgramHeader *, ProgramHeaderPtr);
 OptionalDef(ExpandedSegment);
 
-FixedArrayDefine(SectionHeaderPtr, 64, SectionHeaderArray);
-FixedArrayDefine(ProgramHeaderPtr, 64, ProgramHeaderArray);
+FixedArrayDefine(SectionHeaderPtr, 64, SectionHeaderArray, &Ptr__equals);
+FixedArrayDefine(ProgramHeaderPtr, 64, ProgramHeaderArray, &Ptr__equals);
 
 SectionHeaderArray Elf__read_section_headers(const ElfPtr self);
 ProgramHeaderArray Elf__read_program_headers(const ElfPtr self);
 Elf64Header * Elf__read_header(const ElfPtr self);
 
-FixedArrayDefine(ExpandedSegment, 64, ExpandedSegmentArray);
+FixedArrayDefine(ExpandedSegment, 64, ExpandedSegmentArray, &Ptr__equals);
 
 typedef ExpandedSegmentArray * ExpandedSegmentArrayPtr;
 

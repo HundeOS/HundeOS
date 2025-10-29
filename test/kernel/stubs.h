@@ -4,6 +4,7 @@
 #include "../../kernel/process.h"
 
 #define STUB_PROCESS (Process) { \
+        .handles = EmptyArray(ProcessHandles),\
     }\
 
 #endif

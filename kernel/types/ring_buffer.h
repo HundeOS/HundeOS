@@ -42,6 +42,8 @@ typedef enum RingBufferError {
     RingBufferPushPreDefine(alias) \
     RingBufferPopPreDefine(alias) \
     RingBufferDrainPreDefine(alias) \
+    RingBufferResetPreDefine(alias) \
+    RingBufferItemCountPreDefine(alias) \
 
 
 #define RingBufferBodyDefine(alias) \
@@ -49,6 +51,9 @@ typedef enum RingBufferError {
     RingBufferPushDefine(alias) \
     RingBufferPopDefine(alias) \
     RingBufferDrainDefine(alias) \
+    RingBufferResetDefine(alias) \
+    RingBufferItemCountDefine(alias) \
+
 
 #define RingBufferConstructorPreDefine(alias) \
     alias alias##__new(); \
@@ -113,6 +118,26 @@ typedef enum RingBufferError {
         return Success(Char, val);\
     } \
 
+#define RingBufferResetPreDefine(alias) \
+    Result(NoType) alias##__reset(alias##Ptr self); \
+
+#define RingBufferResetDefine(alias) \
+    Result(NoType) alias##__reset(alias##Ptr self) \
+    { \
+        self->read_pos = 0;\
+        self->write_pos = 0; \
+        return Success(NoType, Nothing);\
+    } \
+
+#define RingBufferItemCountPreDefine(alias) \
+    size_t alias##__item_count(alias##Ptr self); \
+
+#define RingBufferItemCountDefine(alias) \
+    size_t alias##__item_count(alias##Ptr self) \
+    { \
+        return self->write_pos - self->read_pos;\
+    } \
+
 #define RingBufferDrainPreDefine(alias) \
     Result(ItemCount) alias##__drain(alias##Ptr self, CharPtr drain, size_t max); \
 
@@ -126,8 +151,7 @@ typedef enum RingBufferError {
                 IsError(code, message, \
                 { \
                     return Success(ItemCount, i);\
-                } \
-                ) \
+                }); \
             End \
         } \
         return Success(ItemCount, max);\

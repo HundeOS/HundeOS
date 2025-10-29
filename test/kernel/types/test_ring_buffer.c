@@ -61,6 +61,95 @@ void test_ring_buffer_drain_without_wrap_around()
     End
 }
 
+void test_ring_buffer_reset()
+{
+    SmallBuffer buffer = SmallBuffer__new();
+
+    for (Char c = 0; c < NUM_ITEMS; c++)
+    {
+        ResultMatch(Pos, SmallBuffer__push(&buffer, c))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    ResultMatch(NoType, SmallBuffer__reset(&buffer))
+        IsSuccess(_,
+        {
+            TEST_ASSERT_EQUAL_INT(0, SmallBuffer__item_count(&buffer));
+        });
+        IsError(code, message, TEST_FAIL());
+    End
+}
+
+void test_ring_buffer_item_count_not_cycled()
+{
+    SmallBuffer buffer = SmallBuffer__new();
+
+    for (Char c = 0; c < NUM_ITEMS; c++)
+    {
+        ResultMatch(Pos, SmallBuffer__push(&buffer, c))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    for (int i = 0; i < NUM_ITEMS / 2; i++)
+    {
+        ResultMatch(Char, SmallBuffer__pop(&buffer))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    size_t count = SmallBuffer__item_count(&buffer);
+
+    TEST_ASSERT_EQUAL_INT(NUM_ITEMS / 2, count);
+}
+
+void test_ring_buffer_item_count_when_cycled()
+{
+    SmallBuffer buffer = SmallBuffer__new();
+
+    for (Char c = 0; c < NUM_ITEMS; c++)
+    {
+        ResultMatch(Pos, SmallBuffer__push(&buffer, c))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    for (int i = 0; i < NUM_ITEMS / 2; i++)
+    {
+        ResultMatch(Char, SmallBuffer__pop(&buffer))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    for (Char c = 0; c < NUM_ITEMS / 2; c++)
+    {
+        ResultMatch(Pos, SmallBuffer__push(&buffer, c))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    size_t count = SmallBuffer__item_count(&buffer);
+
+    TEST_ASSERT_EQUAL_INT(NUM_ITEMS, count);
+}
+
+void test_ring_buffer_item_count()
+{
+    SmallBuffer buffer = SmallBuffer__new();
+
+    for (Char c = 0; c < NUM_ITEMS; c++)
+    {
+        ResultMatch(Pos, SmallBuffer__push(&buffer, c))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    size_t count = SmallBuffer__item_count(&buffer);
+
+    TEST_ASSERT_EQUAL_INT(NUM_ITEMS, count);
+}
+
 void test_ring_buffer_drain_with_wrap_around()
 {
     SmallBuffer buffer = SmallBuffer__new();

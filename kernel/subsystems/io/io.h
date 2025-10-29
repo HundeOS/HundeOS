@@ -18,7 +18,8 @@ typedef uint8_t Data;
 typedef Data * DataPtr;
 
 typedef uint64_t IOHandle;
-typedef uint64_t DeviceHandle;
+typedef uint32_t IOInternalHandle;
+typedef uint32_t DeviceHandle;
 typedef uint64_t Flags;
 typedef size_t ByteCount;
 
@@ -26,14 +27,16 @@ typedef struct IO IO;
 typedef IO * IOPtr;
 
 ResultDef(IOHandle);
+ResultDef(IOInternalHandle);
 ResultDef(DeviceHandle);
 ResultDef(ByteCount);
 
 OptionalDef(IOHandle);
+OptionalDef(IOInternalHandle);
 OptionalDef(DeviceHandle);
 OptionalDef(IOPtr);
 
-FixedArrayDefine(IOHandle, MAX_HANDLES_PER_DEVICE, IOHandleArray);
+FixedArrayDefine(IOHandle, MAX_HANDLES_PER_DEVICE, IOHandleArray, SimpleEquals(uint64_t));
 RingBufferDefine(_4_MEGS, IOBuffer);
 
 typedef IOBuffer * IOBufferPtr;
@@ -47,10 +50,10 @@ typedef struct IOState
 typedef IOState * IOStatePtr;
 
 
-typedef Result(IOHandle) (* IO_open)(IOStatePtr state, KString path, Flags flags);
-typedef Result(IOHandle) (* IO_close)(IOStatePtr state, IOHandle handle);
-typedef Result(IOBufferPtr) (* IO_read)(IOStatePtr state, IOHandle handle, size_t size);
-typedef Result(ByteCount) (* IO_write)(IOStatePtr state, IOHandle handle, DataPtr data, size_t size);
+typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr state, KString path, Flags flags);
+typedef Result(IOInternalHandle) (* IO_close)(IOStatePtr state, IOInternalHandle handle);
+typedef Result(IOBufferPtr) (* IO_read)(IOStatePtr state, IOInternalHandle handle, size_t size);
+typedef Result(ByteCount) (* IO_write)(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size);
 
 typedef struct IO
 {
@@ -85,7 +88,7 @@ typedef DeviceRegistration * DeviceRegistrationPtr;
 OptionalDef(DeviceRegistrationPtr);
 
 MapDefine(IOHandle, DeviceRegistrationPtr, 1024, IOHandlesMap, SimpleEquals(uint64_t));
-FixedArrayDefine(DeviceRegistration, IO_MAX_DEVICES, IODevicesArray);
+FixedArrayDefine(DeviceRegistration, IO_MAX_DEVICES, IODevicesArray, SimpleEquals(uint64_t));
 
 #define NEW_BUFFER \
     (Buffer) { \

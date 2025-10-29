@@ -1,6 +1,7 @@
 #ifndef __KERNEL_SYSCALL_HANDLER_H
 #define __KERNEL_SYSCALL_HANDLER_H
 #include <stdint.h>
+#include <stdint.h>
 
 #include "../process.h"
 #include "../types/types.h"
@@ -17,18 +18,20 @@ typedef enum SystemCall
     PING = 0xFF,
 } SystemCall;
 
-typedef enum SystemCallResult
+typedef enum SystemCallResults
 {
     SYSCALL_OK = 0,
     SYSCALL_FAILURE = -1,
     SYSCALL_IO_BLOCK = -2
-} SystemCallResult;
+} SystemCallResults;
 
 typedef enum RegisterResult
 {
     REGISTER_OK = 0,
     REGISTER_FAILURE = -1,
 } RegisterResult;
+
+typedef uint64_t SystemCallResult;
 
 ResultDef(SystemCallResult);
 ResultDef(RegisterResult);
@@ -39,7 +42,7 @@ typedef Result(SystemCallResult)(* Handler)(
 
 OptionalDef(Handler);
 ResultDef(Handler);
-FixedArrayDefine(Handler, 256, Handlers);
+FixedArrayDefine(Handler, 256, Handlers, &Ptr__equals);
 
 
 typedef struct SyscallDispatcher

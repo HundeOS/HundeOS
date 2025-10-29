@@ -2,7 +2,9 @@
 #include "../../../../kernel/subsystems/io/io_subsystem.h"
 #include "../../stubs.h"
 
-static const int FAKE_HANDLE = 100;
+static const IOInternalHandle FAKE_HANDLE =            0x00000000000000FF;
+static const IOHandle EXPECTED_OPEN_HANDLE =           0x00000001000000FF; // upper 32bits hold the device handle
+static const DeviceHandle EXPECTED_DEVICE_HANDLE =     0x00000001; // upper 32bits hold the device handle
 #define MAX_READ 100
 
 static bool opened = false;
@@ -30,19 +32,21 @@ void reset_state()
     written = false;
     read = false;
     write_data = NULL;
+    PROC = STUB_PROCESS;
+    STATE = NEW_IO_STATE;
 }
 
-static Result(IOHandle) fake_open(IOStatePtr state_ptr, KString path, Flags flags)
+static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, KString path, Flags flags)
 {
     TEST_ASSERT_EQUAL(&STATE, state_ptr);
     TEST_ASSERT_EQUAL(FLAGS, flags);
 
     IOHandleArray__push(&state_ptr->handles, FAKE_HANDLE);
     opened = true;
-    return Success(IOHandle, FAKE_HANDLE);
+    return Success(IOInternalHandle, FAKE_HANDLE);
 }
 
-static Result(IOBufferPtr) fake_read(IOStatePtr state_ptr, IOHandle handle, size_t size)
+static Result(IOBufferPtr) fake_read(IOStatePtr state_ptr, IOInternalHandle handle, size_t size)
 {
     TEST_ASSERT_EQUAL(&STATE, state_ptr);
     TEST_ASSERT_EQUAL(FAKE_HANDLE, handle);
@@ -59,7 +63,7 @@ static Result(IOBufferPtr) fake_read(IOStatePtr state_ptr, IOHandle handle, size
     return Success(IOBufferPtr, buffer);
 }
 
-static Result(ByteCount) fake_write(IOStatePtr state_ptr, IOHandle handle, DataPtr data, size_t size)
+static Result(ByteCount) fake_write(IOStatePtr state_ptr, IOInternalHandle handle, DataPtr data, size_t size)
 {
     TEST_ASSERT_EQUAL(&STATE, state_ptr);
     TEST_ASSERT_EQUAL(FAKE_HANDLE, handle);
@@ -70,7 +74,7 @@ static Result(ByteCount) fake_write(IOStatePtr state_ptr, IOHandle handle, DataP
     return Success(ByteCount, size);
 }
 
-static Result(IOHandle) fake_close(IOStatePtr state_ptr, IOHandle handle)
+static Result(IOInternalHandle) fake_close(IOStatePtr state_ptr, IOInternalHandle handle)
 {
     TEST_ASSERT_EQUAL(&STATE, state_ptr);
     TEST_ASSERT_EQUAL(FAKE_HANDLE, handle);
@@ -78,9 +82,9 @@ static Result(IOHandle) fake_close(IOStatePtr state_ptr, IOHandle handle)
     closed = true;
     if (!opened)
     {
-        return Error(IOHandle, kstring("not opened"), IO_NOT_OPEN);
+        return Error(IOInternalHandle, kstring("not opened"), IO_NOT_OPEN);
     }
-    return Success(IOHandle, handle);
+    return Success(IOInternalHandle, handle);
 }
 
 #define STUB_IO \
@@ -104,12 +108,15 @@ void test_io_subsystem_registration_and_open()
 
     KString path = KString__new("/dev/test");
 
+
+
     ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
         IsError(code, message, TEST_FAIL());
+        IsSuccess(handle, TEST_ASSERT_EQUAL_UINT(EXPECTED_DEVICE_HANDLE, handle));
     End
 
     ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
-        IsSuccess(result, TEST_ASSERT_EQUAL_INT(FAKE_HANDLE, result));
+        IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL());
     End
 
@@ -155,15 +162,22 @@ void test_io_open_and_write()
 
     KString path = KString__new("/dev/test");
 
+    __d_println(FOCUS, "reg %p\n");
     ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
         IsError(code, message, TEST_FAIL());
     End
 
+    __d_println(FOCUS, "opening %p\n");
     ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
 
+    Match(ArrayIndex, ProcessHandles__find_item(&PROC.handles, EXPECTED_OPEN_HANDLE));
+        IsNone(TEST_FAIL());
+    End
+
+    __d_println(FOCUS, "writing %p\n");
     ResultMatch(ByteCount, IOSubsystem__write(&system, &PROC, handle, &data, MAX_READ));
         IsSuccess(byte_count,
         {
@@ -193,6 +207,10 @@ void test_io_write_when_not_open()
         {
             TEST_FAIL();
         });
+        IsError(code, message,
+        {
+            TEST_ASSERT_EQUAL(IO_NOT_OPEN, code);
+        });
     End
 
     TEST_ASSERT_FALSE(written);
@@ -211,12 +229,17 @@ void test_io_read_when_not_open()
 
     ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
         IsError(code, message, TEST_FAIL());
+        IsSuccess(handle, TEST_ASSERT_EQUAL(EXPECTED_DEVICE_HANDLE, handle));
     End
 
     ResultMatch(ByteCount, IOSubsystem__read(&system, &PROC, handle, &data, MAX_READ));
         IsSuccess(count,
         {
             TEST_FAIL();
+        });
+        IsError(code, message,
+        {
+            TEST_ASSERT_EQUAL(IO_NOT_OPEN, code);
         });
     End
 
@@ -235,12 +258,12 @@ void test_io_subsystem_registration_and_close()
     End
 
     ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
-        IsSuccess(result, TEST_ASSERT_EQUAL_INT(FAKE_HANDLE, result));
+        IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&system, &PROC, FAKE_HANDLE))
-        IsSuccess(result, TEST_ASSERT_EQUAL_INT(FAKE_HANDLE, result));
+    ResultMatch(IOHandle, IOSubsystem__close(&system, &PROC, EXPECTED_OPEN_HANDLE))
+        IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
@@ -258,17 +281,21 @@ void test_io_subsystem_close_disposes_handle()
     End
 
     ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
-        IsSuccess(result, TEST_ASSERT_EQUAL_INT(FAKE_HANDLE, result));
+        IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&system, &PROC, FAKE_HANDLE))
-        IsSuccess(result, TEST_ASSERT_EQUAL_INT(FAKE_HANDLE, result));
+    ResultMatch(IOHandle, IOSubsystem__close(&system, &PROC, EXPECTED_OPEN_HANDLE))
+        IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&system, &PROC, FAKE_HANDLE))
+    ResultMatch(IOHandle, IOSubsystem__close(&system, &PROC, EXPECTED_OPEN_HANDLE))
         IsSuccess(result, TEST_FAIL());
+    End
+
+    Match(ArrayIndex, ProcessHandles__find_item(&PROC.handles, EXPECTED_OPEN_HANDLE));
+        IsSome(val, TEST_FAIL());
     End
 
     TEST_ASSERT_TRUE(closed);

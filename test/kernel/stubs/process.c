@@ -4,7 +4,7 @@
 #include "../../../kernel/types/fixed_array.h"
 
 
-FixedArrayDefine(ProcessPtr, 1024, ProcessArray);
+FixedArrayDefine(ProcessPtr, 1024, ProcessArray, &Ptr__equals);
 FixedArrayBodyDefine(ProcessArray);
 
 static ProcessArray started_processes = EmptyArray(ProcessArray);

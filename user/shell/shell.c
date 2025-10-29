@@ -11,9 +11,10 @@ int main(void)
         char buf[100];
         print("> ");
         int64_t read = console_input(buf, 100);
-        if (read == -1)
+        if (read <= 0)
         {
             print("Error reading console input\n");
+            return -1;
         }
         if (read > 0)
         {

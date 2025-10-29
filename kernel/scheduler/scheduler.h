@@ -8,7 +8,7 @@
 #include "../types/fixed_array.h"
 #include "../process.h"
 
-FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessQueue);
+FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessQueue, &Ptr__equals);
 
 typedef struct CPUScheduler
 {
@@ -23,7 +23,7 @@ typedef CPUScheduler * CPUSchedulerPtr;
 OptionalDef(CPUSchedulerPtr);
 ResultDef(CPUSchedulerPtr);
 
-FixedArrayDefine(CPUSchedulerPtr, MAX_CPUS, CPUSchedulers);
+FixedArrayDefine(CPUSchedulerPtr, MAX_CPUS, CPUSchedulers, &Ptr__equals);
 
 typedef struct Scheduler
 {

@@ -13,12 +13,14 @@
 extern const char * ARRAY_FULL_ERROR;
 extern const char * ARRAY_EMPTY_ERROR;
 extern const char * ARRAY_INDEX_OUT_OF_BOUNDS;
+extern const char * ITEM_NOT_FOUND;
 
 typedef enum ArrayError
 {
     ARRAY_FULL = -1,
     ARRAY_EMPTY = -2,
     ARRAY_OUT_OF_BOUNDS = -3,
+    ARRAY_ITEM_NOT_FOUND = -4,
 } ArrayError;
 
 typedef int ArrayCode;
@@ -90,6 +92,11 @@ OptionalDef(ArrayIndex);
         typedef alias##__type_ptr value_type; \
         _Optional(alias##__type_ptr) optional = opt; \
 
+#define FindResultMatch(alias, opt) \
+    { \
+        typedef alias##__FindResult value_type; \
+        _Optional(alias##__FindResult) optional = opt; \
+
 #define FANone(alias) None(alias##__optional)
 #define FAPtrNone(alias) None(alias##__type_ptr__optional)
 #define IsFANone(alias, block) IsNone(alias##__optional, block)
@@ -100,24 +107,39 @@ OptionalDef(ArrayIndex);
 #define IsFASome(alias, value, block) IsSome(alias##__optional, value, block)
 #define IsFAPtrSome(alias, value, block) IsSome(alias##__type_ptr__optional, value, block)
 
+#define FindResult(alias) alias##__FindResult
+#define FindResultCreate(alias, idx, val) \
+    (FindResult(alias)) { .index = idx, .value = val, } \
+
+#define FindResultNone(alias) None(alias##__FindResult)
+#define FindResultSome(alias, res) Some(alias##__FindResult, res)
+
+#define FindResultOptional(alias) \
+    _Optional(alias##__FindResult) \
+
+
 #define FindPreDefine(alias_name) \
     typedef bool(* alias_name##__predicate)(alias_name##__type_ptr value, void * context); \
-    FAPtrOptional(alias_name) alias_name##__find(alias_name * self, alias_name##__predicate predicate, void * context); \
-    Optional(ArrayIndex) alias_name##__find_item(alias_name * self, alias_name##__type value, EqualFunction equals);
+    FindResultOptional(alias_name) alias_name##__find(alias_name * self, alias_name##__predicate predicate, void * context); \
+    Optional(ArrayIndex) alias_name##__find_item(alias_name * self, alias_name##__type value); \
+
 
 #define FindDefine(alias_name) \
-    FAPtrOptional(alias_name) alias_name##__find(alias_name * self, alias_name##__predicate predicate, void * context) \
+    FindResultOptional(alias_name) alias_name##__find(alias_name * self, alias_name##__predicate predicate, void * context) \
     { \
         for (int i = 0; i < self->len; i++) \
         { \
             if (predicate(&self->data[i], context)) { \
-                return FAPtrSome(alias_name, &self->data[i]); \
+                FindResult(alias_name) res = FindResultCreate(alias_name, i, &self->data[i]); \
+                return FindResultSome(alias_name, res); \
             }\
         } \
-        return FAPtrNone(alias_name);\
+        return FindResultNone(alias_name);\
     };\
-    Optional(ArrayIndex) alias_name##__find_item(alias_name * self, alias_name##__type value, EqualFunction equals) \
+    \
+    Optional(ArrayIndex) alias_name##__find_item(alias_name * self, alias_name##__type value) \
     { \
+        EqualFunction equals = alias_name##__default__equals;\
         for (int i = 0; i < self->len; i++) \
         { \
             if (equals(&self->data[i], &value)) { \
@@ -125,7 +147,7 @@ OptionalDef(ArrayIndex);
             }\
         } \
         return None(ArrayIndex);\
-    };
+    }; \
 
 
 #define AtPreDefine(alias_name) \
@@ -167,25 +189,64 @@ OptionalDef(ArrayIndex);
         return Success(ArrayCode, 0); \
     }; \
 
-#define FixedArrayDefine(type, size, alias_name) \
+#define RemovePreDefine(alias_name) Result(ArrayCode) alias_name##__remove(alias_name * self, alias_name##__type value);
+#define RemoveDefine(alias_name) \
+    Result(ArrayCode) alias_name##__remove(alias_name * self, alias_name##__type value) \
+    { \
+        Match(ArrayIndex, alias_name##__find_item(self, value)) \
+            IsSome(pos, \
+            { \
+                for (int i = pos; i < (self->len - 1); i++)\
+                { \
+                    self->data[i] = self->data[i + 1];\
+                } \
+                self->len--;\
+            })\
+            IsNone(\
+            { \
+                return Error(ArrayCode, kstring(ITEM_NOT_FOUND), ARRAY_ITEM_NOT_FOUND);\
+            })\
+      End \
+      return Success(ArrayCode, 0); \
+    } \
+
+#define FixedArrayDefine(type, size, alias_name, equals) \
     AliasOptional(type, alias_name##__optional) \
+    \
+    typedef struct alias_name##__FindResult \
+    { \
+        type * value; \
+        ArrayIndex index; \
+    } alias_name##__FindResult; \
+    \
+    OptionalDef(alias_name##__FindResult);\
+    \
     static const uint64_t alias_name##__max_size = size; \
+    static const EqualFunction alias_name##__default__equals = equals; \
+    \
     typedef type alias_name##__type; \
     typedef type * alias_name##__type_ptr; \
+    \
     OptionalDef(alias_name##__type_ptr) \
     AliasOptional(alias_name##__type_ptr, alias_name##__type_ptr__optional) \
+    \
     static const type alias_name##__EMPTY; \
-    typedef struct FixedArray(type, size) { \
+    \
+    typedef struct FixedArray(type, size) \
+    { \
         uint64_t len;\
         uint64_t max; \
         type data[size]; \
     } FixedArray(type, size); \
+    \
     typedef FixedArray(type, size) alias_name; \
+    \
     ConstructorPreDefine(alias_name) \
     AtPreDefine(alias_name) \
     PushPreDefine(alias_name) \
     SetPreDefine(alias_name) \
     FindPreDefine(alias_name) \
+    RemovePreDefine(alias_name) \
 
 #define FixedArrayBodyDefine(alias_name) \
     ConstructorDefine(alias_name) \
@@ -193,6 +254,7 @@ OptionalDef(ArrayIndex);
     PushDefine(alias_name) \
     SetDefine(alias_name) \
     FindDefine(alias_name) \
+    RemoveDefine(alias_name) \
 
 #define EmptyArray(alias_name) (alias_name) { \
     .len = 0, \
