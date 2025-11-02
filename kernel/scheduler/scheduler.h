@@ -10,6 +10,15 @@
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessQueue, &Ptr__equals);
 
+typedef uint64_t SchedulerInitStatus;
+ResultDef(SchedulerInitStatus);
+
+typedef enum SchedulerInitStatuses
+{
+    SCHEDULER_INIT_OK = 0,
+    SCHEDULER_INIT_ERROR = -1,
+} SchedulerInitStatuses;
+
 typedef struct CPUScheduler
 {
     ProcessQueue waiting_processes;
@@ -30,5 +39,16 @@ typedef struct Scheduler
     CPUSchedulers schedulers;
 } Scheduler;
 
+typedef Scheduler * SchedulerPtr;
+
+OptionalDef(SchedulerPtr);
+ResultDef(SchedulerPtr);
+
+Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, ElfPtr idle_process);
+
+#define NEW_SCHEDULER \
+    (Scheduler) { \
+        .schedulers = EmptyArray(CPUSchedulers)\
+    } \
 
 #endif

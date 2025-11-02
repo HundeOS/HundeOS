@@ -1,6 +1,8 @@
 #ifndef __KERNEL_KERNEL_INIT_H
 #define __KERNEL_KERNEL_INIT_H
 
+#include <stdint.h>
+
 #include "subsystems/io/io_subsystem.h"
 
 typedef enum InitStatus
@@ -15,6 +17,16 @@ typedef struct Kernel Kernel;
 typedef Kernel * KernelPtr;
 
 ResultDef(InitStatus);
+
+typedef enum SubsystemInitStatuses
+{
+    SUBSYSTEM_INIT_OK,
+    SUBSYSTEM_INIT_FAILED,
+} SubsystemInitStatuses;
+
+typedef uint64_t SubsystemInitStatus;
+
+ResultDef(SubsystemInitStatus);
 
 KernelPtr Kernel__instance();
 void Kernel__init(KernelPtr self);

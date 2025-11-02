@@ -20,7 +20,7 @@ KString kstring(const char * str);
 bool KString__equals(KStringPtr self, KStringPtr other);
 KString KString__sprintf(KStringPtr format, ...);
 KString KString__append(KStringPtr self, KStringPtr other);
-const char * KString__cstr(KString * str);
+const char * KString__cstr(KStringPtr str);
 
 #define EMPTY_KSTRING \
     (KString) { \

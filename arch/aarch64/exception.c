@@ -79,7 +79,8 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
     // Handle synchronous exceptions (e.g., undefined instruction, SVC, data abort)
     switch(ec) {
         case 0x15: // SVC instruction execution
-            __d_printf(DEBUG, "system call: 0x%x\n", ctx->x[8]);
+            __d_printf(DEBUG, "system call: %p\n", ctx->x[8]);
+            __d_printf(DEBUG, "system call args: %p %p %p %p %p\n", ctx->x[0], ctx->x[1], ctx->x[2], ctx->x[3], ctx->x[4]);
             Result(SystemCallResult) syscall_result =
                 SyscallDispatcher__dispatch(
                     &kernel->syscall_dispatcher,
@@ -95,6 +96,7 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
             ResultMatch(SystemCallResult, syscall_result);
                 IsSuccess(call_result,
                 {
+                    __d_printf(DEBUG, "syscall result: res=%p\n", call_result);
                     return call_result;
                 });
                 IsError(code, message,
@@ -103,9 +105,10 @@ uint64_t handle_sync(exception_context_t *ctx, bool hcf) {
                     return code;
                 });
             End
+            return 0;
             break;
         case 0x24: // Data abort from current EL
-            __d_println(FAULT, "data abort: 0x%x");
+            __d_println(FAULT, "data abort:");
             if (hcf) {
                 char buf[128];
                 k_sprintf(buf, "data abort call: cpu=%i", CPU__id());

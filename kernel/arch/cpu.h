@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "init.h"
+#include "init_code.h"
 #include "../types/result.h"
 
 typedef uint64_t CPUID;

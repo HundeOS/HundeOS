@@ -66,7 +66,7 @@ Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
             })
     End;
 
-    char buf[1024];
-    k_sprintf(buf, "Unhandled syscall: %i", syscall_id);
-    return Error(SystemCallResult, KString__new(buf), SYSCALL_FAILURE);
+    KString format = kstring("Unhandled syscall: %i");
+    KString message = KString__sprintf(&format, syscall_id);
+    return Error(SystemCallResult, message, SYSCALL_FAILURE);
 }

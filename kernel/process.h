@@ -14,6 +14,7 @@
 FixedArrayDefine(IOHandle, MAX_HANDLES_PER_PROCESS, ProcessHandles, SimpleEquals(uint64_t));
 
 typedef struct ProcessContext ProcessContext;
+typedef struct ProcessContext * ProcessContextPtr;
 
 typedef uint64_t ProcessID;
 
@@ -29,10 +30,18 @@ typedef enum {
     PROC_STATE_UNALLOCATED         // Being destroyed
 } ProcessState;
 
+
+typedef enum ProcessSetupStatus
+{
+    PROCESS_FAILED_TO_SETUP = -1,
+    PROCESS_SETUP = 0,
+} ProcessSetupStatus;
+
+
 typedef struct Process {
     KernelAddress page_table;
 
-    ProcessContext * context;
+    ProcessContextPtr context;
     Stack stack;
 
     ProcessID pid;
@@ -43,10 +52,11 @@ typedef struct Process {
 
 typedef Process * ProcessPtr;
 
-ProcessPtr Process__spawn_from_elf(Elf * elf);
+ProcessPtr Process__spawn_from_elf(ElfPtr elf);
 ProcessPtr Process__new(KernelAddress page_table, UserAddress entry, Stack stack);
 
 OptionalDef(ProcessPtr);
+ResultDef(ProcessPtr);
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 FixedArrayDefine(ProcessPtr, MAX_CPUS, CPUProcesses, &Ptr__equals);
@@ -58,5 +68,7 @@ FixedArrayDefine(ProcessTablePtr, MAX_CPUS, CPUProcessTables, &Ptr__equals);
 
 Optional(ProcessPtr) Process__current_for_cpu(int cpu);
 Optional(ProcessTablePtr) Process__all_for_cpu(int cpu);
+
+Result(ProcessPtr) Process__setup(ElfPtr binary);
 
 #endif

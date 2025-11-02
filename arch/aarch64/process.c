@@ -7,6 +7,8 @@
 #include "asm_helpers.h"
 #include "../../kernel/process.h"
 
+#include <stdint.h>
+
 
 /* Build SPSR for entering EL0t.
  *  M[3:0]=0000 (EL0t)
@@ -44,6 +46,40 @@ static UserAddress Process__el1_trampoline()
         .execute = true,
         .valid = true,
     };
+}
+
+ProcessContextPtr ProcessContext__init(StackPtr stack, UserAddress entry_point, KernelAddress page_table)
+{
+    ProcessContextPtr context = k_v_ptr(stack->top, ProcessContext);
+    context->sp = vaddr(stack->top);
+
+    for (int i = 0; i < 31; i++)
+    {
+        context->x[i] = 0;
+        context->q[i] = 0;
+    }
+
+    context->spsr = Process__spsr_for_el0(0);
+
+    UserAddress trampoline = Process__el1_trampoline();
+    PageTable__map(v_ptr(page_table, PageTable),
+        trampoline,
+        PAGE_SIZE * 4);
+
+    context->elr = vaddr(trampoline);
+
+    uint64_t argc = 0;
+    char ** argv = NULL;
+    context->x[0] = argc;
+    context->x[1] = (uint64_t) argv;
+    context->x[8] = vaddr(entry_point);
+
+    return context;
+}
+
+void Process__switch_context(ProcessContextPtr context)
+{
+
 }
 
 __attribute__((noreturn))

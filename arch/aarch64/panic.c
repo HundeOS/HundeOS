@@ -12,9 +12,6 @@ void Kernel__halt() {
 
 void Kernel__dump_state(ProcessContext * ctx) {
     uint64_t esr = read_esr_el1();
-    uint64_t elr = read_elr_el1();
-    uint64_t far = read_far_el1();
-    uint64_t sctlr = read_sctlr_el1();
 
     uint32_t ec = (esr >> 26) & 0x3F;
 
@@ -29,9 +26,9 @@ void Kernel__dump_state(ProcessContext * ctx) {
     __d_printf(FAULT, "TBBR1: %p\n", read_ttbr1_el1());
 
     if (ctx) {
-        __d_printf(FAULT, "PC: %p\n", ctx->pc);
+        __d_printf(FAULT, "PC: %p\n", ctx->elr);
         __d_printf(FAULT, "SP: %p\n", ctx->sp);
-        __d_printf(FAULT, "PSTATE: %p\n", ctx->pstate);
+        __d_printf(FAULT, "PSTATE: %p\n", ctx->spsr);
         int width = 6;
         for (int i = 0; i < 31; i++) {
             if (i % width == 0) {

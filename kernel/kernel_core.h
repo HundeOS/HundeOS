@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "subsystems/io/io_subsystem.h"
 #include "syscall/syscall_dispatcher.h"
+#include "scheduler/scheduler.h"
 #include "heap.h"
 #include "mutex.h"
 
@@ -17,6 +18,7 @@ typedef struct Kernel
     SyscallDispatcher syscall_dispatcher;
     IOSubsystem io_subsystem;
     Heap heap;
+    Scheduler scheduler;
 } Kernel;
 
 typedef Kernel * KernelPtr;

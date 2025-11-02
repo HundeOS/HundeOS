@@ -10,6 +10,8 @@ typedef struct Stack
     UserAddress top;
 } Stack;
 
+typedef Stack * StackPtr;
+
 Stack Stack__new();
 void Stack__map(Stack * self, PageTable * page_table);
 

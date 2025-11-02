@@ -14,6 +14,6 @@
         .name=bin_name\
     }
 
-Elf * EmbeddedElf__load(const char * name);
+ElfPtr EmbeddedElf__load(const char * name);
 
 #endif
