@@ -52,11 +52,11 @@ typedef struct Process {
 
 typedef Process * ProcessPtr;
 
-ProcessPtr Process__spawn_from_elf(ElfPtr elf);
-ProcessPtr Process__new(KernelAddress page_table, UserAddress entry, Stack stack);
-
 OptionalDef(ProcessPtr);
 ResultDef(ProcessPtr);
+
+Result(ProcessPtr) Process__spawn_from_elf(ElfPtr elf);
+ProcessPtr Process__new(KernelAddress page_table, UserAddress entry, Stack stack);
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 FixedArrayDefine(ProcessPtr, MAX_CPUS, CPUProcesses, &Ptr__equals);

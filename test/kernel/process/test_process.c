@@ -70,23 +70,30 @@ bool process_in_cpu_processes(int cpu, ProcessPtr process)
 
 void test_spawning_from_elf(void)
 {
-    Elf * elf = EmbeddedElf__load("hello_world");
-    Process * process = Process__spawn_from_elf(elf);
+    ElfPtr elf = EmbeddedElf__load("hello_world");
+    ResultMatch(ProcessPtr, Process__spawn_from_elf(elf))
+        IsError(code, message,
+        {
+            TEST_FAIL();
+        })
+        IsSuccess(process,
+        {
+            TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
+                0x400000,
+                true,
+                false,
+                true,
+                101));
+            TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
+                BASE_STACK,
+                true,
+                true,
+                false,
+                STACK_SIZE));
 
-    TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
-        0x400000,
-        true,
-        false,
-        true,
-        101));
-    TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
-        BASE_STACK,
-        true,
-        true,
-        false,
-        STACK_SIZE));
-
-    TEST_ASSERT(process_is_started(process));
-    TEST_ASSERT(process_tied_to_cpu(5, process));
-    TEST_ASSERT(process_in_cpu_processes(5, process));
+            TEST_ASSERT(process_is_started(process));
+            TEST_ASSERT(process_tied_to_cpu(5, process));
+            TEST_ASSERT(process_in_cpu_processes(5, process));
+        })
+    End
 }
