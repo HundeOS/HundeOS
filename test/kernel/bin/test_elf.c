@@ -86,7 +86,7 @@ void __test__sections(void)
 
 }
 
-void test__map_binary_runnable(void)
+void test_map_binary_runnable(void)
 {
     Elf * elf = load_test_elf();
     ExpandedSegmentArray addresses = Elf__map(elf);
@@ -107,7 +107,7 @@ void test__map_binary_runnable(void)
     End;
 }
 
-void test__program_header(void)
+void test_program_header(void)
 {
     Elf * elf = load_test_elf();
 

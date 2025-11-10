@@ -30,7 +30,7 @@ FixedArrayDefine(TestType, 1, TinyTestArray, SimpleEquals(uint64_t));
 FixedArrayBodyDefine(TinyTestArray);
 
 
-void test__fixed_array_push_and_at(void)
+void test_fixed_array_push_and_at(void)
 {
     TestType val = 10;
     TestArray array = TestArray__new();
@@ -47,7 +47,7 @@ void test__fixed_array_push_and_at(void)
     End
 }
 
-void test__fixed_array_at_ptr(void)
+void test_fixed_array_at_ptr(void)
 {
     TestType val = 10;
     TestArray array = TestArray__new();
@@ -159,7 +159,7 @@ void test_fixed_array_remove(void)
     End
 }
 
-void test__fixed_array_find_item_doesnt_exist(void)
+void test_fixed_array_find_item_doesnt_exist(void)
 {
     TestArray array = TestArray__new();
     for (int i = 0; i < TEST_ARRAY_SIZE; i++)
@@ -172,7 +172,7 @@ void test__fixed_array_find_item_doesnt_exist(void)
     End
 }
 
-void test__fixed_array_iterate(void)
+void test_fixed_array_iterate(void)
 {
     TestArray array = TestArray__new();
 
@@ -189,7 +189,7 @@ void test__fixed_array_iterate(void)
     End
 }
 
-void test__fixed_array_push_when_full(void)
+void test_fixed_array_push_when_full(void)
 {
     TestType val = 10;
     TinyTestArray array = TinyTestArray__new();
@@ -204,7 +204,7 @@ void test__fixed_array_push_when_full(void)
     End
 }
 
-void test__set_in_bounds(void)
+void test_set_in_bounds(void)
 {
     TestType val = 10;
     int index = TEST_ARRAY_SIZE - 1;
@@ -220,7 +220,7 @@ void test__set_in_bounds(void)
     End
 }
 
-void test__set_out_of_bounds(void)
+void test_set_out_of_bounds(void)
 {
     TestType val = 10;
     TestArray array = TestArray__new();

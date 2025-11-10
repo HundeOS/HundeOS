@@ -58,7 +58,7 @@ static Result(IOBufferPtr) fake_read(IOStatePtr state_ptr, IOInternalHandle hand
     IOBuffer__push(buffer, 2);
     IOBuffer__push(buffer, 3);
     IOBuffer__push(buffer, 4);
-    __d_printf(FOCUS, "in stub  %i %i %i\n", buffer->read_pos, buffer->write_pos, buffer->buffer_size);
+    __d_printf(DEBUG, "in stub  %i %i %i\n", buffer->read_pos, buffer->write_pos, buffer->buffer_size);
     read = true;
     return Success(IOBufferPtr, buffer);
 }
@@ -162,12 +162,12 @@ void test_io_open_and_write()
 
     KString path = KString__new("/dev/test");
 
-    __d_println(FOCUS, "reg %p\n");
+    __d_println(DEBUG, "reg %p\n");
     ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
         IsError(code, message, TEST_FAIL());
     End
 
-    __d_println(FOCUS, "opening %p\n");
+    __d_println(DEBUG, "opening %p\n");
     ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
@@ -177,7 +177,7 @@ void test_io_open_and_write()
         IsNone(TEST_FAIL());
     End
 
-    __d_println(FOCUS, "writing %p\n");
+    __d_println(DEBUG, "writing %p\n");
     ResultMatch(ByteCount, IOSubsystem__write(&system, &PROC, handle, &data, MAX_READ));
         IsSuccess(byte_count,
         {
@@ -219,7 +219,6 @@ void test_io_write_when_not_open()
 
 void test_io_read_when_not_open()
 {
-    k_println("starting test");
     Data data[MAX_READ] = {0};
 
     IOSubsystem system = NEW_IO_SUBSYSTEM;
