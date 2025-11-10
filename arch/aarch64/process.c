@@ -145,10 +145,3 @@ void Process__save_context(ProcessPtr self, ProcessContextPtr context)
         *self->context = *context;
     }
 }
-
-__attribute__((noreturn))
-void Process__start(ProcessPtr self)
-{
-    __d_println(DEBUG, "Process entering el0");
-    Process__context_switch(self);
-}

@@ -9,6 +9,5 @@ void timer_handler(CPUID cpu_id, SchedulerPtr scheduler, ProcessContextPtr conte
     __d_printf(TIMER_IRQ, "timer_handler for %i\n", cpu_id);
     CPU__check_halt();
 
-    Optional(ContextSwitch) context_switch = Scheduler__interrupt(scheduler, cpu_id, context);
-    ContextSwitch__switch(context_switch);
+    Scheduler__preempt(scheduler, cpu_id, context);
 }

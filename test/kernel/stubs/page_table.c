@@ -50,7 +50,7 @@ bool check_address_mapped(PageTable *page_table, Address virtual_address, bool r
             IsSome(mapped_address,
                 {
                     UserAddress mapped = mapped_address.address;
-                    __d_printf(FOCUS,
+                    __d_printf(PROGRESS,
                         "Checking %i mapped address calls vaddr=%p mapped=%p size=%i expected_size=%i rwx=%i%i%i expected rwx=%i%i%i\n",
                         i, virtual_address, mapped.virtual_addr, mapped_address.size, size,
                         mapped_address.address.read, mapped_address.address.write, mapped_address.address.execute,

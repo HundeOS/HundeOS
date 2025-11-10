@@ -52,14 +52,14 @@
             .present = true, \
             .val = value, \
         } \
-    }; \
+    } \
 
 #define None(alias) \
     (_Optional(alias)) { \
         .none = (_None(alias)) { \
             .present = false, \
         } \
-    }; \
+    } \
 
 #define Match(alias, opt) \
 { \

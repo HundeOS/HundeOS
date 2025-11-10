@@ -55,8 +55,9 @@ OptionalDef(SchedulerPtr);
 ResultDef(SchedulerPtr);
 
 SchedulerPtr Scheduler__heap_new();
+
 Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, ElfPtr idle_process);
-Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
+void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
 

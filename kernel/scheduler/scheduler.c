@@ -90,10 +90,9 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, ProcessCon
             IsSome(proc,
             {
                 __d_printf(SCHEDULER, "CPUScheduler__interrupt %s\n", cstr(proc->name));
-                current = Some(ProcessPtr, proc);
                 Process__save_context(proc, context);
                 proc->last_tick = self->last_tick;
-                proc->state = PROC_STATE_INTERRUPTED;
+                proc->state = PROC_STATE_SWITCHING_CONTEXT;
             })
         End
 
@@ -146,13 +145,8 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, ProcessCon
 // __attribute__((noreturn))
 void CPUScheduler__start(CPUSchedulerPtr self)
 {
-    CriticalSection(self->scheduler_lock,
-    {
-        self->idle_process->state = PROC_STATE_RUNNING;
-        self->idle_process->last_tick = self->last_tick;
-    });
-
-    Process__start(self->idle_process);
+    ContextSwitch context_switch = ContextSwitch__new(self->idle_process, None(ProcessPtr));
+    ContextSwitch__switch(Some(ContextSwitch, context_switch));
 }
 
 Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, ElfPtr idle_process)
@@ -267,6 +261,14 @@ Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, Proce
 
     return None(ContextSwitch);
 }
+
+
+void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context)
+{
+    Optional(ContextSwitch) context_switch = Scheduler__interrupt(self, cpu, context);
+    ContextSwitch__switch(context_switch);
+}
+
 
 Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu)
 {

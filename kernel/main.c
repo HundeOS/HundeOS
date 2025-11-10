@@ -22,7 +22,7 @@ void schedule(SchedulerPtr scheduler, const char * name)
         IsSuccess(process, Scheduler__schedule(scheduler, process))
         IsError(code, message,
         {
-            __d_printf(FOCUS, "Program failed: %s\n", name);
+            __d_printf(PANIC, "Program failed: %s\n", name);
             Kernel__panic(cstr(message), NULL);
         })
     End
@@ -31,10 +31,10 @@ void schedule(SchedulerPtr scheduler, const char * name)
 
 void Kernel_main(CPUID cpu_id) {
     KernelPtr kernel = Kernel__instance();
-    __d_printf(DEBUG, "Kernel starting init: %i\n", cpu_id);
+    __d_printf(PROGRESS, "Kernel starting init: %i\n", cpu_id);
     if (cpu_id == 1)
     {
-        __d_printf(DEBUG, "Kernel starting init: %i\n", cpu_id);
+        __d_printf(PROGRESS, "Kernel starting init: %i\n", cpu_id);
         Kernel__init(kernel);
     }
     else
@@ -52,13 +52,13 @@ void Kernel_main(CPUID cpu_id) {
     ResultMatch(InitCode, CPU__init());
         IsError(code, message,
         {
-            __d_printf(FOCUS, "CPU init failed: %i\n", cpu_id);
+            __d_printf(PANIC, "CPU init failed: %i\n", cpu_id);
             Kernel__panic(KString__cstr(&message), NULL);
             return;
         });
     End
 
-    __d_printf(DEBUG, "Kernel starting loading program: %i\n", cpu_id);
+    __d_printf(PROGRESS, "Kernel starting loading program: %i\n", cpu_id);
 
     schedule(&kernel->scheduler, "shell");
     schedule(&kernel->scheduler, "hello_world");
@@ -69,7 +69,6 @@ void Kernel_main(CPUID cpu_id) {
 
     // Process__spawn_from_elf(program);
 
-    __d_println(FOCUS, "Here?");
     __d_printf(PROGRESS, "Kernel starting scheduler: %i\n", cpu_id);
     // starts the idle process and wont return
     Scheduler__start(&kernel->scheduler, cpu_id - 1);

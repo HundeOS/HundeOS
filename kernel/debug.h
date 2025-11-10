@@ -10,6 +10,7 @@ typedef enum {
     IRQ = 0,
     IRQ2 = 1,
     INFO = 2,
+    MMU,
     PROCESS_DEBUG,
     TIMER_IRQ,
     SCHEDULER_DEBUG,
@@ -60,6 +61,8 @@ inline const char * level_to_string(Level level)
             return "SYSCALL";
         case MUTEX:
             return "MUTEX";
+        case MMU:
+            return "MMU";
     }
     return "UNKNOWN";
 }

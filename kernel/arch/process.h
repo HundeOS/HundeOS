@@ -9,8 +9,6 @@ typedef uint64_t ProcessID;
 typedef struct Process Process;
 typedef Process * ProcessPtr;
 
-extern void Process__start(ProcessPtr self);
-
 void Process__context_switch(ProcessPtr self);
 void Process__save_context(ProcessPtr self, ProcessContextPtr context);
 

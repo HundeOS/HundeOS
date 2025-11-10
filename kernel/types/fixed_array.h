@@ -55,7 +55,6 @@ OptionalDef(ArrayIndex);
     alias_name * alias_name##__heap_new() \
     { \
         alias_name * array = v_ptr(Kernel__alloc(sizeof(alias_name)), alias_name);\
-        __d_printf(FOCUS, "Allocated %p\n", array); \
         array->len = 0;\
         array->max = alias_name##__max_size;\
         return array;\

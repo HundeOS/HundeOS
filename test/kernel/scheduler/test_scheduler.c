@@ -1,6 +1,7 @@
 #include "unity.h"
 #include "../stubs/panic.h"
 #include "../stubs/cpu.h"
+#include "../stubs/process.h"
 #include "../../../kernel/process.h"
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/scheduler/scheduler.h"
@@ -13,6 +14,7 @@ void setUp(void)
 {
     clear_panic_state();
     set_cpu_id(cpu_id);
+    current_process_reset();
 
     scheduler = Scheduler__heap_new();
     ElfPtr idle = EmbeddedElf__load("idle");
@@ -30,22 +32,14 @@ void test_scheduler_interrupt_when_no_processes_are_running_stays_in_idle(void)
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE0000; // whatever as long as we dont deref
     Scheduler__start(scheduler, cpu_id);
 
-    Match(ContextSwitch, Scheduler__interrupt(scheduler, cpu_id, context))
-        IsNone(
-        {
-            ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
-            ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    Scheduler__preempt(scheduler, cpu_id, context);
+    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
+    ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
 
-            TEST_ASSERT_EQUAL(idle, current);
-            TEST_ASSERT_EQUAL(idle->context, context);
-            TEST_ASSERT_EQUAL(idle->state, PROC_STATE_RUNNING);
-        });
-        IsSome(context_switch,
-        {
-            TEST_FAIL();
-        })
-    End
-
+    TEST_ASSERT_EQUAL(idle, current);
+    TEST_ASSERT_EQUAL(idle->context, context);
+    TEST_ASSERT_EQUAL(idle->state, PROC_STATE_RUNNING);
+    TEST_ASSERT_EQUAL(current_running_process(), idle);
 }
 
 
@@ -85,7 +79,7 @@ ProcessPtr dummy_process(Tick last_tick, CPUID cpu, ProcessState state)
     return NULL;
 }
 
-void test_scheduler_interrupt_when_idle_with_a_process_ready(void)
+void test_scheduler_preempt_when_idle_with_a_process_ready(void)
 {
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE0000; // whatever as long as we dont deref
     CPUID scheduled_cpu = 3;
@@ -96,31 +90,32 @@ void test_scheduler_interrupt_when_idle_with_a_process_ready(void)
         IsSuccess(cpu, TEST_ASSERT_EQUAL(scheduled_cpu, cpu))
         IsError(code, message, TEST_FAIL());
     End
+    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, scheduled_cpu));
 
     Scheduler__start(scheduler, scheduled_cpu);
-    Match(ContextSwitch, Scheduler__interrupt(scheduler, scheduled_cpu, context))
+    // should start with idle
+    TEST_ASSERT_EQUAL(idle, current_running_process());
+    TEST_ASSERT_EQUAL(idle->state, PROC_STATE_RUNNING);
+
+    Scheduler__preempt(scheduler, scheduled_cpu, context);
+    TEST_ASSERT_EQUAL(dummy, current_running_process());
+    TEST_ASSERT_EQUAL(0, dummy->last_tick);
+    TEST_ASSERT_EQUAL(dummy->state, PROC_STATE_RUNNING);
+
+    TEST_ASSERT_EQUAL(idle->context, context); // check the context was saved
+    TEST_ASSERT_EQUAL(idle->state, PROC_STATE_INTERRUPTED); // check the context was saved
+    TEST_ASSERT_EQUAL(1, idle->last_tick); // check the context was saved
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, scheduled_cpu))
         IsNone(TEST_FAIL());
-        IsSome(context_switch,
+        IsSome(current,
         {
-            ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, scheduled_cpu));
-            TEST_ASSERT_EQUAL(dummy, context_switch.new_proc);
-            TEST_ASSERT_EQUAL(0, dummy->last_tick);
-            TEST_ASSERT_EQUAL(dummy->state, PROC_STATE_SWITCHING_CONTEXT);
-
-            TEST_ASSERT_EQUAL(idle->context, context); // check the context was saved
-            TEST_ASSERT_EQUAL(idle->state, PROC_STATE_INTERRUPTED); // check the context was saved
-            TEST_ASSERT_EQUAL(1, idle->last_tick); // check the context was saved
-
-            // we should be in an inbetween land where there is no current process as
-            // a context switch is happening
-            Match(ProcessPtr, Scheduler__current_process(scheduler, scheduled_cpu))
-                IsSome(current, TEST_FAIL());
-            End
-        })
+            TEST_ASSERT_EQUAL(dummy, current);
+        });
     End
 }
 
-void test_scheduler_interrupt_when_idle_with_multiple_processes_ready_selects_longest_waiting(void)
+void test_scheduler_prempt_when_idle_with_multiple_processes_ready_selects_longest_waiting(void)
 {
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE0000; // whatever as long as we dont deref
 
@@ -134,18 +129,15 @@ void test_scheduler_interrupt_when_idle_with_multiple_processes_ready_selects_lo
     Scheduler__schedule(scheduler, proc_2nd_most_recently_run);
     Scheduler__schedule(scheduler, proc_least_recently_run);
 
-    Match(ContextSwitch, Scheduler__interrupt(scheduler, dummy_cpu, context))
-        IsNone(TEST_FAIL());
-        IsSome(context_switch,
-        {
-            TEST_ASSERT_EQUAL(proc_least_recently_run, context_switch.new_proc);
-            TEST_ASSERT_EQUAL(PROC_STATE_SWITCHING_CONTEXT, proc_least_recently_run->state);
+    Scheduler__preempt(scheduler, dummy_cpu, context);
+    TEST_ASSERT_EQUAL(proc_least_recently_run, current_running_process());
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc_least_recently_run->state);
 
-            // we should not have a current process as we have a pending context switch
-            Match(ProcessPtr, Scheduler__current_process(scheduler, dummy_cpu))
-                IsSome(current, TEST_FAIL());
-            End
-        })
+    Match(ProcessPtr, Scheduler__current_process(scheduler, dummy_cpu))
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(proc_least_recently_run, current);
+        });
     End
 }
 
@@ -154,7 +146,7 @@ void test_scheduler_interrupt_switch_from_one_ready_process_to_another(void)
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE0000; // whatever as long as we dont deref
 
     CPUID dummy_cpu = 11;
-    ProcessPtr proc_most_recently_run = dummy_process(1, dummy_cpu, PROC_STATE_READY);
+    ProcessPtr proc_most_recently_run = dummy_process(1000, dummy_cpu, PROC_STATE_READY);
     ProcessPtr proc_least_recently_run = dummy_process(0, dummy_cpu, PROC_STATE_READY);
 
     Scheduler__start(scheduler, dummy_cpu);
@@ -162,25 +154,14 @@ void test_scheduler_interrupt_switch_from_one_ready_process_to_another(void)
     Scheduler__schedule(scheduler, proc_most_recently_run);
     Scheduler__schedule(scheduler, proc_least_recently_run);
 
-    Optional(ContextSwitch) context_switch = Scheduler__interrupt(scheduler, dummy_cpu, context);
-    Match(ContextSwitch, context_switch)
-        IsNone(TEST_FAIL());
-        IsSome(context_switch,
-        {
-            TEST_ASSERT_EQUAL(proc_least_recently_run, context_switch.new_proc);
-            TEST_ASSERT_EQUAL(proc_least_recently_run->state, PROC_STATE_SWITCHING_CONTEXT);
-        })
-    End
+    Scheduler__preempt(scheduler, dummy_cpu, context);
+    TEST_ASSERT_EQUAL(proc_least_recently_run, current_running_process());
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, proc_most_recently_run->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc_least_recently_run->state);
 
-    ContextSwitch__switch(context_switch);
-    Match(ContextSwitch, Scheduler__interrupt(scheduler, dummy_cpu, context))
-        IsNone(TEST_FAIL());
-        IsSome(context_switch,
-        {
-            TEST_ASSERT_EQUAL(proc_most_recently_run, context_switch.new_proc);
-            TEST_ASSERT_EQUAL(proc_most_recently_run->state, PROC_STATE_SWITCHING_CONTEXT);
+    Scheduler__preempt(scheduler, dummy_cpu, context);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc_most_recently_run->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, proc_least_recently_run->state);
+    TEST_ASSERT_EQUAL(proc_most_recently_run, current_running_process());
 
-            TEST_ASSERT_EQUAL(proc_least_recently_run->state, PROC_STATE_INTERRUPTED);
-        })
-    End
 }

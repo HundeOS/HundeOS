@@ -49,7 +49,7 @@ Result(ProcessPtr) Process__setup(ElfPtr binary)
             IsSome(segment,
             {
                 UserAddress addr = segment.address;
-                __d_printf(PROGRESS, "Mapping segment %i phys=%p, virt=%p\n", i, addr.kernel_addr.phys_addr, addr.virtual_addr);
+                __d_printf(MMU, "Mapping segment %i phys=%p, virt=%p\n", i, addr.kernel_addr.phys_addr, addr.virtual_addr);
                 PageTable__map(v_ptr(page_table, PageTable), segment.address, segment.size);
             })
             IsNone(return Error(ProcessPtr, not_mapped_message, PROCESS_FAILED_TO_SETUP););
