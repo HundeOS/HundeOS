@@ -26,7 +26,7 @@ SectionHeaderArray Elf__read_section_headers(const ElfPtr self)
     Offset section_names = header->section_name_index;
 
     SectionHeaderPtr start = offset_ptr(self->start, section_header_offset, SectionHeader);
-    k_printf("header offset=%p size=%i names=%p\n", section_header_offset, section_header_size, section_names);
+    __d_printf(PROCESS, "header offset=%p size=%i names=%p\n", section_header_offset, section_header_size, section_names);
     for (int i = 0; i < section_header_entries; i++)
     {
         SectionHeaderPtr header = offset_ptr(start, i * section_header_size, SectionHeader);
@@ -78,7 +78,7 @@ static ExpandedSegment Elf__expand_segment(ElfPtr self,
                                            ProgramHeaderPtr header,
                                            ExpandedSegmentArrayPtr expanded_segments)
 {
-    __d_println(FOCUS, "Expanding segment");
+    __d_printf(PROCESS, "Expanding segment header=%p name=%s\n", header, self->name);
     if (header->type == Load)
     {
         UserAddress address = Elf__explode(self, header);
@@ -94,7 +94,7 @@ static ExpandedSegment Elf__expand_segment(ElfPtr self,
 ExpandedSegmentArray Elf__map(const ElfPtr self) {
     ProgramHeaderArray headers = Elf__read_program_headers(self);
     ExpandedSegmentArray expanded_segments = ExpandedSegmentArray__new();
-    __d_printf(FOCUS, "Mapping segments %i\n", headers.len);
+    __d_printf(DEBUG, "Mapping segments %i\n", headers.len);
 
     for (int i = 0; i < headers.len; i++)
     {

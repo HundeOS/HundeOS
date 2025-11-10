@@ -10,25 +10,57 @@
 #include "subsystems/io/io.h"
 #include "types/comparison.h"
 
-
 FixedArrayDefine(IOHandle, MAX_HANDLES_PER_PROCESS, ProcessHandles, SimpleEquals(uint64_t));
 
 typedef struct ProcessContext ProcessContext;
 typedef struct ProcessContext * ProcessContextPtr;
 
 typedef uint64_t ProcessID;
+typedef uint64_t ProcessState;
+typedef uint64_t Tick;
 
-typedef enum {
-    PROC_STATE_NEW,         // Being created
-    PROC_STATE_READY,       // Ready to run
-    PROC_STATE_RUNNING,     // Currently executing
-    PROC_STATE_WAITING,     // Waiting for I/O or event
-    PROC_STATE_SLEEPING,    // Sleeping (timed wait)
-    PROC_STATE_STOPPED,     // Stopped (e.g., by signal)
-    PROC_STATE_ZOMBIE,      // Terminated but not reaped
-    PROC_STATE_DEAD,         // Being destroyed
-    PROC_STATE_UNALLOCATED         // Being destroyed
-} ProcessState;
+// state bits
+// 6    5      4     3    2         1     0
+// dead stop active sleep wait interrupt ready
+//
+typedef enum ProcessStates{
+    PROC_STATE_NEW               = 0b0000000, // Being created
+    PROC_STATE_READY             = 0b0000001, // Ready to run
+    PROC_STATE_RUNNING           = 0b0010000, // Currently executing
+    PROC_STATE_INTERRUPTED       = 0b0000010, // Interrupted by signal
+    PROC_STATE_WAITING           = 0b0000100, // Waiting for I/O or event
+    PROC_STATE_SLEEPING          = 0b0001000, // Sleeping (timed wait)
+    PROC_STATE_STOPPED           = 0b0100000, // Stopped (e.g., by signal)
+    PROC_STATE_DEAD              = 0b1000000, // Being destroyed
+    PROC_STATE_SWITCHING_CONTEXT = 0b0100100, // Switching context
+} ProcessStates;
+
+inline const char * ProcessState__to_string(ProcessState state)
+{
+    switch (state)
+    {
+        case PROC_STATE_NEW:
+            return "PROC_STATE_NEW";
+        case PROC_STATE_READY:
+            return "PROC_STATE_READY";
+        case PROC_STATE_RUNNING:
+            return "PROC_STATE_RUNNING";
+        case PROC_STATE_INTERRUPTED:
+            return "PROC_STATE_INTERRUPTED";
+        case PROC_STATE_WAITING:
+            return "PROC_STATE_WAITING";
+        case PROC_STATE_SLEEPING:
+            return "PROC_STATE_SLEEPING";
+        case PROC_STATE_STOPPED:
+            return "PROC_STATE_STOPPED";
+        case PROC_STATE_DEAD:
+            return "PROC_STATE_DEAD";
+        case PROC_STATE_SWITCHING_CONTEXT:
+            return "PROC_STATE_SWITCHING_CONTEXT";
+        default:
+            return "UNKNOWN";
+    }
+}
 
 
 typedef enum ProcessSetupStatus
@@ -48,6 +80,8 @@ typedef struct Process {
     ProcessState state;
     UserAddress entry_point;
     ProcessHandles handles;
+    Tick last_tick;
+    KString name;
 } Process;
 
 typedef Process * ProcessPtr;
@@ -55,19 +89,11 @@ typedef Process * ProcessPtr;
 OptionalDef(ProcessPtr);
 ResultDef(ProcessPtr);
 
-Result(ProcessPtr) Process__spawn_from_elf(ElfPtr elf);
-ProcessPtr Process__new(KernelAddress page_table, UserAddress entry, Stack stack);
+ProcessPtr Process__new(KString name, KernelAddress page_table, UserAddress entry, Stack stack);
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
-FixedArrayDefine(ProcessPtr, MAX_CPUS, CPUProcesses, &Ptr__equals);
 
 OptionalType(ProcessTable *, ProcessTablePtr);
-SimpleEqualsPreDef(ProcessTablePtr);
-
-FixedArrayDefine(ProcessTablePtr, MAX_CPUS, CPUProcessTables, &Ptr__equals);
-
-Optional(ProcessPtr) Process__current_for_cpu(int cpu);
-Optional(ProcessTablePtr) Process__all_for_cpu(int cpu);
 
 Result(ProcessPtr) Process__setup(ElfPtr binary);
 

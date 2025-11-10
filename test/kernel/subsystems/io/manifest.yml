@@ -4,6 +4,7 @@ manifest:
     - kernel/subsystems/io/**/*.c
     - kernel/types/*.c
     - kernel/process.c
+    - kernel/mutex.c
     - kernel/bin/*.c
     - kernel/stack.c
     - kernel/print.c

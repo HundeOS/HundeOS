@@ -2,6 +2,8 @@
 #include "cpu.h"
 #include <unistd.h>
 
+#include "../../../kernel/all_defs.h"
+
 static CPUID cpu_id = 0;
 
 void reset_cpu_id()
@@ -32,6 +34,11 @@ void CPU__noop()
 void CPU__wait()
 {
 
+}
+
+uint64_t CPU__count()
+{
+    return MAX_CPUS;
 }
 
 void CPU__wait_for_interrupts()

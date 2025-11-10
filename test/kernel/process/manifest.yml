@@ -3,6 +3,7 @@ manifest:
     - kernel/process.c
     - kernel/address.c
     - kernel/print.c
+    - kernel/mutex.c
     - kernel/stack.c
     - kernel/bin/*.c
     - kernel/types/*.c

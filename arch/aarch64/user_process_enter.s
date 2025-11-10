@@ -1,3 +1,5 @@
+.include "arch/aarch64/asm_macros.inc"
+
 .global _user_process_enter
 _user_process_enter:
     // x0=arggc, x1=argv, x2=spsr, x3=sp, x4=page_table_phys, x5=entry_point

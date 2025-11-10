@@ -14,11 +14,13 @@ inline void write_ttbr1_el1(uint64_t v){ __asm__ volatile("msr ttbr1_el1, %0" ::
 inline uint64_t read_ttbr0_el1(void){ uint64_t v; __asm__ volatile("mrs %0, ttbr0_el1":"=r"(v)); return v; }
 inline uint64_t read_ttbr1_el1(void){ uint64_t v; __asm__ volatile("mrs %0, ttbr1_el1":"=r"(v)); return v; }
 
+
 inline uint64_t read_mair_el1(){ uint64_t v; __asm__ volatile("mrs %0, mair_el1" :"=r"(v)); return v; }
 inline void write_mair_el1(uint64_t v){ __asm__ volatile("msr mair_el1, %0" :: "r"(v)); }
 
 inline void write_elr_el1(uint64_t v){ __asm__ volatile("msr elr_el1, %0" :: "r"(v)); }
 
+inline uint64_t read_sp_el0() { uint64_t v; __asm__ volatile("mrs %0, sp_el0" : "=r"(v)); return v; }
 inline void write_sp_el0(uint64_t v) { __asm__ volatile("msr sp_el0, %0" :: "r"(v)); }
 inline void write_spsr_el1(uint64_t v) { __asm__ volatile("msr spsr_el1, %0" :: "r"(v)); }
 inline void write_spsr_el0(uint64_t v) { __asm__ volatile("msr spsr_el0, %0" :: "r"(v)); }

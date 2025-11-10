@@ -4,20 +4,29 @@
 #include "../../../kernel/types/fixed_array.h"
 
 
-FixedArrayDefine(ProcessPtr, 1024, ProcessArray, &Ptr__equals);
+FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessArray, &Ptr__equals);
 FixedArrayBodyDefine(ProcessArray);
 
 static ProcessArray started_processes = EmptyArray(ProcessArray);
 
-extern uint64_t Process__start(Process * self)
+void Process__start(Process * self)
 {
     ProcessArray__push(&started_processes, self);
-    return 100;
 }
 
 void reset_started_processes(void)
 {
     started_processes.len = 0;
+}
+
+void Process__context_switch(ProcessPtr self)
+{
+
+}
+
+void Process__save_context(ProcessPtr self, ProcessContextPtr context)
+{
+    self->context = context;
 }
 
 bool process_is_started(Process * proc)

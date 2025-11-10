@@ -69,4 +69,24 @@ typedef uint64_t Code;
     } \
 
 
+#define ___res_panic(message) \
+    Kernel__panic(message, NULL);
+
+
+#define ResultUnwrap(T, result, val_name, block) \
+    { \
+        T val_name; \
+        Result(T) __res = result; \
+        if(__res.error.success) \
+        { \
+            val_name = __res.success.val; \
+        } \
+        else \
+        { \
+            ___res_panic("Error, no value to unwrap"); \
+        } \
+        block; \
+    }
+
+
 #endif

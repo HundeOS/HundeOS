@@ -3,6 +3,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include "arch/cpu.h"
+#include "debug.h"
 
 typedef struct {
     volatile uint32_t v;
@@ -10,17 +11,33 @@ typedef struct {
 
 #define MUTEX_INIT (mutex_t){ .v = 0 }
 
-inline int mutex_trylock(mutex_t *m){
-    return __atomic_exchange_n(&m->v, 1u, __ATOMIC_ACQUIRE) == 0u;
-}
+int mutex_trylock(mutex_t *m);
+void mutex_lock(mutex_t *m);
+void mutex_unlock(mutex_t *m);
 
-inline void mutex_lock(mutex_t *m){
-    while (__atomic_exchange_n(&m->v, 1u, __ATOMIC_ACQUIRE) != 0u)
-        CPU__yield();
-}
+#define _cs_return\
+    mutex_unlock(__mutex); \
+    __d_printf(MUTEX, "Returning from critical_section %s:%i\n", __FILE__, __LINE__);\
+    return \
 
-inline void mutex_unlock(mutex_t *m){
-    __atomic_store_n(&m->v, 0u, __ATOMIC_RELEASE);
-}
+#define _cs_exit()\
+    goto __csexit; \
+
+#define _cs_exit_then(code)\
+    __d_printf(MUTEX, "Early exit from critical_section %s:%i\n", __FILE__, __LINE__);\
+    mutex_unlock(__mutex); \
+    code; \
+
+#define CriticalSection(m, block) \
+    { \
+        __d_printf(MUTEX, "Entering critical_section (%s) %s:%i\n", #m, __FILE__, __LINE__);\
+        mutex_t * __mutex = &m;\
+        mutex_lock(__mutex); \
+        __d_printf(MUTEX, "Obtained lock (%s) %s:%i \n", #m, __FILE__, __LINE__);\
+        block; \
+__csexit: \
+        mutex_unlock(__mutex); \
+        __d_printf(MUTEX, "Leaving critical_section (%s) %s:%i\n", #m, __FILE__, __LINE__);\
+    }
 
 #endif

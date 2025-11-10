@@ -15,9 +15,16 @@
  *  DAIF: 0 = unmask (enable) Debug/SError/IRQ/FIQ on entry
  *        set bits if you want them masked initially.
  */
-inline uint64_t Process__spsr_for_el0(unsigned daif_mask /*bits [9:6]*/) {
-    const uint64_t M_EL0t = 0x0ull;
-    return (0b000 << 6) | (0b00 << 2) | 0b0000 | M_EL0t | ((uint64_t)(daif_mask & 0xF) << 6);
+inline uint64_t Process__spsr_for_el0(unsigned mask_irqs /*bits [9:6]*/) {
+    uint64_t spsr = 0;
+    // EL0t mode (M[3:0] = 0b0000)
+    spsr |= (0b0000);
+    // Mask FIQ, IRQ, SError
+    spsr |= (1UL << 6) | (1UL << 7) | (1UL << 8);
+    // If you want to unmask IRQs for user processes, clear bit 7
+    if (!mask_irqs)
+        spsr &= ~(1UL << 7);
+    return spsr;
 }
 
 extern char __el0_entry[];
@@ -48,100 +55,100 @@ static UserAddress Process__el1_trampoline()
     };
 }
 
-ProcessContextPtr ProcessContext__init(StackPtr stack, UserAddress entry_point, KernelAddress page_table)
+ProcessContextPtr ProcessContext__init(ProcessID pid, StackPtr stack, UserAddress entry_point, KernelAddress page_table)
 {
-    ProcessContextPtr context = k_v_ptr(stack->top, ProcessContext);
+    KernelAddress context_addr = Kernel__alloc(sizeof(ProcessContext));
+    ProcessContextPtr context = v_ptr(context_addr, ProcessContext);
+
+    __d_printf(PROCESS, "ProcessContext init context=%p\n", context);
+
     context->sp = vaddr(stack->top);
 
     for (int i = 0; i < 31; i++)
     {
         context->x[i] = 0;
+    }
+    for (int i = 0; i < 32; i++)
+    {
         context->q[i] = 0;
     }
+    context->fpcr = 0;
+    context->fpsr = 0;
 
-    context->spsr = Process__spsr_for_el0(0);
+    // context->spsr = Process__spsr_for_el0(0);
+    context->spsr = 0x0;
 
     UserAddress trampoline = Process__el1_trampoline();
-    PageTable__map(v_ptr(page_table, PageTable),
-        trampoline,
-        PAGE_SIZE * 4);
+    PageTable__map(v_ptr(page_table, PageTable), trampoline, PAGE_SIZE * 4);
 
     context->elr = vaddr(trampoline);
 
     uint64_t argc = 0;
     char ** argv = NULL;
     context->x[0] = argc;
-    context->x[1] = (uint64_t) argv;
+    context->x[1] = (Anything) argv;
     context->x[8] = vaddr(entry_point);
 
     return context;
 }
 
-void Process__switch_context(ProcessContextPtr context)
-{
-
-}
+extern void asm_switch_context(Anything sp, Anything tbbr0);
 
 __attribute__((noreturn))
-void Process__enter_el0(Process * self,
-                        bool mask_irqs_on_entry)  // 1 => keep IRQs masked at EL0
+void Process__context_switch(ProcessPtr self)
 {
-    UserAddress trampoline = Process__el1_trampoline();
-    PageTable__map(v_ptr(self->page_table, PageTable),
-        trampoline,
-        PAGE_SIZE * 4);
+    ProcessContextPtr context = self->context;
 
-    uint64_t spsr = Process__spsr_for_el0(mask_irqs_on_entry ? 0b0111 : 0); // mask D,A,I if desired
-    uint64_t argc = 0;
-    char ** argv = NULL;
+    const char * name = cstr(self->name);
+    __d_printf(PROCESS, "Process context switch name=%s sp=%p tbbr0=%p spsr_el1=%x x0=%p x1=%p x8=%p elr=%p\n",
+        name,
+        self->context->sp,
+        paddr(self->page_table),
+        self->context->spsr,
+        self->context->x[0],
+        self->context->x[1],
+        self->context->x[8],
+        self->context->elr);
 
-    __d_printf(DEBUG,
-        "Process entering el0 sp=%p ep=%p pt=%p\n",
-        self->stack.top.virtual_addr,
-        self->entry_point.virtual_addr,
-        self->page_table.phys_addr);
-
-    __asm__ volatile(
-            "msr sp_el0, %0          \n"
-
-            // 2) install TTBR0_EL1 (process page table) + TLB maintenance
-            "dsb ishst               \n"
-            "msr ttbr0_el1, %1       \n"
-            "dsb ish                 \n"
-            "isb                     \n"
-            "tlbi vmalle1            \n"
-            "dsb ish                 \n"
-            "isb                     \n"
-
-            // 3) program ELR_EL1 with trampoline user entry VA
-            "msr elr_el1, %2         \n"
-
-            // 4) program SPSR_EL1 for EL0t
-            "msr spsr_el1, %3        \n"
-            "isb                     \n"
-
-            // 5) preload argument registers that EL0 code expects
-            "mov x8, %4              \n"
-            "mov x0, %5              \n"
-            "mov x1, %6              \n"
-            "msr daifclr, #0xf       \n" // unmask all exceptions
-            // 6) transition EL1->EL0t and start executing at ELR_EL1
-            "eret                    \n"
-            ::
-           "r"(vaddr(self->stack.top)),
-           "r"(paddr(self->page_table)),
-           "r"(vaddr(trampoline)),
-           "r"(spsr),
-           "r"(vaddr(self->entry_point)),
-           "r"(argc),
-           "r"(argv)
-           : "memory");
-    __d_println(PANIC, "Process exited");
+    Address base = addr(context);
+    __d_printf(PROCESS,
+        "ProcessContext offsets from context(%p) sp=%p x[0]=%p q[0]=%p elr=%p spsr=%p fpcr=%p fpsr=%p size=%p\n",
+        context,
+        addr(&context->sp) - base,
+        addr(&context->x) - base,
+        addr(&context->q) - base,
+        addr(&context->elr) - base,
+        addr(&context->spsr) - base,
+        addr(&context->fpcr) - base,
+        addr(&context->fpsr) - base,
+        sizeof(ProcessContext));
+    asm_switch_context((Anything)context, paddr(self->page_table));
     __builtin_unreachable();
 }
 
-uint64_t Process__start(Process * self) {
-    self->state = PROC_STATE_RUNNING;
+void Process__save_context(ProcessPtr self, ProcessContextPtr context)
+{
+    if (self->context == NULL)
+    {
+        Kernel__panic("Process context is NULL", context);
+    }
+    else if (self->state != PROC_STATE_RUNNING)
+    {
+        KString format = KString__new("Process not running state=%s pid=%i name=%s\n");
+        KString message = KString__sprintf(&format, ProcessState__to_string(self->state), self->pid, cstr(self->name));
+
+        Kernel__panic(cstr(message), context);
+    }
+    else
+    {
+        __d_printf(PROCESS, "Process context save self=%p context=%p %i %i\n", self->context, context, self->pid, context->x[20]);
+        *self->context = *context;
+    }
+}
+
+__attribute__((noreturn))
+void Process__start(ProcessPtr self)
+{
     __d_println(DEBUG, "Process entering el0");
-    Process__enter_el0(self, 0);
+    Process__context_switch(self);
 }

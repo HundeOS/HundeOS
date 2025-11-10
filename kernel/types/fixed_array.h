@@ -117,12 +117,10 @@ OptionalDef(ArrayIndex);
 #define FindResultOptional(alias) \
     _Optional(alias##__FindResult) \
 
-
 #define FindPreDefine(alias_name) \
     typedef bool(* alias_name##__predicate)(alias_name##__type_ptr value, void * context); \
     FindResultOptional(alias_name) alias_name##__find(alias_name * self, alias_name##__predicate predicate, void * context); \
     Optional(ArrayIndex) alias_name##__find_item(alias_name * self, alias_name##__type value); \
-
 
 #define FindDefine(alias_name) \
     FindResultOptional(alias_name) alias_name##__find(alias_name * self, alias_name##__predicate predicate, void * context) \
@@ -149,6 +147,32 @@ OptionalDef(ArrayIndex);
         return None(ArrayIndex);\
     }; \
 
+
+#define FilterPreDefine(alias_name) \
+alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predicate, void * context); \
+
+#define FilterDefine(alias_name) \
+alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predicate, void * context) \
+{ \
+    alias_name result = alias_name##__new();\
+    for (int i = 0; i < self->len; i++) \
+    { \
+        alias_name##__type_ptr val = &self->data[i];\
+        if (predicate(val, context))\
+        { \
+            alias_name##__push(&result, *val);\
+        } \
+    } \
+    return result;\
+} \
+
+#define LenPreDefine(alias_name) size_t alias_name##__len(alias_name * self);
+
+#define LenDefine(alias_name) \
+    size_t alias_name##__len(alias_name * self) \
+    { \
+        return self->len;\
+    } \
 
 #define AtPreDefine(alias_name) \
     FAOptional(alias_name) alias_name##__at(alias_name * self, uint64_t index); \
@@ -210,6 +234,107 @@ OptionalDef(ArrayIndex);
       return Success(ArrayCode, 0); \
     } \
 
+#define SortPreDefine(alias_name) \
+    typedef int (* alias_name##__Comparator)(alias_name##__type_ptr a, alias_name##__type_ptr b); \
+    alias_name alias_name##__sort_desc(alias_name * self, alias_name##__Comparator compare);\
+    alias_name alias_name##__sort_asc(alias_name * self, alias_name##__Comparator compare);
+
+#define SortDefine(alias_name) \
+    alias_name alias_name##__sort_desc(alias_name * self, alias_name##__Comparator compare) \
+    { \
+        alias_name result = alias_name##__new(); \
+        \
+        if (self->len == 0) \
+        { \
+            return result;\
+        } \
+        for (int iter = 0; iter < self->len; iter++)\
+        { \
+            alias_name##__type largest; \
+            for (int pos = 0; pos < self->len; pos++) \
+            { \
+                alias_name##__type val = self->data[pos];\
+                if (iter == 0) \
+                { \
+                    if (pos == 0) \
+                    { \
+                        largest = val;\
+                    } \
+                    else \
+                    { \
+                        if (compare(&val, &largest) > 0) \
+                        { \
+                            largest = val;\
+                        } \
+                    } \
+                } \
+                else \
+                { \
+                    if (compare(&result.data[iter - 1], &largest) <= 0)\
+                    { \
+                        largest = val;\
+                    } \
+                    if (compare(&result.data[iter - 1], &val) > 0)\
+                    {\
+                        if (compare(&val, &largest) > 0)\
+                        { \
+                            largest = val; \
+                        } \
+                    }\
+                } \
+            End \
+            alias_name##__push(&result, largest); \
+        } \
+        return result;\
+    } \
+    \
+    alias_name alias_name##__sort_asc(alias_name * self, alias_name##__Comparator compare) \
+    { \
+        alias_name result = alias_name##__new(); \
+        if (self->len == 0) \
+        { \
+            return result;\
+        } \
+        for (int iter = 0; iter < self->len; iter++)\
+        { \
+            alias_name##__type smallest; \
+            for (int pos = 0; pos < self->len; pos++) \
+            { \
+                alias_name##__type val = self->data[pos];\
+                if (iter == 0) \
+                { \
+                    if (pos == 0) \
+                    { \
+                        smallest = val;\
+                    } \
+                    else \
+                    { \
+                        if (compare(&val, &smallest) < 0) \
+                        { \
+                            smallest = val;\
+                        } \
+                    } \
+                } \
+                else \
+                { \
+                    if (compare(&result.data[iter - 1], &smallest) >= 0)\
+                    { \
+                        smallest = val;\
+                    } \
+                    if (compare(&result.data[iter - 1], &val) < 0)\
+                    {\
+                        if (compare(&val, &smallest) < 0)\
+                        { \
+                            smallest = val; \
+                        } \
+                    }\
+                } \
+            End \
+            alias_name##__push(&result, smallest); \
+        } \
+        return result;\
+    } \
+
 #define FixedArrayDefine(type, size, alias_name, equals) \
     AliasOptional(type, alias_name##__optional) \
     \
@@ -232,29 +357,33 @@ OptionalDef(ArrayIndex);
     \
     static const type alias_name##__EMPTY; \
     \
-    typedef struct FixedArray(type, size) \
+    typedef struct alias_name \
     { \
         uint64_t len;\
         uint64_t max; \
         type data[size]; \
-    } FixedArray(type, size); \
-    \
-    typedef FixedArray(type, size) alias_name; \
+    } alias_name; \
     \
     ConstructorPreDefine(alias_name) \
+    LenPreDefine(alias_name) \
     AtPreDefine(alias_name) \
     PushPreDefine(alias_name) \
     SetPreDefine(alias_name) \
     FindPreDefine(alias_name) \
     RemovePreDefine(alias_name) \
+    SortPreDefine(alias_name) \
+    FilterPreDefine(alias_name) \
 
 #define FixedArrayBodyDefine(alias_name) \
     ConstructorDefine(alias_name) \
+    LenDefine(alias_name) \
     AtDefine(alias_name) \
     PushDefine(alias_name) \
     SetDefine(alias_name) \
     FindDefine(alias_name) \
     RemoveDefine(alias_name) \
+    SortDefine(alias_name) \
+    FilterDefine(alias_name) \
 
 #define EmptyArray(alias_name) (alias_name) { \
     .len = 0, \

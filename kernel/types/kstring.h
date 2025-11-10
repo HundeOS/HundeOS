@@ -29,4 +29,10 @@ const char * KString__cstr(KStringPtr str);
         .data[0] = 0 \
     } \
 
+#define cstr(kstr) \
+    KString__cstr(&kstr)
+
+#define cstr_p(kstrptr) \
+    KString__cstr(kstrptr)
+
 #endif

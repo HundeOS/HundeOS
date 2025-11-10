@@ -1,4 +1,8 @@
 #include <stdint.h>
+#include <stdint.h>
+#include <stdint.h>
+#include <stdint.h>
+#include <stdint.h>
 
 #include "unity.h"
 
@@ -61,6 +65,28 @@ bool predicate_str(KStringPtr value, void * context)
 }
 
 void test_fixed_array_find(void)
+{
+    TestType val = 10;
+    TestStringArray array = TestStringArray__new();
+    KString format = kstring("hello %i");
+    for (int i = 0; i < TEST_ARRAY_SIZE; i++)
+    {
+        TestStringArray__push(&array, KString__sprintf(&format, i));
+    }
+
+    KString match = kstring("hello 10");
+
+    FindResultMatch(TestStringArray, TestStringArray__find(&array, &predicate_str, &match));
+        IsNone(TEST_FAIL());
+        IsSome(found,
+        {
+            TEST_ASSERT_EQUAL(10, found.index);
+            TEST_ASSERT_TRUE(KString__equals(&match, found.value));
+        });
+    End
+}
+
+void test_fixed_array_sort(void)
 {
     TestType val = 10;
     TestStringArray array = TestStringArray__new();
@@ -201,5 +227,84 @@ void test__set_out_of_bounds(void)
     ResultMatch(ArrayCode, TestArray__set(&array, TEST_ARRAY_SIZE,val));
         IsError(code, message, TEST_ASSERT_EQUAL_INT(ARRAY_OUT_OF_BOUNDS, code));
         IsSuccess(_, TEST_FAIL());
+    End
+}
+
+int compare_uint64(uint64_t * a, uint64_t * b)
+{
+    return *a - *b;
+}
+
+void test_sort_desc(void)
+{
+    TestArray array = TestArray__new();
+    for (int i = 0; i < 10; i++)
+    {
+        TestArray__push(&array, i);
+    }
+    TestArray sorted = TestArray__sort_desc(&array, compare_uint64);
+
+    FAIterate(TestArray, sorted, index, value)
+        TEST_ASSERT_EQUAL_INT(9 - index, value);
+    End
+}
+
+void test_sort_desc_single_item(void)
+{
+    TestArray array = TestArray__new();
+    TestArray__push(&array, 0);
+    TestArray sorted = TestArray__sort_desc(&array, compare_uint64);
+
+    TEST_ASSERT_EQUAL(1, TestArray__len(&sorted));
+    FAIterate(TestArray, sorted, index, value)
+        TEST_ASSERT_EQUAL_INT(0, value);
+    End
+}
+
+void test_sort_asc(void)
+{
+    TestArray array = TestArray__new();
+    for (int i = 10; i > 0; i--)
+    {
+        TestArray__push(&array, i);
+    }
+    TestArray sorted = TestArray__sort_asc(&array, compare_uint64);
+
+    FAIterate(TestArray, sorted, index, value)
+        TEST_ASSERT_EQUAL_INT(1 + index, value);
+    End
+}
+
+void test_sort_asc_single_item(void)
+{
+    TestArray array = TestArray__new();
+    TestArray__push(&array, 0);
+
+    TestArray sorted = TestArray__sort_asc(&array, compare_uint64);
+
+    TEST_ASSERT_EQUAL(1, TestArray__len(&sorted));
+    FAIterate(TestArray, sorted, index, value)
+        TEST_ASSERT_EQUAL_INT(0, value);
+    End
+}
+
+bool greater_than(uint64_t * a, void * b)
+{
+    return *a > *(uint64_t *)b;
+}
+
+void test_filter(void)
+{
+    uint64_t five = 5;
+    TestArray array = TestArray__new();
+    for (int i = 0; i < 10; i++)
+    {
+        TestArray__push(&array, i);
+    }
+
+    TestArray filtered = TestArray__filter(&array, greater_than, &five);
+    TEST_ASSERT_EQUAL(4, TestArray__len(&filtered));
+    FAIterate(TestArray, filtered, index, value)
+        TEST_ASSERT(value > 5);
     End
 }

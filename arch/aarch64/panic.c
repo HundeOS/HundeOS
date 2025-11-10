@@ -45,3 +45,10 @@ void Kernel__dump_state(ProcessContext * ctx) {
         __d_println(FAULT, "No context provided");
     }
 }
+
+void Kernel__dump_context(ProcessContext * ctx) {
+    __d_printf(FAULT, "Context: %p\n", ctx);
+    __d_printf(FAULT, "PC: %p\n", ctx->elr);
+    __d_printf(FAULT, "SP: %p\n", ctx->sp);
+    __d_printf(FAULT, "PSTATE: %p\n", ctx->spsr);
+}

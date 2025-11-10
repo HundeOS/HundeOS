@@ -1,6 +1,8 @@
 #ifndef __KERNEL_TYPES_OPTIONAL_H
 #define __KERNEL_TYPES_OPTIONAL_H
 #include "../debug.h"
+#include "../panic.h"
+#include <stdbool.h>
 
 #define _Optional(alias) \
     Optional__##alias \
@@ -67,6 +69,12 @@
 #define End \
 } \
 
+#define is_something(optional) \
+    optional.some.present
+
+#define is_nothing(optional) \
+    !optional.none.present
+
 #define IsSome(val_name, block) \
     if (optional.some.present) \
     { \
@@ -79,5 +87,20 @@
     { \
         block; \
     } \
+
+inline int ___opt_panic(const char * message)
+{
+    Kernel__panic(message, NULL);
+    return 0;
+}
+
+
+
+#define UnwrapPanic(T, opt) \
+    opt.some.present ? opt.some.val : ___opt_panic("No value to unwrap")\
+
+
+#define Unwrap(T, opt, alternate_val) \
+        opt.some.present ? opt.some.val : alternate_val;\
 
 #endif

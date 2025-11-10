@@ -2,10 +2,9 @@
 #define __KERNEL_ARCH_HALT_H
 
 #include "process.h"
-// typedef struct exception_context_t exception_context_t;
 
 extern void Kernel__halt();
 extern void Kernel__halt_all();
 extern void Kernel__dump_state(ProcessContext * ctx);
-
+extern void Kernel__dump_context(ProcessContext * ctx);
 #endif

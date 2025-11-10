@@ -1,7 +1,7 @@
 #include <stdlib.h>
-#include <stdbool.h>
 #include "unity.h"
-#include "../../../kernel/arch/panic.h"
+#include "../../../kernel/arch/process.h"
+#include <stdbool.h>
 
 static bool panic_state = false;
 

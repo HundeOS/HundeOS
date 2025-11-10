@@ -2,3 +2,4 @@ manifest:
   source_files:
     - kernel/types/*.c
     - kernel/print.c
+    - kernel/mutex.c

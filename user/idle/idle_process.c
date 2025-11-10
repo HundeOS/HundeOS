@@ -1,7 +1,12 @@
+#include <stdbool.h>
+#include "../arch/wait.h"
+#include "../user.h"
+
 int main(void)
 {
     while(true)
     {
-        __asm__("wfi");
+        // print("reenter idle\n");
+        wait_for_interrupt();
     }
 }

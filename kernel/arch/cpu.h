@@ -7,6 +7,9 @@
 #include "../types/result.h"
 
 typedef uint64_t CPUID;
+
+ResultDef(CPUID);
+
 typedef struct CPU CPU;
 
 extern CPUID CPU__id();
