@@ -2,6 +2,7 @@
 #include "../stubs/panic.h"
 #include "../stubs/cpu.h"
 #include "../stubs/process.h"
+#include "../fixtures/process.h"
 #include "../../../kernel/process.h"
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/scheduler/scheduler.h"
@@ -42,6 +43,47 @@ void test_scheduler_interrupt_when_no_processes_are_running_stays_in_idle(void)
     TEST_ASSERT_EQUAL(current_running_process(), idle);
 }
 
+void test_all_processes_when_processes_are_scheduled()
+{
+    ProcessPtr proc1 = dummy_process(1, 1, PROC_STATE_READY);
+    ProcessPtr proc2 = dummy_process(2, 1, PROC_STATE_READY);
+    ProcessPtr proc3 = dummy_process(3, 1, PROC_STATE_READY);
+
+    Scheduler__start(scheduler, 1);
+    Scheduler__schedule(scheduler, proc1);
+    Scheduler__schedule(scheduler, proc2);
+    Scheduler__schedule(scheduler, proc3);
+
+    ProcessTablePtr processes = Scheduler__all_processes(scheduler, 1);
+
+    TEST_ASSERT_EQUAL(3, ProcessTable__len(processes));
+    Match(ArrayIndex, ProcessTable__find_item(processes, proc1))
+        IsNone(TEST_FAIL())
+    End
+    Match(ArrayIndex, ProcessTable__find_item(processes, proc2))
+        IsNone(TEST_FAIL())
+    End
+    Match(ArrayIndex, ProcessTable__find_item(processes, proc3))
+        IsNone(TEST_FAIL())
+    End
+
+}
+
+void test_all_processes_when_processes_are_scheduled_on_different_cpu()
+{
+    ProcessPtr proc1 = dummy_process(1, 1, PROC_STATE_READY);
+    ProcessPtr proc2 = dummy_process(2, 1, PROC_STATE_READY);
+    ProcessPtr proc3 = dummy_process(3, 1, PROC_STATE_READY);
+
+    Scheduler__start(scheduler, 1);
+    Scheduler__schedule(scheduler, proc1);
+    Scheduler__schedule(scheduler, proc2);
+    Scheduler__schedule(scheduler, proc3);
+
+    ProcessTablePtr processes = Scheduler__all_processes(scheduler, 2);
+
+    TEST_ASSERT_EQUAL(0, ProcessTable__len(processes));
+}
 
 void test_scheduler_save_context_to_current_process(void)
 {
@@ -62,21 +104,79 @@ void test_scheduler_save_context_to_current_process(void)
     End
 }
 
-ProcessPtr dummy_process(Tick last_tick, CPUID cpu, ProcessState state)
+void test_scheduler_exit_removes_process_when_its_current(void)
 {
-    ElfPtr hello_world = EmbeddedElf__load("hello_world");
-    ResultMatch(ProcessPtr, Process__setup(hello_world))
-        IsSuccess(process,
-        {
-            process->last_tick = last_tick;
-            process->pid = last_tick * MAX_CPUS + cpu;
-            process->state = state;
+    ProcessPtr proc = dummy_process(1, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, context);
 
-            return process;
-        });
-        IsError(code, message, TEST_FAIL())
+    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
+
+    ResultMatch(ProcessPtr, Scheduler__exit(scheduler, proc))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(exited,
+        {
+            TEST_ASSERT_EQUAL(proc, exited);
+            TEST_ASSERT_EQUAL(PROC_STATE_DEAD, exited->state);
+        })
     End
-    return NULL;
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(idle, current);
+        })
+    End
+
+    ProcessTablePtr processes = Scheduler__all_processes(scheduler, cpu_id);
+
+    TEST_ASSERT_EQUAL(0, ProcessTable__len(processes));
+}
+
+void test_scheduler_exit_removes_process_when_its_not_current(void)
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessPtr other_proc = dummy_process(0, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__schedule(scheduler, other_proc);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(current, other_proc);
+        })
+    End
+
+
+    ResultMatch(ProcessPtr, Scheduler__exit(scheduler, proc))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(exited,
+        {
+            TEST_ASSERT_EQUAL(proc, exited);
+            TEST_ASSERT_EQUAL(PROC_STATE_DEAD, exited->state);
+        })
+    End
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(other_proc, current);
+        })
+    End
+
+    ProcessTablePtr processes = Scheduler__all_processes(scheduler, cpu_id);
+
+    TEST_ASSERT_EQUAL(1, ProcessTable__len(processes));
 }
 
 void test_scheduler_preempt_when_idle_with_a_process_ready(void)

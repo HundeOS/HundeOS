@@ -44,7 +44,6 @@ OptionalDef(Handler);
 ResultDef(Handler);
 FixedArrayDefine(Handler, 256, Handlers, &Ptr__equals);
 
-
 typedef struct SyscallDispatcher
 {
     Handlers handlers;

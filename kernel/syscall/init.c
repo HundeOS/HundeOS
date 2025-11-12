@@ -24,18 +24,19 @@
 
 Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
 {
-    __d_println(DEBUG, "Init__syscalls()");
-    mutex_lock(&self->init_lock);
-    __d_println(DEBUG, "Init__syscalls() - doing");
-    if (!self->init_done)
+    __d_println(SYSCALL, "Init__syscalls()");
+    CriticalSection(self->init_lock,
     {
-        REGISTER(self, PRINT, &Print__handler);
-        REGISTER(self, PING, &Ping__handler);
-        REGISTER(self, PROC_EXIT, &Exit__handler);
-        REGISTER(self, IO_CALL, &IO__handler);
-        self->init_done = true;
-        __d_println(DEBUG, "Init__syscalls() - done ok");
-    }
-    mutex_unlock(&self->init_lock);
+        __d_println(DEBUG, "Init__syscalls() - doing");
+        if (!self->init_done)
+        {
+            REGISTER(self, PRINT, &Print__handler);
+            REGISTER(self, PING, &Ping__handler);
+            REGISTER(self, PROC_EXIT, &Exit__handler);
+            REGISTER(self, IO_CALL, &IO__handler);
+            self->init_done = true;
+            __d_println(SYSCALL, "Init__syscalls() - done ok");
+        }
+    });
     return Success(RegisterResult, REGISTER_OK);
 }

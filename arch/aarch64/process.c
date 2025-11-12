@@ -139,9 +139,13 @@ void Process__save_context(ProcessPtr self, ProcessContextPtr context)
 
         Kernel__panic(cstr(message), context);
     }
+    else if (context != NULL)
+    {
+        __d_printf(PROCESS, "Process context save self=%p context=%p %i\n", self->context, context, self->pid);
+        *self->context = *context;
+    }
     else
     {
-        __d_printf(PROCESS, "Process context save self=%p context=%p %i %i\n", self->context, context, self->pid, context->x[20]);
-        *self->context = *context;
+        __d_printf(PROCESS, "Process context ignoring save self=%p context=NULL %i\n", self->context, self->pid);
     }
 }

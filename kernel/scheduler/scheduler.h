@@ -23,7 +23,8 @@ typedef enum SchedulerErrors
 {
     SCHEDULER_INVALID_CPU = -1,
     SCHEDULER_GENERAL_ERROR = -2,
-    SCHEDULER_NOT_STARTED = -3
+    SCHEDULER_NOT_STARTED = -3,
+    SCHEDULER_PROCESS_NOT_FOUND = -4,
 } SchedulerErrors;
 
 typedef struct CPUScheduler
@@ -58,10 +59,12 @@ SchedulerPtr Scheduler__heap_new();
 
 Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, ElfPtr idle_process);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
+Result(ProcessPtr) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc);
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
-
 Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);
+ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
+
 Optional(ProcessPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 
 Result(CPUID) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc);

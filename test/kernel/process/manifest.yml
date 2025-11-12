@@ -1,9 +1,9 @@
 manifest:
   source_files:
     - kernel/process.c
+    - kernel/bin/*.c
     - kernel/address.c
     - kernel/print.c
     - kernel/mutex.c
     - kernel/stack.c
-    - kernel/bin/*.c
     - kernel/types/*.c

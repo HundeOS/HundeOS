@@ -75,6 +75,26 @@ Optional(ProcessPtr) CPUScheduler__current_process(CPUSchedulerPtr self)
     return None(ProcessPtr);
 }
 
+Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
+{
+    __d_printf(SCHEDULER, "CPUScheduler__exit %s\n", cstr(proc->name));
+    CriticalSection(self->scheduler_lock,
+    {
+        Optional(ProcessPtr) current = CPUScheduler__current_process(self);
+        ResultMatch(ArrayCode, ProcessTable__remove(&self->processes, proc))
+            IsError(code, message,
+            {
+                _cs_return Error(ProcessPtr, kstring("process not found"), SCHEDULER_PROCESS_NOT_FOUND);
+            })
+            IsSuccess(process_index,
+            {
+                proc->state = PROC_STATE_DEAD;
+                _cs_return Success(ProcessPtr, proc);
+            })
+        End
+    });
+}
+
 Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, ProcessContextPtr context)
 {
     ProcessState ready_state = PROC_STATE_READY | PROC_STATE_INTERRUPTED;
@@ -148,6 +168,41 @@ void CPUScheduler__start(CPUSchedulerPtr self)
     ContextSwitch context_switch = ContextSwitch__new(self->idle_process, None(ProcessPtr));
     ContextSwitch__switch(Some(ContextSwitch, context_switch));
 }
+
+ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu)
+{
+    Match(CPUSchedulerPtr, CPUSchedulers__at(&self->schedulers, cpu))
+        IsSome(scheduler,
+        {
+            return &scheduler->processes;
+        });
+    End
+}
+
+Result(ProcessPtr) Scheduler__exit(SchedulerPtr self, ProcessPtr proc)
+{
+    FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+        Result(ProcessPtr) res = CPUScheduler__exit(sched, proc);
+        ResultMatch(ProcessPtr, res)
+            IsSuccess(exited,
+            {
+                Optional(ProcessPtr) current_for_cpu = CPUScheduler__current_process(sched);
+
+                Match(ProcessPtr, current_for_cpu)
+                    IsNone(Scheduler__preempt(self, cpu, NULL));
+                End
+
+                return res;
+            });
+        End
+    End
+
+
+    KString no_scheduler_format = kstring("Process not found: %i\n");
+    KString no_scheduler = KString__sprintf(&no_scheduler_format, proc->pid);
+    return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
 
 Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, ElfPtr idle_process)
 {

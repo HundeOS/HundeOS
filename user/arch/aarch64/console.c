@@ -4,10 +4,13 @@
 
 #include "io.h"
 #include "exit.h"
+#include "../../user.h"
 
 extern void print(const char * str);
 
 static IOHandle console_handle = 0;
+
+const size_t BUFFER_SIZE = 1024;
 
 ByteCount console_input(char * buf, size_t size)
 {
@@ -34,4 +37,27 @@ ByteCount console_input(char * buf, size_t size)
         buf[res] = '\0';
     }
     return res;
+}
+
+ByteCount console_read_line(char * buf, bool echo, size_t size)
+{
+    ByteCount read = 0;
+    size_t size_with_term_space = size - 1;
+    for (int i = 0; i < size_with_term_space; i+= read)
+    {
+        read = console_input(&buf[i], size);
+        if (echo)
+        {
+            for (int ch = 0; ch < read; ch++)
+            {
+                print(&buf[i + ch]);
+            }
+        }
+        if (buf[i] == '\n' || buf[i] == '\r')
+        {
+            buf[i] = '\0';
+            break;
+        }
+    }
+    return read;
 }

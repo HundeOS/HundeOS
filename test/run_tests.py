@@ -20,7 +20,7 @@ UNITY = {unity_path}
 CFLAGS = -c -O2 -Wall -Wextra -mno-outline-atomics -I{kernel_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE)
 
 # Assembler flags
-ASFLAGS = -c -O2 -Wall -Wextra -nostdlib -latomic -I{stubs_dir}
+ASFLAGS = -c -O2 -Wall -Wextra -nostdlib -latomic -I{stubs_dir} -I{fixtures_dir}
 
 # Linker flags
 LDFLAGS =
@@ -127,7 +127,9 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
         source_files = manifest["manifest"]["source_files"]
         test_dir_relative_script = os.path.join(test_dir, project_dir)
         stubs_dir = os.path.join("kernel", "stubs")
+        fixtures_dir = os.path.join("kernel", "fixtures")
         stubs_dir_relative = os.path.join(relative_base, stubs_dir)
+        fixtures_dir_relative = os.path.join(relative_base, fixtures_dir)
 
         source_expanded = [f"{project_dir}/{expand[len(test_dir_relative_script) + 1:]}"
                            for file in source_files
@@ -140,6 +142,10 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                          for expand in glob.glob(os.path.join(stubs_dir, "*.c"))]
         stubs_asm_files = [f"{relative_base}/{expand}"
                            for expand in glob.glob(os.path.join(stubs_dir, "*.s"))]
+        fixtures_c_files = [f"{relative_base}/{expand}"
+                            for expand in glob.glob(os.path.join(fixtures_dir, "*.c"))]
+        fixtures_asm_files = [f"{relative_base}/{expand}"
+                              for expand in glob.glob(os.path.join(fixtures_dir, "*.s"))]
 
         source_c_files = [file
                           for file
@@ -164,6 +170,13 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                                  for file
                                  in stubs_asm_files]
 
+        fixtures_dir_c_objects = [os.path.join(build_dir, file.replace(".c", ".o"))
+                                  for file
+                                  in fixtures_c_files]
+        fixtures_dir_asm_objects = [os.path.join(build_dir, file.replace(".s", ".o"))
+                                    for file
+                                    in fixtures_asm_files]
+
         test_dep_c_objects = [os.path.join(build_dir, file.replace(".c", ".o"))
                               for file
                               in test_dir_c_files
@@ -179,12 +192,20 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
 
             makefile.write(TEMPLATE.format(c_sources=join(test_dir_c_files),
                                            asm_sources=join(test_dir_asm_files),
-                                           kernel_sources=join([*source_c_files, *stubs_c_files]),
-                                           kernel_asm_sources=join([*source_asm_files, *stubs_asm_files]),
+                                           kernel_sources=join([*source_c_files,
+                                                                *stubs_c_files,
+                                                                *fixtures_c_files]),
+                                           kernel_asm_sources=join([*source_asm_files,
+                                                                    *stubs_asm_files,
+                                                                    *fixtures_asm_files]),
                                            c_objects=join(test_dep_c_objects),
                                            asm_objects=join(test_dep_asm_objects),
-                                           kernel_objects=join([*c_objects, *stubs_dir_c_objects]),
-                                           kernel_asm_objects=join([*asm_objects, *stubs_dir_asm_objects]),
+                                           kernel_objects=join([*c_objects,
+                                                                *stubs_dir_c_objects,
+                                                                *fixtures_dir_c_objects]),
+                                           kernel_asm_objects=join([*asm_objects,
+                                                                    *stubs_dir_asm_objects,
+                                                                    *fixtures_dir_asm_objects]),
                                            unity_path=unity_path,
                                            test=os.path.basename(test_dir),
                                            kernel_dir=kernel_dir,
@@ -192,6 +213,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                                            build_dir=build_dir,
                                            test_base=relative_base,
                                            stubs_dir=stubs_dir_relative,
+                                           fixtures_dir=fixtures_dir_relative,
                                            runner_bins=join(runner_bins),
                                            runner_tasks="\n".join(runner_tasks)))
 

@@ -30,14 +30,14 @@ void __kernel_panic(KernelPtr self, KStringPtr message)
 void PanicOnError(Result(SubsystemInitStatus) res, KernelPtr kernel, KStringPtr progress_message)
 {
     ResultMatch(SubsystemInitStatus, res);
-    IsError(code, message,
-    {
-        __kernel_panic(kernel, &message);
-    });
-    IsSuccess(_,
-    {
-        __d_println(PROGRESS, KString__cstr(progress_message));
-    });
+        IsError(code, message,
+        {
+            __kernel_panic(kernel, &message);
+        });
+        IsSuccess(_,
+        {
+            __d_println(PROGRESS, KString__cstr(progress_message));
+        });
     End
 }
 

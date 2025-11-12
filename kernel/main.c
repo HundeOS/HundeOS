@@ -61,15 +61,13 @@ void Kernel_main(CPUID cpu_id) {
     __d_printf(PROGRESS, "Kernel starting loading program: %i\n", cpu_id);
 
     schedule(&kernel->scheduler, "shell");
-    schedule(&kernel->scheduler, "hello_world");
 
     __d_printf(PROGRESS, "CPU entering main: %i\n", cpu_id);
-    CPUTimer__start(10);
+    CPUTimer__start(1000);
     __d_printf(PROGRESS, "Timer started: %i\n", cpu_id);
 
-    // Process__spawn_from_elf(program);
-
     __d_printf(PROGRESS, "Kernel starting scheduler: %i\n", cpu_id);
+
     // starts the idle process and wont return
     Scheduler__start(&kernel->scheduler, cpu_id - 1);
 
