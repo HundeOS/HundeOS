@@ -2,7 +2,8 @@
 #define __KERNEL_SUBSYSTEMS_IO_IO_H
 #include <stdint.h>
 
-#include "../../types/ring_buffer.h"
+#include "types.h"
+#include "../../scheduler/kernel_context.h"
 
 #include "../../types/fixed_array.h"
 #include "../../types/comparison.h"
@@ -12,48 +13,51 @@
 #include "../../all_defs.h"
 
 
-#define _4_MEGS 4194304
-
-typedef uint8_t Data;
-typedef Data * DataPtr;
-
-typedef uint64_t IOHandle;
-typedef uint32_t IOInternalHandle;
-typedef uint32_t DeviceHandle;
-typedef uint64_t Flags;
-typedef size_t ByteCount;
-
 typedef struct IO IO;
 typedef IO * IOPtr;
 
-ResultDef(IOHandle);
-ResultDef(IOInternalHandle);
-ResultDef(DeviceHandle);
-ResultDef(ByteCount);
+typedef struct IOSubsystem IOSubsystem;
+typedef IOSubsystem * IOSubsystemPtr;
 
-OptionalDef(IOHandle);
-OptionalDef(IOInternalHandle);
-OptionalDef(DeviceHandle);
 OptionalDef(IOPtr);
-
-FixedArrayDefine(IOHandle, MAX_HANDLES_PER_DEVICE, IOHandleArray, SimpleEquals(uint64_t));
-RingBufferDefine(_4_MEGS, IOBuffer);
-
-typedef IOBuffer * IOBufferPtr;
-ResultDef(IOBufferPtr);
 
 typedef struct IOState
 {
     IOHandleArray handles;
-} IOState;
+}
+IOState;
 
 typedef IOState * IOStatePtr;
 
+typedef enum ParkStatus
+{
+    IO_PARK_OK = 0,
+    IO_UNPARK_OK = 1,
+}
+ParkStatus;
+
+ResultDef(ParkStatus);
+
+typedef struct IOContext
+{
+    // inheritance, keep this in first pos
+    KernelContext kernel_context;
+    IOSubsystemPtr io_subsystem;
+    ProcessPtr proc;
+    IOHandle handle;
+    DataPtr buffer;
+    size_t size;
+} IOContext;
+
+OptionalDef(IOContext);
+ResultDef(IOContext);
 
 typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr state, KString path, Flags flags);
 typedef Result(IOInternalHandle) (* IO_close)(IOStatePtr state, IOInternalHandle handle);
 typedef Result(IOBufferPtr) (* IO_read)(IOStatePtr state, IOInternalHandle handle, size_t size);
 typedef Result(ByteCount) (* IO_write)(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size);
+typedef Result(ParkStatus)(* IO_park)(IOStatePtr state, IOContext parked_context);
+typedef Result(ParkStatus)(* IO_unpark)(IOStatePtr state);
 
 typedef struct IO
 {
@@ -61,6 +65,8 @@ typedef struct IO
     IO_read read;
     IO_write write;
     IO_close close;
+    IO_park park;
+    IO_unpark unpark;
 } IO;
 
 OptionalDef(IO);
@@ -73,6 +79,7 @@ typedef enum IOStatus
     IO_REGISTER_FAILED = -2,
     IO_NOT_OPEN = -3,
     IO_UNKNOWN_HANDLE = -4,
+    IO_WAIT_FOR_DATA = -5,
 } IOStatus;
 
 typedef struct DeviceRegistration

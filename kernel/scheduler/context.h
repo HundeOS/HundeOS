@@ -11,8 +11,8 @@ typedef struct ContextSwitch
 
 OptionalDef(ContextSwitch);
 
+
 void ContextSwitch__switch(Optional(ContextSwitch) self_opt);
 ContextSwitch ContextSwitch__new(ProcessPtr new_proc, Optional(ProcessPtr) old_proc);
-
 
 #endif

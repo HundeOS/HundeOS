@@ -3,11 +3,12 @@
 
 #include <stdint.h>
 
-#include "../types/types.h"
 #include "../types/result.h"
 #include "../types/fixed_array.h"
-#include "../process.h"
 #include "context.h"
+#include "kernel_context.h"
+#include "parked.h"
+#include "../process.h"
 
 typedef uint64_t SchedulerInitStatus;
 
@@ -60,6 +61,11 @@ SchedulerPtr Scheduler__heap_new();
 Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, ElfPtr idle_process);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 Result(ProcessPtr) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc);
+
+Result(ProcessPtr) Scheduler__park(
+        SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, Optional(Continuation) kernel_continuation
+    );
+Result(ProcessPtr) Scheduler__unpark(SchedulerPtr self, ProcessPtr proc);
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);

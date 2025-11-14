@@ -3,17 +3,22 @@
 
 #include <stdint.h>
 
-#include "arch/page_table.h"
 #include "bin/elf.h"
 #include "all_defs.h"
 #include "stack.h"
-#include "subsystems/io/io.h"
+#include "subsystems/io/types.h"
 #include "types/comparison.h"
 
 FixedArrayDefine(IOHandle, MAX_HANDLES_PER_PROCESS, ProcessHandles, SimpleEquals(uint64_t));
 
 typedef struct ProcessContext ProcessContext;
 typedef struct ProcessContext * ProcessContextPtr;
+
+typedef struct ParkedKernelContext ParkedKernelContext;
+typedef ParkedKernelContext * ParkedKernelContextPtr;
+
+OptionalDef(ParkedKernelContextPtr);
+ResultDef(ParkedKernelContextPtr);
 
 typedef uint64_t ProcessID;
 typedef uint64_t ProcessState;
@@ -34,6 +39,11 @@ typedef enum ProcessStates{
     PROC_STATE_DEAD              = 0b1000000, // Being destroyed
     PROC_STATE_SWITCHING_CONTEXT = 0b0100100, // Switching context
 } ProcessStates;
+
+typedef enum ProcessErrors
+{
+    PROC_ERROR_NO_PARKED = -1,
+} ProcessErrors;
 
 inline const char * ProcessState__to_string(ProcessState state)
 {
@@ -62,13 +72,11 @@ inline const char * ProcessState__to_string(ProcessState state)
     }
 }
 
-
 typedef enum ProcessSetupStatus
 {
     PROCESS_FAILED_TO_SETUP = -1,
     PROCESS_SETUP = 0,
 } ProcessSetupStatus;
-
 
 typedef struct Process {
     KernelAddress page_table;
@@ -82,6 +90,7 @@ typedef struct Process {
     ProcessHandles handles;
     Tick last_tick;
     KString name;
+    Optional(ParkedKernelContextPtr) parked_context;
 } Process;
 
 typedef Process * ProcessPtr;
@@ -96,5 +105,7 @@ FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 OptionalType(ProcessTable *, ProcessTablePtr);
 
 Result(ProcessPtr) Process__setup(ElfPtr binary);
+Result(ParkedKernelContextPtr) Process__unpark(ProcessPtr self);
+Result(ParkedKernelContextPtr) Process__park(ProcessPtr self, Optional(ParkedKernelContextPtr) parked_context);
 
 #endif

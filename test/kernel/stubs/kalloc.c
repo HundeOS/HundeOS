@@ -13,7 +13,7 @@ KernelAddress Kernel__alloc(size_t size)
 
 Address Kernel__alloc_kernel(size_t size)
 {
-    return Kernel__alloc(size).virtual_addr;
+    return vaddr(Kernel__alloc(size));
 }
 
 UserAddress Kernel__alloc_user(Address virtual_address,

@@ -11,13 +11,15 @@
 #include "bin/embedded_binaries.h"
 #include "scheduler/scheduler.h"
 
+static Scheduler scheduler = NEW_SCHEDULER;
+
 static Kernel instance = {
     .status = INIT_NOT_STARTED,
     .init_lock = MUTEX_INIT,
     .syscall_dispatcher = NEW_SYSCALL_DISPATCHER,
-    .io_subsystem = NEW_IO_SUBSYSTEM,
+    .io_subsystem = NEW_IO_SUBSYSTEM(&scheduler),
     .heap = NEW_HEAP,
-    .scheduler = NEW_SCHEDULER,
+    .scheduler = &scheduler,
 };
 
 void __kernel_panic(KernelPtr self, KStringPtr message)
@@ -86,7 +88,7 @@ Result(SubsystemInitStatus) Kernel__init_heap(KernelPtr self)
 Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
 {
     ElfPtr idle_process = EmbeddedElf__load("idle");
-    ResultMatch(SchedulerInitStatus, Scheduler__init(&self->scheduler, idle_process);)
+    ResultMatch(SchedulerInitStatus, Scheduler__init(self->scheduler, idle_process);)
         IsError(code, message,
         {
             return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);

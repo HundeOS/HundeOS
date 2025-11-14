@@ -92,7 +92,8 @@ ProcessContextPtr ProcessContext__init(ProcessID pid, StackPtr stack, UserAddres
     return context;
 }
 
-extern void asm_switch_context(Anything sp, Anything tbbr0);
+extern void asm_switch_context(ProcessContextPtr context, Address pagetable);
+extern void asm_switch_kernel_context(ProcessContextPtr context, Address pagetable);
 
 __attribute__((noreturn))
 void Process__context_switch(ProcessPtr self)
@@ -122,7 +123,38 @@ void Process__context_switch(ProcessPtr self)
         addr(&context->fpcr) - base,
         addr(&context->fpsr) - base,
         sizeof(ProcessContext));
-    asm_switch_context((Anything)context, paddr(self->page_table));
+
+    // do we have suspended work to finish on the
+    // kernel side?
+    Match(ParkedKernelContextPtr, self->parked_context)
+        IsSome(kernel_context,
+        {
+            Match(Continuation, kernel_context->continuation)
+                IsSome(continuation,
+                {
+                    __d_println(PROCESS, "Continuation kernel context switch");
+                    asm_switch_kernel_context(context, paddr(self->page_table));
+
+                    __d_printf(PROCESS, "Continuation calling %p %p", continuation, kernel_context->kernel_context);
+                    Result(Anything) res = continuation(kernel_context->kernel_context);
+                    ResultMatch(Anything, res)
+                        IsSuccess(result_val,
+                        {
+                            __d_println(PROCESS, "Set syscall result");
+                            context->x[0] = result_val;
+                        });
+                        IsError(code, message,
+                        {
+                            context->x[0] = code;
+                            __d_printf(PANIC, "Continuation error: %s\n", cstr(message));
+                        })
+                    End
+
+                })
+            End
+        })
+    End
+    asm_switch_context(context, paddr(self->page_table));
     __builtin_unreachable();
 }
 

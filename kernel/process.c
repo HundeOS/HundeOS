@@ -1,13 +1,13 @@
 #include "process.h"
+#include "scheduler/parked.h"
 #include "bin/elf.h"
 #include "arch/page_table.h"
 #include "arch/process.h"
 #include "types/kstring.h"
 #include "types/result.h"
 #include "types/optional.h"
-#include "scheduler/scheduler.h"
+// #include "scheduler/scheduler.h"
 
-#include "PROCESS.h"
 #include "kalloc.h"
 #include "stack.h"
 
@@ -29,7 +29,22 @@ ProcessPtr Process__new(KString name, KernelAddress page_table, UserAddress entr
     proc->context = ProcessContext__init(proc->pid, &proc->stack, entry, page_table);
     proc->last_tick = 0;
     proc->name = name;
+    proc->parked_context = None(ParkedKernelContextPtr);
     return proc;
+}
+
+Result(ParkedKernelContextPtr) Process__unpark(ProcessPtr self)
+{
+    Match(ParkedKernelContextPtr, self->parked_context)
+        IsSome(parked,
+        {
+            return Success(ParkedKernelContextPtr, parked);
+        })
+        IsNone(
+        {
+            return Error(ParkedKernelContextPtr, kstring("No parked context"), PROC_ERROR_NO_PARKED);
+        })
+    End
 }
 
 Result(ProcessPtr) Process__setup(ElfPtr binary)

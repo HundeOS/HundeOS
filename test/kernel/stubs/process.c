@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include "../../../kernel/arch/process.h"
 #include "../../../kernel/process.h"
+
+#include "../../../kernel/scheduler/parked.h"
 #include "../../../kernel/types/fixed_array.h"
 
 
@@ -9,9 +11,33 @@ FixedArrayBodyDefine(ProcessArray);
 
 static ProcessPtr current_process = NULL;
 
+static Result(Anything) deferred_syscall_res;
+
+Result(Anything) deferred_syscall_result()
+{
+    return deferred_syscall_res;
+}
+
+void clear_deferred_syscall_result()
+{
+    deferred_syscall_res = Error(Anything, kstring("no syscall result"), -1);
+}
+
 void Process__context_switch(ProcessPtr self)
 {
     current_process = self;
+    Match(ParkedKernelContextPtr, self->parked_context)
+        IsSome(parked_kernel_context,
+        {
+            Match(Continuation, parked_kernel_context->continuation)
+                IsSome(continuation,
+                {
+                    Result(Anything) syscall_res = continuation(parked_kernel_context->kernel_context);
+                    deferred_syscall_res = syscall_res;
+                })
+            End
+        })
+    End
 }
 
 void current_process_reset()

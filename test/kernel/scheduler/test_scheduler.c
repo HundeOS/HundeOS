@@ -9,10 +9,12 @@
 #include "../../../kernel/bin/embedded_binaries.h"
 
 static SchedulerPtr scheduler;
+static void * continuation_context;
 static const CPUID cpu_id = 12;
 
 void setUp(void)
 {
+    continuation_context = NULL;
     clear_panic_state();
     set_cpu_id(cpu_id);
     current_process_reset();
@@ -26,6 +28,12 @@ void tearDown(void)
 {
     TEST_ASSERT_FALSE(panic_occurred());
     scheduler = NULL;
+}
+
+Result(Anything) continuation(void * context)
+{
+    continuation_context = context;
+    return Success(Anything, 100);
 }
 
 void test_scheduler_interrupt_when_no_processes_are_running_stays_in_idle(void)
@@ -179,6 +187,193 @@ void test_scheduler_exit_removes_process_when_its_not_current(void)
     TEST_ASSERT_EQUAL(1, ProcessTable__len(processes));
 }
 
+void test_scheduler_park_switches_process_to_waiting_and_switches_context(void)
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+
+    KernelContext kernel_context = (KernelContext) {
+        .scheduler = scheduler,
+        .proc = &proc,
+    };
+
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(current, proc);
+        })
+    End
+
+
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation)))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(parked,
+        {
+            TEST_ASSERT_EQUAL(proc, parked);
+            TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parked->state);
+        })
+    End
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(idle, current);
+        })
+    End
+
+    ProcessTablePtr processes = Scheduler__all_processes(scheduler, cpu_id);
+
+    TEST_ASSERT_EQUAL(1, ProcessTable__len(processes));
+}
+
+void test_scheduler_unpark_switches_process_back_to_ready(void)
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+
+    KernelContext kernel_context = (KernelContext) {
+        .scheduler = scheduler,
+        .proc = proc,
+    };
+
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(current, proc);
+        })
+    End
+
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation)))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(parked,
+        {
+            TEST_ASSERT_EQUAL(proc, parked);
+            TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parked->state);
+        })
+    End
+
+    ResultMatch(ProcessPtr, Scheduler__unpark(scheduler, proc))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(parked,
+        {
+            TEST_ASSERT_EQUAL(proc, parked);
+            TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, parked->state);
+        })
+    End
+}
+
+void test_scheduler_unpark_when_not_idle(void)
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessPtr running_proc = dummy_process(0, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+
+    KernelContext kernel_context = (KernelContext) {
+        .proc = proc,
+        .scheduler = scheduler,
+    };
+
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__schedule(scheduler, running_proc);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(current, running_proc);
+        })
+    End
+
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation)))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(parked,
+        {
+            TEST_ASSERT_EQUAL(proc, parked);
+            TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parked->state);
+        })
+    End
+
+    ResultMatch(ProcessPtr, Scheduler__unpark(scheduler, proc))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(parked,
+        {
+            TEST_ASSERT_EQUAL(proc, parked);
+            TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, parked->state);
+        })
+    End
+
+    // it should cause a context switch as CPU is currently idle
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(running_proc, current);
+        })
+    End
+}
+
+void test_scheduler_park_switches_process_to_waiting_not_switching_context_when_not_current(void)
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessPtr running = dummy_process(0, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+
+    KernelContext kernel_context = (KernelContext) {
+        .proc = proc,
+        .scheduler = scheduler,
+    };
+
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__schedule(scheduler, running);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(current, running);
+        })
+    End
+
+
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation)))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(parked,
+        {
+            TEST_ASSERT_EQUAL(proc, parked);
+            TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parked->state);
+        })
+    End
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(running, current);
+        })
+    End
+
+    ProcessTablePtr processes = Scheduler__all_processes(scheduler, cpu_id);
+
+    TEST_ASSERT_EQUAL(2, ProcessTable__len(processes));
+}
+
 void test_scheduler_preempt_when_idle_with_a_process_ready(void)
 {
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE0000; // whatever as long as we dont deref
@@ -215,7 +410,7 @@ void test_scheduler_preempt_when_idle_with_a_process_ready(void)
     End
 }
 
-void test_scheduler_prempt_when_idle_with_multiple_processes_ready_selects_longest_waiting(void)
+void test_scheduler_preempt_when_idle_with_multiple_processes_ready_selects_longest_waiting(void)
 {
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE0000; // whatever as long as we dont deref
 

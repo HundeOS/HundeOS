@@ -2,6 +2,7 @@
 #include "../types/result.h"
 #include "../types/optional.h"
 #include "../mutex.h"
+#include "parked.h"
 
 FixedArrayBodyDefine(CPUSchedulers);
 
@@ -31,6 +32,7 @@ bool process_in_state(ProcessPtr * proc, void * compare_state)
 {
     ProcessState state = (*proc)->state;
     ProcessState compare = *(ProcessState *) compare_state;
+    __d_printf(SCHEDULER, "process_in_state %s %s\n", cstr((*proc)->name), ProcessState__to_string(state));
 
     return state & compare;
 }
@@ -75,6 +77,25 @@ Optional(ProcessPtr) CPUScheduler__current_process(CPUSchedulerPtr self)
     return None(ProcessPtr);
 }
 
+bool CPUScheduler__is_idle(CPUSchedulerPtr self)
+{
+    ProcessState running_state = PROC_STATE_RUNNING;
+    FindResultOptional(ProcessTable) current_match = ProcessTable__find(&self->processes, process_in_state, &running_state);
+
+    FindResultMatch(ProcessTable, current_match)
+        IsSome(match,
+        {
+            return false;
+        })
+        IsNone(
+        {
+            return true;
+        })
+    End
+
+    return true;
+}
+
 Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
 {
     __d_printf(SCHEDULER, "CPUScheduler__exit %s\n", cstr(proc->name));
@@ -95,11 +116,52 @@ Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
     });
 }
 
+Result(ProcessPtr) CPUScheduler__park(
+        CPUSchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, Optional(Continuation) kernel_continuation
+    )
+{
+    __d_printf(SCHEDULER, "CPUScheduler__park %s\n", cstr(proc->name));
+    CriticalSection(self->scheduler_lock,
+    {
+        Match(ArrayIndex, ProcessTable__find_item(&self->processes, proc))
+            IsSome(index,
+            {
+                ParkedKernelContextPtr parked = ParkedKernelContext__heap_new(kernel_context, kernel_continuation);
+                proc->state = PROC_STATE_WAITING;
+                proc->parked_context = Some(ParkedKernelContextPtr, parked);
+                _cs_return Success(ProcessPtr, proc);
+            })
+            IsNone(
+            {
+                _cs_return Error(ProcessPtr, kstring("process not found"), SCHEDULER_PROCESS_NOT_FOUND);
+            })
+        End
+    });
+}
+
+Result(ProcessPtr) CPUScheduler__unpark(CPUSchedulerPtr self, ProcessPtr proc)
+{
+    __d_printf(SCHEDULER, "CPUScheduler__unpark %s\n", cstr(proc->name));
+    CriticalSection(self->scheduler_lock,
+    {
+        Match(ArrayIndex, ProcessTable__find_item(&self->processes, proc))
+            IsSome(index,
+            {
+                __d_printf(SCHEDULER, "CPUScheduler__unpark - done %s\n", cstr(proc->name));
+                proc->state = PROC_STATE_INTERRUPTED;
+                _cs_return Success(ProcessPtr, proc);
+            })
+            IsNone(
+            {
+                _cs_return Error(ProcessPtr, kstring("process not found"), SCHEDULER_PROCESS_NOT_FOUND);
+            })
+        End
+    });
+}
+
 Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, ProcessContextPtr context)
 {
     ProcessState ready_state = PROC_STATE_READY | PROC_STATE_INTERRUPTED;
-
-    __d_printf(SCHEDULER, "CPUScheduler__interrupt ready=%x\n", ready_state);
 
     CriticalSection(self->scheduler_lock,
     {
@@ -121,7 +183,7 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, ProcessCon
         ProcessTable ready = ProcessTable__filter(&self->processes, process_in_state, &ready_state);
         ProcessTable sorted_ready = ProcessTable__sort_desc(&ready, longest_waiting);
 
-        __d_printf(SCHEDULER, "num processes - %i\n", ProcessTable__len(&self->processes));
+        __d_printf(SCHEDULER, "total num processes - %i\n", ProcessTable__len(&self->processes));
         __d_printf(SCHEDULER, "num ready - %i\n", ProcessTable__len(&sorted_ready));
 
         Optional(ProcessPtr) selected = ProcessTable__at(&sorted_ready, 0);
@@ -143,17 +205,16 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, ProcessCon
                         proc->state = PROC_STATE_RUNNING;
                         __d_printf(SCHEDULER, "no new proc remain with current - %p %s\n", proc, cstr(proc->name));
                         _cs_return None(ContextSwitch);
-                    })
+                    });
                     IsNone(
-                        {
-                            // no current and nothing ready, go idle
-                            ProcessPtr idle = self->idle_process;
-                            idle->state = PROC_STATE_SWITCHING_CONTEXT;
-                            __d_printf(SCHEDULER, "no new proc or current going idle - %p %s\n", idle, cstr(idle->name));
-                            ContextSwitch context_switch = ContextSwitch__new(idle, current);
-                            _cs_return Some(ContextSwitch, context_switch);
-                        }
-                    );
+                    {
+                        // no current and nothing ready, go idle
+                        ProcessPtr idle = self->idle_process;
+                        idle->state = PROC_STATE_SWITCHING_CONTEXT;
+                        __d_printf(SCHEDULER, "no new proc or current going idle - %p %s\n", idle, cstr(idle->name));
+                        ContextSwitch context_switch = ContextSwitch__new(idle, current);
+                        _cs_return Some(ContextSwitch, context_switch);
+                    });
                 End
 
             })
@@ -192,6 +253,53 @@ Result(ProcessPtr) Scheduler__exit(SchedulerPtr self, ProcessPtr proc)
                     IsNone(Scheduler__preempt(self, cpu, NULL));
                 End
 
+                return res;
+            });
+        End
+    End
+
+
+    KString no_scheduler_format = kstring("Process not found: %i\n");
+    KString no_scheduler = KString__sprintf(&no_scheduler_format, proc->pid);
+    return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
+
+Result(ProcessPtr) Scheduler__park(
+        SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, Optional(Continuation) kernel_continuation
+    )
+{
+    FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+        Result(ProcessPtr) res = CPUScheduler__park(sched, proc, kernel_context, kernel_continuation);
+        ResultMatch(ProcessPtr, res)
+            IsSuccess(exited,
+            {
+                Optional(ProcessPtr) current_for_cpu = CPUScheduler__current_process(sched);
+
+                Match(ProcessPtr, current_for_cpu)
+                    IsNone(Scheduler__preempt(self, cpu, NULL));
+                End
+
+                return res;
+            });
+        End
+    End
+
+
+    KString no_scheduler_format = kstring("No scheduler found for process: %i\n");
+    KString no_scheduler = KString__sprintf(&no_scheduler_format, proc->pid);
+    return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
+Result(ProcessPtr) Scheduler__unpark(SchedulerPtr self, ProcessPtr proc)
+{
+    __d_println(SCHEDULER, "scheduler unparking");
+    FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+        Result(ProcessPtr) res = CPUScheduler__unpark(sched, proc);
+        ResultMatch(ProcessPtr, res)
+            IsSuccess(exited,
+            {
+                __d_println(SCHEDULER, "scheduler unparked process");
                 return res;
             });
         End

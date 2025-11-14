@@ -1,4 +1,5 @@
 #include "context.h"
+#include "../process.h"
 
 ContextSwitch ContextSwitch__new(ProcessPtr new_proc, Optional(ProcessPtr) old_proc)
 {
@@ -22,7 +23,7 @@ void ContextSwitch__switch(Optional(ContextSwitch) self_opt)
 
             ProcessPtr new_proc = self.new_proc;
             const char * name = cstr(new_proc->name);
-            __d_printf(PROCESS, "Switch to proc: %i %s - %s.\n",
+            __d_printf(SCHEDULER, "Switch to proc: %i %s - %s.\n",
                 new_proc->pid,
                 name,
                 ProcessState__to_string(new_proc->state));
@@ -32,7 +33,7 @@ void ContextSwitch__switch(Optional(ContextSwitch) self_opt)
         })
         IsNone(
         {
-            __d_println(PROCESS, "No context to switch to.");
+            __d_println(SCHEDULER, "No context to switch to.");
         })
     End
 }

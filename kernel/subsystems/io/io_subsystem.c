@@ -5,6 +5,8 @@
 #include "../../types/fixed_array.h"
 #include "../../types/optional.h"
 #include "../../debug.h"
+#include "scheduler/scheduler.h"
+
 
 DeviceHandle _to_device_handle(ArrayIndex index)
 {
@@ -87,7 +89,7 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, ProcessPtr proc, KString
 
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, ProcessPtr proc, IOHandle handle)
 {
-    __d_printf(DEBUG, "Closing handle %i\n", handle);
+    __d_printf(IOSUB, "Closing handle %i\n", handle);
     Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
         IsSome(registration,
         {
@@ -115,23 +117,75 @@ Result(ByteCount) IOSubsystem__transfer(IOBufferPtr buffer, DataPtr result, size
     End
 }
 
-Result(ByteCount) IOSubsystem__read(
-        IOSubsystemPtr self, ProcessPtr proc, IOHandle handle, DataPtr result_buffer, size_t size
-    )
+void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContext parked_context)
 {
-    __d_printf(DEBUG, "Read handle %p\n", handle);
-    Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
+    __d_println(IOSUB, "Data arrived");
+    Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, parked_context.handle));
+        IsSome(match,
+        {
+            match->device->unpark(match->state);
+            // tell scheduler things are ready to complete the parked call
+            __d_println(IOSUB, "IO sub unparking process");
+            Scheduler__unpark(self->scheduler, parked_context.proc);
+        })
+        IsNone(
+            __d_println(PANIC, "No device found for parking context");
+        )
+    End
+
+}
+
+void IOSubsystem__park(IOSubsystemPtr self, IOContext io_context)
+{
+    __d_println(IOSUB, "Parking io");
+    Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, io_context.handle));
+        IsSome(match,
+        {
+            __d_println(IOSUB, "Parking context to device");
+            match->device->park(match->state, io_context);
+        })
+        IsNone(
+            __d_println(IOSUB, "No device found for parking context");
+        )
+    End
+}
+
+Result(Anything) IOSubsystem__continue_read(void * context)
+{
+    IOContextPtr io_context = (IOContextPtr) context;
+    __d_printf(IOSUB, "\nConinuining read %p %p\n", io_context, io_context->io_subsystem);
+    ResultMatch(ByteCount, IOSubsystem__read(io_context->io_subsystem, *io_context))
+        IsSuccess(bytes, return Success(Anything, bytes));
+        IsError(code, message, return Error(Anything, message, code));
+    End
+    return Error(Anything, kstring("unexpected code path"), 0);
+}
+
+Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContext context)
+{
+    __d_printf(IOSUB, "Read handle %p\n", context.handle);
+    Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, context.handle));
         IsSome(registration,
         {
-            Result(IOBufferPtr) read_res = registration->device->read(registration->state, _device_internal_handle(handle), size);
+            Result(IOBufferPtr) read_res = registration->device->read(
+                registration->state, _device_internal_handle(context.handle), context.size
+            );
             ResultMatch(IOBufferPtr, read_res)
                 IsSuccess(buffer,
                 {
-                    __d_printf(DEBUG, "reading %p %p\n", result_buffer, buffer);
-                    return IOSubsystem__transfer(buffer, result_buffer, size);
+                    __d_printf(IOSUB, "reading %p %p\n", context.buffer, buffer);
+                    return IOSubsystem__transfer(buffer, context.buffer, context.size);
                 })
                 IsError(code, message,
                 {
+                    if (code == IO_WAIT_FOR_DATA)
+                    {
+                        __d_println(IOSUB, "Parking waiting for IO");
+                        Optional(Continuation) continuation = Some(Continuation, IOSubsystem__continue_read);
+
+                        IOSubsystem__park(self, context);
+                        Scheduler__park(self->scheduler, context.proc, &context.kernel_context, continuation);
+                    }
                     return Error(ByteCount, message, code);
                 })
             End
@@ -139,20 +193,22 @@ Result(ByteCount) IOSubsystem__read(
     End
 
     KString format = kstring("Unknown handle %p\n");
-    KString error_msg = KString__sprintf(&format, handle) ;
+    KString error_msg = KString__sprintf(&format, context.handle) ;
     return Error(ByteCount, error_msg, IO_NOT_OPEN);
 }
 
-Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, ProcessPtr proc, IOHandle handle, DataPtr data, size_t size)
+Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContext context)
 {
-    __d_printf(DEBUG, "Writing handle %i\n", handle);
-    Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
+    __d_printf(DEBUG, "Writing handle %i\n", context.handle);
+    Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, context.handle));
         IsSome(registration,
         {
-            return registration->device->write(registration->state, _device_internal_handle(handle), data, size);
+            return registration->device->write(
+                registration->state, _device_internal_handle(context.handle), context.buffer, context.size);
         });
     End
+
     KString format = kstring("Unknown handle %p\n");
-    KString error_msg = KString__sprintf(&format, handle) ;
+    KString error_msg = KString__sprintf(&format, context.handle);
     return Error(ByteCount, error_msg, IO_NOT_OPEN);
 }

@@ -3,6 +3,7 @@ manifest:
     - kernel/subsystems/io/*.c
     - kernel/subsystems/io/**/*.c
     - kernel/types/*.c
+    - kernel/scheduler/*.c
     - kernel/process.c
     - kernel/mutex.c
     - kernel/bin/*.c

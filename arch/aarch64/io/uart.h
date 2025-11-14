@@ -73,7 +73,7 @@ Result(InitCode) uart_enable_irqs();
 void put_int(int c);
 void puts(const char *s);
 
-void uart_irq_handler();
+void uart_irq_handler(IOSubsystemPtr io_subsystem);
 
 // Result(ByteCount) read_line(BufferPtr buffer);
 

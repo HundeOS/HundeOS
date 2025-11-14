@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "kstring.h"
 
-typedef uint64_t Code;
+typedef int64_t Code;
 
 #define Result(T) \
     Result_##T \

@@ -1,6 +1,8 @@
 #include "syscall_dispatcher.h"
 #include <stdint.h>
 
+#include "../types/types.h"
+
 #include "../debug.h"
 #include "../print.h"
 #include "../types/fixed_array.h"
@@ -8,7 +10,6 @@
 #include "../types/optional.h"
 #include "../mutex.h"
 #include "../process.h"
-#include "../cpu.h"
 
 FixedArrayBodyDefine(Handlers);
 

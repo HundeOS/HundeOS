@@ -8,6 +8,6 @@ Result(SystemCallResult) Exit__handler(
 {
     __d_printf(SYSCALL, "Exiting process %i %s", proc->pid, cstr(proc->name));
 
-    Scheduler__exit(&kernel->scheduler, proc);
+    Scheduler__exit(kernel->scheduler, proc);
     return Success(SystemCallResult, SYSCALL_OK);
 }

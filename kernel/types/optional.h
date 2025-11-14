@@ -25,6 +25,12 @@
     typedef _None(T) _None(alias); \
     typedef T _Type(alias); \
 
+#define OptionalPreDefine(T) \
+    typedef struct _None(T) _None(T); \
+    typedef struct _Some(T) _Some(T); \
+    typedef union _Optional(T) _Optional(T); \
+    typedef T _Type(T);
+
 #define OptionalDef(T) \
     typedef struct _None(T) { \
         bool present; \

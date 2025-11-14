@@ -3,8 +3,9 @@
 
 #include "../../kernel/process.h"
 
-#define STUB_PROCESS (Process) { \
+#define STUB_PROCESS(process_id) (Process) { \
         .handles = EmptyArray(ProcessHandles),\
+        .pid = process_id,\
     }\
 
 #endif

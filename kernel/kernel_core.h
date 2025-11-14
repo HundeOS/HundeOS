@@ -18,7 +18,7 @@ typedef struct Kernel
     SyscallDispatcher syscall_dispatcher;
     IOSubsystem io_subsystem;
     Heap heap;
-    Scheduler scheduler;
+    SchedulerPtr scheduler;
 } Kernel;
 
 typedef Kernel * KernelPtr;

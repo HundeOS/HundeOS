@@ -50,7 +50,7 @@ void irq_handler(ProcessContextPtr context, bool current_el)
         isb();
         if (!current_el)
         {
-            timer_handler(CPU__id() - 1, &kernel->scheduler, context);
+            timer_handler(CPU__id() - 1, kernel->scheduler, context);
         }
         return;
     }
@@ -64,15 +64,17 @@ void irq_handler(ProcessContextPtr context, bool current_el)
 
         if (!current_el)
         {
-            timer_handler(CPU__id() - 1, &kernel->scheduler, context);
+            timer_handler(CPU__id() - 1, kernel->scheduler, context);
         }
         return;
     }
     else if (id == 33)
     {
         __d_printf(IRQ, "irq: %i\n", id);
-        Optional(ProcessPtr) interrupted_process = Scheduler__save_context(&kernel->scheduler, CPU__id() - 1, context);
-        uart_irq_handler();
+        Optional(ProcessPtr) interrupted_process = Scheduler__save_context(kernel->scheduler, CPU__id() - 1, context);
+        icc_eoir1(id);
+        icc_dir(id);
+        uart_irq_handler(&kernel->io_subsystem);
     }
     else
     {
@@ -80,8 +82,6 @@ void irq_handler(ProcessContextPtr context, bool current_el)
 
         __d_printf(UNHANDLED, "unhandled irq: %i\n", id);
     }
-    icc_eoir1(id);
-    icc_dir(id);
 }
 
 uint64_t handle_sync(ProcessContextPtr context, bool hcf) {
@@ -91,7 +91,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool hcf) {
     __d_printf(SYSCALL, "sync call: 0x%x\n", ec);
 
     KernelPtr kernel = Kernel__instance();
-    Optional(ProcessPtr) current_process = Scheduler__save_context(&kernel->scheduler, CPU__id() - 1, context);
+    Optional(ProcessPtr) current_process = Scheduler__save_context(kernel->scheduler, CPU__id() - 1, context);
 
     // Handle synchronous exceptions (e.g., undefined instruction, SVC, data abort)
     switch(ec) {

@@ -6,5 +6,7 @@
 void current_process_reset();
 ProcessPtr current_running_process();
 
+Result(Anything) deferred_syscall_result();
+void clear_deferred_syscall_result();
 
 #endif

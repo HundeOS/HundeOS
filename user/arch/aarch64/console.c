@@ -26,11 +26,7 @@ ByteCount console_input(char * buf, size_t size)
     }
 
     ByteCount res = 0;
-    while (res == 0)
-    {
-        res = read(console_handle, buf, size);
-        asm volatile("wfi");
-    }
+    res = read(console_handle, buf, size);
 
     if (res > 0)
     {

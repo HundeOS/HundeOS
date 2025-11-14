@@ -18,6 +18,8 @@ typedef enum {
     SYSCALL,
     SCHEDULER,
     PROCESS,
+    IODEV,
+    IOSUB,
     PROGRESS,
     UNHANDLED,
     FAULT,
@@ -63,6 +65,10 @@ inline const char * level_to_string(Level level)
             return "MUTEX";
         case MMU:
             return "MMU";
+        case IOSUB:
+            return "IO SUBYSTEM";
+        case IODEV:
+            return "IO DEVICE";
     }
     return "UNKNOWN";
 }

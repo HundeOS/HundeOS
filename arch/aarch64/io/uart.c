@@ -2,15 +2,11 @@
 
 #include <stdint.h>
 
-#include "../gicr.h"
 #include "../../../kernel/kernel.h"
 #include "../../../kernel/subsystems/io/io.h"
 #include "../../../kernel/subsystems/io/console/console.h"
 #include "../../../kernel/types/result.h"
 #include "../../../kernel/types/optional.h"
-#include "../../../kernel/arch/init.h"
-#include <stdint.h>
-#include "../asm_helpers.h"
 
 
 static volatile bool _check_ready()
@@ -131,14 +127,15 @@ ConsoleState console_state = (ConsoleState) {
     .state = NEW_IO_STATE,
     .write_buffer = EmptyRingBuffer(IOBuffer),
     .read_buffer = EmptyRingBuffer(IOBuffer),
+    .parked_context = None(IOContext),
 };
 
-void uart_irq_handler()
+void uart_irq_handler(IOSubsystemPtr io_subsystem)
 {
     __d_println(IRQ, "UART IRQ");
     uint32_t mis = UARTMIS;
-
-    if (mis & (I_RX | I_RT))
+    bool received_data = mis & (I_RX | I_RT);
+    if (received_data)
     {
         // Drain RX FIFO
         while (!(*UART0_FR & FR_RXFE))
@@ -174,5 +171,17 @@ void uart_irq_handler()
         // Read & clear errors
         UART0_RSR_ECR = 0xFF;
         UARTICR = I_ERR;
+    }
+    if (received_data)
+    {
+        // only message io subsystem if there is a parked context
+        Match(IOContext, console_state.parked_context)
+            IsSome(parked_context,
+            {
+                __d_println(DEBUG, "Parked context found");
+                IOSubsystem__data_arrived(io_subsystem, parked_context);
+            })
+            IsNone(__d_println(DEBUG, "NO parked context found");)
+        End
     }
 }
