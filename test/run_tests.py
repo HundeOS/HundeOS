@@ -9,7 +9,7 @@ BASE_DIR = os.path.dirname(__file__)
 
 TEMPLATE = """
 PLATFORM_INCLUDE=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include
-
+COMMON_INCLUDE = {common_includes}
 CROSS_COMPILE =
 AS = gcc
 CC = gcc
@@ -17,7 +17,7 @@ LD = gcc
 
 UNITY = {unity_path}
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -mno-outline-atomics -I{kernel_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE)
+CFLAGS = -c -O2 -Wall -Wextra -mno-outline-atomics -I{kernel_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
 
 # Assembler flags
 ASFLAGS = -c -O2 -Wall -Wextra -nostdlib -latomic -I{stubs_dir} -I{fixtures_dir}
@@ -119,6 +119,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
     # making it relative to the test directory
     project_dir = os.path.join(relative_base, "..")
     kernel_dir = os.path.join(project_dir, "kernel")
+    common_includes = os.path.join(project_dir, "common_includes")
     build_dir = os.path.join(relative_base, "build", test_dir)
     kernel_obj_build_dir = os.path.join(relative_base, "build")
 
@@ -214,6 +215,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                                            test_base=relative_base,
                                            stubs_dir=stubs_dir_relative,
                                            fixtures_dir=fixtures_dir_relative,
+                                           common_includes=common_includes,
                                            runner_bins=join(runner_bins),
                                            runner_tasks="\n".join(runner_tasks)))
 

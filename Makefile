@@ -5,14 +5,15 @@ CC = $(CROSS_COMPILE)gcc
 LD = $(CROSS_COMPILE)gcc
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
+UNITY_PATH=../../tools/Unity
 # Compiler flags
 CFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra \
            -nostdlib -nostartfiles -mcmodel=large -DBSP_VIRT \
-           -march=armv8-a -mno-outline-atomics -Ikernel
+           -march=armv8-a -mno-outline-atomics -Ikernel -I./common_includes
 
 USER_CFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra \
            -nostdlib -nostartfiles -mcmodel=small \
-           -march=armv8-a -mno-outline-atomics
+           -march=armv8-a -mno-outline-atomics -I./common_includes
 
 # Assembler flags
 ASFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra \

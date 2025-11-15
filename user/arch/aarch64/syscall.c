@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include "syscall.h"
+#include "../../sys/syscall.h"
 
 #include <stdint.h>
 

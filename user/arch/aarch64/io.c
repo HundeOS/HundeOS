@@ -1,8 +1,8 @@
-#include "io.h"
+#include "../../sys/io.h"
 
 #include <stddef.h>
 
-#include "syscall.h"
+#include "../syscall.h"
 
 IOHandle open(const char *path, Flags flags)
 {

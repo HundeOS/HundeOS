@@ -1,5 +1,5 @@
 #include <stdbool.h>
-#include "../arch/wait.h"
+#include "../sys/wait.h"
 #include "../user.h"
 
 int main(void)

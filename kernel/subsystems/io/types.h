@@ -7,17 +7,15 @@
 #include "../../types/ring_buffer.h"
 #include "../../types/result.h"
 #include "../../types/optional.h"
+#include "syscalls/io.h"
 
 #define _4_MEGS 4194304
 
 typedef uint8_t Data;
 typedef Data * DataPtr;
 
-typedef uint64_t IOHandle;
 typedef uint32_t IOInternalHandle;
 typedef uint32_t DeviceHandle;
-typedef uint64_t Flags;
-typedef size_t ByteCount;
 
 ResultDef(IOHandle);
 ResultDef(IOInternalHandle);

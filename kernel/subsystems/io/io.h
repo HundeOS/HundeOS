@@ -72,16 +72,6 @@ typedef struct IO
 OptionalDef(IO);
 ResultDef(IO);
 
-typedef enum IOStatus
-{
-    IO_OK = 0,
-    IO_NO_DEVICE_FOUND = -1,
-    IO_REGISTER_FAILED = -2,
-    IO_NOT_OPEN = -3,
-    IO_UNKNOWN_HANDLE = -4,
-    IO_WAIT_FOR_DATA = -5,
-} IOStatus;
-
 typedef struct DeviceRegistration
 {
     IOPtr device;
