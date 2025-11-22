@@ -5,9 +5,9 @@
 
 #include "../types/result.h"
 #include "../types/fixed_array.h"
-#include "context.h"
 #include "kernel_context.h"
 #include "parked.h"
+#include "context_switch.h"
 #include "../process.h"
 
 typedef uint64_t SchedulerInitStatus;
@@ -58,18 +58,20 @@ ResultDef(SchedulerPtr);
 
 SchedulerPtr Scheduler__heap_new();
 
-Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, ElfPtr idle_process);
+Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, Elf idle_process);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 Result(ProcessPtr) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc);
 
 Result(ProcessPtr) Scheduler__park(
-        SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, Optional(Continuation) kernel_continuation
-    );
+    SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, Optional(Continuation) kernel_continuation
+);
 Result(ProcessPtr) Scheduler__unpark(SchedulerPtr self, ProcessPtr proc);
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
+
+uint64_t Scheduler__process_count(SchedulerPtr self);
 
 Optional(ProcessPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 

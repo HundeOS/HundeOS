@@ -24,6 +24,9 @@ int input_loop()
             case COMMAND_FAILED:
                 print("Command failed\n");
                 break;
+            case COMMAND_SUCCESS:
+                print("Command completed successfully\n");
+                break;
         }
     }
 

@@ -20,9 +20,9 @@ void tearDown(void)
     TEST_ASSERT_FALSE(panic_occurred());
 }
 
-static Elf * load_test_elf()
+static Elf load_test_elf()
 {
-    return EmbeddedElf__load("hello_world");
+    return Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
 }
 
 static void check_section(
@@ -58,7 +58,7 @@ static void check_section(
 
 void __test__sections(void)
 {
-    Elf * elf = load_test_elf();
+    Elf elf = load_test_elf();
 
     SectionHeaderArray sections = Elf__read_section_headers(elf);
 
@@ -88,7 +88,7 @@ void __test__sections(void)
 
 void test_map_binary_runnable(void)
 {
-    Elf * elf = load_test_elf();
+    Elf elf = load_test_elf();
     ExpandedSegmentArray addresses = Elf__map(elf);
 
     TEST_ASSERT_EQUAL_UINT(1, addresses.len);
@@ -109,7 +109,7 @@ void test_map_binary_runnable(void)
 
 void test_program_header(void)
 {
-    Elf * elf = load_test_elf();
+    Elf elf = load_test_elf();
 
     ProgramHeaderArray headers = Elf__read_program_headers(elf);
 
@@ -137,7 +137,7 @@ void test_program_header(void)
 
 void test_parse_elf_header(void)
 {
-    Elf * elf = load_test_elf();
+    Elf elf = load_test_elf();
     Elf64Header * header = Elf__read_header(elf);
     byte expected_magic[] = {0x7f, 0x45, 0x4c, 0x46};
     TEST_ASSERT_EQUAL_UINT(2, header->klass);

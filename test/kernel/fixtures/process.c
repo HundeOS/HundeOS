@@ -2,8 +2,8 @@
 
 ProcessPtr dummy_process(Tick last_tick, CPUID cpu, ProcessState state)
 {
-    ElfPtr hello_world = EmbeddedElf__load("hello_world");
-    ResultMatch(ProcessPtr, Process__setup(hello_world))
+    Elf hello_world = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    ResultMatch(ProcessPtr, Process__setup(hello_world, None(ProcessPtr)))
         IsSuccess(process,
         {
             process->last_tick = last_tick;

@@ -20,7 +20,7 @@ void setUp(void)
     current_process_reset();
 
     scheduler = Scheduler__heap_new();
-    ElfPtr idle = EmbeddedElf__load("idle");
+    Elf idle = Unwrap(Elf, EmbeddedElf__load(kstring("idle")), (Elf){});
     Scheduler__init(scheduler, idle);
 }
 
@@ -75,6 +75,28 @@ void test_all_processes_when_processes_are_scheduled()
         IsNone(TEST_FAIL())
     End
 
+}
+
+void test_process_count_when_processes_are_scheduled_across_cpus()
+{
+    ProcessPtr proc1 = dummy_process(1, 1, PROC_STATE_READY);
+    ProcessPtr proc2 = dummy_process(2, 2, PROC_STATE_READY);
+    ProcessPtr proc3 = dummy_process(3, 3, PROC_STATE_READY);
+    ProcessPtr proc4 = dummy_process(1, 1, PROC_STATE_READY);
+    ProcessPtr proc5 = dummy_process(2, 2, PROC_STATE_READY);
+    ProcessPtr proc6 = dummy_process(3, 3, PROC_STATE_READY);
+
+    Scheduler__start(scheduler, 1);
+    Scheduler__schedule(scheduler, proc1);
+    Scheduler__schedule(scheduler, proc2);
+    Scheduler__schedule(scheduler, proc3);
+    Scheduler__schedule(scheduler, proc4);
+    Scheduler__schedule(scheduler, proc5);
+    Scheduler__schedule(scheduler, proc6);
+
+    uint64_t count = Scheduler__process_count(scheduler);
+
+    TEST_ASSERT_EQUAL(6, count);
 }
 
 void test_all_processes_when_processes_are_scheduled_on_different_cpu()
@@ -154,8 +176,6 @@ void test_scheduler_exit_removes_process_when_its_not_current(void)
     Scheduler__start(scheduler, cpu_id);
     Scheduler__preempt(scheduler, cpu_id, context);
 
-    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
-
     Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
         IsNone(TEST_FAIL());
         IsSome(current,
@@ -194,7 +214,7 @@ void test_scheduler_park_switches_process_to_waiting_and_switches_context(void)
 
     KernelContext kernel_context = (KernelContext) {
         .scheduler = scheduler,
-        .proc = &proc,
+        .proc = Some(ProcessPtr, proc),
     };
 
     Scheduler__schedule(scheduler, proc);
@@ -241,7 +261,7 @@ void test_scheduler_unpark_switches_process_back_to_ready(void)
 
     KernelContext kernel_context = (KernelContext) {
         .scheduler = scheduler,
-        .proc = proc,
+        .proc = Some(ProcessPtr, proc),
     };
 
     Scheduler__schedule(scheduler, proc);
@@ -282,7 +302,7 @@ void test_scheduler_unpark_when_not_idle(void)
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
 
     KernelContext kernel_context = (KernelContext) {
-        .proc = proc,
+        .proc = Some(ProcessPtr, proc),
         .scheduler = scheduler,
     };
 
@@ -334,7 +354,7 @@ void test_scheduler_park_switches_process_to_waiting_not_switching_context_when_
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
 
     KernelContext kernel_context = (KernelContext) {
-        .proc = proc,
+        .proc = Some(ProcessPtr, proc),
         .scheduler = scheduler,
     };
 

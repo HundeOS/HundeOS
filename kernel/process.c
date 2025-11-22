@@ -16,7 +16,9 @@ FixedArrayBodyDefine(ProcessHandles);
 
 static ProcessID pid_counter = 0;
 
-ProcessPtr Process__new(KString name, KernelAddress page_table, UserAddress entry, Stack stack)
+ProcessPtr Process__new(
+    KString name, KernelAddress page_table, UserAddress entry, Stack stack, Optional(ProcessPtr) parent
+)
 {
     __d_printf(PROCESS, "Creating process with entry point %p\n", entry);
     ProcessPtr proc = (ProcessPtr) Kernel__alloc_kernel(sizeof(Process));
@@ -30,6 +32,7 @@ ProcessPtr Process__new(KString name, KernelAddress page_table, UserAddress entr
     proc->last_tick = 0;
     proc->name = name;
     proc->parked_context = None(ParkedKernelContextPtr);
+    proc->parent = parent;
     return proc;
 }
 
@@ -47,7 +50,7 @@ Result(ParkedKernelContextPtr) Process__unpark(ProcessPtr self)
     End
 }
 
-Result(ProcessPtr) Process__setup(ElfPtr binary)
+Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
 {
     __d_println(PROCESS, "Process__spawn_from_elf");
     ExpandedSegmentArray expanded_elf = Elf__map(binary);
@@ -80,8 +83,7 @@ Result(ProcessPtr) Process__setup(ElfPtr binary)
         IsNone(__d_println(PANIC, "No entry point"););
         IsSome(entry_point,
         {
-            KString name = kstring(binary->name);
-            ProcessPtr proc = Process__new(name, page_table, entry_point.address, stack);
+            ProcessPtr proc = Process__new(binary.name, page_table, entry_point.address, stack, parent);
             return Success(ProcessPtr, proc);
         })
     End

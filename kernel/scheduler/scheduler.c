@@ -15,9 +15,12 @@ FixedArrayBodyDefine(CPUSchedulers);
         .cpu = cpu, \
     }
 
-Result(CPUSchedulerPtr) CPUScheduler__heap_new(ElfPtr idle_process, CPUID cpu)
+KString unreachable_code = KSTRING_NEW("Unreachable code reached");
+KString process_not_found = KSTRING_NEW("Process not found");
+
+Result(CPUSchedulerPtr) CPUScheduler__heap_new(Elf idle_process, CPUID cpu)
 {
-    ResultMatch(ProcessPtr, Process__setup(idle_process))
+    ResultMatch(ProcessPtr, Process__setup(idle_process, None(ProcessPtr)))
         IsSuccess(idle,
         {
             CPUSchedulerPtr sched = v_ptr(Kernel__alloc(sizeof(CPUScheduler)), CPUScheduler);
@@ -96,6 +99,16 @@ bool CPUScheduler__is_idle(CPUSchedulerPtr self)
     return true;
 }
 
+uint64_t Scheduler__process_count(SchedulerPtr self)
+{
+    uint64_t count = 0;
+    FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+        count += ProcessTable__len(&sched->processes);
+    End
+
+    return count;
+}
+
 Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
 {
     __d_printf(SCHEDULER, "CPUScheduler__exit %s\n", cstr(proc->name));
@@ -105,7 +118,7 @@ Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
         ResultMatch(ArrayCode, ProcessTable__remove(&self->processes, proc))
             IsError(code, message,
             {
-                _cs_return Error(ProcessPtr, kstring("process not found"), SCHEDULER_PROCESS_NOT_FOUND);
+                _cs_return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
             })
             IsSuccess(process_index,
             {
@@ -117,8 +130,8 @@ Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
 }
 
 Result(ProcessPtr) CPUScheduler__park(
-        CPUSchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, Optional(Continuation) kernel_continuation
-    )
+    CPUSchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, Optional(Continuation) kernel_continuation
+)
 {
     __d_printf(SCHEDULER, "CPUScheduler__park %s\n", cstr(proc->name));
     CriticalSection(self->scheduler_lock,
@@ -133,7 +146,7 @@ Result(ProcessPtr) CPUScheduler__park(
             })
             IsNone(
             {
-                _cs_return Error(ProcessPtr, kstring("process not found"), SCHEDULER_PROCESS_NOT_FOUND);
+                _cs_return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
             })
         End
     });
@@ -153,7 +166,7 @@ Result(ProcessPtr) CPUScheduler__unpark(CPUSchedulerPtr self, ProcessPtr proc)
             })
             IsNone(
             {
-                _cs_return Error(ProcessPtr, kstring("process not found"), SCHEDULER_PROCESS_NOT_FOUND);
+                _cs_return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
             })
         End
     });
@@ -312,7 +325,7 @@ Result(ProcessPtr) Scheduler__unpark(SchedulerPtr self, ProcessPtr proc)
 }
 
 
-Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, ElfPtr idle_process)
+Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, Elf idle_process)
 {
     __d_println(SCHEDULER, "Scheduler__init");
     for (int i = 0; i < CPU__count(); i++)
@@ -394,7 +407,6 @@ Result(CPUID) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc)
         });
     End
 
-    KString unreachable_code = kstring("Unreachable code reached");
     return Error(CPUID, unreachable_code, SCHEDULER_GENERAL_ERROR);
 }
 

@@ -3,9 +3,11 @@
 
 #include "kstring.h"
 #include "optional.h"
+#include "fixed_array.h"
 
 OptionalDef(KString);
 OptionalDef(KStringPtr);
 
+FixedArrayDefine(KString, 1024, KStringArray, kstring_equals);
 
 #endif

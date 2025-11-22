@@ -1,4 +1,4 @@
-#include "../../sys/syscall.h"
+#include "syscall.h"
 
 void exit(int code)
 {

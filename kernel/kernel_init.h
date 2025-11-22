@@ -31,6 +31,7 @@ ResultDef(SubsystemInitStatus);
 KernelPtr Kernel__instance();
 void Kernel__init(KernelPtr self);
 InitStatus Kernel__init_status(KernelPtr self);
+KernelPtr Kernel__heap_new(SchedulerPtr scheduler);
 
 Result(InitStatus) Kernel__wait_for_init(KernelPtr self);
 

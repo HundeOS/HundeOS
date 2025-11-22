@@ -13,8 +13,8 @@
 
 FixedArrayBodyDefine(Handlers);
 
-const char * UNHANDLED_SYSCALL = "Unhandled syscall";
-const char * FAILED_TO_DETERMINE_PROCESS = "Failed to determine current process";
+static KString unhandled_syscall = KSTRING_NEW("Unhandled syscall");
+static KString unhandled_syscall_format = KSTRING_NEW("Unhandled syscall %i");
 
 
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler)
@@ -44,30 +44,16 @@ Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
     __d_printf(DEBUG, "SyscallHandler__handle(syscall_id=%i, arg1=%i, arg2=%i, arg3=%i, arg4=%i, arg5=%i)",
                syscall_id, arg1, arg2, arg3, arg4, arg5);
 
-    ProcessPtr proc = NULL;
-    Match(ProcessPtr, process_opt);
-        IsSome(process,
-        {
-            proc = process;
-        });
-        IsNone(
-        {
-            return Error(SystemCallResult, KString__new(FAILED_TO_DETERMINE_PROCESS), SYSCALL_FAILURE);
-        });
-    End
-
     Match(Handler, Handlers__at(&self->handlers, syscall_id));
         IsSome(handler,
             {
-                return handler(kernel, proc, arg1, arg2, arg3, arg4, arg5);
+                return handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5);
             });
         IsNone(
             {
-                return Error(SystemCallResult, KString__new(UNHANDLED_SYSCALL), SYSCALL_FAILURE);
+                return Error(SystemCallResult, unhandled_syscall, SYSCALL_FAILURE);
             })
     End;
 
-    KString format = kstring("Unhandled syscall: %i");
-    KString message = KString__sprintf(&format, syscall_id);
-    return Error(SystemCallResult, message, SYSCALL_FAILURE);
+    return Error(SystemCallResult, KString__sprintf(&unhandled_syscall_format, syscall_id), SYSCALL_FAILURE);
 }

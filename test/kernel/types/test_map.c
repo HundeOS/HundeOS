@@ -8,17 +8,22 @@
 #include "../../../kernel/types/result.h"
 #include "../../../kernel/types/comparison.h"
 #include "../../../kernel/types/kstring.h"
-#include "../../../kernel/types/kstring_optionals.h"
+#include "../../../kernel/types/kstring_additional_types.h"
 
 typedef uint64_t TestInt;
+typedef TestInt * TestIntPtr;
 
 OptionalDef(TestInt);
+OptionalDef(TestIntPtr);
 
 MapDefine(KString, TestInt, 32, TestMap, kstring_equals);
 MapBodyDefine(TestMap);
 
 MapDefine(KString, TestInt, 1, TinyTestMap, kstring_equals);
 MapBodyDefine(TinyTestMap);
+
+static KString hello = KSTRING_NEW("hello");
+static KString world = KSTRING_NEW("world");
 
 void setUp()
 {
@@ -30,17 +35,50 @@ void tearDown()
 
 }
 
-void test_map_set_and_get()
+void test_map_len_and_key()
 {
     TestMap map = TestMap__new();
 
     ResultMatch(MapCode, TestMap__set(&map, kstring("hello"), 12));
         IsError(code, message, TEST_FAIL());
     End
+    ResultMatch(MapCode, TestMap__set(&map, kstring("world"), 12));
+        IsError(code, message, TEST_FAIL());
+    End
 
-    Match(TestInt, TestMap__get(&map, kstring("hello")));
+    TEST_ASSERT_EQUAL(2, TestMap__len(&map));
+
+    KStringPtr key1 = MapUnwrapPanic(KStringPtr, TestMap__key(&map, 0));
+    KStringPtr key2 = MapUnwrapPanic(KStringPtr, TestMap__key(&map, 1));
+    TEST_ASSERT_TRUE(KString__equals(&hello, key1));
+    TEST_ASSERT_TRUE(KString__equals(&world, key2));
+}
+
+void test_map_set_and_get()
+{
+    TestMap map = TestMap__new();
+
+    ResultMatch(MapCode, TestMap__set(&map, hello, 12));
+        IsError(code, message, TEST_FAIL());
+    End
+
+    Match(TestInt, TestMap__get(&map, hello));
         IsNone(TEST_FAIL());
         IsSome(value, TEST_ASSERT_EQUAL_INT(12, value))
+    End
+}
+
+void test_map_set_and_get_ptr()
+{
+    TestMap map = TestMap__new();
+
+    ResultMatch(MapCode, TestMap__set(&map, hello, 12));
+        IsError(code, message, TEST_FAIL());
+    End
+
+    MapPtrMatch(TestMap, TestMap__get_ptr(&map, hello));
+        IsNone(TEST_FAIL());
+        IsSome(value, TEST_ASSERT_EQUAL_INT(12, *value))
     End
 }
 

@@ -1,7 +1,8 @@
 #include <stdint.h>
 
-#include "../../sys/syscall.h"
+#include "syscall.h"
 
-void print(const char * str) {
+void print(const char * str)
+{
     syscall(PRINT, (uint64_t)str, 0, 0, 0, 0);
 }

@@ -86,6 +86,12 @@ OptionalDef(ArrayIndex);
        alias##__type value = array.data[index]; \
 
 
+#define FAPtrIterate(alias, array, index, value) \
+    for (int index = 0; index < array->len; index++) \
+    { \
+       alias##__type value = array->data[index]; \
+
+
 #define FAPtrMatch(alias, opt) \
     { \
         typedef alias##__type_ptr value_type; \
@@ -113,8 +119,53 @@ OptionalDef(ArrayIndex);
 #define FindResultNone(alias) None(alias##__FindResult)
 #define FindResultSome(alias, res) Some(alias##__FindResult, res)
 
+
+#define FAUnwrapPanic(T, opt) \
+    opt.some.present ? opt.some.val : (T)___opt_panic("No value to unwrap")\
+
+
 #define FindResultOptional(alias) \
     _Optional(alias##__FindResult) \
+
+
+#define PopPreDefine(alias_name) \
+    FAOptional(alias_name) alias_name##__pop(alias_name * self); \
+    FAOptional(alias_name) alias_name##__pop_front(alias_name * self); \
+
+#define PopDefine(alias_name) \
+    FAOptional(alias_name) alias_name##__pop(alias_name * self) \
+    { \
+        if (self->len == 0) \
+        { \
+            return FANone(alias_name); \
+        } \
+        else \
+        { \
+            self->len--;\
+            ArrayIndex index = self->len;\
+            return FASome(alias_name, self->data[index]);\
+        } \
+    }; \
+    \
+    FAOptional(alias_name) alias_name##__pop_front(alias_name * self) \
+    { \
+        if (self->len == 0) \
+        { \
+            return FANone(alias_name); \
+        } \
+        else \
+        { \
+            FAOptional(alias_name) result = FASome(alias_name, self->data[0]);\
+            for (int i = 1; i < self->len; i++) \
+            { \
+                self->data[i - 1] = self->data[i]; \
+            } \
+            self->len--;\
+            return result;\
+        } \
+    }; \
+
+
 
 #define FindPreDefine(alias_name) \
     typedef bool(* alias_name##__predicate)(alias_name##__type_ptr value, void * context); \
@@ -367,6 +418,7 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
     LenPreDefine(alias_name) \
     AtPreDefine(alias_name) \
     PushPreDefine(alias_name) \
+    PopPreDefine(alias_name) \
     SetPreDefine(alias_name) \
     FindPreDefine(alias_name) \
     RemovePreDefine(alias_name) \
@@ -378,6 +430,7 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
     LenDefine(alias_name) \
     AtDefine(alias_name) \
     PushDefine(alias_name) \
+    PopDefine(alias_name) \
     SetDefine(alias_name) \
     FindDefine(alias_name) \
     RemoveDefine(alias_name) \

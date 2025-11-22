@@ -10,12 +10,21 @@ FixedArrayBodyDefine(SectionHeaderArray);
 FixedArrayBodyDefine(ProgramHeaderArray);
 FixedArrayBodyDefine(ExpandedSegmentArray);
 
-Elf64Header * Elf__read_header(const ElfPtr self)
+Elf Elf__new(const Address start, const Address end, const KString name)
 {
-    return ptr(self->start, Elf64Header);
+    return (Elf) {
+        .start = start,
+        .end = end,
+        .name = name,
+    };
 }
 
-SectionHeaderArray Elf__read_section_headers(const ElfPtr self)
+Elf64Header * Elf__read_header(Elf self)
+{
+    return ptr(self.start, Elf64Header);
+}
+
+SectionHeaderArray Elf__read_section_headers(Elf self)
 {
     SectionHeaderArray headers = SectionHeaderArray__new();
 
@@ -25,7 +34,7 @@ SectionHeaderArray Elf__read_section_headers(const ElfPtr self)
     Offset section_header_offset = header->section_header_offset;
     Offset section_names = header->section_name_index;
 
-    SectionHeaderPtr start = offset_ptr(self->start, section_header_offset, SectionHeader);
+    SectionHeaderPtr start = offset_ptr(self.start, section_header_offset, SectionHeader);
     __d_printf(PROCESS, "header offset=%p size=%i names=%p\n", section_header_offset, section_header_size, section_names);
     for (int i = 0; i < section_header_entries; i++)
     {
@@ -39,7 +48,7 @@ SectionHeaderArray Elf__read_section_headers(const ElfPtr self)
     return headers;
 }
 
-ProgramHeaderArray Elf__read_program_headers(const ElfPtr self)
+ProgramHeaderArray Elf__read_program_headers(Elf self)
 {
     Elf64Header * header = Elf__read_header(self);
     Offset program_header_offset = header->program_header_offset;
@@ -47,7 +56,7 @@ ProgramHeaderArray Elf__read_program_headers(const ElfPtr self)
     Size program_header_size = header->program_header_entry_size;
 
     ProgramHeaderArray headers = ProgramHeaderArray__new();
-    Offset start = self->start + program_header_offset;
+    Offset start = self.start + program_header_offset;
     for (int i = 0; i < num_headers; i++)
     {
         ProgramHeaderPtr header = offset_ptr(start, i * program_header_size, ProgramHeader);
@@ -59,7 +68,7 @@ ProgramHeaderArray Elf__read_program_headers(const ElfPtr self)
     return headers;
 }
 
-static UserAddress Elf__explode(const ElfPtr self, ProgramHeaderPtr header)
+static UserAddress Elf__explode(const Elf self, ProgramHeaderPtr header)
 {
     UserAddress address = Kernel__alloc_user(
         header->virtual_address,
@@ -68,17 +77,17 @@ static UserAddress Elf__explode(const ElfPtr self, ProgramHeaderPtr header)
         header->flags & Write,
         header->flags & Execute);
 
-    Kernel__memcopy(offset_addr(self->start, header->segment_offset),
+    Kernel__memcopy(offset_addr(self.start, header->segment_offset),
         address.kernel_addr.virtual_addr,
         header->file_size);
     return address;
 }
 
-static ExpandedSegment Elf__expand_segment(ElfPtr self,
-                                           ProgramHeaderPtr header,
-                                           ExpandedSegmentArrayPtr expanded_segments)
+static void Elf__expand_segment(
+    Elf self, ProgramHeaderPtr header, ExpandedSegmentArrayPtr expanded_segments
+)
 {
-    __d_printf(PROCESS, "Expanding segment header=%p name=%s\n", header, self->name);
+    __d_printf(PROCESS, "Expanding segment header=%p name=%s\n", header, cstr(self.name));
     if (header->type == Load)
     {
         UserAddress address = Elf__explode(self, header);
@@ -91,10 +100,10 @@ static ExpandedSegment Elf__expand_segment(ElfPtr self,
 
 }
 
-ExpandedSegmentArray Elf__map(const ElfPtr self) {
+ExpandedSegmentArray Elf__map(const Elf self) {
     ProgramHeaderArray headers = Elf__read_program_headers(self);
     ExpandedSegmentArray expanded_segments = ExpandedSegmentArray__new();
-    __d_printf(DEBUG, "Mapping segments %i\n", headers.len);
+    __d_printf(DEBUG, "Mapping segments %i\n", ProgramHeaderArray__len(&headers));
 
     for (int i = 0; i < headers.len; i++)
     {

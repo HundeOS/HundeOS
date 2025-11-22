@@ -24,6 +24,9 @@ static SchedulerPtr scheduler = NULL;
 static ProcessContextPtr context = (ProcessContextPtr) 0x12345;
 
 static Process PROC = STUB_PROCESS(1);
+static Optional(ProcessPtr) proc = Some(ProcessPtr, &PROC);
+
+IOSubsystem system = NEW_IO_SUBSYSTEM(NULL);
 
 static Flags FLAGS = 1234;
 
@@ -134,19 +137,22 @@ static Result(ParkStatus) fake_park(IOStatePtr state, IOContext parked_context)
 
 static IO TEST_IO = STUB_IO;
 
-void setup_scheduler()
+SchedulerPtr setup_scheduler()
 {
+    Elf idle = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf) {})
     scheduler = Scheduler__heap_new();
-    Scheduler__init(scheduler, EmbeddedElf__load("hello_world"));
+    Scheduler__init(scheduler, idle);
     Scheduler__start(scheduler, cpu);
     Scheduler__schedule(scheduler, &PROC);
     Scheduler__preempt(scheduler, cpu, context);
+
+    return scheduler;
 }
 
 void setUp(void)
 {
     reset_state();
-    setup_scheduler();
+    system = NEW_IO_SUBSYSTEM(setup_scheduler());
 }
 
 void data_available()
@@ -177,8 +183,6 @@ void data_available_interrupt(IOSubsystemPtr io_subsystem)
 
 void test_io_subsystem_registration_and_open()
 {
-    IOSubsystem system = NEW_IO_SUBSYSTEM(scheduler);
-
     KString path = KString__new("/dev/test");
 
     ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
@@ -186,7 +190,7 @@ void test_io_subsystem_registration_and_open()
         IsSuccess(handle, TEST_ASSERT_EQUAL_UINT(EXPECTED_DEVICE_HANDLE, handle));
     End
 
-    ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL());
     End
@@ -196,7 +200,6 @@ void test_io_subsystem_registration_and_open()
 
 void test_io_open_and_read()
 {
-    IOSubsystem system = NEW_IO_SUBSYSTEM(scheduler);
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
@@ -206,7 +209,7 @@ void test_io_open_and_read()
         IsError(code, message, TEST_FAIL());
     End
 
-    ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
@@ -214,7 +217,7 @@ void test_io_open_and_read()
     data_available();
 
     IOContext context = (IOContext) {
-        .proc = &PROC,
+        .proc = proc,
         .handle = handle,
         .buffer = data,
         .size = MAX_READ,
@@ -236,7 +239,6 @@ void test_io_open_and_read()
 
 void test_io_open_and_write()
 {
-    IOSubsystem system = NEW_IO_SUBSYSTEM(scheduler);
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
@@ -248,13 +250,13 @@ void test_io_open_and_write()
     End
 
     __d_println(DEBUG, "opening %p\n");
-    ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
 
     IOContext context = (IOContext) {
-        .proc = &PROC,
+        .proc = proc,
         .handle = handle,
         .buffer = data,
         .size = MAX_READ,
@@ -280,7 +282,6 @@ void test_io_open_and_write()
 
 void test_io_open_and_read_when_no_data_ready_parks_the_process()
 {
-    IOSubsystem system = NEW_IO_SUBSYSTEM(scheduler);
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
@@ -292,13 +293,13 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process()
     End
 
     __d_println(DEBUG, "opening %p\n");
-    ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
 
     IOContext context = (IOContext) {
-        .proc = &PROC,
+        .proc = proc,
         .handle = handle,
         .buffer = data,
         .size = MAX_READ,
@@ -327,7 +328,6 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process()
 
 void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when_data_arrives()
 {
-    IOSubsystem system = NEW_IO_SUBSYSTEM(scheduler);
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
@@ -339,7 +339,7 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
     End
 
     __d_println(DEBUG, "opening %p\n");
-    ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
@@ -349,7 +349,7 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
     End
 
     IOContext context = (IOContext){
-        .proc = &PROC,
+        .proc = proc,
         .handle = handle,
         .buffer = data,
         .size = MAX_READ,
@@ -382,7 +382,6 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
 
 void test_io_write_when_not_open()
 {
-    IOSubsystem system = NEW_IO_SUBSYSTEM(scheduler);
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
@@ -393,7 +392,7 @@ void test_io_write_when_not_open()
     End
 
     IOContext context = (IOContext){
-        .proc = &PROC,
+        .proc = proc,
         .handle = handle,
         .buffer = data,
         .size = 10,
@@ -419,7 +418,6 @@ void test_io_read_when_not_open()
 {
     Data data[MAX_READ] = {0};
 
-    IOSubsystem system = NEW_IO_SUBSYSTEM(scheduler);
     IOHandle handle = -1;
 
     KString path = KString__new("/dev/test");
@@ -430,7 +428,7 @@ void test_io_read_when_not_open()
     End
 
     IOContext context = (IOContext){
-        .proc = &PROC,
+        .proc = proc,
         .handle = handle,
         .buffer = data,
         .size = MAX_READ,
@@ -454,7 +452,6 @@ void test_io_read_when_not_open()
 void test_io_subsystem_registration_and_close()
 {
     IO test_io = STUB_IO;
-    IOSubsystem system = NEW_IO_SUBSYSTEM(scheduler);
 
     KString path = KString__new("/dev/test");
 
@@ -462,12 +459,12 @@ void test_io_subsystem_registration_and_close()
         IsError(code, message, TEST_FAIL());
     End
 
-    ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&system, &PROC, EXPECTED_OPEN_HANDLE))
+    ResultMatch(IOHandle, IOSubsystem__close(&system, proc, EXPECTED_OPEN_HANDLE))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
@@ -477,25 +474,23 @@ void test_io_subsystem_registration_and_close()
 
 void test_io_subsystem_close_disposes_handle()
 {
-    IOSubsystem system = NEW_IO_SUBSYSTEM(scheduler);
-
     KString path = KString__new("/dev/test");
 
     ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
         IsError(code, message, TEST_FAIL());
     End
 
-    ResultMatch(IOHandle, IOSubsystem__open(&system, &PROC, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&system, &PROC, EXPECTED_OPEN_HANDLE))
+    ResultMatch(IOHandle, IOSubsystem__close(&system, proc, EXPECTED_OPEN_HANDLE))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&system, &PROC, EXPECTED_OPEN_HANDLE))
+    ResultMatch(IOHandle, IOSubsystem__close(&system, proc, EXPECTED_OPEN_HANDLE))
         IsSuccess(result, TEST_FAIL());
     End
 

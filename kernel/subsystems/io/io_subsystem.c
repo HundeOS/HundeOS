@@ -7,6 +7,9 @@
 #include "../../debug.h"
 #include "scheduler/scheduler.h"
 
+static KString no_device_found_format = KSTRING_NEW("No device found %s\n");
+static KString failed_to_register_format = KSTRING_NEW("Failed to register device %s\n");
+static KString unknown_handle_format = KSTRING_NEW("Unknown handle %i\n");
 
 DeviceHandle _to_device_handle(ArrayIndex index)
 {
@@ -41,29 +44,24 @@ Result(DeviceHandle) IOSubsystem__register_device(
         });
     End
 
-    KString format = kstring("Failed to register device %s\n");
-    return Error(DeviceHandle, KString__sprintf(&format, path), IO_REGISTER_FAILED);
+
+    return Error(DeviceHandle, KString__sprintf(&failed_to_register_format, path), IO_REGISTER_FAILED);
 }
 
 bool path_match(DeviceRegistration * device, void * v_path)
 {
-    KString * path = v_path;
-    return KString__equals(path, &device->path);
+    KStringPtr path = v_path;
+    return KString__starts_with(path, &device->path);
 }
-
-const char * NO_DEVICE_FOUND = "No device found %s\n";
 
 static FindResultOptional(IODevicesArray) IOSubsystem__find_device(IOSubsystemPtr self, KStringPtr path)
 {
     return IODevicesArray__find(&self->devices, path_match, path);
 }
 
-Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, ProcessPtr proc, KString path, Flags flags)
+Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, Optional(ProcessPtr) proc, KString path, Flags flags)
 {
-    KString format = kstring(NO_DEVICE_FOUND);
-    KString error_msg = KString__sprintf(&format, &path);
-
-    Result(IOHandle) error = Error(IOHandle, error_msg, IO_NO_DEVICE_FOUND);
+    Result(IOHandle) error = Error(IOHandle, KString__sprintf(&no_device_found_format, &path), IO_NO_DEVICE_FOUND);
 
     FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
         IsSome(match,
@@ -76,7 +74,16 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, ProcessPtr proc, KString
                 {
                     IOHandle external_handle = (IOHandle) handle | (((IOHandle)_to_device_handle(match.index)) << 32);
                     IOHandlesMap__set(&self->handles, external_handle, registration);
-                    ProcessHandles__push(&proc->handles, external_handle);
+                    Match(ProcessPtr, proc)
+                        IsSome(process,
+                        {
+                            ProcessHandles__push(&process->handles, external_handle);
+                        })
+                        IsNone(
+                        {
+                            __d_println(PANIC, "TODO: No process found for open, must be kernel, should track its handle");
+                        });
+                    End
                     return Success(IOHandle, external_handle);
                 });
                 IsError(code, message, return Error(IOHandle, message, code))
@@ -87,7 +94,7 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, ProcessPtr proc, KString
     return error;
 }
 
-Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, ProcessPtr proc, IOHandle handle)
+Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, Optional(ProcessPtr) proc, IOHandle handle)
 {
     __d_printf(IOSUB, "Closing handle %i\n", handle);
     Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
@@ -95,7 +102,17 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, ProcessPtr proc, IOHand
         {
             Result(IOInternalHandle) close_res = registration->device->close(registration->state, _device_internal_handle(handle));
             IOHandlesMap__delete(&self->handles, handle);
-            ProcessHandles__remove(&proc->handles, handle);
+            Match(ProcessPtr, proc)
+                IsSome(process,
+                {
+                    ProcessHandles__remove(&process->handles, handle);
+                });
+                IsNone(
+                {
+                    __d_println(PANIC, "TODO: No process found for close, must be kernel, should track its handle");
+                });
+            End
+
 
             ResultMatch(IOInternalHandle, close_res)
                 IsSuccess(_, return Success(IOHandle, handle));
@@ -103,8 +120,8 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, ProcessPtr proc, IOHand
             End
         });
     End
-    KString format = kstring("Unknown handle %p\n");
-    KString error_msg = KString__sprintf(&format, handle) ;
+
+    KString error_msg = KString__sprintf(&unknown_handle_format, handle) ;
     return Error(IOHandle, error_msg, IO_NOT_OPEN);
 }
 
@@ -126,7 +143,11 @@ void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContext parked_context)
             match->device->unpark(match->state);
             // tell scheduler things are ready to complete the parked call
             __d_println(IOSUB, "IO sub unparking process");
-            Scheduler__unpark(self->scheduler, parked_context.proc);
+            Match(ProcessPtr, parked_context.proc)
+                IsSome(process, Scheduler__unpark(self->scheduler, process));
+                IsNone(__d_println(PANIC, "No process found for parked context"));
+            End
+
         })
         IsNone(
             __d_println(PANIC, "No device found for parking context");
@@ -153,7 +174,7 @@ void IOSubsystem__park(IOSubsystemPtr self, IOContext io_context)
 Result(Anything) IOSubsystem__continue_read(void * context)
 {
     IOContextPtr io_context = (IOContextPtr) context;
-    __d_printf(IOSUB, "\nConinuining read %p %p\n", io_context, io_context->io_subsystem);
+    __d_printf(IOSUB, "\nContinuing read %p %p\n", io_context, io_context->io_subsystem);
     ResultMatch(ByteCount, IOSubsystem__read(io_context->io_subsystem, *io_context))
         IsSuccess(bytes, return Success(Anything, bytes));
         IsError(code, message, return Error(Anything, message, code));
@@ -184,7 +205,11 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContext context)
                         Optional(Continuation) continuation = Some(Continuation, IOSubsystem__continue_read);
 
                         IOSubsystem__park(self, context);
-                        Scheduler__park(self->scheduler, context.proc, &context.kernel_context, continuation);
+                        Match(ProcessPtr, context.proc)
+                            IsSome(process, Scheduler__park(self->scheduler, process, &context.kernel_context, continuation))
+                            IsNone(__d_println(PANIC, "No process found for parked context"));
+                        End
+
                     }
                     return Error(ByteCount, message, code);
                 })
@@ -204,11 +229,11 @@ Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContext context)
         IsSome(registration,
         {
             return registration->device->write(
-                registration->state, _device_internal_handle(context.handle), context.buffer, context.size);
+                registration->state, _device_internal_handle(context.handle), context.buffer, context.size
+            );
         });
     End
 
-    KString format = kstring("Unknown handle %p\n");
-    KString error_msg = KString__sprintf(&format, context.handle);
+    KString error_msg = KString__sprintf(&unknown_handle_format, context.handle);
     return Error(ByteCount, error_msg, IO_NOT_OPEN);
 }

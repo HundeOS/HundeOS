@@ -1,7 +1,10 @@
 #include "unity.h"
 #include "../../../kernel/types/kstring.h"
+#include "../../../kernel/types/kstring_additional_types.h"
 #include "../../../kernel/print.h"
 
+KString hello = KSTRING_NEW("hello");
+KString world = KSTRING_NEW("world");
 
 #define TEST_KSTRING_EQUALS(expected, actual) \
     bool equal = KString__equals(&expected, &actual); \
@@ -13,7 +16,6 @@
 
 void setUp(void)
 {
-
 }
 
 void tearDown(void)
@@ -21,6 +23,58 @@ void tearDown(void)
 
 }
 
+
+void test_kstring_split(void)
+{
+    KString str = kstring("hello/world");
+    KStringArray strs = KString__split(&str, '/');
+
+    TEST_ASSERT_EQUAL_INT(2, KStringArray__len(&strs));
+    KStringPtr str1 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 0));
+    KStringPtr str2 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 1));
+
+    TEST_ASSERT_TRUE(KString__equals(str1, &hello));
+    TEST_ASSERT_TRUE(KString__equals(str2, &world));
+}
+
+void test_kstring_split_preceeding_delimiter(void)
+{
+    KString str = kstring("/hello/world");
+    KStringArray strs = KString__split(&str, '/');
+
+    TEST_ASSERT_EQUAL_INT(2, KStringArray__len(&strs));
+    KStringPtr str1 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 0));
+    KStringPtr str2 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 1));
+
+    TEST_ASSERT_TRUE(KString__equals(str1, &hello));
+    TEST_ASSERT_TRUE(KString__equals(str2, &world));
+}
+
+void test_kstring_split_trailing_delimiters(void)
+{
+    KString str = kstring("/hello/world//");
+    KStringArray strs = KString__split(&str, '/');
+
+    TEST_ASSERT_EQUAL_INT(2, KStringArray__len(&strs));
+    KStringPtr str1 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 0));
+    KStringPtr str2 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 1));
+
+    TEST_ASSERT_TRUE(KString__equals(str1, &hello));
+    TEST_ASSERT_TRUE(KString__equals(str2, &world));
+}
+
+void test_kstring_split_double_delimiter(void)
+{
+    KString str = kstring("/hello//world");
+    KStringArray strs = KString__split(&str, '/');
+
+    TEST_ASSERT_EQUAL_INT(2, KStringArray__len(&strs));
+    KStringPtr str1 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 0));
+    KStringPtr str2 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 1));
+
+    TEST_ASSERT_TRUE(KString__equals(str1, &hello));
+    TEST_ASSERT_TRUE(KString__equals(str2, &world));
+}
 
 void test_kstring_equals_when_equals(void)
 {
@@ -44,6 +98,16 @@ void test_kstring_equals_when_not_equal_same_length(void)
     KString str2 = kstring("hella");
 
     TEST_ASSERT_FALSE(KString__equals(&str1, &str2));
+}
+
+KString delimited_string = KSTRING_NEW("hello/world/how/are/you");
+KString rejoined_string = KSTRING_NEW("hello:world:how:are:you");
+void test_kstring_join(void)
+{
+    KStringArray strs = KString__split(&delimited_string, '/');
+
+    KString joined = KString__join(&strs, ':');
+    TEST_KSTRING_EQUALS(rejoined_string, joined);
 }
 
 void test_kstring_sprintf(void)
@@ -70,4 +134,36 @@ void test_kstring_append(void)
     KString appended = KString__append(&str1, &str2);
 
     TEST_KSTRING_EQUALS(expected, appended);
+}
+
+void test_kstring_starts_with_when_starts_with(void)
+{
+    KString match = kstring("12345");
+    KString full = kstring("123456789");
+
+    TEST_ASSERT_TRUE(KString__starts_with(&full, &match));
+}
+
+void test_kstring_starts_with_when_no_match(void)
+{
+    KString no_match = kstring("789");
+    KString full = kstring("123456789");
+
+    TEST_ASSERT_FALSE(KString__starts_with(&full, &no_match));
+}
+
+void test_kstring_starts_with_when_comparing_to_empty(void)
+{
+    KString empty = kstring("");
+    KString full = kstring("123456789");
+
+    TEST_ASSERT_FALSE(KString__starts_with(&full, &empty));
+}
+
+void test_kstring_starts_with_when_empty(void)
+{
+    KString compare = kstring("9876");
+    KString empty = kstring("");
+
+    TEST_ASSERT_FALSE(KString__starts_with(&empty, &compare));
 }

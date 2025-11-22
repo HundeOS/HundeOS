@@ -78,12 +78,18 @@ typedef enum ProcessSetupStatus
     PROCESS_SETUP = 0,
 } ProcessSetupStatus;
 
+typedef struct Process Process;
+typedef Process * ProcessPtr;
+
+OptionalDef(ProcessPtr);
+ResultDef(ProcessPtr);
+
 typedef struct Process {
     KernelAddress page_table;
 
     ProcessContextPtr context;
     Stack stack;
-
+    Optional(ProcessPtr) parent;
     ProcessID pid;
     ProcessState state;
     UserAddress entry_point;
@@ -93,18 +99,15 @@ typedef struct Process {
     Optional(ParkedKernelContextPtr) parked_context;
 } Process;
 
-typedef Process * ProcessPtr;
-
-OptionalDef(ProcessPtr);
-ResultDef(ProcessPtr);
-
-ProcessPtr Process__new(KString name, KernelAddress page_table, UserAddress entry, Stack stack);
+ProcessPtr Process__new(
+    KString name, KernelAddress page_table, UserAddress entry, Stack stack, Optional(ProcessPtr) parent
+);
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 
 OptionalType(ProcessTable *, ProcessTablePtr);
 
-Result(ProcessPtr) Process__setup(ElfPtr binary);
+Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent);
 Result(ParkedKernelContextPtr) Process__unpark(ProcessPtr self);
 Result(ParkedKernelContextPtr) Process__park(ProcessPtr self, Optional(ParkedKernelContextPtr) parked_context);
 

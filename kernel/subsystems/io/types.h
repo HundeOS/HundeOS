@@ -26,7 +26,7 @@ OptionalDef(IOHandle);
 OptionalDef(IOInternalHandle);
 OptionalDef(DeviceHandle);
 
-FixedArrayDefine(IOHandle, MAX_HANDLES_PER_DEVICE, IOHandleArray, SimpleEquals(uint64_t));
+FixedArrayDefine(IOHandle, MAX_HANDLES_PER_DEVICE, IOHandleArray, SimpleEquals(uint32_t));
 RingBufferDefine(_4_MEGS, IOBuffer);
 
 typedef IOBuffer * IOBufferPtr;

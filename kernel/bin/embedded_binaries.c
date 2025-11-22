@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 #include "../debug.h"
+#include "types/kstring_additional_types.h"
 
 __extern_binary(_bin_hello_world);
 __extern_binary(_bin_idle);
@@ -17,17 +18,29 @@ static const Elf embedded_binaries[] = {
     EMBED("shell", _bin_shell),
 };
 
-Elf * EmbeddedElf__load(const char * name)
+Optional(Elf) EmbeddedElf__load(KString name)
 {
     for (int i = 0; i < sizeof(embedded_binaries) / sizeof(Elf); i++)
     {
-        if (compare(embedded_binaries[i].name, name))
+        if (KString__equals(&embedded_binaries[i].name, &name))
         {
-            return &embedded_binaries[i];
+            return Some(Elf, embedded_binaries[i]);
         }
     }
 
-    return NULL;
+    return None(Elf);
+}
+
+
+KStringArray EmbeddedElf__list()
+{
+    KStringArray result = KStringArray__new();
+    for (int i = 0; i < sizeof(embedded_binaries) / sizeof(Elf); i++)
+    {
+        KStringArray__push(&result, embedded_binaries[i].name);
+    }
+
+    return result;
 }
 
 

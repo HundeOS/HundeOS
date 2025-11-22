@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include "../user.h"
+#include "../sys/spawn.h"
 
 
 static const char * CMD_EXIT = "exit";
@@ -46,6 +47,22 @@ static bool matches(const char* str, const char* cmd)
     return true;
 }
 
+ShellResult execute(const char* cmd)
+{
+    SpawnResult result = spawn(P_WAIT, cmd, NULL);
+    switch (result)
+    {
+        case SPAWN_SUCCESS:
+            return COMMAND_SUCCESS;
+        case SPAWN_NO_MEM:
+        case SPAWN_NO_FILE:
+        case SPAWN_NO_PATH:
+        case SPAWN_FAILED:
+            return COMMAND_FAILED;
+    }
+    return COMMAND_FAILED;
+}
+
 ShellResult interpret(const char* input)
 {
     char stripped[1024];
@@ -55,8 +72,5 @@ ShellResult interpret(const char* input)
     {
         return EXIT;
     }
-    else
-    {
-        return COMMAND_NOT_FOUND;
-    }
+    return COMMAND_NOT_FOUND;
 }

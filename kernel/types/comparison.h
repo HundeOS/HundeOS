@@ -42,6 +42,7 @@ SimpleEqualsPreDef(int32_t)
 SimpleEqualsPreDef(int16_t)
 SimpleEqualsPreDef(int8_t)
 SimpleEqualsPreDef(char)
+SimpleEqualsPreDef(Char)
 
 bool Ptr__equals(void * a, void * b);
 bool kstring_equals(void * a, void * b);

@@ -13,17 +13,30 @@
 #include "types/result.h"
 #include "../arch/aarch64/io/uart.h"
 
-
-void schedule(SchedulerPtr scheduler, const char * name)
+KString panic_message = KSTRING_NEW("Program failed: %s\n");
+void schedule(SchedulerPtr scheduler, KString name)
 {
     __d_printf(PROGRESS, "Queuing to scheduler: %s\n", name);
-    ElfPtr program = EmbeddedElf__load(name);
-    ResultMatch(ProcessPtr, Process__setup(program))
-        IsSuccess(process, Scheduler__schedule(scheduler, process))
-        IsError(code, message,
+    Optional(Elf) program = EmbeddedElf__load(name);
+    Match(Elf, program)
+        IsSome(elf,
         {
-            __d_printf(PANIC, "Program failed: %s\n", name);
-            Kernel__panic(cstr(message), NULL);
+            ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+                IsSuccess(process, Scheduler__schedule(scheduler, process))
+                IsError(code, message,
+                {
+                    __d_printf(PANIC, "Program failed: %s\n", name);
+                    KString panic_error = KString__sprintf(&panic_message, cstr(name));
+                    Kernel__panic(cstr(panic_error), NULL);
+                })
+            End
+        });
+        IsNone(
+        {
+            __d_printf(PANIC, "Program failed: %s\n", cstr(name));
+            KString panic_error = KString__sprintf(&panic_message, cstr(name));
+            Kernel__panic(cstr(panic_error), NULL);
+
         })
     End
 }
@@ -60,7 +73,7 @@ void Kernel_main(CPUID cpu_id) {
 
     __d_printf(PROGRESS, "Kernel starting loading program: %i\n", cpu_id);
 
-    schedule(kernel->scheduler, "shell");
+    schedule(kernel->scheduler, kstring("shell"));
 
     __d_printf(PROGRESS, "CPU entering main: %i\n", cpu_id);
     CPUTimer__start(1000);

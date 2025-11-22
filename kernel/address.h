@@ -14,7 +14,7 @@ typedef uint64_t Offset;
 #define paddr(ka) ka.phys_addr
 #define u_kpaddr(ua) ua.kernel_addr.phys_addr
 #define u_kvaddr(ua) ua.kernel_addr.virtual_addr
-#define offset_addr(a, b) a + b
+#define offset_addr(a, b) (Address) (a + b)
 
 #define KERNEL_ADDR(virt, phys) \
     (KernelAddress) { \

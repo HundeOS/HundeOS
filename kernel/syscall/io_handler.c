@@ -5,9 +5,12 @@
 #include <stdint.h>
 
 
+static KString unhandled_operation_format = KSTRING_NEW("Unhandled io operation: %p");
+
 Result(SystemCallResult) IO__handler(
-        KernelPtr kernel, ProcessPtr proc, Anything io_operation, Anything arg2, Anything arg3, Anything arg4, Anything arg5
-    )
+    KernelPtr kernel, Optional(ProcessPtr) proc, Anything io_operation,
+    Anything arg2, Anything arg3, Anything arg4, Anything arg5
+)
 {
     IOSubsystemPtr io_subsystem = &kernel->io_subsystem;
 
@@ -78,7 +81,5 @@ Result(SystemCallResult) IO__handler(
         End
     }
 
-    KString error_message = kstring("Unhandled io operation: %p");
-    KString message = KString__sprintf(&error_message, io_operation);
-    return Error(SystemCallResult, message, SYSCALL_FAILURE);
+    return Error(SystemCallResult, KString__sprintf(&unhandled_operation_format, io_operation), SYSCALL_FAILURE);
 }

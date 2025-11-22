@@ -3,7 +3,7 @@
 
 #include "syscalls/spawn.h"
 
-SpawnResult spawn(int mode, char* path, char* arg0, ...);
+SpawnResult spawn(SpawnMode mode, const char* path, const char* arg0, ...);
 
 
 #endif

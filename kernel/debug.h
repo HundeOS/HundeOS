@@ -20,6 +20,7 @@ typedef enum {
     PROCESS,
     IODEV,
     IOSUB,
+    EXEC,
     PROGRESS,
     UNHANDLED,
     FAULT,
@@ -69,11 +70,13 @@ inline const char * level_to_string(Level level)
             return "IO SUBYSTEM";
         case IODEV:
             return "IO DEVICE";
+        case EXEC:
+            return "EXEC";
     }
     return "UNKNOWN";
 }
 
-#define MIN_LEVEL PROGRESS
+#define MIN_LEVEL EXEC
 #define CPU_IDS 100
 
 #define __d_printf(level, str, ...) \

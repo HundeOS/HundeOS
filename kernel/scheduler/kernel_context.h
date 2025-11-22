@@ -2,16 +2,38 @@
 #define __KERNEL_SCHEDULER_KERNEL_CONTEXT_H
 
 #include "../process.h"
+#include "../context/originating_call_context.h"
 
 typedef struct Scheduler Scheduler;
 typedef Scheduler * SchedulerPtr;
 
 typedef struct KernelContext
 {
-    ProcessPtr proc;
+    Optional(ProcessPtr) proc;
     SchedulerPtr scheduler;
 } KernelContext;
 
 typedef KernelContext * KernelContextPtr;
+
+
+KernelContext KernelContext__new(Optional(ProcessPtr) proc, SchedulerPtr scheduler);
+KernelContextPtr KernelContext__heap_new(Optional(ProcessPtr) proc, SchedulerPtr scheduler);
+
+KernelContext KernelContext__from_originating_context(OriginatingContext originating_context);
+KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext originating_context);
+
+#define NEW_KERNEL_CONTEXT(sched, process) \
+    (KernelContext) { \
+        .proc = process,\
+        .scheduler = sched,\
+    }
+
+
+#define EMPTY_KERNEL_CONTEXT \
+    (KernelContext) { \
+        .proc = None(ProcessPtr),\
+        .scheduler = NULL,\
+    }
+
 
 #endif

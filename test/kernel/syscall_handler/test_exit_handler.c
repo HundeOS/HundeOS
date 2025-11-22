@@ -22,8 +22,8 @@ static ProcessContextPtr context = (ProcessContextPtr) 0x12345;
 void setUp(void)
 {
     process = dummy_process(100, cpu, PROC_STATE_RUNNING);
-
-    Scheduler__init(kernel.scheduler, EmbeddedElf__load("hello_world"));
+    Elf idle_process = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Scheduler__init(kernel.scheduler, idle_process);
     Scheduler__start(kernel.scheduler, cpu);
     Scheduler__schedule(kernel.scheduler, process);
 
@@ -46,7 +46,7 @@ void test_exit_handler_interrupts_and_removes_process_from_scheduler(void)
         IsSome(current, TEST_ASSERT_EQUAL(process, current));
     End
 
-    Exit__handler(&kernel, process, 0, 0, 0, 0, 0);
+    Exit__handler(&kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0);
 
     TEST_ASSERT_EQUAL(PROC_STATE_DEAD, process->state);
 

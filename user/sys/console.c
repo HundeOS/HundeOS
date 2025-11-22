@@ -1,10 +1,9 @@
-#include "../syscall.h"
 #include <stdint.h>
 #include <stddef.h>
 
-#include "../io.h"
-#include "../../sys/exit.h"
-#include "../../user.h"
+#include "io.h"
+#include "exit.h"
+#include "../user.h"
 
 extern void print(const char * str);
 

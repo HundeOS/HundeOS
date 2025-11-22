@@ -11,8 +11,9 @@ typedef size_t ItemCount;
 ResultDef(Pos);
 ResultDef(ItemCount);
 
-static const char * OVERFLOW_ERROR = "Ring buffer overflow";
-static const char * UNDERFLOW_ERROR = "Ring buffer underflow";
+static KString OVERFLOW_ERROR = KSTRING_NEW("Ring buffer overflow");
+static KString OVERFLOW_AVOIDED_ERROR = KSTRING_NEW("Ring buffer overflow would occur");
+static KString UNDERFLOW_ERROR = KSTRING_NEW("Ring buffer underflow");
 
 typedef enum RingBufferError {
     RING_BUFFER_OVERFLOW = -1,
@@ -82,6 +83,7 @@ typedef enum RingBufferError {
 
 #define RingBufferPushPreDefine(alias) \
     Result(Pos) alias##__push(alias##Ptr self, Char value); \
+    Result(Pos) alias##__push_all(alias##Ptr self, Char values[], size_t size); \
 
 #define RingBufferPushDefine(alias) \
     Result(Pos) alias##__push(alias##Ptr self, Char value) \
@@ -90,12 +92,38 @@ typedef enum RingBufferError {
         if ((self->write_pos - self->read_pos) >= self->buffer_size) \
         { \
             __d_printf(DEBUG, "overflow %i %i\n", self->write_pos, self->read_pos); \
-            return Error(Pos, kstring(OVERFLOW_ERROR), RING_BUFFER_OVERFLOW); \
+            return Error(Pos, OVERFLOW_ERROR, RING_BUFFER_OVERFLOW); \
         } \
         \
         Pos pos = self->write_pos % self->buffer_size; \
         self->buffer[pos] = value; \
         self->write_pos++; \
+        \
+        return Success(Pos, pos); \
+    } \
+    \
+    Result(Pos) alias##__push_all(alias##Ptr self, Char values[], size_t size) \
+    { \
+        \
+        if ((self->write_pos - self->read_pos) >= self->buffer_size) \
+        { \
+            __d_printf(DEBUG, "overflow %i %i\n", self->write_pos, self->read_pos); \
+            return Error(Pos, OVERFLOW_ERROR, RING_BUFFER_OVERFLOW); \
+        } \
+        \
+        if ((self->write_pos + (size - 1) - self->read_pos) >= self->buffer_size) \
+        { \
+            __d_printf(DEBUG, "overflow %i %i\n", self->write_pos + size, self->read_pos); \
+            return Error(Pos, OVERFLOW_AVOIDED_ERROR, RING_BUFFER_OVERFLOW); \
+        } \
+        \
+        Pos pos = self->write_pos % self->buffer_size;\
+        for (Pos i = 0; i < size; i++) \
+        { \
+            Pos write_pos = (pos + i) % self->buffer_size; \
+            self->buffer[write_pos] = values[i];\
+        } \
+        self->write_pos += size; \
         \
         return Success(Pos, pos); \
     } \
@@ -109,7 +137,7 @@ typedef enum RingBufferError {
         if ((self->write_pos - self->read_pos) <= 0) \
         { \
             __d_printf(DEBUG, "overflow %i %i\n", self->write_pos, self->read_pos); \
-            return Error(Char, kstring(UNDERFLOW_ERROR), RING_BUFFER_UNDERFLOW); \
+            return Error(Char, UNDERFLOW_ERROR, RING_BUFFER_UNDERFLOW); \
         } \
         Pos pos = self->read_pos % self->buffer_size; \
         Char val = self->buffer[pos]; \
@@ -131,11 +159,17 @@ typedef enum RingBufferError {
 
 #define RingBufferItemCountPreDefine(alias) \
     size_t alias##__item_count(alias##Ptr self); \
+    size_t alias##__free_space(alias##Ptr self); \
 
 #define RingBufferItemCountDefine(alias) \
     size_t alias##__item_count(alias##Ptr self) \
     { \
         return self->write_pos - self->read_pos;\
+    } \
+    \
+    size_t alias##__free_space(alias##Ptr self) \
+    { \
+        return self->buffer_size - alias##__item_count(self);\
     } \
 
 #define RingBufferDrainPreDefine(alias) \

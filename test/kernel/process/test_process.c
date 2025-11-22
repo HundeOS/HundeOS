@@ -21,8 +21,8 @@ void tearDown(void)
 
 void test_setup_from_elf(void)
 {
-    ElfPtr elf = EmbeddedElf__load("hello_world");
-    ResultMatch(ProcessPtr, Process__setup(elf))
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message,
         {
             TEST_FAIL();

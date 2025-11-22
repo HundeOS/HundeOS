@@ -11,7 +11,7 @@
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/types/comparison.h"
 #include "../../../kernel/types/kstring.h"
-#include "../../../kernel/types/kstring_optionals.h"
+#include "../../../kernel/types/kstring_additional_types.h"
 
 typedef uint64_t TestType;
 typedef TestType * TestTypePtr;
@@ -156,6 +156,60 @@ void test_fixed_array_remove(void)
 
     Match(ArrayIndex, TestArray__find_item(&array, 27))
         IsSome(value, TEST_FAIL());
+    End
+}
+
+void test_fixed_array_pop_front(void)
+{
+    TestArray array = TestArray__new();
+    for (int i = 0; i < TEST_ARRAY_SIZE; i++)
+    {
+        TestArray__push(&array, i + 100);
+    }
+
+    Match(TestType, TestArray__pop_front(&array));
+        IsNone(TEST_FAIL());
+        IsSome(val,
+        {
+            TEST_ASSERT_EQUAL_INT(100, val);
+            TEST_ASSERT_EQUAL_INT(TEST_ARRAY_SIZE - 1, TestArray__len(&array));
+        });
+    End
+}
+
+void test_fixed_array_pop_front_when_empty(void)
+{
+    TestArray array = TestArray__new();
+
+    Match(TestType, TestArray__pop_front(&array));
+        IsSome(val, TEST_FAIL());
+    End
+}
+
+void test_fixed_array_pop(void)
+{
+    TestArray array = TestArray__new();
+    for (int i = 0; i < TEST_ARRAY_SIZE; i++)
+    {
+        TestArray__push(&array, i + 100);
+    }
+
+    Match(TestType, TestArray__pop(&array));
+        IsNone(TEST_FAIL());
+        IsSome(val,
+        {
+            TEST_ASSERT_EQUAL_INT(100 + TEST_ARRAY_SIZE - 1, val);
+            TEST_ASSERT_EQUAL_INT(TEST_ARRAY_SIZE - 1, TestArray__len(&array));
+        });
+    End
+}
+
+void test_fixed_array_pop_when_empty(void)
+{
+    TestArray array = TestArray__new();
+
+    Match(TestType, TestArray__pop(&array));
+        IsSome(val, TEST_FAIL());
     End
 }
 

@@ -11,6 +11,15 @@
 #include "bin/embedded_binaries.h"
 #include "scheduler/scheduler.h"
 
+
+static KString failed_to_find_idle_process = KSTRING_NEW("failed to find idle process");
+static KString heap_init_progress = KSTRING_NEW("heap initialised");
+static KString syscall_init_progress = KSTRING_NEW("syscall handlers initialised");
+static KString io_init_progress = KSTRING_NEW("io subsystem initialised");
+static KString scheduler_init_progress = KSTRING_NEW("scheduler initialised");
+static KString arch_init_progress = KSTRING_NEW("architecture specific components initialised");
+static KString failed_to_init_msg = KSTRING_NEW("failed to initialise kernel");
+
 static Scheduler scheduler = NEW_SCHEDULER;
 
 static Kernel instance = {
@@ -22,11 +31,27 @@ static Kernel instance = {
     .scheduler = &scheduler,
 };
 
+KernelPtr Kernel__heap_new(SchedulerPtr scheduler)
+{
+    KernelPtr kernel = ptr(Kernel__alloc_kernel(sizeof(Kernel)), Kernel);
+
+    *kernel = (Kernel) {
+        .status = INIT_NOT_STARTED,
+        .init_lock = MUTEX_INIT,
+        .syscall_dispatcher = NEW_SYSCALL_DISPATCHER,
+        .io_subsystem = NEW_IO_SUBSYSTEM(scheduler),
+        .heap = NEW_HEAP,
+        .scheduler = scheduler,
+    };
+
+    return kernel;
+}
+
 void __kernel_panic(KernelPtr self, KStringPtr message)
 {
     self->status = INIT_FAILED_AND_PANICKED;
     mutex_unlock(&self->init_lock);
-    Kernel__panic(KString__cstr(message), NULL);
+    Kernel__panic(cstr_p(message), NULL);
 }
 
 void PanicOnError(Result(SubsystemInitStatus) res, KernelPtr kernel, KStringPtr progress_message)
@@ -42,8 +67,6 @@ void PanicOnError(Result(SubsystemInitStatus) res, KernelPtr kernel, KStringPtr 
         });
     End
 }
-
-
 
 KernelPtr Kernel__instance()
 {
@@ -87,12 +110,21 @@ Result(SubsystemInitStatus) Kernel__init_heap(KernelPtr self)
 
 Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
 {
-    ElfPtr idle_process = EmbeddedElf__load("idle");
-    ResultMatch(SchedulerInitStatus, Scheduler__init(self->scheduler, idle_process);)
-        IsError(code, message,
+    Optional(Elf) idle_opt = EmbeddedElf__load(kstring("idle"));
+    Match(Elf, idle_opt)
+        IsSome(idle,
         {
-            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-        });
+            ResultMatch(SchedulerInitStatus, Scheduler__init(self->scheduler, idle);)
+                IsError(code, message,
+                {
+                    return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+                });
+            End
+        })
+        IsNone(
+        {
+            return Error(SubsystemInitStatus, failed_to_find_idle_process, SUBSYSTEM_INIT_FAILED);
+        })
     End
 
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
@@ -103,11 +135,6 @@ void Kernel__init(KernelPtr self)
     __d_println(DEBUG, "Kernel__init");
     mutex_lock(&self->init_lock);
     self->status = INIT_IN_PROGRESS;
-    KString heap_init_progress = KString__new("heap initialised");
-    KString syscall_init_progress = KString__new("syscall handlers initialised");
-    KString io_init_progress = KString__new("io subsystem initialised");
-    KString scheduler_init_progress = KString__new("scheduler initialised");
-    KString arch_init_progress = KString__new("architecture specific components initialised");
 
     PanicOnError(Kernel__init_heap(self), self, &heap_init_progress);
     PanicOnError(Kernel__init_syscall_handlers(self), self, &syscall_init_progress);
@@ -128,8 +155,6 @@ InitStatus Kernel__init_status(KernelPtr self)
     return status;
 }
 
-const char * FAILED_TO_INIT_MSG = "Kernel failed to initialize";;
-
 volatile bool Kernel__ready(void * data)
 {
     KernelPtr self = data;
@@ -147,7 +172,7 @@ Result(InitStatus) Kernel__wait_for_init(KernelPtr self)
     }
     if (status == INIT_FAILED_AND_PANICKED)
     {
-        Kernel__panic(FAILED_TO_INIT_MSG, NULL);
-        return Error(InitStatus, KString__new(FAILED_TO_INIT_MSG), status);
+        Kernel__panic(cstr(failed_to_init_msg), NULL);
+        return Error(InitStatus, failed_to_init_msg, status);
     }
 }

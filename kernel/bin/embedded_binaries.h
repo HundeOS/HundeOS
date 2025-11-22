@@ -11,9 +11,10 @@
     (Elf) { \
         .start=(Address)&sym##_start, \
         .end=(Address)&sym##_end, \
-        .name=bin_name\
+        .name=KSTRING_NEW(bin_name)\
     }
 
-ElfPtr EmbeddedElf__load(const char * name);
+Optional(Elf) EmbeddedElf__load(KString name);
+KStringArray EmbeddedElf__list();
 
 #endif

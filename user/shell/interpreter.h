@@ -6,6 +6,7 @@ typedef enum ShellResult
     COMMAND_NOT_FOUND,
     COMMAND_EXECUTED,
     COMMAND_FAILED,
+    COMMAND_SUCCESS,
     EXIT,
 } ShellResult;
 

@@ -12,7 +12,9 @@ void setUp(void)
 
 void test_elf_lookup(void)
 {
-    Elf * elf = EmbeddedElf__load("hello_world");
+    Optional(Elf) elf = EmbeddedElf__load(kstring("hello_world"));
 
-    TEST_ASSERT_NOT_NULL(elf);
+    Match(Elf, elf)
+        IsNone(TEST_FAIL())
+    End
 }

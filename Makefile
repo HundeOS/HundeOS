@@ -49,6 +49,8 @@ USER_ASM_SOURCES := $(shell find ./user -name "*.s" -print)
 USER_ARCH_SOURCES := $(shell find ./user/arch -name "*.c" -print)
 USER_ARCH_ASM_SOURCES := $(shell find ./user/arch -name "*.s" -print)
 
+USER_SYS_SOURCES := $(shell find ./user/sys -name "*.c" -print)
+USER_SYS_ASM_SOURCES := $(shell find ./user/sys -name "*.s" -print)
 
 USER_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_SOURCES))
 USER_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_ASM_SOURCES))
@@ -56,7 +58,10 @@ USER_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_ASM_SOURCES))
 USER_ARCH_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_ARCH_SOURCES))
 USER_ARCH_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_ARCH_ASM_SOURCES))
 
-USER_PROGRAMS := $(patsubst ./user/%,%, $(shell find ./user -mindepth 1 -maxdepth 1 -type d -name "arch" -prune -o -maxdepth 1 -type d -print))
+USER_SYS_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_SYS_SOURCES))
+USER_SYS_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_SYS_ASM_SOURCES))
+
+USER_PROGRAMS := $(patsubst ./user/%,%, $(shell find ./user -mindepth 1 -maxdepth 1 -type d -name "arch" -o -name "sys" -prune -o -maxdepth 1 -type d -print))
 
 USER_BINARY_BUILD_PATH := $(patsubst ./%,build/%,$(USER_PROGRAMS))
 USER_BINARIES := $(patsubst %,build/user/%.bin,$(USER_BINARY_BUILD_PATH))
@@ -112,7 +117,7 @@ $(1)_ASM_SRCS := $$(wildcard user/$(1)/*.s)
 $(1)_OBJS := $$(patsubst user/%.c,build/user/%.o,$$($(1)_SRCS))
 $(1)_ASM_OBJS := $$(patsubst user/%.s,build/user/%.o,$$($(1)_ASM_SRCS))
 
-build/user/$(1).bin: $$($(1)_OBJS) $$($(1)_OBJS) $$(USER_ARCH_ASM_OBJECTS) $$(USER_ARCH_OBJECTS)
+build/user/$(1).bin: $$($(1)_OBJS) $$($(1)_OBJS) $$(USER_ARCH_ASM_OBJECTS) $$(USER_ARCH_OBJECTS) $$(USER_SYS_OBJECTS) $$(USER_SYS_ASM_OBJECTS)
 	$$(LD) $$(USER_LDFLAGS) -Wl,-e,main $$^ -o $$@
 endef
 

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 
 #include "kstring.h"
+#include "types.h"
 
 SimpleEqualsBody(int)
 SimpleEqualsBody(bool)
@@ -15,6 +16,7 @@ SimpleEqualsBody(int32_t)
 SimpleEqualsBody(int16_t)
 SimpleEqualsBody(int8_t)
 SimpleEqualsBody(char)
+SimpleEqualsBody(Char)
 
 // wil be a pointer to an element which is a pointer
 bool Ptr__equals(void * a, void * b)

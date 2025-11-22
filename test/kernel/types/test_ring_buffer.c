@@ -35,6 +35,40 @@ void test_ring_buffer_push_and_pop(void)
     }
 }
 
+
+void test_ring_buffer_push_all_when_in_bounds(void)
+{
+    SmallBuffer buffer = SmallBuffer__new();
+
+    Char data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+
+    ResultMatch(Pos, SmallBuffer__push_all(&buffer, data, sizeof(data)))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    for (Char c = 0; c < 10; c++)
+    {
+        ResultMatch(Char, SmallBuffer__pop(&buffer))
+            IsError(code, message, TEST_FAIL())
+            IsSuccess(value, TEST_ASSERT_EQUAL_INT(c, value));
+        End
+    }
+}
+
+void test_ring_buffer_push_all_when_beyond_bounds(void)
+{
+    SmallBuffer buffer = SmallBuffer__new();
+    ResultMatch(Pos, SmallBuffer__push(&buffer, 11))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    Char data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+
+    ResultMatch(Pos, SmallBuffer__push_all(&buffer, data, sizeof(data)))
+        IsSuccess(pos, TEST_FAIL())
+    End
+}
+
 #define NUM_ITEMS 10
 
 void test_ring_buffer_drain_without_wrap_around()
@@ -148,6 +182,22 @@ void test_ring_buffer_item_count()
     size_t count = SmallBuffer__item_count(&buffer);
 
     TEST_ASSERT_EQUAL_INT(NUM_ITEMS, count);
+}
+
+void test_ring_buffer_free_space()
+{
+    SmallBuffer buffer = SmallBuffer__new();
+
+    for (Char c = 0; c < 5; c++)
+    {
+        ResultMatch(Pos, SmallBuffer__push(&buffer, c))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    size_t free_space = SmallBuffer__free_space(&buffer);
+
+    TEST_ASSERT_EQUAL_INT(5, free_space);
 }
 
 void test_ring_buffer_drain_with_wrap_around()

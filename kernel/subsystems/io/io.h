@@ -11,6 +11,8 @@
 #include "../../types/result.h"
 #include "../../types/kstring.h"
 #include "../../all_defs.h"
+#include "context/originating_call_context.h"
+#include "syscalls/io.h"
 
 
 typedef struct IO IO;
@@ -43,7 +45,7 @@ typedef struct IOContext
     // inheritance, keep this in first pos
     KernelContext kernel_context;
     IOSubsystemPtr io_subsystem;
-    ProcessPtr proc;
+    Optional(ProcessPtr) proc;
     IOHandle handle;
     DataPtr buffer;
     size_t size;
@@ -86,6 +88,14 @@ OptionalDef(DeviceRegistrationPtr);
 
 MapDefine(IOHandle, DeviceRegistrationPtr, 1024, IOHandlesMap, SimpleEquals(uint64_t));
 FixedArrayDefine(DeviceRegistration, IO_MAX_DEVICES, IODevicesArray, SimpleEquals(uint64_t));
+
+IOContext IOContext__new(
+    KernelContext kernel_context, IOSubsystemPtr io_subsystem, Optional(ProcessPtr) proc, IOHandle handle, DataPtr buffer, size_t size
+);
+
+IOContext IOContext__from_originating_context(
+    OriginatingContext originating_context, IOHandle handle, DataPtr buffer, size_t size
+);
 
 #define NEW_BUFFER \
     (Buffer) { \
