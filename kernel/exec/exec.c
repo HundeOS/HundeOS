@@ -3,6 +3,7 @@
 #include "../../common_includes/syscalls/io.h"
 #include "../types/result.h"
 #include "../bin/elf.h"
+#include "../kio/io.h"
 
 FixedArrayBodyDefine(ElfReadBuffer);
 
@@ -41,17 +42,14 @@ static Result(ProcessPtr) Exec__launch(OriginatingContext context, Elf elf, bool
 
 static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, KString path)
 {
-    Data buffer[_128KB];
-    IOContext io_context = IOContext__from_originating_context(context, handle, buffer, sizeof(buffer));
-    Result(ByteCount) read = IOSubsystem__read(io_context.io_subsystem, io_context);
-    __d_printf(EXEC, "Read complete %s\n", cstr(path));
+    DataBufferPtr buffer = DataBuffer__heap_new();
 
-    ResultMatch(ByteCount, read)
+    ResultMatch(ByteCount, read(context, handle, buffer))
         IsSuccess(bytes_read,
         {
-            __d_printf(EXEC, "Copying elf %s\n", cstr(path));
+            __d_printf(EXEC, "Copying elf %i %s\n", bytes_read, cstr(path));
             Address elf_start = Kernel__alloc_kernel(bytes_read);
-            Kernel__memcopy(addr(&buffer), elf_start, bytes_read);
+            Kernel__memcopy(addr(&buffer->data), elf_start, bytes_read);
 
             Elf elf = Elf__new(elf_start, offset_addr(elf_start, bytes_read), path);
             return Success(Elf, elf);
@@ -72,21 +70,15 @@ static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, K
 Result(ProcessPtr) Exec__exec(OriginatingContext context, KString path, bool wait)
 {
     __d_printf(EXEC, "Executing elf %s\n", cstr(path));
-    __d_printf(EXEC, "kernel %p \n", context.kernel);
-    KernelPtr kernel = context.kernel;
-    Optional(ProcessPtr) parent = context.process;
 
-    Result(IOHandle) handle = IOSubsystem__open(&kernel->io_subsystem, parent, path, IO_OPEN_READ);
-    __d_printf(EXEC, "Opened elf %s\n", cstr(path));
-    ResultMatch(IOHandle, handle)
+    ResultMatch(IOHandle, open(context, path, IO_OPEN_READ))
         IsError(code, message,
         {
             return Error(ProcessPtr, message, EXEC_NOT_FOUND);
         })
         IsSuccess(handle,
         {
-            Result(Elf) result_elf = Exec__read_elf(context, handle, path);
-            ResultMatch(Elf, result_elf)
+            ResultMatch(Elf, Exec__read_elf(context, handle, path))
                 IsSuccess(elf,
                 {
                     return Exec__launch(context, elf, wait);

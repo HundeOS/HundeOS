@@ -5,10 +5,16 @@
 #include "../types/fixed_array.h"
 #include "../context/originating_call_context.h"
 
-FixedArrayDefine(Char, _16MB, ReadBuffer, SimpleEquals(Char));
-typedef ReadBuffer * ReadBufferPtr;
+FixedArrayDefine(Char, _16MB, DataBuffer, SimpleEquals(Char));
+typedef DataBuffer * DataBufferPtr;
+
+
+ExternalBuffer DataBuffer__convert_to_external_buffer(DataBufferPtr self);
+
 
 Result(IOHandle) open(OriginatingContext context, KString path, Flags flags);
-Result(ByteCount) read(OriginatingContext context, ReadBufferPtr buffer);
+Result(ByteCount) read(OriginatingContext context, IOHandle handle, DataBufferPtr buffer);
+Result(ByteCount) write(OriginatingContext context, IOHandle handle, DataBufferPtr buffer);
+Result(IOHandle) close(OriginatingContext context, IOHandle handle);
 
 #endif

@@ -32,8 +32,8 @@ ResultDef(IOSubsystemPtr);
 
 Result(DeviceHandle) IOSubsystem__register_device(IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state);
 
-Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, Optional(ProcessPtr) proc, KString path, Flags flags);
-Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, Optional(ProcessPtr) proc, IOHandle handle);
+Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContext context, KString path, Flags flags);
+Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContext context);
 Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContext context);
 Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContext context);
 

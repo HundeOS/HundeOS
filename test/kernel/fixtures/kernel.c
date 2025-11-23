@@ -1,21 +1,24 @@
 #include "kernel.h"
 #include "process.h"
-#include "unity.h"
-#include "../../../kernel/subsystems/io/file/filesystem.h"
-#include "../../../kernel/subsystems/io/file/embedded/embedded.h"
+#include "io_subsystem.h"
 
-KernelPtr init_test_kernel()
+#include "unity.h"
+
+KernelPtr init_test_kernel_without_filesystem()
 {
     SchedulerPtr scheduler = Scheduler__heap_new();
     KernelPtr kernel = Kernel__heap_new(scheduler);
 
-    FilesystemPtr filesystem = RootFilesystem__heap_new();
-    FilesystemIOStatePtr filesystem_state = FilesystemIOState__heap_new(filesystem);
+    Elf idle = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Scheduler__init(kernel->scheduler, idle);
+    Scheduler__start(kernel->scheduler, 0);
 
-    FilesystemPtr embedded_binaries = Filesystem__heap_new(kstring("embed"), EmbeddedFilesystemIO__new());
-    EmbeddedFilesystemIOStatePtr embedded_binaries_state = EmbeddedFilesystemIOState__heap_new(embedded_binaries);
+    return kernel;
+}
 
-    Filesystem__mount(filesystem, kstring("embedded"), embedded_binaries);
+KernelPtr init_test_kernel_with_filesystem(FilesystemPtr filesystem)
+{
+    KernelPtr kernel = init_test_kernel_without_filesystem();
 
     Result(DeviceHandle) register_res = IOSubsystem__register_device(
         &kernel->io_subsystem, kstring("/"), &filesystem->file_io.base_io, &filesystem->state->state
@@ -25,9 +28,11 @@ KernelPtr init_test_kernel()
         IsError(code, message, TEST_FAIL())
     End
 
-    Elf idle = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
-    Scheduler__init(kernel->scheduler, idle);
-    Scheduler__start(kernel->scheduler, 0);
-
     return kernel;
+}
+
+
+KernelPtr init_test_kernel()
+{
+    return init_test_kernel_with_filesystem(init_root_filesystem_with_embedded_binaries());
 }

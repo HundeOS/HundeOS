@@ -16,6 +16,7 @@ manifest:
     - kernel/syscall_handler.c
     - kernel/mutex.c
     - kernel/exec/exec.c
+    - kernel/kio/*.c
     - kernel/heap.c
     - kernel/memory_page.c
     - kernel/context/*.c

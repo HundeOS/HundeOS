@@ -1,9 +1,7 @@
 #include "unity.h"
-#include "../../../../kernel/subsystems/io/io_subsystem.h"
-#include "../../../../kernel/scheduler/scheduler.h"
 #include "../../stubs.h"
 #include "../../stubs/process.h"
-#include "../../../../kernel/bin/embedded_binaries.h"
+#include "../../fixtures/kernel.h"
 
 static const IOInternalHandle FAKE_HANDLE =            0x00000000000000FF;
 static const IOHandle EXPECTED_OPEN_HANDLE =           0x00000001000000FF; // upper 32bits hold the device handle
@@ -17,20 +15,20 @@ static bool read = false;
 
 static CPUID cpu = 1;
 
+static KernelPtr kernel = NULL;
 static DataPtr write_data = NULL;
 static IOBufferPtr buffer = NULL;
-static SchedulerPtr scheduler = NULL;
 
 static ProcessContextPtr context = (ProcessContextPtr) 0x12345;
 
 static Process PROC = STUB_PROCESS(1);
 static Optional(ProcessPtr) proc = Some(ProcessPtr, &PROC);
 
-IOSubsystem system = NEW_IO_SUBSYSTEM(NULL);
-
 static Flags FLAGS = 1234;
 
 static Char expected[] = {1, 2, 3, 4};
+
+static KString path = KSTRING_NEW(":test:");
 
 #define NEW_FAKE_IO_STATE \
     (FakeIOState) { \
@@ -137,22 +135,18 @@ static Result(ParkStatus) fake_park(IOStatePtr state, IOContext parked_context)
 
 static IO TEST_IO = STUB_IO;
 
-SchedulerPtr setup_scheduler()
-{
-    Elf idle = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf) {})
-    scheduler = Scheduler__heap_new();
-    Scheduler__init(scheduler, idle);
-    Scheduler__start(scheduler, cpu);
-    Scheduler__schedule(scheduler, &PROC);
-    Scheduler__preempt(scheduler, cpu, context);
-
-    return scheduler;
-}
-
 void setUp(void)
 {
+    kernel = init_test_kernel_without_filesystem();
     reset_state();
-    system = NEW_IO_SUBSYSTEM(setup_scheduler());
+
+    Scheduler__schedule(kernel->scheduler, &PROC);
+    Scheduler__preempt(kernel->scheduler, cpu, context);
+
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(&kernel->io_subsystem, path, &TEST_IO, &STATE))
+        IsError(code, message, TEST_FAIL());
+    End
+
 }
 
 void data_available()
@@ -181,16 +175,32 @@ void data_available_interrupt(IOSubsystemPtr io_subsystem)
     End
 }
 
+IOContext io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
+{
+    KernelContext kernel_context = KernelContext__new(proc, kernel->scheduler);
+    ;
+    return IOContext__new(kernel_context, &kernel->io_subsystem, handle, ext_buffer);
+}
+
+IOContext open_context()
+{
+    return io_context(None(IOHandle), None(ExternalBuffer));
+}
+
+IOContext close_context(IOHandle handle)
+{
+    return io_context(Some(IOHandle, handle), None(ExternalBuffer));
+}
+
+IOContext rw_context(IOHandle handle, DataPtr data, size_t size)
+{
+    ExternalBuffer ext_buffer = ExternalBuffer__new(data, size);
+    return io_context(Some(IOHandle, handle), Some(ExternalBuffer, ext_buffer));
+}
+
 void test_io_subsystem_registration_and_open()
 {
-    KString path = KString__new("/dev/test");
-
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
-        IsError(code, message, TEST_FAIL());
-        IsSuccess(handle, TEST_ASSERT_EQUAL_UINT(EXPECTED_DEVICE_HANDLE, handle));
-    End
-
-    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL());
     End
@@ -203,28 +213,14 @@ void test_io_open_and_read()
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    KString path = KString__new("/dev/test");
-
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
-        IsError(code, message, TEST_FAIL());
-    End
-
-    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
 
     data_available();
 
-    IOContext context = (IOContext) {
-        .proc = proc,
-        .handle = handle,
-        .buffer = data,
-        .size = MAX_READ,
-        .io_subsystem = &system,
-    };
-
-    ResultMatch(ByteCount, IOSubsystem__read(&system, context));
+    ResultMatch(ByteCount, IOSubsystem__read(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(count,
         {
             TEST_ASSERT_EQUAL_INT(4, count);
@@ -242,33 +238,18 @@ void test_io_open_and_write()
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    KString path = KString__new("/dev/test");
-
-    __d_println(DEBUG, "reg %p\n");
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
-        IsError(code, message, TEST_FAIL());
-    End
-
     __d_println(DEBUG, "opening %p\n");
-    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
-
-    IOContext context = (IOContext) {
-        .proc = proc,
-        .handle = handle,
-        .buffer = data,
-        .size = MAX_READ,
-        .io_subsystem = &system,
-    };
 
     Match(ArrayIndex, ProcessHandles__find_item(&PROC.handles, EXPECTED_OPEN_HANDLE));
         IsNone(TEST_FAIL());
     End
 
     __d_println(DEBUG, "writing %p\n");
-    ResultMatch(ByteCount, IOSubsystem__write(&system, context));
+    ResultMatch(ByteCount, IOSubsystem__write(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(byte_count,
         {
             TEST_ASSERT_EQUAL_UINT(MAX_READ, byte_count);
@@ -285,33 +266,16 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process()
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    KString path = KString__new("/dev/test");
-
-    __d_println(DEBUG, "reg %p\n");
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
-        IsError(code, message, TEST_FAIL());
-    End
-
-    __d_println(DEBUG, "opening %p\n");
-    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
-
-    IOContext context = (IOContext) {
-        .proc = proc,
-        .handle = handle,
-        .buffer = data,
-        .size = MAX_READ,
-        .io_subsystem = &system,
-    };
 
     Match(ArrayIndex, ProcessHandles__find_item(&PROC.handles, EXPECTED_OPEN_HANDLE));
         IsNone(TEST_FAIL());
     End
 
-    __d_println(DEBUG, "reading %p\n");
-    ResultMatch(ByteCount, IOSubsystem__read(&system, context));
+    ResultMatch(ByteCount, IOSubsystem__read(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(count, TEST_FAIL());
         IsError(code, message, TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code));
     End
@@ -321,7 +285,7 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process()
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, PROC.state);
 
-    ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu));
+    ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(kernel->scheduler, cpu));
 
     TEST_ASSERT_NOT_EQUAL(current, &PROC);
 }
@@ -331,15 +295,7 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    KString path = KString__new("/dev/test");
-
-    __d_println(DEBUG, "reg %p\n");
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
-        IsError(code, message, TEST_FAIL());
-    End
-
-    __d_println(DEBUG, "opening %p\n");
-    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
@@ -348,25 +304,16 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
         IsNone(TEST_FAIL());
     End
 
-    IOContext context = (IOContext){
-        .proc = proc,
-        .handle = handle,
-        .buffer = data,
-        .size = MAX_READ,
-        .io_subsystem = &system,
-    };
-
-    __d_println(DEBUG, "reading %p\n");
-    ResultMatch(ByteCount, IOSubsystem__read(&system, context));
+    ResultMatch(ByteCount, IOSubsystem__read(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(count, TEST_FAIL());
         IsError(code, message, TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code));
     End
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, PROC.state);
 
-    ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu));
-    data_available_interrupt(&system);
-    Scheduler__preempt(scheduler, cpu, NULL);
+    ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(kernel->scheduler, cpu));
+    data_available_interrupt(&kernel->io_subsystem);
+    Scheduler__preempt(kernel->scheduler, cpu, NULL);
 
     ResultMatch(Anything, deferred_syscall_result())
         IsSuccess(count, TEST_ASSERT_EQUAL(4, count));
@@ -385,21 +332,7 @@ void test_io_write_when_not_open()
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    KString path = KString__new("/dev/test");
-
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
-        IsError(code, message, TEST_FAIL());
-    End
-
-    IOContext context = (IOContext){
-        .proc = proc,
-        .handle = handle,
-        .buffer = data,
-        .size = 10,
-        .io_subsystem = &system,
-    };
-
-    ResultMatch(ByteCount, IOSubsystem__write(&system, context));
+    ResultMatch(ByteCount, IOSubsystem__write(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(byte_count,
         {
             TEST_FAIL();
@@ -420,22 +353,7 @@ void test_io_read_when_not_open()
 
     IOHandle handle = -1;
 
-    KString path = KString__new("/dev/test");
-
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
-        IsError(code, message, TEST_FAIL());
-        IsSuccess(handle, TEST_ASSERT_EQUAL(EXPECTED_DEVICE_HANDLE, handle));
-    End
-
-    IOContext context = (IOContext){
-        .proc = proc,
-        .handle = handle,
-        .buffer = data,
-        .size = MAX_READ,
-        .io_subsystem = &system,
-    };
-
-    ResultMatch(ByteCount, IOSubsystem__read(&system, context));
+    ResultMatch(ByteCount, IOSubsystem__read(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(count,
         {
             TEST_FAIL();
@@ -451,20 +369,12 @@ void test_io_read_when_not_open()
 
 void test_io_subsystem_registration_and_close()
 {
-    IO test_io = STUB_IO;
-
-    KString path = KString__new("/dev/test");
-
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &test_io, &STATE))
-        IsError(code, message, TEST_FAIL());
-    End
-
-    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&system, proc, EXPECTED_OPEN_HANDLE))
+    ResultMatch(IOHandle, IOSubsystem__close(&kernel->io_subsystem, close_context(EXPECTED_OPEN_HANDLE)))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
@@ -474,23 +384,17 @@ void test_io_subsystem_registration_and_close()
 
 void test_io_subsystem_close_disposes_handle()
 {
-    KString path = KString__new("/dev/test");
-
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&system, path, &TEST_IO, &STATE))
-        IsError(code, message, TEST_FAIL());
-    End
-
-    ResultMatch(IOHandle, IOSubsystem__open(&system, proc, path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&system, proc, EXPECTED_OPEN_HANDLE))
+    ResultMatch(IOHandle, IOSubsystem__close(&kernel->io_subsystem, close_context(EXPECTED_OPEN_HANDLE)))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&system, proc, EXPECTED_OPEN_HANDLE))
+    ResultMatch(IOHandle, IOSubsystem__close(&kernel->io_subsystem, close_context(EXPECTED_OPEN_HANDLE)))
         IsSuccess(result, TEST_FAIL());
     End
 

@@ -2,43 +2,30 @@
 
 #include "../../../../../../kernel/subsystems/io/io_subsystem.h"
 #include "../../../../../../kernel/process.h"
+#include "../../../../../../kernel/print.h"
 #include "../../../../../../kernel/scheduler/scheduler.h"
 #include "../../../../../../kernel/subsystems/io/file/filesystem.h"
-#include "../../../../../../kernel/subsystems/io/file/embedded/embedded.h"
+#include "../../../../fixtures/io_subsystem.h"
 #include "../../../../fixtures/process.h"
+#include "../../../../fixtures/kernel.h"
 
 static FilesystemPtr root = NULL;
-static FilesystemPtr embedded_binaries = NULL;
+static IOStatePtr root_state = NULL;
 
-static EmbeddedFilesystemIOStatePtr embedded_binaries_state = NULL;
-static FilesystemIOStatePtr root_state = NULL;
+static KernelPtr kernel = NULL;
+static ProcessPtr dummy_proc = NULL;
 
-static Scheduler scheduler = NEW_SCHEDULER;
-static IOSubsystem io_subsystem = NEW_IO_SUBSYSTEM(&scheduler);
-
-static Optional(ProcessPtr) dummy_proc = None(ProcessPtr);
 static KernelContext kernel_context = EMPTY_KERNEL_CONTEXT;
 
 void setUp(void)
 {
-    root = RootFilesystem__heap_new();
-    root_state = FilesystemIOState__heap_new(root);
-    dummy_proc = Some(ProcessPtr, dummy_process(100, 11, PROC_STATE_RUNNING));
+    dummy_proc = dummy_process(100, 11, PROC_STATE_RUNNING);
 
-    embedded_binaries = Filesystem__heap_new(kstring("embed"), EmbeddedFilesystemIO__new());
-    embedded_binaries_state = EmbeddedFilesystemIOState__heap_new(embedded_binaries);
+    root = init_root_filesystem_with_embedded_binaries();
+    kernel = init_test_kernel_with_filesystem(root);
+    root_state = &root->state->state;
 
-    Filesystem__mount(root, kstring("embedded"), embedded_binaries);
-
-    kernel_context = KernelContext__new(dummy_proc, &scheduler);
-
-    Result(DeviceHandle) register_res = IOSubsystem__register_device(
-        &io_subsystem, kstring("/"), &root->file_io.base_io, &root->state->state
-    );
-
-    ResultMatch(DeviceHandle, register_res)
-        IsError(code, message, TEST_FAIL())
-    End
+    kernel_context = KernelContext__new(Some(ProcessPtr, dummy_proc), kernel->scheduler);
 }
 
 void tearDown(void)
@@ -48,6 +35,30 @@ void tearDown(void)
 
 static KString embedded = KSTRING_NEW("embedded");
 static KString hello_world = KSTRING_NEW("hello_world");
+
+static const uint64_t HELLO_WORLD_SIZE = 66840;
+
+IOContext io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
+{
+    return IOContext__new(kernel_context, &kernel->io_subsystem, handle, ext_buffer);
+}
+
+IOContext open_context()
+{
+    return io_context(None(IOHandle), None(ExternalBuffer));
+}
+
+IOContext close_context(IOHandle handle)
+{
+    return io_context(Some(IOHandle, handle), None(ExternalBuffer));
+}
+
+IOContext rw_context(IOHandle handle, DataPtr data, size_t size)
+{
+    ExternalBuffer ext_buffer = ExternalBuffer__new(data, size);
+    return io_context(Some(IOHandle, handle), Some(ExternalBuffer, ext_buffer));
+}
+
 
 void test_it_can_list_files_from_root(void)
 {
@@ -85,7 +96,7 @@ void test_it_can_list_files_to_subdir(void)
 
 void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
 {
-    Result(IOHandle) handle = IOSubsystem__open(&io_subsystem, dummy_proc, kstring("/embedded/hello_world"), 0);
+    Result(IOHandle) handle = IOSubsystem__open(&kernel->io_subsystem, open_context(), kstring("/embedded/hello_world"), 0);
 
     ResultMatch(IOHandle, handle)
         IsError(code, message,
@@ -94,17 +105,20 @@ void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
             TEST_FAIL();
         })
         IsSuccess(hand, {
-            Char buffer[4096];
-            IOContext io_context = IOContext__new(kernel_context, &io_subsystem, dummy_proc, hand, buffer, 4096);
-            Result(ByteCount) res = IOSubsystem__read(&io_subsystem, io_context);
+            Char buffer[_128KB];
+
+            Result(ByteCount) res = IOSubsystem__read(&kernel->io_subsystem, rw_context(hand, buffer, sizeof(buffer)));
 
             ResultMatch(ByteCount, res)
                 IsError(code, message,
                 {
-                    k_println(cstr(message));
                     TEST_FAIL();
                 })
-                IsSuccess(bytes, TEST_ASSERT_EQUAL_INT(4096, bytes))
+                IsSuccess(bytes,
+                {
+                    k_printf("Here! %i %i", HELLO_WORLD_SIZE, bytes);
+                    TEST_ASSERT_EQUAL(HELLO_WORLD_SIZE, bytes);
+                })
             End
         });
     End

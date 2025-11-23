@@ -16,6 +16,9 @@ FixedArrayBodyDefine(ProcessHandles);
 
 static ProcessID pid_counter = 0;
 
+static KString no_entry_point_message = KSTRING_NEW("No entry point found in ELF");
+
+
 ProcessPtr Process__new(
     KString name, KernelAddress page_table, UserAddress entry, Stack stack, Optional(ProcessPtr) parent
 )
@@ -54,6 +57,8 @@ Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
 {
     __d_println(PROCESS, "Process__spawn_from_elf");
     ExpandedSegmentArray expanded_elf = Elf__map(binary);
+    __d_printf(PROCESS, "ELF: %s %x %x\n", cstr(binary.name), binary.start, binary.end);
+    __d_printf(PROCESS, "ELF mapped %i\n", ExpandedSegmentArray__len(&expanded_elf));
 
     __d_println(PROCESS, "Creating page table");
     KernelAddress page_table = PageTable__new();
@@ -80,7 +85,11 @@ Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
     __d_println(PROCESS, "Stack mapped");
 
     Match(ExpandedSegment, ExpandedSegmentArray__at(&expanded_elf, 0))
-        IsNone(__d_println(PANIC, "No entry point"););
+        IsNone(
+        {
+            __d_println(PANIC, cstr(no_entry_point_message));
+            return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
+        });
         IsSome(entry_point,
         {
             ProcessPtr proc = Process__new(binary.name, page_table, entry_point.address, stack, parent);

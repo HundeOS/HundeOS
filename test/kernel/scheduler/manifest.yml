@@ -19,3 +19,4 @@ manifest:
     - kernel/heap.c
     - kernel/memory_page.c
     - kernel/context/*.c
+    - kernel/kio/*.c

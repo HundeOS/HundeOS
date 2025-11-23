@@ -23,6 +23,7 @@ typedef enum IOStatus
     IO_INVALID_MOUNT_POINT = -8,
     IO_INVALID_PATH = -9,
     IO_EOF = -10,
+    IO_UNKNOWN_BUFFER = -11,
 }
 IOStatus;
 

@@ -40,15 +40,23 @@ ParkStatus;
 
 ResultDef(ParkStatus);
 
+typedef struct ExternalBuffer
+{
+    DataPtr data;
+    size_t len;
+} ExternalBuffer;
+
+ResultDef(ExternalBuffer);
+OptionalDef(ExternalBuffer);
+
 typedef struct IOContext
 {
     // inheritance, keep this in first pos
     KernelContext kernel_context;
+
     IOSubsystemPtr io_subsystem;
-    Optional(ProcessPtr) proc;
-    IOHandle handle;
-    DataPtr buffer;
-    size_t size;
+    Optional(IOHandle) handle;
+    Optional(ExternalBuffer) buffer;
 } IOContext;
 
 OptionalDef(IOContext);
@@ -90,12 +98,16 @@ MapDefine(IOHandle, DeviceRegistrationPtr, 1024, IOHandlesMap, SimpleEquals(uint
 FixedArrayDefine(DeviceRegistration, IO_MAX_DEVICES, IODevicesArray, SimpleEquals(uint64_t));
 
 IOContext IOContext__new(
-    KernelContext kernel_context, IOSubsystemPtr io_subsystem, Optional(ProcessPtr) proc, IOHandle handle, DataPtr buffer, size_t size
+    KernelContext kernel_context, IOSubsystemPtr io_subsystem,
+    Optional(IOHandle) handle, Optional(ExternalBuffer) buffer
 );
 
 IOContext IOContext__from_originating_context(
-    OriginatingContext originating_context, IOHandle handle, DataPtr buffer, size_t size
+    OriginatingContext originating_context, Optional(IOHandle) handle,
+    Optional(ExternalBuffer) buffer
 );
+
+ExternalBuffer ExternalBuffer__new(DataPtr data, size_t len);
 
 #define NEW_BUFFER \
     (Buffer) { \
