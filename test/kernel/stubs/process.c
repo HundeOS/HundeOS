@@ -32,7 +32,7 @@ void Process__context_switch(ProcessPtr self)
             Match(Continuation, parked_kernel_context->continuation)
                 IsSome(continuation,
                 {
-                    Result(Anything) syscall_res = continuation(parked_kernel_context->kernel_context);
+                    Result(Anything) syscall_res = continuation(parked_kernel_context);
                     deferred_syscall_res = syscall_res;
                 })
             End

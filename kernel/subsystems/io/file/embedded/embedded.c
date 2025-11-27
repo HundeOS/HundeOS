@@ -21,6 +21,7 @@ Result(IOInternalHandle) EmbeddedFileIO_open(IOStatePtr state, KString path, Fla
         IsSome(file,
         {
             KStringArray file_list = EmbeddedElf__list();
+            __d_printf(FILESYSTEM, "File = %s\n", cstr(file))
             Optional(ArrayIndex) index_opt = KStringArray__find_item(&file_list, file);
             Match(ArrayIndex, index_opt)
                 IsNone(return Error(IOInternalHandle, KString__sprintf(&invalid_path_format, cstr(path)), IO_INVALID_PATH));

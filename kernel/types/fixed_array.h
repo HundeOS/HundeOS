@@ -121,8 +121,7 @@ OptionalDef(ArrayIndex);
 
 
 #define FAUnwrapPanic(T, opt) \
-    opt.some.present ? opt.some.val : (T)___opt_panic("No value to unwrap")\
-
+    UnwrapPanic(T, opt)\
 
 #define FindResultOptional(alias) \
     _Optional(alias##__FindResult) \

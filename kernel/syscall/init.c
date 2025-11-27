@@ -5,6 +5,7 @@
 #include "print_handler.h"
 #include "ping_handler.h"
 #include "exit_handler.h"
+#include "exec_handler.h"
 #include "io_handler.h"
 #include "../debug.h"
 #include "../print.h"
@@ -34,6 +35,7 @@ Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
             REGISTER(self, PING, &Ping__handler);
             REGISTER(self, PROC_EXIT, &Exit__handler);
             REGISTER(self, IO_CALL, &IO__handler);
+            REGISTER(self, SYSCALL_EXEC, &Exec__handler);
             self->init_done = true;
             __d_println(SYSCALL, "Init__syscalls() - done ok");
         }

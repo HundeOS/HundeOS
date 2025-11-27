@@ -127,16 +127,16 @@ void Process__context_switch(ProcessPtr self)
     // do we have suspended work to finish on the
     // kernel side?
     Match(ParkedKernelContextPtr, self->parked_context)
-        IsSome(kernel_context,
+        IsSome(parked_kernel_context,
         {
-            Match(Continuation, kernel_context->continuation)
+            Match(Continuation, parked_kernel_context->continuation)
                 IsSome(continuation,
                 {
                     __d_println(PROCESS, "Continuation kernel context switch");
                     asm_switch_kernel_context(context, paddr(self->page_table));
 
-                    __d_printf(PROCESS, "Continuation calling %p %p", continuation, kernel_context->kernel_context);
-                    Result(Anything) res = continuation(kernel_context->kernel_context);
+                    __d_printf(PROCESS, "Continuation calling %p %p", continuation, parked_kernel_context);
+                    Result(Anything) res = continuation(parked_kernel_context);
                     ResultMatch(Anything, res)
                         IsSuccess(result_val,
                         {

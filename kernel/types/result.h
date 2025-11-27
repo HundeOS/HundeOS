@@ -1,7 +1,11 @@
 #ifndef __KERNEL_TYPES_RESULT_H
 #define __KERNEL_TYPES_RESULT_H
+#include <stddef.h>
 #include <stdint.h>
 #include "kstring.h"
+
+typedef struct ProcessContext ProcessContext;
+void Kernel__panic(const char * message, ProcessContext * context);
 
 typedef int64_t Code;
 
@@ -25,7 +29,15 @@ typedef int64_t Code;
         Error_##T error;\
     } Result_##T;\
     \
-    typedef T Result_##T##_type;
+    static T ___res##T##_ZERO;\
+    typedef T Result_##T##_type; \
+    inline T ___res##T##_panic(const char * message) \
+    { \
+        Kernel__panic(message, NULL); \
+        return ___res##T##_ZERO; \
+    } \
+
+
 
 #define Success(T, value) \
     ( Result_##T ) { \
@@ -68,25 +80,10 @@ typedef int64_t Code;
         block; \
     } \
 
+#define ResultUnwrapPanic(T, res) \
+    res.success.success ? res.success.val : ___res##T##_panic("No result value to unwrap\n")\
 
-#define ___res_panic(message) \
-    Kernel__panic(message, NULL);
-
-
-#define ResultUnwrap(T, result, val_name, block) \
-    { \
-        T val_name; \
-        Result(T) __res = result; \
-        if(__res.error.success) \
-        { \
-            val_name = __res.success.val; \
-        } \
-        else \
-        { \
-            ___res_panic("Error, no value to unwrap"); \
-        } \
-        block; \
-    }
-
+#define ResultUnwrap(T, opt, alternate_val) \
+    res.success.success ? res.success.val : alternate_val\
 
 #endif

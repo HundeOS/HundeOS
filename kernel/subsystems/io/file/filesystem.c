@@ -25,10 +25,12 @@ Result(IOInternalHandle) RootFileIO_open(IOStatePtr state, KString path, Flags f
             Match(FilesystemPtr, mount)
                 IsSome(filesystem,
                 {
+                    __d_printf(FILESYSTEM, "mount found = %s", cstr(top_level));
                     return filesystem->file_io.base_io.open(&filesystem->state->state, remaining_path, flags);
                 });
                 IsNone(
                 {
+                    __d_printf(FILESYSTEM, "mount not found = %s", cstr(top_level));
                     return Error(IOInternalHandle, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
                 });
             End
@@ -183,7 +185,7 @@ FilesystemPtr Filesystem__heap_new(KString name, FileIO file_io)
         .file_io = file_io,
         .fs_code = (code << CODE_SHIFT),
     };
-
+    __d_printf(FILESYSTEM, "Created filesystem %x %p with code %x", sizeof(Filesystem), fs, code);
     return fs;
 }
 

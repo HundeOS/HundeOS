@@ -1,8 +1,9 @@
 #ifndef __KERNEL_TYPES_OPTIONAL_H
 #define __KERNEL_TYPES_OPTIONAL_H
 #include "../debug.h"
-#include "../panic.h"
-#include <stdbool.h>
+
+typedef struct ProcessContext ProcessContext;
+void Kernel__panic(const char * message, ProcessContext * context);
 
 #define _Optional(alias) \
     Optional__##alias \
@@ -46,6 +47,13 @@
         _None(T) none;\
     } _Optional(T); \
     typedef T _Type(T); \
+    \
+    static T ___opt##T##_ZERO;\
+    inline T ___opt_##T##_panic(const char * message) \
+    { \
+        Kernel__panic(message, NULL); \
+        return ___opt##T##_ZERO; \
+    } \
 
 #define OptionalType(T, alias) \
     typedef T alias; \
@@ -94,19 +102,13 @@
         block; \
     } \
 
-inline int ___opt_panic(const char * message)
-{
-    Kernel__panic(message, NULL);
-    return 0;
-}
-
 
 
 #define UnwrapPanic(T, opt) \
-    opt.some.present ? opt.some.val : ___opt_panic("No value to unwrap")\
+    opt.some.present ? opt.some.val : ___opt_##T##_panic("No optional value to unwrap\n")\
 
 
 #define Unwrap(T, opt, alternate_val) \
-        opt.some.present ? opt.some.val : alternate_val;\
+    opt.some.present ? opt.some.val : alternate_val;\
 
 #endif

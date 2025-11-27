@@ -7,6 +7,8 @@
 typedef int64_t ByteCount;
 
 void print(const char * str);
+int printf(const char * format, ...);
+
 ByteCount console_read(char * buffer, uint64_t size);
 ByteCount console_read_line(char * buffer, bool echo, uint64_t size);
 void exit(int code);

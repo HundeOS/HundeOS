@@ -1,5 +1,6 @@
 #include "context_switch.h"
 #include "../process.h"
+#include "../arch/process.h"
 
 ContextSwitch ContextSwitch__new(ProcessPtr new_proc, Optional(ProcessPtr) old_proc)
 {

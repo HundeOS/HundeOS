@@ -49,7 +49,9 @@ static bool matches(const char* str, const char* cmd)
 
 ShellResult execute(const char* cmd)
 {
+    print("Executing:\n");
     SpawnResult result = spawn(P_WAIT, cmd, NULL);
+    printf("result = %i\n", result);
     switch (result)
     {
         case SPAWN_SUCCESS:
@@ -70,7 +72,8 @@ ShellResult interpret(const char* input)
     strip(input, stripped);
     if (matches(stripped, CMD_EXIT))
     {
+        exit(0);
         return EXIT;
     }
-    return COMMAND_NOT_FOUND;
+    return execute(stripped);
 }

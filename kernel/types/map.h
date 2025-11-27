@@ -209,7 +209,8 @@ typedef enum MapError
         return None(alias##__key_type_ptr);\
     } \
 
-#define MapUnwrapPanic(T, opt) opt.some.present ? opt.some.val : (T)___opt_panic("No value to unwrap")\
+#define MapUnwrapPanic(T, opt) \
+    UnwrapPanic(T, opt)\
 
 #define MapIterate(alias, map, index, k, v) \
     for (int index = 0; index < map.len; index++) \

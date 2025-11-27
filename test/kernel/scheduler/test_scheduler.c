@@ -7,10 +7,13 @@
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/scheduler/scheduler.h"
 #include "../../../kernel/bin/embedded_binaries.h"
+#include "../../../kernel/scheduler/parked.h"
 
 static SchedulerPtr scheduler;
-static void * continuation_context;
+static ParkedKernelContextPtr continuation_context;
 static const CPUID cpu_id = 12;
+
+static KString no_return_code = KSTRING_NEW("no return code");
 
 void setUp(void)
 {
@@ -30,10 +33,15 @@ void tearDown(void)
     scheduler = NULL;
 }
 
-Result(Anything) continuation(void * context)
+Result(Anything) continuation(ParkedKernelContextPtr parked_context)
 {
-    continuation_context = context;
-    return Success(Anything, 100);
+    continuation_context = parked_context;
+
+    Match(ReturnCode, parked_context->return_code)
+        IsSome(code, return Success(Anything, code);)
+    End
+
+    return Error(Anything, no_return_code, -1);
 }
 
 void test_scheduler_interrupt_when_no_processes_are_running_stays_in_idle(void)
@@ -144,7 +152,7 @@ void test_scheduler_exit_removes_process_when_its_current(void)
 
     ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
 
-    ResultMatch(ProcessPtr, Scheduler__exit(scheduler, proc))
+    ResultMatch(ProcessPtr, Scheduler__exit(scheduler, proc, 10))
         IsError(code, message, TEST_FAIL());
         IsSuccess(exited,
         {
@@ -166,6 +174,58 @@ void test_scheduler_exit_removes_process_when_its_current(void)
     TEST_ASSERT_EQUAL(0, ProcessTable__len(processes));
 }
 
+void test_scheduler_exit_unparks_parent_if_waiting(void)
+{
+    ProcessPtr parent = dummy_process(1, cpu_id, PROC_STATE_READY);
+    ProcessPtr child = dummy_process(1, cpu_id, PROC_STATE_READY);
+    child->parent = Some(ProcessPtr, parent);
+
+    KernelContext kernel_context = (KernelContext) {
+        .scheduler = scheduler,
+        .proc = Some(ProcessPtr, parent),
+    };
+
+
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+    Scheduler__schedule(scheduler, parent);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__schedule(scheduler, child);
+    Scheduler__park(scheduler, parent, &kernel_context, Some(Continuation, continuation), PARK_WAIT_CHILD);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(child, current);
+            TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, current->state);
+        })
+    End
+
+    ResultMatch(ProcessPtr, Scheduler__exit(scheduler, child, 10))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(exited,
+        {
+            TEST_ASSERT_EQUAL(child, exited);
+            TEST_ASSERT_EQUAL(PROC_STATE_DEAD, exited->state);
+        })
+    End
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
+
+    Anything return_code = ResultUnwrapPanic(Anything, deferred_syscall_result());
+    TEST_ASSERT_EQUAL(10, return_code); // return code should have been set for switching context
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(parent, current);
+            TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, current->state);
+        })
+    End
+}
+
 void test_scheduler_exit_removes_process_when_its_not_current(void)
 {
     ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
@@ -185,7 +245,7 @@ void test_scheduler_exit_removes_process_when_its_not_current(void)
     End
 
 
-    ResultMatch(ProcessPtr, Scheduler__exit(scheduler, proc))
+    ResultMatch(ProcessPtr, Scheduler__exit(scheduler, proc, 10))
         IsError(code, message, TEST_FAIL());
         IsSuccess(exited,
         {
@@ -232,7 +292,7 @@ void test_scheduler_park_switches_process_to_waiting_and_switches_context(void)
     End
 
 
-    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation)))
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation), PARK_WAIT_IO))
         IsError(code, message, TEST_FAIL());
         IsSuccess(parked,
         {
@@ -276,7 +336,7 @@ void test_scheduler_unpark_switches_process_back_to_ready(void)
         })
     End
 
-    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation)))
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation), PARK_WAIT_IO))
         IsError(code, message, TEST_FAIL());
         IsSuccess(parked,
         {
@@ -285,13 +345,49 @@ void test_scheduler_unpark_switches_process_back_to_ready(void)
         })
     End
 
-    ResultMatch(ProcessPtr, Scheduler__unpark(scheduler, proc))
+    ResultMatch(ProcessPtr, Scheduler__unpark(scheduler, proc, PARK_WAIT_IO, Some(ReturnCode, 11)))
         IsError(code, message, TEST_FAIL());
         IsSuccess(parked,
         {
             TEST_ASSERT_EQUAL(proc, parked);
             TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, parked->state);
         })
+    End
+}
+
+void test_scheduler_unpark_gives_error_and_doesnt_unpark_if_reasons_dont_match(void)
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+
+    KernelContext kernel_context = (KernelContext) {
+        .scheduler = scheduler,
+        .proc = Some(ProcessPtr, proc),
+    };
+
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
+        IsNone(TEST_FAIL());
+        IsSome(current,
+        {
+            TEST_ASSERT_EQUAL(current, proc);
+        })
+    End
+
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation), PARK_WAIT_IO))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(parked,
+        {
+            TEST_ASSERT_EQUAL(proc, parked);
+            TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parked->state);
+        })
+    End
+
+    ResultMatch(ProcessPtr, Scheduler__unpark(scheduler, proc, PARK_WAIT_CHILD, Some(ReturnCode, 11)))
+        IsSuccess(parked, TEST_FAIL())
     End
 }
 
@@ -319,7 +415,7 @@ void test_scheduler_unpark_when_not_idle(void)
         })
     End
 
-    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation)))
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation), PARK_WAIT_IO))
         IsError(code, message, TEST_FAIL());
         IsSuccess(parked,
         {
@@ -328,7 +424,7 @@ void test_scheduler_unpark_when_not_idle(void)
         })
     End
 
-    ResultMatch(ProcessPtr, Scheduler__unpark(scheduler, proc))
+    ResultMatch(ProcessPtr, Scheduler__unpark(scheduler, proc, PARK_WAIT_IO, Some(ReturnCode, 11)))
         IsError(code, message, TEST_FAIL());
         IsSuccess(parked,
         {
@@ -372,7 +468,7 @@ void test_scheduler_park_switches_process_to_waiting_not_switching_context_when_
     End
 
 
-    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation)))
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation), PARK_WAIT_IO))
         IsError(code, message, TEST_FAIL());
         IsSuccess(parked,
         {

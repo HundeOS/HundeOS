@@ -4,8 +4,8 @@
 #include "../../fixtures/kernel.h"
 
 static const IOInternalHandle FAKE_HANDLE =            0x00000000000000FF;
-static const IOHandle EXPECTED_OPEN_HANDLE =           0x00000001000000FF; // upper 32bits hold the device handle
-static const DeviceHandle EXPECTED_DEVICE_HANDLE =     0x00000001; // upper 32bits hold the device handle
+static const IOHandle EXPECTED_OPEN_HANDLE =           0x00000002000000FF; // upper 32bits hold the device handle
+static const DeviceHandle EXPECTED_DEVICE_HANDLE =     0x00000002; // upper 32bits hold the device handle
 #define MAX_READ 100
 
 static bool opened = false;
@@ -29,6 +29,7 @@ static Flags FLAGS = 1234;
 static Char expected[] = {1, 2, 3, 4};
 
 static KString path = KSTRING_NEW(":test:");
+static KString invalid_path = KSTRING_NEW("/sss");
 
 #define NEW_FAKE_IO_STATE \
     (FakeIOState) { \
@@ -137,7 +138,7 @@ static IO TEST_IO = STUB_IO;
 
 void setUp(void)
 {
-    kernel = init_test_kernel_without_filesystem();
+    kernel = init_test_kernel();
     reset_state();
 
     Scheduler__schedule(kernel->scheduler, &PROC);
@@ -233,6 +234,17 @@ void test_io_open_and_read()
     TEST_ASSERT_TRUE(read);
 }
 
+void test_io_open_path_not_found()
+{
+    IOHandle handle = -1;
+    Data data[MAX_READ] = {0};
+
+    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), invalid_path, FLAGS))
+        IsSuccess(result, TEST_FAIL());
+        // IsError(code, message, TEST_FAIL());
+    End
+}
+
 void test_io_open_and_write()
 {
     IOHandle handle = -1;
@@ -315,10 +327,13 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
     data_available_interrupt(&kernel->io_subsystem);
     Scheduler__preempt(kernel->scheduler, cpu, NULL);
 
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, PROC.state);
+
     ResultMatch(Anything, deferred_syscall_result())
         IsSuccess(count, TEST_ASSERT_EQUAL(4, count));
         IsError(code, message,
         {
+            k_println(cstr(message));
             TEST_FAIL();
         });
     End

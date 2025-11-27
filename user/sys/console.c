@@ -15,7 +15,7 @@ ByteCount console_input(char * buf, size_t size)
 {
     if (console_handle == 0)
     {
-        console_handle = open("/dev/console", 0);
+        console_handle = open(":console:", 0);
 
         if (console_handle <= 0)
         {

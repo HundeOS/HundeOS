@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 SystemCallResult syscall(
-        SystemCall num, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5
-    )
+    SystemCall num, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5
+)
 {
     register Anything x0 __asm__("x0") = arg1;
     register Anything x1 __asm__("x1") = arg2;

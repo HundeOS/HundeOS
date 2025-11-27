@@ -1,4 +1,6 @@
 #include "register.h"
+#include "file/register.h"
+
 #include "io.h"
 #include "io_subsystem.h"
 
@@ -19,18 +21,15 @@
     } \
 
 
-static const char * CONSOLE = "::console";
-static const char * ROOT = "/";
+static KString CONSOLE = KSTRING_NEW(":console:");
+static KString ROOT = KSTRING_NEW("/");
 
 Result(RegisterCode) IOSubsystem__register_devices(IOSubsystemPtr self)
 {
-    KString console_path = kstring(CONSOLE);
-    KString root_fs_path = kstring(CONSOLE);
-    FilesystemPtr root_fs = RootFilesystem__heap_new();
-    FilesystemIOStatePtr root_fs_state = FilesystemIOState__heap_new(root_fs);
+    FilesystemPtr root_fs = Filesystem__build_root_and_mounts();
 
-    IO_REGISTER(self, console_path, Console__heap_new(), (IOStatePtr) ConsoleState__instance());
-    IO_REGISTER(self, root_fs_path, root_fs, (IOStatePtr) root_fs_state);
+    IO_REGISTER(self, CONSOLE, Console__heap_new(), (IOStatePtr) ConsoleState__instance());
+    IO_REGISTER(self, ROOT, &root_fs->file_io.base_io, (IOStatePtr) root_fs->state);
 
     return Success(RegisterCode, IO_OK);
 }

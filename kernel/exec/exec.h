@@ -9,15 +9,6 @@
 #include "../process.h"
 #include "../kernel_core.h"
 
-typedef enum ExecError
-{
-    EXEC_OK = 0,
-    EXEC_NOT_FOUND = 127,
-    EXEC_NOT_IMPLEMENTED = 255,
-    EXEC_FAILED = 155,
-}
-ExecError;
-
 typedef uint64_t ExecResult;
 
 FixedArrayDefine(Char, _16MB, ElfReadBuffer, SimpleEquals(Char));

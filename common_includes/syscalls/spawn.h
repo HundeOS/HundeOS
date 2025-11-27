@@ -1,5 +1,6 @@
 #ifndef __SYSCALL_SPAWN_H
 #define __SYSCALL_SPAWN_H
+#include <stdint.h>
 
 typedef enum SpawnModes
 {
@@ -21,7 +22,7 @@ typedef enum SpawnErrors
 }
 SpawnErrors;
 
-typedef int SpawnResult;
+typedef int64_t SpawnResult;
 typedef int SpawnMode;
 
 

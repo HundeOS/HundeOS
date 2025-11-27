@@ -21,13 +21,13 @@ Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, Sy
 {
     ResultMatch(ArrayCode, Handlers__set(&self->handlers, syscall, handler));
         IsError(code, message,
-            {
-                return Error(RegisterResult, message, REGISTER_FAILURE);
-            });
+        {
+            return Error(RegisterResult, message, REGISTER_FAILURE);
+        });
         IsSuccess(_,
-            {
-                return Success(RegisterResult, REGISTER_OK);
-            });
+        {
+            return Success(RegisterResult, REGISTER_OK);
+        });
     End
 }
 
@@ -46,13 +46,13 @@ Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
 
     Match(Handler, Handlers__at(&self->handlers, syscall_id));
         IsSome(handler,
-            {
-                return handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5);
-            });
+        {
+            return handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5);
+        });
         IsNone(
-            {
-                return Error(SystemCallResult, unhandled_syscall, SYSCALL_FAILURE);
-            })
+        {
+            return Error(SystemCallResult, unhandled_syscall, SYSCALL_FAILURE);
+        })
     End;
 
     return Error(SystemCallResult, KString__sprintf(&unhandled_syscall_format, syscall_id), SYSCALL_FAILURE);

@@ -25,8 +25,8 @@ IOInternalHandle _device_internal_handle(IOHandle handle)
 }
 
 Result(DeviceHandle) IOSubsystem__register_device(
-        IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state
-    )
+    IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state
+)
 {
     DeviceRegistration reg = (DeviceRegistration) {
         .device = device,
@@ -54,6 +54,7 @@ Result(DeviceHandle) IOSubsystem__register_device(
 bool path_match(DeviceRegistration * device, void * v_path)
 {
     KStringPtr path = v_path;
+    __d_printf(IOSUB, "Checking path %s %s\n", cstr_p(path), cstr(device->path));
     return KString__starts_with(path, &device->path);
 }
 
@@ -64,13 +65,16 @@ static FindResultOptional(IODevicesArray) IOSubsystem__find_device(IOSubsystemPt
 
 Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContext context, KString path, Flags flags)
 {
+    __d_printf(IOSUB, "Opening %p\n", self);
     Result(IOHandle) error = Error(IOHandle, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
 
     FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
         IsSome(match,
         {
+            __d_printf(IOSUB, "Opening device %p %p %i\n", match.value->device, match.value->device->open, match.index);
             DeviceRegistrationPtr registration = match.value;
             Result(IOInternalHandle) open_result = registration->device->open(registration->state, path, flags);
+            __d_printf(IOSUB, "Opened device %p %i\n", match.value->device, match.index);
 
             ResultMatch(IOInternalHandle, open_result);
                 IsSuccess(handle,
@@ -158,9 +162,15 @@ void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContext parked_context)
                 {
                     match->device->unpark(match->state);
                     // tell scheduler things are ready to complete the parked call
-                    __d_println(IOSUB, "IO sub unparking process");
+                    __d_println(SCHEDULER, "IO sub unparking process");
                     Match(ProcessPtr, parked_context.kernel_context.proc)
-                        IsSome(process, Scheduler__unpark(self->scheduler, process));
+                        IsSome(process,
+                        {
+                            ResultMatch(ProcessPtr, Scheduler__unpark(self->scheduler, process, PARK_WAIT_IO, None(ReturnCode)))
+                                IsSuccess(_, __d_println(SCHEDULER, "IO sub unparked process OK");)
+                                IsError(code, message, __d_println(PANIC, cstr(message)))
+                            End
+                        });
                         IsNone(__d_println(PANIC, "No process found for parked context"));
                     End
 
@@ -195,14 +205,18 @@ void IOSubsystem__park(IOSubsystemPtr self, IOContext io_context)
     End
 }
 
-Result(Anything) IOSubsystem__continue_read(void * context)
+Result(Anything) IOSubsystem__continue_read(ParkedKernelContextPtr context)
 {
-    IOContextPtr io_context = (IOContextPtr) context;
+    KernelContextPtr kernel_context = context->kernel_context;
+    IOContextPtr io_context = (IOContextPtr) kernel_context;
+
     __d_printf(IOSUB, "\nContinuing read %p %p\n", io_context, io_context->io_subsystem);
+
     ResultMatch(ByteCount, IOSubsystem__read(io_context->io_subsystem, *io_context))
         IsSuccess(bytes, return Success(Anything, bytes));
         IsError(code, message, return Error(Anything, message, code));
     End
+
     return Error(Anything, kstring("unexpected code path"), 0);
 }
 
@@ -238,7 +252,8 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContext context)
                                         Match(ProcessPtr, context.kernel_context.proc)
                                             IsSome(process,
                                             {
-                                                Scheduler__park(self->scheduler, process, &context.kernel_context, continuation);
+                                                __d_println(SCHEDULER, "IO sub parking process");
+                                                Scheduler__park(self->scheduler, process, &context.kernel_context, continuation, PARK_WAIT_IO);
                                             })
                                             IsNone(__d_println(PANIC, "No process found for parked context"));
                                         End
