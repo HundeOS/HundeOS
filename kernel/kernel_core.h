@@ -7,6 +7,7 @@
 #include "scheduler/scheduler.h"
 #include "heap.h"
 #include "mutex.h"
+#include "subsystems/message/message_broker.h"
 
 typedef uint64_t KernelInitStatus;
 
@@ -19,6 +20,7 @@ typedef struct Kernel
     IOSubsystem io_subsystem;
     Heap heap;
     SchedulerPtr scheduler;
+    MessageBroker message_broker;
 } Kernel;
 
 typedef Kernel * KernelPtr;

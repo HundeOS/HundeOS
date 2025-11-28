@@ -1,0 +1,23 @@
+manifest:
+  source_files:
+    - kernel/syscall/*.c
+    - kernel/process.c
+    - kernel/bin/*.c
+    - kernel/stack.c
+    - kernel/kernel_init.c
+    - kernel/spin.c
+    - kernel/print.c
+    - kernel/types/*.c
+    - kernel/scheduler/*.c
+    - kernel/subsystems/message/*.c
+    - kernel/subsystems/io/*.c
+    - kernel/subsystems/io/file/*.c
+    - kernel/subsystems/io/file/embedded/*.c
+    - kernel/subsystems/io/console/*.c
+    - kernel/syscall_handler.c
+    - kernel/mutex.c
+    - kernel/exec/exec.c
+    - kernel/heap.c
+    - kernel/memory_page.c
+    - kernel/context/*.c
+    - kernel/kio/*.c

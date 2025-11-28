@@ -39,20 +39,6 @@ ProcessPtr Process__new(
     return proc;
 }
 
-Result(ParkedKernelContextPtr) Process__unpark(ProcessPtr self)
-{
-    Match(ParkedKernelContextPtr, self->parked_context)
-        IsSome(parked,
-        {
-            return Success(ParkedKernelContextPtr, parked);
-        })
-        IsNone(
-        {
-            return Error(ParkedKernelContextPtr, kstring("No parked context"), PROC_ERROR_NO_PARKED);
-        })
-    End
-}
-
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
 {
     __d_println(PROCESS, "Process__spawn_from_elf");
@@ -97,3 +83,5 @@ Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
         })
     End
 }
+
+

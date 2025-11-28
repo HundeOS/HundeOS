@@ -29,6 +29,7 @@ static Kernel instance = {
     .io_subsystem = NEW_IO_SUBSYSTEM(&scheduler),
     .heap = NEW_HEAP,
     .scheduler = &scheduler,
+    .message_broker = NEW_BROKER,
 };
 
 KernelPtr Kernel__heap_new(SchedulerPtr scheduler)
@@ -42,6 +43,7 @@ KernelPtr Kernel__heap_new(SchedulerPtr scheduler)
         .io_subsystem = NEW_IO_SUBSYSTEM(scheduler),
         .heap = NEW_HEAP,
         .scheduler = scheduler,
+        .message_broker = MessageBroker__new(),
     };
 
     return kernel;

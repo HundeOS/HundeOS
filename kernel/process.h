@@ -108,7 +108,5 @@ FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 OptionalType(ProcessTable *, ProcessTablePtr);
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent);
-Result(ParkedKernelContextPtr) Process__unpark(ProcessPtr self);
-Result(ParkedKernelContextPtr) Process__park(ProcessPtr self, Optional(ParkedKernelContextPtr) parked_context);
 
 #endif

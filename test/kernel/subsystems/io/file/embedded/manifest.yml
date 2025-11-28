@@ -9,6 +9,7 @@ manifest:
     - kernel/print.c
     - kernel/types/*.c
     - kernel/scheduler/*.c
+    - kernel/subsystems/message/*.c
     - kernel/subsystems/io/*.c
     - kernel/subsystems/io/file/*.c
     - kernel/subsystems/io/file/embedded/*.c

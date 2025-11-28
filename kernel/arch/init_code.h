@@ -8,6 +8,7 @@ ResultDef(InitCode);
 typedef enum ArchInitCode {
     ARCH_INIT_OK = 0,
     ARCH_INIT_ERROR = -1,
+    ARCH_INIT_NOT_IMPLEMENTED = -1,
 } ArchInitCode;
 
 #endif
