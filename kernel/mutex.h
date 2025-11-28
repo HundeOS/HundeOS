@@ -20,9 +20,6 @@ void mutex_unlock(mutex_t *m);
     __d_printf(MUTEX, "Returning from critical_section %s:%i\n", __FILE__, __LINE__);\
     return \
 
-#define _cs_exit()\
-    goto __csexit; \
-
 #define _cs_exit_then(code)\
     __d_printf(MUTEX, "Early exit from critical_section %s:%i\n", __FILE__, __LINE__);\
     mutex_unlock(__mutex); \
@@ -35,7 +32,7 @@ void mutex_unlock(mutex_t *m);
         mutex_lock(__mutex); \
         __d_printf(MUTEX, "Obtained lock (%s) %s:%i \n", #m, __FILE__, __LINE__);\
         block; \
-__csexit: \
+        \
         mutex_unlock(__mutex); \
         __d_printf(MUTEX, "Leaving critical_section (%s) %s:%i\n", #m, __FILE__, __LINE__);\
     }

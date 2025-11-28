@@ -34,12 +34,14 @@ void fake_callback_2(KernelListenerPtr self, MessagePtr message)
 void test_message_broker_listener_registers_and_delivers_message()
 {
     Listener listener = KernelListener__new(kernel, SOURCE_PROCESS, fake_callback_1);
-    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(&kernel->message_broker, listener));
+
+    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(kernel->message_broker, listener));
         IsError(code, message, TEST_FAIL());
     End
-    MessagePtr message = Message__heap_new_anything(SOURCE_PROCESS, DUMMY_PID);
 
-    ResultMatch(AckCode, MessageBroker__deliver(&kernel->message_broker, message))
+    MessagePtr message = Message__heap_new_anything(SOURCE_PROCESS, 1234,DUMMY_PID);
+
+    ResultMatch(AckCode, MessageBroker__deliver(kernel->message_broker, message))
         IsError(code, message, TEST_FAIL());
     End
 
@@ -50,15 +52,17 @@ void test_message_broker_listener_registers_and_delivers_message_for_multiple_li
 {
     Listener listener_1 = KernelListener__new(kernel, SOURCE_PROCESS, fake_callback_1);
     Listener listener_2 = KernelListener__new(kernel, SOURCE_PROCESS, fake_callback_2);
-    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(&kernel->message_broker, listener_1));
-        IsError(code, message, TEST_FAIL());
-    End
-    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(&kernel->message_broker, listener_2));
-        IsError(code, message, TEST_FAIL());
-    End
-    MessagePtr message = Message__heap_new_anything(SOURCE_PROCESS, DUMMY_PID);
 
-    ResultMatch(AckCode, MessageBroker__deliver(&kernel->message_broker, message))
+    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(kernel->message_broker, listener_1));
+        IsError(code, message, TEST_FAIL());
+    End
+    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(kernel->message_broker, listener_2));
+        IsError(code, message, TEST_FAIL());
+    End
+
+    MessagePtr message = Message__heap_new_anything(SOURCE_PROCESS, 1234, DUMMY_PID);
+
+    ResultMatch(AckCode, MessageBroker__deliver(kernel->message_broker, message))
         IsError(code, message, TEST_FAIL());
     End
 
@@ -69,12 +73,12 @@ void test_message_broker_listener_registers_and_delivers_message_for_multiple_li
 void test_message_broker_doesnt_deliver_when_not_registered_for_source()
 {
     Listener listener = KernelListener__new(kernel, SOURCE_PROCESS, fake_callback_1);
-    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(&kernel->message_broker, listener));
+    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(kernel->message_broker, listener));
         IsError(code, message, TEST_FAIL());
     End
-    MessagePtr message = Message__heap_new_anything(SOURCE_FAULT, DUMMY_PID);
+    MessagePtr message = Message__heap_new_anything(SOURCE_FAULT, 1234, DUMMY_PID);
 
-    ResultMatch(AckCode, MessageBroker__deliver(&kernel->message_broker, message))
+    ResultMatch(AckCode, MessageBroker__deliver(kernel->message_broker, message))
         IsError(code, message, TEST_FAIL());
     End
 

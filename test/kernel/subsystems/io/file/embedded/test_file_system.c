@@ -116,7 +116,6 @@ void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
                 })
                 IsSuccess(bytes,
                 {
-                    k_printf("Here! %i %i", HELLO_WORLD_SIZE, bytes);
                     TEST_ASSERT_EQUAL(HELLO_WORLD_SIZE, bytes);
                 })
             End

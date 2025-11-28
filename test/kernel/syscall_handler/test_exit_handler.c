@@ -5,18 +5,12 @@
 #include "../../../kernel/process.h"
 #include "../../../kernel/arch/process.h"
 #include "../../../kernel/scheduler/scheduler.h"
+#include "../fixtures/kernel.h"
 #include "../stubs/panic.h"
 
 
-Scheduler scheduler = NEW_SCHEDULER;
-
-#define STUB_KERNEL \
-    (Kernel) { \
-        .scheduler = &scheduler \
-    }
-
 static ProcessPtr process = NULL;
-static Kernel kernel = STUB_KERNEL;
+static KernelPtr kernel = NULL;
 static CPUID cpu = 11;
 static ProcessContextPtr context = (ProcessContextPtr) 0x12345;
 static ProcessPtr idle = NULL;
@@ -32,11 +26,10 @@ Result(Anything) continuation(ParkedKernelContextPtr context)
 
 void setUp(void)
 {
-    Elf idle_process = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
-    Scheduler__init(kernel.scheduler, idle_process);
-    Scheduler__start(kernel.scheduler, cpu);
+    kernel = init_test_kernel_without_filesystem();
+    Scheduler__start(kernel->scheduler, cpu);
 
-    Optional(ProcessPtr) idle_opt = Scheduler__idle_process(kernel.scheduler, cpu);
+    Optional(ProcessPtr) idle_opt = Scheduler__idle_process(kernel->scheduler, cpu);
     idle = UnwrapPanic(ProcessPtr, idle_opt);
 
     cont_called = false;
@@ -51,22 +44,21 @@ ProcessPtr setup_test_process(void)
 {
     process = dummy_process(100, cpu, PROC_STATE_RUNNING);
 
-    Scheduler__schedule(kernel.scheduler, process);
-    Scheduler__preempt(kernel.scheduler, cpu, context);
+    Scheduler__schedule(kernel->scheduler, process);
+    Scheduler__preempt(kernel->scheduler, cpu, context);
 
     return process;
 }
 
 ProcessPtr setup_test_process_waiting_on_child_process(ProcessPtr parent)
 {
-
     ProcessPtr child = dummy_process_with_parent(100, cpu, PROC_STATE_READY, parent);
-    Scheduler__schedule(kernel.scheduler, process);
+    Scheduler__schedule(kernel->scheduler, process);
 
-    parent_context = NEW_KERNEL_CONTEXT(kernel.scheduler, parent);
-    Scheduler__park(kernel.scheduler, parent, &parent_context, Some(Continuation, continuation), PARK_WAIT_CHILD);
-    Scheduler__schedule(kernel.scheduler, child);
-    Scheduler__preempt(kernel.scheduler, cpu, context);
+    parent_context = NEW_KERNEL_CONTEXT(kernel->scheduler, parent);
+    Scheduler__park(kernel->scheduler, parent, &parent_context, Some(Continuation, continuation), PARK_WAIT_CHILD);
+    Scheduler__schedule(kernel->scheduler, child);
+    Scheduler__preempt(kernel->scheduler, cpu, context);
 
     return child;
 }
@@ -74,23 +66,23 @@ ProcessPtr setup_test_process_waiting_on_child_process(ProcessPtr parent)
 void test_exit_handler_interrupts_and_removes_process_from_scheduler(void)
 {
     setup_test_process();
-    Optional(ProcessPtr) current_opt = Scheduler__current_process(kernel.scheduler, cpu);
+    Optional(ProcessPtr) current_opt = Scheduler__current_process(kernel->scheduler, cpu);
 
     Match(ProcessPtr, current_opt)
         IsNone(TEST_FAIL())
         IsSome(current, TEST_ASSERT_EQUAL(process, current));
     End
 
-    Exit__handler(&kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0);
+    Exit__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0);
 
     TEST_ASSERT_EQUAL(PROC_STATE_DEAD, process->state);
 
-    Match(ProcessPtr, Scheduler__current_process(kernel.scheduler, cpu))
+    Match(ProcessPtr, Scheduler__current_process(kernel->scheduler, cpu))
         IsNone(TEST_FAIL());
         IsSome(current, TEST_ASSERT_EQUAL(idle, current));
     End
 
-    ProcessTablePtr processes = Scheduler__all_processes(kernel.scheduler, cpu);
+    ProcessTablePtr processes = Scheduler__all_processes(kernel->scheduler, cpu);
 
     Match(ArrayIndex, ProcessTable__find_item(processes, process))
         IsSome(val, TEST_FAIL());
@@ -101,18 +93,18 @@ void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_
 {
     ProcessPtr parent = setup_test_process();
     ProcessPtr child = setup_test_process_waiting_on_child_process(parent);
-    Optional(ProcessPtr) current_opt = Scheduler__current_process(kernel.scheduler, cpu);
+    Optional(ProcessPtr) current_opt = Scheduler__current_process(kernel->scheduler, cpu);
 
     Match(ProcessPtr, current_opt)
         IsNone(TEST_FAIL())
         IsSome(current, TEST_ASSERT_EQUAL(child, current));
     End
 
-    Exit__handler(&kernel, Some(ProcessPtr, child), 0, 0, 0, 0, 0);
-    Scheduler__preempt(kernel.scheduler, cpu, context); // make sure the parent is woken up ( it was waiting on the child
+    Exit__handler(kernel, Some(ProcessPtr, child), 0, 0, 0, 0, 0);
+    Scheduler__preempt(kernel->scheduler, cpu, context); // make sure the parent is woken up ( it was waiting on the child
     TEST_ASSERT_EQUAL(PROC_STATE_DEAD, child->state);
 
-    Match(ProcessPtr, Scheduler__current_process(kernel.scheduler, cpu))
+    Match(ProcessPtr, Scheduler__current_process(kernel->scheduler, cpu))
         IsNone(TEST_FAIL());
         IsSome(current,
         {
@@ -122,7 +114,7 @@ void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_
         });
     End
 
-    ProcessTablePtr processes = Scheduler__all_processes(kernel.scheduler, cpu);
+    ProcessTablePtr processes = Scheduler__all_processes(kernel->scheduler, cpu);
 
     Match(ArrayIndex, ProcessTable__find_item(processes, child))
         IsSome(val, TEST_FAIL());

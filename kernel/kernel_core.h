@@ -20,7 +20,7 @@ typedef struct Kernel
     IOSubsystem io_subsystem;
     Heap heap;
     SchedulerPtr scheduler;
-    MessageBroker message_broker;
+    MessageBrokerPtr message_broker;
 } Kernel;
 
 typedef Kernel * KernelPtr;

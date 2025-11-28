@@ -20,7 +20,8 @@ static KString scheduler_init_progress = KSTRING_NEW("scheduler initialised");
 static KString arch_init_progress = KSTRING_NEW("architecture specific components initialised");
 static KString failed_to_init_msg = KSTRING_NEW("failed to initialise kernel");
 
-static Scheduler scheduler = NEW_SCHEDULER;
+static MessageBroker message_broker = NEW_BROKER;
+static Scheduler scheduler = NEW_SCHEDULER(&message_broker);
 
 static Kernel instance = {
     .status = INIT_NOT_STARTED,
@@ -29,10 +30,10 @@ static Kernel instance = {
     .io_subsystem = NEW_IO_SUBSYSTEM(&scheduler),
     .heap = NEW_HEAP,
     .scheduler = &scheduler,
-    .message_broker = NEW_BROKER,
+    .message_broker = &message_broker,
 };
 
-KernelPtr Kernel__heap_new(SchedulerPtr scheduler)
+KernelPtr Kernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_broker)
 {
     KernelPtr kernel = ptr(Kernel__alloc_kernel(sizeof(Kernel)), Kernel);
 
@@ -43,7 +44,7 @@ KernelPtr Kernel__heap_new(SchedulerPtr scheduler)
         .io_subsystem = NEW_IO_SUBSYSTEM(scheduler),
         .heap = NEW_HEAP,
         .scheduler = scheduler,
-        .message_broker = MessageBroker__new(),
+        .message_broker = message_broker,
     };
 
     return kernel;

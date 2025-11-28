@@ -13,6 +13,7 @@ typedef struct Kernel Kernel;
 typedef Kernel * KernelPtr;
 
 typedef uint64_t Source;
+typedef uint64_t SourceCode;
 typedef uint64_t Destination;
 typedef uint64_t PayloadType;
 typedef uint64_t ListenerType;
@@ -126,6 +127,7 @@ OptionalDef(Payload);
 typedef struct Message
 {
     Source source;
+    SourceCode source_code;
 
     Optional(Payload) payload;
 }
@@ -136,6 +138,7 @@ typedef Message * MessagePtr;
 typedef struct MessageBroker
 {
     Listeners listeners;
+    mutex_t lock;
 }
 MessageBroker;
 
@@ -144,11 +147,13 @@ typedef MessageBroker * MessageBrokerPtr;
 Listener KernelListener__new(KernelPtr kernel, Source source, KernelCallback callback);
 
 MessageBroker MessageBroker__new();
+MessageBrokerPtr MessageBroker__heap_new();
+
 Result(ListenerRegisterResult) MessageBroker__register_listener(MessageBrokerPtr self, Listener listener);
 Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message);
 
-Message Message__new_anything(Source source, Anything anything);
-MessagePtr Message__heap_new_anything(Source source, Anything anything);
+Message Message__new_anything(Source source, SourceCode source_code, Anything anything);
+MessagePtr Message__heap_new_anything(Source source, SourceCode source_code, Anything anything);
 
 #define NEW_BROKER \
     (MessageBroker) { \

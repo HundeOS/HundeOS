@@ -9,6 +9,7 @@
 #include "parked.h"
 #include "context_switch.h"
 #include "../process.h"
+#include "subsystems/message/message_broker.h"
 
 typedef uint64_t SchedulerInitStatus;
 
@@ -47,6 +48,7 @@ FixedArrayDefine(CPUSchedulerPtr, MAX_CPUS, CPUSchedulers, &Ptr__equals);
 
 typedef struct Scheduler
 {
+    MessageBrokerPtr message_broker;
     CPUSchedulers schedulers;
     mutex_t scheduler_lock;
     bool started;
@@ -57,7 +59,7 @@ typedef Scheduler * SchedulerPtr;
 OptionalDef(SchedulerPtr);
 ResultDef(SchedulerPtr);
 
-SchedulerPtr Scheduler__heap_new();
+SchedulerPtr Scheduler__heap_new(MessageBrokerPtr message_broker);
 
 Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, Elf idle_process);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
@@ -80,8 +82,9 @@ Optional(ProcessPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, Proce
 Result(CPUID) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc);
 Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu);
 
-#define NEW_SCHEDULER \
+#define NEW_SCHEDULER(broker) \
     (Scheduler) { \
+        .message_broker = broker, \
         .schedulers = EmptyArray(CPUSchedulers),\
         .scheduler_lock = MUTEX_INIT, \
         .started = false, \

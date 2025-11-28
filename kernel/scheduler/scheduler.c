@@ -293,6 +293,9 @@ Result(ProcessPtr) Scheduler__exit(SchedulerPtr self, ProcessPtr proc, ReturnCod
                     })
                 End
 
+                MessagePtr message = Message__heap_new_anything(SOURCE_PROCESS, proc->state, proc->pid);
+                MessageBroker__deliver(self->message_broker, message);
+
                 Optional(ProcessPtr) current_for_cpu = CPUScheduler__current_process(sched);
 
                 Match(ProcessPtr, current_for_cpu)
@@ -415,10 +418,10 @@ Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu)
     return None(ProcessPtr);
 }
 
-SchedulerPtr Scheduler__heap_new()
+SchedulerPtr Scheduler__heap_new(MessageBrokerPtr message_broker)
 {
     SchedulerPtr sched = v_ptr(Kernel__alloc(sizeof(Scheduler)), Scheduler);
-    *sched = NEW_SCHEDULER;
+    *sched = NEW_SCHEDULER(message_broker);
     return sched;
 }
 

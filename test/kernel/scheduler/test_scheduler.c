@@ -8,9 +8,14 @@
 #include "../../../kernel/scheduler/scheduler.h"
 #include "../../../kernel/bin/embedded_binaries.h"
 #include "../../../kernel/scheduler/parked.h"
+#include "../../../kernel/subsystems/message/message_broker.h"
+#include "../fixtures/kernel.h"
 
-static SchedulerPtr scheduler;
+static SchedulerPtr scheduler = NULL;
+static KernelPtr kernel = NULL;
 static ParkedKernelContextPtr continuation_context;
+static MessagePtr received_message = NULL;
+
 static const CPUID cpu_id = 12;
 
 static KString no_return_code = KSTRING_NEW("no return code");
@@ -18,13 +23,12 @@ static KString no_return_code = KSTRING_NEW("no return code");
 void setUp(void)
 {
     continuation_context = NULL;
+    received_message = NULL;
     clear_panic_state();
     set_cpu_id(cpu_id);
     current_process_reset();
-
-    scheduler = Scheduler__heap_new();
-    Elf idle = Unwrap(Elf, EmbeddedElf__load(kstring("idle")), (Elf){});
-    Scheduler__init(scheduler, idle);
+    kernel = init_test_kernel_without_filesystem();
+    scheduler = kernel->scheduler;
 }
 
 void tearDown(void)
@@ -172,6 +176,36 @@ void test_scheduler_exit_removes_process_when_its_current(void)
     ProcessTablePtr processes = Scheduler__all_processes(scheduler, cpu_id);
 
     TEST_ASSERT_EQUAL(0, ProcessTable__len(processes));
+}
+
+void fake_callback(KernelListenerPtr listener, MessagePtr message)
+{
+    received_message = message;
+}
+
+void test_scheduler_exit_sends_a_message_to_the_broker_saying_the_process_exited(void)
+{
+    Listener listener = KernelListener__new(kernel, SOURCE_PROCESS, fake_callback);
+    MessageBroker__register_listener(kernel->message_broker, listener);
+
+    ProcessPtr proc = dummy_process(1, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    ResultMatch(ProcessPtr, Scheduler__exit(scheduler, proc, 10))
+        IsError(code, message, TEST_FAIL());
+    End
+
+    TEST_ASSERT_NOT_NULL(received_message);
+    TEST_ASSERT_EQUAL(SOURCE_PROCESS, received_message->source);
+    TEST_ASSERT_EQUAL(PROC_STATE_DEAD, received_message->source_code);
+
+    Payload payload = UnwrapPanic(Payload, received_message->payload);
+    TEST_ASSERT_EQUAL(PAYLOAD_TYPE_ANYTHING, payload.type);
+    TEST_ASSERT_EQUAL(proc->pid, payload.anything);
+
 }
 
 void test_scheduler_exit_unparks_parent_if_waiting(void)

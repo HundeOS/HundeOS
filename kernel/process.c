@@ -15,6 +15,7 @@ FixedArrayBodyDefine(ProcessTable);
 FixedArrayBodyDefine(ProcessHandles);
 
 static ProcessID pid_counter = 0;
+static mutex_t pid_lock = MUTEX_INIT;
 
 static KString no_entry_point_message = KSTRING_NEW("No entry point found in ELF");
 
@@ -23,12 +24,16 @@ ProcessPtr Process__new(
     KString name, KernelAddress page_table, UserAddress entry, Stack stack, Optional(ProcessPtr) parent
 )
 {
+    ProcessID pid;
+
+    CriticalSection(pid_lock, pid = ++pid_counter);
+
     __d_printf(PROCESS, "Creating process with entry point %p\n", entry);
-    ProcessPtr proc = (ProcessPtr) Kernel__alloc_kernel(sizeof(Process));
+    ProcessPtr proc = ptr(Kernel__alloc_kernel(sizeof(Process)), Process);
     proc->entry_point = entry;
     proc->page_table = page_table;
     proc->state = PROC_STATE_NEW;
-    proc->pid = ++pid_counter;
+    proc->pid = pid;
     proc->stack = stack;
     proc->handles = EmptyArray(ProcessHandles);
     proc->context = ProcessContext__init(proc->pid, &proc->stack, entry, page_table);
