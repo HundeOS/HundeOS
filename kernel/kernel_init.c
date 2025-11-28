@@ -36,16 +36,19 @@ static Kernel instance = {
 KernelPtr Kernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_broker)
 {
     KernelPtr kernel = ptr(Kernel__alloc_kernel(sizeof(Kernel)), Kernel);
+    kernel->status = INIT_NOT_STARTED;
+    kernel->init_lock = MUTEX_INIT;
+    kernel->syscall_dispatcher = NEW_SYSCALL_DISPATCHER;
+    kernel->io_subsystem = NEW_IO_SUBSYSTEM(scheduler);
+    IOSubsystemPtr io_subsystem = &kernel->io_subsystem;
+    io_subsystem->scheduler = scheduler;
+    MapInit(IOHandlesMap, io_subsystem->handles);
+    MapInit(ProcessHandleMap, io_subsystem->process_handles);
+    ArrayInit(IODevicesArray, io_subsystem->devices);
 
-    *kernel = (Kernel) {
-        .status = INIT_NOT_STARTED,
-        .init_lock = MUTEX_INIT,
-        .syscall_dispatcher = NEW_SYSCALL_DISPATCHER,
-        .io_subsystem = NEW_IO_SUBSYSTEM(scheduler),
-        .heap = NEW_HEAP,
-        .scheduler = scheduler,
-        .message_broker = message_broker,
-    };
+    kernel->heap = NEW_HEAP;
+    kernel->scheduler = scheduler;
+    kernel->message_broker = message_broker;
 
     return kernel;
 }

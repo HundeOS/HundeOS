@@ -76,6 +76,7 @@ void test_message_broker_doesnt_deliver_when_not_registered_for_source()
     ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(kernel->message_broker, listener));
         IsError(code, message, TEST_FAIL());
     End
+
     MessagePtr message = Message__heap_new_anything(SOURCE_FAULT, 1234, DUMMY_PID);
 
     ResultMatch(AckCode, MessageBroker__deliver(kernel->message_broker, message))

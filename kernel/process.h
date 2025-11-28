@@ -6,10 +6,7 @@
 #include "bin/elf.h"
 #include "all_defs.h"
 #include "stack.h"
-#include "subsystems/io/types.h"
 #include "types/comparison.h"
-
-FixedArrayDefine(IOHandle, MAX_HANDLES_PER_PROCESS, ProcessHandles, SimpleEquals(uint64_t));
 
 typedef struct ProcessContext ProcessContext;
 typedef struct ProcessContext * ProcessContextPtr;
@@ -23,6 +20,9 @@ ResultDef(ParkedKernelContextPtr);
 typedef uint64_t ProcessID;
 typedef uint64_t ProcessState;
 typedef uint64_t Tick;
+
+OptionalDef(ProcessID);
+ResultDef(ProcessID);
 
 // state bits
 // 6    5      4     3    2         1     0
@@ -93,9 +93,9 @@ typedef struct Process {
     ProcessID pid;
     ProcessState state;
     UserAddress entry_point;
-    ProcessHandles handles;
     Tick last_tick;
     KString name;
+
     Optional(ParkedKernelContextPtr) parked_context;
 } Process;
 

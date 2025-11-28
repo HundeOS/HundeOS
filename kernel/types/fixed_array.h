@@ -47,7 +47,6 @@ OptionalDef(ArrayIndex);
     { \
         alias_name result = { \
             .len = 0, \
-            .max = alias_name##__max_size, \
         }; \
         return result; \
     }; \
@@ -56,7 +55,6 @@ OptionalDef(ArrayIndex);
     { \
         alias_name * array = v_ptr(Kernel__alloc(sizeof(alias_name)), alias_name);\
         array->len = 0;\
-        array->max = alias_name##__max_size;\
         return array;\
     } \
 
@@ -64,7 +62,7 @@ OptionalDef(ArrayIndex);
 #define PushDefine(alias_name) \
     Result(ArrayCode) alias_name##__push(alias_name * self, alias_name##__type value) \
     { \
-        if (self->len >= self->max) \
+        if (self->len >= alias_name##__max_size) \
         { \
             return Error(ArrayCode, KString__new(ARRAY_FULL_ERROR), ARRAY_FULL); \
         } \
@@ -249,7 +247,7 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
 #define SetDefine(alias_name) \
     Result(ArrayCode) alias_name##__set(alias_name * self, uint64_t index, alias_name##__type value) \
     { \
-        if (index < 0 || index >= self->max) \
+        if (index < 0 || index >= alias_name##__max_size) \
         { \
             return Error(ArrayCode, KString__new(ARRAY_INDEX_OUT_OF_BOUNDS), ARRAY_OUT_OF_BOUNDS); \
         } \
@@ -409,7 +407,6 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
     typedef struct alias_name \
     { \
         uint64_t len;\
-        uint64_t max; \
         type data[size]; \
     } alias_name; \
     \
@@ -438,7 +435,10 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
 
 #define EmptyArray(alias_name) (alias_name) { \
     .len = 0, \
-    .max = alias_name##__max_size, \
 } \
+
+#define ArrayInit(alias_name, array) \
+    array.len = 0; \
+
 
 #endif

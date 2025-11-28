@@ -12,7 +12,6 @@
 #include "stack.h"
 
 FixedArrayBodyDefine(ProcessTable);
-FixedArrayBodyDefine(ProcessHandles);
 
 static ProcessID pid_counter = 0;
 static mutex_t pid_lock = MUTEX_INIT;
@@ -35,7 +34,6 @@ ProcessPtr Process__new(
     proc->state = PROC_STATE_NEW;
     proc->pid = pid;
     proc->stack = stack;
-    proc->handles = EmptyArray(ProcessHandles);
     proc->context = ProcessContext__init(proc->pid, &proc->stack, entry, page_table);
     proc->last_tick = 0;
     proc->name = name;

@@ -16,12 +16,14 @@ static bool read = false;
 static CPUID cpu = 1;
 
 static KernelPtr kernel = NULL;
+static IOSubsystemPtr io_subsystem = NULL;
+
 static DataPtr write_data = NULL;
 static IOBufferPtr buffer = NULL;
 
 static ProcessContextPtr context = (ProcessContextPtr) 0x12345;
 
-static Process PROC = STUB_PROCESS(1);
+static Process PROC = STUB_PROCESS(100);
 static Optional(ProcessPtr) proc = Some(ProcessPtr, &PROC);
 
 static Flags FLAGS = 1234;
@@ -139,15 +141,15 @@ static IO TEST_IO = STUB_IO;
 void setUp(void)
 {
     kernel = init_test_kernel();
+    io_subsystem = &kernel->io_subsystem;
     reset_state();
 
     Scheduler__schedule(kernel->scheduler, &PROC);
     Scheduler__preempt(kernel->scheduler, cpu, context);
 
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(&kernel->io_subsystem, path, &TEST_IO, &STATE))
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, path, &TEST_IO, &STATE))
         IsError(code, message, TEST_FAIL());
     End
-
 }
 
 void data_available()
@@ -158,7 +160,7 @@ void data_available()
     IOBuffer__push(buffer, 4);
 }
 
-void data_available_interrupt(IOSubsystemPtr io_subsystem)
+void data_available_interrupt(IOSubsystemPtr io_sub)
 {
     Match(IOContext, STATE.parked_context)
         IsSome(parked_context,
@@ -167,7 +169,7 @@ void data_available_interrupt(IOSubsystemPtr io_subsystem)
             IOBuffer__push(buffer, 2);
             IOBuffer__push(buffer, 3);
             IOBuffer__push(buffer, 4);
-            IOSubsystem__data_arrived(io_subsystem, parked_context);
+            IOSubsystem__data_arrived(io_sub, parked_context);
         })
         IsNone(
         {
@@ -180,7 +182,7 @@ IOContext io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buf
 {
     KernelContext kernel_context = KernelContext__new(proc, kernel->scheduler);
     ;
-    return IOContext__new(kernel_context, &kernel->io_subsystem, handle, ext_buffer);
+    return IOContext__new(kernel_context, io_subsystem, handle, ext_buffer);
 }
 
 IOContext open_context()
@@ -201,7 +203,7 @@ IOContext rw_context(IOHandle handle, DataPtr data, size_t size)
 
 void test_io_subsystem_registration_and_open()
 {
-    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL());
     End
@@ -214,14 +216,14 @@ void test_io_open_and_read()
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
 
     data_available();
 
-    ResultMatch(ByteCount, IOSubsystem__read(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
+    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(count,
         {
             TEST_ASSERT_EQUAL_INT(4, count);
@@ -239,10 +241,32 @@ void test_io_open_path_not_found()
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), invalid_path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), invalid_path, FLAGS))
         IsSuccess(result, TEST_FAIL());
-        // IsError(code, message, TEST_FAIL());
     End
+}
+
+void test_io_open()
+{
+    IOHandle handle = -1;
+    Data data[MAX_READ] = {0};
+
+    __d_println(DEBUG, "opening %p\n");
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
+        IsSuccess(result, handle = result);
+        IsError(code, message, TEST_FAIL());
+    End
+
+    MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&io_subsystem->process_handles, PROC.pid));
+        IsNone(TEST_FAIL());
+        IsSome(handles,
+        {
+            Match(ArrayIndex, PIDHandles__find_item(handles, EXPECTED_OPEN_HANDLE))
+                IsNone(TEST_FAIL())
+            End
+        })
+    End
+
 }
 
 void test_io_open_and_write()
@@ -251,17 +275,13 @@ void test_io_open_and_write()
     Data data[MAX_READ] = {0};
 
     __d_println(DEBUG, "opening %p\n");
-    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
 
-    Match(ArrayIndex, ProcessHandles__find_item(&PROC.handles, EXPECTED_OPEN_HANDLE));
-        IsNone(TEST_FAIL());
-    End
-
     __d_println(DEBUG, "writing %p\n");
-    ResultMatch(ByteCount, IOSubsystem__write(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
+    ResultMatch(ByteCount, IOSubsystem__write(io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(byte_count,
         {
             TEST_ASSERT_EQUAL_UINT(MAX_READ, byte_count);
@@ -278,16 +298,12 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process()
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
 
-    Match(ArrayIndex, ProcessHandles__find_item(&PROC.handles, EXPECTED_OPEN_HANDLE));
-        IsNone(TEST_FAIL());
-    End
-
-    ResultMatch(ByteCount, IOSubsystem__read(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
+    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(count, TEST_FAIL());
         IsError(code, message, TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code));
     End
@@ -307,16 +323,12 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
 
-    Match(ArrayIndex, ProcessHandles__find_item(&PROC.handles, EXPECTED_OPEN_HANDLE));
-        IsNone(TEST_FAIL());
-    End
-
-    ResultMatch(ByteCount, IOSubsystem__read(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
+    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(count, TEST_FAIL());
         IsError(code, message, TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code));
     End
@@ -324,7 +336,7 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, PROC.state);
 
     ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(kernel->scheduler, cpu));
-    data_available_interrupt(&kernel->io_subsystem);
+    data_available_interrupt(io_subsystem);
     Scheduler__preempt(kernel->scheduler, cpu, NULL);
 
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, PROC.state);
@@ -333,7 +345,6 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
         IsSuccess(count, TEST_ASSERT_EQUAL(4, count));
         IsError(code, message,
         {
-            k_println(cstr(message));
             TEST_FAIL();
         });
     End
@@ -347,7 +358,7 @@ void test_io_write_when_not_open()
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    ResultMatch(ByteCount, IOSubsystem__write(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
+    ResultMatch(ByteCount, IOSubsystem__write(io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(byte_count,
         {
             TEST_FAIL();
@@ -368,7 +379,7 @@ void test_io_read_when_not_open()
 
     IOHandle handle = -1;
 
-    ResultMatch(ByteCount, IOSubsystem__read(&kernel->io_subsystem, rw_context(handle, data, MAX_READ)));
+    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, rw_context(handle, data, MAX_READ)));
         IsSuccess(count,
         {
             TEST_FAIL();
@@ -384,37 +395,44 @@ void test_io_read_when_not_open()
 
 void test_io_subsystem_registration_and_close()
 {
-    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&kernel->io_subsystem, close_context(EXPECTED_OPEN_HANDLE)))
+    ResultMatch(IOHandle, IOSubsystem__close(io_subsystem, close_context(EXPECTED_OPEN_HANDLE)))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
+
+    MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&io_subsystem->process_handles, PROC.pid));
+        IsNone(TEST_FAIL());
+        IsSome(handles,
+        {
+            Match(ArrayIndex, PIDHandles__find_item(handles, EXPECTED_OPEN_HANDLE))
+                IsSome(_, TEST_FAIL())
+            End
+        })
+    End
+
 
     TEST_ASSERT_TRUE(closed);
 }
 
-void test_io_subsystem_close_disposes_handle()
+void test_io_subsystem_close_fails_on_second_time()
 {
-    ResultMatch(IOHandle, IOSubsystem__open(&kernel->io_subsystem, open_context(), path, FLAGS))
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&kernel->io_subsystem, close_context(EXPECTED_OPEN_HANDLE)))
+    ResultMatch(IOHandle, IOSubsystem__close(io_subsystem, close_context(EXPECTED_OPEN_HANDLE)))
         IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(IOHandle, IOSubsystem__close(&kernel->io_subsystem, close_context(EXPECTED_OPEN_HANDLE)))
+    ResultMatch(IOHandle, IOSubsystem__close(io_subsystem, close_context(EXPECTED_OPEN_HANDLE)))
         IsSuccess(result, TEST_FAIL());
-    End
-
-    Match(ArrayIndex, ProcessHandles__find_item(&PROC.handles, EXPECTED_OPEN_HANDLE));
-        IsSome(val, TEST_FAIL());
     End
 
     TEST_ASSERT_TRUE(closed);

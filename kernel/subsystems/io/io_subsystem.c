@@ -7,6 +7,10 @@
 #include "../../debug.h"
 #include "scheduler/scheduler.h"
 
+FixedArrayBodyDefine(PIDHandles);
+MapBodyDefine(ProcessHandleMap);
+
+
 static KString no_device_found_format = KSTRING_NEW("No device found %s\n");
 static KString failed_to_register_format = KSTRING_NEW("Failed to register device %s\n");
 static KString unknown_handle_format = KSTRING_NEW("Unknown handle %i\n");
@@ -84,7 +88,18 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContext context, KStri
                     Match(ProcessPtr, context.kernel_context.proc)
                         IsSome(process,
                         {
-                            ProcessHandles__push(&process->handles, external_handle);
+                            MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&self->process_handles, process->pid))
+                                IsNone(
+                                {
+                                    PIDHandles pid_handles = PIDHandles__new();
+                                    PIDHandles__push(&pid_handles, external_handle);
+                                    ProcessHandleMap__set(&self->process_handles, process->pid, pid_handles);
+                                })
+                                IsSome(handles,
+                                {
+                                    PIDHandles__push(handles, handle);
+                                })
+                            End
                         })
                         IsNone(
                         {
@@ -115,14 +130,18 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContext context)
                     Match(ProcessPtr, context.kernel_context.proc)
                         IsSome(process,
                         {
-                            ProcessHandles__remove(&process->handles, handle);
+                            MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&self->process_handles, process->pid))
+                                IsSome(proc_handles,
+                                {
+                                    PIDHandles__remove(proc_handles, handle);
+                                })
+                            End
                         });
                         IsNone(
                         {
                             __d_println(PANIC, "TODO: No process found for close, must be kernel, should track its handle");
                         });
                     End
-
 
                     ResultMatch(IOInternalHandle, close_res)
                         IsSuccess(_, return Success(IOHandle, handle));

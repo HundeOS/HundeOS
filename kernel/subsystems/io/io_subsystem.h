@@ -17,12 +17,25 @@ typedef Scheduler * SchedulerPtr;
 
 typedef IOContext * IOContextPtr;
 
+
+FixedArrayDefine(IOHandle, MAX_HANDLES, PIDHandles, SimpleEquals(uint64_t));
+typedef PIDHandles * PIDHandlesPtr;
+OptionalDef(PIDHandles);
+OptionalDef(PIDHandlesPtr);
+
+ResultDef(PIDHandles);
+ResultDef(PIDHandlesPtr);
+
+MapDefine(ProcessID, PIDHandles, MAX_PROCESSES, ProcessHandleMap, SimpleEquals(uint64_t));
+typedef ProcessHandleMap * ProcessHandleMapPtr;
+
 typedef struct IOSubsystem
 {
     IODevicesArray devices;
     IOHandlesMap handles;
 
     SchedulerPtr scheduler;
+    ProcessHandleMap process_handles;
 } IOSubsystem;
 
 typedef IOSubsystem * IOSubsystemPtr;
@@ -47,8 +60,15 @@ Result(IOHandle) IOSubsystem__async_receive(IOSubsystemPtr self, KString path, F
         .devices = EmptyArray(IODevicesArray), \
         .handles = EmptyMap(IOHandlesMap), \
         .scheduler = sched, \
+        .process_handles = EmptyMap(ProcessHandleMap),\
         \
     }
+
+#define IO_SUBSYSTEM_INIT(subsystem, sched) \
+        ArrayInit(IODevicesArray, subsystem.devices); \
+        MapInit(IOHandlesMap, subsystem.handles); \
+        subsystem.scheduler = sched; \
+        MapInit(ProcessHandleMap, subsystem.process_handles);\
 
 #define NEW_IO_STATE \
     (IOState) { \

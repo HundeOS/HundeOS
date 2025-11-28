@@ -16,7 +16,7 @@ ExternalBuffer DataBuffer__convert_to_external_buffer_for_read(DataBufferPtr sel
 {
     return (ExternalBuffer) {
         .data = self->data,
-        .len = self->max,
+        .len = DataBuffer__max_size,
     };
 }
 

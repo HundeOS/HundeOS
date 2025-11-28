@@ -14,24 +14,25 @@ typedef int64_t Code;
 
 #define ResultDef(T) \
     typedef struct Success_##T { \
-        bool success; \
         T val; \
     } Success_##T; \
     \
     typedef struct Error_##T { \
-        bool success; \
         Code code; \
         KString error; \
     } Error_##T; \
     \
-    typedef union Result_##T { \
-        Success_##T success;\
-        Error_##T error;\
+    typedef struct Result_##T { \
+        bool ok; \
+        union { \
+          Success_##T success;\
+          Error_##T error;\
+        };\
     } Result_##T;\
     \
     static T ___res##T##_ZERO;\
     typedef T Result_##T##_type; \
-    inline T ___res##T##_panic(const char * message) \
+    static inline T ___res##T##_panic(const char * message) \
     { \
         Kernel__panic(message, NULL); \
         return ___res##T##_ZERO; \
@@ -41,16 +42,16 @@ typedef int64_t Code;
 
 #define Success(T, value) \
     ( Result_##T ) { \
+        .ok = true, \
         .success = (Success_##T) { \
-            .success = true, \
             .val = value, \
         } \
     } \
 
 #define Error(T, error_message, error_code) \
     ( Result_##T ) { \
+        .ok = false, \
         .error = (Error_##T) { \
-            .success = false, \
             .code = error_code, \
             .error = error_message, \
         } \
@@ -66,14 +67,14 @@ typedef int64_t Code;
 } \
 
 #define IsSuccess(val_name, block) \
-    if (___result.error.success) \
+    if (___result.ok) \
     { \
         __ResultValueType val_name = ___result.success.val; \
         block; \
     } \
 
 #define IsError(code_name, message_name, block) \
-    if (!___result.error.success) \
+    if (!___result.ok) \
     { \
         KString message_name = ___result.error.error; \
         Code code = ___result.error.code; \
@@ -81,9 +82,9 @@ typedef int64_t Code;
     } \
 
 #define ResultUnwrapPanic(T, res) \
-    res.success.success ? res.success.val : ___res##T##_panic("No result value to unwrap\n")\
+    res.ok ? res.success.val : ___res##T##_panic("No result value to unwrap\n")\
 
 #define ResultUnwrap(T, opt, alternate_val) \
-    res.success.success ? res.success.val : alternate_val\
+    res.ok ? res.success.val : alternate_val\
 
 #endif

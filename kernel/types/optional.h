@@ -5,20 +5,20 @@
 typedef struct ProcessContext ProcessContext;
 void Kernel__panic(const char * message, ProcessContext * context);
 
-#define _Optional(alias) \
-    Optional__##alias \
+#define _Optional(T) \
+    Optional__##T \
 
-#define _Some(alias) \
-    Some__##alias \
+#define _Some(T) \
+    Some__##T \
 
-#define _None(alias) \
-    None__##alias \
+#define _None(T) \
+    None__##T \
 
-#define _Type(alias) \
-    alias##__type \
+#define _Type(T) \
+    opt__##T##__type \
 
-#define Optional(alias) \
-    _Optional(alias) \
+#define Optional(T) \
+    _Optional(T) \
 
 #define AliasOptional(T, alias) \
     typedef _Optional(T) _Optional(alias); \
@@ -34,22 +34,23 @@ void Kernel__panic(const char * message, ProcessContext * context);
 
 #define OptionalDef(T) \
     typedef struct _None(T) { \
-        bool present; \
     } _None(T); \
     \
     typedef struct _Some(T) { \
-        bool present; \
         T val; \
     } _Some(T); \
     \
-    typedef union _Optional(T) { \
-        _Some(T) some; \
-        _None(T) none;\
+    typedef struct _Optional(T) { \
+        bool present; \
+        union { \
+          _Some(T) some; \
+          _None(T) none;\
+        }; \
     } _Optional(T); \
     typedef T _Type(T); \
     \
     static T ___opt##T##_ZERO;\
-    inline T ___opt_##T##_panic(const char * message) \
+    static inline T ___opt_##T##_panic(const char * message) \
     { \
         Kernel__panic(message, NULL); \
         return ___opt##T##_ZERO; \
@@ -60,44 +61,44 @@ void Kernel__panic(const char * message, ProcessContext * context);
     OptionalDef(alias); \
 
 
-#define Some(alias, value) \
-    (_Optional(alias)) { \
-        .some = (_Some(alias)) { \
-            .present = true, \
+#define Some(T, value) \
+    (_Optional(T)) { \
+        .present = true,\
+        .some = (_Some(T)) { \
             .val = value, \
         } \
     } \
 
-#define None(alias) \
-    (_Optional(alias)) { \
-        .none = (_None(alias)) { \
-            .present = false, \
+#define None(T) \
+    (_Optional(T)) { \
+        .present = false, \
+        .none = (_None(T)) { \
         } \
     } \
 
-#define Match(alias, opt) \
+#define Match(T, opt) \
 { \
-    typedef alias##__type value_type; \
-    _Optional(alias) optional = opt; \
+    typedef opt__##T##__type value_type; \
+    _Optional(T) optional = opt; \
 
 #define End \
 } \
 
 #define is_something(optional) \
-    optional.some.present
+    optional.present
 
 #define is_nothing(optional) \
-    !optional.none.present
+    !optional.present
 
 #define IsSome(val_name, block) \
-    if (optional.some.present) \
+    if (optional.present) \
     { \
         value_type val_name = optional.some.val; \
         block; \
     } \
 
 #define IsNone(block) \
-    if (!optional.none.present) \
+    if (!optional.present) \
     { \
         block; \
     } \
@@ -105,10 +106,10 @@ void Kernel__panic(const char * message, ProcessContext * context);
 
 
 #define UnwrapPanic(T, opt) \
-    opt.some.present ? opt.some.val : ___opt_##T##_panic("No optional value to unwrap\n")\
+    opt.present ? opt.some.val : ___opt_##T##_panic("No optional value to unwrap\n")\
 
 
 #define Unwrap(T, opt, alternate_val) \
-    opt.some.present ? opt.some.val : alternate_val;\
+    opt.present ? opt.some.val : alternate_val;\
 
 #endif

@@ -26,7 +26,6 @@ KernelAddress PageTable__new()
     PageTable * table = (PageTable *) malloc(sizeof(PageTable));
     table->mapped_addresses = (MapRequestArray) {
         .len = 0,
-        .max = 1024
     };
     return (KernelAddress) {
         .virtual_addr = addr(table),

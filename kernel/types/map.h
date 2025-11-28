@@ -19,8 +19,6 @@ typedef enum MapError
 #define EmptyMap(alias) \
     (alias) {\
         .len = 0,\
-        .max = alias##__max_size,\
-        .equals = alias##__equals_function,\
     }\
 
 #define MapDefine(K, V, size, alias, equals_function) \
@@ -46,9 +44,7 @@ typedef enum MapError
     \
     typedef struct alias \
     { \
-        EqualFunction equals;\
         int len;\
-        int max;\
         alias##__MapEntry entries[size]; \
     } alias;\
     \
@@ -67,6 +63,10 @@ typedef enum MapError
     MapLenDefine(alias) \
     MapKeyDefine(alias) \
 
+
+#define MapInit(alias, map) \
+    map.len = 0; \
+
 #define MapConstructorPreDefine(alias) \
     alias alias##__new();
 
@@ -74,9 +74,7 @@ typedef enum MapError
     alias alias##__new() \
     { \
         alias result = { \
-            .equals = alias##__equals_function, \
             .len = 0, \
-            .max = alias##__max_size, \
         }; \
         return result; \
     }; \
@@ -95,7 +93,7 @@ typedef enum MapError
         for (int i = 0; i < self->len; i++)\
         {\
             alias##__MapEntryPtr curr = &self->entries[i]; \
-            if (self->equals(&key, &curr->key))\
+            if (alias##__equals_function(&key, &curr->key))\
             { \
                 add_index = i;\
                 break; \
@@ -103,7 +101,7 @@ typedef enum MapError
         }\
         if (add_index == self->len)\
         { \
-            if (self->len + 1 > self->max)\
+            if (self->len + 1 > alias##__max_size)\
             { \
                 return Error(MapCode, KString__new(MAP_FULL_ERROR), MAP_FULL);\
             } \
@@ -112,6 +110,12 @@ typedef enum MapError
         self->entries[add_index] = entry;\
         return Success(MapCode, add_index);\
     } \
+
+#define MapPtrMatch(alias, opt) \
+    { \
+        typedef alias##__type_ptr value_type; \
+        Optional(alias##__value_type_ptr) optional = opt; \
+
 
 #define MapGetPreDefine(alias) \
     Optional(alias##__value_type) alias##__get(alias * self, alias##__key_type key); \
@@ -126,7 +130,7 @@ typedef enum MapError
             alias##__MapEntryPtr curr = &self->entries[i];\
             alias##__key_type curr_key = curr->key;\
             \
-            bool match = self->equals(&key_stack, &curr_key);\
+            bool match = alias##__equals_function(&key_stack, &curr_key);\
             if (match) \
             { \
                 return Some(alias##__value_type, curr->value);\
@@ -143,7 +147,7 @@ typedef enum MapError
             alias##__MapEntryPtr curr = &self->entries[i];\
             alias##__key_type curr_key = curr->key;\
             \
-            if (self->equals(&key_stack, &curr_key))\
+            if (alias##__equals_function(&key_stack, &curr_key))\
             { \
                 return Some(alias##__value_type_ptr, &curr->value);\
             } \
@@ -161,7 +165,7 @@ typedef enum MapError
         for (int i = 0; i < self->len; i++)\
         {\
             alias##__MapEntryPtr curr = &self->entries[i];\
-            if (self->equals(&key, &curr->key))\
+            if (alias##__equals_function(&key, &curr->key))\
             { \
                 delete_index = i;\
                 break;\
