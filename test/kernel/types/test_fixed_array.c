@@ -47,7 +47,47 @@ void test_fixed_array_push_and_at(void)
     End
 }
 
-void test_fixed_array_push_and_at_with_negative_index_gives_from_end(void)
+void test_push_all_adds_all_elements_from_oter_array(void)
+{
+    TestArray array = TestArray__new();
+
+    TestArray other = TestArray__new();
+    for (int i = 0; i < 10; i++)
+    {
+        TestArray__push(&other, i);
+    }
+
+    TestArray__push(&array, 123);
+    ResultMatch(ArrayCode, TestArray__push_all(&array, &other))
+        IsError(code, message, TEST_FAIL());
+        IsSuccess(index, TEST_ASSERT_EQUAL(1, index));
+    End
+
+    TEST_ASSERT_EQUAL(11, TestArray__len(&array));
+    TEST_ASSERT_EQUAL(9, UnwrapPanic(TestType, TestArray__at(&array, -1)));
+    TEST_ASSERT_EQUAL(123, UnwrapPanic(TestType, TestArray__at(&array, 0)));
+}
+
+void test_push_all_gives_an_error_and_leaves_target_untouched_if_max_length_would_be_exceeded(void)
+{
+    TestArray array = TestArray__new();
+
+    TestArray other = TestArray__new();
+    for (int i = 0; i < TEST_ARRAY_SIZE; i++)
+    {
+        TestArray__push(&other, i);
+    }
+
+    TestArray__push(&array, 123);
+    ResultMatch(ArrayCode, TestArray__push_all(&array, &other))
+        IsError(code, message, TEST_ASSERT_EQUAL(code, ARRAY_FULL));
+        IsSuccess(index, TEST_FAIL());
+    End
+
+    TEST_ASSERT_EQUAL(1, TestArray__len(&array));
+}
+
+void test_fixed_array_at_with_negative_index_gives_from_end(void)
 {
     TestArray array = TestArray__new();
     for (int i = 0; i < TEST_ARRAY_SIZE; i++)

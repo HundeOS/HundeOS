@@ -177,13 +177,13 @@ void uart_irq_handler(IOSubsystemPtr io_subsystem)
     if (received_data)
     {
         // only message io subsystem if there is a parked context
-        Match(IOContext, ParkedContexts__at(&console_state.parked_contexts, -1))
+        Match(IOContextPtr, ParkedContexts__at(&console_state.parked_contexts, -1))
             IsSome(parked_context,
             {
-                __d_println(DEBUG, "Parked context found");
+                __d_println(IOSUB, "Parked context found");
                 IOSubsystem__data_arrived(io_subsystem, parked_context);
             })
-            IsNone(__d_println(DEBUG, "NO parked context found");)
+            IsNone(__d_println(IOSUB, "NO parked context found");)
         End
     }
 }

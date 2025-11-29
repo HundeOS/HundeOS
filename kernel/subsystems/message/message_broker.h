@@ -1,12 +1,12 @@
 #ifndef __KERNEL_SUBSYSTEMS_MESSAGE_BROKER_H
 #define __KERNEL_SUBSYSTEMS_MESSAGE_BROKER_H
 #include <stdint.h>
-#include <stdint.h>
 #include "../../types/fixed_array.h"
 #include "../../types/optional.h"
 #include "../../types/result.h"
 #include "../../all_defs.h"
 #include "../../process.h"
+#include "../../scheduler/types.h"
 
 
 typedef struct Kernel Kernel;
@@ -27,44 +27,12 @@ typedef uint64_t AckCode;
 ResultDef(AckCode);
 ResultDef(ListenerRegisterResult);
 
-typedef enum Sources
-{
-    SOURCE_KERNEL = 1,
-    SOURCE_FAULT = 2,
-    SOURCE_IRQ = 3,
-    SOURCE_IO = 4,
-    SOURCE_SCHEDULER = 5,
-    SOURCE_PROCESS = 6,
-}
-Sources;
-
-typedef enum AckCodes
-{
-    ACK_OK = 0,
-    ACK_ERROR = 1,
-}
-AckCodes;
-
 typedef enum ListenerTypes
 {
     LISTENER_TYPE_KERNEL = 0,
     LISTENER_TYPE_PROCESS = 1,
 }
 ListenerTypes;
-
-typedef enum PayloadTypes
-{
-    PAYLOAD_TYPE_ANYTHING = 0,
-    PAYLOAD_TYPE_DATA = 1,
-}
-PayloadTypes;
-
-typedef enum ListenerRegisterResults
-{
-    LISTENER_REGISTER_OK = 0,
-    LISTENER_REGISTER_ERROR = 1,
-}
-ListenerRegisterResults;
 
 typedef struct Message Message;
 typedef Message * MessagePtr;
@@ -111,12 +79,24 @@ OptionalDef(Listener);
 
 FixedArrayDefine(Listener, MAX_LISTENERS, Listeners, Ptr__equals);
 
+typedef struct KernelContext KernelContext;
+typedef KernelContext * KernelContextPtr;
+
+typedef struct Deferred
+{
+    Anything anything;
+    Continuation continuation;
+    KernelContextPtr context;
+} Deferred;
+
+
 typedef struct Payload
 {
     PayloadType type;
     union
     {
         Anything anything;
+        Deferred deferred;
         PayloadData data[MAX_PAYLOAD_SIZE];
     };
 }
@@ -154,6 +134,9 @@ Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message
 
 Message Message__new_anything(Source source, SourceCode source_code, Anything anything);
 MessagePtr Message__heap_new_anything(Source source, SourceCode source_code, Anything anything);
+MessagePtr Message__heap_new_deferred(
+    Source source, SourceCode source_code, Anything anything, KernelContextPtr context, Continuation continuation
+);
 
 #define NEW_BROKER \
     (MessageBroker) { \

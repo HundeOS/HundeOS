@@ -6,11 +6,8 @@
 #include "../io_subsystem.h"
 
 #include "../../../types/optional.h"
-#include "../../../types/map.h"
 
-bool io_context_equals_by_handle(void * a, void * b);
-
-FixedArrayDefine(IOContext, 1024, ParkedContexts, io_context_equals_by_handle);
+FixedArrayDefine(IOContextPtr, 1024, ParkedContexts, Ptr__equals);
 
 typedef struct ConsoleState
 {

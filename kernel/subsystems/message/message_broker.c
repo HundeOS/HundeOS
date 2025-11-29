@@ -1,4 +1,5 @@
 #include "message_broker.h"
+#include "subsystem_codes.h"
 
 FixedArrayBodyDefine(Listeners);
 
@@ -32,7 +33,29 @@ Message Message__new_anything(Source source, SourceCode source_code, Anything an
         .source_code = source_code,
         .payload = Some(Payload, payload),
     };
+
 }
+
+Message Message__new_deferred(
+    Source source, SourceCode source_code, Anything anything, KernelContextPtr context, Continuation continuation
+)
+{
+    Payload payload = (Payload) {
+        .type = PAYLOAD_TYPE_DEFERRED,
+        .deferred = (Deferred) {
+                        .anything = anything,
+                        .continuation = continuation,
+                        .context = context
+                    }
+    };
+
+    return (Message) {
+        .source = source,
+        .source_code = source_code,
+        .payload = Some(Payload, payload),
+    };
+}
+
 
 MessagePtr Message__heap_new_anything(Source source, SourceCode source_code, Anything anything)
 {
@@ -42,17 +65,33 @@ MessagePtr Message__heap_new_anything(Source source, SourceCode source_code, Any
     return message;
 }
 
+MessagePtr Message__heap_new_deferred(
+    Source source, SourceCode source_code, Anything anything, KernelContextPtr context, Continuation continuation
+)
+{
+    MessagePtr message = ptr(Kernel__alloc_kernel(sizeof(Message)), Message);
+    *message = Message__new_deferred(source, source_code, anything, context, continuation);
+
+    return message;
+}
+
+
 Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message)
 {
+    __d_printf(BROKER, "delivering message %i %i\n", message->source, message->source_code);
+    Listeners clone = Listeners__new();
+
     CriticalSection(self->lock,
     {
-        FAIterate(Listeners, self->listeners, index, listener)
-            if (listener.source == message->source)
-            {
-                listener.dispatch(&listener, message);
-            }
-        End
+        Listeners__push_all(&clone, &self->listeners);
     })
+
+    FAIterate(Listeners, clone, index, listener)
+        if (listener.source == message->source)
+        {
+            listener.dispatch(&listener, message);
+        }
+    End
     return Success(AckCode, ACK_OK);
 }
 

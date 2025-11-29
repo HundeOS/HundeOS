@@ -12,6 +12,7 @@
 #include "io.h"
 #include "subsystems/message/message_broker.h"
 #include "syscalls/io.h"
+#include "types.h"
 
 typedef struct IOContext IOContext;
 typedef struct Scheduler Scheduler;
@@ -51,12 +52,12 @@ ResultDef(IOSubsystemPtr);
 
 Result(DeviceHandle) IOSubsystem__register_device(IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state);
 
-Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContext context, KString path, Flags flags);
-Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContext context);
-Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContext context);
-Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContext context);
+Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KString path, Flags flags);
+Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context);
+Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context);
+Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context);
 
-void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContext parked_context);
+void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context);
 void IOSubsystem__message_received(KernelListenerPtr listener, MessagePtr message);
 
 // called by IRQs
@@ -68,13 +69,14 @@ IOSubsystemPtr IOSubsystem__heap_new(SchedulerPtr scheduler, MessageBrokerPtr me
 
 IOInternalHandle device_internal_handle(IOHandle handle);
 
-#define NEW_IO_SUBSYSTEM(sched) \
+#define NEW_IO_SUBSYSTEM(sched, broker) \
     (IOSubsystem) { \
         .devices = EmptyArray(IODevicesArray), \
         .handles = EmptyMap(IOHandlesMap), \
         .scheduler = sched, \
         .process_handles = EmptyMap(ProcessHandleMap),\
         .lock = MUTEX_INIT,\
+        .message_broker = broker,\
         \
     }
 

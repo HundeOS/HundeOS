@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "../../../../kernel/subsystems/message/message_broker.h"
+#include "../../../../kernel/subsystems/message/subsystem_codes.h"
 #include "../../fixtures/kernel.h"
 #include "../../../../kernel/kernel_core.h"
 

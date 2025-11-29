@@ -104,7 +104,7 @@ Result(ByteCount) EmbeddedFileIO_write(IOStatePtr state, IOInternalHandle handle
     return Error(ByteCount, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(ParkStatus) EmbeddedFileIO_park(IOStatePtr state, IOContext parked_context)
+Result(ParkStatus) EmbeddedFileIO_park(IOStatePtr state, IOContextPtr parked_context)
 {
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }

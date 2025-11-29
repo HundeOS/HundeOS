@@ -8,6 +8,7 @@
 #include "../../debug.h"
 #include "scheduler/scheduler.h"
 #include "syscalls/io.h"
+#include "../message/subsystem_codes.h"
 
 FixedArrayBodyDefine(PIDHandles);
 MapBodyDefine(ProcessHandleMap);
@@ -70,7 +71,7 @@ static FindResultOptional(IODevicesArray) IOSubsystem__find_device(IOSubsystemPt
     return IODevicesArray__find(&self->devices, path_match, path);
 }
 
-Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContext context, KString path, Flags flags)
+Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KString path, Flags flags)
 {
     __d_printf(IOSUB, "Opening %p\n", self);
     Result(IOHandle) error = Error(IOHandle, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
@@ -88,7 +89,7 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContext context, KStri
                 {
                     IOHandle external_handle = (IOHandle) handle | (((IOHandle)_to_device_handle(match.index)) << 32);
                     IOHandlesMap__set(&self->handles, external_handle, registration);
-                    Match(ProcessID, context.kernel_context.pid)
+                    Match(ProcessID, context->kernel_context.pid)
                         IsSome(pid,
                         {
                             MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&self->process_handles, pid))
@@ -119,9 +120,9 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContext context, KStri
     return error;
 }
 
-Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContext context)
+Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)
 {
-    Match(IOHandle, context.handle)
+    Match(IOHandle, context->handle)
         IsSome(handle,
         {
             __d_printf(IOSUB, "Closing handle %i\n", handle);
@@ -134,7 +135,7 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContext context)
                             registration->device->close(registration->state, device_internal_handle(handle));
 
                         IOHandlesMap__delete(&self->handles, handle);
-                        Match(ProcessID, context.kernel_context.pid)
+                        Match(ProcessID, context->kernel_context.pid)
                             IsSome(pid,
                             {
                                 MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&self->process_handles, pid))
@@ -178,27 +179,30 @@ Result(ByteCount) IOSubsystem__transfer(IOBufferPtr buffer, DataPtr result, size
     End
 }
 
-void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContext parked_context)
+void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context)
 {
-    __d_println(IOSUB, "Data arrived");
-    Match(IOHandle, parked_context.handle)
+    __d_println(SCHEDULER, "Data arrived");
+    Match(IOHandle, parked_context->handle)
         IsSome(handle,
         {
             Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
                 IsSome(match,
                 {
                     match->device->unpark(match->state);
-                    // tell scheduler things are ready to complete the parked call
-                    __d_println(SCHEDULER, "IO sub unparking process");
-                    Match(ProcessPtr, parked_context.kernel_context.proc)
-                        IsSome(process,
+
+                    Match(ProcessID, parked_context->kernel_context.pid)
+                        IsSome(pid,
                         {
-                            ResultMatch(ProcessPtr, Scheduler__unpark(self->scheduler, process, PARK_WAIT_IO, None(ReturnCode)))
-                                IsSuccess(_, __d_println(SCHEDULER, "IO sub unparked process OK");)
-                                IsError(code, message, __d_println(PANIC, cstr(message)))
+                            __d_println(IOSUB, "IO sub unparking process");
+                            MessagePtr message =
+                                Message__heap_new_anything(SOURCE_IO, SUBSYS_IO_AVAILABLE, pid);
+
+                            ResultMatch(AckCode, MessageBroker__deliver(self->message_broker, message));
+                                IsError(code, message, __d_println(PANIC, cstr(message));)
                             End
-                        });
-                        IsNone(__d_println(PANIC, "No process found for parked context"));
+                            __d_println(IOSUB, "IO sub unparked");
+                        })
+                        IsNone(__d_println(PANIC, "No pid found for parked context"));
                     End
                 })
                 IsNone(
@@ -210,10 +214,10 @@ void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContext parked_context)
     End
 }
 
-void IOSubsystem__park(IOSubsystemPtr self, IOContext io_context)
+void IOSubsystem__park(IOSubsystemPtr self, IOContextPtr io_context)
 {
     __d_println(IOSUB, "Parking io");
-    Match(IOHandle, io_context.handle)
+    Match(IOHandle, io_context->handle)
         IsSome(handle,
         {
             Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
@@ -240,7 +244,7 @@ Result(Anything) IOSubsystem__continue_read(ParkedKernelContextPtr context)
     Match(IOSubsystemPtr, io_context->io_subsystem)
         IsSome(io_subsystem,
         {
-            ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, *io_context))
+            ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, io_context))
                 IsSuccess(bytes, return Success(Anything, bytes));
                 IsError(code, message, return Error(Anything, message, code));
             End
@@ -251,10 +255,9 @@ Result(Anything) IOSubsystem__continue_read(ParkedKernelContextPtr context)
     return Error(Anything, kstring("unexpected code path"), IO_PANIC);
 }
 
-Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContext context)
+Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
 {
-    __d_printf(IOSUB, "Read handle %p\n", context.handle);
-    Match(IOHandle, context.handle)
+    Match(IOHandle, context->handle)
         IsSome(handle,
         {
             Optional(DeviceRegistrationPtr) device_opt = None(DeviceRegistrationPtr);
@@ -262,53 +265,54 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContext context)
             CriticalSection(self->lock,
             {
                 device_opt = IOHandlesMap__get(&self->handles, handle);
-
-                Match(DeviceRegistrationPtr, device_opt);
-                    IsSome(registration,
-                    {
-                        Match(ExternalBuffer, context.buffer)
-                            IsSome(ext_buffer,
-                            {
-                                Result(IOBufferPtr) read_res = registration->device->read(
-                                    registration->state, device_internal_handle(handle), ext_buffer.len
-                                );
-                                ResultMatch(IOBufferPtr, read_res)
-                                    IsSuccess(buffer,
+            })
+            Match(DeviceRegistrationPtr, device_opt);
+                IsSome(registration,
+                {
+                    Match(ExternalBuffer, context->buffer)
+                        IsSome(ext_buffer,
+                        {
+                            Result(IOBufferPtr) read_res = registration->device->read(
+                                registration->state, device_internal_handle(handle), ext_buffer.len
+                            );
+                            ResultMatch(IOBufferPtr, read_res)
+                                IsSuccess(buffer,
+                                {
+                                    __d_printf(IOSUB, "reading %p %p\n", context->buffer, buffer);
+                                    return IOSubsystem__transfer(buffer, ext_buffer.data, ext_buffer.len);
+                                })
+                                IsError(code, error_message,
+                                {
+                                    if (code == IO_WAIT_FOR_DATA)
                                     {
-                                        __d_printf(IOSUB, "reading %p %p\n", context.buffer, buffer);
-                                        _cs_return IOSubsystem__transfer(buffer, ext_buffer.data, ext_buffer.len);
-                                    })
-                                    IsError(code, message,
-                                    {
-                                        if (code == IO_WAIT_FOR_DATA)
-                                        {
-                                            __d_println(IOSUB, "Parking waiting for IO");
-                                            Optional(Continuation) continuation =
-                                                Some(Continuation, IOSubsystem__continue_read);
+                                        __d_println(IOSUB, "Parking waiting for IO");
 
-                                            IOSubsystem__park(self, context);
-                                            Match(ProcessPtr, context.kernel_context.proc)
-                                                IsSome(process,
-                                                {
-                                                    __d_println(SCHEDULER, "IO sub parking process");
-                                                    _cs_exit_then(Scheduler__park(
-                                                        self->scheduler, process, &context.kernel_context,
-                                                        continuation, PARK_WAIT_IO
-                                                    ));
-                                                })
-                                                IsNone(__d_println(PANIC, "No process found for parked context"));
-                                            End
+                                        IOSubsystem__park(self, context);
+                                        Match(ProcessID, context->kernel_context.pid)
+                                            IsSome(pid,
+                                            {
+                                                __d_println(IOSUB, "IO sub parking process");
+                                                MessagePtr message =
+                                                    Message__heap_new_deferred(
+                                                        SOURCE_IO, SUBSYS_IO_PARK, pid,
+                                                        &context->kernel_context, IOSubsystem__continue_read
+                                                    );
 
-                                        }
-                                        _cs_return Error(ByteCount, message, code);
-                                    })
-                                End
-                            });
-                        End
-                    })
-                    IsNone(__d_println(PANIC, "No device found for handle"));
-                End
-            });
+                                                MessageBroker__deliver(self->message_broker, message);
+
+                                            })
+                                            IsNone(__d_println(PANIC, "No pid found for parked context"));
+                                        End
+
+                                    }
+                                    return Error(ByteCount, error_message, code);
+                                })
+                            End
+                        });
+                    End
+                })
+                IsNone(__d_println(PANIC, "No device found for handle"));
+            End
         })
         IsNone(
         {
@@ -318,16 +322,15 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContext context)
     return Error(ByteCount, unreachable_code, IO_NOT_OPEN);
 }
 
-Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContext context)
+Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context)
 {
-    __d_printf(DEBUG, "Writing handle %i\n", context.handle);
-    Match(IOHandle, context.handle)
+    Match(IOHandle, context->handle)
         IsSome(handle,
         {
             Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
                 IsSome(registration,
                 {
-                    Match(ExternalBuffer, context.buffer)
+                    Match(ExternalBuffer, context->buffer)
                         IsSome(buffer,
                         {
                             return registration->device->write(
@@ -347,9 +350,9 @@ Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContext context)
     return Error(ByteCount, no_handle_supplied, IO_NOT_OPEN);
 }
 
-Result(Anything) IOSubsystem__dispose_of_process_resources(IOSubsystemPtr self, IOContext context)
+Result(Anything) IOSubsystem__dispose_of_process_resources(IOSubsystemPtr self, IOContextPtr context)
 {
-    Match(ProcessID, context.kernel_context.pid)
+    Match(ProcessID, context->kernel_context.pid)
         IsSome(pid,
         {
             // map get a copy of the list as the handles will be removed as we call close
@@ -357,7 +360,7 @@ Result(Anything) IOSubsystem__dispose_of_process_resources(IOSubsystemPtr self, 
                 IsSome(handles,
                 {
                     FAIterate(PIDHandles, handles, index, handle)
-                        IOContext handle_context = IOContext__from_io_context(context, Some(IOHandle, handle));
+                        IOContextPtr handle_context = IOContext__from_io_context(context, Some(IOHandle, handle));
                         IOSubsystem__close(self, handle_context);
                     End
                 })
@@ -384,8 +387,9 @@ void IOSubsystem__message_received(KernelListenerPtr listener, MessagePtr messag
             if (payload.type == PAYLOAD_TYPE_ANYTHING)
             {
                 ProcessID pid = payload.anything;
-                IOContext context = IOContext__from_message_listener(listener, pid);
+                IOContextPtr context = IOContext__from_message_listener(listener, pid);
                 IOSubsystem__dispose_of_process_resources(listener->kernel->io_subsystem, context);
+                IOContext__dispose(context);
             }
         })
     End

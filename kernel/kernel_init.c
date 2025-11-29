@@ -9,6 +9,7 @@
 #include "syscall/syscall_dispatcher.h"
 #include "kernel_core.h"
 #include "bin/embedded_binaries.h"
+#include "scheduler/register.h"
 #include "scheduler/scheduler.h"
 
 
@@ -22,7 +23,7 @@ static KString failed_to_init_msg = KSTRING_NEW("failed to initialise kernel");
 
 static MessageBroker message_broker = NEW_BROKER;
 static Scheduler scheduler = NEW_SCHEDULER(&message_broker);
-static IOSubsystem io_subsystem = NEW_IO_SUBSYSTEM(&scheduler);
+static IOSubsystem io_subsystem = NEW_IO_SUBSYSTEM(&scheduler, &message_broker);
 
 static Kernel instance = {
     .status = INIT_NOT_STARTED,
@@ -132,6 +133,9 @@ Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
         })
     End
 
+    ResultMatch(SchedulerRegisterCode, Scheduler__register(self))
+        IsError(code, message, return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED));
+    End
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 

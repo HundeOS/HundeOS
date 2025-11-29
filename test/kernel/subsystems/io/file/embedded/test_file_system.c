@@ -41,22 +41,22 @@ static KString hello_world = KSTRING_NEW("hello_world");
 
 static const uint64_t HELLO_WORLD_SIZE = 66840;
 
-IOContext io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
+IOContextPtr io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
 {
-    return IOContext__new(kernel_context, Some(IOSubsystemPtr, kernel->io_subsystem), handle, ext_buffer);
+    return IOContext__heap_new(kernel_context, Some(IOSubsystemPtr, kernel->io_subsystem), handle, ext_buffer);
 }
 
-IOContext open_context()
+IOContextPtr open_context()
 {
     return io_context(None(IOHandle), None(ExternalBuffer));
 }
 
-IOContext close_context(IOHandle handle)
+IOContextPtr close_context(IOHandle handle)
 {
     return io_context(Some(IOHandle, handle), None(ExternalBuffer));
 }
 
-IOContext rw_context(IOHandle handle, DataPtr data, size_t size)
+IOContextPtr rw_context(IOHandle handle, DataPtr data, size_t size)
 {
     ExternalBuffer ext_buffer = ExternalBuffer__new(data, size);
     return io_context(Some(IOHandle, handle), Some(ExternalBuffer, ext_buffer));

@@ -66,7 +66,15 @@ Result(ProcessPtr) Scheduler__park(
     SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
     Optional(Continuation) kernel_continuation, ParkReason reason
 );
+
+Result(ProcessID) Scheduler__park_by_pid(
+    SchedulerPtr self, ProcessID pid, KernelContextPtr kernel_context,
+    Optional(Continuation) kernel_continuation, ParkReason reason
+);
+
 Result(ProcessPtr) Scheduler__unpark(SchedulerPtr self, ProcessPtr proc, ParkReason reason, Optional(ReturnCode) return_code);
+
+Result(ProcessID) Scheduler__unpark_by_pid(SchedulerPtr self, ProcessID pid, ParkReason reason, Optional(ReturnCode) return_code);
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);

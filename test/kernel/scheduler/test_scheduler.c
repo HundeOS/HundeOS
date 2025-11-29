@@ -6,9 +6,10 @@
 #include "../../../kernel/process.h"
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/scheduler/scheduler.h"
-#include "../../../kernel/bin/embedded_binaries.h"
 #include "../../../kernel/scheduler/parked.h"
+#include "../../../kernel/scheduler/register.h"
 #include "../../../kernel/subsystems/message/message_broker.h"
+#include "../../../kernel/subsystems/message/subsystem_codes.h"
 #include "../fixtures/kernel.h"
 
 static SchedulerPtr scheduler = NULL;
@@ -29,6 +30,8 @@ void setUp(void)
     current_process_reset();
     kernel = init_test_kernel_without_filesystem();
     scheduler = kernel->scheduler;
+
+    Scheduler__register(kernel);
 }
 
 void tearDown(void)
@@ -608,5 +611,76 @@ void test_scheduler_interrupt_switch_from_one_ready_process_to_another(void)
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc_most_recently_run->state);
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, proc_least_recently_run->state);
     TEST_ASSERT_EQUAL(proc_most_recently_run, current_running_process());
+}
+
+void test_io_park_messages_put_process_in_to_wait()
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+
+    Scheduler__start(scheduler, cpu_id);
+
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    ProcessPtr running = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    TEST_ASSERT_EQUAL(proc, running);
+
+    KernelContext kernel_context = (KernelContext) {
+        .scheduler = scheduler,
+        .proc = None(ProcessPtr),
+    };
+
+
+    MessagePtr message =
+        Message__heap_new_deferred(
+            SOURCE_IO, SUBSYS_IO_PARK, proc->pid, &kernel_context, continuation
+        );
+    MessageBroker__deliver(kernel->message_broker, message);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    running = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    TEST_ASSERT_NOT_EQUAL(proc, running);
+
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, proc->state);
+}
+
+void test_io_data_arrived_pull_process_out_of_park()
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
+
+    Scheduler__start(scheduler, cpu_id);
+
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    ProcessPtr running = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    TEST_ASSERT_EQUAL(proc, running);
+
+    KernelContext kernel_context = (KernelContext) {
+        .scheduler = scheduler,
+        .proc = None(ProcessPtr),
+    };
+
+    MessagePtr message_park =
+        Message__heap_new_deferred(
+            SOURCE_IO, SUBSYS_IO_PARK, proc->pid, &kernel_context, continuation
+        );
+    MessageBroker__deliver(kernel->message_broker, message_park);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    running = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    TEST_ASSERT_NOT_EQUAL(proc, running);
+
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, proc->state);
+
+    MessagePtr message_available =
+        Message__heap_new_anything(SOURCE_IO, SUBSYS_IO_AVAILABLE, proc->pid);
+    MessageBroker__deliver(kernel->message_broker, message_available);
+    Scheduler__preempt(scheduler, cpu_id, context);
+
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc->state);
+    TEST_ASSERT_EQUAL(&kernel_context, continuation_context->kernel_context);
 
 }

@@ -64,7 +64,7 @@ Result(ByteCount) RootFileIO_write(IOStatePtr state, IOInternalHandle handle, Da
     return Error(ByteCount, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(ParkStatus) RootFileIO_park(IOStatePtr state, IOContext parked_context)
+Result(ParkStatus) RootFileIO_park(IOStatePtr state, IOContextPtr parked_context)
 {
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }

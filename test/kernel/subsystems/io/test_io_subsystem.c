@@ -2,6 +2,7 @@
 #include "../../stubs.h"
 #include "../../stubs/process.h"
 #include "../../fixtures/kernel.h"
+#include "../../../../kernel/subsystems/message/subsystem_codes.h"
 
 static const IOInternalHandle INTERNAL_HANDLE =        0x00000000000000FF;
 static const IOHandle EXPECTED_OPEN_HANDLE =           0x00000002000000FF; // upper 32bits hold the device handle
@@ -30,6 +31,8 @@ static Process PROC = STUB_PROCESS(PID);
 static Optional(ProcessPtr) proc = Some(ProcessPtr, &PROC);
 static Optional(ProcessID) pid = Some(ProcessID, PID);
 
+static MessagePtr io_message = NULL;
+
 static Flags FLAGS = 1234;
 
 static Char expected[] = {1, 2, 3, 4};
@@ -41,14 +44,14 @@ static KString invalid_path = KSTRING_NEW("/sss");
     (FakeIOState) { \
         .state = NEW_IO_STATE, \
         .handles = EmptyArray(IOHandleArray), \
-        .parked_context = None(IOContext), \
+        .parked_context = None(IOContextPtr), \
      } \
 
 typedef struct FakeIOState
 {
     IOState state;
     IOHandleArray handles;
-    Optional(IOContext) parked_context;
+    Optional(IOContextPtr) parked_context;
 } FakeIOState;
 
 typedef FakeIOState * FakeIOStatePtr;
@@ -124,14 +127,14 @@ static Result(IOInternalHandle) fake_close(IOStatePtr state_ptr, IOInternalHandl
 static Result(ParkStatus) fake_unpark(IOStatePtr state)
 {
     FakeIOStatePtr self = (FakeIOStatePtr) state;
-    self->parked_context = None(IOContext);
+    self->parked_context = None(IOContextPtr);
     return Success(ParkStatus, IO_UNPARK_OK);
 }
 
-static Result(ParkStatus) fake_park(IOStatePtr state, IOContext parked_context)
+static Result(ParkStatus) fake_park(IOStatePtr state, IOContextPtr parked_context)
 {
     FakeIOStatePtr self = (FakeIOStatePtr) state;
-    self->parked_context = Some(IOContext, parked_context);
+    self->parked_context = Some(IOContextPtr, parked_context);
     return Success(ParkStatus, IO_PARK_OK);
 }
 
@@ -147,14 +150,25 @@ static Result(ParkStatus) fake_park(IOStatePtr state, IOContext parked_context)
 
 static IO TEST_IO = STUB_IO;
 
+
+void io_available_callback(KernelListenerPtr listener, MessagePtr message)
+{
+    io_message = message;
+}
+
 void setUp(void)
 {
     kernel = init_test_kernel();
     io_subsystem = kernel->io_subsystem;
     reset_state();
 
+    io_message = NULL;
+
     Scheduler__schedule(kernel->scheduler, &PROC);
     Scheduler__preempt(kernel->scheduler, cpu, context);
+
+    Listener listener = KernelListener__new(kernel, SOURCE_IO, io_available_callback);
+    MessageBroker__register_listener(io_subsystem->message_broker, listener);
 
     ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, path, &TEST_IO, &STATE))
         IsError(code, message, TEST_FAIL());
@@ -175,7 +189,7 @@ void data_available()
 
 void data_available_interrupt(IOSubsystemPtr io_sub)
 {
-    Match(IOContext, STATE.parked_context)
+    Match(IOContextPtr, STATE.parked_context)
         IsSome(parked_context,
         {
             IOBuffer__push(buffer, 1);
@@ -191,24 +205,24 @@ void data_available_interrupt(IOSubsystemPtr io_sub)
     End
 }
 
-IOContext io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
+IOContextPtr io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
 {
     KernelContext kernel_context = KernelContext__new(proc, pid, Some(SchedulerPtr, kernel->scheduler));
     ;
-    return IOContext__new(kernel_context, Some(IOSubsystemPtr, io_subsystem), handle, ext_buffer);
+    return IOContext__heap_new(kernel_context, Some(IOSubsystemPtr, io_subsystem), handle, ext_buffer);
 }
 
-IOContext open_context()
+IOContextPtr open_context()
 {
     return io_context(None(IOHandle), None(ExternalBuffer));
 }
 
-IOContext close_context(IOHandle handle)
+IOContextPtr close_context(IOHandle handle)
 {
     return io_context(Some(IOHandle, handle), None(ExternalBuffer));
 }
 
-IOContext rw_context(IOHandle handle, DataPtr data, size_t size)
+IOContextPtr rw_context(IOHandle handle, DataPtr data, size_t size)
 {
     ExternalBuffer ext_buffer = ExternalBuffer__new(data, size);
     return io_context(Some(IOHandle, handle), Some(ExternalBuffer, ext_buffer));
@@ -315,7 +329,9 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process()
         IsError(code, message, TEST_FAIL());
     End
 
-    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, rw_context(handle, data, MAX_READ)));
+    IOContextPtr read_context = rw_context(handle, data, MAX_READ);
+
+    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, read_context));
         IsSuccess(count, TEST_FAIL());
         IsError(code, message, TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code));
     End
@@ -323,11 +339,13 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process()
     TEST_ASSERT_TRUE(opened);
     TEST_ASSERT_TRUE(read);
 
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, PROC.state);
+    TEST_ASSERT_NOT_NULL(io_message);
+    TEST_ASSERT_EQUAL(SUBSYS_IO_PARK, io_message->source_code);
+    Payload payload = UnwrapPanic(Payload, io_message->payload);
 
-    ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(kernel->scheduler, cpu));
-
-    TEST_ASSERT_NOT_EQUAL(current, &PROC);
+    TEST_ASSERT_EQUAL(PAYLOAD_TYPE_DEFERRED, payload.type);
+    TEST_ASSERT_EQUAL(PROC.pid, payload.deferred.anything);
+    TEST_ASSERT_EQUAL(read_context, payload.deferred.context);
 }
 
 void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when_data_arrives()
@@ -340,29 +358,35 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
         IsError(code, message, TEST_FAIL());
     End
 
-    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, rw_context(handle, data, MAX_READ)));
+    IOContextPtr read_context = rw_context(handle, data, MAX_READ);
+    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, read_context));
         IsSuccess(count, TEST_FAIL());
         IsError(code, message, TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code));
     End
 
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, PROC.state);
+    MessagePtr park_message = io_message;
 
-    ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(kernel->scheduler, cpu));
+    TEST_ASSERT_NOT_NULL(park_message);
+    TEST_ASSERT_EQUAL(SUBSYS_IO_PARK, park_message->source_code);
+    Payload park_payload = UnwrapPanic(Payload, park_message->payload);
+
+    TEST_ASSERT_EQUAL(PAYLOAD_TYPE_DEFERRED, park_payload.type);
+    TEST_ASSERT_EQUAL(PROC.pid, park_payload.deferred.anything);
+
+
     data_available_interrupt(io_subsystem);
-    Scheduler__preempt(kernel->scheduler, cpu, NULL);
 
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, PROC.state);
+    TEST_ASSERT_NOT_NULL(park_payload.deferred.continuation);
+    TEST_ASSERT_EQUAL(read_context, park_payload.deferred.context);
 
-    ResultMatch(Anything, deferred_syscall_result())
-        IsSuccess(count, TEST_ASSERT_EQUAL(4, count));
-        IsError(code, message,
-        {
-            TEST_FAIL();
-        });
-    End
+    MessagePtr available_message = io_message;
 
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, data, 4);
-    TEST_ASSERT_NOT_EQUAL(current, &PROC);
+    TEST_ASSERT_NOT_EQUAL(park_message, available_message);
+    TEST_ASSERT_EQUAL(SUBSYS_IO_AVAILABLE, available_message->source_code);
+    Payload available_payload = UnwrapPanic(Payload, available_message->payload);
+
+    TEST_ASSERT_EQUAL(PAYLOAD_TYPE_ANYTHING, available_payload.type);
+    TEST_ASSERT_EQUAL(PROC.pid, available_payload.anything);
 }
 
 void test_io_write_when_not_open()

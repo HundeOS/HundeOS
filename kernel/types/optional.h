@@ -110,6 +110,6 @@ void Kernel__panic(const char * message, ProcessContext * context);
 
 
 #define Unwrap(T, opt, alternate_val) \
-    opt.present ? opt.some.val : alternate_val;\
+    opt.present ? opt.some.val : alternate_val\
 
 #endif

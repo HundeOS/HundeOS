@@ -1,6 +1,5 @@
 #include "console.h"
 #include "debug.h"
-#include "../io.h"
 #include "../../../types/result.h"
 #include "../../../types/kstring.h"
 #include "scheduler/scheduler.h"
@@ -19,16 +18,12 @@ static Result(IOInternalHandle) Console__open(IOStatePtr state, KString path, Fl
     return Success(IOInternalHandle, handle);
 }
 
-bool io_context_equals_by_handle(void * a, void * b)
+bool handle_match(IOContextPtr * context_p, void * handle_p)
 {
-    IOContextPtr a_context = (IOContextPtr) a;
-    IOContextPtr b_context = (IOContextPtr) b;
+    IOContextPtr context = *context_p;
+    IOInternalHandle handle = *(IOInternalHandle *) handle_p;
 
-    Match(IOHandle, a_context->handle)
-        IsSome(parked_handle, return parked_handle == Unwrap(IOHandle, b_context->handle, -1);)
-    End
-
-    return false;
+    return handle == device_internal_handle(Unwrap(IOHandle, context->handle, -1));
 }
 
 static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandle handle)
@@ -37,14 +32,15 @@ static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandl
     IOBuffer__reset(&self->read_buffer);
     IOBuffer__reset(&self->write_buffer);
 
-    KernelContext dummy_kernel_context = KernelContext__new(
-        None(ProcessPtr), None(ProcessID), None(SchedulerPtr));
+    FindResultMatch(ParkedContexts, ParkedContexts__find(&self->parked_contexts, handle_match, &handle))
+        IsSome(found,
+        {
+            ResultMatch(ArrayCode, ParkedContexts__remove(&self->parked_contexts, *found.value))
+                IsError(code, message, __d_println(PANIC, "no parked context found for handle"));
+            End
 
-    IOContext test_context = IOContext__new(dummy_kernel_context,
-        None(IOSubsystemPtr), Some(IOHandle, handle), None(ExternalBuffer));
-
-    ResultMatch(ArrayCode, ParkedContexts__remove(&self->parked_contexts, test_context))
-        IsError(code, message, __d_println(PANIC, "no parked context found for handle"));
+        })
+        IsNone(__d_println(PANIC, "no parked context found for handle"));
     End
 
     return Success(IOInternalHandle, handle);
@@ -65,7 +61,7 @@ static Result(ByteCount) Console__write(IOStatePtr state, IOInternalHandle handl
     return Success(ByteCount, 0);
 }
 
-static Result(ParkStatus) Console__park(IOStatePtr state, IOContext parked_context)
+static Result(ParkStatus) Console__park(IOStatePtr state, IOContextPtr parked_context)
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
 

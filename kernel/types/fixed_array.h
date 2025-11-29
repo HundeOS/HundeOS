@@ -58,7 +58,10 @@ OptionalDef(ArrayIndex);
         return array;\
     } \
 
-#define PushPreDefine(alias_name) Result(ArrayCode) alias_name##__push(alias_name * self, alias_name##__type value);
+#define PushPreDefine(alias_name)\
+    Result(ArrayCode) alias_name##__push(alias_name * self, alias_name##__type value); \
+    Result(ArrayCode) alias_name##__push_all(alias_name * self, alias_name * other); \
+
 #define PushDefine(alias_name) \
     Result(ArrayCode) alias_name##__push(alias_name * self, alias_name##__type value) \
     { \
@@ -73,7 +76,25 @@ OptionalDef(ArrayIndex);
             self->len++; \
             return Success(ArrayCode, index); \
         } \
-    };
+    }; \
+    \
+    Result(ArrayCode) alias_name##__push_all(alias_name * self, alias_name * other) \
+    { \
+        if (self->len + other->len > alias_name##__max_size) \
+        { \
+            return Error(ArrayCode, KString__new(ARRAY_FULL_ERROR), ARRAY_FULL); \
+        } \
+        else \
+        { \
+            ArrayCode first_index = self->len;\
+            for (uint64_t i = 0; i < other->len; i++)\
+            { \
+                self->data[self->len] = other->data[i]; \
+                self->len++;\
+            } \
+            return Success(ArrayCode, first_index);\
+        } \
+    }; \
 
 #define FAOptional(alias) _Optional(alias##__optional)
 #define FAPtrOptional(alias) _Optional(alias##__type_ptr__optional)

@@ -22,6 +22,7 @@ typedef enum {
     IOSUB,
     EXEC,
     FILESYSTEM,
+    BROKER,
     PROGRESS,
     UNHANDLED,
     FAULT,
@@ -75,6 +76,8 @@ inline const char * level_to_string(Level level)
             return "EXEC";
         case FILESYSTEM:
             return "FILESYSTEM";
+        case BROKER:
+            return "BROKER";
     }
     return "UNKNOWN";
 }

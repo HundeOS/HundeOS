@@ -62,14 +62,19 @@ typedef struct IOContext
     Optional(ExternalBuffer) buffer;
 } IOContext;
 
+typedef IOContext * IOContextPtr;
+
 OptionalDef(IOContext);
 ResultDef(IOContext);
+
+OptionalDef(IOContextPtr);
+ResultDef(IOContextPtr);
 
 typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr state, KString path, Flags flags);
 typedef Result(IOInternalHandle) (* IO_close)(IOStatePtr state, IOInternalHandle handle);
 typedef Result(IOBufferPtr) (* IO_read)(IOStatePtr state, IOInternalHandle handle, size_t size);
 typedef Result(ByteCount) (* IO_write)(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size);
-typedef Result(ParkStatus)(* IO_park)(IOStatePtr state, IOContext parked_context);
+typedef Result(ParkStatus)(* IO_park)(IOStatePtr state, IOContextPtr parked_context);
 typedef Result(ParkStatus)(* IO_unpark)(IOStatePtr state);
 
 typedef struct IO
@@ -105,13 +110,20 @@ IOContext IOContext__new(
     Optional(IOHandle) handle, Optional(ExternalBuffer) buffer
 );
 
-IOContext IOContext__from_originating_context(
+IOContextPtr IOContext__heap_new(
+    KernelContext kernel_context, Optional(IOSubsystemPtr) io_subsystem,
+    Optional(IOHandle) handle, Optional(ExternalBuffer) buffer
+);
+
+IOContextPtr IOContext__from_originating_context(
     OriginatingContext originating_context, Optional(IOHandle) handle,
     Optional(ExternalBuffer) buffer
 );
 
-IOContext IOContext__from_message_listener(KernelListenerPtr listener, ProcessID pid);
-IOContext IOContext__from_io_context(IOContext base, Optional(IOHandle) handle);
+IOContextPtr IOContext__from_message_listener(KernelListenerPtr listener, ProcessID pid);
+IOContextPtr IOContext__from_io_context(IOContextPtr base, Optional(IOHandle) handle);
+
+void IOContext__dispose(IOContextPtr self);
 
 ExternalBuffer ExternalBuffer__new(DataPtr data, size_t len);
 

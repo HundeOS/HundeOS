@@ -7,6 +7,21 @@
 
 static KString unhandled_operation_format = KSTRING_NEW("Unhandled io operation: %p");
 
+#define CompleteCall(RT, context, block) \
+    Result(RT) res = block; \
+    IOContext__dispose(context); \
+    ResultMatch(RT, res);\
+        IsError(code, message, \
+        { \
+            return Error(SystemCallResult, message, code); \
+        }); \
+        IsSuccess(val, \
+        { \
+            return Success(SystemCallResult, val); \
+        }) \
+    End \
+
+
 Result(SystemCallResult) IO__handler(
     KernelPtr kernel, Optional(ProcessPtr) proc, Anything io_operation,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
@@ -17,88 +32,54 @@ Result(SystemCallResult) IO__handler(
     Match(ProcessPtr, proc)
         IsSome(process, pid = Some(ProcessID, process->pid));
     End
+
     KernelContext kernel_context = KernelContext__new(proc, pid, Some(SchedulerPtr, kernel->scheduler));
+    IOContextPtr context = NULL;
 
     if (io_operation == IO_OPEN)
     {
         Flags flags = (Flags) arg4;
         KString path = kstring((const char *) arg2);
-        IOContext context =
-            IOContext__new(
+        context =
+            IOContext__heap_new(
                 kernel_context, Some(IOSubsystemPtr, io_subsystem), None(IOHandle), None(ExternalBuffer)
             );
 
-        ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, context, path, flags));
-            IsError(code, message,
-            {
-                return Error(SystemCallResult, message, code);
-            });
-            IsSuccess(handle,
-            {
-                return Success(SystemCallResult, handle);
-            })
-        End
+        CompleteCall(IOHandle, context, IOSubsystem__open(io_subsystem, context, path, flags));
     }
 
     if (io_operation == IO_CLOSE)
     {
-        IOContext context = IOContext__new(
+        context = IOContext__heap_new(
             kernel_context, Some(IOSubsystemPtr, io_subsystem), Some(IOHandle, (IOHandle) arg2), None(ExternalBuffer)
         );
 
-        ResultMatch(IOHandle, IOSubsystem__close(io_subsystem, context));
-            IsError(code, message,
-            {
-                return Error(SystemCallResult, message, code);
-            });
-            IsSuccess(handle,
-            {
-                return Success(SystemCallResult, handle);
-            })
-        End
+        CompleteCall(IOHandle, context, IOSubsystem__close(io_subsystem, context));
     }
 
     if (io_operation == IO_READ)
     {
         ExternalBuffer buffer = ExternalBuffer__new((DataPtr) arg3, (size_t) arg4);
 
-        IOContext context =
-            IOContext__new(
+        context =
+            IOContext__heap_new(
                 kernel_context, Some(IOSubsystemPtr, io_subsystem),
                 Some(IOHandle, (IOHandle) arg2), Some(ExternalBuffer, buffer)
             );
 
-        ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, context));
-            IsError(code, message,
-            {
-                return Error(SystemCallResult, message, code);
-            });
-            IsSuccess(bytes_read,
-            {
-                return Success(SystemCallResult, bytes_read);
-            })
-        End
+        CompleteCall(ByteCount, context, IOSubsystem__read(io_subsystem, context));
     }
 
     if (io_operation == IO_WRITE)
     {
         ExternalBuffer buffer = ExternalBuffer__new((DataPtr) arg3, (size_t) arg4);
-        IOContext context =
-            IOContext__new(
+        context =
+            IOContext__heap_new(
                 kernel_context, Some(IOSubsystemPtr, io_subsystem),
                 Some(IOHandle, (IOHandle) arg2), Some(ExternalBuffer, buffer)
             );
 
-        ResultMatch(ByteCount, IOSubsystem__write(io_subsystem, context));
-            IsError(code, message,
-            {
-                return Error(SystemCallResult, message, code);
-            });
-            IsSuccess(bytes,
-            {
-                return Success(SystemCallResult, bytes);
-            })
-        End
+        CompleteCall(ByteCount, context, IOSubsystem__write(io_subsystem, context));
     }
 
     return Error(SystemCallResult, KString__sprintf(&unhandled_operation_format, io_operation), SYSCALL_FAILURE);
