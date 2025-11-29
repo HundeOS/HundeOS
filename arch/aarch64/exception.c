@@ -74,7 +74,7 @@ void irq_handler(ProcessContextPtr context, bool current_el)
         Optional(ProcessPtr) interrupted_process = Scheduler__save_context(kernel->scheduler, CPU__id() - 1, context);
         icc_eoir1(id);
         icc_dir(id);
-        uart_irq_handler(&kernel->io_subsystem);
+        uart_irq_handler(kernel->io_subsystem);
     }
     else
     {

@@ -12,6 +12,7 @@
 #include "../../types/kstring.h"
 #include "../../all_defs.h"
 #include "context/originating_call_context.h"
+#include "subsystems/message/message_broker.h"
 #include "syscalls/io.h"
 
 
@@ -22,6 +23,7 @@ typedef struct IOSubsystem IOSubsystem;
 typedef IOSubsystem * IOSubsystemPtr;
 
 OptionalDef(IOPtr);
+OptionalDef(IOSubsystemPtr);
 
 typedef struct IOState
 {
@@ -54,7 +56,8 @@ typedef struct IOContext
     // inheritance, keep this in first pos
     KernelContext kernel_context;
 
-    IOSubsystemPtr io_subsystem;
+    Optional(IOSubsystemPtr) io_subsystem;
+
     Optional(IOHandle) handle;
     Optional(ExternalBuffer) buffer;
 } IOContext;
@@ -98,7 +101,7 @@ MapDefine(IOHandle, DeviceRegistrationPtr, 1024, IOHandlesMap, SimpleEquals(uint
 FixedArrayDefine(DeviceRegistration, IO_MAX_DEVICES, IODevicesArray, SimpleEquals(uint64_t));
 
 IOContext IOContext__new(
-    KernelContext kernel_context, IOSubsystemPtr io_subsystem,
+    KernelContext kernel_context, Optional(IOSubsystemPtr) io_subsystem,
     Optional(IOHandle) handle, Optional(ExternalBuffer) buffer
 );
 
@@ -106,6 +109,9 @@ IOContext IOContext__from_originating_context(
     OriginatingContext originating_context, Optional(IOHandle) handle,
     Optional(ExternalBuffer) buffer
 );
+
+IOContext IOContext__from_message_listener(KernelListenerPtr listener, ProcessID pid);
+IOContext IOContext__from_io_context(IOContext base, Optional(IOHandle) handle);
 
 ExternalBuffer ExternalBuffer__new(DataPtr data, size_t len);
 

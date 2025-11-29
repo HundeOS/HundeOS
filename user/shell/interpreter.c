@@ -4,7 +4,7 @@
 #include "../user.h"
 #include "../sys/spawn.h"
 
-
+#define STRIP_BUFFER_SIZE 2048
 static const char * CMD_EXIT = "exit";
 
 static bool whitespace(const char* input)
@@ -12,8 +12,13 @@ static bool whitespace(const char* input)
     return *input == ' ' || *input == '\t' || *input == '\n' || *input == '\r' || *input == '\0';
 }
 
-static void strip(const char* input, char* stripped)
+static void strip(const char* input, char* stripped, size_t strip_size)
 {
+    for (size_t i = 0; i < strip_size; i++)
+    {
+        stripped[i] = '\0';
+    }
+
     for (const char * i = input; *i != '\0'; i++)
     {
         if (!whitespace(i))
@@ -67,9 +72,9 @@ ShellResult execute(const char* cmd)
 
 ShellResult interpret(const char* input)
 {
-    char stripped[1024];
+    char stripped[STRIP_BUFFER_SIZE];
 
-    strip(input, stripped);
+    strip(input, stripped, STRIP_BUFFER_SIZE);
     if (matches(stripped, CMD_EXIT))
     {
         exit(0);

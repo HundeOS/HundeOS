@@ -47,6 +47,25 @@ void test_fixed_array_push_and_at(void)
     End
 }
 
+void test_fixed_array_push_and_at_with_negative_index_gives_from_end(void)
+{
+    TestArray array = TestArray__new();
+    for (int i = 0; i < TEST_ARRAY_SIZE; i++)
+    {
+        ResultMatch(ArrayCode, TestArray__push(&array, i));
+            IsError(code, message, TEST_FAIL());
+        End
+    }
+
+    TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE, array.len);
+
+    TestType value_minus_1 = UnwrapPanic(TestType, TestArray__at(&array, -1));
+    TestType value_minus_10 = UnwrapPanic(TestType, TestArray__at(&array, -10));
+
+    TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE - 1, value_minus_1);
+    TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE - 10, value_minus_10);
+}
+
 void test_fixed_array_at_ptr(void)
 {
     TestType val = 10;
@@ -57,6 +76,26 @@ void test_fixed_array_at_ptr(void)
         IsNone(TEST_FAIL());
         IsSome(value, TEST_ASSERT_EQUAL_INT(val, *value));
     End
+}
+
+void test_fixed_array_at_ptr_with_negative_index(void)
+{
+    TestArray array = TestArray__new();
+    for (int i = 0; i < TEST_ARRAY_SIZE; i++)
+    {
+        ResultMatch(ArrayCode, TestArray__push(&array, i));
+            IsError(code, message, TEST_FAIL());
+        End
+    }
+
+    TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE, array.len);
+
+    TestTypePtr value_minus_1 = FAPtrUnwrapPanic(TestArray, TestArray__ptr_at(&array, -1));
+    TestTypePtr value_minus_10 = FAPtrUnwrapPanic(TestArray, TestArray__ptr_at(&array, -10));
+
+    TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE - 1, *value_minus_1);
+    TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE - 10, *value_minus_10);
+
 }
 
 bool predicate_str(KStringPtr value, void * context)

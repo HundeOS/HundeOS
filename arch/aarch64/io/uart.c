@@ -127,7 +127,9 @@ ConsoleState console_state = (ConsoleState) {
     .state = NEW_IO_STATE,
     .write_buffer = EmptyRingBuffer(IOBuffer),
     .read_buffer = EmptyRingBuffer(IOBuffer),
-    .parked_context = None(IOContext),
+    .parked_contexts = EmptyArray(ParkedContexts),
+    .lock = MUTEX_INIT,
+    .handle_counter = 0,
 };
 
 void uart_irq_handler(IOSubsystemPtr io_subsystem)
@@ -175,7 +177,7 @@ void uart_irq_handler(IOSubsystemPtr io_subsystem)
     if (received_data)
     {
         // only message io subsystem if there is a parked context
-        Match(IOContext, console_state.parked_context)
+        Match(IOContext, ParkedContexts__at(&console_state.parked_contexts, -1))
             IsSome(parked_context,
             {
                 __d_println(DEBUG, "Parked context found");

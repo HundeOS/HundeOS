@@ -24,6 +24,8 @@ typedef enum IOStatus
     IO_INVALID_PATH = -9,
     IO_EOF = -10,
     IO_UNKNOWN_BUFFER = -11,
+    IO_UNKNOWN_PID = -12,
+    IO_PANIC = -255,
 }
 IOStatus;
 

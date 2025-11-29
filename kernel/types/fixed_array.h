@@ -90,6 +90,10 @@ OptionalDef(ArrayIndex);
        alias##__type value = array->data[index]; \
 
 
+#define FAPtrUnwrapPanic(alias, opt) \
+    UnwrapPanic(alias##__type_ptr, opt)\
+
+
 #define FAPtrMatch(alias, opt) \
     { \
         typedef alias##__type_ptr value_type; \
@@ -222,20 +226,43 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
     } \
 
 #define AtPreDefine(alias_name) \
-    FAOptional(alias_name) alias_name##__at(alias_name * self, uint64_t index); \
-    FAPtrOptional(alias_name) alias_name##__ptr_at(alias_name * self, uint64_t index); \
+    FAOptional(alias_name) alias_name##__at(alias_name * self, int64_t index); \
+    FAPtrOptional(alias_name) alias_name##__ptr_at(alias_name * self, int64_t index); \
 
 #define AtDefine(alias_name) \
-    FAOptional(alias_name) alias_name##__at(alias_name * self, uint64_t index) \
+    FAOptional(alias_name) alias_name##__at(alias_name * self, int64_t index) \
     { \
+        \
+        if (index < 0)\
+        {\
+            if (self->len + index >= 0)\
+            {\
+                index += self->len;\
+            }\
+            else \
+            { \
+                return FANone(alias_name);\
+            } \
+        }\
         if (index >= self->len) \
         {   \
             return FANone(alias_name); \
         } \
         return FASome(alias_name, self->data[index]); \
     }; \
-    FAPtrOptional(alias_name) alias_name##__ptr_at(alias_name * self, uint64_t index) \
+    FAPtrOptional(alias_name) alias_name##__ptr_at(alias_name * self, int64_t index) \
     { \
+        if (index < 0)\
+        {\
+            if (self->len + index >= 0)\
+            {\
+                index += self->len;\
+            }\
+            else \
+            { \
+                return FAPtrNone(alias_name);\
+            } \
+        } \
         if (index >= self->len) \
         {   \
             return FAPtrNone(alias_name); \

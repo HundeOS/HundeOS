@@ -5,6 +5,12 @@
 
 typedef int64_t ReturnCode;
 
+typedef struct Scheduler Scheduler;
+typedef Scheduler * SchedulerPtr;
+
+OptionalDef(SchedulerPtr);
+ResultDef(SchedulerPtr);
+
 typedef struct ParkedKernelContext ParkedKernelContext;
 typedef ParkedKernelContext * ParkedKernelContextPtr;
 

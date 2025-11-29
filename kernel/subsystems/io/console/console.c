@@ -3,16 +3,51 @@
 #include "../io.h"
 #include "../../../types/result.h"
 #include "../../../types/kstring.h"
+#include "scheduler/scheduler.h"
 #include "subsystems/io/io_subsystem.h"
+
+FixedArrayBodyDefine(ParkedContexts);
 
 static Result(IOInternalHandle) Console__open(IOStatePtr state, KString path, Flags flags)
 {
-    return Success(IOInternalHandle, 1);
+    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    IOInternalHandle handle = -1;
+    CriticalSection(self->lock,
+    {
+        handle = ++self->handle_counter;
+    });
+    return Success(IOInternalHandle, handle);
+}
+
+bool io_context_equals_by_handle(void * a, void * b)
+{
+    IOContextPtr a_context = (IOContextPtr) a;
+    IOContextPtr b_context = (IOContextPtr) b;
+
+    Match(IOHandle, a_context->handle)
+        IsSome(parked_handle, return parked_handle == Unwrap(IOHandle, b_context->handle, -1);)
+    End
+
+    return false;
 }
 
 static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandle handle)
 {
-    return Success(IOInternalHandle, 1);
+    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    IOBuffer__reset(&self->read_buffer);
+    IOBuffer__reset(&self->write_buffer);
+
+    KernelContext dummy_kernel_context = KernelContext__new(
+        None(ProcessPtr), None(ProcessID), None(SchedulerPtr));
+
+    IOContext test_context = IOContext__new(dummy_kernel_context,
+        None(IOSubsystemPtr), Some(IOHandle, handle), None(ExternalBuffer));
+
+    ResultMatch(ArrayCode, ParkedContexts__remove(&self->parked_contexts, test_context))
+        IsError(code, message, __d_println(PANIC, "no parked context found for handle"));
+    End
+
+    return Success(IOInternalHandle, handle);
 }
 
 static Result(IOBufferPtr) Console__read(IOStatePtr state, IOInternalHandle handle, size_t size)
@@ -33,7 +68,8 @@ static Result(ByteCount) Console__write(IOStatePtr state, IOInternalHandle handl
 static Result(ParkStatus) Console__park(IOStatePtr state, IOContext parked_context)
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
-    self->parked_context = Some(IOContext, parked_context);
+
+    ParkedContexts__push(&self->parked_contexts, parked_context);
     __d_println(IODEV, "parked console context\n");
     return Success(ParkStatus, IO_PARK_OK);
 }
@@ -41,7 +77,7 @@ static Result(ParkStatus) Console__park(IOStatePtr state, IOContext parked_conte
 static Result(ParkStatus) Console__unpark(IOStatePtr state)
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
-    self->parked_context = None(IOContext);
+    ParkedContexts__pop(&self->parked_contexts);
     return Success(ParkStatus, IO_UNPARK_OK);
 }
 
@@ -66,9 +102,4 @@ extern ConsoleState console_state;
 ConsoleStatePtr ConsoleState__instance()
 {
     return &console_state;
-}
-
-void Console__IRQ_handler(ConsoleStatePtr self, Char data)
-{
-
 }

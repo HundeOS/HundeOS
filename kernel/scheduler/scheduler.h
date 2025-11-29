@@ -5,6 +5,7 @@
 
 #include "../types/result.h"
 #include "../types/fixed_array.h"
+#include "types.h"
 #include "kernel_context.h"
 #include "parked.h"
 #include "context_switch.h"
@@ -54,10 +55,6 @@ typedef struct Scheduler
     bool started;
 } Scheduler;
 
-typedef Scheduler * SchedulerPtr;
-
-OptionalDef(SchedulerPtr);
-ResultDef(SchedulerPtr);
 
 SchedulerPtr Scheduler__heap_new(MessageBrokerPtr message_broker);
 

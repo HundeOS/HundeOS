@@ -344,6 +344,10 @@ Result(ProcessPtr) Scheduler__park(
 Result(ProcessPtr) Scheduler__unpark(SchedulerPtr self, ProcessPtr proc, ParkReason reason, Optional(ReturnCode) return_code)
 {
     __d_println(SCHEDULER, "scheduler unparking");
+    if (proc->state != PROC_STATE_WAITING)
+    {
+        return Error(ProcessPtr, kstring("process not in wait state"), SCHEDULER_CANT_UNPARK);
+    }
     FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
         Result(ProcessPtr) res = CPUScheduler__unpark(sched, proc, reason, return_code);
         ResultMatch(ProcessPtr, res)

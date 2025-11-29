@@ -12,14 +12,21 @@ Result(SystemCallResult) IO__handler(
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 )
 {
-    IOSubsystemPtr io_subsystem = &kernel->io_subsystem;
-    KernelContext kernel_context = KernelContext__new(proc, kernel->scheduler);
+    IOSubsystemPtr io_subsystem = kernel->io_subsystem;
+    Optional(ProcessID) pid = None(ProcessID);
+    Match(ProcessPtr, proc)
+        IsSome(process, pid = Some(ProcessID, process->pid));
+    End
+    KernelContext kernel_context = KernelContext__new(proc, pid, Some(SchedulerPtr, kernel->scheduler));
 
     if (io_operation == IO_OPEN)
     {
         Flags flags = (Flags) arg4;
         KString path = kstring((const char *) arg2);
-        IOContext context = IOContext__new(kernel_context, io_subsystem, None(IOHandle), None(ExternalBuffer));
+        IOContext context =
+            IOContext__new(
+                kernel_context, Some(IOSubsystemPtr, io_subsystem), None(IOHandle), None(ExternalBuffer)
+            );
 
         ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, context, path, flags));
             IsError(code, message,
@@ -36,7 +43,7 @@ Result(SystemCallResult) IO__handler(
     if (io_operation == IO_CLOSE)
     {
         IOContext context = IOContext__new(
-            kernel_context, io_subsystem, Some(IOHandle, (IOHandle) arg2), None(ExternalBuffer)
+            kernel_context, Some(IOSubsystemPtr, io_subsystem), Some(IOHandle, (IOHandle) arg2), None(ExternalBuffer)
         );
 
         ResultMatch(IOHandle, IOSubsystem__close(io_subsystem, context));
@@ -55,9 +62,11 @@ Result(SystemCallResult) IO__handler(
     {
         ExternalBuffer buffer = ExternalBuffer__new((DataPtr) arg3, (size_t) arg4);
 
-        IOContext context = IOContext__new(
-            kernel_context, io_subsystem, Some(IOHandle, (IOHandle) arg2), Some(ExternalBuffer, buffer)
-        );
+        IOContext context =
+            IOContext__new(
+                kernel_context, Some(IOSubsystemPtr, io_subsystem),
+                Some(IOHandle, (IOHandle) arg2), Some(ExternalBuffer, buffer)
+            );
 
         ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, context));
             IsError(code, message,
@@ -74,9 +83,11 @@ Result(SystemCallResult) IO__handler(
     if (io_operation == IO_WRITE)
     {
         ExternalBuffer buffer = ExternalBuffer__new((DataPtr) arg3, (size_t) arg4);
-        IOContext context = IOContext__new(
-            kernel_context, io_subsystem, Some(IOHandle, (IOHandle) arg2), Some(ExternalBuffer, buffer)
-        );
+        IOContext context =
+            IOContext__new(
+                kernel_context, Some(IOSubsystemPtr, io_subsystem),
+                Some(IOHandle, (IOHandle) arg2), Some(ExternalBuffer, buffer)
+            );
 
         ResultMatch(ByteCount, IOSubsystem__write(io_subsystem, context));
             IsError(code, message,

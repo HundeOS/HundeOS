@@ -25,7 +25,10 @@ void setUp(void)
     kernel = init_test_kernel_with_filesystem(root);
     root_state = &root->state->state;
 
-    kernel_context = KernelContext__new(Some(ProcessPtr, dummy_proc), kernel->scheduler);
+    kernel_context =
+        KernelContext__new(
+            Some(ProcessPtr, dummy_proc), Some(ProcessID, dummy_proc->pid), Some(SchedulerPtr, kernel->scheduler)
+        );
 }
 
 void tearDown(void)
@@ -40,7 +43,7 @@ static const uint64_t HELLO_WORLD_SIZE = 66840;
 
 IOContext io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
 {
-    return IOContext__new(kernel_context, &kernel->io_subsystem, handle, ext_buffer);
+    return IOContext__new(kernel_context, Some(IOSubsystemPtr, kernel->io_subsystem), handle, ext_buffer);
 }
 
 IOContext open_context()
@@ -96,18 +99,19 @@ void test_it_can_list_files_to_subdir(void)
 
 void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
 {
-    Result(IOHandle) handle = IOSubsystem__open(&kernel->io_subsystem, open_context(), kstring("/embedded/hello_world"), 0);
+    Result(IOHandle) handle =
+        IOSubsystem__open(kernel->io_subsystem, open_context(), kstring("/embedded/hello_world"), 0);
 
     ResultMatch(IOHandle, handle)
         IsError(code, message,
         {
-            k_printf(cstr(message));
             TEST_FAIL();
         })
         IsSuccess(hand, {
             Char buffer[_128KB];
 
-            Result(ByteCount) res = IOSubsystem__read(&kernel->io_subsystem, rw_context(hand, buffer, sizeof(buffer)));
+            Result(ByteCount) res =
+                IOSubsystem__read(kernel->io_subsystem, rw_context(hand, buffer, sizeof(buffer)));
 
             ResultMatch(ByteCount, res)
                 IsError(code, message,

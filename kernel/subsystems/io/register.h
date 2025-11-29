@@ -6,6 +6,6 @@
 typedef uint64_t RegisterCode;
 ResultDef(RegisterCode);
 
-Result(RegisterCode) IOSubsystem__register_devices(IOSubsystemPtr self);
+Result(RegisterCode) IOSubsystem__register(KernelPtr kernel);
 
 #endif

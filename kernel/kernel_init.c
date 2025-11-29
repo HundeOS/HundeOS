@@ -22,29 +22,28 @@ static KString failed_to_init_msg = KSTRING_NEW("failed to initialise kernel");
 
 static MessageBroker message_broker = NEW_BROKER;
 static Scheduler scheduler = NEW_SCHEDULER(&message_broker);
+static IOSubsystem io_subsystem = NEW_IO_SUBSYSTEM(&scheduler);
 
 static Kernel instance = {
     .status = INIT_NOT_STARTED,
     .init_lock = MUTEX_INIT,
     .syscall_dispatcher = NEW_SYSCALL_DISPATCHER,
-    .io_subsystem = NEW_IO_SUBSYSTEM(&scheduler),
+    .io_subsystem = &io_subsystem,
     .heap = NEW_HEAP,
     .scheduler = &scheduler,
     .message_broker = &message_broker,
 };
 
-KernelPtr Kernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_broker)
+KernelPtr Kernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_broker, IOSubsystemPtr io_subsystem)
 {
     KernelPtr kernel = ptr(Kernel__alloc_kernel(sizeof(Kernel)), Kernel);
+
     kernel->status = INIT_NOT_STARTED;
     kernel->init_lock = MUTEX_INIT;
     kernel->syscall_dispatcher = NEW_SYSCALL_DISPATCHER;
-    kernel->io_subsystem = NEW_IO_SUBSYSTEM(scheduler);
-    IOSubsystemPtr io_subsystem = &kernel->io_subsystem;
+
+    kernel->io_subsystem = io_subsystem;
     io_subsystem->scheduler = scheduler;
-    MapInit(IOHandlesMap, io_subsystem->handles);
-    MapInit(ProcessHandleMap, io_subsystem->process_handles);
-    ArrayInit(IODevicesArray, io_subsystem->devices);
 
     kernel->heap = NEW_HEAP;
     kernel->scheduler = scheduler;
@@ -82,7 +81,7 @@ KernelPtr Kernel__instance()
 Result(SubsystemInitStatus) Kernel__io_subsystem_init(KernelPtr self)
 {
     __d_println(DEBUG, "Kernel__io_subsystem_init");
-    ResultMatch(RegisterCode, IOSubsystem__register_devices(&self->io_subsystem));
+    ResultMatch(RegisterCode, IOSubsystem__register(self));
         IsError(code, message,
         {
             return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);

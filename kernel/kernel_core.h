@@ -17,7 +17,7 @@ typedef struct Kernel
     mutex_t init_lock;
 
     SyscallDispatcher syscall_dispatcher;
-    IOSubsystem io_subsystem;
+    IOSubsystemPtr io_subsystem;
     Heap heap;
     SchedulerPtr scheduler;
     MessageBrokerPtr message_broker;

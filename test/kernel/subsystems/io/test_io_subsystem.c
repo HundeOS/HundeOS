@@ -3,7 +3,7 @@
 #include "../../stubs/process.h"
 #include "../../fixtures/kernel.h"
 
-static const IOInternalHandle FAKE_HANDLE =            0x00000000000000FF;
+static const IOInternalHandle INTERNAL_HANDLE =        0x00000000000000FF;
 static const IOHandle EXPECTED_OPEN_HANDLE =           0x00000002000000FF; // upper 32bits hold the device handle
 static const DeviceHandle EXPECTED_DEVICE_HANDLE =     0x00000002; // upper 32bits hold the device handle
 #define MAX_READ 100
@@ -13,7 +13,10 @@ static bool closed = false;
 static bool written = false;
 static bool read = false;
 
-static CPUID cpu = 1;
+static IOHandle closed_handle = -1;
+
+static const ProcessID PID = 1;
+static const CPUID cpu = PID;
 
 static KernelPtr kernel = NULL;
 static IOSubsystemPtr io_subsystem = NULL;
@@ -23,8 +26,9 @@ static IOBufferPtr buffer = NULL;
 
 static ProcessContextPtr context = (ProcessContextPtr) 0x12345;
 
-static Process PROC = STUB_PROCESS(100);
+static Process PROC = STUB_PROCESS(PID);
 static Optional(ProcessPtr) proc = Some(ProcessPtr, &PROC);
+static Optional(ProcessID) pid = Some(ProcessID, PID);
 
 static Flags FLAGS = 1234;
 
@@ -57,8 +61,11 @@ void reset_state()
     closed = false;
     written = false;
     read = false;
+
+    closed_handle = -1;
+
     write_data = NULL;
-    PROC = STUB_PROCESS(cpu);
+    PROC = STUB_PROCESS(PID);
     STATE = NEW_FAKE_IO_STATE;
     buffer = IOBuffer__heap_new();
     clear_deferred_syscall_result();
@@ -69,15 +76,15 @@ static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, KString path, Fl
     TEST_ASSERT_EQUAL(&STATE, state_ptr);
     TEST_ASSERT_EQUAL(FLAGS, flags);
 
-    IOHandleArray__push(&state_ptr->handles, FAKE_HANDLE);
+    IOHandleArray__push(&state_ptr->handles, INTERNAL_HANDLE);
     opened = true;
-    return Success(IOInternalHandle, FAKE_HANDLE);
+    return Success(IOInternalHandle, INTERNAL_HANDLE);
 }
 
 static Result(IOBufferPtr) fake_read(IOStatePtr state_ptr, IOInternalHandle handle, size_t size)
 {
     TEST_ASSERT_EQUAL(&STATE, state_ptr);
-    TEST_ASSERT_EQUAL(FAKE_HANDLE, handle);
+    TEST_ASSERT_EQUAL(INTERNAL_HANDLE, handle);
     TEST_ASSERT_EQUAL(MAX_READ, size);
 
     read = true;
@@ -91,7 +98,7 @@ static Result(IOBufferPtr) fake_read(IOStatePtr state_ptr, IOInternalHandle hand
 static Result(ByteCount) fake_write(IOStatePtr state_ptr, IOInternalHandle handle, DataPtr data, size_t size)
 {
     TEST_ASSERT_EQUAL(&STATE, state_ptr);
-    TEST_ASSERT_EQUAL(FAKE_HANDLE, handle);
+    TEST_ASSERT_EQUAL(INTERNAL_HANDLE, handle);
     TEST_ASSERT_EQUAL(MAX_READ, size);
 
     written = true;
@@ -102,9 +109,11 @@ static Result(ByteCount) fake_write(IOStatePtr state_ptr, IOInternalHandle handl
 static Result(IOInternalHandle) fake_close(IOStatePtr state_ptr, IOInternalHandle handle)
 {
     TEST_ASSERT_EQUAL(&STATE, state_ptr);
-    TEST_ASSERT_EQUAL(FAKE_HANDLE, handle);
+    TEST_ASSERT_EQUAL(INTERNAL_HANDLE, handle);
 
     closed = true;
+    closed_handle = handle;
+
     if (!opened)
     {
         return Error(IOInternalHandle, kstring("not opened"), IO_NOT_OPEN);
@@ -141,13 +150,17 @@ static IO TEST_IO = STUB_IO;
 void setUp(void)
 {
     kernel = init_test_kernel();
-    io_subsystem = &kernel->io_subsystem;
+    io_subsystem = kernel->io_subsystem;
     reset_state();
 
     Scheduler__schedule(kernel->scheduler, &PROC);
     Scheduler__preempt(kernel->scheduler, cpu, context);
 
     ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, path, &TEST_IO, &STATE))
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(ListenerRegisterResult, IOSubsystem__register_listeners(kernel))
         IsError(code, message, TEST_FAIL());
     End
 }
@@ -180,9 +193,9 @@ void data_available_interrupt(IOSubsystemPtr io_sub)
 
 IOContext io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
 {
-    KernelContext kernel_context = KernelContext__new(proc, kernel->scheduler);
+    KernelContext kernel_context = KernelContext__new(proc, pid, Some(SchedulerPtr, kernel->scheduler));
     ;
-    return IOContext__new(kernel_context, io_subsystem, handle, ext_buffer);
+    return IOContext__new(kernel_context, Some(IOSubsystemPtr, io_subsystem), handle, ext_buffer);
 }
 
 IOContext open_context()
@@ -251,13 +264,12 @@ void test_io_open()
     IOHandle handle = -1;
     Data data[MAX_READ] = {0};
 
-    __d_println(DEBUG, "opening %p\n");
     ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
 
-    MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&io_subsystem->process_handles, PROC.pid));
+    MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&io_subsystem->process_handles, PID));
         IsNone(TEST_FAIL());
         IsSome(handles,
         {
@@ -436,4 +448,44 @@ void test_io_subsystem_close_fails_on_second_time()
     End
 
     TEST_ASSERT_TRUE(closed);
+}
+
+void test_io_subsystem_receiving_process_termination_closes_handles_for_that_process()
+{
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
+        IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
+        IsError(code, message, TEST_FAIL())
+    End
+
+    MessagePtr message = Message__heap_new_anything(SOURCE_PROCESS, PROC_STATE_DEAD, PID);
+    MessageBroker__deliver(kernel->message_broker, message);
+
+    TEST_ASSERT_TRUE(closed);
+    TEST_ASSERT_EQUAL(INTERNAL_HANDLE, closed_handle);
+
+    MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&io_subsystem->process_handles, PID))
+        IsSome(_, TEST_FAIL());
+    End
+}
+
+void test_io_subsystem_receiving_other_process_messages_does_nothing()
+{
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
+        IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
+        IsError(code, message, TEST_FAIL())
+    End
+
+    MessagePtr message = Message__heap_new_anything(SOURCE_PROCESS, PROC_STATE_WAITING, PID);
+    MessageBroker__deliver(kernel->message_broker, message);
+
+    TEST_ASSERT_FALSE(closed);
+    TEST_ASSERT_NOT_EQUAL(INTERNAL_HANDLE, closed_handle);
+
+    MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&io_subsystem->process_handles, PID))
+        IsSome(handles,
+        {
+            TEST_ASSERT_EQUAL(1, PIDHandles__len(handles));
+        })
+    End
+
 }

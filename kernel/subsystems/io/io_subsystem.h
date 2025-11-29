@@ -10,6 +10,8 @@
 #include "../../types/comparison.h"
 
 #include "io.h"
+#include "subsystems/message/message_broker.h"
+#include "syscalls/io.h"
 
 typedef struct IOContext IOContext;
 typedef struct Scheduler Scheduler;
@@ -35,8 +37,12 @@ typedef struct IOSubsystem
     IOHandlesMap handles;
 
     SchedulerPtr scheduler;
+    MessageBrokerPtr message_broker;
     ProcessHandleMap process_handles;
-} IOSubsystem;
+
+    mutex_t lock;
+}
+IOSubsystem;
 
 typedef IOSubsystem * IOSubsystemPtr;
 
@@ -51,9 +57,16 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContext context);
 Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContext context);
 
 void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContext parked_context);
+void IOSubsystem__message_received(KernelListenerPtr listener, MessagePtr message);
 
 // called by IRQs
 Result(IOHandle) IOSubsystem__async_receive(IOSubsystemPtr self, KString path, Flags flags);
+
+// registering message broker listeners
+Result(ListenerRegisterResult) IOSubsystem__register_listeners(KernelPtr kernel);
+IOSubsystemPtr IOSubsystem__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_broker);
+
+IOInternalHandle device_internal_handle(IOHandle handle);
 
 #define NEW_IO_SUBSYSTEM(sched) \
     (IOSubsystem) { \
@@ -61,6 +74,7 @@ Result(IOHandle) IOSubsystem__async_receive(IOSubsystemPtr self, KString path, F
         .handles = EmptyMap(IOHandlesMap), \
         .scheduler = sched, \
         .process_handles = EmptyMap(ProcessHandleMap),\
+        .lock = MUTEX_INIT,\
         \
     }
 
@@ -68,6 +82,7 @@ Result(IOHandle) IOSubsystem__async_receive(IOSubsystemPtr self, KString path, F
         ArrayInit(IODevicesArray, subsystem.devices); \
         MapInit(IOHandlesMap, subsystem.handles); \
         subsystem.scheduler = sched; \
+        subsystem.lock = MUTEX_INIT;\
         MapInit(ProcessHandleMap, subsystem.process_handles);\
 
 #define NEW_IO_STATE \
