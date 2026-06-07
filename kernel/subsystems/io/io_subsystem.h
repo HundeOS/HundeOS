@@ -6,6 +6,7 @@
 #include "../../types/result.h"
 #include "../../types/optional.h"
 #include "../../address.h"
+#include "../../mutex.h"
 #include "../../process.h"
 #include "../../types/comparison.h"
 

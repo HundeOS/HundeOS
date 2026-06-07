@@ -7,6 +7,7 @@
 #include "../../types/ring_buffer.h"
 #include "../../types/result.h"
 #include "../../types/optional.h"
+#include "../../all_defs.h"
 #include "syscalls/io.h"
 
 #define _4_MEGS 4194304

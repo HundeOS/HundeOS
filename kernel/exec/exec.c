@@ -5,6 +5,7 @@
 #include "../types/result.h"
 #include "../bin/elf.h"
 #include "../kio/io.h"
+#include "../kalloc.h"
 #include "../syscall/deferred.h"
 
 FixedArrayBodyDefine(ElfReadBuffer);

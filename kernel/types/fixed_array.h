@@ -4,11 +4,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "common.h"
 #include "optional.h"
 #include "result.h"
 #include "types.h"
 #include "comparison.h"
-#include "../kalloc.h"
+#include "../address.h"
+
+KernelAddress Kernel__alloc(size_t size);
 
 extern const char * ARRAY_FULL_ERROR;
 extern const char * ARRAY_EMPTY_ERROR;
@@ -23,10 +26,7 @@ typedef enum ArrayError
     ARRAY_ITEM_NOT_FOUND = -4,
 } ArrayError;
 
-typedef int ArrayCode;
 typedef int ArrayIndex;
-
-ResultDef(ArrayCode);
 
 ResultDef(ArrayIndex);
 OptionalDef(ArrayIndex);
@@ -59,40 +59,40 @@ OptionalDef(ArrayIndex);
     } \
 
 #define PushPreDefine(alias_name)\
-    Result(ArrayCode) alias_name##__push(alias_name * self, alias_name##__type value); \
-    Result(ArrayCode) alias_name##__push_all(alias_name * self, alias_name * other); \
+    Result(CollectionCode) alias_name##__push(alias_name * self, alias_name##__type value); \
+    Result(CollectionCode) alias_name##__push_all(alias_name * self, alias_name * other); \
 
 #define PushDefine(alias_name) \
-    Result(ArrayCode) alias_name##__push(alias_name * self, alias_name##__type value) \
+    Result(CollectionCode) alias_name##__push(alias_name * self, alias_name##__type value) \
     { \
         if (self->len >= alias_name##__max_size) \
         { \
-            return Error(ArrayCode, KString__new(ARRAY_FULL_ERROR), ARRAY_FULL); \
+            return Error(CollectionCode, KString__new(ARRAY_FULL_ERROR), ARRAY_FULL); \
         } \
         else \
         { \
-            ArrayCode index = self->len;\
+            CollectionCode index = self->len;\
             self->data[index] = value; \
             self->len++; \
-            return Success(ArrayCode, index); \
+            return Success(CollectionCode, index); \
         } \
     }; \
     \
-    Result(ArrayCode) alias_name##__push_all(alias_name * self, alias_name * other) \
+    Result(CollectionCode) alias_name##__push_all(alias_name * self, alias_name * other) \
     { \
         if (self->len + other->len > alias_name##__max_size) \
         { \
-            return Error(ArrayCode, KString__new(ARRAY_FULL_ERROR), ARRAY_FULL); \
+            return Error(CollectionCode, KString__new(ARRAY_FULL_ERROR), ARRAY_FULL); \
         } \
         else \
         { \
-            ArrayCode first_index = self->len;\
+            CollectionCode first_index = self->len;\
             for (uint64_t i = 0; i < other->len; i++)\
             { \
                 self->data[self->len] = other->data[i]; \
                 self->len++;\
             } \
-            return Success(ArrayCode, first_index);\
+            return Success(CollectionCode, first_index);\
         } \
     }; \
 
@@ -291,13 +291,13 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
         return FAPtrSome(alias_name, &self->data[index]); \
     }; \
 
-#define SetPreDefine(alias_name) Result(ArrayCode) alias_name##__set(alias_name * self, uint64_t index, alias_name##__type value);
+#define SetPreDefine(alias_name) Result(CollectionCode) alias_name##__set(alias_name * self, uint64_t index, alias_name##__type value);
 #define SetDefine(alias_name) \
-    Result(ArrayCode) alias_name##__set(alias_name * self, uint64_t index, alias_name##__type value) \
+    Result(CollectionCode) alias_name##__set(alias_name * self, uint64_t index, alias_name##__type value) \
     { \
         if (index < 0 || index >= alias_name##__max_size) \
         { \
-            return Error(ArrayCode, KString__new(ARRAY_INDEX_OUT_OF_BOUNDS), ARRAY_OUT_OF_BOUNDS); \
+            return Error(CollectionCode, KString__new(ARRAY_INDEX_OUT_OF_BOUNDS), ARRAY_OUT_OF_BOUNDS); \
         } \
         self->data[index] = value;\
         if (index >= self->len)\
@@ -305,12 +305,12 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
             self->len = index + 1;\
         } \
         \
-        return Success(ArrayCode, 0); \
+        return Success(CollectionCode, 0); \
     }; \
 
-#define RemovePreDefine(alias_name) Result(ArrayCode) alias_name##__remove(alias_name * self, alias_name##__type value);
+#define RemovePreDefine(alias_name) Result(CollectionCode) alias_name##__remove(alias_name * self, alias_name##__type value);
 #define RemoveDefine(alias_name) \
-    Result(ArrayCode) alias_name##__remove(alias_name * self, alias_name##__type value) \
+    Result(CollectionCode) alias_name##__remove(alias_name * self, alias_name##__type value) \
     { \
         Match(ArrayIndex, alias_name##__find_item(self, value)) \
             IsSome(pos, \
@@ -323,10 +323,10 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
             })\
             IsNone(\
             { \
-                return Error(ArrayCode, kstring(ITEM_NOT_FOUND), ARRAY_ITEM_NOT_FOUND);\
+                return Error(CollectionCode, kstring(ITEM_NOT_FOUND), ARRAY_ITEM_NOT_FOUND);\
             })\
       End \
-      return Success(ArrayCode, 0); \
+      return Success(CollectionCode, 0); \
     } \
 
 #define SortPreDefine(alias_name) \

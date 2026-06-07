@@ -40,7 +40,7 @@ SectionHeaderArray Elf__read_section_headers(Elf self)
     {
         SectionHeaderPtr header = offset_ptr(start, i * section_header_size, SectionHeader);
 
-        ResultMatch(ArrayCode, SectionHeaderArray__push(&headers, header) );
+        ResultMatch(CollectionCode, SectionHeaderArray__push(&headers, header) );
             IsError(code, message, __d_println(PANIC, cstr(message));)
         End
 
@@ -61,7 +61,7 @@ ProgramHeaderArray Elf__read_program_headers(Elf self)
     {
         ProgramHeaderPtr header = offset_ptr(start, i * program_header_size, ProgramHeader);
 
-        ResultMatch(ArrayCode, ProgramHeaderArray__push(&headers, header));
+        ResultMatch(CollectionCode, ProgramHeaderArray__push(&headers, header));
             IsError(code, message, __d_println(PANIC, cstr(message));)
         End
     }

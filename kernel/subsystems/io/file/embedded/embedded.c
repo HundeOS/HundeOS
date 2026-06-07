@@ -3,6 +3,7 @@
 #include "../file_io.h"
 #include "../../../../bin/embedded_binaries.h"
 #include "../../../../utils/math.h"
+#include "../../../../kalloc.h"
 
 static KString invalid_path_format = KSTRING_NEW("Invalid path %s");
 static KString invalid_file_handle = KSTRING_NEW("Invalid file handle");

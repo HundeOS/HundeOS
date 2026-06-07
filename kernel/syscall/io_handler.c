@@ -33,7 +33,7 @@ Result(SystemCallResult) IO__handler(
         IsSome(process, pid = Some(ProcessID, process->pid));
     End
 
-    KernelContext kernel_context = KernelContext__new(proc, pid, Some(SchedulerPtr, kernel->scheduler));
+    KernelContext kernel_context = KernelContext__new(pid, Some(SchedulerPtr, kernel->scheduler));
     IOContextPtr context = NULL;
 
     if (io_operation == IO_OPEN)

@@ -10,8 +10,8 @@ Result(InitCode) gic_enable_interrupt(uint32_t irq)
     unsigned int bit = irq % 32;
 
     volatile unsigned int *GICD_ISENABLER = (unsigned int *)(GICD_BASE + 0x100 + (reg * 4));
-    volatile unsigned int *GICD_IPRIORITYR = (unsigned int *)(GICD_BASE + 0x400 + irq);
-    volatile unsigned int *GICD_ITARGETSR = (unsigned int *)(GICD_BASE + 0x800 + irq);
+    volatile uint8_t *GICD_IPRIORITYR = (uint8_t *)(GICD_BASE + 0x400 + irq);
+    volatile uint8_t *GICD_ITARGETSR = (uint8_t *)(GICD_BASE + 0x800 + irq);
     volatile uint32_t *GICD_IGROUPR1 = (uint32_t *)(GICD_BASE + 0x084);
 
     *(volatile uint32_t *)(GICD_BASE + 0x000) = 1;

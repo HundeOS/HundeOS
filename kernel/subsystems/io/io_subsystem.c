@@ -2,6 +2,7 @@
 
 #include "kernel_core.h"
 #include "process.h"
+#include "kalloc.h"
 #include "../../types/result.h"
 #include "../../types/fixed_array.h"
 #include "../../types/optional.h"
@@ -42,9 +43,9 @@ Result(DeviceHandle) IOSubsystem__register_device(
         .state = device_state
     };
 
-    Result(ArrayCode) index_res = IODevicesArray__push(&self->devices, reg);
+    Result(CollectionCode) index_res = IODevicesArray__push(&self->devices, reg);
 
-    ResultMatch(ArrayCode, index_res);
+    ResultMatch(CollectionCode, index_res);
         IsError(code, message,
         {
             return Error(DeviceHandle, message, code);

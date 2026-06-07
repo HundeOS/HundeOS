@@ -1,4 +1,5 @@
 #include "filesystem.h"
+#include "../../../kalloc.h"
 
 MapBodyDefine(Mounts);
 MapBodyDefine(FileHandleTargetMap);

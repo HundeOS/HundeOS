@@ -4,6 +4,7 @@
 #include "kstring.h"
 #include "optional.h"
 #include "fixed_array.h"
+#include "comparison.h"
 
 OptionalDef(KString);
 OptionalDef(KStringPtr);

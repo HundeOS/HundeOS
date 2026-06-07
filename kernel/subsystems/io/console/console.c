@@ -2,6 +2,7 @@
 #include "debug.h"
 #include "../../../types/result.h"
 #include "../../../types/kstring.h"
+#include "../../../kalloc.h"
 #include "scheduler/scheduler.h"
 #include "subsystems/io/io_subsystem.h"
 
@@ -35,12 +36,11 @@ static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandl
     FindResultMatch(ParkedContexts, ParkedContexts__find(&self->parked_contexts, handle_match, &handle))
         IsSome(found,
         {
-            ResultMatch(ArrayCode, ParkedContexts__remove(&self->parked_contexts, *found.value))
-                IsError(code, message, __d_println(PANIC, "no parked context found for handle"));
+            ResultMatch(CollectionCode, ParkedContexts__remove(&self->parked_contexts, *found.value))
+                IsError(code, message, __d_println(IODEV, "no parked context found for handle"));
             End
 
         })
-        IsNone(__d_println(PANIC, "no parked context found for handle"));
     End
 
     return Success(IOInternalHandle, handle);

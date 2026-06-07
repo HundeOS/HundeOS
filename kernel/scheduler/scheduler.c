@@ -3,6 +3,7 @@
 #include "../types/result.h"
 #include "../types/optional.h"
 #include "../mutex.h"
+#include "../kalloc.h"
 #include "parked.h"
 #include "../subsystems/message/subsystem_codes.h"
 
@@ -117,11 +118,11 @@ Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
 {
     __d_printf(SCHEDULER, "CPUScheduler__exit %s\n", cstr(proc->name));
 
-    Result(ArrayCode) remove_res;
+    Result(CollectionCode) remove_res;
 
     CriticalSection(self->scheduler_lock, remove_res = ProcessTable__remove(&self->processes, proc);)
 
-    ResultMatch(ArrayCode, remove_res)
+    ResultMatch(CollectionCode, remove_res)
         IsError(code, message,
         {
             return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);

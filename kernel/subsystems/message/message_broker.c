@@ -1,5 +1,6 @@
 #include "message_broker.h"
 #include "subsystem_codes.h"
+#include "../../kalloc.h"
 
 FixedArrayBodyDefine(Listeners);
 
@@ -99,7 +100,7 @@ Result(ListenerRegisterResult) MessageBroker__register_listener(MessageBrokerPtr
 {
     CriticalSection(self->lock,
     {
-        ResultMatch(ArrayCode, Listeners__push(&self->listeners, listener))
+        ResultMatch(CollectionCode, Listeners__push(&self->listeners, listener))
             IsError(code, message,
             {
                 _cs_return Error(ListenerRegisterResult, too_many_listeners, LISTENER_REGISTER_ERROR);
@@ -129,4 +130,3 @@ Listener KernelListener__new(KernelPtr kernel, Source source, KernelCallback cal
         }
     };
 }
-

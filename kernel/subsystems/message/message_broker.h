@@ -5,6 +5,7 @@
 #include "../../types/optional.h"
 #include "../../types/result.h"
 #include "../../all_defs.h"
+#include "../../mutex.h"
 #include "../../process.h"
 #include "../../scheduler/types.h"
 

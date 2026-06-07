@@ -219,7 +219,6 @@ void test_scheduler_exit_unparks_parent_if_waiting(void)
 
     KernelContext kernel_context = (KernelContext) {
         .scheduler = scheduler,
-        .proc = Some(ProcessPtr, parent),
     };
 
 
@@ -311,7 +310,6 @@ void test_scheduler_park_switches_process_to_waiting_and_switches_context(void)
 
     KernelContext kernel_context = (KernelContext) {
         .scheduler = scheduler,
-        .proc = Some(ProcessPtr, proc),
     };
 
     Scheduler__schedule(scheduler, proc);
@@ -358,7 +356,6 @@ void test_scheduler_unpark_switches_process_back_to_ready(void)
 
     KernelContext kernel_context = (KernelContext) {
         .scheduler = scheduler,
-        .proc = Some(ProcessPtr, proc),
     };
 
     Scheduler__schedule(scheduler, proc);
@@ -399,7 +396,6 @@ void test_scheduler_unpark_gives_error_and_doesnt_unpark_if_reasons_dont_match(v
 
     KernelContext kernel_context = (KernelContext) {
         .scheduler = scheduler,
-        .proc = Some(ProcessPtr, proc),
     };
 
     Scheduler__schedule(scheduler, proc);
@@ -435,7 +431,6 @@ void test_scheduler_unpark_when_not_idle(void)
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
 
     KernelContext kernel_context = (KernelContext) {
-        .proc = Some(ProcessPtr, proc),
         .scheduler = scheduler,
     };
 
@@ -487,7 +482,6 @@ void test_scheduler_park_switches_process_to_waiting_not_switching_context_when_
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE00FF; // whatever as long as we dont deref
 
     KernelContext kernel_context = (KernelContext) {
-        .proc = Some(ProcessPtr, proc),
         .scheduler = scheduler,
     };
 
@@ -628,7 +622,6 @@ void test_io_park_messages_put_process_in_to_wait()
 
     KernelContext kernel_context = (KernelContext) {
         .scheduler = scheduler,
-        .proc = None(ProcessPtr),
     };
 
 
@@ -660,7 +653,6 @@ void test_io_data_arrived_pull_process_out_of_park()
 
     KernelContext kernel_context = (KernelContext) {
         .scheduler = scheduler,
-        .proc = None(ProcessPtr),
     };
 
     MessagePtr message_park =

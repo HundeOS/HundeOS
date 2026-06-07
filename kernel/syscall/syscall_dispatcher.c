@@ -19,7 +19,7 @@ static KString unhandled_syscall_format = KSTRING_NEW("Unhandled syscall %i");
 
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler)
 {
-    ResultMatch(ArrayCode, Handlers__set(&self->handlers, syscall, handler));
+    ResultMatch(CollectionCode, Handlers__set(&self->handlers, syscall, handler));
         IsError(code, message,
         {
             return Error(RegisterResult, message, REGISTER_FAILURE);

@@ -55,7 +55,7 @@ ProcessPtr setup_test_process_waiting_on_child_process(ProcessPtr parent)
     ProcessPtr child = dummy_process_with_parent(100, cpu, PROC_STATE_READY, parent);
     Scheduler__schedule(kernel->scheduler, process);
 
-    parent_context = NEW_KERNEL_CONTEXT(kernel->scheduler, Some(ProcessID, parent->pid), Some(ProcessPtr, parent));
+    parent_context = NEW_KERNEL_CONTEXT(kernel->scheduler, Some(ProcessID, parent->pid));
     Scheduler__park(kernel->scheduler, parent, &parent_context, Some(Continuation, continuation), PARK_WAIT_CHILD);
     Scheduler__schedule(kernel->scheduler, child);
     Scheduler__preempt(kernel->scheduler, cpu, context);

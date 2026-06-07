@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "common.h"
 
 typedef bool(* EqualFunction)(void * a, void * b);
 
@@ -46,6 +47,10 @@ SimpleEqualsPreDef(Char)
 
 bool Ptr__equals(void * a, void * b);
 bool kstring_equals(void * a, void * b);
+
+bool never__equals(void * a, void * b);
+
+HashCode hash__uint64(uint64_t * key);
 
 
 #endif

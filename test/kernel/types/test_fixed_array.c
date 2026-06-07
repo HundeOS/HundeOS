@@ -34,7 +34,7 @@ void test_fixed_array_push_and_at(void)
 {
     TestType val = 10;
     TestArray array = TestArray__new();
-    ResultMatch(ArrayCode, TestArray__push(&array, val));
+    ResultMatch(CollectionCode, TestArray__push(&array, val));
         IsError(code, message, TEST_FAIL());
     End
 
@@ -58,7 +58,7 @@ void test_push_all_adds_all_elements_from_oter_array(void)
     }
 
     TestArray__push(&array, 123);
-    ResultMatch(ArrayCode, TestArray__push_all(&array, &other))
+    ResultMatch(CollectionCode, TestArray__push_all(&array, &other))
         IsError(code, message, TEST_FAIL());
         IsSuccess(index, TEST_ASSERT_EQUAL(1, index));
     End
@@ -79,7 +79,7 @@ void test_push_all_gives_an_error_and_leaves_target_untouched_if_max_length_woul
     }
 
     TestArray__push(&array, 123);
-    ResultMatch(ArrayCode, TestArray__push_all(&array, &other))
+    ResultMatch(CollectionCode, TestArray__push_all(&array, &other))
         IsError(code, message, TEST_ASSERT_EQUAL(code, ARRAY_FULL));
         IsSuccess(index, TEST_FAIL());
     End
@@ -92,7 +92,7 @@ void test_fixed_array_at_with_negative_index_gives_from_end(void)
     TestArray array = TestArray__new();
     for (int i = 0; i < TEST_ARRAY_SIZE; i++)
     {
-        ResultMatch(ArrayCode, TestArray__push(&array, i));
+        ResultMatch(CollectionCode, TestArray__push(&array, i));
             IsError(code, message, TEST_FAIL());
         End
     }
@@ -123,7 +123,7 @@ void test_fixed_array_at_ptr_with_negative_index(void)
     TestArray array = TestArray__new();
     for (int i = 0; i < TEST_ARRAY_SIZE; i++)
     {
-        ResultMatch(ArrayCode, TestArray__push(&array, i));
+        ResultMatch(CollectionCode, TestArray__push(&array, i));
             IsError(code, message, TEST_FAIL());
         End
     }
@@ -225,7 +225,7 @@ void test_fixed_array_remove(void)
         TestArray__push(&array, i + 100);
     }
 
-    ResultMatch(ArrayCode, TestArray__remove(&array, 107));
+    ResultMatch(CollectionCode, TestArray__remove(&array, 107));
         IsError(code, message, TEST_FAIL());
         IsSuccess(code,
         {
@@ -327,11 +327,11 @@ void test_fixed_array_push_when_full(void)
     TestType val = 10;
     TinyTestArray array = TinyTestArray__new();
 
-    ResultMatch(ArrayCode, TinyTestArray__push(&array, val));
+    ResultMatch(CollectionCode, TinyTestArray__push(&array, val));
         IsError(code, message, TEST_FAIL());
     End
 
-    ResultMatch(ArrayCode, TinyTestArray__push(&array, val));
+    ResultMatch(CollectionCode, TinyTestArray__push(&array, val));
         IsSuccess(value, TEST_FAIL());
         IsError(code, message, TEST_ASSERT_EQUAL_INT(ARRAY_FULL, code));
     End
@@ -342,7 +342,7 @@ void test_set_in_bounds(void)
     TestType val = 10;
     int index = TEST_ARRAY_SIZE - 1;
     TestArray array = TestArray__new();
-    ResultMatch(ArrayCode, TestArray__set(&array, index,val));
+    ResultMatch(CollectionCode, TestArray__set(&array, index,val));
         IsError(code, message, TEST_FAIL());
     End
 
@@ -357,7 +357,7 @@ void test_set_out_of_bounds(void)
 {
     TestType val = 10;
     TestArray array = TestArray__new();
-    ResultMatch(ArrayCode, TestArray__set(&array, TEST_ARRAY_SIZE,val));
+    ResultMatch(CollectionCode, TestArray__set(&array, TEST_ARRAY_SIZE,val));
         IsError(code, message, TEST_ASSERT_EQUAL_INT(ARRAY_OUT_OF_BOUNDS, code));
         IsSuccess(_, TEST_FAIL());
     End

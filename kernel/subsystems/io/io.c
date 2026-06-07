@@ -1,5 +1,6 @@
 #include "io.h"
 #include "../../kernel_core.h"
+#include "../../kalloc.h"
 
 FixedArrayBodyDefine(IODevicesArray);
 MapBodyDefine(IOHandlesMap);
@@ -43,8 +44,7 @@ IOContextPtr IOContext__from_message_listener(KernelListenerPtr listener, Proces
 {
     KernelPtr kernel = listener->kernel;
 
-    KernelContext kernel_context =
-        KernelContext__new(None(ProcessPtr), Some(ProcessID, pid), Some(SchedulerPtr, kernel->scheduler));
+    KernelContext kernel_context = KernelContext__new(Some(ProcessID, pid), Some(SchedulerPtr, kernel->scheduler));
 
     return IOContext__heap_new(
         kernel_context, Some(IOSubsystemPtr, kernel->io_subsystem), None(IOHandle), None(ExternalBuffer)

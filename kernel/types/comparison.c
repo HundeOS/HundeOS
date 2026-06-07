@@ -1,6 +1,5 @@
 #include "comparison.h"
 #include <stdint.h>
-#include <stdbool.h>
 
 #include "kstring.h"
 #include "types.h"
@@ -29,4 +28,14 @@ bool kstring_equals(void * a, void * b)
     KStringPtr str1 = a;
     KStringPtr str2 = b;
     return KString__equals(str1, str2);
+}
+
+bool never__equals(void * a, void * b)
+{
+    return false;
+}
+
+HashCode hash__uint64(uint64_t * key)
+{
+    return *key;
 }

@@ -1,5 +1,6 @@
 #include "parked.h"
 #include "../debug.h"
+#include "../kalloc.h"
 
 ParkedKernelContextPtr ParkedKernelContext__heap_new(KernelContextPtr kernel_context, Optional(Continuation) continuation, ParkReason park_reason)
 {

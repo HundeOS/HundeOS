@@ -25,10 +25,7 @@ void setUp(void)
     kernel = init_test_kernel_with_filesystem(root);
     root_state = &root->state->state;
 
-    kernel_context =
-        KernelContext__new(
-            Some(ProcessPtr, dummy_proc), Some(ProcessID, dummy_proc->pid), Some(SchedulerPtr, kernel->scheduler)
-        );
+    kernel_context = KernelContext__new(Some(ProcessID, dummy_proc->pid), Some(SchedulerPtr, kernel->scheduler));
 }
 
 void tearDown(void)

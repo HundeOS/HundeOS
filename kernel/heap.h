@@ -1,13 +1,16 @@
 #ifndef __KERNEL_HEAP_H
 #define __KERNEL_HEAP_H
+#include "all_defs.h"
 #include "address.h"
 #include "types/types.h"
+#include "types/result.h"
+#include "types/optional.h"
+#include "types/hashtable.h"
 #include "mutex.h"
 #include "memory_page.h"
 
-#define COARSE_BLOCK_SIZE _4MB
-#define PAGES_PER_BLOCK (COARSE_BLOCK_SIZE / PAGE_SIZE)
-
+#define BUCKET_SIZE 1024
+#define TABLE_SIZE (MAX_BLOCKS / BUCKET_SIZE)
 
 typedef struct MemoryBlock
 {
@@ -18,13 +21,28 @@ typedef struct MemoryBlock
 
 typedef MemoryBlock * MemoryBlockPtr;
 
+OptionalDef(MemoryBlock);
+ResultDef(MemoryBlock);
+
+HashtableDefine(Address, MemoryBlock, TABLE_SIZE, BUCKET_SIZE, AllocatedBlocks, hash__uint64, SimpleEquals(uint64_t), never__equals);
+
 typedef struct Heap
 {
     Address start;
     Address end;
     Address phys_start;
     MemoryBlock current_block;
-} Heap;
+    AllocatedBlocks allocated_blocks;
+    AllocatedBlocks free_blocks;
+}
+Heap;
+
+typedef enum HeapCodes
+{
+    HEAP_NOT_IMPLEMENTED = -1,
+    HEAP_OK = 0,
+}
+HeapCodes;
 
 typedef Heap * HeapPtr;
 typedef uint64_t HeapCode;
@@ -35,7 +53,7 @@ Result(HeapCode) Heap__init(HeapPtr self);
 KernelAddress Heap__alloc(HeapPtr self);
 KernelAddress Heap__alloc_size(HeapPtr self, size_t size);
 
-void Heap__free(HeapPtr self, MemoryPagePtr page);
+Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr);
 
 KernelAddress Heap__from_physical_address(HeapPtr self, Address physical);
 KernelAddress Heap__from_virtual_address(HeapPtr self, Address virtual);
@@ -54,6 +72,8 @@ KernelAddress Heap__from_virtual_address(HeapPtr self, Address virtual);
         .end = 0, \
         .phys_start = 0,\
         .current_block = NEW_BLOCK, \
+        .allocated_blocks = EmptyHashtable(AllocatedBlocks),\
+        .free_blocks = EmptyHashtable(AllocatedBlocks),\
     } \
 
 #endif

@@ -1,22 +1,20 @@
 #include "kernel_context.h"
 #include "../kernel_core.h"
+#include "../kalloc.h"
 
-KernelContext KernelContext__new(Optional(ProcessPtr) proc, Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler)
+KernelContext KernelContext__new(Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler)
 {
     return (KernelContext) {
-        .proc = proc,
         .pid = pid,
         .scheduler = scheduler
     };
 }
 
-KernelContextPtr KernelContext__heap_new(
-    Optional(ProcessPtr) proc, Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler
-)
+KernelContextPtr KernelContext__heap_new(Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler)
 {
     KernelContextPtr context = ptr(Kernel__alloc_kernel(sizeof(KernelContext)), KernelContext);
 
-    *context = KernelContext__new(proc, pid, scheduler);
+    *context = KernelContext__new(pid, scheduler);
 
     return context;
 }
@@ -28,9 +26,7 @@ KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext
         IsSome(process, pid = Some(ProcessID, process->pid));
     End
 
-    return KernelContext__heap_new(
-        originating_context.process, pid, Some(SchedulerPtr, originating_context.kernel->scheduler)
-    );
+    return KernelContext__heap_new(pid, Some(SchedulerPtr, originating_context.kernel->scheduler));
 }
 
 KernelContext KernelContext__from_originating_context(OriginatingContext originating_context)
@@ -40,7 +36,5 @@ KernelContext KernelContext__from_originating_context(OriginatingContext origina
         IsSome(process, pid = Some(ProcessID, process->pid));
     End
 
-    return KernelContext__new(
-        originating_context.process, pid, Some(SchedulerPtr, originating_context.kernel->scheduler)
-    );
+    return KernelContext__new(pid, Some(SchedulerPtr, originating_context.kernel->scheduler));
 }

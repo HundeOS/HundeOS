@@ -207,7 +207,7 @@ void data_available_interrupt(IOSubsystemPtr io_sub)
 
 IOContextPtr io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
 {
-    KernelContext kernel_context = KernelContext__new(proc, pid, Some(SchedulerPtr, kernel->scheduler));
+    KernelContext kernel_context = KernelContext__new(pid, Some(SchedulerPtr, kernel->scheduler));
     ;
     return IOContext__heap_new(kernel_context, Some(IOSubsystemPtr, io_subsystem), handle, ext_buffer);
 }

@@ -6,7 +6,6 @@
 #include "types/kstring.h"
 #include "types/result.h"
 #include "types/optional.h"
-// #include "scheduler/scheduler.h"
 
 #include "kalloc.h"
 #include "stack.h"

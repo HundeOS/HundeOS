@@ -1,5 +1,6 @@
 #include "filesystem_node.h"
 #include "filesystem.h"
+#include "../../../kalloc.h"
 
 FixedArrayBodyDefine(FilesystemNodes);
 

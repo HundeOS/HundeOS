@@ -4,6 +4,9 @@
 #include "types.h"
 #include "result.h"
 #include "kstring.h"
+#include "../address.h"
+
+KernelAddress Kernel__alloc(size_t size);
 
 typedef size_t Pos;
 typedef size_t ItemCount;

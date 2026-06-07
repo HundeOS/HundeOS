@@ -4,9 +4,7 @@
 
 #include "comparison.h"
 #include "fixed_array.h"
-
-typedef uint8_t MapCode;
-ResultDef(MapCode);
+#include "common.h"
 
 extern const char * MAP_FULL_ERROR;
 
@@ -80,10 +78,10 @@ typedef enum MapError
     }; \
 
 #define MapSetPreDefine(alias) \
-    Result(MapCode) alias##__set(alias * self, alias##__key_type key, alias##__value_type value);
+    Result(CollectionCode) alias##__set(alias * self, alias##__key_type key, alias##__value_type value);
 
 #define MapSetDefine(alias) \
-    Result(MapCode) alias##__set(alias * self, alias##__key_type key, alias##__value_type value) \
+    Result(CollectionCode) alias##__set(alias * self, alias##__key_type key, alias##__value_type value) \
     { \
         alias##__MapEntry entry = (alias##__MapEntry) { \
             .key = key, \
@@ -103,19 +101,13 @@ typedef enum MapError
         { \
             if (self->len + 1 > alias##__max_size)\
             { \
-                return Error(MapCode, KString__new(MAP_FULL_ERROR), MAP_FULL);\
+                return Error(CollectionCode, KString__new(MAP_FULL_ERROR), MAP_FULL);\
             } \
             self->len++;\
         } \
         self->entries[add_index] = entry;\
-        return Success(MapCode, add_index);\
+        return Success(CollectionCode, add_index);\
     } \
-
-#define MapPtrMatch(alias, opt) \
-    { \
-        typedef alias##__type_ptr value_type; \
-        Optional(alias##__value_type_ptr) optional = opt; \
-
 
 #define MapGetPreDefine(alias) \
     Optional(alias##__value_type) alias##__get(alias * self, alias##__key_type key); \
@@ -156,10 +148,10 @@ typedef enum MapError
     } \
 
 #define MapDeletePreDefine(alias) \
-    Result(MapCode) alias##__delete(alias * self, alias##__key_type key);
+    Result(CollectionCode) alias##__delete(alias * self, alias##__key_type key);
 
 #define MapDeleteDefine(alias) \
-    Result(MapCode) alias##__delete(alias * self, alias##__key_type key) \
+    Result(CollectionCode) alias##__delete(alias * self, alias##__key_type key) \
     { \
         int delete_index = self->len;\
         for (int i = 0; i < self->len; i++)\
@@ -181,7 +173,7 @@ typedef enum MapError
             }\
         }\
         \
-        return Success(MapCode, self->len);\
+        return Success(CollectionCode, self->len);\
     } \
 
 #define MapLenPreDefine(alias) \

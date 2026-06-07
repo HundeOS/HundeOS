@@ -1,5 +1,6 @@
 #include "arch/init.h"
 #include "kernel_init.h"
+#include "kalloc.h"
 #include "mutex.h"
 #include "panic.h"
 #include "spin.h"

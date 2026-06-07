@@ -20,14 +20,19 @@
 
 #define MAX_SPINS 100000000
 
-#define _128KB (128 * 1024)
-#define _1MB (1024 * 1024)
-#define _2MB (2 * 1024 * 1024)
-#define _4MB (4 * 1024 * 1024)
-#define _8MB (8 * 1024 * 1024)
-#define _16MB (16 * 1024 * 1024)
-#define _1GB (1024 * _1MB)
+#define _128KB (128ULL * 1024ULL)
+#define _1MB (1024ULL * 1024ULL)
+#define _2MB (2ULL * 1024ULL * 1024ULL)
+#define _4MB (4ULL * 1024ULL * 1024ULL)
+#define _8MB (8ULL * 1024ULL * 1024ULL)
+#define _16MB (16ULL * 1024ULL * 1024ULL)
+#define _1GB (1024ULL * _1MB)
 
-#define _4GB = 4 * _1GB;
+#define _4GB (4ULL * _1GB)
+
+#define COARSE_BLOCK_SIZE _4MB
+#define PAGES_PER_BLOCK (COARSE_BLOCK_SIZE / PAGE_SIZE)
+
+#define MAX_BLOCKS (_4GB / COARSE_BLOCK_SIZE)
 
 #endif

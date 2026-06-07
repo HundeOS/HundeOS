@@ -5,6 +5,7 @@
 #include "../../../types/result.h"
 #include "../../../types/fixed_array.h"
 #include "../../../types/kstring.h"
+#include "../../../all_defs.h"
 
 typedef uint64_t FilesystemAttributes;
 

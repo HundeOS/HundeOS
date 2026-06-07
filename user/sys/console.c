@@ -10,6 +10,7 @@ extern void print(const char * str);
 static IOHandle console_handle = 0;
 
 const size_t BUFFER_SIZE = 1024;
+static const char backspace_sequence[] = "\b \b";
 
 ByteCount console_input(char * buf, size_t size)
 {
@@ -36,23 +37,54 @@ ByteCount console_input(char * buf, size_t size)
 
 ByteCount console_read_line(char * buf, bool echo, size_t size)
 {
-    ByteCount read = 0;
-    size_t size_with_term_space = size - 1;
-    for (int i = 0; i < size_with_term_space; i+= read)
+    if (size == 0)
     {
-        read = console_input(&buf[i], size);
-        if (echo)
+        return 0;
+    }
+
+    size_t pos = 0;
+    size_t max_pos = size - 1;
+
+    while (pos < max_pos)
+    {
+        char input[BUFFER_SIZE];
+        ByteCount read = console_input(input, BUFFER_SIZE - 1);
+
+        for (ByteCount ch = 0; ch < read && pos < max_pos; ch++)
         {
-            for (int ch = 0; ch < read; ch++)
+            char c = input[ch];
+
+            if (c == '\b' || c == 0x7f)
             {
-                print(&buf[i + ch]);
+                if (pos > 0)
+                {
+                    pos--;
+                    buf[pos] = '\0';
+                    if (echo)
+                    {
+                        print(backspace_sequence);
+                    }
+                }
+                continue;
+            }
+
+            if (c == '\n' || c == '\r')
+            {
+                buf[pos] = '\0';
+                return pos;
+            }
+
+            buf[pos++] = c;
+            buf[pos] = '\0';
+
+            if (echo)
+            {
+                char out[2] = { c, '\0' };
+                print(out);
             }
         }
-        if (buf[i] == '\n' || buf[i] == '\r')
-        {
-            buf[i] = '\0';
-            break;
-        }
     }
-    return read;
+
+    buf[pos] = '\0';
+    return pos;
 }

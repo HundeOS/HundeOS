@@ -121,7 +121,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool hcf) {
                 });
                 IsError(code, message,
                 {
-                    __d_printf(PANIC, "syscall error: %s code=%i\n", KString__cstr(&message), code);
+                    __d_printf(SYSCALL, "syscall error: %s code=%i\n", KString__cstr(&message), code);
                     return code;
                 });
             End

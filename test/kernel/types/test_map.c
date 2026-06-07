@@ -39,10 +39,10 @@ void test_map_len_and_key()
 {
     TestMap map = TestMap__new();
 
-    ResultMatch(MapCode, TestMap__set(&map, kstring("hello"), 12));
+    ResultMatch(CollectionCode, TestMap__set(&map, kstring("hello"), 12));
         IsError(code, message, TEST_FAIL());
     End
-    ResultMatch(MapCode, TestMap__set(&map, kstring("world"), 12));
+    ResultMatch(CollectionCode, TestMap__set(&map, kstring("world"), 12));
         IsError(code, message, TEST_FAIL());
     End
 
@@ -58,7 +58,7 @@ void test_map_set_and_get()
 {
     TestMap map = TestMap__new();
 
-    ResultMatch(MapCode, TestMap__set(&map, hello, 12));
+    ResultMatch(CollectionCode, TestMap__set(&map, hello, 12));
         IsError(code, message, TEST_FAIL());
     End
 
@@ -72,7 +72,7 @@ void test_map_set_and_get_ptr()
 {
     TestMap map = TestMap__new();
 
-    ResultMatch(MapCode, TestMap__set(&map, hello, 12));
+    ResultMatch(CollectionCode, TestMap__set(&map, hello, 12));
         IsError(code, message, TEST_FAIL());
     End
 
@@ -86,7 +86,7 @@ void test_map_set_and_delete()
 {
     TestMap map = TestMap__new();
 
-    ResultMatch(MapCode, TestMap__set(&map, kstring("hello"), 12));
+    ResultMatch(CollectionCode, TestMap__set(&map, kstring("hello"), 12));
         IsError(code, message, TEST_FAIL());
     End
 
@@ -95,7 +95,7 @@ void test_map_set_and_delete()
         IsSome(value, TEST_ASSERT_EQUAL_INT(12, value))
     End
 
-    ResultMatch(MapCode, TestMap__delete(&map, kstring("hello")));
+    ResultMatch(CollectionCode, TestMap__delete(&map, kstring("hello")));
         IsError(code, message, TEST_FAIL());
     End
 
@@ -117,7 +117,7 @@ void test_map_delete_only_deletes_requested_entry()
     TestMap__set(&map, key3, 13);
 
 
-    ResultMatch(MapCode, TestMap__delete(&map, key2));
+    ResultMatch(CollectionCode, TestMap__delete(&map, key2));
         IsError(code, message, TEST_FAIL());
     End
 
@@ -146,10 +146,10 @@ void test_map_set_with_full_map()
 {
     TinyTestMap map = TinyTestMap__new();
 
-    ResultMatch(MapCode, TinyTestMap__set(&map, kstring("hello"), 12));
+    ResultMatch(CollectionCode, TinyTestMap__set(&map, kstring("hello"), 12));
         IsError(code, message, TEST_FAIL());
     End
-    ResultMatch(MapCode, TinyTestMap__set(&map, kstring("goodbye"), 12));
+    ResultMatch(CollectionCode, TinyTestMap__set(&map, kstring("goodbye"), 12));
         IsSuccess(val, TEST_FAIL());
     End
 }
