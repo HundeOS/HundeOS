@@ -1,5 +1,6 @@
 #include "console.h"
 #include "debug.h"
+#include "arch/basic_io.h"
 #include "../../../types/result.h"
 #include "../../../types/kstring.h"
 #include "../../../kalloc.h"
@@ -58,7 +59,21 @@ static Result(IOBufferPtr) Console__read(IOStatePtr state, IOInternalHandle hand
 
 static Result(ByteCount) Console__write(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size)
 {
-    return Success(ByteCount, 0);
+    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    DataPtr cursor = data;
+
+    CriticalSection(self->lock,
+    {
+        for (size_t i = 0; i < size; i++)
+        {
+            char out[2];
+            out[0] = cursor[i];
+            out[1] = '\0';
+            BasicIO__puts(out);
+        }
+    });
+
+    return Success(ByteCount, size);
 }
 
 static Result(ParkStatus) Console__park(IOStatePtr state, IOContextPtr parked_context)
@@ -79,7 +94,7 @@ static Result(ParkStatus) Console__unpark(IOStatePtr state)
 
 IOPtr Console__heap_new()
 {
-    IOPtr result = v_ptr(Kernel__alloc(sizeof(IOPtr)), IO);
+    IOPtr result = v_ptr(Kernel__alloc(sizeof(IO)), IO);
 
     *result = (IO) {
         .read = Console__read,

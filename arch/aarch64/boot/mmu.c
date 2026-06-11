@@ -185,12 +185,12 @@ __BOOT__(void) map_embedded_binaries_ro()
     uint64_t phys_start = (uint64_t)&__embedded_binaries_phys_start;
     uint64_t phys_end = (uint64_t)&__embedded_binaries_phys_end;
 
-    _print_unsigned(target);
-    _print(new_line);
-    _print_unsigned(phys_start);
-    _print(new_line);
-    _print_unsigned(phys_end);
-    _print(new_line);
+    boot_debug_print_unsigned(target);
+    boot_debug_print(new_line);
+    boot_debug_print_unsigned(phys_start);
+    boot_debug_print(new_line);
+    boot_debug_print_unsigned(phys_end);
+    boot_debug_print(new_line);
     map_range_2M(&high_mem_l0_table, phys_start, phys_end, target, &embedded_binaries_perms);
 }
 
@@ -257,14 +257,14 @@ __BOOT__(void) zero_table(PageTable * table)
 
 __BOOT__(void) zero_l0_tables()
 {
-    _print(message_zero);
+    boot_debug_print(message_zero);
     zero_table(&low_mem_l0_table);
     zero_table(&high_mem_l0_table);
 }
 
 __BOOT__(void) zero_table_pool()
 {
-    _print(message_zero);
+    boot_debug_print(message_zero);
 
     for (int i = 0; i < PAGE_POOL_SIZE; i++)
     {
@@ -274,7 +274,7 @@ __BOOT__(void) zero_table_pool()
 
 __BOOT__(void) enable_mmu()
 {
-    _print(enabling_mmu);
+    boot_debug_print(enabling_mmu);
     write_mair_el1(MAIR_VALUE);
 
     write_tcr_el1(boot_tcr_el1());
@@ -314,24 +314,24 @@ __BOOT__(void) enable_mmu()
     write_ttbr0_el1((uint64_t)&low_mem_l0_table);
     dsb_ish();
     isb();
-    _print(mmu_enabled);
+    boot_debug_print(mmu_enabled);
 }
 
 __BOOT__(void) setup_boot_mappings()
 {
     zero_l0_tables();
     zero_table_pool();
-    _print(mapping_kernel);
+    boot_debug_print(mapping_kernel);
     map_kernel();
     map_tables_high();
     map_embedded_binaries_ro();
     map_kernel_stack_rw();
-    _print(mapping_uart_low);
+    boot_debug_print(mapping_uart_low);
     map_uart(&low_mem_l0_table, UART0_PHYS_BASE);
-    _print(mapping_uart_high);
+    boot_debug_print(mapping_uart_high);
     map_uart(&high_mem_l0_table, (uint64_t)UART0_BASE);
 
-    _print(mapping_gicd);
+    boot_debug_print(mapping_gicd);
     map_gicd_gicr(&high_mem_l0_table);
-    _print(mapping_kernel_complete);
+    boot_debug_print(mapping_kernel_complete);
 }

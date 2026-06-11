@@ -1,11 +1,28 @@
 #include <stdarg.h>
 #include <stdint.h>
+#include <stddef.h>
 
-#include "syscall.h"
+#include "io.h"
+
+static int strlen(const char * str)
+{
+    int len = 0;
+    while (str[len] != '\0')
+    {
+        len++;
+    }
+
+    return len;
+}
 
 void print(const char * str)
 {
-    syscall(PRINT, (uint64_t)str, 0, 0, 0, 0);
+    if (str == NULL)
+    {
+        str = "(null)";
+    }
+
+    write(STDOUT_FILENO, (char *) str, (size_t) strlen(str));
 }
 
 

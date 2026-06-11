@@ -137,6 +137,7 @@ void Process__context_switch(ProcessPtr self)
 
                     __d_printf(PROCESS, "Continuation calling %p %p", continuation, parked_kernel_context);
                     Result(Anything) res = continuation(parked_kernel_context);
+                    self->parked_context = None(ParkedKernelContextPtr);
                     ResultMatch(Anything, res)
                         IsSuccess(result_val,
                         {

@@ -153,42 +153,42 @@ __BOOT__(void) __debug_table(PageTable * table, uint64_t addr, const char * mess
     PageTable * l1_table = table_at(table, idx0(addr));
     PageTable * l2_table = table_at(l1_table, idx1(addr));
 
-    _print(start_end_dump);
-    _print(message);
-    _print(hex_pre);
-    _print_unsigned(addr);
-    _print(new_line);
-    _print_base(idx0(addr), 10);
-    _print(new_line);
-    _print_base(idx1(addr), 10);
-    _print(new_line);
-    _print_base(idx2(addr), 10);
-    _print(new_line);
+    boot_debug_print(start_end_dump);
+    boot_debug_print(message);
+    boot_debug_print(hex_pre);
+    boot_debug_print_unsigned(addr);
+    boot_debug_print(new_line);
+    boot_debug_print_base(idx0(addr), 10);
+    boot_debug_print(new_line);
+    boot_debug_print_base(idx1(addr), 10);
+    boot_debug_print(new_line);
+    boot_debug_print_base(idx2(addr), 10);
+    boot_debug_print(new_line);
 
-    _print_unsigned(addr & PTE_OFFSET_MASK);
-    _print(new_line);
+    boot_debug_print_unsigned(addr & PTE_OFFSET_MASK);
+    boot_debug_print(new_line);
 
     uint64_t descriptor = l2_table->entries[idx2(addr)];
-    _print(desc_eq);
-    _print_binary(descriptor);
+    boot_debug_print(desc_eq);
+    boot_debug_print_binary(descriptor);
     // _print(sep);
     // _print_unsigned((uint64_t)l2_table);
 
     __dump_table(table, entries, L0);
     __dump_table(l1_table, entries, L1);
     __dump_table(l2_table, entries, L2);
-    _print(start_end_dump);
+    boot_debug_print(start_end_dump);
 }
 
 
 
 __BOOT__(void) __dump_table(PageTable * table, int entries, const char * level)
 {
-    _print(new_line);
-    _print(level);
-    _print(addr_spacer);
-    _print_unsigned((uint64_t)table);
-    _print(new_line);
+    boot_debug_print(new_line);
+    boot_debug_print(level);
+    boot_debug_print(addr_spacer);
+    boot_debug_print_unsigned((uint64_t)table);
+    boot_debug_print(new_line);
 
     int non_zero = 0;
     for (int i = 0; i < TABLE_SIZE && non_zero < entries; i++) {
@@ -196,12 +196,12 @@ __BOOT__(void) __dump_table(PageTable * table, int entries, const char * level)
         if (entry) {
             non_zero++;
 
-            _print_base(i, 10);
-            _print(spacer);
-            _print_binary(table->entries[i]);
-            _print(addr_spacer);
-            _print_unsigned(entry & PTE_NEXTADDR_MASK);
-            _print(new_line);
+            boot_debug_print_base(i, 10);
+            boot_debug_print(spacer);
+            boot_debug_print_binary(table->entries[i]);
+            boot_debug_print(addr_spacer);
+            boot_debug_print_unsigned(entry & PTE_NEXTADDR_MASK);
+            boot_debug_print(new_line);
         }
     }
 }
@@ -212,26 +212,25 @@ __BOOT__(void) debug_table_pool(
     PageTable * high_mem_l0_table,
     PageTable table_pool[],
     int cursor) {
-    _print(new_line);
-    _print(root_table);
-    _print_base(0, 10);
-    _print(new_line);
+    boot_debug_print(new_line);
+    boot_debug_print(root_table);
+    boot_debug_print_base(0, 10);
+    boot_debug_print(new_line);
     __dump_table(low_mem_l0_table, entries, pool_level);
 
-    _print(new_line);
-    _print(root_table);
-    _print_base(1, 10);
-    _print(new_line);
+    boot_debug_print(new_line);
+    boot_debug_print(root_table);
+    boot_debug_print_base(1, 10);
+    boot_debug_print(new_line);
     __dump_table(high_mem_l0_table, entries, pool_level);
 
     for (int i = 0; i < cursor; i++) {
-        _print(pool_spacer);
-        _print_base(i, 10);
-        _print(new_line);
+        boot_debug_print(pool_spacer);
+        boot_debug_print_base(i, 10);
+        boot_debug_print(new_line);
 
         __dump_table(&table_pool[i], entries, pool_level);
 
     }
 }
-
 

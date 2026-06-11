@@ -24,16 +24,16 @@ static volatile __BOOT_DATA__(boot_mutex) mutex = {
 
 
 __BOOT__(void) boot_secondary_cpus() {
-    _print(master_cpu);
-    _print_base(cpu_id(), 10);
-    _print(new_line);
-    _print(start_secondary);
+    boot_debug_print(master_cpu);
+    boot_debug_print_base(cpu_id(), 10);
+    boot_debug_print(new_line);
+    boot_debug_print(start_secondary);
 
     // we count this cpu already online
     uint64_t entry_pa = (uint64_t)&secondary_boot_entry;
 
     for (unsigned cpu = 1; cpu < MAX_CPUS; ++cpu) {
-        _print(new_line);
+        boot_debug_print(new_line);
 
         uintptr_t sp_top = (uintptr_t)&boot_cpu_stacks[cpu][STACK_SIZE];
         SMCCCRes r = smccc_hvc(PSCI_0_2_FN64_CPU_ON,
@@ -45,9 +45,9 @@ __BOOT__(void) boot_secondary_cpus() {
         //                        entry_pa,            // entry PA
         //                        sp_top);             // context_id -> SP
         if ((int64_t)r.x0 == PSCI_RET_SUCCESS || (int64_t)r.x0 == PSCI_RET_ALREADY_ON) {
-            _print(messaged_cpu);
-            _print_base(cpu + 1, 10);
-            _print(new_line);
+            boot_debug_print(messaged_cpu);
+            boot_debug_print_base(cpu + 1, 10);
+            boot_debug_print(new_line);
             messaged++;
         }
     }

@@ -9,6 +9,8 @@
 typedef uint64_t Address;
 typedef uint64_t Offset;
 
+ResultDef(Address);
+
 #define addr_of(p) addr(&p)
 #define vaddr(ka) ka.virtual_addr
 #define paddr(ka) ka.phys_addr

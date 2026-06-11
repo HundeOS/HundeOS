@@ -307,6 +307,8 @@ Result(ProcessPtr) Scheduler__exit(SchedulerPtr self, ProcessPtr proc, ReturnCod
                     IsNone(Scheduler__preempt(self, cpu, NULL));
                 End
 
+                Process__dispose_user_allocations(proc);
+
                 return res;
             });
         End

@@ -13,7 +13,7 @@ CFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wex
 
 USER_CFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra \
            -nostdlib -nostartfiles -mcmodel=small \
-           -march=armv8-a -mno-outline-atomics -I./common_includes
+           -march=armv8-a -mno-outline-atomics -I./common_includes -I./user/lib/newlib/include
 
 # Assembler flags
 ASFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra \
@@ -22,9 +22,14 @@ ASFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -We
 USER_ASFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra \
             -nostdlib -nostartfiles -mcmodel=small -latomic
 
+ifdef __BOOT_DEBUG
+CFLAGS += -D__BOOT_DEBUG
+ASFLAGS += -Wa,-defsym,__BOOT_DEBUG=1
+endif
+
 # Linker flags
 LDFLAGS = -nostdlib -T linker.ld
-USER_LDFLAGS = -nostdlib -Wl,-e,main
+USER_LDFLAGS = -nostdlib -Wl,-e,_start
 
 # Output files
 ELF = build/kernel.elf
@@ -52,6 +57,9 @@ USER_ARCH_ASM_SOURCES := $(shell find ./user/arch -name "*.s" -print)
 USER_SYS_SOURCES := $(shell find ./user/sys -name "*.c" -print)
 USER_SYS_ASM_SOURCES := $(shell find ./user/sys -name "*.s" -print)
 
+USER_LIB_SOURCES := $(shell find ./user/lib -name "*.c" ! -name "nano-mallocr.c" -print)
+USER_LIB_ASM_SOURCES := $(shell find ./user/lib -name "*.s" -print)
+
 USER_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_SOURCES))
 USER_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_ASM_SOURCES))
 
@@ -61,7 +69,10 @@ USER_ARCH_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_ARCH_ASM_SOURCES))
 USER_SYS_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_SYS_SOURCES))
 USER_SYS_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_SYS_ASM_SOURCES))
 
-USER_PROGRAMS := $(patsubst ./user/%,%, $(shell find ./user -mindepth 1 -maxdepth 1 -type d -name "arch" -o -name "sys" -prune -o -maxdepth 1 -type d -print))
+USER_LIB_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_LIB_SOURCES))
+USER_LIB_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_LIB_ASM_SOURCES))
+
+USER_PROGRAMS := $(patsubst ./user/%,%, $(shell find ./user -mindepth 1 -maxdepth 1 -type d ! -name "arch" ! -name "sys" ! -name "lib" -print))
 
 USER_BINARY_BUILD_PATH := $(patsubst ./%,build/%,$(USER_PROGRAMS))
 USER_BINARIES := $(patsubst %,build/user/%.bin,$(USER_BINARY_BUILD_PATH))
@@ -84,6 +95,8 @@ build/kernel/%.o: %.c
 build/kernel/%.o: %.s
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
+
+build/kernel/./kernel/bin/embedded.o: $(USER_BINARIES)
 
 build/user/%.o: user/%.c
 	mkdir -p `dirname $@`
@@ -117,8 +130,8 @@ $(1)_ASM_SRCS := $$(wildcard user/$(1)/*.s)
 $(1)_OBJS := $$(patsubst user/%.c,build/user/%.o,$$($(1)_SRCS))
 $(1)_ASM_OBJS := $$(patsubst user/%.s,build/user/%.o,$$($(1)_ASM_SRCS))
 
-build/user/$(1).bin: $$($(1)_OBJS) $$($(1)_OBJS) $$(USER_ARCH_ASM_OBJECTS) $$(USER_ARCH_OBJECTS) $$(USER_SYS_OBJECTS) $$(USER_SYS_ASM_OBJECTS)
-	$$(LD) $$(USER_LDFLAGS) -Wl,-e,main $$^ -o $$@
+build/user/$(1).bin: $$($(1)_OBJS) $$($(1)_ASM_OBJS) $$(USER_ARCH_ASM_OBJECTS) $$(USER_ARCH_OBJECTS) $$(USER_SYS_OBJECTS) $$(USER_SYS_ASM_OBJECTS) $$(USER_LIB_OBJECTS) $$(USER_LIB_ASM_OBJECTS)
+	$$(LD) $$(USER_LDFLAGS) $$^ -o $$@
 endef
 
 $(foreach dir,$(USER_PROGRAMS),$(eval $(call make-user-prog,$(dir))))

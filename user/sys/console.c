@@ -2,31 +2,17 @@
 #include <stddef.h>
 
 #include "io.h"
-#include "exit.h"
 #include "../user.h"
 
 extern void print(const char * str);
-
-static IOHandle console_handle = 0;
 
 const size_t BUFFER_SIZE = 1024;
 static const char backspace_sequence[] = "\b \b";
 
 ByteCount console_input(char * buf, size_t size)
 {
-    if (console_handle == 0)
-    {
-        console_handle = open(":console:", 0);
-
-        if (console_handle <= 0)
-        {
-            print("invalid handle\n");
-            exit(-1);
-        }
-    }
-
     ByteCount res = 0;
-    res = read(console_handle, buf, size);
+    res = read(STDIN_FILENO, buf, size);
 
     if (res > 0)
     {

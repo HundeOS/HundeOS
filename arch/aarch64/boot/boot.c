@@ -53,10 +53,10 @@ __BOOT__(void) enable_tbi_for_kernel(void) {
 
 __BOOT__(void) jump_to_kernel(uint64_t cpu)
 {
-    _print(new_line);
-    _print(entering_hi_mem);
-    _print_base(cpu, 10);
-    _print(new_line);
+    boot_debug_print(new_line);
+    boot_debug_print(entering_hi_mem);
+    boot_debug_print_base(cpu, 10);
+    boot_debug_print(new_line);
 
     uint64_t base = (uint64_t)&__k_stack_high;
     uint64_t stack_top = (uint64_t)&__k_stack_start + (cpu * STACK_SIZE);
@@ -65,8 +65,8 @@ __BOOT__(void) jump_to_kernel(uint64_t cpu)
 
 __BOOT__(void) common_init(void)
 {
-    _print(new_line);
-    _print(booting);
+    boot_debug_print(new_line);
+    boot_debug_print(booting);
 }
 
 __BOOT_STRING__(daif_) = "DAIF=";
@@ -79,23 +79,23 @@ __BOOT__(void) primary_booted()
     asm volatile("mrs %0, ICC_PMR_EL1" : "=r"(pmr));
     asm volatile("mrs %0, ICC_IGRPEN1_EL1" : "=r"(igrp));
 
-    _print(daif_);
-    _print_base(daif, 16);
-    _print(new_line);
-    _print(pmr_);
-    _print_base(pmr, 16);
-    _print(new_line);
-    _print(igrp_);
-    _print_base(igrp, 16);
-    _print(new_line);
-    _print(current_el);
-    _print_base((read_current_el() >> 2), 10);
-    _print(new_line);
+    boot_debug_print(daif_);
+    boot_debug_print_base(daif, 16);
+    boot_debug_print(new_line);
+    boot_debug_print(pmr_);
+    boot_debug_print_base(pmr, 16);
+    boot_debug_print(new_line);
+    boot_debug_print(igrp_);
+    boot_debug_print_base(igrp, 16);
+    boot_debug_print(new_line);
+    boot_debug_print(current_el);
+    boot_debug_print_base((read_current_el() >> 2), 10);
+    boot_debug_print(new_line);
 
     boot_uart_init();
-    _print(new_line);
-    _print(booting);
-    _print(new_line);
+    boot_debug_print(new_line);
+    boot_debug_print(booting);
+    boot_debug_print(new_line);
 
     boot_vectors_init();
 
@@ -111,11 +111,11 @@ __BOOT__(void) primary_booted()
 
 __BOOT__(void) secondary_booted(uint64_t cpu)
 {
-    _print(new_line);
-    _print(secondary_booting);
-    _print_base(cpu, 10);
-    _print(new_line);
-    _print(new_line);
+    boot_debug_print(new_line);
+    boot_debug_print(secondary_booting);
+    boot_debug_print_base(cpu, 10);
+    boot_debug_print(new_line);
+    boot_debug_print(new_line);
 
     boot_vectors_init();
     enable_fp_simd();

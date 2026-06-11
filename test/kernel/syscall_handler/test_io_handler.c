@@ -1,0 +1,181 @@
+#include "unity.h"
+
+#include "../../../kernel/syscall/io_handler.h"
+#include "../../../kernel/subsystems/io/io_subsystem.h"
+#include "../../../common_includes/syscalls/io.h"
+#include "../fixtures/kernel.h"
+#include "../stubs.h"
+#include "../stubs/panic.h"
+
+static const ProcessID PID = 44;
+static const IOInternalHandle INTERNAL_HANDLE = 0x42;
+static const IOHandle RAW_HANDLE = 0x0000000100000042;
+static const FileDescriptor EXPECTED_FD = 3;
+static const Flags FLAGS = IO_OPEN_WRITE;
+static KString path = KSTRING_NEW(":test:");
+
+static KernelPtr kernel = NULL;
+static Process process = STUB_PROCESS(PID);
+static IOState state = NEW_IO_STATE;
+static bool opened = false;
+static bool written = false;
+static bool closed = false;
+static IOInternalHandle write_handle = 0;
+static DataPtr write_data = NULL;
+static size_t write_size = 0;
+
+static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, KString open_path, Flags flags)
+{
+    TEST_ASSERT_EQUAL(&state, state_ptr);
+    TEST_ASSERT_TRUE(KString__equals(&path, &open_path));
+    TEST_ASSERT_EQUAL(FLAGS, flags);
+    opened = true;
+    return Success(IOInternalHandle, INTERNAL_HANDLE);
+}
+
+static Result(ByteCount) fake_write(IOStatePtr state_ptr, IOInternalHandle handle, DataPtr data, size_t size)
+{
+    TEST_ASSERT_EQUAL(&state, state_ptr);
+    written = true;
+    write_handle = handle;
+    write_data = data;
+    write_size = size;
+    return Success(ByteCount, size);
+}
+
+static Result(IOInternalHandle) fake_close(IOStatePtr state_ptr, IOInternalHandle handle)
+{
+    TEST_ASSERT_EQUAL(&state, state_ptr);
+    closed = true;
+    return Success(IOInternalHandle, handle);
+}
+
+static Result(IOBufferPtr) fake_read(IOStatePtr state_ptr, IOInternalHandle handle, size_t size)
+{
+    return Error(IOBufferPtr, kstring("not implemented"), IO_OPERATION_NOT_IMPLEMENTED);
+}
+
+static Result(ParkStatus) fake_park(IOStatePtr state_ptr, IOContextPtr parked_context)
+{
+    return Success(ParkStatus, IO_PARK_OK);
+}
+
+static Result(ParkStatus) fake_unpark(IOStatePtr state_ptr)
+{
+    return Success(ParkStatus, IO_UNPARK_OK);
+}
+
+static IO test_io = {
+    .open = fake_open,
+    .read = fake_read,
+    .write = fake_write,
+    .close = fake_close,
+    .park = fake_park,
+    .unpark = fake_unpark,
+};
+
+static void install_open_fd(FileDescriptor fd)
+{
+    KernelContext kernel_context = KernelContext__new(
+        Some(ProcessID, process.pid), Some(SchedulerPtr, kernel->scheduler)
+    );
+    IOContextPtr context = IOContext__heap_new(
+        kernel_context, Some(IOSubsystemPtr, kernel->io_subsystem), None(IOHandle), None(ExternalBuffer)
+    );
+
+    ResultMatch(IOHandle, IOSubsystem__open(kernel->io_subsystem, context, path, FLAGS))
+        IsSuccess(handle,
+        {
+            TEST_ASSERT_EQUAL(RAW_HANDLE, handle);
+            Process__set_file_descriptor(&process, fd, handle);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+
+    IOContext__dispose(context);
+    opened = false;
+}
+
+void setUp(void)
+{
+    clear_panic_state();
+    kernel = init_test_kernel_without_filesystem();
+    process = STUB_PROCESS(PID);
+    state = NEW_IO_STATE;
+    opened = false;
+    written = false;
+    closed = false;
+    write_handle = 0;
+    write_data = NULL;
+    write_size = 0;
+
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(kernel->io_subsystem, path, &test_io, &state))
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void tearDown(void)
+{
+    TEST_ASSERT_FALSE(panic_occurred());
+}
+
+void test_io_handler_open_returns_process_file_descriptor(void)
+{
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_OPEN, (Anything) cstr(path), FLAGS, 0, 0
+    ))
+        IsSuccess(fd,
+        {
+            TEST_ASSERT_TRUE(opened);
+            TEST_ASSERT_EQUAL(EXPECTED_FD, fd);
+            TEST_ASSERT_EQUAL(1, process.file_descriptors.len);
+
+            ResultMatch(ProcessIOHandle, Process__get_io_handle(&process, EXPECTED_FD))
+                IsSuccess(handle, TEST_ASSERT_EQUAL(RAW_HANDLE, handle))
+                IsError(code, message, TEST_FAIL())
+            End
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_io_handler_write_translates_file_descriptor_to_io_handle(void)
+{
+    char data[] = "abc";
+    install_open_fd(EXPECTED_FD);
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_WRITE, EXPECTED_FD, (Anything) data, sizeof(data) - 1, 0
+    ))
+        IsSuccess(bytes,
+        {
+            TEST_ASSERT_TRUE(written);
+            TEST_ASSERT_EQUAL(sizeof(data) - 1, bytes);
+            TEST_ASSERT_EQUAL(INTERNAL_HANDLE, write_handle);
+            TEST_ASSERT_EQUAL(data, write_data);
+            TEST_ASSERT_EQUAL(sizeof(data) - 1, write_size);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_io_handler_close_removes_file_descriptor(void)
+{
+    install_open_fd(EXPECTED_FD);
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_CLOSE, EXPECTED_FD, 0, 0, 0
+    ))
+        IsSuccess(fd,
+        {
+            TEST_ASSERT_TRUE(closed);
+            TEST_ASSERT_EQUAL(EXPECTED_FD, fd);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(ProcessIOHandle, Process__get_io_handle(&process, EXPECTED_FD))
+        IsSuccess(handle, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_NOT_OPEN, code))
+    End
+}

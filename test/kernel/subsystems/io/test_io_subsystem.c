@@ -3,6 +3,10 @@
 #include "../../stubs/process.h"
 #include "../../fixtures/kernel.h"
 #include "../../../../kernel/subsystems/message/subsystem_codes.h"
+#include "../../../../kernel/subsystems/io/console/console.h"
+
+void BasicIO__reset_output();
+const char * BasicIO__output();
 
 static const IOInternalHandle INTERNAL_HANDLE =        0x00000000000000FF;
 static const IOHandle EXPECTED_OPEN_HANDLE =           0x00000002000000FF; // upper 32bits hold the device handle
@@ -38,6 +42,7 @@ static Flags FLAGS = 1234;
 static Char expected[] = {1, 2, 3, 4};
 
 static KString path = KSTRING_NEW(":test:");
+static KString console_path = KSTRING_NEW(":console:");
 static KString invalid_path = KSTRING_NEW("/sss");
 
 #define NEW_FAKE_IO_STATE \
@@ -317,6 +322,32 @@ void test_io_open_and_write()
 
     TEST_ASSERT_TRUE(written);
     TEST_ASSERT_EQUAL(&data, write_data);
+}
+
+void test_console_write_outputs_to_basic_io()
+{
+    IOHandle handle = -1;
+    char data[] = "hello console";
+    BasicIO__reset_output();
+
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, console_path, Console__heap_new(), (IOStatePtr) ConsoleState__instance()))
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), console_path, IO_OPEN_WRITE))
+        IsSuccess(result, handle = result);
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(ByteCount, IOSubsystem__write(io_subsystem, rw_context(handle, data, sizeof(data) - 1)));
+        IsSuccess(byte_count,
+        {
+            TEST_ASSERT_EQUAL_UINT(sizeof(data) - 1, byte_count);
+        });
+        IsError(code, message, TEST_FAIL());
+    End
+
+    TEST_ASSERT_EQUAL_STRING(data, BasicIO__output());
 }
 
 void test_io_open_and_read_when_no_data_ready_parks_the_process()

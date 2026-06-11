@@ -7,6 +7,9 @@
 #include "all_defs.h"
 #include "stack.h"
 #include "types/comparison.h"
+#include "types/fixed_array.h"
+#include "types/linked_list.h"
+#include "syscalls/io.h"
 
 typedef struct ProcessContext ProcessContext;
 typedef struct ProcessContext * ProcessContextPtr;
@@ -45,6 +48,14 @@ typedef enum ProcessErrors
     PROC_ERROR_NO_PARKED = -1,
 } ProcessErrors;
 
+typedef uint64_t FileDescriptor;
+typedef uint64_t ProcessIOHandle;
+
+ResultDef(FileDescriptor);
+ResultDef(ProcessIOHandle);
+OptionalDef(FileDescriptor);
+OptionalDef(ProcessIOHandle);
+
 inline const char * ProcessState__to_string(ProcessState state)
 {
     switch (state)
@@ -78,6 +89,56 @@ typedef enum ProcessSetupStatus
     PROCESS_SETUP = 0,
 } ProcessSetupStatus;
 
+ResultDef(ProcessSetupStatus);
+
+typedef enum ProcessMemoryCode
+{
+    PROCESS_MEMORY_OK = 0,
+    PROCESS_MEMORY_NOT_FOUND = -1,
+    PROCESS_MEMORY_FULL = -2,
+    PROCESS_MEMORY_STATIC_ALLOCATION = -3,
+    PROCESS_MEMORY_FREE_FAILED = -4,
+    PROCESS_MEMORY_INVALID_SIZE = -5,
+} ProcessMemoryCode;
+
+ResultDef(ProcessMemoryCode);
+
+typedef enum UserAllocationType
+{
+    USER_ALLOCATION_ELF,
+    USER_ALLOCATION_STACK,
+    USER_ALLOCATION_HEAP,
+    USER_ALLOCATION_DYNAMIC,
+} UserAllocationType;
+
+typedef struct UserAllocation
+{
+    UserAddress address;
+    size_t size;
+    UserAllocationType type;
+} UserAllocation;
+
+typedef UserAllocation * UserAllocationPtr;
+
+OptionalDef(UserAllocation);
+bool UserAllocation__equals(UserAllocationPtr self, UserAllocationPtr other);
+
+LinkedListDefine(UserAllocation, UserAllocations, (EqualFunction) UserAllocation__equals);
+typedef struct ProcessFileDescriptor
+{
+    FileDescriptor fd;
+    ProcessIOHandle handle;
+} ProcessFileDescriptor;
+
+typedef ProcessFileDescriptor * ProcessFileDescriptorPtr;
+
+OptionalDef(ProcessFileDescriptor);
+bool ProcessFileDescriptor__equals(ProcessFileDescriptorPtr self, ProcessFileDescriptorPtr other);
+
+LinkedListDefine(
+    ProcessFileDescriptor, ProcessFileDescriptors, (EqualFunction) ProcessFileDescriptor__equals
+);
+
 typedef struct Process Process;
 typedef Process * ProcessPtr;
 
@@ -95,6 +156,12 @@ typedef struct Process {
     UserAddress entry_point;
     Tick last_tick;
     KString name;
+    Address heap_break;
+    Address heap_mapped_end;
+    Address allocation_next;
+    UserAllocations user_allocations;
+    ProcessFileDescriptors file_descriptors;
+    FileDescriptor next_file_descriptor;
 
     Optional(ParkedKernelContextPtr) parked_context;
 } Process;
@@ -108,5 +175,16 @@ FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 OptionalType(ProcessTable *, ProcessTablePtr);
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent);
+Result(ProcessMemoryCode) Process__record_user_allocation(
+    ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
+);
+Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
+Result(Address) Process__sbrk(ProcessPtr self, int64_t increment);
+Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virtual_address);
+Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self);
+Result(FileDescriptor) Process__allocate_file_descriptor(ProcessPtr self, ProcessIOHandle handle);
+Result(FileDescriptor) Process__set_file_descriptor(ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle);
+Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor fd);
+Result(ProcessIOHandle) Process__remove_file_descriptor(ProcessPtr self, FileDescriptor fd);
 
 #endif

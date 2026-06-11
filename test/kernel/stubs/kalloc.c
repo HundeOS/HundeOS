@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "../../../kernel/address.h"
 #include "../../../kernel/debug.h"
+#include "../../../kernel/kalloc.h"
 
 KernelAddress Kernel__alloc(size_t size)
 {
@@ -34,6 +35,12 @@ UserAddress Kernel__alloc_user(Address virtual_address,
     };
 }
 
+Result(KAllocCode) Kernel__free(Address virtual_address)
+{
+    free(void_ptr(virtual_address));
+    return Success(KAllocCode, KALLOC_OK);
+}
+
 void Kernel__memcopy(Address src, Address target, size_t size)
 {
     void * v_src = (void *)src;
@@ -55,4 +62,3 @@ void Kernel__memset(Address addr, int val, size_t size)
 {
     memset(void_ptr(addr), val, size);
 }
-

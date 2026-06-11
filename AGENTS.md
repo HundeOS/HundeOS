@@ -1,6 +1,6 @@
 ## Source code organisation
 ### kernel
-Non architecture specific kernel code. 
+Non architecture specific core kernel code. 
 Arch specific code in arch/ and linked in.
 
 Interfaces to architecture are defined in kernel/arch
@@ -27,6 +27,9 @@ may not have unit tests as it is difficult to test..
 Stubs are often linked in to tests to isolate code under test or provide
 implementations that are architecture specific in the codebase.
 
+No dependencies on architecture specific code should be made 
+in core kernel tests.
+
 ## Troubleshooting
 Ensure you have evidence for a theory regarding a problem before
 fixing. Ensure the user is informed of the theory and agrees to
@@ -44,3 +47,45 @@ KStrings should be used. These are bounded with length stored independently to t
 
 ## Arrays, HashMaps, etc
 There are macros to create typesafe arrays, HashMaps, etc. These should be used.
+
+There are Macros for iterating over fixedarrays etc. These should be used.
+
+## Pointers in kernel code
+Pointers should be typedefed to a name following the convention
+TypeNamePtr
+- e.g. typedef Process * ProcessPtr
+
+## Key kernel structures
+When possible kernel structures should contain the other structures they use,
+not pointers to structures. This is to make memory allocation/cleanup simpler
+
+# Fixing issues
+## propose a theory and evidence
+- Tell the user what you plan to do before making changes. If there is no
+evidence, the user will be asked to provide evidence.
+- Dont just leap in to fixing things without consulting the user first
+
+
+
+# Changing code
+## propose a change
+Tell the user what you plan to do before making changes.
+
+## Write tests
+Add unit tests for any new code in kernel. Some architecture specific code
+may not have unit tests as it is difficult to test..
+
+# Kernel architecture
+## We will be working towards a "millikernel" architecture
+This means that the kernel is neither monolithic or split up in to micro concerns.
+
+* IO will start in the kernel
+  * Certain subsystems may run in userspace
+* Memory management will start in the kernel
+  * Certain processes may be able to affect page tables in the future
+* Process management will live in the kernel
+* IPC primitives will start in the kernel (message passing)
+* Later on certain interrupts will be passed to specialised processes
+
+# Other
+- reload this file (AGENTS.md) every time there is user interaction

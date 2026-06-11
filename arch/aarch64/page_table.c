@@ -68,7 +68,7 @@ KernelAddress PageTable__from_virtual_address(Address virtual_addr)
     return Kernel__from_virtual_address(virtual_addr);
 }
 
-void PageTable__map(PageTable * self, UserAddress address, size_t size)
+void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address phys_start = align_down_4k(u_kpaddr(address));
@@ -104,7 +104,67 @@ void PageTable__map(PageTable * self, UserAddress address, size_t size)
 
         PageTable__map_4k_page(self, user_addr, phys_addr, perms);
     }
+    __asm__ __volatile__("dsb ishst; isb" ::: "memory");
     __d_println(DEBUG, "Mapped");
+}
+
+static KernelAddress PageTable__next_level_table_if_present(KernelAddress parent_level_table,
+                                                            uint64_t child_index)
+{
+    PageTablePtr parent_level_table_ptr = v_ptr(parent_level_table, PageTable);
+    uint64_t descriptor = parent_level_table_ptr->entries[child_index];
+
+    if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE))
+    {
+        return PageTable__from_physical_address(descriptor & MASK_PTE_NEXTADDR);
+    }
+
+    return NULL_KERNEL_ADDRESS;
+}
+
+static void PageTable__invalidate_page(Address virtual_address)
+{
+    uint64_t page = virtual_address >> 12;
+    __asm__ __volatile__(
+        "dsb ishst\n"
+        "tlbi vaae1is, %0\n"
+        "dsb ish\n"
+        "isb\n"
+        :
+        : "r"(page)
+        : "memory"
+    );
+}
+
+void PageTable__unmap(PageTablePtr self, Address virtual_address, size_t size)
+{
+    Address user_start = align_down_4k(virtual_address);
+    Address user_end = align_up_4k(user_start + size);
+    KernelAddress table = PageTable__from_virtual_address(addr(self));
+
+    for (Address user_addr = user_start; user_addr < user_end; user_addr += PAGE_SIZE)
+    {
+        KernelAddress l1_tbl = PageTable__next_level_table_if_present(table, L0_IDX(user_addr));
+        if (!l1_tbl.valid)
+        {
+            continue;
+        }
+
+        KernelAddress l2_tbl = PageTable__next_level_table_if_present(l1_tbl, L1_IDX(user_addr));
+        if (!l2_tbl.valid)
+        {
+            continue;
+        }
+
+        KernelAddress l3_tbl = PageTable__next_level_table_if_present(l2_tbl, L2_IDX(user_addr));
+        if (!l3_tbl.valid)
+        {
+            continue;
+        }
+
+        v_ptr(l3_tbl, PageTable)->entries[L3_IDX(user_addr)] = 0;
+        PageTable__invalidate_page(user_addr);
+    }
 }
 
 /**
@@ -133,7 +193,7 @@ KernelAddress PageTable__ensure_next_level_table(KernelAddress parent_level_tabl
     // Defensive: table has 512 entries at 4 KiB granule.
     // (Optional) if you have an assertion macro, enable it:
     // assert(child_index < 512);
-    PageTable * parent_level_table_ptr = v_ptr(parent_level_table, PageTable);
+    PageTablePtr parent_level_table_ptr = v_ptr(parent_level_table, PageTable);
 
     uint64_t descriptor = parent_level_table_ptr->entries[child_index];
 

@@ -13,3 +13,19 @@ ByteCount read(IOHandle handle, char *buf, size_t size)
 {
     return syscall(IO_CALL, IO_READ, handle, any(buf), size, 0);
 }
+
+ByteCount write(IOHandle handle, char *buf, size_t size)
+{
+    return syscall(IO_CALL, IO_WRITE, handle, any(buf), size, 0);
+}
+
+IOStatus close(IOHandle handle)
+{
+    IOStatus result = (IOStatus) syscall(IO_CALL, IO_CLOSE, handle, 0, 0, 0);
+    if (result > 0)
+    {
+        return IO_OK;
+    }
+
+    return result;
+}

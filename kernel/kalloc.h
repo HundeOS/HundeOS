@@ -6,12 +6,16 @@
 #include "types/result.h"
 #include "heap.h"
 
+#ifndef __KERNEL_KALLOC_CODE_DEFINED
+#define __KERNEL_KALLOC_CODE_DEFINED
 typedef uint64_t KAllocCode;
 ResultDef(KAllocCode);
+#endif
 
 typedef enum KAllocCodes {
     KALLOC_OK = 0,
     KALLOC_NOT_IMPLEMENTED = -1,
+    KALLOC_INVALID_ADDRESS = -2,
 } KAllocCodes;
 
 Address Kernel__alloc_kernel(size_t size);

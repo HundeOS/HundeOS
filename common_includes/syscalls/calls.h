@@ -8,6 +8,7 @@ typedef enum SystemCall
     PROC_EXIT = 0x00,
     IO_CALL = 0x80,
     SYSCALL_EXEC = 0x81,
+    MEM_CALL = 0x82,
     PING = 0xFF,
 } SystemCall;
 

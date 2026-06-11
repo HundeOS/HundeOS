@@ -3,6 +3,13 @@
     .section .boot.text, "ax"
     .align  7
     .global _start
+
+    .macro boot_debug_bl symbol
+    .ifdef __BOOT_DEBUG
+    bl      \symbol
+    .endif
+    .endm
+
 _start:
     // Get CPU ID first
     mrs     x0, mpidr_el1
@@ -16,7 +23,7 @@ _start:
 //============= BSP (CPU0) Boot Path =============
 bsp_boot:
     mov     w3, #'3'
-    bl      print_crumb_w3
+    boot_debug_bl print_crumb_w3
 
     // Mask during early bring-up
     msr     daifset, #0b1111
@@ -35,7 +42,7 @@ bsp_boot:
 //---------------- EL3 -> EL2 ----------------
 el3_enter:
     mov     w3, #'3'
-    bl      print_crumb_w3
+    boot_debug_bl print_crumb_w3
 
     // EL3 stack
     ldr     x1, =el3_stack_top
@@ -60,14 +67,14 @@ el3_enter:
 //---------------- enter / run at EL2 ----------------
 el2_enter:
     mov     w3, #'2'
-    bl      print_crumb_w3
+    boot_debug_bl print_crumb_w3
 
     ldr     x1, =el2_stack_top
     mov     sp, x1
 el2_entry_from_el3:
     // Make EL1 AArch64
     mov     w3, #'2'
-    bl      print_crumb_w3
+    boot_debug_bl print_crumb_w3
 
     mrs     x1, hcr_el2
     orr     x1, x1, #(1 << 31)      // HCR_EL2.RW=1
@@ -103,25 +110,25 @@ el2_entry_from_el3:
 //    orr     x1, x1, #(0b1111 << 6)  // keep masked
     msr     spsr_el2, x1
     mov     w3, #'a'
-    bl      print_crumb_w3
+    boot_debug_bl print_crumb_w3
     mov     w3, #'b'
-    bl      print_crumb
+    boot_debug_bl print_crumb
     mov     w3, #'c'
-    bl      print_crumb
+    boot_debug_bl print_crumb
     eret
 
 
 //---------------- if we already started at EL1 ----------------
 el1_entry_direct:
     mov     w3, #'1'
-    bl      print_crumb_w3
+    boot_debug_bl print_crumb_w3
     ldr     x1, =el1_stack_top
     mov     sp, x1
 
 //---------------- common EL1 entry ----------------
 el1_start:
     mov     w3, #'1'
-    bl      print_crumb_w3
+    boot_debug_bl print_crumb_w3
     mrs x0, ICC_SRE_EL1
     orr x0, x0, #1
     msr ICC_SRE_EL1, x0
@@ -149,9 +156,9 @@ el1_start:
 2:
     // Call C main
     mov     w3, #'b'
-    bl      print_crumb_w3
-    bl      print_crumb_w3
-    bl      print_crumb_w3
+    boot_debug_bl print_crumb_w3
+    boot_debug_bl print_crumb_w3
+    boot_debug_bl print_crumb_w3
 
     bl primary_booted
 

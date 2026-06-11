@@ -7,6 +7,7 @@
 #include "kernel_core.h"
 
 static KString not_implemented = KSTRING_NEW("Not implemented");
+static KString invalid_address = KSTRING_NEW("Invalid address");
 
 extern char __text_virt[];
 extern char __text_phys[];
@@ -86,12 +87,24 @@ UserAddress Kernel__alloc_user(Address virtual_address,
         .read = read,
         .write = write,
         .execute = execute,
+        .valid = true,
     };
     return allocated;
 }
 
 Result(KAllocCode) Kernel__free(Address virtual_address)
 {
+    KernelAddress address = Kernel__from_virtual_address(virtual_address);
+    if (!address.valid)
+    {
+        return Error(KAllocCode, invalid_address, KALLOC_INVALID_ADDRESS);
+    }
+
+    ResultMatch(HeapCode, Heap__free(heap_ptr(), address))
+        IsSuccess(_, return Success(KAllocCode, KALLOC_OK));
+        IsError(code, message, return Error(KAllocCode, message, code));
+    End
+
     return Error(KAllocCode, not_implemented, KALLOC_NOT_IMPLEMENTED);
 }
 
