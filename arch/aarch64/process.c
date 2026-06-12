@@ -55,7 +55,14 @@ static UserAddress Process__el1_trampoline()
     };
 }
 
-ProcessContextPtr ProcessContext__init(ProcessID pid, StackPtr stack, UserAddress entry_point, KernelAddress page_table)
+ProcessContextPtr ProcessContext__init(
+    ProcessID pid,
+    StackPtr stack,
+    UserAddress entry_point,
+    KernelAddress page_table,
+    uint64_t argc,
+    Address argv
+)
 {
     KernelAddress context_addr = Kernel__alloc(sizeof(ProcessContext));
     ProcessContextPtr context = v_ptr(context_addr, ProcessContext);
@@ -83,10 +90,8 @@ ProcessContextPtr ProcessContext__init(ProcessID pid, StackPtr stack, UserAddres
 
     context->elr = vaddr(trampoline);
 
-    uint64_t argc = 0;
-    char ** argv = NULL;
     context->x[0] = argc;
-    context->x[1] = (Anything) argv;
+    context->x[1] = argv;
     context->x[8] = vaddr(entry_point);
 
     return context;

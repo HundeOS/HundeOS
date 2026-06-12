@@ -1,10 +1,10 @@
 #include "../../user.h"
 
-extern int main(void);
+extern int main(int argc, char ** argv);
 
-void _start(void)
+void _start(int argc, char ** argv)
 {
-    int code = main();
+    int code = main(argc, argv);
     exit(code);
 
     for (;;)

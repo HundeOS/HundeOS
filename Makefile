@@ -72,10 +72,12 @@ USER_SYS_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_SYS_ASM_SOURCES))
 USER_LIB_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_LIB_SOURCES))
 USER_LIB_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_LIB_ASM_SOURCES))
 
-USER_PROGRAMS := $(patsubst ./user/%,%, $(shell find ./user -mindepth 1 -maxdepth 1 -type d ! -name "arch" ! -name "sys" ! -name "lib" -print))
+USER_PROGRAM_ROOT := ./user/programs
+USER_PROGRAMS := $(patsubst $(USER_PROGRAM_ROOT)/%,%, $(shell find $(USER_PROGRAM_ROOT) -mindepth 1 -maxdepth 1 -type d -print))
 
 USER_BINARY_BUILD_PATH := $(patsubst ./%,build/%,$(USER_PROGRAMS))
 USER_BINARIES := $(patsubst %,build/user/%.bin,$(USER_BINARY_BUILD_PATH))
+EMBEDDED_FS := build/kernel/embedded.fs
 
 .PRECIOUS: build/user/arch/%.o
 
@@ -96,7 +98,10 @@ build/kernel/%.o: %.s
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
-build/kernel/./kernel/bin/embedded.o: $(USER_BINARIES)
+$(EMBEDDED_FS): $(USER_BINARIES) tools/build_embedded_fs.py
+	python3 tools/build_embedded_fs.py $@ $(USER_BINARIES)
+
+build/kernel/./kernel/bin/embedded.o: $(EMBEDDED_FS)
 
 build/user/%.o: user/%.c
 	mkdir -p `dirname $@`
@@ -125,8 +130,8 @@ test_clean:
 	make clean -C test
 
 define make-user-prog
-$(1)_SRCS := $$(wildcard user/$(1)/*.c)
-$(1)_ASM_SRCS := $$(wildcard user/$(1)/*.s)
+$(1)_SRCS := $$(wildcard user/programs/$(1)/*.c)
+$(1)_ASM_SRCS := $$(wildcard user/programs/$(1)/*.s)
 $(1)_OBJS := $$(patsubst user/%.c,build/user/%.o,$$($(1)_SRCS))
 $(1)_ASM_OBJS := $$(patsubst user/%.s,build/user/%.o,$$($(1)_ASM_SRCS))
 

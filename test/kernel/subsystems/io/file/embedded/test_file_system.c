@@ -1,6 +1,7 @@
 #include "unity.h"
 
 #include "../../../../../../kernel/subsystems/io/io_subsystem.h"
+#include "../../../../../../kernel/syscall/io_handler.h"
 #include "../../../../../../kernel/process.h"
 #include "../../../../../../kernel/print.h"
 #include "../../../../../../kernel/scheduler/scheduler.h"
@@ -33,7 +34,7 @@ void tearDown(void)
 
 }
 
-static KString embedded = KSTRING_NEW("embedded");
+static KString embedded = KSTRING_NEW("ebin");
 static KString hello_world = KSTRING_NEW("hello_world");
 
 static const uint64_t HELLO_WORLD_SIZE = 66840;
@@ -79,7 +80,7 @@ void test_it_can_list_files_from_root(void)
 
 void test_it_can_list_files_to_subdir(void)
 {
-    Result(FilesystemNodes) nodes = root->file_io.list_nodes(root_state, NULL, kstring("/embedded/"));
+    Result(FilesystemNodes) nodes = root->file_io.list_nodes(root_state, NULL, kstring("/ebin/"));
 
     ResultMatch(FilesystemNodes, nodes)
         IsError(code, message,
@@ -97,7 +98,7 @@ void test_it_can_list_files_to_subdir(void)
 void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
 {
     Result(IOHandle) handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), kstring("/embedded/hello_world"), 0);
+        IOSubsystem__open(kernel->io_subsystem, open_context(), kstring("/ebin/hello_world"), 0);
 
     ResultMatch(IOHandle, handle)
         IsError(code, message,
@@ -121,5 +122,49 @@ void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
                 })
             End
         });
+    End
+}
+
+void test_io_list_dir_lists_root_mounts(void)
+{
+    DirectoryEntry entries[4];
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/", (Anything) entries, 4, 0
+    ))
+        IsSuccess(count,
+        {
+            TEST_ASSERT_EQUAL_INT(1, count);
+            TEST_ASSERT_EQUAL_STRING("ebin", entries[0].name);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_io_list_dir_lists_ebin_files(void)
+{
+    DirectoryEntry entries[4];
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/ebin", (Anything) entries, 4, 0
+    ))
+        IsSuccess(count,
+        {
+            TEST_ASSERT_EQUAL_INT(3, count);
+            TEST_ASSERT_EQUAL_STRING("hello_world", entries[0].name);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_io_list_dir_invalid_path_returns_error(void)
+{
+    DirectoryEntry entries[4];
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/missing", (Anything) entries, 4, 0
+    ))
+        IsSuccess(count, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code))
     End
 }

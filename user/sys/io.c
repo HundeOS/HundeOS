@@ -29,3 +29,8 @@ IOStatus close(IOHandle handle)
 
     return result;
 }
+
+DirectoryEntryCount list_dir(const char * path, DirectoryEntryPtr entries, size_t max_entries)
+{
+    return syscall(IO_CALL, IO_LIST_DIR, any(path), any(entries), max_entries, 0);
+}

@@ -3,7 +3,7 @@
 #include "filesystem.h"
 #include "embedded/embedded.h"
 
-KString embedded = KSTRING_NEW("embedded");
+KString embedded = KSTRING_NEW("ebin");
 
 FilesystemPtr Filesystem__build_root_and_mounts()
 {

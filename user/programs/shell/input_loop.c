@@ -1,4 +1,4 @@
-#include "../user.h"
+#include "../../user.h"
 #include "interpreter.h"
 
 int input_loop()
@@ -25,7 +25,7 @@ int input_loop()
                 print("Command failed\n");
                 break;
             case COMMAND_SUCCESS:
-                print("Command completed successfully\n");
+                // print("Command completed successfully\n");
                 break;
         }
     }

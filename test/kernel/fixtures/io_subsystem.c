@@ -9,7 +9,7 @@ FilesystemPtr init_root_filesystem_with_embedded_binaries()
     FilesystemPtr embedded_binaries = Filesystem__heap_new(kstring("embed"), EmbeddedFilesystemIO__new());
     EmbeddedFilesystemIOStatePtr embedded_binaries_state = EmbeddedFilesystemIOState__heap_new(embedded_binaries);
 
-    Filesystem__mount(filesystem, kstring("embedded"), embedded_binaries);
+    Filesystem__mount(filesystem, kstring("ebin"), embedded_binaries);
 
     return filesystem;
 }

@@ -53,11 +53,15 @@ void test_setup_tracks_static_user_allocations(void)
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
-            TEST_ASSERT_EQUAL(2, process->user_allocations.len);
-            Optional(UserAllocation) elf_allocation = UserAllocations__at(&process->user_allocations, 0);
-            Optional(UserAllocation) stack_allocation = UserAllocations__at(&process->user_allocations, 1);
+            TEST_ASSERT_EQUAL(3, process->user_allocations.len);
+            Optional(UserAllocation) args_allocation = UserAllocations__at(&process->user_allocations, 0);
+            Optional(UserAllocation) elf_allocation = UserAllocations__at(&process->user_allocations, 1);
+            Optional(UserAllocation) stack_allocation = UserAllocations__at(&process->user_allocations, 2);
+            UserAllocation args = UnwrapPanic(UserAllocation, args_allocation);
             UserAllocation elf = UnwrapPanic(UserAllocation, elf_allocation);
             UserAllocation stack = UnwrapPanic(UserAllocation, stack_allocation);
+            TEST_ASSERT_EQUAL(USER_ALLOCATION_DYNAMIC, args.type);
+            TEST_ASSERT_EQUAL(PAGE_SIZE, args.size);
             TEST_ASSERT_EQUAL(USER_ALLOCATION_ELF, elf.type);
             TEST_ASSERT_EQUAL(USER_ALLOCATION_STACK, stack.type);
         })
@@ -75,15 +79,15 @@ void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
                 IsError(code, message, TEST_FAIL())
                 IsSuccess(address,
                 {
-                    TEST_ASSERT_EQUAL(USER_ALLOC_BASE, address.virtual_addr);
+                    TEST_ASSERT_EQUAL(USER_ALLOC_BASE + PAGE_SIZE, address.virtual_addr);
                     UserAllocation allocation = UnwrapPanic(
-                        UserAllocation, UserAllocations__at(&process->user_allocations, 2)
+                        UserAllocation, UserAllocations__at(&process->user_allocations, 3)
                     );
-                    TEST_ASSERT_EQUAL(3, process->user_allocations.len);
+                    TEST_ASSERT_EQUAL(4, process->user_allocations.len);
                     TEST_ASSERT_EQUAL(USER_ALLOCATION_DYNAMIC, allocation.type);
                     TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
                     TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
-                        USER_ALLOC_BASE,
+                        USER_ALLOC_BASE + PAGE_SIZE,
                         true,
                         true,
                         false,
@@ -109,9 +113,9 @@ void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
                 IsError(code, message, TEST_FAIL())
             End
 
-            TEST_ASSERT_EQUAL(2, process->user_allocations.len);
+            TEST_ASSERT_EQUAL(3, process->user_allocations.len);
             TEST_ASSERT_FALSE(check_address_mapped(v_ptr(process->page_table, PageTable),
-                USER_ALLOC_BASE,
+                USER_ALLOC_BASE + PAGE_SIZE,
                 true,
                 true,
                 false,
@@ -185,10 +189,10 @@ void test_process_sbrk_maps_pages_at_heap_break(void)
 
             TEST_ASSERT_EQUAL(USER_HEAP_BASE + 123, process->heap_break);
             TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, process->heap_mapped_end);
-            TEST_ASSERT_EQUAL(3, process->user_allocations.len);
+            TEST_ASSERT_EQUAL(4, process->user_allocations.len);
 
             UserAllocation allocation = UnwrapPanic(
-                UserAllocation, UserAllocations__at(&process->user_allocations, 2)
+                UserAllocation, UserAllocations__at(&process->user_allocations, 3)
             );
             TEST_ASSERT_EQUAL(USER_ALLOCATION_HEAP, allocation.type);
             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
@@ -218,7 +222,7 @@ void test_process_sbrk_growth_inside_mapped_page_does_not_map_more_pages(void)
 
             TEST_ASSERT_EQUAL(USER_HEAP_BASE + 223, process->heap_break);
             TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, process->heap_mapped_end);
-            TEST_ASSERT_EQUAL(3, process->user_allocations.len);
+            TEST_ASSERT_EQUAL(4, process->user_allocations.len);
         })
     End
 }
@@ -234,10 +238,10 @@ void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
             Process__sbrk(process, PAGE_SIZE);
 
             TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE * 2, process->heap_mapped_end);
-            TEST_ASSERT_EQUAL(4, process->user_allocations.len);
+            TEST_ASSERT_EQUAL(5, process->user_allocations.len);
 
             UserAllocation allocation = UnwrapPanic(
-                UserAllocation, UserAllocations__at(&process->user_allocations, 3)
+                UserAllocation, UserAllocations__at(&process->user_allocations, 4)
             );
             TEST_ASSERT_EQUAL(USER_ALLOCATION_HEAP, allocation.type);
             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);

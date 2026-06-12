@@ -7,6 +7,7 @@ typedef enum IOOperation
     IO_CLOSE,
     IO_READ,
     IO_WRITE,
+    IO_LIST_DIR,
 }
 IOOperation;
 
@@ -38,6 +39,19 @@ IOFlags;
 
 typedef int64_t IOHandle;
 typedef int64_t ByteCount;
+typedef int64_t DirectoryEntryCount;
 typedef uint64_t Flags;
+
+#define IO_DIRENT_NAME_MAX 256
+
+typedef struct DirectoryEntry
+{
+    uint64_t attributes;
+    uint64_t name_len;
+    char name[IO_DIRENT_NAME_MAX];
+}
+DirectoryEntry;
+
+typedef DirectoryEntry * DirectoryEntryPtr;
 
 #endif

@@ -128,6 +128,18 @@ Result(SystemCallResult) IO__handler(
         End
     }
 
+    if (io_operation == IO_LIST_DIR)
+    {
+        KString path = kstring((const char *) arg2);
+        DirectoryEntryPtr entries = (DirectoryEntryPtr) arg3;
+        size_t max_entries = (size_t) arg4;
+
+        ResultMatch(DirectoryEntryCount, IOSubsystem__list_dir(io_subsystem, path, entries, max_entries))
+            IsSuccess(count, return Success(SystemCallResult, count));
+            IsError(code, message, return Error(SystemCallResult, message, code));
+        End
+    }
+
     if (io_operation == IO_WRITE)
     {
         FileDescriptor fd = (FileDescriptor) arg2;

@@ -8,6 +8,7 @@
 #include "stack.h"
 #include "types/comparison.h"
 #include "types/fixed_array.h"
+#include "types/kstring_additional_types.h"
 #include "types/linked_list.h"
 #include "syscalls/io.h"
 
@@ -166,8 +167,14 @@ typedef struct Process {
     Optional(ParkedKernelContextPtr) parked_context;
 } Process;
 
-ProcessPtr Process__new(
-    KString name, KernelAddress page_table, UserAddress entry, Stack stack, Optional(ProcessPtr) parent
+Result(ProcessPtr) Process__new(
+    KString name,
+    KernelAddress page_table,
+    UserAddress entry,
+    Stack stack,
+    Optional(ProcessPtr) parent,
+    KString arg0,
+    Optional(KString) arg1
 );
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
@@ -175,6 +182,7 @@ FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 OptionalType(ProcessTable *, ProcessTablePtr);
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent);
+Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, Optional(KString) arg1);
 Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 );

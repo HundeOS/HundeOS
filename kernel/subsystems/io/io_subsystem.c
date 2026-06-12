@@ -3,6 +3,7 @@
 #include "kernel_core.h"
 #include "process.h"
 #include "kalloc.h"
+#include "file/file_io.h"
 #include "../../types/result.h"
 #include "../../types/fixed_array.h"
 #include "../../types/optional.h"
@@ -119,6 +120,62 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KS
     End
 
     return error;
+}
+
+static DirectoryEntry DirectoryEntry__from_node(FilesystemNodePtr node)
+{
+    DirectoryEntry entry = (DirectoryEntry) {
+        .attributes = node->attribs,
+        .name_len = node->name.len,
+    };
+
+    size_t max_name = IO_DIRENT_NAME_MAX - 1;
+    size_t copy_len = node->name.len < max_name ? node->name.len : max_name;
+    for (size_t i = 0; i < copy_len; i++)
+    {
+        entry.name[i] = node->name.data[i];
+    }
+    entry.name[copy_len] = '\0';
+    entry.name_len = copy_len;
+
+    return entry;
+}
+
+Result(DirectoryEntryCount) IOSubsystem__list_dir(
+    IOSubsystemPtr self, KString path, DirectoryEntryPtr entries, size_t max_entries
+)
+{
+    KString root_path = KSTRING_NEW("/");
+    FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
+        IsSome(match,
+        {
+            DeviceRegistrationPtr registration = match.value;
+            if (!KString__equals(&registration->path, &root_path))
+            {
+                return Error(DirectoryEntryCount, kstring("Directory listing not supported"), IO_OPERATION_NOT_SUPPORTED);
+            }
+
+            FileIOPtr file_io = (FileIOPtr) registration->device;
+            ResultMatch(FilesystemNodes, file_io->list_nodes(registration->state, NULL, path))
+                IsSuccess(nodes,
+                {
+                    DirectoryEntryCount count = 0;
+                    FAIterate(FilesystemNodes, nodes, index, node)
+                        if ((size_t) count >= max_entries)
+                        {
+                            return Success(DirectoryEntryCount, count);
+                        }
+                        entries[count] = DirectoryEntry__from_node(node);
+                        count++;
+                    End
+                    return Success(DirectoryEntryCount, count);
+                })
+                IsError(code, message, return Error(DirectoryEntryCount, message, code))
+            End
+        });
+    End
+
+    return Error(DirectoryEntryCount, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
 }
 
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)

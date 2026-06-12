@@ -1,7 +1,7 @@
-#include "../user.h"
+#include "../../user.h"
 #include <stdbool.h>
 
-#include "../sys/wait.h"
+#include "../../sys/wait.h"
 
 int main(void) {
     for (int i = 0; i < 10; i++)

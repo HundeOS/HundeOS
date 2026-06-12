@@ -3,9 +3,11 @@
 #include "bin/elf.h"
 #include "arch/page_table.h"
 #include "arch/process.h"
+#include "arch/process_context.h"
 #include "types/kstring.h"
 #include "types/result.h"
 #include "types/optional.h"
+#include "../common_includes/syscalls/spawn.h"
 
 #include "kalloc.h"
 #include "stack.h"
@@ -24,6 +26,7 @@ static KString user_allocation_full = KSTRING_NEW("Too many user allocations");
 static KString invalid_heap_break = KSTRING_NEW("Invalid heap break");
 static KString file_descriptor_full = KSTRING_NEW("Too many file descriptors");
 static KString file_descriptor_not_found = KSTRING_NEW("File descriptor not found");
+static KString argument_too_long = KSTRING_NEW("Argument too long");
 
 static size_t Process__page_aligned_size(size_t size)
 {
@@ -77,8 +80,73 @@ static FileDescriptor Process__inherit_next_file_descriptor(Optional(ProcessPtr)
     return 3;
 }
 
-ProcessPtr Process__new(
-    KString name, KernelAddress page_table, UserAddress entry, Stack stack, Optional(ProcessPtr) parent
+static size_t Process__copy_arg(char * target, KStringPtr arg)
+{
+    for (size_t i = 0; i < arg->len; i++)
+    {
+        target[i] = arg->data[i];
+    }
+    target[arg->len] = '\0';
+    return arg->len + 1;
+}
+
+static Result(Address) Process__setup_args(
+    ProcessPtr self,
+    KString arg0,
+    Optional(KString) arg1,
+    uint64_t * argc
+)
+{
+    ResultMatch(UserAddress, Process__alloc_user_pages(self, PAGE_SIZE))
+        IsSuccess(args_page,
+        {
+            Address user_base = args_page.virtual_addr;
+            Address kernel_base = args_page.kernel_addr.virtual_addr;
+            Address * argv = ptr(kernel_base, Address);
+
+            *argc = 1;
+            Match(KString, arg1)
+                IsSome(_, *argc = 2)
+            End
+
+            size_t cursor = sizeof(Address) * (*argc + 1);
+            if (cursor + arg0.len + 1 > PAGE_SIZE)
+            {
+                return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
+            }
+
+            argv[0] = user_base + cursor;
+            cursor += Process__copy_arg(ptr(kernel_base + cursor, char), &arg0);
+
+            Match(KString, arg1)
+                IsSome(arg,
+                {
+                    if (cursor + arg.len + 1 > PAGE_SIZE)
+                    {
+                        return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
+                    }
+                    argv[1] = user_base + cursor;
+                    cursor += Process__copy_arg(ptr(kernel_base + cursor, char), &arg);
+                })
+            End
+
+            argv[*argc] = 0;
+            return Success(Address, user_base);
+        })
+        IsError(code, message, return Error(Address, message, code))
+    End
+
+    return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
+}
+
+Result(ProcessPtr) Process__new(
+    KString name,
+    KernelAddress page_table,
+    UserAddress entry,
+    Stack stack,
+    Optional(ProcessPtr) parent,
+    KString arg0,
+    Optional(KString) arg1
 )
 {
     ProcessID pid;
@@ -92,7 +160,6 @@ ProcessPtr Process__new(
     proc->state = PROC_STATE_NEW;
     proc->pid = pid;
     proc->stack = stack;
-    proc->context = ProcessContext__init(proc->pid, &proc->stack, entry, page_table);
     proc->last_tick = 0;
     proc->name = name;
     proc->parked_context = None(ParkedKernelContextPtr);
@@ -103,10 +170,26 @@ ProcessPtr Process__new(
     proc->user_allocations = UserAllocations__new();
     proc->file_descriptors = Process__inherit_file_descriptors(parent);
     proc->next_file_descriptor = Process__inherit_next_file_descriptor(parent);
-    return proc;
+
+    uint64_t argc;
+    ResultMatch(Address, Process__setup_args(proc, arg0, arg1, &argc))
+        IsSuccess(argv,
+        {
+            proc->context = ProcessContext__init(proc->pid, &proc->stack, entry, page_table, argc, argv);
+            return Success(ProcessPtr, proc);
+        })
+        IsError(code, message, return Error(ProcessPtr, message, code))
+    End
+
+    return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG);
 }
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
+{
+    return Process__setup_with_args(binary, parent, None(KString));
+}
+
+Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, Optional(KString) arg1)
 {
     __d_println(PROCESS, "Process__spawn_from_elf");
     ExpandedSegmentArray expanded_elf = Elf__map(binary);
@@ -137,14 +220,21 @@ Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
         });
         IsSome(entry_point,
         {
-            ProcessPtr proc = Process__new(binary.name, page_table, entry_point.address, stack, parent);
-            FAIterate(ExpandedSegmentArray, expanded_elf, segment_index, segment)
-                Process__record_user_allocation(proc, segment.address, segment.size, USER_ALLOCATION_ELF);
+            ResultMatch(ProcessPtr, Process__new(binary.name, page_table, entry_point.address, stack, parent, binary.name, arg1))
+                IsSuccess(proc,
+                {
+                    FAIterate(ExpandedSegmentArray, expanded_elf, segment_index, segment)
+                        Process__record_user_allocation(proc, segment.address, segment.size, USER_ALLOCATION_ELF);
+                    End
+                    Process__record_user_allocation(proc, stack.base, STACK_SIZE, USER_ALLOCATION_STACK);
+                    return Success(ProcessPtr, proc);
+                })
+                IsError(code, message, return Error(ProcessPtr, message, code))
             End
-            Process__record_user_allocation(proc, stack.base, STACK_SIZE, USER_ALLOCATION_STACK);
-            return Success(ProcessPtr, proc);
         })
     End
+
+    return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
 }
 
 Result(ProcessMemoryCode) Process__record_user_allocation(

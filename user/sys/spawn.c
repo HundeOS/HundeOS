@@ -5,6 +5,6 @@
 
 SpawnResult spawn(SpawnMode mode, const char* path, const char* arg0, ...)
 {
-    SpawnResult result = syscall(SYSCALL_EXEC, (Anything) path, mode, 0, 0, 0);
+    SpawnResult result = syscall(SYSCALL_EXEC, (Anything) path, mode, (Anything) arg0, 0, 0);
     return result;
 }

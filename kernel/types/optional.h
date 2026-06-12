@@ -94,6 +94,7 @@ void Kernel__panic(const char * message, ProcessContext * context);
     if (optional.present) \
     { \
         value_type val_name = optional.some.val; \
+        (void) val_name; \
         block; \
     } \
 

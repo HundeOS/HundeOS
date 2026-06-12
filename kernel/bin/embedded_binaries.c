@@ -1,6 +1,6 @@
 #include "../defs.h"
 #include "elf.h"
-#include "utils.h"
+#include "embedded_fs.h"
 #include "embedded_binaries.h"
 
 #include <stddef.h>
@@ -8,25 +8,23 @@
 #include "../debug.h"
 #include "types/kstring_additional_types.h"
 
-__extern_binary(_bin_hello_world);
-__extern_binary(_bin_idle);
-__extern_binary(_bin_shell);
+extern const char __embedded_binaries_start[];
+extern const char __embedded_binaries_end[];
 
-static const Elf embedded_binaries[] = {
-    EMBED("hello_world", _bin_hello_world),
-    EMBED("idle", _bin_idle),
-    EMBED("shell", _bin_shell),
-};
+static EmbeddedFs EmbeddedElf__filesystem()
+{
+    return EmbeddedFs__new((Address) __embedded_binaries_start, (Address) __embedded_binaries_end);
+}
 
 Optional(Elf) EmbeddedElf__load(KString name)
 {
-    for (int i = 0; i < sizeof(embedded_binaries) / sizeof(Elf); i++)
-    {
-        if (KString__equals(&embedded_binaries[i].name, &name))
+    EmbeddedFs filesystem = EmbeddedElf__filesystem();
+    Match(EmbeddedFsFile, EmbeddedFs__find(&filesystem, name))
+        IsSome(file,
         {
-            return Some(Elf, embedded_binaries[i]);
-        }
-    }
+            return Some(Elf, Elf__new(file.start, file.end, file.name));
+        })
+    End
 
     return None(Elf);
 }
@@ -34,13 +32,7 @@ Optional(Elf) EmbeddedElf__load(KString name)
 
 KStringArray EmbeddedElf__list()
 {
-    KStringArray result = KStringArray__new();
-    for (int i = 0; i < sizeof(embedded_binaries) / sizeof(Elf); i++)
-    {
-        KStringArray__push(&result, embedded_binaries[i].name);
-    }
-
-    return result;
+    EmbeddedFs filesystem = EmbeddedElf__filesystem();
+    return EmbeddedFs__list(&filesystem);
 }
-
 

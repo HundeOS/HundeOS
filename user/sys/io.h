@@ -14,5 +14,6 @@ IOHandle open(const char * path, Flags flags);
 ByteCount read(IOHandle handle, char * buf, size_t size);
 ByteCount write(IOHandle handle, char * buf, size_t size);
 IOStatus close(IOHandle handle);
+DirectoryEntryCount list_dir(const char * path, DirectoryEntryPtr entries, size_t max_entries);
 
 #endif

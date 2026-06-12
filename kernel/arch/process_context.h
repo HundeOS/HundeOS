@@ -14,6 +14,8 @@ typedef ProcessContext * ProcessContextPtr;
 ProcessContextPtr ProcessContext__init(ProcessID pid,
                                        StackPtr stack,
                                        UserAddress entry_point,
-                                       KernelAddress page_table);
+                                       KernelAddress page_table,
+                                       uint64_t argc,
+                                       Address argv);
 
 #endif

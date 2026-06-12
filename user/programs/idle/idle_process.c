@@ -1,6 +1,6 @@
 #include <stdbool.h>
-#include "../sys/wait.h"
-#include "../user.h"
+#include "../../sys/wait.h"
+#include "../../user.h"
 
 int main(void)
 {

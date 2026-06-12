@@ -50,6 +50,7 @@ typedef IOSubsystem * IOSubsystemPtr;
 
 ResultDef(IOSubsystem);
 ResultDef(IOSubsystemPtr);
+ResultDef(DirectoryEntryCount);
 
 Result(DeviceHandle) IOSubsystem__register_device(IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state);
 
@@ -57,6 +58,9 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KS
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context);
+Result(DirectoryEntryCount) IOSubsystem__list_dir(
+    IOSubsystemPtr self, KString path, DirectoryEntryPtr entries, size_t max_entries
+);
 
 void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context);
 void IOSubsystem__message_received(KernelListenerPtr listener, MessagePtr message);

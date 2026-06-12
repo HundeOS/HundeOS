@@ -59,6 +59,9 @@ TypeNamePtr
 When possible kernel structures should contain the other structures they use,
 not pointers to structures. This is to make memory allocation/cleanup simpler
 
+## Critical sections
+In kernel code mutexes should be used along with CriticalSection macros
+
 # Fixing issues
 ## propose a theory and evidence
 - Tell the user what you plan to do before making changes. If there is no

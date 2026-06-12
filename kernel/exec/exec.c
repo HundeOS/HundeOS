@@ -12,11 +12,11 @@ FixedArrayBodyDefine(ElfReadBuffer);
 
 static KString unreachable_code = KSTRING_NEW("unreachable code");
 
-static Result(ProcessPtr) Exec__launch(OriginatingContext context, Elf elf, bool wait)
+static Result(ProcessPtr) Exec__launch(OriginatingContext context, Elf elf, bool wait, Optional(KString) arg0)
 {
     __d_printf(EXEC, "Launching elf %s\n", cstr(elf.name));
     KernelPtr kernel = context.kernel;
-    Result(ProcessPtr) proc = Process__setup(elf, context.process);
+    Result(ProcessPtr) proc = Process__setup_with_args(elf, context.process, arg0);
     ResultMatch(ProcessPtr, proc)
         IsSuccess(process,
         {
@@ -79,7 +79,7 @@ static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, K
     return Error(Elf, unreachable_code, SPAWN_FAILED);
 }
 
-Result(ProcessPtr) Exec__exec(OriginatingContext context, KString path, bool wait)
+Result(ProcessPtr) Exec__exec(OriginatingContext context, KString path, bool wait, Optional(KString) arg0)
 {
     __d_printf(EXEC, "Executing elf %s\n", cstr(path));
 
@@ -96,7 +96,7 @@ Result(ProcessPtr) Exec__exec(OriginatingContext context, KString path, bool wai
             ResultMatch(Elf, Exec__read_elf(context, handle, path))
                 IsSuccess(elf,
                 {
-                    return Exec__launch(context, elf, wait);
+                    return Exec__launch(context, elf, wait, arg0);
                 })
                 IsError(code, message,
                 {

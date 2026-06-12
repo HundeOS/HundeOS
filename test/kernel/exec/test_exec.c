@@ -12,7 +12,7 @@
 static KernelPtr kernel = NULL;
 static ProcessPtr parent = NULL;
 
-static KString exec_path = KSTRING_NEW("/embedded/hello_world");
+static KString exec_path = KSTRING_NEW("/ebin/hello_world");
 
 static OriginatingContext context;
 
@@ -44,7 +44,7 @@ void test_exec_spawns_process_and_puts_parent_in_wait()
 {
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
     TEST_ASSERT_EQUAL(1, Scheduler__process_count(kernel->scheduler));
-    ResultMatch(ProcessPtr, Exec__exec(context, exec_path, true))
+    ResultMatch(ProcessPtr, Exec__exec(context, exec_path, true, None(KString)))
         IsError(code, message,
         {
             TEST_FAIL();
@@ -65,7 +65,7 @@ void test_exec_spawns_process_and_sets_up_a_defferred_return()
     TEST_ASSERT_EQUAL(1, Scheduler__process_count(kernel->scheduler));
     ReturnCode return_code = 55;
 
-    ResultMatch(ProcessPtr, Exec__exec(context, exec_path, true))
+    ResultMatch(ProcessPtr, Exec__exec(context, exec_path, true, None(KString)))
         IsError(code, message,
         {
             TEST_FAIL();
