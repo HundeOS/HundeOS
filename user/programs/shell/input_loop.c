@@ -9,8 +9,11 @@ int input_loop()
         print("\n> ");
         ByteCount read = console_read_line(buf, true, 1024);
         print("\n");
-        print(buf);
-        print("\n");
+        if (read < 0)
+        {
+            printf("read error %i\n", (int) read);
+            continue;
+        }
 
         ShellResult result = interpret(buf);
         switch (result)
@@ -24,6 +27,7 @@ int input_loop()
             case COMMAND_FAILED:
                 print("Command failed\n");
                 break;
+            case COMMAND_EXECUTED:
             case COMMAND_SUCCESS:
                 // print("Command completed successfully\n");
                 break;

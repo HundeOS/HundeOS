@@ -7,8 +7,12 @@
 #define STRIP_BUFFER_SIZE 2048
 #define COMMAND_PATH_BUFFER_SIZE 2048
 #define COMMAND_ARG_BUFFER_SIZE 2048
+#define COMMAND_MAX_ARGS 3
+#define COMMAND_ARG_STORAGE_SLOTS (COMMAND_MAX_ARGS + 1)
 static const char * CMD_EXIT = "exit";
 static const char * COMMAND_SEARCH_PATH = "/ebin";
+static char command_buffer[STRIP_BUFFER_SIZE];
+static char argument_buffers[COMMAND_ARG_STORAGE_SLOTS][COMMAND_ARG_BUFFER_SIZE];
 
 static bool whitespace(const char* input)
 {
@@ -23,10 +27,18 @@ static void clear_buffer(char* buffer, size_t size)
     }
 }
 
-static void parse_command(const char* input, char* command, size_t command_size, char* arg0, size_t arg0_size)
+static size_t parse_command(
+    const char* input,
+    char* command,
+    size_t command_size,
+    char args[COMMAND_ARG_STORAGE_SLOTS][COMMAND_ARG_BUFFER_SIZE]
+)
 {
     clear_buffer(command, command_size);
-    clear_buffer(arg0, arg0_size);
+    for (size_t i = 0; i < COMMAND_ARG_STORAGE_SLOTS; i++)
+    {
+        clear_buffer(args[i], COMMAND_ARG_BUFFER_SIZE);
+    }
 
     while (whitespace(input) && *input != '\0')
     {
@@ -44,11 +56,34 @@ static void parse_command(const char* input, char* command, size_t command_size,
         input++;
     }
 
-    size_t arg_pos = 0;
-    while (!whitespace(input) && arg_pos < arg0_size - 1)
+    size_t arg_count = 0;
+    while (*input != '\0' && arg_count < COMMAND_MAX_ARGS)
     {
-        arg0[arg_pos++] = *input++;
+        while (whitespace(input) && *input != '\0')
+        {
+            input++;
+        }
+
+        if (*input == '\0')
+        {
+            break;
+        }
+
+        size_t arg_pos = 0;
+        while (!whitespace(input) && arg_pos < COMMAND_ARG_BUFFER_SIZE - 1)
+        {
+            args[arg_count][arg_pos++] = *input++;
+        }
+
+        arg_count++;
+
+        while (!whitespace(input) && *input != '\0')
+        {
+            input++;
+        }
     }
+
+    return arg_count;
 }
 
 static size_t strlen(const char* str)
@@ -114,7 +149,7 @@ ShellResult execute(const char* cmd)
     command_path(cmd, path, COMMAND_PATH_BUFFER_SIZE);
 
     // print("Executing:\n");
-    SpawnResult result = spawn(P_WAIT, path, NULL);
+    SpawnResult result = spawn(P_WAIT, path, NULL, NULL, NULL);
     if (result != SPAWN_SUCCESS)
     {
         printf("result = %i\n", result);
@@ -133,13 +168,17 @@ ShellResult execute(const char* cmd)
     return COMMAND_FAILED;
 }
 
-ShellResult execute_with_arg(const char* cmd, const char* arg0)
+ShellResult execute_with_args(const char* cmd, char args[COMMAND_ARG_STORAGE_SLOTS][COMMAND_ARG_BUFFER_SIZE], size_t arg_count)
 {
     char path[COMMAND_PATH_BUFFER_SIZE];
     command_path(cmd, path, COMMAND_PATH_BUFFER_SIZE);
 
+    const char * arg0 = arg_count > 0 ? args[0] : NULL;
+    const char * arg1 = arg_count > 1 ? args[1] : NULL;
+    const char * arg2 = arg_count > 2 ? args[2] : NULL;
+
     // print("Executing:\n");
-    SpawnResult result = spawn(P_WAIT, path, arg0);
+    SpawnResult result = spawn(P_WAIT, path, arg0, arg1, arg2);
     if (result != 0)
     {
         printf("result = %i\n", result);
@@ -160,18 +199,17 @@ ShellResult execute_with_arg(const char* cmd, const char* arg0)
 
 ShellResult interpret(const char* input)
 {
-    char command[STRIP_BUFFER_SIZE];
-    char arg0[COMMAND_ARG_BUFFER_SIZE];
+    char * command = command_buffer;
 
-    parse_command(input, command, STRIP_BUFFER_SIZE, arg0, COMMAND_ARG_BUFFER_SIZE);
+    size_t arg_count = parse_command(input, command, STRIP_BUFFER_SIZE, argument_buffers);
     if (matches(command, CMD_EXIT))
     {
         exit(0);
         return EXIT;
     }
-    if (arg0[0] != '\0')
+    if (arg_count > 0)
     {
-        return execute_with_arg(command, arg0);
+        return execute_with_args(command, argument_buffers, arg_count);
     }
     return execute(command);
 }

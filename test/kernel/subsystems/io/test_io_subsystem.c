@@ -300,6 +300,30 @@ void test_io_open()
 
 }
 
+void test_io_open_records_external_handle_when_process_already_has_handles()
+{
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
+        IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), path, FLAGS))
+        IsSuccess(result, TEST_ASSERT_EQUAL_INT(EXPECTED_OPEN_HANDLE, result));
+        IsError(code, message, TEST_FAIL());
+    End
+
+    MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&io_subsystem->process_handles, PID));
+        IsNone(TEST_FAIL());
+        IsSome(handles,
+        {
+            TEST_ASSERT_EQUAL_INT(2, PIDHandles__len(handles));
+            TEST_ASSERT_EQUAL(EXPECTED_OPEN_HANDLE, handles->data[0]);
+            TEST_ASSERT_EQUAL(EXPECTED_OPEN_HANDLE, handles->data[1]);
+            TEST_ASSERT_NOT_EQUAL(INTERNAL_HANDLE, handles->data[1]);
+        })
+    End
+}
+
 void test_io_open_and_write()
 {
     IOHandle handle = -1;
@@ -348,6 +372,23 @@ void test_console_write_outputs_to_basic_io()
     End
 
     TEST_ASSERT_EQUAL_STRING(data, BasicIO__output());
+}
+
+void test_mkdir_and_rm_on_console_return_unsupported()
+{
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, console_path, Console__heap_new(), (IOStatePtr) ConsoleState__instance()))
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(IOStatus, IOSubsystem__mkdir(io_subsystem, console_path))
+        IsSuccess(status, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code))
+    End
+
+    ResultMatch(IOStatus, IOSubsystem__remove(io_subsystem, console_path, 0))
+        IsSuccess(status, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code))
+    End
 }
 
 void test_io_open_and_read_when_no_data_ready_parks_the_process()

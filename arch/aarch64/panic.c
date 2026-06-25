@@ -2,6 +2,7 @@
 #include "../../kernel/debug.h"
 #include "asm_helpers.h"
 #include "exception.h"
+#include "exception_decode.h"
 #include "process.h"
 
 void Kernel__halt() {
@@ -15,8 +16,22 @@ void Kernel__dump_state(ProcessContext * ctx) {
 
     uint32_t ec = (esr >> 26) & 0x3F;
 
-    __d_printf(FAULT, "Exception Class: %p\n", ec);
-    __d_printf(FAULT, "ESR: %p\n", read_esr_el1());
+    __d_printf(FAULT, "Fault: %s\n", AArch64Exception__class_name(ec));
+    __d_printf(FAULT, "Exception Class (EC): %p\n", ec);
+    __d_printf(FAULT, "ESR: %p\n", esr);
+    if (AArch64Exception__has_fault_status(ec))
+    {
+        __d_printf(
+            FAULT,
+            "Fault Status (FSC): %p %s\n",
+            AArch64Exception__fault_status_code(esr),
+            AArch64Exception__fault_status_name(esr)
+        );
+        if (ec == 0x24 || ec == 0x25)
+        {
+            __d_printf(FAULT, "Access: %s\n", AArch64Exception__data_abort_access_name(esr));
+        }
+    }
     __d_printf(FAULT, "Fault Address (FAR): %p\n", read_far_el1());
     __d_printf(FAULT, "Exception Link Register (ELR): %p\n", read_elr_el1());
     __d_printf(FAULT, "SCTLR: %p\n", read_sctlr_el1());
@@ -35,10 +50,6 @@ void Kernel__dump_state(ProcessContext * ctx) {
                 __d_println(FAULT, "");
             }
             __d_printf(FAULT, "X[%i]: %p  ", i, ctx->x[i]);
-        }
-
-        if (ec == 0x21) {
-            __d_println(FAULT, "Instruction Abort from current EL");
         }
     }
     else {

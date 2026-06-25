@@ -43,11 +43,13 @@ void action_unpark_message(KernelListenerPtr self, MessagePtr message)
             if (payload.type == PAYLOAD_TYPE_ANYTHING)
             {
                 ProcessID pid = payload.anything;
+                __d_printf(SCHEDULER, "scheduler unpark message pid=%i\n", pid);
                 Result(ProcessID) pid_res = Scheduler__unpark_by_pid(
                     self->kernel->scheduler, pid, PARK_WAIT_IO, None(ReturnCode)
                 );
 
                 ResultMatch(ProcessID, pid_res)
+                    IsSuccess(unparked_pid, __d_printf(SCHEDULER, "scheduler unpark message success pid=%i\n", unparked_pid););
                     IsError(code, message, __d_printf(PANIC, "Failed to unpark process: %s", cstr(message)));
                 End
             }

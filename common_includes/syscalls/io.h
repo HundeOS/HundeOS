@@ -8,6 +8,8 @@ typedef enum IOOperation
     IO_READ,
     IO_WRITE,
     IO_LIST_DIR,
+    IO_MKDIR,
+    IO_REMOVE,
 }
 IOOperation;
 
@@ -34,6 +36,7 @@ typedef enum IOFlags
 {
     IO_OPEN_READ = 0x1,
     IO_OPEN_WRITE = 0x2,
+    IO_REMOVE_RECURSIVE = 0x4,
 }
 IOFlags;
 

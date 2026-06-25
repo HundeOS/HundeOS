@@ -9,46 +9,129 @@ static KString not_implemented = KSTRING_NEW("Operation not implemented");
 static KString invalid_handle = KSTRING_NEW("Unknown handle");
 
 #define CODE_SHIFT 20
-static const FilesystemCode FS_CODE_MASK = (0xFFFF << CODE_SHIFT);
+static const FilesystemCode FS_CODE_MASK = (0xFFFFULL << CODE_SHIFT);
 
-Result(IOInternalHandle) RootFileIO_open(IOStatePtr state, KString path, Flags flags)
+typedef struct MountRoute
 {
-    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) state;
-    KStringArray path_segments = KString__split(&path, '/');
-    Optional(KString) top_level_opt = KStringArray__pop_front(&path_segments);
-    KString remaining_path = KString__join(&path_segments, '/');
+    FilesystemPtr filesystem;
+    KString mount_path;
+    KString subpath;
+}
+MountRoute;
 
-    Match(KString, top_level_opt)
-        IsNone(return Error(IOInternalHandle, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH));
-        IsSome(top_level,
+OptionalDef(MountRoute);
+
+static bool Filesystem__mount_matches(KStringPtr path, KStringPtr mount_path)
+{
+    KStringArray path_segments = KString__split(path, '/');
+    KStringArray mount_segments = KString__split(mount_path, '/');
+
+    if (KStringArray__len(&mount_segments) > KStringArray__len(&path_segments))
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < KStringArray__len(&mount_segments); i++)
+    {
+        KString path_segment = UnwrapPanic(KString, KStringArray__at(&path_segments, i));
+        KString mount_segment = UnwrapPanic(KString, KStringArray__at(&mount_segments, i));
+        if (!KString__equals(&path_segment, &mount_segment))
         {
-            Optional(FilesystemPtr) mount = Mounts__get(&fs_state->filesystem->mounts, top_level);
-            Match(FilesystemPtr, mount)
-                IsSome(filesystem,
-                {
-                    __d_printf(FILESYSTEM, "mount found = %s", cstr(top_level));
-                    return filesystem->file_io.base_io.open(&filesystem->state->state, remaining_path, flags);
-                });
-                IsNone(
-                {
-                    __d_printf(FILESYSTEM, "mount not found = %s", cstr(top_level));
-                    return Error(IOInternalHandle, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
-                });
-            End
-        });
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static KString Filesystem__subpath(KStringPtr path, KStringPtr mount_path)
+{
+    KStringArray path_segments = KString__split(path, '/');
+    KStringArray mount_segments = KString__split(mount_path, '/');
+    KStringArray subpath_segments = EmptyArray(KStringArray);
+
+    for (size_t i = KStringArray__len(&mount_segments); i < KStringArray__len(&path_segments); i++)
+    {
+        KStringArray__push(&subpath_segments, UnwrapPanic(KString, KStringArray__at(&path_segments, i)));
+    }
+
+    return KString__join(&subpath_segments, '/');
+}
+
+static Optional(MountRoute) Filesystem__find_mount(FilesystemPtr self, KString path)
+{
+    Optional(MountRoute) best = None(MountRoute);
+    size_t best_len = 0;
+
+    MapIterate(Mounts, self->mounts, index, mount_path, mounted_fs)
+        if (Filesystem__mount_matches(&path, &mount_path) && mount_path.len > best_len)
+        {
+            best_len = mount_path.len;
+            best = Some(MountRoute, ((MountRoute) {
+                .filesystem = mounted_fs,
+                .mount_path = mount_path,
+                .subpath = Filesystem__subpath(&path, &mount_path),
+            }));
+        }
+    End
+
+    return best;
+}
+
+static Result(IOInternalHandle) RootFileIO__delegate_close(FilesystemIOStatePtr self, IOInternalHandle handle)
+{
+    FilesystemCode code = (handle & FS_CODE_MASK);
+    MapIterate(Mounts, self->filesystem->mounts, index, name, filesys)
+        if (filesys->fs_code == code)
+        {
+            return filesys->file_io.base_io.close(&filesys->state->state, handle);
+        }
+    End
+
+    return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
+}
+
+static Result(ByteCount) RootFileIO__delegate_write(
+    FilesystemIOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size
+)
+{
+    FilesystemCode code = (handle & FS_CODE_MASK);
+    MapIterate(Mounts, self->filesystem->mounts, index, name, filesys)
+        if (filesys->fs_code == code)
+        {
+            return filesys->file_io.base_io.write(&filesys->state->state, handle, data, size);
+        }
+    End
+
+    return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE);
+}
+
+Result(IOInternalHandle) RootFileIO__open(IOStatePtr self, KString path, Flags flags)
+{
+    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
+    Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, path))
+        IsSome(route,
+        {
+            __d_printf(FILESYSTEM, "mount found = %s", cstr(route.mount_path));
+            return route.filesystem->file_io.base_io.open(
+                &route.filesystem->state->state, route.subpath, flags
+            );
+        })
+        IsNone(return Error(IOInternalHandle, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
     End
 
     return Error(IOInternalHandle, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
 
-Result(IOInternalHandle) RootFileIO_close(IOStatePtr state, IOInternalHandle handle)
+Result(IOInternalHandle) RootFileIO__close(IOStatePtr self, IOInternalHandle handle)
 {
-    return Error(IOInternalHandle, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
+    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
+    return RootFileIO__delegate_close(fs_state, handle);
 }
 
-Result(IOBufferPtr) RootFileIO_read(IOStatePtr state, IOInternalHandle handle, size_t size)
+Result(IOBufferPtr) RootFileIO__read(IOStatePtr self, IOInternalHandle handle, size_t size)
 {
-    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) state;
+    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
     FilesystemCode code = (handle & FS_CODE_MASK);
     MapIterate(Mounts, fs_state->filesystem->mounts, index, name, filesys)
         if (filesys->fs_code == code)
@@ -60,78 +143,132 @@ Result(IOBufferPtr) RootFileIO_read(IOStatePtr state, IOInternalHandle handle, s
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-Result(ByteCount) RootFileIO_write(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size)
+Result(ByteCount) RootFileIO__write(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size)
 {
-    return Error(ByteCount, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
+    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
+    return RootFileIO__delegate_write(fs_state, handle, data, size);
 }
 
-Result(ParkStatus) RootFileIO_park(IOStatePtr state, IOContextPtr parked_context)
+Result(ParkStatus) RootFileIO__park(IOStatePtr self, IOContextPtr parked_context)
 {
+    (void) self;
+    (void) parked_context;
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(ParkStatus) RootFileIO_unpark(IOStatePtr state)
+Result(ParkStatus) RootFileIO__unpark(IOStatePtr self)
 {
+    (void) self;
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(FilesystemNodes) RootFileIO_list_nodes(IOStatePtr state, FilesystemNodePtr parent, KString path)
+Result(FilesystemNodes) RootFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, KString path)
 {
+    (void) parent;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
 
-    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) state;
+    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
     FilesystemPtr filesystem = fs_state->filesystem;
     KStringArray path_segments = KString__split(&path, '/');
 
     if (KStringArray__len(&path_segments) == 0)
     {
-        // list the mounts
-        for (int i = 0; i < Mounts__len(&filesystem->mounts); i++)
-        {
-            MapKeyPtrMatch(Mounts, Mounts__key(&filesystem->mounts, i))
-                IsSome(mount_path,
+        MapIterate(Mounts, filesystem->mounts, index, mount_path, mount_fs)
+            KStringArray mount_segments = KString__split(&mount_path, '/');
+            KString top_level = UnwrapPanic(KString, KStringArray__at(&mount_segments, 0));
+
+            bool already_added = false;
+            FAIterate(FilesystemNodes, result, node_index, node)
+                if (KString__equals(&node->name, &top_level))
                 {
-                    Match(FilesystemPtr, Mounts__get(&filesystem->mounts, *mount_path))
-                        IsSome(mount_fs,
-                        {
-                            FilesystemNodes__push(&result, FilesystemNode__heap_new(mount_fs, *mount_path, 0));
-                        });
-                        IsNone(
-                        {
-                            return Error(FilesystemNodes, KString__sprintf(&invalid_path_format, &path), IO_INVALID_MOUNT_POINT);
-                        })
-                    End
-                });
-                IsNone(
-                {
-                    return Error(FilesystemNodes, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
-                })
+                    already_added = true;
+                }
             End
-        }
+
+            if (!already_added)
+            {
+                FilesystemNodes__push(&result, FilesystemNode__heap_new(mount_fs, top_level, 0));
+            }
+        End
     }
     else
     {
-        Match(KString, KStringArray__pop_front(&path_segments))
-            IsSome(segment,
+        Match(MountRoute, Filesystem__find_mount(filesystem, path))
+            IsSome(route,
             {
-                // KStringArray remaining_segments = KStringArray__remove_at(&path_segments, 0);
-                Match(FilesystemPtr, Mounts__get(&filesystem->mounts, segment))
-                    IsSome(mounted_fs,
+                return route.filesystem->file_io.list_nodes(
+                    &route.filesystem->state->state, filesystem->root, route.subpath
+                );
+            })
+            IsNone(
+            {
+                MapIterate(Mounts, filesystem->mounts, index, mount_path, mount_fs)
+                    KStringArray mount_segments = KString__split(&mount_path, '/');
+                    if (KStringArray__len(&mount_segments) <= KStringArray__len(&path_segments))
                     {
-                        KString subpath = KString__join(&path_segments, '/');
-                        return mounted_fs->file_io.list_nodes(&mounted_fs->state->state, filesystem->root, subpath);
-                    });
-                    IsNone(
+                        continue;
+                    }
+
+                    bool prefix_matches = true;
+                    for (size_t i = 0; i < KStringArray__len(&path_segments); i++)
                     {
-                        return Error(FilesystemNodes, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
-                    })
+                        KString path_segment = UnwrapPanic(KString, KStringArray__at(&path_segments, i));
+                        KString mount_segment = UnwrapPanic(KString, KStringArray__at(&mount_segments, i));
+                        if (!KString__equals(&path_segment, &mount_segment))
+                        {
+                            prefix_matches = false;
+                        }
+                    }
+
+                    if (prefix_matches)
+                    {
+                        KString child = UnwrapPanic(KString, KStringArray__at(&mount_segments, KStringArray__len(&path_segments)));
+                        bool already_added = false;
+                        FAIterate(FilesystemNodes, result, node_index, node)
+                            if (KString__equals(&node->name, &child))
+                            {
+                                already_added = true;
+                            }
+                        End
+
+                        if (!already_added)
+                        {
+                            FilesystemNodes__push(&result, FilesystemNode__heap_new(mount_fs, child, 0));
+                        }
+                    }
                 End
-            });
-            IsNone(return Error(FilesystemNodes, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
+
+                if (FilesystemNodes__len(&result) == 0)
+                {
+                    return Error(FilesystemNodes, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+                }
+            })
         End
     }
 
     return Success(FilesystemNodes, result);
+}
+
+Result(IOStatus) RootFileIO__mkdir(IOStatePtr self, KString path)
+{
+    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
+    Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, path))
+        IsSome(route, return route.filesystem->file_io.mkdir(&route.filesystem->state->state, route.subpath))
+        IsNone(return Error(IOStatus, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
+    End
+
+    return Error(IOStatus, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+}
+
+Result(IOStatus) RootFileIO__remove(IOStatePtr self, KString path, Flags flags)
+{
+    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
+    Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, path))
+        IsSome(route, return route.filesystem->file_io.remove(&route.filesystem->state->state, route.subpath, flags))
+        IsNone(return Error(IOStatus, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
+    End
+
+    return Error(IOStatus, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
 
 
@@ -159,14 +296,16 @@ FileIO RootFilesystemIO__new()
 {
     FileIO root_file_io = (FileIO) {
         .base_io = (IO) {
-            .open = RootFileIO_open,
-            .close = RootFileIO_close,
-            .read = RootFileIO_read,
-            .write = RootFileIO_write,
-            .park = RootFileIO_park,
-            .unpark = RootFileIO_unpark,
+            .open = RootFileIO__open,
+            .close = RootFileIO__close,
+            .read = RootFileIO__read,
+            .write = RootFileIO__write,
+            .park = RootFileIO__park,
+            .unpark = RootFileIO__unpark,
         },
-        .list_nodes = RootFileIO_list_nodes,
+        .list_nodes = RootFileIO__list_nodes,
+        .mkdir = RootFileIO__mkdir,
+        .remove = RootFileIO__remove,
     };
 
     return root_file_io;
@@ -216,5 +355,6 @@ FileHandleTargetPtr FileHandleTarget__heap_new(KString path)
 
 void FileHandleTarget__dispose(FileHandleTargetPtr self)
 {
+    (void) self;
     // TODO we need to implement a free
 }

@@ -1,5 +1,6 @@
 import glob
 import os
+import shutil
 import subprocess
 from typing import LiteralString, Any
 
@@ -81,6 +82,7 @@ def join(files):
     return " ".join(files)
 
 def main():
+    shutil.rmtree("build", ignore_errors=True)
     manifests = glob.glob("**/manifest.yml", recursive=True)
     failed_tests = []
 
@@ -139,14 +141,16 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                             for file
                             in source_expanded
                             if file.endswith(".s")]
+        include_default_stubs = manifest["manifest"].get("include_default_stubs", True)
+        include_default_fixtures = manifest["manifest"].get("include_default_fixtures", True)
         stubs_c_files = [f"{relative_base}/{expand}"
-                         for expand in glob.glob(os.path.join(stubs_dir, "*.c"))]
+                         for expand in glob.glob(os.path.join(stubs_dir, "*.c"))] if include_default_stubs else []
         stubs_asm_files = [f"{relative_base}/{expand}"
-                           for expand in glob.glob(os.path.join(stubs_dir, "*.s"))]
+                           for expand in glob.glob(os.path.join(stubs_dir, "*.s"))] if include_default_stubs else []
         fixtures_c_files = [f"{relative_base}/{expand}"
-                            for expand in glob.glob(os.path.join(fixtures_dir, "*.c"))]
+                            for expand in glob.glob(os.path.join(fixtures_dir, "*.c"))] if include_default_fixtures else []
         fixtures_asm_files = [f"{relative_base}/{expand}"
-                              for expand in glob.glob(os.path.join(fixtures_dir, "*.s"))]
+                              for expand in glob.glob(os.path.join(fixtures_dir, "*.s"))] if include_default_fixtures else []
 
         source_c_files = [file
                           for file

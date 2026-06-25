@@ -70,12 +70,12 @@ ResultDef(IOContext);
 OptionalDef(IOContextPtr);
 ResultDef(IOContextPtr);
 
-typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr state, KString path, Flags flags);
-typedef Result(IOInternalHandle) (* IO_close)(IOStatePtr state, IOInternalHandle handle);
-typedef Result(IOBufferPtr) (* IO_read)(IOStatePtr state, IOInternalHandle handle, size_t size);
-typedef Result(ByteCount) (* IO_write)(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size);
-typedef Result(ParkStatus)(* IO_park)(IOStatePtr state, IOContextPtr parked_context);
-typedef Result(ParkStatus)(* IO_unpark)(IOStatePtr state);
+typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr self, KString path, Flags flags);
+typedef Result(IOInternalHandle) (* IO_close)(IOStatePtr self, IOInternalHandle handle);
+typedef Result(IOBufferPtr) (* IO_read)(IOStatePtr self, IOInternalHandle handle, size_t size);
+typedef Result(ByteCount) (* IO_write)(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size);
+typedef Result(ParkStatus)(* IO_park)(IOStatePtr self, IOContextPtr parked_context);
+typedef Result(ParkStatus)(* IO_unpark)(IOStatePtr self);
 
 typedef struct IO
 {

@@ -13,6 +13,7 @@
 #include "stack.h"
 
 FixedArrayBodyDefine(ProcessTable);
+FixedArrayBodyDefine(ProcessArguments);
 LinkedListBodyDefine(UserAllocations);
 LinkedListBodyDefine(ProcessFileDescriptors);
 
@@ -92,8 +93,7 @@ static size_t Process__copy_arg(char * target, KStringPtr arg)
 
 static Result(Address) Process__setup_args(
     ProcessPtr self,
-    KString arg0,
-    Optional(KString) arg1,
+    ProcessArguments arguments,
     uint64_t * argc
 )
 {
@@ -104,30 +104,16 @@ static Result(Address) Process__setup_args(
             Address kernel_base = args_page.kernel_addr.virtual_addr;
             Address * argv = ptr(kernel_base, Address);
 
-            *argc = 1;
-            Match(KString, arg1)
-                IsSome(_, *argc = 2)
-            End
+            *argc = arguments.len;
 
             size_t cursor = sizeof(Address) * (*argc + 1);
-            if (cursor + arg0.len + 1 > PAGE_SIZE)
-            {
-                return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
-            }
-
-            argv[0] = user_base + cursor;
-            cursor += Process__copy_arg(ptr(kernel_base + cursor, char), &arg0);
-
-            Match(KString, arg1)
-                IsSome(arg,
+            FAIterate(ProcessArguments, arguments, i, arg)
+                if (cursor + arg.len + 1 > PAGE_SIZE)
                 {
-                    if (cursor + arg.len + 1 > PAGE_SIZE)
-                    {
-                        return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
-                    }
-                    argv[1] = user_base + cursor;
-                    cursor += Process__copy_arg(ptr(kernel_base + cursor, char), &arg);
-                })
+                    return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
+                }
+                argv[i] = user_base + cursor;
+                cursor += Process__copy_arg(ptr(kernel_base + cursor, char), &arg);
             End
 
             argv[*argc] = 0;
@@ -145,8 +131,7 @@ Result(ProcessPtr) Process__new(
     UserAddress entry,
     Stack stack,
     Optional(ProcessPtr) parent,
-    KString arg0,
-    Optional(KString) arg1
+    ProcessArguments arguments
 )
 {
     ProcessID pid;
@@ -170,12 +155,36 @@ Result(ProcessPtr) Process__new(
     proc->user_allocations = UserAllocations__new();
     proc->file_descriptors = Process__inherit_file_descriptors(parent);
     proc->next_file_descriptor = Process__inherit_next_file_descriptor(parent);
+    proc->abort = None(ProcessAbort);
+    proc->process_class = PROCESS_CLASS_NORMAL;
+    proc->service_events = ServiceEvents__new();
+    proc->service_wait_target = NULL;
 
     uint64_t argc;
-    ResultMatch(Address, Process__setup_args(proc, arg0, arg1, &argc))
+    ResultMatch(Address, Process__setup_args(proc, arguments, &argc))
         IsSuccess(argv,
         {
+            __d_printf(
+                PROCESS,
+                "Process__new before context init pid=%i proc=%p stack_ptr=%p stack_base=%p stack_top=%p argc=%i argv=%p entry=%p page_table=%p\n",
+                proc->pid,
+                proc,
+                &proc->stack,
+                proc->stack.base.virtual_addr,
+                proc->stack.top.virtual_addr,
+                argc,
+                argv,
+                entry.virtual_addr,
+                page_table.phys_addr
+            );
             proc->context = ProcessContext__init(proc->pid, &proc->stack, entry, page_table, argc, argv);
+            __d_printf(
+                PROCESS,
+                "Process__new after context init pid=%i proc=%p context=%p\n",
+                proc->pid,
+                proc,
+                proc->context
+            );
             return Success(ProcessPtr, proc);
         })
         IsError(code, message, return Error(ProcessPtr, message, code))
@@ -186,10 +195,10 @@ Result(ProcessPtr) Process__new(
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
 {
-    return Process__setup_with_args(binary, parent, None(KString));
+    return Process__setup_with_args(binary, parent, ProcessArguments__new());
 }
 
-Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, Optional(KString) arg1)
+Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments)
 {
     __d_println(PROCESS, "Process__spawn_from_elf");
     ExpandedSegmentArray expanded_elf = Elf__map(binary);
@@ -208,7 +217,18 @@ Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) par
     End
     __d_println(PROCESS, "Code mapped");
 
+    __d_printf(PROCESS, "Creating stack for %s\n", cstr(binary.name));
     Stack stack = Stack__new();
+    __d_printf(
+        PROCESS,
+        "Stack created for %s base=%p top=%p kbase=%p phys=%p\n",
+        cstr(binary.name),
+        stack.base.virtual_addr,
+        stack.top.virtual_addr,
+        stack.base.kernel_addr.virtual_addr,
+        stack.base.kernel_addr.phys_addr
+    );
+    __d_printf(PROCESS, "Mapping stack for %s page_table=%p\n", cstr(binary.name), page_table.phys_addr);
     Stack__map(&stack, v_ptr(page_table, PageTable));
     __d_println(PROCESS, "Stack mapped");
 
@@ -220,7 +240,15 @@ Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) par
         });
         IsSome(entry_point,
         {
-            ResultMatch(ProcessPtr, Process__new(binary.name, page_table, entry_point.address, stack, parent, binary.name, arg1))
+            ProcessArguments process_arguments = ProcessArguments__new();
+            ResultMatch(CollectionCode, ProcessArguments__push(&process_arguments, binary.name))
+                IsError(code, message, return Error(ProcessPtr, message, SPAWN_ARG_TOO_LONG))
+            End
+            ResultMatch(CollectionCode, ProcessArguments__push_all(&process_arguments, &arguments))
+                IsError(code, message, return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG))
+            End
+
+            ResultMatch(ProcessPtr, Process__new(binary.name, page_table, entry_point.address, stack, parent, process_arguments))
                 IsSuccess(proc,
                 {
                     FAIterate(ExpandedSegmentArray, expanded_elf, segment_index, segment)

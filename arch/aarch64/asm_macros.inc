@@ -282,6 +282,14 @@
     add sp, sp, #0x320
 .endm
 
+.macro reset_kernel_stack
+    mrs x9, tpidr_el1
+    ldr x10, =__k_stack_start
+    ldr x11, =10485760
+    mul x9, x9, x11
+    add sp, x10, x9
+.endm
+
 .macro restore_context_preserve_x0
     // --- Restore SIMD/FPU registers ---
     mov x30, sp

@@ -34,3 +34,18 @@ DirectoryEntryCount list_dir(const char * path, DirectoryEntryPtr entries, size_
 {
     return syscall(IO_CALL, IO_LIST_DIR, any(path), any(entries), max_entries, 0);
 }
+
+IOStatus make_dir(const char * path)
+{
+    return syscall(IO_CALL, IO_MKDIR, any(path), 0, 0, 0);
+}
+
+IOStatus remove_file(const char * path)
+{
+    return remove_file_with_flags(path, 0);
+}
+
+IOStatus remove_file_with_flags(const char * path, Flags flags)
+{
+    return syscall(IO_CALL, IO_REMOVE, any(path), flags, 0, 0);
+}

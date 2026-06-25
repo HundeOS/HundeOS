@@ -60,7 +60,7 @@ typedef int64_t Code;
 
 #define ResultMatch(T, res) \
 { \
-    typedef Result_##T##_type __ResultValueType;\
+    typedef Result_##T##_type __ResultValueType __attribute__((unused));\
     Result_##T ___result = res; \
 
 #define End \
@@ -70,6 +70,7 @@ typedef int64_t Code;
     if (___result.ok) \
     { \
         __ResultValueType val_name = ___result.success.val; \
+        (void) val_name; \
         block; \
     } \
 
@@ -78,6 +79,8 @@ typedef int64_t Code;
     { \
         KString message_name = ___result.error.error; \
         Code code = ___result.error.code; \
+        (void) message_name; \
+        (void) code_name; \
         block; \
     } \
 

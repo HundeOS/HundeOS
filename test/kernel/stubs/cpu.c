@@ -5,15 +5,26 @@
 #include "../../../kernel/all_defs.h"
 
 static CPUID cpu_id = 0;
+static uint64_t cpu_count = MAX_CPUS;
 
 void reset_cpu_id()
 {
     cpu_id = 0;
 }
 
+void reset_cpu_count()
+{
+    cpu_count = MAX_CPUS;
+}
+
 void set_cpu_id(CPUID id)
 {
     cpu_id = id;
+}
+
+void set_cpu_count(uint64_t count)
+{
+    cpu_count = count;
 }
 
 void CPU__yield()
@@ -38,7 +49,7 @@ void CPU__wait()
 
 uint64_t CPU__count()
 {
-    return MAX_CPUS;
+    return cpu_count;
 }
 
 void CPU__wait_for_interrupts()

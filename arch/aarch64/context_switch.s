@@ -21,8 +21,8 @@ asm_switch_context:
     tlbi vmalle1
     dsb ish
     isb
+    reset_kernel_stack
     restore_parked_context
-    unwind_kernel_stack
 
 
     // --- Memory barrier for clean return ---

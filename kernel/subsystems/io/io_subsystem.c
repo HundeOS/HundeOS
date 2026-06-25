@@ -103,7 +103,7 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KS
                                 })
                                 IsSome(handles,
                                 {
-                                    PIDHandles__push(handles, handle);
+                                    PIDHandles__push(handles, external_handle);
                                 })
                             End
                         })
@@ -124,10 +124,9 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KS
 
 static DirectoryEntry DirectoryEntry__from_node(FilesystemNodePtr node)
 {
-    DirectoryEntry entry = (DirectoryEntry) {
-        .attributes = node->attribs,
-        .name_len = node->name.len,
-    };
+    DirectoryEntry entry = (DirectoryEntry) { 0 };
+    entry.attributes = node->attribs;
+    entry.name_len = node->name.len;
 
     size_t max_name = IO_DIRENT_NAME_MAX - 1;
     size_t copy_len = node->name.len < max_name ? node->name.len : max_name;
@@ -176,6 +175,46 @@ Result(DirectoryEntryCount) IOSubsystem__list_dir(
     End
 
     return Error(DirectoryEntryCount, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+}
+
+Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, KString path)
+{
+    KString root_path = KSTRING_NEW("/");
+    FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
+        IsSome(match,
+        {
+            DeviceRegistrationPtr registration = match.value;
+            if (!KString__equals(&registration->path, &root_path))
+            {
+                return Error(IOStatus, kstring("mkdir not supported"), IO_OPERATION_NOT_SUPPORTED);
+            }
+
+            FileIOPtr file_io = (FileIOPtr) registration->device;
+            return file_io->mkdir(registration->state, path);
+        });
+    End
+
+    return Error(IOStatus, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+}
+
+Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, KString path, Flags flags)
+{
+    KString root_path = KSTRING_NEW("/");
+    FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
+        IsSome(match,
+        {
+            DeviceRegistrationPtr registration = match.value;
+            if (!KString__equals(&registration->path, &root_path))
+            {
+                return Error(IOStatus, kstring("remove not supported"), IO_OPERATION_NOT_SUPPORTED);
+            }
+
+            FileIOPtr file_io = (FileIOPtr) registration->device;
+            return file_io->remove(registration->state, path, flags);
+        });
+    End
+
+    return Error(IOStatus, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
 }
 
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)
@@ -240,22 +279,28 @@ Result(ByteCount) IOSubsystem__transfer(IOBufferPtr buffer, DataPtr result, size
 void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context)
 {
     __d_println(SCHEDULER, "Data arrived");
+    __d_printf(IOSUB, "IO data arrived parked_context=%p\n", parked_context);
     Match(IOHandle, parked_context->handle)
         IsSome(handle,
         {
+            __d_printf(IOSUB, "IO data arrived handle=0x%x\n", handle);
             Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
                 IsSome(match,
                 {
+                    __d_printf(IOSUB, "IO data arrived device=%p state=%p\n", match->device, match->state);
                     match->device->unpark(match->state);
+                    __d_println(IOSUB, "IO data arrived device unpark done");
 
                     Match(ProcessID, parked_context->kernel_context.pid)
                         IsSome(pid,
                         {
                             __d_println(IOSUB, "IO sub unparking process");
+                            __d_printf(IOSUB, "IO data arrived parked pid=%i\n", pid);
                             MessagePtr message =
                                 Message__heap_new_anything(SOURCE_IO, SUBSYS_IO_AVAILABLE, pid);
 
                             ResultMatch(AckCode, MessageBroker__deliver(self->message_broker, message));
+                                IsSuccess(ack, __d_printf(IOSUB, "IO data arrived message delivered pid=%i ack=%i\n", pid, ack);)
                                 IsError(code, message, __d_println(PANIC, cstr(message));)
                             End
                             __d_println(IOSUB, "IO sub unparked");

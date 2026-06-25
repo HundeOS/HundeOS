@@ -11,6 +11,9 @@
 #include "types/kstring_additional_types.h"
 #include "types/linked_list.h"
 #include "syscalls/io.h"
+#include "syscalls/spawn.h"
+#include "process_class.h"
+#include "service/service.h"
 
 typedef struct ProcessContext ProcessContext;
 typedef struct ProcessContext * ProcessContextPtr;
@@ -52,10 +55,40 @@ typedef enum ProcessErrors
 typedef uint64_t FileDescriptor;
 typedef uint64_t ProcessIOHandle;
 
+#define PROCESS_ABORT_EXIT_BASE (-1000LL)
+
+typedef enum ProcessAbortReason
+{
+    PROCESS_ABORT_DATA_ABORT = 1,
+    PROCESS_ABORT_INSTRUCTION_ABORT = 2,
+    PROCESS_ABORT_UNDEFINED_INSTRUCTION = 3,
+    PROCESS_ABORT_ALIGNMENT = 4,
+    PROCESS_ABORT_BAD_SYSCALL = 5,
+    PROCESS_ABORT_UNKNOWN_USER_EXCEPTION = 6,
+} ProcessAbortReason;
+
+typedef struct ProcessAbort
+{
+    ProcessAbortReason reason;
+    const char * exception_description;
+    const char * fault_status_description;
+    const char * access_description;
+    Address pc;
+    Address fault_address;
+    uint64_t exception_code;
+    uint64_t fault_status_code;
+    uint64_t syndrome;
+    uint64_t cpu;
+} ProcessAbort;
+
+OptionalDef(ProcessAbort);
+
 ResultDef(FileDescriptor);
 ResultDef(ProcessIOHandle);
 OptionalDef(FileDescriptor);
 OptionalDef(ProcessIOHandle);
+
+FixedArrayDefine(KString, SPAWN_MAX_ARGS + 1, ProcessArguments, kstring_equals);
 
 inline const char * ProcessState__to_string(ProcessState state)
 {
@@ -163,6 +196,10 @@ typedef struct Process {
     UserAllocations user_allocations;
     ProcessFileDescriptors file_descriptors;
     FileDescriptor next_file_descriptor;
+    Optional(ProcessAbort) abort;
+    ProcessClass process_class;
+    ServiceEvents service_events;
+    ServiceEventPtr service_wait_target;
 
     Optional(ParkedKernelContextPtr) parked_context;
 } Process;
@@ -173,8 +210,7 @@ Result(ProcessPtr) Process__new(
     UserAddress entry,
     Stack stack,
     Optional(ProcessPtr) parent,
-    KString arg0,
-    Optional(KString) arg1
+    ProcessArguments arguments
 );
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
@@ -182,7 +218,7 @@ FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 OptionalType(ProcessTable *, ProcessTablePtr);
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent);
-Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, Optional(KString) arg1);
+Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments);
 Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 );

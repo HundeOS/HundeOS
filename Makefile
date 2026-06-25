@@ -168,6 +168,42 @@ qemu-virt-1cpu: $(ELF)
 		-D qemu-1cpu.log \
 		-monitor telnet::4444,server,nowait
 
+qemu-virt-1cpu-trace:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
+	mkdir -p build
+	: > build/kernel-trace.log
+	qemu-system-aarch64 \
+		-M virt,gic-version=3,virtualization=off,secure=off \
+		-smp cpus=1 -cpu max \
+		-m 4G  \
+		-serial stdio \
+		-monitor none \
+		-cpu cortex-a57 \
+		-kernel $(ELF) \
+		-nographic \
+		-semihosting-config enable=on,target=native \
+		-d int,unimp \
+		-D qemu-1cpu.log
+
+qemu-virt-2cpus-trace:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
+	mkdir -p build
+	: > build/kernel-trace.log
+	qemu-system-aarch64 \
+		-M virt,gic-version=3 \
+		-smp cpus=2 -cpu max \
+		-m 4G  \
+		-serial stdio \
+		-monitor none \
+		-cpu cortex-a57 \
+		-kernel $(ELF) \
+		-nographic \
+		-semihosting-config enable=on,target=native \
+		-d int,unimp \
+		-D qemu-2cpus.log
+
 qemu-virt-2cpus: $(ELF)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
@@ -190,4 +226,4 @@ qemu-virt-gdb: clean $(ELF)
 		-S \
 		-gdb tcp::1234
 
-.PHONY: all clean qemu test test_clean
+.PHONY: all clean qemu qemu-virt-1cpu-trace qemu-virt-2cpus-trace test test_clean

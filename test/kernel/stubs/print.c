@@ -19,6 +19,11 @@ void BasicIO__puts(const char * buffer)
     strncat(basic_io_output, buffer, sizeof(basic_io_output) - strlen(basic_io_output) - 1);
 }
 
+void DebugTrace__puts(const char * buffer)
+{
+    BasicIO__puts(buffer);
+}
+
 void BasicIO__put_int(int num)
 {
     char buffer[32];

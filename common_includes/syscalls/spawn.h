@@ -2,6 +2,8 @@
 #define __SYSCALL_SPAWN_H
 #include <stdint.h>
 
+#define SPAWN_MAX_ARGS 3
+
 typedef enum SpawnModes
 {
     P_OVERLAY = 1,	// Overlays parent process with child, which destroys the parent. This has the same effect as the exec* functions.

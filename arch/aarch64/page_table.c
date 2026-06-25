@@ -74,8 +74,8 @@ void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
     Address phys_start = align_down_4k(u_kpaddr(address));
     Address user_end = align_up_4k(user_start + size);
 
-    __d_printf(DEBUG, "Pagetable map uvirt=%p\n", vaddr(address));
-    __d_printf(DEBUG, "Pagetable map start=%p phys=%p end=%p\n", user_start, phys_start, user_end);
+    __d_printf(MMU, "Pagetable map uvirt=%p size=%p table=%p\n", vaddr(address), size, self);
+    __d_printf(MMU, "Pagetable map start=%p phys=%p end=%p\n", user_start, phys_start, user_end);
 
     size_t adjusted_range = user_end - user_start;
 
@@ -96,7 +96,7 @@ void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
         .uxn = !address.execute,
         .pxn = 0
     };
-    __d_printf(DEBUG, "Mapping pages = %i\n", pages);
+    __d_printf(MMU, "Mapping pages = %i\n", pages);
     for (int page = 0; page < pages; page++)
     {
         Address user_addr = offset_addr(user_start, page * PAGE_SIZE);
@@ -105,7 +105,7 @@ void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
         PageTable__map_4k_page(self, user_addr, phys_addr, perms);
     }
     __asm__ __volatile__("dsb ishst; isb" ::: "memory");
-    __d_println(DEBUG, "Mapped");
+    __d_println(MMU, "Mapped");
 }
 
 static KernelAddress PageTable__next_level_table_if_present(KernelAddress parent_level_table,

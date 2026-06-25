@@ -140,6 +140,25 @@ Result(SystemCallResult) IO__handler(
         End
     }
 
+    if (io_operation == IO_MKDIR)
+    {
+        KString path = kstring((const char *) arg2);
+        ResultMatch(IOStatus, IOSubsystem__mkdir(io_subsystem, path))
+            IsSuccess(status, return Success(SystemCallResult, status));
+            IsError(code, message, return Error(SystemCallResult, message, code));
+        End
+    }
+
+    if (io_operation == IO_REMOVE)
+    {
+        KString path = kstring((const char *) arg2);
+        Flags flags = (Flags) arg3;
+        ResultMatch(IOStatus, IOSubsystem__remove(io_subsystem, path, flags))
+            IsSuccess(status, return Success(SystemCallResult, status));
+            IsError(code, message, return Error(SystemCallResult, message, code));
+        End
+    }
+
     if (io_operation == IO_WRITE)
     {
         FileDescriptor fd = (FileDescriptor) arg2;

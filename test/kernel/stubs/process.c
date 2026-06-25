@@ -34,6 +34,7 @@ void Process__context_switch(ProcessPtr self)
                 {
                     Result(Anything) syscall_res = continuation(parked_kernel_context);
                     deferred_syscall_res = syscall_res;
+                    self->parked_context = None(ParkedKernelContextPtr);
                 })
             End
         })

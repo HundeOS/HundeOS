@@ -68,6 +68,32 @@ void test_setup_tracks_static_user_allocations(void)
     End
 }
 
+void test_setup_with_args_sets_up_multiple_argv_entries(void)
+{
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    ProcessArguments arguments = ProcessArguments__new();
+    ProcessArguments__push(&arguments, kstring("one"));
+    ProcessArguments__push(&arguments, kstring("two"));
+    ProcessArguments__push(&arguments, kstring("three"));
+
+    ResultMatch(ProcessPtr, Process__setup_with_args(elf, None(ProcessPtr), arguments))
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(process,
+        {
+            UserAllocation args = UnwrapPanic(UserAllocation, UserAllocations__at(&process->user_allocations, 0));
+            Address * argv = ptr(args.address.kernel_addr.virtual_addr, Address);
+            Address user_base = args.address.virtual_addr;
+            Address kernel_base = args.address.kernel_addr.virtual_addr;
+
+            TEST_ASSERT_EQUAL(0, argv[4]);
+            TEST_ASSERT_EQUAL_STRING("hello_world", ptr(kernel_base + (argv[0] - user_base), char));
+            TEST_ASSERT_EQUAL_STRING("one", ptr(kernel_base + (argv[1] - user_base), char));
+            TEST_ASSERT_EQUAL_STRING("two", ptr(kernel_base + (argv[2] - user_base), char));
+            TEST_ASSERT_EQUAL_STRING("three", ptr(kernel_base + (argv[3] - user_base), char));
+        })
+    End
+}
+
 void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});

@@ -2,7 +2,6 @@
 #define  __KERNEL_MUTEX_H
 #include <stdatomic.h>
 #include <stdbool.h>
-#include "arch/cpu.h"
 #include "debug.h"
 
 typedef struct {

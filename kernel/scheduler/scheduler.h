@@ -38,6 +38,7 @@ typedef struct CPUScheduler
     mutex_t scheduler_lock;
     Tick last_tick;
     CPUID cpu;
+    bool started;
 } CPUScheduler;
 
 typedef CPUScheduler * CPUSchedulerPtr;
@@ -52,15 +53,20 @@ typedef struct Scheduler
     MessageBrokerPtr message_broker;
     CPUSchedulers schedulers;
     mutex_t scheduler_lock;
-    bool started;
+    bool ready;
 } Scheduler;
 
+typedef struct IOSubsystem IOSubsystem;
+typedef IOSubsystem * IOSubsystemPtr;
 
 SchedulerPtr Scheduler__heap_new(MessageBrokerPtr message_broker);
 
 Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, Elf idle_process);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 Result(ProcessPtr) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc, ReturnCode return_code);
+Result(ProcessPtr) Scheduler__abort_process(
+    SchedulerPtr scheduler, IOSubsystemPtr io_subsystem, ProcessPtr proc, ProcessAbort abort
+);
 
 Result(ProcessPtr) Scheduler__park(
     SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
@@ -78,7 +84,9 @@ Result(ProcessID) Scheduler__unpark_by_pid(SchedulerPtr self, ProcessID pid, Par
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);
+Optional(ProcessPtr) Scheduler__find_process_by_pid(SchedulerPtr self, ProcessID pid);
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
+ProcessTable Scheduler__all_processes_for_all_cpus(SchedulerPtr self);
 
 uint64_t Scheduler__process_count(SchedulerPtr self);
 
@@ -86,13 +94,16 @@ Optional(ProcessPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, Proce
 
 Result(CPUID) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc);
 Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu);
+void Scheduler__mark_ready(SchedulerPtr self);
+bool Scheduler__ready(SchedulerPtr self);
+Result(SchedulerInitStatus) Scheduler__wait_until_ready(SchedulerPtr self);
 
 #define NEW_SCHEDULER(broker) \
     (Scheduler) { \
         .message_broker = broker, \
         .schedulers = EmptyArray(CPUSchedulers),\
         .scheduler_lock = MUTEX_INIT, \
-        .started = false, \
+        .ready = false, \
     } \
 
 #endif

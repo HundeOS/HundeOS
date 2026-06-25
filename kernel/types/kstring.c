@@ -31,6 +31,7 @@ KStringArray KString__split(KStringPtr self, char delimiter)
     }
     if (start != self->len)
     {
+        buffer[self->len] = '\0';
         KString str = KString__new(&buffer[start]);
         KStringArray__push(&result, str);
     }

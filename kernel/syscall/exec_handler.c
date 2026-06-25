@@ -9,15 +9,23 @@ Result(SystemCallResult) Exec__handler(
 )
 {
     KString path = kstring((const char *)arg1);
-    Optional(KString) arg0 = None(KString);
+    ProcessArguments arguments = ProcessArguments__new();
     if (arg3 != 0)
     {
-        arg0 = Some(KString, kstring((const char *) arg3));
+        ProcessArguments__push(&arguments, kstring((const char *) arg3));
+    }
+    if (arg4 != 0)
+    {
+        ProcessArguments__push(&arguments, kstring((const char *) arg4));
+    }
+    if (arg5 != 0)
+    {
+        ProcessArguments__push(&arguments, kstring((const char *) arg5));
     }
     CallContext call_context = CallContext__new(proc, EXEC, arg1, arg2, arg3, arg4, arg5);
     OriginatingContext originating_context = OriginatingContext__syscall(kernel, call_context);
 
-    Result(ProcessPtr) exec_res = Exec__exec(originating_context, path, arg2 != 0, arg0);
+    Result(ProcessPtr) exec_res = Exec__exec(originating_context, path, arg2 != 0, arguments);
     ResultMatch(ProcessPtr, exec_res)
         IsSuccess(proc,
         {
@@ -28,4 +36,6 @@ Result(SystemCallResult) Exec__handler(
             return Error(SystemCallResult, message, code);
         })
     End
+
+    return Error(SystemCallResult, kstring("Exec handler failed"), SPAWN_FAILED);
 }

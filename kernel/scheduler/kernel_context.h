@@ -27,14 +27,14 @@ KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext
 #define NEW_KERNEL_CONTEXT(sched, proc_id) \
     (KernelContext) { \
         .pid = proc_id, \
-        .scheduler = sched,\
+        .scheduler = Some(SchedulerPtr, sched),\
     } \
 
 
 #define EMPTY_KERNEL_CONTEXT \
     (KernelContext) { \
         .pid = None(ProcessID),\
-        .scheduler = NULL,\
+        .scheduler = None(SchedulerPtr),\
     }
 
 

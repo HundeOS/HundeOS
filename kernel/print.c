@@ -2,31 +2,31 @@
 
 #include <stdint.h>
 #include <stdint.h>
-#include "mutex.h"
 #include "arch/basic_io.h"
 
-static mutex_t print_lock = MUTEX_INIT;
+static void trace_puts(const char * str)
+{
+    DebugTrace__puts(str);
+}
 
 void k_println(const char * str) {
-    mutex_lock(&print_lock);
-    BasicIO__puts(str);
-    BasicIO__puts("\n");
-    mutex_unlock(&print_lock);
+    trace_puts(str);
+    trace_puts("\n");
 }
 
 // Helper function to output a single character using puts
 static void putchar(char c) {
     char str[2] = {c, '\0'};
-    BasicIO__puts(str);
+    trace_puts(str);
 }
 
 // Helper function to output a string character by character
 static void print_string(const char* str) {
     if (!str) {
-        BasicIO__puts("(null)");
+        trace_puts("(null)");
         return;
     }
-    BasicIO__puts(str);
+    trace_puts(str);
 }
 
 // Helper function to convert and print unsigned integer
@@ -46,12 +46,12 @@ static void print_unsigned(unsigned int value, int base, bool uppercase) {
         }
     }
     
-    BasicIO__puts(&buffer[i]);
+    trace_puts(&buffer[i]);
 }
 
 // Helper function to print pointer
 static void print_pointer(void* ptr) {
-    BasicIO__puts("0x");
+    trace_puts("0x");
     uintptr_t value = (uintptr_t)ptr;
     
     char buffer[17];  // 64-bit pointer = 16 hex chars + null
@@ -67,7 +67,18 @@ static void print_pointer(void* ptr) {
     i = 0;
     while (i < 15 && buffer[i] == '0') i++;
     
-    BasicIO__puts(&buffer[i]);
+    trace_puts(&buffer[i]);
+}
+
+static void print_signed(int value)
+{
+    if (value < 0)
+    {
+        putchar('-');
+        value = -value;
+    }
+
+    print_unsigned((unsigned int) value, 10, false);
 }
 
 // Helper to get string length
@@ -97,7 +108,6 @@ int k_printf(const char* format, ...) {
     int count = 0;
     char buffer[256];  // Buffer for building output strings
     int buf_idx = 0;
-    mutex_lock(&print_lock);
     for (int i = 0; format[i] != '\0'; i++) {
         if (format[i] != '%') {
             // Regular character - add to buffer
@@ -106,7 +116,7 @@ int k_printf(const char* format, ...) {
             // Flush buffer if it's getting full or we hit a newline
             if (buf_idx >= 255 || format[i] == '\n') {
                 buffer[buf_idx] = '\0';
-                BasicIO__puts(buffer);
+                trace_puts(buffer);
                 count += buf_idx;
                 buf_idx = 0;
             }
@@ -114,7 +124,7 @@ int k_printf(const char* format, ...) {
             // Flush any pending regular text
             if (buf_idx > 0) {
                 buffer[buf_idx] = '\0';
-                BasicIO__puts(buffer);
+                trace_puts(buffer);
                 count += buf_idx;
                 buf_idx = 0;
             }
@@ -145,7 +155,7 @@ int k_printf(const char* format, ...) {
                 case 'd':
                 case 'i': {
                     int value = va_arg(args, int);
-                    BasicIO__put_int(value);
+                    print_signed(value);
                     
                     // Estimate digits for count (simplified)
                     if (value < 0) count++;  // minus sign
@@ -275,12 +285,11 @@ int k_printf(const char* format, ...) {
     // Flush any remaining buffer content
     if (buf_idx > 0) {
         buffer[buf_idx] = '\0';
-        BasicIO__puts(buffer);
+        trace_puts(buffer);
         count += buf_idx;
     }
     
     va_end(args);
-    mutex_unlock(&print_lock);
     return count;
 }
 

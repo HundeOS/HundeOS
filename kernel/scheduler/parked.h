@@ -14,7 +14,8 @@ typedef uint64_t ParkReason;
 typedef enum ParkReasons
 {
     PARK_WAIT_CHILD = 1,
-    PARK_WAIT_IO = 2
+    PARK_WAIT_IO = 2,
+    PARK_WAIT_SERVICE_EVENT = 3,
 } ParkReasons;
 
 typedef struct ParkedKernelContext

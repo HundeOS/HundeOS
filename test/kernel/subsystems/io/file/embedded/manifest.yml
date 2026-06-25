@@ -2,6 +2,7 @@ manifest:
   source_files:
     - kernel/syscall/*.c
     - kernel/process.c
+    - kernel/process_class.c
     - kernel/bin/*.c
     - kernel/stack.c
     - kernel/kernel_init.c
@@ -9,10 +10,15 @@ manifest:
     - kernel/print.c
     - kernel/types/*.c
     - kernel/scheduler/*.c
+    - kernel/service/*.c
     - kernel/subsystems/message/*.c
     - kernel/subsystems/io/*.c
+    - kernel/subsystems/io/block/*.c
     - kernel/subsystems/io/file/*.c
     - kernel/subsystems/io/file/embedded/*.c
+    - kernel/subsystems/io/file/fat16/*.c
+    - kernel/subsystems/io/file/fat32/*.c
+    - kernel/subsystems/io/file/memfs/*.c
     - kernel/subsystems/io/console/*.c
     - kernel/syscall_handler.c
     - kernel/mutex.c

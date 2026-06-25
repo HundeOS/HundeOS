@@ -1,0 +1,14 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - kernel/types/*.c
+    - kernel/subsystems/io/types.c
+    - kernel/subsystems/io/block/*.c
+    - kernel/subsystems/io/file/filesystem.c
+    - kernel/subsystems/io/file/filesystem_node.c
+    - kernel/subsystems/io/file/fat16/*.c
+    - kernel/mutex.c
+    - test/kernel/stubs/cpu.c
+    - test/kernel/stubs/kalloc.c
+    - test/kernel/stubs/panic.c

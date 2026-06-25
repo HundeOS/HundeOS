@@ -18,12 +18,24 @@ void ContextSwitch__switch(Optional(ContextSwitch) self_opt)
             Match(ProcessPtr, self.old_proc)
                 IsSome(proc,
                 {
-                    proc->state = PROC_STATE_INTERRUPTED;
+                    if (proc->state != PROC_STATE_DEAD && proc->state != PROC_STATE_WAITING)
+                    {
+                        proc->state = PROC_STATE_INTERRUPTED;
+                    }
                 })
             End
 
             ProcessPtr new_proc = self.new_proc;
             const char * name = cstr(new_proc->name);
+            __d_printf(
+                SCHEDULER,
+                "ContextSwitch__switch target pid=%i name=%s state=%s context=%p page_table=%p\n",
+                new_proc->pid,
+                name,
+                ProcessState__to_string(new_proc->state),
+                new_proc->context,
+                paddr(new_proc->page_table)
+            );
             __d_printf(SCHEDULER, "Switch to proc: %i %s - %s.\n",
                 new_proc->pid,
                 name,

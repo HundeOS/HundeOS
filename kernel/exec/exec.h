@@ -14,7 +14,7 @@ typedef uint64_t ExecResult;
 FixedArrayDefine(Char, _16MB, ElfReadBuffer, SimpleEquals(Char));
 
 Result(ProcessPtr) Exec__exec(
-    OriginatingContext originating_context, KString path, bool wait, Optional(KString) arg0
+    OriginatingContext originating_context, KString path, bool wait, ProcessArguments arguments
 );
 
 

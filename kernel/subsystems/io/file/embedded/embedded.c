@@ -10,9 +10,9 @@ static KString invalid_file_handle = KSTRING_NEW("Invalid file handle");
 static KString not_implemented = KSTRING_NEW("Operation not implemented");
 static KString end_of_file = KSTRING_NEW("End pf file");
 
-Result(IOInternalHandle) EmbeddedFileIO_open(IOStatePtr state, KString path, Flags flags)
+Result(IOInternalHandle) EmbeddedFileIO__open(IOStatePtr self, KString path, Flags flags)
 {
-    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) state;
+    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
     KStringArray path_segments = KString__split(&path, '/');
 
     Optional(KString) top_level_opt = KStringArray__pop_front(&path_segments);
@@ -42,14 +42,14 @@ Result(IOInternalHandle) EmbeddedFileIO_open(IOStatePtr state, KString path, Fla
     return Error(IOInternalHandle, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(IOInternalHandle) EmbeddedFileIO_close(IOStatePtr state, IOInternalHandle handle)
+Result(IOInternalHandle) EmbeddedFileIO__close(IOStatePtr self, IOInternalHandle handle)
 {
     return Error(IOInternalHandle, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(IOBufferPtr) EmbeddedFileIO_read(IOStatePtr state, IOInternalHandle handle, size_t size)
+Result(IOBufferPtr) EmbeddedFileIO__read(IOStatePtr self, IOInternalHandle handle, size_t size)
 {
-    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) state;
+    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
 
     Optional(FileHandleTargetPtr) target;
 
@@ -100,24 +100,24 @@ Result(IOBufferPtr) EmbeddedFileIO_read(IOStatePtr state, IOInternalHandle handl
 
 }
 
-Result(ByteCount) EmbeddedFileIO_write(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size)
+Result(ByteCount) EmbeddedFileIO__write(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size)
 {
     return Error(ByteCount, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(ParkStatus) EmbeddedFileIO_park(IOStatePtr state, IOContextPtr parked_context)
+Result(ParkStatus) EmbeddedFileIO__park(IOStatePtr self, IOContextPtr parked_context)
 {
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(ParkStatus) EmbeddedFileIO_unpark(IOStatePtr state)
+Result(ParkStatus) EmbeddedFileIO__unpark(IOStatePtr self)
 {
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(FilesystemNodes) EmbeddedFileIO_list_nodes(IOStatePtr state, FilesystemNodePtr parent, KString path)
+Result(FilesystemNodes) EmbeddedFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, KString path)
 {
-    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) state;
+    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
     FAIterate(KStringArray, EmbeddedElf__list(), index, entry)
         FilesystemNodePtr node = FilesystemNode__heap_new(fs_state->state.filesystem, entry, 0);
@@ -127,18 +127,30 @@ Result(FilesystemNodes) EmbeddedFileIO_list_nodes(IOStatePtr state, FilesystemNo
     return Success(FilesystemNodes, result);
 }
 
+Result(IOStatus) EmbeddedFileIO__mkdir(IOStatePtr self, KString path)
+{
+    return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
+}
+
+Result(IOStatus) EmbeddedFileIO__remove(IOStatePtr self, KString path, Flags flags)
+{
+    return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
+}
+
 FileIO EmbeddedFilesystemIO__new()
 {
     FileIO embedded_file_io = (FileIO) {
         .base_io = (IO) {
-            .read = EmbeddedFileIO_read,
-            .write = EmbeddedFileIO_write,
-            .open = EmbeddedFileIO_open,
-            .close = EmbeddedFileIO_close,
-            .park = EmbeddedFileIO_park,
-            .unpark = EmbeddedFileIO_unpark,
+            .read = EmbeddedFileIO__read,
+            .write = EmbeddedFileIO__write,
+            .open = EmbeddedFileIO__open,
+            .close = EmbeddedFileIO__close,
+            .park = EmbeddedFileIO__park,
+            .unpark = EmbeddedFileIO__unpark,
         },
-        .list_nodes = EmbeddedFileIO_list_nodes,
+        .list_nodes = EmbeddedFileIO__list_nodes,
+        .mkdir = EmbeddedFileIO__mkdir,
+        .remove = EmbeddedFileIO__remove,
     };
     return embedded_file_io;
 }

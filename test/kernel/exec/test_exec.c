@@ -16,7 +16,7 @@ static KString exec_path = KSTRING_NEW("/ebin/hello_world");
 
 static OriginatingContext context;
 
-static const CPUID cpu = 1;
+static const CPUID cpu = 0;
 
 void setUp(void)
 {
@@ -44,7 +44,7 @@ void test_exec_spawns_process_and_puts_parent_in_wait()
 {
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
     TEST_ASSERT_EQUAL(1, Scheduler__process_count(kernel->scheduler));
-    ResultMatch(ProcessPtr, Exec__exec(context, exec_path, true, None(KString)))
+    ResultMatch(ProcessPtr, Exec__exec(context, exec_path, true, ProcessArguments__new()))
         IsError(code, message,
         {
             TEST_FAIL();
@@ -65,7 +65,7 @@ void test_exec_spawns_process_and_sets_up_a_defferred_return()
     TEST_ASSERT_EQUAL(1, Scheduler__process_count(kernel->scheduler));
     ReturnCode return_code = 55;
 
-    ResultMatch(ProcessPtr, Exec__exec(context, exec_path, true, None(KString)))
+    ResultMatch(ProcessPtr, Exec__exec(context, exec_path, true, ProcessArguments__new()))
         IsError(code, message,
         {
             TEST_FAIL();

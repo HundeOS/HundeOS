@@ -94,6 +94,17 @@ ProcessContextPtr ProcessContext__init(
     context->x[1] = argv;
     context->x[8] = vaddr(entry_point);
 
+    __d_printf(
+        PROCESS,
+        "ProcessContext__init done context=%p elr=%p sp=%p x0=%p x1=%p x8=%p page_table=%p\n",
+        context,
+        context->elr,
+        context->sp,
+        context->x[0],
+        context->x[1],
+        context->x[8],
+        paddr(page_table)
+    );
     return context;
 }
 
@@ -160,6 +171,17 @@ void Process__context_switch(ProcessPtr self)
             End
         })
     End
+    __d_printf(
+        PROCESS,
+        "Process__context_switch asm pid=%i name=%s context=%p elr=%p sp=%p x8=%p page_table=%p\n",
+        self->pid,
+        name,
+        context,
+        context->elr,
+        context->sp,
+        context->x[8],
+        paddr(self->page_table)
+    );
     asm_switch_context(context, paddr(self->page_table));
     __builtin_unreachable();
 }

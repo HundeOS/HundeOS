@@ -55,6 +55,14 @@ Pointers should be typedefed to a name following the convention
 TypeNamePtr
 - e.g. typedef Process * ProcessPtr
 
+## Object orientation in c
+An object orientated like namespacing convention is used. This means 
+function/methods for a certain class are prefixed with the class name followed by TWO underscores `__`.
+An example namespacing for a function would be `EmbeddedFileIO__remove`
+
+Additionally the object being acted on should be the first argument to the function and be named `self` so
+as to clearly indicate it is the object being acted on while not clashing with the c++ `this`.
+
 ## Key kernel structures
 When possible kernel structures should contain the other structures they use,
 not pointers to structures. This is to make memory allocation/cleanup simpler
@@ -92,3 +100,11 @@ This means that the kernel is neither monolithic or split up in to micro concern
 
 # Other
 - reload this file (AGENTS.md) every time there is user interaction
+
+## Dont be overconfident
+- Dont leap in to solution mode changing code when the user gives you an error
+panic or whatever. Gather evidence for your theory and
+avoid confirmation bias therefore you should look for evidence that may
+disprove your theory. 
+- Once you have a theory present it to the user with a plan to be
+approved. DO NOT MAKE CHANGES UNTIL THE USER AGREES

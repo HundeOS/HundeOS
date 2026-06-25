@@ -5,13 +5,22 @@
 #include "../types.h"
 #include "filesystem_node.h"
 
-typedef Result(FilesystemNodes) (* FS_list_nodes)(IOStatePtr state, FilesystemNodePtr parent, KString path);
+#ifndef __KERNEL_IO_STATUS_RESULT_DEFINED
+#define __KERNEL_IO_STATUS_RESULT_DEFINED
+ResultDef(IOStatus);
+#endif
+
+typedef Result(FilesystemNodes) (* FS_list_nodes)(IOStatePtr self, FilesystemNodePtr parent, KString path);
+typedef Result(IOStatus) (* FS_mkdir)(IOStatePtr self, KString path);
+typedef Result(IOStatus) (* FS_remove)(IOStatePtr self, KString path, Flags flags);
 
 typedef struct FileIO
 {
     // inheritance, leave as first item
     IO base_io;
     FS_list_nodes list_nodes;
+    FS_mkdir mkdir;
+    FS_remove remove;
 }
 FileIO;
 
