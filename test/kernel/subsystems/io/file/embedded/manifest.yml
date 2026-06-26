@@ -20,6 +20,7 @@ manifest:
     - kernel/subsystems/io/file/fat32/*.c
     - kernel/subsystems/io/file/memfs/*.c
     - kernel/subsystems/io/console/*.c
+    - kernel/subsystems/io/stream/*.c
     - kernel/syscall_handler.c
     - kernel/mutex.c
     - kernel/exec/exec.c

@@ -9,7 +9,7 @@ int main(void)
     {
         ServiceEvent event;
         ServiceCode result = service_wait(&event);
-        if (result != SERVICE_OK)
+        if (!service_ok(result))
         {
             printf("service_test: wait error %i\n", (int) result);
             continue;

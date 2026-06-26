@@ -29,6 +29,24 @@ Result(InitCode) gic_enable_interrupt(uint32_t irq)
     return Success(InitCode, ARCH_INIT_OK);
 }
 
+void gic_mask_interrupt(uint32_t irq)
+{
+    unsigned int reg = irq / 32;
+    unsigned int bit = irq % 32;
+    volatile uint32_t * GICD_ICENABLER = (uint32_t *)(GICD_BASE + 0x180 + (reg * 4));
+    *GICD_ICENABLER = (1u << bit);
+    __asm__ volatile("dsb sy; isb" ::: "memory");
+}
+
+void gic_unmask_interrupt(uint32_t irq)
+{
+    unsigned int reg = irq / 32;
+    unsigned int bit = irq % 32;
+    volatile uint32_t * GICD_ISENABLER = (uint32_t *)(GICD_BASE + 0x100 + (reg * 4));
+    *GICD_ISENABLER = (1u << bit);
+    __asm__ volatile("dsb sy; isb" ::: "memory");
+}
+
 Result(InitCode) gic_init(void)
 {
     // Enable Distributor

@@ -26,6 +26,12 @@ static ByteCount abort_stderr_size = 0;
 
 static const CPUID cpu_id = 12;
 
+void Arch__reset_irq_tracking();
+uint64_t Arch__masked_irq();
+uint64_t Arch__unmasked_irq();
+uint64_t Arch__mask_count();
+uint64_t Arch__unmask_count();
+
 static KString no_return_code = KSTRING_NEW("no return code");
 static KString abort_stderr_path = KSTRING_NEW(":abort-stderr:");
 
@@ -96,6 +102,7 @@ void setUp(void)
     set_cpu_id(cpu_id);
     reset_cpu_count();
     current_process_reset();
+    Arch__reset_irq_tracking();
     kernel = init_test_kernel_without_filesystem();
     scheduler = kernel->scheduler;
 
@@ -858,6 +865,83 @@ void test_service_enqueue_wakes_parked_service_process_and_wait_returns_event(vo
         })
         IsError(code, message, TEST_FAIL())
     End
+}
+
+void test_scheduler_subscribed_irq_is_sent_to_service_process(void)
+{
+    ProcessPtr service_proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    service_proc->process_class = PROCESS_CLASS_SERVICE;
+    IRQNumber irq = 33;
+
+    Scheduler__schedule(scheduler, service_proc);
+
+    ResultMatch(ServiceCode, Scheduler__subscribe_irq(scheduler, service_proc, irq))
+        IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(ServiceCode, Scheduler__send_irq_event(scheduler, irq))
+        IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(irq, Arch__masked_irq());
+    TEST_ASSERT_EQUAL(1, Arch__mask_count());
+
+    KernelContext kernel_context = KernelContext__new(None(ProcessID), Some(SchedulerPtr, scheduler));
+    ResultMatch(ServiceEvent, Service__wait(service_proc, &kernel_context))
+        IsSuccess(event,
+        {
+            TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);
+            TEST_ASSERT_EQUAL(irq, event.source);
+            TEST_ASSERT_EQUAL(0, event.data);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_scheduler_subscribed_irq_coalesces_while_pending_until_process_completes(void)
+{
+    ProcessPtr service_proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    service_proc->process_class = PROCESS_CLASS_SERVICE;
+    IRQNumber irq = 33;
+
+    Scheduler__schedule(scheduler, service_proc);
+
+    ResultMatch(ServiceCode, Scheduler__subscribe_irq(scheduler, service_proc, irq))
+        IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(ServiceCode, Scheduler__send_irq_event(scheduler, irq))
+        IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(ServiceCode, Scheduler__send_irq_event(scheduler, irq))
+        IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(1, ServiceEvents__len(&service_proc->service_events));
+    TEST_ASSERT_EQUAL(1, Arch__mask_count());
+    TEST_ASSERT_EQUAL(0, Arch__unmask_count());
+
+    ResultMatch(ServiceCode, Scheduler__complete_pending_irqs_for_process(scheduler, service_proc))
+        IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(irq, Arch__unmasked_irq());
+    TEST_ASSERT_EQUAL(1, Arch__unmask_count());
+
+    ResultMatch(ServiceCode, Scheduler__send_irq_event(scheduler, irq))
+        IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(2, ServiceEvents__len(&service_proc->service_events));
+    TEST_ASSERT_EQUAL(2, Arch__mask_count());
 }
 
 void test_service_timer_tick_event_is_not_sent_before_interval(void)

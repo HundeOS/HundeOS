@@ -10,8 +10,11 @@
 #include "parked.h"
 #include "../subsystems/message/subsystem_codes.h"
 #include "../subsystems/io/io_subsystem.h"
+#include "../service/service.h"
+#include "../arch/init.h"
 
 FixedArrayBodyDefine(CPUSchedulers);
+MapBodyDefine(IRQServiceMap);
 
 #define CPU_SCHEDULER_INIT(idle, cpu) \
     (CPUScheduler) { \
@@ -698,6 +701,65 @@ Result(CPUID) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc)
     End
 
     return Error(CPUID, unreachable_code, SCHEDULER_GENERAL_ERROR);
+}
+
+Result(ServiceCode) Scheduler__subscribe_irq(SchedulerPtr self, ProcessPtr process, IRQNumber irq)
+{
+    IRQService service = (IRQService) {
+        .process = process,
+        .pending = false,
+        .enabled = true,
+        .delivery_count = 0,
+        .coalesced_count = 0,
+    };
+    IRQServiceMap__set(&self->irq_services, irq, service);
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+Result(ServiceCode) Scheduler__send_irq_event(SchedulerPtr self, IRQNumber irq)
+{
+    MapPtrMatch(IRQServiceMap, IRQServiceMap__get_ptr(&self->irq_services, irq))
+        IsSome(service,
+        {
+            if (!service->enabled)
+            {
+                return Success(ServiceCode, SERVICE_OK);
+            }
+
+            if (service->pending)
+            {
+                service->coalesced_count++;
+                return Success(ServiceCode, SERVICE_OK);
+            }
+
+            service->pending = true;
+            service->delivery_count++;
+            Arch__mask_irq(irq);
+
+            ServiceEvent event;
+            event.type = SERVICE_EVENT_IRQ;
+            event.source = irq;
+            event.data = service->coalesced_count;
+            return Service__enqueue(self, service->process, event);
+        })
+    End
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+Result(ServiceCode) Scheduler__complete_pending_irqs_for_process(SchedulerPtr self, ProcessPtr process)
+{
+    for (int index = 0; index < self->irq_services.len; index++)
+    {
+        IRQNumber irq = self->irq_services.entries[index].key;
+        IRQServicePtr service = &self->irq_services.entries[index].value;
+        if (service->process == process && service->pending)
+        {
+            service->pending = false;
+            service->coalesced_count = 0;
+            Arch__unmask_irq(irq);
+        }
+    }
+    return Success(ServiceCode, SERVICE_OK);
 }
 
 

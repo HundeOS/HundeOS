@@ -5,12 +5,14 @@
 
 #include "../types/result.h"
 #include "../types/fixed_array.h"
+#include "../types/map.h"
 #include "types.h"
 #include "kernel_context.h"
 #include "parked.h"
 #include "context_switch.h"
 #include "../process.h"
 #include "subsystems/message/message_broker.h"
+#include "syscalls/service.h"
 
 typedef uint64_t SchedulerInitStatus;
 
@@ -31,6 +33,24 @@ typedef enum SchedulerErrors
     SCHEDULER_CANT_UNPARK = -5,
 } SchedulerErrors;
 
+typedef uint64_t IRQNumber;
+OptionalDef(IRQNumber);
+
+typedef struct IRQService
+{
+    ProcessPtr process;
+    bool pending;
+    bool enabled;
+    uint64_t delivery_count;
+    uint64_t coalesced_count;
+}
+IRQService;
+
+typedef IRQService * IRQServicePtr;
+
+OptionalDef(IRQService);
+OptionalDef(IRQServicePtr);
+
 typedef struct CPUScheduler
 {
     ProcessTable processes;
@@ -47,11 +67,13 @@ OptionalDef(CPUSchedulerPtr);
 ResultDef(CPUSchedulerPtr);
 
 FixedArrayDefine(CPUSchedulerPtr, MAX_CPUS, CPUSchedulers, &Ptr__equals);
+MapDefine(IRQNumber, IRQService, 256, IRQServiceMap, SimpleEquals(uint64_t));
 
 typedef struct Scheduler
 {
     MessageBrokerPtr message_broker;
     CPUSchedulers schedulers;
+    IRQServiceMap irq_services;
     mutex_t scheduler_lock;
     bool ready;
 } Scheduler;
@@ -97,11 +119,15 @@ Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu);
 void Scheduler__mark_ready(SchedulerPtr self);
 bool Scheduler__ready(SchedulerPtr self);
 Result(SchedulerInitStatus) Scheduler__wait_until_ready(SchedulerPtr self);
+Result(ServiceCode) Scheduler__subscribe_irq(SchedulerPtr self, ProcessPtr process, IRQNumber irq);
+Result(ServiceCode) Scheduler__send_irq_event(SchedulerPtr self, IRQNumber irq);
+Result(ServiceCode) Scheduler__complete_pending_irqs_for_process(SchedulerPtr self, ProcessPtr process);
 
 #define NEW_SCHEDULER(broker) \
     (Scheduler) { \
         .message_broker = broker, \
         .schedulers = EmptyArray(CPUSchedulers),\
+        .irq_services = EmptyMap(IRQServiceMap),\
         .scheduler_lock = MUTEX_INIT, \
         .ready = false, \
     } \

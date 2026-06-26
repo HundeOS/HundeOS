@@ -87,7 +87,7 @@ void irq_handler(ProcessContextPtr context, bool current_el)
         End
         icc_eoir1(id);
         icc_dir(id);
-        uart_irq_handler(kernel->io_subsystem);
+        Scheduler__send_irq_event(kernel->scheduler, UART_IRQ_ID);
         __d_printf(IRQ, "UART IRQ exit current_el=%i cpu=%i\n", current_el, CPU__id());
     }
     else

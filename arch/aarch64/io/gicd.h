@@ -21,6 +21,8 @@ extern const uint64_t __gicd_start[];
 #define GICC_PMR    (*(volatile unsigned int *)(0x08010000UL + 0x004)) // priority mask register
 
 Result(InitCode) gic_enable_interrupt(uint32_t irq);
+void gic_mask_interrupt(uint32_t irq);
+void gic_unmask_interrupt(uint32_t irq);
 Result(InitCode) gic_init();
 
 #endif

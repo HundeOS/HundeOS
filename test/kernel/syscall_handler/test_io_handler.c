@@ -20,6 +20,8 @@ static IOState state = NEW_IO_STATE;
 static bool opened = false;
 static bool written = false;
 static bool closed = false;
+static bool data_available = false;
+static bool eof = false;
 static IOInternalHandle write_handle = 0;
 static DataPtr write_data = NULL;
 static size_t write_size = 0;
@@ -65,6 +67,21 @@ static Result(ParkStatus) fake_unpark(IOStatePtr state_ptr)
     return Success(ParkStatus, IO_UNPARK_OK);
 }
 
+static Optional(IOContextPtr) fake_data_available(IOStatePtr state_ptr, size_t byte_count)
+{
+    TEST_ASSERT_EQUAL(&state, state_ptr);
+    TEST_ASSERT_EQUAL(7, byte_count);
+    data_available = true;
+    return None(IOContextPtr);
+}
+
+static Optional(IOContextPtr) fake_eof(IOStatePtr state_ptr)
+{
+    TEST_ASSERT_EQUAL(&state, state_ptr);
+    eof = true;
+    return None(IOContextPtr);
+}
+
 static IO test_io = {
     .open = fake_open,
     .read = fake_read,
@@ -72,6 +89,8 @@ static IO test_io = {
     .close = fake_close,
     .park = fake_park,
     .unpark = fake_unpark,
+    .data_available = fake_data_available,
+    .eof = fake_eof,
 };
 
 static void install_open_fd(FileDescriptor fd)
@@ -105,6 +124,8 @@ void setUp(void)
     opened = false;
     written = false;
     closed = false;
+    data_available = false;
+    eof = false;
     write_handle = 0;
     write_data = NULL;
     write_size = 0;
@@ -177,5 +198,37 @@ void test_io_handler_close_removes_file_descriptor(void)
     ResultMatch(ProcessIOHandle, Process__get_io_handle(&process, EXPECTED_FD))
         IsSuccess(handle, TEST_FAIL())
         IsError(code, message, TEST_ASSERT_EQUAL(IO_NOT_OPEN, code))
+    End
+}
+
+void test_io_handler_server_data_available_translates_file_descriptor_to_io_handle(void)
+{
+    install_open_fd(EXPECTED_FD);
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_SERVER_DATA_AVAILABLE, EXPECTED_FD, 7, 0, 0
+    ))
+        IsSuccess(status,
+        {
+            TEST_ASSERT_TRUE(data_available);
+            TEST_ASSERT_EQUAL(IO_OK, status);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_io_handler_server_eof_translates_file_descriptor_to_io_handle(void)
+{
+    install_open_fd(EXPECTED_FD);
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_SERVER_EOF, EXPECTED_FD, 0, 0, 0
+    ))
+        IsSuccess(status,
+        {
+            TEST_ASSERT_TRUE(eof);
+            TEST_ASSERT_EQUAL(IO_OK, status);
+        })
+        IsError(code, message, TEST_FAIL())
     End
 }

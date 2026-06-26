@@ -20,3 +20,13 @@ Result(SubsystemInitStatus) Arch__init()
 
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
+
+void Arch__mask_irq(uint64_t irq)
+{
+    gic_mask_interrupt((uint32_t) irq);
+}
+
+void Arch__unmask_irq(uint64_t irq)
+{
+    gic_unmask_interrupt((uint32_t) irq);
+}

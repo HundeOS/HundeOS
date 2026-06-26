@@ -305,6 +305,35 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
 }
 
+Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size)
+{
+    size_t allocation_size = Process__page_aligned_size(size);
+    Address virtual_address = self->allocation_next;
+
+    UserAddress allocation = (UserAddress) {
+        .virtual_addr = virtual_address,
+        .kernel_addr = KERNEL_ADDR(physical, physical),
+        .read = true,
+        .write = true,
+        .execute = false,
+        .valid = true,
+    };
+
+    PageTable__map_mmio(v_ptr(self->page_table, PageTable), allocation, allocation_size);
+    ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
+        self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC
+    ))
+        IsSuccess(_,
+        {
+            self->allocation_next += allocation_size;
+            return Success(UserAddress, allocation);
+        });
+        IsError(code, message, return Error(UserAddress, message, code));
+    End
+
+    return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+}
+
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
 {
     Address old_break = self->heap_break;

@@ -1,7 +1,7 @@
 #include "print.h"
 
 #include <stdint.h>
-#include <stdint.h>
+#include <stdbool.h>
 #include "arch/basic_io.h"
 
 static void trace_puts(const char * str)

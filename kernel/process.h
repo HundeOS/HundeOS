@@ -223,6 +223,7 @@ Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 );
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
+Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size);
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment);
 Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virtual_address);
 Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self);

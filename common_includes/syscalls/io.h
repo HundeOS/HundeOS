@@ -1,6 +1,8 @@
 #ifndef _COMMON_INCLUDES_SYSCALLS_IO_H
 #define _COMMON_INCLUDES_SYSCALLS_IO_H
 
+#include <stdint.h>
+
 typedef enum IOOperation
 {
     IO_OPEN,
@@ -10,6 +12,11 @@ typedef enum IOOperation
     IO_LIST_DIR,
     IO_MKDIR,
     IO_REMOVE,
+    IO_SERVER_REGISTER,
+    IO_SERVER_GET_BUFFER,
+    IO_SERVER_DATA_AVAILABLE,
+    IO_SERVER_DATA_CONSUMED,
+    IO_SERVER_EOF,
 }
 IOOperation;
 
@@ -44,6 +51,24 @@ typedef int64_t IOHandle;
 typedef int64_t ByteCount;
 typedef int64_t DirectoryEntryCount;
 typedef uint64_t Flags;
+
+typedef char * IOServerBufferDataPtr;
+
+typedef struct IOServerBuffer
+{
+    IOServerBufferDataPtr data;
+    uint64_t capacity;
+}
+IOServerBuffer;
+
+typedef IOServerBuffer * IOServerBufferPtr;
+
+typedef enum IOServerRole
+{
+    IO_SERVER_READ = 1,
+    IO_SERVER_WRITE = 2,
+}
+IOServerRole;
 
 #define IO_DIRENT_NAME_MAX 256
 

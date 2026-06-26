@@ -32,6 +32,8 @@ ResultDef(PIDHandlesPtr);
 
 MapDefine(ProcessID, PIDHandles, MAX_PROCESSES, ProcessHandleMap, SimpleEquals(uint64_t));
 typedef ProcessHandleMap * ProcessHandleMapPtr;
+MapDefine(DeviceHandle, ProcessPtr, IO_MAX_DEVICES, IOServerProcessMap, SimpleEquals(uint32_t));
+MapDefine(IOHandle, IOServerRole, MAX_HANDLES, IOServerRoleMap, SimpleEquals(uint64_t));
 
 typedef struct IOSubsystem
 {
@@ -41,6 +43,9 @@ typedef struct IOSubsystem
     SchedulerPtr scheduler;
     MessageBrokerPtr message_broker;
     ProcessHandleMap process_handles;
+    IOServerProcessMap read_server_processes;
+    IOServerProcessMap write_server_processes;
+    IOServerRoleMap server_roles;
 
     mutex_t lock;
 }
@@ -62,6 +67,19 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KS
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context);
+Result(IOHandle) IOSubsystem__server_register(
+    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, KString path, IOServerRole role
+);
+Result(IOStatus) IOSubsystem__server_get_buffer(
+    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, IOServerBufferPtr target
+);
+Result(IOStatus) IOSubsystem__server_data_available(
+    IOSubsystemPtr self, IOContextPtr context, size_t byte_count
+);
+Result(IOStatus) IOSubsystem__server_data_consumed(
+    IOSubsystemPtr self, IOContextPtr context, size_t byte_count
+);
+Result(IOStatus) IOSubsystem__server_eof(IOSubsystemPtr self, IOContextPtr context);
 Result(DirectoryEntryCount) IOSubsystem__list_dir(
     IOSubsystemPtr self, KString path, DirectoryEntryPtr entries, size_t max_entries
 );
@@ -86,6 +104,9 @@ IOInternalHandle device_internal_handle(IOHandle handle);
         .handles = EmptyMap(IOHandlesMap), \
         .scheduler = sched, \
         .process_handles = EmptyMap(ProcessHandleMap),\
+        .read_server_processes = EmptyMap(IOServerProcessMap),\
+        .write_server_processes = EmptyMap(IOServerProcessMap),\
+        .server_roles = EmptyMap(IOServerRoleMap),\
         .lock = MUTEX_INIT,\
         .message_broker = broker,\
         \
@@ -97,6 +118,9 @@ IOInternalHandle device_internal_handle(IOHandle handle);
         subsystem.scheduler = sched; \
         subsystem.lock = MUTEX_INIT;\
         MapInit(ProcessHandleMap, subsystem.process_handles);\
+        MapInit(IOServerProcessMap, subsystem.read_server_processes);\
+        MapInit(IOServerProcessMap, subsystem.write_server_processes);\
+        MapInit(IOServerRoleMap, subsystem.server_roles);\
 
 #define NEW_IO_STATE \
     (IOState) { \

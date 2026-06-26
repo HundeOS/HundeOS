@@ -108,6 +108,32 @@ void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
     __d_println(MMU, "Mapped");
 }
 
+void PageTable__map_mmio(PageTablePtr self, UserAddress address, size_t size)
+{
+    Address user_start = align_down_4k(vaddr(address));
+    Address phys_start = align_down_4k(u_kpaddr(address));
+    Address user_end = align_up_4k(user_start + size);
+    size_t adjusted_range = user_end - user_start;
+    uint64_t pages = adjusted_range / PAGE_SIZE;
+    pages += adjusted_range % PAGE_SIZE ? 1 : 0;
+
+    MappingPermissions perms = (MappingPermissions) {
+        .memory_type = ATTR_INDEX_DEVICE,
+        .shareability = SHARE_OUTER,
+        .access = ACCESS_EL1_RW_EL0_RW,
+        .uxn = 1,
+        .pxn = 1
+    };
+
+    for (int page = 0; page < pages; page++)
+    {
+        Address user_addr = offset_addr(user_start, page * PAGE_SIZE);
+        Address phys_addr = offset_addr(phys_start, page * PAGE_SIZE);
+        PageTable__map_4k_page(self, user_addr, phys_addr, perms);
+    }
+    __asm__ __volatile__("dsb ishst; isb" ::: "memory");
+}
+
 static KernelAddress PageTable__next_level_table_if_present(KernelAddress parent_level_table,
                                                             uint64_t child_index)
 {

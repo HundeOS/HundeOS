@@ -17,17 +17,21 @@
 
 KString panic_message = KSTRING_NEW("Program failed: %s\n");
 static KString console_path = KSTRING_NEW(":console:");
+static KString tty_path = KSTRING_NEW(":tty:");
 
-static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, Flags flags)
+static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, KString path, Flags flags)
 {
-    __d_printf(IOSUB, "open_stdio_handle pid=%i name=%s flags=%i\n", process->pid, cstr(process->name), flags);
+    __d_printf(
+        IOSUB, "open_stdio_handle pid=%i name=%s path=%s flags=%i\n",
+        process->pid, cstr(process->name), cstr(path), flags
+    );
     KernelContext kernel_context = KernelContext__new(
         Some(ProcessID, process->pid), Some(SchedulerPtr, kernel->scheduler)
     );
     IOContextPtr context = IOContext__heap_new(
         kernel_context, Some(IOSubsystemPtr, kernel->io_subsystem), None(IOHandle), None(ExternalBuffer)
     );
-    Result(IOHandle) open_result = IOSubsystem__open(kernel->io_subsystem, context, console_path, flags);
+    Result(IOHandle) open_result = IOSubsystem__open(kernel->io_subsystem, context, path, flags);
     IOContext__dispose(context);
     ResultMatch(IOHandle, open_result)
         IsSuccess(handle, __d_printf(IOSUB, "open_stdio_handle success pid=%i flags=%i handle=%p\n", process->pid, flags, handle););
@@ -39,7 +43,7 @@ static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, 
 static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, ProcessPtr process)
 {
     __d_printf(IOSUB, "install_default_stdio start pid=%i name=%s\n", process->pid, cstr(process->name));
-    ResultMatch(IOHandle, open_stdio_handle(kernel, process, IO_OPEN_READ))
+    ResultMatch(IOHandle, open_stdio_handle(kernel, process, tty_path, IO_OPEN_READ))
         IsSuccess(handle,
         {
             __d_printf(IOSUB, "install_default_stdio fd=0 pid=%i handle=%p\n", process->pid, handle);
@@ -48,7 +52,7 @@ static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, Proces
         IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP));
     End
 
-    ResultMatch(IOHandle, open_stdio_handle(kernel, process, IO_OPEN_WRITE))
+    ResultMatch(IOHandle, open_stdio_handle(kernel, process, console_path, IO_OPEN_WRITE))
         IsSuccess(handle,
         {
             __d_printf(IOSUB, "install_default_stdio fd=1 pid=%i handle=%p\n", process->pid, handle);
@@ -57,7 +61,7 @@ static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, Proces
         IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP));
     End
 
-    ResultMatch(IOHandle, open_stdio_handle(kernel, process, IO_OPEN_WRITE))
+    ResultMatch(IOHandle, open_stdio_handle(kernel, process, console_path, IO_OPEN_WRITE))
         IsSuccess(handle,
         {
             __d_printf(IOSUB, "install_default_stdio fd=2 pid=%i handle=%p\n", process->pid, handle);
@@ -150,6 +154,9 @@ void Kernel_main(CPUID cpu_id) {
     if (cpu_id == 1)
     {
         __d_printf(PROGRESS, "Kernel starting loading program: %i\n", cpu_id);
+        schedule_as(kernel, kstring("uart_rx"), PROCESS_CLASS_SERVICE);
+        schedule_as(kernel, kstring("uart_tx"), PROCESS_CLASS_SERVICE);
+        schedule_as(kernel, kstring("hello_stream"), PROCESS_CLASS_SERVICE);
         schedule(kernel, kstring("shell"));
         Scheduler__mark_ready(kernel->scheduler);
     }

@@ -114,7 +114,7 @@ Result(InitCode) uart_enable_irqs()
 {
     *UART0_CR = 0;            // disable UART
     *UART0_ICR = 0x7FF;       // clear all interrupts
-    *UART0_IMSC = (1 << 4);   // enable RX interrupt
+    *UART0_IMSC = I_RX | I_RT; // enable RX and receive-timeout interrupts
     *UART0_CR = (1 << 9) | (1 << 8) | (1 << 0); // enable UART, TX, RX
 
     __d_println(IRQ2, "Vals");

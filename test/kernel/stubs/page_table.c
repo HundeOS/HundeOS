@@ -54,6 +54,11 @@ void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
     MapRequestArray__push(&self->mapped_addresses, (MapRequest){.address = address, .size = size});
 }
 
+void PageTable__map_mmio(PageTablePtr self, UserAddress address, size_t size)
+{
+    PageTable__map(self, address, size);
+}
+
 void PageTable__unmap(PageTablePtr self, Address virtual_address, size_t size)
 {
     FAIterate(MapRequestArray, self->mapped_addresses, i, mapped_address)

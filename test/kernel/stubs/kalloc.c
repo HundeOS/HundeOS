@@ -12,6 +12,11 @@ KernelAddress Kernel__alloc(size_t size)
     return KERNEL_ADDR(addr, addr);
 }
 
+KernelAddress Kernel__from_virtual_address(Address virtual_addr)
+{
+    return KERNEL_ADDR(virtual_addr, virtual_addr);
+}
+
 Address Kernel__alloc_kernel(size_t size)
 {
     return vaddr(Kernel__alloc(size));

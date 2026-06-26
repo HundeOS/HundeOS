@@ -179,5 +179,130 @@ Result(SystemCallResult) IO__handler(
         End
     }
 
+    if (io_operation == IO_SERVER_REGISTER)
+    {
+        KString path = kstring((const char *) arg2);
+        IOServerRole role = (IOServerRole) arg3;
+        context = IOContext__heap_new(
+            kernel_context, Some(IOSubsystemPtr, io_subsystem), None(IOHandle), None(ExternalBuffer)
+        );
+
+        Result(IOHandle) register_result = IOSubsystem__server_register(io_subsystem, context, process, path, role);
+        IOContext__dispose(context);
+
+        ResultMatch(IOHandle, register_result)
+            IsError(code, message, return Error(SystemCallResult, message, code));
+            IsSuccess(handle,
+            {
+                ResultMatch(FileDescriptor, Process__allocate_file_descriptor(process, (ProcessIOHandle) handle))
+                    IsSuccess(fd, return Success(SystemCallResult, fd));
+                    IsError(code, message, return Error(SystemCallResult, message, code));
+                End
+            })
+        End
+    }
+
+    if (io_operation == IO_SERVER_GET_BUFFER)
+    {
+        FileDescriptor fd = (FileDescriptor) arg2;
+        IOServerBufferPtr target = (IOServerBufferPtr) arg3;
+        Result(ProcessIOHandle) handle_result = Process__get_io_handle(process, fd);
+        ResultMatch(ProcessIOHandle, handle_result)
+            IsError(code, message, return Error(SystemCallResult, message, code));
+            IsSuccess(handle,
+            {
+                context = IOContext__heap_new(
+                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
+                    Some(IOHandle, (IOHandle) handle), None(ExternalBuffer)
+                );
+
+                CompleteCall(IOStatus, context, IOSubsystem__server_get_buffer(io_subsystem, context, process, target));
+            })
+        End
+    }
+
+    if (io_operation == IO_SERVER_DATA_AVAILABLE)
+    {
+        FileDescriptor fd = (FileDescriptor) arg2;
+        size_t byte_count = (size_t) arg3;
+        Result(ProcessIOHandle) handle_result = Process__get_io_handle(process, fd);
+        ResultMatch(ProcessIOHandle, handle_result)
+            IsError(code, message, return Error(SystemCallResult, message, code));
+            IsSuccess(handle,
+            {
+                context = IOContext__heap_new(
+                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
+                    Some(IOHandle, (IOHandle) handle), None(ExternalBuffer)
+                );
+
+                Result(IOStatus) status_result = IOSubsystem__server_data_available(io_subsystem, context, byte_count);
+                IOContext__dispose(context);
+                ResultMatch(IOStatus, status_result)
+                    IsSuccess(status,
+                    {
+                        Scheduler__complete_pending_irqs_for_process(kernel->scheduler, process);
+                        return Success(SystemCallResult, status);
+                    })
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
+            })
+        End
+    }
+
+    if (io_operation == IO_SERVER_DATA_CONSUMED)
+    {
+        FileDescriptor fd = (FileDescriptor) arg2;
+        size_t byte_count = (size_t) arg3;
+        Result(ProcessIOHandle) handle_result = Process__get_io_handle(process, fd);
+        ResultMatch(ProcessIOHandle, handle_result)
+            IsError(code, message, return Error(SystemCallResult, message, code));
+            IsSuccess(handle,
+            {
+                context = IOContext__heap_new(
+                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
+                    Some(IOHandle, (IOHandle) handle), None(ExternalBuffer)
+                );
+
+                Result(IOStatus) status_result = IOSubsystem__server_data_consumed(io_subsystem, context, byte_count);
+                IOContext__dispose(context);
+                ResultMatch(IOStatus, status_result)
+                    IsSuccess(status,
+                    {
+                        Scheduler__complete_pending_irqs_for_process(kernel->scheduler, process);
+                        return Success(SystemCallResult, status);
+                    })
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
+            })
+        End
+    }
+
+    if (io_operation == IO_SERVER_EOF)
+    {
+        FileDescriptor fd = (FileDescriptor) arg2;
+        Result(ProcessIOHandle) handle_result = Process__get_io_handle(process, fd);
+        ResultMatch(ProcessIOHandle, handle_result)
+            IsError(code, message, return Error(SystemCallResult, message, code));
+            IsSuccess(handle,
+            {
+                context = IOContext__heap_new(
+                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
+                    Some(IOHandle, (IOHandle) handle), None(ExternalBuffer)
+                );
+
+                Result(IOStatus) status_result = IOSubsystem__server_eof(io_subsystem, context);
+                IOContext__dispose(context);
+                ResultMatch(IOStatus, status_result)
+                    IsSuccess(status,
+                    {
+                        Scheduler__complete_pending_irqs_for_process(kernel->scheduler, process);
+                        return Success(SystemCallResult, status);
+                    })
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
+            })
+        End
+    }
+
     return Error(SystemCallResult, KString__sprintf(&unhandled_operation_format, io_operation), SYSCALL_FAILURE);
 }

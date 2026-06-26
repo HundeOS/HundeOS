@@ -15,6 +15,12 @@
 #include "subsystems/message/message_broker.h"
 #include "syscalls/io.h"
 
+#ifndef __KERNEL_IO_STATUS_RESULT_DEFINED
+#define __KERNEL_IO_STATUS_RESULT_DEFINED
+ResultDef(IOStatus);
+#endif
+
+OptionalDef(IOServerRole);
 
 typedef struct IO IO;
 typedef IO * IOPtr;
@@ -50,6 +56,7 @@ typedef struct ExternalBuffer
 
 ResultDef(ExternalBuffer);
 OptionalDef(ExternalBuffer);
+ResultDef(IOServerBuffer);
 
 typedef struct IOContext
 {
@@ -76,6 +83,11 @@ typedef Result(IOBufferPtr) (* IO_read)(IOStatePtr self, IOInternalHandle handle
 typedef Result(ByteCount) (* IO_write)(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size);
 typedef Result(ParkStatus)(* IO_park)(IOStatePtr self, IOContextPtr parked_context);
 typedef Result(ParkStatus)(* IO_unpark)(IOStatePtr self);
+typedef Result(IOServerBuffer) (* IO_server_buffer)(IOStatePtr self);
+typedef Result(IOServerBuffer) (* IO_server_write_buffer)(IOStatePtr self);
+typedef Optional(IOContextPtr) (* IO_data_available)(IOStatePtr self, size_t byte_count);
+typedef Result(IOStatus) (* IO_data_consumed)(IOStatePtr self, size_t byte_count);
+typedef Optional(IOContextPtr) (* IO_eof)(IOStatePtr self);
 
 typedef struct IO
 {
@@ -85,6 +97,11 @@ typedef struct IO
     IO_close close;
     IO_park park;
     IO_unpark unpark;
+    IO_server_buffer server_buffer;
+    IO_server_write_buffer server_write_buffer;
+    IO_data_available data_available;
+    IO_data_consumed data_consumed;
+    IO_eof eof;
 } IO;
 
 OptionalDef(IO);

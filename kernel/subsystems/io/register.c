@@ -7,6 +7,7 @@
 
 #include "console/console.h"
 #include "file/filesystem.h"
+#include "stream/stream.h"
 
 #define IO_REGISTER(io_subsystem, path, io_ptr, io_state) \
     { \
@@ -23,6 +24,8 @@
 
 
 static KString CONSOLE = KSTRING_NEW(":console:");
+static KString TTY = KSTRING_NEW(":tty:");
+static KString HELLO_STREAM = KSTRING_NEW("/dev/hello");
 static KString ROOT = KSTRING_NEW("/");
 
 Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
@@ -31,6 +34,8 @@ Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
     FilesystemPtr root_fs = Filesystem__build_root_and_mounts();
 
     IO_REGISTER(io_subsystem, CONSOLE, Console__heap_new(), (IOStatePtr) ConsoleState__instance());
+    IO_REGISTER(io_subsystem, TTY, Stream__heap_new(), (IOStatePtr) StreamState__instance());
+    IO_REGISTER(io_subsystem, HELLO_STREAM, Stream__heap_new(), (IOStatePtr) StreamState__heap_new());
     IO_REGISTER(io_subsystem, ROOT, &root_fs->file_io.base_io, (IOStatePtr) root_fs->state);
 
     ResultMatch(ListenerRegisterResult, IOSubsystem__register_listeners(kernel))

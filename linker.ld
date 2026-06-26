@@ -168,7 +168,7 @@ SECTIONS
   __embedded_binaries_end = .;
   __embedded_binaries_phys_start = LOADADDR(.binaries);
   __embedded_binaries_phys_end = LOADADDR(.binaries) + SIZEOF(.binaries);
-  __lma_cursor = ALIGN(__lma_cursor + SIZEOF(.binaries), PAGE_4KB);
+  __lma_cursor = ALIGN(LOADADDR(.binaries) + SIZEOF(.binaries), PAGE_4KB);
 
   .user.text : AT(ALIGN(__lma_cursor, PAGE_4KB))
   {
