@@ -21,6 +21,7 @@ run the tests and generate the runners.
 Plan and then tell the user what you plan to do before making changes.
 
 ## Unit tests
+### Kernel
 Add unit tests for any new code in kernel. Some architecture specific code
 may not have unit tests as it is difficult to test..
 
@@ -30,6 +31,11 @@ implementations that are architecture specific in the codebase.
 No dependencies on architecture specific code should be made 
 in core kernel tests.
 
+### Drivers and userspace programs
+Properly used commands and drivers running in userspace should
+be unit tested, stubbing out kernel interfaces. Prefer integration
+style testing although tests of key functions can also be written
+
 ## Troubleshooting
 Ensure you have evidence for a theory regarding a problem before
 fixing. Ensure the user is informed of the theory and agrees to
@@ -38,7 +44,8 @@ the evidence.
 # Code standards
 ## Result types (Some, None, Success, Error, etc)
 These should be used in the kernel code in most cases. Raw pointers or NULLs
-should be avoided. 
+should not be used in the kernel or driver except at syscall boundaries. Optional types should be used.
+Dont be stupid thinking you satisfy this requirement by using a 0 instead of a NULL
 
 The matching macros to match results types should be used
 
@@ -55,6 +62,16 @@ Pointers should be typedefed to a name following the convention
 TypeNamePtr
 - e.g. typedef Process * ProcessPtr
 
+## Unused names
+Do not add `(void) name;` statements to suppress unused parameter or unused variable warnings. Disable the relevant unused warning in the build flags instead.
+
+## GOTO no go
+Dont use goto statements, ever.
+
+## CritcalSection
+When using mutexes in the kernel, use the CriticalSection macros along
+with their exit macros (i.e. cs_return)
+
 ## Object orientation in c
 An object orientated like namespacing convention is used. This means 
 function/methods for a certain class are prefixed with the class name followed by TWO underscores `__`.
@@ -70,13 +87,16 @@ not pointers to structures. This is to make memory allocation/cleanup simpler
 ## Critical sections
 In kernel code mutexes should be used along with CriticalSection macros
 
+## Control flow
+Do not use `goto` in new or changed code. When modifying code near an existing
+`goto`, refactor that control flow to use structured returns or helper
+functions instead.
+
 # Fixing issues
 ## propose a theory and evidence
 - Tell the user what you plan to do before making changes. If there is no
 evidence, the user will be asked to provide evidence.
 - Dont just leap in to fixing things without consulting the user first
-
-
 
 # Changing code
 ## propose a change

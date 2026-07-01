@@ -45,7 +45,9 @@ static Result(IOInternalHandle) abort_stderr_close(IOStatePtr state, IOInternalH
     return Success(IOInternalHandle, handle);
 }
 
-static Result(IOBufferPtr) abort_stderr_read(IOStatePtr state, IOInternalHandle handle, size_t size)
+static Result(IOBufferPtr) abort_stderr_read(
+    IOStatePtr state, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+)
 {
     return Error(IOBufferPtr, kstring("unsupported"), IO_OPERATION_NOT_SUPPORTED);
 }
@@ -163,8 +165,8 @@ void test_scheduler_interrupt_when_no_processes_are_running_stays_in_idle(void)
     Scheduler__start(scheduler, cpu_id);
 
     Scheduler__preempt(scheduler, cpu_id, context);
-    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
-    ProcessPtr current = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    ProcessPtr idle = Unwrap(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id), (ProcessPtr){});
+    ProcessPtr current = Unwrap(ProcessPtr, Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
 
     TEST_ASSERT_EQUAL(idle, current);
     TEST_ASSERT_EQUAL(idle->context, context);
@@ -176,7 +178,7 @@ void test_scheduler_interrupt_before_cpu_start_does_not_context_switch(void)
 {
     CPUID unstarted_cpu = 1;
     ProcessContextPtr context = (ProcessContextPtr) 0xFFEE0000; // whatever as long as we dont deref
-    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, unstarted_cpu));
+    ProcessPtr idle = Unwrap(ProcessPtr, Scheduler__idle_process(scheduler, unstarted_cpu), (ProcessPtr){});
 
     current_process_reset();
 
@@ -192,7 +194,7 @@ void test_scheduler_init_creates_cpu_slots_independent_of_online_cpu_count(void)
 
     MessageBrokerPtr message_broker = MessageBroker__heap_new();
     SchedulerPtr local_scheduler = Scheduler__heap_new(message_broker);
-    Elf idle = UnwrapPanic(Elf, EmbeddedElf__load(kstring("hello_world")));
+    Elf idle = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
 
     ResultMatch(SchedulerInitStatus, Scheduler__init(local_scheduler, idle))
         IsError(code, message, TEST_FAIL())
@@ -297,7 +299,7 @@ void test_scheduler_exit_removes_process_when_its_current(void)
     Scheduler__start(scheduler, cpu_id);
     Scheduler__preempt(scheduler, cpu_id, context);
 
-    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
+    ProcessPtr idle = Unwrap(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id), (ProcessPtr){});
 
     ResultMatch(ProcessPtr, Scheduler__exit(scheduler, proc, 10))
         IsError(code, message, TEST_FAIL());
@@ -345,7 +347,7 @@ void test_scheduler_exit_sends_a_message_to_the_broker_saying_the_process_exited
     TEST_ASSERT_EQUAL(SOURCE_PROCESS, received_message->source);
     TEST_ASSERT_EQUAL(PROC_STATE_DEAD, received_message->source_code);
 
-    Payload payload = UnwrapPanic(Payload, received_message->payload);
+    Payload payload = Unwrap(Payload, received_message->payload, (Payload){});
     TEST_ASSERT_EQUAL(PAYLOAD_TYPE_ANYTHING, payload.type);
     TEST_ASSERT_EQUAL(proc->pid, payload.anything);
 
@@ -389,7 +391,7 @@ void test_scheduler_exit_unparks_parent_if_waiting(void)
     End
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
 
-    Anything return_code = ResultUnwrapPanic(Anything, deferred_syscall_result());
+    Anything return_code = ResultUnwrap(Anything, deferred_syscall_result(), (Anything){});
     TEST_ASSERT_EQUAL(10, return_code); // return code should have been set for switching context
 
     Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
@@ -454,7 +456,7 @@ void test_scheduler_abort_process_records_fault_writes_stderr_and_unparks_parent
     TEST_ASSERT_NOT_NULL(strstr(abort_stderr_buffer, "process fault: data abort"));
     TEST_ASSERT_NOT_NULL(strstr(abort_stderr_buffer, "pc=0x400100"));
 
-    Anything return_code = ResultUnwrapPanic(Anything, deferred_syscall_result());
+    Anything return_code = ResultUnwrap(Anything, deferred_syscall_result(), (Anything){});
     TEST_ASSERT_EQUAL(PROCESS_ABORT_EXIT_BASE - PROCESS_ABORT_DATA_ABORT, return_code);
 }
 
@@ -510,7 +512,7 @@ void test_scheduler_park_switches_process_to_waiting_and_switches_context(void)
     Scheduler__start(scheduler, cpu_id);
     Scheduler__preempt(scheduler, cpu_id, context);
 
-    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id));
+    ProcessPtr idle = Unwrap(ProcessPtr, Scheduler__idle_process(scheduler, cpu_id), (ProcessPtr){});
 
     Match(ProcessPtr, Scheduler__current_process(scheduler, cpu_id))
         IsNone(TEST_FAIL());
@@ -720,7 +722,7 @@ void test_scheduler_preempt_when_idle_with_a_process_ready(void)
         IsSuccess(cpu, TEST_ASSERT_EQUAL(scheduled_cpu, cpu))
         IsError(code, message, TEST_FAIL());
     End
-    ProcessPtr idle = UnwrapPanic(ProcessPtr, Scheduler__idle_process(scheduler, scheduled_cpu));
+    ProcessPtr idle = Unwrap(ProcessPtr, Scheduler__idle_process(scheduler, scheduled_cpu), (ProcessPtr){});
 
     Scheduler__start(scheduler, scheduled_cpu);
     // should start with idle
@@ -823,7 +825,7 @@ void test_service_wait_parks_service_process_when_no_event_is_available(void)
     End
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, service_proc->state);
-    Match(ParkedKernelContextPtr, service_proc->parked_context)
+    Match(ParkedKernelContextPtr, Process__top_parked_context(service_proc))
         IsNone(TEST_FAIL())
         IsSome(parked, TEST_ASSERT_EQUAL(PARK_WAIT_SERVICE_EVENT, parked->park_reason))
     End
@@ -1031,7 +1033,7 @@ void test_io_park_messages_put_process_in_to_wait()
     Scheduler__schedule(scheduler, proc);
     Scheduler__preempt(scheduler, cpu_id, context);
 
-    ProcessPtr running = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    ProcessPtr running = Unwrap(ProcessPtr, Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_EQUAL(proc, running);
 
     KernelContext kernel_context = (KernelContext) {
@@ -1046,7 +1048,7 @@ void test_io_park_messages_put_process_in_to_wait()
     MessageBroker__deliver(kernel->message_broker, message);
     Scheduler__preempt(scheduler, cpu_id, context);
 
-    running = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    running = Unwrap(ProcessPtr, Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_NOT_EQUAL(proc, running);
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, proc->state);
@@ -1062,7 +1064,7 @@ void test_io_data_arrived_pull_process_out_of_park()
     Scheduler__schedule(scheduler, proc);
     Scheduler__preempt(scheduler, cpu_id, context);
 
-    ProcessPtr running = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    ProcessPtr running = Unwrap(ProcessPtr, Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_EQUAL(proc, running);
 
     KernelContext kernel_context = (KernelContext) {
@@ -1076,7 +1078,7 @@ void test_io_data_arrived_pull_process_out_of_park()
     MessageBroker__deliver(kernel->message_broker, message_park);
     Scheduler__preempt(scheduler, cpu_id, context);
 
-    running = UnwrapPanic(ProcessPtr, Scheduler__current_process(scheduler, cpu_id));
+    running = Unwrap(ProcessPtr, Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_NOT_EQUAL(proc, running);
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, proc->state);

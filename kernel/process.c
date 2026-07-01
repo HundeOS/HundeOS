@@ -16,6 +16,7 @@ FixedArrayBodyDefine(ProcessTable);
 FixedArrayBodyDefine(ProcessArguments);
 LinkedListBodyDefine(UserAllocations);
 LinkedListBodyDefine(ProcessFileDescriptors);
+LinkedListBodyDefine(ParkedKernelContexts);
 
 static ProcessID pid_counter = 0;
 static mutex_t pid_lock = MUTEX_INIT;
@@ -32,6 +33,11 @@ static KString argument_too_long = KSTRING_NEW("Argument too long");
 static size_t Process__page_aligned_size(size_t size)
 {
     return (size + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
+}
+
+static Address Process__page_base(Address address)
+{
+    return address & ~(PAGE_SIZE - 1);
 }
 
 bool UserAllocation__equals(UserAllocationPtr self, UserAllocationPtr other)
@@ -147,7 +153,7 @@ Result(ProcessPtr) Process__new(
     proc->stack = stack;
     proc->last_tick = 0;
     proc->name = name;
-    proc->parked_context = None(ParkedKernelContextPtr);
+    proc->parked_contexts = ParkedKernelContexts__new();
     proc->parent = parent;
     proc->heap_break = USER_HEAP_BASE;
     proc->heap_mapped_end = USER_HEAP_BASE;
@@ -191,6 +197,26 @@ Result(ProcessPtr) Process__new(
     End
 
     return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG);
+}
+
+Result(CollectionCode) Process__push_parked_context(ProcessPtr self, ParkedKernelContextPtr context)
+{
+    return ParkedKernelContexts__push(&self->parked_contexts, context);
+}
+
+Optional(ParkedKernelContextPtr) Process__top_parked_context(ProcessPtr self)
+{
+    return ParkedKernelContexts__at(&self->parked_contexts, -1);
+}
+
+Optional(ParkedKernelContextPtr) Process__pop_parked_context(ProcessPtr self)
+{
+    return ParkedKernelContexts__remove_at(&self->parked_contexts, -1);
+}
+
+bool Process__is_parked(ProcessPtr self)
+{
+    return ParkedKernelContexts__len(&self->parked_contexts) > 0;
 }
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
@@ -283,6 +309,26 @@ Result(ProcessMemoryCode) Process__record_user_allocation(
     return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
 }
 
+Result(Address) Process__device_address(ProcessPtr self, Address virtual_address)
+{
+    if (self == NULL || virtual_address == 0)
+    {
+        return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+    }
+
+    LLIterate(UserAllocations, self->user_allocations, allocation)
+        Address start = allocation.address.virtual_addr;
+        Address end = start + allocation.size;
+        if (virtual_address >= start && virtual_address < end)
+        {
+            Address offset = virtual_address - start;
+            return Success(Address, allocation.address.kernel_addr.phys_addr + offset);
+        }
+    End
+
+    return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+}
+
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
 {
     size_t allocation_size = Process__page_aligned_size(size);
@@ -307,10 +353,13 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
 
 Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size)
 {
-    size_t allocation_size = Process__page_aligned_size(size);
-    Address virtual_address = self->allocation_next;
+    Address physical_base = Process__page_base(physical);
+    Address physical_offset = physical - physical_base;
+    size_t allocation_size = Process__page_aligned_size(size + physical_offset);
+    Address virtual_base = self->allocation_next;
+    Address virtual_address = virtual_base + physical_offset;
 
-    UserAddress allocation = (UserAddress) {
+    UserAddress mapping = (UserAddress) {
         .virtual_addr = virtual_address,
         .kernel_addr = KERNEL_ADDR(physical, physical),
         .read = true,
@@ -318,15 +367,23 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
         .execute = false,
         .valid = true,
     };
+    UserAddress allocation = (UserAddress) {
+        .virtual_addr = virtual_base,
+        .kernel_addr = KERNEL_ADDR(physical_base, physical_base),
+        .read = true,
+        .write = true,
+        .execute = false,
+        .valid = true,
+    };
 
-    PageTable__map_mmio(v_ptr(self->page_table, PageTable), allocation, allocation_size);
+    PageTable__map_mmio(v_ptr(self->page_table, PageTable), mapping, size);
     ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
-        self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC
+        self, allocation, allocation_size, USER_ALLOCATION_MMIO
     ))
         IsSuccess(_,
         {
             self->allocation_next += allocation_size;
-            return Success(UserAddress, allocation);
+            return Success(UserAddress, mapping);
         });
         IsError(code, message, return Error(UserAddress, message, code));
     End
@@ -391,6 +448,11 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
             Address kernel_virtual = allocation.address.kernel_addr.virtual_addr;
 
             UserAllocations__remove_at(&self->user_allocations, index);
+
+            if (allocation.type == USER_ALLOCATION_MMIO)
+            {
+                return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+            }
 
             ResultMatch(KAllocCode, Kernel__free(kernel_virtual))
                 IsError(code, message, return Error(ProcessMemoryCode, message, PROCESS_MEMORY_FREE_FAILED));

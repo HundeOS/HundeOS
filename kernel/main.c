@@ -154,10 +154,7 @@ void Kernel_main(CPUID cpu_id) {
     if (cpu_id == 1)
     {
         __d_printf(PROGRESS, "Kernel starting loading program: %i\n", cpu_id);
-        schedule_as(kernel, kstring("uart_rx"), PROCESS_CLASS_SERVICE);
-        schedule_as(kernel, kstring("uart_tx"), PROCESS_CLASS_SERVICE);
-        schedule_as(kernel, kstring("hello_stream"), PROCESS_CLASS_SERVICE);
-        schedule(kernel, kstring("shell"));
+        schedule(kernel, kstring("init"));
         Scheduler__mark_ready(kernel->scheduler);
     }
     else

@@ -72,7 +72,7 @@ void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address phys_start = align_down_4k(u_kpaddr(address));
-    Address user_end = align_up_4k(user_start + size);
+    Address user_end = align_up_4k(vaddr(address) + size);
 
     __d_printf(MMU, "Pagetable map uvirt=%p size=%p table=%p\n", vaddr(address), size, self);
     __d_printf(MMU, "Pagetable map start=%p phys=%p end=%p\n", user_start, phys_start, user_end);

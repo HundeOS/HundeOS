@@ -40,7 +40,7 @@ void test_linked_list_push_and_at(void)
     End
 
     TEST_ASSERT_EQUAL(1, TestList__len(&list));
-    TEST_ASSERT_EQUAL(10, UnwrapPanic(TestListType, TestList__at(&list, 0)));
+    TEST_ASSERT_EQUAL(10, Unwrap(TestListType, TestList__at(&list, 0), (TestListType){}));
 }
 
 void test_linked_list_at_with_negative_index_gives_from_end(void)
@@ -50,8 +50,8 @@ void test_linked_list_at_with_negative_index_gives_from_end(void)
     TestList__push(&list, 20);
     TestList__push(&list, 30);
 
-    TEST_ASSERT_EQUAL(30, UnwrapPanic(TestListType, TestList__at(&list, -1)));
-    TEST_ASSERT_EQUAL(20, UnwrapPanic(TestListType, TestList__at(&list, -2)));
+    TEST_ASSERT_EQUAL(30, Unwrap(TestListType, TestList__at(&list, -1), (TestListType){}));
+    TEST_ASSERT_EQUAL(20, Unwrap(TestListType, TestList__at(&list, -2), (TestListType){}));
 }
 
 void test_linked_list_find(void)
@@ -100,11 +100,11 @@ void test_linked_list_remove_at_unlinks_middle_node(void)
     TestList__push(&list, 30);
 
     Optional(TestListType) removed = TestList__remove_at(&list, 1);
-    TEST_ASSERT_EQUAL(20, UnwrapPanic(TestListType, removed));
+    TEST_ASSERT_EQUAL(20, Unwrap(TestListType, removed, (TestListType){}));
 
     TEST_ASSERT_EQUAL(2, TestList__len(&list));
-    TEST_ASSERT_EQUAL(10, UnwrapPanic(TestListType, TestList__at(&list, 0)));
-    TEST_ASSERT_EQUAL(30, UnwrapPanic(TestListType, TestList__at(&list, 1)));
+    TEST_ASSERT_EQUAL(10, Unwrap(TestListType, TestList__at(&list, 0), (TestListType){}));
+    TEST_ASSERT_EQUAL(30, Unwrap(TestListType, TestList__at(&list, 1), (TestListType){}));
 }
 
 void test_linked_list_remove_uses_equals_function(void)
@@ -119,7 +119,7 @@ void test_linked_list_remove_uses_equals_function(void)
     End
 
     TEST_ASSERT_EQUAL(2, TestList__len(&list));
-    TEST_ASSERT_EQUAL(30, UnwrapPanic(TestListType, TestList__at(&list, 1)));
+    TEST_ASSERT_EQUAL(30, Unwrap(TestListType, TestList__at(&list, 1), (TestListType){}));
 }
 
 void test_linked_list_dispose_removes_all_nodes(void)

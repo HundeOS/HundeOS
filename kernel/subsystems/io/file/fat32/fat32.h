@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 #include "../../block/block_device.h"
-#include "../../block/memory_block_device.h"
 #include "../filesystem.h"
 #include "../../../../types/fixed_array.h"
 #include "../../../../types/kstring.h"
@@ -22,10 +21,13 @@
 #define FAT32_END_OF_CHAIN 0x0fffffff
 #define FAT32_EMPTY_CLUSTER 0x00000000
 #define FAT32_ROOT_CLUSTER 2
+#define FAT32_ATTR_VOLUME_ID 0x08
+#define FAT32_ATTR_LFN 0x0f
 #define FAT32_ATTR_DIRECTORY 0x10
 #define FAT32_ATTR_ARCHIVE 0x20
 #define FAT32_MAX_ROOT_ENTRIES 128
 #define FAT32_MAX_FILE_SIZE (FAT32_BYTES_PER_SECTOR * FAT32_SECTORS_PER_CLUSTER)
+#define FAT32_MAX_READ_SIZE (FAT32_BYTES_PER_SECTOR * 128)
 
 typedef enum Fat32Code
 {
@@ -45,7 +47,7 @@ ResultDef(Fat32Code);
 
 typedef struct Fat32Volume
 {
-    BlockDevicePtr device;
+    Optional(BlockDevicePtr) device;
     BlockCount total_sectors;
     uint32_t sectors_per_fat;
     BlockNumber fat_start_sector;
@@ -90,14 +92,13 @@ Fat32FileHandle;
 typedef Fat32FileHandle * Fat32FileHandlePtr;
 
 OptionalDef(Fat32FileHandlePtr);
+ResultDef(Fat32FileHandlePtr);
 
 MapDefine(IOInternalHandle, Fat32FileHandlePtr, MAX_HANDLES_PER_DEVICE, Fat32FileHandleMap, SimpleEquals(uint32_t));
 
 typedef struct Fat32FilesystemIOState
 {
     FilesystemIOState state;
-    MemoryBlockDevice memory_device;
-    BlockDevice block_device;
     Fat32Volume volume;
     Fat32FileHandleMap handles;
     uint32_t handle_count;
@@ -107,7 +108,7 @@ Fat32FilesystemIOState;
 
 typedef Fat32FilesystemIOState * Fat32FilesystemIOStatePtr;
 
-Fat32Volume Fat32Volume__new(BlockDevicePtr device, BlockCount total_sectors);
+Fat32Volume Fat32Volume__new(Optional(BlockDevicePtr) device, BlockCount total_sectors);
 Result(Fat32Code) Fat32Volume__format(Fat32VolumePtr self);
 Result(Fat32Code) Fat32Volume__mount(Fat32VolumePtr self);
 Result(Fat32DirectoryEntries) Fat32Volume__list_root(Fat32VolumePtr self);
@@ -121,6 +122,8 @@ Result(Fat32Code) Fat32Volume__read_root_file(
 
 FileIO Fat32FilesystemIO__new();
 bool Fat32FilesystemIO__available();
-Fat32FilesystemIOStatePtr Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockCount total_sectors);
+Fat32FilesystemIOStatePtr Fat32FilesystemIOState__heap_new(
+    FilesystemPtr fs, BlockDevicePtr device, BlockCount total_sectors
+);
 
 #endif

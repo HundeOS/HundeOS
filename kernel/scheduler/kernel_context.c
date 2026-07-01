@@ -6,7 +6,9 @@ KernelContext KernelContext__new(Optional(ProcessID) pid, Optional(SchedulerPtr)
 {
     return (KernelContext) {
         .pid = pid,
-        .scheduler = scheduler
+        .scheduler = scheduler,
+        .result_mapper = None(KernelResultMapper),
+        .result_mapper_context = 0,
     };
 }
 

@@ -6,6 +6,7 @@ manifest:
     - kernel/bin/*.c
     - kernel/stack.c
     - kernel/kernel_init.c
+    - kernel/irq/*.c
     - kernel/spin.c
     - kernel/print.c
     - kernel/types/*.c
@@ -13,7 +14,9 @@ manifest:
     - kernel/service/*.c
     - kernel/subsystems/message/*.c
     - kernel/subsystems/io/*.c
+    - kernel/subsystems/io/block/*.c
     - kernel/subsystems/io/file/*.c
+    - kernel/subsystems/io/file/devfs/*.c
     - kernel/subsystems/io/file/embedded/*.c
     - kernel/subsystems/io/file/memfs/*.c
     - kernel/subsystems/io/console/*.c

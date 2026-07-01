@@ -3,6 +3,7 @@
 #include "../process.h"
 #include "../scheduler/scheduler.h"
 #include "../scheduler/parked.h"
+#include "../debug.h"
 
 FixedArrayBodyDefine(ServiceEvents);
 
@@ -138,7 +139,7 @@ Result(Anything) Service__complete_wait(ParkedKernelContextPtr parked_context)
 
 static bool Service__is_waiting_for_event(ProcessPtr process)
 {
-    Match(ParkedKernelContextPtr, process->parked_context)
+    Match(ParkedKernelContextPtr, Process__top_parked_context(process))
         IsSome(parked_context, return parked_context->park_reason == PARK_WAIT_SERVICE_EVENT)
     End
 
@@ -147,6 +148,16 @@ static bool Service__is_waiting_for_event(ProcessPtr process)
 
 Result(ServiceCode) Service__enqueue(SchedulerPtr scheduler, ProcessPtr process, ServiceEvent event)
 {
+    __d_printf(
+        IODEV,
+        "service enqueue pid=%i name=%s type=%i source=%i data=%i queued=%i\n",
+        process->pid,
+        cstr(process->name),
+        event.type,
+        event.source,
+        event.data,
+        (int) ServiceEvents__len(&process->service_events)
+    );
     if (!ProcessClass__is_service(process->process_class))
     {
         return Error(ServiceCode, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
@@ -158,6 +169,7 @@ Result(ServiceCode) Service__enqueue(SchedulerPtr scheduler, ProcessPtr process,
 
     if (Service__is_waiting_for_event(process))
     {
+        __d_printf(IODEV, "service enqueue unparking pid=%i type=%i source=%i\n", process->pid, event.type, event.source);
         ResultMatch(ProcessPtr, Scheduler__unpark(scheduler, process, PARK_WAIT_SERVICE_EVENT, None(ReturnCode)))
             IsError(code, message, return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR))
         End

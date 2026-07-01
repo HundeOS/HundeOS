@@ -15,6 +15,21 @@ ParkedKernelContextPtr ParkedKernelContext__heap_new(KernelContextPtr kernel_con
     return context;
 }
 
+KString ParkReason__to_string(ParkReason reason)
+{
+    switch (reason)
+    {
+        case PARK_WAIT_CHILD:
+            return KSTRING_NEW("PARK_WAIT_CHILD");
+        case PARK_WAIT_IO:
+            return KSTRING_NEW("PARK_WAIT_IO");
+        case PARK_WAIT_SERVICE_EVENT:
+            return KSTRING_NEW("PARK_WAIT_SERVICE_EVENT");
+        default:
+            return KSTRING_NEW("PARK_WAIT_UNKNOWN");
+    }
+}
+
 void ParkedKernelContext__dispose(ParkedKernelContextPtr self)
 {
     __d_println(PANIC, "ParkedKernelContext__dispose needs to free KernelContext");

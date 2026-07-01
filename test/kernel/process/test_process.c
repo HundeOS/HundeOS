@@ -57,9 +57,9 @@ void test_setup_tracks_static_user_allocations(void)
             Optional(UserAllocation) args_allocation = UserAllocations__at(&process->user_allocations, 0);
             Optional(UserAllocation) elf_allocation = UserAllocations__at(&process->user_allocations, 1);
             Optional(UserAllocation) stack_allocation = UserAllocations__at(&process->user_allocations, 2);
-            UserAllocation args = UnwrapPanic(UserAllocation, args_allocation);
-            UserAllocation elf = UnwrapPanic(UserAllocation, elf_allocation);
-            UserAllocation stack = UnwrapPanic(UserAllocation, stack_allocation);
+            UserAllocation args = Unwrap(UserAllocation, args_allocation, (UserAllocation){});
+            UserAllocation elf = Unwrap(UserAllocation, elf_allocation, (UserAllocation){});
+            UserAllocation stack = Unwrap(UserAllocation, stack_allocation, (UserAllocation){});
             TEST_ASSERT_EQUAL(USER_ALLOCATION_DYNAMIC, args.type);
             TEST_ASSERT_EQUAL(PAGE_SIZE, args.size);
             TEST_ASSERT_EQUAL(USER_ALLOCATION_ELF, elf.type);
@@ -80,7 +80,7 @@ void test_setup_with_args_sets_up_multiple_argv_entries(void)
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
-            UserAllocation args = UnwrapPanic(UserAllocation, UserAllocations__at(&process->user_allocations, 0));
+            UserAllocation args = Unwrap(UserAllocation, UserAllocations__at(&process->user_allocations, 0), (UserAllocation){});
             Address * argv = ptr(args.address.kernel_addr.virtual_addr, Address);
             Address user_base = args.address.virtual_addr;
             Address kernel_base = args.address.kernel_addr.virtual_addr;
@@ -106,8 +106,8 @@ void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
                 IsSuccess(address,
                 {
                     TEST_ASSERT_EQUAL(USER_ALLOC_BASE + PAGE_SIZE, address.virtual_addr);
-                    UserAllocation allocation = UnwrapPanic(
-                        UserAllocation, UserAllocations__at(&process->user_allocations, 3)
+                    UserAllocation allocation = Unwrap(
+                        UserAllocation, UserAllocations__at(&process->user_allocations, 3), (UserAllocation) {}
                     );
                     TEST_ASSERT_EQUAL(4, process->user_allocations.len);
                     TEST_ASSERT_EQUAL(USER_ALLOCATION_DYNAMIC, allocation.type);
@@ -132,7 +132,7 @@ void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
         IsSuccess(process,
         {
             Result(UserAddress) alloc_result = Process__alloc_user_pages(process, PAGE_SIZE);
-            UserAddress address = ResultUnwrapPanic(UserAddress, alloc_result);
+            UserAddress address = ResultUnwrap(UserAddress, alloc_result, (UserAddress){});
 
             ResultMatch(ProcessMemoryCode, Process__free_user_pages(process, address.virtual_addr))
                 IsSuccess(code, TEST_ASSERT_EQUAL(PROCESS_MEMORY_OK, code))
@@ -201,6 +201,92 @@ void test_process_dispose_user_allocations_unmaps_all_user_allocations(void)
     End
 }
 
+void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void)
+{
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(process,
+        {
+            Address physical = 0x0a000000;
+            ResultMatch(UserAddress, Process__map_mmio(process, physical, PAGE_SIZE))
+                IsSuccess(mmio,
+                {
+                    Match(UserAllocation, UserAllocations__at(&process->user_allocations, process->user_allocations.len - 1))
+                        IsSome(allocation,
+                        {
+                            TEST_ASSERT_EQUAL(USER_ALLOCATION_MMIO, allocation.type);
+                            TEST_ASSERT_EQUAL(mmio.virtual_addr, allocation.address.virtual_addr);
+                            TEST_ASSERT_EQUAL(physical, allocation.address.kernel_addr.virtual_addr);
+                        })
+                        IsNone(TEST_FAIL())
+                    End
+
+                    TEST_ASSERT_TRUE(check_address_mapped(v_ptr(process->page_table, PageTable),
+                        mmio.virtual_addr,
+                        true,
+                        true,
+                        false,
+                        PAGE_SIZE));
+
+                    ResultMatch(ProcessMemoryCode, Process__dispose_user_allocations(process))
+                        IsSuccess(code, TEST_ASSERT_EQUAL(PROCESS_MEMORY_OK, code))
+                        IsError(code, message, TEST_FAIL())
+                    End
+
+                    TEST_ASSERT_EQUAL(0, process->user_allocations.len);
+                    TEST_ASSERT_FALSE(check_address_mapped(v_ptr(process->page_table, PageTable),
+                        mmio.virtual_addr,
+                        true,
+                        true,
+                        false,
+                        PAGE_SIZE));
+                })
+                IsError(code, message, TEST_FAIL())
+            End
+        })
+    End
+}
+
+void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
+{
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(process,
+        {
+            Address physical = 0x0a000200;
+            ResultMatch(UserAddress, Process__map_mmio(process, physical, 0x200))
+                IsSuccess(mmio,
+                {
+                    Address expected_base = USER_ALLOC_BASE + PAGE_SIZE;
+                    TEST_ASSERT_EQUAL(expected_base + 0x200, mmio.virtual_addr);
+                    TEST_ASSERT_EQUAL(physical, mmio.kernel_addr.virtual_addr);
+
+                    Match(UserAllocation, UserAllocations__at(&process->user_allocations, process->user_allocations.len - 1))
+                        IsSome(allocation,
+                        {
+                            TEST_ASSERT_EQUAL(USER_ALLOCATION_MMIO, allocation.type);
+                            TEST_ASSERT_EQUAL(expected_base, allocation.address.virtual_addr);
+                            TEST_ASSERT_EQUAL(0x0a000000, allocation.address.kernel_addr.virtual_addr);
+                            TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
+                        })
+                        IsNone(TEST_FAIL())
+                    End
+
+                    TEST_ASSERT_TRUE(check_address_mapped(v_ptr(process->page_table, PageTable),
+                        mmio.virtual_addr,
+                        true,
+                        true,
+                        false,
+                        0x200));
+                })
+                IsError(code, message, TEST_FAIL())
+            End
+        })
+    End
+}
+
 void test_process_sbrk_maps_pages_at_heap_break(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
@@ -217,8 +303,8 @@ void test_process_sbrk_maps_pages_at_heap_break(void)
             TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, process->heap_mapped_end);
             TEST_ASSERT_EQUAL(4, process->user_allocations.len);
 
-            UserAllocation allocation = UnwrapPanic(
-                UserAllocation, UserAllocations__at(&process->user_allocations, 3)
+            UserAllocation allocation = Unwrap(
+                UserAllocation, UserAllocations__at(&process->user_allocations, 3), (UserAllocation) {}
             );
             TEST_ASSERT_EQUAL(USER_ALLOCATION_HEAP, allocation.type);
             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
@@ -266,8 +352,8 @@ void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
             TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE * 2, process->heap_mapped_end);
             TEST_ASSERT_EQUAL(5, process->user_allocations.len);
 
-            UserAllocation allocation = UnwrapPanic(
-                UserAllocation, UserAllocations__at(&process->user_allocations, 4)
+            UserAllocation allocation = Unwrap(
+                UserAllocation, UserAllocations__at(&process->user_allocations, 4), (UserAllocation) {}
             );
             TEST_ASSERT_EQUAL(USER_ALLOCATION_HEAP, allocation.type);
             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);

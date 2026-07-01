@@ -51,7 +51,7 @@ void test_exec_spawns_process_and_puts_parent_in_wait()
         });
         IsSuccess(spawned_process,
         {
-            ProcessPtr spawned_parent = UnwrapPanic(ProcessPtr, spawned_process->parent);
+            ProcessPtr spawned_parent = Unwrap(ProcessPtr, spawned_process->parent, (ProcessPtr){});
             TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->state);
             TEST_ASSERT_EQUAL(parent, spawned_parent);
             TEST_ASSERT_EQUAL(2, Scheduler__process_count(kernel->scheduler));
@@ -75,7 +75,7 @@ void test_exec_spawns_process_and_sets_up_a_defferred_return()
             Scheduler__exit(kernel->scheduler, spawned_process, return_code);
             Scheduler__preempt(kernel->scheduler, cpu, NULL);
 
-            TEST_ASSERT_EQUAL(return_code, ResultUnwrapPanic(Anything, deferred_syscall_result()));
+            TEST_ASSERT_EQUAL(return_code, ResultUnwrap(Anything, deferred_syscall_result(), (Anything){}));
         })
     End
 }

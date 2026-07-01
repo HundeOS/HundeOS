@@ -9,6 +9,7 @@
 #include "syscall/init.h"
 #include "syscall/syscall_dispatcher.h"
 #include "kernel_core.h"
+#include "irq/irq_dispatcher.h"
 #include "bin/embedded_binaries.h"
 #include "scheduler/register.h"
 #include "scheduler/scheduler.h"
@@ -24,6 +25,7 @@ static KString failed_to_init_msg = KSTRING_NEW("failed to initialise kernel");
 
 static MessageBroker message_broker = NEW_BROKER;
 static Scheduler scheduler = NEW_SCHEDULER(&message_broker);
+static IRQDispatcher irq_dispatcher = NEW_IRQ_DISPATCHER(&scheduler);
 static IOSubsystem io_subsystem = NEW_IO_SUBSYSTEM(&scheduler, &message_broker);
 
 static Kernel instance = {
@@ -34,6 +36,7 @@ static Kernel instance = {
     .heap = NEW_HEAP,
     .scheduler = &scheduler,
     .message_broker = &message_broker,
+    .irq_dispatcher = &irq_dispatcher,
 };
 
 KernelPtr Kernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_broker, IOSubsystemPtr io_subsystem)
@@ -50,6 +53,8 @@ KernelPtr Kernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_brok
     kernel->heap = NEW_HEAP;
     kernel->scheduler = scheduler;
     kernel->message_broker = message_broker;
+    kernel->irq_dispatcher = ptr(Kernel__alloc_kernel(sizeof(IRQDispatcher)), IRQDispatcher);
+    *kernel->irq_dispatcher = NEW_IRQ_DISPATCHER(scheduler);
 
     return kernel;
 }

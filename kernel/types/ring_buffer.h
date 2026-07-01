@@ -5,6 +5,7 @@
 #include "result.h"
 #include "kstring.h"
 #include "../address.h"
+#include "../debug.h"
 
 KernelAddress Kernel__alloc(size_t size);
 

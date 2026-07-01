@@ -1,0 +1,1 @@
+hello from the virtio FAT32 test image

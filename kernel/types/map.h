@@ -205,9 +205,6 @@ typedef enum MapError
         return None(alias##__key_type_ptr);\
     } \
 
-#define MapUnwrapPanic(T, opt) \
-    UnwrapPanic(T, opt)\
-
 #define MapIterate(alias, map, index, k, v) \
     for (int index = 0; index < map.len; index++) \
     { \

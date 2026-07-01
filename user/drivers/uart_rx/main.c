@@ -1,3 +1,5 @@
+#define DRIVER_LOG_TAG "UART-RX"
+
 #include "../../sys/io_server.h"
 #include "../../sys/debug.h"
 #include "../../sys/service.h"
@@ -46,16 +48,19 @@ static uint64_t drain_uart(void * uart, IOServerBufferDataPtr target, uint64_t c
 
 int UART_RX_ENTRYPOINT(void)
 {
-    ServiceMappedRange uart = {
-        .physical = UART0_PHYS_BASE,
-        .size = UART_MMIO_SIZE,
-        .address = 0,
-    };
-    if (!service_ok(service_map_mmio(&uart)))
+    if (!service_ok(service_become_service()))
+    {
+        DRIVER_DEBUG("uart_rx: service registration failed\n");
+        return 1;
+    }
+
+    ServiceMappedMemoryPtr uart_mapping;
+    if (!service_ok(service_map_mmio(UART0_PHYS_BASE, UART_MMIO_SIZE, &uart_mapping)))
     {
         DRIVER_DEBUG("uart_rx: mmio map failed\n");
         return 1;
     }
+    void * uart = driver_ptr(uart_mapping);
 
     IOHandle tty = io_server_register(":tty:", IO_SERVER_READ);
     if (tty < 0)
@@ -84,7 +89,7 @@ int UART_RX_ENTRYPOINT(void)
                 IOServerBuffer buffer;
                 if (io_server_get_buffer(tty, &buffer) == IO_OK)
                 {
-                    uint64_t bytes = drain_uart(uart.address, buffer.data, buffer.capacity);
+                    uint64_t bytes = drain_uart(uart, buffer.data, buffer.capacity);
                     if (bytes > 0)
                     {
                         io_server_data_available(tty, bytes);

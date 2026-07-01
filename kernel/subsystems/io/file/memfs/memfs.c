@@ -424,7 +424,9 @@ Result(IOInternalHandle) MemFileIO__close(IOStatePtr self, IOInternalHandle hand
     return Error(IOInternalHandle, invalid_file_handle, IO_UNKNOWN_HANDLE);
 }
 
-Result(IOBufferPtr) MemFileIO__read(IOStatePtr self, IOInternalHandle handle, size_t size)
+Result(IOBufferPtr) MemFileIO__read(
+    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+)
 {
     MemFilesystemIOStatePtr fs_state = (MemFilesystemIOStatePtr) self;
 
@@ -522,20 +524,16 @@ Result(ByteCount) MemFileIO__write(IOStatePtr self, IOInternalHandle handle, Dat
 
 Result(ParkStatus) MemFileIO__park(IOStatePtr self, IOContextPtr parked_context)
 {
-    (void) self;
-    (void) parked_context;
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
 Result(ParkStatus) MemFileIO__unpark(IOStatePtr self)
 {
-    (void) self;
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
 Result(FilesystemNodes) MemFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, KString path)
 {
-    (void) parent;
     MemFilesystemIOStatePtr fs_state = (MemFilesystemIOStatePtr) self;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
 

@@ -11,6 +11,7 @@
 #include "../../types/comparison.h"
 
 #include "io.h"
+#include "file/filesystem.h"
 #include "subsystems/message/message_broker.h"
 #include "syscalls/io.h"
 #include "types.h"
@@ -46,6 +47,7 @@ typedef struct IOSubsystem
     IOServerProcessMap read_server_processes;
     IOServerProcessMap write_server_processes;
     IOServerRoleMap server_roles;
+    Optional(FilesystemPtr) root_filesystem;
 
     mutex_t lock;
 }
@@ -55,7 +57,10 @@ typedef IOSubsystem * IOSubsystemPtr;
 
 ResultDef(IOSubsystem);
 ResultDef(IOSubsystemPtr);
+#ifndef __KERNEL_DIRECTORY_ENTRY_COUNT_RESULT_DEFINED
+#define __KERNEL_DIRECTORY_ENTRY_COUNT_RESULT_DEFINED
 ResultDef(DirectoryEntryCount);
+#endif
 #ifndef __KERNEL_IO_STATUS_RESULT_DEFINED
 #define __KERNEL_IO_STATUS_RESULT_DEFINED
 ResultDef(IOStatus);
@@ -63,6 +68,9 @@ ResultDef(IOStatus);
 
 Result(DeviceHandle) IOSubsystem__register_device(IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state);
 
+Result(IOHandle) IOSubsystem__record_open_handle(
+    IOSubsystemPtr self, IOContextPtr context, KString path, IOInternalHandle handle
+);
 Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KString path, Flags flags);
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context);
@@ -107,6 +115,7 @@ IOInternalHandle device_internal_handle(IOHandle handle);
         .read_server_processes = EmptyMap(IOServerProcessMap),\
         .write_server_processes = EmptyMap(IOServerProcessMap),\
         .server_roles = EmptyMap(IOServerRoleMap),\
+        .root_filesystem = None(FilesystemPtr),\
         .lock = MUTEX_INIT,\
         .message_broker = broker,\
         \
@@ -121,6 +130,7 @@ IOInternalHandle device_internal_handle(IOHandle handle);
         MapInit(IOServerProcessMap, subsystem.read_server_processes);\
         MapInit(IOServerProcessMap, subsystem.write_server_processes);\
         MapInit(IOServerRoleMap, subsystem.server_roles);\
+        subsystem.root_filesystem = None(FilesystemPtr);\
 
 #define NEW_IO_STATE \
     (IOState) { \

@@ -5,6 +5,7 @@
 
 #include "../types/result.h"
 #include "../types/optional.h"
+#include "../types/kstring.h"
 #include "../process.h"
 #include "kernel_context.h"
 #include "types.h"
@@ -33,6 +34,8 @@ OptionalDef(ParkedKernelContext);
 ParkedKernelContextPtr ParkedKernelContext__heap_new(
     KernelContextPtr kernel_context, Optional(Continuation) continuation, ParkReason park_reason
 );
+
+KString ParkReason__to_string(ParkReason reason);
 
 void ParkedKernelContext__dispose(ParkedKernelContextPtr self);
 

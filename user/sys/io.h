@@ -15,6 +15,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size);
 ByteCount write(IOHandle handle, char * buf, size_t size);
 IOStatus close(IOHandle handle);
 DirectoryEntryCount list_dir(const char * path, DirectoryEntryPtr entries, size_t max_entries);
+const char * io_status_string(IOStatus status);
 IOStatus make_dir(const char * path);
 IOStatus remove_file(const char * path);
 IOStatus remove_file_with_flags(const char * path, Flags flags);

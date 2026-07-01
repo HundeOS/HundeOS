@@ -5,6 +5,8 @@
 #include "../../../../../../kernel/process.h"
 #include "../../../../../../kernel/print.h"
 #include "../../../../../../kernel/scheduler/scheduler.h"
+#include "../../../../../../kernel/subsystems/io/block/block_device.h"
+#include "../../../../../../kernel/subsystems/io/block/memory_block_device.h"
 #include "../../../../../../kernel/subsystems/io/file/filesystem.h"
 #include "../../../../../../kernel/subsystems/io/file/fat16/fat16.h"
 #include "../../../../../../kernel/subsystems/io/file/fat32/fat32.h"
@@ -15,6 +17,10 @@
 
 static FilesystemPtr root = NULL;
 static IOStatePtr root_state = NULL;
+static MemoryBlockDevice fat16_memory_device;
+static MemoryBlockDevice fat32_memory_device;
+static BlockDevice fat16_block_device;
+static BlockDevice fat32_block_device;
 
 static KernelPtr kernel = NULL;
 static ProcessPtr dummy_proc = NULL;
@@ -26,14 +32,21 @@ void setUp(void)
     dummy_proc = dummy_process(100, 11, PROC_STATE_RUNNING);
 
     root = init_root_filesystem_with_embedded_binaries();
+    fat16_memory_device = MemoryBlockDevice__new();
+    fat32_memory_device = MemoryBlockDevice__new();
+    fat16_block_device = MemoryBlockDevice__as_block_device(&fat16_memory_device);
+    fat32_block_device = MemoryBlockDevice__as_block_device(&fat32_memory_device);
+
     FilesystemPtr fat16_filesystem = Filesystem__heap_new(kstring("fat16"), Fat16FilesystemIO__new());
-    Fat16FilesystemIOStatePtr fat16_state = Fat16FilesystemIOState__heap_new(fat16_filesystem, 0);
-    (void) fat16_state;
+    Fat16FilesystemIOStatePtr fat16_state = Fat16FilesystemIOState__heap_new(
+        fat16_filesystem, &fat16_block_device, 0
+    );
     Filesystem__mount(root, kstring("fat16"), fat16_filesystem);
 
     FilesystemPtr fat32_filesystem = Filesystem__heap_new(kstring("fat32"), Fat32FilesystemIO__new());
-    Fat32FilesystemIOStatePtr fat32_state = Fat32FilesystemIOState__heap_new(fat32_filesystem, 0);
-    (void) fat32_state;
+    Fat32FilesystemIOStatePtr fat32_state = Fat32FilesystemIOState__heap_new(
+        fat32_filesystem, &fat32_block_device, 0
+    );
     Filesystem__mount(root, kstring("fat32"), fat32_filesystem);
 
     kernel = init_test_kernel_with_filesystem(root);
@@ -48,6 +61,7 @@ void tearDown(void)
 }
 
 static KString embedded = KSTRING_NEW("ebin");
+static KString dev = KSTRING_NEW("dev");
 static KString tmp = KSTRING_NEW("tmp");
 static KString memfs = KSTRING_NEW("memfs");
 static KString fat16 = KSTRING_NEW("fat16");
@@ -97,16 +111,42 @@ void test_it_can_list_files_from_root(void)
             TEST_FAIL();
         })
         IsSuccess(result, {
-            TEST_ASSERT_EQUAL_INT(4, FilesystemNodes__len(&result));
-            FilesystemNodePtr node = UnwrapPanic(FilesystemNodePtr, FilesystemNodes__at(&result, 0));
+            TEST_ASSERT_EQUAL_INT(5, FilesystemNodes__len(&result));
+            FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(KString__equals(&embedded, &node->name));
-            FilesystemNodePtr tmp_node = UnwrapPanic(FilesystemNodePtr, FilesystemNodes__at(&result, 1));
+            FilesystemNodePtr dev_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 1), (FilesystemNodePtr){});
+            TEST_ASSERT_TRUE(KString__equals(&dev, &dev_node->name));
+            FilesystemNodePtr tmp_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 2), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(KString__equals(&tmp, &tmp_node->name));
-            FilesystemNodePtr fat16_node = UnwrapPanic(FilesystemNodePtr, FilesystemNodes__at(&result, 2));
+            FilesystemNodePtr fat16_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 3), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(KString__equals(&fat16, &fat16_node->name));
-            FilesystemNodePtr fat32_node = UnwrapPanic(FilesystemNodePtr, FilesystemNodes__at(&result, 3));
+            FilesystemNodePtr fat32_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 4), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(KString__equals(&fat32, &fat32_node->name));
         });
+    End
+}
+
+void test_devfs_lists_registered_block_devices(void)
+{
+    ProcessPtr service = dummy_process(200, 11, PROC_STATE_READY);
+    service->process_class = PROCESS_CLASS_SERVICE;
+
+    ResultMatch(BlockDeviceCode, BlockDeviceRegistry__register(KSTRING_NEW("/dev/virtio1"), service, 128, kernel->scheduler))
+        IsSuccess(code, TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    Result(FilesystemNodes) nodes = root->file_io.list_nodes(root_state, NULL, kstring("/dev"));
+
+    ResultMatch(FilesystemNodes, nodes)
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(result,
+        {
+            TEST_ASSERT_EQUAL_INT(1, FilesystemNodes__len(&result));
+            FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
+            KString expected = kstring("virtio1");
+            TEST_ASSERT_TRUE(KString__equals(&expected, &node->name));
+        })
     End
 }
 
@@ -121,7 +161,7 @@ void test_it_can_list_files_to_subdir(void)
         })
         IsSuccess(result, {
             TEST_ASSERT_EQUAL_INT(3, FilesystemNodes__len(&result));
-            FilesystemNodePtr node = UnwrapPanic(FilesystemNodePtr, FilesystemNodes__at(&result, 0));
+            FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(KString__equals(&hello_world, &node->name));
         });
     End
@@ -138,9 +178,38 @@ void test_it_can_list_nested_mount_parent(void)
         })
         IsSuccess(result, {
             TEST_ASSERT_EQUAL_INT(1, FilesystemNodes__len(&result));
-            FilesystemNodePtr node = UnwrapPanic(FilesystemNodePtr, FilesystemNodes__at(&result, 0));
+            FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(KString__equals(&memfs, &node->name));
         });
+    End
+}
+
+void test_filesystem_table_adds_mount_entries(void)
+{
+    FilesystemTable table = FilesystemTable__new();
+    KString device_path = kstring("/dev/virtio1");
+    KString filesystem_type = kstring("fat32");
+    KString mountpoint = kstring("/mnt/fs1");
+
+    ResultMatch(CollectionCode, FilesystemTable__add(
+        &table,
+        device_path,
+        filesystem_type,
+        mountpoint
+    ))
+        IsSuccess(index, TEST_ASSERT_EQUAL(0, index))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(1, FilesystemTableEntries__len(&table.entries));
+    Match(FilesystemTableEntries__type_ptr__optional, FilesystemTableEntries__ptr_at(&table.entries, 0))
+        IsSome(entry,
+        {
+            TEST_ASSERT_TRUE(KString__equals(&entry->device_path, &device_path));
+            TEST_ASSERT_TRUE(KString__equals(&entry->filesystem_type, &filesystem_type));
+            TEST_ASSERT_TRUE(KString__equals(&entry->mountpoint, &mountpoint));
+        })
+        IsNone(TEST_FAIL())
     End
 }
 
@@ -183,11 +252,12 @@ void test_io_list_dir_lists_root_mounts(void)
     ))
         IsSuccess(count,
         {
-            TEST_ASSERT_EQUAL_INT(4, count);
+            TEST_ASSERT_EQUAL_INT(5, count);
             TEST_ASSERT_EQUAL_STRING("ebin", entries[0].name);
-            TEST_ASSERT_EQUAL_STRING("tmp", entries[1].name);
-            TEST_ASSERT_EQUAL_STRING("fat16", entries[2].name);
-            TEST_ASSERT_EQUAL_STRING("fat32", entries[3].name);
+            TEST_ASSERT_EQUAL_STRING("dev", entries[1].name);
+            TEST_ASSERT_EQUAL_STRING("tmp", entries[2].name);
+            TEST_ASSERT_EQUAL_STRING("fat16", entries[3].name);
+            TEST_ASSERT_EQUAL_STRING("fat32", entries[4].name);
         })
         IsError(code, message, TEST_FAIL())
     End
@@ -321,7 +391,7 @@ void test_fat16_mkdir_lists_root_directory_and_empty_directory(void)
     ResultMatch(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/", (Anything) ((DirectoryEntry[5]) { 0 }), 5, 0
     ))
-        IsSuccess(count, TEST_ASSERT_EQUAL_INT(4, count))
+        IsSuccess(count, TEST_ASSERT_EQUAL_INT(5, count))
         IsError(code, message, TEST_FAIL())
     End
 

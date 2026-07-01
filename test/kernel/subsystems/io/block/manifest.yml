@@ -4,7 +4,9 @@ manifest:
   source_files:
     - kernel/types/*.c
     - kernel/subsystems/io/block/*.c
+    - kernel/scheduler/kernel_context.c
     - kernel/mutex.c
     - test/kernel/stubs/cpu.c
     - test/kernel/stubs/kalloc.c
     - test/kernel/stubs/panic.c
+    - test/kernel/isolated_stubs/scheduler.c

@@ -6,6 +6,8 @@
 
 #include "asm_helpers.h"
 #include "../../kernel/process.h"
+#include "../../kernel/scheduler/scheduler.h"
+#include "../../kernel/arch/cpu.h"
 
 #include <stdint.h>
 
@@ -140,37 +142,51 @@ void Process__context_switch(ProcessPtr self)
         addr(&context->fpsr) - base,
         sizeof(ProcessContext));
 
-    // do we have suspended work to finish on the
-    // kernel side?
-    Match(ParkedKernelContextPtr, self->parked_context)
-        IsSome(parked_kernel_context,
-        {
-            Match(Continuation, parked_kernel_context->continuation)
-                IsSome(continuation,
-                {
-                    __d_println(PROCESS, "Continuation kernel context switch");
-                    asm_switch_kernel_context(context, paddr(self->page_table));
+    while (Process__is_parked(self))
+    {
+        Match(ParkedKernelContextPtr, Process__pop_parked_context(self))
+            IsSome(parked_kernel_context,
+            {
+                Match(Continuation, parked_kernel_context->continuation)
+                    IsSome(continuation,
+                    {
+                        __d_println(PROCESS, "Continuation kernel context switch");
+                        asm_switch_kernel_context(context, paddr(self->page_table));
 
-                    __d_printf(PROCESS, "Continuation calling %p %p", continuation, parked_kernel_context);
-                    Result(Anything) res = continuation(parked_kernel_context);
-                    self->parked_context = None(ParkedKernelContextPtr);
-                    ResultMatch(Anything, res)
-                        IsSuccess(result_val,
+                        __d_printf(PROCESS, "Continuation calling %p %p", continuation, parked_kernel_context);
+                        Result(Anything) res = continuation(parked_kernel_context);
+                        if (Process__is_parked(self))
                         {
-                            __d_println(PROCESS, "Set syscall result");
-                            context->x[0] = result_val;
-                        });
-                        IsError(code, message,
-                        {
-                            context->x[0] = code;
-                            __d_printf(PANIC, "Continuation error: %s\n", cstr(message));
-                        })
-                    End
+                            Match(ParkedKernelContextPtr, Process__top_parked_context(self))
+                                IsSome(top_context,
+                                {
+                                    Match(SchedulerPtr, top_context->kernel_context->scheduler)
+                                        IsSome(scheduler, Scheduler__yield_waiting(scheduler, self, CPU__id() - 1))
+                                    End
+                                })
+                            End
+                        }
 
-                })
-            End
-        })
-    End
+                        ResultMatch(Anything, res)
+                            IsSuccess(result_val,
+                            {
+                                __d_println(PROCESS, "Set syscall result");
+                                context->x[0] = result_val;
+                            });
+                            IsError(code, message,
+                            {
+                                context->x[0] = code;
+                                __d_printf(PANIC, "Continuation error: %s\n", cstr(message));
+                            })
+                        End
+
+                    })
+                    IsNone({})
+                End
+            })
+            IsNone({})
+        End
+    }
     __d_printf(
         PROCESS,
         "Process__context_switch asm pid=%i name=%s context=%p elr=%p sp=%p x8=%p page_table=%p\n",

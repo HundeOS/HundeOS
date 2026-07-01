@@ -30,8 +30,8 @@ void test_kstring_split(void)
     KStringArray strs = KString__split(&str, '/');
 
     TEST_ASSERT_EQUAL_INT(2, KStringArray__len(&strs));
-    KStringPtr str1 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 0));
-    KStringPtr str2 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 1));
+    KStringPtr str1 = Unwrap(KStringPtr, KStringArray__ptr_at(&strs, 0), (KStringPtr){});
+    KStringPtr str2 = Unwrap(KStringPtr, KStringArray__ptr_at(&strs, 1), (KStringPtr){});
 
     TEST_ASSERT_TRUE(KString__equals(str1, &hello));
     TEST_ASSERT_TRUE(KString__equals(str2, &world));
@@ -43,8 +43,8 @@ void test_kstring_split_preceeding_delimiter(void)
     KStringArray strs = KString__split(&str, '/');
 
     TEST_ASSERT_EQUAL_INT(2, KStringArray__len(&strs));
-    KStringPtr str1 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 0));
-    KStringPtr str2 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 1));
+    KStringPtr str1 = Unwrap(KStringPtr, KStringArray__ptr_at(&strs, 0), (KStringPtr){});
+    KStringPtr str2 = Unwrap(KStringPtr, KStringArray__ptr_at(&strs, 1), (KStringPtr){});
 
     TEST_ASSERT_TRUE(KString__equals(str1, &hello));
     TEST_ASSERT_TRUE(KString__equals(str2, &world));
@@ -56,8 +56,8 @@ void test_kstring_split_trailing_delimiters(void)
     KStringArray strs = KString__split(&str, '/');
 
     TEST_ASSERT_EQUAL_INT(2, KStringArray__len(&strs));
-    KStringPtr str1 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 0));
-    KStringPtr str2 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 1));
+    KStringPtr str1 = Unwrap(KStringPtr, KStringArray__ptr_at(&strs, 0), (KStringPtr){});
+    KStringPtr str2 = Unwrap(KStringPtr, KStringArray__ptr_at(&strs, 1), (KStringPtr){});
 
     TEST_ASSERT_TRUE(KString__equals(str1, &hello));
     TEST_ASSERT_TRUE(KString__equals(str2, &world));
@@ -69,8 +69,8 @@ void test_kstring_split_double_delimiter(void)
     KStringArray strs = KString__split(&str, '/');
 
     TEST_ASSERT_EQUAL_INT(2, KStringArray__len(&strs));
-    KStringPtr str1 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 0));
-    KStringPtr str2 = FAUnwrapPanic(KStringPtr, KStringArray__ptr_at(&strs, 1));
+    KStringPtr str1 = Unwrap(KStringPtr, KStringArray__ptr_at(&strs, 0), (KStringPtr){});
+    KStringPtr str2 = Unwrap(KStringPtr, KStringArray__ptr_at(&strs, 1), (KStringPtr){});
 
     TEST_ASSERT_TRUE(KString__equals(str1, &hello));
     TEST_ASSERT_TRUE(KString__equals(str2, &world));

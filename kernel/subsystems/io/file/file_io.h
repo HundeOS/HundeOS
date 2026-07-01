@@ -10,7 +10,15 @@
 ResultDef(IOStatus);
 #endif
 
+#ifndef __KERNEL_DIRECTORY_ENTRY_COUNT_RESULT_DEFINED
+#define __KERNEL_DIRECTORY_ENTRY_COUNT_RESULT_DEFINED
+ResultDef(DirectoryEntryCount);
+#endif
+
 typedef Result(FilesystemNodes) (* FS_list_nodes)(IOStatePtr self, FilesystemNodePtr parent, KString path);
+typedef Result(DirectoryEntryCount) (* FS_list_dir)(
+    IOStatePtr self, KString path, DirectoryEntryPtr entries, size_t max_entries
+);
 typedef Result(IOStatus) (* FS_mkdir)(IOStatePtr self, KString path);
 typedef Result(IOStatus) (* FS_remove)(IOStatePtr self, KString path, Flags flags);
 
@@ -19,6 +27,7 @@ typedef struct FileIO
     // inheritance, leave as first item
     IO base_io;
     FS_list_nodes list_nodes;
+    FS_list_dir list_dir;
     FS_mkdir mkdir;
     FS_remove remove;
 }

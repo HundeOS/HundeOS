@@ -4,6 +4,10 @@
 #define MAX_ENTRIES 32
 #define PATH_BUFFER_SIZE 512
 
+#ifndef LS_ENTRYPOINT
+#define LS_ENTRYPOINT main
+#endif
+
 static void path_from_arg(const char * arg, char * path, size_t path_size)
 {
     for (size_t i = 0; i < path_size; i++)
@@ -29,7 +33,7 @@ static void path_from_arg(const char * arg, char * path, size_t path_size)
     }
 }
 
-int main(int argc, char ** argv)
+int LS_ENTRYPOINT(int argc, char ** argv)
 {
     char path[PATH_BUFFER_SIZE];
     DirectoryEntry entries[MAX_ENTRIES];
@@ -39,7 +43,7 @@ int main(int argc, char ** argv)
 
     if (count < 0)
     {
-        printf("ls: error %i\n", (int) count);
+        printf("ls: error %s (%i)\n", io_status_string((IOStatus) count), (int) count);
         return 1;
     }
 

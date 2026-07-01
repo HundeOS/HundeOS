@@ -32,7 +32,6 @@ typedef MemFile * MemFilePtr;
 OptionalDef(MemFile);
 OptionalDef(MemFilePtr);
 ResultDef(MemFilePtr);
-ResultDef(KString);
 
 bool MemFile__equals(MemFilePtr self, MemFilePtr other);
 LinkedListDefine(MemFile, MemFiles, (EqualFunction) MemFile__equals);

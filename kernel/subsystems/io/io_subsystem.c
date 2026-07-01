@@ -81,6 +81,44 @@ static FindResultOptional(IODevicesArray) IOSubsystem__find_device(IOSubsystemPt
     return IODevicesArray__find(&self->devices, path_match, path);
 }
 
+Result(IOHandle) IOSubsystem__record_open_handle(
+    IOSubsystemPtr self, IOContextPtr context, KString path, IOInternalHandle handle
+)
+{
+    FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
+        IsSome(match,
+        {
+            DeviceRegistrationPtr registration = match.value;
+            IOHandle external_handle = (IOHandle) handle | (((IOHandle)_to_device_handle(match.index)) << 32);
+            IOHandlesMap__set(&self->handles, external_handle, registration);
+            Match(ProcessID, context->kernel_context.pid)
+                IsSome(pid,
+                {
+                    MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&self->process_handles, pid))
+                        IsNone(
+                        {
+                            PIDHandles pid_handles = PIDHandles__new();
+                            PIDHandles__push(&pid_handles, external_handle);
+                            ProcessHandleMap__set(&self->process_handles, pid, pid_handles);
+                        })
+                        IsSome(handles,
+                        {
+                            PIDHandles__push(handles, external_handle);
+                        })
+                    End
+                })
+                IsNone(
+                {
+                    __d_println(PANIC, "TODO: No process found for open, must be kernel, should track its handle");
+                });
+            End
+            return Success(IOHandle, external_handle);
+        });
+    End
+
+    return Error(IOHandle, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+}
+
 Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KString path, Flags flags)
 {
     __d_printf(IOSUB, "Opening %p\n", self);
@@ -95,33 +133,7 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KS
             __d_printf(IOSUB, "Opened device %p %i\n", match.value->device, match.index);
 
             ResultMatch(IOInternalHandle, open_result);
-                IsSuccess(handle,
-                {
-                    IOHandle external_handle = (IOHandle) handle | (((IOHandle)_to_device_handle(match.index)) << 32);
-                    IOHandlesMap__set(&self->handles, external_handle, registration);
-                    Match(ProcessID, context->kernel_context.pid)
-                        IsSome(pid,
-                        {
-                            MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&self->process_handles, pid))
-                                IsNone(
-                                {
-                                    PIDHandles pid_handles = PIDHandles__new();
-                                    PIDHandles__push(&pid_handles, external_handle);
-                                    ProcessHandleMap__set(&self->process_handles, pid, pid_handles);
-                                })
-                                IsSome(handles,
-                                {
-                                    PIDHandles__push(handles, external_handle);
-                                })
-                            End
-                        })
-                        IsNone(
-                        {
-                            __d_println(PANIC, "TODO: No process found for open, must be kernel, should track its handle");
-                        });
-                    End
-                    return Success(IOHandle, external_handle);
-                });
+                IsSuccess(handle, return IOSubsystem__record_open_handle(self, context, path, handle));
                 IsError(code, message, return Error(IOHandle, message, code))
             End
         });
@@ -163,6 +175,11 @@ Result(DirectoryEntryCount) IOSubsystem__list_dir(
             }
 
             FileIOPtr file_io = (FileIOPtr) registration->device;
+            if (file_io->list_dir != NULL)
+            {
+                return file_io->list_dir(registration->state, path, entries, max_entries);
+            }
+
             ResultMatch(FilesystemNodes, file_io->list_nodes(registration->state, NULL, path))
                 IsSuccess(nodes,
                 {
@@ -230,19 +247,30 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)
     Match(IOHandle, context->handle)
         IsSome(handle,
         {
-            __d_printf(IOSUB, "Closing handle %i\n", handle);
+            __d_printf(IOSUB, "IOSubsystem__close start handle=%i context=%p\n", handle, context);
             CriticalSection(self->lock,
             {
+                __d_printf(IOSUB, "IOSubsystem__close locked handle=%i\n", handle);
                 Match(DeviceRegistrationPtr, IOHandlesMap__get(&self->handles, handle));
                     IsSome(registration,
                     {
+                        __d_printf(
+                            IOSUB,
+                            "IOSubsystem__close calling device close handle=%i internal=%i registration=%p\n",
+                            handle,
+                            device_internal_handle(handle),
+                            registration
+                        );
                         Result(IOInternalHandle) close_res =
                             registration->device->close(registration->state, device_internal_handle(handle));
+                        __d_printf(IOSUB, "IOSubsystem__close device close returned handle=%i\n", handle);
 
+                        __d_printf(IOSUB, "IOSubsystem__close deleting handle=%i\n", handle);
                         IOHandlesMap__delete(&self->handles, handle);
                         Match(ProcessID, context->kernel_context.pid)
                             IsSome(pid,
                             {
+                                __d_printf(IOSUB, "IOSubsystem__close removing pid handle pid=%i handle=%i\n", pid, handle);
                                 MapPtrMatch(ProcessHandleMap, ProcessHandleMap__get_ptr(&self->process_handles, pid))
                                     IsSome(proc_handles,
                                     {
@@ -257,13 +285,22 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)
                         End
 
                         ResultMatch(IOInternalHandle, close_res)
-                            IsSuccess(_, _cs_return Success(IOHandle, handle));
-                            IsError(code, message, _cs_return Error(IOHandle, message, code));
+                            IsSuccess(_,
+                            {
+                                __d_printf(IOSUB, "IOSubsystem__close success handle=%i\n", handle);
+                                _cs_return Success(IOHandle, handle);
+                            });
+                            IsError(code, message,
+                            {
+                                __d_printf(IOSUB, "IOSubsystem__close device error handle=%i code=%i\n", handle, code);
+                                _cs_return Error(IOHandle, message, code);
+                            });
                         End
                     });
                 End
             });
 
+            __d_printf(IOSUB, "IOSubsystem__close unknown handle=%i\n", handle);
             KString error_msg = KString__sprintf(&unknown_handle_format, handle) ;
             return Error(IOHandle, error_msg, IO_NOT_OPEN);
         })
@@ -396,7 +433,7 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
                         IsSome(ext_buffer,
                         {
                             Result(IOBufferPtr) read_res = registration->device->read(
-                                registration->state, device_internal_handle(handle), ext_buffer.len
+                                registration->state, device_internal_handle(handle), ext_buffer.len, ext_buffer
                             );
                             ResultMatch(IOBufferPtr, read_res)
                                 IsSuccess(buffer,
@@ -406,7 +443,7 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
                                 })
                                 IsError(code, error_message,
                                 {
-                                    if (code == IO_WAIT_FOR_DATA)
+                                    if (code == IO_WAIT_FOR_DATA && registration->device->park != NULL)
                                     {
                                         __d_println(IOSUB, "Parking waiting for IO");
 

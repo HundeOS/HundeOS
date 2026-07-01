@@ -30,7 +30,7 @@ void setUp(void)
     Scheduler__start(kernel->scheduler, cpu);
 
     Optional(ProcessPtr) idle_opt = Scheduler__idle_process(kernel->scheduler, cpu);
-    idle = UnwrapPanic(ProcessPtr, idle_opt);
+    idle = Unwrap(ProcessPtr, idle_opt, (ProcessPtr){});
 
     cont_called = false;
 }

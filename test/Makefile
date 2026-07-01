@@ -8,10 +8,10 @@ LD = gcc
 
 UNITY = ../../../tools/Unity/libunity.a
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -ffreestanding -mno-outline-atomics -I../ -I../../../tools/Unity/ -I$(PLATFORM_INCLUDE)
+CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -ffreestanding -mno-outline-atomics -I../ -I../../../tools/Unity/ -I$(PLATFORM_INCLUDE)
 
 # Assembler flags
-ASFLAGS = -c -O2 -Wall -Wextra -nostdlib -latomic
+ASFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -nostdlib -latomic
 
 # Linker flags
 LDFLAGS =

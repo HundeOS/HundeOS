@@ -5,10 +5,15 @@
 #include "../context/originating_call_context.h"
 #include "../scheduler/types.h"
 
+typedef Result(Anything) (* KernelResultMapper)(Result(Anything) result, Anything context);
+OptionalDef(KernelResultMapper);
+
 typedef struct KernelContext
 {
     Optional(ProcessID) pid;
     Optional(SchedulerPtr) scheduler;
+    Optional(KernelResultMapper) result_mapper;
+    Anything result_mapper_context;
 } KernelContext;
 
 typedef KernelContext * KernelContextPtr;
@@ -28,6 +33,8 @@ KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext
     (KernelContext) { \
         .pid = proc_id, \
         .scheduler = Some(SchedulerPtr, sched),\
+        .result_mapper = None(KernelResultMapper),\
+        .result_mapper_context = 0,\
     } \
 
 
@@ -35,6 +42,8 @@ KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext
     (KernelContext) { \
         .pid = None(ProcessID),\
         .scheduler = None(SchedulerPtr),\
+        .result_mapper = None(KernelResultMapper),\
+        .result_mapper_context = 0,\
     }
 
 

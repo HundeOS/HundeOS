@@ -10,9 +10,9 @@
 #include "exception_decode.h"
 #include "../../kernel/debug.h"
 #include "../../kernel/kernel_core.h"
+#include "../../kernel/irq/irq_dispatcher.h"
 #include "../../kernel/syscall/syscall_dispatcher.h"
 #include "../../kernel/types/optional.h"
-#include "io/uart.h"
 
 // Helper function to get exception syndrome
 inline uint64_t get_esr_el1(void) {
@@ -39,63 +39,47 @@ void irq_handler(ProcessContextPtr context, bool current_el)
 
     uint32_t id = icc_iar1();
     __d_printf(IRQ, "irq: %i\n", id);
+    if (id >= 32)
+    {
+        __d_printf(IODEV, "irq entry id=%i cpu=%i current_el=%i\n", id, CPU__id() - 1, current_el);
+    }
 
     __d_printf(IRQ, "ELR: %p, SP_ELO: %p\n", get_elr_el1(), read_sp_el0());
 
-    if (id == PPI_CNTV)
+    CPUID cpu = CPU__id() - 1;
+    if (id != PPI_CNTV && id != PPI_CNTP)
     {
-        // re-arm for periodic tick
-        uint64_t frq; __asm__ volatile("mrs %0, cntfrq_el0":"=r"(frq));
-        __asm__ volatile("msr cntv_tval_el0, %0" :: "r"(frq/1000)); // 1ms again
-        icc_eoir1(id);
-        icc_dir(id);
-        isb();
-        if (!current_el)
-        {
-            timer_handler(CPU__id() - 1, kernel->scheduler, context);
-        }
-        return;
-    }
-    else if (id == PPI_CNTP)
-    {
-        uint64_t frq; __asm__ volatile("mrs %0, cntfrq_el0":"=r"(frq));
-        __asm__ volatile("msr cntp_tval_el0, %0" :: "r"(frq/1000));
-        icc_eoir1(id);
-        icc_dir(id);
-        isb();
-
-        if (!current_el)
-        {
-            timer_handler(CPU__id() - 1, kernel->scheduler, context);
-        }
-        return;
-    }
-    else if (id == 33)
-    {
-        __d_printf(
-            IRQ,
-            "UART IRQ entry current_el=%i elr=%p sp_el0=%p cpu=%i\n",
-            current_el,
-            get_elr_el1(),
-            read_sp_el0(),
-            CPU__id()
-        );
-        Optional(ProcessPtr) interrupted_process = Scheduler__save_context(kernel->scheduler, CPU__id() - 1, context);
+        Optional(ProcessPtr) interrupted_process = Scheduler__save_context(kernel->scheduler, cpu, context);
         Match(ProcessPtr, interrupted_process)
-            IsSome(proc, __d_printf(IRQ, "UART IRQ saved context pid=%i name=%s\n", proc->pid, cstr(proc->name));)
-            IsNone(__d_println(IRQ, "UART IRQ no process context saved");)
+            IsSome(proc, __d_printf(IRQ, "IRQ saved context pid=%i name=%s\n", proc->pid, cstr(proc->name));)
+            IsNone(__d_println(IRQ, "IRQ no process context saved");)
         End
-        icc_eoir1(id);
-        icc_dir(id);
-        Scheduler__send_irq_event(kernel->scheduler, UART_IRQ_ID);
-        __d_printf(IRQ, "UART IRQ exit current_el=%i cpu=%i\n", current_el, CPU__id());
     }
-    else
-    {
-        __d_printf(IRQ, "irq: %i\n", id);
 
-        __d_printf(UNHANDLED, "unhandled irq: %i\n", id);
-    }
+    icc_eoir1(id);
+    icc_dir(id);
+
+    IRQDispatchContext dispatch_context = (IRQDispatchContext) {
+        .irq = id,
+        .cpu = cpu,
+        .current_el = current_el,
+        .process_context = context,
+    };
+
+    ResultMatch(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, id, &dispatch_context))
+        IsSuccess(status,
+        {
+            if (id >= 32)
+            {
+                __d_printf(IODEV, "irq dispatch id=%i status=%i\n", id, status);
+            }
+            if (status == IRQ_DISPATCH_UNHANDLED)
+            {
+                __d_printf(UNHANDLED, "unhandled irq: %i\n", id);
+            }
+        })
+        IsError(code, message, __d_printf(UNHANDLED, "irq dispatch error %i for irq %i\n", code, id))
+    End
 }
 
 static uint64_t abort_user_process(

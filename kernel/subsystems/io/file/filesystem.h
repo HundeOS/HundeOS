@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "../../../all_defs.h"
+#include "../../../types/linked_list.h"
 #include "../../../types/map.h"
 #include "../../../types/kstring_additional_types.h"
 
@@ -24,6 +25,33 @@ typedef struct Filesystem Filesystem;
 typedef Filesystem * FilesystemPtr;
 typedef uint64_t FilePointer;
 
+typedef struct FilesystemTableEntry
+{
+    KString device_path;
+    KString filesystem_type;
+    KString mountpoint;
+}
+FilesystemTableEntry;
+
+typedef FilesystemTableEntry * FilesystemTableEntryPtr;
+
+OptionalDef(FilesystemTableEntry);
+bool FilesystemTableEntry__equals(FilesystemTableEntryPtr self, FilesystemTableEntryPtr other);
+LinkedListDefine(FilesystemTableEntry, FilesystemTableEntries, (EqualFunction) FilesystemTableEntry__equals);
+
+typedef struct FilesystemTable
+{
+    FilesystemTableEntries entries;
+}
+FilesystemTable;
+
+typedef FilesystemTable * FilesystemTablePtr;
+
+FilesystemTable FilesystemTable__new();
+Result(CollectionCode) FilesystemTable__add(
+    FilesystemTablePtr self, KString device_path, KString filesystem_type, KString mountpoint
+);
+
 OptionalDef(FilesystemPtr);
 ResultDef(FilesystemPtr);
 MapDefine(KString, FilesystemPtr, MAX_MOUNTS, Mounts, kstring_equals);
@@ -38,6 +66,7 @@ typedef struct Filesystem
 {
     KString name;
     Mounts mounts;
+    FilesystemTable filesystem_table;
     FilesystemNodePtr root;
     FileIO file_io;
     FilesystemIOStatePtr state;

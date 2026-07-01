@@ -23,6 +23,7 @@ typedef ParkedKernelContext * ParkedKernelContextPtr;
 
 OptionalDef(ParkedKernelContextPtr);
 ResultDef(ParkedKernelContextPtr);
+LinkedListDefine(ParkedKernelContextPtr, ParkedKernelContexts, &Ptr__equals);
 
 typedef uint64_t ProcessID;
 typedef uint64_t ProcessState;
@@ -143,6 +144,7 @@ typedef enum UserAllocationType
     USER_ALLOCATION_STACK,
     USER_ALLOCATION_HEAP,
     USER_ALLOCATION_DYNAMIC,
+    USER_ALLOCATION_MMIO,
 } UserAllocationType;
 
 typedef struct UserAllocation
@@ -201,7 +203,7 @@ typedef struct Process {
     ServiceEvents service_events;
     ServiceEventPtr service_wait_target;
 
-    Optional(ParkedKernelContextPtr) parked_context;
+    ParkedKernelContexts parked_contexts;
 } Process;
 
 Result(ProcessPtr) Process__new(
@@ -219,9 +221,14 @@ OptionalType(ProcessTable *, ProcessTablePtr);
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent);
 Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments);
+Result(CollectionCode) Process__push_parked_context(ProcessPtr self, ParkedKernelContextPtr context);
+Optional(ParkedKernelContextPtr) Process__top_parked_context(ProcessPtr self);
+Optional(ParkedKernelContextPtr) Process__pop_parked_context(ProcessPtr self);
+bool Process__is_parked(ProcessPtr self);
 Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 );
+Result(Address) Process__device_address(ProcessPtr self, Address virtual_address);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
 Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size);
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment);

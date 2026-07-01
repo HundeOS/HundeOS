@@ -1,3 +1,5 @@
+#define DRIVER_LOG_TAG "UART-TX"
+
 #include "../../sys/io_server.h"
 #include "../../sys/debug.h"
 #include "../../sys/service.h"
@@ -38,16 +40,19 @@ static void write_uart(void * uart, char value)
 
 int UART_TX_ENTRYPOINT(void)
 {
-    ServiceMappedRange uart = {
-        .physical = UART0_PHYS_BASE,
-        .size = UART_MMIO_SIZE,
-        .address = 0,
-    };
-    if (!service_ok(service_map_mmio(&uart)))
+    if (!service_ok(service_become_service()))
+    {
+        DRIVER_DEBUG("uart_tx: service registration failed\n");
+        return 1;
+    }
+
+    ServiceMappedMemoryPtr uart_mapping;
+    if (!service_ok(service_map_mmio(UART0_PHYS_BASE, UART_MMIO_SIZE, &uart_mapping)))
     {
         DRIVER_DEBUG("uart_tx: mmio map failed\n");
         return 1;
     }
+    void * uart = driver_ptr(uart_mapping);
 
     IOHandle tty = io_server_register(":tty:", IO_SERVER_WRITE);
     if (tty < 0)
@@ -72,10 +77,10 @@ int UART_TX_ENTRYPOINT(void)
                 {
                     for (uint64_t i = 0; i < buffer.capacity; i++)
                     {
-                        write_uart(uart.address, buffer.data[i]);
+                        write_uart(uart, buffer.data[i]);
                         if (buffer.data[i] == '\n')
                         {
-                            write_uart(uart.address, '\r');
+                            write_uart(uart, '\r');
                         }
                     }
                     io_server_data_consumed(tty, buffer.capacity);

@@ -2,6 +2,7 @@
 #define __TEST_KERNEL_FIXTURES_PROCESS_H_
 
 #include "unity.h"
+#include "../../../kernel/arch/cpu.h"
 #include "../../../kernel/process.h"
 #include "../../../kernel/bin/embedded_binaries.h"
 

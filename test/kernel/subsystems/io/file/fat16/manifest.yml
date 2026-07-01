@@ -8,7 +8,9 @@ manifest:
     - kernel/subsystems/io/file/filesystem.c
     - kernel/subsystems/io/file/filesystem_node.c
     - kernel/subsystems/io/file/fat16/*.c
+    - kernel/scheduler/kernel_context.c
     - kernel/mutex.c
     - test/kernel/stubs/cpu.c
     - test/kernel/stubs/kalloc.c
     - test/kernel/stubs/panic.c
+    - test/kernel/isolated_stubs/scheduler.c

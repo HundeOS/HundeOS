@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdarg.h>
 
 #include "unity.h"
 
@@ -12,8 +13,17 @@
 
 static char fake_io_buffer[2];
 static uint32_t fake_uart_writes[4];
+struct ServiceMappedMemory
+{
+    void * driver_address;
+    uint64_t device_address;
+    uint64_t size;
+};
+
+static ServiceMappedMemory fake_uart_mapping;
 static uint64_t fake_uart_write_count;
 static uint64_t fake_uart_fr_read_count;
+static bool fake_became_service;
 static bool fake_data_consumed;
 static uint64_t fake_service_wait_count;
 
@@ -45,8 +55,12 @@ void setUp(void)
 {
     fake_io_buffer[0] = 'x';
     fake_io_buffer[1] = '\n';
+    fake_uart_mapping.driver_address = fake_uart_writes;
+    fake_uart_mapping.device_address = 0x09000000ULL;
+    fake_uart_mapping.size = 0x1000ULL;
     fake_uart_write_count = 0;
     fake_uart_fr_read_count = 0;
+    fake_became_service = false;
     fake_data_consumed = false;
     fake_service_wait_count = 0;
     for (uint64_t i = 0; i < 4; i++)
@@ -59,12 +73,53 @@ void tearDown(void)
 {
 }
 
-ServiceCode service_map_mmio(ServiceMappedRangePtr range)
+SyslogResult kernel_syslogf(const char * format, ...)
 {
-    TEST_ASSERT_EQUAL_UINT64(0x09000000ULL, range->physical);
-    TEST_ASSERT_EQUAL_UINT64(0x1000ULL, range->size);
-    range->address = fake_uart_writes;
+    return SYSLOG_OK;
+}
+
+SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+{
+    return SYSLOG_OK;
+}
+
+ServiceCode service_become_service()
+{
+    fake_became_service = true;
     return SERVICE_OK;
+}
+
+ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
+{
+    TEST_ASSERT_EQUAL_UINT64(0x09000000ULL, physical_address);
+    TEST_ASSERT_EQUAL_UINT64(0x1000ULL, size);
+    *memory = &fake_uart_mapping;
+    return SERVICE_OK;
+}
+
+void * driver_ptr(ServiceMappedMemoryPtr memory)
+{
+    return memory->driver_address;
+}
+
+uint64_t device_ptr(ServiceMappedMemoryPtr memory)
+{
+    return memory->device_address;
+}
+
+void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
+{
+    return (void *) ((uint64_t) memory->driver_address + offset);
+}
+
+uint64_t device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
+{
+    return memory->device_address + offset;
+}
+
+uint64_t mapped_size(ServiceMappedMemoryPtr memory)
+{
+    return memory->size;
 }
 
 IOHandle io_server_register(const char * path, IOServerRole role)
@@ -76,7 +131,6 @@ IOHandle io_server_register(const char * path, IOServerRole role)
 
 ServiceCode service_subscribe_irq(uint64_t irq)
 {
-    (void) irq;
     TEST_FAIL_MESSAGE("tx driver should not subscribe to an irq");
     return SERVICE_OK;
 }
@@ -106,8 +160,6 @@ IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)
 
 IOStatus io_server_data_available(IOHandle handle, uint64_t byte_count)
 {
-    (void) handle;
-    (void) byte_count;
     TEST_FAIL_MESSAGE("tx driver should not publish read data");
     return IO_OK;
 }
@@ -122,7 +174,6 @@ IOStatus io_server_data_consumed(IOHandle handle, uint64_t byte_count)
 
 IOStatus io_server_eof(IOHandle handle)
 {
-    (void) handle;
     TEST_FAIL_MESSAGE("tx driver should not signal eof");
     return IO_OK;
 }
@@ -131,6 +182,7 @@ void test_uart_tx_main_maps_registers_waits_for_write_request_and_consumes_data(
 {
     TEST_ASSERT_EQUAL_INT(0, uart_tx_main_under_test());
 
+    TEST_ASSERT_TRUE(fake_became_service);
     TEST_ASSERT_TRUE(fake_data_consumed);
     TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);
     TEST_ASSERT_EQUAL_UINT64(3, fake_uart_write_count);

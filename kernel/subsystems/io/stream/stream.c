@@ -59,7 +59,9 @@ static Result(IOInternalHandle) Stream__close(IOStatePtr state, IOInternalHandle
     return Success(IOInternalHandle, handle);
 }
 
-static Result(IOBufferPtr) Stream__read(IOStatePtr state, IOInternalHandle handle, size_t size)
+static Result(IOBufferPtr) Stream__read(
+    IOStatePtr state, IOInternalHandle handle, size_t size, ExternalBuffer target
+)
 {
     StreamStatePtr self = (StreamStatePtr) state;
     if (IOBuffer__item_count(&self->read_buffer) == 0 && self->eof)

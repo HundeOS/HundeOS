@@ -48,8 +48,8 @@ void test_map_len_and_key()
 
     TEST_ASSERT_EQUAL(2, TestMap__len(&map));
 
-    KStringPtr key1 = MapUnwrapPanic(KStringPtr, TestMap__key(&map, 0));
-    KStringPtr key2 = MapUnwrapPanic(KStringPtr, TestMap__key(&map, 1));
+    KStringPtr key1 = Unwrap(KStringPtr, TestMap__key(&map, 0), (KStringPtr){});
+    KStringPtr key2 = Unwrap(KStringPtr, TestMap__key(&map, 1), (KStringPtr){});
     TEST_ASSERT_TRUE(KString__equals(&hello, key1));
     TEST_ASSERT_TRUE(KString__equals(&world, key2));
 }

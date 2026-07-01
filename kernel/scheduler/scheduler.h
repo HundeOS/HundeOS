@@ -85,6 +85,7 @@ SchedulerPtr Scheduler__heap_new(MessageBrokerPtr message_broker);
 
 Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, Elf idle_process);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
+void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID cpu);
 Result(ProcessPtr) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc, ReturnCode return_code);
 Result(ProcessPtr) Scheduler__abort_process(
     SchedulerPtr scheduler, IOSubsystemPtr io_subsystem, ProcessPtr proc, ProcessAbort abort
@@ -109,6 +110,7 @@ Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__find_process_by_pid(SchedulerPtr self, ProcessID pid);
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
 ProcessTable Scheduler__all_processes_for_all_cpus(SchedulerPtr self);
+ProcessTable Scheduler__process_snapshot(SchedulerPtr self);
 
 uint64_t Scheduler__process_count(SchedulerPtr self);
 

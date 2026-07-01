@@ -52,7 +52,9 @@ static Result(IOInternalHandle) fake_close(IOStatePtr state_ptr, IOInternalHandl
     return Success(IOInternalHandle, handle);
 }
 
-static Result(IOBufferPtr) fake_read(IOStatePtr state_ptr, IOInternalHandle handle, size_t size)
+static Result(IOBufferPtr) fake_read(
+    IOStatePtr state_ptr, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+)
 {
     return Error(IOBufferPtr, kstring("not implemented"), IO_OPERATION_NOT_IMPLEMENTED);
 }
@@ -180,6 +182,16 @@ void test_io_handler_write_translates_file_descriptor_to_io_handle(void)
     End
 }
 
+void test_io_handler_open_rejects_missing_path_at_syscall_boundary(void)
+{
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_OPEN, 0, FLAGS, 0, 0
+    ))
+        IsSuccess(fd, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_INVALID_PATH, code))
+    End
+}
+
 void test_io_handler_close_removes_file_descriptor(void)
 {
     install_open_fd(EXPECTED_FD);
@@ -198,6 +210,38 @@ void test_io_handler_close_removes_file_descriptor(void)
     ResultMatch(ProcessIOHandle, Process__get_io_handle(&process, EXPECTED_FD))
         IsSuccess(handle, TEST_FAIL())
         IsError(code, message, TEST_ASSERT_EQUAL(IO_NOT_OPEN, code))
+    End
+}
+
+void test_io_handler_list_dir_rejects_missing_path_at_syscall_boundary(void)
+{
+    DirectoryEntry entries[2] = { 0 };
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_LIST_DIR, 0, (Anything) entries, 2, 0
+    ))
+        IsSuccess(count, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_INVALID_PATH, code))
+    End
+}
+
+void test_io_handler_list_dir_rejects_missing_entries_at_syscall_boundary(void)
+{
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_LIST_DIR, (Anything) cstr(path), 0, 2, 0
+    ))
+        IsSuccess(count, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_INVALID_PATH, code))
+    End
+}
+
+void test_io_handler_mkdir_rejects_missing_path_at_syscall_boundary(void)
+{
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_MKDIR, 0, 0, 0, 0
+    ))
+        IsSuccess(status, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_INVALID_PATH, code))
     End
 }
 

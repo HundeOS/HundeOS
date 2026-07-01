@@ -47,7 +47,9 @@ static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandl
     return Success(IOInternalHandle, handle);
 }
 
-static Result(IOBufferPtr) Console__read(IOStatePtr state, IOInternalHandle handle, size_t size)
+static Result(IOBufferPtr) Console__read(
+    IOStatePtr state, IOInternalHandle handle, size_t size, ExternalBuffer target
+)
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
     if (IOBuffer__item_count(&self->read_buffer) == 0)

@@ -26,19 +26,26 @@ void clear_deferred_syscall_result()
 void Process__context_switch(ProcessPtr self)
 {
     current_process = self;
-    Match(ParkedKernelContextPtr, self->parked_context)
-        IsSome(parked_kernel_context,
-        {
-            Match(Continuation, parked_kernel_context->continuation)
-                IsSome(continuation,
-                {
-                    Result(Anything) syscall_res = continuation(parked_kernel_context);
-                    deferred_syscall_res = syscall_res;
-                    self->parked_context = None(ParkedKernelContextPtr);
-                })
-            End
-        })
-    End
+    while (Process__is_parked(self))
+    {
+        Match(ParkedKernelContextPtr, Process__pop_parked_context(self))
+            IsSome(parked_kernel_context,
+            {
+                Match(Continuation, parked_kernel_context->continuation)
+                    IsSome(continuation,
+                    {
+                        Result(Anything) syscall_res = continuation(parked_kernel_context);
+                        if (Process__is_parked(self))
+                        {
+                            deferred_syscall_res = syscall_res;
+                            return;
+                        }
+                        deferred_syscall_res = syscall_res;
+                    })
+                End
+            })
+        End
+    }
 }
 
 void current_process_reset()

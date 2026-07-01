@@ -100,19 +100,15 @@ OptionalDef(ArrayIndex);
 #define FAPtrOptional(alias) _Optional(alias##__type_ptr__optional)
 
 #define FAIterate(alias, array, index, value) \
-    for (int index = 0; index < array.len; index++) \
+    for (uint64_t index = 0; index < array.len; index++) \
     { \
        alias##__type value = array.data[index]; \
 
 
 #define FAPtrIterate(alias, array, index, value) \
-    for (int index = 0; index < array->len; index++) \
+    for (uint64_t index = 0; index < array->len; index++) \
     { \
        alias##__type value = array->data[index]; \
-
-
-#define FAPtrUnwrapPanic(alias, opt) \
-    UnwrapPanic(alias##__type_ptr, opt)\
 
 
 #define FAPtrMatch(alias, opt) \
@@ -142,9 +138,6 @@ OptionalDef(ArrayIndex);
 #define FindResultNone(alias) None(alias##__FindResult)
 #define FindResultSome(alias, res) Some(alias##__FindResult, res)
 
-
-#define FAUnwrapPanic(T, opt) \
-    UnwrapPanic(T, opt)\
 
 #define FindResultOptional(alias) \
     _Optional(alias##__FindResult) \

@@ -10,6 +10,8 @@ typedef enum SystemCall
     SYSCALL_EXEC = 0x81,
     MEM_CALL = 0x82,
     SERVICE_CALL = 0x83,
+    SYSCALL_PROCESS_LIST = 0x84,
+    SYSCALL_SYSLOG = 0x85,
     PING = 0xFF,
 } SystemCall;
 

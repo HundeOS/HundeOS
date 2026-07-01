@@ -4,38 +4,32 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define MAX_SIZE 1024
+#include "../../common/types/bstring.h"
+
+#define MAX_SIZE BSTRING_MAX_SIZE
 
 typedef struct KStringArray KStringArray;
 typedef struct KStringArray * KStringArrayPtr;
 
-typedef struct KString {
-    uint64_t len;
-    uint64_t max;
-    char data[MAX_SIZE];
-} KString;
-
+typedef BString KString;
 typedef KString * KStringPtr;
+typedef const KString * ConstKStringPtr;
 
 KString KString__new(const char * str);
 KString kstring(const char * str);
 
-bool KString__equals(KStringPtr self, KStringPtr other);
-KString KString__sprintf(KStringPtr format, ...);
-KString KString__append(KStringPtr self, KStringPtr other);
+bool KString__equals(ConstKStringPtr self, ConstKStringPtr other);
+KString KString__sprintf(ConstKStringPtr format, ...);
+KString KString__append(ConstKStringPtr self, ConstKStringPtr other);
 KString KString__join(KStringArrayPtr array, char delimiter);
 
-KStringArray KString__split(KStringPtr self, char delimiter);
-bool KString__starts_with(KStringPtr self, KStringPtr prefix);
+KStringArray KString__split(ConstKStringPtr self, char delimiter);
+bool KString__starts_with(ConstKStringPtr self, ConstKStringPtr prefix);
 
-const char * KString__cstr(KStringPtr str);
+const char * KString__cstr(ConstKStringPtr str);
 
 #define EMPTY_KSTRING \
-    (KString) { \
-        .len = 0, \
-        .max = MAX_SIZE, \
-        .data[0] = 0 \
-    } \
+    EMPTY_BSTRING \
 
 #define cstr(kstr) \
     KString__cstr(&kstr)
@@ -46,11 +40,7 @@ const char * KString__cstr(KStringPtr str);
 
 #define STRLEN(s) ( (sizeof(s)/sizeof(s[0])) - sizeof(s[0]) )
 #define KSTRING_NEW(chars) \
-    (KString) { \
-        .max = MAX_SIZE, \
-        .len = STRLEN(chars), \
-        .data = chars, \
-    } \
+    BSTRING_NEW(chars) \
 
 #define NULL_TERM(ch) \
     (char[2]){ch, '\0'}

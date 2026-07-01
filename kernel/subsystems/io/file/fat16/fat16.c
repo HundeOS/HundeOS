@@ -874,7 +874,9 @@ static Result(IOInternalHandle) Fat16FileIO__close(IOStatePtr self, IOInternalHa
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-static Result(IOBufferPtr) Fat16FileIO__read(IOStatePtr self, IOInternalHandle handle, size_t size)
+static Result(IOBufferPtr) Fat16FileIO__read(
+    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+)
 {
     Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
 
@@ -955,20 +957,16 @@ static Result(ByteCount) Fat16FileIO__write(IOStatePtr self, IOInternalHandle ha
 
 static Result(ParkStatus) Fat16FileIO__park(IOStatePtr self, IOContextPtr parked_context)
 {
-    (void) self;
-    (void) parked_context;
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
 static Result(ParkStatus) Fat16FileIO__unpark(IOStatePtr self)
 {
-    (void) self;
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
 static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, KString path)
 {
-    (void) parent;
     Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
 
@@ -1050,9 +1048,6 @@ static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, KString path)
 
 static Result(IOStatus) Fat16FileIO__remove(IOStatePtr self, KString path, Flags flags)
 {
-    (void) self;
-    (void) path;
-    (void) flags;
     return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
 }
 
@@ -1078,7 +1073,9 @@ bool Fat16FilesystemIO__available()
     return true;
 }
 
-Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(FilesystemPtr fs, BlockCount total_sectors)
+Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(
+    FilesystemPtr fs, BlockDevicePtr device, BlockCount total_sectors
+)
 {
     Fat16FilesystemIOStatePtr io_state = ptr(
         Kernel__alloc_kernel(sizeof(Fat16FilesystemIOState)), Fat16FilesystemIOState
@@ -1091,14 +1088,12 @@ Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(FilesystemPtr fs, Blo
 
     *io_state = (Fat16FilesystemIOState) {
         .state = FilesystemIOState__new(fs),
-        .memory_device = MemoryBlockDevice__new(),
         .handles = Fat16FileHandleMap__new(),
         .handle_count = 0,
         .mounted = false,
     };
 
-    io_state->block_device = MemoryBlockDevice__as_block_device(&io_state->memory_device);
-    io_state->volume = Fat16Volume__new(&io_state->block_device, total_sectors);
+    io_state->volume = Fat16Volume__new(device, total_sectors);
 
     ResultMatch(Fat16Code, Fat16Volume__format(&io_state->volume))
         IsSuccess(_,

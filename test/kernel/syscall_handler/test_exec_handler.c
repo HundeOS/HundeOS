@@ -1,6 +1,24 @@
+#include "unity.h"
+
+#include "../../../common_includes/syscalls/spawn.h"
+#include "../../../kernel/syscall/exec_handler.h"
+#include "../fixtures/kernel.h"
+#include "../fixtures/process.h"
+#include "../stubs/process.h"
+
+static KernelPtr kernel = NULL;
+static ProcessPtr parent = NULL;
+static KString exec_path = KSTRING_NEW("/ebin/hello_world");
+static const CPUID cpu = 0;
+
 void setUp(void)
 {
-
+    clear_deferred_syscall_result();
+    current_process_reset();
+    kernel = init_test_kernel();
+    parent = dummy_process(0, cpu, PROC_STATE_RUNNING);
+    Scheduler__schedule(kernel->scheduler, parent);
+    Scheduler__preempt(kernel->scheduler, cpu, NULL);
 }
 
 void tearDown(void)
@@ -10,5 +28,36 @@ void tearDown(void)
 
 void test_exec_is_called_triggering_new_process()
 {
+    ResultMatch(SystemCallResult, Exec__handler(
+        kernel,
+        Some(ProcessPtr, parent),
+        (Anything) cstr(exec_path),
+        P_WAIT,
+        0,
+        0,
+        0
+    ))
+        IsSuccess(code, TEST_ASSERT_GREATER_THAN(0, code))
+        IsError(code, message, TEST_FAIL())
+    End
 
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->state);
+}
+
+void test_exec_handler_nowait_spawns_without_parking_parent()
+{
+    ResultMatch(SystemCallResult, Exec__handler(
+        kernel,
+        Some(ProcessPtr, parent),
+        (Anything) cstr(exec_path),
+        P_NOWAIT,
+        0,
+        0,
+        0
+    ))
+        IsSuccess(code, TEST_ASSERT_GREATER_THAN(0, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
 }

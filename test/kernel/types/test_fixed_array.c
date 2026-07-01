@@ -64,8 +64,8 @@ void test_push_all_adds_all_elements_from_oter_array(void)
     End
 
     TEST_ASSERT_EQUAL(11, TestArray__len(&array));
-    TEST_ASSERT_EQUAL(9, UnwrapPanic(TestType, TestArray__at(&array, -1)));
-    TEST_ASSERT_EQUAL(123, UnwrapPanic(TestType, TestArray__at(&array, 0)));
+    TEST_ASSERT_EQUAL(9, Unwrap(TestType, TestArray__at(&array, -1), (TestType){}));
+    TEST_ASSERT_EQUAL(123, Unwrap(TestType, TestArray__at(&array, 0), (TestType){}));
 }
 
 void test_push_all_gives_an_error_and_leaves_target_untouched_if_max_length_would_be_exceeded(void)
@@ -99,8 +99,8 @@ void test_fixed_array_at_with_negative_index_gives_from_end(void)
 
     TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE, array.len);
 
-    TestType value_minus_1 = UnwrapPanic(TestType, TestArray__at(&array, -1));
-    TestType value_minus_10 = UnwrapPanic(TestType, TestArray__at(&array, -10));
+    TestType value_minus_1 = Unwrap(TestType, TestArray__at(&array, -1), (TestType){});
+    TestType value_minus_10 = Unwrap(TestType, TestArray__at(&array, -10), (TestType){});
 
     TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE - 1, value_minus_1);
     TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE - 10, value_minus_10);
@@ -130,8 +130,8 @@ void test_fixed_array_at_ptr_with_negative_index(void)
 
     TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE, array.len);
 
-    TestTypePtr value_minus_1 = FAPtrUnwrapPanic(TestArray, TestArray__ptr_at(&array, -1));
-    TestTypePtr value_minus_10 = FAPtrUnwrapPanic(TestArray, TestArray__ptr_at(&array, -10));
+    TestTypePtr value_minus_1 = Unwrap(TestTypePtr, TestArray__ptr_at(&array, -1), (TestTypePtr){});
+    TestTypePtr value_minus_10 = Unwrap(TestTypePtr, TestArray__ptr_at(&array, -10), (TestTypePtr){});
 
     TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE - 1, *value_minus_1);
     TEST_ASSERT_EQUAL_UINT(TEST_ARRAY_SIZE - 10, *value_minus_10);

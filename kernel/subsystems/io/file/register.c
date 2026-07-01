@@ -1,6 +1,8 @@
 #include "register.h"
 
+#include "../block/block_device.h"
 #include "filesystem.h"
+#include "devfs/devfs.h"
 #include "embedded/embedded.h"
 #include "memfs/memfs.h"
 
@@ -16,11 +18,11 @@ FileIO Fat16FilesystemIO__new()
     return (FileIO) { 0 };
 }
 
-void * Fat16FilesystemIOState__heap_new(FilesystemPtr fs, uint64_t total_sectors) __attribute__((weak));
-void * Fat16FilesystemIOState__heap_new(FilesystemPtr fs, uint64_t total_sectors)
+void * Fat16FilesystemIOState__heap_new(
+    FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors
+) __attribute__((weak));
+void * Fat16FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
 {
-    (void) fs;
-    (void) total_sectors;
     return 0;
 }
 
@@ -36,64 +38,105 @@ FileIO Fat32FilesystemIO__new()
     return (FileIO) { 0 };
 }
 
-void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, uint64_t total_sectors) __attribute__((weak));
-void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, uint64_t total_sectors)
+void * Fat32FilesystemIOState__heap_new(
+    FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors
+) __attribute__((weak));
+void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
 {
-    (void) fs;
-    (void) total_sectors;
     return 0;
 }
 
 KString embedded = KSTRING_NEW("ebin");
+KString dev = KSTRING_NEW("dev");
 KString fat16 = KSTRING_NEW("fat16");
 KString fat32 = KSTRING_NEW("fat32");
 KString memfs = KSTRING_NEW("tmp/memfs");
+
+Optional(BlockDevicePtr) BlockDeviceRegistry__find(KString path) __attribute__((weak));
+Optional(BlockDevicePtr) BlockDeviceRegistry__find(KString path)
+{
+    return None(BlockDevicePtr);
+}
+
+static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableEntryPtr entry)
+{
+    Match(FilesystemPtr, Mounts__get(&root_fs->mounts, entry->mountpoint))
+        IsSome(existing, return)
+    End
+
+    Optional(FilesystemPtr) filesystem = None(FilesystemPtr);
+
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(entry->device_path))
+        IsSome(device,
+        {
+            if (KString__equals(&entry->filesystem_type, &fat16) && Fat16FilesystemIO__available())
+            {
+                FilesystemPtr fat_filesystem = Filesystem__heap_new(entry->mountpoint, Fat16FilesystemIO__new());
+                void * state = Fat16FilesystemIOState__heap_new(fat_filesystem, device, 0);
+                filesystem = Some(FilesystemPtr, fat_filesystem);
+            }
+            else if (KString__equals(&entry->filesystem_type, &fat32) && Fat32FilesystemIO__available())
+            {
+                FilesystemPtr fat_filesystem = Filesystem__heap_new(entry->mountpoint, Fat32FilesystemIO__new());
+                void * state = Fat32FilesystemIOState__heap_new(fat_filesystem, device, 0);
+                filesystem = Some(FilesystemPtr, fat_filesystem);
+            }
+        })
+    End
+
+    Match(FilesystemPtr, filesystem)
+        IsSome(mounted_filesystem, Filesystem__mount(root_fs, entry->mountpoint, mounted_filesystem))
+    End
+}
+
+static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemTablePtr self)
+{
+    ResultMatch(CollectionCode, FilesystemTable__add(
+        self,
+        KSTRING_NEW("/dev/virtio1"),
+        KSTRING_NEW("fat32"),
+        KSTRING_NEW("/mnt/fs1")
+    ))
+        IsSuccess(index, return Success(CollectionCode, index))
+        IsError(code, message, return Error(CollectionCode, message, code))
+    End
+
+    return Success(CollectionCode, 0);
+}
+
+void FilesystemTable__mount_available_entries(FilesystemPtr root_fs)
+{
+    LLIterate(FilesystemTableEntries, root_fs->filesystem_table.entries, entry)
+        FilesystemTable__mount_entry(root_fs, &entry);
+    End
+}
 
 FilesystemPtr Filesystem__build_root_and_mounts()
 {
     FilesystemPtr root_fs = RootFilesystem__heap_new();
     FilesystemIOStatePtr root_fs_state = FilesystemIOState__heap_new(root_fs);
-    (void) root_fs_state;
 
     FilesystemPtr embedded_fs = Filesystem__heap_new(embedded, EmbeddedFilesystemIO__new());
     EmbeddedFilesystemIOStatePtr embedded_fs_state = EmbeddedFilesystemIOState__heap_new(embedded_fs);
-    (void) embedded_fs_state;
 
     Filesystem__mount(root_fs, embedded, embedded_fs);
 
+    FilesystemPtr dev_filesystem = Filesystem__heap_new(dev, DevFilesystemIO__new());
+    DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(dev_filesystem);
+    Filesystem__mount(root_fs, dev, dev_filesystem);
+
     FilesystemPtr mem_filesystem = Filesystem__heap_new(memfs, MemFilesystemIO__new());
     MemFilesystemIOStatePtr memfs_state = MemFilesystemIOState__heap_new(mem_filesystem);
-    (void) memfs_state;
     Filesystem__mount(root_fs, memfs, mem_filesystem);
 
-    FilesystemPtr fat16_filesystem = 0;
-    if (Fat16FilesystemIO__available())
-    {
-        fat16_filesystem = Filesystem__heap_new(fat16, Fat16FilesystemIO__new());
-        void * fat16_state = Fat16FilesystemIOState__heap_new(fat16_filesystem, 0);
-        (void) fat16_state;
-        Filesystem__mount(root_fs, fat16, fat16_filesystem);
-    }
-
-    FilesystemPtr fat32_filesystem = 0;
-    if (Fat32FilesystemIO__available())
-    {
-        fat32_filesystem = Filesystem__heap_new(fat32, Fat32FilesystemIO__new());
-        void * fat32_state = Fat32FilesystemIOState__heap_new(fat32_filesystem, 0);
-        (void) fat32_state;
-        Filesystem__mount(root_fs, fat32, fat32_filesystem);
-    }
+    ResultMatch(CollectionCode, FilesystemTable__add_hardcoded_entries(&root_fs->filesystem_table))
+        IsSuccess(_, FilesystemTable__mount_available_entries(root_fs))
+        IsError(code, message, __d_printf(FILESYSTEM, "Filesystem table setup failed %i %s\n", code, cstr(message)))
+    End
 
     __d_printf(FILESYSTEM, "Root filesystem %p\n", root_fs);
     __d_printf(FILESYSTEM, "Embedded filesystem %p\n", embedded_fs);
+    __d_printf(FILESYSTEM, "Device filesystem %p\n", dev_filesystem);
     __d_printf(FILESYSTEM, "Memory filesystem %p\n", mem_filesystem);
-    if (fat16_filesystem != 0)
-    {
-        __d_printf(FILESYSTEM, "FAT16 filesystem %p\n", fat16_filesystem);
-    }
-    if (fat32_filesystem != 0)
-    {
-        __d_printf(FILESYSTEM, "FAT32 filesystem %p\n", fat32_filesystem);
-    }
     return root_fs;
 }

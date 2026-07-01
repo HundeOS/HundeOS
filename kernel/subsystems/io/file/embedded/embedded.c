@@ -47,7 +47,9 @@ Result(IOInternalHandle) EmbeddedFileIO__close(IOStatePtr self, IOInternalHandle
     return Error(IOInternalHandle, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(IOBufferPtr) EmbeddedFileIO__read(IOStatePtr self, IOInternalHandle handle, size_t size)
+Result(IOBufferPtr) EmbeddedFileIO__read(
+    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+)
 {
     EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
 

@@ -32,6 +32,7 @@ Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
 {
     IOSubsystemPtr io_subsystem = kernel->io_subsystem;
     FilesystemPtr root_fs = Filesystem__build_root_and_mounts();
+    io_subsystem->root_filesystem = Some(FilesystemPtr, root_fs);
 
     IO_REGISTER(io_subsystem, CONSOLE, Console__heap_new(), (IOStatePtr) ConsoleState__instance());
     IO_REGISTER(io_subsystem, TTY, Stream__heap_new(), (IOStatePtr) StreamState__instance());

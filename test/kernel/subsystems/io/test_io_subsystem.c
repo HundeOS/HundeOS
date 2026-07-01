@@ -101,7 +101,9 @@ static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, KString path, Fl
     return Success(IOInternalHandle, INTERNAL_HANDLE);
 }
 
-static Result(IOBufferPtr) fake_read(IOStatePtr state_ptr, IOInternalHandle handle, size_t size)
+static Result(IOBufferPtr) fake_read(
+    IOStatePtr state_ptr, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+)
 {
     TEST_ASSERT_EQUAL(&STATE, state_ptr);
     TEST_ASSERT_EQUAL(INTERNAL_HANDLE, handle);
@@ -564,7 +566,7 @@ void test_stream_read_when_no_data_ready_parks_the_process()
 
     TEST_ASSERT_NOT_NULL(io_message);
     TEST_ASSERT_EQUAL(SUBSYS_IO_PARK, io_message->source_code);
-    Payload payload = UnwrapPanic(Payload, io_message->payload);
+    Payload payload = Unwrap(Payload, io_message->payload, (Payload){});
 
     TEST_ASSERT_EQUAL(PAYLOAD_TYPE_DEFERRED, payload.type);
     TEST_ASSERT_EQUAL(PROC.pid, payload.deferred.anything);
@@ -664,7 +666,7 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process()
 
     TEST_ASSERT_NOT_NULL(io_message);
     TEST_ASSERT_EQUAL(SUBSYS_IO_PARK, io_message->source_code);
-    Payload payload = UnwrapPanic(Payload, io_message->payload);
+    Payload payload = Unwrap(Payload, io_message->payload, (Payload){});
 
     TEST_ASSERT_EQUAL(PAYLOAD_TYPE_DEFERRED, payload.type);
     TEST_ASSERT_EQUAL(PROC.pid, payload.deferred.anything);
@@ -691,7 +693,7 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
 
     TEST_ASSERT_NOT_NULL(park_message);
     TEST_ASSERT_EQUAL(SUBSYS_IO_PARK, park_message->source_code);
-    Payload park_payload = UnwrapPanic(Payload, park_message->payload);
+    Payload park_payload = Unwrap(Payload, park_message->payload, (Payload){});
 
     TEST_ASSERT_EQUAL(PAYLOAD_TYPE_DEFERRED, park_payload.type);
     TEST_ASSERT_EQUAL(PROC.pid, park_payload.deferred.anything);
@@ -706,7 +708,7 @@ void test_io_open_and_read_when_no_data_ready_parks_the_process_and_unparks_when
 
     TEST_ASSERT_NOT_EQUAL(park_message, available_message);
     TEST_ASSERT_EQUAL(SUBSYS_IO_AVAILABLE, available_message->source_code);
-    Payload available_payload = UnwrapPanic(Payload, available_message->payload);
+    Payload available_payload = Unwrap(Payload, available_message->payload, (Payload){});
 
     TEST_ASSERT_EQUAL(PAYLOAD_TYPE_ANYTHING, available_payload.type);
     TEST_ASSERT_EQUAL(PROC.pid, available_payload.anything);

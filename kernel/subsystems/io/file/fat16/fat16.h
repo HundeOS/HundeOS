@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 #include "../../block/block_device.h"
-#include "../../block/memory_block_device.h"
 #include "../filesystem.h"
 #include "../../../../types/fixed_array.h"
 #include "../../../../types/kstring.h"
@@ -97,8 +96,6 @@ MapDefine(IOInternalHandle, Fat16FileHandlePtr, MAX_HANDLES_PER_DEVICE, Fat16Fil
 typedef struct Fat16FilesystemIOState
 {
     FilesystemIOState state;
-    MemoryBlockDevice memory_device;
-    BlockDevice block_device;
     Fat16Volume volume;
     Fat16FileHandleMap handles;
     uint32_t handle_count;
@@ -122,6 +119,8 @@ Result(Fat16Code) Fat16Volume__read_root_file(
 
 FileIO Fat16FilesystemIO__new();
 bool Fat16FilesystemIO__available();
-Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(FilesystemPtr fs, BlockCount total_sectors);
+Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(
+    FilesystemPtr fs, BlockDevicePtr device, BlockCount total_sectors
+);
 
 #endif

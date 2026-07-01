@@ -33,6 +33,13 @@ KString process_wasnt_parked = KSTRING_NEW("Process wasn't parked\n");
 static KString abort_format = KSTRING_NEW(
     "process fault: %s exception=%s fsc=%i:%s access=%s pc=0x%x far=0x%x esr=0x%x ec=0x%x cpu=%i\n"
 );
+static const KString data_abort_reason = KSTRING_NEW("data abort");
+static const KString instruction_abort_reason = KSTRING_NEW("instruction abort");
+static const KString undefined_instruction_reason = KSTRING_NEW("undefined instruction");
+static const KString alignment_fault_reason = KSTRING_NEW("alignment fault");
+static const KString bad_syscall_reason = KSTRING_NEW("bad syscall");
+static const KString unknown_user_exception_reason = KSTRING_NEW("unknown user exception");
+static const KString unknown_fault_reason = KSTRING_NEW("unknown fault");
 
 Result(CPUSchedulerPtr) CPUScheduler__heap_new(Elf idle_process, CPUID cpu)
 {
@@ -171,7 +178,9 @@ Result(ProcessPtr) CPUScheduler__park(
             ParkedKernelContextPtr parked = ParkedKernelContext__heap_new(kernel_context, kernel_continuation, reason);
             proc->state = PROC_STATE_WAITING;
             __d_printf(SCHEDULER, "CPUScheduler__park - context %i\n", parked);
-            proc->parked_context = Some(ParkedKernelContextPtr, parked);
+            ResultMatch(CollectionCode, Process__push_parked_context(proc, parked))
+                IsError(code, message, return Error(ProcessPtr, message, code))
+            End
             return Success(ProcessPtr, proc);
         })
         IsNone(
@@ -198,7 +207,7 @@ Result(ProcessPtr) CPUScheduler__unpark(CPUSchedulerPtr self, ProcessPtr proc, P
         {
             __d_printf(SCHEDULER, "CPUScheduler__unpark - done %s\n", cstr(proc->name));
             __d_printf(SCHEDULER, "CPUScheduler__unpark cpu=%i found target index=%i\n", self->cpu, index);
-            Match(ParkedKernelContextPtr, proc->parked_context)
+            Match(ParkedKernelContextPtr, Process__top_parked_context(proc))
                 IsSome(parked_context,
                 {
                     if (parked_context->park_reason == reason)
@@ -301,6 +310,30 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, ProcessCon
     return None(ContextSwitch);
 }
 
+static Optional(ContextSwitch) CPUScheduler__yield_waiting(CPUSchedulerPtr self, ProcessPtr waiting_proc)
+{
+    ProcessState ready_state = PROC_STATE_READY | PROC_STATE_INTERRUPTED;
+    ProcessTable ready = ProcessTable__filter(&self->processes, process_in_state, &ready_state);
+    ProcessTable sorted_ready = ProcessTable__sort_desc(&ready, service_priority_then_longest_waiting);
+
+    Optional(ProcessPtr) selected = ProcessTable__at(&sorted_ready, 0);
+    Match(ProcessPtr, selected)
+        IsSome(new_proc,
+        {
+            new_proc->state = PROC_STATE_SWITCHING_CONTEXT;
+            return Some(ContextSwitch, ContextSwitch__new(new_proc, Some(ProcessPtr, waiting_proc)));
+        })
+        IsNone(
+        {
+            ProcessPtr idle = self->idle_process;
+            idle->state = PROC_STATE_SWITCHING_CONTEXT;
+            return Some(ContextSwitch, ContextSwitch__new(idle, Some(ProcessPtr, waiting_proc)));
+        })
+    End
+
+    return None(ContextSwitch);
+}
+
 // __attribute__((noreturn))
 void CPUScheduler__start(CPUSchedulerPtr self)
 {
@@ -340,30 +373,45 @@ ProcessTable Scheduler__all_processes_for_all_cpus(SchedulerPtr self)
     return processes;
 }
 
-static const char * ProcessAbortReason__to_string(ProcessAbortReason reason)
+ProcessTable Scheduler__process_snapshot(SchedulerPtr self)
+{
+    ProcessTable processes = ProcessTable__new();
+
+    FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+        if (sched->started)
+        {
+            ProcessTable__push(&processes, sched->idle_process);
+        }
+        ProcessTable__push_all(&processes, &sched->processes);
+    End
+
+    return processes;
+}
+
+static ConstKStringPtr ProcessAbortReason__to_string(ProcessAbortReason reason)
 {
     switch (reason)
     {
         case PROCESS_ABORT_DATA_ABORT:
-            return "data abort";
+            return &data_abort_reason;
         case PROCESS_ABORT_INSTRUCTION_ABORT:
-            return "instruction abort";
+            return &instruction_abort_reason;
         case PROCESS_ABORT_UNDEFINED_INSTRUCTION:
-            return "undefined instruction";
+            return &undefined_instruction_reason;
         case PROCESS_ABORT_ALIGNMENT:
-            return "alignment fault";
+            return &alignment_fault_reason;
         case PROCESS_ABORT_BAD_SYSCALL:
-            return "bad syscall";
+            return &bad_syscall_reason;
         case PROCESS_ABORT_UNKNOWN_USER_EXCEPTION:
-            return "unknown user exception";
+            return &unknown_user_exception_reason;
         default:
-            return "unknown fault";
+            return &unknown_fault_reason;
     }
 }
 
 static bool Scheduler__is_parked_for(ProcessPtr proc, ParkReason reason)
 {
-    Match(ParkedKernelContextPtr, proc->parked_context)
+    Match(ParkedKernelContextPtr, Process__top_parked_context(proc))
         IsSome(parked_context,
         {
             return parked_context->park_reason == reason;
@@ -383,9 +431,10 @@ static void Scheduler__write_abort_to_stderr(IOSubsystemPtr io_subsystem, Proces
     ResultMatch(ProcessIOHandle, Process__get_io_handle(proc, 2))
         IsSuccess(handle,
         {
+            ConstKStringPtr reason = ProcessAbortReason__to_string(abort.reason);
             KString message = KString__sprintf(
                 &abort_format,
-                ProcessAbortReason__to_string(abort.reason),
+                cstr_p(reason),
                 abort.exception_description,
                 (int) abort.fault_status_code,
                 abort.fault_status_description,
@@ -705,6 +754,7 @@ Result(CPUID) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc)
 
 Result(ServiceCode) Scheduler__subscribe_irq(SchedulerPtr self, ProcessPtr process, IRQNumber irq)
 {
+    __d_printf(IODEV, "scheduler subscribe irq=%i pid=%i name=%s\n", irq, process->pid, cstr(process->name));
     IRQService service = (IRQService) {
         .process = process,
         .pending = false,
@@ -718,9 +768,20 @@ Result(ServiceCode) Scheduler__subscribe_irq(SchedulerPtr self, ProcessPtr proce
 
 Result(ServiceCode) Scheduler__send_irq_event(SchedulerPtr self, IRQNumber irq)
 {
+    __d_printf(IODEV, "scheduler send irq event irq=%i\n", irq);
     MapPtrMatch(IRQServiceMap, IRQServiceMap__get_ptr(&self->irq_services, irq))
         IsSome(service,
         {
+            __d_printf(
+                IODEV,
+                "scheduler irq service irq=%i pid=%i pending=%i enabled=%i delivery=%i coalesced=%i\n",
+                irq,
+                service->process->pid,
+                (int) service->pending,
+                (int) service->enabled,
+                (int) service->delivery_count,
+                (int) service->coalesced_count
+            );
             if (!service->enabled)
             {
                 return Success(ServiceCode, SERVICE_OK);
@@ -743,6 +804,7 @@ Result(ServiceCode) Scheduler__send_irq_event(SchedulerPtr self, IRQNumber irq)
             return Service__enqueue(self, service->process, event);
         })
     End
+    __d_printf(IODEV, "scheduler no irq service irq=%i\n", irq);
     return Success(ServiceCode, SERVICE_OK);
 }
 
@@ -754,6 +816,7 @@ Result(ServiceCode) Scheduler__complete_pending_irqs_for_process(SchedulerPtr se
         IRQServicePtr service = &self->irq_services.entries[index].value;
         if (service->process == process && service->pending)
         {
+            __d_printf(IODEV, "scheduler complete pending irq=%i pid=%i\n", irq, process->pid);
             service->pending = false;
             service->coalesced_count = 0;
             Arch__unmask_irq(irq);
@@ -793,6 +856,19 @@ Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, Proce
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context)
 {
     Optional(ContextSwitch) context_switch = Scheduler__interrupt(self, cpu, context);
+    ContextSwitch__switch(context_switch);
+}
+
+void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID cpu)
+{
+    Optional(ContextSwitch) context_switch = None(ContextSwitch);
+    CriticalSection(self->scheduler_lock,
+    {
+        Match(CPUSchedulerPtr, CPUSchedulers__at(&self->schedulers, cpu))
+            IsSome(scheduler, context_switch = CPUScheduler__yield_waiting(scheduler, waiting_proc))
+            IsNone(context_switch = None(ContextSwitch))
+        End
+    })
     ContextSwitch__switch(context_switch);
 }
 

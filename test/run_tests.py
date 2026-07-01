@@ -18,10 +18,10 @@ LD = gcc
 
 UNITY = {unity_path}
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -mno-outline-atomics -I{kernel_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
+CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -mno-outline-atomics -I{kernel_dir} -I{common_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
 
 # Assembler flags
-ASFLAGS = -c -O2 -Wall -Wextra -nostdlib -latomic -I{stubs_dir} -I{fixtures_dir}
+ASFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -nostdlib -latomic -I{stubs_dir} -I{fixtures_dir}
 
 # Linker flags
 LDFLAGS =
@@ -121,6 +121,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
     # making it relative to the test directory
     project_dir = os.path.join(relative_base, "..")
     kernel_dir = os.path.join(project_dir, "kernel")
+    common_dir = os.path.join(project_dir, "common")
     common_includes = os.path.join(project_dir, "common_includes")
     build_dir = os.path.join(relative_base, "build", test_dir)
     kernel_obj_build_dir = os.path.join(relative_base, "build")
@@ -156,6 +157,8 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                           for file
                           in source_expanded
                           if file.endswith(".c")]
+        common_c_files = [f"{project_dir}/{expand[len(test_dir_relative_script) + 1:]}"
+                          for expand in glob.glob(os.path.join(test_dir_relative_script, "common/**/*.c"), recursive=True)]
 
         asm_objects = [os.path.join(kernel_obj_build_dir, file.replace(".s", ".o").replace("../", ""))
                        for file
@@ -164,6 +167,9 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
         c_objects = [os.path.join(kernel_obj_build_dir, file.replace(".c", ".o").replace("../", ""))
                      for file
                      in source_c_files]
+        common_c_objects = [os.path.join(kernel_obj_build_dir, file.replace(".c", ".o").replace("../", ""))
+                            for file
+                            in common_c_files]
 
         test_dir_c_files = [os.path.basename(file) for file in glob.glob(os.path.join(test_dir, "*.c"))]
         test_dir_asm_files = [os.path.basename(file) for file in glob.glob(os.path.join(test_dir, "*.s"))]
@@ -198,6 +204,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
             makefile.write(TEMPLATE.format(c_sources=join(test_dir_c_files),
                                            asm_sources=join(test_dir_asm_files),
                                            kernel_sources=join([*source_c_files,
+                                                                *common_c_files,
                                                                 *stubs_c_files,
                                                                 *fixtures_c_files]),
                                            kernel_asm_sources=join([*source_asm_files,
@@ -206,6 +213,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                                            c_objects=join(test_dep_c_objects),
                                            asm_objects=join(test_dep_asm_objects),
                                            kernel_objects=join([*c_objects,
+                                                                *common_c_objects,
                                                                 *stubs_dir_c_objects,
                                                                 *fixtures_dir_c_objects]),
                                            kernel_asm_objects=join([*asm_objects,
@@ -214,6 +222,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                                            unity_path=unity_path,
                                            test=os.path.basename(test_dir),
                                            kernel_dir=kernel_dir,
+                                           common_dir=common_dir,
                                            project_base=project_dir,
                                            build_dir=build_dir,
                                            test_base=relative_base,

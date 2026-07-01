@@ -8,6 +8,7 @@
 #include "heap.h"
 #include "mutex.h"
 #include "subsystems/message/message_broker.h"
+#include "irq/irq_dispatcher.h"
 
 typedef uint64_t KernelInitStatus;
 
@@ -21,6 +22,7 @@ typedef struct Kernel
     Heap heap;
     SchedulerPtr scheduler;
     MessageBrokerPtr message_broker;
+    IRQDispatcherPtr irq_dispatcher;
 } Kernel;
 
 typedef Kernel * KernelPtr;

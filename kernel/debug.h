@@ -24,11 +24,13 @@ typedef enum {
     EXEC,
     FILESYSTEM,
     BROKER,
+    SYSLOG,
     PROGRESS,
     UNHANDLED,
     FAULT,
     PANIC,
     FOCUS,
+    FAT32,
     LEVEL_COUNT
 } Level;
 
@@ -58,6 +60,8 @@ inline const char * level_to_string(Level level)
             return "PROGRESS";
         case FOCUS:
             return "FOCUS";
+        case FAT32:
+            return "FAT32";
         case PANIC:
             return "PANIC";
         case UNHANDLED:
@@ -80,6 +84,8 @@ inline const char * level_to_string(Level level)
             return "FILESYSTEM";
         case BROKER:
             return "BROKER";
+        case SYSLOG:
+            return "SYSLOG";
         case LEVEL_COUNT:
             return "UNKNOWN";
     }
@@ -92,6 +98,9 @@ inline const char * level_to_string(Level level)
 
 #define ENABLED_LOG_LEVELS ( \
     LOG_LEVEL_MASK(PROGRESS) | \
+    LOG_LEVEL_MASK(SYSLOG) | \
+    LOG_LEVEL_MASK(FAT32) | \
+    LOG_LEVEL_MASK(IODEV) | \
     LOG_LEVEL_MASK(SYSCALL) | \
     LOG_LEVEL_MASK(FAULT) | \
     LOG_LEVEL_MASK(PANIC) \

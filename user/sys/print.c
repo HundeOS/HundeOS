@@ -26,7 +26,15 @@ void print(const char * str)
 }
 
 
-const char * HEX_DIGITS = "0123456789ABCDEF";
+static char hex_digit(unsigned int value)
+{
+    if (value < 10)
+    {
+        return (char) ('0' + value);
+    }
+
+    return (char) ('A' + value - 10);
+}
 
 int sprintf_impl(char* str, const char* format, va_list args)
 {
@@ -115,7 +123,7 @@ int sprintf_impl(char* str, const char* format, va_list args)
                     } else {
                         int start = temp_idx;
                         while (value > 0) {
-                            temp[temp_idx++] = HEX_DIGITS[value % 16];
+                            temp[temp_idx++] = hex_digit(value % 16);
                             value /= 16;
                         }
                         // Reverse

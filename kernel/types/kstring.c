@@ -1,12 +1,12 @@
 #include "kstring.h"
 
-#include "../debug.h"
+#include "../print.h"
 #include "kstring_additional_types.h"
 
 FixedArrayBodyDefine(KStringArray);
 
 
-KStringArray KString__split(KStringPtr self, char delimiter)
+KStringArray KString__split(ConstKStringPtr self, char delimiter)
 {
     KStringArray result = EmptyArray(KStringArray);
     char buffer[MAX_SIZE];
@@ -56,101 +56,42 @@ KString KString__join(KStringArrayPtr array, char delimiter)
     return result;
 }
 
-int KString__length(KStringPtr self)
+int KString__length(ConstKStringPtr self)
 {
     return self->len;
 }
 
-const char * KString__cstr(KStringPtr self)
+const char * KString__cstr(ConstKStringPtr self)
 {
-    return self->data;
+    return BString__cstr(self);
 }
 
 KString KString__new(const char * str)
 {
-    KString res = EMPTY_KSTRING;
-
-    int max_without_nul = res.max - 1;
-    int len = 0;
-
-    for (int i = 0; i < max_without_nul && *str != 0; i++, str++)
-    {
-        res.data[i] = *str;
-        len++;
-    }
-    res.data[len + 1] = 0;
-    res.len = len;
-
-    return res;
+    return BString__new(str);
 }
 
 KString kstring(const char * str)
 {
-    return KString__new(str);
+    return bstring(str);
 }
 
-bool KString__equals(const KStringPtr self, const KStringPtr other)
+bool KString__equals(ConstKStringPtr self, ConstKStringPtr other)
 {
-    __d_printf(DEBUG, "self len: %d, other len: %d \n", self->len, other->len);
-
-    if (self->len != other->len)
-    {
-        return false;
-    }
-
-    for (uint64_t i = 0; i < self->len; i++)
-    {
-        __d_printf(DEBUG, "self: %c, other: %c \n", self->data[i], other->data[i]);
-        if (self->data[i] != other->data[i])
-        {
-            __d_println(DEBUG, "char not equal");
-            return false;
-        }
-    }
-
-    return true;
+    return BString__equals(self, other);
 }
 
-KString KString__append(KStringPtr self, KStringPtr other)
+KString KString__append(ConstKStringPtr self, ConstKStringPtr other)
 {
-    KString result = EMPTY_KSTRING;
-    int len = self->len + other->len;
-    result.len = len;
-
-    for (int i = 0; i < self->len; i++)
-    {
-        result.data[i] = self->data[i];
-    }
-    for (int i = 0; i < other->len; i++)
-    {
-        result.data[i + self->len] = other->data[i];
-    }
-
-    return result;
+    return BString__append(self, other);
 }
 
-bool KString__starts_with(KStringPtr self, KStringPtr prefix)
+bool KString__starts_with(ConstKStringPtr self, ConstKStringPtr prefix)
 {
-    if (self->len < prefix->len)
-    {
-        return false;
-    }
-    if (prefix->len == 0)
-    {
-        return false;
-    }
-
-    for (int i = 0; i < prefix->len; i++)
-    {
-        if (self->data[i] != prefix->data[i])
-        {
-            return false;
-        }
-    }
-    return true;
+    return BString__starts_with(self, prefix);
 }
 
-KString KString__sprintf(KStringPtr self, ...)
+KString KString__sprintf(ConstKStringPtr self, ...)
 {
     va_list args;
     va_start(args, self);
