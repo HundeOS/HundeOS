@@ -201,7 +201,6 @@ typedef struct Process {
     Optional(ProcessAbort) abort;
     ProcessClass process_class;
     ServiceEvents service_events;
-    ServiceEventPtr service_wait_target;
 
     ParkedKernelContexts parked_contexts;
 } Process;

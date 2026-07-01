@@ -37,11 +37,6 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     }));
 }
 
-Result(ServiceCode) Service__enqueue(SchedulerPtr scheduler, ProcessPtr process, ServiceEvent event)
-{
-    return Success(ServiceCode, SERVICE_OK);
-}
-
 void setUp(void)
 {
     clear_panic_state();

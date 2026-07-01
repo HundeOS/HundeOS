@@ -1,6 +1,7 @@
 #ifndef __KERNEL_PROCESS_CLASS_H
 #define __KERNEL_PROCESS_CLASS_H
 
+#include <stdint.h>
 #include <stdbool.h>
 
 typedef enum ProcessClass
@@ -11,6 +12,6 @@ typedef enum ProcessClass
 } ProcessClass;
 
 bool ProcessClass__is_service(ProcessClass self);
-int ProcessClass__priority(ProcessClass self);
+uint64_t ProcessClass__priority(ProcessClass self);
 
 #endif

@@ -164,7 +164,6 @@ Result(ProcessPtr) Process__new(
     proc->abort = None(ProcessAbort);
     proc->process_class = PROCESS_CLASS_NORMAL;
     proc->service_events = ServiceEvents__new();
-    proc->service_wait_target = NULL;
 
     uint64_t argc;
     ResultMatch(Address, Process__setup_args(proc, arguments, &argc))

@@ -24,12 +24,6 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     return Error(UserAddress, invalid_argument, BLOCK_DEVICE_IO_ERROR);
 }
 
-Result(ServiceCode) Service__enqueue(SchedulerPtr scheduler, ProcessPtr process, ServiceEvent event) __attribute__((weak));
-Result(ServiceCode) Service__enqueue(SchedulerPtr scheduler, ProcessPtr process, ServiceEvent event)
-{
-    return Error(ServiceCode, invalid_argument, SERVICE_OPERATION_NOT_SUPPORTED);
-}
-
 typedef struct UserspaceBlockDevice
 {
     KString path;
@@ -264,7 +258,7 @@ static Result(BlockCount) UserspaceBlockDevice__create_request(
             event.source = request->request_id;
             event.data = 0;
 
-            ResultMatch(ServiceCode, Service__enqueue(self->scheduler, self->service_process, event))
+            ResultMatch(ServiceCode, Scheduler__service_enqueue(self->scheduler, self->service_process, event))
                 IsError(code, message, return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR))
             End
 
@@ -405,7 +399,9 @@ Result(Anything) BlockDevice__read_async(
             event.source = request->request_id;
             event.data = 0;
 
-            ResultMatch(ServiceCode, Service__enqueue(userspace_device->scheduler, userspace_device->service_process, event))
+            ResultMatch(ServiceCode, Scheduler__service_enqueue(
+                userspace_device->scheduler, userspace_device->service_process, event
+            ))
                 IsError(code, message, return Error(Anything, message, BLOCK_DEVICE_IO_ERROR))
             End
 

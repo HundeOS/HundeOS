@@ -5,7 +5,7 @@ bool ProcessClass__is_service(ProcessClass self)
     return self == PROCESS_CLASS_SERVICE || self == PROCESS_CLASS_REALTIME_SERVICE;
 }
 
-int ProcessClass__priority(ProcessClass self)
+uint64_t ProcessClass__priority(ProcessClass self)
 {
     switch (self)
     {

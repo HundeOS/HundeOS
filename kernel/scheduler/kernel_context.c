@@ -21,6 +21,38 @@ KernelContextPtr KernelContext__heap_new(Optional(ProcessID) pid, Optional(Sched
     return context;
 }
 
+KernelContextPtr KernelContext__heap_new_with_mapper(
+    Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler,
+    KernelResultMapper mapper, Anything mapper_context
+)
+{
+    KernelContextPtr context = KernelContext__heap_new(pid, scheduler);
+    KernelContext__set_result_mapper(context, mapper, mapper_context);
+    return context;
+}
+
+void KernelContext__set_result_mapper(
+    KernelContextPtr self, KernelResultMapper mapper, Anything mapper_context
+)
+{
+    self->result_mapper = Some(KernelResultMapper, mapper);
+    self->result_mapper_context = mapper_context;
+}
+
+Result(Anything) KernelContext__map_result(KernelContextPtr self, Result(Anything) result)
+{
+    Match(KernelResultMapper, self->result_mapper)
+        IsSome(mapper, return mapper(result, self->result_mapper_context))
+    End
+
+    return result;
+}
+
+void KernelContext__dispose_heap(KernelContextPtr self)
+{
+    Kernel__free(addr(self));
+}
+
 KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext originating_context)
 {
     Optional(ProcessID) pid = None(ProcessID);

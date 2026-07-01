@@ -382,7 +382,7 @@ void IOSubsystem__park(IOSubsystemPtr self, IOContextPtr io_context)
                             event.type = SERVICE_EVENT_IO;
                             event.source = SERVICE_IO_READ_REQUEST;
                             event.data = handle_device;
-                            Service__enqueue(self->scheduler, server_process, event);
+                            Scheduler__service_enqueue(self->scheduler, server_process, event);
                         })
                     End
                 })
@@ -506,7 +506,7 @@ Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context)
                                             event.type = SERVICE_EVENT_IO;
                                             event.source = SERVICE_IO_WRITE_REQUEST;
                                             event.data = device_handle(handle);
-                                            Service__enqueue(self->scheduler, server_process, event);
+                                            Scheduler__service_enqueue(self->scheduler, server_process, event);
                                         })
                                     End
                                     return Success(ByteCount, count);

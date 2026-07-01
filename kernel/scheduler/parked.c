@@ -32,5 +32,6 @@ KString ParkReason__to_string(ParkReason reason)
 
 void ParkedKernelContext__dispose(ParkedKernelContextPtr self)
 {
-    __d_println(PANIC, "ParkedKernelContext__dispose needs to free KernelContext");
+    KernelContext__dispose_heap(self->kernel_context);
+    Kernel__free(addr(self));
 }

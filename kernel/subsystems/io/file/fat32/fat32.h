@@ -25,9 +25,26 @@
 #define FAT32_ATTR_LFN 0x0f
 #define FAT32_ATTR_DIRECTORY 0x10
 #define FAT32_ATTR_ARCHIVE 0x20
+#define FAT32_SHORT_NAME_SIZE 11
 #define FAT32_MAX_ROOT_ENTRIES 128
 #define FAT32_MAX_FILE_SIZE (FAT32_BYTES_PER_SECTOR * FAT32_SECTORS_PER_CLUSTER)
 #define FAT32_MAX_READ_SIZE (FAT32_BYTES_PER_SECTOR * 128)
+
+typedef uint8_t Fat32Attribute;
+typedef Fat32Attribute * Fat32AttributePtr;
+typedef uint8_t Fat32Checksum;
+typedef Fat32Checksum * Fat32ChecksumPtr;
+typedef uint32_t Fat32Cluster;
+typedef Fat32Cluster * Fat32ClusterPtr;
+typedef bool Fat32Flag;
+typedef Fat32Flag * Fat32FlagPtr;
+typedef size_t Fat32Offset;
+typedef Fat32Offset * Fat32OffsetPtr;
+typedef BlockNumber * BlockNumberPtr;
+
+OptionalDef(Data);
+FixedArrayDefine(Data, FAT32_SHORT_NAME_SIZE, Fat32ShortName, SimpleEquals(uint8_t));
+typedef Fat32ShortName * Fat32ShortNamePtr;
 
 typedef enum Fat32Code
 {
@@ -117,7 +134,7 @@ Result(Fat32Code) Fat32Volume__create_root_file(
 );
 Result(Fat32Code) Fat32Volume__create_root_directory(Fat32VolumePtr self, KString name);
 Result(Fat32Code) Fat32Volume__read_root_file(
-    Fat32VolumePtr self, KString name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
+    Fat32VolumePtr self, KString name, DataPtr target, uint32_t target_size, Fat32ClusterPtr bytes_read
 );
 
 FileIO Fat32FilesystemIO__new();

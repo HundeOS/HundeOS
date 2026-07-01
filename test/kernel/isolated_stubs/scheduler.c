@@ -16,3 +16,15 @@ Result(ProcessID) Scheduler__unpark_by_pid(
 {
     return Error(ProcessID, scheduler_not_linked, SCHEDULER_PROCESS_NOT_FOUND);
 }
+
+Result(ServiceEvent) Scheduler__service_wait(
+    SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context, Optional(Continuation) continuation
+)
+{
+    return Error(ServiceEvent, scheduler_not_linked, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
+Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr process, ServiceEvent event)
+{
+    return Success(ServiceCode, SERVICE_OK);
+}

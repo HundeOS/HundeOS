@@ -44,7 +44,10 @@ the evidence.
 # Code standards
 ## Result types (Some, None, Success, Error, etc)
 These should be used in the kernel code in most cases. Raw pointers or NULLs
-should not be used in the kernel or driver except at syscall boundaries. Optional types should be used.
+should not be used in the kernel or driver. Optional types should be used.
+Syscall handlers are the only place where NULL checks are allowed, and only
+for validating raw syscall boundary arguments before converting them to typed
+kernel values.
 Dont be stupid thinking you satisfy this requirement by using a 0 instead of a NULL
 
 The matching macros to match results types should be used

@@ -25,6 +25,15 @@ KernelContext KernelContext__new(
 KernelContextPtr KernelContext__heap_new(
     Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler
 );
+KernelContextPtr KernelContext__heap_new_with_mapper(
+    Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler,
+    KernelResultMapper mapper, Anything mapper_context
+);
+void KernelContext__set_result_mapper(
+    KernelContextPtr self, KernelResultMapper mapper, Anything mapper_context
+);
+Result(Anything) KernelContext__map_result(KernelContextPtr self, Result(Anything) result);
+void KernelContext__dispose_heap(KernelContextPtr self);
 
 KernelContext KernelContext__from_originating_context(OriginatingContext originating_context);
 KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext originating_context);

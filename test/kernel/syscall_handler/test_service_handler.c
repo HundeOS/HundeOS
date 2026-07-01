@@ -72,7 +72,7 @@ void test_service_handler_wait_copies_queued_event(void)
     };
     ServiceEvent target = (ServiceEvent) { 0 };
 
-    ResultMatch(ServiceCode, Service__enqueue(kernel->scheduler, process, queued))
+    ResultMatch(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, queued))
         IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
         IsError(code, message, TEST_FAIL())
     End
@@ -154,7 +154,7 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
         .data = 11,
     };
 
-    ResultMatch(ServiceCode, Service__enqueue(kernel->scheduler, process, queued))
+    ResultMatch(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, queued))
         IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
         IsError(code, message, TEST_FAIL())
     End
@@ -171,7 +171,7 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
     TEST_ASSERT_EQUAL(SERVICE_EVENT_MESSAGE, target.type);
     TEST_ASSERT_EQUAL(7, target.source);
     TEST_ASSERT_EQUAL(11, target.data);
-    TEST_ASSERT_NULL(process->service_wait_target);
+    TEST_ASSERT_EQUAL(0, ServiceEvents__len(&process->service_events));
 }
 
 void test_service_handler_wait_only_completes_pending_irq_when_it_parks(void)

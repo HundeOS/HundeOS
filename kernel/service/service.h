@@ -29,10 +29,9 @@ ResultDef(ServiceCode);
 bool ServiceEvent__equals(ServiceEventPtr self, ServiceEventPtr other);
 FixedArrayDefine(ServiceEvent, MAX_SERVICE_EVENTS, ServiceEvents, (EqualFunction) ServiceEvent__equals);
 
-Result(ServiceEvent) Service__wait(ProcessPtr process, KernelContextPtr kernel_context);
-Result(ServiceCode) Service__wait_to_buffer(ProcessPtr process, KernelContextPtr kernel_context, ServiceEventPtr target);
-Result(ServiceCode) Service__enqueue(SchedulerPtr scheduler, ProcessPtr process, ServiceEvent event);
+Result(ServiceEvent) Service__pop_next_event(ProcessPtr process);
+Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent event);
 Result(ServiceCode) Service__send_timer_tick_events(SchedulerPtr scheduler, uint64_t tick_count);
-Result(Anything) Service__complete_wait(ParkedKernelContextPtr parked_context);
+Result(ServiceEvent) Service__complete_wait(ParkedKernelContextPtr parked_context);
 
 #endif

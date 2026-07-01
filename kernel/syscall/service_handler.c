@@ -2,6 +2,8 @@
 
 #include "../kernel_core.h"
 #include "../debug.h"
+#include "../scheduler/kernel_context.h"
+#include "../scheduler/parked.h"
 #include "../service/service.h"
 #include "../subsystems/io/block/block_device.h"
 #include "../subsystems/io/file/register.h"
@@ -19,36 +21,6 @@ typedef struct ServiceMappedMemoryRequest
 ServiceMappedMemoryRequest;
 
 typedef ServiceMappedMemoryRequest * ServiceMappedMemoryRequestPtr;
-
-Result(BlockDeviceCode) BlockDeviceRegistry__register(
-    KString path, ProcessPtr service_process, BlockCount block_count, SchedulerPtr scheduler
-) __attribute__((weak));
-Result(BlockDeviceCode) BlockDeviceRegistry__register(
-    KString path, ProcessPtr service_process, BlockCount block_count, SchedulerPtr scheduler
-)
-{
-    return Error(BlockDeviceCode, unsupported_operation, BLOCK_DEVICE_IO_ERROR);
-}
-
-Result(ServiceCode) BlockDeviceService__get_request(
-    ProcessPtr service_process, uint64_t request_id, ServiceBlockRequestPtr target
-) __attribute__((weak));
-Result(ServiceCode) BlockDeviceService__get_request(
-    ProcessPtr service_process, uint64_t request_id, ServiceBlockRequestPtr target
-)
-{
-    return Error(ServiceCode, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
-}
-
-Result(ServiceCode) BlockDeviceService__complete(
-    ProcessPtr service_process, ServiceBlockCompletionPtr completion
-) __attribute__((weak));
-Result(ServiceCode) BlockDeviceService__complete(
-    ProcessPtr service_process, ServiceBlockCompletionPtr completion
-)
-{
-    return Error(ServiceCode, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
-}
 
 static ServiceCode Service__map_irq_registration_status(Code code)
 {
@@ -76,6 +48,54 @@ static ServiceCode Service__map_block_registration_status(Code code)
     return SERVICE_DEVICE_REGISTRATION_FAILED;
 }
 
+static Result(Anything) ServiceEvent__copy_to_target(Result(Anything) result, Anything context)
+{
+    ServiceEventPtr target = ptr(context, ServiceEvent);
+
+    ResultMatch(Anything, result)
+        IsSuccess(event_ptr,
+        {
+            ServiceEventPtr event = ptr(event_ptr, ServiceEvent);
+            *target = *event;
+            return Success(Anything, SERVICE_OK);
+        })
+        IsError(code, message, return Error(Anything, message, code))
+    End
+
+    return Error(Anything, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
+}
+
+static Result(Anything) Service__complete_wait_syscall(ParkedKernelContextPtr parked_context)
+{
+    ResultMatch(ServiceEvent, Service__complete_wait(parked_context))
+        IsSuccess(event,
+        {
+            Result(Anything) mapped = KernelContext__map_result(
+                parked_context->kernel_context,
+                Success(Anything, (Anything) &event)
+            );
+            ParkedKernelContext__dispose(parked_context);
+            return mapped;
+        })
+        IsError(code, message,
+        {
+            Result(Anything) mapped = KernelContext__map_result(
+                parked_context->kernel_context,
+                Error(Anything, message, code)
+            );
+            ParkedKernelContext__dispose(parked_context);
+            return mapped;
+        })
+    End
+
+    Result(Anything) mapped = KernelContext__map_result(
+        parked_context->kernel_context,
+        Error(Anything, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED)
+    );
+    ParkedKernelContext__dispose(parked_context);
+    return mapped;
+}
+
 Result(SystemCallResult) Service__handler(
     KernelPtr kernel, Optional(ProcessPtr) process_opt, Anything service_operation,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
@@ -93,6 +113,12 @@ Result(SystemCallResult) Service__handler(
 
             if (service_operation == SERVICE_WAIT)
             {
+                ServiceEventPtr target = (ServiceEventPtr) arg2;
+                if (target == NULL)
+                {
+                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
+                }
+
                 __d_printf(
                     IODEV,
                     "service wait pid=%i name=%s queued=%i target=%p\n",
@@ -101,24 +127,40 @@ Result(SystemCallResult) Service__handler(
                     (int) ServiceEvents__len(&process->service_events),
                     arg2
                 );
-                if (ServiceEvents__len(&process->service_events) == 0)
-                {
-                    Scheduler__complete_pending_irqs_for_process(kernel->scheduler, process);
-                }
-                KernelContext kernel_context = KernelContext__new(
-                    Some(ProcessID, process->pid), Some(SchedulerPtr, kernel->scheduler)
-                );
-                ServiceEventPtr target = (ServiceEventPtr) arg2;
 
-                ResultMatch(ServiceCode, Service__wait_to_buffer(process, &kernel_context, target))
-                    IsSuccess(code,
+                KernelContextPtr kernel_context = KernelContext__heap_new_with_mapper(
+                    Some(ProcessID, process->pid),
+                    Some(SchedulerPtr, kernel->scheduler),
+                    ServiceEvent__copy_to_target,
+                    (Anything) target
+                );
+
+                ResultMatch(ServiceEvent, Scheduler__service_wait(
+                    kernel->scheduler,
+                    process,
+                    kernel_context,
+                    Some(Continuation, Service__complete_wait_syscall)
+                ))
+                    IsSuccess(event,
                     {
-                        __d_printf(IODEV, "service wait return pid=%i code=%i\n", process->pid, code);
-                        return Success(SystemCallResult, code);
+                        Result(Anything) mapped = KernelContext__map_result(
+                            kernel_context,
+                            Success(Anything, (Anything) &event)
+                        );
+                        KernelContext__dispose_heap(kernel_context);
+                        __d_printf(IODEV, "service wait return pid=%i code=%i\n", process->pid, SERVICE_OK);
+                        ResultMatch(Anything, mapped)
+                            IsSuccess(mapped_code, return Success(SystemCallResult, mapped_code))
+                            IsError(mapped_code, mapped_message, return Error(SystemCallResult, mapped_message, mapped_code))
+                        End
                     })
                     IsError(code, message,
                     {
-                        __d_printf(IODEV, "service wait error pid=%i code=%i\n", process->pid, code);
+                        if (code != SERVICE_EVENT_QUEUE_EMPTY)
+                        {
+                            KernelContext__dispose_heap(kernel_context);
+                            __d_printf(IODEV, "service wait error pid=%i code=%i\n", process->pid, code);
+                        }
                         return Error(SystemCallResult, message, code);
                     })
                 End

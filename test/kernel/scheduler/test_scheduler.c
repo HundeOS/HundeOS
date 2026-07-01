@@ -819,7 +819,7 @@ void test_service_wait_parks_service_process_when_no_event_is_available(void)
 
     Scheduler__schedule(scheduler, service_proc);
 
-    ResultMatch(ServiceEvent, Service__wait(service_proc, &kernel_context))
+    ResultMatch(ServiceEvent, Scheduler__service_wait(scheduler, service_proc, &kernel_context, None(Continuation)))
         IsSuccess(event, TEST_FAIL())
         IsError(code, message, TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code))
     End
@@ -840,7 +840,7 @@ void test_service_enqueue_wakes_parked_service_process_and_wait_returns_event(vo
 
     Scheduler__schedule(scheduler, service_proc);
 
-    ResultMatch(ServiceEvent, Service__wait(service_proc, &kernel_context))
+    ResultMatch(ServiceEvent, Scheduler__service_wait(scheduler, service_proc, &kernel_context, None(Continuation)))
         IsSuccess(event, TEST_FAIL())
         IsError(code, message, TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code))
     End
@@ -851,19 +851,61 @@ void test_service_enqueue_wakes_parked_service_process_and_wait_returns_event(vo
         .data = 99,
     };
 
-    ResultMatch(ServiceCode, Service__enqueue(scheduler, service_proc, irq_event))
+    ResultMatch(ServiceCode, Scheduler__service_enqueue(scheduler, service_proc, irq_event))
         IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
         IsError(code, message, TEST_FAIL())
     End
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, service_proc->state);
 
-    ResultMatch(ServiceEvent, Service__wait(service_proc, &kernel_context))
+    ResultMatch(ServiceEvent, Scheduler__service_wait(scheduler, service_proc, &kernel_context, None(Continuation)))
         IsSuccess(event,
         {
             TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);
             TEST_ASSERT_EQUAL(32, event.source);
             TEST_ASSERT_EQUAL(99, event.data);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_scheduler_irq_event_wakes_parked_service_process(void)
+{
+    ProcessPtr service_proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    service_proc->process_class = PROCESS_CLASS_SERVICE;
+    IRQNumber irq = 39;
+
+    KernelContext kernel_context = KernelContext__new(None(ProcessID), Some(SchedulerPtr, scheduler));
+
+    Scheduler__schedule(scheduler, service_proc);
+
+    ResultMatch(ServiceCode, Scheduler__subscribe_irq(scheduler, service_proc, irq))
+        IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(ServiceEvent, Scheduler__service_wait(scheduler, service_proc, &kernel_context, None(Continuation)))
+        IsSuccess(event, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code))
+    End
+
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, service_proc->state);
+
+    ResultMatch(ServiceCode, Scheduler__send_irq_event(scheduler, irq))
+        IsSuccess(code, TEST_ASSERT_EQUAL_INT(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(irq, Arch__masked_irq());
+    TEST_ASSERT_EQUAL(1, Arch__mask_count());
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, service_proc->state);
+
+    ResultMatch(ServiceEvent, Scheduler__service_wait(scheduler, service_proc, &kernel_context, None(Continuation)))
+        IsSuccess(event,
+        {
+            TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);
+            TEST_ASSERT_EQUAL(irq, event.source);
+            TEST_ASSERT_EQUAL(0, event.data);
         })
         IsError(code, message, TEST_FAIL())
     End
@@ -891,7 +933,7 @@ void test_scheduler_subscribed_irq_is_sent_to_service_process(void)
     TEST_ASSERT_EQUAL(1, Arch__mask_count());
 
     KernelContext kernel_context = KernelContext__new(None(ProcessID), Some(SchedulerPtr, scheduler));
-    ResultMatch(ServiceEvent, Service__wait(service_proc, &kernel_context))
+    ResultMatch(ServiceEvent, Scheduler__service_wait(scheduler, service_proc, &kernel_context, None(Continuation)))
         IsSuccess(event,
         {
             TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);
@@ -974,7 +1016,7 @@ void test_service_timer_tick_event_is_sent_to_service_process_at_interval(void)
     End
 
     KernelContext kernel_context = KernelContext__new(None(ProcessID), Some(SchedulerPtr, scheduler));
-    ResultMatch(ServiceEvent, Service__wait(service_proc, &kernel_context))
+    ResultMatch(ServiceEvent, Scheduler__service_wait(scheduler, service_proc, &kernel_context, None(Continuation)))
         IsSuccess(event,
         {
             TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);

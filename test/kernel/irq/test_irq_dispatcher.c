@@ -115,8 +115,8 @@ void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event
 
     ServiceEvent event = (ServiceEvent) { 0 };
     KernelContext kernel_context = KernelContext__new(Some(ProcessID, process->pid), Some(SchedulerPtr, kernel->scheduler));
-    ResultMatch(ServiceCode, Service__wait_to_buffer(process, &kernel_context, &event))
-        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+    ResultMatch(ServiceEvent, Scheduler__service_wait(kernel->scheduler, process, &kernel_context, None(Continuation)))
+        IsSuccess(wait_event, event = wait_event)
         IsError(code, message, TEST_FAIL())
     End
 

@@ -124,6 +124,10 @@ Result(SchedulerInitStatus) Scheduler__wait_until_ready(SchedulerPtr self);
 Result(ServiceCode) Scheduler__subscribe_irq(SchedulerPtr self, ProcessPtr process, IRQNumber irq);
 Result(ServiceCode) Scheduler__send_irq_event(SchedulerPtr self, IRQNumber irq);
 Result(ServiceCode) Scheduler__complete_pending_irqs_for_process(SchedulerPtr self, ProcessPtr process);
+Result(ServiceEvent) Scheduler__service_wait(
+    SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context, Optional(Continuation) continuation
+);
+Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr process, ServiceEvent event);
 
 #define NEW_SCHEDULER(broker) \
     (Scheduler) { \
