@@ -11,6 +11,7 @@
 #include "parked.h"
 #include "context_switch.h"
 #include "../process.h"
+#include "../service/event_dispatcher.h"
 #include "subsystems/message/message_broker.h"
 #include "syscalls/service.h"
 
@@ -33,24 +34,6 @@ typedef enum SchedulerErrors
     SCHEDULER_CANT_UNPARK = -5,
 } SchedulerErrors;
 
-typedef uint64_t IRQNumber;
-OptionalDef(IRQNumber);
-
-typedef struct IRQService
-{
-    ProcessPtr process;
-    bool pending;
-    bool enabled;
-    uint64_t delivery_count;
-    uint64_t coalesced_count;
-}
-IRQService;
-
-typedef IRQService * IRQServicePtr;
-
-OptionalDef(IRQService);
-OptionalDef(IRQServicePtr);
-
 typedef struct CPUScheduler
 {
     ProcessTable processes;
@@ -67,13 +50,12 @@ OptionalDef(CPUSchedulerPtr);
 ResultDef(CPUSchedulerPtr);
 
 FixedArrayDefine(CPUSchedulerPtr, MAX_CPUS, CPUSchedulers, &Ptr__equals);
-MapDefine(IRQNumber, IRQService, 256, IRQServiceMap, SimpleEquals(uint64_t));
 
 typedef struct Scheduler
 {
     MessageBrokerPtr message_broker;
     CPUSchedulers schedulers;
-    IRQServiceMap irq_services;
+    ServiceEventDispatcher service_event_dispatcher;
     mutex_t scheduler_lock;
     bool ready;
 } Scheduler;
@@ -107,6 +89,7 @@ Result(ProcessID) Scheduler__unpark_by_pid(SchedulerPtr self, ProcessID pid, Par
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);
+bool Scheduler__should_preempt_on_timer(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__find_process_by_pid(SchedulerPtr self, ProcessID pid);
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
 ProcessTable Scheduler__all_processes_for_all_cpus(SchedulerPtr self);
@@ -117,13 +100,15 @@ uint64_t Scheduler__process_count(SchedulerPtr self);
 Optional(ProcessPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 
 Result(CPUID) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc);
+Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc, CPUID cpu);
+Result(CPUID) Scheduler__cpu_for_process(SchedulerPtr self, ProcessPtr process);
 Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu);
 void Scheduler__mark_ready(SchedulerPtr self);
 bool Scheduler__ready(SchedulerPtr self);
 Result(SchedulerInitStatus) Scheduler__wait_until_ready(SchedulerPtr self);
 Result(ServiceCode) Scheduler__subscribe_irq(SchedulerPtr self, ProcessPtr process, IRQNumber irq);
 Result(ServiceCode) Scheduler__send_irq_event(SchedulerPtr self, IRQNumber irq);
-Result(ServiceCode) Scheduler__complete_pending_irqs_for_process(SchedulerPtr self, ProcessPtr process);
+Result(ServiceEvent) Scheduler__service_take_next_event(SchedulerPtr self, ProcessPtr process);
 Result(ServiceEvent) Scheduler__service_wait(
     SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context, Optional(Continuation) continuation
 );
@@ -133,7 +118,7 @@ Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr pro
     (Scheduler) { \
         .message_broker = broker, \
         .schedulers = EmptyArray(CPUSchedulers),\
-        .irq_services = EmptyMap(IRQServiceMap),\
+        .service_event_dispatcher = NEW_SERVICE_EVENT_DISPATCHER,\
         .scheduler_lock = MUTEX_INIT, \
         .ready = false, \
     } \

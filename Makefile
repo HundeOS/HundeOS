@@ -44,6 +44,7 @@ DISK_LONG_NAME = This is a long filename.txt
 DISK_LARGE_FILE = tools/disk_large_file.txt
 DISK_LARGE_NAME = BIGFILE.TXT
 MKFS_FAT ?= mkfs.fat
+SERIAL ?= stdio
 
 SOURCES := $(shell find ./kernel -name "*.c" -print)
 ASM_SOURCES := $(shell find ./kernel -name "*.s" -print)
@@ -181,7 +182,7 @@ qemu-virt: $(ELF) $(DISK_IMG)
 		-M virt,gic-version=3 \
 		-smp cpus=4 -cpu max \
 		-m 4G  \
-		-serial stdio \
+		-serial $(SERIAL) \
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
@@ -194,7 +195,7 @@ qemu-virt-1cpu: $(ELF) $(DISK_IMG)
 		-M virt,gic-version=3,virtualization=off,secure=off \
 		-smp cpus=1 -cpu max \
 		-m 4G  \
-		-serial stdio \
+		-serial $(SERIAL) \
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
@@ -214,7 +215,7 @@ qemu-virt-1cpu-trace:
 		-M virt,gic-version=3,virtualization=off,secure=off \
 		-smp cpus=1 -cpu max \
 		-m 4G  \
-		-serial stdio \
+		-serial $(SERIAL) \
 		-monitor none \
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
@@ -235,7 +236,7 @@ qemu-virt-2cpus-trace:
 		-M virt,gic-version=3 \
 		-smp cpus=2 -cpu max \
 		-m 4G  \
-		-serial stdio \
+		-serial $(SERIAL) \
 		-monitor none \
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
@@ -251,7 +252,7 @@ qemu-virt-2cpus: $(ELF) $(DISK_IMG)
 		-M virt,gic-version=3 \
 		-smp cpus=2 -cpu max \
 		-m 4G  \
-		-serial stdio \
+		-serial $(SERIAL) \
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \

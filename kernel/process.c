@@ -11,6 +11,7 @@
 
 #include "kalloc.h"
 #include "stack.h"
+#include "idle_debug.h"
 
 FixedArrayBodyDefine(ProcessTable);
 FixedArrayBodyDefine(ProcessArguments);
@@ -163,7 +164,8 @@ Result(ProcessPtr) Process__new(
     proc->next_file_descriptor = Process__inherit_next_file_descriptor(parent);
     proc->abort = None(ProcessAbort);
     proc->process_class = PROCESS_CLASS_NORMAL;
-    proc->service_events = ServiceEvents__new();
+    proc->service = ServiceState__new();
+    proc->idle_debug_address = None(UserAddress);
 
     uint64_t argc;
     ResultMatch(Address, Process__setup_args(proc, arguments, &argc))
@@ -216,6 +218,15 @@ Optional(ParkedKernelContextPtr) Process__pop_parked_context(ProcessPtr self)
 bool Process__is_parked(ProcessPtr self)
 {
     return ParkedKernelContexts__len(&self->parked_contexts) > 0;
+}
+
+bool Process__is_handling_service_irq(ProcessPtr self)
+{
+    Match(ServiceEvent, self->service.active_irq_event)
+        IsSome(event, return true)
+    End
+
+    return false;
 }
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
@@ -348,6 +359,28 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     End
 
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+}
+
+Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self)
+{
+    UserAddress allocation = Kernel__alloc_user(
+        IDLE_DEBUG_PAGE_VADDR, PAGE_SIZE, true, true, false
+    );
+    IdleDebugStatePtr state = k_v_ptr(allocation, IdleDebugState);
+    state->magic = IDLE_DEBUG_MAGIC;
+    state->before_wfi_count = 0;
+    state->after_wfi_count = 0;
+
+    PageTable__map(v_ptr(self->page_table, PageTable), allocation, PAGE_SIZE);
+
+    ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
+        self, allocation, PAGE_SIZE, USER_ALLOCATION_DYNAMIC
+    ))
+        IsError(code, message, return Error(UserAddress, message, code))
+    End
+
+    self->idle_debug_address = Some(UserAddress, allocation);
+    return Success(UserAddress, allocation);
 }
 
 Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size)

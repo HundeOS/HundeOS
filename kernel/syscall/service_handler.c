@@ -124,7 +124,7 @@ Result(SystemCallResult) Service__handler(
                     "service wait pid=%i name=%s queued=%i target=%p\n",
                     process->pid,
                     cstr(process->name),
-                    (int) ServiceEvents__len(&process->service_events),
+                    (int) ServiceEvents__len(&process->service.events),
                     arg2
                 );
 

@@ -29,9 +29,15 @@ ResultDef(ServiceCode);
 bool ServiceEvent__equals(ServiceEventPtr self, ServiceEventPtr other);
 FixedArrayDefine(ServiceEvent, MAX_SERVICE_EVENTS, ServiceEvents, (EqualFunction) ServiceEvent__equals);
 
+typedef struct ServiceState
+{
+    ServiceEvents events;
+    Optional(ServiceEvent) active_irq_event;
+} ServiceState;
+
+ServiceState ServiceState__new();
 Result(ServiceEvent) Service__pop_next_event(ProcessPtr process);
 Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent event);
-Result(ServiceCode) Service__send_timer_tick_events(SchedulerPtr scheduler, uint64_t tick_count);
 Result(ServiceEvent) Service__complete_wait(ParkedKernelContextPtr parked_context);
 
 #endif

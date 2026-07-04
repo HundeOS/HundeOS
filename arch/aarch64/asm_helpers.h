@@ -30,6 +30,7 @@ inline void eret(void){ __asm__ volatile("eret"); }
 
 inline void isb(void){ __asm__ volatile("isb"); }
 inline void dsb_ish(void){ __asm__ volatile("dsb ish"); }
+inline void dsb_sy(void){ __asm__ volatile("dsb sy" ::: "memory"); }
 inline void dsb_ishst(void){ __asm__ volatile("dsb ishst" ::: "memory"); }
 inline void dmb_ish(void){ __asm__ __volatile__("dmb ish" ::: "memory"); }
 
@@ -47,12 +48,15 @@ inline void wr_cntv_tval(uint64_t v){ __asm__ volatile("msr cntv_tval_el0, %0" :
 inline void wr_cntv_ctl(uint64_t v){  __asm__ volatile("msr cntv_ctl_el0,  %0" :: "r"(v)); }
 inline void wr_cntp_tval(uint64_t v){ __asm__ volatile("msr cntp_tval_el0, %0" :: "r"(v)); }
 inline void wr_cntp_ctl(uint64_t v){  __asm__ volatile("msr cntp_ctl_el0,  %0" :: "r"(v)); }
+inline uint64_t read_cntv_ctl(){ uint64_t v; __asm__ volatile("mrs %0, cntv_ctl_el0" : "=r"(v)); return v; }
+inline uint64_t read_cntp_ctl(){ uint64_t v; __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(v)); return v; }
 
 inline void wr_icc_pmr(uint64_t v){   __asm__ volatile("msr ICC_PMR_EL1, %0" :: "r"(v)); }
 inline void wr_icc_igrpen1(uint64_t v){__asm__ volatile("msr ICC_IGRPEN1_EL1, %0" :: "r"(v)); }
 inline void wr_icc_sre(uint64_t v){   __asm__ volatile("msr ICC_SRE_EL1, %0" :: "r"(v)); __asm__ volatile("isb"); }
 inline void enable_irq(void){         __asm__ volatile("msr daifclr, #2"); }  // clear I-bit
 inline uint64_t read_daifclr(){ uint64_t v; __asm__ __volatile__("mrs %0, daif" : "=r"(v)); return v; }
+inline uint64_t read_icc_pmr(){ uint64_t v; __asm__ volatile("mrs %0, ICC_PMR_EL1" : "=r"(v)); return v; }
 inline uint64_t read_icc_igrpen1(){ uint64_t v; __asm__ volatile("mrs %0, ICC_IGRPEN1_EL1" : "=r"(v)); return v; }
 
 inline uint64_t read_current_el(){ uint64_t v; __asm__ volatile("mrs %0, CurrentEL" : "=r"(v)); return v; }

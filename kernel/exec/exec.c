@@ -25,16 +25,46 @@ static Result(ProcessPtr) Exec__launch(OriginatingContext context, Elf elf, bool
                 IsSome(parent,
                 {
                     __d_printf(EXEC, "Parent %p\n", parent);
-                    Scheduler__schedule(kernel->scheduler, new_proc);
+                    Result(CPUID) schedule_result = wait
+                        ? Scheduler__cpu_for_process(kernel->scheduler, parent)
+                        : Scheduler__schedule(kernel->scheduler, new_proc);
                     if (wait)
                     {
-                        __d_printf(EXEC, "Parking parent %p\n", parent);
+                        ResultMatch(CPUID, schedule_result)
+                            IsSuccess(parent_cpu,
+                            {
+                                schedule_result = Scheduler__schedule_on_cpu(kernel->scheduler, new_proc, parent_cpu);
+                            })
+                            IsError(code, message, return Error(ProcessPtr, message, SPAWN_FAILED))
+                        End
+                    }
+
+                    ResultMatch(CPUID, schedule_result)
+                        IsError(code, message, return Error(ProcessPtr, message, SPAWN_FAILED))
+                    End
+
+                    if (wait)
+                    {
+                        __d_printf(
+                            EXEC,
+                            "Parking parent pid=%i name=%s waiting_for_pid=%i name=%s\n",
+                            parent->pid,
+                            cstr(parent->name),
+                            new_proc->pid,
+                            cstr(new_proc->name)
+                        );
                         // TODO we need a continuation to give the result of the proc back to the parent
                         KernelContextPtr kernel_context = KernelContext__from_originating_context_heap(context);
 
                         Scheduler__park(
                             kernel->scheduler, parent, kernel_context,
                             Some(Continuation, SystemCall__Complete), PARK_WAIT_CHILD
+                        );
+                        __d_printf(
+                            EXEC,
+                            "Parent parked pid=%i child_pid=%i\n",
+                            parent->pid,
+                            new_proc->pid
                         );
                     }
                     __d_printf(EXEC, "Scheduling elf %s\n", cstr(elf.name));

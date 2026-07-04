@@ -3,16 +3,59 @@
 #include <stddef.h>
 #include "../../user.h"
 #include "../../sys/spawn.h"
+#include "../../sys/syslog.h"
 
 #define STRIP_BUFFER_SIZE 2048
 #define COMMAND_PATH_BUFFER_SIZE 2048
 #define COMMAND_ARG_BUFFER_SIZE 2048
 #define COMMAND_MAX_ARGS 3
 #define COMMAND_ARG_STORAGE_SLOTS (COMMAND_MAX_ARGS + 1)
+#define SHELL_DEBUG_PREVIEW_SIZE 96
 static const char * CMD_EXIT = "exit";
 static const char * COMMAND_SEARCH_PATH = "/ebin";
 static char command_buffer[STRIP_BUFFER_SIZE];
 static char argument_buffers[COMMAND_ARG_STORAGE_SLOTS][COMMAND_ARG_BUFFER_SIZE];
+
+static void debug_preview(const char * input, char * target, size_t target_size)
+{
+    size_t out = 0;
+    for (size_t in = 0; input[in] != '\0' && out < target_size - 1 && in < SHELL_DEBUG_PREVIEW_SIZE; in++)
+    {
+        char ch = input[in];
+        if (ch == '\n')
+        {
+            if (out + 2 >= target_size)
+            {
+                break;
+            }
+            target[out++] = '\\';
+            target[out++] = 'n';
+            continue;
+        }
+        if (ch == '\r')
+        {
+            if (out + 2 >= target_size)
+            {
+                break;
+            }
+            target[out++] = '\\';
+            target[out++] = 'r';
+            continue;
+        }
+        if (ch == '\t')
+        {
+            if (out + 2 >= target_size)
+            {
+                break;
+            }
+            target[out++] = '\\';
+            target[out++] = 't';
+            continue;
+        }
+        target[out++] = ch;
+    }
+    target[out] = '\0';
+}
 
 static bool whitespace(const char* input)
 {
@@ -149,7 +192,9 @@ ShellResult execute(const char* cmd)
     command_path(cmd, path, COMMAND_PATH_BUFFER_SIZE);
 
     // print("Executing:\n");
+    kernel_syslog_tagf("SHELL", "execute cmd=%s path=%s", cmd, path);
     SpawnResult result = spawn(P_WAIT, path, NULL, NULL, NULL);
+    kernel_syslog_tagf("SHELL", "execute spawn result=%i", result);
     if (result != SPAWN_SUCCESS)
     {
         printf("result = %i\n", result);
@@ -178,7 +223,18 @@ ShellResult execute_with_args(const char* cmd, char args[COMMAND_ARG_STORAGE_SLO
     const char * arg2 = arg_count > 2 ? args[2] : NULL;
 
     // print("Executing:\n");
+    kernel_syslog_tagf(
+        "SHELL",
+        "execute_with_args cmd=%s path=%s argc=%i arg0=%s arg1=%s arg2=%s",
+        cmd,
+        path,
+        (int) arg_count,
+        arg0 ? arg0 : "",
+        arg1 ? arg1 : "",
+        arg2 ? arg2 : ""
+    );
     SpawnResult result = spawn(P_WAIT, path, arg0, arg1, arg2);
+    kernel_syslog_tagf("SHELL", "execute_with_args spawn result=%i", result);
     if (result != 0)
     {
         printf("result = %i\n", result);
@@ -200,10 +256,23 @@ ShellResult execute_with_args(const char* cmd, char args[COMMAND_ARG_STORAGE_SLO
 ShellResult interpret(const char* input)
 {
     char * command = command_buffer;
+    char preview[SHELL_DEBUG_PREVIEW_SIZE * 2];
+    debug_preview(input, preview, sizeof(preview));
+    kernel_syslog_tagf("SHELL", "interpret input=%s", preview);
 
     size_t arg_count = parse_command(input, command, STRIP_BUFFER_SIZE, argument_buffers);
+    kernel_syslog_tagf(
+        "SHELL",
+        "interpret parsed command=%s argc=%i arg0=%s arg1=%s arg2=%s",
+        command,
+        (int) arg_count,
+        arg_count > 0 ? argument_buffers[0] : "",
+        arg_count > 1 ? argument_buffers[1] : "",
+        arg_count > 2 ? argument_buffers[2] : ""
+    );
     if (matches(command, CMD_EXIT))
     {
+        kernel_syslog_tagf("SHELL", "interpret exit command");
         exit(0);
         return EXIT;
     }

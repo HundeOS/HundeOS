@@ -36,4 +36,21 @@ void mutex_unlock(mutex_t *m);
         __d_printf(MUTEX, "Leaving critical_section (%s) %s:%i\n", #m, __FILE__, __LINE__);\
     }
 
+#define CriticalSectionTry(m, block, failed_block) \
+    { \
+        __d_printf(MUTEX, "Trying critical_section (%s) %s:%i\n", #m, __FILE__, __LINE__);\
+        mutex_t * __mutex = &m;\
+        if (mutex_trylock(__mutex)) \
+        { \
+            __d_printf(MUTEX, "Obtained lock (%s) %s:%i \n", #m, __FILE__, __LINE__);\
+            block; \
+            mutex_unlock(__mutex); \
+            __d_printf(MUTEX, "Leaving critical_section (%s) %s:%i\n", #m, __FILE__, __LINE__);\
+        } \
+        else \
+        { \
+            failed_block; \
+        } \
+    }
+
 #endif

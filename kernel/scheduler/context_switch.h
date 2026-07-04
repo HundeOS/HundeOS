@@ -12,7 +12,7 @@ typedef struct ContextSwitch
 OptionalDef(ContextSwitch);
 
 
-void ContextSwitch__switch(Optional(ContextSwitch) self_opt);
+void ContextSwitch__switch(ContextSwitch self);
 ContextSwitch ContextSwitch__new(ProcessPtr new_proc, Optional(ProcessPtr) old_proc);
 
 #endif

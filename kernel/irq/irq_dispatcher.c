@@ -108,7 +108,7 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(
             {
                 __d_printf(IODEV, "irq dispatcher service irq=%i\n", irq);
                 ResultMatch(ServiceCode, Scheduler__send_irq_event(self->scheduler, irq))
-                    IsSuccess(_, return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED))
+                    IsSuccess(_, return Success(IRQDispatchStatus, IRQ_DISPATCH_RESCHEDULE))
                     IsError(code, message, return Error(IRQDispatchStatus, message, IRQ_DISPATCH_ERROR))
                 End
             }

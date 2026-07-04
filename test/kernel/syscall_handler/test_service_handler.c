@@ -171,10 +171,10 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
     TEST_ASSERT_EQUAL(SERVICE_EVENT_MESSAGE, target.type);
     TEST_ASSERT_EQUAL(7, target.source);
     TEST_ASSERT_EQUAL(11, target.data);
-    TEST_ASSERT_EQUAL(0, ServiceEvents__len(&process->service_events));
+    TEST_ASSERT_EQUAL(0, ServiceEvents__len(&process->service.events));
 }
 
-void test_service_handler_wait_only_completes_pending_irq_when_it_parks(void)
+void test_service_handler_wait_completes_previous_irq_before_next_wait(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
@@ -204,6 +204,7 @@ void test_service_handler_wait_only_completes_pending_irq_when_it_parks(void)
 
     TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, target.type);
     TEST_ASSERT_EQUAL(irq, target.source);
+    TEST_ASSERT_TRUE(Process__is_handling_service_irq(process));
     TEST_ASSERT_EQUAL(0, Arch__unmask_count());
 
     ResultMatch(SystemCallResult, Service__handler(
@@ -214,6 +215,7 @@ void test_service_handler_wait_only_completes_pending_irq_when_it_parks(void)
     End
 
     TEST_ASSERT_EQUAL(1, Arch__unmask_count());
+    TEST_ASSERT_FALSE(Process__is_handling_service_irq(process));
 }
 
 void test_service_handler_subscribe_irq_registers_service_consumer(void)
@@ -240,7 +242,7 @@ void test_service_handler_subscribe_irq_registers_service_consumer(void)
     };
 
     ResultMatch(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, irq, &context))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status))
+        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_DISPATCH_RESCHEDULE, status))
         IsError(code, message, TEST_FAIL())
     End
 

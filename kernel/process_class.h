@@ -13,5 +13,6 @@ typedef enum ProcessClass
 
 bool ProcessClass__is_service(ProcessClass self);
 uint64_t ProcessClass__priority(ProcessClass self);
+const char * ProcessClass__to_string(ProcessClass self);
 
 #endif

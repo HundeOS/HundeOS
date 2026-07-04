@@ -377,11 +377,7 @@ Result(SystemCallResult) IO__handler(
                 Result(IOStatus) status_result = IOSubsystem__server_data_available(io_subsystem, context, byte_count);
                 IOContext__dispose(context);
                 ResultMatch(IOStatus, status_result)
-                    IsSuccess(status,
-                    {
-                        Scheduler__complete_pending_irqs_for_process(kernel->scheduler, process);
-                        return Success(SystemCallResult, status);
-                    })
+                    IsSuccess(status, return Success(SystemCallResult, status))
                     IsError(code, message, return Error(SystemCallResult, message, code))
                 End
             })
@@ -405,11 +401,7 @@ Result(SystemCallResult) IO__handler(
                 Result(IOStatus) status_result = IOSubsystem__server_data_consumed(io_subsystem, context, byte_count);
                 IOContext__dispose(context);
                 ResultMatch(IOStatus, status_result)
-                    IsSuccess(status,
-                    {
-                        Scheduler__complete_pending_irqs_for_process(kernel->scheduler, process);
-                        return Success(SystemCallResult, status);
-                    })
+                    IsSuccess(status, return Success(SystemCallResult, status))
                     IsError(code, message, return Error(SystemCallResult, message, code))
                 End
             })
@@ -432,11 +424,7 @@ Result(SystemCallResult) IO__handler(
                 Result(IOStatus) status_result = IOSubsystem__server_eof(io_subsystem, context);
                 IOContext__dispose(context);
                 ResultMatch(IOStatus, status_result)
-                    IsSuccess(status,
-                    {
-                        Scheduler__complete_pending_irqs_for_process(kernel->scheduler, process);
-                        return Success(SystemCallResult, status);
-                    })
+                    IsSuccess(status, return Success(SystemCallResult, status))
                     IsError(code, message, return Error(SystemCallResult, message, code))
                 End
             })

@@ -8,6 +8,7 @@
 #include "../../kernel/process.h"
 #include "../../kernel/scheduler/scheduler.h"
 #include "../../kernel/arch/cpu.h"
+#include "../../kernel/panic.h"
 
 #include <stdint.h>
 
@@ -113,13 +114,49 @@ ProcessContextPtr ProcessContext__init(
 extern void asm_switch_context(ProcessContextPtr context, Address pagetable);
 extern void asm_switch_kernel_context(ProcessContextPtr context, Address pagetable);
 
+void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
+{
+    uint64_t mode = self->spsr & 0xf;
+    uint64_t irq_masked = self->spsr & (1UL << 7);
+
+    __d_printf(
+        PROCESS_SWITCH,
+        "ProcessContext user irq check context=%p elr=%p sp=%p spsr=%p mode=%p irq_masked=%p current_daif=%p ttbr0=%p\n",
+        self,
+        self->elr,
+        self->sp,
+        self->spsr,
+        mode,
+        irq_masked,
+        read_daifclr(),
+        read_ttbr0_el1()
+    );
+
+    if (irq_masked)
+    {
+        __d_printf(
+            FAULT,
+            "Refusing to return to userspace with IRQs masked: context=%p elr=%p sp=%p spsr=%p mode=%p irq_masked=%p current_daif=%p ttbr0=%p\n",
+            self,
+            self->elr,
+            self->sp,
+            self->spsr,
+            mode,
+            irq_masked,
+            read_daifclr(),
+            read_ttbr0_el1()
+        );
+        Kernel__panic("Return to userspace with IRQs masked", self);
+    }
+}
+
 __attribute__((noreturn))
 void Process__context_switch(ProcessPtr self)
 {
     ProcessContextPtr context = self->context;
 
     const char * name = cstr(self->name);
-    __d_printf(PROCESS, "Process context switch name=%s sp=%p tbbr0=%p spsr_el1=%x x0=%p x1=%p x8=%p elr=%p\n",
+    __d_printf(PROCESS_SWITCH, "Process context switch name=%s sp=%p tbbr0=%p spsr_el1=%x x0=%p x1=%p x8=%p elr=%p\n",
         name,
         self->context->sp,
         paddr(self->page_table),
@@ -130,7 +167,7 @@ void Process__context_switch(ProcessPtr self)
         self->context->elr);
 
     Address base = addr(context);
-    __d_printf(PROCESS,
+    __d_printf(PROCESS_SWITCH,
         "ProcessContext offsets from context(%p) sp=%p x[0]=%p q[0]=%p elr=%p spsr=%p fpcr=%p fpsr=%p size=%p\n",
         context,
         addr(&context->sp) - base,
@@ -150,10 +187,10 @@ void Process__context_switch(ProcessPtr self)
                 Match(Continuation, parked_kernel_context->continuation)
                     IsSome(continuation,
                     {
-                        __d_println(PROCESS, "Continuation kernel context switch");
+                        __d_println(PROCESS_SWITCH, "Continuation kernel context switch");
                         asm_switch_kernel_context(context, paddr(self->page_table));
 
-                        __d_printf(PROCESS, "Continuation calling %p %p", continuation, parked_kernel_context);
+                        __d_printf(PROCESS_SWITCH, "Continuation calling %p %p", continuation, parked_kernel_context);
                         Result(Anything) res = continuation(parked_kernel_context);
                         if (Process__is_parked(self))
                         {
@@ -188,7 +225,7 @@ void Process__context_switch(ProcessPtr self)
         End
     }
     __d_printf(
-        PROCESS,
+        PROCESS_SWITCH,
         "Process__context_switch asm pid=%i name=%s context=%p elr=%p sp=%p x8=%p page_table=%p\n",
         self->pid,
         name,
@@ -198,6 +235,8 @@ void Process__context_switch(ProcessPtr self)
         context->x[8],
         paddr(self->page_table)
     );
+    ProcessContext__assert_user_irqs_unmasked(context);
+    __d_println(PROCESS_SWITCH, "Irqs OK");
     asm_switch_context(context, paddr(self->page_table));
     __builtin_unreachable();
 }

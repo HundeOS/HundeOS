@@ -15,6 +15,14 @@ bool ServiceEvent__equals(ServiceEventPtr self, ServiceEventPtr other)
     return self->type == other->type && self->source == other->source && self->data == other->data;
 }
 
+ServiceState ServiceState__new()
+{
+    return (ServiceState) {
+        .events = ServiceEvents__new(),
+        .active_irq_event = None(ServiceEvent),
+    };
+}
+
 Result(ServiceEvent) Service__pop_next_event(ProcessPtr process)
 {
     if (!ProcessClass__is_service(process->process_class))
@@ -22,7 +30,7 @@ Result(ServiceEvent) Service__pop_next_event(ProcessPtr process)
         return Error(ServiceEvent, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
     }
 
-    Match(ServiceEvent, ServiceEvents__pop_front(&process->service_events))
+    Match(ServiceEvent, ServiceEvents__pop_front(&process->service.events))
         IsSome(event, return Success(ServiceEvent, event))
     End
 
@@ -36,7 +44,7 @@ Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent ev
         return Error(ServiceCode, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
     }
 
-    ResultMatch(CollectionCode, ServiceEvents__push(&process->service_events, event))
+    ResultMatch(CollectionCode, ServiceEvents__push(&process->service.events, event))
         IsError(code, message, return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL))
     End
 
@@ -54,7 +62,7 @@ Result(ServiceEvent) Service__complete_wait(ParkedKernelContextPtr parked_contex
                     Match(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid))
                         IsSome(process,
                         {
-                            return Service__pop_next_event(process);
+                            return Scheduler__service_take_next_event(scheduler, process);
                         })
                     End
                 })
@@ -63,30 +71,4 @@ Result(ServiceEvent) Service__complete_wait(ParkedKernelContextPtr parked_contex
     End
 
     return Error(ServiceEvent, no_process, SERVICE_SCHEDULER_ERROR);
-}
-
-Result(ServiceCode) Service__send_timer_tick_events(SchedulerPtr scheduler, uint64_t tick_count)
-{
-    if (tick_count == 0 || tick_count % SERVICE_TIMER_EVENT_INTERVAL != 0)
-    {
-        return Success(ServiceCode, SERVICE_OK);
-    }
-
-    ServiceEvent event = (ServiceEvent) {
-        .type = SERVICE_EVENT_IRQ,
-        .source = SERVICE_TIMER_TICK_SOURCE,
-        .data = tick_count,
-    };
-
-    ProcessTable processes = Scheduler__all_processes_for_all_cpus(scheduler);
-    FAIterate(ProcessTable, processes, index, process)
-        if (ProcessClass__is_service(process->process_class))
-        {
-            ResultMatch(ServiceCode, Scheduler__service_enqueue(scheduler, process, event))
-                IsError(code, message, return Error(ServiceCode, message, code))
-            End
-        }
-    End
-
-    return Success(ServiceCode, SERVICE_OK);
 }

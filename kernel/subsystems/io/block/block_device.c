@@ -1,5 +1,6 @@
 #include "block_device.h"
 
+#include "panic.h"
 #include "../../../all_defs.h"
 #include "../../../kalloc.h"
 #include "../../../process.h"
@@ -176,7 +177,10 @@ static void UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr requ
                         Some(Continuation, UserspaceBlockDevice__complete_wait),
                         PARK_WAIT_IO
                     ))
-                        IsError(code, message, {})
+                        IsError(code, message, {
+                            __d_printf(PANIC, "Park failed %s\n", cstr(message));
+                            Kernel__panic(cstr(message), NULL);
+                        })
                     End
                 })
             End

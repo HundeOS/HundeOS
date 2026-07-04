@@ -106,7 +106,7 @@ void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event
     TEST_ASSERT_EQUAL_UINT64(1, Arch__enable_count());
 
     ResultMatch(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status))
+        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_DISPATCH_RESCHEDULE, status))
         IsError(code, message, TEST_FAIL())
     End
 

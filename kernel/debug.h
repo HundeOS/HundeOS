@@ -19,6 +19,7 @@ typedef enum {
     SYSCALL,
     SCHEDULER,
     PROCESS,
+    PROCESS_SWITCH,
     IODEV,
     IOSUB,
     EXEC,
@@ -56,6 +57,8 @@ inline const char * level_to_string(Level level)
             return "SCHEDULER";
         case PROCESS:
             return "PROCESS";
+        case PROCESS_SWITCH:
+            return "PROCESS_SWITCH";
         case PROGRESS:
             return "PROGRESS";
         case FOCUS:
@@ -100,10 +103,12 @@ inline const char * level_to_string(Level level)
     LOG_LEVEL_MASK(PROGRESS) | \
     LOG_LEVEL_MASK(SYSLOG) | \
     LOG_LEVEL_MASK(FAT32) | \
+    LOG_LEVEL_MASK(EXEC) | \
     LOG_LEVEL_MASK(IODEV) | \
-    LOG_LEVEL_MASK(SYSCALL) | \
+    LOG_LEVEL_MASK(TIMER_IRQ) | \
     LOG_LEVEL_MASK(FAULT) | \
-    LOG_LEVEL_MASK(PANIC) \
+    LOG_LEVEL_MASK(PANIC) | \
+    LOG_LEVEL_MASK(PROCESS_SWITCH) \
 )
 
 inline bool __d_should_log(Level level)

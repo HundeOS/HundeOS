@@ -15,6 +15,8 @@
 #include "process_class.h"
 #include "service/service.h"
 
+OptionalDef(UserAddress);
+
 typedef struct ProcessContext ProcessContext;
 typedef struct ProcessContext * ProcessContextPtr;
 
@@ -200,7 +202,8 @@ typedef struct Process {
     FileDescriptor next_file_descriptor;
     Optional(ProcessAbort) abort;
     ProcessClass process_class;
-    ServiceEvents service_events;
+    ServiceState service;
+    Optional(UserAddress) idle_debug_address;
 
     ParkedKernelContexts parked_contexts;
 } Process;
@@ -224,11 +227,13 @@ Result(CollectionCode) Process__push_parked_context(ProcessPtr self, ParkedKerne
 Optional(ParkedKernelContextPtr) Process__top_parked_context(ProcessPtr self);
 Optional(ParkedKernelContextPtr) Process__pop_parked_context(ProcessPtr self);
 bool Process__is_parked(ProcessPtr self);
+bool Process__is_handling_service_irq(ProcessPtr self);
 Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 );
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
+Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self);
 Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size);
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment);
 Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virtual_address);

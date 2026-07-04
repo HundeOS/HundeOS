@@ -82,7 +82,7 @@ void reset_state()
     PROC = STUB_PROCESS(PID);
     SERVER_PROC = STUB_PROCESS(2);
     SERVER_PROC.process_class = PROCESS_CLASS_SERVICE;
-    SERVER_PROC.service_events = ServiceEvents__new();
+    SERVER_PROC.service = ServiceState__new();
     SERVER_PROC.user_allocations = UserAllocations__new();
     SERVER_PROC.allocation_next = USER_ALLOC_BASE;
     SERVER_PROC.page_table = PageTable__new();
@@ -494,7 +494,7 @@ void test_stream_client_write_buffers_data_for_write_server_until_consumed()
         IsError(code, message, TEST_FAIL());
     End
 
-    Match(ServiceEvent, ServiceEvents__pop_front(&SERVER_PROC.service_events))
+    Match(ServiceEvent, ServiceEvents__pop_front(&SERVER_PROC.service.events))
         IsSome(event,
         {
             TEST_ASSERT_EQUAL(SERVICE_EVENT_IO, event.type);
@@ -620,7 +620,7 @@ void test_hello_stream_read_returns_server_written_data_after_data_available()
     TEST_ASSERT_NOT_NULL(io_message);
     TEST_ASSERT_EQUAL(SUBSYS_IO_PARK, io_message->source_code);
 
-    Match(ServiceEvent, ServiceEvents__pop_front(&SERVER_PROC.service_events))
+    Match(ServiceEvent, ServiceEvents__pop_front(&SERVER_PROC.service.events))
         IsSome(event,
         {
             TEST_ASSERT_EQUAL(SERVICE_EVENT_IO, event.type);

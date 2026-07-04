@@ -14,6 +14,8 @@
 #include "../../kernel/syscall/syscall_dispatcher.h"
 #include "../../kernel/types/optional.h"
 
+#define CPU_POKE_SGI 1U
+
 // Helper function to get exception syndrome
 inline uint64_t get_esr_el1(void) {
     uint64_t esr;
@@ -59,6 +61,16 @@ void irq_handler(ProcessContextPtr context, bool current_el)
     icc_eoir1(id);
     icc_dir(id);
 
+    if (id == CPU_POKE_SGI)
+    {
+        __d_printf(SCHEDULER, "cpu poke irq cpu=%i current_el=%i\n", cpu, current_el);
+        if (!current_el)
+        {
+            Scheduler__preempt(kernel->scheduler, cpu, context);
+        }
+        return;
+    }
+
     IRQDispatchContext dispatch_context = (IRQDispatchContext) {
         .irq = id,
         .cpu = cpu,
@@ -76,6 +88,11 @@ void irq_handler(ProcessContextPtr context, bool current_el)
             if (status == IRQ_DISPATCH_UNHANDLED)
             {
                 __d_printf(UNHANDLED, "unhandled irq: %i\n", id);
+            }
+            if (!current_el && status == IRQ_DISPATCH_RESCHEDULE)
+            {
+                __d_printf(IODEV, "irq dispatch id=%i requested reschedule cpu=%i\n", id, cpu);
+                Scheduler__preempt(kernel->scheduler, cpu, context);
             }
         })
         IsError(code, message, __d_printf(UNHANDLED, "irq dispatch error %i for irq %i\n", code, id))
@@ -118,6 +135,28 @@ static uint64_t abort_user_process(
     End
 
     return 0;
+}
+
+static bool yield_if_process_parked(KernelPtr kernel, Optional(ProcessPtr) current_process)
+{
+    Match(ProcessPtr, current_process)
+        IsSome(process,
+        {
+            if (Process__is_parked(process))
+            {
+                __d_printf(
+                    SYSCALL,
+                    "syscall parked pid=%i name=%s yielding\n",
+                    process->pid,
+                    cstr(process->name)
+                );
+                Scheduler__yield_waiting(kernel->scheduler, process, CPU__id() - 1);
+                return true;
+            }
+        })
+    End
+
+    return false;
 }
 
 uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
@@ -193,10 +232,18 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                         IsNone(__d_printf(SYSCALL, "syscall exit no-current-process id=%p result=%p\n", context->x[8], call_result);)
                     End
                     __d_printf(SYSCALL, "syscall result: res=%p\n", call_result);
+                    if (yield_if_process_parked(kernel, current_process))
+                    {
+                        return 0;
+                    }
                     return call_result;
                 });
                 IsError(code, message,
                 {
+                    if (yield_if_process_parked(kernel, current_process))
+                    {
+                        return 0;
+                    }
                     Match(ProcessPtr, current_process)
                         IsSome(proc, __d_printf(
                             SYSCALL,

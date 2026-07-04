@@ -5,6 +5,8 @@
 #include "../../kernel/debug.h"
 #include "cpu_common.h"
 
+#define CPU_POKE_SGI 1U
+
 static uint8_t __attribute__((aligned(16))) cpu_stacks[MAX_CPUS][STACK_SIZE];
 
 inline void wr_vbar_el1(uint64_t v){ __asm__ __volatile__("msr VBAR_EL1, %0"::"r"(v)); __asm__ __volatile__("isb"); }
@@ -36,6 +38,16 @@ void CPU__wait() {
 
 void CPU__yield(void) {
     __asm__ __volatile__("yield");
+}
+
+void CPU__poke(CPUID cpu)
+{
+    uint64_t target_list = 1ULL << (cpu & 0xf);
+    uint64_t sgi = ((uint64_t) CPU_POKE_SGI << 24) | target_list;
+    __asm__ volatile("dsb sy" ::: "memory");
+    __asm__ volatile("msr ICC_SGI1R_EL1, %0" :: "r"(sgi));
+    __asm__ volatile("isb" ::: "memory");
+    __d_printf(SCHEDULER, "CPU__poke target=%i sgi=%i\n", (int) cpu, CPU_POKE_SGI);
 }
 
 inline void CPU__halt_forever() {

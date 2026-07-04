@@ -3,8 +3,6 @@
 
 #include <stdint.h>
 
-#define SERVICE_TIMER_EVENT_INTERVAL 30000ULL
-#define SERVICE_TIMER_TICK_SOURCE 1ULL
 #define SERVICE_DEVICE_PATH_MAX 256ULL
 
 typedef enum ServiceOperation

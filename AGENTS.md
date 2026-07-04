@@ -75,6 +75,12 @@ Dont use goto statements, ever.
 When using mutexes in the kernel, use the CriticalSection macros along
 with their exit macros (i.e. cs_return)
 
+Never hold a mutex or CriticalSection across an actual context switch. Code
+that mutates shared scheduling, service, or event state should return an
+explicit result describing whether a reschedule is needed, then release the
+lock before any context switch or preemption path is triggered. Separate
+"mark runnable / request reschedule" from "perform context switch now".
+
 ## Object orientation in c
 An object orientated like namespacing convention is used. This means 
 function/methods for a certain class are prefixed with the class name followed by TWO underscores `__`.
@@ -89,6 +95,9 @@ not pointers to structures. This is to make memory allocation/cleanup simpler
 
 ## Critical sections
 In kernel code mutexes should be used along with CriticalSection macros
+
+Critical sections must not call into code paths that can context switch before
+the mutex is released.
 
 ## Control flow
 Do not use `goto` in new or changed code. When modifying code near an existing

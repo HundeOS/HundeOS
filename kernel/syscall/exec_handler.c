@@ -10,6 +10,8 @@ Result(SystemCallResult) Exec__handler(
 )
 {
     KString path = kstring((const char *)arg1);
+    __d_printf(EXEC, "exec handler path=%s mode=%i\n", cstr(path), (int) arg2);
+
     ProcessArguments arguments = ProcessArguments__new();
     if (arg3 != 0)
     {
@@ -32,10 +34,12 @@ Result(SystemCallResult) Exec__handler(
     ResultMatch(ProcessPtr, exec_res)
         IsSuccess(proc,
         {
+            __d_printf(EXEC, "exec handler success path=%s pid=%i\n", cstr(path), proc->pid);
             return Success(SystemCallResult, proc->pid);
         })
         IsError(code, message,
         {
+            __d_printf(EXEC, "exec handler error path=%s code=%i message=%s\n", cstr(path), code, cstr(message));
             return Error(SystemCallResult, message, code);
         })
     End

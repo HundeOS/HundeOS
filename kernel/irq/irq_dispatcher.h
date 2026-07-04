@@ -14,6 +14,7 @@ typedef enum IRQDispatchStatus
 {
     IRQ_DISPATCH_HANDLED = 0,
     IRQ_DISPATCH_UNHANDLED = 1,
+    IRQ_DISPATCH_RESCHEDULE = 2,
     IRQ_DISPATCH_ERROR = -1,
 }
 IRQDispatchStatus;

@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "../../kernel/debug.h"
+#include "../../kernel/all_defs.h"
 #include "../../kernel/arch/cpu.h"
 #include "../../kernel/cpu_timer.h"
 #include "../../kernel/kernel_core.h"
@@ -12,6 +13,9 @@
 #include "gicr.h"
 #include "boot/boot_debug.h"
 
+static uint64_t timer_hz = 1000;
+//static uint64_t timer_irq_counts[MAX_CPUS] = { 0 };
+static const uint64_t TIMER_TRACE_INTERVAL_TICKS = 2000;
 
 inline unsigned cpu_aff0(void)
 {
@@ -38,6 +42,7 @@ inline volatile uint8_t* CPUTimer__gicr_base_this_cpu(void)
 __attribute__((noinline))  // keeps return addresses clean for debugging
 static void CPUTimer__enable(bool use_virtual_timer, uint64_t hz)
 {
+    timer_hz = hz ? hz : 1000u;
     CPUTimer__gicv3_dist_enable_grp1ns();
     volatile uint8_t * gicr = CPUTimer__gicr_base_this_cpu();
 
@@ -61,7 +66,8 @@ static void CPUTimer__enable(bool use_virtual_timer, uint64_t hz)
     unsigned bit1 = ((ppi - 16u) * 2u) + 1u; // ICFGR1: bit[1]=1 => edge
 
     uint32_t icfgr1 = mmio_read32(gicr + GICR_ICFGR1_OFFSET);
-    icfgr1 |= (1u << bit1);
+
+    icfgr1 &= ~(1u << bit1);
     mmio_write32(icfgr1, gicr + GICR_ICFGR1_OFFSET);
 
     uint8_t * priority_reg = (gicr + GICR_IPRIORITYR_OFFSET(ppi));
@@ -83,7 +89,7 @@ static void CPUTimer__enable(bool use_virtual_timer, uint64_t hz)
 
     // --- Arm the generic timer (per-CPU) ---
     uint64_t frq  = rd_cntfrq();
-    uint64_t tick = frq / (hz ? hz : 1000u); // default 1 kHz if hz==0
+    uint64_t tick = frq / timer_hz;
 
     if (use_virtual_timer)
     {
@@ -116,18 +122,22 @@ static void CPUTimer__rearm(IRQNumber irq)
     __asm__ volatile("mrs %0, cntfrq_el0":"=r"(frq));
     if (irq == PPI_CNTV)
     {
-        __asm__ volatile("msr cntv_tval_el0, %0" :: "r"(frq / 1000));
+        __asm__ volatile("msr cntv_tval_el0, %0" :: "r"(frq / timer_hz));
     }
     if (irq == PPI_CNTP)
     {
-        __asm__ volatile("msr cntp_tval_el0, %0" :: "r"(frq / 1000));
+        __asm__ volatile("msr cntp_tval_el0, %0" :: "r"(frq / timer_hz));
     }
+
+    // Force system register synchronization right here!
+    dsb_sy();
+    isb();
 }
 
 Result(IRQDispatchStatus) CPUTimer__handle_irq(IRQDispatchContextPtr context, void * data)
 {
-
     CPUTimer__rearm(context->irq);
+    dsb_sy();
     isb();
     if (!context->current_el)
     {

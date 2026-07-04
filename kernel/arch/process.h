@@ -11,5 +11,6 @@ typedef Process * ProcessPtr;
 
 void Process__context_switch(ProcessPtr self);
 void Process__save_context(ProcessPtr self, ProcessContextPtr context);
+// void Process__set_syscall_result(ProcessPtr self, SystemCallResult result);
 
 #endif

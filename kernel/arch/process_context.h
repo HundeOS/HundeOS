@@ -17,5 +17,6 @@ ProcessContextPtr ProcessContext__init(ProcessID pid,
                                        KernelAddress page_table,
                                        uint64_t argc,
                                        Address argv);
+void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self);
 
 #endif

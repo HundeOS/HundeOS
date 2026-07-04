@@ -21,6 +21,7 @@ void BasicIO__put_int(int num) {
 static const char trace_path[] = "build/kernel-trace.log";
 static uintptr_t trace_handle = (uintptr_t) -1;
 static bool trace_open_attempted = false;
+static volatile uint32_t trace_write_lock = 0;
 
 static uintptr_t Semihosting__call(uintptr_t operation, uintptr_t argument)
 {
@@ -56,12 +57,28 @@ static uintptr_t DebugTrace__open_handle()
     return trace_handle;
 }
 
+static bool DebugTrace__try_lock()
+{
+    return __atomic_exchange_n(&trace_write_lock, 1u, __ATOMIC_ACQUIRE) == 0u;
+}
+
+static void DebugTrace__unlock()
+{
+    __atomic_store_n(&trace_write_lock, 0u, __ATOMIC_RELEASE);
+}
+
 void DebugTrace__puts(const char* str)
 {
+    if (!DebugTrace__try_lock())
+    {
+        return;
+    }
+
     uintptr_t handle = DebugTrace__open_handle();
     if (handle == (uintptr_t) -1)
     {
         Semihosting__call(SEMIHOST_SYS_WRITE0, (uintptr_t) str);
+        DebugTrace__unlock();
         return;
     }
 
@@ -71,6 +88,7 @@ void DebugTrace__puts(const char* str)
         DebugTrace__strlen(str),
     };
     Semihosting__call(SEMIHOST_SYS_WRITE, (uintptr_t) args);
+    DebugTrace__unlock();
 }
 #else
 void DebugTrace__puts(const char* str)

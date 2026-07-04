@@ -6,6 +6,13 @@
 
 #include "../../../../common_includes/syscalls/service.h"
 
+#include "../../../../user/sys/mmio.h"
+
+void __mmio_sync_boundary()
+{
+
+}
+
 #define VIRTIO_MMIO_MAGIC          0x000
 #define VIRTIO_MMIO_VERSION        0x004
 #define VIRTIO_MMIO_DEVICE_ID      0x008
@@ -34,6 +41,9 @@ struct ServiceMappedMemory
     uint64_t device_address;
     uint64_t size;
 };
+
+typedef struct VirtioBlkDevice VirtioBlkDevice;
+typedef VirtioBlkDevice * VirtioBlkDevicePtr;
 
 typedef struct FakeVirtioSlot
 {
@@ -66,12 +76,21 @@ static bool fake_block_registered;
 static bool fake_logged;
 static const char * fake_log_tag;
 static bool fake_block_request_mode;
+static bool fake_out_of_order_mode;
 static bool fake_block_request_fetched;
 static bool fake_block_completed;
 static uint8_t fake_request_buffer[512];
+static uint8_t fake_second_request_buffer[512];
 static ServiceBlockRequest fake_block_request;
+static ServiceBlockRequest fake_second_block_request;
 static ServiceCode fake_completion_status;
 static uint64_t fake_completion_blocks;
+static uint64_t fake_completion_request_ids[4];
+static uint64_t fake_completion_count;
+static uint32_t fake_submitted_type;
+static uint64_t fake_submitted_sector;
+static bool fake_active_device_ready;
+static VirtioBlkDevicePtr fake_active_device;
 
 static uint32_t fake_virtio_read32(void * base, uint64_t offset);
 static void fake_virtio_write32(void * base, uint64_t offset, uint32_t value);
@@ -79,7 +98,9 @@ static void fake_virtio_write32(void * base, uint64_t offset, uint32_t value);
 #define VIRTIO_BLK_ENTRYPOINT virtio_blk_main_under_test
 #define VIRTIO_READ32 fake_virtio_read32
 #define VIRTIO_WRITE32 fake_virtio_write32
+#define VIRTIO_BLK_TEST_DEVICE_READY(device) do { fake_active_device = (device); fake_active_device_ready = true; } while (false)
 #include "../../../../user/drivers/virtio_blk/main.c"
+
 
 static FakeVirtioSlotPtr fake_slot_for_base(void * base)
 {
@@ -216,12 +237,17 @@ void setUp(void)
     fake_logged = false;
     fake_log_tag = 0;
     fake_block_request_mode = false;
+    fake_out_of_order_mode = false;
     fake_block_request_fetched = false;
     fake_block_completed = false;
     fake_completion_status = SERVICE_ABORT;
     fake_completion_blocks = 0;
+    fake_completion_count = 0;
+    fake_submitted_type = 0xffffffffU;
+    fake_submitted_sector = 0xffffffffffffffffULL;
+    fake_active_device_ready = false;
     fake_block_request = (ServiceBlockRequest) {
-        .request_id = 77,
+        .request_id = 40,
         .operation = SERVICE_BLOCK_READ,
         .block = 3,
         .block_count = 1,
@@ -229,9 +255,23 @@ void setUp(void)
         .buffer = fake_request_buffer,
         .buffer_size = sizeof(fake_request_buffer),
     };
+    fake_second_block_request = (ServiceBlockRequest) {
+        .request_id = 41,
+        .operation = SERVICE_BLOCK_READ,
+        .block = 4,
+        .block_count = 1,
+        .block_size = 512,
+        .buffer = fake_second_request_buffer,
+        .buffer_size = sizeof(fake_second_request_buffer),
+    };
     for (uint64_t i = 0; i < sizeof(fake_request_buffer); i++)
     {
         fake_request_buffer[i] = 0;
+        fake_second_request_buffer[i] = 0;
+    }
+    for (uint64_t i = 0; i < 4; i++)
+    {
+        fake_completion_request_ids[i] = 0;
     }
 }
 
@@ -311,6 +351,25 @@ ServiceCode service_register_block_device(const char * path, uint64_t block_size
 
 ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPtr request)
 {
+    if (fake_out_of_order_mode)
+    {
+        if (request_id == fake_block_request.request_id)
+        {
+            *request = fake_block_request;
+            fake_block_request_fetched = true;
+            return SERVICE_OK;
+        }
+        if (request_id == fake_second_block_request.request_id)
+        {
+            *request = fake_second_block_request;
+            fake_block_request_fetched = true;
+            return SERVICE_OK;
+        }
+
+        TEST_FAIL_MESSAGE("unexpected out-of-order block request id");
+        return SERVICE_BLOCK_REQUEST_NOT_FOUND;
+    }
+
     if (!fake_block_request_mode)
     {
         TEST_FAIL_MESSAGE("virtio block request handling is not exercised by this test");
@@ -325,6 +384,16 @@ ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPt
 
 ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint64_t block_count)
 {
+    if (fake_out_of_order_mode)
+    {
+        TEST_ASSERT_LESS_THAN_UINT64(4, fake_completion_count);
+        fake_completion_request_ids[fake_completion_count++] = request_id;
+        fake_block_completed = true;
+        fake_completion_status = status;
+        fake_completion_blocks = block_count;
+        return SERVICE_OK;
+    }
+
     if (!fake_block_request_mode)
     {
         TEST_FAIL_MESSAGE("virtio block request completion is not exercised by this test");
@@ -349,6 +418,54 @@ ServiceCode service_device_address(void * driver_address, uint64_t * device_addr
 ServiceCode service_wait(ServiceEventPtr event)
 {
     fake_service_wait_count++;
+    if (fake_out_of_order_mode)
+    {
+        if (fake_service_wait_count == 1)
+        {
+            event->type = SERVICE_EVENT_BLOCK_IO;
+            event->source = fake_block_request.request_id;
+            event->data = 0;
+            return SERVICE_OK;
+        }
+        if (fake_service_wait_count == 2)
+        {
+            event->type = SERVICE_EVENT_BLOCK_IO;
+            event->source = fake_second_block_request.request_id;
+            event->data = 0;
+            return SERVICE_OK;
+        }
+        if (fake_service_wait_count == 3)
+        {
+            TEST_ASSERT_TRUE(fake_active_device_ready);
+            fake_active_device->in_flight[1].status = 0;
+            VirtioBlk__used()->ring[VirtioBlk__used()->idx % VIRTIO_BLK_QUEUE_SIZE] = (VirtqUsedElem) {
+                .id = 3,
+                .len = 512,
+            };
+            VirtioBlk__used()->idx++;
+            event->type = SERVICE_EVENT_IRQ;
+            event->source = fake_expected_irq;
+            event->data = 0;
+            return SERVICE_OK;
+        }
+        if (fake_service_wait_count == 4)
+        {
+            TEST_ASSERT_TRUE(fake_active_device_ready);
+            fake_active_device->in_flight[0].status = 0;
+            VirtioBlk__used()->ring[VirtioBlk__used()->idx % VIRTIO_BLK_QUEUE_SIZE] = (VirtqUsedElem) {
+                .id = 0,
+                .len = 512,
+            };
+            VirtioBlk__used()->idx++;
+            event->type = SERVICE_EVENT_IRQ;
+            event->source = fake_expected_irq;
+            event->data = 0;
+            return SERVICE_OK;
+        }
+
+        return SERVICE_COMPLETE;
+    }
+
     if (fake_block_request_mode)
     {
         if (fake_service_wait_count == 1)
@@ -360,7 +477,14 @@ ServiceCode service_wait(ServiceEventPtr event)
         }
         if (fake_service_wait_count == 2)
         {
-            virtio_blk_status = 0;
+            TEST_ASSERT_TRUE(fake_active_device_ready);
+            fake_submitted_type = fake_active_device->in_flight[0].header.type;
+            fake_submitted_sector = fake_active_device->in_flight[0].header.sector;
+            fake_active_device->in_flight[0].status = 0;
+            VirtioBlk__used()->ring[VirtioBlk__used()->idx % VIRTIO_BLK_QUEUE_SIZE] = (VirtqUsedElem) {
+                .id = 0,
+                .len = 512,
+            };
             VirtioBlk__used()->idx++;
             event->type = SERVICE_EVENT_IRQ;
             event->source = fake_expected_irq;
@@ -463,8 +587,8 @@ void test_virtio_blk_main_completes_block_read_request_through_queue(void)
     TEST_ASSERT_EQUAL_UINT32(1, descs[2].len);
     TEST_ASSERT_EQUAL_UINT16(2, descs[2].flags);
 
-    TEST_ASSERT_EQUAL_UINT32(0, virtio_blk_header.type);
-    TEST_ASSERT_EQUAL_UINT64(3, virtio_blk_header.sector);
+    TEST_ASSERT_EQUAL_UINT32(0, fake_submitted_type);
+    TEST_ASSERT_EQUAL_UINT64(3, fake_submitted_sector);
     TEST_ASSERT_EQUAL_UINT16(1, VirtioBlk__avail()->idx);
     TEST_ASSERT_EQUAL_UINT16(0, VirtioBlk__avail()->ring[0]);
 }
@@ -486,6 +610,22 @@ void test_virtio_blk_main_completes_block_write_request_through_queue(void)
     TEST_ASSERT_EQUAL_UINT32(512, descs[1].len);
     TEST_ASSERT_EQUAL_UINT16(1, descs[1].flags);
     TEST_ASSERT_EQUAL_UINT16(2, descs[1].next);
-    TEST_ASSERT_EQUAL_UINT32(1, virtio_blk_header.type);
-    TEST_ASSERT_EQUAL_UINT64(4, virtio_blk_header.sector);
+    TEST_ASSERT_EQUAL_UINT32(1, fake_submitted_type);
+    TEST_ASSERT_EQUAL_UINT64(4, fake_submitted_sector);
+}
+
+void test_virtio_blk_main_delivers_out_of_order_used_entries_in_request_order(void)
+{
+    fake_out_of_order_mode = true;
+
+    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test());
+
+    TEST_ASSERT_TRUE(fake_block_request_fetched);
+    TEST_ASSERT_TRUE(fake_block_completed);
+    TEST_ASSERT_EQUAL_UINT64(2, fake_completion_count);
+    TEST_ASSERT_EQUAL_UINT64(40, fake_completion_request_ids[0]);
+    TEST_ASSERT_EQUAL_UINT64(41, fake_completion_request_ids[1]);
+    TEST_ASSERT_EQUAL_UINT16(2, VirtioBlk__avail()->idx);
+    TEST_ASSERT_EQUAL_UINT16(0, VirtioBlk__avail()->ring[0]);
+    TEST_ASSERT_EQUAL_UINT16(3, VirtioBlk__avail()->ring[1]);
 }

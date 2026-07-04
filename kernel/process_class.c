@@ -18,3 +18,18 @@ uint64_t ProcessClass__priority(ProcessClass self)
             return 0;
     }
 }
+
+const char * ProcessClass__to_string(ProcessClass self)
+{
+    switch (self)
+    {
+        case PROCESS_CLASS_REALTIME_SERVICE:
+            return "realtime_service";
+        case PROCESS_CLASS_SERVICE:
+            return "service";
+        case PROCESS_CLASS_NORMAL:
+            return "normal";
+        default:
+            return "unknown";
+    }
+}
