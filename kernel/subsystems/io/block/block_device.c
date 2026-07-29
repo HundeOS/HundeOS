@@ -5,8 +5,10 @@
 #include "../../../kalloc.h"
 #include "../../../process.h"
 #include "../../../service/service.h"
-#include "../../../scheduler/scheduler.h"
 #include "../../../scheduler/parked.h"
+#include "../../../subsystems/message/io_operation_message.h"
+#include "../../../subsystems/message/message_broker.h"
+#include "../../../subsystems/message/subsystem_codes.h"
 #include "../../../types/map.h"
 
 static KString invalid_argument = KSTRING_NEW("Invalid block device argument");
@@ -27,9 +29,10 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
 
 typedef struct UserspaceBlockDevice
 {
+    KString alias;
     KString path;
     ProcessPtr service_process;
-    SchedulerPtr scheduler;
+    MessageBrokerPtr message_broker;
     BlockCount block_count;
     BlockDevice block_device;
 }
@@ -38,6 +41,7 @@ UserspaceBlockDevice;
 typedef UserspaceBlockDevice * UserspaceBlockDevicePtr;
 
 OptionalDef(UserspaceBlockDevicePtr);
+FixedArrayBodyDefine(BlockDeviceMetadataEntries);
 
 typedef struct UserspaceBlockRequest
 {
@@ -79,7 +83,19 @@ static BlockDeviceRegistryMap registry = EmptyMap(BlockDeviceRegistryMap);
 static BlockRequestMap requests = EmptyMap(BlockRequestMap);
 static bool registry_initialized = false;
 static uint64_t next_request_id = 1;
+static uint64_t next_device_id = 0;
 static Optional(KernelContextPtr) current_context = None(KernelContextPtr);
+static KString hd_alias_format = KSTRING_NEW("hd%i");
+
+static void UserspaceBlockDevice__copy_path(char target[SERVICE_DEVICE_PATH_MAX], KString source)
+{
+    StringPos i = 0;
+    for (; i < source.len && i < SERVICE_DEVICE_PATH_MAX - 1; i++)
+    {
+        target[i] = source.data[i];
+    }
+    target[i] = '\0';
+}
 
 static void BlockDeviceRegistry__init()
 {
@@ -90,12 +106,38 @@ static void BlockDeviceRegistry__init()
 
     registry = BlockDeviceRegistryMap__new();
     requests = BlockRequestMap__new();
+    next_device_id = 0;
     registry_initialized = true;
 }
 
-static Result(Anything) UserspaceBlockDevice__complete_wait(ParkedKernelContextPtr parked_context)
+bool BlockDeviceMetadata__equals(BlockDeviceMetadataPtr self, BlockDeviceMetadataPtr other)
 {
-    BlockDeviceParkContextPtr block_context = (BlockDeviceParkContextPtr) parked_context->kernel_context;
+    return KString__equals(&self->alias, &other->alias)
+        && KString__equals(&self->path, &other->path)
+        && self->block_size == other->block_size
+        && self->block_count == other->block_count
+        && self->userspace_service == other->userspace_service;
+}
+
+static Result(ServiceCode) UserspaceBlockDevice__deliver_service_event(
+    UserspaceBlockDevicePtr self, ServiceEvent event
+)
+{
+    MessagePtr message = Message__heap_new_service_event_delivery(
+        SOURCE_SERVICE, SUBSYS_SERVICE_EVENT_AVAILABLE, self->service_process, event
+    );
+
+    ResultMatch(AckCode, MessageBroker__deliver(self->message_broker, message))
+        IsSuccess(_, return Success(ServiceCode, SERVICE_OK))
+        IsError(code, message, return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR))
+    End
+
+    return Error(ServiceCode, request_failed, SERVICE_SCHEDULER_ERROR);
+}
+
+static Result(Anything) UserspaceBlockDevice__complete_wait(ParkedOperationPtr parked_operation)
+{
+    BlockDeviceParkContextPtr block_context = (BlockDeviceParkContextPtr) parked_operation->kernel_context;
 
     Match(UserspaceBlockRequestPtr, BlockRequestMap__get(&requests, block_context->request_id))
         IsSome(request,
@@ -170,17 +212,22 @@ static void UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr requ
                     block_context->request_id = request->request_id;
                     request->waiting_pid = Some(ProcessID, pid);
 
-                    ResultMatch(ProcessID, Scheduler__park_by_pid(
-                        request->device->scheduler,
+                    MessagePtr message = Message__heap_new_deferred_with_context_ownership(
+                        SOURCE_IO,
+                        SUBSYS_IO_PARK,
                         pid,
                         (KernelContextPtr) block_context,
-                        Some(Continuation, UserspaceBlockDevice__complete_wait),
-                        PARK_WAIT_IO
-                    ))
-                        IsError(code, message, {
-                            __d_printf(PANIC, "Park failed %s\n", cstr(message));
+                        UserspaceBlockDevice__complete_wait,
+                        true
+                    );
+                    message->payload.some.val.deferred.operation_key = Some(OperationKey, request->request_id);
+
+                    ResultMatch(AckCode, MessageBroker__deliver(request->device->message_broker, message))
+                        IsError(code, message,
+                        {
+                            __d_printf(PANIC, "Park message failed %s\n", cstr(message));
                             Kernel__panic(cstr(message), NULL);
-                        })
+                        });
                     End
                 })
             End
@@ -248,13 +295,18 @@ static Result(BlockCount) UserspaceBlockDevice__create_request(
 
             __d_printf(
                 IODEV,
-                "block request create id=%i op=%i block=%i count=%i io_context=%p continuation=%i\n",
+                "block request create id=%i op=%i block=%i count=%i io_context=%p continuation=%i "
+                "buffer_user=0x%x buffer_kernel=0x%x buffer_phys=0x%x size=%i\n",
                 (int) request->request_id,
                 (int) request->operation,
                 (int) request->block,
                 (int) request->block_count,
                 request->io_context,
-                (int) request->continuation.present
+                (int) request->continuation.present,
+                (unsigned int) request->buffer.virtual_addr,
+                (unsigned int) request->buffer.kernel_addr.virtual_addr,
+                (unsigned int) request->buffer.kernel_addr.phys_addr,
+                (int) buffer_size
             );
 
             ServiceEvent event;
@@ -262,7 +314,7 @@ static Result(BlockCount) UserspaceBlockDevice__create_request(
             event.source = request->request_id;
             event.data = 0;
 
-            ResultMatch(ServiceCode, Scheduler__service_enqueue(self->scheduler, self->service_process, event))
+            ResultMatch(ServiceCode, UserspaceBlockDevice__deliver_service_event(self, event))
                 IsError(code, message, return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR))
             End
 
@@ -398,14 +450,26 @@ Result(Anything) BlockDevice__read_async(
                 IsError(code, message, return Error(Anything, registry_full, BLOCK_DEVICE_REGISTRY_FULL))
             End
 
+            __d_printf(
+                IODEV,
+                "block async request create id=%i block=%i count=%i buffer_user=0x%x "
+                "buffer_kernel=0x%x buffer_phys=0x%x size=%i io_context=%p\n",
+                (int) request->request_id,
+                (int) request->block,
+                (int) request->block_count,
+                (unsigned int) request->buffer.virtual_addr,
+                (unsigned int) request->buffer.kernel_addr.virtual_addr,
+                (unsigned int) request->buffer.kernel_addr.phys_addr,
+                (int) context->buffer_size,
+                request->io_context
+            );
+
             ServiceEvent event;
             event.type = SERVICE_EVENT_BLOCK_IO;
             event.source = request->request_id;
             event.data = 0;
 
-            ResultMatch(ServiceCode, Scheduler__service_enqueue(
-                userspace_device->scheduler, userspace_device->service_process, event
-            ))
+            ResultMatch(ServiceCode, UserspaceBlockDevice__deliver_service_event(userspace_device, event))
                 IsError(code, message, return Error(Anything, message, BLOCK_DEVICE_IO_ERROR))
             End
 
@@ -479,10 +543,10 @@ void BlockDevice__clear_current_context()
 }
 
 Result(BlockDeviceCode) BlockDeviceRegistry__register(
-    KString path, ProcessPtr service_process, BlockCount block_count, SchedulerPtr scheduler
+    KString path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
 )
 {
-    if (path.len == 0 || service_process == NULL || scheduler == NULL)
+    if (path.len == 0 || service_process == NULL || message_broker == NULL)
     {
         return Error(BlockDeviceCode, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
@@ -495,9 +559,10 @@ Result(BlockDeviceCode) BlockDeviceRegistry__register(
 
     UserspaceBlockDevicePtr device = ptr(Kernel__alloc_kernel(sizeof(UserspaceBlockDevice)), UserspaceBlockDevice);
     *device = (UserspaceBlockDevice) {
+        .alias = KString__sprintf(&hd_alias_format, (int) next_device_id++),
         .path = path,
         .service_process = service_process,
-        .scheduler = scheduler,
+        .message_broker = message_broker,
         .block_count = block_count,
     };
     device->block_device = BlockDevice__new(device, UserspaceBlockDevice__read, UserspaceBlockDevice__write);
@@ -531,6 +596,7 @@ Result(ServiceCode) BlockDeviceService__get_request(
             }
 
             target->request_id = request->request_id;
+            UserspaceBlockDevice__copy_path(target->device_path, request->device->path);
             target->operation = request->operation;
             target->block = request->block;
             target->block_count = request->block_count;
@@ -595,9 +661,10 @@ Result(ServiceCode) BlockDeviceService__complete(
             Match(ProcessID, request->waiting_pid)
                 IsSome(pid,
                 {
-                    ResultMatch(ProcessID, Scheduler__unpark_by_pid(
-                        request->device->scheduler, pid, PARK_WAIT_IO, None(ReturnCode)
-                    ))
+                    MessagePtr message = Message__heap_new_io_operation(
+                        SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid, request->request_id
+                    );
+                    ResultMatch(AckCode, MessageBroker__deliver(request->device->message_broker, message))
                         IsError(code, message, {})
                     End
                 })
@@ -631,4 +698,42 @@ BlockDevicePaths BlockDeviceRegistry__paths()
     End
 
     return paths;
+}
+
+BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
+{
+    BlockDeviceRegistry__init();
+
+    BlockDeviceMetadataEntries entries = EmptyArray(BlockDeviceMetadataEntries);
+    MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
+        BlockDeviceMetadataEntries__push(&entries, ((BlockDeviceMetadata) {
+            .alias = device->alias,
+            .path = device->path,
+            .block_size = device->block_device.block_size,
+            .block_count = device->block_count,
+            .userspace_service = device->block_device.userspace_service,
+        }));
+    End
+
+    return entries;
+}
+
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(KString alias)
+{
+    BlockDeviceRegistry__init();
+
+    MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
+        if (KString__equals(&device->alias, &alias))
+        {
+            return Some(BlockDeviceMetadata, ((BlockDeviceMetadata) {
+                .alias = device->alias,
+                .path = device->path,
+                .block_size = device->block_device.block_size,
+                .block_count = device->block_count,
+                .userspace_service = device->block_device.userspace_service,
+            }));
+        }
+    End
+
+    return None(BlockDeviceMetadata);
 }

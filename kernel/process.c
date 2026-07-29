@@ -17,7 +17,7 @@ FixedArrayBodyDefine(ProcessTable);
 FixedArrayBodyDefine(ProcessArguments);
 LinkedListBodyDefine(UserAllocations);
 LinkedListBodyDefine(ProcessFileDescriptors);
-LinkedListBodyDefine(ParkedKernelContexts);
+LinkedListBodyDefine(ParkedOperations);
 
 static ProcessID pid_counter = 0;
 static mutex_t pid_lock = MUTEX_INIT;
@@ -154,7 +154,7 @@ Result(ProcessPtr) Process__new(
     proc->stack = stack;
     proc->last_tick = 0;
     proc->name = name;
-    proc->parked_contexts = ParkedKernelContexts__new();
+    proc->parked_operations = ParkedOperations__new();
     proc->parent = parent;
     proc->heap_break = USER_HEAP_BASE;
     proc->heap_mapped_end = USER_HEAP_BASE;
@@ -200,24 +200,42 @@ Result(ProcessPtr) Process__new(
     return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG);
 }
 
-Result(CollectionCode) Process__push_parked_context(ProcessPtr self, ParkedKernelContextPtr context)
+Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation)
 {
-    return ParkedKernelContexts__push(&self->parked_contexts, context);
+    return ParkedOperations__push(&self->parked_operations, operation);
 }
 
-Optional(ParkedKernelContextPtr) Process__top_parked_context(ProcessPtr self)
+Optional(ParkedOperationPtr) Process__top_parked_operation(ProcessPtr self)
 {
-    return ParkedKernelContexts__at(&self->parked_contexts, -1);
+    return ParkedOperations__at(&self->parked_operations, -1);
 }
 
-Optional(ParkedKernelContextPtr) Process__pop_parked_context(ProcessPtr self)
+Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self)
 {
-    return ParkedKernelContexts__remove_at(&self->parked_contexts, -1);
+    return ParkedOperations__remove_at(&self->parked_operations, -1);
+}
+
+Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self)
+{
+    for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+    {
+        Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index))
+            IsSome(parked_operation,
+            {
+                if (ParkedOperation__is_ready(parked_operation))
+                {
+                    return ParkedOperations__remove_at(&self->parked_operations, index);
+                }
+            })
+        End
+    }
+
+    return None(ParkedOperationPtr);
 }
 
 bool Process__is_parked(ProcessPtr self)
 {
-    return ParkedKernelContexts__len(&self->parked_contexts) > 0;
+    return ParkedOperations__len(&self->parked_operations) > 0;
 }
 
 bool Process__is_handling_service_irq(ProcessPtr self)

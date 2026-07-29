@@ -2,9 +2,9 @@
 
 static KString missing_return_code = KSTRING_NEW("Missing return code");
 
-Result(Anything) SystemCall__Complete(ParkedKernelContextPtr parked_kernel_context)
+Result(Anything) SystemCall__Complete(ParkedOperationPtr parked_operation)
 {
-    Match(ReturnCode, parked_kernel_context->return_code)
+    Match(ReturnCode, parked_operation->return_code)
         IsSome(code, return Success(Anything, code);)
     End
 

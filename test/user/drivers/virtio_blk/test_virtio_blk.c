@@ -60,6 +60,7 @@ typedef struct FakeVirtioSlot
     uint32_t queue_notify;
     uint32_t interrupt_status;
     uint32_t interrupt_ack;
+    uint64_t capacity;
     uint32_t status_writes[5];
     uint64_t status_write_count;
 } FakeVirtioSlot, * FakeVirtioSlotPtr;
@@ -69,14 +70,17 @@ static uint8_t fake_virtio_region[TEST_VIRTIO_REGION_SIZE];
 static ServiceMappedMemory fake_virtio_mapping;
 static uint64_t fake_map_count;
 static uint64_t fake_service_wait_count;
-static uint64_t fake_expected_irq;
+static uint64_t fake_expected_irqs[TEST_VIRTIO_SLOT_COUNT];
+static uint64_t fake_expected_irq_count;
+static uint64_t fake_registered_paths_count;
+static char fake_registered_paths[TEST_VIRTIO_SLOT_COUNT][SERVICE_DEVICE_PATH_MAX];
+static uint64_t fake_registered_block_counts[TEST_VIRTIO_SLOT_COUNT];
 static bool fake_became_service;
 static bool fake_irq_subscribed;
 static bool fake_block_registered;
 static bool fake_logged;
 static const char * fake_log_tag;
 static bool fake_block_request_mode;
-static bool fake_out_of_order_mode;
 static bool fake_block_request_fetched;
 static bool fake_block_completed;
 static uint8_t fake_request_buffer[512];
@@ -85,8 +89,6 @@ static ServiceBlockRequest fake_block_request;
 static ServiceBlockRequest fake_second_block_request;
 static ServiceCode fake_completion_status;
 static uint64_t fake_completion_blocks;
-static uint64_t fake_completion_request_ids[4];
-static uint64_t fake_completion_count;
 static uint32_t fake_submitted_type;
 static uint64_t fake_submitted_sector;
 static bool fake_active_device_ready;
@@ -147,6 +149,14 @@ static uint32_t fake_virtio_read32(void * base, uint64_t offset)
     if (offset == VIRTIO_MMIO_INTERRUPT_STAT)
     {
         return slot->interrupt_status;
+    }
+    if (offset == VIRTIO_MMIO_CONFIG)
+    {
+        return (uint32_t) (slot->capacity & 0xffffffffU);
+    }
+    if (offset == VIRTIO_MMIO_CONFIG + 4)
+    {
+        return (uint32_t) (slot->capacity >> 32);
     }
 
     TEST_FAIL_MESSAGE("unexpected virtio read offset");
@@ -214,6 +224,7 @@ void setUp(void)
             .queue_num_max = 8,
             .interrupt_status = 3,
             .interrupt_ack = 0,
+            .capacity = 1024,
             .status_write_count = 0
         };
         for (uint64_t i = 0; i < 5; i++)
@@ -230,24 +241,29 @@ void setUp(void)
 
     fake_map_count = 0;
     fake_service_wait_count = 0;
-    fake_expected_irq = VIRTIO_MMIO_FIRST_IRQ_ID;
+    fake_expected_irqs[0] = VIRTIO_MMIO_FIRST_IRQ_ID;
+    fake_expected_irq_count = 1;
+    fake_registered_paths_count = 0;
+    for (uint64_t i = 0; i < TEST_VIRTIO_SLOT_COUNT; i++)
+    {
+        fake_registered_block_counts[i] = 0;
+    }
     fake_became_service = false;
     fake_irq_subscribed = false;
     fake_block_registered = false;
     fake_logged = false;
     fake_log_tag = 0;
     fake_block_request_mode = false;
-    fake_out_of_order_mode = false;
     fake_block_request_fetched = false;
     fake_block_completed = false;
     fake_completion_status = SERVICE_ABORT;
     fake_completion_blocks = 0;
-    fake_completion_count = 0;
     fake_submitted_type = 0xffffffffU;
     fake_submitted_sector = 0xffffffffffffffffULL;
     fake_active_device_ready = false;
     fake_block_request = (ServiceBlockRequest) {
         .request_id = 40,
+        .device_path = "/dev/virtio1",
         .operation = SERVICE_BLOCK_READ,
         .block = 3,
         .block_count = 1,
@@ -257,6 +273,7 @@ void setUp(void)
     };
     fake_second_block_request = (ServiceBlockRequest) {
         .request_id = 41,
+        .device_path = "/dev/virtio1",
         .operation = SERVICE_BLOCK_READ,
         .block = 4,
         .block_count = 1,
@@ -268,10 +285,6 @@ void setUp(void)
     {
         fake_request_buffer[i] = 0;
         fake_second_request_buffer[i] = 0;
-    }
-    for (uint64_t i = 0; i < 4; i++)
-    {
-        fake_completion_request_ids[i] = 0;
     }
 }
 
@@ -335,41 +348,38 @@ uint64_t mapped_size(ServiceMappedMemoryPtr memory)
 
 ServiceCode service_subscribe_irq(uint64_t irq)
 {
-    TEST_ASSERT_EQUAL_UINT64(fake_expected_irq, irq);
+    bool matched = false;
+    for (uint64_t i = 0; i < fake_expected_irq_count; i++)
+    {
+        if (fake_expected_irqs[i] == irq)
+        {
+            matched = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(matched);
     fake_irq_subscribed = true;
     return SERVICE_OK;
 }
 
 ServiceCode service_register_block_device(const char * path, uint64_t block_size, uint64_t block_count)
 {
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio1", path);
     TEST_ASSERT_EQUAL_UINT64(512, block_size);
-    TEST_ASSERT_EQUAL_UINT64(0, block_count);
+    TEST_ASSERT_LESS_THAN_UINT64(TEST_VIRTIO_SLOT_COUNT, fake_registered_paths_count);
+    uint64_t i = 0;
+    for (; i < SERVICE_DEVICE_PATH_MAX - 1 && path[i] != '\0'; i++)
+    {
+        fake_registered_paths[fake_registered_paths_count][i] = path[i];
+    }
+    fake_registered_paths[fake_registered_paths_count][i] = '\0';
+    fake_registered_block_counts[fake_registered_paths_count] = block_count;
+    fake_registered_paths_count++;
     fake_block_registered = true;
     return SERVICE_OK;
 }
 
 ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPtr request)
 {
-    if (fake_out_of_order_mode)
-    {
-        if (request_id == fake_block_request.request_id)
-        {
-            *request = fake_block_request;
-            fake_block_request_fetched = true;
-            return SERVICE_OK;
-        }
-        if (request_id == fake_second_block_request.request_id)
-        {
-            *request = fake_second_block_request;
-            fake_block_request_fetched = true;
-            return SERVICE_OK;
-        }
-
-        TEST_FAIL_MESSAGE("unexpected out-of-order block request id");
-        return SERVICE_BLOCK_REQUEST_NOT_FOUND;
-    }
-
     if (!fake_block_request_mode)
     {
         TEST_FAIL_MESSAGE("virtio block request handling is not exercised by this test");
@@ -384,16 +394,6 @@ ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPt
 
 ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint64_t block_count)
 {
-    if (fake_out_of_order_mode)
-    {
-        TEST_ASSERT_LESS_THAN_UINT64(4, fake_completion_count);
-        fake_completion_request_ids[fake_completion_count++] = request_id;
-        fake_block_completed = true;
-        fake_completion_status = status;
-        fake_completion_blocks = block_count;
-        return SERVICE_OK;
-    }
-
     if (!fake_block_request_mode)
     {
         TEST_FAIL_MESSAGE("virtio block request completion is not exercised by this test");
@@ -418,54 +418,6 @@ ServiceCode service_device_address(void * driver_address, uint64_t * device_addr
 ServiceCode service_wait(ServiceEventPtr event)
 {
     fake_service_wait_count++;
-    if (fake_out_of_order_mode)
-    {
-        if (fake_service_wait_count == 1)
-        {
-            event->type = SERVICE_EVENT_BLOCK_IO;
-            event->source = fake_block_request.request_id;
-            event->data = 0;
-            return SERVICE_OK;
-        }
-        if (fake_service_wait_count == 2)
-        {
-            event->type = SERVICE_EVENT_BLOCK_IO;
-            event->source = fake_second_block_request.request_id;
-            event->data = 0;
-            return SERVICE_OK;
-        }
-        if (fake_service_wait_count == 3)
-        {
-            TEST_ASSERT_TRUE(fake_active_device_ready);
-            fake_active_device->in_flight[1].status = 0;
-            VirtioBlk__used()->ring[VirtioBlk__used()->idx % VIRTIO_BLK_QUEUE_SIZE] = (VirtqUsedElem) {
-                .id = 3,
-                .len = 512,
-            };
-            VirtioBlk__used()->idx++;
-            event->type = SERVICE_EVENT_IRQ;
-            event->source = fake_expected_irq;
-            event->data = 0;
-            return SERVICE_OK;
-        }
-        if (fake_service_wait_count == 4)
-        {
-            TEST_ASSERT_TRUE(fake_active_device_ready);
-            fake_active_device->in_flight[0].status = 0;
-            VirtioBlk__used()->ring[VirtioBlk__used()->idx % VIRTIO_BLK_QUEUE_SIZE] = (VirtqUsedElem) {
-                .id = 0,
-                .len = 512,
-            };
-            VirtioBlk__used()->idx++;
-            event->type = SERVICE_EVENT_IRQ;
-            event->source = fake_expected_irq;
-            event->data = 0;
-            return SERVICE_OK;
-        }
-
-        return SERVICE_COMPLETE;
-    }
-
     if (fake_block_request_mode)
     {
         if (fake_service_wait_count == 1)
@@ -478,16 +430,16 @@ ServiceCode service_wait(ServiceEventPtr event)
         if (fake_service_wait_count == 2)
         {
             TEST_ASSERT_TRUE(fake_active_device_ready);
-            fake_submitted_type = fake_active_device->in_flight[0].header.type;
-            fake_submitted_sector = fake_active_device->in_flight[0].header.sector;
-            fake_active_device->in_flight[0].status = 0;
-            VirtioBlk__used()->ring[VirtioBlk__used()->idx % VIRTIO_BLK_QUEUE_SIZE] = (VirtqUsedElem) {
+            fake_submitted_type = virtio_blk_header.type;
+            fake_submitted_sector = virtio_blk_header.sector;
+            virtio_blk_status = 0;
+            VirtioBlk__used(fake_active_device)->ring[VirtioBlk__used(fake_active_device)->idx % VIRTIO_BLK_QUEUE_SIZE] = (VirtqUsedElem) {
                 .id = 0,
                 .len = 512,
             };
-            VirtioBlk__used()->idx++;
+            VirtioBlk__used(fake_active_device)->idx++;
             event->type = SERVICE_EVENT_IRQ;
-            event->source = fake_expected_irq;
+            event->source = fake_expected_irqs[0];
             event->data = 0;
             return SERVICE_OK;
         }
@@ -498,7 +450,7 @@ ServiceCode service_wait(ServiceEventPtr event)
     if (fake_service_wait_count == 1)
     {
         event->type = SERVICE_EVENT_IRQ;
-        event->source = fake_expected_irq;
+        event->source = fake_expected_irqs[0];
         event->data = 0;
         return SERVICE_OK;
     }
@@ -508,11 +460,15 @@ ServiceCode service_wait(ServiceEventPtr event)
 
 void test_virtio_blk_main_maps_first_mmio_slot_and_acknowledges_irq(void)
 {
-    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test());
+    char * argv[] = { "virtio_blk", "0", "/dev/virtio1" };
+    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test(3, argv));
 
     TEST_ASSERT_TRUE(fake_became_service);
     TEST_ASSERT_TRUE(fake_block_registered);
     TEST_ASSERT_TRUE(fake_irq_subscribed);
+    TEST_ASSERT_EQUAL_UINT64(1, fake_registered_paths_count);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_registered_paths[0]);
+    TEST_ASSERT_EQUAL_UINT64(1024, fake_registered_block_counts[0]);
     TEST_ASSERT_EQUAL_UINT64(1, fake_map_count);
     TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);
     TEST_ASSERT_EQUAL_UINT64(4, fake_slots[0].status_write_count);
@@ -530,17 +486,19 @@ void test_virtio_blk_main_maps_first_mmio_slot_and_acknowledges_irq(void)
 
 void test_virtio_blk_main_scans_to_second_mmio_slot_and_uses_matching_irq(void)
 {
-    fake_slots[0].device_id = 0;
     fake_slots[1].device_id = VIRTIO_DEVICE_ID_BLOCK;
-    fake_expected_irq = VIRTIO_MMIO_FIRST_IRQ_ID + 1;
+    fake_expected_irqs[0] = VIRTIO_MMIO_FIRST_IRQ_ID + 1;
 
-    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test());
+    char * argv[] = { "virtio_blk", "1", "/dev/virtio2" };
+    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test(3, argv));
 
     TEST_ASSERT_TRUE(fake_became_service);
     TEST_ASSERT_TRUE(fake_block_registered);
     TEST_ASSERT_TRUE(fake_irq_subscribed);
+    TEST_ASSERT_EQUAL_UINT64(1, fake_registered_paths_count);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio2", fake_registered_paths[0]);
+    TEST_ASSERT_EQUAL_UINT64(1024, fake_registered_block_counts[0]);
     TEST_ASSERT_EQUAL_UINT64(1, fake_map_count);
-    TEST_ASSERT_EQUAL_UINT64(0, fake_slots[0].status_write_count);
     TEST_ASSERT_EQUAL_UINT64(4, fake_slots[1].status_write_count);
     TEST_ASSERT_EQUAL_UINT32(0, fake_slots[1].status_writes[0]);
     TEST_ASSERT_EQUAL_UINT32(1, fake_slots[1].status_writes[1]);
@@ -553,7 +511,8 @@ void test_virtio_blk_main_exits_when_no_mmio_slot_is_block_device(void)
 {
     fake_slots[0].device_id = 0;
 
-    TEST_ASSERT_EQUAL_INT(1, virtio_blk_main_under_test());
+    char * argv[] = { "virtio_blk", "0", "/dev/virtio1" };
+    TEST_ASSERT_EQUAL_INT(1, virtio_blk_main_under_test(3, argv));
 
     TEST_ASSERT_TRUE(fake_became_service);
     TEST_ASSERT_FALSE(fake_irq_subscribed);
@@ -565,11 +524,31 @@ void test_virtio_blk_main_exits_when_no_mmio_slot_is_block_device(void)
     TEST_ASSERT_EQUAL_UINT64(0, fake_slots[0].status_write_count);
 }
 
+void test_virtio_blk_main_limits_runtime_to_first_discovered_block_device(void)
+{
+    fake_slots[1].device_id = VIRTIO_DEVICE_ID_BLOCK;
+    fake_slots[1].capacity = 2048;
+    fake_expected_irqs[0] = VIRTIO_MMIO_FIRST_IRQ_ID;
+    fake_expected_irq_count = 1;
+    char * argv[] = { "virtio_blk", "0", "/dev/virtio1" };
+
+    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test(3, argv));
+
+    TEST_ASSERT_TRUE(fake_block_registered);
+    TEST_ASSERT_TRUE(fake_irq_subscribed);
+    TEST_ASSERT_EQUAL_UINT64(1, fake_registered_paths_count);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_registered_paths[0]);
+    TEST_ASSERT_EQUAL_UINT64(1024, fake_registered_block_counts[0]);
+    TEST_ASSERT_EQUAL_UINT64(4, fake_slots[0].status_write_count);
+    TEST_ASSERT_EQUAL_UINT64(0, fake_slots[1].status_write_count);
+}
+
 void test_virtio_blk_main_completes_block_read_request_through_queue(void)
 {
     fake_block_request_mode = true;
+    char * argv[] = { "virtio_blk", "0", "/dev/virtio1" };
 
-    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test());
+    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test(3, argv));
 
     TEST_ASSERT_TRUE(fake_block_request_fetched);
     TEST_ASSERT_TRUE(fake_block_completed);
@@ -577,7 +556,7 @@ void test_virtio_blk_main_completes_block_read_request_through_queue(void)
     TEST_ASSERT_EQUAL_UINT64(1, fake_completion_blocks);
     TEST_ASSERT_EQUAL_UINT32(0, fake_slots[0].queue_notify);
 
-    VirtqDesc * descs = VirtioBlk__descs();
+    VirtqDesc * descs = VirtioBlk__descs(fake_active_device);
     TEST_ASSERT_EQUAL_UINT32(sizeof(VirtioBlkOuthdr), descs[0].len);
     TEST_ASSERT_EQUAL_UINT16(1, descs[0].flags);
     TEST_ASSERT_EQUAL_UINT16(1, descs[0].next);
@@ -589,8 +568,8 @@ void test_virtio_blk_main_completes_block_read_request_through_queue(void)
 
     TEST_ASSERT_EQUAL_UINT32(0, fake_submitted_type);
     TEST_ASSERT_EQUAL_UINT64(3, fake_submitted_sector);
-    TEST_ASSERT_EQUAL_UINT16(1, VirtioBlk__avail()->idx);
-    TEST_ASSERT_EQUAL_UINT16(0, VirtioBlk__avail()->ring[0]);
+    TEST_ASSERT_EQUAL_UINT16(1, VirtioBlk__avail(fake_active_device)->idx);
+    TEST_ASSERT_EQUAL_UINT16(0, VirtioBlk__avail(fake_active_device)->ring[0]);
 }
 
 void test_virtio_blk_main_completes_block_write_request_through_queue(void)
@@ -598,15 +577,16 @@ void test_virtio_blk_main_completes_block_write_request_through_queue(void)
     fake_block_request_mode = true;
     fake_block_request.operation = SERVICE_BLOCK_WRITE;
     fake_block_request.block = 4;
+    char * argv[] = { "virtio_blk", "0", "/dev/virtio1" };
 
-    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test());
+    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test(3, argv));
 
     TEST_ASSERT_TRUE(fake_block_request_fetched);
     TEST_ASSERT_TRUE(fake_block_completed);
     TEST_ASSERT_EQUAL(SERVICE_OK, fake_completion_status);
     TEST_ASSERT_EQUAL_UINT64(1, fake_completion_blocks);
 
-    VirtqDesc * descs = VirtioBlk__descs();
+    VirtqDesc * descs = VirtioBlk__descs(fake_active_device);
     TEST_ASSERT_EQUAL_UINT32(512, descs[1].len);
     TEST_ASSERT_EQUAL_UINT16(1, descs[1].flags);
     TEST_ASSERT_EQUAL_UINT16(2, descs[1].next);
@@ -616,16 +596,21 @@ void test_virtio_blk_main_completes_block_write_request_through_queue(void)
 
 void test_virtio_blk_main_delivers_out_of_order_used_entries_in_request_order(void)
 {
-    fake_out_of_order_mode = true;
+    fake_block_request_mode = true;
+    const char * path = "/dev/virtio2";
+    uint64_t i = 0;
+    for (; path[i] != '\0' && i < SERVICE_DEVICE_PATH_MAX - 1; i++)
+    {
+        fake_block_request.device_path[i] = path[i];
+    }
+    fake_block_request.device_path[i] = '\0';
+    char * argv[] = { "virtio_blk", "0", "/dev/virtio1" };
 
-    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test());
+    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test(3, argv));
 
     TEST_ASSERT_TRUE(fake_block_request_fetched);
     TEST_ASSERT_TRUE(fake_block_completed);
-    TEST_ASSERT_EQUAL_UINT64(2, fake_completion_count);
-    TEST_ASSERT_EQUAL_UINT64(40, fake_completion_request_ids[0]);
-    TEST_ASSERT_EQUAL_UINT64(41, fake_completion_request_ids[1]);
-    TEST_ASSERT_EQUAL_UINT16(2, VirtioBlk__avail()->idx);
-    TEST_ASSERT_EQUAL_UINT16(0, VirtioBlk__avail()->ring[0]);
-    TEST_ASSERT_EQUAL_UINT16(3, VirtioBlk__avail()->ring[1]);
+    TEST_ASSERT_EQUAL(SERVICE_BLOCK_REQUEST_FAILED, fake_completion_status);
+    TEST_ASSERT_EQUAL_UINT64(0, fake_completion_blocks);
+    TEST_ASSERT_EQUAL_UINT16(0, VirtioBlk__avail(fake_active_device)->idx);
 }

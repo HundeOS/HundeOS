@@ -1,5 +1,6 @@
 #ifndef __KERNEL_SUBSYSTEMS_MESSAGE_BROKER_H
 #define __KERNEL_SUBSYSTEMS_MESSAGE_BROKER_H
+#include <stdbool.h>
 #include <stdint.h>
 #include "../../types/fixed_array.h"
 #include "../../types/optional.h"
@@ -8,6 +9,8 @@
 #include "../../mutex.h"
 #include "../../process.h"
 #include "../../scheduler/types.h"
+#include "../../service/service.h"
+#include "io_operation_message.h"
 
 
 typedef struct Kernel Kernel;
@@ -88,6 +91,8 @@ typedef struct Deferred
     Anything anything;
     Continuation continuation;
     KernelContextPtr context;
+    bool owns_context;
+    Optional(OperationKey) operation_key;
 } Deferred;
 
 
@@ -97,7 +102,10 @@ typedef struct Payload
     union
     {
         Anything anything;
+        ProcessID process_id;
         Deferred deferred;
+        IOOperationMessage io_operation;
+        ServiceEventDelivery service_event_delivery;
         PayloadData data[MAX_PAYLOAD_SIZE];
     };
 }
@@ -113,6 +121,8 @@ typedef struct Message
     Optional(Payload) payload;
 }
 Message;
+
+OptionalDef(Message);
 
 typedef Message * MessagePtr;
 
@@ -132,11 +142,35 @@ MessageBrokerPtr MessageBroker__heap_new();
 
 Result(ListenerRegisterResult) MessageBroker__register_listener(MessageBrokerPtr self, Listener listener);
 Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message);
+void Message__dispose(MessagePtr self);
 
 Message Message__new_anything(Source source, SourceCode source_code, Anything anything);
 MessagePtr Message__heap_new_anything(Source source, SourceCode source_code, Anything anything);
+Message Message__new_process_id(Source source, SourceCode source_code, ProcessID process_id);
+MessagePtr Message__heap_new_process_id(Source source, SourceCode source_code, ProcessID process_id);
+Message Message__new_io_operation(
+    Source source, SourceCode source_code, ProcessID pid, OperationKey operation_key
+);
+MessagePtr Message__heap_new_io_operation(
+    Source source, SourceCode source_code, ProcessID pid, OperationKey operation_key
+);
+Message Message__new_service_event_delivery(
+    Source source, SourceCode source_code, ProcessPtr process, ServiceEvent event
+);
+MessagePtr Message__heap_new_service_event_delivery(
+    Source source, SourceCode source_code, ProcessPtr process, ServiceEvent event
+);
 MessagePtr Message__heap_new_deferred(
     Source source, SourceCode source_code, Anything anything, KernelContextPtr context, Continuation continuation
+);
+MessagePtr Message__heap_new_deferred_with_context_ownership(
+    Source source, SourceCode source_code, Anything anything,
+    KernelContextPtr context, Continuation continuation, bool owns_context
+);
+MessagePtr Message__heap_new_deferred_with_context_ownership_and_operation_key(
+    Source source, SourceCode source_code, Anything anything,
+    KernelContextPtr context, Continuation continuation,
+    bool owns_context, Optional(OperationKey) operation_key
 );
 
 #define NEW_BROKER \

@@ -1,7 +1,5 @@
-#include <stdint.h>
 #include "../../sys/syscall.h"
 
-#include <stdint.h>
 
 SystemCallResult syscall(
     SystemCall num, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5

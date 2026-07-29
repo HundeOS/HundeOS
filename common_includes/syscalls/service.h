@@ -71,6 +71,7 @@ ServiceBlockOperation;
 typedef struct ServiceBlockRequest
 {
     uint64_t request_id;
+    char device_path[SERVICE_DEVICE_PATH_MAX];
     ServiceBlockOperation operation;
     uint64_t block;
     uint64_t block_count;

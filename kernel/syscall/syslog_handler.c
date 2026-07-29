@@ -5,7 +5,7 @@
 
 static KString invalid_syslog_message = KSTRING_NEW("Invalid syslog message");
 
-static Result(KString) Syslog__copy_string(Anything string_address, uint64_t max_len)
+static Result(KString) Syslog__copy_string(Anything string_address, StringPos max_len)
 {
     if (string_address == 0)
     {
@@ -19,7 +19,7 @@ static Result(KString) Syslog__copy_string(Anything string_address, uint64_t max
         max_len = message.max - 1;
     }
 
-    uint64_t position = 0;
+    StringPos position = 0;
     while (position < max_len && source[position] != '\0')
     {
         message.data[position] = source[position];

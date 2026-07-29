@@ -15,6 +15,8 @@ typedef BString KString;
 typedef KString * KStringPtr;
 typedef const KString * ConstKStringPtr;
 
+OptionalDef(char);
+
 KString KString__new(const char * str);
 KString kstring(const char * str);
 
@@ -25,6 +27,10 @@ KString KString__join(KStringArrayPtr array, char delimiter);
 
 KStringArray KString__split(ConstKStringPtr self, char delimiter);
 bool KString__starts_with(ConstKStringPtr self, ConstKStringPtr prefix);
+StringPos KString__copy_to(ConstKStringPtr self, char * target, StringPos target_size);
+StringPos KString__length(ConstKStringPtr self);
+Optional(char) KString__char_at(ConstKStringPtr self, StringPos index);
+KString KString__uppercase(ConstKStringPtr self);
 
 const char * KString__cstr(ConstKStringPtr str);
 

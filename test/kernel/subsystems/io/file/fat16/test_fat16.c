@@ -162,6 +162,16 @@ void test_fat16_rejects_names_outside_8_3_format(void)
         IsSuccess(code, TEST_FAIL())
         IsError(code, message, TEST_ASSERT_EQUAL(FAT16_UNSUPPORTED_NAME, code))
     End
+
+    ResultMatch(Fat16Code, Fat16Volume__create_root_file(
+        &volume,
+        kstring("name!.txt"),
+        content,
+        sizeof(content)
+    ))
+        IsSuccess(code, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(FAT16_UNSUPPORTED_NAME, code))
+    End
 }
 
 void test_fat16_rejects_file_larger_than_one_cluster_for_now(void)

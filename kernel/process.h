@@ -20,12 +20,12 @@ OptionalDef(UserAddress);
 typedef struct ProcessContext ProcessContext;
 typedef struct ProcessContext * ProcessContextPtr;
 
-typedef struct ParkedKernelContext ParkedKernelContext;
-typedef ParkedKernelContext * ParkedKernelContextPtr;
+typedef struct ParkedOperation ParkedOperation;
+typedef ParkedOperation * ParkedOperationPtr;
 
-OptionalDef(ParkedKernelContextPtr);
-ResultDef(ParkedKernelContextPtr);
-LinkedListDefine(ParkedKernelContextPtr, ParkedKernelContexts, &Ptr__equals);
+OptionalDef(ParkedOperationPtr);
+ResultDef(ParkedOperationPtr);
+LinkedListDefine(ParkedOperationPtr, ParkedOperations, &Ptr__equals);
 
 typedef uint64_t ProcessID;
 typedef uint64_t ProcessState;
@@ -205,7 +205,7 @@ typedef struct Process {
     ServiceState service;
     Optional(UserAddress) idle_debug_address;
 
-    ParkedKernelContexts parked_contexts;
+    ParkedOperations parked_operations;
 } Process;
 
 Result(ProcessPtr) Process__new(
@@ -223,9 +223,10 @@ OptionalType(ProcessTable *, ProcessTablePtr);
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent);
 Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments);
-Result(CollectionCode) Process__push_parked_context(ProcessPtr self, ParkedKernelContextPtr context);
-Optional(ParkedKernelContextPtr) Process__top_parked_context(ProcessPtr self);
-Optional(ParkedKernelContextPtr) Process__pop_parked_context(ProcessPtr self);
+Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation);
+Optional(ParkedOperationPtr) Process__top_parked_operation(ProcessPtr self);
+Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self);
+Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self);
 bool Process__is_parked(ProcessPtr self);
 bool Process__is_handling_service_irq(ProcessPtr self);
 Result(ProcessMemoryCode) Process__record_user_allocation(

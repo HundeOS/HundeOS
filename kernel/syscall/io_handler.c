@@ -292,6 +292,24 @@ Result(SystemCallResult) IO__handler(
         End
     }
 
+    if (io_operation == IO_LINK)
+    {
+        if (arg2 == 0 || arg3 == 0)
+        {
+            return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
+        }
+
+        KString source_path = kstring((const char *) arg2);
+        KString target_path = kstring((const char *) arg3);
+        BlockDevice__set_current_context(&kernel_context);
+        Result(IOStatus) link_result = IOSubsystem__link(io_subsystem, source_path, target_path);
+        BlockDevice__clear_current_context();
+        ResultMatch(IOStatus, link_result)
+            IsSuccess(status, return Success(SystemCallResult, status));
+            IsError(code, message, return Error(SystemCallResult, message, code));
+        End
+    }
+
     if (io_operation == IO_WRITE)
     {
         FileDescriptor fd = (FileDescriptor) arg2;

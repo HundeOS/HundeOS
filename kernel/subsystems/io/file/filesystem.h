@@ -86,6 +86,7 @@ typedef FileHandleTarget * FileHandleTargetPtr;
 
 OptionalDef(FileHandleTarget);
 OptionalDef(FileHandleTargetPtr);
+ResultDef(FileHandleTargetPtr);
 
 MapDefine(IOInternalHandle, FileHandleTargetPtr, MAX_HANDLES_PER_DEVICE, FileHandleTargetMap, SimpleEquals(uint32_t));
 

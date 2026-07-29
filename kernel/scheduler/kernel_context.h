@@ -8,15 +8,18 @@
 typedef Result(Anything) (* KernelResultMapper)(Result(Anything) result, Anything context);
 OptionalDef(KernelResultMapper);
 
-typedef struct KernelContext
+typedef struct KernelContext KernelContext;
+typedef KernelContext * KernelContextPtr;
+OptionalDef(KernelContextPtr);
+
+struct KernelContext
 {
     Optional(ProcessID) pid;
     Optional(SchedulerPtr) scheduler;
     Optional(KernelResultMapper) result_mapper;
+    Optional(KernelContextPtr) next_context;
     Anything result_mapper_context;
-} KernelContext;
-
-typedef KernelContext * KernelContextPtr;
+};
 
 KernelContext KernelContext__new(
     Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler

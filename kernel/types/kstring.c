@@ -11,8 +11,8 @@ KStringArray KString__split(ConstKStringPtr self, char delimiter)
     KStringArray result = EmptyArray(KStringArray);
     char buffer[MAX_SIZE];
 
-    int64_t start = 0;
-    for (int64_t i = 0; i < self->len; i++)
+    StringPos start = 0;
+    for (StringPos i = 0; i < self->len; i++)
     {
         if (self->data[i] != delimiter)
         {
@@ -56,9 +56,41 @@ KString KString__join(KStringArrayPtr array, char delimiter)
     return result;
 }
 
-int KString__length(ConstKStringPtr self)
+StringPos KString__length(ConstKStringPtr self)
 {
     return self->len;
+}
+
+Optional(char) KString__char_at(ConstKStringPtr self, StringPos index)
+{
+    if (index < 0 || index >= KString__length(self))
+    {
+        return None(char);
+    }
+
+    return Some(char, self->data[index]);
+}
+
+KString KString__uppercase(ConstKStringPtr self)
+{
+    KString result = EMPTY_KSTRING;
+    result.len = KString__length(self);
+
+    for (StringPos i = 0; i < KString__length(self); i++)
+    {
+        char ch = Unwrap(char, KString__char_at(self, i), '\0');
+        if (ch >= 'a' && ch <= 'z')
+        {
+            result.data[i] = (char) (ch - ('a' - 'A'));
+        }
+        else
+        {
+            result.data[i] = ch;
+        }
+    }
+
+    result.data[result.len] = '\0';
+    return result;
 }
 
 const char * KString__cstr(ConstKStringPtr self)
@@ -89,6 +121,11 @@ KString KString__append(ConstKStringPtr self, ConstKStringPtr other)
 bool KString__starts_with(ConstKStringPtr self, ConstKStringPtr prefix)
 {
     return BString__starts_with(self, prefix);
+}
+
+StringPos KString__copy_to(ConstKStringPtr self, char * target, StringPos target_size)
+{
+    return BString__copy_to(self, target, target_size);
 }
 
 KString KString__sprintf(ConstKStringPtr self, ...)

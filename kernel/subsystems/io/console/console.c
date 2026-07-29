@@ -4,7 +4,6 @@
 #include "../../../types/result.h"
 #include "../../../types/kstring.h"
 #include "../../../kalloc.h"
-#include "scheduler/scheduler.h"
 #include "subsystems/io/io_subsystem.h"
 
 FixedArrayBodyDefine(ParkedContexts);
@@ -31,18 +30,21 @@ bool handle_match(IOContextPtr * context_p, void * handle_p)
 static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandle handle)
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
-    IOBuffer__reset(&self->read_buffer);
-    IOBuffer__reset(&self->write_buffer);
 
-    FindResultMatch(ParkedContexts, ParkedContexts__find(&self->parked_contexts, handle_match, &handle))
-        IsSome(found,
-        {
-            ResultMatch(CollectionCode, ParkedContexts__remove(&self->parked_contexts, *found.value))
-                IsError(code, message, __d_println(IODEV, "no parked context found for handle"));
-            End
+    CriticalSection(self->lock,
+    {
+        IOBuffer__reset(&self->read_buffer);
+        IOBuffer__reset(&self->write_buffer);
 
-        })
-    End
+        FindResultMatch(ParkedContexts, ParkedContexts__find(&self->parked_contexts, handle_match, &handle))
+            IsSome(found,
+            {
+                ResultMatch(CollectionCode, ParkedContexts__remove(&self->parked_contexts, *found.value))
+                    IsError(code, message, __d_println(IODEV, "no parked context found for handle"));
+                End
+            })
+        End
+    });
 
     return Success(IOInternalHandle, handle);
 }
@@ -82,15 +84,28 @@ static Result(ParkStatus) Console__park(IOStatePtr state, IOContextPtr parked_co
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
 
-    ParkedContexts__push(&self->parked_contexts, parked_context);
-    __d_println(IODEV, "parked console context\n");
+    CriticalSection(self->lock,
+    {
+        ResultMatch(CollectionCode, ParkedContexts__push(&self->parked_contexts, parked_context))
+            IsError(code, message, _cs_return Error(ParkStatus, message, code))
+        End
+        __d_println(IODEV, "parked console context\n");
+    });
+
     return Success(ParkStatus, IO_PARK_OK);
 }
 
 static Result(ParkStatus) Console__unpark(IOStatePtr state)
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
-    ParkedContexts__pop(&self->parked_contexts);
+
+    CriticalSection(self->lock,
+    {
+        Match(IOContextPtr, ParkedContexts__pop(&self->parked_contexts))
+            IsNone(_cs_return Error(ParkStatus, kstring("No parked console context"), ARRAY_EMPTY))
+        End
+    });
+
     return Success(ParkStatus, IO_UNPARK_OK);
 }
 

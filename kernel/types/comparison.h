@@ -5,7 +5,10 @@
 #include <stdint.h>
 #include "common.h"
 
+#ifndef __COMMON_TYPES_EQUAL_FUNCTION_DEFINED
+#define __COMMON_TYPES_EQUAL_FUNCTION_DEFINED
 typedef bool(* EqualFunction)(void * a, void * b);
+#endif
 
 #define SimpleEquals(T) \
     T##_equals

@@ -139,6 +139,11 @@ Result(IOStatus) EmbeddedFileIO__remove(IOStatePtr self, KString path, Flags fla
     return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
 }
 
+Result(IOStatus) EmbeddedFileIO__link(IOStatePtr self, KString source_path, KString target_path)
+{
+    return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
+}
+
 FileIO EmbeddedFilesystemIO__new()
 {
     FileIO embedded_file_io = (FileIO) {
@@ -153,6 +158,7 @@ FileIO EmbeddedFilesystemIO__new()
         .list_nodes = EmbeddedFileIO__list_nodes,
         .mkdir = EmbeddedFileIO__mkdir,
         .remove = EmbeddedFileIO__remove,
+        .link = EmbeddedFileIO__link,
     };
     return embedded_file_io;
 }

@@ -14,3 +14,4 @@ manifest:
     - test/kernel/stubs/kalloc.c
     - test/kernel/stubs/panic.c
     - test/kernel/isolated_stubs/scheduler.c
+    - test/kernel/isolated_stubs/message_broker.c

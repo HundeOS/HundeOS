@@ -1,155 +1,29 @@
 #include <stdint.h>
 
 #include "unity.h"
-#include <stdint.h>
 
 #include "../../../kernel/types/map.h"
-#include "../../../kernel/types/optional.h"
-#include "../../../kernel/types/result.h"
 #include "../../../kernel/types/comparison.h"
-#include "../../../kernel/types/kstring.h"
-#include "../../../kernel/types/kstring_additional_types.h"
 
-typedef uint64_t TestInt;
-typedef TestInt * TestIntPtr;
+typedef uint64_t TestType;
+typedef uint64_t TestKey;
 
-OptionalDef(TestInt);
-OptionalDef(TestIntPtr);
+OptionalDef(TestType);
+OptionalDef(TestKey);
 
-MapDefine(KString, TestInt, 32, TestMap, kstring_equals);
-MapBodyDefine(TestMap);
-
-MapDefine(KString, TestInt, 1, TinyTestMap, kstring_equals);
+MapDefine(TestKey, TestType, 1, TinyTestMap, SimpleEquals(uint64_t));
 MapBodyDefine(TinyTestMap);
 
-static KString hello = KSTRING_NEW("hello");
-static KString world = KSTRING_NEW("world");
-
-void setUp()
-{
-
-}
-
-void tearDown()
-{
-
-}
-
-void test_map_len_and_key()
-{
-    TestMap map = TestMap__new();
-
-    ResultMatch(CollectionCode, TestMap__set(&map, kstring("hello"), 12));
-        IsError(code, message, TEST_FAIL());
-    End
-    ResultMatch(CollectionCode, TestMap__set(&map, kstring("world"), 12));
-        IsError(code, message, TEST_FAIL());
-    End
-
-    TEST_ASSERT_EQUAL(2, TestMap__len(&map));
-
-    KStringPtr key1 = Unwrap(KStringPtr, TestMap__key(&map, 0), (KStringPtr){});
-    KStringPtr key2 = Unwrap(KStringPtr, TestMap__key(&map, 1), (KStringPtr){});
-    TEST_ASSERT_TRUE(KString__equals(&hello, key1));
-    TEST_ASSERT_TRUE(KString__equals(&world, key2));
-}
-
-void test_map_set_and_get()
-{
-    TestMap map = TestMap__new();
-
-    ResultMatch(CollectionCode, TestMap__set(&map, hello, 12));
-        IsError(code, message, TEST_FAIL());
-    End
-
-    Match(TestInt, TestMap__get(&map, hello));
-        IsNone(TEST_FAIL());
-        IsSome(value, TEST_ASSERT_EQUAL_INT(12, value))
-    End
-}
-
-void test_map_set_and_get_ptr()
-{
-    TestMap map = TestMap__new();
-
-    ResultMatch(CollectionCode, TestMap__set(&map, hello, 12));
-        IsError(code, message, TEST_FAIL());
-    End
-
-    MapPtrMatch(TestMap, TestMap__get_ptr(&map, hello));
-        IsNone(TEST_FAIL());
-        IsSome(value, TEST_ASSERT_EQUAL_INT(12, *value))
-    End
-}
-
-void test_map_set_and_delete()
-{
-    TestMap map = TestMap__new();
-
-    ResultMatch(CollectionCode, TestMap__set(&map, kstring("hello"), 12));
-        IsError(code, message, TEST_FAIL());
-    End
-
-    Match(TestInt, TestMap__get(&map, kstring("hello")));
-        IsNone(TEST_FAIL());
-        IsSome(value, TEST_ASSERT_EQUAL_INT(12, value))
-    End
-
-    ResultMatch(CollectionCode, TestMap__delete(&map, kstring("hello")));
-        IsError(code, message, TEST_FAIL());
-    End
-
-    Match(TestInt, TestMap__get(&map, kstring("hello")));
-        IsSome(value, TEST_FAIL())
-    End
-
-}
-
-void test_map_delete_only_deletes_requested_entry()
-{
-    TestMap map = TestMap__new();
-    KString key1 = kstring("hello");
-    KString key2 = kstring("bye bye");
-    KString key3 = kstring("i'm here");
-
-    TestMap__set(&map, key1, 11);
-    TestMap__set(&map, key2, 12);
-    TestMap__set(&map, key3, 13);
-
-
-    ResultMatch(CollectionCode, TestMap__delete(&map, key2));
-        IsError(code, message, TEST_FAIL());
-    End
-
-    Match(TestInt, TestMap__get(&map, key2));
-        IsSome(value, TEST_FAIL())
-    End
-    Match(TestInt, TestMap__get(&map, key1));
-        IsNone(TEST_FAIL())
-    End
-    Match(TestInt, TestMap__get(&map, key3));
-        IsNone(TEST_FAIL())
-    End
-
-}
-
-void test_map_get_with_non_existent_key()
-{
-    TestMap map = TestMap__new();
-
-    Match(TestInt, TestMap__get(&map, kstring("hello")));
-        IsSome(value, TEST_FAIL())
-    End
-}
-
-void test_map_set_with_full_map()
+void test_kernel_map_wrapper_returns_full_error(void)
 {
     TinyTestMap map = TinyTestMap__new();
 
-    ResultMatch(CollectionCode, TinyTestMap__set(&map, kstring("hello"), 12));
-        IsError(code, message, TEST_FAIL());
+    ResultMatch(CollectionCode, TinyTestMap__set(&map, 1, 11))
+        IsError(code, message, TEST_FAIL())
     End
-    ResultMatch(CollectionCode, TinyTestMap__set(&map, kstring("goodbye"), 12));
-        IsSuccess(val, TEST_FAIL());
+
+    ResultMatch(CollectionCode, TinyTestMap__set(&map, 2, 12))
+        IsSuccess(index, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(MAP_FULL, code))
     End
 }

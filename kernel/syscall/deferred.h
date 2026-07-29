@@ -5,7 +5,7 @@
 #include "../types/types.h"
 #include "../scheduler/parked.h"
 
-Result(Anything) SystemCall__Complete(ParkedKernelContextPtr parked_kernel_context);
+Result(Anything) SystemCall__Complete(ParkedOperationPtr parked_operation);
 
 
 #endif

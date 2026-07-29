@@ -1,7 +1,6 @@
 #include "stream.h"
 
 #include "debug.h"
-#include "scheduler/scheduler.h"
 #include "subsystems/io/io_subsystem.h"
 #include "../../../kalloc.h"
 #include "../../../types/kstring.h"
@@ -42,19 +41,23 @@ static Result(IOInternalHandle) Stream__open(IOStatePtr state, KString path, Fla
 static Result(IOInternalHandle) Stream__close(IOStatePtr state, IOInternalHandle handle)
 {
     StreamStatePtr self = (StreamStatePtr) state;
-    IOBuffer__reset(&self->read_buffer);
-    IOBuffer__reset(&self->write_buffer);
-    self->data_available = false;
-    self->eof = false;
 
-    FindResultMatch(StreamParkedContexts, StreamParkedContexts__find(&self->parked_contexts, Stream__handle_match, &handle))
-        IsSome(found,
-        {
-            ResultMatch(CollectionCode, StreamParkedContexts__remove(&self->parked_contexts, *found.value))
-                IsError(code, message, __d_println(IODEV, "no parked context found for handle"));
-            End
-        })
-    End
+    CriticalSection(self->lock,
+    {
+        IOBuffer__reset(&self->read_buffer);
+        IOBuffer__reset(&self->write_buffer);
+        self->data_available = false;
+        self->eof = false;
+
+        FindResultMatch(StreamParkedContexts, StreamParkedContexts__find(&self->parked_contexts, Stream__handle_match, &handle))
+            IsSome(found,
+            {
+                ResultMatch(CollectionCode, StreamParkedContexts__remove(&self->parked_contexts, *found.value))
+                    IsError(code, message, __d_println(IODEV, "no parked context found for handle"));
+                End
+            })
+        End
+    });
 
     return Success(IOInternalHandle, handle);
 }
@@ -99,15 +102,28 @@ static Result(ParkStatus) Stream__park(IOStatePtr state, IOContextPtr parked_con
 {
     StreamStatePtr self = (StreamStatePtr) state;
 
-    StreamParkedContexts__push(&self->parked_contexts, parked_context);
-    __d_println(IODEV, "parked stream context\n");
+    CriticalSection(self->lock,
+    {
+        ResultMatch(CollectionCode, StreamParkedContexts__push(&self->parked_contexts, parked_context))
+            IsError(code, message, _cs_return Error(ParkStatus, message, code))
+        End
+        __d_println(IODEV, "parked stream context\n");
+    });
+
     return Success(ParkStatus, IO_PARK_OK);
 }
 
 static Result(ParkStatus) Stream__unpark(IOStatePtr state)
 {
     StreamStatePtr self = (StreamStatePtr) state;
-    StreamParkedContexts__pop(&self->parked_contexts);
+
+    CriticalSection(self->lock,
+    {
+        Match(IOContextPtr, StreamParkedContexts__pop(&self->parked_contexts))
+            IsNone(_cs_return Error(ParkStatus, kstring("No parked stream context"), ARRAY_EMPTY))
+        End
+    });
+
     return Success(ParkStatus, IO_UNPARK_OK);
 }
 

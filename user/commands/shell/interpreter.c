@@ -1,244 +1,139 @@
 #include "interpreter.h"
 
-#include <stddef.h>
 #include "../../user.h"
 #include "../../sys/spawn.h"
-#include "../../sys/syslog.h"
 
-#define STRIP_BUFFER_SIZE 2048
-#define COMMAND_PATH_BUFFER_SIZE 2048
-#define COMMAND_ARG_BUFFER_SIZE 2048
-#define COMMAND_MAX_ARGS 3
-#define COMMAND_ARG_STORAGE_SLOTS (COMMAND_MAX_ARGS + 1)
-#define SHELL_DEBUG_PREVIEW_SIZE 96
-static const char * CMD_EXIT = "exit";
-static const char * COMMAND_SEARCH_PATH = "/ebin";
-static char command_buffer[STRIP_BUFFER_SIZE];
-static char argument_buffers[COMMAND_ARG_STORAGE_SLOTS][COMMAND_ARG_BUFFER_SIZE];
+#define SPAWN_ARG_LIMIT 3
 
-static void debug_preview(const char * input, char * target, size_t target_size)
+static const BString CMD_EXIT = BSTRING_NEW("exit");
+static const BString COMMAND_SEARCH_PATH = BSTRING_NEW("/ebin");
+static const BString QUOTE_DELIMITER = BSTRING_NEW("\"");
+static const BString TOKEN_DELIMITERS = BSTRING_NEW(" \t\n\r");
+
+FixedArrayBodyDefine(CommandArguments);
+
+static Command Command__new(void)
 {
-    size_t out = 0;
-    for (size_t in = 0; input[in] != '\0' && out < target_size - 1 && in < SHELL_DEBUG_PREVIEW_SIZE; in++)
+    Command command = {
+        .name = EMPTY_BSTRING,
+        .args = { 0 }
+    };
+    command.args = CommandArguments__new();
+
+    return command;
+}
+
+static BStringSplit Interpreter__parse_token(ConstBStringPtr input)
+{
+    BString remaining = BString__strip(input);
+
+    if (BString__starts_with(&remaining, &QUOTE_DELIMITER))
     {
-        char ch = input[in];
-        if (ch == '\n')
-        {
-            if (out + 2 >= target_size)
+        BString quoted = BString__slice(&remaining, 1, -1);
+        return BString__split_first_any(&quoted, &QUOTE_DELIMITER);
+    }
+
+    return BString__split_first_any(&remaining, &TOKEN_DELIMITERS);
+}
+
+static bool Interpreter__matches(ConstBStringPtr str, ConstBStringPtr cmd)
+{
+    return BString__equals(str, cmd);
+}
+
+static BString Interpreter__command_path(ConstBStringPtr cmd)
+{
+    BString root_prefix = BSTRING_NEW("/");
+
+    if (BString__starts_with(cmd, &root_prefix))
+    {
+        return *cmd;
+    }
+
+    BString prefix = BString__append(&COMMAND_SEARCH_PATH, &root_prefix);
+    return BString__append(&prefix, cmd);
+}
+
+Interpreter Interpreter__new(void)
+{
+    Interpreter interpreter = {
+        .command = { 0 }
+    };
+    interpreter.command = Command__new();
+    return interpreter;
+}
+
+Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
+{
+    self->command = Command__new();
+
+    BString remaining = *input;
+
+    BStringSplit command_split = Interpreter__parse_token(&remaining);
+    Match(BString, command_split.match)
+        IsSome(parsed_command, self->command.name = parsed_command)
+        IsNone(return self->command)
+    End
+
+    remaining = command_split.rest;
+
+    while (CommandArguments__len(&self->command.args) < COMMAND_MAX_ARGS)
+    {
+        BStringSplit arg_split = Interpreter__parse_token(&remaining);
+        Match(BString, arg_split.match)
+            IsSome(argument,
             {
-                break;
-            }
-            target[out++] = '\\';
-            target[out++] = 'n';
-            continue;
-        }
-        if (ch == '\r')
-        {
-            if (out + 2 >= target_size)
-            {
-                break;
-            }
-            target[out++] = '\\';
-            target[out++] = 'r';
-            continue;
-        }
-        if (ch == '\t')
-        {
-            if (out + 2 >= target_size)
-            {
-                break;
-            }
-            target[out++] = '\\';
-            target[out++] = 't';
-            continue;
-        }
-        target[out++] = ch;
+                ResultMatch(CollectionCode, CommandArguments__push(&self->command.args, argument))
+                    IsError(code, message, return self->command)
+                End
+            })
+            IsNone(return self->command)
+        End
+        remaining = arg_split.rest;
     }
-    target[out] = '\0';
+
+    return self->command;
 }
 
-static bool whitespace(const char* input)
+ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
 {
-    return *input == ' ' || *input == '\t' || *input == '\n' || *input == '\r' || *input == '\0';
-}
-
-static void clear_buffer(char* buffer, size_t size)
-{
-    for (size_t i = 0; i < size; i++)
+    if (BString__is_empty(&command->name))
     {
-        buffer[i] = '\0';
-    }
-}
-
-static size_t parse_command(
-    const char* input,
-    char* command,
-    size_t command_size,
-    char args[COMMAND_ARG_STORAGE_SLOTS][COMMAND_ARG_BUFFER_SIZE]
-)
-{
-    clear_buffer(command, command_size);
-    for (size_t i = 0; i < COMMAND_ARG_STORAGE_SLOTS; i++)
-    {
-        clear_buffer(args[i], COMMAND_ARG_BUFFER_SIZE);
+        return COMMAND_SUCCESS;
     }
 
-    while (whitespace(input) && *input != '\0')
+    if (Interpreter__matches(&command->name, &CMD_EXIT))
     {
-        input++;
+        exit(0);
+        return EXIT;
     }
 
-    size_t command_pos = 0;
-    while (!whitespace(input) && command_pos < command_size - 1)
+    if (CommandArguments__len(&command->args) > SPAWN_ARG_LIMIT)
     {
-        command[command_pos++] = *input++;
+        return COMMAND_FAILED;
     }
 
-    while (whitespace(input) && *input != '\0')
-    {
-        input++;
-    }
+    BString path = Interpreter__command_path(&command->name);
+    const char * arg0 = NULL;
+    const char * arg1 = NULL;
+    const char * arg2 = NULL;
 
-    size_t arg_count = 0;
-    while (*input != '\0' && arg_count < COMMAND_MAX_ARGS)
-    {
-        while (whitespace(input) && *input != '\0')
-        {
-            input++;
-        }
+    FAPtrMatch(CommandArguments, CommandArguments__ptr_at(&command->args, 0))
+        IsSome(value, arg0 = BString__cstr(value))
+    End
+    FAPtrMatch(CommandArguments, CommandArguments__ptr_at(&command->args, 1))
+        IsSome(value, arg1 = BString__cstr(value))
+    End
+    FAPtrMatch(CommandArguments, CommandArguments__ptr_at(&command->args, 2))
+        IsSome(value, arg2 = BString__cstr(value))
+    End
+    SpawnResult result = spawn(P_WAIT, BString__cstr(&path), arg0, arg1, arg2);
 
-        if (*input == '\0')
-        {
-            break;
-        }
-
-        size_t arg_pos = 0;
-        while (!whitespace(input) && arg_pos < COMMAND_ARG_BUFFER_SIZE - 1)
-        {
-            args[arg_count][arg_pos++] = *input++;
-        }
-
-        arg_count++;
-
-        while (!whitespace(input) && *input != '\0')
-        {
-            input++;
-        }
-    }
-
-    return arg_count;
-}
-
-static size_t strlen(const char* str)
-{
-    size_t len = 0;
-    while (str[len] != '\0') len++;
-    return len;
-}
-
-static bool matches(const char* str, const char* cmd)
-{
-    if (strlen(str) != strlen(cmd))
-    {
-        return false;
-    }
-    for (size_t i = 0; i < strlen(cmd); i++)
-    {
-        if (str[i] != cmd[i])
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-static void command_path(const char* cmd, char* path, size_t path_size)
-{
-    for (size_t i = 0; i < path_size; i++)
-    {
-        path[i] = '\0';
-    }
-
-    if (cmd[0] == '/')
-    {
-        for (size_t i = 0; cmd[i] != '\0' && i < path_size - 1; i++)
-        {
-            path[i] = cmd[i];
-        }
-        return;
-    }
-
-    size_t position = 0;
-    for (size_t i = 0; COMMAND_SEARCH_PATH[i] != '\0' && position < path_size - 1; i++)
-    {
-        path[position++] = COMMAND_SEARCH_PATH[i];
-    }
-
-    if (position < path_size - 1)
-    {
-        path[position++] = '/';
-    }
-
-    for (size_t i = 0; cmd[i] != '\0' && position < path_size - 1; i++)
-    {
-        path[position++] = cmd[i];
-    }
-}
-
-ShellResult execute(const char* cmd)
-{
-    char path[COMMAND_PATH_BUFFER_SIZE];
-    command_path(cmd, path, COMMAND_PATH_BUFFER_SIZE);
-
-    // print("Executing:\n");
-    kernel_syslog_tagf("SHELL", "execute cmd=%s path=%s", cmd, path);
-    SpawnResult result = spawn(P_WAIT, path, NULL, NULL, NULL);
-    kernel_syslog_tagf("SHELL", "execute spawn result=%i", result);
     if (result != SPAWN_SUCCESS)
     {
-        printf("result = %i\n", result);
+        printf("result = %i\n", (int) result);
     }
 
-    switch (result)
-    {
-        case SPAWN_SUCCESS:
-            return COMMAND_SUCCESS;
-        case SPAWN_NO_MEM:
-        case SPAWN_NO_FILE:
-        case SPAWN_NO_PATH:
-        case SPAWN_FAILED:
-            return COMMAND_FAILED;
-    }
-    return COMMAND_FAILED;
-}
-
-ShellResult execute_with_args(const char* cmd, char args[COMMAND_ARG_STORAGE_SLOTS][COMMAND_ARG_BUFFER_SIZE], size_t arg_count)
-{
-    char path[COMMAND_PATH_BUFFER_SIZE];
-    command_path(cmd, path, COMMAND_PATH_BUFFER_SIZE);
-
-    const char * arg0 = arg_count > 0 ? args[0] : NULL;
-    const char * arg1 = arg_count > 1 ? args[1] : NULL;
-    const char * arg2 = arg_count > 2 ? args[2] : NULL;
-
-    // print("Executing:\n");
-    kernel_syslog_tagf(
-        "SHELL",
-        "execute_with_args cmd=%s path=%s argc=%i arg0=%s arg1=%s arg2=%s",
-        cmd,
-        path,
-        (int) arg_count,
-        arg0 ? arg0 : "",
-        arg1 ? arg1 : "",
-        arg2 ? arg2 : ""
-    );
-    SpawnResult result = spawn(P_WAIT, path, arg0, arg1, arg2);
-    kernel_syslog_tagf("SHELL", "execute_with_args spawn result=%i", result);
-    if (result != 0)
-    {
-        printf("result = %i\n", result);
-    }
     switch (result)
     {
         case SPAWN_SUCCESS:
@@ -250,35 +145,12 @@ ShellResult execute_with_args(const char* cmd, char args[COMMAND_ARG_STORAGE_SLO
         case SPAWN_FAILED:
             return COMMAND_FAILED;
     }
+
     return COMMAND_FAILED;
 }
 
-ShellResult interpret(const char* input)
+ShellResult Interpreter__interpret(InterpreterPtr self, ConstBStringPtr input)
 {
-    char * command = command_buffer;
-    char preview[SHELL_DEBUG_PREVIEW_SIZE * 2];
-    debug_preview(input, preview, sizeof(preview));
-    kernel_syslog_tagf("SHELL", "interpret input=%s", preview);
-
-    size_t arg_count = parse_command(input, command, STRIP_BUFFER_SIZE, argument_buffers);
-    kernel_syslog_tagf(
-        "SHELL",
-        "interpret parsed command=%s argc=%i arg0=%s arg1=%s arg2=%s",
-        command,
-        (int) arg_count,
-        arg_count > 0 ? argument_buffers[0] : "",
-        arg_count > 1 ? argument_buffers[1] : "",
-        arg_count > 2 ? argument_buffers[2] : ""
-    );
-    if (matches(command, CMD_EXIT))
-    {
-        kernel_syslog_tagf("SHELL", "interpret exit command");
-        exit(0);
-        return EXIT;
-    }
-    if (arg_count > 0)
-    {
-        return execute_with_args(command, argument_buffers, arg_count);
-    }
-    return execute(command);
+    Command command = Interpreter__parse(self, input);
+    return Interpreter__execute(self, &command);
 }

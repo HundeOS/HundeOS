@@ -10,8 +10,11 @@ typedef uint64_t HashCode;
 OptionalDef(HashCode);
 ResultDef(HashCode);
 
+#ifndef __COMMON_TYPES_COLLECTION_CODE_DEFINED
+#define __COMMON_TYPES_COLLECTION_CODE_DEFINED
 typedef uint8_t CollectionCode;
 ResultDef(CollectionCode);
+#endif
 
 
 #endif

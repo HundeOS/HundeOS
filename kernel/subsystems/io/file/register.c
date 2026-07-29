@@ -46,10 +46,31 @@ void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device,
     return 0;
 }
 
+bool Ext2FilesystemIO__available() __attribute__((weak));
+bool Ext2FilesystemIO__available()
+{
+    return false;
+}
+
+FileIO Ext2FilesystemIO__new() __attribute__((weak));
+FileIO Ext2FilesystemIO__new()
+{
+    return (FileIO) { 0 };
+}
+
+void * Ext2FilesystemIOState__heap_new(
+    FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors
+) __attribute__((weak));
+void * Ext2FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
+{
+    return 0;
+}
+
 KString embedded = KSTRING_NEW("ebin");
 KString dev = KSTRING_NEW("dev");
 KString fat16 = KSTRING_NEW("fat16");
 KString fat32 = KSTRING_NEW("fat32");
+KString ext2 = KSTRING_NEW("ext2");
 KString memfs = KSTRING_NEW("tmp/memfs");
 
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(KString path) __attribute__((weak));
@@ -81,6 +102,12 @@ static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableE
                 void * state = Fat32FilesystemIOState__heap_new(fat_filesystem, device, 0);
                 filesystem = Some(FilesystemPtr, fat_filesystem);
             }
+            else if (KString__equals(&entry->filesystem_type, &ext2) && Ext2FilesystemIO__available())
+            {
+                FilesystemPtr ext2_filesystem = Filesystem__heap_new(entry->mountpoint, Ext2FilesystemIO__new());
+                void * state = Ext2FilesystemIOState__heap_new(ext2_filesystem, device, 0);
+                filesystem = Some(FilesystemPtr, ext2_filesystem);
+            }
         })
     End
 
@@ -94,10 +121,20 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
     ResultMatch(CollectionCode, FilesystemTable__add(
         self,
         KSTRING_NEW("/dev/virtio1"),
+        KSTRING_NEW("ext2"),
+        KSTRING_NEW("/mnt/ext2fs")
+    ))
+        IsSuccess(index, {})
+        IsError(code, message, return Error(CollectionCode, message, code))
+    End
+
+    ResultMatch(CollectionCode, FilesystemTable__add(
+        self,
+        KSTRING_NEW("/dev/virtio2"),
         KSTRING_NEW("fat32"),
         KSTRING_NEW("/mnt/fs1")
     ))
-        IsSuccess(index, return Success(CollectionCode, index))
+        IsSuccess(index, {})
         IsError(code, message, return Error(CollectionCode, message, code))
     End
 

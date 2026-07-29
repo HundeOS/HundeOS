@@ -21,6 +21,7 @@ typedef Result(DirectoryEntryCount) (* FS_list_dir)(
 );
 typedef Result(IOStatus) (* FS_mkdir)(IOStatePtr self, KString path);
 typedef Result(IOStatus) (* FS_remove)(IOStatePtr self, KString path, Flags flags);
+typedef Result(IOStatus) (* FS_link)(IOStatePtr self, KString source_path, KString target_path);
 
 typedef struct FileIO
 {
@@ -30,6 +31,7 @@ typedef struct FileIO
     FS_list_dir list_dir;
     FS_mkdir mkdir;
     FS_remove remove;
+    FS_link link;
 }
 FileIO;
 

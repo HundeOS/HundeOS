@@ -4,17 +4,6 @@
 
 static KString invalid_process_list_request = KSTRING_NEW("Invalid process list request");
 
-static void ProcessInfo__copy_kstring(char * target, uint64_t target_size, KStringPtr source)
-{
-    uint64_t position = 0;
-    while (position + 1 < target_size && position < source->len)
-    {
-        target[position] = source->data[position];
-        position++;
-    }
-    target[position] = '\0';
-}
-
 static KString ProcessClass__snapshot_name(ProcessClass process_class)
 {
     switch (process_class)
@@ -38,17 +27,17 @@ static ProcessInfo ProcessInfo__from_process(ProcessPtr process)
     KString no_wait_reason = KSTRING_NEW("-");
     KString class_name = ProcessClass__snapshot_name(process->process_class);
 
-    ProcessInfo__copy_kstring(info.name, PROCESS_INFO_NAME_SIZE, &process->name);
-    ProcessInfo__copy_kstring(info.state, PROCESS_INFO_STATE_SIZE, &state);
-    Match(ParkedKernelContextPtr, Process__top_parked_context(process))
-        IsSome(parked_context,
+    KString__copy_to(&process->name, info.name, PROCESS_INFO_NAME_SIZE);
+    KString__copy_to(&state, info.state, PROCESS_INFO_STATE_SIZE);
+    Match(ParkedOperationPtr, Process__top_parked_operation(process))
+        IsSome(parked_operation,
         {
-            KString wait_reason = ParkReason__to_string(parked_context->park_reason);
-            ProcessInfo__copy_kstring(info.wait_reason, PROCESS_INFO_WAIT_SIZE, &wait_reason);
+            KString wait_reason = ParkReason__to_string(parked_operation->park_reason);
+            KString__copy_to(&wait_reason, info.wait_reason, PROCESS_INFO_WAIT_SIZE);
         })
-        IsNone(ProcessInfo__copy_kstring(info.wait_reason, PROCESS_INFO_WAIT_SIZE, &no_wait_reason))
+        IsNone(KString__copy_to(&no_wait_reason, info.wait_reason, PROCESS_INFO_WAIT_SIZE))
     End
-    ProcessInfo__copy_kstring(info.class_name, PROCESS_INFO_CLASS_SIZE, &class_name);
+    KString__copy_to(&class_name, info.class_name, PROCESS_INFO_CLASS_SIZE);
     return info;
 }
 

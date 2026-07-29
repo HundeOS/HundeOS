@@ -2,6 +2,9 @@
 .vscode
 *.iml
 
+.DS_Store
+__pycache__
+
 *.o
 *.img
 *.log

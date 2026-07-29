@@ -1,4 +1,5 @@
 #include "fat16.h"
+#include "../fat/fat_name.h"
 #include "../../../../kalloc.h"
 
 FixedArrayBodyDefine(Fat16DirectoryEntries);
@@ -163,71 +164,9 @@ static Result(Fat16Code) Fat16Volume__write_sector(Fat16VolumePtr self, BlockNum
     return Error(Fat16Code, io_error, FAT16_IO_ERROR);
 }
 
-static char Fat16__uppercase(char ch)
-{
-    if (ch >= 'a' && ch <= 'z')
-    {
-        return (char) (ch - ('a' - 'A'));
-    }
-
-    return ch;
-}
-
-static bool Fat16__is_valid_name_char(char ch)
-{
-    return (ch >= 'A' && ch <= 'Z')
-        || (ch >= '0' && ch <= '9')
-        || ch == '_'
-        || ch == '-';
-}
-
 static Result(Fat16Code) Fat16__encode_83_name(KStringPtr name, Data target[11])
 {
-    if (name == 0 || name->len == 0)
-    {
-        return Error(Fat16Code, unsupported_name, FAT16_UNSUPPORTED_NAME);
-    }
-
-    for (size_t i = 0; i < 11; i++)
-    {
-        target[i] = ' ';
-    }
-
-    size_t target_index = 0;
-    bool extension = false;
-    bool saw_dot = false;
-
-    for (uint64_t i = 0; i < name->len; i++)
-    {
-        char ch = Fat16__uppercase(name->data[i]);
-
-        if (ch == '.')
-        {
-            if (saw_dot || i == 0)
-            {
-                return Error(Fat16Code, unsupported_name, FAT16_UNSUPPORTED_NAME);
-            }
-            saw_dot = true;
-            extension = true;
-            target_index = 8;
-            continue;
-        }
-
-        if (!Fat16__is_valid_name_char(ch))
-        {
-            return Error(Fat16Code, unsupported_name, FAT16_UNSUPPORTED_NAME);
-        }
-
-        if ((!extension && target_index >= 8) || (extension && target_index >= 11))
-        {
-            return Error(Fat16Code, unsupported_name, FAT16_UNSUPPORTED_NAME);
-        }
-
-        target[target_index] = (Data) ch;
-        target_index++;
-    }
-
-    if (saw_dot && target[8] == ' ')
+    if (!FatName__encode_83(name, target))
     {
         return Error(Fat16Code, unsupported_name, FAT16_UNSUPPORTED_NAME);
     }
@@ -801,7 +740,7 @@ static bool Fat16FilesystemIO__is_root_file_path(KString path)
         return false;
     }
 
-    for (uint64_t i = 0; i < path.len; i++)
+    for (StringPos i = 0; i < path.len; i++)
     {
         if (path.data[i] == '/')
         {
@@ -1051,6 +990,11 @@ static Result(IOStatus) Fat16FileIO__remove(IOStatePtr self, KString path, Flags
     return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
 }
 
+static Result(IOStatus) Fat16FileIO__link(IOStatePtr self, KString source_path, KString target_path)
+{
+    return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
+}
+
 FileIO Fat16FilesystemIO__new()
 {
     return (FileIO) {
@@ -1065,6 +1009,7 @@ FileIO Fat16FilesystemIO__new()
         .list_nodes = Fat16FileIO__list_nodes,
         .mkdir = Fat16FileIO__mkdir,
         .remove = Fat16FileIO__remove,
+        .link = Fat16FileIO__link,
     };
 }
 

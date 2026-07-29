@@ -108,7 +108,8 @@ inline const char * level_to_string(Level level)
     LOG_LEVEL_MASK(TIMER_IRQ) | \
     LOG_LEVEL_MASK(FAULT) | \
     LOG_LEVEL_MASK(PANIC) | \
-    LOG_LEVEL_MASK(PROCESS_SWITCH) \
+    LOG_LEVEL_MASK(PROCESS_SWITCH) | \
+    LOG_LEVEL_MASK(SYSCALL) \
 )
 
 inline bool __d_should_log(Level level)

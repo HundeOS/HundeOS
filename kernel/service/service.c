@@ -51,12 +51,12 @@ Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent ev
     return Success(ServiceCode, SERVICE_OK);
 }
 
-Result(ServiceEvent) Service__complete_wait(ParkedKernelContextPtr parked_context)
+Result(ServiceEvent) Service__complete_wait(ParkedOperationPtr parked_operation)
 {
-    Match(SchedulerPtr, parked_context->kernel_context->scheduler)
+    Match(SchedulerPtr, parked_operation->kernel_context->scheduler)
         IsSome(scheduler,
         {
-            Match(ProcessID, parked_context->kernel_context->pid)
+            Match(ProcessID, parked_operation->kernel_context->pid)
                 IsSome(pid,
                 {
                     Match(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid))

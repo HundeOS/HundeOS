@@ -1,6 +1,7 @@
 #ifndef _COMMON_INCLUDES_SYSCALLS_CALLS_H
 #define _COMMON_INCLUDES_SYSCALLS_CALLS_H
-#include <stdint.h>
+
+#include "types.h"
 
 typedef enum SystemCall
 {
@@ -22,9 +23,5 @@ typedef enum SystemCallResults
     SYSCALL_IO_BLOCK = -2
 }
 SystemCallResults;
-
-
-typedef uint64_t SystemCallResult;
-typedef uint64_t Anything;
 
 #endif

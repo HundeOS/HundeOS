@@ -1,15 +1,19 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "../../common/types/bstring.h"
 #include "io.h"
 #include "../user.h"
 
 extern void print(const char * str);
 
-const size_t BUFFER_SIZE = 1024;
+enum
+{
+    BUFFER_SIZE = 1024
+};
 static const char backspace_sequence[] = "\b \b";
 
-ByteCount console_input(char * buf, size_t size)
+ByteCount console_read(char * buf, uint64_t size)
 {
     ByteCount res = 0;
     res = read(STDIN_FILENO, buf, size);
@@ -21,7 +25,7 @@ ByteCount console_input(char * buf, size_t size)
     return res;
 }
 
-ByteCount console_read_line(char * buf, bool echo, size_t size)
+ByteCount console_read_line(char * buf, bool echo, uint64_t size)
 {
     if (size == 0)
     {
@@ -34,7 +38,7 @@ ByteCount console_read_line(char * buf, bool echo, size_t size)
     while (pos < max_pos)
     {
         char input[BUFFER_SIZE];
-        ByteCount read = console_input(input, BUFFER_SIZE - 1);
+        ByteCount read = console_read(input, BUFFER_SIZE - 1);
 
         for (ByteCount ch = 0; ch < read && pos < max_pos; ch++)
         {
@@ -73,4 +77,34 @@ ByteCount console_read_line(char * buf, bool echo, size_t size)
 
     buf[pos] = '\0';
     return pos;
+}
+
+BString Console__read(void)
+{
+    BString input = EMPTY_BSTRING;
+    ByteCount read = console_read(input.data, input.max - 1);
+
+    if (read <= 0)
+    {
+        return input;
+    }
+
+    input.len = read;
+    input.data[input.len] = '\0';
+    return input;
+}
+
+BString Console__read_line(bool echo)
+{
+    BString input = EMPTY_BSTRING;
+    ByteCount read = console_read_line(input.data, echo, input.max);
+
+    if (read <= 0)
+    {
+        return input;
+    }
+
+    input.len = read;
+    input.data[input.len] = '\0';
+    return input;
 }

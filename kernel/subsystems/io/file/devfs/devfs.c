@@ -5,11 +5,25 @@
 
 static KString invalid_path = KSTRING_NEW("Invalid devfs path");
 static KString not_supported = KSTRING_NEW("Devfs operation not supported");
+static KString invalid_handle = KSTRING_NEW("Invalid devfs handle");
+static KString metadata_format = KSTRING_NEW("path=%s\nblock_size=%i\nblock_count=%i\nuserspace_service=%i\n");
 
 BlockDevicePaths BlockDeviceRegistry__paths() __attribute__((weak));
 BlockDevicePaths BlockDeviceRegistry__paths()
 {
     return EmptyArray(BlockDevicePaths);
+}
+
+BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries() __attribute__((weak));
+BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
+{
+    return EmptyArray(BlockDeviceMetadataEntries);
+}
+
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(KString alias) __attribute__((weak));
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(KString alias)
+{
+    return None(BlockDeviceMetadata);
 }
 
 static KString DevFilesystemIO__name_from_path(KString path)
@@ -23,21 +37,104 @@ static KString DevFilesystemIO__name_from_path(KString path)
     return Unwrap(KString, KStringArray__at(&segments, KStringArray__len(&segments) - 1), path);
 }
 
+static Result(IOInternalHandle) DevFilesystemIOState__add_handle(DevFilesystemIOStatePtr self, KString path)
+{
+    CriticalSection(self->state.lock,
+    {
+        IOInternalHandle handle = self->next_handle++ | self->state.filesystem->fs_code;
+        FileHandleTargetPtr target = FileHandleTarget__heap_new(path);
+        FileHandleTargetMap__set(&self->state.handles, handle, target);
+        _cs_return Success(IOInternalHandle, handle);
+    })
+}
+
+static Result(FileHandleTargetPtr) DevFilesystemIOState__get_handle(DevFilesystemIOStatePtr self, IOInternalHandle handle)
+{
+    CriticalSection(self->state.lock,
+    {
+        Match(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle))
+            IsSome(target, _cs_return Success(FileHandleTargetPtr, target))
+            IsNone(_cs_return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE))
+        End
+    })
+
+    return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE);
+}
+
+static Result(IOInternalHandle) DevFilesystemIOState__delete_handle(DevFilesystemIOStatePtr self, IOInternalHandle handle)
+{
+    CriticalSection(self->state.lock,
+    {
+        Match(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle))
+            IsSome(target,
+            {
+                FileHandleTarget__dispose(target);
+                FileHandleTargetMap__delete(&self->state.handles, handle);
+                _cs_return Success(IOInternalHandle, handle);
+            })
+            IsNone(_cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE))
+        End
+    })
+
+    return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
+}
+
 static Result(IOInternalHandle) DevFilesystemIO__open(IOStatePtr self, KString path, Flags flags)
 {
-    return Error(IOInternalHandle, not_supported, IO_OPERATION_NOT_SUPPORTED);
+    DevFilesystemIOStatePtr fs_state = (DevFilesystemIOStatePtr) self;
+
+    Match(BlockDeviceMetadata, BlockDeviceRegistry__metadata(path))
+        IsSome(metadata, return DevFilesystemIOState__add_handle(fs_state, path))
+    End
+
+    return Error(IOInternalHandle, invalid_path, IO_INVALID_PATH);
 }
 
 static Result(IOInternalHandle) DevFilesystemIO__close(IOStatePtr self, IOInternalHandle handle)
 {
-    return Error(IOInternalHandle, not_supported, IO_OPERATION_NOT_SUPPORTED);
+    return DevFilesystemIOState__delete_handle((DevFilesystemIOStatePtr) self, handle);
 }
 
 static Result(IOBufferPtr) DevFilesystemIO__read(
     IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
 )
 {
-    return Error(IOBufferPtr, not_supported, IO_OPERATION_NOT_SUPPORTED);
+    DevFilesystemIOStatePtr fs_state = (DevFilesystemIOStatePtr) self;
+
+    ResultMatch(FileHandleTargetPtr, DevFilesystemIOState__get_handle(fs_state, handle))
+        IsSuccess(target,
+        {
+            Match(BlockDeviceMetadata, BlockDeviceRegistry__metadata(target->path))
+                IsSome(metadata,
+                {
+                    KString text = KString__sprintf(
+                        &metadata_format,
+                        cstr(metadata.path),
+                        (int) metadata.block_size,
+                        (int) metadata.block_count,
+                        (int) metadata.userspace_service
+                    );
+
+                    if (target->offset >= (FilePointer) text.len)
+                    {
+                        return Error(IOBufferPtr, invalid_path, IO_EOF);
+                    }
+
+                    size_t remaining = (size_t) text.len - target->offset;
+                    size_t read_size = remaining < size ? remaining : size;
+                    IOBuffer__reset(&target->buffer);
+                    IOBuffer__push_all(&target->buffer, ptr(&text.data[target->offset], Char), read_size);
+                    target->offset += read_size;
+                    return Success(IOBufferPtr, &target->buffer);
+                })
+            End
+
+            return Error(IOBufferPtr, invalid_path, IO_INVALID_PATH);
+        })
+        IsError(code, message, return Error(IOBufferPtr, message, code))
+    End
+
+    return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
 static Result(ByteCount) DevFilesystemIO__write(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size)
@@ -66,11 +163,19 @@ static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, File
     DevFilesystemIOStatePtr fs_state = (DevFilesystemIOStatePtr) self;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
     BlockDevicePaths paths = BlockDeviceRegistry__paths();
+    BlockDeviceMetadataEntries metadata_entries = BlockDeviceRegistry__metadata_entries();
 
     FAIterate(BlockDevicePaths, paths, index, device_path)
         FilesystemNodes__push(
             &result,
             FilesystemNode__heap_new(fs_state->state.filesystem, DevFilesystemIO__name_from_path(device_path), 0)
+        );
+    End
+
+    FAIterate(BlockDeviceMetadataEntries, metadata_entries, index, metadata)
+        FilesystemNodes__push(
+            &result,
+            FilesystemNode__heap_new(fs_state->state.filesystem, metadata.alias, 0)
         );
     End
 
@@ -83,6 +188,11 @@ static Result(IOStatus) DevFilesystemIO__mkdir(IOStatePtr self, KString path)
 }
 
 static Result(IOStatus) DevFilesystemIO__remove(IOStatePtr self, KString path, Flags flags)
+{
+    return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
+}
+
+static Result(IOStatus) DevFilesystemIO__link(IOStatePtr self, KString source_path, KString target_path)
 {
     return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
 }
@@ -101,6 +211,7 @@ FileIO DevFilesystemIO__new()
         .list_nodes = DevFilesystemIO__list_nodes,
         .mkdir = DevFilesystemIO__mkdir,
         .remove = DevFilesystemIO__remove,
+        .link = DevFilesystemIO__link,
     };
 }
 
@@ -109,6 +220,7 @@ DevFilesystemIOStatePtr DevFilesystemIOState__heap_new(FilesystemPtr fs)
     DevFilesystemIOStatePtr state = ptr(Kernel__alloc_kernel(sizeof(DevFilesystemIOState)), DevFilesystemIOState);
     *state = (DevFilesystemIOState) {
         .state = FilesystemIOState__new(fs),
+        .next_handle = 1,
     };
     fs->state = &state->state;
     return state;

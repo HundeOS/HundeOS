@@ -17,7 +17,7 @@ static ProcessPtr idle = NULL;
 static bool cont_called = false;
 static KernelContext parent_context = EMPTY_KERNEL_CONTEXT;
 
-Result(Anything) continuation(ParkedKernelContextPtr context)
+Result(Anything) continuation(ParkedOperationPtr operation)
 {
     cont_called = true;
 

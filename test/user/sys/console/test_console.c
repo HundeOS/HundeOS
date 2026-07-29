@@ -1,0 +1,76 @@
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "unity.h"
+
+#include "../../../../common/types/bstring.h"
+#include "../../../../common_includes/syscalls/io.h"
+
+static const char * next_input;
+static ByteCount next_input_size;
+static BString printed_output;
+
+ByteCount read(IOHandle handle, char * buf, size_t size)
+{
+    ByteCount copied = 0;
+
+    for (; copied < next_input_size && copied < (ByteCount) size; copied++)
+    {
+        buf[copied] = next_input[copied];
+    }
+
+    return copied;
+}
+
+void print(const char * str)
+{
+    BString text = bstring(str);
+    printed_output = BString__append(&printed_output, &text);
+}
+
+#include "../../../../user/sys/console.c"
+
+void setUp(void)
+{
+    next_input = "";
+    next_input_size = 0;
+    printed_output = EMPTY_BSTRING;
+}
+
+void tearDown(void)
+{
+}
+
+void test_console_read_returns_bstring(void)
+{
+    next_input = "abc";
+    next_input_size = 3;
+
+    BString input = Console__read();
+
+    TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&input));
+    TEST_ASSERT_EQUAL_INT64(3, input.len);
+}
+
+void test_console_read_line_returns_bstring_until_newline(void)
+{
+    next_input = "hello\n";
+    next_input_size = 6;
+
+    BString line = Console__read_line(false);
+
+    TEST_ASSERT_EQUAL_STRING("hello", BString__cstr(&line));
+    TEST_ASSERT_EQUAL_INT64(5, line.len);
+}
+
+void test_console_read_line_handles_backspace_and_echo(void)
+{
+    next_input = "ab\bcd\n";
+    next_input_size = 6;
+
+    BString line = Console__read_line(true);
+
+    TEST_ASSERT_EQUAL_STRING("acd", BString__cstr(&line));
+    TEST_ASSERT_EQUAL_STRING("ab\b \bcd", BString__cstr(&printed_output));
+}

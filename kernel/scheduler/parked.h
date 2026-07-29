@@ -6,6 +6,7 @@
 #include "../types/result.h"
 #include "../types/optional.h"
 #include "../types/kstring.h"
+#include "../types/linked_list.h"
 #include "../process.h"
 #include "kernel_context.h"
 #include "types.h"
@@ -19,24 +20,42 @@ typedef enum ParkReasons
     PARK_WAIT_SERVICE_EVENT = 3,
 } ParkReasons;
 
-typedef struct ParkedKernelContext
+LinkedListDefine(ParkedOperationPtr, BlockedParkedOperations, &Ptr__equals);
+
+struct ParkedOperation
 {
     KernelContextPtr kernel_context;
+    bool owns_kernel_context;
+    bool ready;
     Optional(Continuation) continuation;
+    Optional(OperationKey) operation_key;
     ParkReason park_reason;
     Optional(ReturnCode) return_code;
-} ParkedKernelContext;
+    // Owned dependencies that must resolve before this operation can continue.
+    BlockedParkedOperations blocked_operations;
+    uint64_t pending_operations;
+};
 
-typedef ParkedKernelContext * ParkedKernelContextPtr;
-OptionalDef(ParkedKernelContext);
+OptionalDef(ParkedOperation);
 
-
-ParkedKernelContextPtr ParkedKernelContext__heap_new(
+ParkedOperationPtr ParkedOperation__heap_new(
     KernelContextPtr kernel_context, Optional(Continuation) continuation, ParkReason park_reason
+);
+ParkedOperationPtr ParkedOperation__heap_new_with_context_ownership(
+    KernelContextPtr kernel_context, Optional(Continuation) continuation,
+    ParkReason park_reason, bool owns_kernel_context
+);
+bool ParkedOperation__is_ready(ParkedOperationPtr self);
+void ParkedOperation__mark_ready(ParkedOperationPtr self);
+Result(CollectionCode) ParkedOperation__add_blocked_operation(
+    ParkedOperationPtr self, ParkedOperationPtr blocked_operation
+);
+Result(CollectionCode) ParkedOperation__resolve_blocked_operation(
+    ParkedOperationPtr self, ParkedOperationPtr blocked_operation
 );
 
 KString ParkReason__to_string(ParkReason reason);
 
-void ParkedKernelContext__dispose(ParkedKernelContextPtr self);
+void ParkedOperation__dispose(ParkedOperationPtr self);
 
 #endif

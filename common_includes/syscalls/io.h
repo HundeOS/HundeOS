@@ -12,6 +12,7 @@ typedef enum IOOperation
     IO_LIST_DIR,
     IO_MKDIR,
     IO_REMOVE,
+    IO_LINK,
     IO_SERVER_REGISTER,
     IO_SERVER_GET_BUFFER,
     IO_SERVER_DATA_AVAILABLE,

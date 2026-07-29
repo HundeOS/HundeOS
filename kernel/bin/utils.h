@@ -1,10 +1,11 @@
 #ifndef __KERNEL_BIN_UTILS_H_
 #define __KERNEL_BIN_UTILS_H_
 #include <stdint.h>
+#include "../types/kstring.h"
 
-inline uint64_t strlen(const char *str)
+inline StringPos strlen(const char *str)
 {
-    uint64_t len = 0;
+    StringPos len = 0;
     while (*str++)
     {
         len++;

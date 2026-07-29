@@ -359,6 +359,35 @@ Result(IOStatus) RootFileIO__remove(IOStatePtr self, KString path, Flags flags)
     return Error(IOStatus, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
 
+Result(IOStatus) RootFileIO__link(IOStatePtr self, KString source_path, KString target_path)
+{
+    FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
+    Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, source_path))
+        IsSome(source_route,
+        {
+            Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, target_path))
+                IsSome(target_route,
+                {
+                    if (source_route.filesystem != target_route.filesystem || source_route.filesystem->state != target_route.filesystem->state)
+                    {
+                        return Error(IOStatus, invalid_path_format, IO_OPERATION_NOT_SUPPORTED);
+                    }
+
+                    return source_route.filesystem->file_io.link(
+                        &source_route.filesystem->state->state,
+                        source_route.subpath,
+                        target_route.subpath
+                    );
+                })
+                IsNone(return Error(IOStatus, KString__sprintf(&invalid_path_format, &target_path), IO_INVALID_PATH))
+            End
+        })
+        IsNone(return Error(IOStatus, KString__sprintf(&invalid_path_format, &source_path), IO_INVALID_PATH))
+    End
+
+    return Error(IOStatus, KString__sprintf(&invalid_path_format, &source_path), IO_INVALID_PATH);
+}
+
 
 FilesystemIOState FilesystemIOState__new(FilesystemPtr filesystem)
 {
@@ -395,6 +424,7 @@ FileIO RootFilesystemIO__new()
         .list_dir = RootFileIO__list_dir,
         .mkdir = RootFileIO__mkdir,
         .remove = RootFileIO__remove,
+        .link = RootFileIO__link,
     };
 
     return root_file_io;

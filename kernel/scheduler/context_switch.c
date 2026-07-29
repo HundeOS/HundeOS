@@ -2,6 +2,7 @@
 #include "../process.h"
 #include "../arch/process.h"
 #include "../debug.h"
+#include "scheduler/scheduler.h"
 
 ContextSwitch ContextSwitch__new(ProcessPtr new_proc, Optional(ProcessPtr) old_proc)
 {
@@ -9,6 +10,55 @@ ContextSwitch ContextSwitch__new(ProcessPtr new_proc, Optional(ProcessPtr) old_p
         .new_proc = new_proc,
         .old_proc = old_proc
     };
+}
+
+static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
+{
+    while (true)
+    {
+        Match(ParkedOperationPtr, Process__pop_ready_parked_operation(self))
+            IsSome(parked_operation,
+            {
+                Match(Continuation, parked_operation->continuation)
+                    IsSome(continuation,
+                    {
+                        Process__activate_address_space(self);
+
+                        __d_printf(PROCESS_SWITCH, "Continuation calling %p %p", continuation, parked_operation);
+                        Result(Anything) res = continuation(parked_operation);
+                        if (Process__is_parked(self))
+                        {
+                            Match(ParkedOperationPtr, Process__top_parked_operation(self))
+                                IsSome(top_context,
+                                {
+                                    Match(SchedulerPtr, top_context->kernel_context->scheduler)
+                                        IsSome(scheduler, Scheduler__yield_waiting(scheduler, self, CPU__id() - 1))
+                                    End
+                                })
+                            End
+                        }
+
+                        ResultMatch(Anything, res)
+                            IsSuccess(result_val,
+                            {
+                                __d_println(PROCESS, "Set syscall result");
+                                Process__set_syscall_result(self, result_val);
+                            });
+                            IsError(code, message,
+                            {
+                                Process__set_syscall_result(self, code);
+                                __d_printf(PANIC, "Continuation error: %s\n", cstr(message));
+                            })
+                        End
+
+                        ParkedOperation__dispose(parked_operation);
+                    })
+                    IsNone(ParkedOperation__dispose(parked_operation))
+                End
+            })
+            IsNone(return Success(Anything, 0))
+        End
+    }
 }
 
 void ContextSwitch__switch(ContextSwitch self)
@@ -39,5 +89,7 @@ void ContextSwitch__switch(ContextSwitch self)
         ProcessState__to_string(new_proc->state));
 
     new_proc->state = PROC_STATE_RUNNING;
+    Process__finalise_deferred_syscalls(new_proc);
+
     Process__context_switch(new_proc);
 }

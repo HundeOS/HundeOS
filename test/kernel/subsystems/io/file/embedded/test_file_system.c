@@ -131,7 +131,7 @@ void test_devfs_lists_registered_block_devices(void)
     ProcessPtr service = dummy_process(200, 11, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
 
-    ResultMatch(BlockDeviceCode, BlockDeviceRegistry__register(KSTRING_NEW("/dev/virtio1"), service, 128, kernel->scheduler))
+    ResultMatch(BlockDeviceCode, BlockDeviceRegistry__register(KSTRING_NEW("/dev/virtio1"), service, 128, kernel->message_broker))
         IsSuccess(code, TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code))
         IsError(code, message, TEST_FAIL())
     End
@@ -142,10 +142,48 @@ void test_devfs_lists_registered_block_devices(void)
         IsError(code, message, TEST_FAIL())
         IsSuccess(result,
         {
-            TEST_ASSERT_EQUAL_INT(1, FilesystemNodes__len(&result));
-            FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
-            KString expected = kstring("virtio1");
-            TEST_ASSERT_TRUE(KString__equals(&expected, &node->name));
+            TEST_ASSERT_EQUAL_INT(2, FilesystemNodes__len(&result));
+
+            FilesystemNodePtr driver_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
+            KString expected_driver = kstring("virtio1");
+            TEST_ASSERT_TRUE(KString__equals(&expected_driver, &driver_node->name));
+
+            FilesystemNodePtr metadata_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 1), (FilesystemNodePtr){});
+            KString expected_metadata = kstring("hd0");
+            TEST_ASSERT_TRUE(KString__equals(&expected_metadata, &metadata_node->name));
+        })
+    End
+}
+
+void test_devfs_can_open_and_read_block_device_metadata(void)
+{
+    ProcessPtr service = dummy_process(200, 11, PROC_STATE_READY);
+    service->process_class = PROCESS_CLASS_SERVICE;
+
+    ResultMatch(BlockDeviceCode, BlockDeviceRegistry__register(KSTRING_NEW("/dev/virtio1"), service, 128, kernel->message_broker))
+        IsSuccess(code, TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    Result(IOHandle) metadata_handle =
+        IOSubsystem__open(kernel->io_subsystem, open_context(), kstring("/dev/hd0"), IO_OPEN_READ);
+
+    ResultMatch(IOHandle, metadata_handle)
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(handle,
+        {
+            char buffer[128];
+            ResultMatch(ByteCount, IOSubsystem__read(kernel->io_subsystem, rw_context(handle, (DataPtr) buffer, sizeof(buffer))))
+                IsError(code, message, TEST_FAIL())
+                IsSuccess(bytes,
+                {
+                    buffer[bytes] = '\0';
+                    TEST_ASSERT_EQUAL_STRING(
+                        "path=/dev/virtio1\nblock_size=512\nblock_count=128\nuserspace_service=1\n",
+                        buffer
+                    );
+                })
+            End
         })
     End
 }

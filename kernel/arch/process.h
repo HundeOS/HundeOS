@@ -3,14 +3,16 @@
 
 #include <stdint.h>
 #include "process_context.h"
+#include "../../common_includes/syscalls/types.h"
 
 typedef uint64_t ProcessID;
 
 typedef struct Process Process;
 typedef Process * ProcessPtr;
 
+void Process__activate_address_space(ProcessPtr self);
 void Process__context_switch(ProcessPtr self);
 void Process__save_context(ProcessPtr self, ProcessContextPtr context);
-// void Process__set_syscall_result(ProcessPtr self, SystemCallResult result);
+void Process__set_syscall_result(ProcessPtr self, SystemCallResult result);
 
 #endif

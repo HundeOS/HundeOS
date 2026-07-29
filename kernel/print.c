@@ -1,8 +1,10 @@
 #include "print.h"
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include "arch/basic_io.h"
+#include "../common/types/bstring.h"
 
 static void trace_puts(const char * str)
 {
@@ -81,9 +83,8 @@ static void print_signed(int value)
     print_unsigned((unsigned int) value, 10, false);
 }
 
-// Helper to get string length
-static int strlen(const char* str) {
-    int len = 0;
+static StringPos strlen(const char* str) {
+    StringPos len = 0;
     if (!str) return 0;
     while (str[len]) len++;
     return len;
@@ -102,6 +103,11 @@ static int strncpy_len(char* dest, const char* src, int n) {
 
 // Simple printf implementation
 int k_printf(const char* format, ...) {
+    if (format == NULL)
+    {
+        return 0;
+    }
+
     va_list args;
     va_start(args, format);
     
@@ -261,7 +267,14 @@ int k_printf(const char* format, ...) {
                 case 's': {
                     char* str = va_arg(args, char*);
                     print_string(str);
-                    count += strlen(str);
+                    if (str == NULL)
+                    {
+                        count += 6;
+                    }
+                    else
+                    {
+                        count += (int) strlen(str);
+                    }
                     break;
                 }
                 
@@ -305,6 +318,17 @@ static char hex_digit(unsigned int value)
 
 int k_sprintf_impl(char* str, const char* format, va_list args)
 {
+    if (str == NULL)
+    {
+        return 0;
+    }
+
+    if (format == NULL)
+    {
+        str[0] = '\0';
+        return 0;
+    }
+
     int count = 0;
     int str_idx = 0;
 

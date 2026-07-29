@@ -6,6 +6,7 @@
 typedef struct DevFilesystemIOState
 {
     FilesystemIOState state;
+    IOInternalHandle next_handle;
 }
 DevFilesystemIOState;
 

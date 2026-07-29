@@ -38,16 +38,35 @@ typedef struct BlockDevice BlockDevice;
 typedef BlockDevice * BlockDevicePtr;
 typedef struct Process Process;
 typedef Process * ProcessPtr;
-typedef struct Scheduler Scheduler;
-typedef Scheduler * SchedulerPtr;
-typedef struct KernelContext KernelContext;
-typedef KernelContext * KernelContextPtr;
-OptionalDef(KernelContextPtr);
+typedef struct MessageBroker MessageBroker;
+typedef MessageBroker * MessageBrokerPtr;
 OptionalDef(BlockRequestID);
 
 OptionalDef(BlockDevicePtr);
 FixedArrayDefine(KString, IO_MAX_DEVICES, BlockDevicePaths, kstring_equals);
 ResultDef(BlockDevicePaths);
+
+typedef struct BlockDeviceMetadata
+{
+    KString alias;
+    KString path;
+    size_t block_size;
+    BlockCount block_count;
+    bool userspace_service;
+}
+BlockDeviceMetadata;
+
+typedef BlockDeviceMetadata * BlockDeviceMetadataPtr;
+
+OptionalDef(BlockDeviceMetadata);
+bool BlockDeviceMetadata__equals(BlockDeviceMetadataPtr self, BlockDeviceMetadataPtr other);
+FixedArrayDefine(
+    BlockDeviceMetadata,
+    IO_MAX_DEVICES,
+    BlockDeviceMetadataEntries,
+    (EqualFunction) BlockDeviceMetadata__equals
+);
+ResultDef(BlockDeviceMetadataEntries);
 
 typedef struct BlockIOContext BlockIOContext;
 typedef BlockIOContext * BlockIOContextPtr;
@@ -100,10 +119,12 @@ Result(Anything) BlockDevice__write_async(
 void BlockDevice__set_current_context(KernelContextPtr context);
 void BlockDevice__clear_current_context();
 Result(BlockDeviceCode) BlockDeviceRegistry__register(
-    KString path, ProcessPtr service_process, BlockCount block_count, SchedulerPtr scheduler
+    KString path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
 );
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(KString path);
 BlockDevicePaths BlockDeviceRegistry__paths();
+BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries();
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(KString alias);
 Result(ServiceCode) BlockDeviceService__get_request(
     ProcessPtr service_process, uint64_t request_id, ServiceBlockRequestPtr target
 );

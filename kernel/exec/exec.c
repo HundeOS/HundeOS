@@ -56,9 +56,9 @@ static Result(ProcessPtr) Exec__launch(OriginatingContext context, Elf elf, bool
                         // TODO we need a continuation to give the result of the proc back to the parent
                         KernelContextPtr kernel_context = KernelContext__from_originating_context_heap(context);
 
-                        Scheduler__park(
+                        Scheduler__park_with_context_ownership(
                             kernel->scheduler, parent, kernel_context,
-                            Some(Continuation, SystemCall__Complete), PARK_WAIT_CHILD
+                            Some(Continuation, SystemCall__Complete), PARK_WAIT_CHILD, true
                         );
                         __d_printf(
                             EXEC,

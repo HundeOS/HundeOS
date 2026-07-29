@@ -2,6 +2,8 @@
 
 #include "../../../kernel/syscall/service_handler.h"
 #include "../../../kernel/service/service.h"
+#include "../../../kernel/scheduler/context_switch.h"
+#include "../../../kernel/scheduler/register.h"
 #include "../../../kernel/arch/process.h"
 #include "../../../kernel/kalloc.h"
 #include "../../../kernel/subsystems/io/block/block_device.h"
@@ -19,6 +21,13 @@ static BlockCount async_continuation_blocks = 0;
 static bool async_continuation_has_buffer = false;
 static bool async_write_continuation_called = false;
 static bool chained_async_continuation_called = false;
+static bool first_parallel_async_called = false;
+static bool second_parallel_async_called = false;
+
+static void test_resume_process(ProcessPtr process)
+{
+    ContextSwitch__switch(ContextSwitch__new(process, None(ProcessPtr)));
+}
 
 void Arch__reset_irq_tracking();
 uint64_t Arch__mask_count();
@@ -48,11 +57,16 @@ void setUp(void)
     current_process_reset();
     Arch__reset_irq_tracking();
     kernel = init_test_kernel_without_filesystem();
+    ResultMatch(SchedulerRegisterCode, Scheduler__register(kernel))
+        IsError(code, message, TEST_FAIL())
+    End
     async_continuation_called = false;
     async_continuation_blocks = 0;
     async_continuation_has_buffer = false;
     async_write_continuation_called = false;
     chained_async_continuation_called = false;
+    first_parallel_async_called = false;
+    second_parallel_async_called = false;
 }
 
 void tearDown(void)
@@ -161,12 +175,9 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, process->state);
 
-    Process__context_switch(process);
+    test_resume_process(process);
 
-    ResultMatch(Anything, deferred_syscall_result())
-        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
-        IsError(code, message, TEST_FAIL())
-    End
+    TEST_ASSERT_EQUAL(SERVICE_OK, ResultUnwrap(Anything, deferred_syscall_result(), (Anything) -999));
 
     TEST_ASSERT_EQUAL(SERVICE_EVENT_MESSAGE, target.type);
     TEST_ASSERT_EQUAL(7, target.source);
@@ -423,6 +434,7 @@ void test_service_handler_gets_and_completes_block_write_request(void)
     End
 
     TEST_ASSERT_EQUAL(event.source, request.request_id);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio-protocol", request.device_path);
     TEST_ASSERT_EQUAL(SERVICE_BLOCK_WRITE, request.operation);
     TEST_ASSERT_EQUAL_UINT64(7, request.block);
     TEST_ASSERT_EQUAL_UINT64(1, request.block_count);
@@ -546,6 +558,20 @@ static Result(Anything) chained_async_read_continuation(BlockIOContextPtr contex
     return Success(Anything, 99);
 }
 
+static Result(Anything) first_parallel_async_continuation(BlockIOContextPtr context)
+{
+    first_parallel_async_called = true;
+    async_continuation_blocks = context->completed_blocks;
+    return Success(Anything, 101);
+}
+
+static Result(Anything) second_parallel_async_continuation(BlockIOContextPtr context)
+{
+    second_parallel_async_called = true;
+    async_continuation_blocks = context->completed_blocks;
+    return Success(Anything, 202);
+}
+
 void test_service_handler_block_completion_runs_async_read_continuation_with_kernel_buffer(void)
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
@@ -620,15 +646,12 @@ void test_service_handler_block_completion_runs_async_read_continuation_with_ker
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
 
-    Process__context_switch(reader);
+    test_resume_process(reader);
 
     TEST_ASSERT_TRUE(async_continuation_called);
     TEST_ASSERT_TRUE(async_continuation_has_buffer);
     TEST_ASSERT_EQUAL(1, async_continuation_blocks);
-    ResultMatch(Anything, deferred_syscall_result())
-        IsSuccess(code, TEST_ASSERT_EQUAL(77, code))
-        IsError(code, message, TEST_FAIL())
-    End
+    TEST_ASSERT_EQUAL(77, ResultUnwrap(Anything, deferred_syscall_result(), (Anything) -999));
 }
 
 void test_service_handler_chained_async_read_parks_from_block_context(void)
@@ -708,7 +731,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     End
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
-    Process__context_switch(reader);
+    test_resume_process(reader);
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, reader->state);
 
     ServiceEvent second_event = { 0 };
@@ -744,14 +767,143 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     End
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
-    Process__context_switch(reader);
+    test_resume_process(reader);
 
     TEST_ASSERT_TRUE(chained_async_continuation_called);
     TEST_ASSERT_EQUAL(1, async_continuation_blocks);
-    ResultMatch(Anything, deferred_syscall_result())
-        IsSuccess(code, TEST_ASSERT_EQUAL(99, code))
+    TEST_ASSERT_EQUAL(99, ResultUnwrap(Anything, deferred_syscall_result(), (Anything) -999));
+}
+
+void test_service_handler_parallel_async_reads_complete_out_of_order_without_resuming_unready_request(void)
+{
+    ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
+    service->process_class = PROCESS_CLASS_SERVICE;
+    ServiceBlockDeviceRegistration registration = {
+        .path = "/dev/virtio-parallel",
+        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
+        .block_count = 128,
+    };
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
         IsError(code, message, TEST_FAIL())
     End
+
+    ProcessPtr reader = dummy_process(2, cpu, PROC_STATE_READY);
+    ResultMatch(CPUID, Scheduler__schedule(kernel->scheduler, reader))
+        IsSuccess(scheduled_cpu, {})
+        IsError(code, message, TEST_FAIL())
+    End
+
+    BlockDevicePtr device = NULL;
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(kstring("/dev/virtio-parallel")))
+        IsSome(found, device = found)
+        IsNone(TEST_FAIL())
+    End
+
+    BlockIOContextPtr first_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
+    first_context->kernel_context = KernelContext__new(
+        Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler)
+    );
+    first_context->owner_context = 0;
+
+    BlockIOContextPtr second_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
+    second_context->kernel_context = KernelContext__new(
+        Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler)
+    );
+    second_context->owner_context = 0;
+
+    BlockDevice__set_current_context(&first_context->kernel_context);
+    ResultMatch(Anything, BlockDevice__read_async(device, 9, 1, first_context, first_parallel_async_continuation))
+        IsSuccess(result, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code))
+    End
+    ResultMatch(Anything, BlockDevice__read_async(device, 10, 1, second_context, second_parallel_async_continuation))
+        IsSuccess(result, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code))
+    End
+    BlockDevice__clear_current_context();
+
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, reader->state);
+
+    ServiceEvent first_event = { 0 };
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &first_event, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ServiceEvent second_event = { 0 };
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &second_event, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ServiceBlockRequest first_request = { 0 };
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_BLOCK_GET_REQUEST, first_event.source, (Anything) &first_request, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ServiceBlockRequest second_request = { 0 };
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_BLOCK_GET_REQUEST, second_event.source, (Anything) &second_request, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(9, first_request.block);
+    TEST_ASSERT_EQUAL(10, second_request.block);
+
+    ServiceBlockCompletion second_completion = {
+        .request_id = second_request.request_id,
+        .status = SERVICE_OK,
+        .block_count = 1,
+    };
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &second_completion, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
+    test_resume_process(reader);
+
+    TEST_ASSERT_FALSE(first_parallel_async_called);
+    TEST_ASSERT_TRUE(second_parallel_async_called);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
+    TEST_ASSERT_TRUE(Process__is_parked(reader));
+    TEST_ASSERT_EQUAL_UINT64(1, ParkedOperations__len(&reader->parked_operations));
+    TEST_ASSERT_EQUAL(202, ResultUnwrap(Anything, deferred_syscall_result(), (Anything) -999));
+
+    ServiceBlockCompletion first_completion = {
+        .request_id = first_request.request_id,
+        .status = SERVICE_OK,
+        .block_count = 1,
+    };
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &first_completion, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
+    test_resume_process(reader);
+
+    TEST_ASSERT_TRUE(first_parallel_async_called);
+    TEST_ASSERT_FALSE(Process__is_parked(reader));
+    TEST_ASSERT_EQUAL_UINT64(0, ParkedOperations__len(&reader->parked_operations));
+    TEST_ASSERT_EQUAL(101, ResultUnwrap(Anything, deferred_syscall_result(), (Anything) -999));
 }
 
 void test_service_handler_failed_block_completion_unparks_waiting_reader_with_error(void)
@@ -816,11 +968,8 @@ void test_service_handler_failed_block_completion_unparks_waiting_reader_with_er
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
 
-    Process__context_switch(reader);
-    ResultMatch(Anything, deferred_syscall_result())
-        IsSuccess(code, TEST_FAIL())
-        IsError(code, message, TEST_ASSERT_EQUAL(BLOCK_DEVICE_IO_ERROR, code))
-    End
+    test_resume_process(reader);
+    TEST_ASSERT_EQUAL(BLOCK_DEVICE_IO_ERROR, ResultUnwrap(Anything, deferred_syscall_result(), (Anything) -999));
 }
 
 void test_service_handler_block_completion_runs_async_write_continuation(void)
@@ -905,12 +1054,9 @@ void test_service_handler_block_completion_runs_async_write_continuation(void)
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, writer->state);
 
-    Process__context_switch(writer);
+    test_resume_process(writer);
 
     TEST_ASSERT_TRUE(async_write_continuation_called);
     TEST_ASSERT_EQUAL(1, async_continuation_blocks);
-    ResultMatch(Anything, deferred_syscall_result())
-        IsSuccess(code, TEST_ASSERT_EQUAL(88, code))
-        IsError(code, message, TEST_FAIL())
-    End
+    TEST_ASSERT_EQUAL(88, ResultUnwrap(Anything, deferred_syscall_result(), (Anything) -999));
 }

@@ -1,4 +1,5 @@
 #include "fat32.h"
+#include "../fat/fat_name.h"
 #include "../../../../kalloc.h"
 #include "../../../../debug.h"
 
@@ -188,72 +189,10 @@ static Result(Fat32Code) Fat32Volume__write_sector(Fat32VolumePtr self, BlockNum
     return Error(Fat32Code, invalid_argument, FAT32_INVALID_ARGUMENT);
 }
 
-static char Fat32__uppercase(char ch)
-{
-    if (ch >= 'a' && ch <= 'z')
-    {
-        return (char) (ch - ('a' - 'A'));
-    }
-
-    return ch;
-}
-
-static bool Fat32__is_valid_name_char(char ch)
-{
-    return (ch >= 'A' && ch <= 'Z')
-        || (ch >= '0' && ch <= '9')
-        || ch == '_'
-        || ch == '-';
-}
-
 static Result(Fat32Code) Fat32__encode_83_name(KStringPtr name, Fat32ShortNamePtr target)
 {
-    if (name->len == 0)
-    {
-        return Error(Fat32Code, unsupported_name, FAT32_UNSUPPORTED_NAME);
-    }
-
     target->len = FAT32_SHORT_NAME_SIZE;
-    for (size_t i = 0; i < FAT32_SHORT_NAME_SIZE; i++)
-    {
-        target->data[i] = ' ';
-    }
-
-    size_t target_index = 0;
-    bool extension = false;
-    bool saw_dot = false;
-
-    for (uint64_t i = 0; i < name->len; i++)
-    {
-        char ch = Fat32__uppercase(name->data[i]);
-
-        if (ch == '.')
-        {
-            if (saw_dot || i == 0)
-            {
-                return Error(Fat32Code, unsupported_name, FAT32_UNSUPPORTED_NAME);
-            }
-            saw_dot = true;
-            extension = true;
-            target_index = 8;
-            continue;
-        }
-
-        if (!Fat32__is_valid_name_char(ch))
-        {
-            return Error(Fat32Code, unsupported_name, FAT32_UNSUPPORTED_NAME);
-        }
-
-        if ((!extension && target_index >= 8) || (extension && target_index >= FAT32_SHORT_NAME_SIZE))
-        {
-            return Error(Fat32Code, unsupported_name, FAT32_UNSUPPORTED_NAME);
-        }
-
-        target->data[target_index] = (Data) ch;
-        target_index++;
-    }
-
-    if (saw_dot && target->data[8] == ' ')
+    if (!FatName__encode_83(name, target->data))
     {
         return Error(Fat32Code, unsupported_name, FAT32_UNSUPPORTED_NAME);
     }
@@ -358,27 +297,16 @@ static KString Fat32__entry_name(DataPtr entry, KStringPtr lfn_name, uint8_t che
     return Fat32__decode_83_name(entry);
 }
 
-static bool Fat32__chars_equal_ignore_case(char left, char right)
-{
-    return Fat32__uppercase(left) == Fat32__uppercase(right);
-}
-
 static bool Fat32__names_equal(ConstKStringPtr left, ConstKStringPtr right)
 {
-    if (left->len != right->len)
+    if (KString__length(left) != KString__length(right))
     {
         return false;
     }
 
-    for (size_t i = 0; i < left->len; i++)
-    {
-        if (!Fat32__chars_equal_ignore_case(left->data[i], right->data[i]))
-        {
-            return false;
-        }
-    }
-
-    return true;
+    KString uppercase_left = KString__uppercase(left);
+    KString uppercase_right = KString__uppercase(right);
+    return KString__equals(&uppercase_left, &uppercase_right);
 }
 
 static Result(Fat32Code) Fat32Volume__write_fat_entry(Fat32VolumePtr self, uint32_t cluster, uint32_t value)
@@ -2918,6 +2846,11 @@ static Result(IOStatus) Fat32FileIO__remove(IOStatePtr self, KString path, Flags
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
 }
 
+static Result(IOStatus) Fat32FileIO__link(IOStatePtr self, KString source_path, KString target_path)
+{
+    return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
+}
+
 FileIO Fat32FilesystemIO__new()
 {
     return (FileIO) {
@@ -2933,6 +2866,7 @@ FileIO Fat32FilesystemIO__new()
         .list_dir = Fat32FileIO__list_dir,
         .mkdir = Fat32FileIO__mkdir,
         .remove = Fat32FileIO__remove,
+        .link = Fat32FileIO__link,
     };
 }
 

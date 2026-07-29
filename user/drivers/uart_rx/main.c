@@ -80,19 +80,49 @@ int UART_RX_ENTRYPOINT(void)
          service_alive(wait_status);
          wait_status = service_wait(&event))
     {
+        DRIVER_DEBUG(
+            "uart_rx: wait_status=%i event_type=%i event_source=%i event_data=%i\n",
+            (int) wait_status,
+            (int) event.type,
+            (int) event.source,
+            (int) event.data
+        );
         if (service_ok(wait_status))
         {
             bool uart_irq = event.type == SERVICE_EVENT_IRQ && event.source == UART_IRQ_ID;
             bool read_request = event.type == SERVICE_EVENT_IO && event.source == SERVICE_IO_READ_REQUEST;
+            DRIVER_DEBUG(
+                "uart_rx: uart_irq=%i read_request=%i\n",
+                uart_irq,
+                read_request
+            );
             if (uart_irq || read_request)
             {
                 IOServerBuffer buffer;
-                if (io_server_get_buffer(tty, &buffer) == IO_OK)
+                IOStatus buffer_status = io_server_get_buffer(tty, &buffer);
+                DRIVER_DEBUG(
+                    "uart_rx: get_buffer status=%i capacity=%i data=%p\n",
+                    (int) buffer_status,
+                    (int) buffer.capacity,
+                    buffer.data
+                );
+                if (buffer_status == IO_OK)
                 {
                     uint64_t bytes = drain_uart(uart, buffer.data, buffer.capacity);
+                    DRIVER_DEBUG("uart_rx: drained bytes=%i\n", (int) bytes);
                     if (bytes > 0)
                     {
-                        io_server_data_available(tty, bytes);
+                        DRIVER_DEBUG(
+                            "uart_rx: first_byte=%i first_byte_hex=%x\n",
+                            (int) ((unsigned char) buffer.data[0]),
+                            (unsigned int) ((unsigned char) buffer.data[0])
+                        );
+                        IOStatus data_status = io_server_data_available(tty, bytes);
+                        DRIVER_DEBUG(
+                            "uart_rx: data_available status=%i bytes=%i\n",
+                            (int) data_status,
+                            (int) bytes
+                        );
                     }
                 }
             }

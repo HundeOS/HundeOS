@@ -65,35 +65,29 @@ static Result(Anything) ServiceEvent__copy_to_target(Result(Anything) result, An
     return Error(Anything, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
 }
 
-static Result(Anything) Service__complete_wait_syscall(ParkedKernelContextPtr parked_context)
+static Result(Anything) Service__complete_wait_syscall(ParkedOperationPtr parked_operation)
 {
-    ResultMatch(ServiceEvent, Service__complete_wait(parked_context))
+    ResultMatch(ServiceEvent, Service__complete_wait(parked_operation))
         IsSuccess(event,
         {
-            Result(Anything) mapped = KernelContext__map_result(
-                parked_context->kernel_context,
+            return KernelContext__map_result(
+                parked_operation->kernel_context,
                 Success(Anything, (Anything) &event)
             );
-            ParkedKernelContext__dispose(parked_context);
-            return mapped;
         })
         IsError(code, message,
         {
-            Result(Anything) mapped = KernelContext__map_result(
-                parked_context->kernel_context,
+            return KernelContext__map_result(
+                parked_operation->kernel_context,
                 Error(Anything, message, code)
             );
-            ParkedKernelContext__dispose(parked_context);
-            return mapped;
         })
     End
 
-    Result(Anything) mapped = KernelContext__map_result(
-        parked_context->kernel_context,
+    return KernelContext__map_result(
+        parked_operation->kernel_context,
         Error(Anything, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED)
     );
-    ParkedKernelContext__dispose(parked_context);
-    return mapped;
 }
 
 Result(SystemCallResult) Service__handler(
@@ -135,11 +129,12 @@ Result(SystemCallResult) Service__handler(
                     (Anything) target
                 );
 
-                ResultMatch(ServiceEvent, Scheduler__service_wait(
+                ResultMatch(ServiceEvent, Scheduler__service_wait_with_context_ownership(
                     kernel->scheduler,
                     process,
                     kernel_context,
-                    Some(Continuation, Service__complete_wait_syscall)
+                    Some(Continuation, Service__complete_wait_syscall),
+                    true
                 ))
                     IsSuccess(event,
                     {
@@ -196,6 +191,13 @@ Result(SystemCallResult) Service__handler(
                 ResultMatch(Address, Process__device_address(process, request->driver_address))
                     IsSuccess(device_address,
                     {
+                        __d_printf(
+                            IODEV,
+                            "service device address pid=%i driver=0x%x device=0x%x\n",
+                            (int) process->pid,
+                            (unsigned int) request->driver_address,
+                            (unsigned int) device_address
+                        );
                         request->device_address = device_address;
                         return Success(SystemCallResult, SERVICE_OK);
                     })
@@ -226,7 +228,7 @@ Result(SystemCallResult) Service__handler(
                 }
 
                 ResultMatch(BlockDeviceCode, BlockDeviceRegistry__register(
-                    kstring(request->path), process, request->block_count, kernel->scheduler
+                    kstring(request->path), process, request->block_count, kernel->message_broker
                 ))
                     IsSuccess(_,
                     {

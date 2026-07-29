@@ -8,6 +8,7 @@ KernelContext KernelContext__new(Optional(ProcessID) pid, Optional(SchedulerPtr)
         .pid = pid,
         .scheduler = scheduler,
         .result_mapper = None(KernelResultMapper),
+        .next_context = None(KernelContextPtr),
         .result_mapper_context = 0,
     };
 }

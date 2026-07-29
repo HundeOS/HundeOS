@@ -5,16 +5,16 @@
 #include "../../../../kernel/kernel_core.h"
 
 static KernelPtr kernel = NULL;
-static MessagePtr received_message_1 = NULL;
-static MessagePtr received_message_2 = NULL;
+static Optional(Message) received_message_1 = None(Message);
+static Optional(Message) received_message_2 = None(Message);
 static const ProcessID DUMMY_PID = 1234;
 
 
 void setUp()
 {
     kernel = init_test_kernel_without_filesystem();
-    received_message_1 = NULL;
-    received_message_2 = NULL;
+    received_message_1 = None(Message);
+    received_message_2 = None(Message);
 }
 
 void tearDown()
@@ -24,12 +24,12 @@ void tearDown()
 
 void fake_callback_1(KernelListenerPtr self, MessagePtr message)
 {
-    received_message_1 = message;
+    received_message_1 = Some(Message, *message);
 }
 
 void fake_callback_2(KernelListenerPtr self, MessagePtr message)
 {
-    received_message_2 = message;
+    received_message_2 = Some(Message, *message);
 }
 
 void test_message_broker_listener_registers_and_delivers_message()
@@ -46,7 +46,8 @@ void test_message_broker_listener_registers_and_delivers_message()
         IsError(code, message, TEST_FAIL());
     End
 
-    TEST_ASSERT_EQUAL(message, received_message_1);
+    TEST_ASSERT_TRUE(received_message_1.present);
+    TEST_ASSERT_EQUAL(1234, received_message_1.some.val.source_code);
 }
 
 void test_message_broker_listener_registers_and_delivers_message_for_multiple_listeners()
@@ -67,8 +68,10 @@ void test_message_broker_listener_registers_and_delivers_message_for_multiple_li
         IsError(code, message, TEST_FAIL());
     End
 
-    TEST_ASSERT_EQUAL(message, received_message_1);
-    TEST_ASSERT_EQUAL(message, received_message_2);
+    TEST_ASSERT_TRUE(received_message_1.present);
+    TEST_ASSERT_TRUE(received_message_2.present);
+    TEST_ASSERT_EQUAL(1234, received_message_1.some.val.source_code);
+    TEST_ASSERT_EQUAL(1234, received_message_2.some.val.source_code);
 }
 
 void test_message_broker_doesnt_deliver_when_not_registered_for_source()
@@ -84,6 +87,6 @@ void test_message_broker_doesnt_deliver_when_not_registered_for_source()
         IsError(code, message, TEST_FAIL());
     End
 
-    TEST_ASSERT_NULL(received_message_1);
-    TEST_ASSERT_NULL(received_message_2);
+    TEST_ASSERT_FALSE(received_message_1.present);
+    TEST_ASSERT_FALSE(received_message_2.present);
 }

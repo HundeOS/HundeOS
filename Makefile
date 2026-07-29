@@ -43,6 +43,13 @@ DISK_LONG_FILE = tools/disk_long_filename.txt
 DISK_LONG_NAME = This is a long filename.txt
 DISK_LARGE_FILE = tools/disk_large_file.txt
 DISK_LARGE_NAME = BIGFILE.TXT
+EXT2_IMG = build/ext2.img
+EXT2_SIZE_MB = 64
+EXT2_LABEL = EXT2FS
+EXT2_ROOT_DIR = tools/ext2_root
+EXT2_IMG_BLOCK_SIZE = 1024
+EXT2_INODE_SIZE = 128
+EXT2_MKFS ?= genext2fs
 MKFS_FAT ?= mkfs.fat
 SERIAL ?= stdio
 
@@ -111,6 +118,23 @@ $(DISK_IMG): tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $
 	python3 tools/populate_fat32_image.py $@ "$(DISK_LONG_NAME)" $(DISK_LONG_FILE)
 	python3 tools/populate_fat32_image.py $@ $(DISK_LARGE_NAME) $(DISK_LARGE_FILE)
 
+$(EXT2_IMG): $(shell find $(EXT2_ROOT_DIR) -type f -print)
+	mkdir -p `dirname $@`
+	rm -f $@.tmp
+	dd if=/dev/zero of=$@.tmp bs=1048576 count=$(EXT2_SIZE_MB)
+	@if ! command -v $(EXT2_MKFS) >/dev/null 2>&1; then \
+		echo "Missing ext2 image builder: $(EXT2_MKFS)"; \
+		echo "Set EXT2_MKFS=/path/to/tool or install one of: mke2fs, mkfs.ext2, genext2fs, e2fsdroid"; \
+		rm -f $@.tmp; \
+		exit 1; \
+	fi
+	@if [ "$(EXT2_MKFS)" = "genext2fs" ]; then \
+		$(EXT2_MKFS) -b $$(( $(EXT2_SIZE_MB) * 1024 )) -B $(EXT2_IMG_BLOCK_SIZE) -L $(EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
+	else \
+		$(EXT2_MKFS) -q -F -t ext2 -b $(EXT2_IMG_BLOCK_SIZE) -I $(EXT2_INODE_SIZE) -L $(EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
+	fi
+	mv $@.tmp $@
+
 disk: tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $(DISK_LARGE_FILE)
 	mkdir -p `dirname $(DISK_IMG)`
 	dd if=/dev/zero of=$(DISK_IMG) bs=1048576 count=$(DISK_SIZE_MB)
@@ -118,6 +142,8 @@ disk: tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $(DISK_L
 	python3 tools/populate_fat32_image.py $(DISK_IMG) $(DISK_TEST_NAME) $(DISK_TEST_FILE)
 	python3 tools/populate_fat32_image.py $(DISK_IMG) "$(DISK_LONG_NAME)" $(DISK_LONG_FILE)
 	python3 tools/populate_fat32_image.py $(DISK_IMG) $(DISK_LARGE_NAME) $(DISK_LARGE_FILE)
+
+ext2-disk: $(EXT2_IMG)
 
 build/kernel/%.o: %.c
 	mkdir -p `dirname $@`
@@ -177,7 +203,7 @@ $(foreach dir,$(USER_BINARY_DIRS),$(eval $(call make-user-bin,$(dir))))
 user_binaries: $(USER_BINARIES)
 
 
-qemu-virt: $(ELF) $(DISK_IMG)
+qemu-virt: $(ELF) $(DISK_IMG) $(EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
 		-smp cpus=4 -cpu max \
@@ -186,11 +212,13 @@ qemu-virt: $(ELF) $(DISK_IMG)
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait
 
-qemu-virt-1cpu: $(ELF) $(DISK_IMG)
+qemu-virt-1cpu: $(ELF) $(DISK_IMG) $(EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3,virtualization=off,secure=off \
 		-smp cpus=1 -cpu max \
@@ -199,15 +227,15 @@ qemu-virt-1cpu: $(ELF) $(DISK_IMG)
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
   		-kernel $(ELF) \
   		-nographic \
-  		-d int,unimp \
-		-D qemu-1cpu.log \
 		-monitor telnet::4444,server,nowait
 
 qemu-virt-1cpu-trace:
-	$(MAKE) clean
 	$(MAKE) $(DISK_IMG)
+	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
 	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p build
 	: > build/kernel-trace.log
@@ -220,6 +248,8 @@ qemu-virt-1cpu-trace:
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
 		-kernel $(ELF) \
 		-nographic \
 		-semihosting-config enable=on,target=native \
@@ -227,8 +257,8 @@ qemu-virt-1cpu-trace:
 		-D qemu-1cpu.log
 
 qemu-virt-2cpus-trace:
-	$(MAKE) clean
 	$(MAKE) $(DISK_IMG)
+	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
 	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p build
 	: > build/kernel-trace.log
@@ -241,13 +271,15 @@ qemu-virt-2cpus-trace:
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
 		-kernel $(ELF) \
 		-nographic \
 		-semihosting-config enable=on,target=native \
 		-d int,unimp \
 		-D qemu-2cpus.log
 
-qemu-virt-2cpus: $(ELF) $(DISK_IMG)
+qemu-virt-2cpus: $(ELF) $(DISK_IMG) $(EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
 		-smp cpus=2 -cpu max \
@@ -256,6 +288,8 @@ qemu-virt-2cpus: $(ELF) $(DISK_IMG)
 		-cpu cortex-a57 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait

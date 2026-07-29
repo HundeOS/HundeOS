@@ -9,6 +9,7 @@ typedef enum Sources
     SOURCE_IO = 4,
     SOURCE_SCHEDULER = 5,
     SOURCE_PROCESS = 6,
+    SOURCE_SERVICE = 7,
 }
 Sources;
 
@@ -24,6 +25,9 @@ typedef enum PayloadTypes
     PAYLOAD_TYPE_ANYTHING = 0,
     PAYLOAD_TYPE_DATA = 1,
     PAYLOAD_TYPE_DEFERRED = 2,
+    PAYLOAD_TYPE_PROCESS_ID = 3,
+    PAYLOAD_TYPE_IO_OPERATION = 4,
+    PAYLOAD_TYPE_SERVICE_EVENT_DELIVERY = 5,
 }
 PayloadTypes;
 
@@ -39,8 +43,15 @@ typedef enum IOSystemCodes
 {
     SUBSYS_IO_PARK = 4001,
     SUBSYS_IO_AVAILABLE = 4002,
+    SUBSYS_IO_OPERATION_AVAILABLE = 4003,
 }
 IOSystemCodes;
+
+typedef enum ServiceSystemCodes
+{
+    SUBSYS_SERVICE_EVENT_AVAILABLE = 5001,
+}
+ServiceSystemCodes;
 
 typedef enum ProcessCodes
 {

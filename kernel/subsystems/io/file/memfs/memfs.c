@@ -61,11 +61,11 @@ static KString MemFilesystem__parent_path(KString path)
     KString result = EMPTY_KSTRING;
     int64_t last_separator = -1;
 
-    for (uint64_t i = 0; i < path.len; i++)
+    for (StringPos i = 0; i < path.len; i++)
     {
         if (path.data[i] == '/')
         {
-            last_separator = i;
+            last_separator = (int64_t) i;
         }
     }
 
@@ -87,9 +87,9 @@ static KString MemFilesystem__parent_path(KString path)
 static KString MemFilesystem__basename(KString path)
 {
     KString result = EMPTY_KSTRING;
-    uint64_t start = 0;
+    StringPos start = 0;
 
-    for (uint64_t i = 0; i < path.len; i++)
+    for (StringPos i = 0; i < path.len; i++)
     {
         if (path.data[i] == '/')
         {
@@ -97,7 +97,7 @@ static KString MemFilesystem__basename(KString path)
         }
     }
 
-    for (uint64_t i = start; i < path.len && result.len < result.max - 1; i++)
+    for (StringPos i = start; i < path.len && result.len < result.max - 1; i++)
     {
         result.data[result.len++] = path.data[i];
     }
@@ -150,7 +150,7 @@ static bool MemFilesystem__path_is_child_of(KStringPtr child, KStringPtr parent)
 
     if (parent->len > 0)
     {
-        for (uint64_t i = 0; i < parent->len; i++)
+        for (StringPos i = 0; i < parent->len; i++)
         {
             if (child->data[i] != parent->data[i])
             {
@@ -638,6 +638,11 @@ Result(IOStatus) MemFileIO__remove(IOStatePtr self, KString path, Flags flags)
     return Error(IOStatus, KString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
 
+Result(IOStatus) MemFileIO__link(IOStatePtr self, KString source_path, KString target_path)
+{
+    return Error(IOStatus, kstring("link not supported"), IO_OPERATION_NOT_SUPPORTED);
+}
+
 FileIO MemFilesystemIO__new()
 {
     FileIO mem_file_io = (FileIO) {
@@ -652,6 +657,7 @@ FileIO MemFilesystemIO__new()
         .list_nodes = MemFileIO__list_nodes,
         .mkdir = MemFileIO__mkdir,
         .remove = MemFileIO__remove,
+        .link = MemFileIO__link,
     };
     return mem_file_io;
 }

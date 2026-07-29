@@ -2,7 +2,7 @@
 
 #include "../../sys/debug.h"
 #include "../../sys/service.h"
-#include "../../sys/mmio.h"
+#include "../../sys/sync.h"
 
 #ifndef VIRTIO_BLK_ENTRYPOINT
 #define VIRTIO_BLK_ENTRYPOINT main
@@ -18,20 +18,21 @@
 #define VIRTIO_MMIO_REGION_SIZE     (VIRTIO_MMIO_SLOT_SIZE * VIRTIO_MMIO_SLOT_COUNT)
 #define VIRTIO_MMIO_FIRST_IRQ_ID    48ULL
 
-#define VIRTIO_MMIO_MAGIC          0x000
-#define VIRTIO_MMIO_VERSION        0x004
-#define VIRTIO_MMIO_DEVICE_ID      0x008
-#define VIRTIO_MMIO_VENDOR_ID      0x00c
+#define VIRTIO_MMIO_MAGIC           0x000
+#define VIRTIO_MMIO_VERSION         0x004
+#define VIRTIO_MMIO_DEVICE_ID       0x008
+#define VIRTIO_MMIO_VENDOR_ID       0x00c
 #define VIRTIO_MMIO_GUEST_PAGE_SIZE 0x028
-#define VIRTIO_MMIO_QUEUE_SEL      0x030
-#define VIRTIO_MMIO_QUEUE_NUM_MAX  0x034
-#define VIRTIO_MMIO_QUEUE_NUM      0x038
-#define VIRTIO_MMIO_QUEUE_ALIGN    0x03c
-#define VIRTIO_MMIO_QUEUE_PFN      0x040
-#define VIRTIO_MMIO_QUEUE_NOTIFY   0x050
-#define VIRTIO_MMIO_INTERRUPT_STAT 0x060
-#define VIRTIO_MMIO_INTERRUPT_ACK  0x064
-#define VIRTIO_MMIO_STATUS         0x070
+#define VIRTIO_MMIO_QUEUE_SEL       0x030
+#define VIRTIO_MMIO_QUEUE_NUM_MAX   0x034
+#define VIRTIO_MMIO_QUEUE_NUM       0x038
+#define VIRTIO_MMIO_QUEUE_ALIGN     0x03c
+#define VIRTIO_MMIO_QUEUE_PFN       0x040
+#define VIRTIO_MMIO_QUEUE_NOTIFY    0x050
+#define VIRTIO_MMIO_INTERRUPT_STAT  0x060
+#define VIRTIO_MMIO_INTERRUPT_ACK   0x064
+#define VIRTIO_MMIO_STATUS          0x070
+#define VIRTIO_MMIO_CONFIG          0x100
 
 #define VIRTIO_MMIO_MAGIC_VALUE 0x74726976U
 #define VIRTIO_DEVICE_ID_BLOCK  2U
@@ -43,9 +44,6 @@
 #define VIRTIO_BLK_QUEUE_SIZE  8U
 #define VIRTIO_BLK_QUEUE_ALIGN 4096U
 #define VIRTIO_BLK_QUEUE_BYTES 8192U
-#define VIRTIO_BLK_DESCS_PER_REQUEST 3U
-#define VIRTIO_BLK_MAX_IN_FLIGHT (VIRTIO_BLK_QUEUE_SIZE / VIRTIO_BLK_DESCS_PER_REQUEST)
-#define VIRTIO_BLK_PENDING_QUEUE_SIZE 16U
 
 #define VIRTQ_DESC_F_NEXT  1U
 #define VIRTQ_DESC_F_WRITE 2U
@@ -55,6 +53,18 @@
 
 #define VIRTIO_BLK_S_OK    0U
 #define VIRTIO_BLK_S_IOERR 1U
+
+typedef struct VirtioBlkDevice
+{
+    ServiceMappedMemoryPtr mapping;
+    void * mmio;
+    uint64_t slot;
+    uint64_t irq_id;
+    uint64_t block_count;
+    char path[SERVICE_DEVICE_PATH_MAX];
+    uint16_t last_used_idx;
+}
+VirtioBlkDevice, * VirtioBlkDevicePtr;
 
 typedef struct VirtqDesc
 {
@@ -96,39 +106,9 @@ typedef struct VirtioBlkOuthdr
 }
 VirtioBlkOuthdr;
 
-typedef struct VirtioBlkPendingRequest
-{
-    bool active;
-    bool completed;
-    uint64_t request_id;
-    uint64_t submit_sequence;
-    uint64_t block_count;
-    ServiceCode service_status;
-    uint64_t completed_blocks;
-    VirtioBlkOuthdr header;
-    uint8_t status;
-}
-VirtioBlkPendingRequest;
-
-typedef VirtioBlkPendingRequest * VirtioBlkPendingRequestPtr;
-
-typedef struct VirtioBlkDevice
-{
-    ServiceMappedMemoryPtr mapping;
-    void * mmio;
-    uint64_t slot;
-    uint64_t irq_id;
-    uint16_t last_used_idx;
-    uint64_t next_submit_sequence;
-    uint64_t next_delivery_sequence;
-    VirtioBlkPendingRequest in_flight[VIRTIO_BLK_MAX_IN_FLIGHT];
-    uint64_t pending_ids[VIRTIO_BLK_PENDING_QUEUE_SIZE];
-    uint64_t pending_read_index;
-    uint64_t pending_write_index;
-    uint64_t pending_count;
-} VirtioBlkDevice, * VirtioBlkDevicePtr;
-
 static uint8_t virtio_queue_area[VIRTIO_BLK_QUEUE_BYTES] __attribute__((aligned(VIRTIO_BLK_QUEUE_ALIGN)));
+static VirtioBlkOuthdr virtio_blk_header;
+static uint8_t virtio_blk_status;
 
 static void zero_bytes(void * target, uint64_t size)
 {
@@ -144,17 +124,17 @@ static uint64_t align_up(uint64_t value, uint64_t alignment)
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
-static VirtqDesc * VirtioBlk__descs()
+static VirtqDesc * VirtioBlk__descs(VirtioBlkDevicePtr self)
 {
     return (VirtqDesc *) virtio_queue_area;
 }
 
-static VirtqAvail * VirtioBlk__avail()
+static VirtqAvail * VirtioBlk__avail(VirtioBlkDevicePtr self)
 {
     return (VirtqAvail *) (virtio_queue_area + sizeof(VirtqDesc) * VIRTIO_BLK_QUEUE_SIZE);
 }
 
-static VirtqUsed * VirtioBlk__used()
+static VirtqUsed * VirtioBlk__used(VirtioBlkDevicePtr self)
 {
     uint64_t used_offset = align_up(
         sizeof(VirtqDesc) * VIRTIO_BLK_QUEUE_SIZE + sizeof(VirtqAvail),
@@ -200,8 +180,56 @@ static bool VirtioBlk__probe(void * mmio, uint64_t slot, uint64_t physical_addre
         && device_id == VIRTIO_DEVICE_ID_BLOCK;
 }
 
-static bool VirtioBlk__find_device(VirtioBlkDevicePtr self)
+static uint64_t VirtioBlk__read_u64_config(void * mmio, uint64_t offset)
 {
+    uint64_t low = VIRTIO_READ32(mmio, VIRTIO_MMIO_CONFIG + offset);
+    uint64_t high = VIRTIO_READ32(mmio, VIRTIO_MMIO_CONFIG + offset + 4);
+    return low | (high << 32);
+}
+
+static void VirtioBlk__copy_string(char target[SERVICE_DEVICE_PATH_MAX], const char * source)
+{
+    uint64_t i = 0;
+    if (source != 0)
+    {
+        for (; source[i] != '\0' && i < SERVICE_DEVICE_PATH_MAX - 1; i++)
+        {
+            target[i] = source[i];
+        }
+    }
+    target[i] = '\0';
+}
+
+static bool VirtioBlk__parse_u64(const char * value, uint64_t * target)
+{
+    if (value == 0 || value[0] == '\0')
+    {
+        return false;
+    }
+
+    uint64_t parsed = 0;
+    for (uint64_t i = 0; value[i] != '\0'; i++)
+    {
+        if (value[i] < '0' || value[i] > '9')
+        {
+            return false;
+        }
+
+        parsed = (parsed * 10) + (uint64_t) (value[i] - '0');
+    }
+
+    *target = parsed;
+    return true;
+}
+
+static bool VirtioBlk__bind_device(VirtioBlkDevicePtr self, uint64_t slot, const char * path)
+{
+    if (slot >= VIRTIO_MMIO_SLOT_COUNT)
+    {
+        DRIVER_DEBUG("virtio_blk: slot out of range %i\n", (int) slot);
+        return false;
+    }
+
     ServiceMappedMemoryPtr mapping;
     if (!service_ok(service_map_mmio(VIRTIO_MMIO_FIRST_PHYS_BASE, VIRTIO_MMIO_REGION_SIZE, &mapping)))
     {
@@ -209,25 +237,31 @@ static bool VirtioBlk__find_device(VirtioBlkDevicePtr self)
         return false;
     }
 
-    for (uint64_t slot = 0; slot < VIRTIO_MMIO_SLOT_COUNT; slot++)
+    uint64_t physical_address = VIRTIO_MMIO_FIRST_PHYS_BASE + (slot * VIRTIO_MMIO_SLOT_SIZE);
+    void * mmio = driver_ptr_offset(mapping, slot * VIRTIO_MMIO_SLOT_SIZE);
+    if (!VirtioBlk__probe(mmio, slot, physical_address))
     {
-        uint64_t physical_address = VIRTIO_MMIO_FIRST_PHYS_BASE + (slot * VIRTIO_MMIO_SLOT_SIZE);
-
-        void * mmio = driver_ptr_offset(mapping, slot * VIRTIO_MMIO_SLOT_SIZE);
-        if (VirtioBlk__probe(mmio, slot, physical_address))
-        {
-            self->mapping = mapping;
-            self->mmio = mmio;
-            self->slot = slot;
-            self->irq_id = VIRTIO_MMIO_FIRST_IRQ_ID + slot;
-            self->last_used_idx = 0;
-            self->next_submit_sequence = 0;
-            self->next_delivery_sequence = 0;
-            return true;
-        }
+        DRIVER_DEBUG("virtio_blk: requested slot %i is not a block device\n", (int) slot);
+        return false;
     }
 
-    return false;
+    *self = (VirtioBlkDevice) {
+        .mapping = mapping,
+        .mmio = mmio,
+        .slot = slot,
+        .irq_id = VIRTIO_MMIO_FIRST_IRQ_ID + slot,
+        .block_count = VirtioBlk__read_u64_config(mmio, 0),
+        .last_used_idx = 0,
+    };
+    VirtioBlk__copy_string(self->path, path);
+    DRIVER_DEBUG(
+        "virtio_blk: discovered path=%s slot=%i irq=%i block_count=%i\n",
+        self->path,
+        (int) self->slot,
+        (int) self->irq_id,
+        (int) self->block_count
+    );
+    return true;
 }
 
 static void VirtioBlk__acknowledge_driver(void * mmio)
@@ -253,6 +287,8 @@ static bool VirtioBlk__setup_queue(VirtioBlkDevicePtr self)
     }
 
     zero_bytes(virtio_queue_area, VIRTIO_BLK_QUEUE_BYTES);
+    virtio_blk_header = (VirtioBlkOuthdr) { 0 };
+    virtio_blk_status = 0;
 
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_GUEST_PAGE_SIZE, VIRTIO_BLK_QUEUE_ALIGN);
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_SEL, VIRTIO_BLK_QUEUE_INDEX);
@@ -267,16 +303,7 @@ static bool VirtioBlk__setup_queue(VirtioBlkDevicePtr self)
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_ALIGN, VIRTIO_BLK_QUEUE_ALIGN);
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_PFN, queue_device_address / VIRTIO_BLK_QUEUE_ALIGN);
 
-    self->last_used_idx = VirtioBlk__used()->idx;
-    self->next_submit_sequence = 0;
-    self->next_delivery_sequence = 0;
-    for (uint64_t i = 0; i < VIRTIO_BLK_MAX_IN_FLIGHT; i++)
-    {
-        self->in_flight[i] = (VirtioBlkPendingRequest) { 0 };
-    }
-    self->pending_read_index = 0;
-    self->pending_write_index = 0;
-    self->pending_count = 0;
+    self->last_used_idx = VirtioBlk__used(self)->idx;
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_DRIVER_OK);
     return true;
 }
@@ -284,140 +311,96 @@ static bool VirtioBlk__setup_queue(VirtioBlkDevicePtr self)
 static void VirtioBlk__ack_interrupt(void * mmio)
 {
     uint32_t status = VIRTIO_READ32(mmio, VIRTIO_MMIO_INTERRUPT_STAT);
-    __mmio_sync_boundary();
+    __sync_boundary();
     DRIVER_DEBUG("virtio_blk: irq status=0x%x\n", status);
     if (status != 0)
     {
         VIRTIO_WRITE32(mmio, VIRTIO_MMIO_INTERRUPT_ACK, status);
-        __mmio_sync_boundary();
+        __sync_boundary();
         DRIVER_DEBUG("virtio_blk: irq acked status=0x%x\n", status);
     }
 }
 
-static bool VirtioBlk__pending_enqueue(VirtioBlkDevicePtr self, uint64_t request_id)
+static bool VirtioBlk__wait_for_used(VirtioBlkDevicePtr self)
 {
-    if (self->pending_count >= VIRTIO_BLK_PENDING_QUEUE_SIZE)
+    ServiceEvent event;
+    DRIVER_DEBUG(
+        "virtio_blk: wait used start last=%i used=%i irq=%i\n",
+        (int) self->last_used_idx,
+        (int) VirtioBlk__used(self)->idx,
+        (int) self->irq_id
+    );
+
+    while (VirtioBlk__used(self)->idx == self->last_used_idx)
     {
-        DRIVER_DEBUG("virtio_blk: pending queue full id=%i\n", (int) request_id);
-        return false;
-    }
-
-    self->pending_ids[self->pending_write_index] = request_id;
-    self->pending_write_index = (self->pending_write_index + 1) % VIRTIO_BLK_PENDING_QUEUE_SIZE;
-    self->pending_count++;
-    return true;
-}
-
-static bool VirtioBlk__pending_dequeue(VirtioBlkDevicePtr self, uint64_t * request_id)
-{
-    if (self->pending_count == 0)
-    {
-        return false;
-    }
-
-    *request_id = self->pending_ids[self->pending_read_index];
-    self->pending_read_index = (self->pending_read_index + 1) % VIRTIO_BLK_PENDING_QUEUE_SIZE;
-    self->pending_count--;
-    return true;
-}
-
-static bool VirtioBlk__free_slot(VirtioBlkDevicePtr self, VirtioBlkPendingRequestPtr * target)
-{
-    for (uint64_t i = 0; i < VIRTIO_BLK_MAX_IN_FLIGHT; i++)
-    {
-        if (!self->in_flight[i].active)
+        ServiceCode wait_status = service_wait(&event);
+        DRIVER_DEBUG(
+            "virtio_blk: wait returned status=%i event_type=%i source=%i data=%i used=%i last=%i\n",
+            (int) wait_status,
+            (int) event.type,
+            (int) event.source,
+            (int) event.data,
+            (int) VirtioBlk__used(self)->idx,
+            (int) self->last_used_idx
+        );
+        if (!service_alive(wait_status))
         {
-            *target = &self->in_flight[i];
-            return true;
+            DRIVER_DEBUG("virtio_blk: wait aborted status=%i\n", (int) wait_status);
+            return false;
+        }
+
+        if (service_ok(wait_status) && event.type == SERVICE_EVENT_IRQ && event.source == self->irq_id)
+        {
+            VirtioBlk__ack_interrupt(self->mmio);
         }
     }
 
-    return false;
-}
-
-static bool VirtioBlk__slot_for_descriptor(
-    VirtioBlkDevicePtr self, uint32_t descriptor_head, VirtioBlkPendingRequestPtr * target
-)
-{
-    if (descriptor_head % VIRTIO_BLK_DESCS_PER_REQUEST != 0)
-    {
-        return false;
-    }
-
-    uint32_t slot_index = descriptor_head / VIRTIO_BLK_DESCS_PER_REQUEST;
-    if (slot_index >= VIRTIO_BLK_MAX_IN_FLIGHT || !self->in_flight[slot_index].active)
-    {
-        return false;
-    }
-
-    *target = &self->in_flight[slot_index];
+    self->last_used_idx = VirtioBlk__used(self)->idx;
+    DRIVER_DEBUG(
+        "virtio_blk: wait used done last=%i status=%i\n",
+        (int) self->last_used_idx,
+        (int) virtio_blk_status
+    );
     return true;
 }
 
-static uint16_t VirtioBlk__descriptor_head_for_slot(VirtioBlkDevicePtr self, VirtioBlkPendingRequestPtr slot)
+static ServiceCode VirtioBlk__execute_request(VirtioBlkDevicePtr self, ServiceBlockRequestPtr request)
 {
-    uint64_t slot_index = ((uint64_t) slot - (uint64_t) self->in_flight) / sizeof(VirtioBlkPendingRequest);
-    return (uint16_t) (slot_index * VIRTIO_BLK_DESCS_PER_REQUEST);
-}
-
-static void VirtioBlk__mark_request_failed(
-    VirtioBlkDevicePtr self, VirtioBlkPendingRequestPtr slot, uint64_t request_id, ServiceCode status
-)
-{
-    slot->active = true;
-    slot->completed = true;
-    slot->request_id = request_id;
-    slot->submit_sequence = self->next_submit_sequence++;
-    slot->block_count = 0;
-    slot->service_status = status;
-    slot->completed_blocks = 0;
-    slot->status = VIRTIO_BLK_S_IOERR;
-}
-
-static void VirtioBlk__submit_request(
-    VirtioBlkDevicePtr self, VirtioBlkPendingRequestPtr slot, ServiceBlockRequestPtr request
-)
-{
-    uint16_t descriptor_head = VirtioBlk__descriptor_head_for_slot(self, slot);
-    uint16_t descriptor_buffer = descriptor_head + 1;
-    uint16_t descriptor_status = descriptor_head + 2;
+    if (request->block_count == 0 || request->buffer == 0 || request->buffer_size < request->block_count * request->block_size)
+    {
+        return SERVICE_INVALID_BUFFER;
+    }
 
     uint64_t header_device_address = 0;
     uint64_t buffer_device_address = 0;
     uint64_t status_device_address = 0;
-    if (!service_ok(service_device_address(&slot->header, &header_device_address))
+    if (!service_ok(service_device_address(&virtio_blk_header, &header_device_address))
         || !service_ok(service_device_address(request->buffer, &buffer_device_address))
-        || !service_ok(service_device_address(&slot->status, &status_device_address)))
+        || !service_ok(service_device_address(&virtio_blk_status, &status_device_address)))
     {
-        VirtioBlk__mark_request_failed(self, slot, request->request_id, SERVICE_INVALID_BUFFER);
-        return;
+        return SERVICE_INVALID_BUFFER;
     }
 
-    slot->active = true;
-    slot->completed = false;
-    slot->request_id = request->request_id;
-    slot->submit_sequence = self->next_submit_sequence++;
-    slot->block_count = request->block_count;
-    slot->service_status = SERVICE_EVENT_QUEUE_EMPTY;
-    slot->completed_blocks = 0;
-    slot->status = VIRTIO_BLK_S_IOERR;
-    slot->header = (VirtioBlkOuthdr) {
+    virtio_blk_status = VIRTIO_BLK_S_IOERR;
+    virtio_blk_header = (VirtioBlkOuthdr) {
         .type = request->operation == SERVICE_BLOCK_WRITE ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN,
         .reserved = 0,
         .sector = request->block * (request->block_size / 512),
     };
 
-    VirtqDesc * descs = VirtioBlk__descs();
-    VirtqAvail * avail = VirtioBlk__avail();
-    VirtqUsed * used = VirtioBlk__used();
+    VirtqDesc * descs = VirtioBlk__descs(self);
+    VirtqAvail * avail = VirtioBlk__avail(self);
+    VirtqUsed * used = VirtioBlk__used(self);
 
     DRIVER_DEBUG(
-        "virtio_blk: submit request id=%i op=%i seq=%i desc=%i sector=%i header_dev=0x%x buffer_dev=0x%x status_dev=0x%x avail=%i used=%i last=%i\n",
+        "virtio_blk: submit request id=%i op=%i sector=%i header_drv=%p buffer_drv=%p status_drv=%p "
+        "header_dev=0x%x buffer_dev=0x%x status_dev=0x%x avail=%i used=%i last=%i\n",
         (int) request->request_id,
         (int) request->operation,
-        (int) slot->submit_sequence,
-        (int) descriptor_head,
-        (int) slot->header.sector,
+        (int) virtio_blk_header.sector,
+        &virtio_blk_header,
+        request->buffer,
+        &virtio_blk_status,
         (unsigned int) header_device_address,
         (unsigned int) buffer_device_address,
         (unsigned int) status_device_address,
@@ -426,216 +409,194 @@ static void VirtioBlk__submit_request(
         (int) self->last_used_idx
     );
 
-    descs[descriptor_head] = (VirtqDesc) {
+    descs[0] = (VirtqDesc) {
         .addr = header_device_address,
         .len = sizeof(VirtioBlkOuthdr),
         .flags = VIRTQ_DESC_F_NEXT,
-        .next = descriptor_buffer,
+        .next = 1,
     };
-    descs[descriptor_buffer] = (VirtqDesc) {
+    descs[1] = (VirtqDesc) {
         .addr = buffer_device_address,
         .len = (uint32_t) request->buffer_size,
         .flags = request->operation == SERVICE_BLOCK_READ ? (VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE) : VIRTQ_DESC_F_NEXT,
-        .next = descriptor_status,
+        .next = 2,
     };
-    descs[descriptor_status] = (VirtqDesc) {
+    descs[2] = (VirtqDesc) {
         .addr = status_device_address,
         .len = 1,
         .flags = VIRTQ_DESC_F_WRITE,
         .next = 0,
     };
 
-    avail->ring[avail->idx % VIRTIO_BLK_QUEUE_SIZE] = descriptor_head;
-    __mmio_sync_boundary();
+    avail->ring[avail->idx % VIRTIO_BLK_QUEUE_SIZE] = 0;
+    __sync_boundary();
     avail->idx++;
-    __mmio_sync_boundary();
+    __sync_boundary();
     DRIVER_DEBUG(
-        "virtio_blk: notify request id=%i desc=%i avail=%i used=%i last=%i ring_slot=%i\n",
+        "virtio_blk: notify request id=%i avail=%i used=%i last=%i ring_slot=%i\n",
         (int) request->request_id,
-        (int) descriptor_head,
         (int) avail->idx,
         (int) used->idx,
         (int) self->last_used_idx,
         (int) ((avail->idx - 1) % VIRTIO_BLK_QUEUE_SIZE)
     );
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_NOTIFY, VIRTIO_BLK_QUEUE_INDEX);
-}
 
-static void VirtioBlk__flush_completed(VirtioBlkDevicePtr self)
-{
-    bool flushed = true;
-    while (flushed)
+    if (!VirtioBlk__wait_for_used(self))
     {
-        flushed = false;
-        for (uint64_t i = 0; i < VIRTIO_BLK_MAX_IN_FLIGHT; i++)
-        {
-            VirtioBlkPendingRequestPtr slot = &self->in_flight[i];
-            if (slot->active && slot->completed && slot->submit_sequence == self->next_delivery_sequence)
-            {
-                DRIVER_DEBUG(
-                    "virtio_blk: deliver request id=%i seq=%i status=%i completed=%i\n",
-                    (int) slot->request_id,
-                    (int) slot->submit_sequence,
-                    (int) slot->service_status,
-                    (int) slot->completed_blocks
-                );
-                service_block_complete(slot->request_id, slot->service_status, slot->completed_blocks);
-                *slot = (VirtioBlkPendingRequest) { 0 };
-                self->next_delivery_sequence++;
-                flushed = true;
-                break;
-            }
-        }
+        DRIVER_DEBUG("virtio_blk: request id=%i wait failed\n", (int) request->request_id);
+        return SERVICE_BLOCK_REQUEST_FAILED;
     }
-}
 
-static void VirtioBlk__drain_used(VirtioBlkDevicePtr self)
-{
-    VirtqUsed * used = VirtioBlk__used();
-    while (self->last_used_idx != used->idx)
+    if (request->operation == SERVICE_BLOCK_READ && request->buffer_size >= 8)
     {
-        uint16_t used_index = self->last_used_idx % VIRTIO_BLK_QUEUE_SIZE;
-        VirtqUsedElem elem = used->ring[used_index];
-        VirtioBlkPendingRequestPtr slot;
-        if (!VirtioBlk__slot_for_descriptor(self, elem.id, &slot))
-        {
-            DRIVER_DEBUG(
-                "virtio_blk: used unknown desc=%i len=%i last=%i used=%i\n",
-                (int) elem.id,
-                (int) elem.len,
-                (int) self->last_used_idx,
-                (int) used->idx
-            );
-        }
-        else
-        {
-            slot->completed = true;
-            slot->service_status = slot->status == VIRTIO_BLK_S_OK ? SERVICE_OK : SERVICE_BLOCK_REQUEST_FAILED;
-            slot->completed_blocks = service_ok(slot->service_status) ? slot->block_count : 0;
-            DRIVER_DEBUG(
-                "virtio_blk: used request id=%i seq=%i desc=%i len=%i status=%i last=%i used=%i\n",
-                (int) slot->request_id,
-                (int) slot->submit_sequence,
-                (int) elem.id,
-                (int) elem.len,
-                (int) slot->status,
-                (int) self->last_used_idx,
-                (int) used->idx
-            );
-        }
-
-        self->last_used_idx++;
-    }
-}
-
-static void VirtioBlk__pump_pending(VirtioBlkDevicePtr self)
-{
-    while (self->pending_count > 0)
-    {
-        VirtioBlkPendingRequestPtr slot;
-        if (!VirtioBlk__free_slot(self, &slot))
-        {
-            return;
-        }
-
-        uint64_t request_id = 0;
-        if (!VirtioBlk__pending_dequeue(self, &request_id))
-        {
-            return;
-        }
-
-        ServiceBlockRequest request;
-        ServiceCode request_status = service_block_get_request(request_id, &request);
-        if (!service_ok(request_status))
-        {
-            DRIVER_DEBUG("virtio_blk: block request %i fetch failed %i\n", (int) request_id, (int) request_status);
-            VirtioBlk__mark_request_failed(self, slot, request_id, request_status);
-            VirtioBlk__flush_completed(self);
-            continue;
-        }
-
+        uint8_t * buffer = (uint8_t *) request->buffer;
         DRIVER_DEBUG(
-            "virtio_blk: block request id=%i op=%i block=%i count=%i buffer=%p size=%i\n",
-            (int) request.request_id,
-            (int) request.operation,
-            (int) request.block,
-            (int) request.block_count,
-            request.buffer,
-            (int) request.buffer_size
+            "virtio_blk: read request id=%i sector=%i first_bytes=%i,%i,%i,%i,%i,%i,%i,%i\n",
+            (int) request->request_id,
+            (int) virtio_blk_header.sector,
+            (int) buffer[0],
+            (int) buffer[1],
+            (int) buffer[2],
+            (int) buffer[3],
+            (int) buffer[4],
+            (int) buffer[5],
+            (int) buffer[6],
+            (int) buffer[7]
         );
-
-        if (request.operation != SERVICE_BLOCK_READ
-            && request.operation != SERVICE_BLOCK_WRITE)
-        {
-            VirtioBlk__mark_request_failed(self, slot, request.request_id, SERVICE_BLOCK_REQUEST_FAILED);
-            VirtioBlk__flush_completed(self);
-            continue;
-        }
-
-        if (request.block_count == 0
-            || request.buffer_size < request.block_count * request.block_size)
-        {
-            VirtioBlk__mark_request_failed(self, slot, request.request_id, SERVICE_INVALID_BUFFER);
-            VirtioBlk__flush_completed(self);
-            continue;
-        }
-
-        VirtioBlk__submit_request(self, slot, &request);
-        VirtioBlk__flush_completed(self);
     }
+
+    DRIVER_DEBUG(
+        "virtio_blk: request id=%i completed virtio_status=%i used=%i last=%i\n",
+        (int) request->request_id,
+        (int) virtio_blk_status,
+        (int) used->idx,
+        (int) self->last_used_idx
+    );
+    return virtio_blk_status == VIRTIO_BLK_S_OK ? SERVICE_OK : SERVICE_BLOCK_REQUEST_FAILED;
+}
+
+static bool VirtioBlk__paths_equal(const char * left, const char * right)
+{
+    uint64_t i = 0;
+    while (left[i] != '\0' && right[i] != '\0')
+    {
+        if (left[i] != right[i])
+        {
+            return false;
+        }
+        i++;
+    }
+
+    return left[i] == right[i];
 }
 
 static void VirtioBlk__handle_block_request(VirtioBlkDevicePtr self, uint64_t request_id)
 {
-    if (!VirtioBlk__pending_enqueue(self, request_id))
+    ServiceBlockRequest request;
+    ServiceCode request_status = service_block_get_request(request_id, &request);
+    if (!service_ok(request_status))
     {
-        service_block_complete(request_id, SERVICE_BLOCK_REQUEST_FAILED, 0);
+        DRIVER_DEBUG("virtio_blk: block request %i fetch failed %i\n", (int) request_id, (int) request_status);
+        service_block_complete(request_id, request_status, 0);
         return;
     }
 
-    VirtioBlk__pump_pending(self);
+    if (!VirtioBlk__paths_equal(request.device_path, self->path))
+    {
+        DRIVER_DEBUG(
+            "virtio_blk: no device for request id=%i path=%s active_path=%s\n",
+            (int) request.request_id,
+            request.device_path,
+            self->path
+        );
+        service_block_complete(request.request_id, SERVICE_BLOCK_REQUEST_FAILED, 0);
+        return;
+    }
+
+    DRIVER_DEBUG(
+        "virtio_blk: route request id=%i req_path=%s dev_path=%s slot=%i irq=%i block_count=%i\n",
+        (int) request.request_id,
+        request.device_path,
+        self->path,
+        (int) self->slot,
+        (int) self->irq_id,
+        (int) self->block_count
+    );
+
+    DRIVER_DEBUG(
+        "virtio_blk: block request id=%i path=%s op=%i block=%i count=%i buffer=%p size=%i\n",
+        (int) request.request_id,
+        request.device_path,
+        (int) request.operation,
+        (int) request.block,
+        (int) request.block_count,
+        request.buffer,
+        (int) request.buffer_size
+    );
+
+    if (request.operation != SERVICE_BLOCK_READ && request.operation != SERVICE_BLOCK_WRITE)
+    {
+        service_block_complete(request.request_id, SERVICE_BLOCK_REQUEST_FAILED, 0);
+        return;
+    }
+
+    ServiceCode status = VirtioBlk__execute_request(self, &request);
+    uint64_t completed_blocks = service_ok(status) ? request.block_count : 0;
+    DRIVER_DEBUG(
+        "virtio_blk: block complete id=%i status=%i completed=%i\n",
+        (int) request.request_id,
+        (int) status,
+        (int) completed_blocks
+    );
+    service_block_complete(request.request_id, status, completed_blocks);
 }
 
-static void VirtioBlk__handle_irq(VirtioBlkDevicePtr self)
+int VIRTIO_BLK_ENTRYPOINT(int argc, char ** argv)
 {
-    VirtioBlk__ack_interrupt(self->mmio);
-    VirtioBlk__drain_used(self);
-    VirtioBlk__flush_completed(self);
-    VirtioBlk__pump_pending(self);
-}
+    if (argc < 3)
+    {
+        DRIVER_DEBUG("virtio_blk: expected slot and path arguments\n");
+        return 1;
+    }
 
-int VIRTIO_BLK_ENTRYPOINT(void)
-{
+    uint64_t slot = 0;
+    if (!VirtioBlk__parse_u64(argv[1], &slot))
+    {
+        DRIVER_DEBUG("virtio_blk: invalid slot argument %s\n", argv[1]);
+        return 1;
+    }
+
     if (!service_ok(service_become_service()))
     {
         DRIVER_DEBUG("virtio_blk: service registration failed\n");
         return 1;
     }
 
-    VirtioBlkDevice device;
-    if (!VirtioBlk__find_device(&device))
+    VirtioBlkDevice device = { 0 };
+    if (!VirtioBlk__bind_device(&device, slot, argv[2]))
     {
-        DRIVER_DEBUG("virtio_blk: block device not found\n");
+        DRIVER_DEBUG("virtio_blk: block device bind failed slot=%i path=%s\n", (int) slot, argv[2]);
         return 1;
     }
 
     VirtioBlk__acknowledge_driver(device.mmio);
     if (!VirtioBlk__setup_queue(&device))
     {
-        DRIVER_DEBUG("virtio_blk: queue setup failed\n");
+        DRIVER_DEBUG("virtio_blk: queue setup failed path=%s\n", device.path);
         return 1;
     }
     VIRTIO_BLK_TEST_DEVICE_READY(&device);
 
-    if (!service_ok(service_register_block_device("/dev/virtio1", 512, 0)))
+    if (!service_ok(service_register_block_device(device.path, 512, device.block_count)))
     {
-        DRIVER_DEBUG("virtio_blk: block device registration failed\n");
+        DRIVER_DEBUG("virtio_blk: block device registration failed path=%s\n", device.path);
         return 1;
     }
 
     if (!service_ok(service_subscribe_irq(device.irq_id)))
     {
-        DRIVER_DEBUG("virtio_blk: irq subscribe failed\n");
+        DRIVER_DEBUG("virtio_blk: irq subscribe failed path=%s\n", device.path);
         return 1;
     }
 
@@ -651,21 +612,20 @@ int VIRTIO_BLK_ENTRYPOINT(void)
                 (int) event.type,
                 (int) event.source,
                 (int) event.data,
-                (int) VirtioBlk__used()->idx,
+                (int) VirtioBlk__used(&device)->idx,
                 (int) device.last_used_idx
             );
-            __mmio_sync_boundary();
-            bool virtio_irq = event.type == SERVICE_EVENT_IRQ && event.source == device.irq_id;
-            if (virtio_irq)
+            __sync_boundary();
+            if (event.type == SERVICE_EVENT_IRQ && event.source == device.irq_id)
             {
-                VirtioBlk__handle_irq(&device);
+                VirtioBlk__ack_interrupt(device.mmio);
             }
 
             if (event.type == SERVICE_EVENT_BLOCK_IO)
             {
                 VirtioBlk__handle_block_request(&device, event.source);
             }
-            __mmio_sync_boundary();
+            __sync_boundary();
         }
     }
 

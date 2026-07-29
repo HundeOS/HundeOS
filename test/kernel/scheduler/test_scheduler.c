@@ -2,6 +2,7 @@
 #include "../stubs/panic.h"
 #include "../stubs/cpu.h"
 #include "../stubs/process.h"
+#include "../stubs/process_context_layout.h"
 #include "../fixtures/process.h"
 #include "../../../kernel/process.h"
 #include "../../../kernel/types/optional.h"
@@ -18,11 +19,14 @@
 
 static SchedulerPtr scheduler = NULL;
 static KernelPtr kernel = NULL;
-static ParkedKernelContextPtr continuation_context;
-static MessagePtr received_message = NULL;
+static ParkedOperationPtr continuation_context;
+static KernelContextPtr continuation_kernel_context;
+static Optional(Message) received_message = None(Message);
 static bool abort_stderr_written = false;
 static char abort_stderr_buffer[512];
 static ByteCount abort_stderr_size = 0;
+static ProcessPtr expected_active_process = NULL;
+static bool continuation_saw_active_address_space = false;
 
 static const CPUID cpu_id = 12;
 
@@ -96,14 +100,18 @@ static IOState abort_stderr_state = NEW_IO_STATE;
 void setUp(void)
 {
     continuation_context = NULL;
-    received_message = NULL;
+    continuation_kernel_context = NULL;
+    received_message = None(Message);
     abort_stderr_written = false;
     abort_stderr_size = 0;
     abort_stderr_buffer[0] = '\0';
+    expected_active_process = NULL;
+    continuation_saw_active_address_space = false;
     clear_panic_state();
     set_cpu_id(cpu_id);
     reset_cpu_count();
     current_process_reset();
+    clear_deferred_syscall_result();
     Arch__reset_irq_tracking();
     kernel = init_test_kernel_without_filesystem();
     scheduler = kernel->scheduler;
@@ -117,15 +125,110 @@ void tearDown(void)
     scheduler = NULL;
 }
 
-Result(Anything) continuation(ParkedKernelContextPtr parked_context)
+Result(Anything) continuation(ParkedOperationPtr parked_operation)
 {
-    continuation_context = parked_context;
+    continuation_context = parked_operation;
+    continuation_kernel_context = parked_operation->kernel_context;
+    continuation_saw_active_address_space = active_address_space_process() == expected_active_process;
 
-    Match(ReturnCode, parked_context->return_code)
+    Match(ReturnCode, parked_operation->return_code)
         IsSome(code, return Success(Anything, code);)
     End
 
     return Error(Anything, no_return_code, -1);
+}
+
+void test_parked_operation_is_ready_without_blocked_operations()
+{
+    ParkedOperationPtr operation = ParkedOperation__heap_new_with_context_ownership(
+        KernelContext__heap_new(None(ProcessID), None(SchedulerPtr)),
+        None(Continuation),
+        PARK_WAIT_IO,
+        true
+    );
+    ParkedOperation__mark_ready(operation);
+
+    TEST_ASSERT_TRUE(Scheduler__parked_operation_is_ready(scheduler, operation));
+    TEST_ASSERT_EQUAL_UINT64(0, operation->pending_operations);
+
+    ParkedOperation__dispose(operation);
+}
+
+void test_parked_operation_waits_until_all_blocked_operations_resolve_out_of_order()
+{
+    ParkedOperationPtr operation = ParkedOperation__heap_new_with_context_ownership(
+        KernelContext__heap_new(None(ProcessID), None(SchedulerPtr)),
+        None(Continuation),
+        PARK_WAIT_IO,
+        true
+    );
+    ParkedOperation__mark_ready(operation);
+    ParkedOperationPtr first_dependency = ParkedOperation__heap_new_with_context_ownership(
+        KernelContext__heap_new(None(ProcessID), None(SchedulerPtr)),
+        None(Continuation),
+        PARK_WAIT_IO,
+        true
+    );
+    ParkedOperationPtr second_dependency = ParkedOperation__heap_new_with_context_ownership(
+        KernelContext__heap_new(None(ProcessID), None(SchedulerPtr)),
+        None(Continuation),
+        PARK_WAIT_IO,
+        true
+    );
+
+    ResultMatch(CollectionCode, Scheduler__add_blocked_operation(scheduler, operation, first_dependency))
+        IsError(code, message, TEST_FAIL())
+    End
+    ResultMatch(CollectionCode, Scheduler__add_blocked_operation(scheduler, operation, second_dependency))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_FALSE(Scheduler__parked_operation_is_ready(scheduler, operation));
+    TEST_ASSERT_EQUAL_UINT64(2, operation->pending_operations);
+
+    ResultMatch(CollectionCode, Scheduler__resolve_blocked_operation(scheduler, operation, second_dependency))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_FALSE(Scheduler__parked_operation_is_ready(scheduler, operation));
+    TEST_ASSERT_EQUAL_UINT64(1, operation->pending_operations);
+    TEST_ASSERT_EQUAL_UINT64(1, BlockedParkedOperations__len(&operation->blocked_operations));
+
+    ResultMatch(CollectionCode, Scheduler__resolve_blocked_operation(scheduler, operation, first_dependency))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_TRUE(Scheduler__parked_operation_is_ready(scheduler, operation));
+    TEST_ASSERT_EQUAL_UINT64(0, operation->pending_operations);
+    TEST_ASSERT_EQUAL_UINT64(0, BlockedParkedOperations__len(&operation->blocked_operations));
+
+    ParkedOperation__dispose(operation);
+}
+
+void test_parked_operation_disposes_unresolved_blocked_operations()
+{
+    ParkedOperationPtr operation = ParkedOperation__heap_new_with_context_ownership(
+        KernelContext__heap_new(None(ProcessID), None(SchedulerPtr)),
+        None(Continuation),
+        PARK_WAIT_IO,
+        true
+    );
+    ParkedOperation__mark_ready(operation);
+    ParkedOperationPtr blocked_operation = ParkedOperation__heap_new_with_context_ownership(
+        KernelContext__heap_new(None(ProcessID), None(SchedulerPtr)),
+        None(Continuation),
+        PARK_WAIT_IO,
+        true
+    );
+
+    ResultMatch(CollectionCode, ParkedOperation__add_blocked_operation(operation, blocked_operation))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL_UINT64(1, operation->pending_operations);
+    TEST_ASSERT_EQUAL_UINT64(1, BlockedParkedOperations__len(&operation->blocked_operations));
+
+    ParkedOperation__dispose(operation);
 }
 
 static void install_abort_stderr(ProcessPtr proc)
@@ -325,7 +428,7 @@ void test_scheduler_exit_removes_process_when_its_current(void)
 
 void fake_callback(KernelListenerPtr listener, MessagePtr message)
 {
-    received_message = message;
+    received_message = Some(Message, *message);
 }
 
 void test_scheduler_exit_sends_a_message_to_the_broker_saying_the_process_exited(void)
@@ -343,13 +446,13 @@ void test_scheduler_exit_sends_a_message_to_the_broker_saying_the_process_exited
         IsError(code, message, TEST_FAIL());
     End
 
-    TEST_ASSERT_NOT_NULL(received_message);
-    TEST_ASSERT_EQUAL(SOURCE_PROCESS, received_message->source);
-    TEST_ASSERT_EQUAL(PROC_STATE_DEAD, received_message->source_code);
+    TEST_ASSERT_TRUE(received_message.present);
+    TEST_ASSERT_EQUAL(SOURCE_PROCESS, received_message.some.val.source);
+    TEST_ASSERT_EQUAL(PROC_STATE_DEAD, received_message.some.val.source_code);
 
-    Payload payload = Unwrap(Payload, received_message->payload, (Payload){});
-    TEST_ASSERT_EQUAL(PAYLOAD_TYPE_ANYTHING, payload.type);
-    TEST_ASSERT_EQUAL(proc->pid, payload.anything);
+    Payload payload = Unwrap(Payload, received_message.some.val.payload, (Payload){});
+    TEST_ASSERT_EQUAL(PAYLOAD_TYPE_PROCESS_ID, payload.type);
+    TEST_ASSERT_EQUAL(proc->pid, payload.process_id);
 
 }
 
@@ -581,6 +684,36 @@ void test_scheduler_unpark_switches_process_back_to_ready(void)
             TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, parked->state);
         })
     End
+}
+
+void test_scheduler_context_switch_finalises_ready_parked_operation_before_resume(void)
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessContext context = {0};
+
+    KernelContext kernel_context = KernelContext__new(None(ProcessID), Some(SchedulerPtr, scheduler));
+
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, &context);
+
+    ResultMatch(ProcessPtr, Scheduler__park(scheduler, proc, &kernel_context, Some(Continuation, continuation), PARK_WAIT_IO))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(ProcessPtr, Scheduler__unpark(scheduler, proc, PARK_WAIT_IO, Some(ReturnCode, 11)))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    expected_active_process = proc;
+    Scheduler__preempt(scheduler, cpu_id, &context);
+
+    TEST_ASSERT_EQUAL(proc, current_running_process());
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc->state);
+    TEST_ASSERT_EQUAL(&kernel_context, continuation_kernel_context);
+    TEST_ASSERT_TRUE(continuation_saw_active_address_space);
+    TEST_ASSERT_EQUAL(11, proc->context->x[0]);
+    TEST_ASSERT_EQUAL(11, ResultUnwrap(Anything, deferred_syscall_result(), (Anything){}));
 }
 
 void test_scheduler_unpark_gives_error_and_doesnt_unpark_if_reasons_dont_match(void)
@@ -881,7 +1014,7 @@ void test_service_wait_parks_service_process_when_no_event_is_available(void)
     End
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, service_proc->state);
-    Match(ParkedKernelContextPtr, Process__top_parked_context(service_proc))
+    Match(ParkedOperationPtr, Process__top_parked_operation(service_proc))
         IsNone(TEST_FAIL())
         IsSome(parked, TEST_ASSERT_EQUAL(PARK_WAIT_SERVICE_EVENT, parked->park_reason))
     End
@@ -1174,11 +1307,11 @@ void test_io_data_arrived_pull_process_out_of_park()
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, proc->state);
 
     MessagePtr message_available =
-        Message__heap_new_anything(SOURCE_IO, SUBSYS_IO_AVAILABLE, proc->pid);
+        Message__heap_new_process_id(SOURCE_IO, SUBSYS_IO_AVAILABLE, proc->pid);
     MessageBroker__deliver(kernel->message_broker, message_available);
     Scheduler__preempt(scheduler, cpu_id, context);
 
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc->state);
-    TEST_ASSERT_EQUAL(&kernel_context, continuation_context->kernel_context);
+    TEST_ASSERT_EQUAL(&kernel_context, continuation_kernel_context);
 
 }

@@ -1,15 +1,10 @@
 #include <stdint.h>
 #include "../../../kernel/arch/process.h"
 #include "../../../kernel/process.h"
-
-#include "../../../kernel/scheduler/parked.h"
-#include "../../../kernel/types/fixed_array.h"
-
-
-FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessArray, &Ptr__equals);
-FixedArrayBodyDefine(ProcessArray);
+#include "process_context_layout.h"
 
 static ProcessPtr current_process = NULL;
+static ProcessPtr active_process = NULL;
 
 static Result(Anything) deferred_syscall_res;
 
@@ -26,31 +21,17 @@ void clear_deferred_syscall_result()
 void Process__context_switch(ProcessPtr self)
 {
     current_process = self;
-    while (Process__is_parked(self))
-    {
-        Match(ParkedKernelContextPtr, Process__pop_parked_context(self))
-            IsSome(parked_kernel_context,
-            {
-                Match(Continuation, parked_kernel_context->continuation)
-                    IsSome(continuation,
-                    {
-                        Result(Anything) syscall_res = continuation(parked_kernel_context);
-                        if (Process__is_parked(self))
-                        {
-                            deferred_syscall_res = syscall_res;
-                            return;
-                        }
-                        deferred_syscall_res = syscall_res;
-                    })
-                End
-            })
-        End
-    }
+}
+
+void Process__activate_address_space(ProcessPtr self)
+{
+    active_process = self;
 }
 
 void current_process_reset()
 {
     current_process = NULL;
+    active_process = NULL;
 }
 
 ProcessPtr current_running_process()
@@ -58,7 +39,21 @@ ProcessPtr current_running_process()
     return current_process;
 }
 
+ProcessPtr active_address_space_process()
+{
+    return active_process;
+}
+
 void Process__save_context(ProcessPtr self, ProcessContextPtr context)
 {
     self->context = context;
+}
+
+void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
+{
+    if (self->context != NULL)
+    {
+        self->context->x[0] = result;
+    }
+    deferred_syscall_res = Success(Anything, result);
 }

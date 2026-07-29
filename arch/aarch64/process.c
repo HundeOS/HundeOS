@@ -6,7 +6,6 @@
 
 #include "asm_helpers.h"
 #include "../../kernel/process.h"
-#include "../../kernel/scheduler/scheduler.h"
 #include "../../kernel/arch/cpu.h"
 #include "../../kernel/panic.h"
 
@@ -114,23 +113,16 @@ ProcessContextPtr ProcessContext__init(
 extern void asm_switch_context(ProcessContextPtr context, Address pagetable);
 extern void asm_switch_kernel_context(ProcessContextPtr context, Address pagetable);
 
+void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
+{
+    ProcessContextPtr context = self->context;
+    context->x[0] = result;
+}
+
 void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
 {
     uint64_t mode = self->spsr & 0xf;
     uint64_t irq_masked = self->spsr & (1UL << 7);
-
-    __d_printf(
-        PROCESS_SWITCH,
-        "ProcessContext user irq check context=%p elr=%p sp=%p spsr=%p mode=%p irq_masked=%p current_daif=%p ttbr0=%p\n",
-        self,
-        self->elr,
-        self->sp,
-        self->spsr,
-        mode,
-        irq_masked,
-        read_daifclr(),
-        read_ttbr0_el1()
-    );
 
     if (irq_masked)
     {
@@ -156,7 +148,7 @@ void Process__context_switch(ProcessPtr self)
     ProcessContextPtr context = self->context;
 
     const char * name = cstr(self->name);
-    __d_printf(PROCESS_SWITCH, "Process context switch name=%s sp=%p tbbr0=%p spsr_el1=%x x0=%p x1=%p x8=%p elr=%p\n",
+    __d_printf(PROCESS_SWITCH, "Process context switch name=%s sp=%p tbbr0=%p spsr_el1=%p x0=%p x1=%p x8=%p elr=%p\n",
         name,
         self->context->sp,
         paddr(self->page_table),
@@ -168,62 +160,17 @@ void Process__context_switch(ProcessPtr self)
 
     Address base = addr(context);
     __d_printf(PROCESS_SWITCH,
-        "ProcessContext offsets from context(%p) sp=%p x[0]=%p q[0]=%p elr=%p spsr=%p fpcr=%p fpsr=%p size=%p\n",
+        "ProcessContext offsets from context=%p sp=%i x0=%i q0=%i elr=%i spsr=%i fpcr=%i fpsr=%i size=%i\n",
         context,
-        addr(&context->sp) - base,
-        addr(&context->x) - base,
-        addr(&context->q) - base,
-        addr(&context->elr) - base,
-        addr(&context->spsr) - base,
-        addr(&context->fpcr) - base,
-        addr(&context->fpsr) - base,
-        sizeof(ProcessContext));
+        (int) (addr(&context->sp) - base),
+        (int) (addr(&context->x) - base),
+        (int) (addr(&context->q) - base),
+        (int) (addr(&context->elr) - base),
+        (int) (addr(&context->spsr) - base),
+        (int) (addr(&context->fpcr) - base),
+        (int) (addr(&context->fpsr) - base),
+        (int) sizeof(ProcessContext));
 
-    while (Process__is_parked(self))
-    {
-        Match(ParkedKernelContextPtr, Process__pop_parked_context(self))
-            IsSome(parked_kernel_context,
-            {
-                Match(Continuation, parked_kernel_context->continuation)
-                    IsSome(continuation,
-                    {
-                        __d_println(PROCESS_SWITCH, "Continuation kernel context switch");
-                        asm_switch_kernel_context(context, paddr(self->page_table));
-
-                        __d_printf(PROCESS_SWITCH, "Continuation calling %p %p", continuation, parked_kernel_context);
-                        Result(Anything) res = continuation(parked_kernel_context);
-                        if (Process__is_parked(self))
-                        {
-                            Match(ParkedKernelContextPtr, Process__top_parked_context(self))
-                                IsSome(top_context,
-                                {
-                                    Match(SchedulerPtr, top_context->kernel_context->scheduler)
-                                        IsSome(scheduler, Scheduler__yield_waiting(scheduler, self, CPU__id() - 1))
-                                    End
-                                })
-                            End
-                        }
-
-                        ResultMatch(Anything, res)
-                            IsSuccess(result_val,
-                            {
-                                __d_println(PROCESS, "Set syscall result");
-                                context->x[0] = result_val;
-                            });
-                            IsError(code, message,
-                            {
-                                context->x[0] = code;
-                                __d_printf(PANIC, "Continuation error: %s\n", cstr(message));
-                            })
-                        End
-
-                    })
-                    IsNone({})
-                End
-            })
-            IsNone({})
-        End
-    }
     __d_printf(
         PROCESS_SWITCH,
         "Process__context_switch asm pid=%i name=%s context=%p elr=%p sp=%p x8=%p page_table=%p\n",
@@ -239,6 +186,12 @@ void Process__context_switch(ProcessPtr self)
     __d_println(PROCESS_SWITCH, "Irqs OK");
     asm_switch_context(context, paddr(self->page_table));
     __builtin_unreachable();
+}
+
+void Process__activate_address_space(ProcessPtr self)
+{
+    ProcessContextPtr context = self->context;
+    asm_switch_kernel_context(context, paddr(self->page_table));
 }
 
 void Process__save_context(ProcessPtr self, ProcessContextPtr context)

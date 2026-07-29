@@ -93,8 +93,9 @@ Result(DirectoryEntryCount) IOSubsystem__list_dir(
 );
 Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, KString path);
 Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, KString path, Flags flags);
+Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, KString source_path, KString target_path);
 
-void IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context);
+Result(IOStatus) IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context);
 void IOSubsystem__message_received(KernelListenerPtr listener, MessagePtr message);
 
 // called by IRQs
