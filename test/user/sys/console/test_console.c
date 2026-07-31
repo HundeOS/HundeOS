@@ -74,3 +74,16 @@ void test_console_read_line_handles_backspace_and_echo(void)
     TEST_ASSERT_EQUAL_STRING("acd", BString__cstr(&line));
     TEST_ASSERT_EQUAL_STRING("ab\b \bcd", BString__cstr(&printed_output));
 }
+
+void test_console_read_does_not_write_past_one_byte_buffer(void)
+{
+    next_input = "x";
+    next_input_size = 1;
+
+    char buffer[2] = { '?', '!' };
+    ByteCount read_count = console_read(buffer, 1);
+
+    TEST_ASSERT_EQUAL_INT64(1, read_count);
+    TEST_ASSERT_EQUAL_CHAR('x', buffer[0]);
+    TEST_ASSERT_EQUAL_CHAR('!', buffer[1]);
+}

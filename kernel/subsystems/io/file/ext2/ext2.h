@@ -21,6 +21,7 @@
 #define EXT2_NDIR_BLOCKS 12U
 #define EXT2_MAX_READ_SIZE (EXT2_BLOCK_SIZE * EXT2_NDIR_BLOCKS)
 #define EXT2_MAX_ROOT_ENTRIES 128U
+#define EXT2_MAX_GROUPS 32U
 
 #define EXT2_INODE_MODE_FILE 0x8000U
 #define EXT2_INODE_MODE_DIR 0x4000U
@@ -70,9 +71,13 @@ typedef struct Ext2Volume
     Ext2BlockCount blocks_per_group;
     Ext2InodeCount inodes_per_group;
     Ext2InodeSize inode_size;
+    Ext2BlockCount group_count;
     Ext2Block block_bitmap_block;
     Ext2Block inode_bitmap_block;
     Ext2Block inode_table_block;
+    Ext2Block group_block_bitmap_block[EXT2_MAX_GROUPS];
+    Ext2Block group_inode_bitmap_block[EXT2_MAX_GROUPS];
+    Ext2Block group_inode_table_block[EXT2_MAX_GROUPS];
     Ext2Block first_data_block;
     bool mounted;
 }

@@ -169,6 +169,106 @@ static void build_test_volume(void)
     write_block(8, file_block);
 }
 
+static void write_inode_for_grouped_volume(
+    DataPtr inode_table_block,
+    Ext2InodeCount inodes_per_group,
+    Ext2InodeNumber inode_number,
+    Ext2InodeMode mode,
+    Ext2FileSize size,
+    Ext2Block block0,
+    uint16_t links_count
+)
+{
+    size_t offset = ((inode_number - 1U) % inodes_per_group) * 128U;
+    write_u16(inode_table_block, offset, mode);
+    write_u32(inode_table_block, offset + 4U, size);
+    write_u16(inode_table_block, offset + 26U, links_count);
+    write_u32(inode_table_block, offset + 40U, block0);
+}
+
+static void build_multi_group_inode_test_volume(void)
+{
+    Data superblock[EXT2_BLOCK_SIZE] = { 0 };
+    Data group_desc[EXT2_BLOCK_SIZE] = { 0 };
+    Data group0_block_bitmap[EXT2_BLOCK_SIZE] = { 0 };
+    Data group0_inode_bitmap[EXT2_BLOCK_SIZE] = { 0 };
+    Data group0_inode_table[EXT2_BLOCK_SIZE] = { 0 };
+    Data group4_block_bitmap[EXT2_BLOCK_SIZE] = { 0 };
+    Data group4_inode_bitmap[EXT2_BLOCK_SIZE] = { 0 };
+    Data group4_inode_table[EXT2_BLOCK_SIZE] = { 0 };
+    Data root_dir[EXT2_BLOCK_SIZE] = { 0 };
+    Data file_block[EXT2_BLOCK_SIZE] = { 0 };
+
+    write_u32(superblock, 0, 80);
+    write_u32(superblock, 4, 40);
+    write_u32(superblock, 12, 53);
+    write_u32(superblock, 16, 74);
+    write_u32(superblock, 20, 1);
+    write_u32(superblock, 24, 0);
+    write_u32(superblock, 32, 8);
+    write_u32(superblock, 40, 16);
+    write_u32(superblock, 76, 1);
+    write_u16(superblock, 56, EXT2_SUPER_MAGIC);
+    write_u16(superblock, 88, 128);
+
+    write_u32(group_desc, 0, 3);
+    write_u32(group_desc, 4, 4);
+    write_u32(group_desc, 8, 5);
+
+    write_u32(group_desc, 1U * 32U + 0U, 8);
+    write_u32(group_desc, 1U * 32U + 4U, 9);
+    write_u32(group_desc, 1U * 32U + 8U, 10);
+
+    write_u32(group_desc, 2U * 32U + 0U, 15);
+    write_u32(group_desc, 2U * 32U + 4U, 16);
+    write_u32(group_desc, 2U * 32U + 8U, 17);
+
+    write_u32(group_desc, 3U * 32U + 0U, 18);
+    write_u32(group_desc, 3U * 32U + 4U, 19);
+    write_u32(group_desc, 3U * 32U + 8U, 20);
+
+    write_u32(group_desc, 4U * 32U + 0U, 11);
+    write_u32(group_desc, 4U * 32U + 4U, 12);
+    write_u32(group_desc, 4U * 32U + 8U, 13);
+
+    set_bitmap_bit(group0_block_bitmap, 0);
+    set_bitmap_bit(group0_block_bitmap, 1);
+    set_bitmap_bit(group0_block_bitmap, 2);
+    set_bitmap_bit(group0_block_bitmap, 3);
+    set_bitmap_bit(group0_block_bitmap, 4);
+    set_bitmap_bit(group0_block_bitmap, 6);
+
+    set_bitmap_bit(group0_inode_bitmap, 0);
+    set_bitmap_bit(group0_inode_bitmap, 1);
+
+    set_bitmap_bit(group4_block_bitmap, 3);
+    set_bitmap_bit(group4_inode_bitmap, 1);
+
+    write_inode_for_grouped_volume(group0_inode_table, 16, 2, EXT2_INODE_MODE_DIR | 0755, EXT2_BLOCK_SIZE, 7, 2);
+    write_inode_for_grouped_volume(group4_inode_table, 16, 66, EXT2_INODE_MODE_FILE | 0644, 5, 14, 1);
+
+    write_dirent(root_dir, 0, 2, 12, ".", 2);
+    write_dirent(root_dir, 12, 2, 12, "..", 2);
+    write_dirent(root_dir, 24, 66, EXT2_BLOCK_SIZE - 24, "hello.txt", 1);
+
+    file_block[0] = 'h';
+    file_block[1] = 'e';
+    file_block[2] = 'l';
+    file_block[3] = 'l';
+    file_block[4] = 'o';
+
+    write_block(1, superblock);
+    write_block(2, group_desc);
+    write_block(3, group0_block_bitmap);
+    write_block(4, group0_inode_bitmap);
+    write_block(5, group0_inode_table);
+    write_block(7, root_dir);
+    write_block(11, group4_block_bitmap);
+    write_block(12, group4_inode_bitmap);
+    write_block(13, group4_inode_table);
+    write_block(14, file_block);
+}
+
 static void add_empty_docs_directory(void)
 {
     Data inode_table[EXT2_BLOCK_SIZE] = { 0 };
@@ -403,6 +503,44 @@ void test_ext2_reads_root_file_contents_in_chunks(void)
                         {
                             TEST_ASSERT_EQUAL(3, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("llo", output, 3);
+                        })
+                        IsError(code, message, TEST_FAIL())
+                    End
+                })
+                IsError(code, message, TEST_FAIL())
+            End
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_ext2_reads_file_contents_from_later_inode_group(void)
+{
+    Data output[16] = { 0 };
+    ExternalBuffer target = (ExternalBuffer) {
+        .data = output,
+        .len = sizeof(output),
+    };
+
+    memory_device = MemoryBlockDevice__new();
+    block_device = MemoryBlockDevice__as_block_device(&memory_device);
+    volume = Ext2Volume__new(Some(BlockDevicePtr, &block_device), TEST_EXT2_SECTORS);
+    build_multi_group_inode_test_volume();
+
+    FilesystemPtr fs = Filesystem__heap_new(kstring("ext2"), Ext2FilesystemIO__new());
+    Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
+
+    ResultMatch(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, kstring("hello.txt"), IO_OPEN_READ))
+        IsSuccess(handle,
+        {
+            ResultMatch(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, handle, 5, target))
+                IsSuccess(buffer,
+                {
+                    ResultMatch(ItemCount, IOBuffer__drain(buffer, output, 5))
+                        IsSuccess(bytes_read,
+                        {
+                            TEST_ASSERT_EQUAL(5, bytes_read);
+                            TEST_ASSERT_EQUAL_MEMORY("hello", output, 5);
                         })
                         IsError(code, message, TEST_FAIL())
                     End
@@ -937,4 +1075,34 @@ void test_ext2_userspace_link_starts_async(void)
         IsSuccess(status, TEST_FAIL())
         IsError(code, message, TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code))
     End
+}
+
+void test_ext2_userspace_link_preserves_live_kernel_context_on_first_request(void)
+{
+    FakeUserspaceBlockDevice userspace = {
+        .path = KSTRING_NEW("/dev/test"),
+        .service_process = (ProcessPtr) 1,
+        .scheduler = (SchedulerPtr) 0x44,
+        .block_count = TEST_EXT2_SECTORS,
+    };
+    BlockDevice userspace_device = BlockDevice__new(&userspace, block_device.read, block_device.write);
+    userspace_device.userspace_service = true;
+    userspace.block_device = userspace_device;
+
+    FilesystemPtr fs = Filesystem__heap_new(kstring("ext2"), Ext2FilesystemIO__new());
+    Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
+    state->volume = volume;
+    state->volume.device = Some(BlockDevicePtr, &userspace_device);
+    state->volume.mounted = true;
+
+    KernelContext kernel_context = KernelContext__new(Some(ProcessID, 77), Some(SchedulerPtr, userspace.scheduler));
+    BlockDevice__set_current_context(&kernel_context);
+    ResultMatch(IOStatus, fs->file_io.link(&state->state.state, kstring("hello.txt"), kstring("copy.txt")))
+        IsSuccess(status, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code))
+    End
+    BlockDevice__clear_current_context();
+
+    Optional(KernelContextPtr) current_context = BlockDevice__current_context();
+    TEST_ASSERT_FALSE(current_context.present);
 }

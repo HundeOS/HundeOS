@@ -542,6 +542,11 @@ void BlockDevice__clear_current_context()
     current_context = None(KernelContextPtr);
 }
 
+Optional(KernelContextPtr) BlockDevice__current_context()
+{
+    return current_context;
+}
+
 Result(BlockDeviceCode) BlockDeviceRegistry__register(
     KString path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
 )

@@ -108,6 +108,41 @@ bool BString__push_char(BStringPtr self, char ch)
     return true;
 }
 
+bool BString__insert_char(BStringPtr self, StringPos index, char ch)
+{
+    if (index < 0 || index > self->len || self->len + 1 >= self->max)
+    {
+        return false;
+    }
+
+    for (StringPos i = self->len; i > index; i--)
+    {
+        self->data[i] = self->data[i - 1];
+    }
+
+    self->data[index] = ch;
+    self->len++;
+    self->data[self->len] = '\0';
+    return true;
+}
+
+bool BString__remove_at(BStringPtr self, StringPos index)
+{
+    if (index < 0 || index >= self->len)
+    {
+        return false;
+    }
+
+    for (StringPos i = index; i + 1 < self->len; i++)
+    {
+        self->data[i] = self->data[i + 1];
+    }
+
+    self->len--;
+    self->data[self->len] = '\0';
+    return true;
+}
+
 BString BString__strip(ConstBStringPtr self)
 {
     StringPos start = 0;

@@ -9,6 +9,7 @@ static const BString CMD_EXIT = BSTRING_NEW("exit");
 static const BString COMMAND_SEARCH_PATH = BSTRING_NEW("/ebin");
 static const BString QUOTE_DELIMITER = BSTRING_NEW("\"");
 static const BString TOKEN_DELIMITERS = BSTRING_NEW(" \t\n\r");
+static const BString BACKGROUND_OPERATOR = BSTRING_NEW("&");
 
 FixedArrayBodyDefine(CommandArguments);
 
@@ -16,7 +17,8 @@ static Command Command__new(void)
 {
     Command command = {
         .name = EMPTY_BSTRING,
-        .args = { 0 }
+        .args = { 0 },
+        .background = false,
     };
     command.args = CommandArguments__new();
 
@@ -87,10 +89,24 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
                     IsError(code, message, return self->command)
                 End
             })
-            IsNone(return self->command)
+            IsNone(break)
         End
         remaining = arg_split.rest;
     }
+
+    Match(BString, CommandArguments__pop(&self->command.args))
+        IsSome(last_argument,
+        {
+            if (BString__equals(&last_argument, &BACKGROUND_OPERATOR))
+            {
+                self->command.background = true;
+            }
+            else
+            {
+                CommandArguments__push(&self->command.args, last_argument);
+            }
+        })
+    End
 
     return self->command;
 }
@@ -127,7 +143,8 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
     FAPtrMatch(CommandArguments, CommandArguments__ptr_at(&command->args, 2))
         IsSome(value, arg2 = BString__cstr(value))
     End
-    SpawnResult result = spawn(P_WAIT, BString__cstr(&path), arg0, arg1, arg2);
+    SpawnMode mode = command->background ? P_NOWAIT : P_WAIT;
+    SpawnResult result = spawn(mode, BString__cstr(&path), arg0, arg1, arg2);
 
     if (result != SPAWN_SUCCESS)
     {

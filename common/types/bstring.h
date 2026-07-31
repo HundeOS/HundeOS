@@ -35,6 +35,8 @@ void BString__clear(BStringPtr self);
 bool BString__is_empty(ConstBStringPtr self);
 bool BString__is_whitespace(char ch);
 bool BString__push_char(BStringPtr self, char ch);
+bool BString__insert_char(BStringPtr self, StringPos index, char ch);
+bool BString__remove_at(BStringPtr self, StringPos index);
 BString BString__strip(ConstBStringPtr self);
 BString BString__slice(ConstBStringPtr self, StringPos start, StringPos end);
 BStringSplit BString__split_first_any(ConstBStringPtr self, ConstBStringPtr delimiters);

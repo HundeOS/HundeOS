@@ -3,7 +3,12 @@
 
 #include <stdbool.h>
 #include "../../../common/types/bstring.h"
+#include "../../types/linked_list.h"
 #include "interpreter.h"
+
+LinkedListDefine(BString, ShellHistory, bstring_equals);
+typedef ShellHistory * ShellHistoryPtr;
+typedef const ShellHistory * ConstShellHistoryPtr;
 
 typedef struct InputStream InputStream;
 typedef InputStream * InputStreamPtr;
@@ -20,6 +25,7 @@ typedef struct Shell
 {
     Interpreter interpreter;
     InputStreamPtr input;
+    ShellHistory history;
 }
 Shell;
 

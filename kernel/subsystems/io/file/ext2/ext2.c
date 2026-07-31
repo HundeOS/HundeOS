@@ -588,9 +588,38 @@ static Result(Ext2Code) Ext2Volume__parse_superblock(Ext2VolumePtr self, DataPtr
 
 static Result(Ext2Code) Ext2Volume__parse_group_descriptor(Ext2VolumePtr self, DataPtr group_desc)
 {
-    self->block_bitmap_block = Ext2__read_u32(group_desc, 0);
-    self->inode_bitmap_block = Ext2__read_u32(group_desc, 4);
-    self->inode_table_block = Ext2__read_u32(group_desc, 8);
+    if (self->blocks_per_group == 0)
+    {
+        return Error(Ext2Code, invalid_volume, EXT2_INVALID_VOLUME);
+    }
+
+    self->group_count =
+        (self->blocks_count + self->blocks_per_group - 1U) / self->blocks_per_group;
+    if (self->group_count == 0 || self->group_count > EXT2_MAX_GROUPS)
+    {
+        return Error(Ext2Code, not_supported, EXT2_NOT_SUPPORTED);
+    }
+
+    for (size_t group_index = 0; group_index < self->group_count; group_index++)
+    {
+        size_t descriptor_offset = group_index * 32U;
+        Ext2Block block_bitmap_block = Ext2__read_u32(group_desc, descriptor_offset);
+        Ext2Block inode_bitmap_block = Ext2__read_u32(group_desc, descriptor_offset + 4U);
+        Ext2Block inode_table_block = Ext2__read_u32(group_desc, descriptor_offset + 8U);
+
+        if (block_bitmap_block == 0 || inode_bitmap_block == 0 || inode_table_block == 0)
+        {
+            return Error(Ext2Code, invalid_volume, EXT2_INVALID_VOLUME);
+        }
+
+        self->group_block_bitmap_block[group_index] = block_bitmap_block;
+        self->group_inode_bitmap_block[group_index] = inode_bitmap_block;
+        self->group_inode_table_block[group_index] = inode_table_block;
+    }
+
+    self->block_bitmap_block = self->group_block_bitmap_block[0];
+    self->inode_bitmap_block = self->group_inode_bitmap_block[0];
+    self->inode_table_block = self->group_inode_table_block[0];
     if (self->block_bitmap_block == 0 || self->inode_bitmap_block == 0 || self->inode_table_block == 0)
     {
         return Error(Ext2Code, invalid_volume, EXT2_INVALID_VOLUME);
@@ -600,16 +629,37 @@ static Result(Ext2Code) Ext2Volume__parse_group_descriptor(Ext2VolumePtr self, D
     return Success(Ext2Code, EXT2_OK);
 }
 
+static size_t Ext2Volume__inode_group_index(Ext2VolumePtr self, Ext2InodeNumber inode_number)
+{
+    if (self->inodes_per_group == 0 || inode_number == 0)
+    {
+        return 0;
+    }
+
+    return (size_t) ((inode_number - 1U) / self->inodes_per_group);
+}
+
 static Ext2Block Ext2Volume__inode_block(Ext2VolumePtr self, Ext2InodeNumber inode_number)
 {
-    Ext2InodeNumber inode_index = inode_number - 1;
-    return self->inode_table_block + ((inode_index * self->inode_size) / EXT2_BLOCK_SIZE);
+    Ext2InodeNumber inode_index = inode_number - 1U;
+    size_t group_index = Ext2Volume__inode_group_index(self, inode_number);
+    if (group_index >= self->group_count)
+    {
+        return 0;
+    }
+
+    Ext2InodeNumber group_local_index = inode_index % self->inodes_per_group;
+    return self->group_inode_table_block[group_index]
+        + ((group_local_index * self->inode_size) / EXT2_BLOCK_SIZE);
 }
 
 static size_t Ext2Volume__inode_offset(Ext2VolumePtr self, Ext2InodeNumber inode_number)
 {
-    Ext2InodeNumber inode_index = inode_number - 1;
-    return (inode_index * self->inode_size) % EXT2_BLOCK_SIZE;
+    Ext2InodeNumber inode_index = inode_number - 1U;
+    Ext2InodeNumber group_local_index = self->inodes_per_group == 0
+        ? inode_index
+        : (inode_index % self->inodes_per_group);
+    return (group_local_index * self->inode_size) % EXT2_BLOCK_SIZE;
 }
 
 static void Ext2Inode__read_from_block(
@@ -2429,6 +2479,9 @@ static Result(IOStatus) Ext2FileIO__start_async_link(
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = EMPTY_KERNEL_CONTEXT;
+            Match(KernelContextPtr, BlockDevice__current_context())
+                IsSome(kernel_context, block_context->kernel_context = *kernel_context)
+            End
             block_context->owner_context = (Anything) link_context;
 
             if (!fs_state->volume.mounted)

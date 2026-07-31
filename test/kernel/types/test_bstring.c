@@ -41,6 +41,40 @@ void test_bstring_push_char_rejects_when_full(void)
     TEST_ASSERT_EQUAL_INT64(BSTRING_MAX_SIZE - 1, str.len);
 }
 
+void test_bstring_insert_char_inserts_at_requested_position(void)
+{
+    BString str = bstring("ac");
+
+    TEST_ASSERT_TRUE(BString__insert_char(&str, 1, 'b'));
+    TEST_ASSERT_EQUAL_INT64(3, str.len);
+    TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&str));
+}
+
+void test_bstring_insert_char_rejects_out_of_bounds_index(void)
+{
+    BString str = bstring("ab");
+
+    TEST_ASSERT_FALSE(BString__insert_char(&str, 3, 'c'));
+    TEST_ASSERT_EQUAL_STRING("ab", BString__cstr(&str));
+}
+
+void test_bstring_remove_at_removes_requested_position(void)
+{
+    BString str = bstring("abc");
+
+    TEST_ASSERT_TRUE(BString__remove_at(&str, 1));
+    TEST_ASSERT_EQUAL_INT64(2, str.len);
+    TEST_ASSERT_EQUAL_STRING("ac", BString__cstr(&str));
+}
+
+void test_bstring_remove_at_rejects_out_of_bounds_index(void)
+{
+    BString str = bstring("ab");
+
+    TEST_ASSERT_FALSE(BString__remove_at(&str, 2));
+    TEST_ASSERT_EQUAL_STRING("ab", BString__cstr(&str));
+}
+
 void test_bstring_is_whitespace_matches_shell_whitespace_set(void)
 {
     TEST_ASSERT_TRUE(BString__is_whitespace(' '));

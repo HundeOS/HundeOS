@@ -118,6 +118,7 @@ Result(Anything) BlockDevice__write_async(
 );
 void BlockDevice__set_current_context(KernelContextPtr context);
 void BlockDevice__clear_current_context();
+Optional(KernelContextPtr) BlockDevice__current_context();
 Result(BlockDeviceCode) BlockDeviceRegistry__register(
     KString path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
 );

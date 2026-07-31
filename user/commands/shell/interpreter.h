@@ -14,6 +14,7 @@ typedef struct Command
 {
     BString name;
     CommandArguments args;
+    bool background;
 }
 Command;
 
