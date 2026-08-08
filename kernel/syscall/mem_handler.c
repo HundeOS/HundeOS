@@ -2,9 +2,9 @@
 
 #include "syscalls/mem.h"
 
-static KString no_process = KSTRING_NEW("No process for memory syscall");
-static KString invalid_size = KSTRING_NEW("Invalid memory allocation size");
-static KString unsupported_operation = KSTRING_NEW("Unsupported memory operation");
+static BString no_process = BSTRING_NEW("No process for memory syscall");
+static BString invalid_size = BSTRING_NEW("Invalid memory allocation size");
+static BString unsupported_operation = BSTRING_NEW("Unsupported memory operation");
 
 static MemStatus Mem__status_from_process_code(ProcessMemoryCode code)
 {

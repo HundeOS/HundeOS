@@ -66,17 +66,17 @@ ResultDef(DirectoryEntryCount);
 ResultDef(IOStatus);
 #endif
 
-Result(DeviceHandle) IOSubsystem__register_device(IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state);
+Result(DeviceHandle) IOSubsystem__register_device(IOSubsystemPtr self, BString path, IOPtr device, IOStatePtr device_state);
 
 Result(IOHandle) IOSubsystem__record_open_handle(
-    IOSubsystemPtr self, IOContextPtr context, KString path, IOInternalHandle handle
+    IOSubsystemPtr self, IOContextPtr context, BString path, IOInternalHandle handle
 );
-Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KString path, Flags flags);
+Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, BString path, Flags flags);
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context);
 Result(IOHandle) IOSubsystem__server_register(
-    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, KString path, IOServerRole role
+    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, BString path, IOServerRole role
 );
 Result(IOStatus) IOSubsystem__server_get_buffer(
     IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, IOServerBufferPtr target
@@ -89,17 +89,17 @@ Result(IOStatus) IOSubsystem__server_data_consumed(
 );
 Result(IOStatus) IOSubsystem__server_eof(IOSubsystemPtr self, IOContextPtr context);
 Result(DirectoryEntryCount) IOSubsystem__list_dir(
-    IOSubsystemPtr self, KString path, DirectoryEntryPtr entries, size_t max_entries
+    IOSubsystemPtr self, BString path, DirectoryEntryPtr entries, size_t max_entries
 );
-Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, KString path);
-Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, KString path, Flags flags);
-Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, KString source_path, KString target_path);
+Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, BString path);
+Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, BString path, Flags flags);
+Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, BString source_path, BString target_path);
 
 Result(IOStatus) IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context);
 void IOSubsystem__message_received(KernelListenerPtr listener, MessagePtr message);
 
 // called by IRQs
-Result(IOHandle) IOSubsystem__async_receive(IOSubsystemPtr self, KString path, Flags flags);
+Result(IOHandle) IOSubsystem__async_receive(IOSubsystemPtr self, BString path, Flags flags);
 
 // registering message broker listeners
 Result(ListenerRegisterResult) IOSubsystem__register_listeners(KernelPtr kernel);

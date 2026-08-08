@@ -83,7 +83,7 @@
                 return alias##__table__set(&self->table, hash, bucket);\
             })\
         End\
-        return Error(CollectionCode, kstring("no bucket"), 0); \
+        return Error(CollectionCode, bstring("no bucket"), 0); \
     } \
 
 #define HashtableGetPreDefine(alias) \

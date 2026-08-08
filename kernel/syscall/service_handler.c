@@ -8,8 +8,9 @@
 #include "../subsystems/io/block/block_device.h"
 #include "../subsystems/io/file/register.h"
 
-static KString no_process = KSTRING_NEW("No process for service syscall");
-static KString unsupported_operation = KSTRING_NEW("Unsupported service operation");
+static BString no_process = BSTRING_NEW("No process for service syscall");
+static BString unsupported_operation = BSTRING_NEW("Unsupported service operation");
+static BString permission_denied = BSTRING_NEW("Permission denied");
 
 typedef struct ServiceMappedMemoryRequest
 {
@@ -46,6 +47,16 @@ static ServiceCode Service__map_block_registration_status(Code code)
         return SERVICE_INVALID_BUFFER;
     }
     return SERVICE_DEVICE_REGISTRATION_FAILED;
+}
+
+static Result(SystemCallResult) Service__require_capability(ProcessPtr process, ProcessCapabilities capability)
+{
+    if (Process__has_capability(process, capability))
+    {
+        return Success(SystemCallResult, SERVICE_OK);
+    }
+
+    return Error(SystemCallResult, permission_denied, SERVICE_PERMISSION_DENIED);
 }
 
 static Result(Anything) ServiceEvent__copy_to_target(Result(Anything) result, Anything context)
@@ -101,6 +112,9 @@ Result(SystemCallResult) Service__handler(
         {
             if (service_operation == SERVICE_BECOME_SERVICE)
             {
+                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_BECOME_SERVICE))
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
                 process->process_class = PROCESS_CLASS_SERVICE;
                 return Success(SystemCallResult, SERVICE_OK);
             }
@@ -163,6 +177,9 @@ Result(SystemCallResult) Service__handler(
 
             if (service_operation == SERVICE_MAP_MMIO)
             {
+                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_MAP_MMIO))
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
                 ServiceMappedMemoryRequestPtr request = (ServiceMappedMemoryRequestPtr) arg2;
                 if (request == NULL)
                 {
@@ -207,6 +224,9 @@ Result(SystemCallResult) Service__handler(
 
             if (service_operation == SERVICE_SUBSCRIBE_IRQ)
             {
+                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_SUBSCRIBE_IRQ))
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
                 uint64_t irq = (uint64_t) arg2;
                 __d_printf(IODEV, "service subscribe irq pid=%i irq=%i\n", process->pid, (int) irq);
                 ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, process))
@@ -221,6 +241,9 @@ Result(SystemCallResult) Service__handler(
 
             if (service_operation == SERVICE_REGISTER_BLOCK_DEVICE)
             {
+                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_REGISTER_BLOCK_DEVICE))
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
                 ServiceBlockDeviceRegistrationPtr request = (ServiceBlockDeviceRegistrationPtr) arg2;
                 if (request == NULL || request->block_size != BLOCK_DEVICE_BLOCK_SIZE)
                 {
@@ -228,7 +251,7 @@ Result(SystemCallResult) Service__handler(
                 }
 
                 ResultMatch(BlockDeviceCode, BlockDeviceRegistry__register(
-                    kstring(request->path), process, request->block_count, kernel->message_broker
+                    bstring(request->path), process, request->block_count, kernel->message_broker
                 ))
                     IsSuccess(_,
                     {
@@ -247,6 +270,9 @@ Result(SystemCallResult) Service__handler(
 
             if (service_operation == SERVICE_BLOCK_GET_REQUEST)
             {
+                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS))
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
                 uint64_t request_id = (uint64_t) arg2;
                 ServiceBlockRequestPtr target = (ServiceBlockRequestPtr) arg3;
                 ResultMatch(ServiceCode, BlockDeviceService__get_request(process, request_id, target))
@@ -257,6 +283,9 @@ Result(SystemCallResult) Service__handler(
 
             if (service_operation == SERVICE_BLOCK_COMPLETE)
             {
+                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS))
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
                 ServiceBlockCompletionPtr completion = (ServiceBlockCompletionPtr) arg2;
                 ResultMatch(ServiceCode, BlockDeviceService__complete(process, completion))
                     IsSuccess(code, return Success(SystemCallResult, code))

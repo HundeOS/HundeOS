@@ -7,16 +7,16 @@
 #include <stdint.h>
 
 
-static KString unhandled_operation_format = KSTRING_NEW("Unhandled io operation: %p");
-static KString no_process = KSTRING_NEW("No process for IO syscall");
-static KString invalid_path_argument = KSTRING_NEW("Invalid path argument");
+static BString unhandled_operation_format = BSTRING_NEW("Unhandled io operation: %p");
+static BString no_process = BSTRING_NEW("No process for IO syscall");
+static BString invalid_path_argument = BSTRING_NEW("Invalid path argument");
 
 typedef struct IOOpenCompletionContext
 {
     KernelContext kernel_context;
     IOSubsystemPtr io_subsystem;
     ProcessPtr process;
-    KString path;
+    BString path;
 }
 IOOpenCompletionContext;
 
@@ -129,7 +129,7 @@ Result(SystemCallResult) IO__handler(
         }
 
         Flags flags = (Flags) arg3;
-        KString path = kstring((const char *) arg2);
+        BString path = bstring((const char *) arg2);
         IOOpenCompletionContextPtr open_completion_context =
             ptr(Kernel__alloc_kernel(sizeof(IOOpenCompletionContext)), IOOpenCompletionContext);
         *open_completion_context = (IOOpenCompletionContext) {
@@ -244,7 +244,7 @@ Result(SystemCallResult) IO__handler(
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        KString path = kstring((const char *) arg2);
+        BString path = bstring((const char *) arg2);
         DirectoryEntryPtr entries = (DirectoryEntryPtr) arg3;
         size_t max_entries = (size_t) arg4;
 
@@ -264,7 +264,7 @@ Result(SystemCallResult) IO__handler(
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        KString path = kstring((const char *) arg2);
+        BString path = bstring((const char *) arg2);
         BlockDevice__set_current_context(&kernel_context);
         Result(IOStatus) mkdir_result = IOSubsystem__mkdir(io_subsystem, path);
         BlockDevice__clear_current_context();
@@ -281,7 +281,7 @@ Result(SystemCallResult) IO__handler(
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        KString path = kstring((const char *) arg2);
+        BString path = bstring((const char *) arg2);
         Flags flags = (Flags) arg3;
         BlockDevice__set_current_context(&kernel_context);
         Result(IOStatus) remove_result = IOSubsystem__remove(io_subsystem, path, flags);
@@ -299,8 +299,8 @@ Result(SystemCallResult) IO__handler(
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        KString source_path = kstring((const char *) arg2);
-        KString target_path = kstring((const char *) arg3);
+        BString source_path = bstring((const char *) arg2);
+        BString target_path = bstring((const char *) arg3);
         BlockDevice__set_current_context(&kernel_context);
         Result(IOStatus) link_result = IOSubsystem__link(io_subsystem, source_path, target_path);
         BlockDevice__clear_current_context();
@@ -338,7 +338,7 @@ Result(SystemCallResult) IO__handler(
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        KString path = kstring((const char *) arg2);
+        BString path = bstring((const char *) arg2);
         IOServerRole role = (IOServerRole) arg3;
         context = IOContext__heap_new(
             kernel_context, Some(IOSubsystemPtr, io_subsystem), None(IOHandle), None(ExternalBuffer)
@@ -449,5 +449,5 @@ Result(SystemCallResult) IO__handler(
         End
     }
 
-    return Error(SystemCallResult, KString__sprintf(&unhandled_operation_format, io_operation), SYSCALL_FAILURE);
+    return Error(SystemCallResult, BString__sprintf(&unhandled_operation_format, io_operation), SYSCALL_FAILURE);
 }

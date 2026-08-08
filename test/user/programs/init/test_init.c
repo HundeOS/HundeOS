@@ -3,6 +3,7 @@
 #include "unity.h"
 
 #include "../../../../common_includes/syscalls/spawn.h"
+#include "../../../../common_includes/syscalls/process.h"
 #include "../../../../common_includes/syscalls/service.h"
 
 typedef struct SpawnCall
@@ -28,6 +29,9 @@ static char printed_output[256];
 static uint64_t printed_output_len;
 static uint8_t fake_virtio_region[0x200ULL * 32ULL];
 static ServiceMappedMemory fake_mapping;
+static ProcessChildEvent fake_child_events[4];
+static uint64_t fake_child_event_count;
+static uint64_t fake_child_event_index;
 
 #define HUNDESCHAU_ENTRYPOINT hundeschau_main_under_test
 #define printf test_printf
@@ -69,6 +73,9 @@ void setUp(void)
     slot2[0x000 / 4] = 0x74726976U;
     slot2[0x004 / 4] = 1;
     slot2[0x008 / 4] = 2;
+
+    fake_child_event_count = 0;
+    fake_child_event_index = 0;
 }
 
 void tearDown(void)
@@ -120,6 +127,19 @@ SpawnResult spawn(SpawnMode mode, const char* path, const char* arg0, const char
     return (SpawnResult) spawn_call_count;
 }
 
+SpawnResult spawn_as(
+    SpawnMode mode,
+    UserID requested_user_id,
+    const char* path,
+    const char* arg0,
+    const char* arg1,
+    const char* arg2
+)
+{
+    TEST_FAIL();
+    return SPAWN_FAILED;
+}
+
 ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
 {
     TEST_ASSERT_EQUAL_UINT64(0x0a000000ULL, physical_address);
@@ -144,37 +164,67 @@ int test_printf(const char * format, ...)
     return (int) i;
 }
 
-void test_init_spawns_drivers_in_background_then_shell_in_foreground(void)
+ProcessChildEventResult wait_for_child_event(ProcessChildEventPtr event)
 {
-    TEST_ASSERT_EQUAL_INT(0, hundeschau_main_under_test());
+    if (fake_child_event_index >= fake_child_event_count)
+    {
+        return PROCESS_CHILD_EVENT_QUEUE_EMPTY;
+    }
+
+    *event = fake_child_events[fake_child_event_index++];
+    return PROCESS_CHILD_EVENT_OK;
+}
+
+void test_init_spawns_required_processes_in_background(void)
+{
+    HundeschauRequiredProcesses required_processes = { 0 };
+    TEST_ASSERT_EQUAL_INT(0, Hundeschau__initialise_required_processes(&required_processes));
 
     TEST_ASSERT_EQUAL_UINT64(5, spawn_call_count);
-    TEST_ASSERT_TRUE(strings_equal("🐶 HundeOS: hundeschau begins 🐾\n", printed_output));
     TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[0].mode);
-    TEST_ASSERT_EQUAL_STRING("/ebin/virtio_blk", spawn_calls[0].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[0].path);
     TEST_ASSERT_EQUAL_STRING("0", spawn_calls[0].arg0);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", spawn_calls[0].arg1);
     TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[1].mode);
-    TEST_ASSERT_EQUAL_STRING("/ebin/virtio_blk", spawn_calls[1].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[1].path);
     TEST_ASSERT_EQUAL_STRING("2", spawn_calls[1].arg0);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio2", spawn_calls[1].arg1);
     TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[2].mode);
-    TEST_ASSERT_EQUAL_STRING("/ebin/uart_rx", spawn_calls[2].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[2].path);
     TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[3].mode);
-    TEST_ASSERT_EQUAL_STRING("/ebin/uart_tx", spawn_calls[3].path);
-    TEST_ASSERT_EQUAL(P_WAIT, spawn_calls[4].mode);
-    TEST_ASSERT_EQUAL_STRING("/ebin/shell", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[4].mode);
+    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[4].path);
 }
 
-void test_init_does_not_start_shell_when_required_driver_fails(void)
+void test_init_returns_failure_when_required_driver_fails(void)
 {
-    failing_path = "/ebin/virtio_blk";
+    failing_path = "/sbin/drivers/virtio_blk";
+
+    HundeschauRequiredProcesses required_processes = { 0 };
+    TEST_ASSERT_EQUAL_INT(2, Hundeschau__initialise_required_processes(&required_processes));
+
+    TEST_ASSERT_EQUAL_UINT64(5, spawn_call_count);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[0].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[1].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[2].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[4].path);
+}
+
+void test_init_respawns_required_process_when_child_event_arrives(void)
+{
+    fake_child_event_count = 1;
+    fake_child_events[0] = (ProcessChildEvent) {
+        .pid = 2,
+        .status = 0,
+        .type = PROCESS_CHILD_EVENT_EXITED,
+    };
 
     TEST_ASSERT_EQUAL_INT(1, hundeschau_main_under_test());
 
-    TEST_ASSERT_EQUAL_UINT64(4, spawn_call_count);
-    TEST_ASSERT_EQUAL_STRING("/ebin/virtio_blk", spawn_calls[0].path);
-    TEST_ASSERT_EQUAL_STRING("/ebin/virtio_blk", spawn_calls[1].path);
-    TEST_ASSERT_EQUAL_STRING("/ebin/uart_rx", spawn_calls[2].path);
-    TEST_ASSERT_EQUAL_STRING("/ebin/uart_tx", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("2", spawn_calls[5].arg0);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio2", spawn_calls[5].arg1);
 }

@@ -4,7 +4,7 @@
 #include "mutex.h"
 #include "panic.h"
 #include "spin.h"
-#include "types/kstring.h"
+#include "types/bstring.h"
 #include "subsystems/io/register.h"
 #include "syscall/init.h"
 #include "syscall/syscall_dispatcher.h"
@@ -15,13 +15,13 @@
 #include "scheduler/scheduler.h"
 
 
-static KString failed_to_find_idle_process = KSTRING_NEW("failed to find idle process");
-static KString heap_init_progress = KSTRING_NEW("heap initialised");
-static KString syscall_init_progress = KSTRING_NEW("syscall handlers initialised");
-static KString io_init_progress = KSTRING_NEW("io subsystem initialised");
-static KString scheduler_init_progress = KSTRING_NEW("scheduler initialised");
-static KString arch_init_progress = KSTRING_NEW("architecture specific components initialised");
-static KString failed_to_init_msg = KSTRING_NEW("failed to initialise kernel");
+static BString failed_to_find_idle_process = BSTRING_NEW("failed to find idle process");
+static BString heap_init_progress = BSTRING_NEW("heap initialised");
+static BString syscall_init_progress = BSTRING_NEW("syscall handlers initialised");
+static BString io_init_progress = BSTRING_NEW("io subsystem initialised");
+static BString scheduler_init_progress = BSTRING_NEW("scheduler initialised");
+static BString arch_init_progress = BSTRING_NEW("architecture specific components initialised");
+static BString failed_to_init_msg = BSTRING_NEW("failed to initialise kernel");
 
 static MessageBroker message_broker = NEW_BROKER;
 static Scheduler scheduler = NEW_SCHEDULER(&message_broker);
@@ -59,14 +59,14 @@ KernelPtr Kernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_brok
     return kernel;
 }
 
-void __kernel_panic(KernelPtr self, KStringPtr message)
+void __kernel_panic(KernelPtr self, BStringPtr message)
 {
     self->status = INIT_FAILED_AND_PANICKED;
     mutex_unlock(&self->init_lock);
     Kernel__panic(cstr_p(message), NULL);
 }
 
-void PanicOnError(Result(SubsystemInitStatus) res, KernelPtr kernel, KStringPtr progress_message)
+void PanicOnError(Result(SubsystemInitStatus) res, KernelPtr kernel, BStringPtr progress_message)
 {
     ResultMatch(SubsystemInitStatus, res);
         IsError(code, message,
@@ -75,7 +75,7 @@ void PanicOnError(Result(SubsystemInitStatus) res, KernelPtr kernel, KStringPtr 
         });
         IsSuccess(_,
         {
-            __d_println(PROGRESS, KString__cstr(progress_message));
+            __d_println(PROGRESS, BString__cstr(progress_message));
         });
     End
 }
@@ -122,7 +122,7 @@ Result(SubsystemInitStatus) Kernel__init_heap(KernelPtr self)
 
 Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
 {
-    Optional(Elf) idle_opt = EmbeddedElf__load(kstring("idle"));
+    Optional(Elf) idle_opt = EmbeddedElf__load(bstring("idle"));
     Match(Elf, idle_opt)
         IsSome(idle,
         {

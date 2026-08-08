@@ -5,7 +5,7 @@ CC = $(CROSS_COMPILE)gcc
 LD = $(CROSS_COMPILE)gcc
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
-UNITY_PATH=../../tools/Unity
+UNITY_PATH=vendor/Unity
 # Compiler flags
 CFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
            -nostdlib -nostartfiles -mcmodel=large -DBSP_VIRT \
@@ -96,7 +96,12 @@ COMMON_USER_OBJECTS := $(patsubst ./common/%.c,build/common/%.o,$(COMMON_SOURCES
 
 USER_BINARY_ROOTS := user/programs user/commands user/drivers
 USER_BINARY_DIRS := $(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null))
+USER_DRIVER_DIRS := $(filter user/drivers/%,$(USER_BINARY_DIRS))
+USER_NON_DRIVER_DIRS := $(filter-out $(USER_DRIVER_DIRS),$(USER_BINARY_DIRS))
 USER_BINARIES := $(patsubst %,build/user/%.bin,$(notdir $(USER_BINARY_DIRS)))
+EMBEDDED_FS_INPUTS := \
+	$(foreach dir,$(USER_NON_DRIVER_DIRS),build/user/$(notdir $(dir)).bin) \
+	$(foreach dir,$(USER_DRIVER_DIRS),drivers/$(notdir $(dir))=build/user/$(notdir $(dir)).bin)
 EMBEDDED_FS := build/kernel/embedded.fs
 
 .PRECIOUS: build/user/arch/%.o
@@ -154,7 +159,7 @@ build/kernel/%.o: %.s
 	$(AS) $(ASFLAGS) $< -o $@
 
 $(EMBEDDED_FS): $(USER_BINARIES) tools/build_embedded_fs.py
-	python3 tools/build_embedded_fs.py $@ $(USER_BINARIES)
+	python3 tools/build_embedded_fs.py $@ $(EMBEDDED_FS_INPUTS)
 
 build/kernel/./kernel/bin/embedded.o: $(EMBEDDED_FS)
 

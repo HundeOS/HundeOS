@@ -317,7 +317,7 @@ Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr)
         })
     End
 
-    return Error(HeapCode, kstring("address not allocated"), HEAP_NOT_IMPLEMENTED);
+    return Error(HeapCode, bstring("address not allocated"), HEAP_NOT_IMPLEMENTED);
 }
 
 KernelAddress Heap__from_virtual_address(HeapPtr self, Address virtual)

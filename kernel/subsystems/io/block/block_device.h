@@ -9,7 +9,7 @@
 #include "../../../types/fixed_array.h"
 #include "../../../types/optional.h"
 #include "../../../types/result.h"
-#include "../../../types/kstring_additional_types.h"
+#include "../../../types/bstring_additional_types.h"
 #include "../../../types/types.h"
 #include "../../../service/service.h"
 #include "../../../scheduler/kernel_context.h"
@@ -43,13 +43,13 @@ typedef MessageBroker * MessageBrokerPtr;
 OptionalDef(BlockRequestID);
 
 OptionalDef(BlockDevicePtr);
-FixedArrayDefine(KString, IO_MAX_DEVICES, BlockDevicePaths, kstring_equals);
+FixedArrayDefine(BString, IO_MAX_DEVICES, BlockDevicePaths, bstring_equals);
 ResultDef(BlockDevicePaths);
 
 typedef struct BlockDeviceMetadata
 {
-    KString alias;
-    KString path;
+    BString alias;
+    BString path;
     size_t block_size;
     BlockCount block_count;
     bool userspace_service;
@@ -120,12 +120,13 @@ void BlockDevice__set_current_context(KernelContextPtr context);
 void BlockDevice__clear_current_context();
 Optional(KernelContextPtr) BlockDevice__current_context();
 Result(BlockDeviceCode) BlockDeviceRegistry__register(
-    KString path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
+    BString path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
 );
-Optional(BlockDevicePtr) BlockDeviceRegistry__find(KString path);
+Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPtr process);
+Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path);
 BlockDevicePaths BlockDeviceRegistry__paths();
 BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries();
-Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(KString alias);
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias);
 Result(ServiceCode) BlockDeviceService__get_request(
     ProcessPtr service_process, uint64_t request_id, ServiceBlockRequestPtr target
 );

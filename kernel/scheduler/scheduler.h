@@ -133,6 +133,11 @@ Result(ServiceEvent) Scheduler__service_wait_with_context_ownership(
     SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context,
     Optional(Continuation) continuation, bool owns_kernel_context
 );
+Result(ProcessChildEvent) Scheduler__child_wait_with_context_ownership(
+    SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context,
+    Optional(Continuation) continuation, bool owns_kernel_context
+);
+Result(ProcessChildEvent) Scheduler__child_take_next_event(SchedulerPtr self, ProcessPtr process);
 Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr process, ServiceEvent event);
 Result(CollectionCode) Scheduler__add_blocked_operation(
     SchedulerPtr self, ParkedOperationPtr operation, ParkedOperationPtr blocked_operation

@@ -31,7 +31,7 @@ ExternalBuffer DataBuffer__convert_to_external_buffer_for_read(DataBufferPtr sel
     };
 }
 
-Result(IOHandle) open(OriginatingContext context, KString path, Flags flags)
+Result(IOHandle) open(OriginatingContext context, BString path, Flags flags)
 {
     IOContextPtr io_context = IOContext__from_originating_context(context, None(IOHandle), None(ExternalBuffer));
     __d_printf(IOSUB, "Opening %s %p\n", cstr(path), context.kernel);

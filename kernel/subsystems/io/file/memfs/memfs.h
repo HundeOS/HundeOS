@@ -20,7 +20,7 @@ LinkedListDefine(MemFilePage, MemFilePages, (EqualFunction) MemFilePage__equals)
 
 typedef struct MemFile
 {
-    KString name;
+    BString name;
     size_t size;
     size_t capacity;
     MemFilePages pages;
@@ -38,7 +38,7 @@ LinkedListDefine(MemFile, MemFiles, (EqualFunction) MemFile__equals);
 
 typedef struct MemDirectory
 {
-    KString path;
+    BString path;
 }
 MemDirectory;
 
@@ -52,7 +52,7 @@ LinkedListDefine(MemDirectory, MemDirectories, (EqualFunction) MemDirectory__equ
 
 typedef struct MemFileHandle
 {
-    KString path;
+    BString path;
     FilePointer offset;
     IOBuffer buffer;
     Flags flags;

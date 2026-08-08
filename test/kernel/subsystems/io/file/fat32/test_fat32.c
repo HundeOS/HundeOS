@@ -17,7 +17,7 @@ static Data async_page[BLOCK_DEVICE_BLOCK_SIZE];
 
 typedef struct FakeUserspaceBlockDevice
 {
-    KString path;
+    BString path;
     ProcessPtr service_process;
     SchedulerPtr scheduler;
     BlockCount block_count;
@@ -141,7 +141,7 @@ static void test_write_short_entry(DataPtr entry, DataPtr short_name, uint32_t c
     test_write_u32(entry, 28, size);
 }
 
-static void test_write_lfn_entries(DataPtr target, KString name, DataPtr short_name)
+static void test_write_lfn_entries(DataPtr target, BString name, DataPtr short_name)
 {
     uint8_t checksum = test_short_name_checksum(short_name);
     size_t entry_count = (name.len + 1 + 12) / 13;
@@ -209,21 +209,21 @@ void test_fat32_filesystem_state_mounts_existing_volume_without_formatting(void)
     format_volume();
     mount_volume();
 
-    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, kstring("keep.txt"), content, sizeof(content)))
+    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, bstring("keep.txt"), content, sizeof(content)))
         IsSuccess(code, TEST_ASSERT_EQUAL(FAT32_OK, code))
         IsError(code, message, TEST_FAIL())
     End
 
-    FilesystemPtr fs = Filesystem__heap_new(kstring("fat32"), Fat32FilesystemIO__new());
+    FilesystemPtr fs = Filesystem__heap_new(bstring("fat32"), Fat32FilesystemIO__new());
     Fat32FilesystemIOStatePtr state = Fat32FilesystemIOState__heap_new(fs, &block_device, 0);
 
     TEST_ASSERT_TRUE(state->mounted);
 
     ResultMatch(Fat32DirectoryEntries, Fat32Volume__list_root(&state->volume))
         IsSuccess(entries, {
-            KString expected = KSTRING_NEW("KEEP.TXT");
+            BString expected = BSTRING_NEW("KEEP.TXT");
             TEST_ASSERT_EQUAL(1, entries.len);
-            TEST_ASSERT_TRUE(KString__equals(&entries.data[0].name, &expected));
+            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
         })
         IsError(code, message, TEST_FAIL())
     End
@@ -274,16 +274,16 @@ void test_fat32_creates_lists_and_reads_root_file(void)
     format_volume();
     mount_volume();
 
-    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, kstring("hello.txt"), content, sizeof(content)))
+    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, bstring("hello.txt"), content, sizeof(content)))
         IsSuccess(code, TEST_ASSERT_EQUAL(FAT32_OK, code))
         IsError(code, message, TEST_FAIL())
     End
 
     ResultMatch(Fat32DirectoryEntries, Fat32Volume__list_root(&volume))
         IsSuccess(entries, {
-            KString expected = KSTRING_NEW("HELLO.TXT");
+            BString expected = BSTRING_NEW("HELLO.TXT");
             TEST_ASSERT_EQUAL(1, entries.len);
-            TEST_ASSERT_TRUE(KString__equals(&entries.data[0].name, &expected));
+            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
             TEST_ASSERT_EQUAL(FAT32_ATTR_ARCHIVE, entries.data[0].attributes);
             TEST_ASSERT_EQUAL(sizeof(content), entries.data[0].size);
             TEST_ASSERT_TRUE(entries.data[0].first_cluster >= 2);
@@ -293,7 +293,7 @@ void test_fat32_creates_lists_and_reads_root_file(void)
 
     ResultMatch(Fat32Code, Fat32Volume__read_root_file(
         &volume,
-        kstring("HELLO.TXT"),
+        bstring("HELLO.TXT"),
         target,
         sizeof(target),
         &bytes_read
@@ -308,7 +308,7 @@ void test_fat32_creates_lists_and_reads_root_file(void)
 
 void test_fat32_lists_and_reads_long_filename_root_file(void)
 {
-    KString long_name = KSTRING_NEW("This is a long filename.txt");
+    BString long_name = BSTRING_NEW("This is a long filename.txt");
     Data short_name[11] = { 'L', 'O', 'N', 'G', 'F', 'I', '~', '1', 'T', 'X', 'T' };
     Data content[] = { 'l', 'o', 'n', 'g', ' ', 'n', 'a', 'm', 'e' };
     Data target[32] = { 0 };
@@ -334,7 +334,7 @@ void test_fat32_lists_and_reads_long_filename_root_file(void)
         IsSuccess(entries,
         {
             TEST_ASSERT_EQUAL(1, entries.len);
-            TEST_ASSERT_TRUE(KString__equals(&entries.data[0].name, &long_name));
+            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &long_name));
             TEST_ASSERT_EQUAL(sizeof(content), entries.data[0].size);
         })
         IsError(code, message, TEST_FAIL())
@@ -387,7 +387,7 @@ void test_fat32_reads_root_file_across_cluster_chain(void)
 
     ResultMatch(Fat32Code, Fat32Volume__read_root_file(
         &volume,
-        kstring("BIGFILE.TXT"),
+        bstring("BIGFILE.TXT"),
         target,
         sizeof(target),
         &bytes_read
@@ -408,17 +408,17 @@ void test_fat32_list_dir_uses_async_mount_then_root_read_when_unmounted(void)
     format_volume();
     mount_volume();
 
-    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, kstring("async.txt"), content, sizeof(content)))
+    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, bstring("async.txt"), content, sizeof(content)))
         IsSuccess(code, TEST_ASSERT_EQUAL(FAT32_OK, code))
         IsError(code, message, TEST_FAIL())
     End
 
-    FilesystemPtr fs = Filesystem__heap_new(kstring("fat32"), Fat32FilesystemIO__new());
+    FilesystemPtr fs = Filesystem__heap_new(bstring("fat32"), Fat32FilesystemIO__new());
     Fat32FilesystemIOStatePtr state = Fat32FilesystemIOState__heap_new(fs, &block_device, 0);
     state->mounted = false;
     state->volume = Fat32Volume__new(Some(BlockDevicePtr, &block_device), 0);
 
-    ResultMatch(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, kstring("/"), entries, 4))
+    ResultMatch(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4))
         IsSuccess(count,
         {
             TEST_ASSERT_EQUAL(1, count);
@@ -436,7 +436,7 @@ void test_fat32_userspace_async_write_does_not_hold_handle_lock(void)
 {
     Data content[] = { 'h', 'i' };
     FakeUserspaceBlockDevice userspace = {
-        .path = KSTRING_NEW("/dev/test"),
+        .path = BSTRING_NEW("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_FAT32_SECTORS,
@@ -448,7 +448,7 @@ void test_fat32_userspace_async_write_does_not_hold_handle_lock(void)
     format_volume();
     mount_volume();
 
-    FilesystemPtr fs = Filesystem__heap_new(kstring("fat32"), Fat32FilesystemIO__new());
+    FilesystemPtr fs = Filesystem__heap_new(bstring("fat32"), Fat32FilesystemIO__new());
     Fat32FilesystemIOStatePtr state = Fat32FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
@@ -456,7 +456,7 @@ void test_fat32_userspace_async_write_does_not_hold_handle_lock(void)
 
     IOInternalHandle handle = 0;
     ResultMatch(IOInternalHandle, fs->file_io.base_io.open(
-        &state->state.state, kstring("async.txt"), IO_OPEN_WRITE
+        &state->state.state, bstring("async.txt"), IO_OPEN_WRITE
     ))
         IsSuccess(opened, handle = opened)
         IsError(code, message, TEST_FAIL())
@@ -478,16 +478,16 @@ void test_fat32_creates_and_lists_root_directory(void)
     format_volume();
     mount_volume();
 
-    ResultMatch(Fat32Code, Fat32Volume__create_root_directory(&volume, kstring("docs")))
+    ResultMatch(Fat32Code, Fat32Volume__create_root_directory(&volume, bstring("docs")))
         IsSuccess(code, TEST_ASSERT_EQUAL(FAT32_OK, code))
         IsError(code, message, TEST_FAIL())
     End
 
     ResultMatch(Fat32DirectoryEntries, Fat32Volume__list_root(&volume))
         IsSuccess(entries, {
-            KString expected = KSTRING_NEW("DOCS");
+            BString expected = BSTRING_NEW("DOCS");
             TEST_ASSERT_EQUAL(1, entries.len);
-            TEST_ASSERT_TRUE(KString__equals(&entries.data[0].name, &expected));
+            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
             TEST_ASSERT_EQUAL(FAT32_ATTR_DIRECTORY, entries.data[0].attributes);
             TEST_ASSERT_EQUAL(0, entries.data[0].size);
             TEST_ASSERT_TRUE(entries.data[0].first_cluster >= 2);
@@ -503,11 +503,11 @@ void test_fat32_rejects_duplicate_root_file(void)
     format_volume();
     mount_volume();
 
-    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, kstring("a.bin"), content, sizeof(content)))
+    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, bstring("a.bin"), content, sizeof(content)))
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, kstring("A.BIN"), content, sizeof(content)))
+    ResultMatch(Fat32Code, Fat32Volume__create_root_file(&volume, bstring("A.BIN"), content, sizeof(content)))
         IsSuccess(code, TEST_FAIL())
         IsError(code, message, TEST_ASSERT_EQUAL(FAT32_ALREADY_EXISTS, code))
     End
@@ -522,7 +522,7 @@ void test_fat32_rejects_names_outside_8_3_format(void)
 
     ResultMatch(Fat32Code, Fat32Volume__create_root_file(
         &volume,
-        kstring("too-long-name.txt"),
+        bstring("too-long-name.txt"),
         content,
         sizeof(content)
     ))
@@ -532,7 +532,7 @@ void test_fat32_rejects_names_outside_8_3_format(void)
 
     ResultMatch(Fat32Code, Fat32Volume__create_root_file(
         &volume,
-        kstring("name!.txt"),
+        bstring("name!.txt"),
         content,
         sizeof(content)
     ))
@@ -550,7 +550,7 @@ void test_fat32_rejects_file_larger_than_one_cluster_for_now(void)
 
     ResultMatch(Fat32Code, Fat32Volume__create_root_file(
         &volume,
-        kstring("large.bin"),
+        bstring("large.bin"),
         content,
         sizeof(content)
     ))

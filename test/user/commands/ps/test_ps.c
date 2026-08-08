@@ -83,18 +83,20 @@ void test_ps_prints_process_snapshot(void)
     copy_text(fake_processes[0].state, "PROC_STATE_READY", PROCESS_INFO_STATE_SIZE);
     copy_text(fake_processes[0].wait_reason, "-", PROCESS_INFO_WAIT_SIZE);
     copy_text(fake_processes[0].class_name, "normal", PROCESS_INFO_CLASS_SIZE);
+    copy_text(fake_processes[0].user_name, "root", PROCESS_INFO_USER_SIZE);
     copy_text(fake_processes[0].name, "init", PROCESS_INFO_NAME_SIZE);
     fake_processes[1].pid = 2;
     copy_text(fake_processes[1].state, "PROC_STATE_WAITING", PROCESS_INFO_STATE_SIZE);
     copy_text(fake_processes[1].wait_reason, "PARK_WAIT_SERVICE_EVENT", PROCESS_INFO_WAIT_SIZE);
     copy_text(fake_processes[1].class_name, "service", PROCESS_INFO_CLASS_SIZE);
+    copy_text(fake_processes[1].user_name, "hund", PROCESS_INFO_USER_SIZE);
     copy_text(fake_processes[1].name, "virtio_blk", PROCESS_INFO_NAME_SIZE);
 
     TEST_ASSERT_EQUAL_INT(0, ps_main_under_test());
     TEST_ASSERT_EQUAL_STRING(
-        "PID STATE WAIT CLASS NAME\n"
-        "1 PROC_STATE_READY - normal init\n"
-        "2 PROC_STATE_WAITING PARK_WAIT_SERVICE_EVENT service virtio_blk\n",
+        "PID STATE WAIT CLASS USER NAME\n"
+        "1 PROC_STATE_READY - normal root init\n"
+        "2 PROC_STATE_WAITING PARK_WAIT_SERVICE_EVENT service hund virtio_blk\n",
         output
     );
 }

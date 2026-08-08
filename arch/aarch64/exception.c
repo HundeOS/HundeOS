@@ -252,17 +252,17 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                             cstr(proc->name),
                             context->x[8],
                             code,
-                            KString__cstr(&message)
+                            BString__cstr(&message)
                         );)
                         IsNone(__d_printf(
                             SYSCALL,
                             "syscall error no-current-process id=%p code=%i message=%s\n",
                             context->x[8],
                             code,
-                            KString__cstr(&message)
+                            BString__cstr(&message)
                         );)
                     End
-                    __d_printf(SYSCALL, "syscall error: %s code=%i\n", KString__cstr(&message), code);
+                    __d_printf(SYSCALL, "syscall error: %s code=%i\n", BString__cstr(&message), code);
                     return code;
                 });
             End

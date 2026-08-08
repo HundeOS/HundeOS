@@ -8,9 +8,9 @@ bool FatName__is_valid_83_char(char ch)
         || ch == '-';
 }
 
-bool FatName__encode_83(ConstKStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
+bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
 {
-    if (KString__length(name) == 0)
+    if (BString__length(name) == 0)
     {
         return false;
     }
@@ -20,25 +20,25 @@ bool FatName__encode_83(ConstKStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
         target[i] = ' ';
     }
 
-    KStringArray parts = KString__split(name, '.');
-    size_t part_count = KStringArray__len(&parts);
+    BStringArray parts = BString__split(name, '.');
+    size_t part_count = BStringArray__len(&parts);
     if (part_count == 0 || part_count > 2)
     {
         return false;
     }
 
-    KString base = Unwrap(KString, KStringArray__at(&parts, 0), EMPTY_KSTRING);
-    if (KString__length(&base) == 0)
+    BString base = Unwrap(BString, BStringArray__at(&parts, 0), EMPTY_BSTRING);
+    if (BString__length(&base) == 0)
     {
         return false;
     }
 
-    KString uppercase_base = KString__uppercase(&base);
+    BString uppercase_base = BString__uppercase(&base);
 
     size_t target_index = 0;
-    for (StringPos i = 0; i < KString__length(&uppercase_base); i++)
+    for (StringPos i = 0; i < BString__length(&uppercase_base); i++)
     {
-        char ch = Unwrap(char, KString__char_at(&uppercase_base, i), '\0');
+        char ch = Unwrap(char, BString__char_at(&uppercase_base, i), '\0');
 
         if (!FatName__is_valid_83_char(ch) || target_index >= 8)
         {
@@ -51,18 +51,18 @@ bool FatName__encode_83(ConstKStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
 
     if (part_count == 2)
     {
-        KString extension = Unwrap(KString, KStringArray__at(&parts, 1), EMPTY_KSTRING);
-        if (KString__length(&extension) == 0)
+        BString extension = Unwrap(BString, BStringArray__at(&parts, 1), EMPTY_BSTRING);
+        if (BString__length(&extension) == 0)
         {
             return false;
         }
 
-        KString uppercase_extension = KString__uppercase(&extension);
+        BString uppercase_extension = BString__uppercase(&extension);
 
         target_index = 8;
-        for (StringPos i = 0; i < KString__length(&uppercase_extension); i++)
+        for (StringPos i = 0; i < BString__length(&uppercase_extension); i++)
         {
-            char ch = Unwrap(char, KString__char_at(&uppercase_extension, i), '\0');
+            char ch = Unwrap(char, BString__char_at(&uppercase_extension, i), '\0');
 
             if (!FatName__is_valid_83_char(ch) || target_index >= FAT_NAME_83_SIZE)
             {

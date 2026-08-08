@@ -11,13 +11,13 @@
 #include "../../../subsystems/message/subsystem_codes.h"
 #include "../../../types/map.h"
 
-static KString invalid_argument = KSTRING_NEW("Invalid block device argument");
-static KString already_registered = KSTRING_NEW("Block device already registered");
-static KString registry_full = KSTRING_NEW("Block device registry full");
-static KString request_pending = KSTRING_NEW("Userspace block IO request pending");
-static KString request_not_found = KSTRING_NEW("Userspace block IO request not found");
-static KString request_failed = KSTRING_NEW("Userspace block IO request failed");
-static KString request_not_complete = KSTRING_NEW("Userspace block IO request is not complete");
+static BString invalid_argument = BSTRING_NEW("Invalid block device argument");
+static BString already_registered = BSTRING_NEW("Block device already registered");
+static BString registry_full = BSTRING_NEW("Block device registry full");
+static BString request_pending = BSTRING_NEW("Userspace block IO request pending");
+static BString request_not_found = BSTRING_NEW("Userspace block IO request not found");
+static BString request_failed = BSTRING_NEW("Userspace block IO request failed");
+static BString request_not_complete = BSTRING_NEW("Userspace block IO request is not complete");
 
 #define MAX_BLOCK_REQUESTS IO_MAX_DEVICES
 
@@ -29,8 +29,8 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
 
 typedef struct UserspaceBlockDevice
 {
-    KString alias;
-    KString path;
+    BString alias;
+    BString path;
     ProcessPtr service_process;
     MessageBrokerPtr message_broker;
     BlockCount block_count;
@@ -42,6 +42,8 @@ typedef UserspaceBlockDevice * UserspaceBlockDevicePtr;
 
 OptionalDef(UserspaceBlockDevicePtr);
 FixedArrayBodyDefine(BlockDeviceMetadataEntries);
+FixedArrayDefine(BlockRequestID, MAX_BLOCK_REQUESTS, BlockRequestIDs, SimpleEquals(uint64_t));
+FixedArrayBodyDefine(BlockRequestIDs);
 
 typedef struct UserspaceBlockRequest
 {
@@ -74,7 +76,7 @@ typedef BlockDeviceParkContext * BlockDeviceParkContextPtr;
 
 OptionalDef(UserspaceBlockRequestPtr);
 FixedArrayBodyDefine(BlockDevicePaths);
-MapDefine(KString, UserspaceBlockDevicePtr, IO_MAX_DEVICES, BlockDeviceRegistryMap, kstring_equals);
+MapDefine(BString, UserspaceBlockDevicePtr, IO_MAX_DEVICES, BlockDeviceRegistryMap, bstring_equals);
 MapBodyDefine(BlockDeviceRegistryMap);
 MapDefine(BlockRequestID, UserspaceBlockRequestPtr, MAX_BLOCK_REQUESTS, BlockRequestMap, SimpleEquals(uint64_t));
 MapBodyDefine(BlockRequestMap);
@@ -85,9 +87,9 @@ static bool registry_initialized = false;
 static uint64_t next_request_id = 1;
 static uint64_t next_device_id = 0;
 static Optional(KernelContextPtr) current_context = None(KernelContextPtr);
-static KString hd_alias_format = KSTRING_NEW("hd%i");
+static BString hd_alias_format = BSTRING_NEW("hd%i");
 
-static void UserspaceBlockDevice__copy_path(char target[SERVICE_DEVICE_PATH_MAX], KString source)
+static void UserspaceBlockDevice__copy_path(char target[SERVICE_DEVICE_PATH_MAX], BString source)
 {
     StringPos i = 0;
     for (; i < source.len && i < SERVICE_DEVICE_PATH_MAX - 1; i++)
@@ -112,8 +114,8 @@ static void BlockDeviceRegistry__init()
 
 bool BlockDeviceMetadata__equals(BlockDeviceMetadataPtr self, BlockDeviceMetadataPtr other)
 {
-    return KString__equals(&self->alias, &other->alias)
-        && KString__equals(&self->path, &other->path)
+    return BString__equals(&self->alias, &other->alias)
+        && BString__equals(&self->path, &other->path)
         && self->block_size == other->block_size
         && self->block_count == other->block_count
         && self->userspace_service == other->userspace_service;
@@ -548,7 +550,7 @@ Optional(KernelContextPtr) BlockDevice__current_context()
 }
 
 Result(BlockDeviceCode) BlockDeviceRegistry__register(
-    KString path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
+    BString path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
 )
 {
     if (path.len == 0 || service_process == NULL || message_broker == NULL)
@@ -564,7 +566,7 @@ Result(BlockDeviceCode) BlockDeviceRegistry__register(
 
     UserspaceBlockDevicePtr device = ptr(Kernel__alloc_kernel(sizeof(UserspaceBlockDevice)), UserspaceBlockDevice);
     *device = (UserspaceBlockDevice) {
-        .alias = KString__sprintf(&hd_alias_format, (int) next_device_id++),
+        .alias = BString__sprintf(&hd_alias_format, (int) next_device_id++),
         .path = path,
         .service_process = service_process,
         .message_broker = message_broker,
@@ -579,6 +581,52 @@ Result(BlockDeviceCode) BlockDeviceRegistry__register(
     End
 
     return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
+}
+
+Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPtr process)
+{
+    if (process == NULL)
+    {
+        return Error(BlockDeviceCode, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+    }
+
+    BlockDeviceRegistry__init();
+
+    BlockRequestIDs stale_request_ids = BlockRequestIDs__new();
+    MapIterate(BlockRequestMap, requests, index, request_id, request)
+        if (request->device->service_process == process)
+        {
+            ResultMatch(CollectionCode, BlockRequestIDs__push(&stale_request_ids, request_id))
+                IsError(code, message, return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL))
+            End
+        }
+    End
+
+    FAIterate(BlockRequestIDs, stale_request_ids, request_index, stale_request_id)
+        Match(UserspaceBlockRequestPtr, BlockRequestMap__get(&requests, stale_request_id))
+            IsSome(request, Kernel__free(addr(request)))
+        End
+        BlockRequestMap__delete(&requests, stale_request_id);
+    End
+
+    BlockDevicePaths stale_paths = EmptyArray(BlockDevicePaths);
+    MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
+        if (device->service_process == process)
+        {
+            ResultMatch(CollectionCode, BlockDevicePaths__push(&stale_paths, path))
+                IsError(code, message, return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL))
+            End
+        }
+    End
+
+    FAIterate(BlockDevicePaths, stale_paths, path_index, stale_path)
+        Match(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry, stale_path))
+            IsSome(device, Kernel__free(addr(device)))
+        End
+        BlockDeviceRegistryMap__delete(&registry, stale_path);
+    End
+
+    return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
 }
 
 Result(ServiceCode) BlockDeviceService__get_request(
@@ -682,7 +730,7 @@ Result(ServiceCode) BlockDeviceService__complete(
     return Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
 }
 
-Optional(BlockDevicePtr) BlockDeviceRegistry__find(KString path)
+Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path)
 {
     BlockDeviceRegistry__init();
 
@@ -723,12 +771,12 @@ BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
     return entries;
 }
 
-Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(KString alias)
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias)
 {
     BlockDeviceRegistry__init();
 
     MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
-        if (KString__equals(&device->alias, &alias))
+        if (BString__equals(&device->alias, &alias))
         {
             return Some(BlockDeviceMetadata, ((BlockDeviceMetadata) {
                 .alias = device->alias,

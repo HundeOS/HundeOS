@@ -5,7 +5,7 @@
 
 #include "../types/result.h"
 #include "../types/optional.h"
-#include "../types/kstring.h"
+#include "../types/bstring.h"
 #include "../types/linked_list.h"
 #include "../process.h"
 #include "kernel_context.h"
@@ -18,6 +18,7 @@ typedef enum ParkReasons
     PARK_WAIT_CHILD = 1,
     PARK_WAIT_IO = 2,
     PARK_WAIT_SERVICE_EVENT = 3,
+    PARK_WAIT_CHILD_EVENT = 4,
 } ParkReasons;
 
 LinkedListDefine(ParkedOperationPtr, BlockedParkedOperations, &Ptr__equals);
@@ -54,7 +55,7 @@ Result(CollectionCode) ParkedOperation__resolve_blocked_operation(
     ParkedOperationPtr self, ParkedOperationPtr blocked_operation
 );
 
-KString ParkReason__to_string(ParkReason reason);
+BString ParkReason__to_string(ParkReason reason);
 
 void ParkedOperation__dispose(ParkedOperationPtr self);
 

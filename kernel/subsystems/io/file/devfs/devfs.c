@@ -3,10 +3,10 @@
 #include "../../../../kalloc.h"
 #include "../../block/block_device.h"
 
-static KString invalid_path = KSTRING_NEW("Invalid devfs path");
-static KString not_supported = KSTRING_NEW("Devfs operation not supported");
-static KString invalid_handle = KSTRING_NEW("Invalid devfs handle");
-static KString metadata_format = KSTRING_NEW("path=%s\nblock_size=%i\nblock_count=%i\nuserspace_service=%i\n");
+static BString invalid_path = BSTRING_NEW("Invalid devfs path");
+static BString not_supported = BSTRING_NEW("Devfs operation not supported");
+static BString invalid_handle = BSTRING_NEW("Invalid devfs handle");
+static BString metadata_format = BSTRING_NEW("path=%s\nblock_size=%i\nblock_count=%i\nuserspace_service=%i\n");
 
 BlockDevicePaths BlockDeviceRegistry__paths() __attribute__((weak));
 BlockDevicePaths BlockDeviceRegistry__paths()
@@ -20,24 +20,24 @@ BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
     return EmptyArray(BlockDeviceMetadataEntries);
 }
 
-Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(KString alias) __attribute__((weak));
-Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(KString alias)
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias) __attribute__((weak));
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias)
 {
     return None(BlockDeviceMetadata);
 }
 
-static KString DevFilesystemIO__name_from_path(KString path)
+static BString DevFilesystemIO__name_from_path(BString path)
 {
-    KStringArray segments = KString__split(&path, '/');
-    if (KStringArray__len(&segments) == 0)
+    BStringArray segments = BString__split(&path, '/');
+    if (BStringArray__len(&segments) == 0)
     {
         return path;
     }
 
-    return Unwrap(KString, KStringArray__at(&segments, KStringArray__len(&segments) - 1), path);
+    return Unwrap(BString, BStringArray__at(&segments, BStringArray__len(&segments) - 1), path);
 }
 
-static Result(IOInternalHandle) DevFilesystemIOState__add_handle(DevFilesystemIOStatePtr self, KString path)
+static Result(IOInternalHandle) DevFilesystemIOState__add_handle(DevFilesystemIOStatePtr self, BString path)
 {
     CriticalSection(self->state.lock,
     {
@@ -79,7 +79,7 @@ static Result(IOInternalHandle) DevFilesystemIOState__delete_handle(DevFilesyste
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-static Result(IOInternalHandle) DevFilesystemIO__open(IOStatePtr self, KString path, Flags flags)
+static Result(IOInternalHandle) DevFilesystemIO__open(IOStatePtr self, BString path, Flags flags)
 {
     DevFilesystemIOStatePtr fs_state = (DevFilesystemIOStatePtr) self;
 
@@ -107,7 +107,7 @@ static Result(IOBufferPtr) DevFilesystemIO__read(
             Match(BlockDeviceMetadata, BlockDeviceRegistry__metadata(target->path))
                 IsSome(metadata,
                 {
-                    KString text = KString__sprintf(
+                    BString text = BString__sprintf(
                         &metadata_format,
                         cstr(metadata.path),
                         (int) metadata.block_size,
@@ -152,10 +152,10 @@ static Result(ParkStatus) DevFilesystemIO__unpark(IOStatePtr self)
     return Error(ParkStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
 }
 
-static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, KString path)
+static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, BString path)
 {
-    KStringArray path_segments = KString__split(&path, '/');
-    if (KStringArray__len(&path_segments) != 0)
+    BStringArray path_segments = BString__split(&path, '/');
+    if (BStringArray__len(&path_segments) != 0)
     {
         return Error(FilesystemNodes, invalid_path, IO_INVALID_PATH);
     }
@@ -182,17 +182,17 @@ static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, File
     return Success(FilesystemNodes, result);
 }
 
-static Result(IOStatus) DevFilesystemIO__mkdir(IOStatePtr self, KString path)
+static Result(IOStatus) DevFilesystemIO__mkdir(IOStatePtr self, BString path)
 {
     return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
 }
 
-static Result(IOStatus) DevFilesystemIO__remove(IOStatePtr self, KString path, Flags flags)
+static Result(IOStatus) DevFilesystemIO__remove(IOStatePtr self, BString path, Flags flags)
 {
     return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
 }
 
-static Result(IOStatus) DevFilesystemIO__link(IOStatePtr self, KString source_path, KString target_path)
+static Result(IOStatus) DevFilesystemIO__link(IOStatePtr self, BString source_path, BString target_path)
 {
     return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
 }

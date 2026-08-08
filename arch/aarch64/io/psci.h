@@ -6,6 +6,8 @@
 // PSCI v0.2+ function IDs (SMC64)
 #define PSCI_0_2_FN64_CPU_ON        0xC4000003ull
 #define PSCI_0_2_FN64_AFFINITY_INFO 0xC4000004ull
+#define PSCI_0_2_FN64_SYSTEM_OFF    0x84000008ull
+#define PSCI_0_2_FN64_SYSTEM_RESET  0x84000009ull
 
 // PSCI return codes
 #define PSCI_RET_SUCCESS     0
@@ -14,7 +16,7 @@
 
 
 // SMCCC result
-typedef struct smccc_res { uint64_t x0, x1, x2, x3; } SMCCCRes;
+typedef struct smccc_res { int64_t x0, x1, x2, x3; } SMCCCRes;
 
 inline SMCCCRes smc_call(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
 {
@@ -25,7 +27,7 @@ inline SMCCCRes smc_call(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
     __asm__ volatile("smc #0"
                      : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
                      : : "x4","x5","x6","x7","memory","cc");
-    return (struct smccc_res){ r0, r1, r2, r3 };
+    return (SMCCCRes){ (int64_t) r0, (int64_t) r1, (int64_t) r2, (int64_t) r3 };
 }
 
 inline SMCCCRes smccc_hvc(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
@@ -37,7 +39,7 @@ inline SMCCCRes smccc_hvc(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
     __asm__ volatile("hvc #0"
         : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
         : : "x4","x5","x6","x7","memory","cc");
-    return (SMCCCRes){ r0, r1, r2, r3 };
+    return (SMCCCRes){ (int64_t) r0, (int64_t) r1, (int64_t) r2, (int64_t) r3 };
 }
 
 #endif

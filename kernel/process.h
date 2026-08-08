@@ -8,12 +8,14 @@
 #include "stack.h"
 #include "types/comparison.h"
 #include "types/fixed_array.h"
-#include "types/kstring_additional_types.h"
+#include "types/bstring_additional_types.h"
 #include "types/linked_list.h"
 #include "syscalls/io.h"
+#include "../common_includes/syscalls/process.h"
 #include "syscalls/spawn.h"
 #include "process_class.h"
 #include "service/service.h"
+#include "scheduler/types.h"
 
 OptionalDef(UserAddress);
 
@@ -33,6 +35,11 @@ typedef uint64_t Tick;
 
 OptionalDef(ProcessID);
 ResultDef(ProcessID);
+OptionalDef(ProcessSignal);
+OptionalDef(ProcessChildEvent);
+ResultDef(ProcessChildEvent);
+OptionalDef(UserID);
+OptionalDef(GroupID);
 
 // state bits
 // 6    5      4     3    2         1     0
@@ -59,6 +66,7 @@ typedef uint64_t FileDescriptor;
 typedef uint64_t ProcessIOHandle;
 
 #define PROCESS_ABORT_EXIT_BASE (-1000LL)
+#define PROCESS_SIGNAL_EXIT_BASE (-2000LL)
 
 typedef enum ProcessAbortReason
 {
@@ -91,7 +99,10 @@ ResultDef(ProcessIOHandle);
 OptionalDef(FileDescriptor);
 OptionalDef(ProcessIOHandle);
 
-FixedArrayDefine(KString, SPAWN_MAX_ARGS + 1, ProcessArguments, kstring_equals);
+FixedArrayDefine(BString, SPAWN_MAX_ARGS + 1, ProcessArguments, bstring_equals);
+bool ProcessChildEvent__equals(ProcessChildEventPtr self, ProcessChildEventPtr other);
+#define MAX_PROCESS_CHILD_EVENTS 64
+FixedArrayDefine(ProcessChildEvent, MAX_PROCESS_CHILD_EVENTS, ProcessChildEvents, (EqualFunction) ProcessChildEvent__equals);
 
 inline const char * ProcessState__to_string(ProcessState state)
 {
@@ -179,6 +190,8 @@ LinkedListDefine(
 
 typedef struct Process Process;
 typedef Process * ProcessPtr;
+typedef struct Kernel Kernel;
+typedef Kernel * KernelPtr;
 
 OptionalDef(ProcessPtr);
 ResultDef(ProcessPtr);
@@ -193,7 +206,7 @@ typedef struct Process {
     ProcessState state;
     UserAddress entry_point;
     Tick last_tick;
-    KString name;
+    BString name;
     Address heap_break;
     Address heap_mapped_end;
     Address allocation_next;
@@ -204,12 +217,17 @@ typedef struct Process {
     ProcessClass process_class;
     ServiceState service;
     Optional(UserAddress) idle_debug_address;
+    UserID user_id;
+    GroupID group_id;
+    ProcessCapabilities capabilities;
+    ProcessSignalMask pending_signals;
+    ProcessChildEvents child_events;
 
     ParkedOperations parked_operations;
 } Process;
 
 Result(ProcessPtr) Process__new(
-    KString name,
+    BString name,
     KernelAddress page_table,
     UserAddress entry,
     Stack stack,
@@ -229,6 +247,20 @@ Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self);
 Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self);
 bool Process__is_parked(ProcessPtr self);
 bool Process__is_handling_service_irq(ProcessPtr self);
+void Process__set_identity(ProcessPtr self, UserID user_id, GroupID group_id, ProcessCapabilities capabilities);
+void Process__set_root_identity(ProcessPtr self);
+void Process__set_hund_identity(ProcessPtr self);
+void Process__set_user_identity(ProcessPtr self);
+bool Process__is_root(ProcessPtr self);
+bool Process__has_capability(ProcessPtr self, ProcessCapabilities capability);
+bool Process__supports_signal(ProcessPtr self, ProcessSignal signal);
+void Process__queue_signal(ProcessPtr self, ProcessSignal signal);
+bool Process__has_pending_signal(ProcessPtr self);
+Optional(ProcessSignal) Process__take_pending_signal(ProcessPtr self);
+ReturnCode ProcessSignal__exit_code(ProcessSignal signal);
+Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self);
+Result(CollectionCode) Process__push_child_event(ProcessPtr self, ProcessChildEvent event);
+Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(KernelPtr kernel, ProcessPtr self);
 Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 );

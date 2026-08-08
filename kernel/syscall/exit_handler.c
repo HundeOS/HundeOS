@@ -3,7 +3,7 @@
 #include "../kernel_core.h"
 #include "syscalls/calls.h"
 
-static KString process_not_found = KSTRING_NEW("Process not found");
+static BString process_not_found = BSTRING_NEW("Process not found");
 
 Result(SystemCallResult) Exit__handler(
     KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,
@@ -16,6 +16,7 @@ Result(SystemCallResult) Exit__handler(
         {
             __d_printf(SYSCALL, "Exiting process %i %s", process->pid, cstr(process->name));
 
+            Process__dispose_owned_kernel_resources(kernel, process);
             Scheduler__exit(kernel->scheduler, process, exit_code);
             return Success(SystemCallResult, SYSCALL_OK);
         })

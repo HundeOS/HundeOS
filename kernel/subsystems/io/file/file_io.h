@@ -15,13 +15,13 @@ ResultDef(IOStatus);
 ResultDef(DirectoryEntryCount);
 #endif
 
-typedef Result(FilesystemNodes) (* FS_list_nodes)(IOStatePtr self, FilesystemNodePtr parent, KString path);
+typedef Result(FilesystemNodes) (* FS_list_nodes)(IOStatePtr self, FilesystemNodePtr parent, BString path);
 typedef Result(DirectoryEntryCount) (* FS_list_dir)(
-    IOStatePtr self, KString path, DirectoryEntryPtr entries, size_t max_entries
+    IOStatePtr self, BString path, DirectoryEntryPtr entries, size_t max_entries
 );
-typedef Result(IOStatus) (* FS_mkdir)(IOStatePtr self, KString path);
-typedef Result(IOStatus) (* FS_remove)(IOStatePtr self, KString path, Flags flags);
-typedef Result(IOStatus) (* FS_link)(IOStatePtr self, KString source_path, KString target_path);
+typedef Result(IOStatus) (* FS_mkdir)(IOStatePtr self, BString path);
+typedef Result(IOStatus) (* FS_remove)(IOStatePtr self, BString path, Flags flags);
+typedef Result(IOStatus) (* FS_link)(IOStatePtr self, BString source_path, BString target_path);
 
 typedef struct FileIO
 {

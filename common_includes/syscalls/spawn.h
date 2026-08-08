@@ -2,7 +2,10 @@
 #define __SYSCALL_SPAWN_H
 #include <stdint.h>
 
+#include "process.h"
+
 #define SPAWN_MAX_ARGS 3
+#define SPAWN_INHERIT_USER_ID UINT64_MAX
 
 typedef enum SpawnModes
 {
@@ -28,5 +31,16 @@ SpawnErrors;
 typedef int64_t SpawnResult;
 typedef int SpawnMode;
 
+typedef struct SpawnRequest
+{
+    const char * path;
+    SpawnMode mode;
+    UserID requested_user_id;
+    const char * arg0;
+    const char * arg1;
+    const char * arg2;
+} SpawnRequest;
+
+typedef SpawnRequest * SpawnRequestPtr;
 
 #endif

@@ -1,4 +1,5 @@
 #include "../../sys/spawn.h"
+#include "../../sys/process.h"
 #include "../../sys/service.h"
 #include "../../user.h"
 
@@ -17,6 +18,21 @@
 
 #define VIRTIO_MMIO_MAGIC_VALUE 0x74726976U
 #define VIRTIO_DEVICE_ID_BLOCK  2U
+#define HUNDESCHAU_REQUIRED_PROCESSES_MAX 16U
+
+typedef struct HundeschauRequiredProcess
+{
+    uint64_t pid;
+    const char * path;
+    char arg0[32];
+    char arg1[SERVICE_DEVICE_PATH_MAX];
+} HundeschauRequiredProcess;
+
+typedef struct HundeschauRequiredProcesses
+{
+    HundeschauRequiredProcess items[HUNDESCHAU_REQUIRED_PROCESSES_MAX];
+    uint64_t len;
+} HundeschauRequiredProcesses;
 
 static volatile uint32_t * Hundeschau__reg32(void * base, uint64_t offset)
 {
@@ -70,6 +86,20 @@ static uint64_t Hundeschau__u64_to_decimal(uint64_t value, char * target, uint64
     return len;
 }
 
+static void Hundeschau__copy_string(char * target, uint64_t size, const char * source)
+{
+    uint64_t i = 0;
+    if (source != NULL)
+    {
+        while (i + 1 < size && source[i] != '\0')
+        {
+            target[i] = source[i];
+            i++;
+        }
+    }
+    target[i] = '\0';
+}
+
 static void Hundeschau__virtio_path(uint64_t ordinal, char target[SERVICE_DEVICE_PATH_MAX])
 {
     const char * prefix = "/dev/virtio";
@@ -88,7 +118,9 @@ static void Hundeschau__virtio_path(uint64_t ordinal, char target[SERVICE_DEVICE
     target[i] = '\0';
 }
 
-static int Hundeschau__spawn_background(const char * path, const char * arg0, const char * arg1)
+static int Hundeschau__spawn_required_process(
+    HundeschauRequiredProcesses * processes, const char * path, const char * arg0, const char * arg1
+)
 {
     SpawnResult result = spawn(P_NOWAIT, path, arg0, arg1, NULL);
     if (result < 0)
@@ -96,10 +128,35 @@ static int Hundeschau__spawn_background(const char * path, const char * arg0, co
         printf("hundeschau: failed to start %s: %i\n", path, (int) result);
         return 1;
     }
+
+    if (processes->len < HUNDESCHAU_REQUIRED_PROCESSES_MAX)
+    {
+        HundeschauRequiredProcess * process = &processes->items[processes->len++];
+        process->pid = (uint64_t) result;
+        process->path = path;
+        Hundeschau__copy_string(process->arg0, sizeof(process->arg0), arg0);
+        Hundeschau__copy_string(process->arg1, sizeof(process->arg1), arg1);
+    }
+
     return 0;
 }
 
-static int Hundeschau__spawn_virtio_drivers(void)
+static HundeschauRequiredProcess * Hundeschau__find_required_process(
+    HundeschauRequiredProcesses * processes, uint64_t pid
+)
+{
+    for (uint64_t i = 0; i < processes->len; i++)
+    {
+        if (processes->items[i].pid == pid)
+        {
+            return &processes->items[i];
+        }
+    }
+
+    return NULL;
+}
+
+static int Hundeschau__spawn_virtio_drivers(HundeschauRequiredProcesses * processes)
 {
     ServiceMappedMemoryPtr mapping = 0;
     if (!service_ok(service_map_mmio(VIRTIO_MMIO_FIRST_PHYS_BASE, VIRTIO_MMIO_REGION_SIZE, &mapping)))
@@ -123,7 +180,7 @@ static int Hundeschau__spawn_virtio_drivers(void)
             char path_arg[SERVICE_DEVICE_PATH_MAX];
             Hundeschau__u64_to_decimal(slot, slot_arg, sizeof(slot_arg));
             Hundeschau__virtio_path(virtio_ordinal, path_arg);
-            failures += Hundeschau__spawn_background("/ebin/virtio_blk", slot_arg, path_arg);
+            failures += Hundeschau__spawn_required_process(processes, "/sbin/drivers/virtio_blk", slot_arg, path_arg);
             virtio_ordinal++;
         }
     }
@@ -131,27 +188,58 @@ static int Hundeschau__spawn_virtio_drivers(void)
     return failures;
 }
 
-int HUNDESCHAU_ENTRYPOINT(void)
+static int Hundeschau__initialise_required_processes(HundeschauRequiredProcesses * processes)
 {
     int failures = 0;
 
+    failures += Hundeschau__spawn_virtio_drivers(processes);
+    failures += Hundeschau__spawn_required_process(processes, "/sbin/drivers/uart_rx", NULL, NULL);
+    failures += Hundeschau__spawn_required_process(processes, "/sbin/drivers/uart_tx", NULL, NULL);
+    failures += Hundeschau__spawn_required_process(processes, "/sbin/login", NULL, NULL);
+
+    return failures;
+}
+
+int HUNDESCHAU_ENTRYPOINT(void)
+{
+    HundeschauRequiredProcesses required_processes = { 0 };
+
     printf("🐶 HundeOS: hundeschau begins 🐾\n");
 
-    failures += Hundeschau__spawn_virtio_drivers();
-    failures += Hundeschau__spawn_background("/ebin/uart_rx", NULL, NULL);
-    failures += Hundeschau__spawn_background("/ebin/uart_tx", NULL, NULL);
-
-    if (failures != 0)
+    if (Hundeschau__initialise_required_processes(&required_processes) != 0)
     {
         return 1;
     }
 
-    SpawnResult shell_result = spawn(P_WAIT, "/ebin/shell", NULL, NULL, NULL);
-    if (shell_result < 0)
+    while (true)
     {
-        printf("hundeschau: failed to start /ebin/shell: %i\n", (int) shell_result);
-        return 1;
-    }
+        ProcessChildEvent event = { 0 };
+        ProcessChildEventResult result = wait_for_child_event(&event);
+        if (result < 0)
+        {
+            printf("hundeschau: wait child event failed: %i\n", (int) result);
+            return 1;
+        }
 
-    return 0;
+        HundeschauRequiredProcess * process = Hundeschau__find_required_process(&required_processes, event.pid);
+        if (process == NULL)
+        {
+            continue;
+        }
+
+        SpawnResult respawn_result = spawn(
+            P_NOWAIT,
+            process->path,
+            process->arg0[0] == '\0' ? NULL : process->arg0,
+            process->arg1[0] == '\0' ? NULL : process->arg1,
+            NULL
+        );
+        if (respawn_result < 0)
+        {
+            printf("hundeschau: failed to start %s: %i\n", process->path, (int) respawn_result);
+            return 1;
+        }
+
+        process->pid = (uint64_t) respawn_result;
+    }
 }

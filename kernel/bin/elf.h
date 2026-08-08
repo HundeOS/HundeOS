@@ -174,7 +174,7 @@ typedef struct {
 typedef struct Elf {
     const Address start;
     const Address end;
-    KString name;
+    BString name;
 } Elf;
 
 typedef struct ExpandedSegment
@@ -201,7 +201,7 @@ SectionHeaderArray Elf__read_section_headers(Elf self);
 ProgramHeaderArray Elf__read_program_headers(Elf self);
 Elf64Header * Elf__read_header(Elf self);
 
-Elf Elf__new(Address start, Address end, KString name);
+Elf Elf__new(Address start, Address end, BString name);
 
 FixedArrayDefine(ExpandedSegment, 64, ExpandedSegmentArray, &Ptr__equals);
 

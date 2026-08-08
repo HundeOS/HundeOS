@@ -61,6 +61,9 @@ Result(ServiceEvent) ServiceEventDispatcher__take_next(ServiceEventDispatcherPtr
 Result(ServiceCode) ServiceEventDispatcher__complete_active_irq(
     ServiceEventDispatcherPtr self, ProcessPtr process
 );
+Result(ServiceCode) ServiceEventDispatcher__unsubscribe_process(
+    ServiceEventDispatcherPtr self, ProcessPtr process
+);
 
 #define NEW_SERVICE_EVENT_DISPATCHER \
     (ServiceEventDispatcher) { \

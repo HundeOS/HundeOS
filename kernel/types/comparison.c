@@ -1,7 +1,7 @@
 #include "comparison.h"
 #include <stdint.h>
 
-#include "kstring.h"
+#include "bstring.h"
 #include "types.h"
 
 SimpleEqualsBody(int)
@@ -21,13 +21,6 @@ SimpleEqualsBody(Char)
 bool Ptr__equals(void * a, void * b)
 {
     return *(void **)a == *(void **)b;
-}
-
-bool kstring_equals(void * a, void * b)
-{
-    KStringPtr str1 = a;
-    KStringPtr str2 = b;
-    return KString__equals(str1, str2);
 }
 
 bool never__equals(void * a, void * b)

@@ -6,8 +6,10 @@
 #include "service.h"
 
 MapBodyDefine(IRQServiceMap);
+FixedArrayDefine(IRQNumber, 256, ServiceIRQNumbers, SimpleEquals(uint64_t));
+FixedArrayBodyDefine(ServiceIRQNumbers);
 
-static KString service_event_queue_empty = KSTRING_NEW("Service event queue is empty");
+static BString service_event_queue_empty = BSTRING_NEW("Service event queue is empty");
 
 ServiceEventDispatcher ServiceEventDispatcher__new()
 {
@@ -181,6 +183,33 @@ Result(ServiceCode) ServiceEventDispatcher__complete_active_irq(
                 process->service.active_irq_event = None(ServiceEvent);
             })
         End
+    })
+
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+Result(ServiceCode) ServiceEventDispatcher__unsubscribe_process(
+    ServiceEventDispatcherPtr self, ProcessPtr process
+)
+{
+    ServiceIRQNumbers stale_irqs = ServiceIRQNumbers__new();
+
+    CriticalSection(self->lock,
+    {
+        MapIterate(IRQServiceMap, self->irq_services, index, irq, service)
+            if (service.process == process)
+            {
+                ResultMatch(CollectionCode, ServiceIRQNumbers__push(&stale_irqs, irq))
+                    IsError(code, message, _cs_return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL))
+                End
+            }
+        End
+
+        FAIterate(ServiceIRQNumbers, stale_irqs, irq_index, irq)
+            IRQServiceMap__delete(&self->irq_services, irq);
+        End
+
+        process->service.active_irq_event = None(ServiceEvent);
     })
 
     return Success(ServiceCode, SERVICE_OK);

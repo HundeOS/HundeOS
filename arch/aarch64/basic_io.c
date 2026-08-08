@@ -77,7 +77,6 @@ void DebugTrace__puts(const char* str)
     uintptr_t handle = DebugTrace__open_handle();
     if (handle == (uintptr_t) -1)
     {
-        Semihosting__call(SEMIHOST_SYS_WRITE0, (uintptr_t) str);
         DebugTrace__unlock();
         return;
     }

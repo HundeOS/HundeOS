@@ -8,20 +8,20 @@ FilesystemPtr init_root_filesystem_with_embedded_binaries()
     FilesystemPtr filesystem = RootFilesystem__heap_new();
     FilesystemIOStatePtr filesystem_state = FilesystemIOState__heap_new(filesystem);
 
-    FilesystemPtr embedded_binaries = Filesystem__heap_new(kstring("embed"), EmbeddedFilesystemIO__new());
+    FilesystemPtr embedded_binaries = Filesystem__heap_new(bstring("embed"), EmbeddedFilesystemIO__new());
     EmbeddedFilesystemIOStatePtr embedded_binaries_state = EmbeddedFilesystemIOState__heap_new(embedded_binaries);
 
-    Filesystem__mount(filesystem, kstring("ebin"), embedded_binaries);
+    Filesystem__mount(filesystem, bstring("sbin"), embedded_binaries);
 
-    FilesystemPtr devfs = Filesystem__heap_new(kstring("dev"), DevFilesystemIO__new());
+    FilesystemPtr devfs = Filesystem__heap_new(bstring("dev"), DevFilesystemIO__new());
     DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(devfs);
 
-    Filesystem__mount(filesystem, kstring("dev"), devfs);
+    Filesystem__mount(filesystem, bstring("dev"), devfs);
 
-    FilesystemPtr memfs = Filesystem__heap_new(kstring("tmp/memfs"), MemFilesystemIO__new());
+    FilesystemPtr memfs = Filesystem__heap_new(bstring("tmp/memfs"), MemFilesystemIO__new());
     MemFilesystemIOStatePtr memfs_state = MemFilesystemIOState__heap_new(memfs);
 
-    Filesystem__mount(filesystem, kstring("tmp/memfs"), memfs);
+    Filesystem__mount(filesystem, bstring("tmp/memfs"), memfs);
 
     return filesystem;
 }

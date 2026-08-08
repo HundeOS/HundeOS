@@ -8,7 +8,7 @@
 #include "../../block/block_device.h"
 #include "../filesystem.h"
 #include "../../../../types/fixed_array.h"
-#include "../../../../types/kstring.h"
+#include "../../../../types/bstring.h"
 #include "../../../../types/map.h"
 #include "../../../../types/result.h"
 
@@ -78,7 +78,7 @@ typedef Fat32Volume * Fat32VolumePtr;
 
 typedef struct Fat32DirectoryEntry
 {
-    KString name;
+    BString name;
     uint8_t attributes;
     uint32_t first_cluster;
     uint32_t size;
@@ -99,7 +99,7 @@ ResultDef(Fat32DirectoryEntries);
 
 typedef struct Fat32FileHandle
 {
-    KString path;
+    BString path;
     FilePointer offset;
     IOBuffer buffer;
     Flags flags;
@@ -130,11 +130,11 @@ Result(Fat32Code) Fat32Volume__format(Fat32VolumePtr self);
 Result(Fat32Code) Fat32Volume__mount(Fat32VolumePtr self);
 Result(Fat32DirectoryEntries) Fat32Volume__list_root(Fat32VolumePtr self);
 Result(Fat32Code) Fat32Volume__create_root_file(
-    Fat32VolumePtr self, KString name, DataPtr data, uint32_t size
+    Fat32VolumePtr self, BString name, DataPtr data, uint32_t size
 );
-Result(Fat32Code) Fat32Volume__create_root_directory(Fat32VolumePtr self, KString name);
+Result(Fat32Code) Fat32Volume__create_root_directory(Fat32VolumePtr self, BString name);
 Result(Fat32Code) Fat32Volume__read_root_file(
-    Fat32VolumePtr self, KString name, DataPtr target, uint32_t target_size, Fat32ClusterPtr bytes_read
+    Fat32VolumePtr self, BString name, DataPtr target, uint32_t target_size, Fat32ClusterPtr bytes_read
 );
 
 FileIO Fat32FilesystemIO__new();

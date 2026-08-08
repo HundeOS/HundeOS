@@ -6,7 +6,7 @@
 #include <stddef.h>
 
 #include "../debug.h"
-#include "types/kstring_additional_types.h"
+#include "../types/bstring_additional_types.h"
 
 extern const char __embedded_binaries_start[];
 extern const char __embedded_binaries_end[];
@@ -16,7 +16,7 @@ static EmbeddedFs EmbeddedElf__filesystem()
     return EmbeddedFs__new((Address) __embedded_binaries_start, (Address) __embedded_binaries_end);
 }
 
-Optional(Elf) EmbeddedElf__load(KString name)
+Optional(Elf) EmbeddedElf__load(BString name)
 {
     EmbeddedFs filesystem = EmbeddedElf__filesystem();
     Match(EmbeddedFsFile, EmbeddedFs__find(&filesystem, name))
@@ -30,9 +30,8 @@ Optional(Elf) EmbeddedElf__load(KString name)
 }
 
 
-KStringArray EmbeddedElf__list()
+BStringArray EmbeddedElf__list()
 {
     EmbeddedFs filesystem = EmbeddedElf__filesystem();
     return EmbeddedFs__list(&filesystem);
 }
-

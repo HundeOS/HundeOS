@@ -9,7 +9,7 @@
 #include "../../types/comparison.h"
 #include "../../types/map.h"
 #include "../../types/result.h"
-#include "../../types/kstring.h"
+#include "../../types/bstring.h"
 #include "../../all_defs.h"
 #include "context/originating_call_context.h"
 #include "subsystems/message/message_broker.h"
@@ -77,7 +77,7 @@ ResultDef(IOContext);
 OptionalDef(IOContextPtr);
 ResultDef(IOContextPtr);
 
-typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr self, KString path, Flags flags);
+typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr self, BString path, Flags flags);
 typedef Result(IOInternalHandle) (* IO_close)(IOStatePtr self, IOInternalHandle handle);
 typedef Result(IOBufferPtr) (* IO_read)(
     IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target
@@ -112,7 +112,7 @@ ResultDef(IO);
 typedef struct DeviceRegistration
 {
     IOPtr device;
-    KString path;
+    BString path;
     IOStatePtr state;
 } DeviceRegistration;
 

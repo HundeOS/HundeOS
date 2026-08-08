@@ -59,6 +59,7 @@ typedef enum ServiceCode
     SERVICE_DEVICE_REGISTRATION_FAILED = -12,
     SERVICE_BLOCK_REQUEST_NOT_FOUND = -13,
     SERVICE_BLOCK_REQUEST_FAILED = -14,
+    SERVICE_PERMISSION_DENIED = -15,
 } ServiceCode;
 
 typedef enum ServiceBlockOperation

@@ -2,7 +2,7 @@
 
 FixedArrayBodyDefine(BlockCacheEntries);
 
-static KString invalid_argument = KSTRING_NEW("Invalid block cache argument");
+static BString invalid_argument = BSTRING_NEW("Invalid block cache argument");
 
 bool BlockCacheEntry__equals(BlockCacheEntryPtr self, BlockCacheEntryPtr other)
 {

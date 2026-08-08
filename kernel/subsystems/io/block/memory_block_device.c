@@ -2,8 +2,8 @@
 
 LinkedListBodyDefine(MemoryDeviceBlocks);
 
-static KString invalid_argument = KSTRING_NEW("Invalid memory block device argument");
-static KString allocation_failed = KSTRING_NEW("Memory block device allocation failed");
+static BString invalid_argument = BSTRING_NEW("Invalid memory block device argument");
+static BString allocation_failed = BSTRING_NEW("Memory block device allocation failed");
 
 bool MemoryDeviceBlock__equals(MemoryDeviceBlockPtr self, MemoryDeviceBlockPtr other)
 {

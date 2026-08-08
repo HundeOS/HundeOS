@@ -5,41 +5,185 @@
 #include "../../../../utils/math.h"
 #include "../../../../kalloc.h"
 
-static KString invalid_path_format = KSTRING_NEW("Invalid path %s");
-static KString invalid_file_handle = KSTRING_NEW("Invalid file handle");
-static KString not_implemented = KSTRING_NEW("Operation not implemented");
-static KString end_of_file = KSTRING_NEW("End pf file");
+static BString invalid_path_format = BSTRING_NEW("Invalid path %s");
+static BString invalid_file_handle = BSTRING_NEW("Invalid file handle");
+static BString not_implemented = BSTRING_NEW("Operation not implemented");
+static BString end_of_file = BSTRING_NEW("End pf file");
+static const BString drivers_name = BSTRING_NEW("drivers");
+static const BString drivers_prefix = BSTRING_NEW("drivers/");
 
-Result(IOInternalHandle) EmbeddedFileIO__open(IOStatePtr self, KString path, Flags flags)
+static BString EmbeddedFileIO__relative_path(BString path)
 {
-    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
-    KStringArray path_segments = KString__split(&path, '/');
+    StringPos start = 0;
+    StringPos end = BString__length(&path);
 
-    Optional(KString) top_level_opt = KStringArray__pop_front(&path_segments);
-
-    Match(KString, top_level_opt)
-        IsNone(return Error(IOInternalHandle, KString__sprintf(&invalid_path_format, cstr(path)), IO_INVALID_PATH));
-        IsSome(file,
+    while (start < end)
+    {
+        char ch = Unwrap(char, BString__char_at(&path, start), '\0');
+        if (ch != '/')
         {
-            KStringArray file_list = EmbeddedElf__list();
-            __d_printf(FILESYSTEM, "File = %s\n", cstr(file))
-            Optional(ArrayIndex) index_opt = KStringArray__find_item(&file_list, file);
-            Match(ArrayIndex, index_opt)
-                IsNone(return Error(IOInternalHandle, KString__sprintf(&invalid_path_format, cstr(path)), IO_INVALID_PATH));
-                IsSome(index,
-                {
-                    CriticalSection(fs_state->state.lock,
-                    {
-                        IOInternalHandle handle = (IOInternalHandle) fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
-                        FileHandleTargetMap__set(&fs_state->state.handles, handle, FileHandleTarget__heap_new(path));
-                        _cs_return Success(IOInternalHandle, handle);
-                    })
-                });
-            End
-        });
+            break;
+        }
+        start++;
+    }
+
+    while (end > start)
+    {
+        char ch = Unwrap(char, BString__char_at(&path, end - 1), '\0');
+        if (ch != '/')
+        {
+            break;
+        }
+        end--;
+    }
+
+    return BString__slice(&path, start, end);
+}
+
+static bool EmbeddedFileIO__contains_node(FilesystemNodes nodes, BString name)
+{
+    FAIterate(FilesystemNodes, nodes, index, node)
+        if (BString__equals(&node->name, &name))
+        {
+            return true;
+        }
     End
 
-    return Error(IOInternalHandle, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
+    return false;
+}
+
+static void EmbeddedFileIO__metadata_for_child(
+    BString parent_path,
+    BString child_name,
+    bool is_directory,
+    UserID * user_id,
+    GroupID * group_id,
+    FilesystemPermissions * mode
+)
+{
+    bool is_driver_path = false;
+
+    if (BString__length(&parent_path) == 0)
+    {
+        is_driver_path = is_directory && BString__equals(&child_name, &drivers_name);
+    }
+    else if (BString__equals(&parent_path, &drivers_name) || BString__starts_with(&parent_path, &drivers_prefix))
+    {
+        is_driver_path = true;
+    }
+
+    if (is_driver_path)
+    {
+        *user_id = PROCESS_USER_HUND;
+        *group_id = PROCESS_GROUP_HUND;
+        *mode = is_directory
+            ? (IO_MODE_TYPE_DIR | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC)
+            : (IO_MODE_TYPE_FILE | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC);
+        return;
+    }
+
+    *user_id = PROCESS_USER_ROOT;
+    *group_id = PROCESS_GROUP_ROOT;
+    *mode = is_directory
+        ? (IO_MODE_TYPE_DIR
+            | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC
+            | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC
+            | IO_MODE_OTHER_READ | IO_MODE_OTHER_EXEC)
+        : (IO_MODE_TYPE_FILE
+            | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC
+            | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC
+            | IO_MODE_OTHER_READ | IO_MODE_OTHER_EXEC);
+}
+
+static Optional(FilesystemNodePtr) EmbeddedFileIO__node_for_entry(
+    FilesystemPtr filesystem,
+    BString parent_path,
+    BString entry_name
+)
+{
+    BString relative_parent = EmbeddedFileIO__relative_path(parent_path);
+    BString relative_entry = EmbeddedFileIO__relative_path(entry_name);
+
+    if (BString__length(&relative_entry) == 0)
+    {
+        return None(FilesystemNodePtr);
+    }
+
+    BString remaining = relative_entry;
+    if (BString__length(&relative_parent) > 0)
+    {
+        if (!BString__starts_with(&relative_entry, &relative_parent))
+        {
+            return None(FilesystemNodePtr);
+        }
+
+        if (BString__length(&relative_entry) == BString__length(&relative_parent))
+        {
+            return None(FilesystemNodePtr);
+        }
+
+        char separator = Unwrap(char, BString__char_at(&relative_entry, BString__length(&relative_parent)), '\0');
+        if (separator != '/')
+        {
+            return None(FilesystemNodePtr);
+        }
+
+        remaining = BString__slice(
+            &relative_entry,
+            BString__length(&relative_parent) + 1,
+            BString__length(&relative_entry)
+        );
+    }
+
+    BStringArray segments = BString__split(&remaining, '/');
+    if (BStringArray__len(&segments) == 0)
+    {
+        return None(FilesystemNodePtr);
+    }
+
+    BString child_name = Unwrap(BString, BStringArray__at(&segments, 0), EMPTY_BSTRING);
+    bool is_directory = BStringArray__len(&segments) > 1;
+    UserID user_id = PROCESS_USER_ROOT;
+    GroupID group_id = PROCESS_GROUP_ROOT;
+    FilesystemPermissions mode = 0;
+    EmbeddedFileIO__metadata_for_child(relative_parent, child_name, is_directory, &user_id, &group_id, &mode);
+
+    return Some(
+        FilesystemNodePtr,
+        FilesystemNode__heap_new_with_metadata(
+            filesystem,
+            child_name,
+            IO_DIRENT_ATTR_NONE,
+            user_id,
+            group_id,
+            mode
+        )
+    );
+}
+
+Result(IOInternalHandle) EmbeddedFileIO__open(IOStatePtr self, BString path, Flags flags)
+{
+    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
+    BString relative_path = EmbeddedFileIO__relative_path(path);
+
+    if (BString__length(&relative_path) == 0)
+    {
+        return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, cstr(path)), IO_INVALID_PATH);
+    }
+
+    Match(Elf, EmbeddedElf__load(relative_path))
+        IsSome(elf,
+        {
+            CriticalSection(fs_state->state.lock,
+            {
+                IOInternalHandle handle = (IOInternalHandle) fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
+                FileHandleTargetMap__set(&fs_state->state.handles, handle, FileHandleTarget__heap_new(relative_path));
+                _cs_return Success(IOInternalHandle, handle);
+            })
+        })
+    End
+
+    return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, cstr(path)), IO_INVALID_PATH);
 }
 
 Result(IOInternalHandle) EmbeddedFileIO__close(IOStatePtr self, IOInternalHandle handle)
@@ -89,7 +233,7 @@ Result(IOBufferPtr) EmbeddedFileIO__read(
                     IsNone(
                     {
                         return Error(IOBufferPtr,
-                                     KString__sprintf(&invalid_path_format, cstr(target_ptr->path)),
+                                     BString__sprintf(&invalid_path_format, cstr(target_ptr->path)),
                                      IO_INVALID_PATH);
                     })
                 End
@@ -117,29 +261,37 @@ Result(ParkStatus) EmbeddedFileIO__unpark(IOStatePtr self)
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-Result(FilesystemNodes) EmbeddedFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, KString path)
+Result(FilesystemNodes) EmbeddedFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, BString path)
 {
     EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
-    FAIterate(KStringArray, EmbeddedElf__list(), index, entry)
-        FilesystemNodePtr node = FilesystemNode__heap_new(fs_state->state.filesystem, entry, 0);
-        FilesystemNodes__push(&result, node);
+    BString relative_path = EmbeddedFileIO__relative_path(path);
+    FAIterate(BStringArray, EmbeddedElf__list(), index, entry)
+        Match(FilesystemNodePtr, EmbeddedFileIO__node_for_entry(fs_state->state.filesystem, relative_path, entry))
+            IsSome(node,
+            {
+                if (!EmbeddedFileIO__contains_node(result, node->name))
+                {
+                    FilesystemNodes__push(&result, node);
+                }
+            })
+        End
     End
 
     return Success(FilesystemNodes, result);
 }
 
-Result(IOStatus) EmbeddedFileIO__mkdir(IOStatePtr self, KString path)
+Result(IOStatus) EmbeddedFileIO__mkdir(IOStatePtr self, BString path)
 {
     return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
 }
 
-Result(IOStatus) EmbeddedFileIO__remove(IOStatePtr self, KString path, Flags flags)
+Result(IOStatus) EmbeddedFileIO__remove(IOStatePtr self, BString path, Flags flags)
 {
     return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
 }
 
-Result(IOStatus) EmbeddedFileIO__link(IOStatePtr self, KString source_path, KString target_path)
+Result(IOStatus) EmbeddedFileIO__link(IOStatePtr self, BString source_path, BString target_path)
 {
     return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
 }

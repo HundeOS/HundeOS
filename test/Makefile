@@ -6,9 +6,9 @@ AS = gcc
 CC = gcc
 LD = gcc
 
-UNITY = ../../../tools/Unity/libunity.a
+UNITY = ../vendor/Unity
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -ffreestanding -mno-outline-atomics -I../ -I../../../tools/Unity/ -I$(PLATFORM_INCLUDE)
+CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -ffreestanding -mno-outline-atomics -I../ -I$(UNITY)/src -I$(PLATFORM_INCLUDE)
 
 # Assembler flags
 ASFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -nostdlib -latomic

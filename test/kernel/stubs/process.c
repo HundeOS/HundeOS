@@ -15,7 +15,7 @@ Result(Anything) deferred_syscall_result()
 
 void clear_deferred_syscall_result()
 {
-    deferred_syscall_res = Error(Anything, kstring("no syscall result"), -1);
+    deferred_syscall_res = Error(Anything, bstring("no syscall result"), -1);
 }
 
 void Process__context_switch(ProcessPtr self)

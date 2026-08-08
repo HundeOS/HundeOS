@@ -16,7 +16,9 @@ AS = gcc
 CC = gcc
 LD = gcc
 
-UNITY = {unity_path}
+UNITY = {unity_dir}
+UNITY_SOURCE = $(UNITY)/src/unity.c
+UNITY_OBJECT = {unity_object}
 # Compiler flags
 CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -mno-outline-atomics -I{kernel_dir} -I{common_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
 
@@ -64,6 +66,10 @@ setup:
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
+$(UNITY_OBJECT): $(UNITY_SOURCE)
+	mkdir -p `dirname $@`
+	$(CC) $(CFLAGS) -c $< -o $@
+
 {runner_tasks}
 
 # Clean build artifacts
@@ -76,7 +82,7 @@ compile: $(RUNNER_BINS)
 .PHONY: all clean qemu
 """
 
-UNITY_PATH = os.environ.get("UNITY_PATH", "../../tools/Unity")
+UNITY_PATH = os.environ.get("UNITY_PATH", "vendor/Unity")
 
 def join(files):
     return " ".join(files)
@@ -114,51 +120,70 @@ def main():
 
 
 def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any, unity_path: str, test_runners: list[str]):
-    levels = test_dir.split(os.sep)
+    test_dir = os.path.abspath(test_dir)
+    project_root = os.path.abspath(os.path.join(BASE_DIR, ".."))
+    test_dir_rel = os.path.relpath(test_dir, project_root)
+
+    levels = test_dir_rel.split(os.sep)
     steps_back = [".."] * len(levels)
     relative_base = os.path.join(*steps_back)
 
     # making it relative to the test directory
-    project_dir = os.path.join(relative_base, "..")
+    project_dir = relative_base
     kernel_dir = os.path.join(project_dir, "kernel")
     common_dir = os.path.join(project_dir, "common")
     common_includes = os.path.join(project_dir, "common_includes")
-    build_dir = os.path.join(relative_base, "build", test_dir)
+    unity_dir = os.path.join(project_dir, "vendor", "Unity")
+    build_dir = os.path.join(relative_base, "build", test_dir_rel)
     kernel_obj_build_dir = os.path.join(relative_base, "build")
+    unity_object = os.path.join(kernel_obj_build_dir, "vendor", "Unity", "src", "unity.o")
 
     with open(manifest, "r") as manifest_file:
         manifest = yaml.load(manifest_file, Loader=yaml.FullLoader)
         source_files = manifest["manifest"]["source_files"]
-        test_dir_relative_script = os.path.join(test_dir, project_dir)
-        stubs_dir = os.path.join("kernel", "stubs")
-        fixtures_dir = os.path.join("kernel", "fixtures")
+        stubs_dir_fs = os.path.join(BASE_DIR, "kernel", "stubs")
+        fixtures_dir_fs = os.path.join(BASE_DIR, "kernel", "fixtures")
+        stubs_dir = os.path.join("test", "kernel", "stubs")
+        fixtures_dir = os.path.join("test", "kernel", "fixtures")
         stubs_dir_relative = os.path.join(relative_base, stubs_dir)
         fixtures_dir_relative = os.path.join(relative_base, fixtures_dir)
 
-        source_expanded = [f"{project_dir}/{expand[len(test_dir_relative_script) + 1:]}"
-                           for file in source_files
-                           for expand in glob.glob(os.path.join(test_dir_relative_script, file))]
+        source_expanded = [
+            os.path.relpath(expand, test_dir)
+            for file in source_files
+            for expand in glob.glob(os.path.join(project_root, file))
+        ]
         source_asm_files = [file
                             for file
                             in source_expanded
                             if file.endswith(".s")]
         include_default_stubs = manifest["manifest"].get("include_default_stubs", True)
         include_default_fixtures = manifest["manifest"].get("include_default_fixtures", True)
-        stubs_c_files = [f"{relative_base}/{expand}"
-                         for expand in glob.glob(os.path.join(stubs_dir, "*.c"))] if include_default_stubs else []
-        stubs_asm_files = [f"{relative_base}/{expand}"
-                           for expand in glob.glob(os.path.join(stubs_dir, "*.s"))] if include_default_stubs else []
-        fixtures_c_files = [f"{relative_base}/{expand}"
-                            for expand in glob.glob(os.path.join(fixtures_dir, "*.c"))] if include_default_fixtures else []
-        fixtures_asm_files = [f"{relative_base}/{expand}"
-                              for expand in glob.glob(os.path.join(fixtures_dir, "*.s"))] if include_default_fixtures else []
+        stubs_c_files = [
+            os.path.relpath(expand, test_dir)
+            for expand in glob.glob(os.path.join(stubs_dir_fs, "*.c"))
+        ] if include_default_stubs else []
+        stubs_asm_files = [
+            os.path.relpath(expand, test_dir)
+            for expand in glob.glob(os.path.join(stubs_dir_fs, "*.s"))
+        ] if include_default_stubs else []
+        fixtures_c_files = [
+            os.path.relpath(expand, test_dir)
+            for expand in glob.glob(os.path.join(fixtures_dir_fs, "*.c"))
+        ] if include_default_fixtures else []
+        fixtures_asm_files = [
+            os.path.relpath(expand, test_dir)
+            for expand in glob.glob(os.path.join(fixtures_dir_fs, "*.s"))
+        ] if include_default_fixtures else []
 
         source_c_files = [file
                           for file
                           in source_expanded
                           if file.endswith(".c")]
-        common_c_files = [f"{project_dir}/{expand[len(test_dir_relative_script) + 1:]}"
-                          for expand in glob.glob(os.path.join(test_dir_relative_script, "common/**/*.c"), recursive=True)]
+        common_c_files = [
+            os.path.relpath(expand, test_dir)
+            for expand in glob.glob(os.path.join(project_root, "common/**/*.c"), recursive=True)
+        ]
 
         asm_objects = [os.path.join(kernel_obj_build_dir, file.replace(".s", ".o").replace("../", ""))
                        for file
@@ -219,7 +244,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                                            kernel_asm_objects=join([*asm_objects,
                                                                     *stubs_dir_asm_objects,
                                                                     *fixtures_dir_asm_objects]),
-                                           unity_path=unity_path,
+                                           unity_dir=unity_dir,
                                            test=os.path.basename(test_dir),
                                            kernel_dir=kernel_dir,
                                            common_dir=common_dir,
@@ -229,6 +254,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                                            stubs_dir=stubs_dir_relative,
                                            fixtures_dir=fixtures_dir_relative,
                                            common_includes=common_includes,
+                                           unity_object=unity_object,
                                            runner_bins=join(runner_bins),
                                            runner_tasks="\n".join(runner_tasks)))
 
@@ -242,8 +268,8 @@ def _task_template(build_dir, runner):
     test_name = os.path.basename(runner).replace("_Runner.c", "")
     return f"""
 
-{runner_bin}: $(ASM_OBJECTS) $(C_OBJECTS) $(KERNEL_ASM_OBJECTS) $(KERNEL_OBJECTS) {runner_obj} {test_obj}
-	$(LD) $(LDFLAGS) $(UNITY)/libunity.a $^ -o $@
+{runner_bin}: $(UNITY_OBJECT) $(ASM_OBJECTS) $(C_OBJECTS) $(KERNEL_ASM_OBJECTS) $(KERNEL_OBJECTS) {runner_obj} {test_obj}
+	$(LD) $(LDFLAGS) $^ -o $@
 
 run-{test_name}: {runner_bin} 
 	{runner_bin}

@@ -104,6 +104,8 @@ inline const char * level_to_string(Level level)
     LOG_LEVEL_MASK(SYSLOG) | \
     LOG_LEVEL_MASK(FAT32) | \
     LOG_LEVEL_MASK(EXEC) | \
+    LOG_LEVEL_MASK(IOSUB) | \
+    LOG_LEVEL_MASK(FILESYSTEM) | \
     LOG_LEVEL_MASK(IODEV) | \
     LOG_LEVEL_MASK(TIMER_IRQ) | \
     LOG_LEVEL_MASK(FAULT) | \

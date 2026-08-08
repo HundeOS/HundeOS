@@ -74,16 +74,16 @@ void test_fat16_creates_lists_and_reads_root_file(void)
     format_volume();
     mount_volume();
 
-    ResultMatch(Fat16Code, Fat16Volume__create_root_file(&volume, kstring("hello.txt"), content, sizeof(content)))
+    ResultMatch(Fat16Code, Fat16Volume__create_root_file(&volume, bstring("hello.txt"), content, sizeof(content)))
         IsSuccess(code, TEST_ASSERT_EQUAL(FAT16_OK, code))
         IsError(code, message, TEST_FAIL())
     End
 
     ResultMatch(Fat16DirectoryEntries, Fat16Volume__list_root(&volume))
         IsSuccess(entries, {
-            KString expected = KSTRING_NEW("HELLO.TXT");
+            BString expected = BSTRING_NEW("HELLO.TXT");
             TEST_ASSERT_EQUAL(1, entries.len);
-            TEST_ASSERT_TRUE(KString__equals(&entries.data[0].name, &expected));
+            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
             TEST_ASSERT_EQUAL(FAT16_ATTR_ARCHIVE, entries.data[0].attributes);
             TEST_ASSERT_EQUAL(sizeof(content), entries.data[0].size);
             TEST_ASSERT_TRUE(entries.data[0].first_cluster >= 2);
@@ -93,7 +93,7 @@ void test_fat16_creates_lists_and_reads_root_file(void)
 
     ResultMatch(Fat16Code, Fat16Volume__read_root_file(
         &volume,
-        kstring("HELLO.TXT"),
+        bstring("HELLO.TXT"),
         target,
         sizeof(target),
         &bytes_read
@@ -111,16 +111,16 @@ void test_fat16_creates_and_lists_root_directory(void)
     format_volume();
     mount_volume();
 
-    ResultMatch(Fat16Code, Fat16Volume__create_root_directory(&volume, kstring("docs")))
+    ResultMatch(Fat16Code, Fat16Volume__create_root_directory(&volume, bstring("docs")))
         IsSuccess(code, TEST_ASSERT_EQUAL(FAT16_OK, code))
         IsError(code, message, TEST_FAIL())
     End
 
     ResultMatch(Fat16DirectoryEntries, Fat16Volume__list_root(&volume))
         IsSuccess(entries, {
-            KString expected = KSTRING_NEW("DOCS");
+            BString expected = BSTRING_NEW("DOCS");
             TEST_ASSERT_EQUAL(1, entries.len);
-            TEST_ASSERT_TRUE(KString__equals(&entries.data[0].name, &expected));
+            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
             TEST_ASSERT_EQUAL(FAT16_ATTR_DIRECTORY, entries.data[0].attributes);
             TEST_ASSERT_EQUAL(0, entries.data[0].size);
             TEST_ASSERT_TRUE(entries.data[0].first_cluster >= 2);
@@ -136,11 +136,11 @@ void test_fat16_rejects_duplicate_root_file(void)
     format_volume();
     mount_volume();
 
-    ResultMatch(Fat16Code, Fat16Volume__create_root_file(&volume, kstring("a.bin"), content, sizeof(content)))
+    ResultMatch(Fat16Code, Fat16Volume__create_root_file(&volume, bstring("a.bin"), content, sizeof(content)))
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(Fat16Code, Fat16Volume__create_root_file(&volume, kstring("A.BIN"), content, sizeof(content)))
+    ResultMatch(Fat16Code, Fat16Volume__create_root_file(&volume, bstring("A.BIN"), content, sizeof(content)))
         IsSuccess(code, TEST_FAIL())
         IsError(code, message, TEST_ASSERT_EQUAL(FAT16_ALREADY_EXISTS, code))
     End
@@ -155,7 +155,7 @@ void test_fat16_rejects_names_outside_8_3_format(void)
 
     ResultMatch(Fat16Code, Fat16Volume__create_root_file(
         &volume,
-        kstring("too-long-name.txt"),
+        bstring("too-long-name.txt"),
         content,
         sizeof(content)
     ))
@@ -165,7 +165,7 @@ void test_fat16_rejects_names_outside_8_3_format(void)
 
     ResultMatch(Fat16Code, Fat16Volume__create_root_file(
         &volume,
-        kstring("name!.txt"),
+        bstring("name!.txt"),
         content,
         sizeof(content)
     ))
@@ -183,7 +183,7 @@ void test_fat16_rejects_file_larger_than_one_cluster_for_now(void)
 
     ResultMatch(Fat16Code, Fat16Volume__create_root_file(
         &volume,
-        kstring("large.bin"),
+        bstring("large.bin"),
         content,
         sizeof(content)
     ))

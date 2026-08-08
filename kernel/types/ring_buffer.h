@@ -3,7 +3,7 @@
 
 #include "types.h"
 #include "result.h"
-#include "kstring.h"
+#include "bstring.h"
 #include "../address.h"
 #include "../debug.h"
 
@@ -15,9 +15,9 @@ typedef size_t ItemCount;
 ResultDef(Pos);
 ResultDef(ItemCount);
 
-static KString OVERFLOW_ERROR = KSTRING_NEW("Ring buffer overflow");
-static KString OVERFLOW_AVOIDED_ERROR = KSTRING_NEW("Ring buffer overflow would occur");
-static KString UNDERFLOW_ERROR = KSTRING_NEW("Ring buffer underflow");
+static BString OVERFLOW_ERROR = BSTRING_NEW("Ring buffer overflow");
+static BString OVERFLOW_AVOIDED_ERROR = BSTRING_NEW("Ring buffer overflow would occur");
+static BString UNDERFLOW_ERROR = BSTRING_NEW("Ring buffer underflow");
 
 typedef enum RingBufferError {
     RING_BUFFER_OVERFLOW = -1,

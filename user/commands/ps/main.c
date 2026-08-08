@@ -17,15 +17,16 @@ int PS_ENTRYPOINT(void)
         return 1;
     }
 
-    printf("PID %s WAIT CLASS NAME\n", "STATE");
+    printf("PID %s WAIT CLASS USER NAME\n", "STATE");
     for (ProcessListResult i = 0; i < count; i++)
     {
         printf(
-            "%i %s %s %s %s\n",
+            "%i %s %s %s %s %s\n",
             (int) processes[i].pid,
             processes[i].state,
             processes[i].wait_reason,
             processes[i].class_name,
+            processes[i].user_name,
             processes[i].name
         );
     }

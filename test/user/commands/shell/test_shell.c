@@ -182,11 +182,11 @@ void test_interpreter_parse_supports_empty_quoted_argument(void)
 void test_interpreter_parse_preserves_root_path_command_name(void)
 {
     Interpreter interpreter = Interpreter__new();
-    BString input = bstring("/ebin/cat /mnt/fs1/test.txt");
+    BString input = bstring("/sbin/cat /mnt/fs1/test.txt");
 
     Command command = Interpreter__parse(&interpreter, &input);
 
-    TEST_ASSERT_EQUAL_STRING("/ebin/cat", BString__cstr(&command.name));
+    TEST_ASSERT_EQUAL_STRING("/sbin/cat", BString__cstr(&command.name));
     TEST_ASSERT_EQUAL_UINT64(1, CommandArguments__len(&command.args));
     assert_command_argument(&command, 0, "/mnt/fs1/test.txt");
 }
@@ -223,7 +223,7 @@ void test_interpreter_execute_spawns_command_with_args(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_WAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_STRING("/ebin/cat", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_STRING("/sbin/cat", BString__cstr(&last_spawn_call.path));
     TEST_ASSERT_EQUAL_STRING("This is a long filename.txt", BString__cstr(&last_spawn_call.arg0));
     TEST_ASSERT_EQUAL_STRING("", BString__cstr(&last_spawn_call.arg1));
     TEST_ASSERT_EQUAL_STRING("", BString__cstr(&last_spawn_call.arg2));
@@ -240,7 +240,7 @@ void test_interpreter_execute_spawns_background_command_with_same_args(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_STRING("/ebin/cat", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_STRING("/sbin/cat", BString__cstr(&last_spawn_call.path));
     TEST_ASSERT_EQUAL_STRING("test.txt", BString__cstr(&last_spawn_call.arg0));
     TEST_ASSERT_EQUAL_STRING("", BString__cstr(&last_spawn_call.arg1));
 }
@@ -326,7 +326,7 @@ void test_interpreter_interpret_groups_double_quoted_argument(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_WAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_STRING("/ebin/cat", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_STRING("/sbin/cat", BString__cstr(&last_spawn_call.path));
     TEST_ASSERT_EQUAL_STRING("This is a long filename.txt", BString__cstr(&last_spawn_call.arg0));
     TEST_ASSERT_EQUAL_STRING("", BString__cstr(&last_spawn_call.arg1));
     TEST_ASSERT_EQUAL_STRING("", BString__cstr(&last_spawn_call.arg2));
@@ -340,7 +340,7 @@ void test_interpreter_interpret_mixes_quoted_and_unquoted_arguments(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__interpret(&interpreter, &input));
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
-    TEST_ASSERT_EQUAL_STRING("/ebin/write", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_STRING("/sbin/write", BString__cstr(&last_spawn_call.path));
     TEST_ASSERT_EQUAL_STRING("/mnt/fs1/out.txt", BString__cstr(&last_spawn_call.arg0));
     TEST_ASSERT_EQUAL_STRING("hello world", BString__cstr(&last_spawn_call.arg1));
     TEST_ASSERT_EQUAL_STRING("", BString__cstr(&last_spawn_call.arg2));
@@ -354,7 +354,7 @@ void test_interpreter_interpret_supports_empty_quoted_argument(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__interpret(&interpreter, &input));
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
-    TEST_ASSERT_EQUAL_STRING("/ebin/write", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_STRING("/sbin/write", BString__cstr(&last_spawn_call.path));
     TEST_ASSERT_EQUAL_STRING("", BString__cstr(&last_spawn_call.arg0));
     TEST_ASSERT_EQUAL_STRING("tail", BString__cstr(&last_spawn_call.arg1));
 }

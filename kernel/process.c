@@ -4,9 +4,12 @@
 #include "arch/page_table.h"
 #include "arch/process.h"
 #include "arch/process_context.h"
-#include "types/kstring.h"
+#include "types/bstring.h"
 #include "types/result.h"
 #include "types/optional.h"
+#include "kernel_core.h"
+#include "irq/irq_dispatcher.h"
+#include "subsystems/io/block/block_device.h"
 #include "../common_includes/syscalls/spawn.h"
 
 #include "kalloc.h"
@@ -15,6 +18,7 @@
 
 FixedArrayBodyDefine(ProcessTable);
 FixedArrayBodyDefine(ProcessArguments);
+FixedArrayBodyDefine(ProcessChildEvents);
 LinkedListBodyDefine(UserAllocations);
 LinkedListBodyDefine(ProcessFileDescriptors);
 LinkedListBodyDefine(ParkedOperations);
@@ -22,14 +26,25 @@ LinkedListBodyDefine(ParkedOperations);
 static ProcessID pid_counter = 0;
 static mutex_t pid_lock = MUTEX_INIT;
 
-static KString no_entry_point_message = KSTRING_NEW("No entry point found in ELF");
-static KString user_allocation_not_found = KSTRING_NEW("User allocation not found");
-static KString static_user_allocation = KSTRING_NEW("Cannot free static user allocation");
-static KString user_allocation_full = KSTRING_NEW("Too many user allocations");
-static KString invalid_heap_break = KSTRING_NEW("Invalid heap break");
-static KString file_descriptor_full = KSTRING_NEW("Too many file descriptors");
-static KString file_descriptor_not_found = KSTRING_NEW("File descriptor not found");
-static KString argument_too_long = KSTRING_NEW("Argument too long");
+static BString no_entry_point_message = BSTRING_NEW("No entry point found in ELF");
+static BString user_allocation_not_found = BSTRING_NEW("User allocation not found");
+static BString static_user_allocation = BSTRING_NEW("Cannot free static user allocation");
+static BString user_allocation_full = BSTRING_NEW("Too many user allocations");
+static BString invalid_heap_break = BSTRING_NEW("Invalid heap break");
+static BString file_descriptor_full = BSTRING_NEW("Too many file descriptors");
+static BString file_descriptor_not_found = BSTRING_NEW("File descriptor not found");
+static BString argument_too_long = BSTRING_NEW("Argument too long");
+static const ProcessCapabilities PROCESS__HUND_CAPABILITIES =
+    PROCESS_CAP_BECOME_SERVICE
+    | PROCESS_CAP_MAP_MMIO
+    | PROCESS_CAP_SUBSCRIBE_IRQ
+    | PROCESS_CAP_REGISTER_BLOCK_DEVICE
+    | PROCESS_CAP_HANDLE_BLOCK_REQUESTS;
+
+static ProcessSignalMask ProcessSignal__mask(ProcessSignal signal)
+{
+    return (ProcessSignalMask) 1ULL << signal;
+}
 
 static size_t Process__page_aligned_size(size_t size)
 {
@@ -49,6 +64,43 @@ bool UserAllocation__equals(UserAllocationPtr self, UserAllocationPtr other)
 bool ProcessFileDescriptor__equals(ProcessFileDescriptorPtr self, ProcessFileDescriptorPtr other)
 {
     return self->fd == other->fd;
+}
+
+bool ProcessChildEvent__equals(ProcessChildEventPtr self, ProcessChildEventPtr other)
+{
+    return self->pid == other->pid && self->status == other->status && self->type == other->type;
+}
+
+void Process__set_identity(ProcessPtr self, UserID user_id, GroupID group_id, ProcessCapabilities capabilities)
+{
+    self->user_id = user_id;
+    self->group_id = group_id;
+    self->capabilities = capabilities;
+}
+
+void Process__set_root_identity(ProcessPtr self)
+{
+    Process__set_identity(self, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, PROCESS_CAP_ALL);
+}
+
+void Process__set_hund_identity(ProcessPtr self)
+{
+    Process__set_identity(self, PROCESS_USER_HUND, PROCESS_GROUP_HUND, PROCESS__HUND_CAPABILITIES);
+}
+
+void Process__set_user_identity(ProcessPtr self)
+{
+    Process__set_identity(self, PROCESS_USER_USER, PROCESS_GROUP_USER, PROCESS_CAP_NONE);
+}
+
+bool Process__is_root(ProcessPtr self)
+{
+    return self->user_id == PROCESS_USER_ROOT;
+}
+
+bool Process__has_capability(ProcessPtr self, ProcessCapabilities capability)
+{
+    return Process__is_root(self) || (self->capabilities & capability) == capability;
 }
 
 static bool allocation_matches_virtual(UserAllocationPtr allocation, void * context)
@@ -88,7 +140,7 @@ static FileDescriptor Process__inherit_next_file_descriptor(Optional(ProcessPtr)
     return 3;
 }
 
-static size_t Process__copy_arg(char * target, KStringPtr arg)
+static size_t Process__copy_arg(char * target, BStringPtr arg)
 {
     for (size_t i = 0; i < arg->len; i++)
     {
@@ -133,7 +185,7 @@ static Result(Address) Process__setup_args(
 }
 
 Result(ProcessPtr) Process__new(
-    KString name,
+    BString name,
     KernelAddress page_table,
     UserAddress entry,
     Stack stack,
@@ -166,6 +218,16 @@ Result(ProcessPtr) Process__new(
     proc->process_class = PROCESS_CLASS_NORMAL;
     proc->service = ServiceState__new();
     proc->idle_debug_address = None(UserAddress);
+    proc->user_id = PROCESS_USER_ROOT;
+    proc->group_id = PROCESS_GROUP_ROOT;
+    proc->capabilities = PROCESS_CAP_ALL;
+    proc->pending_signals = 0;
+    proc->child_events = ProcessChildEvents__new();
+
+    Match(ProcessPtr, parent)
+        IsSome(parent_process, Process__set_identity(proc, parent_process->user_id, parent_process->group_id, parent_process->capabilities))
+        IsNone(Process__set_root_identity(proc))
+    End
 
     uint64_t argc;
     ResultMatch(Address, Process__setup_args(proc, arguments, &argc))
@@ -245,6 +307,88 @@ bool Process__is_handling_service_irq(ProcessPtr self)
     End
 
     return false;
+}
+
+bool Process__supports_signal(ProcessPtr self, ProcessSignal signal)
+{
+    switch (signal)
+    {
+        case PROCESS_SIGNAL_INTERRUPT:
+        case PROCESS_SIGNAL_KILL:
+        case PROCESS_SIGNAL_TERMINATE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void Process__queue_signal(ProcessPtr self, ProcessSignal signal)
+{
+    self->pending_signals |= ProcessSignal__mask(signal);
+}
+
+bool Process__has_pending_signal(ProcessPtr self)
+{
+    return self->pending_signals != 0;
+}
+
+Optional(ProcessSignal) Process__take_pending_signal(ProcessPtr self)
+{
+    ProcessSignal ordered[] = {
+        PROCESS_SIGNAL_KILL,
+        PROCESS_SIGNAL_TERMINATE,
+        PROCESS_SIGNAL_INTERRUPT,
+    };
+
+    for (size_t i = 0; i < sizeof(ordered) / sizeof(ordered[0]); i++)
+    {
+        ProcessSignal signal = ordered[i];
+        ProcessSignalMask mask = ProcessSignal__mask(signal);
+        if ((self->pending_signals & mask) != 0)
+        {
+            self->pending_signals &= ~mask;
+            return Some(ProcessSignal, signal);
+        }
+    }
+
+    return None(ProcessSignal);
+}
+
+ReturnCode ProcessSignal__exit_code(ProcessSignal signal)
+{
+    return PROCESS_SIGNAL_EXIT_BASE - signal;
+}
+
+Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(KernelPtr kernel, ProcessPtr self)
+{
+    if (kernel == NULL || self == NULL)
+    {
+        return Error(ProcessSetupStatus, argument_too_long, PROCESS_FAILED_TO_SETUP);
+    }
+
+    ResultMatch(BlockDeviceCode, BlockDeviceRegistry__dispose_process_resources(self))
+        IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP))
+    End
+
+    ResultMatch(IRQRegistrationStatus, IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, self))
+        IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP))
+    End
+
+    return Success(ProcessSetupStatus, PROCESS_SETUP);
+}
+
+Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self)
+{
+    Match(ProcessChildEvent, ProcessChildEvents__pop_front(&self->child_events))
+        IsSome(event, return Success(ProcessChildEvent, event))
+    End
+
+    return Error(ProcessChildEvent, bstring("Child event queue empty"), PROCESS_CHILD_EVENT_QUEUE_EMPTY);
+}
+
+Result(CollectionCode) Process__push_child_event(ProcessPtr self, ProcessChildEvent event)
+{
+    return ProcessChildEvents__push(&self->child_events, event);
 }
 
 Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)

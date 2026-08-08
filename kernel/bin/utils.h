@@ -1,7 +1,7 @@
 #ifndef __KERNEL_BIN_UTILS_H_
 #define __KERNEL_BIN_UTILS_H_
 #include <stdint.h>
-#include "../types/kstring.h"
+#include "../types/bstring.h"
 
 inline StringPos strlen(const char *str)
 {

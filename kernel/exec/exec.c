@@ -10,9 +10,98 @@
 
 FixedArrayBodyDefine(ElfReadBuffer);
 
-static KString unreachable_code = KSTRING_NEW("unreachable code");
+static BString unreachable_code = BSTRING_NEW("unreachable code");
+static BString permission_denied_message = BSTRING_NEW("Permission denied");
+static const BString drivers_prefix = BSTRING_NEW("/sbin/drivers/");
+static const BString hundeschau_program = BSTRING_NEW("/sbin/hundeschau");
+static const BString hundeschau_boot_program = BSTRING_NEW("hundeschau");
+static const BString virtio_blk_program = BSTRING_NEW("/sbin/drivers/virtio_blk");
+static const BString uart_rx_program = BSTRING_NEW("/sbin/drivers/uart_rx");
+static const BString uart_tx_program = BSTRING_NEW("/sbin/drivers/uart_tx");
 
-static Result(ProcessPtr) Exec__launch(OriginatingContext context, Elf elf, bool wait, ProcessArguments arguments)
+static bool Exec__is_hund_owned_program(ConstBStringPtr path)
+{
+    return BString__equals(path, &hundeschau_program)
+        || BString__equals(path, &hundeschau_boot_program)
+        || BString__equals(path, &virtio_blk_program)
+        || BString__equals(path, &uart_rx_program)
+        || BString__equals(path, &uart_tx_program);
+}
+
+void Exec__apply_builtin_identity_policy(ProcessPtr self)
+{
+    if (Exec__is_hund_owned_program(&self->name))
+    {
+        Process__set_hund_identity(self);
+    }
+}
+
+static bool Exec__can_execute(OriginatingContext context, ConstBStringPtr path)
+{
+    if (!BString__starts_with(path, &drivers_prefix))
+    {
+        return true;
+    }
+
+    Match(ProcessPtr, context.process)
+        IsSome(process, return process->group_id == PROCESS_GROUP_HUND)
+    End
+
+    return true;
+}
+
+static bool Exec__can_spawn_as(OriginatingContext context, UserID requested_user_id)
+{
+    Match(ProcessPtr, context.process)
+        IsSome(process,
+        {
+            if (Process__is_root(process))
+            {
+                return true;
+            }
+
+            if (process->group_id == PROCESS_GROUP_HUND)
+            {
+                return requested_user_id == PROCESS_USER_HUND || requested_user_id == PROCESS_USER_USER;
+            }
+
+            return process->user_id == requested_user_id;
+        })
+    End
+
+    return false;
+}
+
+static void Exec__apply_requested_identity(ProcessPtr self, Optional(UserID) requested_user_id)
+{
+    Match(UserID, requested_user_id)
+        IsSome(user_id,
+        {
+            switch (user_id)
+            {
+                case PROCESS_USER_ROOT:
+                    Process__set_root_identity(self);
+                    return;
+                case PROCESS_USER_HUND:
+                    Process__set_hund_identity(self);
+                    return;
+                case PROCESS_USER_USER:
+                    Process__set_user_identity(self);
+                    return;
+                default:
+                    return;
+            }
+        })
+    End
+}
+
+static Result(ProcessPtr) Exec__launch(
+    OriginatingContext context,
+    Elf elf,
+    bool wait,
+    Optional(UserID) requested_user_id,
+    ProcessArguments arguments
+)
 {
     __d_printf(EXEC, "Launching elf %s\n", cstr(elf.name));
     KernelPtr kernel = context.kernel;
@@ -21,6 +110,8 @@ static Result(ProcessPtr) Exec__launch(OriginatingContext context, Elf elf, bool
         IsSuccess(process,
         {
             ProcessPtr new_proc = process;
+            Exec__apply_requested_identity(new_proc, requested_user_id);
+            Exec__apply_builtin_identity_policy(new_proc);
             Match(ProcessPtr, context.process)
                 IsSome(parent,
                 {
@@ -82,7 +173,7 @@ static Result(ProcessPtr) Exec__launch(OriginatingContext context, Elf elf, bool
     return Error(ProcessPtr, unreachable_code, SPAWN_FAILED);
 }
 
-static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, KString path)
+static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, BString path)
 {
     DataBufferPtr buffer = DataBuffer__heap_new();
     __d_println(EXEC, "Reading elf");
@@ -109,9 +200,35 @@ static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, K
     return Error(Elf, unreachable_code, SPAWN_FAILED);
 }
 
-Result(ProcessPtr) Exec__exec(OriginatingContext context, KString path, bool wait, ProcessArguments arguments)
+Result(ProcessPtr) Exec__exec(OriginatingContext context, BString path, bool wait, ProcessArguments arguments)
+{
+    return Exec__exec_as(context, path, wait, None(UserID), arguments);
+}
+
+Result(ProcessPtr) Exec__exec_as(
+    OriginatingContext context,
+    BString path,
+    bool wait,
+    Optional(UserID) requested_user_id,
+    ProcessArguments arguments
+)
 {
     __d_printf(EXEC, "Executing elf %s\n", cstr(path));
+
+    if (!Exec__can_execute(context, &path))
+    {
+        return Error(ProcessPtr, permission_denied_message, SPAWN_FAILED);
+    }
+
+    Match(UserID, requested_user_id)
+        IsSome(user_id,
+        {
+            if (!Exec__can_spawn_as(context, user_id))
+            {
+                return Error(ProcessPtr, permission_denied_message, SPAWN_FAILED);
+            }
+        })
+    End
 
     ResultMatch(IOHandle, open(context, path, IO_OPEN_READ))
         IsError(code, message,
@@ -126,7 +243,7 @@ Result(ProcessPtr) Exec__exec(OriginatingContext context, KString path, bool wai
             ResultMatch(Elf, Exec__read_elf(context, handle, path))
                 IsSuccess(elf,
                 {
-                    return Exec__launch(context, elf, wait, arguments);
+                    return Exec__launch(context, elf, wait, requested_user_id, arguments);
                 })
                 IsError(code, message,
                 {

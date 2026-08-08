@@ -90,6 +90,9 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_kernel(
 Result(IRQRegistrationStatus) IRQDispatcher__register_service(
     IRQDispatcherPtr self, IRQNumber irq, ProcessPtr process
 );
+Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(
+    IRQDispatcherPtr self, ProcessPtr process
+);
 
 Result(IRQDispatchStatus) IRQDispatcher__dispatch(
     IRQDispatcherPtr self, IRQNumber irq, IRQDispatchContextPtr context

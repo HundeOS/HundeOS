@@ -5,23 +5,23 @@
 FixedArrayBodyDefine(Fat16DirectoryEntries);
 MapBodyDefine(Fat16FileHandleMap);
 
-static KString invalid_argument = KSTRING_NEW("Invalid FAT16 argument");
-static KString io_error = KSTRING_NEW("FAT16 block IO failed");
-static KString invalid_volume = KSTRING_NEW("Invalid FAT16 volume");
-static KString no_space = KSTRING_NEW("FAT16 volume has no free space");
-static KString not_found = KSTRING_NEW("FAT16 file not found");
-static KString already_exists = KSTRING_NEW("FAT16 file already exists");
-static KString unsupported_name = KSTRING_NEW("FAT16 only supports 8.3 root names");
-static KString file_too_large = KSTRING_NEW("FAT16 file is too large for this operation");
-static KString invalid_path = KSTRING_NEW("Invalid FAT16 path");
-static KString invalid_handle = KSTRING_NEW("Invalid FAT16 handle");
-static KString not_implemented = KSTRING_NEW("FAT16 operation not implemented");
+static BString invalid_argument = BSTRING_NEW("Invalid FAT16 argument");
+static BString io_error = BSTRING_NEW("FAT16 block IO failed");
+static BString invalid_volume = BSTRING_NEW("Invalid FAT16 volume");
+static BString no_space = BSTRING_NEW("FAT16 volume has no free space");
+static BString not_found = BSTRING_NEW("FAT16 file not found");
+static BString already_exists = BSTRING_NEW("FAT16 file already exists");
+static BString unsupported_name = BSTRING_NEW("FAT16 only supports 8.3 root names");
+static BString file_too_large = BSTRING_NEW("FAT16 file is too large for this operation");
+static BString invalid_path = BSTRING_NEW("Invalid FAT16 path");
+static BString invalid_handle = BSTRING_NEW("Invalid FAT16 handle");
+static BString not_implemented = BSTRING_NEW("FAT16 operation not implemented");
 
 #define FAT16_DEFAULT_MEMORY_SECTORS 256
 
 bool Fat16DirectoryEntry__equals(Fat16DirectoryEntryPtr self, Fat16DirectoryEntryPtr other)
 {
-    return KString__equals(&self->name, &other->name)
+    return BString__equals(&self->name, &other->name)
         && self->attributes == other->attributes
         && self->first_cluster == other->first_cluster
         && self->size == other->size;
@@ -164,7 +164,7 @@ static Result(Fat16Code) Fat16Volume__write_sector(Fat16VolumePtr self, BlockNum
     return Error(Fat16Code, io_error, FAT16_IO_ERROR);
 }
 
-static Result(Fat16Code) Fat16__encode_83_name(KStringPtr name, Data target[11])
+static Result(Fat16Code) Fat16__encode_83_name(BStringPtr name, Data target[11])
 {
     if (!FatName__encode_83(name, target))
     {
@@ -174,9 +174,9 @@ static Result(Fat16Code) Fat16__encode_83_name(KStringPtr name, Data target[11])
     return Success(Fat16Code, FAT16_OK);
 }
 
-static KString Fat16__decode_83_name(DataPtr source)
+static BString Fat16__decode_83_name(DataPtr source)
 {
-    KString result = EMPTY_KSTRING;
+    BString result = EMPTY_BSTRING;
 
     for (size_t i = 0; i < 8 && source[i] != ' '; i++)
     {
@@ -265,7 +265,7 @@ static BlockNumber Fat16Volume__cluster_sector(Fat16VolumePtr self, uint16_t clu
 }
 
 static Result(Fat16Code) Fat16Volume__find_root_entry(
-    Fat16VolumePtr self, KString name, BlockNumber * sector, size_t * offset
+    Fat16VolumePtr self, BString name, BlockNumber * sector, size_t * offset
 )
 {
     Data encoded_name[11] = { 0 };
@@ -538,7 +538,7 @@ Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self)
 }
 
 Result(Fat16Code) Fat16Volume__create_root_file(
-    Fat16VolumePtr self, KString name, DataPtr data, uint32_t size
+    Fat16VolumePtr self, BString name, DataPtr data, uint32_t size
 )
 {
     if (!Fat16Volume__has_valid_geometry(self) || (data == 0 && size > 0))
@@ -610,7 +610,7 @@ Result(Fat16Code) Fat16Volume__create_root_file(
     return Success(Fat16Code, FAT16_OK);
 }
 
-Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, KString name)
+Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, BString name)
 {
     if (!Fat16Volume__has_valid_geometry(self))
     {
@@ -672,7 +672,7 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, KStrin
 }
 
 Result(Fat16Code) Fat16Volume__read_root_file(
-    Fat16VolumePtr self, KString name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
+    Fat16VolumePtr self, BString name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
 )
 {
     if (!Fat16Volume__has_valid_geometry(self) || target == 0 || bytes_read == 0)
@@ -728,12 +728,12 @@ static IOStatus Fat16FilesystemIO__status_from_fat16(Fat16Code code)
     return IO_OPERATION_NOT_SUPPORTED;
 }
 
-static bool Fat16FilesystemIO__is_root_path(KString path)
+static bool Fat16FilesystemIO__is_root_path(BString path)
 {
     return path.len == 0 || (path.len == 1 && path.data[0] == '/');
 }
 
-static bool Fat16FilesystemIO__is_root_file_path(KString path)
+static bool Fat16FilesystemIO__is_root_file_path(BString path)
 {
     if (path.len == 0)
     {
@@ -751,7 +751,7 @@ static bool Fat16FilesystemIO__is_root_file_path(KString path)
     return true;
 }
 
-static Fat16FileHandlePtr Fat16FileHandle__heap_new(KString path, Flags flags)
+static Fat16FileHandlePtr Fat16FileHandle__heap_new(BString path, Flags flags)
 {
     Fat16FileHandlePtr handle = ptr(Kernel__alloc_kernel(sizeof(Fat16FileHandle)), Fat16FileHandle);
     *handle = (Fat16FileHandle) {
@@ -764,7 +764,7 @@ static Fat16FileHandlePtr Fat16FileHandle__heap_new(KString path, Flags flags)
     return handle;
 }
 
-static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, KString path, Flags flags)
+static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, BString path, Flags flags)
 {
     Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
 
@@ -904,7 +904,7 @@ static Result(ParkStatus) Fat16FileIO__unpark(IOStatePtr self)
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, KString path)
+static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, BString path)
 {
     Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
@@ -969,7 +969,7 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
     return Success(FilesystemNodes, result);
 }
 
-static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, KString path)
+static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, BString path)
 {
     Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
     if (fs_state == 0 || !fs_state->mounted || !Fat16FilesystemIO__is_root_file_path(path))
@@ -985,12 +985,12 @@ static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, KString path)
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
 }
 
-static Result(IOStatus) Fat16FileIO__remove(IOStatePtr self, KString path, Flags flags)
+static Result(IOStatus) Fat16FileIO__remove(IOStatePtr self, BString path, Flags flags)
 {
     return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
 }
 
-static Result(IOStatus) Fat16FileIO__link(IOStatePtr self, KString source_path, KString target_path)
+static Result(IOStatus) Fat16FileIO__link(IOStatePtr self, BString source_path, BString target_path)
 {
     return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
 }

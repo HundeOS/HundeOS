@@ -8,7 +8,7 @@
 #include "../../block/block_device.h"
 #include "../filesystem.h"
 #include "../../../../types/fixed_array.h"
-#include "../../../../types/kstring.h"
+#include "../../../../types/bstring.h"
 #include "../../../../types/map.h"
 #include "../../../../types/result.h"
 
@@ -59,7 +59,7 @@ typedef Fat16Volume * Fat16VolumePtr;
 
 typedef struct Fat16DirectoryEntry
 {
-    KString name;
+    BString name;
     uint8_t attributes;
     uint16_t first_cluster;
     uint32_t size;
@@ -80,7 +80,7 @@ ResultDef(Fat16DirectoryEntries);
 
 typedef struct Fat16FileHandle
 {
-    KString path;
+    BString path;
     FilePointer offset;
     IOBuffer buffer;
     Flags flags;
@@ -110,11 +110,11 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self);
 Result(Fat16Code) Fat16Volume__mount(Fat16VolumePtr self);
 Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self);
 Result(Fat16Code) Fat16Volume__create_root_file(
-    Fat16VolumePtr self, KString name, DataPtr data, uint32_t size
+    Fat16VolumePtr self, BString name, DataPtr data, uint32_t size
 );
-Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, KString name);
+Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, BString name);
 Result(Fat16Code) Fat16Volume__read_root_file(
-    Fat16VolumePtr self, KString name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
+    Fat16VolumePtr self, BString name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
 );
 
 FileIO Fat16FilesystemIO__new();

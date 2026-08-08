@@ -6,8 +6,8 @@
 #include "address.h"
 #include "kernel_core.h"
 
-static KString not_implemented = KSTRING_NEW("Not implemented");
-static KString invalid_address = KSTRING_NEW("Invalid address");
+static BString not_implemented = BSTRING_NEW("Not implemented");
+static BString invalid_address = BSTRING_NEW("Invalid address");
 
 extern char __text_virt[];
 extern char __text_phys[];

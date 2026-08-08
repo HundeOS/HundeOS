@@ -3,17 +3,17 @@
 #include "../debug.h"
 #include "syscalls/syslog.h"
 
-static KString invalid_syslog_message = KSTRING_NEW("Invalid syslog message");
+static BString invalid_syslog_message = BSTRING_NEW("Invalid syslog message");
 
-static Result(KString) Syslog__copy_string(Anything string_address, StringPos max_len)
+static Result(BString) Syslog__copy_string(Anything string_address, StringPos max_len)
 {
     if (string_address == 0)
     {
-        return Error(KString, invalid_syslog_message, SYSLOG_INVALID_ARGUMENT);
+        return Error(BString, invalid_syslog_message, SYSLOG_INVALID_ARGUMENT);
     }
 
     char * source = (char *) string_address;
-    KString message = EMPTY_KSTRING;
+    BString message = EMPTY_BSTRING;
     if (max_len > message.max - 1)
     {
         max_len = message.max - 1;
@@ -28,20 +28,20 @@ static Result(KString) Syslog__copy_string(Anything string_address, StringPos ma
 
     message.data[position] = '\0';
     message.len = position;
-    return Success(KString, message);
+    return Success(BString, message);
 }
 
-static Result(KString) Syslog__copy_message(Anything message_address)
+static Result(BString) Syslog__copy_message(Anything message_address)
 {
     return Syslog__copy_string(message_address, SYSLOG_MAX_MESSAGE - 1);
 }
 
-static Result(KString) Syslog__copy_tag(Anything tag_address)
+static Result(BString) Syslog__copy_tag(Anything tag_address)
 {
     return Syslog__copy_string(tag_address, SYSLOG_MAX_TAG - 1);
 }
 
-static void Syslog__write(KString tag, Optional(ProcessPtr) proc, KString message)
+static void Syslog__write(BString tag, Optional(ProcessPtr) proc, BString message)
 {
     if (!__d_should_log(SYSLOG))
     {
@@ -74,13 +74,13 @@ Result(SystemCallResult) Syslog__handler(
     Anything arg5
 )
 {
-    ResultMatch(KString, Syslog__copy_message(arg1))
+    ResultMatch(BString, Syslog__copy_message(arg1))
         IsSuccess(message,
         {
-            KString tag = KSTRING_NEW("SYSLOG");
+            BString tag = BSTRING_NEW("SYSLOG");
             if (arg2 != 0)
             {
-                ResultMatch(KString, Syslog__copy_tag(arg2))
+                ResultMatch(BString, Syslog__copy_tag(arg2))
                     IsSuccess(copied_tag, tag = copied_tag)
                     IsError(code, message, return Error(SystemCallResult, message, code))
                 End

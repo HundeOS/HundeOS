@@ -2,13 +2,13 @@
 #include "debug.h"
 #include "arch/basic_io.h"
 #include "../../../types/result.h"
-#include "../../../types/kstring.h"
+#include "../../../types/bstring.h"
 #include "../../../kalloc.h"
 #include "subsystems/io/io_subsystem.h"
 
 FixedArrayBodyDefine(ParkedContexts);
 
-static Result(IOInternalHandle) Console__open(IOStatePtr state, KString path, Flags flags)
+static Result(IOInternalHandle) Console__open(IOStatePtr state, BString path, Flags flags)
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
     IOInternalHandle handle = -1;
@@ -56,7 +56,7 @@ static Result(IOBufferPtr) Console__read(
     ConsoleStatePtr self = (ConsoleStatePtr) state;
     if (IOBuffer__item_count(&self->read_buffer) == 0)
     {
-        return Error(IOBufferPtr, kstring("wait for IO"), IO_WAIT_FOR_DATA);
+        return Error(IOBufferPtr, bstring("wait for IO"), IO_WAIT_FOR_DATA);
     }
     return Success(IOBufferPtr, &self->read_buffer);
 }
@@ -102,7 +102,7 @@ static Result(ParkStatus) Console__unpark(IOStatePtr state)
     CriticalSection(self->lock,
     {
         Match(IOContextPtr, ParkedContexts__pop(&self->parked_contexts))
-            IsNone(_cs_return Error(ParkStatus, kstring("No parked console context"), ARRAY_EMPTY))
+            IsNone(_cs_return Error(ParkStatus, bstring("No parked console context"), ARRAY_EMPTY))
         End
     });
 

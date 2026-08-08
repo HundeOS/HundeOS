@@ -202,8 +202,8 @@ void Process__save_context(ProcessPtr self, ProcessContextPtr context)
     }
     else if (self->state != PROC_STATE_RUNNING)
     {
-        KString format = KString__new("Process not running state=%s pid=%i name=%s\n");
-        KString message = KString__sprintf(&format, ProcessState__to_string(self->state), self->pid, cstr(self->name));
+        BString format = BString__new("Process not running state=%s pid=%i name=%s\n");
+        BString message = BString__sprintf(&format, ProcessState__to_string(self->state), self->pid, cstr(self->name));
 
         Kernel__panic(cstr(message), context);
     }

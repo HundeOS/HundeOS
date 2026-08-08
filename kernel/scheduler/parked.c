@@ -57,7 +57,7 @@ Result(CollectionCode) ParkedOperation__add_blocked_operation(
         IsError(code, message, return Error(CollectionCode, message, code))
     End
 
-    return Error(CollectionCode, kstring("Unable to add blocked operation"), LINKED_LIST_ALLOCATION_FAILED);
+    return Error(CollectionCode, bstring("Unable to add blocked operation"), LINKED_LIST_ALLOCATION_FAILED);
 }
 
 Result(CollectionCode) ParkedOperation__resolve_blocked_operation(
@@ -76,21 +76,23 @@ Result(CollectionCode) ParkedOperation__resolve_blocked_operation(
         IsError(code, message, return Error(CollectionCode, message, code))
     End
 
-    return Error(CollectionCode, kstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND);
+    return Error(CollectionCode, bstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND);
 }
 
-KString ParkReason__to_string(ParkReason reason)
+BString ParkReason__to_string(ParkReason reason)
 {
     switch (reason)
     {
         case PARK_WAIT_CHILD:
-            return KSTRING_NEW("PARK_WAIT_CHILD");
+            return BSTRING_NEW("PARK_WAIT_CHILD");
         case PARK_WAIT_IO:
-            return KSTRING_NEW("PARK_WAIT_IO");
+            return BSTRING_NEW("PARK_WAIT_IO");
         case PARK_WAIT_SERVICE_EVENT:
-            return KSTRING_NEW("PARK_WAIT_SERVICE_EVENT");
+            return BSTRING_NEW("PARK_WAIT_SERVICE_EVENT");
+        case PARK_WAIT_CHILD_EVENT:
+            return BSTRING_NEW("PARK_WAIT_CHILD_EVENT");
         default:
-            return KSTRING_NEW("PARK_WAIT_UNKNOWN");
+            return BSTRING_NEW("PARK_WAIT_UNKNOWN");
     }
 }
 

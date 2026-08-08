@@ -6,13 +6,13 @@
 FixedArrayBodyDefine(Ext2DirectoryEntries);
 MapBodyDefine(Ext2FileHandleMap);
 
-static KString invalid_argument = KSTRING_NEW("Invalid EXT2 argument");
-static KString io_error = KSTRING_NEW("EXT2 block IO failed");
-static KString invalid_volume = KSTRING_NEW("Invalid EXT2 volume");
-static KString not_found = KSTRING_NEW("EXT2 path not found");
-static KString not_supported = KSTRING_NEW("EXT2 feature not supported");
-static KString invalid_path = KSTRING_NEW("Invalid EXT2 path");
-static KString invalid_handle = KSTRING_NEW("Invalid EXT2 handle");
+static BString invalid_argument = BSTRING_NEW("Invalid EXT2 argument");
+static BString io_error = BSTRING_NEW("EXT2 block IO failed");
+static BString invalid_volume = BSTRING_NEW("Invalid EXT2 volume");
+static BString not_found = BSTRING_NEW("EXT2 path not found");
+static BString not_supported = BSTRING_NEW("EXT2 feature not supported");
+static BString invalid_path = BSTRING_NEW("Invalid EXT2 path");
+static BString invalid_handle = BSTRING_NEW("Invalid EXT2 handle");
 
 typedef struct Ext2Inode
 {
@@ -26,11 +26,11 @@ Ext2Inode;
 typedef struct Ext2AsyncListDirContext
 {
     Ext2FilesystemIOStatePtr fs_state;
-    KString path;
+    BString path;
     DirectoryEntryPtr entries;
     size_t max_entries;
     DirectoryEntryCount count;
-    KStringArray segments;
+    BStringArray segments;
     size_t segment_index;
     Ext2InodeNumber current_inode_number;
     Ext2Inode current_inode;
@@ -100,11 +100,11 @@ typedef struct Ext2AsyncWriteContext
 {
     Ext2FilesystemIOStatePtr fs_state;
     Ext2FileHandlePtr file_handle;
-    KString path;
-    KStringArray segments;
+    BString path;
+    BStringArray segments;
     size_t parent_segment_count;
     size_t segment_index;
-    KString leaf_name;
+    BString leaf_name;
     Ext2AsyncWritePhase phase;
 
     Ext2InodeNumber current_inode_number;
@@ -166,11 +166,11 @@ Ext2AsyncMkdirPhase;
 typedef struct Ext2AsyncMkdirContext
 {
     Ext2FilesystemIOStatePtr fs_state;
-    KString path;
-    KStringArray segments;
+    BString path;
+    BStringArray segments;
     size_t parent_segment_count;
     size_t segment_index;
-    KString leaf_name;
+    BString leaf_name;
     Ext2AsyncMkdirPhase phase;
 
     Ext2InodeNumber current_inode_number;
@@ -212,9 +212,9 @@ Ext2AsyncLookupPhase;
 typedef struct Ext2AsyncOpenContext
 {
     Ext2FilesystemIOStatePtr fs_state;
-    KString path;
+    BString path;
     Flags flags;
-    KStringArray segments;
+    BStringArray segments;
     size_t segment_index;
     Ext2InodeNumber current_inode_number;
     Ext2Inode current_inode;
@@ -249,13 +249,13 @@ Ext2AsyncRemovePhase;
 typedef struct Ext2AsyncRemoveContext
 {
     Ext2FilesystemIOStatePtr fs_state;
-    KString path;
+    BString path;
     Flags flags;
-    KStringArray segments;
-    KStringArray resume_paths;
+    BStringArray segments;
+    BStringArray resume_paths;
     size_t parent_segment_count;
     size_t segment_index;
-    KString leaf_name;
+    BString leaf_name;
     Ext2AsyncRemovePhase phase;
 
     Ext2InodeNumber current_inode_number;
@@ -303,13 +303,13 @@ Ext2AsyncLinkPhase;
 typedef struct Ext2AsyncLinkContext
 {
     Ext2FilesystemIOStatePtr fs_state;
-    KString source_path;
-    KString target_path;
-    KStringArray source_segments;
-    KStringArray target_segments;
+    BString source_path;
+    BString target_path;
+    BStringArray source_segments;
+    BStringArray target_segments;
     size_t segment_index;
     size_t target_parent_segment_count;
-    KString target_leaf_name;
+    BString target_leaf_name;
     bool traversing_target_parent;
     Ext2AsyncLinkPhase phase;
 
@@ -343,13 +343,13 @@ static Result(Ext2Code) Ext2Volume__update_allocation_counts(
     int32_t used_dirs_delta
 );
 static Result(Ext2Code) Ext2Volume__lookup_child(
-    Ext2VolumePtr self, Ext2InodeNumber directory_inode, KString name, Ext2InodeNumber * child_inode
+    Ext2VolumePtr self, Ext2InodeNumber directory_inode, BString name, Ext2InodeNumber * child_inode
 );
 static Result(Ext2Code) Ext2Volume__resolve_parent(
     Ext2VolumePtr self,
-    KString path,
+    BString path,
     Ext2InodeNumber * parent_inode_number,
-    KString * leaf_name
+    BString * leaf_name
 );
 
 static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr block_context);
@@ -372,22 +372,22 @@ static Result(Anything) Ext2FileIO__read_open_block_async(
 );
 static Result(IOInternalHandle) Ext2FileIO__start_async_open(
     Ext2FilesystemIOStatePtr fs_state,
-    KString path,
+    BString path,
     Flags flags
 );
 static Result(IOStatus) Ext2FileIO__start_async_remove(
     Ext2FilesystemIOStatePtr fs_state,
-    KString path,
+    BString path,
     Flags flags
 );
 static Result(IOStatus) Ext2FileIO__start_async_mkdir(
     Ext2FilesystemIOStatePtr fs_state,
-    KString path
+    BString path
 );
 static Result(IOStatus) Ext2FileIO__start_async_link(
     Ext2FilesystemIOStatePtr fs_state,
-    KString source_path,
-    KString target_path
+    BString source_path,
+    BString target_path
 );
 static Result(IOBufferPtr) Ext2FileIO__start_async_read(
     Ext2FilesystemIOStatePtr fs_state,
@@ -401,7 +401,7 @@ static Result(Anything) Ext2Volume__complete_sync_write(BlockIOContextPtr block_
 static Result(Ext2Code) Ext2Volume__remove_inode(
     Ext2VolumePtr self,
     Ext2InodeNumber parent_inode_number,
-    KString leaf_name,
+    BString leaf_name,
     Ext2InodeNumber target_inode_number,
     Ext2Inode * target_inode,
     Flags flags
@@ -452,7 +452,7 @@ static DirectoryEntry Ext2FileIO__directory_entry_from_ext2_entry(Ext2DirectoryE
 
 bool Ext2DirectoryEntry__equals(Ext2DirectoryEntryPtr self, Ext2DirectoryEntryPtr other)
 {
-    return KString__equals(&self->name, &other->name)
+    return BString__equals(&self->name, &other->name)
         && self->file_type == other->file_type
         && self->inode == other->inode
         && self->size == other->size;
@@ -800,7 +800,7 @@ static Result(Ext2Code) Ext2Volume__allocate_block_from_bitmap(
 static Result(Ext2Code) Ext2Volume__insert_dirent(
     Ext2VolumePtr self,
     Ext2InodeNumber directory_inode_number,
-    KString name,
+    BString name,
     Ext2InodeNumber child_inode_number,
     Ext2DirectoryEntryType child_type
 )
@@ -1022,7 +1022,7 @@ static Result(Ext2Code) Ext2Volume__write_inode_data(
 
 static Result(Ext2Code) Ext2Volume__write_file_at_path(
     Ext2VolumePtr self,
-    KString path,
+    BString path,
     DataPtr data,
     size_t size,
     Ext2InodeNumber * inode_number,
@@ -1030,7 +1030,7 @@ static Result(Ext2Code) Ext2Volume__write_file_at_path(
 )
 {
     Ext2InodeNumber parent_inode_number = 0;
-    KString leaf_name = EMPTY_KSTRING;
+    BString leaf_name = EMPTY_BSTRING;
 
     ResultMatch(Ext2Code, Ext2Volume__resolve_parent(self, path, &parent_inode_number, &leaf_name))
         IsError(code, message, return Error(Ext2Code, message, code))
@@ -1107,10 +1107,10 @@ static Result(Ext2Code) Ext2Volume__write_file_at_path(
     return Success(Ext2Code, EXT2_OK);
 }
 
-static Result(Ext2Code) Ext2Volume__mkdir_at_path(Ext2VolumePtr self, KString path)
+static Result(Ext2Code) Ext2Volume__mkdir_at_path(Ext2VolumePtr self, BString path)
 {
     Ext2InodeNumber parent_inode_number = 0;
-    KString leaf_name = EMPTY_KSTRING;
+    BString leaf_name = EMPTY_BSTRING;
 
     ResultMatch(Ext2Code, Ext2Volume__resolve_parent(self, path, &parent_inode_number, &leaf_name))
         IsError(code, message, return Error(Ext2Code, message, code))
@@ -1322,15 +1322,15 @@ static Result(Ext2DirectoryEntries) Ext2Volume__list_directory_inode(
 
             if (entry_inode != 0 && name_len > 0)
             {
-                KString name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     name.data[i] = (char) block[offset + 8 + i];
                 }
                 name.len = name_len;
                 name.data[name.len] = '\0';
 
-                if (!KString__equals(&name, &KSTRING_NEW(".")) && !KString__equals(&name, &KSTRING_NEW("..")))
+                if (!BString__equals(&name, &BSTRING_NEW(".")) && !BString__equals(&name, &BSTRING_NEW("..")))
                 {
                     Ext2Inode entry_node = { 0 };
                     ResultMatch(Ext2Code, Ext2Volume__read_inode(self, entry_inode, &entry_node))
@@ -1356,14 +1356,14 @@ static Result(Ext2DirectoryEntries) Ext2Volume__list_directory_inode(
 }
 
 static Result(Ext2Code) Ext2Volume__lookup_child(
-    Ext2VolumePtr self, Ext2InodeNumber directory_inode, KString name, Ext2InodeNumber * child_inode
+    Ext2VolumePtr self, Ext2InodeNumber directory_inode, BString name, Ext2InodeNumber * child_inode
 )
 {
     ResultMatch(Ext2DirectoryEntries, Ext2Volume__list_directory_inode(self, directory_inode))
         IsSuccess(entries,
         {
             FAIterate(Ext2DirectoryEntries, entries, index, entry)
-                if (KString__equals(&entry.name, &name))
+                if (BString__equals(&entry.name, &name))
                 {
                     *child_inode = entry.inode;
                     return Success(Ext2Code, EXT2_OK);
@@ -1377,19 +1377,19 @@ static Result(Ext2Code) Ext2Volume__lookup_child(
 }
 
 static Result(Ext2Code) Ext2Volume__find_inode_at_path(
-    Ext2VolumePtr self, KString path, Ext2InodeNumber * inode_number
+    Ext2VolumePtr self, BString path, Ext2InodeNumber * inode_number
 )
 {
-    if (KString__equals(&path, &KSTRING_NEW("/")) || path.len == 0)
+    if (BString__equals(&path, &BSTRING_NEW("/")) || path.len == 0)
     {
         *inode_number = EXT2_ROOT_INODE;
         return Success(Ext2Code, EXT2_OK);
     }
 
-    KStringArray segments = KString__split(&path, '/');
+    BStringArray segments = BString__split(&path, '/');
     Ext2InodeNumber current = EXT2_ROOT_INODE;
 
-    FAIterate(KStringArray, segments, index, segment)
+    FAIterate(BStringArray, segments, index, segment)
         ResultMatch(Ext2Code, Ext2Volume__lookup_child(self, current, segment, &current))
             IsError(code, message, return Error(Ext2Code, message, code))
         End
@@ -1401,17 +1401,17 @@ static Result(Ext2Code) Ext2Volume__find_inode_at_path(
 
 static Result(Ext2Code) Ext2Volume__resolve_parent(
     Ext2VolumePtr self,
-    KString path,
+    BString path,
     Ext2InodeNumber * parent_inode_number,
-    KString * leaf_name
+    BString * leaf_name
 )
 {
-    if (path.len == 0 || KString__equals(&path, &KSTRING_NEW("/")))
+    if (path.len == 0 || BString__equals(&path, &BSTRING_NEW("/")))
     {
         return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND);
     }
 
-    KStringArray segments = KString__split(&path, '/');
+    BStringArray segments = BString__split(&path, '/');
     if (segments.len == 0)
     {
         return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND);
@@ -1433,7 +1433,7 @@ static Result(Ext2Code) Ext2Volume__resolve_parent(
 static Result(Ext2Code) Ext2Volume__remove_dirent(
     Ext2VolumePtr self,
     Ext2InodeNumber directory_inode_number,
-    KString name,
+    BString name,
     Ext2InodeNumber * removed_inode_number
 )
 {
@@ -1476,15 +1476,15 @@ static Result(Ext2Code) Ext2Volume__remove_dirent(
 
             if (entry_inode != 0 && name_len > 0)
             {
-                KString entry_name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString entry_name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     entry_name.data[i] = (char) block[offset + 8 + i];
                 }
                 entry_name.len = name_len;
                 entry_name.data[entry_name.len] = '\0';
 
-                if (KString__equals(&entry_name, &name))
+                if (BString__equals(&entry_name, &name))
                 {
                     *removed_inode_number = entry_inode;
                     if (has_previous)
@@ -1510,28 +1510,28 @@ static Result(Ext2Code) Ext2Volume__remove_dirent(
     return Error(Ext2Code, not_found, EXT2_NOT_FOUND);
 }
 
-static KString Ext2__child_path(KString parent_path, KString child_name)
+static BString Ext2__child_path(BString parent_path, BString child_name)
 {
-    if (parent_path.len == 0 || KString__equals(&parent_path, &KSTRING_NEW("/")))
+    if (parent_path.len == 0 || BString__equals(&parent_path, &BSTRING_NEW("/")))
     {
         return child_name;
     }
 
-    KString with_slash = KString__append(&parent_path, &KSTRING_NEW("/"));
-    return KString__append(&with_slash, &child_name);
+    BString with_slash = BString__append(&parent_path, &BSTRING_NEW("/"));
+    return BString__append(&with_slash, &child_name);
 }
 
 static void Ext2AsyncRemoveContext__reset_for_path(
     Ext2AsyncRemoveContextPtr self,
-    KString path,
+    BString path,
     Ext2AsyncRemovePhase phase
 )
 {
     self->path = path;
-    self->segments = KString__split(&path, '/');
+    self->segments = BString__split(&path, '/');
     self->parent_segment_count = 0;
     self->segment_index = 0;
-    self->leaf_name = EMPTY_KSTRING;
+    self->leaf_name = EMPTY_BSTRING;
     self->phase = phase;
 
     self->current_inode_number = EXT2_ROOT_INODE;
@@ -1561,7 +1561,7 @@ static void Ext2AsyncRemoveContext__reset_for_path(
 static Result(Ext2Code) Ext2Volume__remove_inode(
     Ext2VolumePtr self,
     Ext2InodeNumber parent_inode_number,
-    KString leaf_name,
+    BString leaf_name,
     Ext2InodeNumber target_inode_number,
     Ext2Inode * target_inode,
     Flags flags
@@ -1655,10 +1655,10 @@ static Result(Ext2Code) Ext2Volume__remove_inode(
     return Ext2Volume__remove_dirent(self, parent_inode_number, leaf_name, &target_inode_number);
 }
 
-static Result(Ext2Code) Ext2Volume__remove_at_path(Ext2VolumePtr self, KString path, Flags flags)
+static Result(Ext2Code) Ext2Volume__remove_at_path(Ext2VolumePtr self, BString path, Flags flags)
 {
     Ext2InodeNumber parent_inode_number = 0;
-    KString leaf_name = EMPTY_KSTRING;
+    BString leaf_name = EMPTY_BSTRING;
     Ext2InodeNumber target_inode_number = 0;
     Ext2Inode target_inode = { 0 };
 
@@ -1684,12 +1684,12 @@ static Result(Ext2Code) Ext2Volume__remove_at_path(Ext2VolumePtr self, KString p
     );
 }
 
-static Result(Ext2Code) Ext2Volume__link_at_path(Ext2VolumePtr self, KString source_path, KString target_path)
+static Result(Ext2Code) Ext2Volume__link_at_path(Ext2VolumePtr self, BString source_path, BString target_path)
 {
     Ext2InodeNumber source_inode_number = 0;
     Ext2Inode source_inode = { 0 };
     Ext2InodeNumber target_parent_inode_number = 0;
-    KString target_leaf_name = EMPTY_KSTRING;
+    BString target_leaf_name = EMPTY_BSTRING;
     Ext2InodeNumber existing_inode_number = 0;
 
     ResultMatch(Ext2Code, Ext2Volume__find_inode_at_path(self, source_path, &source_inode_number))
@@ -1799,7 +1799,7 @@ static bool Ext2FilesystemIOState__uses_userspace_device(Ext2FilesystemIOStatePt
 }
 
 static Result(IOInternalHandle) Ext2FilesystemIOState__add_handle(
-    Ext2FilesystemIOStatePtr self, KString path, Flags flags, Ext2InodeNumber inode_number, Ext2Inode * inode
+    Ext2FilesystemIOStatePtr self, BString path, Flags flags, Ext2InodeNumber inode_number, Ext2Inode * inode
 )
 {
     Ext2FileHandle file_handle = {
@@ -2155,10 +2155,10 @@ static Result(ByteCount) Ext2FileIO__start_async_write(
         .fs_state = fs_state,
         .file_handle = file_handle,
         .path = file_handle->path,
-        .segments = KString__split(&file_handle->path, '/'),
+        .segments = BString__split(&file_handle->path, '/'),
         .parent_segment_count = 0,
         .segment_index = 0,
-        .leaf_name = EMPTY_KSTRING,
+        .leaf_name = EMPTY_BSTRING,
         .phase = fs_state->volume.mounted ? EXT2_ASYNC_WRITE_READ_PARENT_INODE : EXT2_ASYNC_WRITE_READ_SUPERBLOCK,
         .current_inode_number = EXT2_ROOT_INODE,
         .current_inode = { 0 },
@@ -2234,7 +2234,7 @@ static Result(ByteCount) Ext2FileIO__start_async_write(
 
 static Result(IOInternalHandle) Ext2FileIO__start_async_open(
     Ext2FilesystemIOStatePtr fs_state,
-    KString path,
+    BString path,
     Flags flags
 )
 {
@@ -2244,7 +2244,7 @@ static Result(IOInternalHandle) Ext2FileIO__start_async_open(
         .fs_state = fs_state,
         .path = path,
         .flags = flags,
-        .segments = KString__split(&path, '/'),
+        .segments = BString__split(&path, '/'),
         .segment_index = 0,
         .current_inode_number = EXT2_ROOT_INODE,
         .current_inode = { 0 },
@@ -2293,7 +2293,7 @@ static Result(IOInternalHandle) Ext2FileIO__start_async_open(
 
 static Result(IOStatus) Ext2FileIO__start_async_remove(
     Ext2FilesystemIOStatePtr fs_state,
-    KString path,
+    BString path,
     Flags flags
 )
 {
@@ -2303,8 +2303,8 @@ static Result(IOStatus) Ext2FileIO__start_async_remove(
         .fs_state = fs_state,
         .path = path,
         .flags = flags,
-        .segments = EmptyArray(KStringArray),
-        .resume_paths = EmptyArray(KStringArray),
+        .segments = EmptyArray(BStringArray),
+        .resume_paths = EmptyArray(BStringArray),
     };
 
     Ext2AsyncRemoveContext__reset_for_path(
@@ -2359,7 +2359,7 @@ static Result(IOStatus) Ext2FileIO__start_async_remove(
 
 static Result(IOStatus) Ext2FileIO__start_async_mkdir(
     Ext2FilesystemIOStatePtr fs_state,
-    KString path
+    BString path
 )
 {
     Ext2AsyncMkdirContextPtr mkdir_context =
@@ -2367,10 +2367,10 @@ static Result(IOStatus) Ext2FileIO__start_async_mkdir(
     *mkdir_context = (Ext2AsyncMkdirContext) {
         .fs_state = fs_state,
         .path = path,
-        .segments = KString__split(&path, '/'),
+        .segments = BString__split(&path, '/'),
         .parent_segment_count = 0,
         .segment_index = 0,
-        .leaf_name = EMPTY_KSTRING,
+        .leaf_name = EMPTY_BSTRING,
         .phase = fs_state->volume.mounted ? EXT2_ASYNC_MKDIR_READ_PARENT_INODE : EXT2_ASYNC_MKDIR_READ_SUPERBLOCK,
         .current_inode_number = EXT2_ROOT_INODE,
         .current_inode = { 0 },
@@ -2435,8 +2435,8 @@ static Result(IOStatus) Ext2FileIO__start_async_mkdir(
 
 static Result(IOStatus) Ext2FileIO__start_async_link(
     Ext2FilesystemIOStatePtr fs_state,
-    KString source_path,
-    KString target_path
+    BString source_path,
+    BString target_path
 )
 {
     Ext2AsyncLinkContextPtr link_context =
@@ -2445,11 +2445,11 @@ static Result(IOStatus) Ext2FileIO__start_async_link(
         .fs_state = fs_state,
         .source_path = source_path,
         .target_path = target_path,
-        .source_segments = KString__split(&source_path, '/'),
-        .target_segments = KString__split(&target_path, '/'),
+        .source_segments = BString__split(&source_path, '/'),
+        .target_segments = BString__split(&target_path, '/'),
         .segment_index = 0,
         .target_parent_segment_count = 0,
-        .target_leaf_name = EMPTY_KSTRING,
+        .target_leaf_name = EMPTY_BSTRING,
         .traversing_target_parent = false,
         .phase = fs_state->volume.mounted ? EXT2_ASYNC_LINK_READ_SOURCE_INODE : EXT2_ASYNC_LINK_READ_SUPERBLOCK,
         .current_inode_number = EXT2_ROOT_INODE,
@@ -2516,7 +2516,7 @@ static Result(IOStatus) Ext2FileIO__start_async_link(
     return Error(IOStatus, io_error, IO_PANIC);
 }
 
-static Result(IOInternalHandle) Ext2FileIO__open(IOStatePtr self, KString path, Flags flags)
+static Result(IOInternalHandle) Ext2FileIO__open(IOStatePtr self, BString path, Flags flags)
 {
     Ext2FilesystemIOStatePtr fs_state = (Ext2FilesystemIOStatePtr) self;
     Ext2InodeNumber inode_number = 0;
@@ -2849,7 +2849,7 @@ static Result(Anything) Ext2FileIO__complete_async_open(BlockIOContextPtr block_
 
     if (context->phase == EXT2_ASYNC_LOOKUP_READ_DIR_BLOCK)
     {
-        KString target_name = context->segments.data[context->segment_index];
+        BString target_name = context->segments.data[context->segment_index];
         size_t offset = 0;
 
         while (offset + 8 <= EXT2_BLOCK_SIZE)
@@ -2865,15 +2865,15 @@ static Result(Anything) Ext2FileIO__complete_async_open(BlockIOContextPtr block_
 
             if (inode != 0 && name_len > 0)
             {
-                KString entry_name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString entry_name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                 }
                 entry_name.len = name_len;
                 entry_name.data[entry_name.len] = '\0';
 
-                if (KString__equals(&entry_name, &target_name))
+                if (BString__equals(&entry_name, &target_name))
                 {
                     context->current_inode_number = inode;
                     context->segment_index++;
@@ -3061,15 +3061,15 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
 
                 if (inode != 0 && name_len > 0)
                 {
-                    KString entry_name = EMPTY_KSTRING;
-                    for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                    BString entry_name = EMPTY_BSTRING;
+                    for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                     {
                         entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                     }
                     entry_name.len = name_len;
                     entry_name.data[entry_name.len] = '\0';
 
-                    if (KString__equals(&entry_name, &context->target_leaf_name))
+                    if (BString__equals(&entry_name, &context->target_leaf_name))
                     {
                         return Error(Anything, invalid_path, IO_INVALID_PATH);
                     }
@@ -3139,7 +3139,7 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
             );
         }
 
-        KString target_name = traversing_target
+        BString target_name = traversing_target
             ? context->target_segments.data[context->segment_index]
             : context->source_segments.data[context->segment_index];
 
@@ -3156,15 +3156,15 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
 
             if (inode != 0 && name_len > 0)
             {
-                KString entry_name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString entry_name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                 }
                 entry_name.len = name_len;
                 entry_name.data[entry_name.len] = '\0';
 
-                if (KString__equals(&entry_name, &target_name))
+                if (BString__equals(&entry_name, &target_name))
                 {
                     context->current_inode_number = inode;
                     context->segment_index++;
@@ -3341,7 +3341,7 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
 
         if (context->segment_index < context->parent_segment_count)
         {
-            KString target_name = context->segments.data[context->segment_index];
+            BString target_name = context->segments.data[context->segment_index];
             while (offset + 8 <= EXT2_BLOCK_SIZE)
             {
                 Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
@@ -3355,15 +3355,15 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
 
                 if (inode != 0 && name_len > 0)
                 {
-                    KString entry_name = EMPTY_KSTRING;
-                    for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                    BString entry_name = EMPTY_BSTRING;
+                    for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                     {
                         entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                     }
                     entry_name.len = name_len;
                     entry_name.data[entry_name.len] = '\0';
 
-                    if (KString__equals(&entry_name, &target_name))
+                    if (BString__equals(&entry_name, &target_name))
                     {
                         context->current_inode_number = inode;
                         context->segment_index++;
@@ -3414,15 +3414,15 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
 
             if (inode != 0 && name_len > 0)
             {
-                KString entry_name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString entry_name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                 }
                 entry_name.len = name_len;
                 entry_name.data[entry_name.len] = '\0';
 
-                if (KString__equals(&entry_name, &context->leaf_name))
+                if (BString__equals(&entry_name, &context->leaf_name))
                 {
                     context->found_target = true;
                     context->creating = false;
@@ -3858,7 +3858,7 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
 
         if (context->segment_index < context->parent_segment_count)
         {
-            KString target_name = context->segments.data[context->segment_index];
+            BString target_name = context->segments.data[context->segment_index];
             while (offset + 8 <= EXT2_BLOCK_SIZE)
             {
                 Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
@@ -3872,15 +3872,15 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
 
                 if (inode != 0 && name_len > 0)
                 {
-                    KString entry_name = EMPTY_KSTRING;
-                    for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                    BString entry_name = EMPTY_BSTRING;
+                    for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                     {
                         entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                     }
                     entry_name.len = name_len;
                     entry_name.data[entry_name.len] = '\0';
 
-                    if (KString__equals(&entry_name, &target_name))
+                    if (BString__equals(&entry_name, &target_name))
                     {
                         context->current_inode_number = inode;
                         context->segment_index++;
@@ -3931,15 +3931,15 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
 
             if (inode != 0 && name_len > 0)
             {
-                KString entry_name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString entry_name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                 }
                 entry_name.len = name_len;
                 entry_name.data[entry_name.len] = '\0';
 
-                if (KString__equals(&entry_name, &context->leaf_name))
+                if (BString__equals(&entry_name, &context->leaf_name))
                 {
                     return Error(Anything, invalid_path, IO_INVALID_PATH);
                 }
@@ -4264,7 +4264,7 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
         if (context->segment_index < context->parent_segment_count)
         {
-            KString target_name = context->segments.data[context->segment_index];
+            BString target_name = context->segments.data[context->segment_index];
             while (offset + 8 <= EXT2_BLOCK_SIZE)
             {
                 Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
@@ -4278,15 +4278,15 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
                 if (inode != 0 && name_len > 0)
                 {
-                    KString entry_name = EMPTY_KSTRING;
-                    for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                    BString entry_name = EMPTY_BSTRING;
+                    for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                     {
                         entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                     }
                     entry_name.len = name_len;
                     entry_name.data[entry_name.len] = '\0';
 
-                    if (KString__equals(&entry_name, &target_name))
+                    if (BString__equals(&entry_name, &target_name))
                     {
                         context->current_inode_number = inode;
                         context->segment_index++;
@@ -4336,15 +4336,15 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
             if (inode != 0 && name_len > 0)
             {
-                KString entry_name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString entry_name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                 }
                 entry_name.len = name_len;
                 entry_name.data[entry_name.len] = '\0';
 
-                if (KString__equals(&entry_name, &context->leaf_name))
+                if (BString__equals(&entry_name, &context->leaf_name))
                 {
                     context->parent_inode_number = context->current_inode_number;
                     context->parent_dir_block = context->current_inode.block[context->current_dir_block_index];
@@ -4529,23 +4529,23 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
             if (inode != 0 && name_len > 0)
             {
-                KString entry_name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString entry_name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
                 }
                 entry_name.len = name_len;
                 entry_name.data[entry_name.len] = '\0';
 
-                if (!KString__equals(&entry_name, &KSTRING_NEW(".")) && !KString__equals(&entry_name, &KSTRING_NEW("..")))
+                if (!BString__equals(&entry_name, &BSTRING_NEW(".")) && !BString__equals(&entry_name, &BSTRING_NEW("..")))
                 {
                     if ((context->flags & IO_REMOVE_RECURSIVE) == 0)
                     {
                         return Error(Anything, not_supported, IO_OPERATION_NOT_SUPPORTED);
                     }
 
-                    KString child_path = Ext2__child_path(context->path, entry_name);
-                    ResultMatch(CollectionCode, KStringArray__push(&context->resume_paths, context->path))
+                    BString child_path = Ext2__child_path(context->path, entry_name);
+                    ResultMatch(CollectionCode, BStringArray__push(&context->resume_paths, context->path))
                         IsError(code, message, return Error(Anything, not_supported, IO_OPERATION_NOT_SUPPORTED))
                     End
 
@@ -4742,7 +4742,7 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
     if (context->phase == EXT2_ASYNC_REMOVE_WRITE_PARENT_DIR_BLOCK)
     {
-        Match(KStringArray__optional, KStringArray__pop(&context->resume_paths))
+        Match(BStringArray__optional, BStringArray__pop(&context->resume_paths))
             IsSome(resume_path,
             {
                 Ext2AsyncRemoveContext__reset_for_path(
@@ -4982,15 +4982,15 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
 
             if (inode != 0 && name_len > 0)
             {
-                KString name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     name.data[i] = (char) block_context->buffer[offset + 8 + i];
                 }
                 name.len = name_len;
                 name.data[name.len] = '\0';
 
-                if (KString__equals(&name, &context->segments.data[context->segment_index]))
+                if (BString__equals(&name, &context->segments.data[context->segment_index]))
                 {
                     context->current_inode_number = inode;
                     context->segment_index++;
@@ -5039,15 +5039,15 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
 
             if (inode != 0 && name_len > 0)
             {
-                KString name = EMPTY_KSTRING;
-                for (size_t i = 0; i < name_len && i < MAX_SIZE - 1; i++)
+                BString name = EMPTY_BSTRING;
+                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
                     name.data[i] = (char) block_context->buffer[offset + 8 + i];
                 }
                 name.len = name_len;
                 name.data[name.len] = '\0';
 
-                if (!KString__equals(&name, &KSTRING_NEW(".")) && !KString__equals(&name, &KSTRING_NEW("..")))
+                if (!BString__equals(&name, &BSTRING_NEW(".")) && !BString__equals(&name, &BSTRING_NEW("..")))
                 {
                     Ext2DirectoryEntry entry = {
                         .name = name,
@@ -5102,7 +5102,7 @@ static Result(DirectoryEntryCount) Ext2FileIO__copy_entries_to_dirents(
 }
 
 static Result(DirectoryEntryCount) Ext2FileIO__list_dir(
-    IOStatePtr self, KString path, DirectoryEntryPtr entries, size_t max_entries
+    IOStatePtr self, BString path, DirectoryEntryPtr entries, size_t max_entries
 )
 {
     Ext2FilesystemIOStatePtr fs_state = (Ext2FilesystemIOStatePtr) self;
@@ -5117,7 +5117,7 @@ static Result(DirectoryEntryCount) Ext2FileIO__list_dir(
             .entries = entries,
             .max_entries = max_entries,
             .count = 0,
-            .segments = KString__split(&path, '/'),
+            .segments = BString__split(&path, '/'),
             .segment_index = 0,
             .current_inode_number = EXT2_ROOT_INODE,
             .current_inode = { 0 },
@@ -5153,7 +5153,7 @@ static Result(DirectoryEntryCount) Ext2FileIO__list_dir(
     return Error(DirectoryEntryCount, invalid_path, IO_INVALID_PATH);
 }
 
-static Result(IOStatus) Ext2FileIO__mkdir(IOStatePtr self, KString path)
+static Result(IOStatus) Ext2FileIO__mkdir(IOStatePtr self, BString path)
 {
     Ext2FilesystemIOStatePtr fs_state = (Ext2FilesystemIOStatePtr) self;
 
@@ -5180,7 +5180,7 @@ static Result(IOStatus) Ext2FileIO__mkdir(IOStatePtr self, KString path)
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
 }
 
-static Result(IOStatus) Ext2FileIO__remove(IOStatePtr self, KString path, Flags flags)
+static Result(IOStatus) Ext2FileIO__remove(IOStatePtr self, BString path, Flags flags)
 {
     Ext2FilesystemIOStatePtr fs_state = (Ext2FilesystemIOStatePtr) self;
     if (Ext2FilesystemIOState__uses_userspace_device(fs_state))
@@ -5206,7 +5206,7 @@ static Result(IOStatus) Ext2FileIO__remove(IOStatePtr self, KString path, Flags 
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
 }
 
-static Result(IOStatus) Ext2FileIO__link(IOStatePtr self, KString source_path, KString target_path)
+static Result(IOStatus) Ext2FileIO__link(IOStatePtr self, BString source_path, BString target_path)
 {
     Ext2FilesystemIOStatePtr fs_state = (Ext2FilesystemIOStatePtr) self;
     if (Ext2FilesystemIOState__uses_userspace_device(fs_state))

@@ -12,7 +12,7 @@ KernelPtr init_test_kernel_without_filesystem()
 
     KernelPtr kernel = Kernel__heap_new(scheduler, message_broker, io_subsystem);
 
-    Elf idle = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf idle = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
 
     Scheduler__init(scheduler, idle);
     Scheduler__start(scheduler, 0);
@@ -25,7 +25,7 @@ KernelPtr init_test_kernel_with_filesystem(FilesystemPtr filesystem)
     KernelPtr kernel = init_test_kernel_without_filesystem();
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, filesystem);
     Result(DeviceHandle) register_res = IOSubsystem__register_device(
-        kernel->io_subsystem, kstring("/"), &filesystem->file_io.base_io, &filesystem->state->state
+        kernel->io_subsystem, bstring("/"), &filesystem->file_io.base_io, &filesystem->state->state
     );
     ResultMatch(DeviceHandle, register_res)
         IsError(code, message, TEST_FAIL())

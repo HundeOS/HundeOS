@@ -118,3 +118,36 @@ void test_ls_prints_named_io_error(void)
     TEST_ASSERT_EQUAL_STRING("/mnt/fs1", requested_path);
     TEST_ASSERT_EQUAL_STRING("ls: error IO_INVALID_PATH (-9)\n", output);
 }
+
+void test_ls_long_format_prints_mode_owner_group_and_name(void)
+{
+    fake_count = 1;
+    fake_entries[0].user_id = PROCESS_USER_HUND;
+    fake_entries[0].group_id = PROCESS_GROUP_HUND;
+    fake_entries[0].mode = IO_MODE_TYPE_DIR | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC;
+    copy_text(fake_entries[0].name, "drivers", IO_DIRENT_NAME_MAX);
+
+    char * argv[] = { "ls", "-l", "/sbin" };
+
+    TEST_ASSERT_EQUAL_INT(0, ls_main_under_test(3, argv));
+    TEST_ASSERT_EQUAL_STRING("/sbin", requested_path);
+    TEST_ASSERT_EQUAL_STRING("dr-xr-x--- hund hund drivers\n", output);
+}
+
+void test_ls_a_hides_dot_entries_unless_requested(void)
+{
+    fake_count = 2;
+    copy_text(fake_entries[0].name, ".hidden", IO_DIRENT_NAME_MAX);
+    copy_text(fake_entries[1].name, "shown", IO_DIRENT_NAME_MAX);
+
+    char * argv[] = { "ls", "/" };
+    TEST_ASSERT_EQUAL_INT(0, ls_main_under_test(2, argv));
+    TEST_ASSERT_EQUAL_STRING("shown\n", output);
+
+    output_position = 0;
+    output[0] = '\0';
+
+    char * all_argv[] = { "ls", "-a", "/" };
+    TEST_ASSERT_EQUAL_INT(0, ls_main_under_test(3, all_argv));
+    TEST_ASSERT_EQUAL_STRING(".hidden\nshown\n", output);
+}

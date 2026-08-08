@@ -5,7 +5,7 @@
 #include "../../../all_defs.h"
 #include "../../../types/linked_list.h"
 #include "../../../types/map.h"
-#include "../../../types/kstring_additional_types.h"
+#include "../../../types/bstring_additional_types.h"
 
 #include "file_io.h"
 
@@ -27,9 +27,9 @@ typedef uint64_t FilePointer;
 
 typedef struct FilesystemTableEntry
 {
-    KString device_path;
-    KString filesystem_type;
-    KString mountpoint;
+    BString device_path;
+    BString filesystem_type;
+    BString mountpoint;
 }
 FilesystemTableEntry;
 
@@ -49,12 +49,12 @@ typedef FilesystemTable * FilesystemTablePtr;
 
 FilesystemTable FilesystemTable__new();
 Result(CollectionCode) FilesystemTable__add(
-    FilesystemTablePtr self, KString device_path, KString filesystem_type, KString mountpoint
+    FilesystemTablePtr self, BString device_path, BString filesystem_type, BString mountpoint
 );
 
 OptionalDef(FilesystemPtr);
 ResultDef(FilesystemPtr);
-MapDefine(KString, FilesystemPtr, MAX_MOUNTS, Mounts, kstring_equals);
+MapDefine(BString, FilesystemPtr, MAX_MOUNTS, Mounts, bstring_equals);
 
 typedef struct FilesystemNode FilesystemNode;
 typedef FilesystemNode * FilesystemNodePtr;
@@ -64,7 +64,7 @@ typedef FilesystemIOState * FilesystemIOStatePtr;
 
 typedef struct Filesystem
 {
-    KString name;
+    BString name;
     Mounts mounts;
     FilesystemTable filesystem_table;
     FilesystemNodePtr root;
@@ -76,7 +76,7 @@ Filesystem;
 
 typedef struct FileHandleTarget
 {
-    KString path;
+    BString path;
     FilePointer offset;
     IOBuffer buffer;
 }
@@ -104,13 +104,13 @@ FilesystemIOState;
 
 typedef FilesystemIOState * FilesystemIOStatePtr;
 
-FileHandleTargetPtr FileHandleTarget__heap_new(KString path);
+FileHandleTargetPtr FileHandleTarget__heap_new(BString path);
 void FileHandleTarget__dispose(FileHandleTargetPtr self);
 
-FilesystemPtr Filesystem__heap_new(KString name, FileIO file_io);
+FilesystemPtr Filesystem__heap_new(BString name, FileIO file_io);
 FilesystemPtr RootFilesystem__heap_new();
 
-Result(MountResult) Filesystem__mount(FilesystemPtr root, KString path, FilesystemPtr filesystem);
+Result(MountResult) Filesystem__mount(FilesystemPtr root, BString path, FilesystemPtr filesystem);
 
 FilesystemIOState FilesystemIOState__new(FilesystemPtr filesystem);
 FilesystemIOStatePtr FilesystemIOState__heap_new(FilesystemPtr filesystem);

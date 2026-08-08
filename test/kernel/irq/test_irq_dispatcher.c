@@ -196,3 +196,32 @@ void test_irq_dispatcher_rejects_service_registration_when_kernel_consumer_exist
 
     TEST_ASSERT_EQUAL_UINT64(0, Arch__enable_count());
 }
+
+void test_irq_dispatcher_dispose_process_resources_unregisters_service_consumer(void)
+{
+    ProcessPtr first_process = dummy_process(1, 0, PROC_STATE_READY);
+    first_process->process_class = PROCESS_CLASS_SERVICE;
+    ProcessPtr second_process = dummy_process(2, 0, PROC_STATE_READY);
+    second_process->process_class = PROCESS_CLASS_SERVICE;
+    IRQNumber irq = 48;
+
+    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, first_process))
+        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(IRQRegistrationStatus, IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, first_process))
+        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL_UINT64(irq, Arch__masked_irq());
+    TEST_ASSERT_EQUAL_UINT64(1, Arch__mask_count());
+
+    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, second_process))
+        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL_UINT64(2, Arch__enable_count());
+}

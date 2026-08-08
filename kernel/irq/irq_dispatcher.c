@@ -1,12 +1,14 @@
 #include "irq_dispatcher.h"
 
-static KString missing_dispatcher = KSTRING_NEW("Missing IRQ dispatcher");
-static KString missing_kernel_consumer = KSTRING_NEW("Missing IRQ kernel consumer");
-static KString missing_service_process = KSTRING_NEW("Missing IRQ service process");
-static KString missing_scheduler = KSTRING_NEW("Missing scheduler for IRQ service consumer");
-static KString irq_already_registered = KSTRING_NEW("IRQ already registered");
+static BString missing_dispatcher = BSTRING_NEW("Missing IRQ dispatcher");
+static BString missing_kernel_consumer = BSTRING_NEW("Missing IRQ kernel consumer");
+static BString missing_service_process = BSTRING_NEW("Missing IRQ service process");
+static BString missing_scheduler = BSTRING_NEW("Missing scheduler for IRQ service consumer");
+static BString irq_already_registered = BSTRING_NEW("IRQ already registered");
 
 MapBodyDefine(IRQConsumerMap);
+FixedArrayDefine(IRQNumber, 256, IRQNumbers, SimpleEquals(uint64_t));
+FixedArrayBodyDefine(IRQNumbers);
 
 Result(IRQRegistrationStatus) IRQDispatcher__register_kernel(
     IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, void * data
@@ -77,6 +79,45 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(
     End
 
     ResultMatch(SubsystemInitStatus, Arch__enable_irq(irq))
+        IsError(code, message, return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR))
+    End
+
+    return Success(IRQRegistrationStatus, IRQ_REGISTERED);
+}
+
+Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(
+    IRQDispatcherPtr self, ProcessPtr process
+)
+{
+    if (self == NULL)
+    {
+        return Error(IRQRegistrationStatus, missing_dispatcher, IRQ_REGISTRATION_ERROR);
+    }
+    if (process == NULL)
+    {
+        return Error(IRQRegistrationStatus, missing_service_process, IRQ_INVALID_CONSUMER);
+    }
+
+    IRQNumbers stale_irqs = IRQNumbers__new();
+
+    CriticalSection(self->lock,
+    {
+        MapIterate(IRQConsumerMap, self->consumers, index, irq, consumer)
+            if (consumer.type == IRQ_CONSUMER_SERVICE && consumer.service_process == process)
+            {
+                ResultMatch(CollectionCode, IRQNumbers__push(&stale_irqs, irq))
+                    IsError(code, message, _cs_return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR))
+                End
+            }
+        End
+
+        FAIterate(IRQNumbers, stale_irqs, irq_index, irq)
+            IRQConsumerMap__delete(&self->consumers, irq);
+            Arch__mask_irq(irq);
+        End
+    });
+
+    ResultMatch(ServiceCode, ServiceEventDispatcher__unsubscribe_process(&self->scheduler->service_event_dispatcher, process))
         IsError(code, message, return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR))
     End
 

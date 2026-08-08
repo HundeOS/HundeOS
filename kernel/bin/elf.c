@@ -10,7 +10,7 @@ FixedArrayBodyDefine(SectionHeaderArray);
 FixedArrayBodyDefine(ProgramHeaderArray);
 FixedArrayBodyDefine(ExpandedSegmentArray);
 
-Elf Elf__new(const Address start, const Address end, const KString name)
+Elf Elf__new(const Address start, const Address end, const BString name)
 {
     return (Elf) {
         .start = start,

@@ -2,6 +2,7 @@
 #define _COMMON_INCLUDES_SYSCALLS_IO_H
 
 #include <stdint.h>
+#include "process.h"
 
 typedef enum IOOperation
 {
@@ -36,6 +37,7 @@ typedef enum IOStatus
     IO_EOF = -10,
     IO_UNKNOWN_BUFFER = -11,
     IO_UNKNOWN_PID = -12,
+    IO_PERMISSION_DENIED = -13,
     IO_PANIC = -255,
 }
 IOStatus;
@@ -45,6 +47,7 @@ typedef enum IOFlags
     IO_OPEN_READ = 0x1,
     IO_OPEN_WRITE = 0x2,
     IO_REMOVE_RECURSIVE = 0x4,
+    IO_OPEN_EXECUTE = 0x8,
 }
 IOFlags;
 
@@ -52,6 +55,8 @@ typedef int64_t IOHandle;
 typedef int64_t ByteCount;
 typedef int64_t DirectoryEntryCount;
 typedef uint64_t Flags;
+typedef uint16_t FileMode;
+typedef uint64_t DirectoryEntryAttributes;
 
 typedef char * IOServerBufferDataPtr;
 
@@ -73,9 +78,29 @@ IOServerRole;
 
 #define IO_DIRENT_NAME_MAX 256
 
+#define IO_MODE_TYPE_MASK 0xF000U
+#define IO_MODE_TYPE_FILE 0x8000U
+#define IO_MODE_TYPE_DIR 0x4000U
+
+#define IO_MODE_OWNER_READ  0x0100U
+#define IO_MODE_OWNER_WRITE 0x0080U
+#define IO_MODE_OWNER_EXEC  0x0040U
+#define IO_MODE_GROUP_READ  0x0020U
+#define IO_MODE_GROUP_WRITE 0x0010U
+#define IO_MODE_GROUP_EXEC  0x0008U
+#define IO_MODE_OTHER_READ  0x0004U
+#define IO_MODE_OTHER_WRITE 0x0002U
+#define IO_MODE_OTHER_EXEC  0x0001U
+
+#define IO_DIRENT_ATTR_NONE 0ULL
+#define IO_DIRENT_ATTR_HIDDEN (1ULL << 0)
+
 typedef struct DirectoryEntry
 {
-    uint64_t attributes;
+    DirectoryEntryAttributes attributes;
+    UserID user_id;
+    GroupID group_id;
+    FileMode mode;
     uint64_t name_len;
     char name[IO_DIRENT_NAME_MAX];
 }

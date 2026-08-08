@@ -10,11 +10,33 @@
 #include "../types/optional.h"
 #include "../mutex.h"
 #include "../process.h"
+#include "../kernel_core.h"
+#include "../scheduler/scheduler.h"
 
 FixedArrayBodyDefine(Handlers);
 
-static KString unhandled_syscall = KSTRING_NEW("Unhandled syscall");
-static KString unhandled_syscall_format = KSTRING_NEW("Unhandled syscall %i");
+static BString unhandled_syscall = BSTRING_NEW("Unhandled syscall");
+static BString unhandled_syscall_format = BSTRING_NEW("Unhandled syscall %i");
+
+static Result(SystemCallResult) SyscallDispatcher__deliver_pending_signal(
+    KernelPtr kernel, Optional(ProcessPtr) process_opt, Result(SystemCallResult) syscall_result
+)
+{
+    Match(ProcessPtr, process_opt)
+        IsSome(process,
+        {
+            Match(ProcessSignal, Process__take_pending_signal(process))
+                IsSome(signal,
+                {
+                    Process__dispose_owned_kernel_resources(kernel, process);
+                    Scheduler__exit(kernel->scheduler, process, ProcessSignal__exit_code(signal));
+                })
+            End
+        })
+    End
+
+    return syscall_result;
+}
 
 
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler)
@@ -47,7 +69,9 @@ Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
     Match(Handler, Handlers__at(&self->handlers, syscall_id));
         IsSome(handler,
         {
-            return handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5);
+            return SyscallDispatcher__deliver_pending_signal(
+                kernel, process_opt, handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5)
+            );
         });
         IsNone(
         {
@@ -55,5 +79,5 @@ Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
         })
     End;
 
-    return Error(SystemCallResult, KString__sprintf(&unhandled_syscall_format, syscall_id), SYSCALL_FAILURE);
+    return Error(SystemCallResult, BString__sprintf(&unhandled_syscall_format, syscall_id), SYSCALL_FAILURE);
 }

@@ -30,7 +30,7 @@ static Result(BlockCount) fake_read(
 
     if (block >= FAKE_BLOCK_COUNT || count != 1)
     {
-        return Error(BlockCount, kstring("invalid block"), BLOCK_DEVICE_IO_ERROR);
+        return Error(BlockCount, bstring("invalid block"), BLOCK_DEVICE_IO_ERROR);
     }
 
     for (size_t i = 0; i < BLOCK_DEVICE_BLOCK_SIZE; i++)
@@ -49,7 +49,7 @@ static Result(BlockCount) fake_write(
 
     if (block >= FAKE_BLOCK_COUNT || count != 1)
     {
-        return Error(BlockCount, kstring("invalid block"), BLOCK_DEVICE_IO_ERROR);
+        return Error(BlockCount, bstring("invalid block"), BLOCK_DEVICE_IO_ERROR);
     }
 
     for (size_t i = 0; i < BLOCK_DEVICE_BLOCK_SIZE; i++)

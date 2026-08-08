@@ -5,21 +5,22 @@
 #include "kernel_init.h"
 #include "panic.h"
 #include "process.h"
+#include "exec/exec.h"
 #include "arch/cpu.h"
 #include "arch/cpu_timer.h"
 #include "arch/panic.h"
 #include "bin/embedded_binaries.h"
-#include "types/kstring.h"
+#include "types/bstring.h"
 #include "types/result.h"
 #include "subsystems/io/io_subsystem.h"
 #include "syscalls/io.h"
 #include "../arch/aarch64/io/uart.h"
 
-KString panic_message = KSTRING_NEW("Program failed: %s\n");
-static KString console_path = KSTRING_NEW(":console:");
-static KString tty_path = KSTRING_NEW(":tty:");
+BString panic_message = BSTRING_NEW("Program failed: %s\n");
+static BString console_path = BSTRING_NEW(":console:");
+static BString tty_path = BSTRING_NEW(":tty:");
 
-static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, KString path, Flags flags)
+static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, BString path, Flags flags)
 {
     __d_printf(
         IOSUB, "open_stdio_handle pid=%i name=%s path=%s flags=%i\n",
@@ -74,7 +75,7 @@ static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, Proces
     return Success(ProcessSetupStatus, PROCESS_SETUP);
 }
 
-void schedule_as(KernelPtr kernel, KString name, ProcessClass process_class)
+void schedule_as(KernelPtr kernel, BString name, ProcessClass process_class)
 {
     __d_printf(PROGRESS, "Queuing to scheduler: %s\n", cstr(name));
     Optional(Elf) program = EmbeddedElf__load(name);
@@ -86,6 +87,7 @@ void schedule_as(KernelPtr kernel, KString name, ProcessClass process_class)
                 {
                     __d_printf(PROCESS, "schedule_as setup success pid=%i name=%s process=%p\n", process->pid, cstr(process->name), process);
                     process->process_class = process_class;
+                    Exec__apply_builtin_identity_policy(process);
                     ResultMatch(ProcessSetupStatus, install_default_stdio(kernel, process))
                         IsSuccess(_,
                         {
@@ -94,14 +96,14 @@ void schedule_as(KernelPtr kernel, KString name, ProcessClass process_class)
                         });
                         IsError(code, message,
                         {
-                            Kernel__panic(KString__cstr(&message), NULL);
+                            Kernel__panic(BString__cstr(&message), NULL);
                         })
                     End
                 })
                 IsError(code, message,
                 {
                     __d_printf(PANIC, "Program failed: %s\n", cstr(name));
-                    KString panic_error = KString__sprintf(&panic_message, cstr(name));
+                    BString panic_error = BString__sprintf(&panic_message, cstr(name));
                     Kernel__panic(cstr(panic_error), NULL);
                 })
             End
@@ -109,14 +111,14 @@ void schedule_as(KernelPtr kernel, KString name, ProcessClass process_class)
         IsNone(
         {
             __d_printf(PANIC, "Program failed: %s\n", cstr(name));
-            KString panic_error = KString__sprintf(&panic_message, cstr(name));
+            BString panic_error = BString__sprintf(&panic_message, cstr(name));
             Kernel__panic(cstr(panic_error), NULL);
 
         })
     End
 }
 
-void schedule(KernelPtr kernel, KString name)
+void schedule(KernelPtr kernel, BString name)
 {
     schedule_as(kernel, name, PROCESS_CLASS_NORMAL);
 }
@@ -146,7 +148,7 @@ void Kernel_main(CPUID cpu_id) {
         IsError(code, message,
         {
             __d_printf(PANIC, "CPU init failed: %i\n", cpu_id);
-            Kernel__panic(KString__cstr(&message), NULL);
+            Kernel__panic(BString__cstr(&message), NULL);
             return;
         });
     End
@@ -154,7 +156,7 @@ void Kernel_main(CPUID cpu_id) {
     if (cpu_id == 1)
     {
         __d_printf(PROGRESS, "Kernel starting loading program: %i\n", cpu_id);
-        schedule(kernel, kstring("hundeschau"));
+        schedule(kernel, bstring("hundeschau"));
         Scheduler__mark_ready(kernel->scheduler);
     }
     else
@@ -162,7 +164,7 @@ void Kernel_main(CPUID cpu_id) {
         ResultMatch(SchedulerInitStatus, Scheduler__wait_until_ready(kernel->scheduler))
             IsError(code, message,
             {
-                Kernel__panic(KString__cstr(&message), NULL);
+                Kernel__panic(BString__cstr(&message), NULL);
                 return;
             });
         End

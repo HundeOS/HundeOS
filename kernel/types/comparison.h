@@ -49,7 +49,7 @@ SimpleEqualsPreDef(char)
 SimpleEqualsPreDef(Char)
 
 bool Ptr__equals(void * a, void * b);
-bool kstring_equals(void * a, void * b);
+bool bstring_equals(void * a, void * b);
 
 bool never__equals(void * a, void * b);
 

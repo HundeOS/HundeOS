@@ -48,12 +48,12 @@ static Flags FLAGS = 1234;
 
 static Char expected[] = {1, 2, 3, 4};
 
-static KString path = KSTRING_NEW(":test:");
-static KString second_path = KSTRING_NEW(":test2:");
-static KString console_path = KSTRING_NEW(":console:");
-static KString tty_path = KSTRING_NEW(":tty:");
-static KString hello_stream_path = KSTRING_NEW("/dev/hello");
-static KString invalid_path = KSTRING_NEW("/sss");
+static BString path = BSTRING_NEW(":test:");
+static BString second_path = BSTRING_NEW(":test2:");
+static BString console_path = BSTRING_NEW(":console:");
+static BString tty_path = BSTRING_NEW(":tty:");
+static BString hello_stream_path = BSTRING_NEW("/dev/hello");
+static BString invalid_path = BSTRING_NEW("/sss");
 
 #define NEW_FAKE_IO_STATE \
     (FakeIOState) { \
@@ -97,7 +97,7 @@ void reset_state()
     clear_deferred_syscall_result();
 }
 
-static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, KString path, Flags flags)
+static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, BString path, Flags flags)
 {
     TEST_ASSERT_EQUAL(FLAGS, flags);
 
@@ -116,7 +116,7 @@ static Result(IOBufferPtr) fake_read(
     read = true;
     if (IOBuffer__item_count(buffer) == 0)
     {
-        return Error(IOBufferPtr, kstring("no data"), IO_WAIT_FOR_DATA);
+        return Error(IOBufferPtr, bstring("no data"), IO_WAIT_FOR_DATA);
     }
     return Success(IOBufferPtr, buffer);
 }
@@ -140,7 +140,7 @@ static Result(IOInternalHandle) fake_close(IOStatePtr state_ptr, IOInternalHandl
 
     if (!opened)
     {
-        return Error(IOInternalHandle, kstring("not opened"), IO_NOT_OPEN);
+        return Error(IOInternalHandle, bstring("not opened"), IO_NOT_OPEN);
     }
     return Success(IOInternalHandle, handle);
 }

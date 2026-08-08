@@ -66,15 +66,15 @@ void * Ext2FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, 
     return 0;
 }
 
-KString embedded = KSTRING_NEW("ebin");
-KString dev = KSTRING_NEW("dev");
-KString fat16 = KSTRING_NEW("fat16");
-KString fat32 = KSTRING_NEW("fat32");
-KString ext2 = KSTRING_NEW("ext2");
-KString memfs = KSTRING_NEW("tmp/memfs");
+BString embedded = BSTRING_NEW("sbin");
+BString dev = BSTRING_NEW("dev");
+BString fat16 = BSTRING_NEW("fat16");
+BString fat32 = BSTRING_NEW("fat32");
+BString ext2 = BSTRING_NEW("ext2");
+BString memfs = BSTRING_NEW("tmp/memfs");
 
-Optional(BlockDevicePtr) BlockDeviceRegistry__find(KString path) __attribute__((weak));
-Optional(BlockDevicePtr) BlockDeviceRegistry__find(KString path)
+Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path) __attribute__((weak));
+Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path)
 {
     return None(BlockDevicePtr);
 }
@@ -90,19 +90,19 @@ static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableE
     Match(BlockDevicePtr, BlockDeviceRegistry__find(entry->device_path))
         IsSome(device,
         {
-            if (KString__equals(&entry->filesystem_type, &fat16) && Fat16FilesystemIO__available())
+            if (BString__equals(&entry->filesystem_type, &fat16) && Fat16FilesystemIO__available())
             {
                 FilesystemPtr fat_filesystem = Filesystem__heap_new(entry->mountpoint, Fat16FilesystemIO__new());
                 void * state = Fat16FilesystemIOState__heap_new(fat_filesystem, device, 0);
                 filesystem = Some(FilesystemPtr, fat_filesystem);
             }
-            else if (KString__equals(&entry->filesystem_type, &fat32) && Fat32FilesystemIO__available())
+            else if (BString__equals(&entry->filesystem_type, &fat32) && Fat32FilesystemIO__available())
             {
                 FilesystemPtr fat_filesystem = Filesystem__heap_new(entry->mountpoint, Fat32FilesystemIO__new());
                 void * state = Fat32FilesystemIOState__heap_new(fat_filesystem, device, 0);
                 filesystem = Some(FilesystemPtr, fat_filesystem);
             }
-            else if (KString__equals(&entry->filesystem_type, &ext2) && Ext2FilesystemIO__available())
+            else if (BString__equals(&entry->filesystem_type, &ext2) && Ext2FilesystemIO__available())
             {
                 FilesystemPtr ext2_filesystem = Filesystem__heap_new(entry->mountpoint, Ext2FilesystemIO__new());
                 void * state = Ext2FilesystemIOState__heap_new(ext2_filesystem, device, 0);
@@ -120,9 +120,9 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
 {
     ResultMatch(CollectionCode, FilesystemTable__add(
         self,
-        KSTRING_NEW("/dev/virtio1"),
-        KSTRING_NEW("ext2"),
-        KSTRING_NEW("/mnt/ext2fs")
+        BSTRING_NEW("/dev/virtio1"),
+        BSTRING_NEW("ext2"),
+        BSTRING_NEW("/")
     ))
         IsSuccess(index, {})
         IsError(code, message, return Error(CollectionCode, message, code))
@@ -130,9 +130,9 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
 
     ResultMatch(CollectionCode, FilesystemTable__add(
         self,
-        KSTRING_NEW("/dev/virtio2"),
-        KSTRING_NEW("fat32"),
-        KSTRING_NEW("/mnt/fs1")
+        BSTRING_NEW("/dev/virtio2"),
+        BSTRING_NEW("fat32"),
+        BSTRING_NEW("/mnt/fs1")
     ))
         IsSuccess(index, {})
         IsError(code, message, return Error(CollectionCode, message, code))

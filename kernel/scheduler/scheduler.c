@@ -25,23 +25,28 @@ FixedArrayBodyDefine(CPUSchedulers);
         .started = false, \
     }
 
-KString unreachable_code = KSTRING_NEW("Unreachable code reached\n");
-KString process_not_found = KSTRING_NEW("Process not found\n");
-KString reason_mismatch_format = KSTRING_NEW("Process was parked for reason %i, not %i\n");
-KString process_wasnt_parked = KSTRING_NEW("Process wasn't parked\n");
-static KString abort_format = KSTRING_NEW(
+BString unreachable_code = BSTRING_NEW("Unreachable code reached\n");
+BString process_not_found = BSTRING_NEW("Process not found\n");
+BString reason_mismatch_format = BSTRING_NEW("Process was parked for reason %i, not %i\n");
+BString process_wasnt_parked = BSTRING_NEW("Process wasn't parked\n");
+static BString abort_format = BSTRING_NEW(
     "process fault: %s exception=%s fsc=%i:%s access=%s pc=0x%x far=0x%x esr=0x%x ec=0x%x cpu=%i\n"
 );
-static const KString data_abort_reason = KSTRING_NEW("data abort");
-static const KString instruction_abort_reason = KSTRING_NEW("instruction abort");
-static const KString undefined_instruction_reason = KSTRING_NEW("undefined instruction");
-static const KString alignment_fault_reason = KSTRING_NEW("alignment fault");
-static const KString bad_syscall_reason = KSTRING_NEW("bad syscall");
-static const KString unknown_user_exception_reason = KSTRING_NEW("unknown user exception");
-static const KString unknown_fault_reason = KSTRING_NEW("unknown fault");
-static KString service_event_queue_empty = KSTRING_NEW("Service event queue is empty");
+static const BString data_abort_reason = BSTRING_NEW("data abort");
+static const BString instruction_abort_reason = BSTRING_NEW("instruction abort");
+static const BString undefined_instruction_reason = BSTRING_NEW("undefined instruction");
+static const BString alignment_fault_reason = BSTRING_NEW("alignment fault");
+static const BString bad_syscall_reason = BSTRING_NEW("bad syscall");
+static const BString unknown_user_exception_reason = BSTRING_NEW("unknown user exception");
+static const BString unknown_fault_reason = BSTRING_NEW("unknown fault");
+static BString service_event_queue_empty = BSTRING_NEW("Service event queue is empty");
+static BString child_event_queue_empty = BSTRING_NEW("Child event queue is empty");
 
 static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
+static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
+static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(
+    SchedulerPtr self, ProcessPtr parent, ProcessPtr child, ReturnCode return_code
+);
 static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_key(
     SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
     Optional(Continuation) kernel_continuation, ParkReason reason,
@@ -461,7 +466,7 @@ ProcessTable Scheduler__process_snapshot(SchedulerPtr self)
     return processes;
 }
 
-static ConstKStringPtr ProcessAbortReason__to_string(ProcessAbortReason reason)
+static ConstBStringPtr ProcessAbortReason__to_string(ProcessAbortReason reason)
 {
     switch (reason)
     {
@@ -504,8 +509,8 @@ static void Scheduler__write_abort_to_stderr(IOSubsystemPtr io_subsystem, Proces
     ResultMatch(ProcessIOHandle, Process__get_io_handle(proc, 2))
         IsSuccess(handle,
         {
-            ConstKStringPtr reason = ProcessAbortReason__to_string(abort.reason);
-            KString message = KString__sprintf(
+            ConstBStringPtr reason = ProcessAbortReason__to_string(abort.reason);
+            BString message = BString__sprintf(
                 &abort_format,
                 cstr_p(reason),
                 abort.exception_description,
@@ -546,6 +551,12 @@ static Result(ProcessPtr) Scheduler__terminate_process(SchedulerPtr self, Proces
                 Match(ProcessPtr, exited->parent)
                     IsSome(parent,
                     {
+                        if (!Scheduler__is_parked_for(parent, PARK_WAIT_CHILD))
+                        {
+                            ResultMatch(ServiceCode, Scheduler__notify_parent_child_exit_locked(self, parent, proc, return_code))
+                                IsError(code, message, return Error(ProcessPtr, message, code))
+                            End
+                        }
                         if (Scheduler__is_parked_for(parent, PARK_WAIT_CHILD))
                         {
                             __d_printf(
@@ -584,9 +595,26 @@ static Result(ProcessPtr) Scheduler__terminate_process(SchedulerPtr self, Proces
     End
 
 
-    KString no_scheduler_format = kstring("Process not found: %i\n");
-    KString no_scheduler = KString__sprintf(&no_scheduler_format, proc->pid);
+    BString no_scheduler_format = bstring("Process not found: %i\n");
+    BString no_scheduler = BString__sprintf(&no_scheduler_format, proc->pid);
     return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
+static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(
+    SchedulerPtr self, ProcessPtr parent, ProcessPtr child, ReturnCode return_code
+)
+{
+    ProcessChildEvent event;
+    event.pid = child->pid;
+    event.status = return_code;
+    event.type = PROCESS_CHILD_EVENT_EXITED;
+
+    ResultMatch(CollectionCode, Process__push_child_event(parent, event))
+        IsSuccess(_, )
+        IsError(code, message, return Error(ServiceCode, message, code))
+    End
+
+    return Scheduler__child_mark_runnable_locked(self, parent);
 }
 
 Result(ProcessPtr) Scheduler__exit(SchedulerPtr self, ProcessPtr proc, ReturnCode return_code)
@@ -721,8 +749,8 @@ static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_k
     End
 
 
-    KString no_scheduler_format = kstring("No scheduler found for process: %i\n");
-    KString no_scheduler = KString__sprintf(&no_scheduler_format, proc->pid);
+    BString no_scheduler_format = bstring("No scheduler found for process: %i\n");
+    BString no_scheduler = BString__sprintf(&no_scheduler_format, proc->pid);
     return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
@@ -777,8 +805,8 @@ static Result(ProcessPtr) Scheduler__unpark_with_operation_key(
     End
 
 
-    KString no_scheduler_format = kstring("Process not found: %i\n");
-    KString no_scheduler = KString__sprintf(&no_scheduler_format, proc->pid);
+    BString no_scheduler_format = bstring("Process not found: %i\n");
+    BString no_scheduler = BString__sprintf(&no_scheduler_format, proc->pid);
     return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
@@ -794,7 +822,7 @@ Result(CollectionCode) Scheduler__add_blocked_operation(
         End
     })
 
-    return Error(CollectionCode, kstring("Unable to add blocked operation"), LINKED_LIST_ALLOCATION_FAILED);
+    return Error(CollectionCode, bstring("Unable to add blocked operation"), LINKED_LIST_ALLOCATION_FAILED);
 }
 
 Result(CollectionCode) Scheduler__resolve_blocked_operation(
@@ -802,7 +830,7 @@ Result(CollectionCode) Scheduler__resolve_blocked_operation(
 )
 {
     Result(CollectionCode) resolved_operation = Error(
-        CollectionCode, kstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND
+        CollectionCode, bstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND
     );
 
     CriticalSection(self->scheduler_lock,
@@ -819,7 +847,7 @@ Result(CollectionCode) Scheduler__resolve_blocked_operation(
         IsError(code, message, return Error(CollectionCode, message, code))
     End
 
-    return Error(CollectionCode, kstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND);
+    return Error(CollectionCode, bstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND);
 }
 
 bool Scheduler__parked_operation_is_ready(SchedulerPtr self, ParkedOperationPtr operation)
@@ -951,8 +979,8 @@ Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc,
         })
         IsNone(
         {
-            KString invalid_cpu_format = kstring("Invalid CPU %i\n");
-            KString invalid_cpu = KString__sprintf(&invalid_cpu_format, cpu);
+            BString invalid_cpu_format = bstring("Invalid CPU %i\n");
+            BString invalid_cpu = BString__sprintf(&invalid_cpu_format, cpu);
 
             return Error(CPUID, invalid_cpu, SCHEDULER_INVALID_CPU);
         });
@@ -1016,6 +1044,16 @@ Result(ServiceEvent) Scheduler__service_take_next_event(SchedulerPtr self, Proce
     return Error(ServiceEvent, service_event_queue_empty, SERVICE_EVENT_QUEUE_EMPTY);
 }
 
+Result(ProcessChildEvent) Scheduler__child_take_next_event(SchedulerPtr self, ProcessPtr process)
+{
+    CriticalSection(self->scheduler_lock,
+    {
+        _cs_return Process__pop_next_child_event(process);
+    })
+
+    return Error(ProcessChildEvent, child_event_queue_empty, PROCESS_CHILD_EVENT_QUEUE_EMPTY);
+}
+
 Result(ServiceEvent) Scheduler__service_wait(
     SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context, Optional(Continuation) continuation
 )
@@ -1057,9 +1095,42 @@ Result(ServiceEvent) Scheduler__service_wait_with_context_ownership(
         End
     })
 
-    KString no_scheduler_format = kstring("No scheduler found for process: %i\n");
-    KString no_scheduler = KString__sprintf(&no_scheduler_format, process->pid);
+    BString no_scheduler_format = bstring("No scheduler found for process: %i\n");
+    BString no_scheduler = BString__sprintf(&no_scheduler_format, process->pid);
     return Error(ServiceEvent, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
+Result(ProcessChildEvent) Scheduler__child_wait_with_context_ownership(
+    SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context,
+    Optional(Continuation) continuation, bool owns_kernel_context
+)
+{
+    CriticalSection(self->scheduler_lock,
+    {
+        ResultMatch(ProcessChildEvent, Process__pop_next_child_event(process))
+            IsSuccess(event, _cs_return Success(ProcessChildEvent, event))
+            IsError(code, message,
+            {
+                if (code != PROCESS_CHILD_EVENT_QUEUE_EMPTY)
+                {
+                    _cs_return Error(ProcessChildEvent, message, code);
+                }
+            })
+        End
+
+        FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+            ResultMatch(ProcessPtr, CPUScheduler__park(
+                sched, process, kernel_context, continuation,
+                PARK_WAIT_CHILD_EVENT, owns_kernel_context, None(OperationKey)
+            ))
+                IsSuccess(parked, _cs_return Error(ProcessChildEvent, child_event_queue_empty, PROCESS_CHILD_EVENT_QUEUE_EMPTY))
+            End
+        End
+    })
+
+    BString no_scheduler_format = bstring("No scheduler found for process: %i\n");
+    BString no_scheduler = BString__sprintf(&no_scheduler_format, process->pid);
+    return Error(ProcessChildEvent, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
 static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr self, ProcessPtr process)
@@ -1098,8 +1169,8 @@ static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr 
 
     return Success(ServiceCode, SERVICE_OK);
 
-    KString no_scheduler_format = kstring("No scheduler found for process: %i\n");
-    KString no_scheduler = KString__sprintf(&no_scheduler_format, process->pid);
+    BString no_scheduler_format = bstring("No scheduler found for process: %i\n");
+    BString no_scheduler = BString__sprintf(&no_scheduler_format, process->pid);
     return Error(ServiceCode, no_scheduler, SERVICE_SCHEDULER_ERROR);
 }
 
@@ -1113,6 +1184,27 @@ Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr pro
 
         _cs_return Scheduler__service_mark_runnable_locked(self, process);
     })
+
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process)
+{
+    if (Scheduler__is_parked_for(process, PARK_WAIT_CHILD_EVENT))
+    {
+        FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+            ResultMatch(ProcessPtr, CPUScheduler__unpark(sched, process, PARK_WAIT_CHILD_EVENT, None(ReturnCode)))
+                IsSuccess(unparked, return Success(ServiceCode, SERVICE_OK))
+                IsError(code, message,
+                {
+                    if (code != SCHEDULER_PROCESS_NOT_FOUND)
+                    {
+                        return Error(ServiceCode, message, code);
+                    }
+                })
+            End
+        End
+    }
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -1211,8 +1303,8 @@ Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu)
             });
             IsNone(
             {
-                KString invalid_cpu_format = kstring("Invalid CPU %i\n");
-                KString invalid_cpu = KString__sprintf(&invalid_cpu_format, cpu);
+                BString invalid_cpu_format = bstring("Invalid CPU %i\n");
+                BString invalid_cpu = BString__sprintf(&invalid_cpu_format, cpu);
 
                 _cs_return Error(SchedulerInitStatus, invalid_cpu, SCHEDULER_INVALID_CPU);
                 __d_println(MUTEX, "Unreachable code reached");
@@ -1220,7 +1312,7 @@ Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu)
         End
     });
 
-    KString scheduler_failed_format = kstring("Scheduler failed to start CPU %i\n");
+    BString scheduler_failed_format = bstring("Scheduler failed to start CPU %i\n");
 
-    return Error(SchedulerInitStatus, KString__sprintf(&scheduler_failed_format, cpu), SCHEDULER_INIT_ERROR);
+    return Error(SchedulerInitStatus, BString__sprintf(&scheduler_failed_format, cpu), SCHEDULER_INIT_ERROR);
 }

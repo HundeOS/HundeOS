@@ -16,6 +16,7 @@ manifest:
     - kernel/subsystems/io/*.c
     - kernel/subsystems/io/block/*.c
     - kernel/subsystems/io/file/*.c
+    - kernel/subsystems/io/file/fat/*.c
     - kernel/subsystems/io/file/devfs/*.c
     - kernel/subsystems/io/file/embedded/*.c
     - kernel/subsystems/io/file/fat16/*.c

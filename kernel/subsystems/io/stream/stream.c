@@ -3,7 +3,7 @@
 #include "debug.h"
 #include "subsystems/io/io_subsystem.h"
 #include "../../../kalloc.h"
-#include "../../../types/kstring.h"
+#include "../../../types/bstring.h"
 #include "../../../types/result.h"
 
 FixedArrayBodyDefine(StreamParkedContexts);
@@ -27,7 +27,7 @@ static bool Stream__handle_match(IOContextPtr * context_p, void * handle_p)
     return handle == device_internal_handle(Unwrap(IOHandle, context->handle, -1));
 }
 
-static Result(IOInternalHandle) Stream__open(IOStatePtr state, KString path, Flags flags)
+static Result(IOInternalHandle) Stream__open(IOStatePtr state, BString path, Flags flags)
 {
     StreamStatePtr self = (StreamStatePtr) state;
     IOInternalHandle handle = -1;
@@ -69,12 +69,12 @@ static Result(IOBufferPtr) Stream__read(
     StreamStatePtr self = (StreamStatePtr) state;
     if (IOBuffer__item_count(&self->read_buffer) == 0 && self->eof)
     {
-        return Error(IOBufferPtr, kstring("EOF"), IO_EOF);
+        return Error(IOBufferPtr, bstring("EOF"), IO_EOF);
     }
 
     if (!self->data_available || IOBuffer__item_count(&self->read_buffer) == 0)
     {
-        return Error(IOBufferPtr, kstring("wait for IO"), IO_WAIT_FOR_DATA);
+        return Error(IOBufferPtr, bstring("wait for IO"), IO_WAIT_FOR_DATA);
     }
     return Success(IOBufferPtr, &self->read_buffer);
 }
@@ -120,7 +120,7 @@ static Result(ParkStatus) Stream__unpark(IOStatePtr state)
     CriticalSection(self->lock,
     {
         Match(IOContextPtr, StreamParkedContexts__pop(&self->parked_contexts))
-            IsNone(_cs_return Error(ParkStatus, kstring("No parked stream context"), ARRAY_EMPTY))
+            IsNone(_cs_return Error(ParkStatus, bstring("No parked stream context"), ARRAY_EMPTY))
         End
     });
 

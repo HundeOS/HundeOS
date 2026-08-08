@@ -100,6 +100,8 @@ const char * io_status_string(IOStatus status)
             return "IO_UNKNOWN_BUFFER";
         case IO_UNKNOWN_PID:
             return "IO_UNKNOWN_PID";
+        case IO_PERMISSION_DENIED:
+            return "IO_PERMISSION_DENIED";
         case IO_PANIC:
             return "IO_PANIC";
     }

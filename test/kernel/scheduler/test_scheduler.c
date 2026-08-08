@@ -36,10 +36,10 @@ uint64_t Arch__unmasked_irq();
 uint64_t Arch__mask_count();
 uint64_t Arch__unmask_count();
 
-static KString no_return_code = KSTRING_NEW("no return code");
-static KString abort_stderr_path = KSTRING_NEW(":abort-stderr:");
+static BString no_return_code = BSTRING_NEW("no return code");
+static BString abort_stderr_path = BSTRING_NEW(":abort-stderr:");
 
-static Result(IOInternalHandle) abort_stderr_open(IOStatePtr state, KString path, Flags flags)
+static Result(IOInternalHandle) abort_stderr_open(IOStatePtr state, BString path, Flags flags)
 {
     return Success(IOInternalHandle, 0x1234);
 }
@@ -53,7 +53,7 @@ static Result(IOBufferPtr) abort_stderr_read(
     IOStatePtr state, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
 )
 {
-    return Error(IOBufferPtr, kstring("unsupported"), IO_OPERATION_NOT_SUPPORTED);
+    return Error(IOBufferPtr, bstring("unsupported"), IO_OPERATION_NOT_SUPPORTED);
 }
 
 static Result(ByteCount) abort_stderr_write(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size)
@@ -297,7 +297,7 @@ void test_scheduler_init_creates_cpu_slots_independent_of_online_cpu_count(void)
 
     MessageBrokerPtr message_broker = MessageBroker__heap_new();
     SchedulerPtr local_scheduler = Scheduler__heap_new(message_broker);
-    Elf idle = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf idle = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
 
     ResultMatch(SchedulerInitStatus, Scheduler__init(local_scheduler, idle))
         IsError(code, message, TEST_FAIL())

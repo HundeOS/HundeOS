@@ -12,7 +12,7 @@ static const IOInternalHandle INTERNAL_HANDLE = 0x42;
 static const IOHandle RAW_HANDLE = 0x0000000100000042;
 static const FileDescriptor EXPECTED_FD = 3;
 static const Flags FLAGS = IO_OPEN_WRITE;
-static KString path = KSTRING_NEW(":test:");
+static BString path = BSTRING_NEW(":test:");
 
 static KernelPtr kernel = NULL;
 static Process process = STUB_PROCESS(PID);
@@ -26,10 +26,10 @@ static IOInternalHandle write_handle = 0;
 static DataPtr write_data = NULL;
 static size_t write_size = 0;
 
-static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, KString open_path, Flags flags)
+static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, BString open_path, Flags flags)
 {
     TEST_ASSERT_EQUAL(&state, state_ptr);
-    TEST_ASSERT_TRUE(KString__equals(&path, &open_path));
+    TEST_ASSERT_TRUE(BString__equals(&path, &open_path));
     TEST_ASSERT_EQUAL(FLAGS, flags);
     opened = true;
     return Success(IOInternalHandle, INTERNAL_HANDLE);
@@ -56,7 +56,7 @@ static Result(IOBufferPtr) fake_read(
     IOStatePtr state_ptr, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
 )
 {
-    return Error(IOBufferPtr, kstring("not implemented"), IO_OPERATION_NOT_IMPLEMENTED);
+    return Error(IOBufferPtr, bstring("not implemented"), IO_OPERATION_NOT_IMPLEMENTED);
 }
 
 static Result(ParkStatus) fake_park(IOStatePtr state_ptr, IOContextPtr parked_context)

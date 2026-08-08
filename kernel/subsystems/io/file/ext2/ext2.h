@@ -8,7 +8,7 @@
 #include "../../block/block_device.h"
 #include "../filesystem.h"
 #include "../../../../types/fixed_array.h"
-#include "../../../../types/kstring.h"
+#include "../../../../types/bstring.h"
 #include "../../../../types/map.h"
 #include "../../../../types/result.h"
 
@@ -87,7 +87,7 @@ typedef Ext2Volume * Ext2VolumePtr;
 
 typedef struct Ext2DirectoryEntry
 {
-    KString name;
+    BString name;
     Ext2DirectoryEntryType file_type;
     Ext2InodeNumber inode;
     Ext2FileSize size;
@@ -108,7 +108,7 @@ ResultDef(Ext2DirectoryEntries);
 
 typedef struct Ext2FileHandle
 {
-    KString path;
+    BString path;
     FilePointer offset;
     Ext2InodeNumber inode_number;
     Ext2InodeMode mode;

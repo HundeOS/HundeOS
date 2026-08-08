@@ -2,6 +2,7 @@
 #define __COMMON_TYPES_BSTRING_H
 
 #include <stdbool.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include "optional.h"
 
@@ -21,6 +22,8 @@ typedef BString * BStringPtr;
 typedef const BString * ConstBStringPtr;
 
 OptionalDef(BString);
+OptionalDef(char);
+OptionalDef(uint64_t);
 
 typedef struct BStringSplit
 {
@@ -28,6 +31,9 @@ typedef struct BStringSplit
     BString rest;
 }
 BStringSplit;
+
+typedef struct BStringArray BStringArray;
+typedef struct BStringArray * BStringArrayPtr;
 
 BString BString__new(const char * str);
 BString bstring(const char * str);
@@ -40,12 +46,20 @@ bool BString__remove_at(BStringPtr self, StringPos index);
 BString BString__strip(ConstBStringPtr self);
 BString BString__slice(ConstBStringPtr self, StringPos start, StringPos end);
 BStringSplit BString__split_first_any(ConstBStringPtr self, ConstBStringPtr delimiters);
+BStringArray BString__split(ConstBStringPtr self, char delimiter);
 bool BString__equals(ConstBStringPtr self, ConstBStringPtr other);
 bool bstring_equals(void * a, void * b);
 BString BString__append(ConstBStringPtr self, ConstBStringPtr other);
+BString BString__join(BStringArrayPtr array, char delimiter);
 bool BString__starts_with(ConstBStringPtr self, ConstBStringPtr prefix);
+StringPos BString__length(ConstBStringPtr self);
+Optional(char) BString__char_at(ConstBStringPtr self, StringPos index);
 StringPos BString__copy_to(ConstBStringPtr self, char * target, StringPos target_size);
 const char * BString__cstr(ConstBStringPtr self);
+BString BString__uppercase(ConstBStringPtr self);
+Optional(uint64_t) BString__parse_uint64(ConstBStringPtr self);
+BString BString__vsprintf(ConstBStringPtr format, va_list args);
+BString BString__sprintf(ConstBStringPtr format, ...);
 
 #define EMPTY_BSTRING \
     (BString) { \
@@ -61,5 +75,11 @@ const char * BString__cstr(ConstBStringPtr self);
         .len = BString__STRLEN(chars), \
         .data = chars, \
     } \
+
+#define cstr(bstr) \
+    BString__cstr(&(bstr))
+
+#define cstr_p(bstrptr) \
+    BString__cstr(bstrptr)
 
 #endif

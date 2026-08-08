@@ -3,7 +3,7 @@
 
 #include "elf.h"
 
-Optional(Elf) EmbeddedElf__load(KString name);
-KStringArray EmbeddedElf__list();
+Optional(Elf) EmbeddedElf__load(BString name);
+BStringArray EmbeddedElf__list();
 
 #endif

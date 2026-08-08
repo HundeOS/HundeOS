@@ -24,6 +24,15 @@ static bool chained_async_continuation_called = false;
 static bool first_parallel_async_called = false;
 static bool second_parallel_async_called = false;
 
+typedef struct TestServiceMappedMemoryRequest
+{
+    uint64_t physical_address;
+    uint64_t size;
+    uint64_t driver_address;
+    uint64_t device_address;
+}
+TestServiceMappedMemoryRequest;
+
 static void test_resume_process(ProcessPtr process)
 {
     ContextSwitch__switch(ContextSwitch__new(process, None(ProcessPtr)));
@@ -46,6 +55,21 @@ FileIO Fat32FilesystemIO__new()
 }
 
 void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
+{
+    return MemFilesystemIOState__heap_new(fs);
+}
+
+bool Ext2FilesystemIO__available()
+{
+    return true;
+}
+
+FileIO Ext2FilesystemIO__new()
+{
+    return MemFilesystemIO__new();
+}
+
+void * Ext2FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
 {
     return MemFilesystemIOState__heap_new(fs);
 }
@@ -118,6 +142,41 @@ void test_service_handler_become_service_marks_process_as_service(void)
     End
 
     TEST_ASSERT_EQUAL(PROCESS_CLASS_SERVICE, process->process_class);
+}
+
+void test_service_handler_become_service_denies_unprivileged_process(void)
+{
+    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
+    process->process_class = PROCESS_CLASS_NORMAL;
+    Process__set_identity(process, 1000, 1000, PROCESS_CAP_NONE);
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, process), SERVICE_BECOME_SERVICE, 0, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code))
+    End
+
+    TEST_ASSERT_EQUAL(PROCESS_CLASS_NORMAL, process->process_class);
+}
+
+void test_service_handler_map_mmio_denies_unprivileged_process(void)
+{
+    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
+    Process__set_identity(process, 1000, 1000, PROCESS_CAP_NONE);
+    TestServiceMappedMemoryRequest request = {
+        .physical_address = 0x09000000,
+        .size = 0x1000,
+        .driver_address = 0,
+        .device_address = 0,
+    };
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, process), SERVICE_MAP_MMIO, (Anything) &request, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code))
+    End
 }
 
 void test_service_handler_translates_service_user_address_to_device_address(void)
@@ -311,7 +370,7 @@ void test_service_handler_registers_block_device_for_service_process(void)
         IsError(code, message, TEST_FAIL())
     End
 
-    KString path = kstring("/dev/virtio1");
+    BString path = bstring("/dev/virtio1");
     Match(BlockDevicePtr, BlockDeviceRegistry__find(path))
         IsSome(device, TEST_ASSERT_NOT_NULL(device))
         IsNone(TEST_FAIL())
@@ -324,16 +383,16 @@ void test_service_handler_registering_block_device_mounts_matching_filesystem_ta
     FilesystemIOState__heap_new(root);
     ResultMatch(CollectionCode, FilesystemTable__add(
         &root->filesystem_table,
-        kstring("/dev/virtio-table"),
-        kstring("fat32"),
-        kstring("/mnt/fs1")
+        bstring("/dev/virtio-table"),
+        bstring("fat32"),
+        bstring("/mnt/fs1")
     ))
         IsSuccess(index, {})
         IsError(code, message, TEST_FAIL())
     End
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
 
-    Match(FilesystemPtr, Mounts__get(&root->mounts, kstring("/mnt/fs1")))
+    Match(FilesystemPtr, Mounts__get(&root->mounts, bstring("/mnt/fs1")))
         IsSome(mounted, TEST_FAIL())
         IsNone({})
     End
@@ -353,7 +412,48 @@ void test_service_handler_registering_block_device_mounts_matching_filesystem_ta
         IsError(code, message, TEST_FAIL())
     End
 
-    Match(FilesystemPtr, Mounts__get(&root->mounts, kstring("/mnt/fs1")))
+    Match(FilesystemPtr, Mounts__get(&root->mounts, bstring("/mnt/fs1")))
+        IsSome(mounted, TEST_ASSERT_NOT_NULL(mounted))
+        IsNone(TEST_FAIL())
+    End
+}
+
+void test_service_handler_registering_block_device_mounts_root_filesystem_table_entry(void)
+{
+    FilesystemPtr root = RootFilesystem__heap_new();
+    FilesystemIOState__heap_new(root);
+    ResultMatch(CollectionCode, FilesystemTable__add(
+        &root->filesystem_table,
+        bstring("/dev/virtio-root"),
+        bstring("ext2"),
+        bstring("/")
+    ))
+        IsSuccess(index, {})
+        IsError(code, message, TEST_FAIL())
+    End
+    kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
+
+    Match(FilesystemPtr, Mounts__get(&root->mounts, bstring("/")))
+        IsSome(mounted, TEST_FAIL())
+        IsNone({})
+    End
+
+    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
+    process->process_class = PROCESS_CLASS_SERVICE;
+    ServiceBlockDeviceRegistration request = {
+        .path = "/dev/virtio-root",
+        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
+        .block_count = 128,
+    };
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    Match(FilesystemPtr, Mounts__get(&root->mounts, bstring("/")))
         IsSome(mounted, TEST_ASSERT_NOT_NULL(mounted))
         IsNone(TEST_FAIL())
     End
@@ -384,6 +484,48 @@ void test_service_handler_rejects_duplicate_block_device_registration(void)
     End
 }
 
+void test_service_handler_process_cleanup_unregisters_block_device(void)
+{
+    ProcessPtr first_process = dummy_process(1, cpu, PROC_STATE_READY);
+    first_process->process_class = PROCESS_CLASS_SERVICE;
+    ProcessPtr second_process = dummy_process(2, cpu, PROC_STATE_READY);
+    second_process->process_class = PROCESS_CLASS_SERVICE;
+    ServiceBlockDeviceRegistration request = {
+        .path = "/dev/virtio-cleanup",
+        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
+        .block_count = 128,
+    };
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, first_process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")))
+        IsSome(device, TEST_ASSERT_NOT_NULL(device))
+        IsNone(TEST_FAIL())
+    End
+
+    ResultMatch(ProcessSetupStatus, Process__dispose_owned_kernel_resources(kernel, first_process))
+        IsSuccess(status, TEST_ASSERT_EQUAL(PROCESS_SETUP, status))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")))
+        IsSome(device, TEST_FAIL())
+        IsNone({})
+    End
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, second_process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
 void test_service_handler_gets_and_completes_block_write_request(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
@@ -402,7 +544,7 @@ void test_service_handler_gets_and_completes_block_write_request(void)
     End
 
     BlockDevicePtr device = NULL;
-    Match(BlockDevicePtr, BlockDeviceRegistry__find(kstring("/dev/virtio-protocol")))
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-protocol")))
         IsSome(found, device = found)
         IsNone(TEST_FAIL())
     End
@@ -479,7 +621,7 @@ void test_service_handler_block_completion_unparks_waiting_reader(void)
     End
 
     BlockDevicePtr device = NULL;
-    Match(BlockDevicePtr, BlockDeviceRegistry__find(kstring("/dev/virtio-park")))
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-park")))
         IsSome(found, device = found)
         IsNone(TEST_FAIL())
     End
@@ -596,7 +738,7 @@ void test_service_handler_block_completion_runs_async_read_continuation_with_ker
     End
 
     BlockDevicePtr device = NULL;
-    Match(BlockDevicePtr, BlockDeviceRegistry__find(kstring("/dev/virtio-async")))
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-async")))
         IsSome(found, device = found)
         IsNone(TEST_FAIL())
     End
@@ -678,7 +820,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     End
 
     BlockDevicePtr device = NULL;
-    Match(BlockDevicePtr, BlockDeviceRegistry__find(kstring("/dev/virtio-chain")))
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-chain")))
         IsSome(found, device = found)
         IsNone(TEST_FAIL())
     End
@@ -798,7 +940,7 @@ void test_service_handler_parallel_async_reads_complete_out_of_order_without_res
     End
 
     BlockDevicePtr device = NULL;
-    Match(BlockDevicePtr, BlockDeviceRegistry__find(kstring("/dev/virtio-parallel")))
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-parallel")))
         IsSome(found, device = found)
         IsNone(TEST_FAIL())
     End
@@ -930,7 +1072,7 @@ void test_service_handler_failed_block_completion_unparks_waiting_reader_with_er
     End
 
     BlockDevicePtr device = NULL;
-    Match(BlockDevicePtr, BlockDeviceRegistry__find(kstring("/dev/virtio-park-fail")))
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-park-fail")))
         IsSome(found, device = found)
         IsNone(TEST_FAIL())
     End
@@ -996,7 +1138,7 @@ void test_service_handler_block_completion_runs_async_write_continuation(void)
     End
 
     BlockDevicePtr device = NULL;
-    Match(BlockDevicePtr, BlockDeviceRegistry__find(kstring("/dev/virtio-async-write")))
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-async-write")))
         IsSome(found, device = found)
         IsNone(TEST_FAIL())
     End

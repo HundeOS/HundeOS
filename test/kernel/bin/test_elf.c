@@ -22,7 +22,7 @@ void tearDown(void)
 
 static Elf load_test_elf()
 {
-    return Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    return Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
 }
 
 static void check_section(

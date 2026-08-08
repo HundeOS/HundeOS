@@ -1,6 +1,6 @@
 #include "deferred.h"
 
-static KString missing_return_code = KSTRING_NEW("Missing return code");
+static BString missing_return_code = BSTRING_NEW("Missing return code");
 
 Result(Anything) SystemCall__Complete(ParkedOperationPtr parked_operation)
 {

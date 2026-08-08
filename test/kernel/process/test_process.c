@@ -22,7 +22,7 @@ void tearDown(void)
 
 void test_setup_from_elf(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message,
         {
@@ -48,7 +48,7 @@ void test_setup_from_elf(void)
 
 void test_setup_tracks_static_user_allocations(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -70,11 +70,11 @@ void test_setup_tracks_static_user_allocations(void)
 
 void test_setup_with_args_sets_up_multiple_argv_entries(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ProcessArguments arguments = ProcessArguments__new();
-    ProcessArguments__push(&arguments, kstring("one"));
-    ProcessArguments__push(&arguments, kstring("two"));
-    ProcessArguments__push(&arguments, kstring("three"));
+    ProcessArguments__push(&arguments, bstring("one"));
+    ProcessArguments__push(&arguments, bstring("two"));
+    ProcessArguments__push(&arguments, bstring("three"));
 
     ResultMatch(ProcessPtr, Process__setup_with_args(elf, None(ProcessPtr), arguments))
         IsError(code, message, TEST_FAIL())
@@ -96,7 +96,7 @@ void test_setup_with_args_sets_up_multiple_argv_entries(void)
 
 void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -126,7 +126,7 @@ void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
 
 void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -152,7 +152,7 @@ void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
 
 void test_process_free_user_pages_rejects_static_allocation(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -167,7 +167,7 @@ void test_process_free_user_pages_rejects_static_allocation(void)
 
 void test_process_dispose_user_allocations_unmaps_all_user_allocations(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -203,7 +203,7 @@ void test_process_dispose_user_allocations_unmaps_all_user_allocations(void)
 
 void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -250,7 +250,7 @@ void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void
 
 void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -289,7 +289,7 @@ void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
 
 void test_process_sbrk_maps_pages_at_heap_break(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -320,7 +320,7 @@ void test_process_sbrk_maps_pages_at_heap_break(void)
 
 void test_process_sbrk_growth_inside_mapped_page_does_not_map_more_pages(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -341,7 +341,7 @@ void test_process_sbrk_growth_inside_mapped_page_does_not_map_more_pages(void)
 
 void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -369,7 +369,7 @@ void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
 
 void test_process_sbrk_can_shrink_without_unmapping_pages(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -389,7 +389,7 @@ void test_process_sbrk_can_shrink_without_unmapping_pages(void)
 
 void test_process_sbrk_rejects_shrink_below_heap_base(void)
 {
-    Elf elf = Unwrap(Elf, EmbeddedElf__load(kstring("hello_world")), (Elf){});
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
     ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
@@ -414,6 +414,44 @@ void test_process_file_descriptors_allocate_from_three(void)
     ResultMatch(ProcessIOHandle, Process__get_io_handle(process, 3))
         IsSuccess(handle, TEST_ASSERT_EQUAL(0x1234, handle))
         IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_process_setup_defaults_to_root_identity(void)
+{
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
+    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(process,
+        {
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_ROOT, process->user_id);
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_ROOT, process->group_id);
+            TEST_ASSERT_TRUE(Process__is_root(process));
+            TEST_ASSERT_TRUE(Process__has_capability(process, PROCESS_CAP_MAP_MMIO));
+        })
+    End
+}
+
+void test_process_child_inherits_parent_identity(void)
+{
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
+    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(parent,
+        {
+            Process__set_hund_identity(parent);
+
+            ResultMatch(ProcessPtr, Process__setup(elf, Some(ProcessPtr, parent)))
+                IsError(code, message, TEST_FAIL())
+                IsSuccess(child,
+                {
+                    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, child->user_id);
+                    TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_HUND, child->group_id);
+                    TEST_ASSERT_FALSE(Process__is_root(child));
+                    TEST_ASSERT_TRUE(Process__has_capability(child, PROCESS_CAP_REGISTER_BLOCK_DEVICE));
+                })
+            End
+        })
     End
 }
 

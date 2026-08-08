@@ -8,7 +8,7 @@
 
 static KernelPtr kernel = NULL;
 static ProcessPtr parent = NULL;
-static KString exec_path = KSTRING_NEW("/ebin/hello_world");
+static BString exec_path = BSTRING_NEW("/sbin/hello_world");
 static const CPUID cpu = 0;
 
 void setUp(void)
@@ -17,6 +17,7 @@ void setUp(void)
     current_process_reset();
     kernel = init_test_kernel();
     parent = dummy_process(0, cpu, PROC_STATE_RUNNING);
+    Process__set_hund_identity(parent);
     Scheduler__schedule(kernel->scheduler, parent);
     Scheduler__preempt(kernel->scheduler, cpu, NULL);
 }
@@ -60,4 +61,29 @@ void test_exec_handler_nowait_spawns_without_parking_parent()
     End
 
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
+}
+
+void test_exec_request_handler_can_spawn_as_user(void)
+{
+    SpawnRequest request = (SpawnRequest) {
+        .path = "/sbin/shell",
+        .mode = P_NOWAIT,
+        .requested_user_id = PROCESS_USER_USER,
+        .arg0 = 0,
+        .arg1 = 0,
+        .arg2 = 0,
+    };
+
+    ResultMatch(SystemCallResult, ExecRequest__handler(
+        kernel,
+        Some(ProcessPtr, parent),
+        (Anything) &request,
+        0,
+        0,
+        0,
+        0
+    ))
+        IsSuccess(code, TEST_ASSERT_GREATER_THAN(0, code))
+        IsError(code, message, TEST_FAIL())
+    End
 }

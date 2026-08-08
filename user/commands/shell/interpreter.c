@@ -6,7 +6,7 @@
 #define SPAWN_ARG_LIMIT 3
 
 static const BString CMD_EXIT = BSTRING_NEW("exit");
-static const BString COMMAND_SEARCH_PATH = BSTRING_NEW("/ebin");
+static const BString COMMAND_SEARCH_PATH = BSTRING_NEW("/sbin");
 static const BString QUOTE_DELIMITER = BSTRING_NEW("\"");
 static const BString TOKEN_DELIMITERS = BSTRING_NEW(" \t\n\r");
 static const BString BACKGROUND_OPERATOR = BSTRING_NEW("&");

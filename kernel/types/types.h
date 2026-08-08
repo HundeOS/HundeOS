@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "result.h"
 #include "optional.h"
-#include "kstring.h"
+#include "bstring.h"
 
 typedef uint8_t Char;
 typedef Char * CharPtr;

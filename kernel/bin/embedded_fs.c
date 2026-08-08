@@ -64,9 +64,9 @@ bool EmbeddedFs__is_valid(EmbeddedFsPtr self)
     return true;
 }
 
-static KString EmbeddedFs__entry_name(EmbeddedFsPtr self, EmbeddedFsEntryPtr entry)
+static BString EmbeddedFs__entry_name(EmbeddedFsPtr self, EmbeddedFsEntryPtr entry)
 {
-    return KString__new((const char *) (self->start + entry->name_offset));
+    return BString__new((const char *) (self->start + entry->name_offset));
 }
 
 static bool EmbeddedFs__entry_is_valid(EmbeddedFsPtr self, EmbeddedFsEntryPtr entry)
@@ -85,7 +85,7 @@ static bool EmbeddedFs__entry_is_valid(EmbeddedFsPtr self, EmbeddedFsEntryPtr en
     return true;
 }
 
-Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, KString name)
+Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, BString name)
 {
     if (!EmbeddedFs__is_valid(self))
     {
@@ -103,8 +103,8 @@ Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, KString name)
             continue;
         }
 
-        KString entry_name = EmbeddedFs__entry_name(self, entry);
-        if (KString__equals(&entry_name, &name))
+        BString entry_name = EmbeddedFs__entry_name(self, entry);
+        if (BString__equals(&entry_name, &name))
         {
             return Some(EmbeddedFsFile, ((EmbeddedFsFile) {
                 .start = self->start + entry->data_offset,
@@ -117,9 +117,9 @@ Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, KString name)
     return None(EmbeddedFsFile);
 }
 
-KStringArray EmbeddedFs__list(EmbeddedFsPtr self)
+BStringArray EmbeddedFs__list(EmbeddedFsPtr self)
 {
-    KStringArray result = KStringArray__new();
+    BStringArray result = BStringArray__new();
     if (!EmbeddedFs__is_valid(self))
     {
         return result;
@@ -133,7 +133,7 @@ KStringArray EmbeddedFs__list(EmbeddedFsPtr self)
         EmbeddedFsEntryPtr entry = &entries[i];
         if (EmbeddedFs__entry_is_valid(self, entry))
         {
-            KStringArray__push(&result, EmbeddedFs__entry_name(self, entry));
+            BStringArray__push(&result, EmbeddedFs__entry_name(self, entry));
         }
     }
 

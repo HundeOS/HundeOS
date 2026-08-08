@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "../address.h"
-#include "../types/kstring_additional_types.h"
+#include "../types/bstring_additional_types.h"
 #include "../types/optional.h"
 
 #define EMBEDDED_FS_MAGIC 0x31534645
@@ -52,7 +52,7 @@ typedef struct EmbeddedFsFile
 {
     Address start;
     Address end;
-    KString name;
+    BString name;
 }
 EmbeddedFsFile;
 
@@ -62,7 +62,7 @@ OptionalDef(EmbeddedFsFile);
 
 EmbeddedFs EmbeddedFs__new(Address start, Address end);
 bool EmbeddedFs__is_valid(EmbeddedFsPtr self);
-Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, KString name);
-KStringArray EmbeddedFs__list(EmbeddedFsPtr self);
+Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, BString name);
+BStringArray EmbeddedFs__list(EmbeddedFsPtr self);
 
 #endif

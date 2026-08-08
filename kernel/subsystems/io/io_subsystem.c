@@ -21,14 +21,14 @@ MapBodyDefine(IOServerProcessMap);
 MapBodyDefine(IOServerRoleMap);
 
 
-static KString no_device_found_format = KSTRING_NEW("No device found %s\n");
-static KString failed_to_register_format = KSTRING_NEW("Failed to register device %s\n");
-static KString unknown_handle_format = KSTRING_NEW("Unknown handle %i\n");
-static KString no_handle_supplied = KSTRING_NEW("No handle supplied");
-static KString unreachable_code = KSTRING_NEW("IO unreachable code path");
-static KString no_buffer_supplied = KSTRING_NEW("No buffer supplied");
-static KString no_pid_found = KSTRING_NEW("No pid found");
-static KString tty_path = KSTRING_NEW(":tty:");
+static BString no_device_found_format = BSTRING_NEW("No device found %s\n");
+static BString failed_to_register_format = BSTRING_NEW("Failed to register device %s\n");
+static BString unknown_handle_format = BSTRING_NEW("Unknown handle %i\n");
+static BString no_handle_supplied = BSTRING_NEW("No handle supplied");
+static BString unreachable_code = BSTRING_NEW("IO unreachable code path");
+static BString no_buffer_supplied = BSTRING_NEW("No buffer supplied");
+static BString no_pid_found = BSTRING_NEW("No pid found");
+static BString tty_path = BSTRING_NEW(":tty:");
 
 DeviceHandle _to_device_handle(ArrayIndex index)
 {
@@ -62,7 +62,7 @@ static Result(ServiceCode) IOSubsystem__deliver_service_event(
 }
 
 Result(DeviceHandle) IOSubsystem__register_device(
-    IOSubsystemPtr self, KString path, IOPtr device, IOStatePtr device_state
+    IOSubsystemPtr self, BString path, IOPtr device, IOStatePtr device_state
 )
 {
     DeviceRegistration reg = (DeviceRegistration) {
@@ -85,23 +85,23 @@ Result(DeviceHandle) IOSubsystem__register_device(
     End
 
 
-    return Error(DeviceHandle, KString__sprintf(&failed_to_register_format, path), IO_REGISTER_FAILED);
+    return Error(DeviceHandle, BString__sprintf(&failed_to_register_format, path), IO_REGISTER_FAILED);
 }
 
 bool path_match(DeviceRegistration * device, void * v_path)
 {
-    KStringPtr path = v_path;
+    BStringPtr path = v_path;
     __d_printf(IOSUB, "Checking path %s %s\n", cstr_p(path), cstr(device->path));
-    return KString__starts_with(path, &device->path);
+    return BString__starts_with(path, &device->path);
 }
 
-static FindResultOptional(IODevicesArray) IOSubsystem__find_device(IOSubsystemPtr self, KStringPtr path)
+static FindResultOptional(IODevicesArray) IOSubsystem__find_device(IOSubsystemPtr self, BStringPtr path)
 {
     return IODevicesArray__find(&self->devices, path_match, path);
 }
 
 Result(IOHandle) IOSubsystem__record_open_handle(
-    IOSubsystemPtr self, IOContextPtr context, KString path, IOInternalHandle handle
+    IOSubsystemPtr self, IOContextPtr context, BString path, IOInternalHandle handle
 )
 {
     FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
@@ -135,13 +135,13 @@ Result(IOHandle) IOSubsystem__record_open_handle(
         });
     End
 
-    return Error(IOHandle, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    return Error(IOHandle, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
 }
 
-Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, KString path, Flags flags)
+Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, BString path, Flags flags)
 {
     __d_printf(IOSUB, "Opening %p\n", self);
-    Result(IOHandle) error = Error(IOHandle, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    Result(IOHandle) error = Error(IOHandle, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
 
     FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
         IsSome(match,
@@ -165,6 +165,9 @@ static DirectoryEntry DirectoryEntry__from_node(FilesystemNodePtr node)
 {
     DirectoryEntry entry = (DirectoryEntry) { 0 };
     entry.attributes = node->attribs;
+    entry.user_id = node->user_id;
+    entry.group_id = node->group_id;
+    entry.mode = node->mode;
     entry.name_len = node->name.len;
 
     size_t max_name = IO_DIRENT_NAME_MAX - 1;
@@ -180,17 +183,26 @@ static DirectoryEntry DirectoryEntry__from_node(FilesystemNodePtr node)
 }
 
 Result(DirectoryEntryCount) IOSubsystem__list_dir(
-    IOSubsystemPtr self, KString path, DirectoryEntryPtr entries, size_t max_entries
+    IOSubsystemPtr self, BString path, DirectoryEntryPtr entries, size_t max_entries
 )
 {
-    KString root_path = KSTRING_NEW("/");
+    BString root_path = BSTRING_NEW("/");
+    if (BString__equals(&path, &root_path))
+    {
+        __d_printf(IOSUB, "IOSubsystem__list_dir root path=%s max=%i\n", cstr(path), (int) max_entries);
+    }
     FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
         IsSome(match,
         {
             DeviceRegistrationPtr registration = match.value;
-            if (!KString__equals(&registration->path, &root_path))
+            if (BString__equals(&path, &root_path))
             {
-                return Error(DirectoryEntryCount, kstring("Directory listing not supported"), IO_OPERATION_NOT_SUPPORTED);
+                __d_printf(IOSUB, "IOSubsystem__list_dir matched registration path=%s state=%p device=%p\n",
+                    cstr(registration->path), registration->state, registration->device);
+            }
+            if (!BString__equals(&registration->path, &root_path))
+            {
+                return Error(DirectoryEntryCount, bstring("Directory listing not supported"), IO_OPERATION_NOT_SUPPORTED);
             }
 
             FileIOPtr file_io = (FileIOPtr) registration->device;
@@ -218,19 +230,19 @@ Result(DirectoryEntryCount) IOSubsystem__list_dir(
         });
     End
 
-    return Error(DirectoryEntryCount, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    return Error(DirectoryEntryCount, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
 }
 
-Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, KString path)
+Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, BString path)
 {
-    KString root_path = KSTRING_NEW("/");
+    BString root_path = BSTRING_NEW("/");
     FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
         IsSome(match,
         {
             DeviceRegistrationPtr registration = match.value;
-            if (!KString__equals(&registration->path, &root_path))
+            if (!BString__equals(&registration->path, &root_path))
             {
-                return Error(IOStatus, kstring("mkdir not supported"), IO_OPERATION_NOT_SUPPORTED);
+                return Error(IOStatus, bstring("mkdir not supported"), IO_OPERATION_NOT_SUPPORTED);
             }
 
             FileIOPtr file_io = (FileIOPtr) registration->device;
@@ -238,19 +250,19 @@ Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, KString path)
         });
     End
 
-    return Error(IOStatus, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
 }
 
-Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, KString path, Flags flags)
+Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, BString path, Flags flags)
 {
-    KString root_path = KSTRING_NEW("/");
+    BString root_path = BSTRING_NEW("/");
     FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &path));
         IsSome(match,
         {
             DeviceRegistrationPtr registration = match.value;
-            if (!KString__equals(&registration->path, &root_path))
+            if (!BString__equals(&registration->path, &root_path))
             {
-                return Error(IOStatus, kstring("remove not supported"), IO_OPERATION_NOT_SUPPORTED);
+                return Error(IOStatus, bstring("remove not supported"), IO_OPERATION_NOT_SUPPORTED);
             }
 
             FileIOPtr file_io = (FileIOPtr) registration->device;
@@ -258,12 +270,12 @@ Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, KString path, Flags fl
         });
     End
 
-    return Error(IOStatus, KString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
 }
 
-Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, KString source_path, KString target_path)
+Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, BString source_path, BString target_path)
 {
-    KString root_path = KSTRING_NEW("/");
+    BString root_path = BSTRING_NEW("/");
     FindResultMatch(IODevicesArray, IOSubsystem__find_device(self, &source_path));
         IsSome(source_match,
         {
@@ -272,17 +284,17 @@ Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, KString source_path, KSt
                 {
                     DeviceRegistrationPtr source_registration = source_match.value;
                     DeviceRegistrationPtr target_registration = target_match.value;
-                    if (!KString__equals(&source_registration->path, &root_path)
-                        || !KString__equals(&target_registration->path, &root_path))
+                    if (!BString__equals(&source_registration->path, &root_path)
+                        || !BString__equals(&target_registration->path, &root_path))
                     {
-                        return Error(IOStatus, kstring("link not supported"), IO_OPERATION_NOT_SUPPORTED);
+                        return Error(IOStatus, bstring("link not supported"), IO_OPERATION_NOT_SUPPORTED);
                     }
 
                     FileIOPtr source_file_io = (FileIOPtr) source_registration->device;
                     FileIOPtr target_file_io = (FileIOPtr) target_registration->device;
                     if (source_file_io != target_file_io || source_registration->state != target_registration->state)
                     {
-                        return Error(IOStatus, kstring("cross-filesystem link not supported"), IO_OPERATION_NOT_SUPPORTED);
+                        return Error(IOStatus, bstring("cross-filesystem link not supported"), IO_OPERATION_NOT_SUPPORTED);
                     }
 
                     return source_file_io->link(source_registration->state, source_path, target_path);
@@ -291,7 +303,7 @@ Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, KString source_path, KSt
         });
     End
 
-    return Error(IOStatus, KString__sprintf(&no_device_found_format, cstr(source_path)), IO_NO_DEVICE_FOUND);
+    return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(source_path)), IO_NO_DEVICE_FOUND);
 }
 
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)
@@ -353,7 +365,7 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)
             });
 
             __d_printf(IOSUB, "IOSubsystem__close unknown handle=%i\n", handle);
-            KString error_msg = KString__sprintf(&unknown_handle_format, handle) ;
+            BString error_msg = BString__sprintf(&unknown_handle_format, handle) ;
             return Error(IOHandle, error_msg, IO_NOT_OPEN);
         })
         IsNone(
@@ -413,7 +425,7 @@ Result(IOStatus) IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr par
                     End
                 })
                 IsNone(
-                    return Error(IOStatus, kstring("No device found for parking context"), IO_NOT_OPEN);
+                    return Error(IOStatus, bstring("No device found for parking context"), IO_NOT_OPEN);
                 )
             End
         })
@@ -454,7 +466,7 @@ static Result(ParkStatus) IOSubsystem__park(IOSubsystemPtr self, IOContextPtr io
                     return Success(ParkStatus, IO_PARK_OK);
                 })
                 IsNone(
-                    return Error(ParkStatus, kstring("No device found for parking context"), IO_NOT_OPEN);
+                    return Error(ParkStatus, bstring("No device found for parking context"), IO_NOT_OPEN);
                 )
             End
         })
@@ -478,10 +490,10 @@ Result(Anything) IOSubsystem__continue_read(ParkedOperationPtr parked_operation)
                 IsError(code, message, return Error(Anything, message, code));
             End
         })
-        IsNone(return Error(Anything, kstring("no io subsystem found"), IO_PANIC))
+        IsNone(return Error(Anything, bstring("no io subsystem found"), IO_PANIC))
     End
 
-    return Error(Anything, kstring("unexpected code path"), IO_PANIC);
+    return Error(Anything, bstring("unexpected code path"), IO_PANIC);
 }
 
 static Result(ByteCount) IOSubsystem__request_read_park(IOSubsystemPtr self, IOContextPtr context)
@@ -516,7 +528,7 @@ static Result(ByteCount) IOSubsystem__request_read_park(IOSubsystemPtr self, IOC
                     );
 
                     ResultMatch(AckCode, MessageBroker__deliver(self->message_broker, message))
-                        IsSuccess(_, return Error(ByteCount, kstring("IO read parked"), IO_WAIT_FOR_DATA))
+                        IsSuccess(_, return Error(ByteCount, bstring("IO read parked"), IO_WAIT_FOR_DATA))
                         IsError(code, message, return Error(ByteCount, message, code))
                     End
                 })
@@ -558,7 +570,7 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
                                         {
                                             if (bytes > 0
                                                 && registration->state == (IOStatePtr) StreamState__instance()
-                                                && KString__equals(&registration->path, &tty_path))
+                                                && BString__equals(&registration->path, &tty_path))
                                             {
                                                 __d_printf(
                                                     IODEV,
@@ -644,7 +656,7 @@ Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context)
 }
 
 Result(IOHandle) IOSubsystem__server_register(
-    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, KString path, IOServerRole role
+    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, BString path, IOServerRole role
 )
 {
     ResultMatch(IOHandle, IOSubsystem__open(self, context, path, IO_OPEN_WRITE))
@@ -734,7 +746,7 @@ Result(IOStatus) IOSubsystem__server_get_buffer(
 
                     if (buffer_getter == NULL)
                     {
-                        return Error(IOStatus, kstring("server buffer not supported"), IO_OPERATION_NOT_SUPPORTED);
+                        return Error(IOStatus, bstring("server buffer not supported"), IO_OPERATION_NOT_SUPPORTED);
                     }
 
                     ResultMatch(IOServerBuffer, buffer_getter(registration->state))
@@ -769,7 +781,7 @@ Result(IOStatus) IOSubsystem__server_data_available(IOSubsystemPtr self, IOConte
                 {
                     if (registration->device->data_available == NULL)
                     {
-                        return Error(IOStatus, kstring("data available not supported"), IO_OPERATION_NOT_SUPPORTED);
+                        return Error(IOStatus, bstring("data available not supported"), IO_OPERATION_NOT_SUPPORTED);
                     }
 
                     Match(IOContextPtr, registration->device->data_available(registration->state, byte_count))
@@ -801,7 +813,7 @@ Result(IOStatus) IOSubsystem__server_data_consumed(IOSubsystemPtr self, IOContex
                 {
                     if (registration->device->data_consumed == NULL)
                     {
-                        return Error(IOStatus, kstring("data consumed not supported"), IO_OPERATION_NOT_SUPPORTED);
+                        return Error(IOStatus, bstring("data consumed not supported"), IO_OPERATION_NOT_SUPPORTED);
                     }
                     return registration->device->data_consumed(registration->state, byte_count);
                 });
@@ -822,7 +834,7 @@ Result(IOStatus) IOSubsystem__server_eof(IOSubsystemPtr self, IOContextPtr conte
                 {
                     if (registration->device->eof == NULL)
                     {
-                        return Error(IOStatus, kstring("eof not supported"), IO_OPERATION_NOT_SUPPORTED);
+                        return Error(IOStatus, bstring("eof not supported"), IO_OPERATION_NOT_SUPPORTED);
                     }
 
                     Match(IOContextPtr, registration->device->eof(registration->state))

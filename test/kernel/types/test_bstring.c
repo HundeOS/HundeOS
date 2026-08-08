@@ -185,3 +185,60 @@ void test_bstring_split_first_any_returns_whole_input_when_no_delimiter_found(vo
     TEST_ASSERT_EQUAL_STRING("token", BString__cstr(&split.match.some.val));
     TEST_ASSERT_TRUE(BString__is_empty(&split.rest));
 }
+
+void test_bstring_parse_uint64_returns_value_for_valid_decimal(void)
+{
+    BString input = bstring("12345");
+
+    Match(uint64_t, BString__parse_uint64(&input))
+        IsSome(value, TEST_ASSERT_EQUAL_UINT64(12345, value))
+        IsNone(TEST_FAIL())
+    End
+}
+
+void test_bstring_parse_uint64_rejects_empty_input(void)
+{
+    BString input = EMPTY_BSTRING;
+
+    TEST_ASSERT_FALSE(BString__parse_uint64(&input).present);
+}
+
+void test_bstring_parse_uint64_rejects_non_digit_input(void)
+{
+    BString input = bstring("12x");
+
+    TEST_ASSERT_FALSE(BString__parse_uint64(&input).present);
+}
+
+void test_bstring_uppercase_converts_ascii_lowercase(void)
+{
+    BString input = bstring("Sigterm-42");
+
+    BString uppercase = BString__uppercase(&input);
+
+    TEST_ASSERT_EQUAL_STRING("SIGTERM-42", BString__cstr(&uppercase));
+}
+
+void test_bstring_length_returns_stored_length(void)
+{
+    BString input = bstring("hello");
+
+    TEST_ASSERT_EQUAL_INT64(5, BString__length(&input));
+}
+
+void test_bstring_char_at_returns_character_when_in_bounds(void)
+{
+    BString input = bstring("hello");
+
+    Match(char, BString__char_at(&input, 1))
+        IsSome(ch, TEST_ASSERT_EQUAL_CHAR('e', ch))
+        IsNone(TEST_FAIL())
+    End
+}
+
+void test_bstring_char_at_returns_none_when_out_of_bounds(void)
+{
+    BString input = bstring("hello");
+
+    TEST_ASSERT_FALSE(BString__char_at(&input, 5).present);
+}

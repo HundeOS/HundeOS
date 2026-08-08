@@ -23,10 +23,10 @@
     } \
 
 
-static KString CONSOLE = KSTRING_NEW(":console:");
-static KString TTY = KSTRING_NEW(":tty:");
-static KString HELLO_STREAM = KSTRING_NEW("/dev/hello");
-static KString ROOT = KSTRING_NEW("/");
+static BString CONSOLE = BSTRING_NEW(":console:");
+static BString TTY = BSTRING_NEW(":tty:");
+static BString HELLO_STREAM = BSTRING_NEW("/dev/hello");
+static BString ROOT = BSTRING_NEW("/");
 
 Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
 {
