@@ -12,7 +12,7 @@
 
 extern void (* secondary_boot_entry)(void);
 
-__BOOT_DATA__(static uint8_t) __attribute__((aligned(16))) boot_cpu_stacks[MAX_CPUS][STACK_SIZE];
+__BOOT_ALLOCATION__(static uint8_t) __attribute__((aligned(16))) boot_cpu_stacks[MAX_CPUS][STACK_SIZE];
 
 // we count the primary
 __BOOT_DATA__(static uint64_t) cpus_online = 1;
@@ -23,7 +23,7 @@ static volatile __BOOT_DATA__(boot_mutex) mutex = {
 };
 
 
-__BOOT__(void) boot_secondary_cpus() {
+__BOOT__(void) boot_secondary_cpus(uint64_t cpu_count) {
     boot_debug_print(master_cpu);
     boot_debug_print_base(cpu_id(), 10);
     boot_debug_print(new_line);
@@ -32,7 +32,12 @@ __BOOT__(void) boot_secondary_cpus() {
     // we count this cpu already online
     uint64_t entry_pa = (uint64_t)&secondary_boot_entry;
 
-    for (unsigned cpu = 1; cpu < MAX_CPUS; ++cpu) {
+    if (cpu_count > MAX_CPUS)
+    {
+        cpu_count = MAX_CPUS;
+    }
+
+    for (uint64_t cpu = 1; cpu < cpu_count; ++cpu) {
         boot_debug_print(new_line);
 
         uintptr_t sp_top = (uintptr_t)&boot_cpu_stacks[cpu][STACK_SIZE];

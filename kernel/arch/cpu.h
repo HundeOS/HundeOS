@@ -5,6 +5,7 @@
 
 #include "init_code.h"
 #include "../types/result.h"
+#include "../system_info.h"
 
 typedef uint64_t CPUID;
 
@@ -23,7 +24,7 @@ extern void CPU__check_halt();
 extern void CPU__halt_all();
 extern void CPU__poke(CPUID cpu);
 
-extern Result(InitCode) CPU__init();
+extern Result(InitCode) CPU__init(SystemInfoPtr system_info);
 
 extern void CPU__assign_id(CPUID id);
 

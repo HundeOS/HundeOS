@@ -11,6 +11,7 @@
 #include "parked.h"
 #include "context_switch.h"
 #include "../process.h"
+#include "../system_info.h"
 #include "../service/event_dispatcher.h"
 #include "subsystems/message/message_broker.h"
 #include "syscalls/service.h"
@@ -48,12 +49,15 @@ typedef CPUScheduler * CPUSchedulerPtr;
 
 OptionalDef(CPUSchedulerPtr);
 ResultDef(CPUSchedulerPtr);
+OptionalDef(KernelPtr);
 
 FixedArrayDefine(CPUSchedulerPtr, MAX_CPUS, CPUSchedulers, &Ptr__equals);
 
 typedef struct Scheduler
 {
+    Optional(KernelPtr) kernel;
     MessageBrokerPtr message_broker;
+    Optional(InterruptControllerInfo) interrupt_controller;
     CPUSchedulers schedulers;
     ServiceEventDispatcher service_event_dispatcher;
     mutex_t scheduler_lock;
@@ -65,7 +69,7 @@ typedef IOSubsystem * IOSubsystemPtr;
 
 SchedulerPtr Scheduler__heap_new(MessageBrokerPtr message_broker);
 
-Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, Elf idle_process);
+Result(SchedulerInitStatus) Scheduler__init(KernelPtr kernel, SchedulerPtr self, Elf idle_process);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID cpu);
 Result(ProcessPtr) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc, ReturnCode return_code);
@@ -149,7 +153,9 @@ bool Scheduler__parked_operation_is_ready(SchedulerPtr self, ParkedOperationPtr 
 
 #define NEW_SCHEDULER(broker) \
     (Scheduler) { \
+        .kernel = None(KernelPtr), \
         .message_broker = broker, \
+        .interrupt_controller = None(InterruptControllerInfo), \
         .schedulers = EmptyArray(CPUSchedulers),\
         .service_event_dispatcher = NEW_SERVICE_EVENT_DISPATCHER,\
         .scheduler_lock = MUTEX_INIT, \

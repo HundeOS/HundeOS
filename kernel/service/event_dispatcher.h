@@ -6,6 +6,7 @@
 
 #include "../mutex.h"
 #include "../process.h"
+#include "../system_info.h"
 #include "../types/map.h"
 #include "../types/optional.h"
 #include "../types/result.h"
@@ -53,13 +54,15 @@ ServiceEventDispatcher ServiceEventDispatcher__new();
 Result(ServiceCode) ServiceEventDispatcher__subscribe_irq(
     ServiceEventDispatcherPtr self, ProcessPtr process, IRQNumber irq
 );
-Result(ServiceEventDispatch) ServiceEventDispatcher__dispatch_irq(ServiceEventDispatcherPtr self, IRQNumber irq);
+Result(ServiceEventDispatch) ServiceEventDispatcher__dispatch_irq(
+    ServiceEventDispatcherPtr self, InterruptControllerInfoPtr interrupt_controller, IRQNumber irq
+);
 Result(ServiceCode) ServiceEventDispatcher__enqueue(
     ServiceEventDispatcherPtr self, ProcessPtr process, ServiceEvent event
 );
 Result(ServiceEvent) ServiceEventDispatcher__take_next(ServiceEventDispatcherPtr self, ProcessPtr process);
 Result(ServiceCode) ServiceEventDispatcher__complete_active_irq(
-    ServiceEventDispatcherPtr self, ProcessPtr process
+    ServiceEventDispatcherPtr self, InterruptControllerInfoPtr interrupt_controller, ProcessPtr process
 );
 Result(ServiceCode) ServiceEventDispatcher__unsubscribe_process(
     ServiceEventDispatcherPtr self, ProcessPtr process

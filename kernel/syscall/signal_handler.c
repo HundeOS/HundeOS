@@ -37,7 +37,7 @@ Result(SystemCallResult) Signal__handler(
                     Process__queue_signal(target, signal);
                     return Success(SystemCallResult, PROCESS_SIGNAL_OK);
                 default:
-                    Process__dispose_owned_kernel_resources(kernel, target);
+                    Process__dispose_owned_kernel_resources(target);
                     ResultMatch(ProcessPtr, Scheduler__exit(
                         kernel->scheduler, target, ProcessSignal__exit_code(signal)
                     ))

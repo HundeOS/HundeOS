@@ -508,7 +508,7 @@ void test_service_handler_process_cleanup_unregisters_block_device(void)
         IsNone(TEST_FAIL())
     End
 
-    ResultMatch(ProcessSetupStatus, Process__dispose_owned_kernel_resources(kernel, first_process))
+    ResultMatch(ProcessSetupStatus, Process__dispose_owned_kernel_resources(first_process))
         IsSuccess(status, TEST_ASSERT_EQUAL(PROCESS_SETUP, status))
         IsError(code, message, TEST_FAIL())
     End

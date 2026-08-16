@@ -94,11 +94,13 @@ typedef struct {
 
 
 int PageTable__map_2M_block(PageTable * self,
+                            KernelPtr kernel,
                             uint64_t virtual_address,
                             uint64_t phys_addr,
                             MappingPermissions perms);
 
 int PageTable__map_4k_page(PageTable * self,
+                           KernelPtr kernel,
                            uint64_t virtual_address,
                            uint64_t phys_addr,
                            MappingPermissions perms);
@@ -186,6 +188,6 @@ inline PageTableEntry PageTable__make_table_desc(PageTable * next_level_page)
     return FLAG_PTE_VALID | FLAG_PTE_TABLE | ((uint64_t)next_level_page & MASK_PTE_NEXTADDR);
 }
 
-KernelAddress PageTable__from_virtual_address(Address virtual_addr);
+KernelAddress PageTable__from_virtual_address(KernelPtr kernel, Address virtual_addr);
 
 #endif

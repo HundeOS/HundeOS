@@ -58,6 +58,7 @@ static UserAddress Process__el1_trampoline()
 }
 
 ProcessContextPtr ProcessContext__init(
+    KernelPtr kernel,
     ProcessID pid,
     StackPtr stack,
     UserAddress entry_point,
@@ -88,7 +89,7 @@ ProcessContextPtr ProcessContext__init(
     context->spsr = 0x0;
 
     UserAddress trampoline = Process__el1_trampoline();
-    PageTable__map(v_ptr(page_table, PageTable), trampoline, PAGE_SIZE * 4);
+    PageTable__map(v_ptr(page_table, PageTable), kernel, trampoline, PAGE_SIZE * 4);
 
     context->elr = vaddr(trampoline);
 

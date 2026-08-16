@@ -67,8 +67,13 @@ void CPU__halt_all() {
     CPU__halt_forever();
 }
 
-Result(InitCode) CPU__init()
+Result(InitCode) CPU__init(SystemInfoPtr system_info)
 {
+    if (system_info->interrupt_controller.kind != INTERRUPT_CONTROLLER_GIC_V3)
+    {
+        return Success(InitCode, ARCH_INIT_OK);
+    }
+
     __asm__ __volatile__(
     "mov x0, #0xff            \n"
     "msr ICC_PMR_EL1, x0      \n"        // accept all priorities

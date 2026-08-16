@@ -1,6 +1,5 @@
 #include "arch/init.h"
 #include "kernel_init.h"
-#include "kalloc.h"
 #include "mutex.h"
 #include "panic.h"
 #include "spin.h"
@@ -22,6 +21,7 @@ static BString io_init_progress = BSTRING_NEW("io subsystem initialised");
 static BString scheduler_init_progress = BSTRING_NEW("scheduler initialised");
 static BString arch_init_progress = BSTRING_NEW("architecture specific components initialised");
 static BString failed_to_init_msg = BSTRING_NEW("failed to initialise kernel");
+static BString missing_system_info = BSTRING_NEW("missing system info");
 
 static MessageBroker message_broker = NEW_BROKER;
 static Scheduler scheduler = NEW_SCHEDULER(&message_broker);
@@ -33,31 +33,12 @@ static Kernel instance = {
     .init_lock = MUTEX_INIT,
     .syscall_dispatcher = NEW_SYSCALL_DISPATCHER,
     .io_subsystem = &io_subsystem,
+    .system_info = None(SystemInfo),
     .heap = NEW_HEAP,
     .scheduler = &scheduler,
     .message_broker = &message_broker,
     .irq_dispatcher = &irq_dispatcher,
 };
-
-KernelPtr Kernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_broker, IOSubsystemPtr io_subsystem)
-{
-    KernelPtr kernel = ptr(Kernel__alloc_kernel(sizeof(Kernel)), Kernel);
-
-    kernel->status = INIT_NOT_STARTED;
-    kernel->init_lock = MUTEX_INIT;
-    kernel->syscall_dispatcher = NEW_SYSCALL_DISPATCHER;
-
-    kernel->io_subsystem = io_subsystem;
-    io_subsystem->scheduler = scheduler;
-
-    kernel->heap = NEW_HEAP;
-    kernel->scheduler = scheduler;
-    kernel->message_broker = message_broker;
-    kernel->irq_dispatcher = ptr(Kernel__alloc_kernel(sizeof(IRQDispatcher)), IRQDispatcher);
-    *kernel->irq_dispatcher = NEW_IRQ_DISPATCHER(scheduler);
-
-    return kernel;
-}
 
 void __kernel_panic(KernelPtr self, BStringPtr message)
 {
@@ -110,7 +91,13 @@ Result(SubsystemInitStatus) Kernel__init_syscall_handlers(KernelPtr self)
 
 Result(SubsystemInitStatus) Kernel__init_heap(KernelPtr self)
 {
-    ResultMatch(HeapCode, Heap__init(&self->heap);)
+    if (is_nothing(self->system_info))
+    {
+        return Error(SubsystemInitStatus, missing_system_info, SUBSYSTEM_INIT_FAILED);
+    }
+
+    SystemInfoPtr system_info = &self->system_info.some.val;
+    ResultMatch(HeapCode, Heap__init(&self->heap, system_info);)
         IsError(code, message,
         {
             return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
@@ -122,11 +109,20 @@ Result(SubsystemInitStatus) Kernel__init_heap(KernelPtr self)
 
 Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
 {
+    if (is_nothing(self->system_info))
+    {
+        return Error(SubsystemInitStatus, missing_system_info, SUBSYSTEM_INIT_FAILED);
+    }
+
+    SystemInfoPtr system_info = &self->system_info.some.val;
+    self->scheduler->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
+    self->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
+
     Optional(Elf) idle_opt = EmbeddedElf__load(bstring("idle"));
     Match(Elf, idle_opt)
         IsSome(idle,
         {
-            ResultMatch(SchedulerInitStatus, Scheduler__init(self->scheduler, idle);)
+            ResultMatch(SchedulerInitStatus, Scheduler__init(self, self->scheduler, idle);)
                 IsError(code, message,
                 {
                     return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
@@ -155,7 +151,7 @@ void Kernel__init(KernelPtr self)
     PanicOnError(Kernel__init_syscall_handlers(self), self, &syscall_init_progress);
     PanicOnError(Kernel__io_subsystem_init(self), self, &io_init_progress);
     PanicOnError(Kernel__init_scheduler(self), self, &scheduler_init_progress);
-    PanicOnError(Arch__init(), self, &arch_init_progress);
+    PanicOnError(Arch__init(self), self, &arch_init_progress);
 
     self->status = INIT_DONE;
     mutex_unlock(&self->init_lock);

@@ -1,22 +1,47 @@
 #include "print.h"
-#include "../io/uart.h"
+#include "uart.h"
 #include "mutex.h"
+
+static __BOOT_DATA__(uint64_t) boot_uart_physical_base = BOOT_UART0_PHYS_BASE;
 
 static __BOOT_DATA__(boot_mutex) print_lock = {
     .lock = 0
 };
 
+__BOOT__(void) BootUart__set_physical_base(uint64_t physical_base)
+{
+    if (physical_base != 0)
+    {
+        boot_uart_physical_base = physical_base;
+    }
+}
+
+__BOOT__(volatile unsigned int *) BootUart__reg(uint64_t offset)
+{
+    return (volatile unsigned int *)(boot_uart_physical_base + offset);
+}
+
+__BOOT__(void) BootUart__init(void)
+{
+    *BOOT_P_UART0_CR = 0;
+    *BOOT_P_UART0_ICR = 0x7FF;
+    *BOOT_P_UART0_IBRD = 2;
+    *BOOT_P_UART0_FBRD = 0xB;
+    *BOOT_P_UART0_LCRH = 0b11 << 5;
+    *BOOT_P_UART0_CR = 0x301;
+}
+
 inline void _send(unsigned int c) {
 
     for (int j = 0; j < 1000; j++) {
         __asm__ __volatile__("nop");
-        volatile int status = (*P_UART0_FR);
-        if (status & 0x20) {
+        volatile int status = (*BOOT_P_UART0_FR);
+        if ((status & 0x20) == 0) {
             break;
         }
     }
 
-    *P_UART0_DR = c;
+    *BOOT_P_UART0_DR = c;
 }
 
 __BOOT__(void) _print(const char * str) {

@@ -6,6 +6,7 @@ ENTRY(_start)
 PHDRS {
   boot  PT_LOAD FLAGS(5);            /* R X: low boot code (VMA=LMA low)   */
   bootdata PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
+  bootalloc PT_LOAD FLAGS(6);
   ktext PT_LOAD FLAGS(5);            /* R X: high .text/.rodata (VMA high, LMA low via AT) */
   kdata PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
   kstack PT_LOAD FLAGS(6);            /* R W: high .data/.bss (VMA high, LMA low via AT)   */
@@ -23,6 +24,7 @@ KERNEL_HEAP_BASE = 0xFFFFF00000000000;
 /*KERNEL_BASE = 0x0000000040200000;*/
 KERNEL_BASE = 0x40080000;
 /*KERNEL_BASE = 0x00;*/
+BOOT_ALLOCATION_BASE = 0x4B000000;
 
 HEAP_END = 2 * 1024 * 1024 * 1024; /* 2 GB */
 
@@ -76,9 +78,19 @@ SECTIONS
   __boot_bss_start = .;
   .boot.bss.stack (NOLOAD) : ALIGN(PAGE_4KB) {
     KEEP(*(.boot.bss.stack))
+    KEEP(*(.boot.bss))
+    KEEP(*(.boot.bss.*))
   } :bootdata
   __boot_bss_end = .;
-  __boot_end = ALIGN(__boot_bss_end, PAGE_4KB);
+  __boot_loaded_end = ALIGN(__boot_bss_end, PAGE_4KB);
+
+  .boot.allocation BOOT_ALLOCATION_BASE (NOLOAD) : ALIGN(PAGE_4KB) {
+    __boot_allocation_start = .;
+    KEEP(*(.boot.allocation))
+    KEEP(*(.boot.allocation.*))
+    __boot_allocation_end = .;
+  } :bootalloc
+  __boot_end = ALIGN(ADDR(.boot.allocation) + SIZEOF(.boot.allocation), PAGE_4KB);
 
 
    /** MMIO first **/
@@ -180,6 +192,8 @@ SECTIONS
   __user_jump_phys_end = LOADADDR(.user.text) + SIZEOF(.user.text);
 
   __lma_cursor = LOADADDR(.user.text) + SIZEOF(.user.text);
+  ASSERT(__lma_cursor <= __boot_allocation_start, "kernel image overlaps boot allocations")
+  __lma_cursor = __boot_end;
 
 
   . = KERNEL_STACK_BASE;

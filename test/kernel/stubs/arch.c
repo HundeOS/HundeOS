@@ -7,25 +7,25 @@ static uint64_t mask_count = 0;
 static uint64_t unmask_count = 0;
 static uint64_t enable_count = 0;
 
-Result(SubsystemInitStatus) Arch__init()
+Result(SubsystemInitStatus) Arch__init(KernelPtr kernel)
 {
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
-void Arch__mask_irq(uint64_t irq)
+void Arch__mask_irq(InterruptControllerInfoPtr interrupt_controller, uint64_t irq)
 {
     masked_irq = irq;
     mask_count++;
 }
 
-Result(SubsystemInitStatus) Arch__enable_irq(uint64_t irq)
+Result(SubsystemInitStatus) Arch__enable_irq(InterruptControllerInfoPtr interrupt_controller, uint64_t irq)
 {
     enabled_irq = irq;
     enable_count++;
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
-void Arch__unmask_irq(uint64_t irq)
+void Arch__unmask_irq(InterruptControllerInfoPtr interrupt_controller, uint64_t irq)
 {
     unmasked_irq = irq;
     unmask_count++;

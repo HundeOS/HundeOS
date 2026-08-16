@@ -7,6 +7,7 @@
 #include "../arch/init.h"
 #include "../mutex.h"
 #include "../scheduler/scheduler.h"
+#include "../system_info.h"
 #include "../types/map.h"
 #include "../types/result.h"
 
@@ -69,6 +70,7 @@ MapDefine(IRQNumber, IRQConsumer, 256, IRQConsumerMap, SimpleEquals(uint64_t));
 typedef struct IRQDispatcher
 {
     SchedulerPtr scheduler;
+    Optional(InterruptControllerInfo) interrupt_controller;
     IRQConsumerMap consumers;
     mutex_t lock;
 }
@@ -79,6 +81,7 @@ typedef IRQDispatcher * IRQDispatcherPtr;
 #define NEW_IRQ_DISPATCHER(scheduler_ptr) \
     (IRQDispatcher) { \
         .scheduler = scheduler_ptr, \
+        .interrupt_controller = None(InterruptControllerInfo), \
         .consumers = EmptyMap(IRQConsumerMap), \
         .lock = MUTEX_INIT, \
     }

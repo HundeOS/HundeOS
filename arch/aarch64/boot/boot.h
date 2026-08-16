@@ -1,7 +1,7 @@
 #ifndef __AARCH64_BOOT_H_
 #define __AARCH64_BOOT_H_
 #include <stdint.h>
-#include <stdint.h>
+#include "../../../kernel/system_info.h"
 
 #define MIMO_HIGH_END MIMO_HIGH_BASE + 4 * 1024 * 1024
 #define MAX_KERNEL_SIZE 4 * 1024 * 1024
@@ -11,11 +11,21 @@
 #define KERNEL_LOW_PHYS_MAX (uint64_t)(KERNEL_LOW_PHYS_BASE + MAX_KERNEL_SIZE)
 #define KERNEL_LOW_VIRT_BASE (uint64_t)(KERNEL_LOW_PHYS_BASE)
 
+#ifdef __MACH__
+#define __BOOT__(a) a
+#define __BOOT_RODATA__(a) a
+#define __BOOT_DATA__(a) a
+#define __BOOT_PAGE_TABLE__(a) a
+#define __BOOT_BSS__(a) a
+#define __BOOT_ALLOCATION__(a) a
+#else
 #define __BOOT__(a) a __attribute__((section(".boot.text")))
 #define __BOOT_RODATA__(a) a __attribute__((section(".boot.rodata")))
 #define __BOOT_DATA__(a) a __attribute__((section(".boot.data"))) __attribute__(( aligned(4096)))
 #define __BOOT_PAGE_TABLE__(a) a __attribute__((section(".boot.data.table"))) __attribute__(( aligned(4096)))
 #define __BOOT_BSS__(a) a __attribute__((section(".boot.bss")))
+#define __BOOT_ALLOCATION__(a) a __attribute__((section(".boot.allocation"))) __attribute__(( aligned(4096)))
+#endif
 #define __BOOT_STRING__(name) __BOOT_RODATA__(static const char name[])
 
 // Masks for addresses inside descriptors
@@ -53,7 +63,9 @@ inline unsigned idx1(uint64_t va){ return (va>>30)&0x1FF; }
 inline unsigned idx2(uint64_t va){ return (va>>21)&0x1FF; }
 inline unsigned idx3(uint64_t va){ return (va>>12)&0x1FF; }
 
-extern void enter_kernel(uint64_t stack, uint64_t vectors, uint64_t entry);
+extern void enter_kernel(uint64_t stack, uint64_t vectors, uint64_t entry, SystemInfoPtr system_info);
+void enable_fp_simd(void);
+void enable_tbi_for_kernel(void);
 
 enum {
     PTE_VALID  = 1ull << 0,

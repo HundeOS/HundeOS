@@ -5,6 +5,6 @@
 #include "boot.h"
 #include "../cpu_common.h"
 
-__BOOT__(void) boot_secondary_cpus();
+__BOOT__(void) boot_secondary_cpus(uint64_t cpu_count);
 
 #endif

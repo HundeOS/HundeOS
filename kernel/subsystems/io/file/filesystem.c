@@ -634,6 +634,8 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
     DirectoryEntryCount count = 0;
     bool listed_backing = false;
+    bool backing_request_pending = false;
+    BString backing_pending_message = EMPTY_BSTRING;
 
     if (RootFileIO__trace_list_dir(&path))
     {
@@ -695,6 +697,11 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
                     })
                     IsError(code, message,
                     {
+                        if (code == BLOCK_DEVICE_REQUEST_PENDING)
+                        {
+                            backing_request_pending = true;
+                            backing_pending_message = message;
+                        }
                         if (code != BLOCK_DEVICE_REQUEST_PENDING && async_context != 0)
                         {
                             Kernel__free(addr(async_context));
@@ -710,6 +717,11 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
                     IsSome(existing_context, BlockDevice__set_current_context(existing_context))
                     IsNone(BlockDevice__clear_current_context())
                 End
+
+                if (backing_request_pending)
+                {
+                    return Error(DirectoryEntryCount, backing_pending_message, BLOCK_DEVICE_REQUEST_PENDING);
+                }
             }
             else if (route.filesystem->file_io.list_nodes != NULL)
             {

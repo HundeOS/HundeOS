@@ -15,6 +15,7 @@
 #include "subsystems/io/io_subsystem.h"
 #include "syscalls/io.h"
 #include "../arch/aarch64/io/uart.h"
+#include "system_info.h"
 
 BString panic_message = BSTRING_NEW("Program failed: %s\n");
 static BString console_path = BSTRING_NEW(":console:");
@@ -82,7 +83,7 @@ void schedule_as(KernelPtr kernel, BString name, ProcessClass process_class)
     Match(Elf, program)
         IsSome(elf,
         {
-            ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+            ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
                 IsSuccess(process,
                 {
                     __d_printf(PROCESS, "schedule_as setup success pid=%i name=%s process=%p\n", process->pid, cstr(process->name), process);
@@ -144,7 +145,17 @@ void Kernel_main(CPUID cpu_id) {
         return;
     }
 
-    ResultMatch(InitCode, CPU__init());
+    SystemInfo system_info = (SystemInfo) {};
+    Match(SystemInfo, kernel->system_info)
+        IsSome(value, system_info = value;)
+        IsNone(
+        {
+            Kernel__panic("Kernel missing system info", NULL);
+            return;
+        })
+    End
+
+    ResultMatch(InitCode, CPU__init(&system_info));
         IsError(code, message,
         {
             __d_printf(PANIC, "CPU init failed: %i\n", cpu_id);
@@ -171,7 +182,7 @@ void Kernel_main(CPUID cpu_id) {
     }
 
     __d_printf(PROGRESS, "CPU entering main: %i\n", cpu_id);
-    CPUTimer__start(1000);
+    CPUTimer__start(&system_info, 1000);
     __d_printf(PROGRESS, "Timer started: %i\n", cpu_id);
 
     __d_printf(PROGRESS, "Kernel starting scheduler: %i\n", cpu_id);
@@ -181,4 +192,9 @@ void Kernel_main(CPUID cpu_id) {
 
     CPU__wait();
     Kernel__halt();
+}
+
+void Kernel__boot(void)
+{
+    Kernel_main(CPU__id());
 }

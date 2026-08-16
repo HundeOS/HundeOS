@@ -1,0 +1,4 @@
+KERNEL_BASE = 0x80200000;
+BOOT_ALLOCATION_BASE = 0x90200000;
+
+INCLUDE arch/aarch64/boot/qemu_virt/linker.ld

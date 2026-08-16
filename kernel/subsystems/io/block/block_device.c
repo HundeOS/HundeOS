@@ -3,6 +3,7 @@
 #include "panic.h"
 #include "../../../all_defs.h"
 #include "../../../kalloc.h"
+#include "../../../kernel_init.h"
 #include "../../../process.h"
 #include "../../../service/service.h"
 #include "../../../scheduler/parked.h"
@@ -109,6 +110,26 @@ static void BlockDeviceRegistry__init()
     registry = BlockDeviceRegistryMap__new();
     requests = BlockRequestMap__new();
     next_device_id = 0;
+    registry_initialized = true;
+}
+
+void BlockDeviceRegistry__reset(void)
+{
+    if (registry_initialized)
+    {
+        MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
+            Kernel__free(addr(device));
+        End
+
+        MapIterate(BlockRequestMap, requests, request_index, request_id, request)
+            Kernel__free(addr(request));
+        End
+    }
+
+    registry = BlockDeviceRegistryMap__new();
+    requests = BlockRequestMap__new();
+    next_device_id = 0;
+    next_request_id = 1;
     registry_initialized = true;
 }
 

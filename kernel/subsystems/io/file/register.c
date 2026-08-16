@@ -5,6 +5,7 @@
 #include "devfs/devfs.h"
 #include "embedded/embedded.h"
 #include "memfs/memfs.h"
+#include "procfs/procfs.h"
 
 bool Fat16FilesystemIO__available() __attribute__((weak));
 bool Fat16FilesystemIO__available()
@@ -72,6 +73,7 @@ BString fat16 = BSTRING_NEW("fat16");
 BString fat32 = BSTRING_NEW("fat32");
 BString ext2 = BSTRING_NEW("ext2");
 BString memfs = BSTRING_NEW("tmp/memfs");
+BString proc = BSTRING_NEW("proc");
 
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path) __attribute__((weak));
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path)
@@ -148,7 +150,7 @@ void FilesystemTable__mount_available_entries(FilesystemPtr root_fs)
     End
 }
 
-FilesystemPtr Filesystem__build_root_and_mounts()
+FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel)
 {
     FilesystemPtr root_fs = RootFilesystem__heap_new();
     FilesystemIOStatePtr root_fs_state = FilesystemIOState__heap_new(root_fs);
@@ -162,6 +164,10 @@ FilesystemPtr Filesystem__build_root_and_mounts()
     DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(dev_filesystem);
     Filesystem__mount(root_fs, dev, dev_filesystem);
 
+    FilesystemPtr proc_filesystem = Filesystem__heap_new(proc, ProcFilesystemIO__new());
+    ProcFilesystemIOStatePtr procfs_state = ProcFilesystemIOState__heap_new(proc_filesystem, kernel);
+    Filesystem__mount(root_fs, proc, proc_filesystem);
+
     FilesystemPtr mem_filesystem = Filesystem__heap_new(memfs, MemFilesystemIO__new());
     MemFilesystemIOStatePtr memfs_state = MemFilesystemIOState__heap_new(mem_filesystem);
     Filesystem__mount(root_fs, memfs, mem_filesystem);
@@ -174,6 +180,7 @@ FilesystemPtr Filesystem__build_root_and_mounts()
     __d_printf(FILESYSTEM, "Root filesystem %p\n", root_fs);
     __d_printf(FILESYSTEM, "Embedded filesystem %p\n", embedded_fs);
     __d_printf(FILESYSTEM, "Device filesystem %p\n", dev_filesystem);
+    __d_printf(FILESYSTEM, "Proc filesystem %p\n", proc_filesystem);
     __d_printf(FILESYSTEM, "Memory filesystem %p\n", mem_filesystem);
     return root_fs;
 }

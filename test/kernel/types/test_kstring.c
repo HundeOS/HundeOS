@@ -113,7 +113,7 @@ void test_kstring_join(void)
 void test_kstring_sprintf(void)
 {
     BString format = bstring("hello %i %p");
-    BString expected = bstring("hello 10 0xFE");
+    BString expected = bstring("hello 10 0xfe");
 
     BString formatted = BString__sprintf(&format, 10, 0xFE);
     TEST_KSTRING_EQUALS(expected, formatted);

@@ -6,6 +6,9 @@
 #include "types/result.h"
 #include "heap.h"
 
+typedef struct Kernel Kernel;
+typedef Kernel * KernelPtr;
+
 #ifndef __KERNEL_KALLOC_CODE_DEFINED
 #define __KERNEL_KALLOC_CODE_DEFINED
 typedef uint64_t KAllocCode;
@@ -25,8 +28,8 @@ UserAddress Kernel__alloc_user(Address virtual_address,
                                bool write,
                                bool execute);
 KernelAddress Kernel__alloc(size_t size);
-KernelAddress Kernel__from_physical_address(Address physical);
-KernelAddress Kernel__from_virtual_address(Address virtual_addr);
+KernelAddress Kernel__from_physical_address(KernelPtr self, Address physical);
+KernelAddress Kernel__from_virtual_address(KernelPtr self, Address virtual_addr);
 
 Result(KAllocCode) Kernel__free(Address virtual_addr);
 

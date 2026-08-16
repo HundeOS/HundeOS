@@ -7,6 +7,7 @@
 #include "../../../../kernel/subsystems/io/console/console.h"
 #include "../../../../kernel/subsystems/io/register.h"
 #include "../../../../kernel/subsystems/io/stream/stream.h"
+#include "../../../../kernel/scheduler/context_switch.h"
 #include "../../../../kernel/scheduler/register.h"
 #include "../../../../kernel/arch/process.h"
 #include "../../../../kernel/arch/page_table.h"
@@ -90,7 +91,7 @@ void reset_state()
     SERVER_PROC.service = ServiceState__new();
     SERVER_PROC.user_allocations = UserAllocations__new();
     SERVER_PROC.allocation_next = USER_ALLOC_BASE;
-    SERVER_PROC.page_table = PageTable__new();
+    SERVER_PROC.page_table = PageTable__new(kernel);
     STATE = NEW_FAKE_IO_STATE;
     SECOND_STATE = NEW_FAKE_IO_STATE;
     buffer = IOBuffer__heap_new();
@@ -239,6 +240,17 @@ void data_available_interrupt_for_state(IOSubsystemPtr io_sub, FakeIOStatePtr st
 void data_available_interrupt(IOSubsystemPtr io_sub)
 {
     data_available_interrupt_for_state(io_sub, &STATE);
+}
+
+IOServerBufferDataPtr server_buffer_data_for_test(ProcessPtr process, IOServerBuffer buffer)
+{
+    ResultMatch(Address, Process__device_address(process, (Address) buffer.data))
+        IsSuccess(address, return (IOServerBufferDataPtr) address);
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_FAIL();
+    return NULL;
 }
 
 IOContextPtr io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
@@ -393,6 +405,8 @@ void test_console_write_outputs_to_basic_io()
         IsSuccess(result, handle = result);
         IsError(code, message, TEST_FAIL());
     End
+
+    BasicIO__reset_output();
 
     ResultMatch(ByteCount, IOSubsystem__write(io_subsystem, rw_context(handle, data, sizeof(data) - 1)));
         IsSuccess(byte_count,
@@ -570,7 +584,7 @@ void test_stream_read_resumes_through_context_switch_when_data_arrives()
 
     for (size_t i = 0; i < sizeof(data) - 1; i++)
     {
-        server_buffer.data[i] = data[i];
+        server_buffer_data_for_test(&SERVER_PROC, server_buffer)[i] = data[i];
     }
 
     ResultMatch(IOStatus, IOSubsystem__server_data_available(io_subsystem, close_context(server_handle), sizeof(data) - 1))
@@ -578,7 +592,7 @@ void test_stream_read_resumes_through_context_switch_when_data_arrives()
         IsError(code, message, TEST_FAIL())
     End
 
-    Process__context_switch(&PROC);
+    ContextSwitch__switch(ContextSwitch__new(&PROC, None(ProcessPtr)));
 
     ResultMatch(Anything, deferred_syscall_result())
         IsSuccess(byte_count,

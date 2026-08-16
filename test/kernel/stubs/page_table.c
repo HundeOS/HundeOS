@@ -38,7 +38,7 @@ typedef struct PageTable
     MapRequestArray mapped_addresses;
 } PageTable;
 
-KernelAddress PageTable__new()
+KernelAddress PageTable__new(KernelPtr kernel)
 {
     PageTablePtr table = (PageTablePtr) malloc(sizeof(PageTable));
     table->mapped_addresses = EmptyArray(MapRequestArray);
@@ -49,17 +49,17 @@ KernelAddress PageTable__new()
     };
 }
 
-void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
+void PageTable__map(PageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     MapRequestArray__push(&self->mapped_addresses, (MapRequest){.address = address, .size = size});
 }
 
-void PageTable__map_mmio(PageTablePtr self, UserAddress address, size_t size)
+void PageTable__map_mmio(PageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
-    PageTable__map(self, address, size);
+    PageTable__map(self, kernel, address, size);
 }
 
-void PageTable__unmap(PageTablePtr self, Address virtual_address, size_t size)
+void PageTable__unmap(PageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
 {
     FAIterate(MapRequestArray, self->mapped_addresses, i, mapped_address)
         if (MapRequest__is_covered_by_unmap(&mapped_address, virtual_address, size))

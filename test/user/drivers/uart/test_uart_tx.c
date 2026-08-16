@@ -10,6 +10,7 @@
 #define UART_DR   0x000
 #define UART_FR   0x018
 #define FR_TXFF   (1u << 5)
+#define UART_PHYS_BASE 0x12345000ULL
 
 static char fake_io_buffer[2];
 static uint32_t fake_uart_writes[4];
@@ -26,6 +27,14 @@ static uint64_t fake_uart_fr_read_count;
 static bool fake_became_service;
 static bool fake_data_consumed;
 static uint64_t fake_service_wait_count;
+static bool fake_sysinfo_opened;
+static bool fake_sysinfo_closed;
+
+static const char fake_sysinfo[] =
+    "uart.physical_base=0x12345000\n"
+    "uart.virtual_base=0xffff000000000000\n"
+    "uart.irq=99\n"
+    "uart.mmio_size=0x1000\n";
 
 static uint32_t fake_uart_read32(void * base, uint64_t offset);
 static void fake_uart_write32(void * base, uint64_t offset, uint32_t value);
@@ -56,13 +65,15 @@ void setUp(void)
     fake_io_buffer[0] = 'x';
     fake_io_buffer[1] = '\n';
     fake_uart_mapping.driver_address = fake_uart_writes;
-    fake_uart_mapping.device_address = 0x09000000ULL;
+    fake_uart_mapping.device_address = UART_PHYS_BASE;
     fake_uart_mapping.size = 0x1000ULL;
     fake_uart_write_count = 0;
     fake_uart_fr_read_count = 0;
     fake_became_service = false;
     fake_data_consumed = false;
     fake_service_wait_count = 0;
+    fake_sysinfo_opened = false;
+    fake_sysinfo_closed = false;
     for (uint64_t i = 0; i < 4; i++)
     {
         fake_uart_writes[i] = 0;
@@ -91,10 +102,38 @@ ServiceCode service_become_service()
 
 ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
 {
-    TEST_ASSERT_EQUAL_UINT64(0x09000000ULL, physical_address);
+    TEST_ASSERT_EQUAL_UINT64(UART_PHYS_BASE, physical_address);
     TEST_ASSERT_EQUAL_UINT64(0x1000ULL, size);
     *memory = &fake_uart_mapping;
     return SERVICE_OK;
+}
+
+IOHandle open(const char * path, Flags flags)
+{
+    TEST_ASSERT_EQUAL_STRING("/proc/sysinfo", path);
+    TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
+    fake_sysinfo_opened = true;
+    return 7;
+}
+
+ByteCount read(IOHandle handle, char * buf, size_t size)
+{
+    TEST_ASSERT_EQUAL_INT64(7, handle);
+    TEST_ASSERT_TRUE(fake_sysinfo_opened);
+    size_t index = 0;
+    while (fake_sysinfo[index] != '\0' && index < size)
+    {
+        buf[index] = fake_sysinfo[index];
+        index++;
+    }
+    return (ByteCount) index;
+}
+
+IOStatus close(IOHandle handle)
+{
+    TEST_ASSERT_EQUAL_INT64(7, handle);
+    fake_sysinfo_closed = true;
+    return IO_OK;
 }
 
 void * driver_ptr(ServiceMappedMemoryPtr memory)
@@ -183,6 +222,8 @@ void test_uart_tx_main_maps_registers_waits_for_write_request_and_consumes_data(
     TEST_ASSERT_EQUAL_INT(0, uart_tx_main_under_test());
 
     TEST_ASSERT_TRUE(fake_became_service);
+    TEST_ASSERT_TRUE(fake_sysinfo_opened);
+    TEST_ASSERT_TRUE(fake_sysinfo_closed);
     TEST_ASSERT_TRUE(fake_data_consumed);
     TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);
     TEST_ASSERT_EQUAL_UINT64(3, fake_uart_write_count);

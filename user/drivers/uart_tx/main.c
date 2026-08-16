@@ -3,9 +3,7 @@
 #include "../../sys/io_server.h"
 #include "../../sys/debug.h"
 #include "../../sys/service.h"
-
-#define UART0_PHYS_BASE 0x09000000ULL
-#define UART_MMIO_SIZE  0x1000ULL
+#include "../../sys/uart_config.h"
 
 #define UART_DR   0x000
 #define UART_FR   0x018
@@ -46,8 +44,15 @@ int UART_TX_ENTRYPOINT(void)
         return 1;
     }
 
+    UartDriverConfig config;
+    if (!UartDriverConfig__load(&config))
+    {
+        DRIVER_DEBUG("uart_tx: sysinfo read failed\n");
+        return 1;
+    }
+
     ServiceMappedMemoryPtr uart_mapping;
-    if (!service_ok(service_map_mmio(UART0_PHYS_BASE, UART_MMIO_SIZE, &uart_mapping)))
+    if (!service_ok(service_map_mmio(config.physical_base, config.mmio_size, &uart_mapping)))
     {
         DRIVER_DEBUG("uart_tx: mmio map failed\n");
         return 1;

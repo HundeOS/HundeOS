@@ -11,7 +11,8 @@ struct ProcessContext
     uint64_t fpsr;
 };
 
-ProcessContextPtr ProcessContext__init(ProcessID pid,
+ProcessContextPtr ProcessContext__init(KernelPtr kernel,
+                                       ProcessID pid,
                                        StackPtr stack,
                                        UserAddress entry_point,
                                        KernelAddress page_table,

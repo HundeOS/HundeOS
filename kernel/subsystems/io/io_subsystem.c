@@ -1,6 +1,7 @@
 #include "io_subsystem.h"
 
 #include "kernel_core.h"
+#include "kernel_init.h"
 #include "process.h"
 #include "kalloc.h"
 #include "arch/page_table.h"
@@ -699,14 +700,14 @@ static Result(IOServerBuffer) IOSubsystem__map_server_buffer(ProcessPtr process,
 
     UserAddress user_address = (UserAddress) {
         .virtual_addr = user_page,
-        .kernel_addr = Kernel__from_virtual_address(kernel_page),
+        .kernel_addr = Kernel__from_virtual_address(Kernel__instance(), kernel_page),
         .read = true,
         .write = true,
         .execute = false,
         .valid = true,
     };
 
-    PageTable__map(v_ptr(process->page_table, PageTable), user_address, map_size);
+    PageTable__map(v_ptr(process->page_table, PageTable), Kernel__instance(), user_address, map_size);
     ResultMatch(ProcessMemoryCode, Process__record_user_allocation(process, user_address, map_size, USER_ALLOCATION_DYNAMIC))
         IsSuccess(_,
         {

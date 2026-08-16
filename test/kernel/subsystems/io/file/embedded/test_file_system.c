@@ -13,6 +13,7 @@
 #include "../../../../../../kernel/subsystems/io/file/fat32/fat32.h"
 #include "../../../../../../kernel/subsystems/io/file/memfs/memfs.h"
 #include "../../../../../../kernel/subsystems/io/file/register.h"
+#include "../../../../../../kernel/system_info.h"
 #include "../../../../fixtures/io_subsystem.h"
 #include "../../../../fixtures/process.h"
 #include "../../../../fixtures/kernel.h"
@@ -28,6 +29,28 @@ static KernelPtr kernel = NULL;
 static ProcessPtr dummy_proc = NULL;
 
 static KernelContext kernel_context = EMPTY_KERNEL_CONTEXT;
+static SystemInfo fake_system_info = {
+    .cpu_count = 4,
+    .physical_memory = {
+        .physical_start = 0,
+        .physical_end = 0x100000000,
+    },
+    .kernel_heap = {
+        .virtual_start = 0xfffff00000000000,
+        .physical_start = 0x90200000,
+        .physical_end = 0x98200000,
+    },
+    .uart = {
+        .physical_base = 0x12345000,
+        .virtual_base = 0xffff000000000000,
+        .irq = 99,
+    },
+    .interrupt_controller = {
+        .kind = INTERRUPT_CONTROLLER_GIC_V3,
+        .distributor_physical_base = 0x08000000,
+        .redistributor_physical_base = 0x080a0000,
+    },
+};
 
 static BString async_list_pending = BSTRING_NEW("Async list pending");
 static BString async_invalid_path = BSTRING_NEW("Invalid path");
@@ -86,6 +109,7 @@ static AsyncListDirFilesystemIOStatePtr AsyncListDirFilesystemIOState__heap_new(
 
 void setUp(void)
 {
+    BlockDeviceRegistry__reset();
     dummy_proc = dummy_process(100, 11, PROC_STATE_RUNNING);
 
     root = init_root_filesystem_with_embedded_binaries();
@@ -107,6 +131,7 @@ void setUp(void)
     Filesystem__mount(root, bstring("fat32"), fat32_filesystem);
 
     kernel = init_test_kernel_with_filesystem(root);
+    kernel->system_info = Some(SystemInfo, fake_system_info);
     root_state = &root->state->state;
 
     kernel_context = KernelContext__new(Some(ProcessID, dummy_proc->pid), Some(SchedulerPtr, kernel->scheduler));
@@ -119,6 +144,7 @@ void tearDown(void)
 
 static BString embedded = BSTRING_NEW("sbin");
 static BString dev = BSTRING_NEW("dev");
+static BString proc = BSTRING_NEW("proc");
 static BString tmp = BSTRING_NEW("tmp");
 static BString memfs = BSTRING_NEW("memfs");
 static BString fat16 = BSTRING_NEW("fat16");
@@ -168,16 +194,18 @@ void test_it_can_list_files_from_root(void)
             TEST_FAIL();
         })
         IsSuccess(result, {
-            TEST_ASSERT_EQUAL_INT(5, FilesystemNodes__len(&result));
+            TEST_ASSERT_EQUAL_INT(6, FilesystemNodes__len(&result));
             FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&embedded, &node->name));
             FilesystemNodePtr dev_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 1), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&dev, &dev_node->name));
-            FilesystemNodePtr tmp_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 2), (FilesystemNodePtr){});
+            FilesystemNodePtr proc_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 2), (FilesystemNodePtr){});
+            TEST_ASSERT_TRUE(BString__equals(&proc, &proc_node->name));
+            FilesystemNodePtr tmp_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 3), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&tmp, &tmp_node->name));
-            FilesystemNodePtr fat16_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 3), (FilesystemNodePtr){});
+            FilesystemNodePtr fat16_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 4), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&fat16, &fat16_node->name));
-            FilesystemNodePtr fat32_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 4), (FilesystemNodePtr){});
+            FilesystemNodePtr fat32_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 5), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&fat32, &fat32_node->name));
         });
     End
@@ -245,6 +273,184 @@ void test_devfs_can_open_and_read_block_device_metadata(void)
     End
 }
 
+void test_procfs_can_open_and_read_system_info(void)
+{
+    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
+    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    SystemInfoPtr system_info = &procfs_kernel->system_info.some.val;
+    for (uint64_t index = 0; index < 12; index++)
+    {
+        PhysicalMemoryRegion region = {
+            .physical_start = 0x40000000 + (index * 0x1000000),
+            .physical_end = 0x40000000 + ((index + 1) * 0x1000000),
+        };
+        PhysicalMemoryRegions__push(&system_info->physical_memory.free_regions, region);
+    }
+
+    FilesystemPtr procfs_root = Filesystem__build_root_and_mounts(procfs_kernel);
+    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(procfs_root);
+
+    Result(IOHandle) sysinfo_handle =
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), bstring("/proc/sysinfo"), IO_OPEN_READ);
+
+    ResultMatch(IOHandle, sysinfo_handle)
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(handle,
+        {
+            char buffer[4096];
+            ByteCount total = 0;
+            bool eof = false;
+            while (!eof && total < sizeof(buffer) - 1)
+            {
+                ResultMatch(ByteCount, IOSubsystem__read(
+                    mounted_kernel->io_subsystem,
+                    rw_context(handle, (DataPtr) &buffer[total], 128)
+                ))
+                    IsError(code, message,
+                    {
+                        if (code == IO_EOF)
+                        {
+                            eof = true;
+                        }
+                        else
+                        {
+                            TEST_FAIL();
+                        }
+                    })
+                    IsSuccess(bytes, total += bytes;)
+                End
+            }
+            buffer[total] = '\0';
+
+            TEST_ASSERT_TRUE(eof);
+            TEST_ASSERT_GREATER_THAN(1024, total);
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "cpu.count=4\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.physical_start=0x0\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.physical_end=0x100000000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.physical_size=0x100000000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.physical_size_human=4 GiB\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.free_region.count=12\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.free_region.11.physical_start=0x4b000000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.free_region.11.physical_end=0x4c000000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.free_region.11.physical_size_human=16 MiB\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.kernel_heap.physical_start=0x90200000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.kernel_heap.physical_end=0x98200000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.kernel_heap.physical_size=0x8000000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.kernel_heap.physical_size_human=128 MiB\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "uart.physical_base=0x12345000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "uart.irq=99\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "uart.mmio_size=0x1000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "interrupt_controller.kind=2\n"));
+            TEST_ASSERT_NOT_NULL(strstr(
+                buffer,
+                "interrupt_controller.distributor_physical_base=0x8000000\n"
+            ));
+        })
+    End
+}
+
+void test_procfs_can_read_system_info_from_non_zero_offset(void)
+{
+    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
+    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    SystemInfoPtr system_info = &procfs_kernel->system_info.some.val;
+    for (uint64_t index = 0; index < 12; index++)
+    {
+        PhysicalMemoryRegion region = {
+            .physical_start = 0x40000000 + (index * 0x1000000),
+            .physical_end = 0x40000000 + ((index + 1) * 0x1000000),
+        };
+        PhysicalMemoryRegions__push(&system_info->physical_memory.free_regions, region);
+    }
+
+    FilesystemPtr procfs_root = Filesystem__build_root_and_mounts(procfs_kernel);
+    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(procfs_root);
+
+    Result(IOHandle) sysinfo_handle =
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), bstring("/proc/sysinfo"), IO_OPEN_READ);
+
+    ResultMatch(IOHandle, sysinfo_handle)
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(handle,
+        {
+            char skipped[128];
+            ResultMatch(ByteCount, IOSubsystem__read(
+                mounted_kernel->io_subsystem, rw_context(handle, (DataPtr) skipped, sizeof(skipped))
+            ))
+                IsError(code, message, TEST_FAIL())
+                IsSuccess(bytes, TEST_ASSERT_EQUAL_UINT64(128, bytes);)
+            End
+
+            char buffer[4096];
+            ByteCount total = 0;
+            bool eof = false;
+            while (!eof && total < sizeof(buffer) - 1)
+            {
+                ResultMatch(ByteCount, IOSubsystem__read(
+                    mounted_kernel->io_subsystem,
+                    rw_context(handle, (DataPtr) &buffer[total], 128)
+                ))
+                    IsError(code, message,
+                    {
+                        if (code == IO_EOF)
+                        {
+                            eof = true;
+                        }
+                        else
+                        {
+                            TEST_FAIL();
+                        }
+                    })
+                    IsSuccess(bytes, total += bytes;)
+                End
+            }
+            buffer[total] = '\0';
+
+            TEST_ASSERT_TRUE(eof);
+            TEST_ASSERT_GREATER_THAN(896, total);
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.free_region.11.physical_end=0x4c000000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "interrupt_controller.kind=2\n"));
+        })
+    End
+}
+
+void test_procfs_returns_eof_after_streaming_system_info(void)
+{
+    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
+    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    FilesystemPtr procfs_root = Filesystem__build_root_and_mounts(procfs_kernel);
+    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(procfs_root);
+
+    Result(IOHandle) sysinfo_handle =
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), bstring("/proc/sysinfo"), IO_OPEN_READ);
+
+    ResultMatch(IOHandle, sysinfo_handle)
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(handle,
+        {
+            char buffer[2048];
+            ResultMatch(ByteCount, IOSubsystem__read(
+                mounted_kernel->io_subsystem,
+                rw_context(handle, (DataPtr) buffer, sizeof(buffer))
+            ))
+                IsError(code, message, TEST_FAIL())
+                IsSuccess(bytes, {})
+            End
+
+            ResultMatch(ByteCount, IOSubsystem__read(
+                mounted_kernel->io_subsystem,
+                rw_context(handle, (DataPtr) buffer, sizeof(buffer))
+            ))
+                IsError(code, message,
+                {
+                    TEST_ASSERT_EQUAL_INT64(IO_EOF, code);
+                })
+                IsSuccess(bytes, TEST_FAIL())
+            End
+        })
+    End
+}
+
 void test_it_can_list_files_to_subdir(void)
 {
     Result(FilesystemNodes) nodes = root->file_io.list_nodes(root_state, NULL, bstring("/sbin/"));
@@ -255,7 +461,7 @@ void test_it_can_list_files_to_subdir(void)
             TEST_FAIL();
         })
         IsSuccess(result, {
-            TEST_ASSERT_EQUAL_INT(3, FilesystemNodes__len(&result));
+            TEST_ASSERT_EQUAL_INT(4, FilesystemNodes__len(&result));
             FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&hello_world, &node->name));
         });
@@ -340,19 +546,20 @@ void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
 
 void test_io_list_dir_lists_root_mounts(void)
 {
-    DirectoryEntry entries[5];
+    DirectoryEntry entries[6];
 
     ResultMatch(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/", (Anything) entries, 5, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/", (Anything) entries, 6, 0
     ))
         IsSuccess(count,
         {
-            TEST_ASSERT_EQUAL_INT(5, count);
+            TEST_ASSERT_EQUAL_INT(6, count);
             TEST_ASSERT_EQUAL_STRING("sbin", entries[0].name);
             TEST_ASSERT_EQUAL_STRING("dev", entries[1].name);
-            TEST_ASSERT_EQUAL_STRING("tmp", entries[2].name);
-            TEST_ASSERT_EQUAL_STRING("fat16", entries[3].name);
-            TEST_ASSERT_EQUAL_STRING("fat32", entries[4].name);
+            TEST_ASSERT_EQUAL_STRING("proc", entries[2].name);
+            TEST_ASSERT_EQUAL_STRING("tmp", entries[3].name);
+            TEST_ASSERT_EQUAL_STRING("fat16", entries[4].name);
+            TEST_ASSERT_EQUAL_STRING("fat32", entries[5].name);
         })
         IsError(code, message, TEST_FAIL())
     End
@@ -401,11 +608,12 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
             bool saw_hello = false;
             bool saw_ebin = false;
             bool saw_dev = false;
+            bool saw_proc = false;
             bool saw_tmp = false;
             bool saw_fat16 = false;
             bool saw_fat32 = false;
 
-            TEST_ASSERT_EQUAL_INT(7, count);
+            TEST_ASSERT_EQUAL_INT(8, count);
             for (DirectoryEntryCount i = 0; i < count; i++)
             {
                 if (strcmp(entries[i].name, "docs") == 0)
@@ -423,6 +631,10 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
                 else if (strcmp(entries[i].name, "dev") == 0)
                 {
                     saw_dev = true;
+                }
+                else if (strcmp(entries[i].name, "proc") == 0)
+                {
+                    saw_proc = true;
                 }
                 else if (strcmp(entries[i].name, "tmp") == 0)
                 {
@@ -442,6 +654,7 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
             TEST_ASSERT_TRUE(saw_hello);
             TEST_ASSERT_TRUE(saw_ebin);
             TEST_ASSERT_TRUE(saw_dev);
+            TEST_ASSERT_TRUE(saw_proc);
             TEST_ASSERT_TRUE(saw_tmp);
             TEST_ASSERT_TRUE(saw_fat16);
             TEST_ASSERT_TRUE(saw_fat32);
@@ -484,11 +697,12 @@ void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
                     bool saw_hello = false;
                     bool saw_ebin = false;
                     bool saw_dev = false;
+                    bool saw_proc = false;
                     bool saw_tmp = false;
                     bool saw_fat16 = false;
                     bool saw_fat32 = false;
 
-                    TEST_ASSERT_EQUAL_INT(7, count);
+                    TEST_ASSERT_EQUAL_INT(8, count);
                     for (DirectoryEntryCount i = 0; i < count; i++)
                     {
                         if (strcmp(entries[i].name, "docs") == 0)
@@ -506,6 +720,10 @@ void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
                         else if (strcmp(entries[i].name, "dev") == 0)
                         {
                             saw_dev = true;
+                        }
+                        else if (strcmp(entries[i].name, "proc") == 0)
+                        {
+                            saw_proc = true;
                         }
                         else if (strcmp(entries[i].name, "tmp") == 0)
                         {
@@ -525,6 +743,7 @@ void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
                     TEST_ASSERT_TRUE(saw_hello);
                     TEST_ASSERT_TRUE(saw_ebin);
                     TEST_ASSERT_TRUE(saw_dev);
+                    TEST_ASSERT_TRUE(saw_proc);
                     TEST_ASSERT_TRUE(saw_tmp);
                     TEST_ASSERT_TRUE(saw_fat16);
                     TEST_ASSERT_TRUE(saw_fat32);
@@ -574,6 +793,10 @@ void test_root_async_list_dir_synthesizes_mount_parent_on_backing_invalid_path(v
         IsNone(TEST_FAIL())
     End
 
+    FilesystemPtr mnt_filesystem = Filesystem__heap_new(bstring("mnt/fs1"), MemFilesystemIO__new());
+    MemFilesystemIOState__heap_new(mnt_filesystem);
+    Filesystem__mount(root, bstring("mnt/fs1"), mnt_filesystem);
+
     BlockDevice__set_current_context(&kernel_context);
     ResultMatch(DirectoryEntryCount, root->file_io.list_dir(root_state, bstring("/mnt"), mnt_entries, 4))
         IsSuccess(count, TEST_FAIL())
@@ -606,7 +829,9 @@ void test_root_async_list_dir_synthesizes_mount_parent_on_backing_invalid_path(v
 
 void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(void)
 {
-    FilesystemPtr built_root = Filesystem__build_root_and_mounts();
+    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
+    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    FilesystemPtr built_root = Filesystem__build_root_and_mounts(procfs_kernel);
     FilesystemPtr backing_root = Filesystem__heap_new(bstring("root-memfs"), MemFilesystemIO__new());
     MemFilesystemIOState__heap_new(backing_root);
     Filesystem__mount(built_root, bstring("/"), backing_root);
@@ -671,9 +896,10 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
             bool saw_hello = false;
             bool saw_ebin = false;
             bool saw_dev = false;
+            bool saw_proc = false;
             bool saw_tmp = false;
 
-            TEST_ASSERT_EQUAL_INT(5, count);
+            TEST_ASSERT_EQUAL_INT(6, count);
             for (DirectoryEntryCount i = 0; i < count; i++)
             {
                 if (strcmp(root_entries[i].name, "docs") == 0)
@@ -692,6 +918,10 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
                 {
                     saw_dev = true;
                 }
+                else if (strcmp(root_entries[i].name, "proc") == 0)
+                {
+                    saw_proc = true;
+                }
                 else if (strcmp(root_entries[i].name, "tmp") == 0)
                 {
                     saw_tmp = true;
@@ -702,6 +932,7 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
             TEST_ASSERT_TRUE(saw_hello);
             TEST_ASSERT_TRUE(saw_ebin);
             TEST_ASSERT_TRUE(saw_dev);
+            TEST_ASSERT_TRUE(saw_proc);
             TEST_ASSERT_TRUE(saw_tmp);
         })
         IsError(code, message, TEST_FAIL())
@@ -710,7 +941,9 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
 
 void test_build_root_and_mounts_lists_tmp_mount_parent_when_backing_root_is_mounted(void)
 {
-    FilesystemPtr built_root = Filesystem__build_root_and_mounts();
+    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
+    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    FilesystemPtr built_root = Filesystem__build_root_and_mounts(procfs_kernel);
     FilesystemPtr backing_root = Filesystem__heap_new(bstring("root-memfs"), MemFilesystemIO__new());
     MemFilesystemIOState__heap_new(backing_root);
     Filesystem__mount(built_root, bstring("/"), backing_root);
@@ -739,8 +972,9 @@ void test_io_list_dir_lists_ebin_files(void)
     ))
         IsSuccess(count,
         {
-            TEST_ASSERT_EQUAL_INT(3, count);
+            TEST_ASSERT_EQUAL_INT(4, count);
             TEST_ASSERT_EQUAL_STRING("hello_world", entries[0].name);
+            TEST_ASSERT_EQUAL_STRING("drivers", entries[3].name);
         })
         IsError(code, message, TEST_FAIL())
     End

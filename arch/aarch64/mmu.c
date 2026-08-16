@@ -39,10 +39,10 @@ void MMU__park_ttbr0(uint64_t guard_L0_pa, uint16_t guard_asid, bool disable_wal
 }
 
 
-void MMU__install_null_low_mem_table()
+void MMU__install_null_low_mem_table(KernelPtr kernel)
 {
     PageTable * table = MMU__init_null();
-    KernelAddress address = PageTable__from_virtual_address(addr(table));
+    KernelAddress address = PageTable__from_virtual_address(kernel, addr(table));
 
     MMU__park_ttbr0(address.phys_addr, (GUARD_ASID << 48), false);
     __asm__ volatile("tlbi vmalle1");  // invalidate all EL1 stage-1 TLBs

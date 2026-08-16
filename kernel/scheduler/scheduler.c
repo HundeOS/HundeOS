@@ -6,6 +6,7 @@
 #include "../kalloc.h"
 #include "../print.h"
 #include "../all_defs.h"
+#include "../kernel_core.h"
 #include "../spin.h"
 #include "parked.h"
 #include "../subsystems/message/subsystem_codes.h"
@@ -41,6 +42,7 @@ static const BString unknown_user_exception_reason = BSTRING_NEW("unknown user e
 static const BString unknown_fault_reason = BSTRING_NEW("unknown fault");
 static BString service_event_queue_empty = BSTRING_NEW("Service event queue is empty");
 static BString child_event_queue_empty = BSTRING_NEW("Child event queue is empty");
+static BString missing_interrupt_controller = BSTRING_NEW("Missing interrupt controller info");
 
 static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
 static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
@@ -103,9 +105,9 @@ static Optional(ParkedOperationPtr) Scheduler__find_parked_operation(
     return None(ParkedOperationPtr);
 }
 
-Result(CPUSchedulerPtr) CPUScheduler__heap_new(Elf idle_process, CPUID cpu)
+Result(CPUSchedulerPtr) CPUScheduler__heap_new(KernelPtr kernel, Elf idle_process, CPUID cpu)
 {
-    ResultMatch(ProcessPtr, Process__setup(idle_process, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, idle_process, None(ProcessPtr)))
         IsSuccess(idle,
         {
             CPUSchedulerPtr sched = v_ptr(Kernel__alloc(sizeof(CPUScheduler)), CPUScheduler);
@@ -543,6 +545,12 @@ static void Scheduler__write_abort_to_stderr(IOSubsystemPtr io_subsystem, Proces
 
 static Result(ProcessPtr) Scheduler__terminate_process(SchedulerPtr self, ProcessPtr proc, ReturnCode return_code)
 {
+    if (is_nothing(self->kernel))
+    {
+        return Error(ProcessPtr, bstring("Scheduler has no owning kernel"), SCHEDULER_GENERAL_ERROR);
+    }
+
+    KernelPtr kernel = self->kernel.some.val;
     FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
         Result(ProcessPtr) res = CPUScheduler__exit(sched, proc);
         ResultMatch(ProcessPtr, res)
@@ -858,14 +866,18 @@ bool Scheduler__parked_operation_is_ready(SchedulerPtr self, ParkedOperationPtr 
 }
 
 
-Result(SchedulerInitStatus) Scheduler__init(SchedulerPtr self, Elf idle_process)
+Result(SchedulerInitStatus) Scheduler__init(KernelPtr kernel, SchedulerPtr self, Elf idle_process)
 {
     __d_println(SCHEDULER, "Scheduler__init");
+    self->kernel = Some(KernelPtr, kernel);
+    Match(SystemInfo, kernel->system_info)
+        IsSome(system_info, self->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller))
+    End
     self->ready = false;
     for (uint64_t i = 0; i < MAX_CPUS; i++)
     {
         __d_printf(SCHEDULER, "Scheduler__init cpu - %i\n", i);
-        ResultMatch(CPUSchedulerPtr, CPUScheduler__heap_new(idle_process, i))
+        ResultMatch(CPUSchedulerPtr, CPUScheduler__heap_new(kernel, idle_process, i))
             IsError(code, message,
             {
                 return Error(SchedulerInitStatus, message, SCHEDULER_INIT_ERROR);
@@ -1013,9 +1025,17 @@ Result(ServiceCode) Scheduler__subscribe_irq(SchedulerPtr self, ProcessPtr proce
 Result(ServiceCode) Scheduler__send_irq_event(SchedulerPtr self, IRQNumber irq)
 {
     __d_printf(IODEV, "scheduler send irq event irq=%i\n", irq);
+    if (is_nothing(self->interrupt_controller))
+    {
+        return Error(ServiceCode, missing_interrupt_controller, SERVICE_SCHEDULER_ERROR);
+    }
+
+    InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
     CriticalSection(self->scheduler_lock,
     {
-        ResultMatch(ServiceEventDispatch, ServiceEventDispatcher__dispatch_irq(&self->service_event_dispatcher, irq))
+        ResultMatch(ServiceEventDispatch, ServiceEventDispatcher__dispatch_irq(
+            &self->service_event_dispatcher, interrupt_controller, irq
+        ))
             IsSuccess(dispatch,
             {
                 Match(ProcessPtr, dispatch.process)
@@ -1068,9 +1088,17 @@ Result(ServiceEvent) Scheduler__service_wait_with_context_ownership(
     Optional(Continuation) continuation, bool owns_kernel_context
 )
 {
+    if (is_nothing(self->interrupt_controller))
+    {
+        return Error(ServiceEvent, missing_interrupt_controller, SERVICE_SCHEDULER_ERROR);
+    }
+
+    InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
     CriticalSection(self->scheduler_lock,
     {
-        ResultMatch(ServiceCode, ServiceEventDispatcher__complete_active_irq(&self->service_event_dispatcher, process))
+        ResultMatch(ServiceCode, ServiceEventDispatcher__complete_active_irq(
+            &self->service_event_dispatcher, interrupt_controller, process
+        ))
             IsError(code, message, _cs_return Error(ServiceEvent, message, code))
         End
 

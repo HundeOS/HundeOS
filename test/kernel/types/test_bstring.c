@@ -242,3 +242,60 @@ void test_bstring_char_at_returns_none_when_out_of_bounds(void)
 
     TEST_ASSERT_FALSE(BString__char_at(&input, 5).present);
 }
+
+void test_bstring_iterate_visits_each_character(void)
+{
+    BString input = bstring("abc");
+    BString output = EMPTY_BSTRING;
+
+    BStringIterate(&input, index, ch)
+        BString__push_char(&output, ch);
+    }
+
+    TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&output));
+}
+
+void test_bstring_sprintf_formats_unsigned_decimal(void)
+{
+    BString format = bstring("value=%u");
+
+    BString formatted = BString__sprintf(&format, 4000000000U);
+
+    TEST_ASSERT_EQUAL_STRING("value=4000000000", BString__cstr(&formatted));
+}
+
+void test_bstring_sprintf_formats_signed_64_bit_decimal(void)
+{
+    BString format = bstring("value=%lld");
+
+    BString formatted = BString__sprintf(&format, -4294967296LL);
+
+    TEST_ASSERT_EQUAL_STRING("value=-4294967296", BString__cstr(&formatted));
+}
+
+void test_bstring_sprintf_formats_unsigned_64_bit_decimal(void)
+{
+    BString format = bstring("value=%llu");
+
+    BString formatted = BString__sprintf(&format, 4294967296ULL);
+
+    TEST_ASSERT_EQUAL_STRING("value=4294967296", BString__cstr(&formatted));
+}
+
+void test_bstring_sprintf_formats_unsigned_64_bit_hex(void)
+{
+    BString format = bstring("addr=0x%llx");
+
+    BString formatted = BString__sprintf(&format, 0xffff000000600000ULL);
+
+    TEST_ASSERT_EQUAL_STRING("addr=0xffff000000600000", BString__cstr(&formatted));
+}
+
+void test_bstring_sprintf_formats_pointer_width_hex(void)
+{
+    BString format = bstring("addr=%p");
+
+    BString formatted = BString__sprintf(&format, (uintptr_t) 0xffff000000600000ULL);
+
+    TEST_ASSERT_EQUAL_STRING("addr=0xffff000000600000", BString__cstr(&formatted));
+}

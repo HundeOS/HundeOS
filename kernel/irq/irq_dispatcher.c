@@ -4,6 +4,7 @@ static BString missing_dispatcher = BSTRING_NEW("Missing IRQ dispatcher");
 static BString missing_kernel_consumer = BSTRING_NEW("Missing IRQ kernel consumer");
 static BString missing_service_process = BSTRING_NEW("Missing IRQ service process");
 static BString missing_scheduler = BSTRING_NEW("Missing scheduler for IRQ service consumer");
+static BString missing_interrupt_controller = BSTRING_NEW("Missing interrupt controller info");
 static BString irq_already_registered = BSTRING_NEW("IRQ already registered");
 
 MapBodyDefine(IRQConsumerMap);
@@ -57,6 +58,12 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(
     {
         return Error(IRQRegistrationStatus, missing_scheduler, IRQ_REGISTRATION_ERROR);
     }
+    if (is_nothing(self->interrupt_controller))
+    {
+        return Error(IRQRegistrationStatus, missing_interrupt_controller, IRQ_REGISTRATION_ERROR);
+    }
+
+    InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
 
     IRQConsumer irq_consumer = (IRQConsumer) {
         .type = IRQ_CONSUMER_SERVICE,
@@ -78,7 +85,7 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(
         IsError(code, message, return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR))
     End
 
-    ResultMatch(SubsystemInitStatus, Arch__enable_irq(irq))
+    ResultMatch(SubsystemInitStatus, Arch__enable_irq(interrupt_controller, irq))
         IsError(code, message, return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR))
     End
 
@@ -97,6 +104,12 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(
     {
         return Error(IRQRegistrationStatus, missing_service_process, IRQ_INVALID_CONSUMER);
     }
+    if (is_nothing(self->interrupt_controller))
+    {
+        return Error(IRQRegistrationStatus, missing_interrupt_controller, IRQ_REGISTRATION_ERROR);
+    }
+
+    InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
 
     IRQNumbers stale_irqs = IRQNumbers__new();
 
@@ -113,7 +126,7 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(
 
         FAIterate(IRQNumbers, stale_irqs, irq_index, irq)
             IRQConsumerMap__delete(&self->consumers, irq);
-            Arch__mask_irq(irq);
+            Arch__mask_irq(interrupt_controller, irq);
         End
     });
 

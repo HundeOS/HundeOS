@@ -9,6 +9,7 @@
 #include "mutex.h"
 #include "subsystems/message/message_broker.h"
 #include "irq/irq_dispatcher.h"
+#include "system_info.h"
 
 typedef uint64_t KernelInitStatus;
 
@@ -19,6 +20,7 @@ typedef struct Kernel
 
     SyscallDispatcher syscall_dispatcher;
     IOSubsystemPtr io_subsystem;
+    Optional(SystemInfo) system_info;
     Heap heap;
     SchedulerPtr scheduler;
     MessageBrokerPtr message_broker;

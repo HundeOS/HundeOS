@@ -16,7 +16,7 @@ Result(SystemCallResult) Exit__handler(
         {
             __d_printf(SYSCALL, "Exiting process %i %s", process->pid, cstr(process->name));
 
-            Process__dispose_owned_kernel_resources(kernel, process);
+            Process__dispose_owned_kernel_resources(process);
             Scheduler__exit(kernel->scheduler, process, exit_code);
             return Success(SystemCallResult, SYSCALL_OK);
         })

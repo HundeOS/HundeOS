@@ -299,7 +299,7 @@ void test_scheduler_init_creates_cpu_slots_independent_of_online_cpu_count(void)
     SchedulerPtr local_scheduler = Scheduler__heap_new(message_broker);
     Elf idle = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
 
-    ResultMatch(SchedulerInitStatus, Scheduler__init(local_scheduler, idle))
+    ResultMatch(SchedulerInitStatus, Scheduler__init(kernel, local_scheduler, idle))
         IsError(code, message, TEST_FAIL())
     End
 

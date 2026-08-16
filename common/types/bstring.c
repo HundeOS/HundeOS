@@ -24,7 +24,82 @@ static char BString__hex_digit(unsigned int value)
         return (char) ('0' + value);
     }
 
-    return (char) ('A' + value - 10);
+    return (char) ('a' + value - 10);
+}
+
+static void BString__append_cstr_mut(BStringPtr self, const char * text)
+{
+    for (StringPos i = 0; text[i] != '\0'; i++)
+    {
+        if (!BString__push_char(self, text[i]))
+        {
+            return;
+        }
+    }
+}
+
+static void BString__append_reversed_mut(BStringPtr self, ConstBStringPtr reversed)
+{
+    BString copy = *reversed;
+    while (!BString__is_empty(&copy))
+    {
+        StringPos last_index = BString__length(&copy) - 1;
+        Match(char, BString__char_at(&copy, last_index))
+            IsSome(ch, BString__push_char(self, ch);)
+            IsNone(return;)
+        End
+
+        BString__remove_at(&copy, last_index);
+    }
+}
+
+static void BString__append_uint64_dec_mut(BStringPtr self, uint64_t value)
+{
+    BString reversed = EMPTY_BSTRING;
+
+    if (value == 0)
+    {
+        BString__push_char(&reversed, '0');
+    }
+
+    while (value > 0)
+    {
+        BString__push_char(&reversed, (char) ('0' + (value % 10)));
+        value /= 10;
+    }
+
+    BString__append_reversed_mut(self, &reversed);
+}
+
+static void BString__append_int64_dec_mut(BStringPtr self, int64_t value)
+{
+    uint64_t magnitude = (uint64_t) value;
+
+    if (value < 0)
+    {
+        BString__push_char(self, '-');
+        magnitude = (uint64_t) (-(value + 1)) + 1;
+    }
+
+    BString__append_uint64_dec_mut(self, magnitude);
+}
+
+static void BString__append_uint64_hex_mut(BStringPtr self, uint64_t value)
+{
+    BString reversed = EMPTY_BSTRING;
+
+    if (value == 0)
+    {
+        BString__push_char(&reversed, '0');
+    }
+
+    while (value > 0)
+    {
+        BString__push_char(&reversed, BString__hex_digit((unsigned int) (value % 16)));
+        value /= 16;
+    }
+
+    BString__append_reversed_mut(self, &reversed);
 }
 
 BString BString__slice(ConstBStringPtr self, StringPos start, StringPos end)
@@ -404,72 +479,81 @@ BString BString__vsprintf(ConstBStringPtr format, va_list args)
         return result;
     }
 
-    int str_idx = 0;
-
-    for (StringPos i = 0; i < format->len && str_idx + 1 < result.max; i++)
+    for (StringPos i = 0; i < BString__length(format); i++)
     {
-        if (format->data[i] != '%')
+        char format_char = Unwrap(char, BString__char_at(format, i), '\0');
+        if (format_char != '%')
         {
-            result.data[str_idx++] = format->data[i];
+            BString__push_char(&result, format_char);
             continue;
         }
 
         i++;
-        while (i < format->len && format->data[i] >= '0' && format->data[i] <= '9')
+        format_char = Unwrap(char, BString__char_at(format, i), '\0');
+        while (i < BString__length(format) && format_char >= '0' && format_char <= '9')
         {
             i++;
+            format_char = Unwrap(char, BString__char_at(format, i), '\0');
         }
 
-        if (i >= format->len)
+        if (i >= BString__length(format))
         {
             break;
         }
 
-        switch (format->data[i])
+        int long_count = 0;
+        while (i < BString__length(format) && format_char == 'l' && long_count < 2)
+        {
+            long_count++;
+            i++;
+            format_char = Unwrap(char, BString__char_at(format, i), '\0');
+        }
+
+        if (i >= BString__length(format))
+        {
+            break;
+        }
+
+        switch (format_char)
         {
             case 'd':
             case 'i':
             {
-                int value = va_arg(args, int);
-                char temp[20];
-                int temp_idx = 0;
-                bool is_negative = false;
-
-                if (value < 0)
+                int64_t value;
+                if (long_count == 0)
                 {
-                    is_negative = true;
-                    value = -value;
+                    value = va_arg(args, int);
                 }
-
-                if (value == 0)
+                else if (long_count == 1)
                 {
-                    temp[temp_idx++] = '0';
+                    value = va_arg(args, long);
                 }
                 else
                 {
-                    int start = temp_idx;
-                    while (value > 0)
-                    {
-                        temp[temp_idx++] = (char) ('0' + (value % 10));
-                        value /= 10;
-                    }
-                    for (int j = 0; j < (temp_idx - start) / 2; j++)
-                    {
-                        char swap = temp[start + j];
-                        temp[start + j] = temp[temp_idx - 1 - j];
-                        temp[temp_idx - 1 - j] = swap;
-                    }
+                    value = va_arg(args, long long);
                 }
 
-                if (is_negative && str_idx + 1 < result.max)
+                BString__append_int64_dec_mut(&result, value);
+                break;
+            }
+
+            case 'u':
+            {
+                uint64_t value;
+                if (long_count == 0)
                 {
-                    result.data[str_idx++] = '-';
+                    value = va_arg(args, unsigned int);
+                }
+                else if (long_count == 1)
+                {
+                    value = va_arg(args, unsigned long);
+                }
+                else
+                {
+                    value = va_arg(args, unsigned long long);
                 }
 
-                for (int j = 0; j < temp_idx && str_idx + 1 < result.max; j++)
-                {
-                    result.data[str_idx++] = temp[j];
-                }
+                BString__append_uint64_dec_mut(&result, value);
                 break;
             }
 
@@ -480,63 +564,50 @@ BString BString__vsprintf(ConstBStringPtr format, va_list args)
                 {
                     str = "(null)";
                 }
-                while (*str != '\0' && str_idx + 1 < result.max)
-                {
-                    result.data[str_idx++] = *str++;
-                }
+                BString__append_cstr_mut(&result, str);
                 break;
             }
 
             case 'c':
             {
                 int ch = va_arg(args, int);
-                result.data[str_idx++] = (char) ch;
+                BString__push_char(&result, (char) ch);
                 break;
             }
 
             case 'p':
             case 'x':
             {
-                unsigned int value = va_arg(args, unsigned int);
-                char temp[20];
-                int temp_idx = 0;
-
-                if (value == 0)
+                uint64_t value;
+                if (format_char == 'p')
                 {
-                    temp[temp_idx++] = '0';
+                    value = va_arg(args, uintptr_t);
+                }
+                else if (long_count == 0)
+                {
+                    value = va_arg(args, unsigned int);
+                }
+                else if (long_count == 1)
+                {
+                    value = va_arg(args, unsigned long);
                 }
                 else
                 {
-                    int start = temp_idx;
-                    while (value > 0)
-                    {
-                        temp[temp_idx++] = BString__hex_digit(value % 16);
-                        value /= 16;
-                    }
-                    for (int j = 0; j < (temp_idx - start) / 2; j++)
-                    {
-                        char swap = temp[start + j];
-                        temp[start + j] = temp[temp_idx - 1 - j];
-                        temp[temp_idx - 1 - j] = swap;
-                    }
+                    value = va_arg(args, unsigned long long);
                 }
 
-                if (format->data[i] == 'p' && str_idx + 2 < result.max)
+                if (format_char == 'p')
                 {
-                    result.data[str_idx++] = '0';
-                    result.data[str_idx++] = 'x';
+                    BString__append_cstr_mut(&result, "0x");
                 }
 
-                for (int j = 0; j < temp_idx && str_idx + 1 < result.max; j++)
-                {
-                    result.data[str_idx++] = temp[j];
-                }
+                BString__append_uint64_hex_mut(&result, value);
                 break;
             }
 
             case '%':
             {
-                result.data[str_idx++] = '%';
+                BString__push_char(&result, '%');
                 break;
             }
 
@@ -545,8 +616,6 @@ BString BString__vsprintf(ConstBStringPtr format, va_list args)
         }
     }
 
-    result.data[str_idx] = '\0';
-    result.len = str_idx;
     return result;
 }
 

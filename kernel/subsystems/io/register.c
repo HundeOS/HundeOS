@@ -31,7 +31,7 @@ static BString ROOT = BSTRING_NEW("/");
 Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
 {
     IOSubsystemPtr io_subsystem = kernel->io_subsystem;
-    FilesystemPtr root_fs = Filesystem__build_root_and_mounts();
+    FilesystemPtr root_fs = Filesystem__build_root_and_mounts(kernel);
     io_subsystem->root_filesystem = Some(FilesystemPtr, root_fs);
 
     IO_REGISTER(io_subsystem, CONSOLE, Console__heap_new(), (IOStatePtr) ConsoleState__instance());

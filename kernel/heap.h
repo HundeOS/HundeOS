@@ -8,6 +8,7 @@
 #include "types/hashtable.h"
 #include "mutex.h"
 #include "memory_page.h"
+#include "system_info.h"
 
 #define BUCKET_SIZE 1024
 #define TABLE_SIZE (MAX_BLOCKS / BUCKET_SIZE)
@@ -48,7 +49,7 @@ typedef Heap * HeapPtr;
 typedef uint64_t HeapCode;
 
 ResultDef(HeapCode);
-Result(HeapCode) Heap__init(HeapPtr self);
+Result(HeapCode) Heap__init(HeapPtr self, SystemInfoPtr system_info);
 
 KernelAddress Heap__alloc(HeapPtr self);
 KernelAddress Heap__alloc_size(HeapPtr self, size_t size);

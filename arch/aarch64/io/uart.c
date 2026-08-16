@@ -1,5 +1,6 @@
 #include "uart.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "../../../kernel/kernel.h"
@@ -8,17 +9,36 @@
 #include "../../../kernel/types/result.h"
 #include "../../../kernel/types/optional.h"
 
+static UartInfoPtr uart_info = NULL;
 
-static volatile bool _check_ready()
+void uart_use_info(UartInfoPtr info)
 {
-    return (bool) (*UART0_FR & 0x20);
+    uart_info = info;
+}
+
+static volatile uint32_t * uart_reg(uint64_t offset)
+{
+    return (volatile uint32_t *)(uart_info->virtual_base + offset);
+}
+
+static bool uart_tx_ready()
+{
+    return (*uart_reg(UART0_FR_OFFSET) & FR_TXFF) == 0;
 }
 
 static void _send(unsigned int c)
 {
+    const uint64_t max_wait = 100000;
     __asm__ volatile("dsb sy");
-    Spin__wait(&_check_ready);
-    *UART0_DR = c;
+    for (uint64_t count = 0; !uart_tx_ready() && count < max_wait; count++)
+    {
+        CPU__wait();
+    }
+
+    if (uart_tx_ready())
+    {
+        *uart_reg(UART0_DR_OFFSET) = c;
+    }
     __asm__ volatile("dsb sy");
 }
 
@@ -41,7 +61,7 @@ void puts(const char* str) {
 
 static volatile bool _check_read_ready()
 {
-    return (bool) (*UART0_FR & FR_RXFE);
+    return (bool) (*uart_reg(UART0_FR_OFFSET) & FR_RXFE);
 }
 
 Optional(Char) _readchar()
@@ -51,7 +71,7 @@ Optional(Char) _readchar()
     WaitResult wait_res = Spin__wait(&_check_read_ready);
     if (wait_res == WAIT_OK)
     {
-        res = Some(Char, (Char) (*UART0_DR & 0xFF));
+        res = Some(Char, (Char) (*uart_reg(UART0_DR_OFFSET) & 0xFF));
     }
 
     __asm__ volatile("dsb sy");
@@ -94,31 +114,37 @@ void put_int(int num) {
     }
 }
 
-Result(InitCode) uart_init()
+Result(InitCode) uart_init(UartInfoPtr info)
 {
-    register unsigned int r;
+    uart_use_info(info);
 
     // initialize UART
-    *UART0_CR = 0;           // turn off UART0
+    *uart_reg(UART0_CR_OFFSET) = 0;           // turn off UART0
 
-    *UART0_ICR = 0x7FF;      // clear interrupts
-    *UART0_IBRD = 2;         // 115200 baud
-    *UART0_FBRD = 0xB;
-    *UART0_LCRH = 0b11 << 5; // 8n1
-    *UART0_CR = 0x301;       // enable Tx, Rx, FIFO
+    *uart_reg(UART0_ICR_OFFSET) = 0x7FF;      // clear interrupts
+    *uart_reg(UART0_IBRD_OFFSET) = 2;         // 115200 baud
+    *uart_reg(UART0_FBRD_OFFSET) = 0xB;
+    *uart_reg(UART0_LCRH_OFFSET) = 0b11 << 5; // 8n1
+    *uart_reg(UART0_CR_OFFSET) = 0x301;       // enable Tx, Rx, FIFO
 
     return Success(InitCode, ARCH_INIT_OK);
 }
 
-Result(InitCode) uart_enable_irqs()
+Result(InitCode) uart_enable_irqs(UartInfoPtr info)
 {
-    *UART0_CR = 0;            // disable UART
-    *UART0_ICR = 0x7FF;       // clear all interrupts
-    *UART0_IMSC = I_RX | I_RT; // enable RX and receive-timeout interrupts
-    *UART0_CR = (1 << 9) | (1 << 8) | (1 << 0); // enable UART, TX, RX
+    uart_use_info(info);
+
+    *uart_reg(UART0_CR_OFFSET) = 0;            // disable UART
+    *uart_reg(UART0_ICR_OFFSET) = 0x7FF;       // clear all interrupts
+    *uart_reg(UART0_IMSC_OFFSET) = I_RX | I_RT; // enable RX and receive-timeout interrupts
+    *uart_reg(UART0_CR_OFFSET) = (1 << 9) | (1 << 8) | (1 << 0); // enable UART, TX, RX
 
     __d_println(IRQ2, "Vals");
-    __d_printf(IRQ2, "IMSC=%x MIS=%x CR=%x\n", *UART0_IMSC, UARTMIS, *UART0_CR);
+    __d_printf(IRQ2,
+        "IMSC=%x MIS=%x CR=%x\n",
+        *uart_reg(UART0_IMSC_OFFSET),
+        *uart_reg(UART0_MIS_OFFSET),
+        *uart_reg(UART0_CR_OFFSET));
 
     return Success(InitCode, ARCH_INIT_OK);
 }
@@ -135,44 +161,44 @@ ConsoleState console_state = (ConsoleState) {
 void uart_irq_handler(IOSubsystemPtr io_subsystem)
 {
     __d_println(IRQ, "UART IRQ");
-    uint32_t mis = UARTMIS;
+    uint32_t mis = *uart_reg(UART0_MIS_OFFSET);
     bool received_data = mis & (I_RX | I_RT);
     if (received_data)
     {
         // Drain RX FIFO
-        while (!(*UART0_FR & FR_RXFE))
+        while (!(*uart_reg(UART0_FR_OFFSET) & FR_RXFE))
         {
-            Char ch = (Char) *UART0_DR & 0xFF;
+            Char ch = (Char) *uart_reg(UART0_DR_OFFSET) & 0xFF;
             __d_printf(IRQ, "Read char: %i\n", ch);
             __d_printf(IRQ, "Read char: %c\n", ch);
             IOBuffer__push(&console_state.read_buffer, ch);
         }
         // Clear RX + timeout
-        UARTICR = I_RX | I_RT;
+        *uart_reg(UART0_ICR_OFFSET) = I_RX | I_RT;
     }
 
     if (mis & I_TX)
     {
         // Fill TX FIFO until full or nothing left to send
-        while (!(*UART0_FR & FR_TXFF))
+        while (!(*uart_reg(UART0_FR_OFFSET) & FR_TXFF))
         {
             ResultMatch(Char, IOBuffer__pop(&console_state.write_buffer))
                 IsSuccess(val,
                 {
-                    *UART0_DR = val;
+                    *uart_reg(UART0_DR_OFFSET) = val;
                 });
             End
 
         }
         // Clear TX
-        UARTICR = I_TX;
+        *uart_reg(UART0_ICR_OFFSET) = I_TX;
     }
 
     if (mis & I_ERR)
     {
         // Read & clear errors
-        UART0_RSR_ECR = 0xFF;
-        UARTICR = I_ERR;
+        *uart_reg(UART0_RSR_ECR_OFFSET) = 0xFF;
+        *uart_reg(UART0_ICR_OFFSET) = I_ERR;
     }
     if (received_data)
     {

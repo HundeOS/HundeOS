@@ -12,18 +12,16 @@
 
 HashtableBodyDefine(AllocatedBlocks);
 
-extern char __heap_start[];
-extern char __heap_end[];
-extern char __heap_start_phys[];
-
-Result(HeapCode) Heap__init(HeapPtr self)
+Result(HeapCode) Heap__init(HeapPtr self, SystemInfoPtr system_info)
 {
+    MemoryRegionPtr kernel_heap = &system_info->kernel_heap;
+
     *self = (Heap) {
-        .start = addr_of(__heap_start),
-        .end = addr_of(__heap_end),
-        .phys_start = addr_of(__heap_start_phys),
+        .start = kernel_heap->virtual_start,
+        .end = kernel_heap->virtual_start + (kernel_heap->physical_end - kernel_heap->physical_start),
+        .phys_start = kernel_heap->physical_start,
         .current_block = (MemoryBlock) {
-            .start = KERNEL_ADDR(addr_of(__heap_start), addr_of(__heap_start_phys)),
+            .start = KERNEL_ADDR(kernel_heap->virtual_start, kernel_heap->physical_start),
             .pages_allocated = 0,
             .block_lock = MUTEX_INIT,
         },

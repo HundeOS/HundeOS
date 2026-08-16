@@ -17,7 +17,7 @@ Stack Stack__new()
     };
 }
 
-void Stack__map(Stack * self, PageTable * page_table)
+void Stack__map(KernelPtr kernel, Stack * self, PageTable * page_table)
 {
     __d_printf(
         MMU,
@@ -29,6 +29,6 @@ void Stack__map(Stack * self, PageTable * page_table)
         self->base.kernel_addr.phys_addr,
         page_table
     );
-    PageTable__map(page_table, self->base, STACK_SIZE);
+    PageTable__map(page_table, kernel, self->base, STACK_SIZE);
     __d_printf(MMU, "Stack__map done stack=%p page_table=%p\n", self, page_table);
 }

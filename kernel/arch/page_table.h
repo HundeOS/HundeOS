@@ -5,12 +5,14 @@
 
 typedef struct PageTable PageTable;
 typedef PageTable * PageTablePtr;
+typedef struct Kernel Kernel;
+typedef Kernel * KernelPtr;
 
 extern KernelAddress PageTable__create();
 extern KernelAddress PageTable__kernel_address(PageTablePtr self);
-extern KernelAddress PageTable__new();
-extern void PageTable__map(PageTablePtr self, UserAddress address, size_t size);
-extern void PageTable__map_mmio(PageTablePtr self, UserAddress address, size_t size);
-extern void PageTable__unmap(PageTablePtr self, Address virtual_address, size_t size);
+extern KernelAddress PageTable__new(KernelPtr kernel);
+extern void PageTable__map(PageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
+extern void PageTable__map_mmio(PageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
+extern void PageTable__unmap(PageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size);
 
 #endif

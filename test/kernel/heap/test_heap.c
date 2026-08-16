@@ -1,8 +1,12 @@
 #include "unity.h"
 #include "../../../kernel/heap.h"
+#include "../../../kernel/system_info.h"
 #include "../../../kernel/types/result.h"
 
 Heap heap = NEW_HEAP;
+
+static uint8_t test_heap_memory[PAGE_SIZE * 16];
+static const Address test_heap_physical_base = 0x70000000ULL;
 
 static void assert_free_success(KernelAddress addr)
 {
@@ -20,7 +24,14 @@ static void assert_free_fails(KernelAddress addr)
 
 void setUp(void)
 {
-    ResultMatch(HeapCode, Heap__init(&heap))
+    SystemInfo system_info = {
+        .kernel_heap = {
+            .virtual_start = (Address)&test_heap_memory[0],
+            .physical_start = test_heap_physical_base,
+            .physical_end = test_heap_physical_base + sizeof(test_heap_memory),
+        },
+    };
+    ResultMatch(HeapCode, Heap__init(&heap, &system_info))
         IsError(code, message, TEST_FAIL());
     End
 }
@@ -42,6 +53,14 @@ void test_simple_heap_alloc_and_free(void)
 
     // check the memory has been recycled
     TEST_ASSERT_EQUAL(physical, physical_second_alloc);
+}
+
+void test_heap_init_uses_system_info_physical_base(void)
+{
+    KernelAddress addr = Heap__alloc(&heap);
+
+    TEST_ASSERT_EQUAL_UINT64((Address)&test_heap_memory[0], vaddr(addr));
+    TEST_ASSERT_EQUAL_UINT64(test_heap_physical_base, paddr(addr));
 }
 
 void test_heap_alloc_reuses_freed_single_page(void)

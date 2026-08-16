@@ -5,6 +5,8 @@
 #include "../fixtures/process.h"
 #include "../stubs/panic.h"
 
+static InterruptControllerInfo interrupt_controller = { 0 };
+
 void Arch__reset_irq_tracking();
 uint64_t Arch__masked_irq();
 uint64_t Arch__unmasked_irq();
@@ -33,7 +35,7 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(ServiceEventDispatch, ServiceEventDispatcher__dispatch_irq(&dispatcher, 48))
+    ResultMatch(ServiceEventDispatch, ServiceEventDispatcher__dispatch_irq(&dispatcher, &interrupt_controller, 48))
         IsSuccess(dispatch,
         {
             Match(ProcessPtr, dispatch.process)
@@ -57,7 +59,7 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
         IsError(code, message, TEST_FAIL())
     End
 
-    ResultMatch(ServiceCode, ServiceEventDispatcher__complete_active_irq(&dispatcher, process))
+    ResultMatch(ServiceCode, ServiceEventDispatcher__complete_active_irq(&dispatcher, &interrupt_controller, process))
         IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
         IsError(code, message, TEST_FAIL())
     End

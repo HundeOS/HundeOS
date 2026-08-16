@@ -14,6 +14,7 @@ enter_high_kernel:
 
     //bl      print_crumb
 
+    mov     x0, x26
     br      x25              // branch to high VA entrypoint
 halt:
     wfe

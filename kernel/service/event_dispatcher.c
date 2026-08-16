@@ -60,7 +60,9 @@ Result(ServiceCode) ServiceEventDispatcher__enqueue(
     return Success(ServiceCode, SERVICE_OK);
 }
 
-Result(ServiceEventDispatch) ServiceEventDispatcher__dispatch_irq(ServiceEventDispatcherPtr self, IRQNumber irq)
+Result(ServiceEventDispatch) ServiceEventDispatcher__dispatch_irq(
+    ServiceEventDispatcherPtr self, InterruptControllerInfoPtr interrupt_controller, IRQNumber irq
+)
 {
     __d_printf(IODEV, "service event dispatcher irq=%i\n", irq);
     ServiceEventDispatch no_dispatch = (ServiceEventDispatch) {
@@ -99,7 +101,7 @@ Result(ServiceEventDispatch) ServiceEventDispatcher__dispatch_irq(ServiceEventDi
 
                 service->pending = true;
                 service->delivery_count++;
-                Arch__mask_irq(irq);
+                Arch__mask_irq(interrupt_controller, irq);
 
                 ServiceEvent event;
                 event.type = SERVICE_EVENT_IRQ;
@@ -158,7 +160,7 @@ Result(ServiceEvent) ServiceEventDispatcher__take_next(ServiceEventDispatcherPtr
 }
 
 Result(ServiceCode) ServiceEventDispatcher__complete_active_irq(
-    ServiceEventDispatcherPtr self, ProcessPtr process
+    ServiceEventDispatcherPtr self, InterruptControllerInfoPtr interrupt_controller, ProcessPtr process
 )
 {
     CriticalSection(self->lock,
@@ -175,7 +177,7 @@ Result(ServiceCode) ServiceEventDispatcher__complete_active_irq(
                             service->pending = false;
                             service->coalesced_count = 0;
                             process->service.active_irq_event = None(ServiceEvent);
-                            Arch__unmask_irq(event.source);
+                            Arch__unmask_irq(interrupt_controller, event.source);
                             _cs_return Success(ServiceCode, SERVICE_OK);
                         }
                     })

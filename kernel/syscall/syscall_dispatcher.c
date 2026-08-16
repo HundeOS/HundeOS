@@ -28,7 +28,7 @@ static Result(SystemCallResult) SyscallDispatcher__deliver_pending_signal(
             Match(ProcessSignal, Process__take_pending_signal(process))
                 IsSome(signal,
                 {
-                    Process__dispose_owned_kernel_resources(kernel, process);
+                    Process__dispose_owned_kernel_resources(process);
                     Scheduler__exit(kernel->scheduler, process, ProcessSignal__exit_code(signal));
                 })
             End

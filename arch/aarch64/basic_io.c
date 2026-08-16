@@ -92,6 +92,5 @@ void DebugTrace__puts(const char* str)
 #else
 void DebugTrace__puts(const char* str)
 {
-    BasicIO__puts(str);
 }
 #endif

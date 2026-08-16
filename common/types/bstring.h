@@ -82,4 +82,9 @@ BString BString__sprintf(ConstBStringPtr format, ...);
 #define cstr_p(bstrptr) \
     BString__cstr(bstrptr)
 
+#define BStringIterate(self, index, ch) \
+    for (StringPos index = 0; index < BString__length(self); index++) \
+    { \
+        char ch = Unwrap(char, BString__char_at(self, index), '\0'); \
+
 #endif

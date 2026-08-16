@@ -105,7 +105,7 @@ static Result(ProcessPtr) Exec__launch(
 {
     __d_printf(EXEC, "Launching elf %s\n", cstr(elf.name));
     KernelPtr kernel = context.kernel;
-    Result(ProcessPtr) proc = Process__setup_with_args(elf, context.process, arguments);
+    Result(ProcessPtr) proc = Process__setup_with_args(kernel, elf, context.process, arguments);
     ResultMatch(ProcessPtr, proc)
         IsSuccess(process,
         {

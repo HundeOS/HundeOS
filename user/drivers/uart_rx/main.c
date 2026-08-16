@@ -3,15 +3,17 @@
 #include "../../sys/io_server.h"
 #include "../../sys/debug.h"
 #include "../../sys/service.h"
-
-#define UART0_PHYS_BASE 0x09000000ULL
-#define UART_MMIO_SIZE  0x1000ULL
-#define UART_IRQ_ID     33ULL
+#include "../../sys/uart_config.h"
 
 #define UART_DR   0x000
 #define UART_FR   0x018
+#define UART_CR   0x030
+#define UART_IMSC 0x038
 #define UART_ICR  0x044
 #define FR_RXFE   (1u << 4)
+#define CR_UARTEN (1u << 0)
+#define CR_TXE    (1u << 8)
+#define CR_RXE    (1u << 9)
 #define I_RX      (1u << 4)
 #define I_RT      (1u << 6)
 #define I_ERR     ((1u << 7) | (1u << 8) | (1u << 9) | (1u << 10))
@@ -35,6 +37,13 @@ static volatile uint32_t * reg32(void * base, uint64_t offset)
 #define UART_WRITE32(base, offset, value) (*reg32((base), (offset)) = (uint32_t) (value))
 #endif
 
+static void configure_uart_rx(void * uart)
+{
+    UART_WRITE32(uart, UART_ICR, I_RX | I_RT | I_ERR);
+    UART_WRITE32(uart, UART_IMSC, I_RX | I_RT);
+    UART_WRITE32(uart, UART_CR, CR_UARTEN | CR_TXE | CR_RXE);
+}
+
 static uint64_t drain_uart(void * uart, IOServerBufferDataPtr target, uint64_t capacity)
 {
     uint64_t count = 0;
@@ -54,13 +63,21 @@ int UART_RX_ENTRYPOINT(void)
         return 1;
     }
 
+    UartDriverConfig config;
+    if (!UartDriverConfig__load(&config))
+    {
+        DRIVER_DEBUG("uart_rx: sysinfo read failed\n");
+        return 1;
+    }
+
     ServiceMappedMemoryPtr uart_mapping;
-    if (!service_ok(service_map_mmio(UART0_PHYS_BASE, UART_MMIO_SIZE, &uart_mapping)))
+    if (!service_ok(service_map_mmio(config.physical_base, config.mmio_size, &uart_mapping)))
     {
         DRIVER_DEBUG("uart_rx: mmio map failed\n");
         return 1;
     }
     void * uart = driver_ptr(uart_mapping);
+    configure_uart_rx(uart);
 
     IOHandle tty = io_server_register(":tty:", IO_SERVER_READ);
     if (tty < 0)
@@ -69,7 +86,7 @@ int UART_RX_ENTRYPOINT(void)
         return 1;
     }
 
-    if (!service_ok(service_subscribe_irq(UART_IRQ_ID)))
+    if (!service_ok(service_subscribe_irq(config.irq)))
     {
         DRIVER_DEBUG("uart_rx: irq subscribe failed\n");
         return 1;
@@ -89,7 +106,7 @@ int UART_RX_ENTRYPOINT(void)
         );
         if (service_ok(wait_status))
         {
-            bool uart_irq = event.type == SERVICE_EVENT_IRQ && event.source == UART_IRQ_ID;
+            bool uart_irq = event.type == SERVICE_EVENT_IRQ && event.source == config.irq;
             bool read_request = event.type == SERVICE_EVENT_IO && event.source == SERVICE_IO_READ_REQUEST;
             DRIVER_DEBUG(
                 "uart_rx: uart_irq=%i read_request=%i\n",

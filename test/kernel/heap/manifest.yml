@@ -9,6 +9,7 @@ manifest:
     - kernel/irq/*.c
     - kernel/spin.c
     - kernel/print.c
+    - kernel/system_info.c
     - kernel/types/*.c
     - kernel/scheduler/*.c
     - kernel/service/*.c
@@ -19,6 +20,7 @@ manifest:
     - kernel/subsystems/io/file/devfs/*.c
     - kernel/subsystems/io/file/embedded/*.c
     - kernel/subsystems/io/file/memfs/*.c
+    - kernel/subsystems/io/file/procfs/*.c
     - kernel/subsystems/io/console/*.c
     - kernel/subsystems/io/stream/*.c
     - kernel/syscall_handler.c

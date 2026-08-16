@@ -5,14 +5,18 @@
 #include "../../../kernel/bin/embedded_binaries.h"
 
 #include "../fixtures/process.h"
+#include "../fixtures/kernel.h"
 #include "../stubs/panic.h"
 #include "../stubs/mmu.h"
 #include "../stubs/page_table.h"
+
+static KernelPtr kernel;
 
 void setUp(void)
 {
     clear_panic_state();
     reset_mmu_state();
+    kernel = init_test_kernel_without_filesystem();
 }
 
 void tearDown(void)
@@ -23,7 +27,7 @@ void tearDown(void)
 void test_setup_from_elf(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message,
         {
             TEST_FAIL();
@@ -49,7 +53,7 @@ void test_setup_from_elf(void)
 void test_setup_tracks_static_user_allocations(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -76,7 +80,7 @@ void test_setup_with_args_sets_up_multiple_argv_entries(void)
     ProcessArguments__push(&arguments, bstring("two"));
     ProcessArguments__push(&arguments, bstring("three"));
 
-    ResultMatch(ProcessPtr, Process__setup_with_args(elf, None(ProcessPtr), arguments))
+    ResultMatch(ProcessPtr, Process__setup_with_args(kernel, elf, None(ProcessPtr), arguments))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -97,7 +101,7 @@ void test_setup_with_args_sets_up_multiple_argv_entries(void)
 void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -127,7 +131,7 @@ void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
 void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -153,7 +157,7 @@ void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
 void test_process_free_user_pages_rejects_static_allocation(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -168,7 +172,7 @@ void test_process_free_user_pages_rejects_static_allocation(void)
 void test_process_dispose_user_allocations_unmaps_all_user_allocations(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -204,7 +208,7 @@ void test_process_dispose_user_allocations_unmaps_all_user_allocations(void)
 void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -251,7 +255,7 @@ void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void
 void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -290,7 +294,7 @@ void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
 void test_process_sbrk_maps_pages_at_heap_break(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -321,7 +325,7 @@ void test_process_sbrk_maps_pages_at_heap_break(void)
 void test_process_sbrk_growth_inside_mapped_page_does_not_map_more_pages(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -342,7 +346,7 @@ void test_process_sbrk_growth_inside_mapped_page_does_not_map_more_pages(void)
 void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -370,7 +374,7 @@ void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
 void test_process_sbrk_can_shrink_without_unmapping_pages(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -390,7 +394,7 @@ void test_process_sbrk_can_shrink_without_unmapping_pages(void)
 void test_process_sbrk_rejects_shrink_below_heap_base(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -420,7 +424,7 @@ void test_process_file_descriptors_allocate_from_three(void)
 void test_process_setup_defaults_to_root_identity(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(process,
         {
@@ -435,13 +439,13 @@ void test_process_setup_defaults_to_root_identity(void)
 void test_process_child_inherits_parent_identity(void)
 {
     Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(elf, None(ProcessPtr)))
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
         IsError(code, message, TEST_FAIL())
         IsSuccess(parent,
         {
             Process__set_hund_identity(parent);
 
-            ResultMatch(ProcessPtr, Process__setup(elf, Some(ProcessPtr, parent)))
+            ResultMatch(ProcessPtr, Process__setup(kernel, elf, Some(ProcessPtr, parent)))
                 IsError(code, message, TEST_FAIL())
                 IsSuccess(child,
                 {

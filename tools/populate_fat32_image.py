@@ -6,6 +6,7 @@ import struct
 
 FAT32_END_OF_CHAIN = 0x0FFFFFFF
 FAT32_ATTR_ARCHIVE = 0x20
+FAT32_ATTR_DIRECTORY = 0x10
 FAT32_ATTR_LFN = 0x0F
 DIR_ENTRY_SIZE = 32
 
@@ -35,6 +36,14 @@ def encode_83_name(name: str) -> bytes:
     encoded[0:len(stem)] = stem.encode("ascii")
     encoded[8:8 + len(ext)] = ext.encode("ascii")
     return bytes(encoded)
+
+
+def encode_dot_name(name: str) -> bytes:
+    if name == ".":
+        return b".          "
+    if name == "..":
+        return b"..         "
+    return encode_83_name(name)
 
 
 def is_83_name(name: str) -> bool:
@@ -87,7 +96,7 @@ def build_lfn_entries(long_name: str, short_name: bytes) -> list[bytes]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Copy a small test file into a FAT32 image.")
     parser.add_argument("image", help="FAT32 image to update in place.")
-    parser.add_argument("fat_name", help="8.3 name to create in the image root directory.")
+    parser.add_argument("fat_name", help="8.3 name or slash-separated 8.3 path to create in the image.")
     parser.add_argument("source", help="Host file to copy into the image.")
     return parser.parse_args()
 
@@ -108,6 +117,119 @@ def find_free_clusters(
             if len(clusters) == count:
                 return clusters
     raise RuntimeError("no free FAT32 cluster found")
+
+
+def set_cluster_chain(
+    image: bytearray,
+    fat_offset: int,
+    bytes_per_sector: int,
+    sectors_per_fat: int,
+    fat_count: int,
+    clusters: list[int],
+) -> None:
+    for cluster_index, cluster in enumerate(clusters):
+        next_value = FAT32_END_OF_CHAIN
+        if cluster_index + 1 < len(clusters):
+            next_value = clusters[cluster_index + 1]
+
+        for fat_index in range(fat_count):
+            fat_entry = fat_offset + (fat_index * sectors_per_fat * bytes_per_sector) + cluster * 4
+            write_u32(image, fat_entry, next_value)
+
+
+def cluster_offset(data_offset: int, cluster_size: int, cluster: int) -> int:
+    return data_offset + (cluster - 2) * cluster_size
+
+
+def find_directory_entry(image: bytearray, directory_offset: int, cluster_size: int, short_name: bytes) -> int | None:
+    for offset in range(directory_offset, directory_offset + cluster_size, DIR_ENTRY_SIZE):
+        first = image[offset]
+        if first == 0x00:
+            return None
+        if first != 0xE5 and bytes(image[offset:offset + 11]) == short_name:
+            return offset
+
+    return None
+
+
+def find_free_directory_entry(
+    image: bytearray,
+    directory_offset: int,
+    cluster_size: int,
+    required_entries: int,
+    short_name: bytes,
+    lfn_entries: list[bytes],
+) -> int:
+    entry_offset = None
+    free_run = 0
+    run_start = directory_offset
+    for offset in range(directory_offset, directory_offset + cluster_size, DIR_ENTRY_SIZE):
+        first = image[offset]
+        if first == 0x00 or first == 0xE5:
+            if free_run == 0:
+                run_start = offset
+            free_run += 1
+            if free_run >= required_entries:
+                entry_offset = run_start
+                break
+        else:
+            free_run = 0
+            if bytes(image[offset:offset + 11]) == short_name:
+                entry_offset = offset - (len(lfn_entries) * DIR_ENTRY_SIZE)
+                break
+
+    if entry_offset is None:
+        raise RuntimeError("no free directory entry found")
+
+    return entry_offset
+
+
+def write_directory_entry(
+    image: bytearray,
+    offset: int,
+    short_name: bytes,
+    attributes: int,
+    cluster: int,
+    size: int,
+) -> None:
+    image[offset:offset + DIR_ENTRY_SIZE] = b"\0" * DIR_ENTRY_SIZE
+    image[offset:offset + 11] = short_name
+    image[offset + 11] = attributes
+    write_u16(image, offset + 20, (cluster >> 16) & 0xFFFF)
+    write_u16(image, offset + 26, cluster & 0xFFFF)
+    write_u32(image, offset + 28, size)
+
+
+def create_directory(
+    image: bytearray,
+    fat_offset: int,
+    bytes_per_sector: int,
+    sectors_per_fat: int,
+    fat_count: int,
+    data_offset: int,
+    cluster_size: int,
+    parent_cluster: int,
+    directory_name: str,
+) -> int:
+    directory_short_name = encode_83_name(directory_name)
+    parent_offset = cluster_offset(data_offset, cluster_size, parent_cluster)
+    existing = find_directory_entry(image, parent_offset, cluster_size, directory_short_name)
+    if existing is not None:
+        if (image[existing + 11] & FAT32_ATTR_DIRECTORY) == 0:
+            raise RuntimeError(f"{directory_name} exists and is not a directory")
+        return (read_u16(image, existing + 20) << 16) | read_u16(image, existing + 26)
+
+    directory_cluster = find_free_clusters(image, fat_offset, bytes_per_sector, sectors_per_fat, 1)[0]
+    set_cluster_chain(image, fat_offset, bytes_per_sector, sectors_per_fat, fat_count, [directory_cluster])
+
+    directory_offset = cluster_offset(data_offset, cluster_size, directory_cluster)
+    image[directory_offset:directory_offset + cluster_size] = b"\0" * cluster_size
+    write_directory_entry(image, directory_offset, encode_dot_name("."), FAT32_ATTR_DIRECTORY, directory_cluster, 0)
+    write_directory_entry(image, directory_offset + DIR_ENTRY_SIZE, encode_dot_name(".."), FAT32_ATTR_DIRECTORY, parent_cluster, 0)
+
+    entry_offset = find_free_directory_entry(image, parent_offset, cluster_size, 1, directory_short_name, [])
+    write_directory_entry(image, entry_offset, directory_short_name, FAT32_ATTR_DIRECTORY, directory_cluster, 0)
+    return directory_cluster
 
 
 def update_fsinfo(
@@ -162,20 +284,39 @@ def main() -> int:
     fat_offset = reserved_sectors * bytes_per_sector
     data_offset = (reserved_sectors + fat_count * sectors_per_fat) * bytes_per_sector
     cluster_count = (total_sectors - (reserved_sectors + fat_count * sectors_per_fat)) // sectors_per_cluster
-    root_offset = data_offset + (root_cluster - 2) * cluster_size
+    path_parts = [part for part in args.fat_name.replace("\\", "/").split("/") if part]
+    if not path_parts:
+        raise RuntimeError("empty FAT path")
+
+    target_directory_cluster = root_cluster
+    for directory_name in path_parts[:-1]:
+        target_directory_cluster = create_directory(
+            image,
+            fat_offset,
+            bytes_per_sector,
+            sectors_per_fat,
+            fat_count,
+            data_offset,
+            cluster_size,
+            target_directory_cluster,
+            directory_name.upper(),
+        )
+
+    target_name = path_parts[-1]
+    target_directory_offset = cluster_offset(data_offset, cluster_size, target_directory_cluster)
     needed_clusters = max(1, (len(content) + cluster_size - 1) // cluster_size)
     file_clusters = find_free_clusters(image, fat_offset, bytes_per_sector, sectors_per_fat, needed_clusters)
     file_cluster = file_clusters[0]
 
-    if is_83_name(args.fat_name):
-        short_display_name = args.fat_name
+    if is_83_name(target_name):
+        short_display_name = target_name
     else:
         short_display_name = "LONGFI~1.TXT"
         alias_index = 1
         while True:
             alias_name = encode_83_name(short_display_name)
             alias_exists = False
-            for offset in range(root_offset, root_offset + cluster_size, DIR_ENTRY_SIZE):
+            for offset in range(target_directory_offset, target_directory_offset + cluster_size, DIR_ENTRY_SIZE):
                 if image[offset] == 0x00:
                     break
                 if image[offset] != 0xE5 and bytes(image[offset:offset + 11]) == alias_name:
@@ -188,36 +329,11 @@ def main() -> int:
                 raise RuntimeError("no free long-name short alias found")
             short_display_name = f"LONGFI~{alias_index}.TXT"
     name = encode_83_name(short_display_name)
-    lfn_entries = [] if short_display_name == args.fat_name else build_lfn_entries(args.fat_name, name)
+    lfn_entries = [] if short_display_name == target_name else build_lfn_entries(target_name, name)
     required_entries = len(lfn_entries) + 1
-    entry_offset = None
-    free_run = 0
-    run_start = root_offset
-    for offset in range(root_offset, root_offset + cluster_size, DIR_ENTRY_SIZE):
-        first = image[offset]
-        if first == 0x00 or first == 0xE5:
-            if free_run == 0:
-                run_start = offset
-            free_run += 1
-            if free_run >= required_entries:
-                entry_offset = run_start
-                break
-        else:
-            free_run = 0
-            if bytes(image[offset:offset + 11]) == name:
-                entry_offset = offset - (len(lfn_entries) * DIR_ENTRY_SIZE)
-                break
+    entry_offset = find_free_directory_entry(image, target_directory_offset, cluster_size, required_entries, name, lfn_entries)
 
-    if entry_offset is None:
-        raise RuntimeError("no free root directory entry found")
-
-    for cluster_index, cluster in enumerate(file_clusters):
-        next_value = FAT32_END_OF_CHAIN
-        if cluster_index + 1 < len(file_clusters):
-            next_value = file_clusters[cluster_index + 1]
-        for fat_index in range(fat_count):
-            fat_entry = fat_offset + (fat_index * sectors_per_fat * bytes_per_sector) + cluster * 4
-            write_u32(image, fat_entry, next_value)
+    set_cluster_chain(image, fat_offset, bytes_per_sector, sectors_per_fat, fat_count, file_clusters)
 
     for cluster_index, cluster in enumerate(file_clusters):
         file_offset = data_offset + (cluster - 2) * cluster_size
@@ -231,12 +347,7 @@ def main() -> int:
         image[offset:offset + DIR_ENTRY_SIZE] = lfn_entry
 
     short_entry_offset = entry_offset + len(lfn_entries) * DIR_ENTRY_SIZE
-    image[short_entry_offset:short_entry_offset + DIR_ENTRY_SIZE] = b"\0" * DIR_ENTRY_SIZE
-    image[short_entry_offset:short_entry_offset + 11] = name
-    image[short_entry_offset + 11] = FAT32_ATTR_ARCHIVE
-    write_u16(image, short_entry_offset + 20, (file_cluster >> 16) & 0xFFFF)
-    write_u16(image, short_entry_offset + 26, file_cluster & 0xFFFF)
-    write_u32(image, short_entry_offset + 28, len(content))
+    write_directory_entry(image, short_entry_offset, name, FAT32_ATTR_ARCHIVE, file_cluster, len(content))
     update_fsinfo(image, bytes_per_sector, fsinfo_sector, fat_offset, cluster_count)
 
     os.makedirs(os.path.dirname(args.image), exist_ok=True)

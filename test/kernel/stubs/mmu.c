@@ -15,7 +15,7 @@ void MMU__init()
     // do nothing
 }
 
-void MMU__install_null_low_mem_table()
+void MMU__install_null_low_mem_table(KernelPtr kernel)
 {
 
 }
@@ -24,4 +24,3 @@ void MMU__install_low_mem_table(KernelAddress address)
 {
     low_mem_table = address;
 }
-

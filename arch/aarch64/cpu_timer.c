@@ -22,29 +22,38 @@ inline unsigned cpu_aff0(void)
     return (unsigned)(rd_mpidr() & 0xff);
 }
 
-void CPUTimer__gicv3_dist_enable_grp1ns(void)
+void CPUTimer__gicv3_dist_enable_grp1ns(InterruptControllerInfoPtr interrupt_controller)
 {
     // Enable ARE_NS (bit 4) and EnableGrp1NS (bit 1). Leave grp0 off.
-    uint32_t ctlr = r32(GICD_BASE + GICD_CTLR_OFFSET);
+    uint32_t ctlr = r32(interrupt_controller->distributor_virtual_base + GICD_CTLR_OFFSET);
     ctlr |= (1u<<4) /*ARE_NS*/ | (1u<<1) /*EnableGrp1NS*/;
-    w32(GICD_BASE + GICD_CTLR_OFFSET, ctlr);
+    w32(interrupt_controller->distributor_virtual_base + GICD_CTLR_OFFSET, ctlr);
     dsb_ish();
     isb();
 }
 
 // Map: redistributor base for this CPU (QEMU virt packs by Aff0)
-inline volatile uint8_t* CPUTimer__gicr_base_this_cpu(void)
+inline volatile uint8_t* CPUTimer__gicr_base_this_cpu(InterruptControllerInfoPtr interrupt_controller)
 {
-    return (volatile uint8_t*)(GICR_BASE + (uint64_t)cpu_aff0() * GICR_STRIDE);
+    return (volatile uint8_t*)(
+        interrupt_controller->redistributor_virtual_base + (uint64_t)cpu_aff0() * GICR_STRIDE
+    );
 }
 
 /* Configure GICv3 CPU interface + enable PPI for CNTV (27) */
 __attribute__((noinline))  // keeps return addresses clean for debugging
-static void CPUTimer__enable(bool use_virtual_timer, uint64_t hz)
+static void CPUTimer__enable(SystemInfoPtr system_info, bool use_virtual_timer, uint64_t hz)
 {
     timer_hz = hz ? hz : 1000u;
-    CPUTimer__gicv3_dist_enable_grp1ns();
-    volatile uint8_t * gicr = CPUTimer__gicr_base_this_cpu();
+    InterruptControllerInfoPtr interrupt_controller = &system_info->interrupt_controller;
+
+    if (interrupt_controller->kind != INTERRUPT_CONTROLLER_GIC_V3)
+    {
+        return;
+    }
+
+    CPUTimer__gicv3_dist_enable_grp1ns(interrupt_controller);
+    volatile uint8_t * gicr = CPUTimer__gicr_base_this_cpu(interrupt_controller);
 
     // --- Wake up this redistributor ---
     uint32_t waker = mmio_read32(gicr + GICR_WAKER_OFFSET);
@@ -111,9 +120,9 @@ static void CPUTimer__enable(bool use_virtual_timer, uint64_t hz)
     enable_irq();
 }
 
-void CPUTimer__start(uint64_t hz)
+void CPUTimer__start(SystemInfoPtr system_info, uint64_t hz)
 {
-    CPUTimer__enable(true, hz);
+    CPUTimer__enable(system_info, true, hz);
 }
 
 static void CPUTimer__rearm(IRQNumber irq)

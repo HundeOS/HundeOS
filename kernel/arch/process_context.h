@@ -11,7 +11,11 @@ typedef uint64_t ProcessID;
 typedef struct ProcessContext ProcessContext;
 typedef ProcessContext * ProcessContextPtr;
 
-ProcessContextPtr ProcessContext__init(ProcessID pid,
+typedef struct Kernel Kernel;
+typedef Kernel * KernelPtr;
+
+ProcessContextPtr ProcessContext__init(KernelPtr kernel,
+                                       ProcessID pid,
                                        StackPtr stack,
                                        UserAddress entry_point,
                                        KernelAddress page_table,

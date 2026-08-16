@@ -6,9 +6,9 @@
 
 #include "../../../../common_includes/syscalls/service.h"
 
-#include "../../../../user/sys/mmio.h"
+#include "../../../../user/sys/sync.h"
 
-void __mmio_sync_boundary()
+void __sync_boundary()
 {
 
 }

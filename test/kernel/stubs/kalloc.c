@@ -12,9 +12,14 @@ KernelAddress Kernel__alloc(size_t size)
     return KERNEL_ADDR(addr, addr);
 }
 
-KernelAddress Kernel__from_virtual_address(Address virtual_addr)
+KernelAddress Kernel__from_virtual_address(KernelPtr kernel, Address virtual_addr)
 {
     return KERNEL_ADDR(virtual_addr, virtual_addr);
+}
+
+KernelAddress Kernel__from_physical_address(KernelPtr kernel, Address physical)
+{
+    return KERNEL_ADDR(physical, physical);
 }
 
 Address Kernel__alloc_kernel(size_t size)

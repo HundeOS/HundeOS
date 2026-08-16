@@ -9,18 +9,38 @@
 
 #define UART_DR   0x000
 #define UART_FR   0x018
+#define UART_CR   0x030
+#define UART_IMSC 0x038
 #define UART_ICR  0x044
 #define FR_RXFE   (1u << 4)
-#define UART_IRQ_ID 33ULL
+#define UART_PHYS_BASE 0x12345000ULL
+#define UART_IRQ_ID 99ULL
 
 static uint32_t fake_uart_values[4];
 static uint64_t fake_uart_read_index;
 static uint64_t fake_uart_read_count;
-static uint32_t fake_uart_icr;
+static uint32_t fake_uart_icr_writes[2];
+static uint64_t fake_uart_icr_write_count;
+static uint32_t fake_uart_imsc;
+static uint32_t fake_uart_cr;
 static char fake_io_buffer[8];
 static bool fake_data_available;
 static bool fake_became_service;
 static uint64_t fake_service_wait_count;
+static bool fake_sysinfo_opened;
+static bool fake_sysinfo_closed;
+
+#define SYSINFO_PADDING_LINE "memory.free_region.00.physical_start=0x0\n"
+#define SYSINFO_PADDING_4 SYSINFO_PADDING_LINE SYSINFO_PADDING_LINE SYSINFO_PADDING_LINE SYSINFO_PADDING_LINE
+#define SYSINFO_PADDING_16 SYSINFO_PADDING_4 SYSINFO_PADDING_4 SYSINFO_PADDING_4 SYSINFO_PADDING_4
+#define SYSINFO_PADDING_32 SYSINFO_PADDING_16 SYSINFO_PADDING_16
+
+static const char fake_sysinfo[] =
+    SYSINFO_PADDING_32
+    "uart.physical_base=0x12345000\n"
+    "uart.virtual_base=0xffff000000000000\n"
+    "uart.irq=99\n"
+    "uart.mmio_size=0x1000\n";
 
 struct ServiceMappedMemory
 {
@@ -58,8 +78,23 @@ static uint32_t fake_uart_read32(void * base, uint64_t offset)
 static void fake_uart_write32(void * base, uint64_t offset, uint32_t value)
 {
     TEST_ASSERT_NOT_NULL(base);
-    TEST_ASSERT_EQUAL_UINT64(UART_ICR, offset);
-    fake_uart_icr = value;
+    if (offset == UART_ICR)
+    {
+        TEST_ASSERT_LESS_THAN_UINT64(2, fake_uart_icr_write_count);
+        fake_uart_icr_writes[fake_uart_icr_write_count++] = value;
+        return;
+    }
+    if (offset == UART_IMSC)
+    {
+        fake_uart_imsc = value;
+        return;
+    }
+    if (offset == UART_CR)
+    {
+        fake_uart_cr = value;
+        return;
+    }
+    TEST_FAIL_MESSAGE("unexpected uart write offset");
 }
 
 void setUp(void)
@@ -70,13 +105,19 @@ void setUp(void)
     fake_uart_values[3] = 0;
     fake_uart_read_index = 0;
     fake_uart_read_count = 0;
-    fake_uart_icr = 0;
+    fake_uart_icr_writes[0] = 0;
+    fake_uart_icr_writes[1] = 0;
+    fake_uart_icr_write_count = 0;
+    fake_uart_imsc = 0;
+    fake_uart_cr = 0;
     fake_uart_mapping.driver_address = fake_uart_values;
-    fake_uart_mapping.device_address = 0x09000000ULL;
+    fake_uart_mapping.device_address = UART_PHYS_BASE;
     fake_uart_mapping.size = 0x1000ULL;
     fake_data_available = false;
     fake_became_service = false;
     fake_service_wait_count = 0;
+    fake_sysinfo_opened = false;
+    fake_sysinfo_closed = false;
     for (uint64_t i = 0; i < sizeof(fake_io_buffer); i++)
     {
         fake_io_buffer[i] = 0;
@@ -105,10 +146,38 @@ ServiceCode service_become_service()
 
 ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
 {
-    TEST_ASSERT_EQUAL_UINT64(0x09000000ULL, physical_address);
+    TEST_ASSERT_EQUAL_UINT64(UART_PHYS_BASE, physical_address);
     TEST_ASSERT_EQUAL_UINT64(0x1000ULL, size);
     *memory = &fake_uart_mapping;
     return SERVICE_OK;
+}
+
+IOHandle open(const char * path, Flags flags)
+{
+    TEST_ASSERT_EQUAL_STRING("/proc/sysinfo", path);
+    TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
+    fake_sysinfo_opened = true;
+    return 7;
+}
+
+ByteCount read(IOHandle handle, char * buf, size_t size)
+{
+    TEST_ASSERT_EQUAL_INT64(7, handle);
+    TEST_ASSERT_TRUE(fake_sysinfo_opened);
+    size_t index = 0;
+    while (fake_sysinfo[index] != '\0' && index < size)
+    {
+        buf[index] = fake_sysinfo[index];
+        index++;
+    }
+    return (ByteCount) index;
+}
+
+IOStatus close(IOHandle handle)
+{
+    TEST_ASSERT_EQUAL_INT64(7, handle);
+    fake_sysinfo_closed = true;
+    return IO_OK;
 }
 
 void * driver_ptr(ServiceMappedMemoryPtr memory)
@@ -197,11 +266,17 @@ void test_uart_rx_main_maps_registers_subscribes_irq_and_publishes_read_data(voi
     TEST_ASSERT_EQUAL_INT(0, uart_rx_main_under_test());
 
     TEST_ASSERT_TRUE(fake_became_service);
+    TEST_ASSERT_TRUE(fake_sysinfo_opened);
+    TEST_ASSERT_TRUE(fake_sysinfo_closed);
     TEST_ASSERT_TRUE(fake_data_available);
     TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);
     TEST_ASSERT_EQUAL_UINT64(3, fake_uart_read_count);
     TEST_ASSERT_EQUAL_CHAR('a', fake_io_buffer[0]);
     TEST_ASSERT_EQUAL_CHAR('b', fake_io_buffer[1]);
     TEST_ASSERT_EQUAL_CHAR('c', fake_io_buffer[2]);
-    TEST_ASSERT_EQUAL_UINT32((1u << 4) | (1u << 6) | (1u << 7) | (1u << 8) | (1u << 9) | (1u << 10), fake_uart_icr);
+    TEST_ASSERT_EQUAL_UINT64(2, fake_uart_icr_write_count);
+    TEST_ASSERT_EQUAL_UINT32((1u << 4) | (1u << 6) | (1u << 7) | (1u << 8) | (1u << 9) | (1u << 10), fake_uart_icr_writes[0]);
+    TEST_ASSERT_EQUAL_UINT32((1u << 4) | (1u << 6), fake_uart_imsc);
+    TEST_ASSERT_EQUAL_UINT32((1u << 0) | (1u << 8) | (1u << 9), fake_uart_cr);
+    TEST_ASSERT_EQUAL_UINT32((1u << 4) | (1u << 6) | (1u << 7) | (1u << 8) | (1u << 9) | (1u << 10), fake_uart_icr_writes[1]);
 }

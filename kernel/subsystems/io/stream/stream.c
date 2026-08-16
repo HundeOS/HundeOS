@@ -248,15 +248,13 @@ StreamStatePtr StreamState__instance()
 StreamStatePtr StreamState__heap_new()
 {
     StreamStatePtr result = ptr(Kernel__alloc_kernel(sizeof(StreamState)), StreamState);
-    *result = (StreamState) {
-        .state = NEW_IO_STATE,
-        .write_buffer = EmptyRingBuffer(IOBuffer),
-        .read_buffer = EmptyRingBuffer(IOBuffer),
-        .data_available = false,
-        .eof = false,
-        .parked_contexts = EmptyArray(StreamParkedContexts),
-        .lock = MUTEX_INIT,
-        .handle_counter = 0,
-    };
+    result->state = NEW_IO_STATE;
+    result->write_buffer = EmptyRingBuffer(IOBuffer);
+    result->read_buffer = EmptyRingBuffer(IOBuffer);
+    result->data_available = false;
+    result->eof = false;
+    result->parked_contexts = EmptyArray(StreamParkedContexts);
+    result->lock = MUTEX_INIT;
+    result->handle_counter = 0;
     return result;
 }

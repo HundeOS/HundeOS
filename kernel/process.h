@@ -197,6 +197,7 @@ OptionalDef(ProcessPtr);
 ResultDef(ProcessPtr);
 
 typedef struct Process {
+    KernelPtr kernel;
     KernelAddress page_table;
 
     ProcessContextPtr context;
@@ -227,6 +228,7 @@ typedef struct Process {
 } Process;
 
 Result(ProcessPtr) Process__new(
+    KernelPtr kernel,
     BString name,
     KernelAddress page_table,
     UserAddress entry,
@@ -239,8 +241,8 @@ FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 
 OptionalType(ProcessTable *, ProcessTablePtr);
 
-Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent);
-Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments);
+Result(ProcessPtr) Process__setup(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent);
+Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments);
 Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation);
 Optional(ParkedOperationPtr) Process__top_parked_operation(ProcessPtr self);
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self);
@@ -260,7 +262,7 @@ Optional(ProcessSignal) Process__take_pending_signal(ProcessPtr self);
 ReturnCode ProcessSignal__exit_code(ProcessSignal signal);
 Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self);
 Result(CollectionCode) Process__push_child_event(ProcessPtr self, ProcessChildEvent event);
-Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(KernelPtr kernel, ProcessPtr self);
+Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr self);
 Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 );

@@ -185,6 +185,7 @@ static Result(Address) Process__setup_args(
 }
 
 Result(ProcessPtr) Process__new(
+    KernelPtr kernel,
     BString name,
     KernelAddress page_table,
     UserAddress entry,
@@ -199,6 +200,7 @@ Result(ProcessPtr) Process__new(
 
     __d_printf(PROCESS, "Creating process with entry point %p\n", entry);
     ProcessPtr proc = ptr(Kernel__alloc_kernel(sizeof(Process)), Process);
+    proc->kernel = kernel;
     proc->entry_point = entry;
     proc->page_table = page_table;
     proc->state = PROC_STATE_NEW;
@@ -246,7 +248,7 @@ Result(ProcessPtr) Process__new(
                 entry.virtual_addr,
                 page_table.phys_addr
             );
-            proc->context = ProcessContext__init(proc->pid, &proc->stack, entry, page_table, argc, argv);
+            proc->context = ProcessContext__init(kernel, proc->pid, &proc->stack, entry, page_table, argc, argv);
             __d_printf(
                 PROCESS,
                 "Process__new after context init pid=%i proc=%p context=%p\n",
@@ -359,9 +361,9 @@ ReturnCode ProcessSignal__exit_code(ProcessSignal signal)
     return PROCESS_SIGNAL_EXIT_BASE - signal;
 }
 
-Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(KernelPtr kernel, ProcessPtr self)
+Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr self)
 {
-    if (kernel == NULL || self == NULL)
+    if (self == NULL || self->kernel == NULL)
     {
         return Error(ProcessSetupStatus, argument_too_long, PROCESS_FAILED_TO_SETUP);
     }
@@ -370,7 +372,7 @@ Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(KernelPtr ker
         IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP))
     End
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, self))
+    ResultMatch(IRQRegistrationStatus, IRQDispatcher__dispose_process_resources(self->kernel->irq_dispatcher, self))
         IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP))
     End
 
@@ -391,12 +393,12 @@ Result(CollectionCode) Process__push_child_event(ProcessPtr self, ProcessChildEv
     return ProcessChildEvents__push(&self->child_events, event);
 }
 
-Result(ProcessPtr) Process__setup(Elf binary, Optional(ProcessPtr) parent)
+Result(ProcessPtr) Process__setup(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent)
 {
-    return Process__setup_with_args(binary, parent, ProcessArguments__new());
+    return Process__setup_with_args(kernel, binary, parent, ProcessArguments__new());
 }
 
-Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments)
+Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments)
 {
     __d_println(PROCESS, "Process__spawn_from_elf");
     ExpandedSegmentArray expanded_elf = Elf__map(binary);
@@ -404,14 +406,14 @@ Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) par
     __d_printf(PROCESS, "ELF mapped %i\n", ExpandedSegmentArray__len(&expanded_elf));
 
     __d_println(PROCESS, "Creating page table");
-    KernelAddress page_table = PageTable__new();
+    KernelAddress page_table = PageTable__new(kernel);
 
     __d_println(PROCESS, "Page table created");
 
     FAIterate(ExpandedSegmentArray, expanded_elf, i, segment)
         UserAddress addr = segment.address;
         __d_printf(MMU, "Mapping segment %i phys=%p, virt=%p\n", i, addr.kernel_addr.phys_addr, addr.virtual_addr);
-        PageTable__map(v_ptr(page_table, PageTable), segment.address, segment.size);
+        PageTable__map(v_ptr(page_table, PageTable), kernel, segment.address, segment.size);
     End
     __d_println(PROCESS, "Code mapped");
 
@@ -427,7 +429,7 @@ Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) par
         stack.base.kernel_addr.phys_addr
     );
     __d_printf(PROCESS, "Mapping stack for %s page_table=%p\n", cstr(binary.name), page_table.phys_addr);
-    Stack__map(&stack, v_ptr(page_table, PageTable));
+    Stack__map(kernel, &stack, v_ptr(page_table, PageTable));
     __d_println(PROCESS, "Stack mapped");
 
     Match(ExpandedSegment, ExpandedSegmentArray__at(&expanded_elf, 0))
@@ -446,7 +448,7 @@ Result(ProcessPtr) Process__setup_with_args(Elf binary, Optional(ProcessPtr) par
                 IsError(code, message, return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG))
             End
 
-            ResultMatch(ProcessPtr, Process__new(binary.name, page_table, entry_point.address, stack, parent, process_arguments))
+            ResultMatch(ProcessPtr, Process__new(kernel, binary.name, page_table, entry_point.address, stack, parent, process_arguments))
                 IsSuccess(proc,
                 {
                     FAIterate(ExpandedSegmentArray, expanded_elf, segment_index, segment)
@@ -507,7 +509,7 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     Address virtual_address = self->allocation_next;
 
     UserAddress allocation = Kernel__alloc_user(virtual_address, allocation_size, true, true, false);
-    PageTable__map(v_ptr(self->page_table, PageTable), allocation, allocation_size);
+    PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, allocation_size);
 
     ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
         self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC
@@ -533,7 +535,7 @@ Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self)
     state->before_wfi_count = 0;
     state->after_wfi_count = 0;
 
-    PageTable__map(v_ptr(self->page_table, PageTable), allocation, PAGE_SIZE);
+    PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, PAGE_SIZE);
 
     ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
         self, allocation, PAGE_SIZE, USER_ALLOCATION_DYNAMIC
@@ -570,7 +572,7 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
         .valid = true,
     };
 
-    PageTable__map_mmio(v_ptr(self->page_table, PageTable), mapping, size);
+    PageTable__map_mmio(v_ptr(self->page_table, PageTable), self->kernel, mapping, size);
     ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
         self, allocation, allocation_size, USER_ALLOCATION_MMIO
     ))
@@ -617,7 +619,7 @@ Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
             self->heap_mapped_end, allocation_size, true, true, false
         );
 
-        PageTable__map(v_ptr(self->page_table, PageTable), allocation, allocation_size);
+        PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, allocation_size);
         ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
             self, allocation, allocation_size, USER_ALLOCATION_HEAP
         ))
@@ -638,7 +640,7 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
     Match(UserAllocation, UserAllocations__at(&self->user_allocations, index))
         IsSome(allocation,
         {
-            PageTable__unmap(v_ptr(self->page_table, PageTable), allocation.address.virtual_addr, allocation.size);
+            PageTable__unmap(v_ptr(self->page_table, PageTable), self->kernel, allocation.address.virtual_addr, allocation.size);
             Address kernel_virtual = allocation.address.kernel_addr.virtual_addr;
 
             UserAllocations__remove_at(&self->user_allocations, index);

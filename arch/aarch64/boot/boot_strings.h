@@ -88,6 +88,16 @@ __BOOT_STRING__(mapping_uart_high) = "Mapping uart high\n";
 
 __BOOT_STRING__(mapping_gicd) = "Mapping GICD\n";
 __BOOT_STRING__(mapping_gicr) = "Mapping GICR\n";
+__BOOT_STRING__(mapping_check) = "Mapping check ";
+__BOOT_STRING__(mapping_ok) = " ok";
+__BOOT_STRING__(mapping_missing) = " missing";
+__BOOT_STRING__(mapping_pa) = " pa=0x";
+__BOOT_STRING__(mapping_level) = " level=";
+__BOOT_STRING__(mapping_desc) = " desc=0x";
+__BOOT_STRING__(mapping_cpu_enter) = "CPU__enter_kernel";
+__BOOT_STRING__(mapping_memset) = "memset";
+__BOOT_STRING__(mapping_vectors) = "vector_table";
+__BOOT_STRING__(mapping_stack) = "kernel_stack";
 
 
 __BOOT_STRING__(mmu_enable) = "Switching on MMU\n";

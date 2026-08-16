@@ -9,53 +9,35 @@
 static BString not_implemented = BSTRING_NEW("Not implemented");
 static BString invalid_address = BSTRING_NEW("Invalid address");
 
-extern char __text_virt[];
-extern char __text_phys[];
-extern char __lma_end[];
-
 inline HeapPtr heap_ptr()
 {
     KernelPtr kernel = Kernel__instance();
     return &kernel->heap;
 }
 
-static bool Kernel__is_from_high_kernel_virtual(Address virtual_addr)
+KernelAddress Kernel__from_physical_address(KernelPtr self, Address physical)
 {
-    Address virtual_start = addr_of(__text_virt);
-    Address physical_start = addr_of(__text_phys);
-    Address physical_end = addr_of(__lma_end);
-    Address virtual_end = virtual_start + (physical_end - physical_start);
-
-    return virtual_addr >= virtual_start && virtual_addr < virtual_end;
-}
-
-static bool Kernel__is_from_high_kernel_physical(Address physical)
-{
-    Address physical_start = addr_of(__text_phys);
-    Address physical_end = addr_of(__lma_end);
-
-    return physical >= physical_start && physical < physical_end;
-}
-
-KernelAddress Kernel__from_physical_address(Address physical)
-{
-    if (Kernel__is_from_high_kernel_physical(physical))
+    if (!is_nothing(self->system_info))
     {
-        Address virtual_start = addr_of(__text_virt);
-        Address physical_start = addr_of(__text_phys);
-        return KERNEL_ADDR(virtual_start + (physical - physical_start), physical);
+        KernelAddress address = SystemInfo__kernel_address_for_physical(&self->system_info.some.val, physical);
+        if (address.valid)
+        {
+            return address;
+        }
     }
 
     return Heap__from_physical_address(heap_ptr(), physical);
 }
 
-KernelAddress Kernel__from_virtual_address(Address virtual_addr)
+KernelAddress Kernel__from_virtual_address(KernelPtr self, Address virtual_addr)
 {
-    if (Kernel__is_from_high_kernel_virtual(virtual_addr))
+    if (!is_nothing(self->system_info))
     {
-        Address virtual_start = addr_of(__text_virt);
-        Address physical_start = addr_of(__text_phys);
-        return KERNEL_ADDR(virtual_addr, physical_start + (virtual_addr - virtual_start));
+        KernelAddress address = SystemInfo__kernel_address_for_virtual(&self->system_info.some.val, virtual_addr);
+        if (address.valid)
+        {
+            return address;
+        }
     }
 
     return Heap__from_virtual_address(heap_ptr(), virtual_addr);
@@ -94,7 +76,7 @@ UserAddress Kernel__alloc_user(Address virtual_address,
 
 Result(KAllocCode) Kernel__free(Address virtual_address)
 {
-    KernelAddress address = Kernel__from_virtual_address(virtual_address);
+    KernelAddress address = Kernel__from_virtual_address(Kernel__instance(), virtual_address);
     if (!address.valid)
     {
         return Error(KAllocCode, invalid_address, KALLOC_INVALID_ADDRESS);

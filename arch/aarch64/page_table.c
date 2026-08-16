@@ -6,6 +6,7 @@
 #include "mmu.h"
 #include "../../kernel/debug.h"
 #include "../../kernel/kalloc.h"
+#include "../../kernel/kernel_core.h"
 
 #define PAGE_MASK   (~(PAGE_SIZE - 1ULL))
 #define PAGE_OFF(x) ((uint64_t)(x) & (PAGE_SIZE - 1ULL))
@@ -47,28 +48,28 @@
 //  UXN (bit 54)       : Unprivileged eXecute-Never (blocks EL0 execute)
 
 
-KernelAddress PageTable__new() {
+KernelAddress PageTable__new(KernelPtr kernel) {
     KernelAddress table = Kernel__alloc(PAGE_SIZE);
     __d_printf(DEBUG, "new table 0x%x", table);
     return table;
 }
 
-KernelAddress PageTable__empty()
+KernelAddress PageTable__empty(KernelPtr kernel)
 {
-    return PageTable__new();
+    return PageTable__new(kernel);
 }
 
-KernelAddress PageTable__from_physical_address(Address physical)
+KernelAddress PageTable__from_physical_address(KernelPtr kernel, Address physical)
 {
-    return Kernel__from_physical_address(physical);
+    return Kernel__from_physical_address(kernel, physical);
 }
 
-KernelAddress PageTable__from_virtual_address(Address virtual_addr)
+KernelAddress PageTable__from_virtual_address(KernelPtr kernel, Address virtual_addr)
 {
-    return Kernel__from_virtual_address(virtual_addr);
+    return Kernel__from_virtual_address(kernel, virtual_addr);
 }
 
-void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
+void PageTable__map(PageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address phys_start = align_down_4k(u_kpaddr(address));
@@ -102,13 +103,13 @@ void PageTable__map(PageTablePtr self, UserAddress address, size_t size)
         Address user_addr = offset_addr(user_start, page * PAGE_SIZE);
         Address phys_addr = offset_addr(phys_start, page * PAGE_SIZE);
 
-        PageTable__map_4k_page(self, user_addr, phys_addr, perms);
+        PageTable__map_4k_page(self, kernel, user_addr, phys_addr, perms);
     }
     __asm__ __volatile__("dsb ishst; isb" ::: "memory");
     __d_println(MMU, "Mapped");
 }
 
-void PageTable__map_mmio(PageTablePtr self, UserAddress address, size_t size)
+void PageTable__map_mmio(PageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address phys_start = align_down_4k(u_kpaddr(address));
@@ -129,12 +130,13 @@ void PageTable__map_mmio(PageTablePtr self, UserAddress address, size_t size)
     {
         Address user_addr = offset_addr(user_start, page * PAGE_SIZE);
         Address phys_addr = offset_addr(phys_start, page * PAGE_SIZE);
-        PageTable__map_4k_page(self, user_addr, phys_addr, perms);
+        PageTable__map_4k_page(self, kernel, user_addr, phys_addr, perms);
     }
     __asm__ __volatile__("dsb ishst; isb" ::: "memory");
 }
 
 static KernelAddress PageTable__next_level_table_if_present(KernelAddress parent_level_table,
+                                                            KernelPtr kernel,
                                                             uint64_t child_index)
 {
     PageTablePtr parent_level_table_ptr = v_ptr(parent_level_table, PageTable);
@@ -142,7 +144,7 @@ static KernelAddress PageTable__next_level_table_if_present(KernelAddress parent
 
     if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE))
     {
-        return PageTable__from_physical_address(descriptor & MASK_PTE_NEXTADDR);
+        return PageTable__from_physical_address(kernel, descriptor & MASK_PTE_NEXTADDR);
     }
 
     return NULL_KERNEL_ADDRESS;
@@ -162,27 +164,27 @@ static void PageTable__invalidate_page(Address virtual_address)
     );
 }
 
-void PageTable__unmap(PageTablePtr self, Address virtual_address, size_t size)
+void PageTable__unmap(PageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
 {
     Address user_start = align_down_4k(virtual_address);
     Address user_end = align_up_4k(user_start + size);
-    KernelAddress table = PageTable__from_virtual_address(addr(self));
+    KernelAddress table = PageTable__from_virtual_address(kernel, addr(self));
 
     for (Address user_addr = user_start; user_addr < user_end; user_addr += PAGE_SIZE)
     {
-        KernelAddress l1_tbl = PageTable__next_level_table_if_present(table, L0_IDX(user_addr));
+        KernelAddress l1_tbl = PageTable__next_level_table_if_present(table, kernel, L0_IDX(user_addr));
         if (!l1_tbl.valid)
         {
             continue;
         }
 
-        KernelAddress l2_tbl = PageTable__next_level_table_if_present(l1_tbl, L1_IDX(user_addr));
+        KernelAddress l2_tbl = PageTable__next_level_table_if_present(l1_tbl, kernel, L1_IDX(user_addr));
         if (!l2_tbl.valid)
         {
             continue;
         }
 
-        KernelAddress l3_tbl = PageTable__next_level_table_if_present(l2_tbl, L2_IDX(user_addr));
+        KernelAddress l3_tbl = PageTable__next_level_table_if_present(l2_tbl, kernel, L2_IDX(user_addr));
         if (!l3_tbl.valid)
         {
             continue;
@@ -214,6 +216,7 @@ void PageTable__unmap(PageTablePtr self, Address virtual_address, size_t size)
  *     (e.g., dsb ishst; isb; and invalidate if replacing something).
  */
 KernelAddress PageTable__ensure_next_level_table(KernelAddress parent_level_table,
+                                                 KernelPtr kernel,
                                                  uint64_t child_index)
 {
     // Defensive: table has 512 entries at 4 KiB granule.
@@ -225,7 +228,7 @@ KernelAddress PageTable__ensure_next_level_table(KernelAddress parent_level_tabl
 
     // Case 1: already a valid TABLE descriptor → return its next-level base.
     if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE)) {
-        return PageTable__from_physical_address(descriptor & MASK_PTE_NEXTADDR);
+        return PageTable__from_physical_address(kernel, descriptor & MASK_PTE_NEXTADDR);
     }
 
     // Case 2: slot holds a valid LEAF (block/page) → caller must split it.
@@ -254,6 +257,7 @@ KernelAddress PageTable__ensure_next_level_table(KernelAddress parent_level_tabl
 }
 
 int PageTable__map_2M_block(PageTable * self,
+                            KernelPtr kernel,
                             uint64_t virtual_address,
                             uint64_t phys_addr,
                             MappingPermissions perms)
@@ -263,9 +267,9 @@ int PageTable__map_2M_block(PageTable * self,
         return -1;
     }
     __d_println(DEBUG, "Mapping 2M");
-    KernelAddress table = PageTable__from_virtual_address(addr(self));
-    KernelAddress l1_tbl = PageTable__ensure_next_level_table(table, L0_IDX(virtual_address));
-    KernelAddress l2_tbl = PageTable__ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
+    KernelAddress table = PageTable__from_virtual_address(kernel, addr(self));
+    KernelAddress l1_tbl = PageTable__ensure_next_level_table(table, kernel, L0_IDX(virtual_address));
+    KernelAddress l2_tbl = PageTable__ensure_next_level_table(l1_tbl, kernel, L1_IDX(virtual_address));
 
     __d_printf(DEBUG, "Mapping 2M 0x%x\n", l2_tbl);
     v_ptr(l2_tbl, PageTable)->entries[L2_IDX(virtual_address)] =
@@ -275,6 +279,7 @@ int PageTable__map_2M_block(PageTable * self,
 }
 
 int PageTable__map_4k_page(PageTable * self,
+                           KernelPtr kernel,
                            Address virtual_address,
                            Address phys_addr,
                            MappingPermissions perms)
@@ -283,10 +288,10 @@ int PageTable__map_4k_page(PageTable * self,
         return -1;
     }
 
-    KernelAddress table = PageTable__from_virtual_address(addr(self));
-    KernelAddress l1_tbl = PageTable__ensure_next_level_table(table, L0_IDX(virtual_address));
-    KernelAddress l2_tbl = PageTable__ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
-    KernelAddress l3_tbl = PageTable__ensure_next_level_table(l2_tbl, L2_IDX(virtual_address));
+    KernelAddress table = PageTable__from_virtual_address(kernel, addr(self));
+    KernelAddress l1_tbl = PageTable__ensure_next_level_table(table, kernel, L0_IDX(virtual_address));
+    KernelAddress l2_tbl = PageTable__ensure_next_level_table(l1_tbl, kernel, L1_IDX(virtual_address));
+    KernelAddress l3_tbl = PageTable__ensure_next_level_table(l2_tbl, kernel, L2_IDX(virtual_address));
 
     v_ptr(l3_tbl, PageTable)->entries[L3_IDX(virtual_address)] =
         PageTable__make_page_desc_4k_l3(

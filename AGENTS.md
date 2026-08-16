@@ -10,7 +10,7 @@ Architecture specific code. Currently aarch64. Assembly and architecture specifi
 integration code goes here, along with bootloaders
 
 ### user
-Userspace code
+Userspace code. It includes commands and drivers
 
 ### test
 Unit tests. Running tests is done with make test. A python script is used to
@@ -52,13 +52,24 @@ Dont be stupid thinking you satisfy this requirement by using a 0 instead of a N
 
 The matching macros to match results types should be used
 
-## Strings in kernel code
-KStrings should be used. These are bounded with length stored independently to the buffer.
+Do not access Optional or Result internals directly, including fields like
+`.present`, `.some.val`, success payload fields, or error payload fields. Use
+`Match`, `ResultMatch`, `Unwrap`, or `ResultUnwrap` instead. The only exception
+is inside the implementation of the Optional/Result macros themselves.
+
+## Strings in code
+BStrings should be used. These are bounded with length stored independently to the buffer.
+
+Do not access fields in the BString struct direcly, 
+use the provided functions or add functions if they make sense and are needed.
 
 ## Arrays, HashMaps, etc
 There are macros to create typesafe arrays, HashMaps, etc. These should be used.
 
 There are Macros for iterating over fixedarrays etc. These should be used.
+
+Do not access fields data structure structs directly,
+use the provided functions or add functions if they make sense and are needed.
 
 ## Pointers in kernel code
 Pointers should be typedefed to a name following the convention
