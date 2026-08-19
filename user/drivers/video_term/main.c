@@ -21,6 +21,7 @@
 #define VIDEO_TERM_TEXT_Y_OFFSET ((VIDEO_TERM_CELL_HEIGHT - VIDEO_TERM_FONT_HEIGHT) / 2ULL)
 #define VIDEO_TERM_COLOR_BG 0x00000000U
 #define VIDEO_TERM_COLOR_FG 0x00d8d8d8U
+#define VIDEO_TERM_CURSOR_XOR_COLOR 0x00ffffffU
 #define VIDEO_TERM_REPLACEMENT_CODEPOINT 0xfffdU
 #define VIDEO_TERM_EMOJI_CLUSTER_CAPACITY VIDEO_TERM_EMOJI_MAX_CODEPOINTS
 
@@ -71,6 +72,9 @@ typedef struct VideoTerm
     uint64_t rows;
     uint64_t cursor_x;
     uint64_t cursor_y;
+    bool cursor_visible;
+    uint64_t cursor_draw_x;
+    uint64_t cursor_draw_y;
     uint32_t utf8_codepoint;
     uint8_t utf8_remaining;
     VideoTermEscapeState escape_state;
@@ -460,6 +464,68 @@ static void VideoTerm__fill_rect(
     }
 }
 
+static void VideoTerm__invert_cursor_cell(VideoTermPtr self, uint64_t cell_x, uint64_t cell_y)
+{
+    if (cell_x >= self->columns || cell_y >= self->rows)
+    {
+        return;
+    }
+
+    uint64_t origin_x = cell_x * VIDEO_TERM_COLUMN_WIDTH;
+    uint64_t origin_y = cell_y * VIDEO_TERM_CELL_HEIGHT;
+    uint32_t xor_color = VideoTerm__convert_color(self, VIDEO_TERM_CURSOR_XOR_COLOR);
+
+    for (uint64_t row = 0; row < VIDEO_TERM_CELL_HEIGHT; row++)
+    {
+        uint64_t target_y = origin_y + row;
+        if (target_y >= self->config.height)
+        {
+            return;
+        }
+
+        for (uint64_t col = 0; col < VIDEO_TERM_COLUMN_WIDTH; col++)
+        {
+            uint64_t target_x = origin_x + col;
+            if (target_x >= self->config.width)
+            {
+                break;
+            }
+
+            uint64_t pixel_index = (target_y * self->config.pixels_per_scanline) + target_x;
+            if (pixel_index >= self->mapped_pixels)
+            {
+                break;
+            }
+
+            self->pixels[pixel_index] ^= xor_color;
+        }
+    }
+}
+
+static void VideoTerm__show_cursor(VideoTermPtr self)
+{
+    if (self->cursor_visible)
+    {
+        return;
+    }
+
+    self->cursor_draw_x = self->cursor_x;
+    self->cursor_draw_y = self->cursor_y;
+    VideoTerm__invert_cursor_cell(self, self->cursor_draw_x, self->cursor_draw_y);
+    self->cursor_visible = true;
+}
+
+static void VideoTerm__hide_cursor(VideoTermPtr self)
+{
+    if (!self->cursor_visible)
+    {
+        return;
+    }
+
+    VideoTerm__invert_cursor_cell(self, self->cursor_draw_x, self->cursor_draw_y);
+    self->cursor_visible = false;
+}
+
 static void VideoTerm__draw_emoji(VideoTermPtr self, VideoTermEmojiEntryPtr emoji)
 {
     if (self->cursor_x + VIDEO_TERM_EMOJI_ADVANCE_COLUMNS > self->columns)
@@ -510,6 +576,9 @@ static void VideoTerm__clear(VideoTermPtr self)
     VideoTerm__fill_rect(self, 0, 0, self->config.width, self->config.height, VIDEO_TERM_COLOR_BG);
     self->cursor_x = 0;
     self->cursor_y = 0;
+    self->cursor_visible = false;
+    self->cursor_draw_x = 0;
+    self->cursor_draw_y = 0;
 }
 
 static void VideoTerm__clear_line_cells(VideoTermPtr self, uint64_t start_column, uint64_t end_column)
@@ -921,6 +990,9 @@ static VideoTerm VideoTerm__new(FramebufferConfig config, void * pixels, uint64_
         .rows = config.height / VIDEO_TERM_CELL_HEIGHT,
         .cursor_x = 0,
         .cursor_y = 0,
+        .cursor_visible = false,
+        .cursor_draw_x = 0,
+        .cursor_draw_y = 0,
         .utf8_codepoint = 0,
         .utf8_remaining = 0,
         .escape_state = VIDEO_TERM_ESCAPE_STATE_NONE,
@@ -980,6 +1052,8 @@ int VIDEO_TERM_ENTRYPOINT(void)
         return 1;
     }
 
+    VideoTerm__show_cursor(&terminal);
+
     ServiceEvent event;
     ServiceCode wait_status;
     for (wait_status = service_wait(&event);
@@ -994,11 +1068,13 @@ int VIDEO_TERM_ENTRYPOINT(void)
                 IOServerBuffer buffer;
                 if (io_server_get_buffer(video, &buffer) == IO_OK)
                 {
+                    VideoTerm__hide_cursor(&terminal);
                     for (uint64_t i = 0; i < buffer.capacity; i++)
                     {
                         VideoTerm__write_byte(&terminal, (uint8_t) buffer.data[i]);
                     }
                     VideoTerm__flush_emoji_cluster(&terminal);
+                    VideoTerm__show_cursor(&terminal);
                     io_server_data_consumed(video, buffer.capacity);
                 }
             }

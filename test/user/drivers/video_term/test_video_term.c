@@ -333,6 +333,18 @@ static void VideoTermTest__assert_cell_has_no_pixel(uint64_t cell_x, uint32_t co
     TEST_ASSERT_FALSE(VideoTermTest__cell_has_pixel(cell_x, color));
 }
 
+static void VideoTermTest__assert_cell_filled(uint64_t cell_x, uint32_t color)
+{
+    uint64_t origin_x = cell_x * VIDEO_TERM_COLUMN_WIDTH;
+    for (uint64_t row = 0; row < VIDEO_TERM_CELL_HEIGHT; row++)
+    {
+        for (uint64_t col = 0; col < VIDEO_TERM_COLUMN_WIDTH; col++)
+        {
+            TEST_ASSERT_EQUAL_UINT32(color, fake_framebuffer[(row * FRAMEBUFFER_STRIDE) + origin_x + col]);
+        }
+    }
+}
+
 static void VideoTermTest__set_shell_redraw_stress_input(void)
 {
     static char redraw_input[12000];
@@ -403,7 +415,44 @@ void test_video_term_main_draws_plain_digits_with_text_font(void)
     TEST_ASSERT_TRUE(fake_data_consumed);
     TEST_ASSERT_TRUE(VideoTermTest__cell_has_pixel(0, 0x00d8d8d8U));
     TEST_ASSERT_TRUE(VideoTermTest__cell_has_pixel(1, 0x00d8d8d8U));
-    TEST_ASSERT_EQUAL_UINT32(0x00000000U, fake_framebuffer[(1 * FRAMEBUFFER_STRIDE) + 20]);
+    VideoTermTest__assert_cell_has_no_pixel(0, 0x00abcdefU);
+    VideoTermTest__assert_cell_has_no_pixel(1, 0x00abcdefU);
+}
+
+void test_video_term_main_draws_block_cursor_after_written_text(void)
+{
+    VideoTermTest__set_input("a");
+
+    TEST_ASSERT_EQUAL_INT(0, video_term_main_under_test());
+
+    TEST_ASSERT_TRUE(fake_data_consumed);
+    TEST_ASSERT_TRUE(VideoTermTest__cell_has_pixel(0, 0x00d8d8d8U));
+    VideoTermTest__assert_cell_filled(1, 0x00ffffffU);
+}
+
+void test_video_term_cursor_hide_restores_cell_pixels(void)
+{
+    FramebufferConfig config = {
+        .physical_base = FRAMEBUFFER_PHYS_BASE,
+        .physical_size = FRAMEBUFFER_SIZE,
+        .width = FRAMEBUFFER_WIDTH,
+        .height = FRAMEBUFFER_HEIGHT,
+        .pixels_per_scanline = FRAMEBUFFER_STRIDE,
+        .pixel_format = FRAMEBUFFER_CONFIG_PIXEL_FORMAT_RGB_RESERVED_8BIT_PER_COLOR,
+        .red_mask = 0xff0000,
+        .green_mask = 0xff00,
+        .blue_mask = 0xff,
+        .reserved_mask = 0xff000000,
+    };
+    VideoTerm terminal = VideoTerm__new(config, fake_framebuffer, FRAMEBUFFER_SIZE);
+
+    VideoTerm__draw_codepoint(&terminal, 'a');
+    VideoTerm__show_cursor(&terminal);
+    VideoTermTest__assert_cell_filled(1, 0x00ffffffU);
+
+    VideoTerm__hide_cursor(&terminal);
+    VideoTermTest__assert_cell_filled(1, 0x00000000U);
+    TEST_ASSERT_TRUE(VideoTermTest__cell_has_pixel(0, 0x00d8d8d8U));
 }
 
 void test_video_term_main_handles_shell_clear_line_sequence(void)
