@@ -13,6 +13,7 @@
 #include "../../../../../../kernel/subsystems/io/file/fat32/fat32.h"
 #include "../../../../../../kernel/subsystems/io/file/memfs/memfs.h"
 #include "../../../../../../kernel/subsystems/io/file/register.h"
+#include "../../../../../../kernel/subsystems/io/stream/stream.h"
 #include "../../../../../../kernel/system_info.h"
 #include "../../../../fixtures/io_subsystem.h"
 #include "../../../../fixtures/process.h"
@@ -50,6 +51,12 @@ static SystemInfo fake_system_info = {
         .distributor_physical_base = 0x08000000,
         .redistributor_physical_base = 0x080a0000,
     },
+    .pci = Some(PciInfo, ((PciInfo) {
+        .ecam_physical_base = 0x4010000000,
+        .ecam_size = 0x10000000,
+        .bus_start = 0,
+        .bus_end = 255,
+    })),
 };
 
 static BString async_list_pending = BSTRING_NEW("Async list pending");
@@ -112,7 +119,9 @@ void setUp(void)
     BlockDeviceRegistry__reset();
     dummy_proc = dummy_process(100, 11, PROC_STATE_RUNNING);
 
-    root = init_root_filesystem_with_embedded_binaries();
+    kernel = init_test_kernel();
+    root = Unwrap(FilesystemPtr, kernel->io_subsystem->root_filesystem, (FilesystemPtr){});
+
     fat16_memory_device = MemoryBlockDevice__new();
     fat32_memory_device = MemoryBlockDevice__new();
     fat16_block_device = MemoryBlockDevice__as_block_device(&fat16_memory_device);
@@ -130,7 +139,6 @@ void setUp(void)
     );
     Filesystem__mount(root, bstring("fat32"), fat32_filesystem);
 
-    kernel = init_test_kernel_with_filesystem(root);
     kernel->system_info = Some(SystemInfo, fake_system_info);
     root_state = &root->state->state;
 
@@ -153,6 +161,18 @@ static BString hello_world = BSTRING_NEW("hello_world");
 static BString corrupt = BSTRING_NEW("corrupt");
 
 static const uint64_t HELLO_WORLD_SIZE = 66840;
+
+static bool FilesystemNodes__has_name(FilesystemNodes * self, BString name)
+{
+    FAPtrIterate(FilesystemNodes, self, index, node)
+        if (BString__equals(&name, &node->name))
+        {
+            return true;
+        }
+    End
+
+    return false;
+}
 
 IOContextPtr io_context(Optional(IOHandle) handle, Optional(ExternalBuffer) ext_buffer)
 {
@@ -216,6 +236,15 @@ void test_devfs_lists_registered_block_devices(void)
     ProcessPtr service = dummy_process(200, 11, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
 
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(
+        kernel->io_subsystem,
+        bstring("/dev/businfo"),
+        (IOPtr) Stream__heap_new(),
+        (IOStatePtr) StreamState__heap_new()
+    ))
+        IsError(code, message, TEST_FAIL())
+    End
+
     ResultMatch(BlockDeviceCode, BlockDeviceRegistry__register(BSTRING_NEW("/dev/virtio1"), service, 128, kernel->message_broker))
         IsSuccess(code, TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code))
         IsError(code, message, TEST_FAIL())
@@ -227,15 +256,10 @@ void test_devfs_lists_registered_block_devices(void)
         IsError(code, message, TEST_FAIL())
         IsSuccess(result,
         {
-            TEST_ASSERT_EQUAL_INT(2, FilesystemNodes__len(&result));
-
-            FilesystemNodePtr driver_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
-            BString expected_driver = bstring("virtio1");
-            TEST_ASSERT_TRUE(BString__equals(&expected_driver, &driver_node->name));
-
-            FilesystemNodePtr metadata_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 1), (FilesystemNodePtr){});
-            BString expected_metadata = bstring("hd0");
-            TEST_ASSERT_TRUE(BString__equals(&expected_metadata, &metadata_node->name));
+            TEST_ASSERT_EQUAL_INT(3, FilesystemNodes__len(&result));
+            TEST_ASSERT_TRUE(FilesystemNodes__has_name(&result, bstring("businfo")));
+            TEST_ASSERT_TRUE(FilesystemNodes__has_name(&result, bstring("virtio1")));
+            TEST_ASSERT_TRUE(FilesystemNodes__has_name(&result, bstring("hd0")));
         })
     End
 }
@@ -340,6 +364,13 @@ void test_procfs_can_open_and_read_system_info(void)
             TEST_ASSERT_NOT_NULL(strstr(buffer, "uart.physical_base=0x12345000\n"));
             TEST_ASSERT_NOT_NULL(strstr(buffer, "uart.irq=99\n"));
             TEST_ASSERT_NOT_NULL(strstr(buffer, "uart.mmio_size=0x1000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.present=0\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "pci.present=1\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "pci.ecam.physical_base=0x4010000000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "pci.ecam.size=0x10000000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "pci.ecam.size_human=256 MiB\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "pci.bus.start=0\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "pci.bus.end=255\n"));
             TEST_ASSERT_NOT_NULL(strstr(buffer, "interrupt_controller.kind=2\n"));
             TEST_ASSERT_NOT_NULL(strstr(
                 buffer,
@@ -410,6 +441,62 @@ void test_procfs_can_read_system_info_from_non_zero_offset(void)
             TEST_ASSERT_GREATER_THAN(896, total);
             TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.free_region.11.physical_end=0x4c000000\n"));
             TEST_ASSERT_NOT_NULL(strstr(buffer, "interrupt_controller.kind=2\n"));
+        })
+    End
+}
+
+void test_procfs_can_read_framebuffer_system_info(void)
+{
+    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
+    SystemInfo framebuffer_system_info = fake_system_info;
+    framebuffer_system_info.framebuffer = Some(FramebufferInfo, ((FramebufferInfo) {
+        .physical_base = 0x3e000000,
+        .size = 0x7e9000,
+        .width = 1920,
+        .height = 1080,
+        .pixels_per_scanline = 2048,
+        .pixel_format = FRAMEBUFFER_PIXEL_FORMAT_BGR_RESERVED_8BIT_PER_COLOR,
+        .red_mask = 0x00ff0000,
+        .green_mask = 0x0000ff00,
+        .blue_mask = 0x000000ff,
+        .reserved_mask = 0xff000000,
+    }));
+    procfs_kernel->system_info = Some(SystemInfo, framebuffer_system_info);
+
+    FilesystemPtr procfs_root = Filesystem__build_root_and_mounts(procfs_kernel);
+    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(procfs_root);
+
+    Result(IOHandle) sysinfo_handle =
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), bstring("/proc/sysinfo"), IO_OPEN_READ);
+
+    ResultMatch(IOHandle, sysinfo_handle)
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(handle,
+        {
+            char buffer[2048];
+            ResultMatch(ByteCount, IOSubsystem__read(
+                mounted_kernel->io_subsystem,
+                rw_context(handle, (DataPtr) buffer, sizeof(buffer) - 1)
+            ))
+                IsError(code, message, TEST_FAIL())
+                IsSuccess(bytes,
+                {
+                    buffer[bytes] = '\0';
+
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.present=1\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.physical_base=0x3e000000\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.physical_size=0x7e9000\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.physical_size_human=8100 KiB\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.width=1920\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.height=1080\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.pixels_per_scanline=2048\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.pixel_format=1\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.red_mask=0xff0000\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.green_mask=0xff00\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.blue_mask=0xff\n"));
+                    TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.reserved_mask=0xff000000\n"));
+                })
+            End
         })
     End
 }

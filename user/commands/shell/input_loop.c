@@ -182,10 +182,22 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
             history_cursor = NULL;
         }
 
+        bool append_at_end = cursor == line.len;
         if (BString__insert_char(&line, cursor, ch))
         {
             cursor++;
-            ConsoleInputStream__redraw_line(&line, cursor, echo);
+            if (append_at_end)
+            {
+                if (echo)
+                {
+                    char output[2] = { ch, '\0' };
+                    print(output);
+                }
+            }
+            else
+            {
+                ConsoleInputStream__redraw_line(&line, cursor, echo);
+            }
         }
     }
 }

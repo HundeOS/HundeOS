@@ -17,6 +17,7 @@ typedef enum SystemCall
     SYSCALL_PROCESS_WAIT_CHILD_EVENT = 0x87,
     SYSCALL_SHUTDOWN = 0x88,
     SYSCALL_EXEC_REQUEST = 0x89,
+    SYSCALL_AUTH = 0x8A,
     PING = 0xFF,
 } SystemCall;
 

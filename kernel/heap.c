@@ -333,6 +333,17 @@ KernelAddress Heap__from_virtual_address(HeapPtr self, Address virtual)
     return KERNEL_ADDR(virtual, physical);
 }
 
+KernelAddress Heap__try_from_virtual_address(HeapPtr self, Address virtual)
+{
+    if (virtual < self->start || virtual >= self->end)
+    {
+        return INVALID_KERNEL_ADDR;
+    }
+
+    Address offset = virtual - self->start;
+    return KERNEL_ADDR(virtual, offset + self->phys_start);
+}
+
 KernelAddress Heap__from_physical_address(HeapPtr self, Address physical)
 {
     Address offset = physical - self->phys_start;

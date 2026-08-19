@@ -29,34 +29,6 @@ inline uint64_t Process__spsr_for_el0(unsigned mask_irqs /*bits [9:6]*/) {
     return spsr;
 }
 
-extern char __el0_entry[];
-extern char __user_jump_start[];
-extern char __user_jump_end[];
-extern char __user_jump_phys_start[];
-extern char __user_jump_phys_end[];
-
-const Address TRAMP_ADDR = 0x10000;
-
-static UserAddress Process__el1_trampoline()
-{
-    Offset tramp_offset = addr_of(__el0_entry) - addr_of(__user_jump_start);
-    __d_printf(DEBUG, "Trampoline v=%p u=%p off=%p\n", addr_of(__el0_entry), addr_of(__user_jump_start), tramp_offset);
-
-    // we need to map the trampoline
-    return (UserAddress) {
-        .virtual_addr = TRAMP_ADDR,
-        .kernel_addr = (KernelAddress) {
-            .virtual_addr = addr_of(__user_jump_start),
-            .phys_addr = addr_of(__user_jump_phys_start),
-            .valid = true,
-        },
-        .read = true,
-        .write = false,
-        .execute = true,
-        .valid = true,
-    };
-}
-
 ProcessContextPtr ProcessContext__init(
     KernelPtr kernel,
     ProcessID pid,
@@ -88,10 +60,7 @@ ProcessContextPtr ProcessContext__init(
     // context->spsr = Process__spsr_for_el0(0);
     context->spsr = 0x0;
 
-    UserAddress trampoline = Process__el1_trampoline();
-    PageTable__map(v_ptr(page_table, PageTable), kernel, trampoline, PAGE_SIZE * 4);
-
-    context->elr = vaddr(trampoline);
+    context->elr = vaddr(entry_point);
 
     context->x[0] = argc;
     context->x[1] = argv;

@@ -96,6 +96,17 @@ typedef struct EfiBootServices
     void * exit;
     void * unload_image;
     EfiStatus (* exit_boot_services)(EfiHandle image_handle, uint64_t map_key);
+    void * get_next_monotonic_count;
+    void * stall;
+    void * set_watchdog_timer;
+    void * connect_controller;
+    void * disconnect_controller;
+    void * open_protocol;
+    void * close_protocol;
+    void * open_protocol_information;
+    void * protocols_per_handle;
+    void * locate_handle_buffer;
+    EfiStatus (* locate_protocol)(const EfiGuid * protocol, void * registration, void ** interface);
 }
 EfiBootServices;
 
@@ -191,6 +202,50 @@ typedef struct EfiMemoryDescriptor
 }
 EfiMemoryDescriptor;
 
+typedef struct EfiPixelBitmask
+{
+    uint32_t red_mask;
+    uint32_t green_mask;
+    uint32_t blue_mask;
+    uint32_t reserved_mask;
+}
+EfiPixelBitmask;
+
+typedef struct EfiGraphicsOutputModeInformation
+{
+    uint32_t version;
+    uint32_t horizontal_resolution;
+    uint32_t vertical_resolution;
+    uint32_t pixel_format;
+    EfiPixelBitmask pixel_information;
+    uint32_t pixels_per_scanline;
+}
+EfiGraphicsOutputModeInformation;
+
+typedef struct EfiGraphicsOutputProtocolMode
+{
+    uint32_t max_mode;
+    uint32_t mode;
+    EfiGraphicsOutputModeInformation * info;
+    uint64_t size_of_info;
+    EfiPhysicalAddress framebuffer_base;
+    uint64_t framebuffer_size;
+}
+EfiGraphicsOutputProtocolMode;
+
+typedef struct EfiGraphicsOutputProtocol
+{
+    EfiStatus (* query_mode)(
+        struct EfiGraphicsOutputProtocol * self,
+        uint32_t mode_number,
+        uint64_t * size_of_info,
+        EfiGraphicsOutputModeInformation ** info);
+    EfiStatus (* set_mode)(struct EfiGraphicsOutputProtocol * self, uint32_t mode_number);
+    void * blt;
+    EfiGraphicsOutputProtocolMode * mode;
+}
+EfiGraphicsOutputProtocol;
+
 typedef void (* KernelEntry)(
     uint64_t image_handle,
     uint64_t system_table,
@@ -257,6 +312,13 @@ static const EfiGuid file_info_guid = {
     .data4 = { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b },
 };
 
+static const EfiGuid graphics_output_protocol_guid = {
+    .data1 = 0x9042a9de,
+    .data2 = 0x23dc,
+    .data3 = 0x4a38,
+    .data4 = { 0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a },
+};
+
 static const uint16_t kernel_path[] = {
     'K', 'E', 'R', 'N', 'E', 'L', '.', 'E', 'L', 'F', 0
 };
@@ -297,6 +359,10 @@ static const uint16_t kernel_read_failed[] = {
 
 static const uint16_t kernel_allocated[] = {
     'k', 'e', 'r', 'n', 'e', 'l', ' ', 'a', 'l', 'l', 'o', 'c', 'a', 't', 'e', 'd', '\r', '\n', 0
+};
+
+static const uint16_t framebuffer_found[] = {
+    'f', 'r', 'a', 'm', 'e', 'b', 'u', 'f', 'f', 'e', 'r', ' ', 0
 };
 
 static const uint16_t kernel_alloc_failed[] = {
@@ -416,6 +482,53 @@ static int is_physical_memory_type(uint32_t type)
 static int is_free_physical_memory_type(uint32_t type)
 {
     return type == EFI_CONVENTIONAL_MEMORY;
+}
+
+static void fill_framebuffer_handoff(EfiSystemTable * system_table, PiUefiHandoffPtr handoff)
+{
+    EfiGraphicsOutputProtocol * graphics = 0;
+    EfiBootServices * boot_services = system_table->boot_services;
+
+    if (boot_services->locate_protocol == 0)
+    {
+        return;
+    }
+
+    EfiStatus status = boot_services->locate_protocol(
+        &graphics_output_protocol_guid,
+        0,
+        (void **) &graphics);
+    if (status != EFI_SUCCESS || graphics == 0 || graphics->mode == 0 || graphics->mode->info == 0)
+    {
+        return;
+    }
+
+    EfiGraphicsOutputProtocolMode * mode = graphics->mode;
+    EfiGraphicsOutputModeInformation * info = mode->info;
+    if (mode->framebuffer_base == 0 || mode->framebuffer_size == 0)
+    {
+        return;
+    }
+
+    handoff->framebuffer_present = 1;
+    handoff->framebuffer = (PiUefiFramebuffer) {
+        .physical_base = mode->framebuffer_base,
+        .size = mode->framebuffer_size,
+        .width = info->horizontal_resolution,
+        .height = info->vertical_resolution,
+        .pixels_per_scanline = info->pixels_per_scanline,
+        .pixel_format = info->pixel_format,
+        .red_mask = info->pixel_information.red_mask,
+        .green_mask = info->pixel_information.green_mask,
+        .blue_mask = info->pixel_information.blue_mask,
+        .reserved_mask = info->pixel_information.reserved_mask,
+    };
+
+    print(system_table, framebuffer_found);
+    print_hex(system_table, handoff->framebuffer.physical_base);
+    print(system_table, (const uint16_t[]) { ' ', 0 });
+    print_hex(system_table, handoff->framebuffer.size);
+    print_newline(system_table);
 }
 
 static uint64_t physical_memory_end_from_map(
@@ -812,6 +925,8 @@ static EfiStatus exit_boot_services(
 EfiStatus efi_main(EfiHandle image_handle, EfiSystemTable * system_table)
 {
     print(system_table, loader_start);
+    loader_memset(&pi_uefi_handoff, 0, sizeof(pi_uefi_handoff));
+    fill_framebuffer_handoff(system_table, &pi_uefi_handoff);
 
     EfiFileProtocol * kernel_file = 0;
     EfiStatus status = open_kernel_file(image_handle, system_table, &kernel_file);

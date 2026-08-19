@@ -34,6 +34,10 @@ extern const uint64_t __gicd_start[];
 #define QEMU_VIRT_GICR_PHYS_BASE (QEMU_VIRT_GICD_PHYS_BASE + GICR_OFFSET)
 #define QEMU_VIRT_GICD_BASE      ((uint64_t)&__gicd_start[0])
 #define QEMU_VIRT_GICR_BASE      (QEMU_VIRT_GICD_BASE + GICR_OFFSET)
+#define QEMU_VIRT_PCI_ECAM_PHYS_BASE 0x4010000000ULL
+#define QEMU_VIRT_PCI_ECAM_SIZE      0x10000000ULL
+#define QEMU_VIRT_PCI_BUS_START      0ULL
+#define QEMU_VIRT_PCI_BUS_END        255ULL
 
 __BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = {
     .cpu_count = 4,
@@ -42,6 +46,12 @@ __BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = {
     .uart_physical_base = BOOT_UART0_PHYS_BASE,
     .uart_virtual_base = BOOT_MMIO_VIRT_BASE,
     .uart_irq = BOOT_UART_IRQ_ID,
+    .pci = Some(PciInfo, ((PciInfo) {
+        .ecam_physical_base = QEMU_VIRT_PCI_ECAM_PHYS_BASE,
+        .ecam_size = QEMU_VIRT_PCI_ECAM_SIZE,
+        .bus_start = QEMU_VIRT_PCI_BUS_START,
+        .bus_end = QEMU_VIRT_PCI_BUS_END,
+    })),
     .interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V3,
     .gic_distributor_physical_base = QEMU_VIRT_GICD_PHYS_BASE,
     .gic_distributor_virtual_base = QEMU_VIRT_GICD_BASE,
@@ -93,6 +103,8 @@ __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
     qemu_virt_system_info.uart.physical_base = qemu_virt_platform_info.uart_physical_base;
     qemu_virt_system_info.uart.virtual_base = qemu_virt_platform_info.uart_virtual_base;
     qemu_virt_system_info.uart.irq = qemu_virt_platform_info.uart_irq;
+    qemu_virt_system_info.framebuffer = None(FramebufferInfo);
+    qemu_virt_system_info.pci = qemu_virt_platform_info.pci;
 
     qemu_virt_system_info.gic.distributor_physical_base = qemu_virt_platform_info.gic_distributor_physical_base;
     qemu_virt_system_info.gic.distributor_virtual_base = qemu_virt_platform_info.gic_distributor_virtual_base;
@@ -123,7 +135,7 @@ __BOOT__(void) qemu_virt_enter_kernel(uint64_t cpu)
     boot_debug_print_base(cpu, 10);
     boot_debug_print(new_line);
 
-    uint64_t stack_top = (uint64_t)&__k_stack_start[0] + (cpu * STACK_SIZE);
+    uint64_t stack_top = (uint64_t)&__k_stack_start[0] + ((cpu + 1) * STACK_SIZE);
     enter_kernel(stack_top, (uint64_t)&vector_table, (uint64_t)&CPU__enter_kernel, &qemu_virt_system_info);
 }
 

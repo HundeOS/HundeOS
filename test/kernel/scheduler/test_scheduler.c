@@ -293,19 +293,27 @@ void test_scheduler_interrupt_before_cpu_start_does_not_context_switch(void)
 
 void test_scheduler_init_creates_cpu_slots_independent_of_online_cpu_count(void)
 {
-    set_cpu_count(1);
+    set_cpu_count(MAX_CPUS);
 
     MessageBrokerPtr message_broker = MessageBroker__heap_new();
     SchedulerPtr local_scheduler = Scheduler__heap_new(message_broker);
     Elf idle = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
+    SystemInfo system_info = (SystemInfo) {
+        .cpu_count = 1,
+    };
+    kernel->system_info = Some(SystemInfo, system_info);
 
     ResultMatch(SchedulerInitStatus, Scheduler__init(kernel, local_scheduler, idle))
         IsError(code, message, TEST_FAIL())
     End
 
-    Match(ProcessPtr, Scheduler__idle_process(local_scheduler, 1))
+    Match(ProcessPtr, Scheduler__idle_process(local_scheduler, 0))
         IsSome(idle_process, TEST_ASSERT_NOT_NULL(idle_process);)
         IsNone(TEST_FAIL())
+    End
+
+    Match(ProcessPtr, Scheduler__idle_process(local_scheduler, 1))
+        IsSome(idle_process, TEST_FAIL())
     End
 
     reset_cpu_count();

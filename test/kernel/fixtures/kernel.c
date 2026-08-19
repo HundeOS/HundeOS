@@ -6,6 +6,7 @@
 #include "../../../kernel/subsystems/message/message_broker.h"
 #include "../../../kernel/irq/irq_dispatcher.h"
 #include "../../../kernel/kalloc.h"
+#include "../../../kernel/all_defs.h"
 
 static KernelPtr TestKernel__heap_new(
     SchedulerPtr scheduler,
@@ -22,15 +23,23 @@ static KernelPtr TestKernel__heap_new(
     kernel->io_subsystem = io_subsystem;
     io_subsystem->scheduler = scheduler;
 
-    kernel->system_info = Some(SystemInfo, ((SystemInfo) { 0 }));
+    SystemInfo system_info = (SystemInfo) {
+        .cpu_count = MAX_CPUS,
+    };
+    kernel->system_info = Some(SystemInfo, system_info);
     kernel->heap = NEW_HEAP;
     kernel->scheduler = scheduler;
     kernel->message_broker = message_broker;
     kernel->irq_dispatcher = ptr(Kernel__alloc_kernel(sizeof(IRQDispatcher)), IRQDispatcher);
     *kernel->irq_dispatcher = NEW_IRQ_DISPATCHER(scheduler);
-    SystemInfoPtr system_info = &kernel->system_info.some.val;
-    kernel->scheduler->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
-    kernel->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
+    kernel->auth = NEW_AUTH;
+    Match(SystemInfo, kernel->system_info)
+        IsSome(value,
+        {
+            kernel->scheduler->interrupt_controller = Some(InterruptControllerInfo, value.interrupt_controller);
+            kernel->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, value.interrupt_controller);
+        })
+    End
 
     return kernel;
 }
@@ -69,5 +78,15 @@ KernelPtr init_test_kernel_with_filesystem(FilesystemPtr filesystem)
 
 KernelPtr init_test_kernel()
 {
-    return init_test_kernel_with_filesystem(init_root_filesystem_with_embedded_binaries());
+    KernelPtr kernel = init_test_kernel_without_filesystem();
+    FilesystemPtr filesystem = init_root_filesystem_with_embedded_binaries(kernel);
+    kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, filesystem);
+    Result(DeviceHandle) register_res = IOSubsystem__register_device(
+        kernel->io_subsystem, bstring("/"), &filesystem->file_io.base_io, &filesystem->state->state
+    );
+    ResultMatch(DeviceHandle, register_res)
+        IsError(code, message, TEST_FAIL())
+    End
+
+    return kernel;
 }

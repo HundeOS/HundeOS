@@ -1,11 +1,15 @@
 #ifndef __SYSCALL_SPAWN_H
 #define __SYSCALL_SPAWN_H
+#include <stdbool.h>
 #include <stdint.h>
 
+#include "auth.h"
 #include "process.h"
 
 #define SPAWN_MAX_ARGS 3
 #define SPAWN_INHERIT_USER_ID UINT64_MAX
+#define SPAWN_INHERIT_AUTH_TICKET AUTH_NO_TICKET
+#define SPAWN_STDIO_DEFAULT ((SpawnStdio) { 0 })
 
 typedef enum SpawnModes
 {
@@ -30,12 +34,57 @@ SpawnErrors;
 
 typedef int64_t SpawnResult;
 typedef int SpawnMode;
+typedef uint64_t SpawnFileDescriptor;
+
+typedef struct SpawnStdio
+{
+    uint8_t present;
+    SpawnFileDescriptor stdin_fd;
+    SpawnFileDescriptor stdout_fd;
+    SpawnFileDescriptor stderr_fd;
+} SpawnStdio;
+
+static inline SpawnStdio SpawnStdio__new(
+    SpawnFileDescriptor stdin_fd,
+    SpawnFileDescriptor stdout_fd,
+    SpawnFileDescriptor stderr_fd
+)
+{
+    return (SpawnStdio) {
+        .present = 1,
+        .stdin_fd = stdin_fd,
+        .stdout_fd = stdout_fd,
+        .stderr_fd = stderr_fd,
+    };
+}
+
+static inline bool SpawnStdio__is_present(SpawnStdio self)
+{
+    return self.present != 0;
+}
+
+static inline SpawnFileDescriptor SpawnStdio__stdin_fd(SpawnStdio self)
+{
+    return self.stdin_fd;
+}
+
+static inline SpawnFileDescriptor SpawnStdio__stdout_fd(SpawnStdio self)
+{
+    return self.stdout_fd;
+}
+
+static inline SpawnFileDescriptor SpawnStdio__stderr_fd(SpawnStdio self)
+{
+    return self.stderr_fd;
+}
 
 typedef struct SpawnRequest
 {
     const char * path;
     SpawnMode mode;
     UserID requested_user_id;
+    AuthTicketID auth_ticket_id;
+    SpawnStdio stdio;
     const char * arg0;
     const char * arg1;
     const char * arg2;

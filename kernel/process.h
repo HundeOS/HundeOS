@@ -276,6 +276,9 @@ Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self);
 Result(FileDescriptor) Process__allocate_file_descriptor(ProcessPtr self, ProcessIOHandle handle);
 Result(FileDescriptor) Process__set_file_descriptor(ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle);
 Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor fd);
+Result(FileDescriptor) Process__copy_file_descriptor(
+    ProcessPtr self, ProcessPtr source, FileDescriptor target_fd, FileDescriptor source_fd
+);
 Result(ProcessIOHandle) Process__remove_file_descriptor(ProcessPtr self, FileDescriptor fd);
 
 #endif

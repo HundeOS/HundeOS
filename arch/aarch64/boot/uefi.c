@@ -19,8 +19,11 @@
 #define ACPI_RSDP_SIGNATURE 0x2052545020445352ULL
 #define ACPI_SPCR_SIGNATURE 0x52435053U
 #define ACPI_MADT_SIGNATURE 0x43495041U
+#define ACPI_MCFG_SIGNATURE 0x4746434dU
 #define ACPI_XSDT_SIGNATURE 0x54445358U
 #define ACPI_RSDT_SIGNATURE 0x54445352U
+#define ACPI_MCFG_ENTRY_SIZE 16U
+#define ACPI_PCI_ECAM_BUS_SIZE 0x100000ULL
 
 typedef struct EfiTableHeader
 {
@@ -280,6 +283,33 @@ static __BOOT__(void) UefiAcpi__apply_madt(BootPlatformInfoPtr platform, uint64_
     }
 }
 
+static __BOOT__(void) UefiAcpi__apply_mcfg(BootPlatformInfoPtr platform, uint64_t mcfg)
+{
+    uint32_t len = UefiAcpi__read32(mcfg + 4);
+    uint32_t offset = 44;
+
+    while (offset + ACPI_MCFG_ENTRY_SIZE <= len)
+    {
+        uint64_t entry = mcfg + offset;
+        uint64_t ecam_base = UefiAcpi__read64(entry);
+        uint64_t bus_start = UefiAcpi__read8(entry + 10);
+        uint64_t bus_end = UefiAcpi__read8(entry + 11);
+
+        if (ecam_base != 0 && bus_end >= bus_start)
+        {
+            platform->pci = Some(PciInfo, ((PciInfo) {
+                .ecam_physical_base = ecam_base,
+                .ecam_size = ((bus_end - bus_start) + 1ULL) * ACPI_PCI_ECAM_BUS_SIZE,
+                .bus_start = bus_start,
+                .bus_end = bus_end,
+            }));
+            return;
+        }
+
+        offset += ACPI_MCFG_ENTRY_SIZE;
+    }
+}
+
 static __BOOT__(void) UefiAcpi__apply_table(BootPlatformInfoPtr platform, uint64_t table)
 {
     if (UefiAcpi__sdt_valid(table, ACPI_SPCR_SIGNATURE))
@@ -289,6 +319,10 @@ static __BOOT__(void) UefiAcpi__apply_table(BootPlatformInfoPtr platform, uint64
     else if (UefiAcpi__sdt_valid(table, ACPI_MADT_SIGNATURE))
     {
         UefiAcpi__apply_madt(platform, table);
+    }
+    else if (UefiAcpi__sdt_valid(table, ACPI_MCFG_SIGNATURE))
+    {
+        UefiAcpi__apply_mcfg(platform, table);
     }
 }
 

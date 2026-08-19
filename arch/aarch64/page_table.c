@@ -72,11 +72,11 @@ KernelAddress PageTable__from_virtual_address(KernelPtr kernel, Address virtual_
 void PageTable__map(PageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     Address user_start = align_down_4k(vaddr(address));
-    Address phys_start = align_down_4k(u_kpaddr(address));
     Address user_end = align_up_4k(vaddr(address) + size);
+    Address kernel_start = align_down_4k(u_kvaddr(address) - (vaddr(address) - user_start));
 
     __d_printf(MMU, "Pagetable map uvirt=%p size=%p table=%p\n", vaddr(address), size, self);
-    __d_printf(MMU, "Pagetable map start=%p phys=%p end=%p\n", user_start, phys_start, user_end);
+    __d_printf(MMU, "Pagetable map start=%p kernel=%p end=%p\n", user_start, kernel_start, user_end);
 
     size_t adjusted_range = user_end - user_start;
 
@@ -101,7 +101,13 @@ void PageTable__map(PageTablePtr self, KernelPtr kernel, UserAddress address, si
     for (int page = 0; page < pages; page++)
     {
         Address user_addr = offset_addr(user_start, page * PAGE_SIZE);
-        Address phys_addr = offset_addr(phys_start, page * PAGE_SIZE);
+        Address kernel_addr = offset_addr(kernel_start, page * PAGE_SIZE);
+        KernelAddress backing = Kernel__try_from_virtual_address(kernel, kernel_addr);
+        Address phys_addr = offset_addr(align_down_4k(u_kpaddr(address)), page * PAGE_SIZE);
+        if (backing.valid)
+        {
+            phys_addr = align_down_4k(paddr(backing));
+        }
 
         PageTable__map_4k_page(self, kernel, user_addr, phys_addr, perms);
     }

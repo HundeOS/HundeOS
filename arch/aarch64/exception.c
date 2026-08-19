@@ -162,8 +162,22 @@ static bool yield_if_process_parked(KernelPtr kernel, Optional(ProcessPtr) curre
 uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
     uint64_t esr = get_esr_el1();
     uint64_t ec = (esr >> 26) & 0x3F;  // Exception class
+    uint64_t elr = get_elr_el1();
+    uint64_t far = get_far_el1();
 
-    __d_printf(SYSCALL, "sync call: 0x%x\n", ec);
+    __d_printf(
+        SYSCALL,
+        "sync call: ec=0x%x esr=%p elr=%p far=%p context_elr=%p x8=%p x0=%p current_el=%i cpu=%i\n",
+        ec,
+        esr,
+        elr,
+        far,
+        context->elr,
+        context->x[8],
+        context->x[0],
+        current_el,
+        CPU__id() - 1
+    );
 
     KernelPtr kernel = Kernel__instance();
     Optional(ProcessPtr) current_process = Scheduler__save_context(kernel->scheduler, CPU__id() - 1, context);

@@ -4,11 +4,24 @@
 #include "../panic.h"
 #include "../kalloc.h"
 #include "../print.h"
+#include "../arch/cache.h"
+#include "../all_defs.h"
 #include "../types/fixed_array.h"
 
 FixedArrayBodyDefine(SectionHeaderArray);
 FixedArrayBodyDefine(ProgramHeaderArray);
 FixedArrayBodyDefine(ExpandedSegmentArray);
+
+static Address Elf__page_start(Address address)
+{
+    return address & ~(PAGE_SIZE - 1ULL);
+}
+
+static size_t Elf__page_allocation_size(Address address, size_t size)
+{
+    Offset page_offset = address - Elf__page_start(address);
+    return (page_offset + size + PAGE_SIZE - 1ULL) & ~(PAGE_SIZE - 1ULL);
+}
 
 Elf Elf__new(const Address start, const Address end, const BString name)
 {
@@ -70,17 +83,28 @@ ProgramHeaderArray Elf__read_program_headers(Elf self)
 
 static UserAddress Elf__explode(const Elf self, ProgramHeaderPtr header)
 {
-    UserAddress address = Kernel__alloc_user(
-        header->virtual_address,
-        header->memory_size,
+    Address segment_start = header->virtual_address;
+    Address page_start = Elf__page_start(segment_start);
+    Offset page_offset = segment_start - page_start;
+    size_t allocation_size = Elf__page_allocation_size(segment_start, header->memory_size);
+
+    UserAddress page_address = Kernel__alloc_user(
+        page_start,
+        allocation_size,
         header->flags & Read,
         header->flags & Write,
         header->flags & Execute);
+    UserAddress address = UserAddress__relative(&page_address, page_offset);
 
+    Kernel__memset(page_address.kernel_addr.virtual_addr, 0, allocation_size);
     Kernel__memcopy(offset_addr(self.start, header->segment_offset),
         address.kernel_addr.virtual_addr,
         header->file_size);
-    return address;
+    if (header->flags & Execute)
+    {
+        Arch__sync_instruction_memory(address.kernel_addr.virtual_addr, header->file_size);
+    }
+    return page_address;
 }
 
 static void Elf__expand_segment(
@@ -93,7 +117,7 @@ static void Elf__expand_segment(
         UserAddress address = Elf__explode(self, header);
         ExpandedSegment segment = (ExpandedSegment) {
             .address = address,
-            .size = header->memory_size,
+            .size = Elf__page_allocation_size(header->virtual_address, header->memory_size),
         };
         ExpandedSegmentArray__push(expanded_segments, segment);
     }
@@ -113,4 +137,21 @@ ExpandedSegmentArray Elf__map(const Elf self) {
         End
     }
     return expanded_segments;
+}
+
+Optional(ExpandedSegment) Elf__entry_segment(Elf self, ExpandedSegmentArrayPtr expanded_segments)
+{
+    Address entry = Elf__read_header(self)->entry;
+    ExpandedSegmentArray segments = *expanded_segments;
+
+    FAIterate(ExpandedSegmentArray, segments, i, segment)
+        Address start = segment.address.virtual_addr;
+        Address end = start + segment.size;
+        if (entry >= start && entry < end)
+        {
+            return Some(ExpandedSegment, segment);
+        }
+    End
+
+    return None(ExpandedSegment);
 }

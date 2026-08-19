@@ -432,7 +432,7 @@ Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Option
     Stack__map(kernel, &stack, v_ptr(page_table, PageTable));
     __d_println(PROCESS, "Stack mapped");
 
-    Match(ExpandedSegment, ExpandedSegmentArray__at(&expanded_elf, 0))
+    Match(ExpandedSegment, Elf__entry_segment(binary, &expanded_elf))
         IsNone(
         {
             __d_println(PANIC, cstr(no_entry_point_message));
@@ -440,6 +440,8 @@ Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Option
         });
         IsSome(entry_point,
         {
+            Offset entry_offset = Elf__read_header(binary)->entry - entry_point.address.virtual_addr;
+            UserAddress entry_address = UserAddress__relative(&entry_point.address, entry_offset);
             ProcessArguments process_arguments = ProcessArguments__new();
             ResultMatch(CollectionCode, ProcessArguments__push(&process_arguments, binary.name))
                 IsError(code, message, return Error(ProcessPtr, message, SPAWN_ARG_TOO_LONG))
@@ -448,7 +450,7 @@ Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Option
                 IsError(code, message, return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG))
             End
 
-            ResultMatch(ProcessPtr, Process__new(kernel, binary.name, page_table, entry_point.address, stack, parent, process_arguments))
+            ResultMatch(ProcessPtr, Process__new(kernel, binary.name, page_table, entry_address, stack, parent, process_arguments))
                 IsSuccess(proc,
                 {
                     FAIterate(ExpandedSegmentArray, expanded_elf, segment_index, segment)
@@ -496,7 +498,20 @@ Result(Address) Process__device_address(ProcessPtr self, Address virtual_address
         if (virtual_address >= start && virtual_address < end)
         {
             Address offset = virtual_address - start;
-            return Success(Address, allocation.address.kernel_addr.phys_addr + offset);
+            if (allocation.type == USER_ALLOCATION_MMIO)
+            {
+                return Success(Address, allocation.address.kernel_addr.phys_addr + offset);
+            }
+
+            KernelAddress address = Kernel__from_virtual_address(
+                self->kernel, allocation.address.kernel_addr.virtual_addr + offset
+            );
+            if (!address.valid)
+            {
+                return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+            }
+
+            return Success(Address, address.phys_addr);
         }
     End
 
@@ -755,6 +770,18 @@ Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor f
     End
 
     return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
+}
+
+Result(FileDescriptor) Process__copy_file_descriptor(
+    ProcessPtr self, ProcessPtr source, FileDescriptor target_fd, FileDescriptor source_fd
+)
+{
+    ResultMatch(ProcessIOHandle, Process__get_io_handle(source, source_fd))
+        IsSuccess(handle, return Process__set_file_descriptor(self, target_fd, handle))
+        IsError(code, message, return Error(FileDescriptor, message, code))
+    End
+
+    return Error(FileDescriptor, file_descriptor_not_found, IO_NOT_OPEN);
 }
 
 Result(ProcessIOHandle) Process__remove_file_descriptor(ProcessPtr self, FileDescriptor fd)

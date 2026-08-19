@@ -1,4 +1,5 @@
 #include "../../../kernel/arch/init.h"
+#include "../../../kernel/arch/cache.h"
 
 static uint64_t masked_irq = 0;
 static uint64_t unmasked_irq = 0;
@@ -29,6 +30,10 @@ void Arch__unmask_irq(InterruptControllerInfoPtr interrupt_controller, uint64_t 
 {
     unmasked_irq = irq;
     unmask_count++;
+}
+
+void Arch__sync_instruction_memory(Address address, size_t size)
+{
 }
 
 void Arch__reset_irq_tracking()

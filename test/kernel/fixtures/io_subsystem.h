@@ -4,6 +4,6 @@
 #include "../../../kernel/subsystems/io/io_subsystem.h"
 #include "../../../kernel/subsystems/io/file/filesystem.h"
 
-FilesystemPtr init_root_filesystem_with_embedded_binaries();
+FilesystemPtr init_root_filesystem_with_embedded_binaries(KernelPtr kernel);
 
 #endif

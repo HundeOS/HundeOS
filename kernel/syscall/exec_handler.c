@@ -3,6 +3,7 @@
 #include "../../common_includes/syscalls/spawn.h"
 #include "../exec/exec.h"
 #include "../types/bstring_additional_types.h"
+#include "auth.h"
 
 Result(SystemCallResult) Exec__handler(
     KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,
@@ -64,7 +65,14 @@ Result(SystemCallResult) ExecRequest__handler(
     }
 
     BString path = bstring(request->path);
-    __d_printf(EXEC, "exec request handler path=%s mode=%i requested_user=%i\n", cstr(path), request->mode, (int) request->requested_user_id);
+    __d_printf(
+        EXEC,
+        "exec request handler path=%s mode=%i requested_user=%i auth_ticket=%i\n",
+        cstr(path),
+        request->mode,
+        (int) request->requested_user_id,
+        (int) request->auth_ticket_id
+    );
 
     ProcessArguments arguments = ProcessArguments__new();
     if (request->arg0 != 0)
@@ -85,11 +93,24 @@ Result(SystemCallResult) ExecRequest__handler(
 
     SpawnMode mode = request->mode;
     bool wait = mode == P_WAIT;
-    Optional(UserID) requested_user_id = request->requested_user_id == SPAWN_INHERIT_USER_ID
-        ? None(UserID)
-        : Some(UserID, request->requested_user_id);
+    Optional(UserID) requested_user_id = None(UserID);
+    if (request->auth_ticket_id != SPAWN_INHERIT_AUTH_TICKET)
+    {
+        Match(ProcessPtr, proc)
+            IsSome(process,
+            {
+                ResultMatch(UserID, Auth__consume_ticket(&kernel->auth, process, request->auth_ticket_id))
+                    IsSuccess(user_id, requested_user_id = Some(UserID, user_id);)
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
+            })
+            IsNone(return Error(SystemCallResult, bstring("No process"), AUTH_NO_PROCESS))
+        End
+    }
 
-    Result(ProcessPtr) exec_res = Exec__exec_as(originating_context, path, wait, requested_user_id, arguments);
+    Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(
+        originating_context, path, wait, requested_user_id, arguments, request->stdio
+    );
     ResultMatch(ProcessPtr, exec_res)
         IsSuccess(spawned_proc,
         {

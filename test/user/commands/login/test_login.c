@@ -1,17 +1,21 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "unity.h"
 
 #include "../../../../common/types/bstring.h"
+#include "../../../../common_includes/syscalls/auth.h"
 #include "../../../../common_includes/syscalls/process.h"
 #include "../../../../common_includes/syscalls/spawn.h"
 
 static SpawnMode last_mode;
-static UserID last_requested_user_id;
+static AuthTicketID last_auth_ticket_id;
 static char last_path[64];
 static SpawnResult next_spawn_result;
+static char last_auth_username[64];
+static char last_auth_password[64];
 static char output[512];
 static uint64_t output_position;
 static BString console_inputs[8];
@@ -24,9 +28,11 @@ static uint64_t console_input_index;
 void setUp(void)
 {
     last_mode = 0;
-    last_requested_user_id = SPAWN_INHERIT_USER_ID;
+    last_auth_ticket_id = AUTH_NO_TICKET;
     last_path[0] = '\0';
     next_spawn_result = 1;
+    last_auth_username[0] = '\0';
+    last_auth_password[0] = '\0';
     output_position = 0;
     output[0] = '\0';
     console_input_count = 0;
@@ -84,9 +90,28 @@ static void queue_console_input(const char * value)
     console_inputs[console_input_count++] = BString__new(value);
 }
 
-SpawnResult spawn_as(
+AuthResult auth(const char * username, const char * password)
+{
+    copy_text(last_auth_username, sizeof(last_auth_username), username);
+    copy_text(last_auth_password, sizeof(last_auth_password), password);
+    if (strcmp(username, "root") == 0 && strcmp(password, "root") == 0)
+    {
+        return 42;
+    }
+    if (strcmp(username, "hund") == 0 && strcmp(password, "hund") == 0)
+    {
+        return 42;
+    }
+    if (strcmp(username, "user") == 0 && strcmp(password, "user") == 0)
+    {
+        return 42;
+    }
+    return AUTH_INVALID_CREDENTIALS;
+}
+
+SpawnResult spawn_with_auth(
     SpawnMode mode,
-    UserID requested_user_id,
+    AuthTicketID auth_ticket_id,
     const char* path,
     const char* arg0,
     const char* arg1,
@@ -94,7 +119,7 @@ SpawnResult spawn_as(
 )
 {
     last_mode = mode;
-    last_requested_user_id = requested_user_id;
+    last_auth_ticket_id = auth_ticket_id;
     copy_text(last_path, sizeof(last_path), path);
     TEST_ASSERT_NULL(arg0);
     TEST_ASSERT_NULL(arg1);
@@ -137,8 +162,10 @@ void test_login_authenticates_user_and_spawns_shell_as_user(void)
     next_spawn_result = -1;
 
     TEST_ASSERT_EQUAL_INT(1, login_main_under_test());
+    TEST_ASSERT_EQUAL_STRING("user", last_auth_username);
+    TEST_ASSERT_EQUAL_STRING("user", last_auth_password);
     TEST_ASSERT_EQUAL(P_WAIT, last_mode);
-    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_USER, last_requested_user_id);
+    TEST_ASSERT_EQUAL_UINT64(42, last_auth_ticket_id);
     TEST_ASSERT_EQUAL_STRING("/sbin/shell", last_path);
     TEST_ASSERT_TRUE(contains_text(output, "login: failed to start shell: -1\n"));
 }
@@ -152,6 +179,7 @@ void test_login_retries_after_invalid_credentials(void)
     next_spawn_result = -1;
 
     TEST_ASSERT_EQUAL_INT(1, login_main_under_test());
-    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_ROOT, last_requested_user_id);
+    TEST_ASSERT_EQUAL_UINT64(42, last_auth_ticket_id);
+    TEST_ASSERT_TRUE(contains_text(output, "login: invalid credentials\n"));
     TEST_ASSERT_TRUE(contains_text(output, "login: failed to start shell: -1\n"));
 }

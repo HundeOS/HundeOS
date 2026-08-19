@@ -10,6 +10,7 @@
 #include "subsystems/message/message_broker.h"
 #include "irq/irq_dispatcher.h"
 #include "system_info.h"
+#include "syscall/auth.h"
 
 typedef uint64_t KernelInitStatus;
 
@@ -25,6 +26,7 @@ typedef struct Kernel
     SchedulerPtr scheduler;
     MessageBrokerPtr message_broker;
     IRQDispatcherPtr irq_dispatcher;
+    Auth auth;
 } Kernel;
 
 typedef Kernel * KernelPtr;

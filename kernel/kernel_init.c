@@ -38,11 +38,12 @@ static Kernel instance = {
     .scheduler = &scheduler,
     .message_broker = &message_broker,
     .irq_dispatcher = &irq_dispatcher,
+    .auth = NEW_AUTH,
 };
 
 void __kernel_panic(KernelPtr self, BStringPtr message)
 {
-    self->status = INIT_FAILED_AND_PANICKED;
+    __atomic_store_n(&self->status, INIT_FAILED_AND_PANICKED, __ATOMIC_RELEASE);
     mutex_unlock(&self->init_lock);
     Kernel__panic(cstr_p(message), NULL);
 }
@@ -145,7 +146,7 @@ void Kernel__init(KernelPtr self)
 {
     __d_println(DEBUG, "Kernel__init");
     mutex_lock(&self->init_lock);
-    self->status = INIT_IN_PROGRESS;
+    __atomic_store_n(&self->status, INIT_IN_PROGRESS, __ATOMIC_RELEASE);
 
     PanicOnError(Kernel__init_heap(self), self, &heap_init_progress);
     PanicOnError(Kernel__init_syscall_handlers(self), self, &syscall_init_progress);
@@ -153,14 +154,14 @@ void Kernel__init(KernelPtr self)
     PanicOnError(Kernel__init_scheduler(self), self, &scheduler_init_progress);
     PanicOnError(Arch__init(self), self, &arch_init_progress);
 
-    self->status = INIT_DONE;
+    __atomic_store_n(&self->status, INIT_DONE, __ATOMIC_RELEASE);
     mutex_unlock(&self->init_lock);
 }
 
 InitStatus Kernel__init_status(KernelPtr self)
 {
     mutex_lock(&self->init_lock);
-    InitStatus status = self->status;
+    InitStatus status = __atomic_load_n(&self->status, __ATOMIC_ACQUIRE);
     mutex_unlock(&self->init_lock);
 
     return status;
@@ -169,13 +170,14 @@ InitStatus Kernel__init_status(KernelPtr self)
 volatile bool Kernel__ready(void * data)
 {
     KernelPtr self = data;
-    return Kernel__init_status(self) != INIT_DONE && Kernel__init_status(self) != INIT_FAILED_AND_PANICKED;
+    InitStatus status = __atomic_load_n(&self->status, __ATOMIC_ACQUIRE);
+    return status != INIT_DONE && status != INIT_FAILED_AND_PANICKED;
 }
 
 Result(InitStatus) Kernel__wait_for_init(KernelPtr self)
 {
     Spin__wait_context(Kernel__ready, self, MAX_SPINS);
-    InitStatus status = self->status;
+    InitStatus status = __atomic_load_n(&self->status, __ATOMIC_ACQUIRE);
 
     if (status == INIT_DONE)
     {
@@ -186,4 +188,6 @@ Result(InitStatus) Kernel__wait_for_init(KernelPtr self)
         Kernel__panic(cstr(failed_to_init_msg), NULL);
         return Error(InitStatus, failed_to_init_msg, status);
     }
+
+    return Error(InitStatus, failed_to_init_msg, status);
 }

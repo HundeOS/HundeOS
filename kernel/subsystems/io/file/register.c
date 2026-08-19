@@ -1,5 +1,6 @@
 #include "register.h"
 
+#include "../../../kernel_core.h"
 #include "../block/block_device.h"
 #include "filesystem.h"
 #include "devfs/devfs.h"
@@ -161,7 +162,7 @@ FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel)
     Filesystem__mount(root_fs, embedded, embedded_fs);
 
     FilesystemPtr dev_filesystem = Filesystem__heap_new(dev, DevFilesystemIO__new());
-    DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(dev_filesystem);
+    DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(dev_filesystem, kernel->io_subsystem);
     Filesystem__mount(root_fs, dev, dev_filesystem);
 
     FilesystemPtr proc_filesystem = Filesystem__heap_new(proc, ProcFilesystemIO__new());

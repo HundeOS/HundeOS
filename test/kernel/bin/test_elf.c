@@ -6,6 +6,7 @@
 #include "../../../kernel/bin/elf.h"
 #include "../../../kernel/bin/embedded_binaries.h"
 #include "../stubs/panic.h"
+#include "../stubs/kalloc.h"
 
 extern const unsigned char _bin_hello_world_start[];
 extern const unsigned char _bin_hello_world_end[];
@@ -13,10 +14,12 @@ extern const unsigned char _bin_hello_world_end[];
 void setUp(void)
 {
     clear_panic_state();
+    KAllocStub__set_alloc_fill(false, 0);
 }
 
 void tearDown(void)
 {
+    KAllocStub__set_alloc_fill(false, 0);
     TEST_ASSERT_FALSE(panic_occurred());
 }
 
@@ -101,10 +104,115 @@ void test_map_binary_runnable(void)
                 TEST_ASSERT(segment.address.read);
                 TEST_ASSERT_FALSE(segment.address.write);
                 TEST_ASSERT_EQUAL_UINT(0x400000, segment.address.virtual_addr);
-                TEST_ASSERT_EQUAL_UINT(101, segment.size);
+                TEST_ASSERT_EQUAL_UINT(4096, segment.size);
             }
         )
     End;
+}
+
+void test_map_zeroes_load_segment_memory_beyond_file_size(void)
+{
+    uint8_t image[256] = {0};
+    Elf64Header * header = ptr(image, Elf64Header);
+    ProgramHeaderPtr program_header = ptr(&image[64], ProgramHeader);
+    uint8_t * file_data = &image[128];
+
+    file_data[0] = 0x11;
+    file_data[1] = 0x22;
+    file_data[2] = 0x33;
+    file_data[3] = 0x44;
+
+    header->program_header_offset = 64;
+    header->program_header_entry_size = sizeof(ProgramHeader);
+    header->program_header_entries = 1;
+
+    *program_header = (ProgramHeader) {
+        .type = Load,
+        .flags = Read | Write,
+        .segment_offset = 128,
+        .virtual_address = 0x500000,
+        .physical_address = 0x500000,
+        .file_size = 4,
+        .memory_size = 16,
+        .alignment = 0x1000,
+    };
+
+    KAllocStub__set_alloc_fill(true, 0xaa);
+    ExpandedSegmentArray segments = Elf__map(Elf__new((Address) image, (Address) &image[sizeof(image)], bstring("bss_test")));
+    KAllocStub__set_alloc_fill(false, 0);
+
+    TEST_ASSERT_EQUAL_UINT(1, ExpandedSegmentArray__len(&segments));
+    Match(ExpandedSegment, ExpandedSegmentArray__at(&segments, 0))
+        IsSome(segment,
+        {
+            uint8_t * mapped = ptr(segment.address.kernel_addr.virtual_addr, uint8_t);
+            TEST_ASSERT_EQUAL_UINT8(0x11, mapped[0]);
+            TEST_ASSERT_EQUAL_UINT8(0x22, mapped[1]);
+            TEST_ASSERT_EQUAL_UINT8(0x33, mapped[2]);
+            TEST_ASSERT_EQUAL_UINT8(0x44, mapped[3]);
+            for (size_t index = 4; index < 16; index++)
+            {
+                TEST_ASSERT_EQUAL_UINT8(0, mapped[index]);
+            }
+        })
+        IsNone(TEST_FAIL())
+    End
+}
+
+void test_map_handles_unaligned_load_segment_memory(void)
+{
+    uint8_t image[256] = {0};
+    Elf64Header * header = ptr(image, Elf64Header);
+    ProgramHeaderPtr program_header = ptr(&image[64], ProgramHeader);
+    uint8_t * file_data = &image[128];
+
+    file_data[0] = 0x99;
+    file_data[1] = 0x88;
+    file_data[2] = 0x77;
+    file_data[3] = 0x66;
+
+    header->program_header_offset = 64;
+    header->program_header_entry_size = sizeof(ProgramHeader);
+    header->program_header_entries = 1;
+
+    *program_header = (ProgramHeader) {
+        .type = Load,
+        .flags = Read | Write,
+        .segment_offset = 128,
+        .virtual_address = 0x5002d8,
+        .physical_address = 0x5002d8,
+        .file_size = 4,
+        .memory_size = 16,
+        .alignment = 0x1000,
+    };
+
+    KAllocStub__set_alloc_fill(true, 0xaa);
+    ExpandedSegmentArray segments = Elf__map(Elf__new((Address) image, (Address) &image[sizeof(image)], bstring("unaligned_bss_test")));
+    KAllocStub__set_alloc_fill(false, 0);
+
+    TEST_ASSERT_EQUAL_UINT(1, ExpandedSegmentArray__len(&segments));
+    Match(ExpandedSegment, ExpandedSegmentArray__at(&segments, 0))
+        IsSome(segment,
+        {
+            TEST_ASSERT_EQUAL_UINT(0x500000, segment.address.virtual_addr);
+            TEST_ASSERT_EQUAL_UINT(4096, segment.size);
+
+            uint8_t * page = ptr(segment.address.kernel_addr.virtual_addr, uint8_t);
+            uint8_t * mapped = page + 0x2d8;
+
+            TEST_ASSERT_EQUAL_UINT8(0, page[0]);
+            TEST_ASSERT_EQUAL_UINT8(0, page[0x2d7]);
+            TEST_ASSERT_EQUAL_UINT8(0x99, mapped[0]);
+            TEST_ASSERT_EQUAL_UINT8(0x88, mapped[1]);
+            TEST_ASSERT_EQUAL_UINT8(0x77, mapped[2]);
+            TEST_ASSERT_EQUAL_UINT8(0x66, mapped[3]);
+            for (size_t index = 4; index < 16; index++)
+            {
+                TEST_ASSERT_EQUAL_UINT8(0, mapped[index]);
+            }
+        })
+        IsNone(TEST_FAIL())
+    End
 }
 
 void test_program_header(void)

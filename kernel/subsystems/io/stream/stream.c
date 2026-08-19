@@ -127,6 +127,33 @@ static Result(ParkStatus) Stream__unpark(IOStatePtr state)
     return Success(ParkStatus, IO_UNPARK_OK);
 }
 
+static Optional(IOContextPtr) Stream__last_parked_context_with_handle(StreamStatePtr self)
+{
+    Optional(IOContextPtr) parked_context = None(IOContextPtr);
+    bool searching = true;
+
+    while (searching)
+    {
+        searching = false;
+        Match(IOContextPtr, StreamParkedContexts__at(&self->parked_contexts, -1))
+            IsSome(context,
+            {
+                Match(IOHandle, context->handle)
+                    IsSome(handle, parked_context = Some(IOContextPtr, context))
+                    IsNone(
+                    {
+                        __d_printf(IODEV, "stream dropping parked context without handle context=%p\n", context);
+                        StreamParkedContexts__pop(&self->parked_contexts);
+                        searching = true;
+                    })
+                End
+            })
+        End
+    }
+
+    return parked_context;
+}
+
 static Result(IOServerBuffer) Stream__server_buffer(IOStatePtr state)
 {
     StreamStatePtr self = (StreamStatePtr) state;
@@ -183,7 +210,7 @@ static Optional(IOContextPtr) Stream__data_available(IOStatePtr state, size_t by
         self->read_buffer.write_pos += byte_count;
         self->data_available = true;
         self->eof = false;
-        parked_context = StreamParkedContexts__at(&self->parked_contexts, -1);
+        parked_context = Stream__last_parked_context_with_handle(self);
     });
 
     return parked_context;

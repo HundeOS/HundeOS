@@ -1,6 +1,7 @@
 #include "devfs.h"
 
 #include "../../../../kalloc.h"
+#include "../../io_subsystem.h"
 #include "../../block/block_device.h"
 
 static BString invalid_path = BSTRING_NEW("Invalid devfs path");
@@ -165,6 +166,12 @@ static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, File
     BlockDevicePaths paths = BlockDeviceRegistry__paths();
     BlockDeviceMetadataEntries metadata_entries = BlockDeviceRegistry__metadata_entries();
 
+    ResultMatch(CollectionCode, IOSubsystem__append_dev_filesystem_nodes(
+        fs_state->io_subsystem, fs_state->state.filesystem, &result
+    ))
+        IsError(code, message, return Error(FilesystemNodes, message, code))
+    End
+
     FAIterate(BlockDevicePaths, paths, index, device_path)
         FilesystemNodes__push(
             &result,
@@ -215,11 +222,12 @@ FileIO DevFilesystemIO__new()
     };
 }
 
-DevFilesystemIOStatePtr DevFilesystemIOState__heap_new(FilesystemPtr fs)
+DevFilesystemIOStatePtr DevFilesystemIOState__heap_new(FilesystemPtr fs, IOSubsystemPtr io_subsystem)
 {
     DevFilesystemIOStatePtr state = ptr(Kernel__alloc_kernel(sizeof(DevFilesystemIOState)), DevFilesystemIOState);
     *state = (DevFilesystemIOState) {
         .state = FilesystemIOState__new(fs),
+        .io_subsystem = io_subsystem,
         .next_handle = 1,
     };
     fs->state = &state->state;

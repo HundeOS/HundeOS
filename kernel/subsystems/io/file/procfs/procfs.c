@@ -31,6 +31,24 @@ static BString uart_physical_base_key = BSTRING_NEW("uart.physical_base");
 static BString uart_virtual_base_key = BSTRING_NEW("uart.virtual_base");
 static BString uart_irq_key = BSTRING_NEW("uart.irq");
 static BString uart_mmio_size_key = BSTRING_NEW("uart.mmio_size");
+static BString framebuffer_present_key = BSTRING_NEW("framebuffer.present");
+static BString framebuffer_physical_base_key = BSTRING_NEW("framebuffer.physical_base");
+static BString framebuffer_physical_size_key = BSTRING_NEW("framebuffer.physical_size");
+static BString framebuffer_physical_size_human_key = BSTRING_NEW("framebuffer.physical_size_human");
+static BString framebuffer_width_key = BSTRING_NEW("framebuffer.width");
+static BString framebuffer_height_key = BSTRING_NEW("framebuffer.height");
+static BString framebuffer_pixels_per_scanline_key = BSTRING_NEW("framebuffer.pixels_per_scanline");
+static BString framebuffer_pixel_format_key = BSTRING_NEW("framebuffer.pixel_format");
+static BString framebuffer_red_mask_key = BSTRING_NEW("framebuffer.red_mask");
+static BString framebuffer_green_mask_key = BSTRING_NEW("framebuffer.green_mask");
+static BString framebuffer_blue_mask_key = BSTRING_NEW("framebuffer.blue_mask");
+static BString framebuffer_reserved_mask_key = BSTRING_NEW("framebuffer.reserved_mask");
+static BString pci_present_key = BSTRING_NEW("pci.present");
+static BString pci_ecam_physical_base_key = BSTRING_NEW("pci.ecam.physical_base");
+static BString pci_ecam_size_key = BSTRING_NEW("pci.ecam.size");
+static BString pci_ecam_size_human_key = BSTRING_NEW("pci.ecam.size_human");
+static BString pci_bus_start_key = BSTRING_NEW("pci.bus.start");
+static BString pci_bus_end_key = BSTRING_NEW("pci.bus.end");
 static BString memory_physical_start_key = BSTRING_NEW("memory.physical_start");
 static BString memory_physical_end_key = BSTRING_NEW("memory.physical_end");
 static BString memory_physical_size_key = BSTRING_NEW("memory.physical_size");
@@ -246,6 +264,48 @@ static void ProcSysinfoWriter__append_physical_memory_regions(ProcSysinfoWriterP
     }
 }
 
+static void ProcSysinfoWriter__append_framebuffer(ProcSysinfoWriterPtr self, Optional(FramebufferInfo) framebuffer)
+{
+    Match(FramebufferInfo, framebuffer)
+        IsSome(info,
+        {
+            ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 1);
+            ProcSysinfoWriter__append_hex_line(self, &framebuffer_physical_base_key, info.physical_base);
+            ProcSysinfoWriter__append_hex_line(self, &framebuffer_physical_size_key, info.size);
+            ProcSysinfoWriter__append_human_size_line(self, &framebuffer_physical_size_human_key, info.size);
+            ProcSysinfoWriter__append_dec_line(self, &framebuffer_width_key, info.width);
+            ProcSysinfoWriter__append_dec_line(self, &framebuffer_height_key, info.height);
+            ProcSysinfoWriter__append_dec_line(
+                self,
+                &framebuffer_pixels_per_scanline_key,
+                info.pixels_per_scanline
+            );
+            ProcSysinfoWriter__append_dec_line(self, &framebuffer_pixel_format_key, info.pixel_format);
+            ProcSysinfoWriter__append_hex_line(self, &framebuffer_red_mask_key, info.red_mask);
+            ProcSysinfoWriter__append_hex_line(self, &framebuffer_green_mask_key, info.green_mask);
+            ProcSysinfoWriter__append_hex_line(self, &framebuffer_blue_mask_key, info.blue_mask);
+            ProcSysinfoWriter__append_hex_line(self, &framebuffer_reserved_mask_key, info.reserved_mask);
+        })
+        IsNone(ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 0);)
+    End
+}
+
+static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, Optional(PciInfo) pci)
+{
+    Match(PciInfo, pci)
+        IsSome(info,
+        {
+            ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 1);
+            ProcSysinfoWriter__append_hex_line(self, &pci_ecam_physical_base_key, info.ecam_physical_base);
+            ProcSysinfoWriter__append_hex_line(self, &pci_ecam_size_key, info.ecam_size);
+            ProcSysinfoWriter__append_human_size_line(self, &pci_ecam_size_human_key, info.ecam_size);
+            ProcSysinfoWriter__append_dec_line(self, &pci_bus_start_key, info.bus_start);
+            ProcSysinfoWriter__append_dec_line(self, &pci_bus_end_key, info.bus_end);
+        })
+        IsNone(ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 0);)
+    End
+}
+
 static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
     SystemInfoPtr info,
     IOBufferPtr buffer,
@@ -260,6 +320,8 @@ static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
     ProcSysinfoWriter__append_hex_line(&writer, &uart_virtual_base_key, info->uart.virtual_base);
     ProcSysinfoWriter__append_dec_line(&writer, &uart_irq_key, info->uart.irq);
     ProcSysinfoWriter__append_hex_line(&writer, &uart_mmio_size_key, 0x1000);
+    ProcSysinfoWriter__append_framebuffer(&writer, info->framebuffer);
+    ProcSysinfoWriter__append_pci(&writer, info->pci);
     ProcSysinfoWriter__append_hex_line(&writer, &memory_physical_start_key, info->physical_memory.physical_start);
     ProcSysinfoWriter__append_hex_line(&writer, &memory_physical_end_key, info->physical_memory.physical_end);
     uint64_t physical_size = info->physical_memory.physical_end - info->physical_memory.physical_start;
@@ -362,27 +424,27 @@ static Result(IOBufferPtr) ProcFilesystemIO__read(
                 return Error(IOBufferPtr, invalid_path, IO_INVALID_PATH);
             }
 
-            if (is_nothing(fs_state->kernel->system_info))
-            {
-                return Error(IOBufferPtr, missing_system_info, IO_OPERATION_NOT_SUPPORTED);
-            }
+            Match(SystemInfo, fs_state->kernel->system_info)
+                IsSome(system_info,
+                {
+                    IOBuffer__reset(&target->buffer);
+                    ProcSysinfoWriter writer =
+                        ProcSysinfoWriter__write_system_info(&system_info, &target->buffer, target->offset, size);
+                    if (writer.failed)
+                    {
+                        return Error(IOBufferPtr, sysinfo_buffer_full, IO_OPERATION_NOT_SUPPORTED);
+                    }
 
-            SystemInfoPtr system_info = &fs_state->kernel->system_info.some.val;
-            IOBuffer__reset(&target->buffer);
-            ProcSysinfoWriter writer =
-                ProcSysinfoWriter__write_system_info(system_info, &target->buffer, target->offset, size);
-            if (writer.failed)
-            {
-                return Error(IOBufferPtr, sysinfo_buffer_full, IO_OPERATION_NOT_SUPPORTED);
-            }
+                    if (writer.written == 0 && target->offset >= writer.cursor)
+                    {
+                        return Error(IOBufferPtr, invalid_path, IO_EOF);
+                    }
 
-            if (writer.written == 0 && target->offset >= writer.cursor)
-            {
-                return Error(IOBufferPtr, invalid_path, IO_EOF);
-            }
-
-            target->offset += writer.written;
-            return Success(IOBufferPtr, &target->buffer);
+                    target->offset += writer.written;
+                    return Success(IOBufferPtr, &target->buffer);
+                })
+                IsNone(return Error(IOBufferPtr, missing_system_info, IO_OPERATION_NOT_SUPPORTED);)
+            End
         })
         IsError(code, message, return Error(IOBufferPtr, message, code))
     End

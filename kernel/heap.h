@@ -58,6 +58,7 @@ Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr);
 
 KernelAddress Heap__from_physical_address(HeapPtr self, Address physical);
 KernelAddress Heap__from_virtual_address(HeapPtr self, Address virtual);
+KernelAddress Heap__try_from_virtual_address(HeapPtr self, Address virtual);
 
 #define NEW_BLOCK \
     { \

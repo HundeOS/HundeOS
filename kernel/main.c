@@ -138,7 +138,7 @@ void Kernel_main(CPUID cpu_id) {
         Kernel__wait_for_init(kernel);
     }
 
-    if (kernel->status != INIT_DONE)
+    if (Kernel__init_status(kernel) != INIT_DONE)
     {
         __d_printf(PANIC, "Kernel init failed: %i\n", cpu_id);
         Kernel__panic("Kernel not initialised", NULL);

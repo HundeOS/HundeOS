@@ -54,6 +54,7 @@ static BString second_path = BSTRING_NEW(":test2:");
 static BString console_path = BSTRING_NEW(":console:");
 static BString tty_path = BSTRING_NEW(":tty:");
 static BString hello_stream_path = BSTRING_NEW("/dev/hello");
+static BString businfo_stream_path = BSTRING_NEW("/dev/businfo");
 static BString invalid_path = BSTRING_NEW("/sss");
 
 #define NEW_FAKE_IO_STATE \
@@ -395,9 +396,12 @@ void test_console_write_outputs_to_basic_io()
 {
     IOHandle handle = -1;
     char data[] = "hello console";
+    ConsoleStatePtr console_state = ConsoleState__instance();
+    IOBuffer__reset(&console_state->write_buffer);
     BasicIO__reset_output();
 
-    ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, console_path, Console__heap_new(), (IOStatePtr) ConsoleState__instance()))
+    IOPtr console = Console__heap_new();
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, console_path, console, (IOStatePtr) console_state))
         IsError(code, message, TEST_FAIL());
     End
 
@@ -417,6 +421,15 @@ void test_console_write_outputs_to_basic_io()
     End
 
     TEST_ASSERT_EQUAL_STRING(data, BasicIO__output());
+
+    ResultMatch(IOServerBuffer, console->server_write_buffer((IOStatePtr) console_state))
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(buffer,
+        {
+            TEST_ASSERT_EQUAL_UINT64(sizeof(data) - 1, buffer.capacity);
+            TEST_ASSERT_EQUAL_MEMORY(data, buffer.data, sizeof(data) - 1);
+        })
+    End
 }
 
 void test_mkdir_and_rm_on_console_return_unsupported()
@@ -547,6 +560,50 @@ void test_stream_read_when_no_data_ready_parks_the_process()
     TEST_ASSERT_EQUAL_PTR(data, parked_buffer.data);
 }
 
+void test_stream_read_server_registration_delivers_read_request_for_already_parked_reader()
+{
+    IOHandle read_handle = -1;
+    IOHandle server_handle = -1;
+    Data read_data[MAX_READ] = {0};
+    StreamStatePtr stream_state = StreamState__heap_new();
+
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, tty_path, Stream__heap_new(), (IOStatePtr) stream_state))
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), tty_path, IO_OPEN_READ))
+        IsSuccess(result, read_handle = result);
+        IsError(code, message, TEST_FAIL());
+    End
+
+    IOContextPtr read_context = rw_context(read_handle, read_data, MAX_READ);
+
+    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, read_context))
+        IsSuccess(count, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code))
+    End
+
+    Match(ServiceEvent, ServiceEvents__pop_front(&SERVER_PROC.service.events))
+        IsSome(event, TEST_FAIL())
+        IsNone({})
+    End
+
+    ResultMatch(IOHandle, IOSubsystem__server_register(io_subsystem, open_context(), &SERVER_PROC, tty_path, IO_SERVER_READ))
+        IsSuccess(result, server_handle = result);
+        IsError(code, message, TEST_FAIL());
+    End
+
+    TEST_ASSERT_NOT_EQUAL(-1, server_handle);
+    Match(ServiceEvent, ServiceEvents__pop_front(&SERVER_PROC.service.events))
+        IsSome(event,
+        {
+            TEST_ASSERT_EQUAL(SERVICE_EVENT_IO, event.type);
+            TEST_ASSERT_EQUAL(SERVICE_IO_READ_REQUEST, event.source);
+        })
+        IsNone(TEST_FAIL())
+    End
+}
+
 void test_stream_read_resumes_through_context_switch_when_data_arrives()
 {
     IOHandle read_handle = -1;
@@ -601,6 +658,113 @@ void test_stream_read_resumes_through_context_switch_when_data_arrives()
             TEST_ASSERT_EQUAL_UINT8_ARRAY(data, read_data, byte_count);
         })
         IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_stream_read_returns_buffered_server_data_when_data_arrives_before_reader_parks()
+{
+    IOHandle read_handle = -1;
+    IOHandle server_handle = -1;
+    char data[] = "k";
+    Data read_data[MAX_READ] = {0};
+    StreamStatePtr stream_state = StreamState__heap_new();
+
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, tty_path, Stream__heap_new(), (IOStatePtr) stream_state))
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(IOHandle, IOSubsystem__server_register(io_subsystem, open_context(), &SERVER_PROC, tty_path, IO_SERVER_READ))
+        IsSuccess(result, server_handle = result);
+        IsError(code, message, TEST_FAIL());
+    End
+
+    IOServerBuffer server_buffer;
+    ResultMatch(IOStatus, IOSubsystem__server_get_buffer(io_subsystem, close_context(server_handle), &SERVER_PROC, &server_buffer))
+        IsSuccess(status, TEST_ASSERT_EQUAL_INT(IO_OK, status))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    server_buffer_data_for_test(&SERVER_PROC, server_buffer)[0] = data[0];
+
+    ResultMatch(IOStatus, IOSubsystem__server_data_available(io_subsystem, close_context(server_handle), sizeof(data) - 1))
+        IsSuccess(status, TEST_ASSERT_EQUAL_INT(IO_OK, status))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), tty_path, IO_OPEN_READ))
+        IsSuccess(result, read_handle = result);
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, rw_context(read_handle, read_data, MAX_READ)))
+        IsSuccess(byte_count,
+        {
+            TEST_ASSERT_EQUAL_UINT(sizeof(data) - 1, byte_count);
+            TEST_ASSERT_EQUAL_UINT8_ARRAY(data, read_data, byte_count);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_stream_data_available_drops_parked_context_without_handle_and_wakes_reader()
+{
+    IOHandle read_handle = -1;
+    IOHandle server_handle = -1;
+    char data[] = "k";
+    Data read_data[MAX_READ] = {0};
+    StreamStatePtr stream_state = StreamState__heap_new();
+    IOPtr stream = Stream__heap_new();
+
+    ResultMatch(DeviceHandle, IOSubsystem__register_device(io_subsystem, tty_path, stream, (IOStatePtr) stream_state))
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(IOHandle, IOSubsystem__server_register(io_subsystem, open_context(), &SERVER_PROC, tty_path, IO_SERVER_READ))
+        IsSuccess(result, server_handle = result);
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), tty_path, IO_OPEN_READ))
+        IsSuccess(result, read_handle = result);
+        IsError(code, message, TEST_FAIL());
+    End
+
+    ResultMatch(ByteCount, IOSubsystem__read(io_subsystem, rw_context(read_handle, read_data, MAX_READ)))
+        IsSuccess(byte_count, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code))
+    End
+
+    IOContextPtr malformed_context = io_context(None(IOHandle), None(ExternalBuffer));
+    ResultMatch(ParkStatus, stream->park((IOStatePtr) stream_state, malformed_context))
+        IsSuccess(status, TEST_ASSERT_EQUAL(IO_PARK_OK, status))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    IOServerBuffer server_buffer;
+    ResultMatch(IOStatus, IOSubsystem__server_get_buffer(io_subsystem, close_context(server_handle), &SERVER_PROC, &server_buffer))
+        IsSuccess(status, TEST_ASSERT_EQUAL_INT(IO_OK, status))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    server_buffer_data_for_test(&SERVER_PROC, server_buffer)[0] = data[0];
+
+    ResultMatch(IOStatus, IOSubsystem__server_data_available(io_subsystem, close_context(server_handle), sizeof(data) - 1))
+        IsSuccess(status, TEST_ASSERT_EQUAL_INT(IO_OK, status))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL_UINT64(0, StreamParkedContexts__len(&stream_state->parked_contexts));
+
+    Match(Message, io_message)
+        IsSome(available_message,
+        {
+            TEST_ASSERT_EQUAL(SUBSYS_IO_OPERATION_AVAILABLE, available_message.source_code);
+            Payload available_payload = Unwrap(Payload, available_message.payload, (Payload){});
+            TEST_ASSERT_EQUAL(PAYLOAD_TYPE_IO_OPERATION, available_payload.type);
+            TEST_ASSERT_EQUAL(PID, available_payload.io_operation.pid);
+            TEST_ASSERT_EQUAL_UINT64(read_handle, available_payload.io_operation.operation_key);
+        })
+        IsNone(TEST_FAIL())
     End
 }
 
@@ -700,6 +864,19 @@ void test_hello_stream_read_returns_server_written_data_after_data_available()
         IsError(code, message, TEST_FAIL());
     End
     IOContext__dispose(server_open_context);
+
+    KernelContext businfo_kernel_context = KernelContext__new(
+        Some(ProcessID, SERVER_PROC.pid), Some(SchedulerPtr, kernel->scheduler)
+    );
+    IOContextPtr businfo_open_context = IOContext__heap_new(
+        businfo_kernel_context, Some(IOSubsystemPtr, io_subsystem), None(IOHandle), None(ExternalBuffer)
+    );
+
+    ResultMatch(IOHandle, IOSubsystem__server_register(io_subsystem, businfo_open_context, &SERVER_PROC, businfo_stream_path, IO_SERVER_READ))
+        IsSuccess(result, IOSubsystem__close(io_subsystem, close_context(result)));
+        IsError(code, message, TEST_FAIL());
+    End
+    IOContext__dispose(businfo_open_context);
 
     ResultMatch(IOHandle, IOSubsystem__open(io_subsystem, open_context(), hello_stream_path, IO_OPEN_READ))
         IsSuccess(result, read_handle = result);

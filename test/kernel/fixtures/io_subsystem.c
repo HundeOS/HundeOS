@@ -5,7 +5,7 @@
 #include "../../../kernel/subsystems/io/file/procfs/procfs.h"
 #include "kernel.h"
 
-FilesystemPtr init_root_filesystem_with_embedded_binaries()
+FilesystemPtr init_root_filesystem_with_embedded_binaries(KernelPtr kernel)
 {
     FilesystemPtr filesystem = RootFilesystem__heap_new();
     FilesystemIOStatePtr filesystem_state = FilesystemIOState__heap_new(filesystem);
@@ -16,12 +16,11 @@ FilesystemPtr init_root_filesystem_with_embedded_binaries()
     Filesystem__mount(filesystem, bstring("sbin"), embedded_binaries);
 
     FilesystemPtr devfs = Filesystem__heap_new(bstring("dev"), DevFilesystemIO__new());
-    DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(devfs);
+    DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(devfs, kernel->io_subsystem);
 
     Filesystem__mount(filesystem, bstring("dev"), devfs);
 
     FilesystemPtr procfs = Filesystem__heap_new(bstring("proc"), ProcFilesystemIO__new());
-    KernelPtr kernel = init_test_kernel_without_filesystem();
     ProcFilesystemIOStatePtr procfs_state = ProcFilesystemIOState__heap_new(procfs, kernel);
 
     Filesystem__mount(filesystem, bstring("proc"), procfs);

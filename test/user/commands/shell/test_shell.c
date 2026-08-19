@@ -396,7 +396,7 @@ void test_console_input_stream_restores_current_draft_with_down_arrow(void)
 
     TEST_ASSERT_EQUAL_STRING("par", BString__cstr(&line));
     TEST_ASSERT_EQUAL_STRING(
-        "\r\033[2K> p\r\033[2K> pa\r\033[2K> par\r\033[2K> second\r\033[2K> par",
+        "par\r\033[2K> second\r\033[2K> par",
         BString__cstr(&printed_output)
     );
 }
@@ -410,7 +410,7 @@ void test_console_input_stream_inserts_at_cursor_after_left_arrow(void)
 
     TEST_ASSERT_EQUAL_STRING("aXc", BString__cstr(&line));
     TEST_ASSERT_EQUAL_STRING(
-        "\r\033[2K> a\r\033[2K> ac\r\033[2K> ac\033[1D\r\033[2K> aXc\033[1D",
+        "ac\r\033[2K> ac\033[1D\r\033[2K> aXc\033[1D",
         BString__cstr(&printed_output)
     );
 }
@@ -424,7 +424,7 @@ void test_console_input_stream_backspace_removes_before_cursor(void)
 
     TEST_ASSERT_EQUAL_STRING("bc", BString__cstr(&line));
     TEST_ASSERT_EQUAL_STRING(
-        "\r\033[2K> a\r\033[2K> ab\r\033[2K> abc\r\033[2K> abc\033[1D\r\033[2K> abc\033[2D\r\033[2K> bc\033[2D",
+        "abc\r\033[2K> abc\033[1D\r\033[2K> abc\033[2D\r\033[2K> bc\033[2D",
         BString__cstr(&printed_output)
     );
 }
@@ -444,4 +444,15 @@ void test_console_input_stream_recalled_history_line_can_move_and_insert(void)
         "\r\033[2K> hello\r\033[2K> hello\033[1D\r\033[2K> hellXo\033[1D",
         BString__cstr(&printed_output)
     );
+}
+
+void test_console_input_stream_appends_without_full_redraw(void)
+{
+    ConsoleInputStream input = ConsoleInputStream__new();
+    set_console_input("hello\n");
+
+    BString line = ConsoleInputStream__read_line(&input.input, true);
+
+    TEST_ASSERT_EQUAL_STRING("hello", BString__cstr(&line));
+    TEST_ASSERT_EQUAL_STRING("hello", BString__cstr(&printed_output));
 }

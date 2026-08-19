@@ -30,9 +30,11 @@ UserAddress Kernel__alloc_user(Address virtual_address,
 KernelAddress Kernel__alloc(size_t size);
 KernelAddress Kernel__from_physical_address(KernelPtr self, Address physical);
 KernelAddress Kernel__from_virtual_address(KernelPtr self, Address virtual_addr);
+KernelAddress Kernel__try_from_virtual_address(KernelPtr self, Address virtual_addr);
 
 Result(KAllocCode) Kernel__free(Address virtual_addr);
 
 void Kernel__memcopy(Address src, Address target, size_t size);
+void Kernel__memset(Address addr, int val, size_t size);
 
 #endif

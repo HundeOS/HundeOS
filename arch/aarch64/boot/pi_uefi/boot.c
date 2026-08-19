@@ -46,6 +46,7 @@ __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = {
     .uart_physical_base = BOOT_UART0_PHYS_BASE,
     .uart_virtual_base = BOOT_MMIO_VIRT_BASE,
     .uart_irq = PI4_UART_IRQ_ID,
+    .framebuffer = None(FramebufferInfo),
     .interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V2,
     .gic_distributor_physical_base = PI4_GICD_PHYS_BASE,
     .gic_distributor_virtual_base = PI_UEFI_GICD_BASE,
@@ -86,6 +87,22 @@ __BOOT__(void) pi_uefi_set_entry_args(
                 .physical_end = handoff->physical_memory_regions[index].physical_end,
             };
         }
+
+        if (handoff->framebuffer_present != 0)
+        {
+            pi_uefi_platform_info.framebuffer = Some(FramebufferInfo, ((FramebufferInfo) {
+                .physical_base = handoff->framebuffer.physical_base,
+                .size = handoff->framebuffer.size,
+                .width = handoff->framebuffer.width,
+                .height = handoff->framebuffer.height,
+                .pixels_per_scanline = handoff->framebuffer.pixels_per_scanline,
+                .pixel_format = (FramebufferPixelFormat) handoff->framebuffer.pixel_format,
+                .red_mask = handoff->framebuffer.red_mask,
+                .green_mask = handoff->framebuffer.green_mask,
+                .blue_mask = handoff->framebuffer.blue_mask,
+                .reserved_mask = handoff->framebuffer.reserved_mask,
+            }));
+        }
     }
 }
 
@@ -123,6 +140,8 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     pi_uefi_system_info.uart.physical_base = pi_uefi_platform_info.uart_physical_base;
     pi_uefi_system_info.uart.virtual_base = pi_uefi_platform_info.uart_virtual_base;
     pi_uefi_system_info.uart.irq = pi_uefi_platform_info.uart_irq;
+    pi_uefi_system_info.framebuffer = pi_uefi_platform_info.framebuffer;
+    pi_uefi_system_info.pci = pi_uefi_platform_info.pci;
 
     pi_uefi_system_info.gic.distributor_physical_base = pi_uefi_platform_info.gic_distributor_physical_base;
     pi_uefi_system_info.gic.distributor_virtual_base = (uint64_t)&__gicd_start[0];
@@ -161,7 +180,7 @@ __BOOT__(void) pi_uefi_enter_kernel(uint64_t cpu)
     boot_debug_print_base(cpu, 10);
     boot_debug_print(new_line);
 
-    uint64_t stack_top = (uint64_t)&__k_stack_start[0] + (cpu * STACK_SIZE);
+    uint64_t stack_top = (uint64_t)&__k_stack_start[0] + ((cpu + 1) * STACK_SIZE);
     enter_kernel(stack_top, (uint64_t)&vector_table, (uint64_t)&CPU__enter_kernel, &pi_uefi_system_info);
 }
 

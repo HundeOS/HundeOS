@@ -91,6 +91,9 @@ Result(IOStatus) IOSubsystem__server_eof(IOSubsystemPtr self, IOContextPtr conte
 Result(DirectoryEntryCount) IOSubsystem__list_dir(
     IOSubsystemPtr self, BString path, DirectoryEntryPtr entries, size_t max_entries
 );
+Result(CollectionCode) IOSubsystem__append_dev_filesystem_nodes(
+    IOSubsystemPtr self, FilesystemPtr filesystem, FilesystemNodes * target
+);
 Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, BString path);
 Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, BString path, Flags flags);
 Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, BString source_path, BString target_path);

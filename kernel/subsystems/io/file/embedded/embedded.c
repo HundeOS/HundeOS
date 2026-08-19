@@ -225,7 +225,8 @@ Result(IOBufferPtr) EmbeddedFileIO__read(
                             return Error(IOBufferPtr, end_of_file, IO_EOF);
                         }
 
-                        size_t read_size = min(elf_size, free_space);
+                        size_t remaining = elf_size - target_ptr->offset;
+                        size_t read_size = min(size, min(remaining, free_space));
 
                         IOBuffer__push_all(&target_ptr->buffer, &bytes[target_ptr->offset], read_size);
                         target_ptr->offset += read_size;

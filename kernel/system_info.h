@@ -34,6 +34,38 @@ typedef struct UartInfo {
     uint64_t irq;
 } UartInfo;
 
+typedef enum FramebufferPixelFormat {
+    FRAMEBUFFER_PIXEL_FORMAT_RGB_RESERVED_8BIT_PER_COLOR = 0,
+    FRAMEBUFFER_PIXEL_FORMAT_BGR_RESERVED_8BIT_PER_COLOR = 1,
+    FRAMEBUFFER_PIXEL_FORMAT_BIT_MASK = 2,
+    FRAMEBUFFER_PIXEL_FORMAT_BLT_ONLY = 3,
+    FRAMEBUFFER_PIXEL_FORMAT_UNKNOWN = 0xff,
+} FramebufferPixelFormat;
+
+typedef struct FramebufferInfo {
+    Address physical_base;
+    uint64_t size;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixels_per_scanline;
+    FramebufferPixelFormat pixel_format;
+    uint32_t red_mask;
+    uint32_t green_mask;
+    uint32_t blue_mask;
+    uint32_t reserved_mask;
+} FramebufferInfo;
+
+OptionalDef(FramebufferInfo);
+
+typedef struct PciInfo {
+    Address ecam_physical_base;
+    uint64_t ecam_size;
+    uint64_t bus_start;
+    uint64_t bus_end;
+} PciInfo;
+
+OptionalDef(PciInfo);
+
 typedef struct GicInfo {
     Address distributor_physical_base;
     Address distributor_virtual_base;
@@ -74,6 +106,8 @@ typedef struct SystemInfo {
     MemoryRegion embedded_binaries;
     MemoryRegion mmio;
     UartInfo uart;
+    Optional(FramebufferInfo) framebuffer;
+    Optional(PciInfo) pci;
     GicInfo gic;
     InterruptControllerInfo interrupt_controller;
 } SystemInfo;
@@ -83,6 +117,8 @@ OptionalDef(SystemInfo);
 typedef MemoryRegion * MemoryRegionPtr;
 typedef PhysicalMemoryRegion * PhysicalMemoryRegionPtr;
 typedef UartInfo * UartInfoPtr;
+typedef FramebufferInfo * FramebufferInfoPtr;
+typedef PciInfo * PciInfoPtr;
 typedef GicInfo * GicInfoPtr;
 typedef PhysicalMemoryInfo * PhysicalMemoryInfoPtr;
 typedef InterruptControllerInfo * InterruptControllerInfoPtr;

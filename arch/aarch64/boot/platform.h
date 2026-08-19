@@ -12,6 +12,8 @@ typedef struct BootPlatformInfo {
     uint64_t uart_physical_base;
     uint64_t uart_virtual_base;
     uint64_t uart_irq;
+    Optional(FramebufferInfo) framebuffer;
+    Optional(PciInfo) pci;
     InterruptControllerKind interrupt_controller_kind;
     uint64_t gic_distributor_physical_base;
     uint64_t gic_distributor_virtual_base;

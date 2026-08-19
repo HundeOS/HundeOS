@@ -4,3 +4,5 @@ manifest:
   source_files:
     - kernel/system_info.c
     - arch/aarch64/boot/uefi.c
+    - test/kernel/stubs/kalloc.c
+    - test/kernel/stubs/cpu.c

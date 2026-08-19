@@ -159,9 +159,10 @@ static void set_checksum(uint8_t * buffer, size_t checksum_offset, size_t len)
 void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
 {
     uint8_t rsdp[36] = { 0 };
-    uint8_t xsdt[36 + 16] = { 0 };
+    uint8_t xsdt[36 + 24] = { 0 };
     uint8_t spcr[64] = { 0 };
     uint8_t madt[44 + 24 + 80 + 16] = { 0 };
+    uint8_t mcfg[44 + 16] = { 0 };
 
     memcpy(rsdp, "RSD PTR ", 8);
     rsdp[15] = 2;
@@ -174,6 +175,7 @@ void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
     write_le32(xsdt, 4, sizeof(xsdt));
     write_le64(xsdt, 36, (uint64_t)(uintptr_t) spcr);
     write_le64(xsdt, 44, (uint64_t)(uintptr_t) madt);
+    write_le64(xsdt, 52, (uint64_t)(uintptr_t) mcfg);
     set_checksum(xsdt, 9, sizeof(xsdt));
 
     write_sig(spcr, "SPCR");
@@ -199,6 +201,13 @@ void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
     madt[gicr + 1] = 16;
     write_le64(madt, gicr + 4, 0xff848000ULL);
     set_checksum(madt, 9, sizeof(madt));
+
+    write_sig(mcfg, "MCFG");
+    write_le32(mcfg, 4, sizeof(mcfg));
+    write_le64(mcfg, 44, 0x4010000000ULL);
+    mcfg[54] = 0;
+    mcfg[55] = 255;
+    set_checksum(mcfg, 9, sizeof(mcfg));
 
     TestEfiConfigurationTable config = {
         .vendor_guid = {
@@ -233,4 +242,14 @@ void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
     TEST_ASSERT_EQUAL_UINT64(0xff841000ULL, platform.gic_distributor_physical_base);
     TEST_ASSERT_EQUAL_UINT64(0xff848000ULL, platform.gic_redistributor_physical_base);
     TEST_ASSERT_EQUAL_UINT64(0xff842000ULL, platform.gic_cpu_interface_physical_base);
+    Match(PciInfo, platform.pci)
+        IsSome(info,
+        {
+            TEST_ASSERT_EQUAL_UINT64(0x4010000000ULL, info.ecam_physical_base);
+            TEST_ASSERT_EQUAL_UINT64(0x10000000ULL, info.ecam_size);
+            TEST_ASSERT_EQUAL_UINT64(0, info.bus_start);
+            TEST_ASSERT_EQUAL_UINT64(255, info.bus_end);
+        })
+        IsNone(TEST_FAIL_MESSAGE("UEFI ACPI MCFG should populate PCI info");)
+    End
 }

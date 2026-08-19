@@ -25,7 +25,9 @@
 
 static BString CONSOLE = BSTRING_NEW(":console:");
 static BString TTY = BSTRING_NEW(":tty:");
+static BString KEYBOARD = BSTRING_NEW(":keyboard:");
 static BString HELLO_STREAM = BSTRING_NEW("/dev/hello");
+static BString BUSINFO_STREAM = BSTRING_NEW("/dev/businfo");
 static BString ROOT = BSTRING_NEW("/");
 
 Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
@@ -36,7 +38,9 @@ Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
 
     IO_REGISTER(io_subsystem, CONSOLE, Console__heap_new(), (IOStatePtr) ConsoleState__instance());
     IO_REGISTER(io_subsystem, TTY, Stream__heap_new(), (IOStatePtr) StreamState__instance());
+    IO_REGISTER(io_subsystem, KEYBOARD, Stream__heap_new(), (IOStatePtr) StreamState__heap_new());
     IO_REGISTER(io_subsystem, HELLO_STREAM, Stream__heap_new(), (IOStatePtr) StreamState__heap_new());
+    IO_REGISTER(io_subsystem, BUSINFO_STREAM, Stream__heap_new(), (IOStatePtr) StreamState__heap_new());
     IO_REGISTER(io_subsystem, ROOT, &root_fs->file_io.base_io, (IOStatePtr) root_fs->state);
 
     ResultMatch(ListenerRegisterResult, IOSubsystem__register_listeners(kernel))

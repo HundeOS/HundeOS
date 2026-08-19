@@ -13,6 +13,7 @@
 #include "syslog_handler.h"
 #include "signal_handler.h"
 #include "shutdown_handler.h"
+#include "auth.h"
 #include "../debug.h"
 #include "../print.h"
 
@@ -50,6 +51,7 @@ Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
             REGISTER(self, SYSCALL_SYSLOG, &Syslog__handler);
             REGISTER(self, SYSCALL_PROCESS_SIGNAL, &Signal__handler);
             REGISTER(self, SYSCALL_SHUTDOWN, &Shutdown__handler);
+            REGISTER(self, SYSCALL_AUTH, &Auth__handler);
             self->init_done = true;
             __d_println(SYSCALL, "Init__syscalls() - done ok");
         }

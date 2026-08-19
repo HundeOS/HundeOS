@@ -17,30 +17,47 @@ inline HeapPtr heap_ptr()
 
 KernelAddress Kernel__from_physical_address(KernelPtr self, Address physical)
 {
-    if (!is_nothing(self->system_info))
-    {
-        KernelAddress address = SystemInfo__kernel_address_for_physical(&self->system_info.some.val, physical);
-        if (address.valid)
-        {
-            return address;
-        }
-    }
+    Match(SystemInfo, self->system_info)
+        IsSome(system_info, {
+            KernelAddress address = SystemInfo__kernel_address_for_physical(&system_info, physical);
+            if (address.valid)
+            {
+                return address;
+            }
+        })
+    End
 
     return Heap__from_physical_address(heap_ptr(), physical);
 }
 
 KernelAddress Kernel__from_virtual_address(KernelPtr self, Address virtual_addr)
 {
-    if (!is_nothing(self->system_info))
-    {
-        KernelAddress address = SystemInfo__kernel_address_for_virtual(&self->system_info.some.val, virtual_addr);
-        if (address.valid)
-        {
-            return address;
-        }
-    }
+    Match(SystemInfo, self->system_info)
+        IsSome(system_info, {
+            KernelAddress address = SystemInfo__kernel_address_for_virtual(&system_info, virtual_addr);
+            if (address.valid)
+            {
+                return address;
+            }
+        })
+    End
 
     return Heap__from_virtual_address(heap_ptr(), virtual_addr);
+}
+
+KernelAddress Kernel__try_from_virtual_address(KernelPtr self, Address virtual_addr)
+{
+    Match(SystemInfo, self->system_info)
+        IsSome(system_info, {
+            KernelAddress address = SystemInfo__kernel_address_for_virtual(&system_info, virtual_addr);
+            if (address.valid)
+            {
+                return address;
+            }
+        })
+    End
+
+    return Heap__try_from_virtual_address(heap_ptr(), virtual_addr);
 }
 
 KernelAddress Kernel__alloc(size_t size)

@@ -5,10 +5,15 @@
 #include "../../../../common_includes/syscalls/spawn.h"
 #include "../../../../common_includes/syscalls/process.h"
 #include "../../../../common_includes/syscalls/service.h"
+#include "../../../../common_includes/syscalls/io.h"
 
 typedef struct SpawnCall
 {
     SpawnMode mode;
+    uint8_t has_stdio;
+    SpawnFileDescriptor stdin_fd;
+    SpawnFileDescriptor stdout_fd;
+    SpawnFileDescriptor stderr_fd;
     char path[64];
     char arg0[64];
     char arg1[64];
@@ -22,7 +27,7 @@ struct ServiceMappedMemory
     uint64_t size;
 };
 
-static SpawnCall spawn_calls[8];
+static SpawnCall spawn_calls[10];
 static uint64_t spawn_call_count;
 static const char * failing_path;
 static char printed_output[256];
@@ -32,6 +37,11 @@ static ServiceMappedMemory fake_mapping;
 static ProcessChildEvent fake_child_events[4];
 static uint64_t fake_child_event_count;
 static uint64_t fake_child_event_index;
+static uint64_t fake_open_count;
+static const char * fake_sysinfo;
+static bool fake_sysinfo_opened;
+static bool fake_sysinfo_closed;
+static bool fake_expect_keyboard_input;
 
 #define HUNDESCHAU_ENTRYPOINT hundeschau_main_under_test
 #define printf test_printf
@@ -43,7 +53,7 @@ void setUp(void)
     spawn_call_count = 0;
     failing_path = NULL;
     printed_output_len = 0;
-    for (uint64_t i = 0; i < 8; i++)
+    for (uint64_t i = 0; i < 10; i++)
     {
         spawn_calls[i] = (SpawnCall) { 0 };
     }
@@ -76,6 +86,11 @@ void setUp(void)
 
     fake_child_event_count = 0;
     fake_child_event_index = 0;
+    fake_open_count = 0;
+    fake_sysinfo = "framebuffer.present=0\n";
+    fake_sysinfo_opened = false;
+    fake_sysinfo_closed = false;
+    fake_expect_keyboard_input = false;
 }
 
 void tearDown(void)
@@ -112,8 +127,38 @@ static void copy_string(char * target, uint64_t size, const char * source)
 
 SpawnResult spawn(SpawnMode mode, const char* path, const char* arg0, const char* arg1, const char* arg2)
 {
-    TEST_ASSERT_LESS_THAN_UINT64(8, spawn_call_count);
+    TEST_ASSERT_LESS_THAN_UINT64(10, spawn_call_count);
     spawn_calls[spawn_call_count].mode = mode;
+    copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), path);
+    copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), arg0);
+    copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), arg1);
+    spawn_call_count++;
+
+    if (failing_path != NULL && strings_equal(path, failing_path))
+    {
+        return SPAWN_NO_FILE;
+    }
+
+    return (SpawnResult) spawn_call_count;
+}
+
+SpawnResult spawn_with_stdio(
+    SpawnMode mode,
+    const char* path,
+    SpawnFileDescriptor stdin_fd,
+    SpawnFileDescriptor stdout_fd,
+    SpawnFileDescriptor stderr_fd,
+    const char* arg0,
+    const char* arg1,
+    const char* arg2
+)
+{
+    TEST_ASSERT_LESS_THAN_UINT64(10, spawn_call_count);
+    spawn_calls[spawn_call_count].mode = mode;
+    spawn_calls[spawn_call_count].has_stdio = 1;
+    spawn_calls[spawn_call_count].stdin_fd = stdin_fd;
+    spawn_calls[spawn_call_count].stdout_fd = stdout_fd;
+    spawn_calls[spawn_call_count].stderr_fd = stderr_fd;
     copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), path);
     copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), arg0);
     copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), arg1);
@@ -138,6 +183,54 @@ SpawnResult spawn_as(
 {
     TEST_FAIL();
     return SPAWN_FAILED;
+}
+
+IOHandle open(const char * path, Flags flags)
+{
+    if (strings_equal(path, "/proc/sysinfo"))
+    {
+        TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
+        fake_sysinfo_opened = true;
+        return 1;
+    }
+
+    if (fake_open_count == 0)
+    {
+        TEST_ASSERT_EQUAL_STRING(fake_expect_keyboard_input ? ":keyboard:" : ":tty:", path);
+        TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
+    }
+    else if (fake_open_count == 1)
+    {
+        TEST_ASSERT_EQUAL_STRING(":console:", path);
+        TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE, flags);
+    }
+    else
+    {
+        TEST_ASSERT_EQUAL_STRING(":console:", path);
+        TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE, flags);
+    }
+
+    fake_open_count++;
+    return (IOHandle) (fake_open_count + 6);
+}
+
+ByteCount read(IOHandle handle, char * buf, size_t size)
+{
+    TEST_ASSERT_EQUAL_INT64(1, handle);
+    uint64_t index = 0;
+    while (fake_sysinfo[index] != '\0' && index < size)
+    {
+        buf[index] = fake_sysinfo[index];
+        index++;
+    }
+    return (ByteCount) index;
+}
+
+IOStatus close(IOHandle handle)
+{
+    TEST_ASSERT_EQUAL_INT64(1, handle);
+    fake_sysinfo_closed = true;
+    return IO_OK;
 }
 
 ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
@@ -180,7 +273,7 @@ void test_init_spawns_required_processes_in_background(void)
     HundeschauRequiredProcesses required_processes = { 0 };
     TEST_ASSERT_EQUAL_INT(0, Hundeschau__initialise_required_processes(&required_processes));
 
-    TEST_ASSERT_EQUAL_UINT64(5, spawn_call_count);
+    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
     TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[0].mode);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[0].path);
     TEST_ASSERT_EQUAL_STRING("0", spawn_calls[0].arg0);
@@ -190,11 +283,51 @@ void test_init_spawns_required_processes_in_background(void)
     TEST_ASSERT_EQUAL_STRING("2", spawn_calls[1].arg0);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio2", spawn_calls[1].arg1);
     TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[2].mode);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[2].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[2].path);
     TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[3].mode);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[3].path);
     TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[4].mode);
-    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[5].mode);
+    TEST_ASSERT_EQUAL_UINT8(1, spawn_calls[5].has_stdio);
+    TEST_ASSERT_EQUAL_UINT64(7, spawn_calls[5].stdin_fd);
+    TEST_ASSERT_EQUAL_UINT64(8, spawn_calls[5].stdout_fd);
+    TEST_ASSERT_EQUAL_UINT64(9, spawn_calls[5].stderr_fd);
+    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_UINT64(3, fake_open_count);
+    TEST_ASSERT_TRUE(fake_sysinfo_opened);
+    TEST_ASSERT_TRUE(fake_sysinfo_closed);
+}
+
+void test_init_spawns_framebuffer_keyboard_console(void)
+{
+    fake_expect_keyboard_input = true;
+    fake_sysinfo =
+        "framebuffer.present=1\n"
+        "framebuffer.physical_base=0x3e000000\n"
+        "framebuffer.physical_size=0x20000\n"
+        "framebuffer.width=512\n"
+        "framebuffer.height=64\n"
+        "framebuffer.pixels_per_scanline=512\n"
+        "framebuffer.pixel_format=0\n";
+
+    HundeschauRequiredProcesses required_processes = { 0 };
+    TEST_ASSERT_EQUAL_INT(0, Hundeschau__initialise_required_processes(&required_processes));
+
+    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[0].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[1].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[2].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/video_term", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_keyboard", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_UINT8(1, spawn_calls[5].has_stdio);
+    TEST_ASSERT_EQUAL_UINT64(7, spawn_calls[5].stdin_fd);
+    TEST_ASSERT_EQUAL_UINT64(8, spawn_calls[5].stdout_fd);
+    TEST_ASSERT_EQUAL_UINT64(9, spawn_calls[5].stderr_fd);
+    TEST_ASSERT_EQUAL_UINT64(3, fake_open_count);
+    TEST_ASSERT_TRUE(fake_sysinfo_opened);
+    TEST_ASSERT_TRUE(fake_sysinfo_closed);
 }
 
 void test_init_returns_failure_when_required_driver_fails(void)
@@ -204,12 +337,14 @@ void test_init_returns_failure_when_required_driver_fails(void)
     HundeschauRequiredProcesses required_processes = { 0 };
     TEST_ASSERT_EQUAL_INT(2, Hundeschau__initialise_required_processes(&required_processes));
 
-    TEST_ASSERT_EQUAL_UINT64(5, spawn_call_count);
+    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[0].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[1].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[2].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[3].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[2].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_UINT8(1, spawn_calls[5].has_stdio);
 }
 
 void test_init_respawns_required_process_when_child_event_arrives(void)
@@ -223,8 +358,41 @@ void test_init_respawns_required_process_when_child_event_arrives(void)
 
     TEST_ASSERT_EQUAL_INT(1, hundeschau_main_under_test());
 
+    TEST_ASSERT_EQUAL_UINT64(7, spawn_call_count);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[6].path);
+    TEST_ASSERT_EQUAL_STRING("2", spawn_calls[6].arg0);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio2", spawn_calls[6].arg1);
+}
+
+void test_init_does_not_respawn_hundebus_when_child_event_arrives(void)
+{
+    fake_child_event_count = 1;
+    fake_child_events[0] = (ProcessChildEvent) {
+        .pid = 3,
+        .status = 0,
+        .type = PROCESS_CHILD_EVENT_EXITED,
+    };
+
+    TEST_ASSERT_EQUAL_INT(1, hundeschau_main_under_test());
+
     TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[5].path);
-    TEST_ASSERT_EQUAL_STRING("2", spawn_calls[5].arg0);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio2", spawn_calls[5].arg1);
+}
+
+void test_init_respawns_login_with_same_stdio(void)
+{
+    fake_child_event_count = 1;
+    fake_child_events[0] = (ProcessChildEvent) {
+        .pid = 6,
+        .status = 0,
+        .type = PROCESS_CHILD_EVENT_EXITED,
+    };
+
+    TEST_ASSERT_EQUAL_INT(1, hundeschau_main_under_test());
+
+    TEST_ASSERT_EQUAL_UINT64(7, spawn_call_count);
+    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[6].path);
+    TEST_ASSERT_EQUAL_UINT8(1, spawn_calls[6].has_stdio);
+    TEST_ASSERT_EQUAL_UINT64(7, spawn_calls[6].stdin_fd);
+    TEST_ASSERT_EQUAL_UINT64(8, spawn_calls[6].stdout_fd);
+    TEST_ASSERT_EQUAL_UINT64(9, spawn_calls[6].stderr_fd);
 }

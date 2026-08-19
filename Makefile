@@ -123,6 +123,13 @@ USER_BINARY_DIRS := $(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mi
 USER_DRIVER_DIRS := $(filter user/drivers/%,$(USER_BINARY_DIRS))
 USER_NON_DRIVER_DIRS := $(filter-out $(USER_DRIVER_DIRS),$(USER_BINARY_DIRS))
 USER_BINARIES := $(patsubst %,build/user/%.bin,$(notdir $(USER_BINARY_DIRS)))
+USER_VIDEO_TERM_FONT := vendor/unifont/unifont_all-17.0.05.hex
+USER_VIDEO_TERM_FONT_OBJECT := build/user/drivers/video_term/unifont_all.o
+USER_VIDEO_TERM_EMOJI_PNGS := $(wildcard vendor/noto_emoji/png/128/emoji_u*.png)
+USER_VIDEO_TERM_EMOJI_HEADER := user/drivers/video_term/emoji_atlas.h
+USER_VIDEO_TERM_EMOJI_ATLAS := build/user/drivers/video_term/emoji_atlas.rgba
+USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT := build/user/drivers/video_term/emoji_atlas.o
+video_term_EXTRA_OBJS := $(USER_VIDEO_TERM_FONT_OBJECT) $(USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT)
 EMBEDDED_FS_INPUTS := \
 	$(foreach dir,$(USER_NON_DRIVER_DIRS),build/user/$(notdir $(dir)).bin) \
 	$(foreach dir,$(USER_DRIVER_DIRS),drivers/$(notdir $(dir))=build/user/$(notdir $(dir)).bin)
@@ -199,6 +206,19 @@ build/user/common/%.o: common/%.c
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+$(USER_VIDEO_TERM_FONT_OBJECT): $(USER_VIDEO_TERM_FONT)
+	mkdir -p `dirname $@`
+	$(OBJCOPY) -I binary -O elf64-littleaarch64 -B aarch64 $< $@
+
+build/user/drivers/video_term/main.o: $(USER_VIDEO_TERM_EMOJI_HEADER)
+
+$(USER_VIDEO_TERM_EMOJI_ATLAS): tools/build_video_term_emoji_atlas.py $(USER_VIDEO_TERM_EMOJI_PNGS)
+	python3 tools/build_video_term_emoji_atlas.py
+
+$(USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT): $(USER_VIDEO_TERM_EMOJI_ATLAS)
+	mkdir -p `dirname $@`
+	$(OBJCOPY) -I binary -O elf64-littleaarch64 -B aarch64 $< $@
+
 $(KERNEL_BUILD_DIR)/./common/types/dyn_string.o: common/types/dyn_string.c
 	mkdir -p `dirname $@`
 	$(CC) $(CFLAGS) -DDYN_STRING_USE_KERNEL_ALLOC -c $< -o $@
@@ -249,7 +269,7 @@ $(notdir $(1))_ASM_SRCS := $$(wildcard $(1)/*.s)
 $(notdir $(1))_OBJS := $$(patsubst user/%.c,build/user/%.o,$$($(notdir $(1))_SRCS))
 $(notdir $(1))_ASM_OBJS := $$(patsubst user/%.s,build/user/%.o,$$($(notdir $(1))_ASM_SRCS))
 
-build/user/$(notdir $(1)).bin: $$($(notdir $(1))_OBJS) $$($(notdir $(1))_ASM_OBJS) $$(COMMON_USER_OBJECTS) $$(USER_ARCH_ASM_OBJECTS) $$(USER_ARCH_OBJECTS) $$(USER_SYS_OBJECTS) $$(USER_SYS_ASM_OBJECTS) $$(USER_LIB_OBJECTS) $$(USER_LIB_ASM_OBJECTS)
+build/user/$(notdir $(1)).bin: $$($(notdir $(1))_OBJS) $$($(notdir $(1))_ASM_OBJS) $$($(notdir $(1))_EXTRA_OBJS) $$(COMMON_USER_OBJECTS) $$(USER_ARCH_ASM_OBJECTS) $$(USER_ARCH_OBJECTS) $$(USER_SYS_OBJECTS) $$(USER_SYS_ASM_OBJECTS) $$(USER_LIB_OBJECTS) $$(USER_LIB_ASM_OBJECTS)
 	$$(LD) $$(USER_LDFLAGS) $$^ -o $$@
 endef
 
@@ -317,6 +337,30 @@ qemu-pi-uefi-firmware-trace:
 		-semihosting-config enable=on,target=native \
 		-d int,unimp \
 		-D qemu-pi-uefi.log \
+		-monitor none
+
+qemu-pi-uefi-firmware-framebuffer-trace:
+	rm -rf build/pi_uefi/kernel $(PI_UEFI_KERNEL_ELF) $(PI_UEFI_ESP_IMG)
+	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS)
+	@if [ -z "$(QEMU_EFI_CODE)" ]; then echo "Missing QEMU AArch64 EDK2 code firmware. Set QEMU_EFI_CODE=/path/to/code.fd"; exit 1; fi
+	@if [ -z "$(QEMU_EFI_VARS_TEMPLATE)" ]; then echo "Missing QEMU EDK2 vars template. Set QEMU_EFI_VARS_TEMPLATE=/path/to/vars.fd"; exit 1; fi
+	mkdir -p build
+	: > build/kernel-trace.log
+	: > build/uefi-framebuffer-serial.log
+	qemu-system-aarch64 \
+		-M virt,gic-version=3,virtualization=off,secure=off \
+		-smp cpus=4 -cpu cortex-a57 \
+		-m 4G \
+		-serial file:build/uefi-framebuffer-serial.log \
+		-drive if=pflash,format=raw,readonly=on,file=$(QEMU_EFI_CODE) \
+		-drive if=pflash,format=raw,file=$(PI_UEFI_EFI_VARS) \
+		-drive if=none,file=$(PI_UEFI_ESP_IMG),format=raw,id=esp \
+		-device virtio-blk-device,drive=esp \
+		-device ramfb \
+		-device virtio-keyboard-device \
+		-semihosting-config enable=on,target=native \
+		-d int,unimp \
+		-D qemu-pi-uefi-framebuffer.log \
 		-monitor none
 
 qemu-virt: $(ELF) $(DISK_IMG) $(EXT2_IMG)

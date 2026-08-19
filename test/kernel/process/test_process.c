@@ -9,6 +9,7 @@
 #include "../stubs/panic.h"
 #include "../stubs/mmu.h"
 #include "../stubs/page_table.h"
+#include "../stubs/kalloc.h"
 
 static KernelPtr kernel;
 
@@ -16,6 +17,7 @@ void setUp(void)
 {
     clear_panic_state();
     reset_mmu_state();
+    KAllocStub__reset_virtual_translation();
     kernel = init_test_kernel_without_filesystem();
 }
 
@@ -34,6 +36,7 @@ void test_setup_from_elf(void)
         })
         IsSuccess(process,
         {
+            TEST_ASSERT_EQUAL(Elf__read_header(elf)->entry, process->entry_point.virtual_addr);
             TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
                 0x400000,
                 true,
@@ -122,6 +125,31 @@ void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
                         true,
                         false,
                         PAGE_SIZE));
+                })
+            End
+        })
+    End
+}
+
+void test_process_device_address_resolves_each_kernel_virtual_page_to_physical(void)
+{
+    Elf elf = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
+    ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(process,
+        {
+            ResultMatch(UserAddress, Process__alloc_user_pages(process, PAGE_SIZE * 2))
+                IsError(code, message, TEST_FAIL())
+                IsSuccess(address,
+                {
+                    Address second_kernel_page = address.kernel_addr.virtual_addr + PAGE_SIZE;
+                    Address second_physical_page = 0x12345000;
+                    KAllocStub__set_virtual_translation(second_kernel_page, PAGE_SIZE, second_physical_page);
+
+                    ResultMatch(Address, Process__device_address(process, address.virtual_addr + PAGE_SIZE + 0x80))
+                        IsError(code, message, TEST_FAIL())
+                        IsSuccess(physical, TEST_ASSERT_EQUAL(second_physical_page + 0x80, physical))
+                    End
                 })
             End
         })
@@ -496,6 +524,23 @@ void test_process_file_descriptors_inherit_from_parent(void)
 
     ResultMatch(FileDescriptor, Process__allocate_file_descriptor(child, 0x5678))
         IsSuccess(fd, TEST_ASSERT_EQUAL(4, fd))
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_process_can_copy_file_descriptor_from_parent(void)
+{
+    ProcessPtr parent = dummy_process(1, 0, PROC_STATE_RUNNING);
+    ProcessPtr child = dummy_process(2, 0, PROC_STATE_RUNNING);
+    Process__set_file_descriptor(parent, 7, 0x7000);
+
+    ResultMatch(FileDescriptor, Process__copy_file_descriptor(child, parent, 0, 7))
+        IsSuccess(fd, TEST_ASSERT_EQUAL(0, fd))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(ProcessIOHandle, Process__get_io_handle(child, 0))
+        IsSuccess(handle, TEST_ASSERT_EQUAL(0x7000, handle))
         IsError(code, message, TEST_FAIL())
     End
 }

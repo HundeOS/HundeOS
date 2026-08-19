@@ -43,6 +43,7 @@ static const BString unknown_fault_reason = BSTRING_NEW("unknown fault");
 static BString service_event_queue_empty = BSTRING_NEW("Service event queue is empty");
 static BString child_event_queue_empty = BSTRING_NEW("Child event queue is empty");
 static BString missing_interrupt_controller = BSTRING_NEW("Missing interrupt controller info");
+static BString no_cpus_available = BSTRING_NEW("No CPUs available");
 
 static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
 static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
@@ -870,11 +871,24 @@ Result(SchedulerInitStatus) Scheduler__init(KernelPtr kernel, SchedulerPtr self,
 {
     __d_println(SCHEDULER, "Scheduler__init");
     self->kernel = Some(KernelPtr, kernel);
+    uint64_t cpu_count = MAX_CPUS;
     Match(SystemInfo, kernel->system_info)
-        IsSome(system_info, self->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller))
+        IsSome(system_info,
+        {
+            self->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller);
+            cpu_count = system_info.cpu_count;
+        })
     End
+    if (cpu_count == 0)
+    {
+        return Error(SchedulerInitStatus, no_cpus_available, SCHEDULER_INIT_ERROR);
+    }
+    if (cpu_count > MAX_CPUS)
+    {
+        cpu_count = MAX_CPUS;
+    }
     self->ready = false;
-    for (uint64_t i = 0; i < MAX_CPUS; i++)
+    for (uint64_t i = 0; i < cpu_count; i++)
     {
         __d_printf(SCHEDULER, "Scheduler__init cpu - %i\n", i);
         ResultMatch(CPUSchedulerPtr, CPUScheduler__heap_new(kernel, idle_process, i))

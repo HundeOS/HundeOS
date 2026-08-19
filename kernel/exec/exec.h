@@ -8,6 +8,7 @@
 #include "../types/comparison.h"
 #include "../process.h"
 #include "../kernel_core.h"
+#include "syscalls/spawn.h"
 
 typedef uint64_t ExecResult;
 
@@ -22,6 +23,21 @@ Result(ProcessPtr) Exec__exec_as(
     bool wait,
     Optional(UserID) requested_user_id,
     ProcessArguments arguments
+);
+Result(ProcessPtr) Exec__exec_authorized_as(
+    OriginatingContext originating_context,
+    BString path,
+    bool wait,
+    Optional(UserID) requested_user_id,
+    ProcessArguments arguments
+);
+Result(ProcessPtr) Exec__exec_authorized_as_with_stdio(
+    OriginatingContext originating_context,
+    BString path,
+    bool wait,
+    Optional(UserID) requested_user_id,
+    ProcessArguments arguments,
+    SpawnStdio stdio
 );
 
 void Exec__apply_builtin_identity_policy(ProcessPtr self);

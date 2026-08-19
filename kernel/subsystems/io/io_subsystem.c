@@ -101,6 +101,42 @@ static FindResultOptional(IODevicesArray) IOSubsystem__find_device(IOSubsystemPt
     return IODevicesArray__find(&self->devices, path_match, path);
 }
 
+static bool IOSubsystem__is_dev_path(ConstBStringPtr path)
+{
+    BString dev_prefix = BSTRING_NEW("/dev/");
+    return BString__starts_with(path, &dev_prefix);
+}
+
+static BString IOSubsystem__dev_name_from_path(BString path)
+{
+    BStringArray segments = BString__split(&path, '/');
+    if (BStringArray__len(&segments) == 0)
+    {
+        return path;
+    }
+
+    return Unwrap(BString, BStringArray__at(&segments, BStringArray__len(&segments) - 1), path);
+}
+
+Result(CollectionCode) IOSubsystem__append_dev_filesystem_nodes(
+    IOSubsystemPtr self, FilesystemPtr filesystem, FilesystemNodes * target
+)
+{
+    FAIterate(IODevicesArray, self->devices, index, registration)
+        if (IOSubsystem__is_dev_path(&registration.path))
+        {
+            ResultMatch(CollectionCode, FilesystemNodes__push(
+                target,
+                FilesystemNode__heap_new(filesystem, IOSubsystem__dev_name_from_path(registration.path), 0)
+            ))
+                IsError(code, message, return Error(CollectionCode, message, code))
+            End
+        }
+    End
+
+    return Success(CollectionCode, 0);
+}
+
 Result(IOHandle) IOSubsystem__record_open_handle(
     IOSubsystemPtr self, IOContextPtr context, BString path, IOInternalHandle handle
 )
@@ -670,6 +706,13 @@ Result(IOHandle) IOSubsystem__server_register(
             else
             {
                 IOServerProcessMap__set(&self->read_server_processes, device_handle(handle), process);
+                ServiceEvent event;
+                event.type = SERVICE_EVENT_IO;
+                event.source = SERVICE_IO_READ_REQUEST;
+                event.data = device_handle(handle);
+                ResultMatch(ServiceCode, IOSubsystem__deliver_service_event(self, process, event))
+                    IsError(code, message, return Error(IOHandle, message, code))
+                End
             }
             IOServerRoleMap__set(&self->server_roles, handle, role);
             return Success(IOHandle, handle);

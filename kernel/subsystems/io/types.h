@@ -26,6 +26,7 @@ ResultDef(ByteCount);
 OptionalDef(IOHandle);
 OptionalDef(IOInternalHandle);
 OptionalDef(DeviceHandle);
+OptionalDef(ByteCount);
 
 FixedArrayDefine(IOHandle, MAX_HANDLES_PER_DEVICE, IOHandleArray, SimpleEquals(uint32_t));
 RingBufferDefine(_4_MEGS, IOBuffer);

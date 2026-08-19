@@ -208,5 +208,6 @@ FixedArrayDefine(ExpandedSegment, 64, ExpandedSegmentArray, &Ptr__equals);
 typedef ExpandedSegmentArray * ExpandedSegmentArrayPtr;
 
 ExpandedSegmentArray Elf__map(Elf self);
+Optional(ExpandedSegment) Elf__entry_segment(Elf self, ExpandedSegmentArrayPtr expanded_segments);
 
 #endif

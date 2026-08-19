@@ -73,11 +73,49 @@ static Result(ByteCount) Console__write(IOStatePtr state, IOInternalHandle handl
             char out[2];
             out[0] = cursor[i];
             out[1] = '\0';
+            ResultMatch(Pos, IOBuffer__push(&self->write_buffer, cursor[i]))
+                IsError(code, message, _cs_return Error(ByteCount, message, code))
+            End
             BasicIO__puts(out);
         }
     });
 
     return Success(ByteCount, size);
+}
+
+static Result(IOServerBuffer) Console__server_write_buffer(IOStatePtr state)
+{
+    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    IOServerBuffer buffer = (IOServerBuffer) {
+        .data = NULL,
+        .capacity = 0,
+    };
+
+    CriticalSection(self->lock,
+    {
+        size_t read_pos = self->write_buffer.read_pos % self->write_buffer.buffer_size;
+        size_t item_count = IOBuffer__item_count(&self->write_buffer);
+        size_t contiguous = self->write_buffer.buffer_size - read_pos;
+        buffer.data = (IOServerBufferDataPtr) &self->write_buffer.buffer[read_pos];
+        buffer.capacity = item_count < contiguous ? item_count : contiguous;
+    });
+
+    return Success(IOServerBuffer, buffer);
+}
+
+static Result(IOStatus) Console__data_consumed(IOStatePtr state, size_t byte_count)
+{
+    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    CriticalSection(self->lock,
+    {
+        size_t item_count = IOBuffer__item_count(&self->write_buffer);
+        if (byte_count > item_count)
+        {
+            byte_count = item_count;
+        }
+        self->write_buffer.read_pos += byte_count;
+    });
+    return Success(IOStatus, IO_OK);
 }
 
 static Result(ParkStatus) Console__park(IOStatePtr state, IOContextPtr parked_context)
@@ -120,6 +158,8 @@ IOPtr Console__heap_new()
         .close = Console__close,
         .park = Console__park,
         .unpark = Console__unpark,
+        .server_write_buffer = Console__server_write_buffer,
+        .data_consumed = Console__data_consumed,
     };
 
     return result;

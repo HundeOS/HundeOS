@@ -156,124 +156,122 @@
 
 .macro restore_context
     // --- Restore SIMD/FPU registers ---
-    mov x30, sp
-    add x1, x30, #0x110 // q[n] offset
+    mov x11, sp
+    add x12, x11, #0x110 // q[n] offset
 
-    ldp q0,  q1,  [x1, #16 * 0]
-    ldp q2,  q3,  [x1, #16 * 1]
-    ldp q4,  q5,  [x1, #16 * 2]
-    ldp q6,  q7,  [x1, #16 * 3]
-    ldp q8,  q9,  [x1, #16 * 4]
-    ldp q10, q11, [x1, #16 * 5]
-    ldp q12, q13, [x1, #16 * 6]
-    ldp q14, q15, [x1, #16 * 7]
-    ldp q16, q17, [x1, #16 * 8]
-    ldp q18, q19, [x1, #16 * 9]
-    ldp q20, q21, [x1, #16 * 10]
-    ldp q22, q23, [x1, #16 * 11]
-    ldp q24, q25, [x1, #16 * 12]
-    ldp q26, q27, [x1, #16 * 13]
-    ldp q28, q29, [x1, #16 * 14]
-    ldp q30, q31, [x1, #16 * 15]
+    ldp q0,  q1,  [x12, #16 * 0]
+    ldp q2,  q3,  [x12, #16 * 1]
+    ldp q4,  q5,  [x12, #16 * 2]
+    ldp q6,  q7,  [x12, #16 * 3]
+    ldp q8,  q9,  [x12, #16 * 4]
+    ldp q10, q11, [x12, #16 * 5]
+    ldp q12, q13, [x12, #16 * 6]
+    ldp q14, q15, [x12, #16 * 7]
+    ldp q16, q17, [x12, #16 * 8]
+    ldp q18, q19, [x12, #16 * 9]
+    ldp q20, q21, [x12, #16 * 10]
+    ldp q22, q23, [x12, #16 * 11]
+    ldp q24, q25, [x12, #16 * 12]
+    ldp q26, q27, [x12, #16 * 13]
+    ldp q28, q29, [x12, #16 * 14]
+    ldp q30, q31, [x12, #16 * 15]
 
     //--- Restore FPCR/FPSR ---
-    ldr x2, [x30, #0x310]  //fpcr offset
-    ldr x3, [x30, #0x318]  //fpsr offset
+    ldr x2, [x11, #0x310]  //fpcr offset
+    ldr x3, [x11, #0x318]  //fpsr offset
 
     msr fpcr, x2
     msr fpsr, x3
 
     // --- Restore SP, ELR, SPSR ---
-    ldr x1, [x30, #0xF8]
+    ldr x1, [x11, #0xF8]
     msr sp_el0, x1
 
-    ldr x1, [x30, #0x100]
+    ldr x1, [x11, #0x100]
     msr elr_el1, x1
 
-    ldr x1, [x30, #0x108]
+    ldr x1, [x11, #0x108]
     msr spsr_el1, x1
 
-    mov x1, x30
     // --- Restore general-purpose registers ---
-    ldr x30,      [x1, #16 * 15]
-    ldp x28, x29, [x1, #16 * 14]
-    ldp x26, x27, [x1, #16 * 13]
-    ldp x24, x25, [x1, #16 * 12]
-    ldp x22, x23, [x1, #16 * 11]
-    ldp x20, x21, [x1, #16 * 10]
-    ldp x18, x19, [x1, #16 * 9]
-    ldp x16, x17, [x1, #16 * 8]
-    ldp x14, x15, [x1, #16 * 7]
-    ldp x12, x13, [x1, #16 * 6]
-    ldp x10, x11, [x1, #16 * 5]
-    ldp x8,  x9,  [x1, #16 * 4]
-    ldp x6,  x7,  [x1, #16 * 3]
-    ldp x4,  x5,  [x1, #16 * 2]
-    ldp x2,  x3,  [x1, #16 * 1]
-    ldp x0,  x1,  [x1, #16 * 0]
+    ldp x28, x29, [x11, #16 * 14]
+    ldp x26, x27, [x11, #16 * 13]
+    ldp x24, x25, [x11, #16 * 12]
+    ldp x22, x23, [x11, #16 * 11]
+    ldp x20, x21, [x11, #16 * 10]
+    ldp x18, x19, [x11, #16 * 9]
+    ldp x16, x17, [x11, #16 * 8]
+    ldp x14, x15, [x11, #16 * 7]
+    ldp x12, x13, [x11, #16 * 6]
+    ldr x10,      [x11, #16 * 5]
+    ldp x8,  x9,  [x11, #16 * 4]
+    ldp x6,  x7,  [x11, #16 * 3]
+    ldp x4,  x5,  [x11, #16 * 2]
+    ldp x2,  x3,  [x11, #16 * 1]
+    ldp x0,  x1,  [x11, #16 * 0]
+    ldr x30,      [x11, #16 * 15]
+    ldr x11,      [x11, #16 * 5 + 8]
 
     add sp, sp, #0x320
 .endm
 
 .macro restore_parked_context
     // --- Restore SIMD/FPU registers ---
-    mov x30, x0
-    add x1, x30, #0x110 // q[n] offset
+    mov x11, x0
+    add x12, x11, #0x110 // q[n] offset
 
-    ldp q0,  q1,  [x1, #16 * 0]
-    ldp q2,  q3,  [x1, #16 * 1]
-    ldp q4,  q5,  [x1, #16 * 2]
-    ldp q6,  q7,  [x1, #16 * 3]
-    ldp q8,  q9,  [x1, #16 * 4]
-    ldp q10, q11, [x1, #16 * 5]
-    ldp q12, q13, [x1, #16 * 6]
-    ldp q14, q15, [x1, #16 * 7]
-    ldp q16, q17, [x1, #16 * 8]
-    ldp q18, q19, [x1, #16 * 9]
-    ldp q20, q21, [x1, #16 * 10]
-    ldp q22, q23, [x1, #16 * 11]
-    ldp q24, q25, [x1, #16 * 12]
-    ldp q26, q27, [x1, #16 * 13]
-    ldp q28, q29, [x1, #16 * 14]
-    ldp q30, q31, [x1, #16 * 15]
+    ldp q0,  q1,  [x12, #16 * 0]
+    ldp q2,  q3,  [x12, #16 * 1]
+    ldp q4,  q5,  [x12, #16 * 2]
+    ldp q6,  q7,  [x12, #16 * 3]
+    ldp q8,  q9,  [x12, #16 * 4]
+    ldp q10, q11, [x12, #16 * 5]
+    ldp q12, q13, [x12, #16 * 6]
+    ldp q14, q15, [x12, #16 * 7]
+    ldp q16, q17, [x12, #16 * 8]
+    ldp q18, q19, [x12, #16 * 9]
+    ldp q20, q21, [x12, #16 * 10]
+    ldp q22, q23, [x12, #16 * 11]
+    ldp q24, q25, [x12, #16 * 12]
+    ldp q26, q27, [x12, #16 * 13]
+    ldp q28, q29, [x12, #16 * 14]
+    ldp q30, q31, [x12, #16 * 15]
 
     //--- Restore FPCR/FPSR ---
-    ldr x2, [x30, #0x310]  //fpcr offset
-    ldr x3, [x30, #0x318]  //fpsr offset
+    ldr x2, [x11, #0x310]  //fpcr offset
+    ldr x3, [x11, #0x318]  //fpsr offset
 
     msr fpcr, x2
     msr fpsr, x3
 
     // --- Restore SP, ELR, SPSR ---
-    ldr x1, [x30, #0xF8]
+    ldr x1, [x11, #0xF8]
     msr sp_el0, x1
 
-    ldr x1, [x30, #0x100]
+    ldr x1, [x11, #0x100]
     msr elr_el1, x1
 
-    ldr x1, [x30, #0x108]
-
-    ldr x1, [x30, #0x108]
+    ldr x1, [x11, #0x108]
     msr spsr_el1, x1
 
-    mov x1, x30
     // --- Restore general-purpose registers ---
-    ldr x30,      [x1, #16 * 15]
-    ldp x28, x29, [x1, #16 * 14]
-    ldp x26, x27, [x1, #16 * 13]
-    ldp x24, x25, [x1, #16 * 12]
-    ldp x22, x23, [x1, #16 * 11]
-    ldp x20, x21, [x1, #16 * 10]
-    ldp x18, x19, [x1, #16 * 9]
-    ldp x16, x17, [x1, #16 * 8]
-    ldp x14, x15, [x1, #16 * 7]
-    ldp x12, x13, [x1, #16 * 6]
-    ldp x10, x11, [x1, #16 * 5]
-    ldp x8,  x9,  [x1, #16 * 4]
-    ldp x6,  x7,  [x1, #16 * 3]
-    ldp x4,  x5,  [x1, #16 * 2]
-    ldp x2,  x3,  [x1, #16 * 1]
-    ldp x0,  x1,  [x1, #16 * 0]
+    ldp x28, x29, [x11, #16 * 14]
+    ldp x26, x27, [x11, #16 * 13]
+    ldp x24, x25, [x11, #16 * 12]
+    ldp x22, x23, [x11, #16 * 11]
+    ldp x20, x21, [x11, #16 * 10]
+    ldp x18, x19, [x11, #16 * 9]
+    ldp x16, x17, [x11, #16 * 8]
+    ldp x14, x15, [x11, #16 * 7]
+    ldp x12, x13, [x11, #16 * 6]
+    ldr x10,      [x11, #16 * 5]
+    ldp x8,  x9,  [x11, #16 * 4]
+    ldp x6,  x7,  [x11, #16 * 3]
+    ldp x4,  x5,  [x11, #16 * 2]
+    ldp x2,  x3,  [x11, #16 * 1]
+    ldp x0,  x1,  [x11, #16 * 0]
+    ldr x30,      [x11, #16 * 15]
+    ldr x11,      [x11, #16 * 5 + 8]
 .endm
 
 .macro unwind_kernel_stack
@@ -286,67 +284,68 @@
     mrs x9, tpidr_el1
     ldr x10, =__k_stack_start
     ldr x11, =10485760
+    add x9, x9, #1
     mul x9, x9, x11
     add sp, x10, x9
 .endm
 
 .macro restore_context_preserve_x0
     // --- Restore SIMD/FPU registers ---
-    mov x30, sp
-    add x1, x30, #0x110 // q[n] offset
+    mov x11, sp
+    add x12, x11, #0x110 // q[n] offset
 
-    ldp q0,  q1,  [x1, #16 * 0]
-    ldp q2,  q3,  [x1, #16 * 1]
-    ldp q4,  q5,  [x1, #16 * 2]
-    ldp q6,  q7,  [x1, #16 * 3]
-    ldp q8,  q9,  [x1, #16 * 4]
-    ldp q10, q11, [x1, #16 * 5]
-    ldp q12, q13, [x1, #16 * 6]
-    ldp q14, q15, [x1, #16 * 7]
-    ldp q16, q17, [x1, #16 * 8]
-    ldp q18, q19, [x1, #16 * 9]
-    ldp q20, q21, [x1, #16 * 10]
-    ldp q22, q23, [x1, #16 * 11]
-    ldp q24, q25, [x1, #16 * 12]
-    ldp q26, q27, [x1, #16 * 13]
-    ldp q28, q29, [x1, #16 * 14]
-    ldp q30, q31, [x1, #16 * 15]
+    ldp q0,  q1,  [x12, #16 * 0]
+    ldp q2,  q3,  [x12, #16 * 1]
+    ldp q4,  q5,  [x12, #16 * 2]
+    ldp q6,  q7,  [x12, #16 * 3]
+    ldp q8,  q9,  [x12, #16 * 4]
+    ldp q10, q11, [x12, #16 * 5]
+    ldp q12, q13, [x12, #16 * 6]
+    ldp q14, q15, [x12, #16 * 7]
+    ldp q16, q17, [x12, #16 * 8]
+    ldp q18, q19, [x12, #16 * 9]
+    ldp q20, q21, [x12, #16 * 10]
+    ldp q22, q23, [x12, #16 * 11]
+    ldp q24, q25, [x12, #16 * 12]
+    ldp q26, q27, [x12, #16 * 13]
+    ldp q28, q29, [x12, #16 * 14]
+    ldp q30, q31, [x12, #16 * 15]
 
     //--- Restore FPCR/FPSR ---
-    ldr x2, [x30, #0x310]  //fpcr offset
-    ldr x3, [x30, #0x318]  //fpsr offset
+    ldr x2, [x11, #0x310]  //fpcr offset
+    ldr x3, [x11, #0x318]  //fpsr offset
 
     msr fpcr, x2
     msr fpsr, x3
 
     // --- Restore SP, ELR, SPSR ---
-    ldr x1, [x30, #0xF8]
+    ldr x1, [x11, #0xF8]
     msr sp_el0, x1
 
-    ldr x1, [x30, #0x100]
+    ldr x1, [x11, #0x100]
     msr elr_el1, x1
 
-    ldr x1, [x30, #0x108]
+    ldr x1, [x11, #0x108]
     msr spsr_el1, x1
 
-    mov x1, x30
     // --- Restore general-purpose registers ---
-    ldr x30,      [x1, #16 * 15]
-    ldp x28, x29, [x1, #16 * 14]
-    ldp x26, x27, [x1, #16 * 13]
-    ldp x24, x25, [x1, #16 * 12]
-    ldp x22, x23, [x1, #16 * 11]
-    ldp x20, x21, [x1, #16 * 10]
-    ldp x18, x19, [x1, #16 * 9]
-    ldp x16, x17, [x1, #16 * 8]
-    ldp x14, x15, [x1, #16 * 7]
-    ldp x12, x13, [x1, #16 * 6]
-    ldp x10, x11, [x1, #16 * 5]
-    ldp x8,  x9,  [x1, #16 * 4]
-    ldp x6,  x7,  [x1, #16 * 3]
-    ldp x4,  x5,  [x1, #16 * 2]
-    ldp x2,  x3,  [x1, #16 * 1]
-    ldr x1,  [x1, #8]       // restore only x1
+    ldp x28, x29, [x11, #16 * 14]
+    ldp x26, x27, [x11, #16 * 13]
+    ldp x24, x25, [x11, #16 * 12]
+    ldp x22, x23, [x11, #16 * 11]
+    ldp x20, x21, [x11, #16 * 10]
+    ldp x18, x19, [x11, #16 * 9]
+    ldp x16, x17, [x11, #16 * 8]
+    ldp x14, x15, [x11, #16 * 7]
+    ldp x12, x13, [x11, #16 * 6]
+    ldr x10,      [x11, #16 * 5]
+    ldp x8,  x9,  [x11, #16 * 4]
+    ldp x6,  x7,  [x11, #16 * 3]
+    ldp x4,  x5,  [x11, #16 * 2]
+    ldp x2,  x3,  [x11, #16 * 1]
+    ldr x1,       [x11, #8]
+    ldr x30,      [x11, #16 * 15]
+    ldr x11,      [x11, #16 * 5 + 8]
     // NOTE: x0 intentionally not restored (used for syscall return)
 
     add sp, sp, #0x320
