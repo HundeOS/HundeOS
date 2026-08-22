@@ -5,6 +5,11 @@
 RingBufferDefine(10, SmallBuffer)
 RingBufferBodyDefine(SmallBuffer)
 
+RingBufferDefine(4, StackOnlyBuffer)
+RingBufferStackBodyDefine(StackOnlyBuffer)
+
+#define NUM_ITEMS 10
+
 void setUp(void)
 {
 
@@ -33,6 +38,91 @@ void test_ring_buffer_push_and_pop(void)
             IsSuccess(value, TEST_ASSERT_EQUAL_INT(c, value));
         End
     }
+}
+
+void test_ring_buffer_stack_body_define_provides_new_push_and_pop(void)
+{
+    StackOnlyBuffer buffer = StackOnlyBuffer__new();
+
+    ResultMatch(Pos, StackOnlyBuffer__push(&buffer, 'a'))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(Char, StackOnlyBuffer__pop(&buffer))
+        IsSuccess(value, TEST_ASSERT_EQUAL_UINT8('a', value))
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_ring_buffer_iterate_visits_items_without_consuming(void)
+{
+    SmallBuffer buffer = SmallBuffer__new();
+    Char visited[4] = { 0 };
+    size_t count = 0;
+
+    for (Char c = 0; c < 4; c++)
+    {
+        ResultMatch(Pos, SmallBuffer__push(&buffer, c))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    RingBufferIterate(SmallBuffer, buffer, index, value)
+        visited[count] = value;
+        count++;
+    }
+
+    TEST_ASSERT_EQUAL_UINT64(4, count);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(((Char[]) { 0, 1, 2, 3 }), visited, 4);
+    TEST_ASSERT_EQUAL_UINT64(4, SmallBuffer__item_count(&buffer));
+}
+
+void test_ring_buffer_iterate_visits_wrapped_items_in_fifo_order(void)
+{
+    SmallBuffer buffer = SmallBuffer__new();
+    Char visited[10] = { 0 };
+    size_t count = 0;
+
+    for (Char c = 0; c < NUM_ITEMS; c++)
+    {
+        ResultMatch(Pos, SmallBuffer__push(&buffer, c))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    for (Char c = 0; c < NUM_ITEMS / 2; c++)
+    {
+        ResultMatch(Char, SmallBuffer__pop(&buffer))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    for (Char c = 0; c < NUM_ITEMS / 2; c++)
+    {
+        ResultMatch(Pos, SmallBuffer__push(&buffer, c))
+            IsError(code, message, TEST_FAIL())
+        End
+    }
+
+    RingBufferPtrIterate(SmallBuffer, &buffer, index, value)
+        visited[count] = value;
+        count++;
+    }
+
+    TEST_ASSERT_EQUAL_UINT64(NUM_ITEMS, count);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(((Char[]) { 5, 6, 7, 8, 9, 0, 1, 2, 3, 4 }), visited, NUM_ITEMS);
+}
+
+void test_ring_buffer_iterate_empty_buffer_does_not_enter_loop(void)
+{
+    SmallBuffer buffer = SmallBuffer__new();
+    size_t count = 0;
+
+    RingBufferIterate(SmallBuffer, buffer, index, value)
+        count++;
+    }
+
+    TEST_ASSERT_EQUAL_UINT64(0, count);
 }
 
 
@@ -68,8 +158,6 @@ void test_ring_buffer_push_all_when_beyond_bounds(void)
         IsSuccess(pos, TEST_FAIL())
     End
 }
-
-#define NUM_ITEMS 10
 
 void test_ring_buffer_drain_without_wrap_around()
 {

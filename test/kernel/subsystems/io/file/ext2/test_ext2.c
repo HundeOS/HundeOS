@@ -425,6 +425,7 @@ void test_ext2_mounts_and_lists_root_directory(void)
         {
             TEST_ASSERT_EQUAL(1, entries.len);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries.data[0].name.data);
+            TEST_ASSERT_EQUAL_UINT16(EXT2_INODE_MODE_FILE | 0644, entries.data[0].mode);
         })
         IsError(code, message, TEST_FAIL())
     End
@@ -565,6 +566,10 @@ void test_ext2_list_dir_uses_async_mount_then_root_read_when_unmounted(void)
         {
             TEST_ASSERT_EQUAL(1, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries[0].name);
+            TEST_ASSERT_EQUAL_UINT64(IO_DIRENT_ATTR_NONE, entries[0].attributes);
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_ROOT, entries[0].user_id);
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_ROOT, entries[0].group_id);
+            TEST_ASSERT_EQUAL_UINT16(IO_MODE_TYPE_FILE | 0644, entries[0].mode);
         })
         IsError(code, message, TEST_FAIL())
     End
@@ -831,6 +836,10 @@ void test_ext2_mkdir_creates_empty_directory(void)
             TEST_ASSERT_EQUAL(2, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", root_entries[0].name);
             TEST_ASSERT_EQUAL_STRING("docs", root_entries[1].name);
+            TEST_ASSERT_EQUAL_UINT64(IO_DIRENT_ATTR_NONE, root_entries[1].attributes);
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_ROOT, root_entries[1].user_id);
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_ROOT, root_entries[1].group_id);
+            TEST_ASSERT_EQUAL_UINT16(IO_MODE_TYPE_DIR | 0755, root_entries[1].mode);
         })
         IsError(code, message, TEST_FAIL())
     End

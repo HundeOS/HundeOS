@@ -116,6 +116,15 @@ SECTIONS
     . += 2M;
     __gicd_end = .;
 
+    . = ALIGN(BLOCK_2MB);
+    .bss.framebuffer (NOLOAD):
+    {
+      KEEP(*(.bss.framebuffer))
+    } : kio
+    __framebuffer_start = .;
+    . += 32M;
+    __framebuffer_end = .;
+
   __lma_cursor = ALIGN(LOADADDR(.boot.rodata) + SIZEOF(.boot.rodata), BLOCK_2MB);
   __lma_start = __lma_cursor;
   __high_phys_base = __lma_cursor;

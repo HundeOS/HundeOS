@@ -56,10 +56,21 @@ DISK_LONG_FILE = tools/disk_long_filename.txt
 DISK_LONG_NAME = This is a long filename.txt
 DISK_LARGE_FILE = tools/disk_large_file.txt
 DISK_LARGE_NAME = BIGFILE.TXT
+SD_CARD_FAT32_IMG = build/sdcard-fat32.img
+SD_CARD_FAT32_SIZE_MB = 64
+SD_CARD_FAT32_LABEL = TESTSD
+SD_CARD_FAT32_README_FILE = tools/sdcard_fat32_readme.txt
+SD_CARD_FAT32_CONFIG_FILE = tools/sdcard_fat32_config.txt
+SD_CARD_FAT32_NOTE_FILE = tools/sdcard_fat32_note.txt
 EXT2_IMG = build/ext2.img
 EXT2_SIZE_MB = 64
 EXT2_LABEL = EXT2FS
 EXT2_ROOT_DIR = tools/ext2_root
+BOOT_CONFIG ?= qemu_virt
+BOOT_CONFIG_EXT2_IMG = build/boot_config/$(BOOT_CONFIG).img
+BOOT_CONFIG_EXT2_SIZE_MB = 8
+BOOT_CONFIG_EXT2_LABEL = BOOTCFG
+BOOT_CONFIG_ROOT_DIR = config/$(BOOT_CONFIG)
 EXT2_IMG_BLOCK_SIZE = 1024
 EXT2_INODE_SIZE = 128
 EXT2_MKFS ?= genext2fs
@@ -118,10 +129,11 @@ USER_LIB_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_LIB_SOURCES))
 USER_LIB_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_LIB_ASM_SOURCES))
 COMMON_USER_OBJECTS := $(patsubst ./common/%.c,build/user/common/%.o,$(COMMON_SOURCES))
 
-USER_BINARY_ROOTS := user/programs user/commands user/drivers
+USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
 USER_BINARY_DIRS := $(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null))
 USER_DRIVER_DIRS := $(filter user/drivers/%,$(USER_BINARY_DIRS))
-USER_NON_DRIVER_DIRS := $(filter-out $(USER_DRIVER_DIRS),$(USER_BINARY_DIRS))
+USER_SERVICE_DIRS := $(filter user/services/%,$(USER_BINARY_DIRS))
+USER_NON_DRIVER_DIRS := $(filter-out $(USER_DRIVER_DIRS) $(USER_SERVICE_DIRS),$(USER_BINARY_DIRS))
 USER_BINARIES := $(patsubst %,build/user/%.bin,$(notdir $(USER_BINARY_DIRS)))
 USER_VIDEO_TERM_FONT := vendor/unifont/unifont_all-17.0.05.hex
 USER_VIDEO_TERM_FONT_OBJECT := build/user/drivers/video_term/unifont_all.o
@@ -132,7 +144,8 @@ USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT := build/user/drivers/video_term/emoji_atlas.
 video_term_EXTRA_OBJS := $(USER_VIDEO_TERM_FONT_OBJECT) $(USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT)
 EMBEDDED_FS_INPUTS := \
 	$(foreach dir,$(USER_NON_DRIVER_DIRS),build/user/$(notdir $(dir)).bin) \
-	$(foreach dir,$(USER_DRIVER_DIRS),drivers/$(notdir $(dir))=build/user/$(notdir $(dir)).bin)
+	$(foreach dir,$(USER_DRIVER_DIRS),drivers/$(notdir $(dir))=build/user/$(notdir $(dir)).bin) \
+	$(foreach dir,$(USER_SERVICE_DIRS),services/$(notdir $(dir))=build/user/$(notdir $(dir)).bin)
 EMBEDDED_FS := build/kernel/embedded.fs
 
 .PRECIOUS: build/user/arch/%.o
@@ -154,6 +167,14 @@ $(DISK_IMG): tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $
 	python3 tools/populate_fat32_image.py $@ "$(DISK_LONG_NAME)" $(DISK_LONG_FILE)
 	python3 tools/populate_fat32_image.py $@ $(DISK_LARGE_NAME) $(DISK_LARGE_FILE)
 
+$(SD_CARD_FAT32_IMG): tools/populate_fat32_image.py $(SD_CARD_FAT32_README_FILE) $(SD_CARD_FAT32_CONFIG_FILE) $(SD_CARD_FAT32_NOTE_FILE)
+	mkdir -p `dirname $@`
+	dd if=/dev/zero of=$@ bs=1048576 count=$(SD_CARD_FAT32_SIZE_MB)
+	$(MKFS_FAT) -F 32 -S 512 -s 1 -R 32 -n $(SD_CARD_FAT32_LABEL) $@
+	python3 tools/populate_fat32_image.py $@ README.TXT $(SD_CARD_FAT32_README_FILE)
+	python3 tools/populate_fat32_image.py $@ CONFIG.TXT $(SD_CARD_FAT32_CONFIG_FILE)
+	python3 tools/populate_fat32_image.py $@ DOCS/NOTE.TXT $(SD_CARD_FAT32_NOTE_FILE)
+
 $(EXT2_IMG): $(shell find $(EXT2_ROOT_DIR) -type f -print)
 	mkdir -p `dirname $@`
 	rm -f $@.tmp
@@ -171,6 +192,23 @@ $(EXT2_IMG): $(shell find $(EXT2_ROOT_DIR) -type f -print)
 	fi
 	mv $@.tmp $@
 
+build/boot_config/%.img: $(shell find config -type f -print)
+	mkdir -p `dirname $@`
+	rm -f $@.tmp
+	dd if=/dev/zero of=$@.tmp bs=1048576 count=$(BOOT_CONFIG_EXT2_SIZE_MB)
+	@if ! command -v $(EXT2_MKFS) >/dev/null 2>&1; then \
+		echo "Missing ext2 image builder: $(EXT2_MKFS)"; \
+		echo "Set EXT2_MKFS=/path/to/tool or install one of: mke2fs, mkfs.ext2, genext2fs, e2fsdroid"; \
+		rm -f $@.tmp; \
+		exit 1; \
+	fi
+	@if [ "$(EXT2_MKFS)" = "genext2fs" ]; then \
+		$(EXT2_MKFS) -b $$(( $(BOOT_CONFIG_EXT2_SIZE_MB) * 1024 )) -B $(EXT2_IMG_BLOCK_SIZE) -L $(BOOT_CONFIG_EXT2_LABEL) -d config/$* $@.tmp; \
+	else \
+		$(EXT2_MKFS) -q -F -t ext2 -b $(EXT2_IMG_BLOCK_SIZE) -I $(EXT2_INODE_SIZE) -L $(BOOT_CONFIG_EXT2_LABEL) -d config/$* $@.tmp; \
+	fi
+	mv $@.tmp $@
+
 disk: tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $(DISK_LARGE_FILE)
 	mkdir -p `dirname $(DISK_IMG)`
 	dd if=/dev/zero of=$(DISK_IMG) bs=1048576 count=$(DISK_SIZE_MB)
@@ -179,7 +217,9 @@ disk: tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $(DISK_L
 	python3 tools/populate_fat32_image.py $(DISK_IMG) "$(DISK_LONG_NAME)" $(DISK_LONG_FILE)
 	python3 tools/populate_fat32_image.py $(DISK_IMG) $(DISK_LARGE_NAME) $(DISK_LARGE_FILE)
 
-ext2-disk: $(EXT2_IMG)
+sd-fat32-disk: $(SD_CARD_FAT32_IMG)
+
+ext2-disk: $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG)
 
 $(KERNEL_BUILD_DIR)/%.o: %.c
 	mkdir -p `dirname $@`
@@ -277,29 +317,40 @@ $(foreach dir,$(USER_BINARY_DIRS),$(eval $(call make-user-bin,$(dir))))
 
 user_binaries: $(USER_BINARIES)
 
+pi-uefi: BOOT_CONFIG = pi_uefi
 pi-uefi:
 	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES=-DBSP_RPI4 LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld all
 
+pi-uefi-efi: BOOT_CONFIG = pi_uefi
 pi-uefi-efi:
 	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES=-DBSP_RPI4 LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_EFI)
 
+pi-uefi-esp: BOOT_CONFIG = pi_uefi
 pi-uefi-esp:
 	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES=-DBSP_RPI4 LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG)
 
-qemu-pi-uefi:
+qemu-pi-uefi: BOOT_CONFIG = qemu_pi_uefi
+qemu-pi-uefi: $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES=-DBSP_RPI4 LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld all
 	qemu-system-aarch64 \
 		-M $(QEMU_PI_MACHINE) \
 		-m $(QEMU_PI_MEMORY) \
 		-serial $(SERIAL) \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
+		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
 		-device loader,file=build/pi_uefi/kernel.img,addr=$(QEMU_PI_KERNEL_ADDR),force-raw=on \
 		-device loader,addr=$(QEMU_PI_KERNEL_ENTRY),cpu-num=0 \
 		-nographic \
 		-monitor telnet::4444,server,nowait
 
+qemu-pi-uefi-firmware: BOOT_CONFIG = qemu_pi_uefi
 qemu-pi-uefi-firmware:
 	rm -rf build/pi_uefi/kernel $(PI_UEFI_KERNEL_ELF) $(PI_UEFI_ESP_IMG)
-	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS)
+	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 	@if [ -z "$(QEMU_EFI_CODE)" ]; then echo "Missing QEMU AArch64 EDK2 code firmware. Set QEMU_EFI_CODE=/path/to/code.fd"; exit 1; fi
 	@if [ -z "$(QEMU_EFI_VARS_TEMPLATE)" ]; then echo "Missing QEMU EDK2 vars template. Set QEMU_EFI_VARS_TEMPLATE=/path/to/vars.fd"; exit 1; fi
 	mkdir -p build
@@ -311,15 +362,22 @@ qemu-pi-uefi-firmware:
 		-serial $(SERIAL) \
 		-drive if=pflash,format=raw,readonly=on,file=$(QEMU_EFI_CODE) \
 		-drive if=pflash,format=raw,file=$(PI_UEFI_EFI_VARS) \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
+		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
 		-drive if=none,file=$(PI_UEFI_ESP_IMG),format=raw,id=esp \
 		-device virtio-blk-device,drive=esp \
 		-nographic \
 		-semihosting-config enable=on,target=native \
 		-monitor telnet::4444,server,nowait
 
+qemu-pi-uefi-firmware-trace: BOOT_CONFIG = qemu_pi_uefi_trace
 qemu-pi-uefi-firmware-trace:
 	rm -rf build/pi_uefi/kernel $(PI_UEFI_KERNEL_ELF) $(PI_UEFI_ESP_IMG)
-	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS)
+	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG)
 	@if [ -z "$(QEMU_EFI_CODE)" ]; then echo "Missing QEMU AArch64 EDK2 code firmware. Set QEMU_EFI_CODE=/path/to/code.fd"; exit 1; fi
 	@if [ -z "$(QEMU_EFI_VARS_TEMPLATE)" ]; then echo "Missing QEMU EDK2 vars template. Set QEMU_EFI_VARS_TEMPLATE=/path/to/vars.fd"; exit 1; fi
 	mkdir -p build
@@ -331,6 +389,15 @@ qemu-pi-uefi-firmware-trace:
 		-serial $(SERIAL) \
 		-drive if=pflash,format=raw,readonly=on,file=$(QEMU_EFI_CODE) \
 		-drive if=pflash,format=raw,file=$(PI_UEFI_EFI_VARS) \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
+		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
+		-device sdhci-pci,id=sdhci0 \
+		-device sd-card,drive=sd0 \
 		-drive if=none,file=$(PI_UEFI_ESP_IMG),format=raw,id=esp \
 		-device virtio-blk-device,drive=esp \
 		-nographic \
@@ -339,9 +406,10 @@ qemu-pi-uefi-firmware-trace:
 		-D qemu-pi-uefi.log \
 		-monitor none
 
+qemu-pi-uefi-firmware-framebuffer-trace: BOOT_CONFIG = qemu_pi_uefi_video
 qemu-pi-uefi-firmware-framebuffer-trace:
 	rm -rf build/pi_uefi/kernel $(PI_UEFI_KERNEL_ELF) $(PI_UEFI_ESP_IMG)
-	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS)
+	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG)
 	@if [ -z "$(QEMU_EFI_CODE)" ]; then echo "Missing QEMU AArch64 EDK2 code firmware. Set QEMU_EFI_CODE=/path/to/code.fd"; exit 1; fi
 	@if [ -z "$(QEMU_EFI_VARS_TEMPLATE)" ]; then echo "Missing QEMU EDK2 vars template. Set QEMU_EFI_VARS_TEMPLATE=/path/to/vars.fd"; exit 1; fi
 	mkdir -p build
@@ -354,6 +422,15 @@ qemu-pi-uefi-firmware-framebuffer-trace:
 		-serial file:build/uefi-framebuffer-serial.log \
 		-drive if=pflash,format=raw,readonly=on,file=$(QEMU_EFI_CODE) \
 		-drive if=pflash,format=raw,file=$(PI_UEFI_EFI_VARS) \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
+		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
+		-device sdhci-pci,id=sdhci0 \
+		-device sd-card,drive=sd0 \
 		-drive if=none,file=$(PI_UEFI_ESP_IMG),format=raw,id=esp \
 		-device virtio-blk-device,drive=esp \
 		-device ramfb \
@@ -363,39 +440,47 @@ qemu-pi-uefi-firmware-framebuffer-trace:
 		-D qemu-pi-uefi-framebuffer.log \
 		-monitor none
 
-qemu-virt: $(ELF) $(DISK_IMG) $(EXT2_IMG)
+qemu-virt: BOOT_CONFIG = qemu_virt
+qemu-virt: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
 		-smp cpus=4 -cpu max \
 		-m 4G  \
 		-serial $(SERIAL) \
 		-cpu cortex-a57 \
-		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
-		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
 		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait
 
-qemu-virt-1cpu: $(ELF) $(DISK_IMG) $(EXT2_IMG)
+qemu-virt-1cpu: BOOT_CONFIG = qemu_virt
+qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3,virtualization=off,secure=off \
 		-smp cpus=1 -cpu max \
 		-m 4G  \
 		-serial $(SERIAL) \
 		-cpu cortex-a57 \
-		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
-		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
 		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
   		-kernel $(ELF) \
   		-nographic \
 		-monitor telnet::4444,server,nowait
 
+qemu-virt-1cpu-trace: BOOT_CONFIG = qemu_virt
 qemu-virt-1cpu-trace:
 	$(MAKE) $(DISK_IMG)
 	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
+	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p build
 	: > build/kernel-trace.log
@@ -406,19 +491,23 @@ qemu-virt-1cpu-trace:
 		-serial $(SERIAL) \
 		-monitor none \
 		-cpu cortex-a57 \
-		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
-		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
 		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
 		-kernel $(ELF) \
 		-nographic \
 		-semihosting-config enable=on,target=native \
 		-d int,unimp \
 		-D qemu-1cpu.log
 
+qemu-virt-2cpus-trace: BOOT_CONFIG = qemu_virt
 qemu-virt-2cpus-trace:
 	$(MAKE) $(DISK_IMG)
 	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
+	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p build
 	: > build/kernel-trace.log
@@ -429,27 +518,32 @@ qemu-virt-2cpus-trace:
 		-serial $(SERIAL) \
 		-monitor none \
 		-cpu cortex-a57 \
-		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
-		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
 		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
 		-kernel $(ELF) \
 		-nographic \
 		-semihosting-config enable=on,target=native \
 		-d int,unimp \
 		-D qemu-2cpus.log
 
-qemu-virt-2cpus: $(ELF) $(DISK_IMG) $(EXT2_IMG)
+qemu-virt-2cpus: BOOT_CONFIG = qemu_virt
+qemu-virt-2cpus: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
 		-smp cpus=2 -cpu max \
 		-m 4G  \
 		-serial $(SERIAL) \
 		-cpu cortex-a57 \
-		-drive if=none,file=$(DISK_IMG),format=raw,id=hd0 \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
-		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd1 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
 		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait

@@ -4,7 +4,33 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#ifdef DYN_STRING_USE_KERNEL_ALLOC
+#include "../../kernel/kalloc.h"
+#define DYN_STRING_ALLOC(size) ((void *) Kernel__alloc(size).virtual_addr)
+#define DYN_STRING_FREE(ptr) \
+    { \
+        Result(KAllocCode) free_result = Kernel__free(addr(ptr)); \
+        ResultMatch(KAllocCode, free_result) \
+            IsError(code, message, {}) \
+        End \
+    }
+#else
+void * malloc(size_t size);
+void free(void * ptr);
+#define DYN_STRING_ALLOC(size) malloc(size)
+#define DYN_STRING_FREE(ptr) free(ptr)
+#endif
+
+#ifndef LINKED_LIST_ALLOC
+#define LINKED_LIST_ALLOC(size) DYN_STRING_ALLOC(size)
+#endif
+
+#ifndef LINKED_LIST_FREE
+#define LINKED_LIST_FREE(ptr) DYN_STRING_FREE(ptr)
+#endif
+
 #include "bstring.h"
+#include "linked_list.h"
 #include "optional.h"
 #include "result.h"
 
@@ -28,7 +54,13 @@ DynString;
 typedef DynString * DynStringPtr;
 typedef const DynString * ConstDynStringPtr;
 
+OptionalDef(DynString);
 OptionalDef(DynStringPtr);
+
+bool dyn_string_equals(void * a, void * b);
+LinkedListDefine(DynString, DynStringLines, &dyn_string_equals);
+OptionalDef(DynStringLines);
+void DynStringLines__dispose_all(DynStringLines * self);
 
 Result(DynStringCode) DynString__init(DynStringPtr self, StringPos capacity);
 Result(DynStringCode) DynString__reserve(DynStringPtr self, StringPos capacity);
@@ -40,5 +72,8 @@ void DynString__dispose(DynStringPtr self);
 const char * DynString__cstr(ConstDynStringPtr self);
 StringPos DynString__length(ConstDynStringPtr self);
 StringPos DynString__capacity(ConstDynStringPtr self);
+Optional(char) DynString__char_at(ConstDynStringPtr self, StringPos index);
+Optional(BString) DynString__bstring(ConstDynStringPtr self);
+Optional(DynStringLines) DynString__lines(ConstDynStringPtr self);
 
 #endif

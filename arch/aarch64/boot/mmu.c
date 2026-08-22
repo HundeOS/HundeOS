@@ -32,6 +32,7 @@ extern const uint64_t __embedded_binaries_start[];
 extern const uint64_t __embedded_binaries_end[];
 extern const uint64_t __embedded_binaries_phys_start[];
 extern const uint64_t __embedded_binaries_phys_end[];
+extern const uint64_t __framebuffer_start[];
 
 extern char __boot_end[];
 static __BOOT_PAGE_TABLE__(PageTable) low_mem_l0_table;
@@ -214,6 +215,27 @@ __BOOT__(void) map_gicd_gicr(PageTable * table, BootPlatformInfoPtr platform)
         &device_perms);
 }
 
+__BOOT__(void) map_framebuffer(PageTable * table, BootPlatformInfoPtr platform)
+{
+    Match(FramebufferInfo, platform->framebuffer)
+        IsSome(framebuffer,
+        {
+            uint64_t map_size = framebuffer.size;
+            if (map_size > BOOT_FRAMEBUFFER_MAP_SIZE)
+            {
+                map_size = BOOT_FRAMEBUFFER_MAP_SIZE;
+            }
+            map_range_2M(
+                table,
+                framebuffer.physical_base,
+                framebuffer.physical_base + map_size,
+                (uint64_t)&__framebuffer_start[0],
+                &device_perms
+            );
+        })
+    End
+}
+
 __BOOT__(void) map_kernel(SystemInfoPtr system_info)
 {
     uint64_t k_low_phys = KERNEL_LOW_PHYS_BASE;
@@ -375,6 +397,7 @@ __BOOT__(void) setup_boot_mappings(BootPlatformInfoPtr platform, SystemInfoPtr s
 
     boot_debug_print(mapping_gicd);
     map_gicd_gicr(&high_mem_l0_table, platform);
+    map_framebuffer(&high_mem_l0_table, platform);
     boot_debug_print(mapping_kernel_complete);
 #ifdef __BOOT_DEBUG
     debug_boot_mappings(system_info);

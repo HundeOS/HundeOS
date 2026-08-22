@@ -4,5 +4,6 @@
 #include "syscalls/calls.h"
 
 SystemCallResult shutdown_system(void);
+SystemCallResult panic_system(void);
 
 #endif

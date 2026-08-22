@@ -39,7 +39,8 @@ static const ProcessCapabilities PROCESS__HUND_CAPABILITIES =
     | PROCESS_CAP_MAP_MMIO
     | PROCESS_CAP_SUBSCRIBE_IRQ
     | PROCESS_CAP_REGISTER_BLOCK_DEVICE
-    | PROCESS_CAP_HANDLE_BLOCK_REQUESTS;
+    | PROCESS_CAP_HANDLE_BLOCK_REQUESTS
+    | PROCESS_CAP_MOUNT_FILESYSTEM;
 
 static ProcessSignalMask ProcessSignal__mask(ProcessSignal signal)
 {
@@ -50,6 +51,13 @@ static size_t Process__page_aligned_size(size_t size)
 {
     return (size + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
 }
+
+static Result(FileDescriptor) Process__set_file_descriptor_unlocked(
+    ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle
+);
+static Result(FileDescriptor) Process__allocate_file_descriptor_unlocked(ProcessPtr self, ProcessIOHandle handle);
+static Result(ProcessIOHandle) Process__get_io_handle_unlocked(ProcessPtr self, FileDescriptor fd);
+static Result(ProcessIOHandle) Process__remove_file_descriptor_unlocked(ProcessPtr self, FileDescriptor fd);
 
 static Address Process__page_base(Address address)
 {
@@ -200,6 +208,7 @@ Result(ProcessPtr) Process__new(
 
     __d_printf(PROCESS, "Creating process with entry point %p\n", entry);
     ProcessPtr proc = ptr(Kernel__alloc_kernel(sizeof(Process)), Process);
+    proc->lock = MUTEX_INIT;
     proc->kernel = kernel;
     proc->entry_point = entry;
     proc->page_table = page_table;
@@ -266,40 +275,172 @@ Result(ProcessPtr) Process__new(
 
 Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation)
 {
-    return ParkedOperations__push(&self->parked_operations, operation);
-}
+    CriticalSection(self->lock,
+    {
+        ResultMatch(CollectionCode, ParkedOperations__push(&self->parked_operations, operation))
+            IsSuccess(index, _cs_return Success(CollectionCode, index))
+            IsError(code, message, _cs_return Error(CollectionCode, message, code))
+        End
+    })
 
-Optional(ParkedOperationPtr) Process__top_parked_operation(ProcessPtr self)
-{
-    return ParkedOperations__at(&self->parked_operations, -1);
+    return Error(CollectionCode, BSTRING_NEW("Unable to push parked operation"), LINKED_LIST_ALLOCATION_FAILED);
 }
 
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self)
 {
-    return ParkedOperations__remove_at(&self->parked_operations, -1);
-}
-
-Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self)
-{
-    for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+    CriticalSection(self->lock,
     {
-        Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index))
-            IsSome(parked_operation,
-            {
-                if (ParkedOperation__is_ready(parked_operation))
-                {
-                    return ParkedOperations__remove_at(&self->parked_operations, index);
-                }
-            })
+        Match(ParkedOperationPtr, ParkedOperations__remove_at(&self->parked_operations, -1))
+            IsSome(parked_operation, _cs_return Some(ParkedOperationPtr, parked_operation))
         End
-    }
+    })
 
     return None(ParkedOperationPtr);
 }
 
+Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self)
+{
+    CriticalSection(self->lock,
+    {
+        for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+        {
+            Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index))
+                IsSome(parked_operation,
+                {
+                    if (ParkedOperation__is_ready(parked_operation))
+                    {
+                        Match(ParkedOperationPtr, ParkedOperations__remove_at(&self->parked_operations, index))
+                            IsSome(removed, _cs_return Some(ParkedOperationPtr, removed))
+                        End
+                    }
+                })
+            End
+        }
+    })
+
+    return None(ParkedOperationPtr);
+}
+
+Optional(ParkReason) Process__top_park_reason(ProcessPtr self)
+{
+    CriticalSection(self->lock,
+    {
+        Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, -1))
+            IsSome(parked_operation, _cs_return Some(ParkReason, parked_operation->park_reason))
+        End
+    })
+
+    return None(ParkReason);
+}
+
+Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self)
+{
+    CriticalSection(self->lock,
+    {
+        Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, -1))
+            IsSome(parked_operation,
+            {
+                Match(SchedulerPtr, parked_operation->kernel_context->scheduler)
+                    IsSome(scheduler, _cs_return Some(SchedulerPtr, scheduler))
+                End
+            })
+        End
+    })
+
+    return None(SchedulerPtr);
+}
+
+bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key)
+{
+    CriticalSection(self->lock,
+    {
+        for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+        {
+            Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index))
+                IsSome(parked_operation,
+                {
+                    if (parked_operation->park_reason != reason)
+                    {
+                        continue;
+                    }
+
+                    Match(OperationKey, operation_key)
+                        IsSome(key,
+                        {
+                            Match(OperationKey, parked_operation->operation_key)
+                                IsSome(parked_key,
+                                {
+                                    if (parked_key == key)
+                                    {
+                                        _cs_return true;
+                                    }
+                                })
+                            End
+                        })
+                        IsNone(_cs_return true)
+                    End
+                })
+            End
+        }
+    })
+
+    return false;
+}
+
+bool Process__mark_parked_operation_ready(
+    ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key, Optional(ReturnCode) return_code
+)
+{
+    CriticalSection(self->lock,
+    {
+        for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+        {
+            Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index))
+                IsSome(parked_operation,
+                {
+                    if (parked_operation->park_reason != reason)
+                    {
+                        continue;
+                    }
+
+                    Match(OperationKey, operation_key)
+                        IsSome(key,
+                        {
+                            Match(OperationKey, parked_operation->operation_key)
+                                IsSome(parked_key,
+                                {
+                                    if (parked_key == key)
+                                    {
+                                        parked_operation->return_code = return_code;
+                                        ParkedOperation__mark_ready(parked_operation);
+                                        _cs_return true;
+                                    }
+                                })
+                            End
+                        })
+                        IsNone(
+                        {
+                            parked_operation->return_code = return_code;
+                            ParkedOperation__mark_ready(parked_operation);
+                            _cs_return true;
+                        })
+                    End
+                })
+            End
+        }
+    })
+
+    return false;
+}
+
 bool Process__is_parked(ProcessPtr self)
 {
-    return ParkedOperations__len(&self->parked_operations) > 0;
+    CriticalSection(self->lock,
+    {
+        _cs_return ParkedOperations__len(&self->parked_operations) > 0;
+    })
+
+    return false;
 }
 
 bool Process__is_handling_service_irq(ProcessPtr self)
@@ -710,6 +851,17 @@ Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self)
 
 Result(FileDescriptor) Process__set_file_descriptor(ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle)
 {
+    CriticalSection(self->lock,
+        _cs_return Process__set_file_descriptor_unlocked(self, fd, handle);
+    )
+
+    return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
+}
+
+static Result(FileDescriptor) Process__set_file_descriptor_unlocked(
+    ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle
+)
+{
     LLFindResultMatch(ProcessFileDescriptors, ProcessFileDescriptors__find(
         &self->file_descriptors, file_descriptor_matches_fd, &fd
     ))
@@ -745,13 +897,22 @@ Result(FileDescriptor) Process__set_file_descriptor(ProcessPtr self, FileDescrip
 
 Result(FileDescriptor) Process__allocate_file_descriptor(ProcessPtr self, ProcessIOHandle handle)
 {
+    CriticalSection(self->lock,
+        _cs_return Process__allocate_file_descriptor_unlocked(self, handle);
+    )
+
+    return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
+}
+
+static Result(FileDescriptor) Process__allocate_file_descriptor_unlocked(ProcessPtr self, ProcessIOHandle handle)
+{
     FileDescriptor fd = self->next_file_descriptor;
     while (fd < MAX_HANDLES_PER_PROCESS)
     {
         LLFindResultMatch(ProcessFileDescriptors, ProcessFileDescriptors__find(
             &self->file_descriptors, file_descriptor_matches_fd, &fd
         ))
-            IsNone(return Process__set_file_descriptor(self, fd, handle))
+            IsNone(return Process__set_file_descriptor_unlocked(self, fd, handle))
         End
 
         fd++;
@@ -761,6 +922,15 @@ Result(FileDescriptor) Process__allocate_file_descriptor(ProcessPtr self, Proces
 }
 
 Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor fd)
+{
+    CriticalSection(self->lock,
+        _cs_return Process__get_io_handle_unlocked(self, fd);
+    )
+
+    return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
+}
+
+static Result(ProcessIOHandle) Process__get_io_handle_unlocked(ProcessPtr self, FileDescriptor fd)
 {
     LLFindResultMatch(ProcessFileDescriptors, ProcessFileDescriptors__find(
         &self->file_descriptors, file_descriptor_matches_fd, &fd
@@ -786,7 +956,16 @@ Result(FileDescriptor) Process__copy_file_descriptor(
 
 Result(ProcessIOHandle) Process__remove_file_descriptor(ProcessPtr self, FileDescriptor fd)
 {
-    ResultMatch(ProcessIOHandle, Process__get_io_handle(self, fd))
+    CriticalSection(self->lock,
+        _cs_return Process__remove_file_descriptor_unlocked(self, fd);
+    )
+
+    return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
+}
+
+static Result(ProcessIOHandle) Process__remove_file_descriptor_unlocked(ProcessPtr self, FileDescriptor fd)
+{
+    ResultMatch(ProcessIOHandle, Process__get_io_handle_unlocked(self, fd))
         IsSuccess(handle,
         {
             LLFindResultMatch(ProcessFileDescriptors, ProcessFileDescriptors__find(

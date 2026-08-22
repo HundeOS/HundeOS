@@ -36,6 +36,9 @@ typedef struct Ext2AsyncListDirContext
     Ext2Inode current_inode;
     size_t current_dir_block_index;
     Ext2Block block_to_read;
+    Data current_dir_block_buffer[EXT2_BLOCK_SIZE];
+    size_t current_dir_block_offset;
+    Ext2DirectoryEntry pending_dir_entry;
     enum
     {
         EXT2_ASYNC_LIST_READ_SUPERBLOCK = 1,
@@ -43,6 +46,7 @@ typedef struct Ext2AsyncListDirContext
         EXT2_ASYNC_LIST_READ_INODE = 3,
         EXT2_ASYNC_LIST_READ_DIR_BLOCK_LOOKUP = 4,
         EXT2_ASYNC_LIST_READ_DIR_BLOCK_COLLECT = 5,
+        EXT2_ASYNC_LIST_READ_DIRENT_INODE = 6,
     } phase;
 }
 Ext2AsyncListDirContext;
@@ -437,7 +441,14 @@ static void Ext2__write_u32(DataPtr data, size_t offset, uint32_t value)
 static DirectoryEntry Ext2FileIO__directory_entry_from_ext2_entry(Ext2DirectoryEntryPtr entry)
 {
     DirectoryEntry dirent = (DirectoryEntry) { 0 };
-    dirent.attributes = entry->file_type == EXT2_DIRENT_TYPE_DIR ? EXT2_INODE_MODE_DIR : EXT2_INODE_MODE_FILE;
+    dirent.attributes = IO_DIRENT_ATTR_NONE;
+    dirent.user_id = PROCESS_USER_ROOT;
+    dirent.group_id = PROCESS_GROUP_ROOT;
+    dirent.mode = entry->mode;
+    if ((dirent.mode & IO_MODE_TYPE_MASK) == 0)
+    {
+        dirent.mode |= entry->file_type == EXT2_DIRENT_TYPE_DIR ? IO_MODE_TYPE_DIR : IO_MODE_TYPE_FILE;
+    }
 
     size_t max_name = IO_DIRENT_NAME_MAX - 1;
     size_t copy_len = entry->name.len < (StringPos) max_name ? (size_t) entry->name.len : max_name;
@@ -455,6 +466,7 @@ bool Ext2DirectoryEntry__equals(Ext2DirectoryEntryPtr self, Ext2DirectoryEntryPt
     return BString__equals(&self->name, &other->name)
         && self->file_type == other->file_type
         && self->inode == other->inode
+        && self->mode == other->mode
         && self->size == other->size;
 }
 
@@ -1341,6 +1353,7 @@ static Result(Ext2DirectoryEntries) Ext2Volume__list_directory_inode(
                         .name = name,
                         .file_type = file_type,
                         .inode = entry_inode,
+                        .mode = entry_node.mode,
                         .size = entry_node.size,
                     })))
                         IsError(code, message, return Error(Ext2DirectoryEntries, invalid_volume, EXT2_INVALID_VOLUME))
@@ -2257,6 +2270,9 @@ static Result(IOInternalHandle) Ext2FileIO__start_async_open(
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = EMPTY_KERNEL_CONTEXT;
+            Match(KernelContextPtr, BlockDevice__current_context())
+                IsSome(kernel_context, block_context->kernel_context = *kernel_context)
+            End
             block_context->owner_context = (Anything) open_context;
 
             if (!fs_state->volume.mounted)
@@ -5024,13 +5040,21 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
 
     if (context->phase == EXT2_ASYNC_LIST_READ_DIR_BLOCK_COLLECT)
     {
-        size_t offset = 0;
+        if (context->current_dir_block_offset == 0)
+        {
+            for (size_t i = 0; i < EXT2_BLOCK_SIZE; i++)
+            {
+                context->current_dir_block_buffer[i] = block_context->buffer[i];
+            }
+        }
+
+        size_t offset = context->current_dir_block_offset;
         while (offset + 8 <= EXT2_BLOCK_SIZE && context->count < (DirectoryEntryCount) context->max_entries)
         {
-            Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
-            uint16_t rec_len = Ext2__read_u16(block_context->buffer, offset + 4);
-            uint8_t name_len = block_context->buffer[offset + 6];
-            Ext2DirectoryEntryType file_type = block_context->buffer[offset + 7];
+            Ext2InodeNumber inode = Ext2__read_u32(context->current_dir_block_buffer, offset);
+            uint16_t rec_len = Ext2__read_u16(context->current_dir_block_buffer, offset + 4);
+            uint8_t name_len = context->current_dir_block_buffer[offset + 6];
+            Ext2DirectoryEntryType file_type = context->current_dir_block_buffer[offset + 7];
 
             if (rec_len == 0)
             {
@@ -5042,21 +5066,24 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
                 BString name = EMPTY_BSTRING;
                 for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
                 {
-                    name.data[i] = (char) block_context->buffer[offset + 8 + i];
+                    name.data[i] = (char) context->current_dir_block_buffer[offset + 8 + i];
                 }
                 name.len = name_len;
                 name.data[name.len] = '\0';
 
                 if (!BString__equals(&name, &BSTRING_NEW(".")) && !BString__equals(&name, &BSTRING_NEW("..")))
                 {
-                    Ext2DirectoryEntry entry = {
+                    context->pending_dir_entry = (Ext2DirectoryEntry) {
                         .name = name,
                         .file_type = file_type,
                         .inode = inode,
+                        .mode = 0,
                         .size = 0,
                     };
-                    context->entries[context->count] = Ext2FileIO__directory_entry_from_ext2_entry(&entry);
-                    context->count++;
+                    context->current_dir_block_offset = offset + rec_len;
+                    context->phase = EXT2_ASYNC_LIST_READ_DIRENT_INODE;
+                    context->block_to_read = Ext2Volume__inode_block(&context->fs_state->volume, inode);
+                    return Ext2FileIO__read_root_dir_async(context, block_context->kernel_context);
                 }
             }
 
@@ -5064,6 +5091,7 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
         }
 
         context->current_dir_block_index++;
+        context->current_dir_block_offset = 0;
         while (
             context->current_dir_block_index < EXT2_NDIR_BLOCKS
             && context->current_inode.block[context->current_dir_block_index] == 0
@@ -5079,6 +5107,25 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
 
         context->block_to_read = context->current_inode.block[context->current_dir_block_index];
         return Ext2FileIO__read_root_dir_async(context, block_context->kernel_context);
+    }
+
+    if (context->phase == EXT2_ASYNC_LIST_READ_DIRENT_INODE)
+    {
+        Ext2Inode inode = { 0 };
+        Ext2Inode__read_from_block(
+            &context->fs_state->volume,
+            context->pending_dir_entry.inode,
+            block_context->buffer,
+            &inode
+        );
+
+        context->pending_dir_entry.mode = inode.mode;
+        context->pending_dir_entry.size = inode.size;
+        context->entries[context->count] =
+            Ext2FileIO__directory_entry_from_ext2_entry(&context->pending_dir_entry);
+        context->count++;
+        context->phase = EXT2_ASYNC_LIST_READ_DIR_BLOCK_COLLECT;
+        return Ext2FileIO__complete_async_list_dir(block_context);
     }
 
     return Error(Anything, invalid_path, IO_INVALID_PATH);
@@ -5120,7 +5167,6 @@ static Result(DirectoryEntryCount) Ext2FileIO__list_dir(
             .segments = BString__split(&path, '/'),
             .segment_index = 0,
             .current_inode_number = EXT2_ROOT_INODE,
-            .current_inode = { 0 },
             .current_dir_block_index = 0,
             .block_to_read = fs_state->volume.mounted
                 ? Ext2Volume__inode_block(&fs_state->volume, EXT2_ROOT_INODE)

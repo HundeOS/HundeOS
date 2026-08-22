@@ -1,0 +1,3 @@
+# device <path> <filesystem> <mountpoint>
+device /dev/virtio1 ext2 /
+device /dev/mmc0 fat32 /mnt/sd

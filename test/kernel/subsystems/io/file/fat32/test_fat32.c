@@ -432,6 +432,31 @@ void test_fat32_list_dir_uses_async_mount_then_root_read_when_unmounted(void)
     TEST_ASSERT_EQUAL(volume.root_cluster, state->volume.root_cluster);
 }
 
+void test_fat32_async_list_dir_resolves_nested_directory(void)
+{
+    DirectoryEntry entries[4] = { 0 };
+
+    format_volume();
+    mount_volume();
+
+    ResultMatch(Fat32Code, Fat32Volume__create_root_directory(&volume, bstring("docs")))
+        IsSuccess(code, TEST_ASSERT_EQUAL(FAT32_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    FilesystemPtr fs = Filesystem__heap_new(bstring("fat32"), Fat32FilesystemIO__new());
+    Fat32FilesystemIOStatePtr state = Fat32FilesystemIOState__heap_new(fs, &block_device, 0);
+    state->mounted = false;
+    state->volume = Fat32Volume__new(Some(BlockDevicePtr, &block_device), 0);
+
+    ResultMatch(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("docs"), entries, 4))
+        IsSuccess(count, TEST_ASSERT_EQUAL(0, count))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_TRUE(state->mounted);
+}
+
 void test_fat32_userspace_async_write_does_not_hold_handle_lock(void)
 {
     Data content[] = { 'h', 'i' };

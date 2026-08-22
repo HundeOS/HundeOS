@@ -8,8 +8,18 @@
 MapBodyDefine(IRQServiceMap);
 FixedArrayDefine(IRQNumber, 256, ServiceIRQNumbers, SimpleEquals(uint64_t));
 FixedArrayBodyDefine(ServiceIRQNumbers);
+FixedArrayBodyDefine(ServiceReadyNames);
+FixedArrayBodyDefine(ServiceReadyWaiters);
+FixedArrayBodyDefine(ServiceReadyProcesses);
 
 static BString service_event_queue_empty = BSTRING_NEW("Service event queue is empty");
+static BString service_ready_waiters_full = BSTRING_NEW("Service ready waiter queue is full");
+static BString service_ready_names_full = BSTRING_NEW("Service ready name table is full");
+
+bool ServiceReadyWaiter__equals(ServiceReadyWaiterPtr self, ServiceReadyWaiterPtr other)
+{
+    return self->process == other->process && BString__equals(&self->name, &other->name);
+}
 
 ServiceEventDispatcher ServiceEventDispatcher__new()
 {
@@ -212,6 +222,120 @@ Result(ServiceCode) ServiceEventDispatcher__unsubscribe_process(
         End
 
         process->service.active_irq_event = None(ServiceEvent);
+    })
+
+    return ServiceEventDispatcher__remove_ready_waiter(self, process);
+}
+
+static bool ServiceReadyNames__matches(BStringPtr ready_name, void * context)
+{
+    ConstBStringPtr requested = context;
+    return BString__equals(ready_name, requested);
+}
+
+static bool ServiceReadyWaiter__matches_process(ServiceReadyWaiterPtr waiter, void * context)
+{
+    ProcessPtr process = context;
+    return waiter->process == process;
+}
+
+bool ServiceEventDispatcher__is_ready(ServiceEventDispatcherPtr self, ConstBStringPtr name)
+{
+    bool ready = false;
+
+    CriticalSection(self->lock,
+    {
+        FindResultMatch(ServiceReadyNames, ServiceReadyNames__find(
+            &self->ready_names, ServiceReadyNames__matches, (void *) name
+        ))
+            IsSome(match, ready = true)
+        End
+    })
+
+    return ready;
+}
+
+Result(ServiceCode) ServiceEventDispatcher__publish_ready(
+    ServiceEventDispatcherPtr self, ConstBStringPtr name, ServiceReadyProcessesPtr ready_processes
+)
+{
+    CriticalSection(self->lock,
+    {
+        FindResultMatch(ServiceReadyNames, ServiceReadyNames__find(
+            &self->ready_names, ServiceReadyNames__matches, (void *) name
+        ))
+            IsNone(
+            {
+                BString ready_name = BString__slice(name, 0, BString__length(name));
+                ResultMatch(CollectionCode, ServiceReadyNames__push(&self->ready_names, ready_name))
+                    IsError(code, message, _cs_return Error(ServiceCode, service_ready_names_full, SERVICE_EVENT_QUEUE_FULL))
+                End
+            })
+        End
+
+        ServiceReadyWaiters retained_waiters = ServiceReadyWaiters__new();
+        FAIterate(ServiceReadyWaiters, self->ready_waiters, index, waiter)
+            if (BString__equals(&waiter.name, name))
+            {
+                ResultMatch(CollectionCode, ServiceReadyProcesses__push(ready_processes, waiter.process))
+                    IsError(code, message, _cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL))
+                End
+            }
+            else
+            {
+                ResultMatch(CollectionCode, ServiceReadyWaiters__push(&retained_waiters, waiter))
+                    IsError(code, message, _cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL))
+                End
+            }
+        End
+        self->ready_waiters = retained_waiters;
+    })
+
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+Result(ServiceCode) ServiceEventDispatcher__wait_ready(
+    ServiceEventDispatcherPtr self, ProcessPtr process, ConstBStringPtr name
+)
+{
+    CriticalSection(self->lock,
+    {
+        FindResultMatch(ServiceReadyNames, ServiceReadyNames__find(
+            &self->ready_names, ServiceReadyNames__matches, (void *) name
+        ))
+            IsSome(match, _cs_return Success(ServiceCode, SERVICE_OK))
+        End
+
+        ServiceReadyWaiter waiter;
+        waiter.process = process;
+        waiter.name = BString__slice(name, 0, BString__length(name));
+
+        ResultMatch(CollectionCode, ServiceReadyWaiters__push(&self->ready_waiters, waiter))
+            IsError(code, message, _cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL))
+        End
+    })
+
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+Result(ServiceCode) ServiceEventDispatcher__remove_ready_waiter(ServiceEventDispatcherPtr self, ProcessPtr process)
+{
+    CriticalSection(self->lock,
+    {
+        while (true)
+        {
+            FindResultMatch(ServiceReadyWaiters, ServiceReadyWaiters__find(
+                &self->ready_waiters, ServiceReadyWaiter__matches_process, process
+            ))
+                IsSome(match,
+                {
+                    ResultMatch(CollectionCode, ServiceReadyWaiters__remove(&self->ready_waiters, *match.value))
+                        IsError(code, message, _cs_return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR))
+                    End
+                })
+                IsNone(_cs_return Success(ServiceCode, SERVICE_OK))
+            End
+        }
     })
 
     return Success(ServiceCode, SERVICE_OK);

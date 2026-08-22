@@ -44,9 +44,16 @@ static BString service_event_queue_empty = BSTRING_NEW("Service event queue is e
 static BString child_event_queue_empty = BSTRING_NEW("Child event queue is empty");
 static BString missing_interrupt_controller = BSTRING_NEW("Missing interrupt controller info");
 static BString no_cpus_available = BSTRING_NEW("No CPUs available");
+static BString process_user_root = BSTRING_NEW("root");
+static BString process_user_hund = BSTRING_NEW("hund");
+static BString process_user_user = BSTRING_NEW("user");
+static BString process_user_unknown = BSTRING_NEW("unknown");
 
 static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
 static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
+static Result(ServiceCode) Scheduler__service_ready_mark_runnable_locked(
+    SchedulerPtr self, ProcessPtr process, ServiceCode result
+);
 static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(
     SchedulerPtr self, ProcessPtr parent, ProcessPtr child, ReturnCode return_code
 );
@@ -68,42 +75,6 @@ static Result(AckCode) Scheduler__publish_process_state(SchedulerPtr self, Proce
 {
     MessagePtr message = Message__heap_new_process_id(SOURCE_PROCESS, proc->state, proc->pid);
     return MessageBroker__deliver(self->message_broker, message);
-}
-
-static Optional(ParkedOperationPtr) Scheduler__find_parked_operation(
-    ProcessPtr proc, ParkReason reason, Optional(OperationKey) operation_key
-)
-{
-    for (int64_t index = (int64_t) ParkedOperations__len(&proc->parked_operations) - 1; index >= 0; index--)
-    {
-        Match(ParkedOperationPtr, ParkedOperations__at(&proc->parked_operations, index))
-            IsSome(parked_operation,
-            {
-                if (parked_operation->park_reason != reason)
-                {
-                    continue;
-                }
-
-                Match(OperationKey, operation_key)
-                    IsSome(key,
-                    {
-                        Match(OperationKey, parked_operation->operation_key)
-                            IsSome(parked_key,
-                            {
-                                if (parked_key == key)
-                                {
-                                    return Some(ParkedOperationPtr, parked_operation);
-                                }
-                            })
-                        End
-                    })
-                    IsNone(return Some(ParkedOperationPtr, parked_operation))
-                End
-            })
-        End
-    }
-
-    return None(ParkedOperationPtr);
 }
 
 Result(CPUSchedulerPtr) CPUScheduler__heap_new(KernelPtr kernel, Elf idle_process, CPUID cpu)
@@ -299,27 +270,23 @@ static Result(ProcessPtr) CPUScheduler__unpark_with_operation_key(
         {
             __d_printf(SCHEDULER, "CPUScheduler__unpark - done %s\n", cstr(proc->name));
             __d_printf(SCHEDULER, "CPUScheduler__unpark cpu=%i found target index=%i\n", self->cpu, index);
-            Match(ParkedOperationPtr, Scheduler__find_parked_operation(proc, reason, operation_key))
-                IsSome(parked_operation,
-                {
-                    proc->state = PROC_STATE_INTERRUPTED;
-                    parked_operation->return_code = return_code;
-                    ParkedOperation__mark_ready(parked_operation);
-                    __d_printf(
-                        SCHEDULER,
-                        "CPUScheduler__unpark cpu=%i success pid=%i state=%s\n",
-                        self->cpu,
-                        proc->pid,
-                        ProcessState__to_string(proc->state)
-                    );
-                    return Success(ProcessPtr, proc);
-                })
-                IsNone(
-                {
-                    __d_printf(SCHEDULER, "CPUScheduler__unpark cpu=%i target pid=%i was not parked\n", self->cpu, proc->pid);
-                    return Error(ProcessPtr, process_wasnt_parked, SCHEDULER_CANT_UNPARK);
-                })
-            End
+            if (Process__mark_parked_operation_ready(proc, reason, operation_key, return_code))
+            {
+                proc->state = PROC_STATE_INTERRUPTED;
+                __d_printf(
+                    SCHEDULER,
+                    "CPUScheduler__unpark cpu=%i success pid=%i state=%s\n",
+                    self->cpu,
+                    proc->pid,
+                    ProcessState__to_string(proc->state)
+                );
+                return Success(ProcessPtr, proc);
+            }
+            else
+            {
+                __d_printf(SCHEDULER, "CPUScheduler__unpark cpu=%i target pid=%i was not parked\n", self->cpu, proc->pid);
+                return Error(ProcessPtr, process_wasnt_parked, SCHEDULER_CANT_UNPARK);
+            }
 
         })
         IsNone(
@@ -469,6 +436,99 @@ ProcessTable Scheduler__process_snapshot(SchedulerPtr self)
     return processes;
 }
 
+static BString ProcessClass__snapshot_name(ProcessClass process_class)
+{
+    switch (process_class)
+    {
+        case PROCESS_CLASS_REALTIME_SERVICE:
+            return BSTRING_NEW("rt-service");
+        case PROCESS_CLASS_SERVICE:
+            return BSTRING_NEW("service");
+        case PROCESS_CLASS_NORMAL:
+        default:
+            return BSTRING_NEW("normal");
+    }
+}
+
+static BString Process__snapshot_user_name(ProcessPtr process)
+{
+    if (process->user_id == PROCESS_USER_ROOT)
+    {
+        return process_user_root;
+    }
+    if (process->user_id == PROCESS_USER_HUND)
+    {
+        return process_user_hund;
+    }
+    if (process->user_id == PROCESS_USER_USER)
+    {
+        return process_user_user;
+    }
+
+    return process_user_unknown;
+}
+
+static ProcessInfo ProcessInfo__from_process_locked(ProcessPtr process)
+{
+    ProcessInfo info = (ProcessInfo) {
+        .pid = process->pid,
+    };
+    BString state = bstring(ProcessState__to_string(process->state));
+    BString no_wait_reason = BSTRING_NEW("-");
+    BString class_name = ProcessClass__snapshot_name(process->process_class);
+    BString user_name = Process__snapshot_user_name(process);
+
+    BString__copy_to(&process->name, info.name, PROCESS_INFO_NAME_SIZE);
+    BString__copy_to(&state, info.state, PROCESS_INFO_STATE_SIZE);
+    BString__copy_to(&no_wait_reason, info.wait_reason, PROCESS_INFO_WAIT_SIZE);
+    Match(ParkReason, Process__top_park_reason(process))
+        IsSome(reason,
+        {
+            BString wait_reason = ParkReason__to_string(reason);
+            BString__copy_to(&wait_reason, info.wait_reason, PROCESS_INFO_WAIT_SIZE);
+        })
+    End
+    BString__copy_to(&class_name, info.class_name, PROCESS_INFO_CLASS_SIZE);
+    BString__copy_to(&user_name, info.user_name, PROCESS_INFO_USER_SIZE);
+    return info;
+}
+
+ProcessListResult Scheduler__process_info_snapshot(SchedulerPtr self, ProcessInfoPtr entries, uint64_t max_entries)
+{
+    uint64_t written = 0;
+
+    CriticalSection(self->scheduler_lock,
+    {
+        FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+            if (written >= max_entries)
+            {
+                _cs_return (ProcessListResult) written;
+            }
+
+            if (sched->started)
+            {
+                entries[written] = ProcessInfo__from_process_locked(sched->idle_process);
+                written++;
+                if (written >= max_entries)
+                {
+                    _cs_return (ProcessListResult) written;
+                }
+            }
+
+            FAIterate(ProcessTable, sched->processes, process_index, process)
+                if (written >= max_entries)
+                {
+                    _cs_return (ProcessListResult) written;
+                }
+                entries[written] = ProcessInfo__from_process_locked(process);
+                written++;
+            End
+        End
+    })
+
+    return (ProcessListResult) written;
+}
+
 static ConstBStringPtr ProcessAbortReason__to_string(ProcessAbortReason reason)
 {
     switch (reason)
@@ -492,14 +552,7 @@ static ConstBStringPtr ProcessAbortReason__to_string(ProcessAbortReason reason)
 
 static bool Scheduler__is_parked_for(ProcessPtr proc, ParkReason reason)
 {
-    Match(ParkedOperationPtr, Scheduler__find_parked_operation(proc, reason, None(OperationKey)))
-        IsSome(parked_operation,
-        {
-            return parked_operation->park_reason == reason;
-        })
-    End
-
-    return false;
+    return Process__has_parked_operation(proc, reason, None(OperationKey));
 }
 
 static void Scheduler__write_abort_to_stderr(IOSubsystemPtr io_subsystem, ProcessPtr proc, ProcessAbort abort)
@@ -797,9 +850,10 @@ static Result(ProcessPtr) Scheduler__unpark_with_operation_key(
 )
 {
     __d_println(SCHEDULER, "scheduler unparking");
-    Match(ParkedOperationPtr, Scheduler__find_parked_operation(proc, reason, operation_key))
-        IsNone(return Error(ProcessPtr, process_wasnt_parked, SCHEDULER_CANT_UNPARK))
-    End
+    if (!Process__has_parked_operation(proc, reason, operation_key))
+    {
+        return Error(ProcessPtr, process_wasnt_parked, SCHEDULER_CANT_UNPARK);
+    }
     FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
         Result(ProcessPtr) res = CPUScheduler__unpark_with_operation_key(
             sched, proc, reason, return_code, operation_key
@@ -1228,6 +1282,92 @@ Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr pro
     })
 
     return Success(ServiceCode, SERVICE_OK);
+}
+
+static Result(ServiceCode) Scheduler__service_ready_mark_runnable_locked(
+    SchedulerPtr self, ProcessPtr process, ServiceCode result
+)
+{
+    if (Scheduler__is_parked_for(process, PARK_WAIT_SERVICE_READY))
+    {
+        FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+            ResultMatch(ProcessPtr, CPUScheduler__unpark(
+                sched, process, PARK_WAIT_SERVICE_READY, Some(ReturnCode, result)
+            ))
+                IsSuccess(unparked, return Success(ServiceCode, SERVICE_OK))
+                IsError(code, message,
+                {
+                    if (code != SCHEDULER_PROCESS_NOT_FOUND)
+                    {
+                        return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR);
+                    }
+                })
+            End
+        End
+    }
+
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+Result(ServiceCode) Scheduler__service_publish_ready(SchedulerPtr self, ConstBStringPtr name)
+{
+    CriticalSection(self->scheduler_lock,
+    {
+        ServiceReadyProcesses ready_processes = ServiceReadyProcesses__new();
+        ResultMatch(ServiceCode, ServiceEventDispatcher__publish_ready(
+            &self->service_event_dispatcher, name, &ready_processes
+        ))
+            IsError(code, message, _cs_return Error(ServiceCode, message, code))
+        End
+
+        FAIterate(ServiceReadyProcesses, ready_processes, index, process)
+            ResultMatch(ServiceCode, Scheduler__service_ready_mark_runnable_locked(self, process, SERVICE_OK))
+                IsError(code, message, _cs_return Error(ServiceCode, message, code))
+            End
+        End
+    })
+
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+Result(ServiceCode) Scheduler__service_wait_ready_with_context_ownership(
+    SchedulerPtr self, ProcessPtr process, ConstBStringPtr name,
+    KernelContextPtr kernel_context, Optional(Continuation) continuation, bool owns_kernel_context
+)
+{
+    if (!ProcessClass__is_service(process->process_class))
+    {
+        return Error(ServiceCode, service_event_queue_empty, SERVICE_NOT_SERVICE_PROCESS);
+    }
+
+    CriticalSection(self->scheduler_lock,
+    {
+        ResultMatch(ServiceCode, ServiceEventDispatcher__wait_ready(
+            &self->service_event_dispatcher, process, name
+        ))
+            IsSuccess(code,
+            {
+                if (code == SERVICE_OK && ServiceEventDispatcher__is_ready(&self->service_event_dispatcher, name))
+                {
+                    _cs_return Success(ServiceCode, SERVICE_OK);
+                }
+
+                FAIterate(CPUSchedulers, self->schedulers, cpu, sched)
+                    ResultMatch(ProcessPtr, CPUScheduler__park(
+                        sched, process, kernel_context, continuation,
+                        PARK_WAIT_SERVICE_READY, owns_kernel_context, None(OperationKey)
+                    ))
+                        IsSuccess(parked, _cs_return Error(ServiceCode, service_event_queue_empty, SERVICE_EVENT_QUEUE_EMPTY))
+                    End
+                End
+            })
+            IsError(code, message, _cs_return Error(ServiceCode, message, code))
+        End
+    })
+
+    BString no_scheduler_format = bstring("No scheduler found for process: %i\n");
+    BString no_scheduler = BString__sprintf(&no_scheduler_format, process->pid);
+    return Error(ServiceCode, no_scheduler, SERVICE_SCHEDULER_ERROR);
 }
 
 static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process)

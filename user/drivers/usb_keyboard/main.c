@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define RING_BUFFER_DEBUG_PRINTF(level, format, ...)
+#include "../../../kernel/types/ring_buffer.h"
 #include "../../sys/debug.h"
 #include "../../sys/io_server.h"
 #include "../../sys/service.h"
@@ -14,37 +16,21 @@
 #define USB_KEYBOARD_PATH ":keyboard:"
 #define USB_KEYBOARD_PENDING_BYTES 256U
 
+RingBufferDefine(USB_KEYBOARD_PENDING_BYTES, UsbKeyboardPendingBuffer)
+RingBufferStackBodyDefine(UsbKeyboardPendingBuffer)
+
 typedef struct UsbKeyboard
 {
     IOHandle keyboard;
-    char pending[USB_KEYBOARD_PENDING_BYTES];
-    uint64_t pending_read;
-    uint64_t pending_write;
+    UsbKeyboardPendingBuffer pending;
 }
 UsbKeyboard;
 
 typedef UsbKeyboard * UsbKeyboardPtr;
 
-static uint64_t UsbKeyboard__pending_count(UsbKeyboardPtr self)
-{
-    return self->pending_write - self->pending_read;
-}
-
-bool UsbKeyboard__pending_push(UsbKeyboardPtr self, char byte)
-{
-    if (UsbKeyboard__pending_count(self) >= USB_KEYBOARD_PENDING_BYTES)
-    {
-        return false;
-    }
-
-    self->pending[self->pending_write % USB_KEYBOARD_PENDING_BYTES] = byte;
-    self->pending_write++;
-    return true;
-}
-
 static void UsbKeyboard__publish_pending(UsbKeyboardPtr self)
 {
-    if (UsbKeyboard__pending_count(self) == 0)
+    if (UsbKeyboardPendingBuffer__item_count(&self->pending) == 0)
     {
         return;
     }
@@ -55,27 +41,23 @@ static void UsbKeyboard__publish_pending(UsbKeyboardPtr self)
         return;
     }
 
-    uint64_t byte_count = 0;
-    while (byte_count < buffer.capacity && UsbKeyboard__pending_count(self) > 0)
-    {
-        buffer.data[byte_count] = self->pending[self->pending_read % USB_KEYBOARD_PENDING_BYTES];
-        self->pending_read++;
-        byte_count++;
-    }
-
-    if (byte_count > 0)
-    {
-        io_server_data_available(self->keyboard, byte_count);
-    }
+    ResultMatch(ItemCount, UsbKeyboardPendingBuffer__drain(&self->pending, (CharPtr) buffer.data, buffer.capacity))
+        IsSuccess(byte_count,
+        {
+            if (byte_count > 0)
+            {
+                io_server_data_available(self->keyboard, byte_count);
+            }
+        })
+        IsError(code, message, return)
+    End;
 }
 
 static bool UsbKeyboard__init(UsbKeyboardPtr self)
 {
     *self = (UsbKeyboard) {
         .keyboard = -1,
-        .pending = { 0 },
-        .pending_read = 0,
-        .pending_write = 0,
+        .pending = UsbKeyboardPendingBuffer__new(),
     };
 
     if (!service_ok(service_become_service()))

@@ -1,27 +1,42 @@
 #include "dyn_string.h"
 
-#ifdef DYN_STRING_USE_KERNEL_ALLOC
-#include "../../kernel/kalloc.h"
-#define DYN_STRING_ALLOC(size) ((void *) Kernel__alloc(size).virtual_addr)
-#define DYN_STRING_FREE(ptr) \
-    { \
-        Result(KAllocCode) free_result = Kernel__free(addr(ptr)); \
-        ResultMatch(KAllocCode, free_result) \
-            IsError(code, message, {}) \
-        End \
-    }
-#else
-#ifdef __APPLE__
-#include <stdlib.h>
-#else
-#include <malloc.h>
-#endif
-#define DYN_STRING_ALLOC(size) malloc(size)
-#define DYN_STRING_FREE(ptr) free(ptr)
-#endif
-
 static BString allocation_failed = BSTRING_NEW("DynString allocation failed");
 static BString invalid_capacity = BSTRING_NEW("DynString invalid capacity");
+
+LinkedListBodyDefine(DynStringLines);
+
+bool dyn_string_equals(void * a, void * b)
+{
+    DynStringPtr left = (DynStringPtr) a;
+    DynStringPtr right = (DynStringPtr) b;
+    if (DynString__length(left) != DynString__length(right))
+    {
+        return false;
+    }
+
+    for (StringPos i = 0; i < DynString__length(left); i++)
+    {
+        char left_ch = Unwrap(char, DynString__char_at(left, i), '\0');
+        char right_ch = Unwrap(char, DynString__char_at(right, i), '\0');
+        if (left_ch != right_ch)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void DynStringLines__dispose_all(DynStringLines * self)
+{
+    LLIterate(DynStringLines, *self, line)
+        DynString__dispose(&line);
+    End
+
+    ResultMatch(CollectionCode, DynStringLines__dispose(self))
+        IsError(code, message, {})
+    End
+}
 
 static StringPos DynString__next_capacity(StringPos current, StringPos required)
 {
@@ -153,4 +168,96 @@ StringPos DynString__length(ConstDynStringPtr self)
 StringPos DynString__capacity(ConstDynStringPtr self)
 {
     return self->capacity;
+}
+
+Optional(char) DynString__char_at(ConstDynStringPtr self, StringPos index)
+{
+    if (index < 0 || index >= self->len)
+    {
+        return None(char);
+    }
+
+    return Some(char, self->data[index]);
+}
+
+Optional(BString) DynString__bstring(ConstDynStringPtr self)
+{
+    BString text = EMPTY_BSTRING;
+    for (StringPos i = 0; i < DynString__length(self); i++)
+    {
+        char ch = Unwrap(char, DynString__char_at(self, i), '\0');
+        if (!BString__push_char(&text, ch))
+        {
+            return None(BString);
+        }
+    }
+
+    return Some(BString, text);
+}
+
+static bool DynString__push_line(DynStringLines * lines, DynString line)
+{
+    ResultMatch(CollectionCode, DynStringLines__push(lines, line))
+        IsSuccess(index, return true)
+        IsError(code, message, return false)
+    End
+
+    return false;
+}
+
+Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
+{
+    DynStringLines lines = DynStringLines__new();
+    DynString line;
+    ResultMatch(DynStringCode, DynString__init(&line, 16))
+        IsError(code, message, return None(DynStringLines))
+    End
+
+    for (StringPos i = 0; i < DynString__length(self); i++)
+    {
+        char ch = Unwrap(char, DynString__char_at(self, i), '\0');
+        if (ch == '\n')
+        {
+            if (!DynString__push_line(&lines, line))
+            {
+                DynString__dispose(&line);
+                DynStringLines__dispose_all(&lines);
+                return None(DynStringLines);
+            }
+
+            ResultMatch(DynStringCode, DynString__init(&line, 16))
+                IsError(code, message,
+                {
+                    DynStringLines__dispose_all(&lines);
+                    return None(DynStringLines);
+                })
+            End
+            continue;
+        }
+
+        ResultMatch(DynStringCode, DynString__push_char(&line, ch))
+            IsError(code, message,
+            {
+                DynString__dispose(&line);
+                DynStringLines__dispose_all(&lines);
+                return None(DynStringLines);
+            })
+        End
+    }
+
+    if (DynString__length(&line) > 0)
+    {
+        if (!DynString__push_line(&lines, line))
+        {
+            DynString__dispose(&line);
+            DynStringLines__dispose_all(&lines);
+            return None(DynStringLines);
+        }
+    }
+    else
+    {
+        DynString__dispose(&line);
+    }
+
+    return Some(DynStringLines, lines);
 }

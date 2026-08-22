@@ -1,9 +1,12 @@
 #include "unity.h"
 
 #include "../../../kernel/syscall/io_handler.h"
+#include "../../../kernel/syscall/syslog_handler.h"
 #include "../../../kernel/subsystems/io/io_subsystem.h"
 #include "../../../common_includes/syscalls/io.h"
+#include "../../../common_includes/syscalls/syslog.h"
 #include "../fixtures/kernel.h"
+#include "../fixtures/process.h"
 #include "../stubs.h"
 #include "../stubs/panic.h"
 
@@ -25,6 +28,7 @@ static bool eof = false;
 static IOInternalHandle write_handle = 0;
 static DataPtr write_data = NULL;
 static size_t write_size = 0;
+static char server_buffer_data[16] = { 0 };
 
 static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, BString open_path, Flags flags)
 {
@@ -84,6 +88,15 @@ static Optional(IOContextPtr) fake_eof(IOStatePtr state_ptr)
     return None(IOContextPtr);
 }
 
+static Result(IOServerBuffer) fake_server_buffer(IOStatePtr state_ptr)
+{
+    TEST_ASSERT_EQUAL(&state, state_ptr);
+    return Success(IOServerBuffer, ((IOServerBuffer) {
+        .data = server_buffer_data,
+        .capacity = sizeof(server_buffer_data),
+    }));
+}
+
 static IO test_io = {
     .open = fake_open,
     .read = fake_read,
@@ -91,6 +104,7 @@ static IO test_io = {
     .close = fake_close,
     .park = fake_park,
     .unpark = fake_unpark,
+    .server_buffer = fake_server_buffer,
     .data_available = fake_data_available,
     .eof = fake_eof,
 };
@@ -245,6 +259,48 @@ void test_io_handler_mkdir_rejects_missing_path_at_syscall_boundary(void)
     End
 }
 
+void test_io_handler_mount_rejects_missing_arguments_at_syscall_boundary(void)
+{
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_MOUNT, 0, (Anything) "ext2", (Anything) "/", 0
+    ))
+        IsSuccess(status, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_INVALID_PATH, code))
+    End
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_MOUNT, (Anything) "/dev/virtio1", 0, (Anything) "/", 0
+    ))
+        IsSuccess(status, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_INVALID_PATH, code))
+    End
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, &process), IO_MOUNT, (Anything) "/dev/virtio1", (Anything) "ext2", 0, 0
+    ))
+        IsSuccess(status, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_INVALID_PATH, code))
+    End
+}
+
+void test_io_handler_mount_requires_mount_capability(void)
+{
+    Process__set_user_identity(&process);
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel,
+        Some(ProcessPtr, &process),
+        IO_MOUNT,
+        (Anything) "/dev/virtio1",
+        (Anything) "ext2",
+        (Anything) "/",
+        0
+    ))
+        IsSuccess(status, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, code))
+    End
+}
+
 void test_io_handler_server_data_available_translates_file_descriptor_to_io_handle(void)
 {
     install_open_fd(EXPECTED_FD);
@@ -256,6 +312,71 @@ void test_io_handler_server_data_available_translates_file_descriptor_to_io_hand
         {
             TEST_ASSERT_TRUE(data_available);
             TEST_ASSERT_EQUAL(IO_OK, status);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_io_handler_server_register_fd_can_be_used_for_get_buffer(void)
+{
+    ProcessPtr service_process = dummy_process(100, 1, PROC_STATE_RUNNING);
+    IOServerBuffer server_buffer = { 0 };
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, service_process), IO_SERVER_REGISTER, (Anything) cstr(path), IO_SERVER_READ, 0, 0
+    ))
+        IsSuccess(fd,
+        {
+            TEST_ASSERT_EQUAL(EXPECTED_FD, fd);
+
+            ResultMatch(ProcessIOHandle, Process__get_io_handle(service_process, (FileDescriptor) fd))
+                IsSuccess(handle, TEST_ASSERT_EQUAL(RAW_HANDLE, handle))
+                IsError(code, message, TEST_FAIL())
+            End
+
+            ResultMatch(SystemCallResult, Syslog__handler(
+                kernel,
+                Some(ProcessPtr, service_process),
+                (Anything) "uart_rx: wait_status=0 event_type=3 event_source=1 event_data=2\n",
+                (Anything) "UART-RX",
+                0,
+                0,
+                0
+            ))
+                IsSuccess(status, TEST_ASSERT_EQUAL(SYSLOG_OK, status))
+                IsError(code, message, TEST_FAIL())
+            End
+
+            ResultMatch(SystemCallResult, Syslog__handler(
+                kernel,
+                Some(ProcessPtr, service_process),
+                (Anything) "uart_rx: uart_irq=0 read_request=1\n",
+                (Anything) "UART-RX",
+                0,
+                0,
+                0
+            ))
+                IsSuccess(status, TEST_ASSERT_EQUAL(SYSLOG_OK, status))
+                IsError(code, message, TEST_FAIL())
+            End
+
+            ResultMatch(SystemCallResult, IO__handler(
+                kernel,
+                Some(ProcessPtr, service_process),
+                IO_SERVER_GET_BUFFER,
+                fd,
+                (Anything) &server_buffer,
+                0,
+                0
+            ))
+                IsSuccess(status,
+                {
+                    TEST_ASSERT_EQUAL(IO_OK, status);
+                    TEST_ASSERT_EQUAL_UINT64(sizeof(server_buffer_data), server_buffer.capacity);
+                    TEST_ASSERT_NOT_NULL(server_buffer.data);
+                })
+                IsError(code, message, TEST_FAIL())
+            End
         })
         IsError(code, message, TEST_FAIL())
     End

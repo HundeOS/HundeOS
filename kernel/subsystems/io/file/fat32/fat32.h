@@ -88,6 +88,7 @@ Fat32DirectoryEntry;
 typedef Fat32DirectoryEntry * Fat32DirectoryEntryPtr;
 
 OptionalDef(Fat32DirectoryEntry);
+ResultDef(Fat32DirectoryEntry);
 bool Fat32DirectoryEntry__equals(Fat32DirectoryEntryPtr self, Fat32DirectoryEntryPtr other);
 FixedArrayDefine(
     Fat32DirectoryEntry,

@@ -57,6 +57,11 @@ static SystemInfo fake_system_info = {
         .bus_start = 0,
         .bus_end = 255,
     })),
+    .sd_host = Some(SdHostInfo, ((SdHostInfo) {
+        .physical_base = 0xfe340000,
+        .mmio_size = 0x100,
+        .irq = 126,
+    })),
 };
 
 static BString async_list_pending = BSTRING_NEW("Async list pending");
@@ -371,6 +376,10 @@ void test_procfs_can_open_and_read_system_info(void)
             TEST_ASSERT_NOT_NULL(strstr(buffer, "pci.ecam.size_human=256 MiB\n"));
             TEST_ASSERT_NOT_NULL(strstr(buffer, "pci.bus.start=0\n"));
             TEST_ASSERT_NOT_NULL(strstr(buffer, "pci.bus.end=255\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "sd_host.present=1\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "sd_host.physical_base=0xfe340000\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "sd_host.mmio_size=0x100\n"));
+            TEST_ASSERT_NOT_NULL(strstr(buffer, "sd_host.irq=126\n"));
             TEST_ASSERT_NOT_NULL(strstr(buffer, "interrupt_controller.kind=2\n"));
             TEST_ASSERT_NOT_NULL(strstr(
                 buffer,
@@ -548,7 +557,7 @@ void test_it_can_list_files_to_subdir(void)
             TEST_FAIL();
         })
         IsSuccess(result, {
-            TEST_ASSERT_EQUAL_INT(4, FilesystemNodes__len(&result));
+            TEST_ASSERT_EQUAL_INT(7, FilesystemNodes__len(&result));
             FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&hello_world, &node->name));
         });
@@ -596,6 +605,39 @@ void test_filesystem_table_adds_mount_entries(void)
             TEST_ASSERT_TRUE(BString__equals(&entry->device_path, &device_path));
             TEST_ASSERT_TRUE(BString__equals(&entry->filesystem_type, &filesystem_type));
             TEST_ASSERT_TRUE(BString__equals(&entry->mountpoint, &mountpoint));
+            TEST_ASSERT_FALSE(entry->match_block_count);
+            TEST_ASSERT_EQUAL_UINT64(0, entry->block_count);
+        })
+        IsNone(TEST_FAIL())
+    End
+}
+
+void test_filesystem_table_adds_block_count_mount_entries(void)
+{
+    FilesystemTable table = FilesystemTable__new();
+    uint64_t block_count = 16384;
+    BString filesystem_type = bstring("ext2");
+    BString mountpoint = bstring("/boot/config");
+
+    ResultMatch(CollectionCode, FilesystemTable__add_by_block_count(
+        &table,
+        block_count,
+        filesystem_type,
+        mountpoint
+    ))
+        IsSuccess(index, TEST_ASSERT_EQUAL(0, index))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(1, FilesystemTableEntries__len(&table.entries));
+    Match(FilesystemTableEntries__type_ptr__optional, FilesystemTableEntries__ptr_at(&table.entries, 0))
+        IsSome(entry,
+        {
+            TEST_ASSERT_TRUE(BString__equals(&entry->device_path, &EMPTY_BSTRING));
+            TEST_ASSERT_TRUE(BString__equals(&entry->filesystem_type, &filesystem_type));
+            TEST_ASSERT_TRUE(BString__equals(&entry->mountpoint, &mountpoint));
+            TEST_ASSERT_TRUE(entry->match_block_count);
+            TEST_ASSERT_EQUAL_UINT64(block_count, entry->block_count);
         })
         IsNone(TEST_FAIL())
     End
@@ -1052,16 +1094,39 @@ void test_build_root_and_mounts_lists_tmp_mount_parent_when_backing_root_is_moun
 
 void test_io_list_dir_lists_ebin_files(void)
 {
-    DirectoryEntry entries[4];
+    DirectoryEntry entries[7];
 
     ResultMatch(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/sbin", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/sbin", (Anything) entries, 7, 0
     ))
         IsSuccess(count,
         {
-            TEST_ASSERT_EQUAL_INT(4, count);
+            TEST_ASSERT_EQUAL_INT(7, count);
             TEST_ASSERT_EQUAL_STRING("hello_world", entries[0].name);
-            TEST_ASSERT_EQUAL_STRING("drivers", entries[3].name);
+            TEST_ASSERT_EQUAL_STRING("services", entries[5].name);
+            TEST_ASSERT_EQUAL_STRING("drivers", entries[6].name);
+        })
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_io_list_dir_marks_services_as_hund_owned(void)
+{
+    DirectoryEntry entries[1];
+
+    ResultMatch(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/sbin/services", (Anything) entries, 1, 0
+    ))
+        IsSuccess(count,
+        {
+            TEST_ASSERT_EQUAL_INT(1, count);
+            TEST_ASSERT_EQUAL_STRING("humpen", entries[0].name);
+            TEST_ASSERT_EQUAL(PROCESS_USER_HUND, entries[0].user_id);
+            TEST_ASSERT_EQUAL(PROCESS_GROUP_HUND, entries[0].group_id);
+            TEST_ASSERT_EQUAL(
+                IO_MODE_TYPE_FILE | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC,
+                entries[0].mode
+            );
         })
         IsError(code, message, TEST_FAIL())
     End

@@ -43,11 +43,17 @@ void test_process_list_handler_returns_scheduled_processes(void)
     ProcessPtr driver = dummy_process(2, cpu, PROC_STATE_READY);
     driver->process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(driver);
+    ProcessPtr ready_waiter = dummy_process(3, cpu, PROC_STATE_READY);
+    ready_waiter->process_class = PROCESS_CLASS_SERVICE;
+    Process__set_hund_identity(ready_waiter);
 
     Scheduler__schedule(kernel->scheduler, init);
     Scheduler__schedule(kernel->scheduler, driver);
+    Scheduler__schedule(kernel->scheduler, ready_waiter);
     KernelContext kernel_context = KernelContext__new(Some(ProcessID, driver->pid), Some(SchedulerPtr, kernel->scheduler));
     Scheduler__park(kernel->scheduler, driver, &kernel_context, None(Continuation), PARK_WAIT_SERVICE_EVENT);
+    KernelContext ready_context = KernelContext__new(Some(ProcessID, ready_waiter->pid), Some(SchedulerPtr, kernel->scheduler));
+    Scheduler__park(kernel->scheduler, ready_waiter, &ready_context, None(Continuation), PARK_WAIT_SERVICE_READY);
 
     ProcessInfo entries[4];
     ProcessListRequest request = (ProcessListRequest) {
@@ -60,7 +66,7 @@ void test_process_list_handler_returns_scheduled_processes(void)
     ))
         IsSuccess(count,
         {
-            TEST_ASSERT_EQUAL_UINT64(3, count);
+            TEST_ASSERT_EQUAL_UINT64(4, count);
             TEST_ASSERT_EQUAL_STRING("hello_world", entries[0].name);
             TEST_ASSERT_EQUAL_STRING("PROC_STATE_RUNNING", entries[0].state);
             TEST_ASSERT_EQUAL_STRING("-", entries[0].wait_reason);
@@ -77,6 +83,11 @@ void test_process_list_handler_returns_scheduled_processes(void)
             TEST_ASSERT_EQUAL_STRING("PARK_WAIT_SERVICE_EVENT", entries[2].wait_reason);
             TEST_ASSERT_EQUAL_STRING("service", entries[2].class_name);
             TEST_ASSERT_EQUAL_STRING("hund", entries[2].user_name);
+            TEST_ASSERT_EQUAL_UINT64(ready_waiter->pid, entries[3].pid);
+            TEST_ASSERT_EQUAL_STRING("PROC_STATE_WAITING", entries[3].state);
+            TEST_ASSERT_EQUAL_STRING("PARK_WAIT_SERVICE_READY", entries[3].wait_reason);
+            TEST_ASSERT_EQUAL_STRING("service", entries[3].class_name);
+            TEST_ASSERT_EQUAL_STRING("hund", entries[3].user_name);
         })
         IsError(code, message, TEST_FAIL())
     End
@@ -206,7 +217,7 @@ void test_process_wait_child_event_handler_returns_queued_child_event(void)
         IsError(code, message, TEST_FAIL())
     End
 
-    ProcessChildEvent target = { 0 };
+    ProcessChildEvent target = ProcessChildEvent__new();
 
     ResultMatch(SystemCallResult, ProcessWaitChildEvent__handler(
         kernel, Some(ProcessPtr, parent), (Anything) &target, 0, 0, 0, 0

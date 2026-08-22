@@ -37,6 +37,9 @@ extern const uint64_t __gicd_start[];
 #define PI4_GICR_PHYS_BASE 0xFF848000ULL
 #define PI4_GICC_PHYS_BASE 0xFF842000ULL
 #define PI4_UART_IRQ_ID 153ULL
+#define PI4_EMMC2_PHYS_BASE 0xFE340000ULL
+#define PI4_EMMC2_MMIO_SIZE 0x100ULL
+#define PI4_EMMC2_IRQ_ID 126ULL
 #define PI_UEFI_GICD_BASE ((uint64_t)&__gicd_start[0])
 #define PI_UEFI_GICR_BASE (PI_UEFI_GICD_BASE + GICR_OFFSET)
 __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = {
@@ -47,6 +50,11 @@ __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = {
     .uart_virtual_base = BOOT_MMIO_VIRT_BASE,
     .uart_irq = PI4_UART_IRQ_ID,
     .framebuffer = None(FramebufferInfo),
+    .sd_host = Some(SdHostInfo, ((SdHostInfo) {
+        .physical_base = PI4_EMMC2_PHYS_BASE,
+        .mmio_size = PI4_EMMC2_MMIO_SIZE,
+        .irq = PI4_EMMC2_IRQ_ID,
+    })),
     .interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V2,
     .gic_distributor_physical_base = PI4_GICD_PHYS_BASE,
     .gic_distributor_virtual_base = PI_UEFI_GICD_BASE,
@@ -142,6 +150,7 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     pi_uefi_system_info.uart.irq = pi_uefi_platform_info.uart_irq;
     pi_uefi_system_info.framebuffer = pi_uefi_platform_info.framebuffer;
     pi_uefi_system_info.pci = pi_uefi_platform_info.pci;
+    pi_uefi_system_info.sd_host = pi_uefi_platform_info.sd_host;
 
     pi_uefi_system_info.gic.distributor_physical_base = pi_uefi_platform_info.gic_distributor_physical_base;
     pi_uefi_system_info.gic.distributor_virtual_base = (uint64_t)&__gicd_start[0];

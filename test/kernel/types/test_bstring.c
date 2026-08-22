@@ -196,6 +196,26 @@ void test_bstring_parse_uint64_returns_value_for_valid_decimal(void)
     End
 }
 
+void test_bstring_parse_uint64_base_zero_accepts_hex_prefix(void)
+{
+    BString input = bstring("0xfe340000");
+
+    Match(uint64_t, BString__parse_uint64_base(&input, 0))
+        IsSome(value, TEST_ASSERT_EQUAL_HEX64(0xfe340000, value))
+        IsNone(TEST_FAIL())
+    End
+}
+
+void test_bstring_parse_uint64_base_strips_whitespace(void)
+{
+    BString input = bstring(" 126\n");
+
+    Match(uint64_t, BString__parse_uint64_base(&input, 0))
+        IsSome(value, TEST_ASSERT_EQUAL_UINT64(126, value))
+        IsNone(TEST_FAIL())
+    End
+}
+
 void test_bstring_parse_uint64_rejects_empty_input(void)
 {
     BString input = EMPTY_BSTRING;
@@ -208,6 +228,15 @@ void test_bstring_parse_uint64_rejects_non_digit_input(void)
     BString input = bstring("12x");
 
     TEST_ASSERT_FALSE(BString__parse_uint64(&input).present);
+}
+
+void test_bstring_parse_uint64_base_rejects_trailing_text(void)
+{
+    BString input = bstring("0xfe340000tail");
+
+    Match(uint64_t, BString__parse_uint64_base(&input, 0))
+        IsSome(value, TEST_FAIL())
+    End
 }
 
 void test_bstring_uppercase_converts_ascii_lowercase(void)

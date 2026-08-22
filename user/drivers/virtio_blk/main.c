@@ -594,6 +594,13 @@ int VIRTIO_BLK_ENTRYPOINT(int argc, char ** argv)
         return 1;
     }
 
+    BString ready_path = bstring(device.path);
+    if (!service_ok(service_publish_ready(&ready_path)))
+    {
+        DRIVER_DEBUG("virtio_blk: ready publish failed path=%s\n", device.path);
+        return 1;
+    }
+
     if (!service_ok(service_subscribe_irq(device.irq_id)))
     {
         DRIVER_DEBUG("virtio_blk: irq subscribe failed path=%s\n", device.path);

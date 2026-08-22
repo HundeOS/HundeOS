@@ -41,6 +41,7 @@ typedef enum ProcessCapabilityBits
     PROCESS_CAP_SUBSCRIBE_IRQ = 1ULL << 2,
     PROCESS_CAP_REGISTER_BLOCK_DEVICE = 1ULL << 3,
     PROCESS_CAP_HANDLE_BLOCK_REQUESTS = 1ULL << 4,
+    PROCESS_CAP_MOUNT_FILESYSTEM = 1ULL << 5,
     PROCESS_CAP_ALL = UINT64_MAX,
 } ProcessCapabilityBits;
 
@@ -77,6 +78,15 @@ typedef struct ProcessChildEvent
 } ProcessChildEvent;
 
 typedef ProcessChildEvent * ProcessChildEventPtr;
+
+static inline ProcessChildEvent ProcessChildEvent__new(void)
+{
+    return (ProcessChildEvent) {
+        .pid = 0,
+        .status = 0,
+        .type = 0,
+    };
+}
 
 typedef enum ProcessChildEventResults
 {

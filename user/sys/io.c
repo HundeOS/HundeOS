@@ -24,24 +24,78 @@ IOHandle IO__open(ConstBStringPtr self, Flags flags)
     return open(BString__cstr(self), flags);
 }
 
-ByteCount IO__read(IOHandle handle, BStringPtr self)
+static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr self, StringPos max_bytes)
 {
     BString__clear(self);
+    if (max_bytes <= 0)
+    {
+        return 0;
+    }
 
-    ByteCount bytes = read(handle, self->data, (size_t) (self->max - 1));
+    StringPos buffer_max = self->max - 1;
+    StringPos read_max = max_bytes < buffer_max ? max_bytes : buffer_max;
+
+    ByteCount bytes = read(handle, self->data, (size_t) read_max);
     if (bytes <= 0)
     {
         return bytes;
     }
 
-    if (bytes >= self->max)
+    if (bytes > read_max)
     {
-        bytes = self->max - 1;
+        bytes = read_max;
     }
 
     self->len = bytes;
     self->data[self->len] = '\0';
     return bytes;
+}
+
+ByteCount IO__read(IOHandle handle, BStringPtr self)
+{
+    return IO__read_bstring_with_limit(handle, self, BSTRING_MAX_SIZE - 1);
+}
+
+Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
+{
+    DynString text;
+    ResultMatch(DynStringCode, DynString__init(&text, max_bytes))
+        IsError(code, message, return None(DynString))
+    End
+
+    ByteCount total_read = 0;
+    while (total_read < max_bytes)
+    {
+        BString chunk = EMPTY_BSTRING;
+        ByteCount remaining_capacity = max_bytes - total_read;
+        ByteCount bytes = IO__read_bstring_with_limit(handle, &chunk, remaining_capacity);
+        if (bytes <= 0)
+        {
+            break;
+        }
+
+        ResultMatch(DynStringCode, DynString__append_bstring(&text, &chunk))
+            IsSuccess(code, {})
+            IsError(code, message,
+            {
+                DynString__dispose(&text);
+                return None(DynString);
+            })
+        End
+
+        total_read += bytes;
+        if (total_read >= max_bytes)
+        {
+            break;
+        }
+
+        if (bytes < BSTRING_MAX_SIZE - 1)
+        {
+            break;
+        }
+    }
+
+    return Some(DynString, text);
 }
 
 ByteCount IO__write(IOHandle handle, ConstBStringPtr self)
@@ -147,4 +201,14 @@ IOStatus link_file(const char * source_path, const char * target_path)
 IOStatus IO__link_file(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
     return link_file(BString__cstr(source_path), BString__cstr(target_path));
+}
+
+IOStatus mount_device(const char * device_path, const char * filesystem_type, const char * mountpoint)
+{
+    return syscall(IO_CALL, IO_MOUNT, any(device_path), any(filesystem_type), any(mountpoint), 0);
+}
+
+IOStatus IO__mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
+{
+    return mount_device(BString__cstr(device_path), BString__cstr(filesystem_type), BString__cstr(mountpoint));
 }

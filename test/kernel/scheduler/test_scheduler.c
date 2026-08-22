@@ -1022,9 +1022,9 @@ void test_service_wait_parks_service_process_when_no_event_is_available(void)
     End
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, service_proc->state);
-    Match(ParkedOperationPtr, Process__top_parked_operation(service_proc))
+    Match(ParkReason, Process__top_park_reason(service_proc))
         IsNone(TEST_FAIL())
-        IsSome(parked, TEST_ASSERT_EQUAL(PARK_WAIT_SERVICE_EVENT, parked->park_reason))
+        IsSome(reason, TEST_ASSERT_EQUAL(PARK_WAIT_SERVICE_EVENT, reason))
     End
 }
 

@@ -90,6 +90,7 @@ typedef struct Ext2DirectoryEntry
     BString name;
     Ext2DirectoryEntryType file_type;
     Ext2InodeNumber inode;
+    Ext2InodeMode mode;
     Ext2FileSize size;
 }
 Ext2DirectoryEntry;

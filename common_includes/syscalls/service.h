@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define SERVICE_DEVICE_PATH_MAX 256ULL
+#define SERVICE_READY_NAME_MAX 256ULL
 
 typedef enum ServiceOperation
 {
@@ -15,6 +16,8 @@ typedef enum ServiceOperation
     SERVICE_BLOCK_GET_REQUEST,
     SERVICE_BLOCK_COMPLETE,
     SERVICE_DEVICE_ADDRESS,
+    SERVICE_PUBLISH_READY,
+    SERVICE_WAIT_READY,
 } ServiceOperation;
 
 typedef enum ServiceEventType
@@ -23,6 +26,7 @@ typedef enum ServiceEventType
     SERVICE_EVENT_IRQ = 2,
     SERVICE_EVENT_IO = 3,
     SERVICE_EVENT_BLOCK_IO = 4,
+    SERVICE_EVENT_READY = 5,
 } ServiceEventType;
 
 typedef enum ServiceIOEvent
@@ -115,5 +119,13 @@ typedef struct ServiceBlockDeviceRegistration
 ServiceBlockDeviceRegistration;
 
 typedef ServiceBlockDeviceRegistration * ServiceBlockDeviceRegistrationPtr;
+
+typedef struct ServiceReadyRequest
+{
+    char name[SERVICE_READY_NAME_MAX];
+}
+ServiceReadyRequest;
+
+typedef ServiceReadyRequest * ServiceReadyRequestPtr;
 
 #endif

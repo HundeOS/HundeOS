@@ -4,6 +4,7 @@
 
 #include "unity.h"
 
+#include "../../../../common/types/bstring.h"
 #include "../../../../common_includes/syscalls/service.h"
 
 #include "../../../../user/sys/sync.h"
@@ -83,6 +84,8 @@ static const char * fake_log_tag;
 static bool fake_block_request_mode;
 static bool fake_block_request_fetched;
 static bool fake_block_completed;
+static bool fake_ready_published;
+static BString fake_ready_name;
 static uint8_t fake_request_buffer[512];
 static uint8_t fake_second_request_buffer[512];
 static ServiceBlockRequest fake_block_request;
@@ -256,6 +259,8 @@ void setUp(void)
     fake_block_request_mode = false;
     fake_block_request_fetched = false;
     fake_block_completed = false;
+    fake_ready_published = false;
+    fake_ready_name = EMPTY_BSTRING;
     fake_completion_status = SERVICE_ABORT;
     fake_completion_blocks = 0;
     fake_submitted_type = 0xffffffffU;
@@ -378,6 +383,13 @@ ServiceCode service_register_block_device(const char * path, uint64_t block_size
     return SERVICE_OK;
 }
 
+ServiceCode service_publish_ready(ConstBStringPtr name)
+{
+    fake_ready_name = BString__slice(name, 0, BString__length(name));
+    fake_ready_published = true;
+    return SERVICE_OK;
+}
+
 ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPtr request)
 {
     if (!fake_block_request_mode)
@@ -465,9 +477,12 @@ void test_virtio_blk_main_maps_first_mmio_slot_and_acknowledges_irq(void)
 
     TEST_ASSERT_TRUE(fake_became_service);
     TEST_ASSERT_TRUE(fake_block_registered);
+    TEST_ASSERT_TRUE(fake_ready_published);
     TEST_ASSERT_TRUE(fake_irq_subscribed);
     TEST_ASSERT_EQUAL_UINT64(1, fake_registered_paths_count);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_registered_paths[0]);
+    BString expected_ready_name = BSTRING_NEW("/dev/virtio1");
+    TEST_ASSERT_TRUE(BString__equals(&fake_ready_name, &expected_ready_name));
     TEST_ASSERT_EQUAL_UINT64(1024, fake_registered_block_counts[0]);
     TEST_ASSERT_EQUAL_UINT64(1, fake_map_count);
     TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);

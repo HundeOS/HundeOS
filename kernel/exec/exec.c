@@ -14,19 +14,26 @@ static BString unreachable_code = BSTRING_NEW("unreachable code");
 static BString permission_denied_message = BSTRING_NEW("Permission denied");
 static BString incomplete_elf_message = BSTRING_NEW("Incomplete ELF");
 static const BString drivers_prefix = BSTRING_NEW("/sbin/drivers/");
+static const BString services_prefix = BSTRING_NEW("/sbin/services/");
+static const BString hundeschule_program = BSTRING_NEW("/sbin/hundeschule");
+static const BString hundeschule_boot_program = BSTRING_NEW("hundeschule");
 static const BString hundeschau_program = BSTRING_NEW("/sbin/hundeschau");
 static const BString hundeschau_boot_program = BSTRING_NEW("hundeschau");
 static const BString hundebus_program = BSTRING_NEW("/sbin/drivers/hundebus");
 static const BString virtio_blk_program = BSTRING_NEW("/sbin/drivers/virtio_blk");
+static const BString sdhci_program = BSTRING_NEW("/sbin/drivers/sdhci");
 static const BString uart_rx_program = BSTRING_NEW("/sbin/drivers/uart_rx");
 static const BString uart_tx_program = BSTRING_NEW("/sbin/drivers/uart_tx");
 
 static bool Exec__is_hund_owned_program(ConstBStringPtr path)
 {
     return BString__equals(path, &hundeschau_program)
+        || BString__equals(path, &hundeschule_program)
+        || BString__equals(path, &hundeschule_boot_program)
         || BString__equals(path, &hundeschau_boot_program)
         || BString__equals(path, &hundebus_program)
         || BString__equals(path, &virtio_blk_program)
+        || BString__equals(path, &sdhci_program)
         || BString__equals(path, &uart_rx_program)
         || BString__equals(path, &uart_tx_program);
 }
@@ -41,7 +48,8 @@ void Exec__apply_builtin_identity_policy(ProcessPtr self)
 
 static bool Exec__can_execute(OriginatingContext context, ConstBStringPtr path)
 {
-    if (!BString__starts_with(path, &drivers_prefix))
+    if (!BString__starts_with(path, &drivers_prefix)
+        && !BString__starts_with(path, &services_prefix))
     {
         return true;
     }

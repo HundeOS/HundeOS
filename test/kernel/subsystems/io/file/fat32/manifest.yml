@@ -7,6 +7,7 @@ manifest:
     - kernel/subsystems/io/block/*.c
     - kernel/subsystems/io/file/filesystem.c
     - kernel/subsystems/io/file/filesystem_node.c
+    - kernel/subsystems/io/file/fat/*.c
     - kernel/subsystems/io/file/fat32/*.c
     - kernel/scheduler/kernel_context.c
     - kernel/mutex.c

@@ -11,6 +11,8 @@ static BString not_implemented = BSTRING_NEW("Operation not implemented");
 static BString end_of_file = BSTRING_NEW("End pf file");
 static const BString drivers_name = BSTRING_NEW("drivers");
 static const BString drivers_prefix = BSTRING_NEW("drivers/");
+static const BString services_name = BSTRING_NEW("services");
+static const BString services_prefix = BSTRING_NEW("services/");
 
 static BString EmbeddedFileIO__relative_path(BString path)
 {
@@ -61,18 +63,23 @@ static void EmbeddedFileIO__metadata_for_child(
     FilesystemPermissions * mode
 )
 {
-    bool is_driver_path = false;
+    bool is_hund_path = false;
 
     if (BString__length(&parent_path) == 0)
     {
-        is_driver_path = is_directory && BString__equals(&child_name, &drivers_name);
+        is_hund_path = is_directory
+            && (BString__equals(&child_name, &drivers_name) || BString__equals(&child_name, &services_name));
     }
     else if (BString__equals(&parent_path, &drivers_name) || BString__starts_with(&parent_path, &drivers_prefix))
     {
-        is_driver_path = true;
+        is_hund_path = true;
+    }
+    else if (BString__equals(&parent_path, &services_name) || BString__starts_with(&parent_path, &services_prefix))
+    {
+        is_hund_path = true;
     }
 
-    if (is_driver_path)
+    if (is_hund_path)
     {
         *user_id = PROCESS_USER_HUND;
         *group_id = PROCESS_GROUP_HUND;

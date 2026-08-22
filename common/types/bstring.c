@@ -27,6 +27,24 @@ static char BString__hex_digit(unsigned int value)
     return (char) ('a' + value - 10);
 }
 
+static uint64_t BString__parse_digit_value(char ch)
+{
+    if (ch >= '0' && ch <= '9')
+    {
+        return (uint64_t) (ch - '0');
+    }
+    if (ch >= 'a' && ch <= 'z')
+    {
+        return (uint64_t) (10 + ch - 'a');
+    }
+    if (ch >= 'A' && ch <= 'Z')
+    {
+        return (uint64_t) (10 + ch - 'A');
+    }
+
+    return 36;
+}
+
 static void BString__append_cstr_mut(BStringPtr self, const char * text)
 {
     for (StringPos i = 0; text[i] != '\0'; i++)
@@ -450,21 +468,59 @@ BString BString__uppercase(ConstBStringPtr self)
 
 Optional(uint64_t) BString__parse_uint64(ConstBStringPtr self)
 {
+    return BString__parse_uint64_base(self, 10);
+}
+
+Optional(uint64_t) BString__parse_uint64_base(ConstBStringPtr self, uint64_t base)
+{
     if (self->len == 0)
     {
         return None(uint64_t);
     }
 
+    BString stripped = BString__strip(self);
+    StringPos position = 0;
+    bool saw_digit = false;
     uint64_t result = 0;
-    for (StringPos i = 0; i < self->len; i++)
+
+    if (base == 0)
     {
-        char ch = self->data[i];
-        if (ch < '0' || ch > '9')
+        base = 10;
+        if (stripped.len >= 2 && stripped.data[0] == '0' && (stripped.data[1] == 'x' || stripped.data[1] == 'X'))
+        {
+            base = 16;
+            position = 2;
+        }
+        else if (stripped.len > 1 && stripped.data[0] == '0')
+        {
+            base = 8;
+        }
+    }
+    else if (base == 16 && stripped.len >= 2 && stripped.data[0] == '0' && (stripped.data[1] == 'x' || stripped.data[1] == 'X'))
+    {
+        position = 2;
+    }
+
+    if (base < 2 || base > 36)
+    {
+        return None(uint64_t);
+    }
+
+    for (StringPos i = position; i < stripped.len; i++)
+    {
+        uint64_t digit = BString__parse_digit_value(stripped.data[i]);
+        if (digit >= base)
         {
             return None(uint64_t);
         }
 
-        result = result * 10 + (uint64_t) (ch - '0');
+        result = (result * base) + digit;
+        saw_digit = true;
+    }
+
+    if (!saw_digit)
+    {
+        return None(uint64_t);
     }
 
     return Some(uint64_t, result);

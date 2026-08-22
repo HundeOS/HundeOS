@@ -91,6 +91,8 @@ BString ParkReason__to_string(ParkReason reason)
             return BSTRING_NEW("PARK_WAIT_SERVICE_EVENT");
         case PARK_WAIT_CHILD_EVENT:
             return BSTRING_NEW("PARK_WAIT_CHILD_EVENT");
+        case PARK_WAIT_SERVICE_READY:
+            return BSTRING_NEW("PARK_WAIT_SERVICE_READY");
         default:
             return BSTRING_NEW("PARK_WAIT_UNKNOWN");
     }

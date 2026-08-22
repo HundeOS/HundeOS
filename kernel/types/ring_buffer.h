@@ -19,6 +19,10 @@ static BString OVERFLOW_ERROR = BSTRING_NEW("Ring buffer overflow");
 static BString OVERFLOW_AVOIDED_ERROR = BSTRING_NEW("Ring buffer overflow would occur");
 static BString UNDERFLOW_ERROR = BSTRING_NEW("Ring buffer underflow");
 
+#ifndef RING_BUFFER_DEBUG_PRINTF
+#define RING_BUFFER_DEBUG_PRINTF(level, str, ...) __d_printf(level, str, ##__VA_ARGS__)
+#endif
+
 typedef enum RingBufferError {
     RING_BUFFER_OVERFLOW = -1,
     RING_BUFFER_UNDERFLOW = -2,
@@ -30,6 +34,16 @@ typedef enum RingBufferError {
         .write_pos = 0, \
         .buffer_size = RingBuffer__##alias##__size, \
     } \
+
+#define RingBufferIterate(alias, ring_buffer, index, value) \
+    for (size_t index = 0; index < alias##__item_count(&(ring_buffer)); index++) \
+    { \
+        Char value = (ring_buffer).buffer[((ring_buffer).read_pos + index) % (ring_buffer).buffer_size]; \
+
+#define RingBufferPtrIterate(alias, ring_buffer, index, value) \
+    for (size_t index = 0; index < alias##__item_count(ring_buffer); index++) \
+    { \
+        Char value = (ring_buffer)->buffer[((ring_buffer)->read_pos + index) % (ring_buffer)->buffer_size]; \
 
 #define RingBufferDefine(size, alias) \
     static const size_t RingBuffer__##alias##__size = size; \
@@ -59,12 +73,24 @@ typedef enum RingBufferError {
     RingBufferResetDefine(alias) \
     RingBufferItemCountDefine(alias) \
 
+#define RingBufferStackBodyDefine(alias) \
+    RingBufferStackConstructorDefine(alias) \
+    RingBufferPushDefine(alias) \
+    RingBufferPopDefine(alias) \
+    RingBufferDrainDefine(alias) \
+    RingBufferResetDefine(alias) \
+    RingBufferItemCountDefine(alias) \
+
 
 #define RingBufferConstructorPreDefine(alias) \
     alias alias##__new(); \
     alias##Ptr alias##__heap_new(); \
 
 #define RingBufferConstructorDefine(alias) \
+    RingBufferStackConstructorDefine(alias) \
+    RingBufferHeapConstructorDefine(alias) \
+
+#define RingBufferStackConstructorDefine(alias) \
     alias alias##__new() \
     { \
         return (alias) { \
@@ -73,7 +99,8 @@ typedef enum RingBufferError {
             .buffer_size = RingBuffer__##alias##__size,\
         }; \
     } \
-    \
+
+#define RingBufferHeapConstructorDefine(alias) \
     alias##Ptr alias##__heap_new() \
     { \
         alias##Ptr buf = v_ptr(Kernel__alloc(sizeof(alias)), alias); \
@@ -95,7 +122,7 @@ typedef enum RingBufferError {
         \
         if ((self->write_pos - self->read_pos) >= self->buffer_size) \
         { \
-            __d_printf(DEBUG, "overflow %i %i\n", self->write_pos, self->read_pos); \
+            RING_BUFFER_DEBUG_PRINTF(DEBUG, "overflow %i %i\n", self->write_pos, self->read_pos); \
             return Error(Pos, OVERFLOW_ERROR, RING_BUFFER_OVERFLOW); \
         } \
         \
@@ -111,13 +138,13 @@ typedef enum RingBufferError {
         \
         if ((self->write_pos - self->read_pos) >= self->buffer_size) \
         { \
-            __d_printf(DEBUG, "overflow %i %i\n", self->write_pos, self->read_pos); \
+            RING_BUFFER_DEBUG_PRINTF(DEBUG, "overflow %i %i\n", self->write_pos, self->read_pos); \
             return Error(Pos, OVERFLOW_ERROR, RING_BUFFER_OVERFLOW); \
         } \
         \
         if ((self->write_pos + (size - 1) - self->read_pos) >= self->buffer_size) \
         { \
-            __d_printf(DEBUG, "overflow %i %i\n", self->write_pos + size, self->read_pos); \
+            RING_BUFFER_DEBUG_PRINTF(DEBUG, "overflow %i %i\n", self->write_pos + size, self->read_pos); \
             return Error(Pos, OVERFLOW_AVOIDED_ERROR, RING_BUFFER_OVERFLOW); \
         } \
         \
@@ -140,7 +167,7 @@ typedef enum RingBufferError {
     { \
         if ((self->write_pos - self->read_pos) <= 0) \
         { \
-            __d_printf(DEBUG, "overflow %i %i\n", self->write_pos, self->read_pos); \
+            RING_BUFFER_DEBUG_PRINTF(DEBUG, "overflow %i %i\n", self->write_pos, self->read_pos); \
             return Error(Char, UNDERFLOW_ERROR, RING_BUFFER_UNDERFLOW); \
         } \
         Pos pos = self->read_pos % self->buffer_size; \
@@ -182,7 +209,7 @@ typedef enum RingBufferError {
 #define RingBufferDrainDefine(alias) \
     Result(ItemCount) alias##__drain(alias##Ptr self, CharPtr drain, size_t max) \
     { \
-        for (int i = 0; i < max; i++) \
+        for (size_t i = 0; i < max; i++) \
         {\
             ResultMatch(Char, alias##__pop(self))\
                 IsSuccess(val, drain[i] = val;)\

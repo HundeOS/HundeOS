@@ -68,6 +68,12 @@ void * Ext2FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, 
     return 0;
 }
 
+BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries() __attribute__((weak));
+BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
+{
+    return EmptyArray(BlockDeviceMetadataEntries);
+}
+
 BString embedded = BSTRING_NEW("sbin");
 BString dev = BSTRING_NEW("dev");
 BString fat16 = BSTRING_NEW("fat16");
@@ -76,10 +82,65 @@ BString ext2 = BSTRING_NEW("ext2");
 BString memfs = BSTRING_NEW("tmp/memfs");
 BString proc = BSTRING_NEW("proc");
 
+#define BOOT_CONFIG_BLOCK_COUNT ((uint64_t) 8 * 1024 * 1024 / BLOCK_DEVICE_BLOCK_SIZE)
+
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path) __attribute__((weak));
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path)
 {
     return None(BlockDevicePtr);
+}
+
+static Result(IOStatus) Filesystem__mount_resolved_block_device(
+    FilesystemPtr root_fs, BlockDevicePtr device, BString filesystem_type, BString mountpoint
+)
+{
+    Optional(FilesystemPtr) filesystem = None(FilesystemPtr);
+
+    if (BString__equals(&filesystem_type, &fat16) && Fat16FilesystemIO__available())
+    {
+        FilesystemPtr fat_filesystem = Filesystem__heap_new(mountpoint, Fat16FilesystemIO__new());
+        Fat16FilesystemIOState__heap_new(fat_filesystem, device, 0);
+        filesystem = Some(FilesystemPtr, fat_filesystem);
+    }
+    else if (BString__equals(&filesystem_type, &fat32) && Fat32FilesystemIO__available())
+    {
+        FilesystemPtr fat_filesystem = Filesystem__heap_new(mountpoint, Fat32FilesystemIO__new());
+        Fat32FilesystemIOState__heap_new(fat_filesystem, device, 0);
+        filesystem = Some(FilesystemPtr, fat_filesystem);
+    }
+    else if (BString__equals(&filesystem_type, &ext2) && Ext2FilesystemIO__available())
+    {
+        FilesystemPtr ext2_filesystem = Filesystem__heap_new(mountpoint, Ext2FilesystemIO__new());
+        Ext2FilesystemIOState__heap_new(ext2_filesystem, device, 0);
+        filesystem = Some(FilesystemPtr, ext2_filesystem);
+    }
+
+    Match(FilesystemPtr, filesystem)
+        IsSome(mounted_filesystem,
+        {
+            ResultMatch(MountResult, Filesystem__mount(root_fs, mountpoint, mounted_filesystem))
+                IsSuccess(_, return Success(IOStatus, IO_OK))
+                IsError(code, message, return Error(IOStatus, message, code))
+            End
+        })
+    End
+
+    return Error(IOStatus, bstring("Filesystem type not supported"), IO_OPERATION_NOT_SUPPORTED);
+}
+
+Result(IOStatus) Filesystem__mount_block_device(
+    FilesystemPtr root_fs, BString device_path, BString filesystem_type, BString mountpoint
+)
+{
+    Match(FilesystemPtr, Mounts__get(&root_fs->mounts, mountpoint))
+        IsSome(existing, return Success(IOStatus, IO_OK))
+    End
+
+    Match(BlockDevicePtr, BlockDeviceRegistry__find(device_path))
+        IsSome(device, return Filesystem__mount_resolved_block_device(root_fs, device, filesystem_type, mountpoint))
+    End
+
+    return Error(IOStatus, bstring("Block device not found"), IO_INVALID_PATH);
 }
 
 static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableEntryPtr entry)
@@ -88,34 +149,24 @@ static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableE
         IsSome(existing, return)
     End
 
-    Optional(FilesystemPtr) filesystem = None(FilesystemPtr);
+    Optional(BlockDevicePtr) device_match = None(BlockDevicePtr);
+    if (entry->match_block_count)
+    {
+        BlockDeviceMetadataEntries metadata_entries = BlockDeviceRegistry__metadata_entries();
+        FAIterate(BlockDeviceMetadataEntries, metadata_entries, index, metadata)
+            if (metadata.block_count == entry->block_count)
+            {
+                device_match = BlockDeviceRegistry__find(metadata.path);
+            }
+        End
+    }
+    else
+    {
+        device_match = BlockDeviceRegistry__find(entry->device_path);
+    }
 
-    Match(BlockDevicePtr, BlockDeviceRegistry__find(entry->device_path))
-        IsSome(device,
-        {
-            if (BString__equals(&entry->filesystem_type, &fat16) && Fat16FilesystemIO__available())
-            {
-                FilesystemPtr fat_filesystem = Filesystem__heap_new(entry->mountpoint, Fat16FilesystemIO__new());
-                void * state = Fat16FilesystemIOState__heap_new(fat_filesystem, device, 0);
-                filesystem = Some(FilesystemPtr, fat_filesystem);
-            }
-            else if (BString__equals(&entry->filesystem_type, &fat32) && Fat32FilesystemIO__available())
-            {
-                FilesystemPtr fat_filesystem = Filesystem__heap_new(entry->mountpoint, Fat32FilesystemIO__new());
-                void * state = Fat32FilesystemIOState__heap_new(fat_filesystem, device, 0);
-                filesystem = Some(FilesystemPtr, fat_filesystem);
-            }
-            else if (BString__equals(&entry->filesystem_type, &ext2) && Ext2FilesystemIO__available())
-            {
-                FilesystemPtr ext2_filesystem = Filesystem__heap_new(entry->mountpoint, Ext2FilesystemIO__new());
-                void * state = Ext2FilesystemIOState__heap_new(ext2_filesystem, device, 0);
-                filesystem = Some(FilesystemPtr, ext2_filesystem);
-            }
-        })
-    End
-
-    Match(FilesystemPtr, filesystem)
-        IsSome(mounted_filesystem, Filesystem__mount(root_fs, entry->mountpoint, mounted_filesystem))
+    Match(BlockDevicePtr, device_match)
+        IsSome(device, Filesystem__mount_resolved_block_device(root_fs, device, entry->filesystem_type, entry->mountpoint))
     End
 }
 
@@ -131,9 +182,19 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
         IsError(code, message, return Error(CollectionCode, message, code))
     End
 
+    ResultMatch(CollectionCode, FilesystemTable__add_by_block_count(
+        self,
+        BOOT_CONFIG_BLOCK_COUNT,
+        BSTRING_NEW("ext2"),
+        BSTRING_NEW("/boot/config")
+    ))
+        IsSuccess(index, {})
+        IsError(code, message, return Error(CollectionCode, message, code))
+    End
+
     ResultMatch(CollectionCode, FilesystemTable__add(
         self,
-        BSTRING_NEW("/dev/virtio2"),
+        BSTRING_NEW("/dev/virtio3"),
         BSTRING_NEW("fat32"),
         BSTRING_NEW("/mnt/fs1")
     ))

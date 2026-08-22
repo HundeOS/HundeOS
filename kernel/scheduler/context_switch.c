@@ -28,13 +28,8 @@ static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
                         Result(Anything) res = continuation(parked_operation);
                         if (Process__is_parked(self))
                         {
-                            Match(ParkedOperationPtr, Process__top_parked_operation(self))
-                                IsSome(top_context,
-                                {
-                                    Match(SchedulerPtr, top_context->kernel_context->scheduler)
-                                        IsSome(scheduler, Scheduler__yield_waiting(scheduler, self, CPU__id() - 1))
-                                    End
-                                })
+                            Match(SchedulerPtr, Process__top_parked_operation_scheduler(self))
+                                IsSome(scheduler, Scheduler__yield_waiting(scheduler, self, CPU__id() - 1))
                             End
                         }
 

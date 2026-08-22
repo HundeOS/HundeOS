@@ -6,10 +6,11 @@
 #include <stdint.h>
 
 #include "../../common/types/bstring.h"
+#include "../../common/types/dyn_string.h"
 #include "io.h"
 
 #define PCI_CONFIG_PATH "/proc/sysinfo"
-#define PCI_CONFIG_SYSINFO_SIZE 32768
+#define PCI_CONFIG_MAX 32768
 
 typedef struct PciConfig
 {
@@ -22,69 +23,30 @@ PciConfig;
 
 typedef PciConfig * PciConfigPtr;
 
-static uint64_t PciConfig__digit_value(char ch)
+typedef struct PciConfigParseState
 {
-    if (ch >= '0' && ch <= '9')
-    {
-        return (uint64_t) (ch - '0');
-    }
-    if (ch >= 'a' && ch <= 'f')
-    {
-        return (uint64_t) (10 + ch - 'a');
-    }
-    if (ch >= 'A' && ch <= 'F')
-    {
-        return (uint64_t) (10 + ch - 'A');
-    }
-
-    return 16;
+    PciConfig config;
+    bool found_present;
+    bool found_ecam_physical_base;
+    bool found_ecam_size;
+    bool found_bus_start;
+    bool found_bus_end;
 }
+PciConfigParseState;
 
-static Optional(uint64_t) PciConfig__parse_uint64(ConstBStringPtr text)
+typedef PciConfigParseState * PciConfigParseStatePtr;
+typedef const PciConfigParseState * ConstPciConfigParseStatePtr;
+
+static const BString pci_config_delimiter = BSTRING_NEW("=");
+static const BString pci_config_present_key = BSTRING_NEW("pci.present");
+static const BString pci_config_ecam_physical_base_key = BSTRING_NEW("pci.ecam.physical_base");
+static const BString pci_config_ecam_size_key = BSTRING_NEW("pci.ecam.size");
+static const BString pci_config_bus_start_key = BSTRING_NEW("pci.bus.start");
+static const BString pci_config_bus_end_key = BSTRING_NEW("pci.bus.end");
+
+static Optional(uint64_t) PciConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key)
 {
-    uint64_t base = 10;
-    uint64_t parsed = 0;
-    bool saw_digit = false;
-    BString stripped = BString__strip(text);
-
-    Match(char, BString__char_at(&stripped, 0))
-        IsSome(first,
-        {
-            Match(char, BString__char_at(&stripped, 1))
-                IsSome(second,
-                {
-                    if (first == '0' && (second == 'x' || second == 'X'))
-                    {
-                        base = 16;
-                        stripped = BString__slice(&stripped, 2, -1);
-                    }
-                })
-            End
-        })
-    End
-
-    BStringIterate(&stripped, index, ch)
-        uint64_t digit = PciConfig__digit_value(ch);
-        if (digit >= base)
-        {
-            return None(uint64_t);
-        }
-        parsed = (parsed * base) + digit;
-        saw_digit = true;
-    }
-
-    if (!saw_digit)
-    {
-        return None(uint64_t);
-    }
-
-    return Some(uint64_t, parsed);
-}
-
-static bool PciConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key, uint64_t * value)
-{
-    BString delimiter = BSTRING_NEW("=");
-    BStringSplit split = BString__split_first_any(line, &delimiter);
+    BStringSplit split = BString__split_first_any(line, &pci_config_delimiter);
     bool matched = false;
 
     Match(BString, split.match)
@@ -97,148 +59,128 @@ static bool PciConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key
 
     if (!matched)
     {
-        return false;
+        return None(uint64_t);
     }
 
-    Match(uint64_t, PciConfig__parse_uint64(&split.rest))
-        IsSome(parsed,
+    return BString__parse_uint64_base(&split.rest, 0);
+}
+
+static PciConfigParseState PciConfigParseState__new(void)
+{
+    PciConfigParseState self = { 0 };
+
+    return self;
+}
+
+static PciConfigParseState PciConfigParseState__read_config_line(PciConfigParseState self, ConstBStringPtr line)
+{
+    if (!self.found_present)
+    {
+        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_present_key))
+            IsSome(parsed, self.found_present = parsed == 1)
+        End
+    }
+    if (!self.found_ecam_physical_base)
+    {
+        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_ecam_physical_base_key))
+            IsSome(parsed,
+            {
+                self.config.ecam_physical_base = parsed;
+                self.found_ecam_physical_base = true;
+            })
+        End
+    }
+    if (!self.found_ecam_size)
+    {
+        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_ecam_size_key))
+            IsSome(parsed,
+            {
+                self.config.ecam_size = parsed;
+                self.found_ecam_size = true;
+            })
+        End
+    }
+    if (!self.found_bus_start)
+    {
+        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_bus_start_key))
+            IsSome(parsed,
+            {
+                self.config.bus_start = parsed;
+                self.found_bus_start = true;
+            })
+        End
+    }
+    if (!self.found_bus_end)
+    {
+        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_bus_end_key))
+            IsSome(parsed,
+            {
+                self.config.bus_end = parsed;
+                self.found_bus_end = true;
+            })
+        End
+    }
+
+    return self;
+}
+
+static bool PciConfigParseState__has_required_fields(ConstPciConfigParseStatePtr self)
+{
+    return self->found_present
+        && self->found_ecam_physical_base
+        && self->found_ecam_size
+        && self->found_bus_start
+        && self->found_bus_end;
+}
+
+static bool PciConfig__read_config(ConstDynStringPtr sysinfo, PciConfigPtr self)
+{
+    PciConfigParseState state = PciConfigParseState__new();
+
+    Match(DynStringLines, DynString__lines(sysinfo))
+        IsSome(lines,
         {
-            *value = parsed;
-            return true;
+            LLIterate(DynStringLines, lines, line)
+                Match(BString, DynString__bstring(&line))
+                    IsSome(bstring_line, state = PciConfigParseState__read_config_line(state, &bstring_line))
+                End
+            End
+
+            DynStringLines__dispose_all(&lines);
         })
     End
 
-    return false;
-}
-
-static void PciConfig__read_config_line(
-    ConstBStringPtr line,
-    PciConfigPtr self,
-    bool * found_present,
-    bool * found_ecam_physical_base,
-    bool * found_ecam_size,
-    bool * found_bus_start,
-    bool * found_bus_end)
-{
-    BString present_key = BSTRING_NEW("pci.present");
-    BString ecam_physical_base_key = BSTRING_NEW("pci.ecam.physical_base");
-    BString ecam_size_key = BSTRING_NEW("pci.ecam.size");
-    BString bus_start_key = BSTRING_NEW("pci.bus.start");
-    BString bus_end_key = BSTRING_NEW("pci.bus.end");
-    uint64_t parsed = 0;
-
-    if (!*found_present && PciConfig__read_line_value(line, &present_key, &parsed))
+    if (!PciConfigParseState__has_required_fields(&state))
     {
-        *found_present = parsed == 1;
-    }
-    if (!*found_ecam_physical_base && PciConfig__read_line_value(line, &ecam_physical_base_key, &self->ecam_physical_base))
-    {
-        *found_ecam_physical_base = true;
-    }
-    if (!*found_ecam_size && PciConfig__read_line_value(line, &ecam_size_key, &self->ecam_size))
-    {
-        *found_ecam_size = true;
-    }
-    if (!*found_bus_start && PciConfig__read_line_value(line, &bus_start_key, &self->bus_start))
-    {
-        *found_bus_start = true;
-    }
-    if (!*found_bus_end && PciConfig__read_line_value(line, &bus_end_key, &self->bus_end))
-    {
-        *found_bus_end = true;
-    }
-}
-
-static bool PciConfig__has_required_fields(
-    bool found_present,
-    bool found_ecam_physical_base,
-    bool found_ecam_size,
-    bool found_bus_start,
-    bool found_bus_end)
-{
-    return found_present
-        && found_ecam_physical_base
-        && found_ecam_size
-        && found_bus_start
-        && found_bus_end;
-}
-
-static bool PciConfig__read_config(char * sysinfo, ByteCount bytes, PciConfigPtr self)
-{
-    BString line = EMPTY_BSTRING;
-    bool found_present = false;
-    bool found_ecam_physical_base = false;
-    bool found_ecam_size = false;
-    bool found_bus_start = false;
-    bool found_bus_end = false;
-
-    for (ByteCount index = 0; index < bytes; index++)
-    {
-        if (sysinfo[index] == '\n')
-        {
-            PciConfig__read_config_line(
-                &line,
-                self,
-                &found_present,
-                &found_ecam_physical_base,
-                &found_ecam_size,
-                &found_bus_start,
-                &found_bus_end);
-            BString__clear(&line);
-        }
-        else if (!BString__push_char(&line, sysinfo[index]))
-        {
-            BString__clear(&line);
-        }
-
-        if (PciConfig__has_required_fields(
-            found_present,
-            found_ecam_physical_base,
-            found_ecam_size,
-            found_bus_start,
-            found_bus_end))
-        {
-            return true;
-        }
+        return false;
     }
 
-    if (!BString__is_empty(&line))
-    {
-        PciConfig__read_config_line(
-            &line,
-            self,
-            &found_present,
-            &found_ecam_physical_base,
-            &found_ecam_size,
-            &found_bus_start,
-            &found_bus_end);
-    }
+    *self = state.config;
 
-    return PciConfig__has_required_fields(
-        found_present,
-        found_ecam_physical_base,
-        found_ecam_size,
-        found_bus_start,
-        found_bus_end);
+    return true;
 }
 
 static bool PciConfig__load(PciConfigPtr self)
 {
-    char sysinfo[PCI_CONFIG_SYSINFO_SIZE];
     IOHandle handle = open(PCI_CONFIG_PATH, IO_OPEN_READ);
     if (handle < 0)
     {
         return false;
     }
 
-    ByteCount bytes = read(handle, sysinfo, sizeof(sysinfo) - 1);
+    Optional(DynString) sysinfo = IO__read_dyn_string(handle, PCI_CONFIG_MAX);
     close(handle);
-    if (bytes <= 0)
-    {
-        return false;
-    }
 
-    return PciConfig__read_config(sysinfo, bytes, self);
+    Match(DynString, sysinfo)
+        IsSome(data,
+        {
+            bool loaded = PciConfig__read_config(&data, self);
+            DynString__dispose(&data);
+            return loaded;
+        })
+    End
+
+    return false;
 }
 
 #endif

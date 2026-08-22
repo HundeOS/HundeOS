@@ -38,6 +38,14 @@ static void test_resume_process(ProcessPtr process)
     ContextSwitch__switch(ContextSwitch__new(process, None(ProcessPtr)));
 }
 
+static ServiceReadyRequest test_ready_request(const char * name)
+{
+    ServiceReadyRequest request = {};
+    BString ready_name = bstring(name);
+    BString__copy_to(&ready_name, request.name, SERVICE_READY_NAME_MAX);
+    return request;
+}
+
 void Arch__reset_irq_tracking();
 uint64_t Arch__mask_count();
 uint64_t Arch__unmask_count();
@@ -242,6 +250,60 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
     TEST_ASSERT_EQUAL(7, target.source);
     TEST_ASSERT_EQUAL(11, target.data);
     TEST_ASSERT_EQUAL(0, ServiceEvents__len(&process->service.events));
+}
+
+void test_service_handler_wait_ready_returns_immediately_when_name_was_published(void)
+{
+    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
+    process->process_class = PROCESS_CLASS_SERVICE;
+    ServiceReadyRequest request = test_ready_request("/dev/mmc0");
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, process), SERVICE_PUBLISH_READY, (Anything) &request, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, process), SERVICE_WAIT_READY, (Anything) &request, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_service_handler_publish_ready_unparks_waiter(void)
+{
+    ProcessPtr waiter = dummy_process(1, cpu, PROC_STATE_READY);
+    waiter->process_class = PROCESS_CLASS_SERVICE;
+    ProcessPtr publisher = dummy_process(2, cpu, PROC_STATE_READY);
+    publisher->process_class = PROCESS_CLASS_SERVICE;
+    ServiceReadyRequest request = test_ready_request("/dev/mmc0");
+
+    Scheduler__schedule(kernel->scheduler, waiter);
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, waiter), SERVICE_WAIT_READY, (Anything) &request, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_FAIL())
+        IsError(code, message, TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code))
+    End
+
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, waiter->state);
+
+    ResultMatch(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, publisher), SERVICE_PUBLISH_READY, (Anything) &request, 0, 0, 0
+    ))
+        IsSuccess(code, TEST_ASSERT_EQUAL(SERVICE_OK, code))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, waiter->state);
+
+    test_resume_process(waiter);
+
+    TEST_ASSERT_EQUAL(SERVICE_OK, ResultUnwrap(Anything, deferred_syscall_result(), (Anything) -999));
 }
 
 void test_service_handler_wait_completes_previous_irq_before_next_wait(void)

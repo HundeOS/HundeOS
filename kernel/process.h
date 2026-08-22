@@ -10,6 +10,7 @@
 #include "types/fixed_array.h"
 #include "types/bstring_additional_types.h"
 #include "types/linked_list.h"
+#include "mutex.h"
 #include "syscalls/io.h"
 #include "../common_includes/syscalls/process.h"
 #include "syscalls/spawn.h"
@@ -197,6 +198,7 @@ OptionalDef(ProcessPtr);
 ResultDef(ProcessPtr);
 
 typedef struct Process {
+    mutex_t lock;
     KernelPtr kernel;
     KernelAddress page_table;
 
@@ -244,9 +246,14 @@ OptionalType(ProcessTable *, ProcessTablePtr);
 Result(ProcessPtr) Process__setup(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent);
 Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments);
 Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation);
-Optional(ParkedOperationPtr) Process__top_parked_operation(ProcessPtr self);
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self);
 Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self);
+Optional(ParkReason) Process__top_park_reason(ProcessPtr self);
+Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self);
+bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key);
+bool Process__mark_parked_operation_ready(
+    ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key, Optional(ReturnCode) return_code
+);
 bool Process__is_parked(ProcessPtr self);
 bool Process__is_handling_service_irq(ProcessPtr self);
 void Process__set_identity(ProcessPtr self, UserID user_id, GroupID group_id, ProcessCapabilities capabilities);

@@ -117,7 +117,7 @@ void test_exec_wait_schedules_child_on_parent_cpu(void)
 
 void test_exec_marks_hundeschau_as_hund_identity(void)
 {
-    BString path = BSTRING_NEW("hundeschau");
+    BString path = BSTRING_NEW("/sbin/hundeschau");
     CallContext syscall_context = CallContext__new(
         Some(ProcessPtr, parent), SYSCALL_EXEC, (Anything) cstr(path), 0, 0, 0, 0
     );
@@ -137,6 +137,28 @@ void test_exec_apply_builtin_identity_policy_marks_boot_hundeschau_as_hund(void)
 {
     ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
     process->name = BSTRING_NEW("hundeschau");
+
+    Exec__apply_builtin_identity_policy(process);
+
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, process->user_id);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_HUND, process->group_id);
+}
+
+void test_exec_apply_builtin_identity_policy_marks_boot_hundeschule_as_hund(void)
+{
+    ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
+    process->name = BSTRING_NEW("hundeschule");
+
+    Exec__apply_builtin_identity_policy(process);
+
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, process->user_id);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_HUND, process->group_id);
+}
+
+void test_exec_apply_builtin_identity_policy_marks_sdhci_as_hund(void)
+{
+    ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
+    process->name = BSTRING_NEW("/sbin/drivers/sdhci");
 
     Exec__apply_builtin_identity_policy(process);
 
@@ -178,5 +200,31 @@ void test_exec_as_denies_unprivileged_identity_switch(void)
     ))
         IsError(code, message, TEST_ASSERT_EQUAL(SPAWN_FAILED, code))
         IsSuccess(spawned_process, TEST_FAIL())
+    End
+}
+
+void test_exec_denies_service_path_to_user_process(void)
+{
+    Process__set_user_identity(parent);
+    BString path = BSTRING_NEW("/sbin/services/humpen");
+
+    ResultMatch(ProcessPtr, Exec__exec(context, path, false, ProcessArguments__new()))
+        IsError(code, message, TEST_ASSERT_EQUAL(SPAWN_FAILED, code))
+        IsSuccess(spawned_process, TEST_FAIL())
+    End
+}
+
+void test_exec_allows_service_path_to_hund_process(void)
+{
+    Process__set_hund_identity(parent);
+    BString path = BSTRING_NEW("/sbin/services/humpen");
+
+    ResultMatch(ProcessPtr, Exec__exec(context, path, false, ProcessArguments__new()))
+        IsError(code, message, TEST_FAIL())
+        IsSuccess(spawned_process,
+        {
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, spawned_process->user_id);
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_HUND, spawned_process->group_id);
+        })
     End
 }

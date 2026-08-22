@@ -49,6 +49,10 @@ static BString pci_ecam_size_key = BSTRING_NEW("pci.ecam.size");
 static BString pci_ecam_size_human_key = BSTRING_NEW("pci.ecam.size_human");
 static BString pci_bus_start_key = BSTRING_NEW("pci.bus.start");
 static BString pci_bus_end_key = BSTRING_NEW("pci.bus.end");
+static BString sd_host_present_key = BSTRING_NEW("sd_host.present");
+static BString sd_host_physical_base_key = BSTRING_NEW("sd_host.physical_base");
+static BString sd_host_mmio_size_key = BSTRING_NEW("sd_host.mmio_size");
+static BString sd_host_irq_key = BSTRING_NEW("sd_host.irq");
 static BString memory_physical_start_key = BSTRING_NEW("memory.physical_start");
 static BString memory_physical_end_key = BSTRING_NEW("memory.physical_end");
 static BString memory_physical_size_key = BSTRING_NEW("memory.physical_size");
@@ -306,6 +310,20 @@ static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, Optional(Pc
     End
 }
 
+static void ProcSysinfoWriter__append_sd_host(ProcSysinfoWriterPtr self, Optional(SdHostInfo) sd_host)
+{
+    Match(SdHostInfo, sd_host)
+        IsSome(info,
+        {
+            ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 1);
+            ProcSysinfoWriter__append_hex_line(self, &sd_host_physical_base_key, info.physical_base);
+            ProcSysinfoWriter__append_hex_line(self, &sd_host_mmio_size_key, info.mmio_size);
+            ProcSysinfoWriter__append_dec_line(self, &sd_host_irq_key, info.irq);
+        })
+        IsNone(ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 0);)
+    End
+}
+
 static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
     SystemInfoPtr info,
     IOBufferPtr buffer,
@@ -322,6 +340,7 @@ static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
     ProcSysinfoWriter__append_hex_line(&writer, &uart_mmio_size_key, 0x1000);
     ProcSysinfoWriter__append_framebuffer(&writer, info->framebuffer);
     ProcSysinfoWriter__append_pci(&writer, info->pci);
+    ProcSysinfoWriter__append_sd_host(&writer, info->sd_host);
     ProcSysinfoWriter__append_hex_line(&writer, &memory_physical_start_key, info->physical_memory.physical_start);
     ProcSysinfoWriter__append_hex_line(&writer, &memory_physical_end_key, info->physical_memory.physical_end);
     uint64_t physical_size = info->physical_memory.physical_end - info->physical_memory.physical_start;

@@ -66,6 +66,14 @@ typedef struct PciInfo {
 
 OptionalDef(PciInfo);
 
+typedef struct SdHostInfo {
+    Address physical_base;
+    uint64_t mmio_size;
+    uint64_t irq;
+} SdHostInfo;
+
+OptionalDef(SdHostInfo);
+
 typedef struct GicInfo {
     Address distributor_physical_base;
     Address distributor_virtual_base;
@@ -108,6 +116,7 @@ typedef struct SystemInfo {
     UartInfo uart;
     Optional(FramebufferInfo) framebuffer;
     Optional(PciInfo) pci;
+    Optional(SdHostInfo) sd_host;
     GicInfo gic;
     InterruptControllerInfo interrupt_controller;
 } SystemInfo;
@@ -119,6 +128,7 @@ typedef PhysicalMemoryRegion * PhysicalMemoryRegionPtr;
 typedef UartInfo * UartInfoPtr;
 typedef FramebufferInfo * FramebufferInfoPtr;
 typedef PciInfo * PciInfoPtr;
+typedef SdHostInfo * SdHostInfoPtr;
 typedef GicInfo * GicInfoPtr;
 typedef PhysicalMemoryInfo * PhysicalMemoryInfoPtr;
 typedef InterruptControllerInfo * InterruptControllerInfoPtr;

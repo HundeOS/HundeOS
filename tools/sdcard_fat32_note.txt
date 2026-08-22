@@ -1,0 +1,1 @@
+Nested file on the FAT32 SD card test image.

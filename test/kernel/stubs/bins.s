@@ -8,7 +8,7 @@ ___embedded_binaries_start:
 __binaries_start:
     .long 0x31534645
     .short 1
-    .short 6
+    .short 9
     .long embedded_index - __embedded_binaries_start
     .long embedded_names - __embedded_binaries_start
     .long embedded_data - __embedded_binaries_start
@@ -34,7 +34,28 @@ embedded_index:
     .quad __bin_shell_start - __embedded_binaries_start
     .quad __bin_shell_end - __bin_shell_start
     .long embedded_name_shell - __embedded_binaries_start
-    .long embedded_name_virtio_blk - embedded_name_shell - 1
+    .long embedded_name_hundeschule - embedded_name_shell - 1
+    .long 0
+    .long 0
+
+    .quad __bin_hundeschule_start - __embedded_binaries_start
+    .quad __bin_hundeschule_end - __bin_hundeschule_start
+    .long embedded_name_hundeschule - __embedded_binaries_start
+    .long embedded_name_hundeschau - embedded_name_hundeschule - 1
+    .long 0
+    .long 0
+
+    .quad __bin_hundeschau_start - __embedded_binaries_start
+    .quad __bin_hundeschau_end - __bin_hundeschau_start
+    .long embedded_name_hundeschau - __embedded_binaries_start
+    .long embedded_name_humpen - embedded_name_hundeschau - 1
+    .long 0
+    .long 0
+
+    .quad __bin_humpen_start - __embedded_binaries_start
+    .quad __bin_humpen_end - __bin_humpen_start
+    .long embedded_name_humpen - __embedded_binaries_start
+    .long embedded_name_virtio_blk - embedded_name_humpen - 1
     .long 0
     .long 0
 
@@ -66,6 +87,12 @@ embedded_name_idle:
     .asciz "idle"
 embedded_name_shell:
     .asciz "shell"
+embedded_name_hundeschule:
+    .asciz "hundeschule"
+embedded_name_hundeschau:
+    .asciz "hundeschau"
+embedded_name_humpen:
+    .asciz "services/humpen"
 embedded_name_virtio_blk:
     .asciz "drivers/virtio_blk"
 embedded_name_uart_rx:
@@ -87,6 +114,18 @@ __bin_idle_end:
 __bin_shell_start:
     .incbin "../stubs/hello_world.bin"
 __bin_shell_end:
+    .balign 8
+__bin_hundeschule_start:
+    .incbin "../stubs/hello_world.bin"
+__bin_hundeschule_end:
+    .balign 8
+__bin_hundeschau_start:
+    .incbin "../stubs/hello_world.bin"
+__bin_hundeschau_end:
+    .balign 8
+__bin_humpen_start:
+    .incbin "../stubs/hello_world.bin"
+__bin_humpen_end:
     .balign 8
 __bin_virtio_blk_start:
     .incbin "../stubs/hello_world.bin"

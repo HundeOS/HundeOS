@@ -36,6 +36,11 @@ static void service_copy_path(char target[SERVICE_DEVICE_PATH_MAX], const char *
     target[i] = '\0';
 }
 
+static void service_copy_bstring(char target[SERVICE_READY_NAME_MAX], ConstBStringPtr source)
+{
+    BString__copy_to(source, target, SERVICE_READY_NAME_MAX);
+}
+
 ServiceCode service_wait(ServiceEventPtr event)
 {
     return (ServiceCode) syscall(SERVICE_CALL, SERVICE_WAIT, (Anything) event, 0, 0, 0);
@@ -126,6 +131,32 @@ ServiceCode service_device_address(void * driver_address, uint64_t * device_addr
 
     *device_address = request.device_address;
     return SERVICE_OK;
+}
+
+ServiceCode service_publish_ready(ConstBStringPtr name)
+{
+    if (name == 0)
+    {
+        return SERVICE_INVALID_BUFFER;
+    }
+
+    ServiceReadyRequest request = {};
+    service_copy_bstring(request.name, name);
+
+    return (ServiceCode) syscall(SERVICE_CALL, SERVICE_PUBLISH_READY, (Anything) &request, 0, 0, 0);
+}
+
+ServiceCode service_wait_ready(ConstBStringPtr name)
+{
+    if (name == 0)
+    {
+        return SERVICE_INVALID_BUFFER;
+    }
+
+    ServiceReadyRequest request = {};
+    service_copy_bstring(request.name, name);
+
+    return (ServiceCode) syscall(SERVICE_CALL, SERVICE_WAIT_READY, (Anything) &request, 0, 0, 0);
 }
 
 void * driver_ptr(ServiceMappedMemoryPtr memory)

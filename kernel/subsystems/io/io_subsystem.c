@@ -5,6 +5,7 @@
 #include "process.h"
 #include "kalloc.h"
 #include "arch/page_table.h"
+#include "file/register.h"
 #include "file/file_io.h"
 #include "../../types/result.h"
 #include "../../types/fixed_array.h"
@@ -341,6 +342,17 @@ Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, BString source_path, BSt
     End
 
     return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(source_path)), IO_NO_DEVICE_FOUND);
+}
+
+Result(IOStatus) IOSubsystem__mount(
+    IOSubsystemPtr self, BString device_path, BString filesystem_type, BString mountpoint
+)
+{
+    Match(FilesystemPtr, self->root_filesystem)
+        IsSome(root_fs, return Filesystem__mount_block_device(root_fs, device_path, filesystem_type, mountpoint))
+    End
+
+    return Error(IOStatus, bstring("No root filesystem"), IO_NO_DEVICE_FOUND);
 }
 
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)

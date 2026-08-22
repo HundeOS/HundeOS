@@ -36,6 +36,21 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
 }
 
 #include "../../../../user/sys/io.c"
+#include "../../../../user/sys/sd_host_config.h"
+
+static DynString dyn_string_from_cstr(const char * text)
+{
+    DynString string;
+    ResultMatch(DynStringCode, DynString__init(&string, 128))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    ResultMatch(DynStringCode, DynString__append_cstr(&string, text))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    return string;
+}
 
 void setUp(void)
 {
@@ -84,6 +99,25 @@ void test_io_read_populates_bstring_and_sets_length(void)
     TEST_ASSERT_EQUAL_INT64(3, buffer.len);
 }
 
+void test_io_read_dyn_string_returns_file_contents(void)
+{
+    next_read_data = "abc";
+    next_read_result = 3;
+
+    Match(DynString, IO__read_dyn_string(9, 16))
+        IsSome(text,
+        {
+            TEST_ASSERT_EQUAL(IO_CALL, last_call);
+            TEST_ASSERT_EQUAL(IO_READ, last_arg1);
+            TEST_ASSERT_EQUAL_INT64(9, last_arg2);
+            TEST_ASSERT_EQUAL_STRING("abc", DynString__cstr(&text));
+            TEST_ASSERT_EQUAL_INT64(3, DynString__length(&text));
+            DynString__dispose(&text);
+        })
+        IsNone(TEST_FAIL())
+    End
+}
+
 void test_io_write_uses_bstring_length(void)
 {
     BString value = bstring("hello");
@@ -125,4 +159,76 @@ void test_io_link_uses_bstring_paths(void)
     TEST_ASSERT_EQUAL(IO_LINK, last_arg1);
     TEST_ASSERT_EQUAL_STRING("/mnt/ext2fs/hello.txt", (const char *) last_arg2);
     TEST_ASSERT_EQUAL_STRING("/mnt/ext2fs/copy.txt", (const char *) last_arg3);
+}
+
+void test_io_mount_uses_bstring_paths(void)
+{
+    BString device_path = bstring("/dev/virtio3");
+    BString filesystem_type = bstring("fat32");
+    BString mountpoint = bstring("/mnt/fs1");
+    next_result = IO_OK;
+
+    IOStatus status = IO__mount_device(&device_path, &filesystem_type, &mountpoint);
+
+    TEST_ASSERT_EQUAL(IO_OK, status);
+    TEST_ASSERT_EQUAL(IO_CALL, last_call);
+    TEST_ASSERT_EQUAL(IO_MOUNT, last_arg1);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio3", (const char *) last_arg2);
+    TEST_ASSERT_EQUAL_STRING("fat32", (const char *) last_arg3);
+    TEST_ASSERT_EQUAL_STRING("/mnt/fs1", (const char *) last_arg4);
+}
+
+void test_sd_host_config_parse_reads_present_host(void)
+{
+    DynString sysinfo = dyn_string_from_cstr(
+        "machine=qemu_virt\n"
+        "sd_host.present=1\n"
+        "sd_host.physical_base=0xfe340000\n"
+        "sd_host.mmio_size=0x100\n"
+        "sd_host.irq=126\n"
+    );
+
+    Match(SdHostConfig, SdHostConfig__parse(&sysinfo))
+        IsSome(config,
+        {
+            TEST_ASSERT_EQUAL_HEX64(0xfe340000, config.physical_base);
+            TEST_ASSERT_EQUAL_HEX64(0x100, config.mmio_size);
+            TEST_ASSERT_EQUAL_UINT64(126, config.irq);
+        })
+        IsNone(TEST_FAIL())
+    End
+
+    DynString__dispose(&sysinfo);
+}
+
+void test_sd_host_config_parse_returns_none_when_host_absent(void)
+{
+    DynString sysinfo = dyn_string_from_cstr(
+        "sd_host.present=0\n"
+        "sd_host.physical_base=0xfe340000\n"
+        "sd_host.mmio_size=0x100\n"
+        "sd_host.irq=126\n"
+    );
+
+    Match(SdHostConfig, SdHostConfig__parse(&sysinfo))
+        IsSome(config, TEST_FAIL())
+    End
+
+    DynString__dispose(&sysinfo);
+}
+
+void test_sd_host_config_parse_rejects_partial_numeric_values(void)
+{
+    DynString sysinfo = dyn_string_from_cstr(
+        "sd_host.present=1\n"
+        "sd_host.physical_base=0xfe340000tail\n"
+        "sd_host.mmio_size=0x100\n"
+        "sd_host.irq=126\n"
+    );
+
+    Match(SdHostConfig, SdHostConfig__parse(&sysinfo))
+        IsSome(config, TEST_FAIL())
+    End
+
+    DynString__dispose(&sysinfo);
 }

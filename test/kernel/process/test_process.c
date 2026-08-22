@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "../../../kernel/process.h"
+#include "../../../kernel/scheduler/parked.h"
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/bin/elf.h"
 #include "../../../kernel/bin/embedded_binaries.h"
@@ -42,7 +43,7 @@ void test_setup_from_elf(void)
                 true,
                 false,
                 true,
-                101));
+                PAGE_SIZE));
             TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
                 BASE_STACK,
                 true,
@@ -542,5 +543,53 @@ void test_process_can_copy_file_descriptor_from_parent(void)
     ResultMatch(ProcessIOHandle, Process__get_io_handle(child, 0))
         IsSuccess(handle, TEST_ASSERT_EQUAL(0x7000, handle))
         IsError(code, message, TEST_FAIL())
+    End
+}
+
+void test_process_mark_parked_operation_ready_matches_operation_key(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
+    KernelContext first_context = KernelContext__new(None(ProcessID), None(SchedulerPtr));
+    KernelContext second_context = KernelContext__new(None(ProcessID), None(SchedulerPtr));
+    ParkedOperationPtr first = ParkedOperation__heap_new(&first_context, None(Continuation), PARK_WAIT_IO);
+    ParkedOperationPtr second = ParkedOperation__heap_new(&second_context, None(Continuation), PARK_WAIT_IO);
+    first->operation_key = Some(OperationKey, 10);
+    second->operation_key = Some(OperationKey, 20);
+
+    ResultMatch(CollectionCode, Process__push_parked_operation(process, first))
+        IsError(code, message, TEST_FAIL())
+    End
+    ResultMatch(CollectionCode, Process__push_parked_operation(process, second))
+        IsError(code, message, TEST_FAIL())
+    End
+
+    TEST_ASSERT_TRUE(Process__mark_parked_operation_ready(
+        process, PARK_WAIT_IO, Some(OperationKey, 20), Some(ReturnCode, 123)
+    ));
+
+    Match(ParkedOperationPtr, Process__pop_ready_parked_operation(process))
+        IsSome(ready,
+        {
+            TEST_ASSERT_EQUAL_PTR(second, ready);
+            ParkedOperation__dispose(ready);
+        })
+        IsNone(TEST_FAIL())
+    End
+
+    Match(ParkedOperationPtr, Process__pop_ready_parked_operation(process))
+        IsSome(ready,
+        {
+            ParkedOperation__dispose(ready);
+            TEST_FAIL();
+        })
+    End
+
+    Match(ParkedOperationPtr, Process__pop_parked_operation(process))
+        IsSome(remaining,
+        {
+            TEST_ASSERT_EQUAL_PTR(first, remaining);
+            ParkedOperation__dispose(remaining);
+        })
+        IsNone(TEST_FAIL())
     End
 }

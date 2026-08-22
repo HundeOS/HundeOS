@@ -18,7 +18,9 @@ bool FilesystemTableEntry__equals(FilesystemTableEntryPtr self, FilesystemTableE
 {
     return BString__equals(&self->device_path, &other->device_path)
         && BString__equals(&self->filesystem_type, &other->filesystem_type)
-        && BString__equals(&self->mountpoint, &other->mountpoint);
+        && BString__equals(&self->mountpoint, &other->mountpoint)
+        && self->match_block_count == other->match_block_count
+        && self->block_count == other->block_count;
 }
 
 FilesystemTable FilesystemTable__new()
@@ -36,6 +38,21 @@ Result(CollectionCode) FilesystemTable__add(
         .device_path = device_path,
         .filesystem_type = filesystem_type,
         .mountpoint = mountpoint,
+        .match_block_count = false,
+        .block_count = 0,
+    }));
+}
+
+Result(CollectionCode) FilesystemTable__add_by_block_count(
+    FilesystemTablePtr self, uint64_t block_count, BString filesystem_type, BString mountpoint
+)
+{
+    return FilesystemTableEntries__push(&self->entries, ((FilesystemTableEntry) {
+        .device_path = EMPTY_BSTRING,
+        .filesystem_type = filesystem_type,
+        .mountpoint = mountpoint,
+        .match_block_count = true,
+        .block_count = block_count,
     }));
 }
 

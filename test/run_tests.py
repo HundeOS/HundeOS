@@ -185,14 +185,20 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
             for expand in glob.glob(os.path.join(project_root, "common/**/*.c"), recursive=True)
         ]
 
-        asm_objects = [os.path.join(kernel_obj_build_dir, file.replace(".s", ".o").replace("../", ""))
+        def object_path_for_source(file):
+            source_abs = os.path.abspath(os.path.join(test_dir, file))
+            source_rel = os.path.relpath(source_abs, project_root)
+            source_no_ext, _ = os.path.splitext(source_rel)
+            return os.path.join(kernel_obj_build_dir, source_no_ext + ".o")
+
+        asm_objects = [object_path_for_source(file)
                        for file
                        in source_asm_files]
 
-        c_objects = [os.path.join(kernel_obj_build_dir, file.replace(".c", ".o").replace("../", ""))
+        c_objects = [object_path_for_source(file)
                      for file
                      in source_c_files]
-        common_c_objects = [os.path.join(kernel_obj_build_dir, file.replace(".c", ".o").replace("../", ""))
+        common_c_objects = [object_path_for_source(file)
                             for file
                             in common_c_files]
 

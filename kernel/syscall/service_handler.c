@@ -4,6 +4,7 @@
 #include "../debug.h"
 #include "../scheduler/kernel_context.h"
 #include "../scheduler/parked.h"
+#include "../syscall/deferred.h"
 #include "../service/service.h"
 #include "../subsystems/io/block/block_device.h"
 #include "../subsystems/io/file/register.h"
@@ -290,6 +291,64 @@ Result(SystemCallResult) Service__handler(
                 ResultMatch(ServiceCode, BlockDeviceService__complete(process, completion))
                     IsSuccess(code, return Success(SystemCallResult, code))
                     IsError(code, message, return Error(SystemCallResult, message, code))
+                End
+            }
+
+            if (service_operation == SERVICE_PUBLISH_READY)
+            {
+                if (!ProcessClass__is_service(process->process_class))
+                {
+                    return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS);
+                }
+
+                ServiceReadyRequestPtr request = (ServiceReadyRequestPtr) arg2;
+                if (request == NULL)
+                {
+                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
+                }
+
+                BString name = bstring(request->name);
+                ResultMatch(ServiceCode, Scheduler__service_publish_ready(kernel->scheduler, &name))
+                    IsSuccess(code, return Success(SystemCallResult, code))
+                    IsError(code, message, return Error(SystemCallResult, message, code))
+                End
+            }
+
+            if (service_operation == SERVICE_WAIT_READY)
+            {
+                ServiceReadyRequestPtr request = (ServiceReadyRequestPtr) arg2;
+                if (request == NULL)
+                {
+                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
+                }
+
+                BString name = bstring(request->name);
+                KernelContextPtr kernel_context = KernelContext__heap_new(
+                    Some(ProcessID, process->pid),
+                    Some(SchedulerPtr, kernel->scheduler)
+                );
+
+                ResultMatch(ServiceCode, Scheduler__service_wait_ready_with_context_ownership(
+                    kernel->scheduler,
+                    process,
+                    &name,
+                    kernel_context,
+                    Some(Continuation, SystemCall__Complete),
+                    true
+                ))
+                    IsSuccess(code,
+                    {
+                        KernelContext__dispose_heap(kernel_context);
+                        return Success(SystemCallResult, code);
+                    })
+                    IsError(code, message,
+                    {
+                        if (code != SERVICE_EVENT_QUEUE_EMPTY)
+                        {
+                            KernelContext__dispose_heap(kernel_context);
+                        }
+                        return Error(SystemCallResult, message, code);
+                    })
                 End
             }
         })

@@ -310,6 +310,31 @@ Result(SystemCallResult) IO__handler(
         End
     }
 
+    if (io_operation == IO_MOUNT)
+    {
+        if (arg2 == 0 || arg3 == 0 || arg4 == 0)
+        {
+            return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
+        }
+
+        if (!Process__has_capability(process, PROCESS_CAP_MOUNT_FILESYSTEM))
+        {
+            return Error(SystemCallResult, bstring("Permission denied"), IO_PERMISSION_DENIED);
+        }
+
+        BString device_path = bstring((const char *) arg2);
+        BString filesystem_type = bstring((const char *) arg3);
+        BString mountpoint = bstring((const char *) arg4);
+
+        BlockDevice__set_current_context(&kernel_context);
+        Result(IOStatus) mount_result = IOSubsystem__mount(io_subsystem, device_path, filesystem_type, mountpoint);
+        BlockDevice__clear_current_context();
+        ResultMatch(IOStatus, mount_result)
+            IsSuccess(status, return Success(SystemCallResult, status));
+            IsError(code, message, return Error(SystemCallResult, message, code));
+        End
+    }
+
     if (io_operation == IO_WRITE)
     {
         FileDescriptor fd = (FileDescriptor) arg2;

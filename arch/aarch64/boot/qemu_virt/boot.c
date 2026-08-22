@@ -52,6 +52,7 @@ __BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = {
         .bus_start = QEMU_VIRT_PCI_BUS_START,
         .bus_end = QEMU_VIRT_PCI_BUS_END,
     })),
+    .sd_host = None(SdHostInfo),
     .interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V3,
     .gic_distributor_physical_base = QEMU_VIRT_GICD_PHYS_BASE,
     .gic_distributor_virtual_base = QEMU_VIRT_GICD_BASE,
@@ -105,6 +106,7 @@ __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
     qemu_virt_system_info.uart.irq = qemu_virt_platform_info.uart_irq;
     qemu_virt_system_info.framebuffer = None(FramebufferInfo);
     qemu_virt_system_info.pci = qemu_virt_platform_info.pci;
+    qemu_virt_system_info.sd_host = qemu_virt_platform_info.sd_host;
 
     qemu_virt_system_info.gic.distributor_physical_base = qemu_virt_platform_info.gic_distributor_physical_base;
     qemu_virt_system_info.gic.distributor_virtual_base = qemu_virt_platform_info.gic_distributor_virtual_base;

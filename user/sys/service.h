@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "../../common/types/bstring.h"
 #include "syscalls/service.h"
 
 ServiceCode service_become_service();
@@ -14,6 +15,8 @@ ServiceCode service_register_block_device(const char * path, uint64_t block_size
 ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPtr request);
 ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint64_t block_count);
 ServiceCode service_device_address(void * driver_address, uint64_t * device_address);
+ServiceCode service_publish_ready(ConstBStringPtr name);
+ServiceCode service_wait_ready(ConstBStringPtr name);
 void * driver_ptr(ServiceMappedMemoryPtr memory);
 uint64_t device_ptr(ServiceMappedMemoryPtr memory);
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset);

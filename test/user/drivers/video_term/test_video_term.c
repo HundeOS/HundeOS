@@ -203,6 +203,27 @@ IOStatus close(IOHandle handle)
     return IO_OK;
 }
 
+Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
+{
+    TEST_ASSERT_EQUAL_INT64(7, handle);
+    TEST_ASSERT_TRUE(fake_sysinfo_opened);
+    DynString sysinfo;
+    ResultMatch(DynStringCode, DynString__init(&sysinfo, 128))
+        IsError(code, message, return None(DynString))
+    End
+    for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
+    {
+        ResultMatch(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]))
+            IsError(code, message,
+            {
+                DynString__dispose(&sysinfo);
+                return None(DynString);
+            })
+        End
+    }
+    return Some(DynString, sysinfo);
+}
+
 void * driver_ptr(ServiceMappedMemoryPtr memory)
 {
     return memory->driver_address;

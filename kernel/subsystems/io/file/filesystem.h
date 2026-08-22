@@ -30,6 +30,8 @@ typedef struct FilesystemTableEntry
     BString device_path;
     BString filesystem_type;
     BString mountpoint;
+    bool match_block_count;
+    uint64_t block_count;
 }
 FilesystemTableEntry;
 
@@ -50,6 +52,9 @@ typedef FilesystemTable * FilesystemTablePtr;
 FilesystemTable FilesystemTable__new();
 Result(CollectionCode) FilesystemTable__add(
     FilesystemTablePtr self, BString device_path, BString filesystem_type, BString mountpoint
+);
+Result(CollectionCode) FilesystemTable__add_by_block_count(
+    FilesystemTablePtr self, uint64_t block_count, BString filesystem_type, BString mountpoint
 );
 
 OptionalDef(FilesystemPtr);

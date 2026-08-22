@@ -1,4 +1,6 @@
 manifest:
   include_default_stubs: false
   include_default_fixtures: false
-  source_files: []
+  source_files:
+    - common/types/bstring.c
+    - common/types/dyn_string.c

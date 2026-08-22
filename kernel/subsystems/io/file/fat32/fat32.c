@@ -1284,6 +1284,66 @@ static bool Fat32FilesystemIO__is_root_file_path(BString path)
     return true;
 }
 
+static size_t Fat32__path_segment_count(BStringPtr path)
+{
+    BStringArray segments = BString__split(path, '/');
+    return BStringArray__len(&segments);
+}
+
+static BString Fat32__path_segment_at(BStringPtr path, size_t index)
+{
+    BStringArray segments = BString__split(path, '/');
+    return Unwrap(BString, BStringArray__at(&segments, index), EMPTY_BSTRING);
+}
+
+static Result(Fat32DirectoryEntry) Fat32__find_entry_in_directory_sector(DataPtr sector, BString name)
+{
+    BString lfn_name = EMPTY_BSTRING;
+    uint8_t lfn_checksum = 0;
+    bool lfn_valid = false;
+
+    for (size_t offset = 0; offset < FAT32_BYTES_PER_SECTOR; offset += FAT32_ROOT_ENTRY_SIZE)
+    {
+        if (sector[offset] == 0x00)
+        {
+            return Error(Fat32DirectoryEntry, not_found, FAT32_NOT_FOUND);
+        }
+
+        if (sector[offset] == 0xe5)
+        {
+            Fat32__clear_lfn(&lfn_name, &lfn_checksum, &lfn_valid);
+            continue;
+        }
+
+        if (Fat32__is_lfn_entry(&sector[offset]))
+        {
+            Fat32__accumulate_lfn(&sector[offset], &lfn_name, &lfn_checksum, &lfn_valid);
+            continue;
+        }
+
+        if (!Fat32__is_visible_directory_entry(&sector[offset]))
+        {
+            Fat32__clear_lfn(&lfn_name, &lfn_checksum, &lfn_valid);
+            continue;
+        }
+
+        BString entry_name = Fat32__entry_name(&sector[offset], &lfn_name, lfn_checksum, lfn_valid);
+        if (Fat32__names_equal(&entry_name, &name))
+        {
+            return Success(Fat32DirectoryEntry, ((Fat32DirectoryEntry) {
+                .name = entry_name,
+                .attributes = sector[offset + 11],
+                .first_cluster = Fat32__read_directory_cluster(&sector[offset]),
+                .size = Fat32__read_u32(sector, offset + 28),
+            }));
+        }
+
+        Fat32__clear_lfn(&lfn_name, &lfn_checksum, &lfn_valid);
+    }
+
+    return Error(Fat32DirectoryEntry, not_found, FAT32_NOT_FOUND);
+}
+
 typedef struct Fat32AsyncOpenContext
 {
     Fat32FilesystemIOStatePtr fs_state;
@@ -1305,6 +1365,7 @@ typedef struct Fat32AsyncReadContext
     uint32_t target_cluster;
     uint32_t file_size;
     uint32_t cluster_hops;
+    size_t path_segment_index;
 }
 Fat32AsyncReadContext;
 
@@ -1387,6 +1448,7 @@ static Result(IOBufferPtr) Fat32FileIO__start_async_read_with_device(
         .target_cluster = 0,
         .file_size = 0,
         .cluster_hops = 0,
+        .path_segment_index = 0,
     };
 
     BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
@@ -2293,6 +2355,8 @@ typedef struct Fat32ListDirContext
     DirectoryEntryPtr entries;
     size_t max_entries;
     bool mount_first;
+    bool listing_target;
+    size_t path_segment_index;
 }
 Fat32ListDirContext;
 
@@ -2393,88 +2457,74 @@ static Result(Anything) Fat32FileIO__complete_async_read_directory(BlockIOContex
         return Error(Anything, io_error, IO_INVALID_PATH);
     }
 
-    size_t entry_offset = FAT32_BYTES_PER_SECTOR;
-    BString lfn_name = EMPTY_BSTRING;
-    uint8_t lfn_checksum = 0;
-    bool lfn_valid = false;
-    for (size_t offset = 0; offset < FAT32_BYTES_PER_SECTOR; offset += FAT32_ROOT_ENTRY_SIZE)
-    {
-        if (block_context->buffer[offset] == 0x00)
-        {
-            return Error(Anything, not_found, IO_INVALID_PATH);
-        }
-
-        if (block_context->buffer[offset] == 0xe5)
-        {
-            Fat32__clear_lfn(&lfn_name, &lfn_checksum, &lfn_valid);
-            continue;
-        }
-
-        if (Fat32__is_lfn_entry(&block_context->buffer[offset]))
-        {
-            Fat32__accumulate_lfn(&block_context->buffer[offset], &lfn_name, &lfn_checksum, &lfn_valid);
-            continue;
-        }
-
-        if (!Fat32__is_visible_directory_entry(&block_context->buffer[offset]))
-        {
-            Fat32__clear_lfn(&lfn_name, &lfn_checksum, &lfn_valid);
-            continue;
-        }
-
-        BString entry_name = Fat32__entry_name(&block_context->buffer[offset], &lfn_name, lfn_checksum, lfn_valid);
-        if (Fat32__names_equal(&entry_name, &context->file_handle->path))
-        {
-            entry_offset = offset;
-            break;
-        }
-
-        Fat32__clear_lfn(&lfn_name, &lfn_checksum, &lfn_valid);
-    }
-
-    if (entry_offset >= FAT32_BYTES_PER_SECTOR)
-    {
-        return Error(Anything, not_found, IO_INVALID_PATH);
-    }
-
-    uint32_t file_cluster = Fat32__read_directory_cluster(&block_context->buffer[entry_offset]);
-    uint32_t file_size = Fat32__read_u32(block_context->buffer, entry_offset + 28);
-    uint8_t attributes = block_context->buffer[entry_offset + 11];
-    if ((attributes & FAT32_ATTR_DIRECTORY) != 0
-        || file_cluster < 2
-        || file_size > FAT32_MAX_READ_SIZE
-        || context->file_handle->offset > file_size)
+    size_t segment_count = Fat32__path_segment_count(&context->file_handle->path);
+    if (context->path_segment_index >= segment_count)
     {
         return Error(Anything, invalid_path, IO_INVALID_PATH);
     }
 
-    if (context->file_handle->offset == file_size)
-    {
-        return Error(Anything, not_found, IO_EOF);
-    }
+    BString segment = Fat32__path_segment_at(&context->file_handle->path, context->path_segment_index);
+    ResultMatch(Fat32DirectoryEntry, Fat32__find_entry_in_directory_sector(block_context->buffer, segment))
+        IsSuccess(entry,
+        {
+            if (context->path_segment_index + 1 < segment_count)
+            {
+                if ((entry.attributes & FAT32_ATTR_DIRECTORY) == 0 || entry.first_cluster < 2)
+                {
+                    return Error(Anything, invalid_path, IO_INVALID_PATH);
+                }
 
-    size_t cluster_offset = context->file_handle->offset % FAT32_BYTES_PER_SECTOR;
-    size_t remaining_in_cluster = FAT32_BYTES_PER_SECTOR - cluster_offset;
-    size_t remaining = file_size - context->file_handle->offset;
-    context->read_size = Fat32__min_size(
-        context->requested_size,
-        Fat32__min_size(context->target_buffer.len, Fat32__min_size(remaining, remaining_in_cluster))
-    );
-    if (context->read_size == 0)
-    {
-        return Success(Anything, 0);
-    }
+                context->path_segment_index++;
+                return Fat32FileIO__async_read_sector_for_file(
+                    context,
+                    block_context->kernel_context,
+                    Fat32Volume__cluster_sector(&context->fs_state->volume, entry.first_cluster),
+                    Fat32FileIO__complete_async_read_directory
+                );
+            }
 
-    context->file_cluster = file_cluster;
-    context->target_cluster = file_cluster;
-    context->file_size = file_size;
-    context->cluster_hops = (uint32_t) (context->file_handle->offset / FAT32_BYTES_PER_SECTOR);
-    if (context->cluster_hops == 0)
-    {
-        return Fat32FileIO__async_read_target_file_sector(context, block_context->kernel_context);
-    }
+            uint32_t file_cluster = entry.first_cluster;
+            uint32_t file_size = entry.size;
+            if ((entry.attributes & FAT32_ATTR_DIRECTORY) != 0
+                || file_cluster < 2
+                || file_size > FAT32_MAX_READ_SIZE
+                || context->file_handle->offset > file_size)
+            {
+                return Error(Anything, invalid_path, IO_INVALID_PATH);
+            }
 
-    return Fat32FileIO__async_read_fat_for_file(context, block_context->kernel_context);
+            if (context->file_handle->offset == file_size)
+            {
+                return Error(Anything, not_found, IO_EOF);
+            }
+
+            size_t cluster_offset = context->file_handle->offset % FAT32_BYTES_PER_SECTOR;
+            size_t remaining_in_cluster = FAT32_BYTES_PER_SECTOR - cluster_offset;
+            size_t remaining = file_size - context->file_handle->offset;
+            context->read_size = Fat32__min_size(
+                context->requested_size,
+                Fat32__min_size(context->target_buffer.len, Fat32__min_size(remaining, remaining_in_cluster))
+            );
+            if (context->read_size == 0)
+            {
+                return Success(Anything, 0);
+            }
+
+            context->file_cluster = file_cluster;
+            context->target_cluster = file_cluster;
+            context->file_size = file_size;
+            context->cluster_hops = (uint32_t) (context->file_handle->offset / FAT32_BYTES_PER_SECTOR);
+            if (context->cluster_hops == 0)
+            {
+                return Fat32FileIO__async_read_target_file_sector(context, block_context->kernel_context);
+            }
+
+            return Fat32FileIO__async_read_fat_for_file(context, block_context->kernel_context);
+        })
+        IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
+    End
+
+    return Error(Anything, not_found, IO_INVALID_PATH);
 }
 
 static Result(Anything) Fat32FileIO__complete_async_read_fat_for_file(BlockIOContextPtr block_context)
@@ -2688,6 +2738,34 @@ static Result(Anything) Fat32FileIO__read_root_dir_async(Fat32ListDirContextPtr 
     return Error(Anything, invalid_path, IO_INVALID_PATH);
 }
 
+static Result(Anything) Fat32FileIO__read_list_dir_cluster_async(
+    Fat32ListDirContextPtr context, KernelContext kernel_context, Fat32Cluster cluster
+)
+{
+    Match(BlockDevicePtr, context->fs_state->volume.device)
+        IsSome(device,
+        {
+            BlockIOContextPtr directory_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
+            directory_context->kernel_context = kernel_context;
+            directory_context->owner_context = (Anything) context;
+
+            BlockDevice__set_current_context(&directory_context->kernel_context);
+            Result(Anything) read_result = BlockDevice__read_async(
+                device,
+                Fat32Volume__cluster_sector(&context->fs_state->volume, cluster),
+                1,
+                directory_context,
+                Fat32FileIO__complete_async_list_dir
+            );
+            BlockDevice__clear_current_context();
+            return read_result;
+        })
+        IsNone(return Error(Anything, invalid_path, IO_INVALID_PATH))
+    End
+
+    return Error(Anything, invalid_path, IO_INVALID_PATH);
+}
+
 static Result(Anything) Fat32FileIO__complete_async_list_dir(BlockIOContextPtr block_context)
 {
     Fat32ListDirContextPtr context = ptr(block_context->owner_context, Fat32ListDirContext);
@@ -2704,11 +2782,6 @@ static Result(Anything) Fat32FileIO__complete_async_list_dir(BlockIOContextPtr b
     if (block_context->status != BLOCK_DEVICE_OK || block_context->completed_blocks == 0)
     {
         return Error(Anything, io_error, IO_INVALID_PATH);
-    }
-
-    if (!Fat32FilesystemIO__is_root_path(context->path))
-    {
-        return Error(Anything, invalid_path, IO_INVALID_PATH);
     }
 
     if (context->mount_first)
@@ -2730,15 +2803,51 @@ static Result(Anything) Fat32FileIO__complete_async_list_dir(BlockIOContextPtr b
         return Fat32FileIO__read_root_dir_async(context, block_context->kernel_context);
     }
 
-    ResultMatch(DirectoryEntryCount, Fat32FileIO__copy_directory_sector_to_dirents(
-        block_context->buffer, context->entries, context->max_entries
-    ))
-        IsSuccess(count,
+    if (Fat32FilesystemIO__is_root_path(context->path) || context->listing_target)
+    {
+        ResultMatch(DirectoryEntryCount, Fat32FileIO__copy_directory_sector_to_dirents(
+            block_context->buffer, context->entries, context->max_entries
+        ))
+            IsSuccess(count,
+            {
+                __d_printf(FAT32, "list decoded count=%i\n", (int) count);
+                return Success(Anything, count);
+            })
+            IsError(code, message, return Error(Anything, message, code))
+        End
+    }
+
+    size_t segment_count = Fat32__path_segment_count(&context->path);
+    if (context->path_segment_index >= segment_count)
+    {
+        return Error(Anything, invalid_path, IO_INVALID_PATH);
+    }
+
+    BString segment = Fat32__path_segment_at(&context->path, context->path_segment_index);
+    ResultMatch(Fat32DirectoryEntry, Fat32__find_entry_in_directory_sector(block_context->buffer, segment))
+        IsSuccess(entry,
         {
-            __d_printf(FAT32, "list decoded count=%i\n", (int) count);
-            return Success(Anything, count);
+            if ((entry.attributes & FAT32_ATTR_DIRECTORY) == 0 || entry.first_cluster < 2)
+            {
+                return Error(Anything, invalid_path, IO_INVALID_PATH);
+            }
+
+            if (context->path_segment_index + 1 == segment_count)
+            {
+                context->listing_target = true;
+            }
+            else
+            {
+                context->path_segment_index++;
+            }
+
+            return Fat32FileIO__read_list_dir_cluster_async(
+                context,
+                block_context->kernel_context,
+                entry.first_cluster
+            );
         })
-        IsError(code, message, return Error(Anything, message, code))
+        IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
     End
 
     return Error(Anything, io_error, IO_INVALID_PATH);
@@ -2762,11 +2871,6 @@ static Result(DirectoryEntryCount) Fat32FileIO__list_dir(
         End
     }
 
-    if (!Fat32FilesystemIO__is_root_path(path))
-    {
-        return Error(DirectoryEntryCount, invalid_path, IO_INVALID_PATH);
-    }
-
     Match(BlockDevicePtr, fs_state->volume.device)
         IsSome(device,
         {
@@ -2777,6 +2881,8 @@ static Result(DirectoryEntryCount) Fat32FileIO__list_dir(
             list_context->entries = entries;
             list_context->max_entries = max_entries;
             list_context->mount_first = !fs_state->mounted;
+            list_context->listing_target = false;
+            list_context->path_segment_index = 0;
 
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = EMPTY_KERNEL_CONTEXT;

@@ -58,6 +58,7 @@ StringPos BString__copy_to(ConstBStringPtr self, char * target, StringPos target
 const char * BString__cstr(ConstBStringPtr self);
 BString BString__uppercase(ConstBStringPtr self);
 Optional(uint64_t) BString__parse_uint64(ConstBStringPtr self);
+Optional(uint64_t) BString__parse_uint64_base(ConstBStringPtr self, uint64_t base);
 BString BString__vsprintf(ConstBStringPtr format, va_list args);
 BString BString__sprintf(ConstBStringPtr format, ...);
 

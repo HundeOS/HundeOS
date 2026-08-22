@@ -2,6 +2,7 @@
 
 #include "panic.h"
 #include "../../../all_defs.h"
+#include "../../../cpu.h"
 #include "../../../kalloc.h"
 #include "../../../kernel_init.h"
 #include "../../../process.h"
@@ -87,8 +88,25 @@ static BlockRequestMap requests = EmptyMap(BlockRequestMap);
 static bool registry_initialized = false;
 static uint64_t next_request_id = 1;
 static uint64_t next_device_id = 0;
-static Optional(KernelContextPtr) current_context = None(KernelContextPtr);
+static Optional(KernelContextPtr) current_contexts[MAX_CPUS] = { 0 };
 static BString hd_alias_format = BSTRING_NEW("hd%i");
+
+static CPUID BlockDevice__current_context_index()
+{
+    CPUID id = CPU__id();
+    if (id == 0)
+    {
+        return 0;
+    }
+
+    CPUID index = id - 1;
+    if (index >= MAX_CPUS)
+    {
+        return 0;
+    }
+
+    return index;
+}
 
 static void UserspaceBlockDevice__copy_path(char target[SERVICE_DEVICE_PATH_MAX], BString source)
 {
@@ -208,11 +226,16 @@ static Result(Anything) UserspaceBlockDevice__complete_wait(ParkedOperationPtr p
 
 static void UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr request)
 {
-    Optional(KernelContextPtr) park_context = current_context;
-    if (!park_context.present && request->io_context != 0)
-    {
-        park_context = Some(KernelContextPtr, &request->io_context->kernel_context);
-    }
+    Optional(KernelContextPtr) park_context = BlockDevice__current_context();
+    Match(KernelContextPtr, park_context)
+        IsNone(
+        {
+            if (request->io_context != 0)
+            {
+                park_context = Some(KernelContextPtr, &request->io_context->kernel_context);
+            }
+        })
+    End
 
     Match(KernelContextPtr, park_context)
         IsSome(context,
@@ -428,7 +451,7 @@ Result(Anything) BlockDevice__read_async(
     context->status = BLOCK_DEVICE_REQUEST_PENDING;
     context->request_id = None(BlockRequestID);
     context->buffer_size = count * BLOCK_DEVICE_BLOCK_SIZE;
-    Match(KernelContextPtr, current_context)
+    Match(KernelContextPtr, BlockDevice__current_context())
         IsSome(kernel_context, context->kernel_context = *kernel_context)
     End
 
@@ -522,7 +545,7 @@ Result(Anything) BlockDevice__write_async(
     context->completed_blocks = 0;
     context->status = BLOCK_DEVICE_REQUEST_PENDING;
     context->request_id = None(BlockRequestID);
-    Match(KernelContextPtr, current_context)
+    Match(KernelContextPtr, BlockDevice__current_context())
         IsSome(kernel_context, context->kernel_context = *kernel_context)
     End
 
@@ -557,17 +580,17 @@ Result(Anything) BlockDevice__write_async(
 
 void BlockDevice__set_current_context(KernelContextPtr context)
 {
-    current_context = Some(KernelContextPtr, context);
+    current_contexts[BlockDevice__current_context_index()] = Some(KernelContextPtr, context);
 }
 
 void BlockDevice__clear_current_context()
 {
-    current_context = None(KernelContextPtr);
+    current_contexts[BlockDevice__current_context_index()] = None(KernelContextPtr);
 }
 
 Optional(KernelContextPtr) BlockDevice__current_context()
 {
-    return current_context;
+    return current_contexts[BlockDevice__current_context_index()];
 }
 
 Result(BlockDeviceCode) BlockDeviceRegistry__register(

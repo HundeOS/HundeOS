@@ -115,6 +115,7 @@ Optional(ProcessPtr) Scheduler__find_process_by_pid(SchedulerPtr self, ProcessID
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
 ProcessTable Scheduler__all_processes_for_all_cpus(SchedulerPtr self);
 ProcessTable Scheduler__process_snapshot(SchedulerPtr self);
+ProcessListResult Scheduler__process_info_snapshot(SchedulerPtr self, ProcessInfoPtr entries, uint64_t max_entries);
 
 uint64_t Scheduler__process_count(SchedulerPtr self);
 
@@ -143,6 +144,11 @@ Result(ProcessChildEvent) Scheduler__child_wait_with_context_ownership(
 );
 Result(ProcessChildEvent) Scheduler__child_take_next_event(SchedulerPtr self, ProcessPtr process);
 Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr process, ServiceEvent event);
+Result(ServiceCode) Scheduler__service_publish_ready(SchedulerPtr self, ConstBStringPtr name);
+Result(ServiceCode) Scheduler__service_wait_ready_with_context_ownership(
+    SchedulerPtr self, ProcessPtr process, ConstBStringPtr name,
+    KernelContextPtr kernel_context, Optional(Continuation) continuation, bool owns_kernel_context
+);
 Result(CollectionCode) Scheduler__add_blocked_operation(
     SchedulerPtr self, ParkedOperationPtr operation, ParkedOperationPtr blocked_operation
 );

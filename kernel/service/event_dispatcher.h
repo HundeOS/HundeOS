@@ -32,9 +32,30 @@ OptionalDef(IRQServicePtr);
 
 MapDefine(IRQNumber, IRQService, 256, IRQServiceMap, SimpleEquals(uint64_t));
 
+typedef struct ServiceReadyWaiter
+{
+    ProcessPtr process;
+    BString name;
+}
+ServiceReadyWaiter;
+
+typedef ServiceReadyWaiter * ServiceReadyWaiterPtr;
+
+OptionalDef(ServiceReadyWaiter);
+OptionalDef(ServiceReadyWaiterPtr);
+
+bool ServiceReadyWaiter__equals(ServiceReadyWaiterPtr self, ServiceReadyWaiterPtr other);
+FixedArrayDefine(BString, MAX_SERVICE_READY_NAMES, ServiceReadyNames, bstring_equals);
+FixedArrayDefine(ServiceReadyWaiter, MAX_SERVICE_READY_WAITERS, ServiceReadyWaiters, (EqualFunction) ServiceReadyWaiter__equals);
+FixedArrayDefine(ProcessPtr, MAX_SERVICE_READY_WAITERS, ServiceReadyProcesses, &Ptr__equals);
+
+typedef ServiceReadyProcesses * ServiceReadyProcessesPtr;
+
 typedef struct ServiceEventDispatcher
 {
     IRQServiceMap irq_services;
+    ServiceReadyNames ready_names;
+    ServiceReadyWaiters ready_waiters;
     mutex_t lock;
 }
 ServiceEventDispatcher;
@@ -67,10 +88,20 @@ Result(ServiceCode) ServiceEventDispatcher__complete_active_irq(
 Result(ServiceCode) ServiceEventDispatcher__unsubscribe_process(
     ServiceEventDispatcherPtr self, ProcessPtr process
 );
+bool ServiceEventDispatcher__is_ready(ServiceEventDispatcherPtr self, ConstBStringPtr name);
+Result(ServiceCode) ServiceEventDispatcher__publish_ready(
+    ServiceEventDispatcherPtr self, ConstBStringPtr name, ServiceReadyProcessesPtr ready_processes
+);
+Result(ServiceCode) ServiceEventDispatcher__wait_ready(
+    ServiceEventDispatcherPtr self, ProcessPtr process, ConstBStringPtr name
+);
+Result(ServiceCode) ServiceEventDispatcher__remove_ready_waiter(ServiceEventDispatcherPtr self, ProcessPtr process);
 
 #define NEW_SERVICE_EVENT_DISPATCHER \
     (ServiceEventDispatcher) { \
         .irq_services = EmptyMap(IRQServiceMap), \
+        .ready_names = EmptyArray(ServiceReadyNames), \
+        .ready_waiters = EmptyArray(ServiceReadyWaiters), \
         .lock = MUTEX_INIT, \
     }
 
