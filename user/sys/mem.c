@@ -9,13 +9,13 @@ void * mem_alloc_pages(size_t size)
 {
     if (size == 0)
     {
-        return NULL;
+        return NULL; // hundelint: ignore-no-null
     }
 
     MemAddress result = syscall(MEM_CALL, MEM_ALLOC_PAGES, size, 0, 0, 0);
     if ((int64_t) result <= 0)
     {
-        return NULL;
+        return NULL; // hundelint: ignore-no-null
     }
 
     return (void *) result;

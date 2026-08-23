@@ -46,7 +46,7 @@ static void MemoryBlock__advance(MemoryBlockPtr self, Address heap_end) {
 
     if (next_virtual_addr > heap_end)
     {
-        Kernel__panic("out of heap", NULL);
+        Kernel__panic("out of heap", NULL); // hundelint: ignore-no-null
     }
 
     *self = (MemoryBlock) {
@@ -291,13 +291,15 @@ KernelAddress Heap__alloc_size(HeapPtr self, size_t size)
 {
     uint64_t pages = Heap__pages_for_size(size);
 
-    Match(MemoryBlock, Heap__take_free_block(self, pages))
-        IsSome(block, {
+    match_optional(MemoryBlock, Heap__take_free_block(self, pages),
+        some(block)
+        {
             Heap__zero_pages(block.start, block.pages_allocated);
             Heap__record_allocated(self, block.start, block.pages_allocated);
             return block.start;
-        })
-    End
+        },
+        none() {}
+    )
 
     return Heap__alloc_fresh_size(self, size);
 }
@@ -306,14 +308,16 @@ Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr)
 {
     HashtableOptional(AllocatedBlocks) block = AllocatedBlocks__get(&self->allocated_blocks, addr.virtual_addr);
 
-    Match(MemoryBlock, block)
-        IsSome(allocated, {
+    match_optional(MemoryBlock, block,
+        some(allocated)
+        {
             AllocatedBlocks__remove_key(&self->allocated_blocks, addr.virtual_addr);
             MemoryBlock free_block = Heap__coalesce_free_block(self, allocated);
             AllocatedBlocks__set(&self->free_blocks, free_block.start.virtual_addr, free_block);
             return Success(HeapCode, HEAP_OK);
-        })
-    End
+        },
+        none() {}
+    )
 
     return Error(HeapCode, bstring("address not allocated"), HEAP_NOT_IMPLEMENTED);
 }

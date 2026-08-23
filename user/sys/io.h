@@ -16,6 +16,8 @@ IOHandle open(const char * path, Flags flags);
 ByteCount read(IOHandle handle, char * buf, size_t size);
 ByteCount write(IOHandle handle, char * buf, size_t size);
 IOHandle IO__open(ConstBStringPtr self, Flags flags);
+BString IO__path_from_arg(ConstBStringPtr arg);
+BString IO__path_join(ConstBStringPtr base, ConstBStringPtr child);
 ByteCount IO__read(IOHandle handle, BStringPtr self);
 Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes);
 ByteCount IO__write(IOHandle handle, ConstBStringPtr self);

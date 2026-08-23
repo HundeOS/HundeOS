@@ -48,14 +48,14 @@ Result(CollectionCode) ParkedOperation__add_blocked_operation(
     ParkedOperationPtr self, ParkedOperationPtr blocked_operation
 )
 {
-    ResultMatch(CollectionCode, BlockedParkedOperations__push(&self->blocked_operations, blocked_operation))
-        IsSuccess(index,
+    match_result(CollectionCode, BlockedParkedOperations__push(&self->blocked_operations, blocked_operation),
+        success(index)
         {
             self->pending_operations++;
             return Success(CollectionCode, index);
-        })
-        IsError(code, message, return Error(CollectionCode, message, code))
-    End
+        },
+        error(code, message) { return Error(CollectionCode, message, code); }
+    )
 
     return Error(CollectionCode, bstring("Unable to add blocked operation"), LINKED_LIST_ALLOCATION_FAILED);
 }
@@ -64,17 +64,17 @@ Result(CollectionCode) ParkedOperation__resolve_blocked_operation(
     ParkedOperationPtr self, ParkedOperationPtr blocked_operation
 )
 {
-    ResultMatch(CollectionCode, BlockedParkedOperations__remove(&self->blocked_operations, blocked_operation))
-        IsSuccess(index,
+    match_result(CollectionCode, BlockedParkedOperations__remove(&self->blocked_operations, blocked_operation),
+        success(index)
         {
             if (self->pending_operations > 0)
             {
                 self->pending_operations--;
             }
             return Success(CollectionCode, index);
-        })
-        IsError(code, message, return Error(CollectionCode, message, code))
-    End
+        },
+        error(code, message) { return Error(CollectionCode, message, code); }
+    )
 
     return Error(CollectionCode, bstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND);
 }
@@ -102,9 +102,10 @@ void ParkedOperation__dispose(ParkedOperationPtr self)
 {
     while (BlockedParkedOperations__len(&self->blocked_operations) > 0)
     {
-        Match(ParkedOperationPtr, BlockedParkedOperations__remove_at(&self->blocked_operations, 0))
-            IsSome(blocked_operation, ParkedOperation__dispose(blocked_operation))
-        End
+        match_optional(ParkedOperationPtr, BlockedParkedOperations__remove_at(&self->blocked_operations, 0),
+            some(blocked_operation) { ParkedOperation__dispose(blocked_operation); },
+            none() {}
+        )
     }
     BlockedParkedOperations__dispose(&self->blocked_operations);
     if (self->owns_kernel_context)

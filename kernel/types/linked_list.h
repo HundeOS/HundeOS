@@ -9,9 +9,10 @@
 #define LINKED_LIST_FREE(ptr) \
     { \
         Result(KAllocCode) free_result = Kernel__free(addr(ptr)); \
-        ResultMatch(KAllocCode, free_result) \
-            IsError(code, message, {}) \
-        End \
+        match_result(KAllocCode, free_result, \
+            success(_) {}, \
+            error(code, message) {} \
+        ) \
     }
 
 #include "../../common/types/linked_list.h"

@@ -32,18 +32,18 @@ Result(SystemCallResult) Exec__handler(
     SpawnMode mode = (SpawnMode) arg2;
     bool wait = mode == P_WAIT;
     Result(ProcessPtr) exec_res = Exec__exec(originating_context, path, wait, arguments);
-    ResultMatch(ProcessPtr, exec_res)
-        IsSuccess(proc,
+    match_result(ProcessPtr, exec_res,
+        success(proc)
         {
             __d_printf(EXEC, "exec handler success path=%s pid=%i\n", cstr(path), proc->pid);
             return Success(SystemCallResult, proc->pid);
-        })
-        IsError(code, message,
+        },
+        error(code, message)
         {
             __d_printf(EXEC, "exec handler error path=%s code=%i message=%s\n", cstr(path), code, cstr(message));
             return Error(SystemCallResult, message, code);
-        })
-    End
+        }
+    )
 
     return Error(SystemCallResult, bstring("Exec handler failed"), SPAWN_FAILED);
 }
@@ -96,33 +96,33 @@ Result(SystemCallResult) ExecRequest__handler(
     Optional(UserID) requested_user_id = None(UserID);
     if (request->auth_ticket_id != SPAWN_INHERIT_AUTH_TICKET)
     {
-        Match(ProcessPtr, proc)
-            IsSome(process,
+        match_optional(ProcessPtr, proc,
+            some(process)
             {
-                ResultMatch(UserID, Auth__consume_ticket(&kernel->auth, process, request->auth_ticket_id))
-                    IsSuccess(user_id, requested_user_id = Some(UserID, user_id);)
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
-            })
-            IsNone(return Error(SystemCallResult, bstring("No process"), AUTH_NO_PROCESS))
-        End
+                match_result(UserID, Auth__consume_ticket(&kernel->auth, process, request->auth_ticket_id),
+                    success(user_id) { requested_user_id = Some(UserID, user_id);; },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
+            },
+            none() { return Error(SystemCallResult, bstring("No process"), AUTH_NO_PROCESS); }
+        )
     }
 
     Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(
         originating_context, path, wait, requested_user_id, arguments, request->stdio
     );
-    ResultMatch(ProcessPtr, exec_res)
-        IsSuccess(spawned_proc,
+    match_result(ProcessPtr, exec_res,
+        success(spawned_proc)
         {
             __d_printf(EXEC, "exec request handler success path=%s pid=%i\n", cstr(path), spawned_proc->pid);
             return Success(SystemCallResult, spawned_proc->pid);
-        })
-        IsError(code, message,
+        },
+        error(code, message)
         {
             __d_printf(EXEC, "exec request handler error path=%s code=%i message=%s\n", cstr(path), code, cstr(message));
             return Error(SystemCallResult, message, code);
-        })
-    End
+        }
+    )
 
     return Error(SystemCallResult, bstring("Exec request handler failed"), SPAWN_FAILED);
 }

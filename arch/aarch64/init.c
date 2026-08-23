@@ -23,20 +23,23 @@ Result(SubsystemInitStatus) Arch__init(KernelPtr kernel)
 {
     SystemInfoPtr system_info = &kernel->system_info.some.val;
 
-    ResultMatch(InitCode, gic_init(&system_info->interrupt_controller))
-        IsError(code, message, return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED));
-    End
+    match_result(InitCode, gic_init(&system_info->interrupt_controller),
+        success(_) {},
+        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+    );
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_kernel(
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_kernel(
         kernel->irq_dispatcher, PPI_CNTV, CPUTimer__handle_irq, NULL
-    ))
-        IsError(code, message, return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED));
-    End
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_kernel(
+    ),
+        success(_) {},
+        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+    );
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_kernel(
         kernel->irq_dispatcher, PPI_CNTP, CPUTimer__handle_irq, NULL
-    ))
-        IsError(code, message, return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED));
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+    );
 
     enable_irq();
 
@@ -46,9 +49,10 @@ Result(SubsystemInitStatus) Arch__init(KernelPtr kernel)
 Result(SubsystemInitStatus) Arch__enable_irq(InterruptControllerInfoPtr interrupt_controller, uint64_t irq)
 {
     __d_printf(IODEV, "arch enable irq=%i\n", (int) irq);
-    ResultMatch(InitCode, gic_enable_interrupt(interrupt_controller, (uint32_t) irq))
-        IsError(code, message, return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED));
-    End
+    match_result(InitCode, gic_enable_interrupt(interrupt_controller, (uint32_t) irq),
+        success(_) {},
+        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+    );
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 

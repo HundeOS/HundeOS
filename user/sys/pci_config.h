@@ -49,13 +49,14 @@ static Optional(uint64_t) PciConfig__read_line_value(ConstBStringPtr line, Const
     BStringSplit split = BString__split_first_any(line, &pci_config_delimiter);
     bool matched = false;
 
-    Match(BString, split.match)
-        IsSome(raw_key,
+    match_optional(BString, split.match,
+        some(raw_key)
         {
             BString line_key = BString__strip(&raw_key);
             matched = BString__equals(&line_key, key);
-        })
-    End
+        },
+        none() {}
+    )
 
     if (!matched)
     {
@@ -76,49 +77,54 @@ static PciConfigParseState PciConfigParseState__read_config_line(PciConfigParseS
 {
     if (!self.found_present)
     {
-        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_present_key))
-            IsSome(parsed, self.found_present = parsed == 1)
-        End
+        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_present_key),
+            some(parsed) { self.found_present = parsed == 1; },
+            none() {}
+        )
     }
     if (!self.found_ecam_physical_base)
     {
-        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_ecam_physical_base_key))
-            IsSome(parsed,
+        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_ecam_physical_base_key),
+            some(parsed)
             {
                 self.config.ecam_physical_base = parsed;
                 self.found_ecam_physical_base = true;
-            })
-        End
+            },
+            none() {}
+        )
     }
     if (!self.found_ecam_size)
     {
-        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_ecam_size_key))
-            IsSome(parsed,
+        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_ecam_size_key),
+            some(parsed)
             {
                 self.config.ecam_size = parsed;
                 self.found_ecam_size = true;
-            })
-        End
+            },
+            none() {}
+        )
     }
     if (!self.found_bus_start)
     {
-        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_bus_start_key))
-            IsSome(parsed,
+        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_bus_start_key),
+            some(parsed)
             {
                 self.config.bus_start = parsed;
                 self.found_bus_start = true;
-            })
-        End
+            },
+            none() {}
+        )
     }
     if (!self.found_bus_end)
     {
-        Match(uint64_t, PciConfig__read_line_value(line, &pci_config_bus_end_key))
-            IsSome(parsed,
+        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_bus_end_key),
+            some(parsed)
             {
                 self.config.bus_end = parsed;
                 self.found_bus_end = true;
-            })
-        End
+            },
+            none() {}
+        )
     }
 
     return self;
@@ -137,18 +143,20 @@ static bool PciConfig__read_config(ConstDynStringPtr sysinfo, PciConfigPtr self)
 {
     PciConfigParseState state = PciConfigParseState__new();
 
-    Match(DynStringLines, DynString__lines(sysinfo))
-        IsSome(lines,
+    match_optional(DynStringLines, DynString__lines(sysinfo),
+        some(lines)
         {
             LLIterate(DynStringLines, lines, line)
-                Match(BString, DynString__bstring(&line))
-                    IsSome(bstring_line, state = PciConfigParseState__read_config_line(state, &bstring_line))
-                End
-            End
+                match_optional(BString, DynString__bstring(&line),
+                    some(bstring_line) { state = PciConfigParseState__read_config_line(state, &bstring_line); },
+                    none() {}
+                )
 
+            End
             DynStringLines__dispose_all(&lines);
-        })
-    End
+        },
+        none() {}
+    )
 
     if (!PciConfigParseState__has_required_fields(&state))
     {
@@ -171,14 +179,15 @@ static bool PciConfig__load(PciConfigPtr self)
     Optional(DynString) sysinfo = IO__read_dyn_string(handle, PCI_CONFIG_MAX);
     close(handle);
 
-    Match(DynString, sysinfo)
-        IsSome(data,
+    match_optional(DynString, sysinfo,
+        some(data)
         {
             bool loaded = PciConfig__read_config(&data, self);
             DynString__dispose(&data);
             return loaded;
-        })
-    End
+        },
+        none() {}
+    )
 
     return false;
 }

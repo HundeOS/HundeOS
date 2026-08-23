@@ -20,21 +20,24 @@
 
 #define REGISTER(self, syscall, handler) \
     __d_printf(DEBUG, "Init__syscalls() - %p", syscall); \
-    ResultMatch(RegisterResult, SyscallDispatcher__register(self, syscall, handler);); \
-        IsError(code, message, \
-            {  \
-                mutex_unlock(&self->init_lock); \
-                __d_println(DEBUG, "Init__syscalls() - error"); \
-                return Error(RegisterResult, message, code); \
-            }); \
-        IsSuccess(_, __d_printf(DEBUG, "Init__syscalls() - %p - reg success", syscall);)\
-    End \
+    match_result(RegisterResult, SyscallDispatcher__register(self, syscall, handler), /* hundelint: ignore-match-branch-macros */ \
+        success(_) \
+        { \
+            __d_printf(DEBUG, "Init__syscalls() - %p - reg success", syscall); \
+        }, \
+        error(code, message) \
+        { \
+            mutex_unlock(&self->init_lock); \
+            __d_println(DEBUG, "Init__syscalls() - error"); \
+            return Error(RegisterResult, message, code); \
+        } \
+    ) \
 
 
 Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
 {
     __d_println(SYSCALL, "Init__syscalls()");
-    CriticalSection(self->init_lock,
+    critical_section(self->init_lock,
     {
         __d_println(DEBUG, "Init__syscalls() - doing");
         if (!self->init_done)

@@ -15,9 +15,7 @@ void test_elf_lookup(void)
 {
     Optional(Elf) elf = EmbeddedElf__load(bstring("hello_world"));
 
-    Match(Elf, elf)
-        IsNone(TEST_FAIL())
-    End
+    match_optional(Elf, elf, some(_) {}, none() { TEST_FAIL(); })
 }
 
 void test_elf_list_uses_embedded_index(void)
@@ -45,10 +43,7 @@ void test_elf_lookup_missing_file(void)
 {
     Optional(Elf) elf = EmbeddedElf__load(bstring("missing"));
 
-    Match(Elf, elf)
-        IsSome(_,
-        {
+    match_optional(Elf, elf, some(_) {
             TEST_FAIL();
-        })
-    End
+        }, none() {})
 }

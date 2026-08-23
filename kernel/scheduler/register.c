@@ -9,8 +9,8 @@
 
 void action_park_message(KernelListenerPtr self, MessagePtr message)
 {
-    Match(Payload, message->payload)
-        IsSome(payload,
+    match_optional(Payload, message->payload,
+        some(payload)
         {
             if (payload.type == PAYLOAD_TYPE_DEFERRED)
             {
@@ -22,25 +22,26 @@ void action_park_message(KernelListenerPtr self, MessagePtr message)
                     PARK_WAIT_IO, deferred.owns_context, deferred.operation_key
                 );
 
-                ResultMatch(ProcessID, pid_res)
-                    IsError(code, message, __d_printf(PANIC, "Failed to park process: %s", cstr(message)));
-                End
+                match_result(ProcessID, pid_res,
+                    success(_) {},
+                    error(code, message) { __d_printf(PANIC, "Failed to park process: %s", cstr(message)); }
+                );
             }
             else
             {
                 __d_println(PANIC, "Invalid park payload");
             }
 
-        })
-        IsNone(__d_println(PANIC, "Invalid park message"));
-    End
+        },
+        none() { __d_println(PANIC, "Invalid park message"); }
+    );
 
 }
 
 void action_unpark_message(KernelListenerPtr self, MessagePtr message)
 {
-    Match(Payload, message->payload)
-        IsSome(payload,
+    match_optional(Payload, message->payload,
+        some(payload)
         {
             if (payload.type == PAYLOAD_TYPE_PROCESS_ID)
             {
@@ -50,19 +51,22 @@ void action_unpark_message(KernelListenerPtr self, MessagePtr message)
                     self->kernel->scheduler, pid, PARK_WAIT_IO, None(ReturnCode)
                 );
 
-                ResultMatch(ProcessID, pid_res)
-                    IsSuccess(unparked_pid, __d_printf(SCHEDULER, "scheduler unpark message success pid=%i\n", unparked_pid););
-                    IsError(code, message, __d_printf(PANIC, "Failed to unpark process: %s", cstr(message)));
-                End
+                match_result(ProcessID, pid_res,
+                    success(unparked_pid)
+                    {
+                        __d_printf(SCHEDULER, "scheduler unpark message success pid=%i\n", unparked_pid);
+                    },
+                    error(code, message) { __d_printf(PANIC, "Failed to unpark process: %s", cstr(message)); }
+                )
             }
             else
             {
                 __d_println(PANIC, "Invalid unpark payload");
             }
 
-        })
-        IsNone(__d_println(PANIC, "Invalid unpark message"));
-    End
+        },
+        none() { __d_println(PANIC, "Invalid unpark message"); }
+    );
 
 }
 
@@ -79,8 +83,8 @@ void Scheduler__io_event(KernelListenerPtr self, MessagePtr message)
     }
     else if (message->source_code == SUBSYS_IO_OPERATION_AVAILABLE)
     {
-        Match(Payload, message->payload)
-            IsSome(payload,
+        match_optional(Payload, message->payload,
+            some(payload)
             {
                 if (payload.type == PAYLOAD_TYPE_IO_OPERATION)
                 {
@@ -92,12 +96,14 @@ void Scheduler__io_event(KernelListenerPtr self, MessagePtr message)
                         Some(OperationKey, payload.io_operation.operation_key)
                     );
 
-                    ResultMatch(ProcessID, pid_res)
-                        IsError(code, error_message, __d_printf(PANIC, "Failed to unpark process: %s", cstr(error_message)));
-                    End
+                    match_result(ProcessID, pid_res,
+                        success(_) {},
+                        error(code, error_message) { __d_printf(PANIC, "Failed to unpark process: %s", cstr(error_message)); }
+                    );
                 }
-            })
-        End
+            },
+            none() {}
+        )
     }
 
 }
@@ -109,26 +115,27 @@ void Scheduler__service_event(KernelListenerPtr self, MessagePtr message)
         return;
     }
 
-    Match(Payload, message->payload)
-        IsSome(payload,
+    match_optional(Payload, message->payload,
+        some(payload)
         {
             if (payload.type == PAYLOAD_TYPE_SERVICE_EVENT_DELIVERY)
             {
-                ResultMatch(ServiceCode, Scheduler__service_enqueue(
+                match_result(ServiceCode, Scheduler__service_enqueue(
                     self->kernel->scheduler,
                     payload.service_event_delivery.process,
                     payload.service_event_delivery.event
-                ))
-                    IsError(code, message, __d_printf(PANIC, "Failed to enqueue service event: %s", cstr(message)));
-                End
+                ),
+                    success(_) {},
+                    error(code, message) { __d_printf(PANIC, "Failed to enqueue service event: %s", cstr(message)); }
+                );
             }
             else
             {
                 __d_println(PANIC, "Invalid service event payload");
             }
-        })
-        IsNone(__d_println(PANIC, "Invalid service event message"));
-    End
+        },
+        none() { __d_println(PANIC, "Invalid service event message"); }
+    );
 }
 
 Result(SchedulerRegisterCode) Scheduler__register(KernelPtr kernel)
@@ -137,14 +144,18 @@ Result(SchedulerRegisterCode) Scheduler__register(KernelPtr kernel)
     Listener io_listener = KernelListener__new(kernel, SOURCE_IO, Scheduler__io_event);
     Listener service_listener = KernelListener__new(kernel, SOURCE_SERVICE, Scheduler__service_event);
 
-    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(broker, io_listener))
-        IsError(code, message, return Error(SchedulerRegisterCode, message, code));
-    End
+    match_result(ListenerRegisterResult, MessageBroker__register_listener(broker, io_listener),
+        success(_) {},
+        error(code, message) { return Error(SchedulerRegisterCode, message, code); }
+    );
 
-    ResultMatch(ListenerRegisterResult, MessageBroker__register_listener(broker, service_listener))
-        IsSuccess(res, return Success(SchedulerRegisterCode, res));
-        IsError(code, message, return Error(SchedulerRegisterCode, message, code));
-    End
+    match_result(ListenerRegisterResult, MessageBroker__register_listener(broker, service_listener),
+        success(res)
+        {
+            return Success(SchedulerRegisterCode, res);
+        },
+        error(code, message) { return Error(SchedulerRegisterCode, message, code); }
+    )
 
     return Success(SchedulerRegisterCode, LISTENER_REGISTER_OK);
 }

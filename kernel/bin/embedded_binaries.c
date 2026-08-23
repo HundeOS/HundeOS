@@ -19,12 +19,13 @@ static EmbeddedFs EmbeddedElf__filesystem()
 Optional(Elf) EmbeddedElf__load(BString name)
 {
     EmbeddedFs filesystem = EmbeddedElf__filesystem();
-    Match(EmbeddedFsFile, EmbeddedFs__find(&filesystem, name))
-        IsSome(file,
+    match_optional(EmbeddedFsFile, EmbeddedFs__find(&filesystem, name),
+        some(file)
         {
             return Some(Elf, Elf__new(file.start, file.end, file.name));
-        })
-    End
+        },
+        none() {}
+    )
 
     return None(Elf);
 }

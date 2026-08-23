@@ -81,30 +81,26 @@ ByteCount console_read_line(char * buf, bool echo, uint64_t size)
 
 BString Console__read(void)
 {
-    BString input = EMPTY_BSTRING;
-    ByteCount read = console_read(input.data, input.max - 1);
+    char buffer[BSTRING_MAX_SIZE];
+    ByteCount read = console_read(buffer, BSTRING_MAX_SIZE - 1);
 
     if (read <= 0)
     {
-        return input;
+        return EMPTY_BSTRING;
     }
 
-    input.len = read;
-    input.data[input.len] = '\0';
-    return input;
+    return BString__from_chars(buffer, read);
 }
 
 BString Console__read_line(bool echo)
 {
-    BString input = EMPTY_BSTRING;
-    ByteCount read = console_read_line(input.data, echo, input.max);
+    char buffer[BSTRING_MAX_SIZE];
+    ByteCount read = console_read_line(buffer, echo, BSTRING_MAX_SIZE);
 
     if (read <= 0)
     {
-        return input;
+        return EMPTY_BSTRING;
     }
 
-    input.len = read;
-    input.data[input.len] = '\0';
-    return input;
+    return BString__from_chars(buffer, read);
 }

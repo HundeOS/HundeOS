@@ -36,6 +36,7 @@ void KernelContext__set_result_mapper(
     KernelContextPtr self, KernelResultMapper mapper, Anything mapper_context
 );
 Result(Anything) KernelContext__map_result(KernelContextPtr self, Result(Anything) result);
+bool KernelContext__has_any_state(KernelContextPtr self);
 void KernelContext__dispose_heap(KernelContextPtr self);
 
 KernelContext KernelContext__from_originating_context(OriginatingContext originating_context);

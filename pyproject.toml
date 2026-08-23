@@ -1,0 +1,13 @@
+[project]
+name = "hundeos-kernel-tools"
+version = "0.1.0"
+description = "Python tooling for the HundeOS kernel experiment."
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml",
+    "tree-sitter",
+    "tree-sitter-c",
+]
+
+[tool.uv]
+package = false

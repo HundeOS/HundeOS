@@ -11,15 +11,15 @@ Result(SystemCallResult) Exit__handler(
 )
 {
     ReturnCode exit_code = (ReturnCode) arg1;
-    Match(ProcessPtr, proc)
-        IsSome(process,
+    match_optional(ProcessPtr, proc,
+        some(process)
         {
             __d_printf(SYSCALL, "Exiting process %i %s", process->pid, cstr(process->name));
 
             Process__dispose_owned_kernel_resources(process);
             Scheduler__exit(kernel->scheduler, process, exit_code);
             return Success(SystemCallResult, SYSCALL_OK);
-        })
-        IsNone(return Error(SystemCallResult, process_not_found, SYSCALL_FAILURE))
-    End
+        },
+        none() { return Error(SystemCallResult, process_not_found, SYSCALL_FAILURE); }
+    )
 }

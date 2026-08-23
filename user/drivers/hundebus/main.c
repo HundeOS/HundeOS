@@ -150,10 +150,10 @@ static bool Hundebus__read_pci_device(
 
 static bool Hundebus__record_pci_device(HundebusPtr self, HundebusPciDevice device)
 {
-    ResultMatch(CollectionCode, HundebusPciDevices__push(&self->pci_devices, device))
-        IsSuccess(code, return true)
-        IsError(code, message, return false)
-    End
+    match_result(CollectionCode, HundebusPciDevices__push(&self->pci_devices, device),
+        success(code) { return true; },
+        error(code, message) { return false; }
+    )
     return false;
 }
 
@@ -202,20 +202,20 @@ static uint64_t Hundebus__scan_pci(HundebusPtr self)
 static bool Hundebus__append_line(HundebusPtr self, ConstBStringPtr format, uint64_t value)
 {
     BString line = BString__sprintf(format, value);
-    ResultMatch(DynStringCode, DynString__append_bstring(&self->businfo, &line))
-        IsSuccess(code, return true)
-        IsError(code, message, return false)
-    End
+    match_result(DynStringCode, DynString__append_bstring(&self->businfo, &line),
+        success(code) { return true; },
+        error(code, message) { return false; }
+    )
     return false;
 }
 
 static bool Hundebus__append_device_line(HundebusPtr self, ConstBStringPtr format, uint64_t index, uint64_t value)
 {
     BString line = BString__sprintf(format, index, value);
-    ResultMatch(DynStringCode, DynString__append_bstring(&self->businfo, &line))
-        IsSuccess(code, return true)
-        IsError(code, message, return false)
-    End
+    match_result(DynStringCode, DynString__append_bstring(&self->businfo, &line),
+        success(code) { return true; },
+        error(code, message) { return false; }
+    )
     return false;
 }
 
@@ -230,9 +230,10 @@ static bool Hundebus__append_pci_device(HundebusPtr self, uint64_t index, Hundeb
     BString header_format = BSTRING_NEW("pci.device.%llu.header=0x%llx\n");
 
     BString bdf = BString__sprintf(&bdf_format, index, device->bus, device->device, device->function);
-    ResultMatch(DynStringCode, DynString__append_bstring(&self->businfo, &bdf))
-        IsError(code, message, return false)
-    End
+    match_result(DynStringCode, DynString__append_bstring(&self->businfo, &bdf),
+        success(_) {},
+        error(code, message) { return false; }
+    )
 
     return Hundebus__append_device_line(self, &vendor_format, index, device->vendor_id)
         && Hundebus__append_device_line(self, &device_format, index, device->device_id)
@@ -263,7 +264,7 @@ static bool Hundebus__build_businfo(HundebusPtr self)
         {
             return false;
         }
-    }
+    End
 
     return true;
 }
@@ -315,9 +316,10 @@ static bool Hundebus__init(HundebusPtr self)
         .businfo_handle = -1,
     };
 
-    ResultMatch(DynStringCode, DynString__init(&self->businfo, HUNDEBUS_BUSINFO_INITIAL_CAPACITY))
-        IsError(code, message, return false)
-    End
+    match_result(DynStringCode, DynString__init(&self->businfo, HUNDEBUS_BUSINFO_INITIAL_CAPACITY),
+        success(_) {},
+        error(code, message) { return false; }
+    )
 
     if (!service_ok(service_become_service()))
     {

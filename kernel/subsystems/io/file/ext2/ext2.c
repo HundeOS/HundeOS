@@ -438,27 +438,32 @@ static void Ext2__write_u32(DataPtr data, size_t offset, uint32_t value)
     data[offset + 3] = (Data) ((value >> 24) & 0xff);
 }
 
+static BString Ext2__segment_at(BStringArrayPtr segments, size_t index)
+{
+    match_optional(BString, BStringArray__at(segments, index),
+        some(segment)
+        {
+            return segment;
+        },
+        none() { return EMPTY_BSTRING; }
+    )
+}
+
 static DirectoryEntry Ext2FileIO__directory_entry_from_ext2_entry(Ext2DirectoryEntryPtr entry)
 {
-    DirectoryEntry dirent = (DirectoryEntry) { 0 };
-    dirent.attributes = IO_DIRENT_ATTR_NONE;
-    dirent.user_id = PROCESS_USER_ROOT;
-    dirent.group_id = PROCESS_GROUP_ROOT;
-    dirent.mode = entry->mode;
-    if ((dirent.mode & IO_MODE_TYPE_MASK) == 0)
+    FileMode mode = entry->mode;
+    if ((mode & IO_MODE_TYPE_MASK) == 0)
     {
-        dirent.mode |= entry->file_type == EXT2_DIRENT_TYPE_DIR ? IO_MODE_TYPE_DIR : IO_MODE_TYPE_FILE;
+        mode |= entry->file_type == EXT2_DIRENT_TYPE_DIR ? IO_MODE_TYPE_DIR : IO_MODE_TYPE_FILE;
     }
 
-    size_t max_name = IO_DIRENT_NAME_MAX - 1;
-    size_t copy_len = entry->name.len < (StringPos) max_name ? (size_t) entry->name.len : max_name;
-    for (size_t i = 0; i < copy_len; i++)
-    {
-        dirent.name[i] = entry->name.data[i];
-    }
-    dirent.name[copy_len] = '\0';
-    dirent.name_len = copy_len;
-    return dirent;
+    return DirectoryEntry__new(
+        IO_DIRENT_ATTR_NONE,
+        PROCESS_USER_ROOT,
+        PROCESS_GROUP_ROOT,
+        mode,
+        &entry->name
+    );
 }
 
 bool Ext2DirectoryEntry__equals(Ext2DirectoryEntryPtr self, Ext2DirectoryEntryPtr other)
@@ -478,32 +483,30 @@ static Result(Ext2Code) Ext2Volume__read_blocks(
         .target = target,
     };
 
-    Match(BlockDevicePtr, self->device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, self->device,
+        some(device)
         {
             BlockIOContext block_context = { 0 };
             block_context.kernel_context = EMPTY_KERNEL_CONTEXT;
             block_context.owner_context = (Anything) &sync_context;
 
-            ResultMatch(Anything, BlockDevice__read_async(
+            match_result(Anything, BlockDevice__read_async(
                 device,
                 (BlockNumber) block * EXT2_BLOCK_SECTORS,
                 (BlockCount) count * EXT2_BLOCK_SECTORS,
                 &block_context,
                 Ext2Volume__complete_sync_read
-            ))
-                IsSuccess(blocks,
+            ),
+                success(blocks)
                 {
                     if ((BlockCount) blocks == (BlockCount) count * EXT2_BLOCK_SECTORS)
                     {
                         return Success(Ext2Code, EXT2_OK);
                     }
-                })
-                IsError(code, message, return Error(Ext2Code, io_error, EXT2_IO_ERROR))
-            End
-        })
-        IsNone(return Error(Ext2Code, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+                }, error(code, message) { return Error(Ext2Code, io_error, EXT2_IO_ERROR); })
+        },
+        none() { return Error(Ext2Code, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Ext2Code, io_error, EXT2_IO_ERROR);
 }
@@ -514,33 +517,31 @@ static Result(Ext2Code) Ext2Volume__write_blocks(
 {
     Ext2SyncWriteContext sync_context = { 0 };
 
-    Match(BlockDevicePtr, self->device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, self->device,
+        some(device)
         {
             BlockIOContext block_context = { 0 };
             block_context.kernel_context = EMPTY_KERNEL_CONTEXT;
             block_context.owner_context = (Anything) &sync_context;
 
-            ResultMatch(Anything, BlockDevice__write_async(
+            match_result(Anything, BlockDevice__write_async(
                 device,
                 (BlockNumber) block * EXT2_BLOCK_SECTORS,
                 (BlockCount) count * EXT2_BLOCK_SECTORS,
                 source,
                 &block_context,
                 Ext2Volume__complete_sync_write
-            ))
-                IsSuccess(blocks,
+            ),
+                success(blocks)
                 {
                     if ((BlockCount) blocks == (BlockCount) count * EXT2_BLOCK_SECTORS)
                     {
                         return Success(Ext2Code, EXT2_OK);
                     }
-                })
-                IsError(code, message, return Error(Ext2Code, io_error, EXT2_IO_ERROR))
-            End
-        })
-        IsNone(return Error(Ext2Code, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+                }, error(code, message) { return Error(Ext2Code, io_error, EXT2_IO_ERROR); })
+        },
+        none() { return Error(Ext2Code, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Ext2Code, io_error, EXT2_IO_ERROR);
 }
@@ -707,9 +708,10 @@ static Result(Ext2Code) Ext2Volume__read_inode(
     Ext2Block inode_block = Ext2Volume__inode_block(self, inode_number);
     Data block[EXT2_BLOCK_SIZE] = { 0 };
 
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, inode_block, 1, block))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, inode_block, 1, block),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     Ext2Inode__read_from_block(self, inode_number, block, target);
 
@@ -728,9 +730,10 @@ static Result(Ext2Code) Ext2Volume__write_inode(
     Ext2Block inode_block = Ext2Volume__inode_block(self, inode_number);
     Data block[EXT2_BLOCK_SIZE] = { 0 };
 
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, inode_block, 1, block))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, inode_block, 1, block),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     size_t inode_offset = Ext2Volume__inode_offset(self, inode_number);
     Ext2__write_u16(block, inode_offset, source->mode);
@@ -818,16 +821,17 @@ static Result(Ext2Code) Ext2Volume__insert_dirent(
 )
 {
     Ext2Inode directory_inode = { 0 };
-    ResultMatch(Ext2Code, Ext2Volume__read_inode(self, directory_inode_number, &directory_inode))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_inode(self, directory_inode_number, &directory_inode),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     if (!Ext2Inode__is_dir(&directory_inode))
     {
         return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND);
     }
 
-    uint16_t required_len = Ext2__dirent_record_size(name.len);
+    uint16_t required_len = Ext2__dirent_record_size(BString__length(&name));
     for (size_t block_index = 0; block_index < EXT2_NDIR_BLOCKS; block_index++)
     {
         if (directory_inode.block[block_index] == 0)
@@ -836,9 +840,10 @@ static Result(Ext2Code) Ext2Volume__insert_dirent(
         }
 
         Data block[EXT2_BLOCK_SIZE] = { 0 };
-        ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, directory_inode.block[block_index], 1, block))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__read_blocks(self, directory_inode.block[block_index], 1, block),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
 
         size_t offset = 0;
         while (offset + 8 <= EXT2_BLOCK_SIZE)
@@ -862,11 +867,11 @@ static Result(Ext2Code) Ext2Volume__insert_dirent(
                     Ext2__write_u16(block, offset + 4, actual_len);
                     Ext2__write_u32(block, new_offset, child_inode_number);
                     Ext2__write_u16(block, new_offset + 4, new_len);
-                    block[new_offset + 6] = (Data) name.len;
+                    block[new_offset + 6] = (Data) BString__length(&name);
                     block[new_offset + 7] = (Data) child_type;
-                    for (size_t i = 0; i < name.len; i++)
+                    for (size_t i = 0; i < BString__length(&name); i++)
                     {
-                        block[new_offset + 8 + i] = (Data) name.data[i];
+                        block[new_offset + 8 + i] = (Data) BString__char_at_or(&name, (StringPos) i, '\0');
                     }
 
                     return Ext2Volume__write_blocks(self, directory_inode.block[block_index], 1, block);
@@ -949,16 +954,18 @@ static Result(Ext2Code) Ext2Volume__write_inode_data(
 
     if (creating)
     {
-        ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, self->inode_bitmap_block, 1, inode_bitmap))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__read_blocks(self, self->inode_bitmap_block, 1, inode_bitmap),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
         Ext2__bitmap_set_bit(inode_bitmap, inode_number - 1);
         free_inode_delta--;
     }
 
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, self->block_bitmap_block, 1, block_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, self->block_bitmap_block, 1, block_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     for (size_t i = 0; i < EXT2_NDIR_BLOCKS; i++)
     {
@@ -978,9 +985,10 @@ static Result(Ext2Code) Ext2Volume__write_inode_data(
 
     for (size_t i = 0; i < blocks_needed; i++)
     {
-        ResultMatch(Ext2Code, Ext2Volume__allocate_block_from_bitmap(self, block_bitmap, &inode->block[i]))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__allocate_block_from_bitmap(self, block_bitmap, &inode->block[i]),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
         free_block_delta--;
     }
 
@@ -995,38 +1003,43 @@ static Result(Ext2Code) Ext2Volume__write_inode_data(
             block[j] = data[source_offset + j];
         }
 
-        ResultMatch(Ext2Code, Ext2Volume__write_blocks(self, inode->block[i], 1, block))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__write_blocks(self, inode->block[i], 1, block),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
     }
 
     inode->size = (Ext2FileSize) size;
 
-    ResultMatch(Ext2Code, Ext2Volume__write_inode(self, inode_number, inode))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__write_inode(self, inode_number, inode),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     if (creating)
     {
-        ResultMatch(Ext2Code, Ext2Volume__write_blocks(self, self->inode_bitmap_block, 1, inode_bitmap))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__write_blocks(self, self->inode_bitmap_block, 1, inode_bitmap),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
     }
 
-    ResultMatch(Ext2Code, Ext2Volume__write_blocks(self, self->block_bitmap_block, 1, block_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__write_blocks(self, self->block_bitmap_block, 1, block_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     if (free_block_delta != 0 || free_inode_delta != 0)
     {
-        ResultMatch(Ext2Code, Ext2Volume__update_allocation_counts(
+        match_result(Ext2Code, Ext2Volume__update_allocation_counts(
             self,
             free_block_delta,
             free_inode_delta,
             0
-        ))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        ),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
     }
 
     return Success(Ext2Code, EXT2_OK);
@@ -1044,75 +1057,82 @@ static Result(Ext2Code) Ext2Volume__write_file_at_path(
     Ext2InodeNumber parent_inode_number = 0;
     BString leaf_name = EMPTY_BSTRING;
 
-    ResultMatch(Ext2Code, Ext2Volume__resolve_parent(self, path, &parent_inode_number, &leaf_name))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__resolve_parent(self, path, &parent_inode_number, &leaf_name),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     Ext2InodeNumber existing_inode_number = 0;
     Result(Ext2Code) lookup_result = Ext2Volume__lookup_child(self, parent_inode_number, leaf_name, &existing_inode_number);
-    ResultMatch(Ext2Code, lookup_result)
-        IsSuccess(code,
+    match_result(Ext2Code, lookup_result,
+        success(code)
         {
             Ext2Inode existing_inode = { 0 };
-            ResultMatch(Ext2Code, Ext2Volume__read_inode(self, existing_inode_number, &existing_inode))
-                IsError(inner_code, message, return Error(Ext2Code, message, inner_code))
-            End
+            match_result(Ext2Code, Ext2Volume__read_inode(self, existing_inode_number, &existing_inode),
+                success(_) {},
+                error(inner_code, message) { return Error(Ext2Code, message, inner_code); }
+            )
 
             if (!Ext2Inode__is_file(&existing_inode))
             {
                 return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND);
             }
 
-            ResultMatch(Ext2Code, Ext2Volume__write_inode_data(
+            match_result(Ext2Code, Ext2Volume__write_inode_data(
                 self,
                 existing_inode_number,
                 &existing_inode,
                 data,
                 size,
                 false
-            ))
-                IsError(inner_code, message, return Error(Ext2Code, message, inner_code))
-            End
+            ),
+                success(_) {},
+                error(inner_code, message) { return Error(Ext2Code, message, inner_code); }
+            )
 
             *inode_number = existing_inode_number;
             *inode = existing_inode;
             return Success(Ext2Code, EXT2_OK);
-        })
-        IsError(code, message,
+        },
+        error(code, message)
         {
             if (code != EXT2_NOT_FOUND)
             {
                 return Error(Ext2Code, message, code);
             }
-        })
-    End
+        }
+    )
 
     Data inode_bitmap[EXT2_BLOCK_SIZE] = { 0 };
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, self->inode_bitmap_block, 1, inode_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, self->inode_bitmap_block, 1, inode_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     Ext2InodeNumber new_inode_number = 0;
-    ResultMatch(Ext2Code, Ext2Volume__allocate_inode_from_bitmap(self, inode_bitmap, &new_inode_number))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__allocate_inode_from_bitmap(self, inode_bitmap, &new_inode_number),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     Ext2Inode new_inode = { 0 };
     Ext2Inode__reset_file(&new_inode, (Ext2FileSize) size);
 
-    ResultMatch(Ext2Code, Ext2Volume__write_inode_data(self, new_inode_number, &new_inode, data, size, true))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__write_inode_data(self, new_inode_number, &new_inode, data, size, true),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
-    ResultMatch(Ext2Code, Ext2Volume__insert_dirent(
+    match_result(Ext2Code, Ext2Volume__insert_dirent(
         self,
         parent_inode_number,
         leaf_name,
         new_inode_number,
         EXT2_DIRENT_TYPE_FILE
-    ))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     *inode_number = new_inode_number;
     *inode = new_inode;
@@ -1124,22 +1144,23 @@ static Result(Ext2Code) Ext2Volume__mkdir_at_path(Ext2VolumePtr self, BString pa
     Ext2InodeNumber parent_inode_number = 0;
     BString leaf_name = EMPTY_BSTRING;
 
-    ResultMatch(Ext2Code, Ext2Volume__resolve_parent(self, path, &parent_inode_number, &leaf_name))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__resolve_parent(self, path, &parent_inode_number, &leaf_name),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     Ext2InodeNumber existing_inode_number = 0;
     Result(Ext2Code) lookup_result = Ext2Volume__lookup_child(self, parent_inode_number, leaf_name, &existing_inode_number);
-    ResultMatch(Ext2Code, lookup_result)
-        IsSuccess(code, return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND))
-        IsError(code, message,
+    match_result(Ext2Code, lookup_result,
+        success(code) { return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND); },
+        error(code, message)
         {
             if (code != EXT2_NOT_FOUND)
             {
                 return Error(Ext2Code, message, code);
             }
-        })
-    End
+        }
+    )
 
     Data inode_bitmap[EXT2_BLOCK_SIZE] = { 0 };
     Data block_bitmap[EXT2_BLOCK_SIZE] = { 0 };
@@ -1147,48 +1168,58 @@ static Result(Ext2Code) Ext2Volume__mkdir_at_path(Ext2VolumePtr self, BString pa
     Ext2InodeNumber new_inode_number = 0;
     Ext2Block new_dir_block = 0;
 
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, self->inode_bitmap_block, 1, inode_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, self->block_bitmap_block, 1, block_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, self->inode_bitmap_block, 1, inode_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, self->block_bitmap_block, 1, block_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
-    ResultMatch(Ext2Code, Ext2Volume__allocate_inode_from_bitmap(self, inode_bitmap, &new_inode_number))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__allocate_block_from_bitmap(self, block_bitmap, &new_dir_block))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__allocate_inode_from_bitmap(self, inode_bitmap, &new_inode_number),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__allocate_block_from_bitmap(self, block_bitmap, &new_dir_block),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     Ext2Inode new_inode = { 0 };
     Ext2Inode__reset_dir(&new_inode, new_dir_block);
     Ext2__initialise_dir_block(dir_block, new_inode_number, parent_inode_number);
 
-    ResultMatch(Ext2Code, Ext2Volume__write_blocks(self, new_dir_block, 1, dir_block))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__write_inode(self, new_inode_number, &new_inode))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__write_blocks(self, self->inode_bitmap_block, 1, inode_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__write_blocks(self, self->block_bitmap_block, 1, block_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__insert_dirent(
+    match_result(Ext2Code, Ext2Volume__write_blocks(self, new_dir_block, 1, dir_block),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__write_inode(self, new_inode_number, &new_inode),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__write_blocks(self, self->inode_bitmap_block, 1, inode_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__write_blocks(self, self->block_bitmap_block, 1, block_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__insert_dirent(
         self,
         parent_inode_number,
         leaf_name,
         new_inode_number,
         EXT2_DIRENT_TYPE_DIR
-    ))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__update_allocation_counts(self, -1, -1, 1))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__update_allocation_counts(self, -1, -1, 1),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     return Success(Ext2Code, EXT2_OK);
 }
@@ -1203,12 +1234,14 @@ static Result(Ext2Code) Ext2Volume__update_allocation_counts(
     Data superblock[EXT2_BLOCK_SIZE] = { 0 };
     Data group_desc[EXT2_BLOCK_SIZE] = { 0 };
 
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, 1, 1, superblock))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, 2, 1, group_desc))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, 1, 1, superblock),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, 2, 1, group_desc),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     uint32_t free_blocks = Ext2__read_u32(superblock, 12);
     uint32_t free_inodes = Ext2__read_u32(superblock, 16);
@@ -1222,9 +1255,10 @@ static Result(Ext2Code) Ext2Volume__update_allocation_counts(
     Ext2__write_u16(group_desc, 14, (uint16_t) ((int32_t) group_free_inodes + inode_delta));
     Ext2__write_u16(group_desc, 16, (uint16_t) ((int32_t) used_dirs + used_dirs_delta));
 
-    ResultMatch(Ext2Code, Ext2Volume__write_blocks(self, 1, 1, superblock))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__write_blocks(self, 1, 1, superblock),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     return Ext2Volume__write_blocks(self, 2, 1, group_desc);
 }
@@ -1237,9 +1271,10 @@ static Result(Ext2Code) Ext2Volume__free_inode(Ext2VolumePtr self, Ext2InodeNumb
     }
 
     Data inode_bitmap[EXT2_BLOCK_SIZE] = { 0 };
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, self->inode_bitmap_block, 1, inode_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, self->inode_bitmap_block, 1, inode_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     uint32_t inode_index = inode_number - 1;
     if (!Ext2__bitmap_bit_is_set(inode_bitmap, inode_index))
@@ -1248,9 +1283,10 @@ static Result(Ext2Code) Ext2Volume__free_inode(Ext2VolumePtr self, Ext2InodeNumb
     }
 
     Ext2__bitmap_clear_bit(inode_bitmap, inode_index);
-    ResultMatch(Ext2Code, Ext2Volume__write_blocks(self, self->inode_bitmap_block, 1, inode_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__write_blocks(self, self->inode_bitmap_block, 1, inode_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     return Ext2Volume__update_allocation_counts(self, 0, 1, 0);
 }
@@ -1263,9 +1299,10 @@ static Result(Ext2Code) Ext2Volume__free_block(Ext2VolumePtr self, Ext2Block blo
     }
 
     Data block_bitmap[EXT2_BLOCK_SIZE] = { 0 };
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, self->block_bitmap_block, 1, block_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, self->block_bitmap_block, 1, block_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     uint32_t block_index = block_number - self->first_data_block;
     if (!Ext2__bitmap_bit_is_set(block_bitmap, block_index))
@@ -1274,9 +1311,10 @@ static Result(Ext2Code) Ext2Volume__free_block(Ext2VolumePtr self, Ext2Block blo
     }
 
     Ext2__bitmap_clear_bit(block_bitmap, block_index);
-    ResultMatch(Ext2Code, Ext2Volume__write_blocks(self, self->block_bitmap_block, 1, block_bitmap))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__write_blocks(self, self->block_bitmap_block, 1, block_bitmap),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     return Ext2Volume__update_allocation_counts(self, 1, 0, 0);
 }
@@ -1298,9 +1336,10 @@ static Result(Ext2DirectoryEntries) Ext2Volume__list_directory_inode(
     Ext2DirectoryEntries entries = Ext2DirectoryEntries__new();
     Ext2Inode inode = { 0 };
 
-    ResultMatch(Ext2Code, Ext2Volume__read_inode(self, inode_number, &inode))
-        IsError(code, message, return Error(Ext2DirectoryEntries, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_inode(self, inode_number, &inode),
+        success(_) {},
+        error(code, message) { return Error(Ext2DirectoryEntries, message, code); }
+    )
 
     if (!Ext2Inode__is_dir(&inode))
     {
@@ -1315,9 +1354,10 @@ static Result(Ext2DirectoryEntries) Ext2Volume__list_directory_inode(
         }
 
         Data block[EXT2_BLOCK_SIZE] = { 0 };
-        ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, inode.block[block_index], 1, block))
-            IsError(code, message, return Error(Ext2DirectoryEntries, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__read_blocks(self, inode.block[block_index], 1, block),
+            success(_) {},
+            error(code, message) { return Error(Ext2DirectoryEntries, message, code); }
+        )
 
         size_t offset = 0;
         while (offset + 8 <= EXT2_BLOCK_SIZE)
@@ -1334,30 +1374,26 @@ static Result(Ext2DirectoryEntries) Ext2Volume__list_directory_inode(
 
             if (entry_inode != 0 && name_len > 0)
             {
-                BString name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    name.data[i] = (char) block[offset + 8 + i];
-                }
-                name.len = name_len;
-                name.data[name.len] = '\0';
+                BString name = BString__from_chars((const char *) &block[offset + 8], name_len);
 
                 if (!BString__equals(&name, &BSTRING_NEW(".")) && !BString__equals(&name, &BSTRING_NEW("..")))
                 {
                     Ext2Inode entry_node = { 0 };
-                    ResultMatch(Ext2Code, Ext2Volume__read_inode(self, entry_inode, &entry_node))
-                        IsError(code, message, return Error(Ext2DirectoryEntries, message, code))
-                    End
+                    match_result(Ext2Code, Ext2Volume__read_inode(self, entry_inode, &entry_node),
+                        success(_) {},
+                        error(code, message) { return Error(Ext2DirectoryEntries, message, code); }
+                    )
 
-                    ResultMatch(CollectionCode, Ext2DirectoryEntries__push(&entries, ((Ext2DirectoryEntry) {
+                    match_result(CollectionCode, Ext2DirectoryEntries__push(&entries, ((Ext2DirectoryEntry) {
                         .name = name,
                         .file_type = file_type,
                         .inode = entry_inode,
                         .mode = entry_node.mode,
                         .size = entry_node.size,
-                    })))
-                        IsError(code, message, return Error(Ext2DirectoryEntries, invalid_volume, EXT2_INVALID_VOLUME))
-                    End
+                    })),
+                        success(_) {},
+                        error(code, message) { return Error(Ext2DirectoryEntries, invalid_volume, EXT2_INVALID_VOLUME); }
+                    )
                 }
             }
 
@@ -1372,8 +1408,8 @@ static Result(Ext2Code) Ext2Volume__lookup_child(
     Ext2VolumePtr self, Ext2InodeNumber directory_inode, BString name, Ext2InodeNumber * child_inode
 )
 {
-    ResultMatch(Ext2DirectoryEntries, Ext2Volume__list_directory_inode(self, directory_inode))
-        IsSuccess(entries,
+    match_result(Ext2DirectoryEntries, Ext2Volume__list_directory_inode(self, directory_inode),
+        success(entries)
         {
             FAIterate(Ext2DirectoryEntries, entries, index, entry)
                 if (BString__equals(&entry.name, &name))
@@ -1382,9 +1418,9 @@ static Result(Ext2Code) Ext2Volume__lookup_child(
                     return Success(Ext2Code, EXT2_OK);
                 }
             End
-        })
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+        },
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     return Error(Ext2Code, not_found, EXT2_NOT_FOUND);
 }
@@ -1393,7 +1429,7 @@ static Result(Ext2Code) Ext2Volume__find_inode_at_path(
     Ext2VolumePtr self, BString path, Ext2InodeNumber * inode_number
 )
 {
-    if (BString__equals(&path, &BSTRING_NEW("/")) || path.len == 0)
+    if (BString__equals(&path, &BSTRING_NEW("/")) || BString__length(&path) == 0)
     {
         *inode_number = EXT2_ROOT_INODE;
         return Success(Ext2Code, EXT2_OK);
@@ -1403,11 +1439,12 @@ static Result(Ext2Code) Ext2Volume__find_inode_at_path(
     Ext2InodeNumber current = EXT2_ROOT_INODE;
 
     FAIterate(BStringArray, segments, index, segment)
-        ResultMatch(Ext2Code, Ext2Volume__lookup_child(self, current, segment, &current))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
-    End
+        match_result(Ext2Code, Ext2Volume__lookup_child(self, current, segment, &current),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
 
+    End
     *inode_number = current;
     return Success(Ext2Code, EXT2_OK);
 }
@@ -1419,27 +1456,29 @@ static Result(Ext2Code) Ext2Volume__resolve_parent(
     BString * leaf_name
 )
 {
-    if (path.len == 0 || BString__equals(&path, &BSTRING_NEW("/")))
+    if (BString__length(&path) == 0 || BString__equals(&path, &BSTRING_NEW("/")))
     {
         return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND);
     }
 
     BStringArray segments = BString__split(&path, '/');
-    if (segments.len == 0)
+    if (BStringArray__len(&segments) == 0)
     {
         return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND);
     }
 
     Ext2InodeNumber current = EXT2_ROOT_INODE;
-    for (size_t i = 0; i + 1 < segments.len; i++)
+    for (size_t i = 0; i + 1 < BStringArray__len(&segments); i++)
     {
-        ResultMatch(Ext2Code, Ext2Volume__lookup_child(self, current, segments.data[i], &current))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        BString segment = Ext2__segment_at(&segments, i);
+        match_result(Ext2Code, Ext2Volume__lookup_child(self, current, segment, &current),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
     }
 
     *parent_inode_number = current;
-    *leaf_name = segments.data[segments.len - 1];
+    *leaf_name = Ext2__segment_at(&segments, BStringArray__len(&segments) - 1);
     return Success(Ext2Code, EXT2_OK);
 }
 
@@ -1451,9 +1490,10 @@ static Result(Ext2Code) Ext2Volume__remove_dirent(
 )
 {
     Ext2Inode directory_inode = { 0 };
-    ResultMatch(Ext2Code, Ext2Volume__read_inode(self, directory_inode_number, &directory_inode))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_inode(self, directory_inode_number, &directory_inode),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     if (!Ext2Inode__is_dir(&directory_inode))
     {
@@ -1468,9 +1508,10 @@ static Result(Ext2Code) Ext2Volume__remove_dirent(
         }
 
         Data block[EXT2_BLOCK_SIZE] = { 0 };
-        ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, directory_inode.block[block_index], 1, block))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__read_blocks(self, directory_inode.block[block_index], 1, block),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
 
         size_t offset = 0;
         size_t previous_offset = 0;
@@ -1489,13 +1530,7 @@ static Result(Ext2Code) Ext2Volume__remove_dirent(
 
             if (entry_inode != 0 && name_len > 0)
             {
-                BString entry_name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    entry_name.data[i] = (char) block[offset + 8 + i];
-                }
-                entry_name.len = name_len;
-                entry_name.data[entry_name.len] = '\0';
+                BString entry_name = BString__from_chars((const char *) &block[offset + 8], name_len);
 
                 if (BString__equals(&entry_name, &name))
                 {
@@ -1525,7 +1560,7 @@ static Result(Ext2Code) Ext2Volume__remove_dirent(
 
 static BString Ext2__child_path(BString parent_path, BString child_name)
 {
-    if (parent_path.len == 0 || BString__equals(&parent_path, &BSTRING_NEW("/")))
+    if (BString__length(&parent_path) == 0 || BString__equals(&parent_path, &BSTRING_NEW("/")))
     {
         return child_name;
     }
@@ -1564,10 +1599,10 @@ static void Ext2AsyncRemoveContext__reset_for_path(
     self->freed_block_count = 0;
     self->decrement_only = false;
 
-    if (self->segments.len > 0)
+    if (BStringArray__len(&self->segments) > 0)
     {
-        self->parent_segment_count = self->segments.len - 1;
-        self->leaf_name = self->segments.data[self->segments.len - 1];
+        self->parent_segment_count = BStringArray__len(&self->segments) - 1;
+        self->leaf_name = Ext2__segment_at(&self->segments, BStringArray__len(&self->segments) - 1);
     }
 }
 
@@ -1582,8 +1617,8 @@ static Result(Ext2Code) Ext2Volume__remove_inode(
 {
     if (Ext2Inode__is_dir(target_inode))
     {
-        ResultMatch(Ext2DirectoryEntries, Ext2Volume__list_directory_inode(self, target_inode_number))
-            IsSuccess(entries,
+        match_result(Ext2DirectoryEntries, Ext2Volume__list_directory_inode(self, target_inode_number),
+            success(entries)
             {
                 if (entries.len > 0 && (flags & IO_REMOVE_RECURSIVE) == 0)
                 {
@@ -1592,45 +1627,51 @@ static Result(Ext2Code) Ext2Volume__remove_inode(
 
                 FAIterate(Ext2DirectoryEntries, entries, index, entry)
                     Ext2Inode child_inode = { 0 };
-                    ResultMatch(Ext2Code, Ext2Volume__read_inode(self, entry.inode, &child_inode))
-                        IsError(code, message, return Error(Ext2Code, message, code))
-                    End
+                    match_result(Ext2Code, Ext2Volume__read_inode(self, entry.inode, &child_inode),
+                        success(_) {},
+                        error(code, message) { return Error(Ext2Code, message, code); }
+                    )
 
-                    ResultMatch(Ext2Code, Ext2Volume__remove_inode(
+                    match_result(Ext2Code, Ext2Volume__remove_inode(
                         self,
                         target_inode_number,
                         entry.name,
                         entry.inode,
                         &child_inode,
                         flags
-                    ))
-                        IsError(code, message, return Error(Ext2Code, message, code))
-                    End
+                    ),
+                        success(_) {},
+                        error(code, message) { return Error(Ext2Code, message, code); }
+                    )
                 End
-            })
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+            },
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
 
         for (size_t i = 0; i < EXT2_NDIR_BLOCKS; i++)
         {
             if (target_inode->block[i] != 0)
             {
-                ResultMatch(Ext2Code, Ext2Volume__free_block(self, target_inode->block[i]))
-                    IsError(code, message, return Error(Ext2Code, message, code))
-                End
+                match_result(Ext2Code, Ext2Volume__free_block(self, target_inode->block[i]),
+                    success(_) {},
+                    error(code, message) { return Error(Ext2Code, message, code); }
+                )
             }
         }
 
         *target_inode = (Ext2Inode) { 0 };
-        ResultMatch(Ext2Code, Ext2Volume__write_inode(self, target_inode_number, target_inode))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
-        ResultMatch(Ext2Code, Ext2Volume__free_inode(self, target_inode_number))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
-        ResultMatch(Ext2Code, Ext2Volume__update_allocation_counts(self, 0, 0, -1))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__write_inode(self, target_inode_number, target_inode),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
+        match_result(Ext2Code, Ext2Volume__free_inode(self, target_inode_number),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
+        match_result(Ext2Code, Ext2Volume__update_allocation_counts(self, 0, 0, -1),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
         return Ext2Volume__remove_dirent(self, parent_inode_number, leaf_name, &target_inode_number);
     }
 
@@ -1642,9 +1683,10 @@ static Result(Ext2Code) Ext2Volume__remove_inode(
     if (target_inode->links_count > 1)
     {
         target_inode->links_count--;
-        ResultMatch(Ext2Code, Ext2Volume__write_inode(self, target_inode_number, target_inode))
-            IsError(code, message, return Error(Ext2Code, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__write_inode(self, target_inode_number, target_inode),
+            success(_) {},
+            error(code, message) { return Error(Ext2Code, message, code); }
+        )
         return Ext2Volume__remove_dirent(self, parent_inode_number, leaf_name, &target_inode_number);
     }
 
@@ -1652,19 +1694,22 @@ static Result(Ext2Code) Ext2Volume__remove_inode(
     {
         if (target_inode->block[i] != 0)
         {
-            ResultMatch(Ext2Code, Ext2Volume__free_block(self, target_inode->block[i]))
-                IsError(code, message, return Error(Ext2Code, message, code))
-            End
+            match_result(Ext2Code, Ext2Volume__free_block(self, target_inode->block[i]),
+                success(_) {},
+                error(code, message) { return Error(Ext2Code, message, code); }
+            )
         }
     }
 
     *target_inode = (Ext2Inode) { 0 };
-    ResultMatch(Ext2Code, Ext2Volume__write_inode(self, target_inode_number, target_inode))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__free_inode(self, target_inode_number))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__write_inode(self, target_inode_number, target_inode),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__free_inode(self, target_inode_number),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
     return Ext2Volume__remove_dirent(self, parent_inode_number, leaf_name, &target_inode_number);
 }
 
@@ -1675,17 +1720,20 @@ static Result(Ext2Code) Ext2Volume__remove_at_path(Ext2VolumePtr self, BString p
     Ext2InodeNumber target_inode_number = 0;
     Ext2Inode target_inode = { 0 };
 
-    ResultMatch(Ext2Code, Ext2Volume__resolve_parent(self, path, &parent_inode_number, &leaf_name))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__resolve_parent(self, path, &parent_inode_number, &leaf_name),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
-    ResultMatch(Ext2Code, Ext2Volume__lookup_child(self, parent_inode_number, leaf_name, &target_inode_number))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__lookup_child(self, parent_inode_number, leaf_name, &target_inode_number),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
-    ResultMatch(Ext2Code, Ext2Volume__read_inode(self, target_inode_number, &target_inode))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_inode(self, target_inode_number, &target_inode),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     return Ext2Volume__remove_inode(
         self,
@@ -1705,21 +1753,24 @@ static Result(Ext2Code) Ext2Volume__link_at_path(Ext2VolumePtr self, BString sou
     BString target_leaf_name = EMPTY_BSTRING;
     Ext2InodeNumber existing_inode_number = 0;
 
-    ResultMatch(Ext2Code, Ext2Volume__find_inode_at_path(self, source_path, &source_inode_number))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__read_inode(self, source_inode_number, &source_inode))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__find_inode_at_path(self, source_path, &source_inode_number),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__read_inode(self, source_inode_number, &source_inode),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     if (!Ext2Inode__is_file(&source_inode))
     {
         return Error(Ext2Code, not_supported, EXT2_NOT_SUPPORTED);
     }
 
-    ResultMatch(Ext2Code, Ext2Volume__resolve_parent(self, target_path, &target_parent_inode_number, &target_leaf_name))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__resolve_parent(self, target_path, &target_parent_inode_number, &target_leaf_name),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     Result(Ext2Code) lookup_result = Ext2Volume__lookup_child(
         self,
@@ -1727,30 +1778,32 @@ static Result(Ext2Code) Ext2Volume__link_at_path(Ext2VolumePtr self, BString sou
         target_leaf_name,
         &existing_inode_number
     );
-    ResultMatch(Ext2Code, lookup_result)
-        IsSuccess(code, return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND))
-        IsError(code, message,
+    match_result(Ext2Code, lookup_result,
+        success(code) { return Error(Ext2Code, invalid_path, EXT2_NOT_FOUND); },
+        error(code, message)
         {
             if (code != EXT2_NOT_FOUND)
             {
                 return Error(Ext2Code, message, code);
             }
-        })
-    End
+        }
+    )
 
     source_inode.links_count++;
-    ResultMatch(Ext2Code, Ext2Volume__write_inode(self, source_inode_number, &source_inode))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__insert_dirent(
+    match_result(Ext2Code, Ext2Volume__write_inode(self, source_inode_number, &source_inode),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__insert_dirent(
         self,
         target_parent_inode_number,
         target_leaf_name,
         source_inode_number,
         EXT2_DIRENT_TYPE_FILE
-    ))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
     return Success(Ext2Code, EXT2_OK);
 }
@@ -1777,16 +1830,19 @@ Result(Ext2Code) Ext2Volume__mount(Ext2VolumePtr self)
     Data superblock[EXT2_BLOCK_SIZE] = { 0 };
     Data group_desc[EXT2_BLOCK_SIZE] = { 0 };
 
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, 1, 1, superblock))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
-    ResultMatch(Ext2Code, Ext2Volume__parse_superblock(self, superblock))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, 1, 1, superblock),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
+    match_result(Ext2Code, Ext2Volume__parse_superblock(self, superblock),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
 
-    ResultMatch(Ext2Code, Ext2Volume__read_blocks(self, 2, 1, group_desc))
-        IsError(code, message, return Error(Ext2Code, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__read_blocks(self, 2, 1, group_desc),
+        success(_) {},
+        error(code, message) { return Error(Ext2Code, message, code); }
+    )
     return Ext2Volume__parse_group_descriptor(self, group_desc);
 }
 
@@ -1794,9 +1850,10 @@ Result(Ext2DirectoryEntries) Ext2Volume__list_root(Ext2VolumePtr self)
 {
     if (!self->mounted)
     {
-        ResultMatch(Ext2Code, Ext2Volume__mount(self))
-            IsError(code, message, return Error(Ext2DirectoryEntries, message, code))
-        End
+        match_result(Ext2Code, Ext2Volume__mount(self),
+            success(_) {},
+            error(code, message) { return Error(Ext2DirectoryEntries, message, code); }
+        )
     }
 
     return Ext2Volume__list_directory_inode(self, EXT2_ROOT_INODE);
@@ -1804,9 +1861,10 @@ Result(Ext2DirectoryEntries) Ext2Volume__list_root(Ext2VolumePtr self)
 
 static bool Ext2FilesystemIOState__uses_userspace_device(Ext2FilesystemIOStatePtr self)
 {
-    Match(BlockDevicePtr, self->volume.device)
-        IsSome(device, return device->userspace_service)
-    End
+    match_optional(BlockDevicePtr, self->volume.device,
+        some(device) { return device->userspace_service; },
+        none() {}
+    )
 
     return false;
 }
@@ -1829,24 +1887,24 @@ static Result(IOInternalHandle) Ext2FilesystemIOState__add_handle(
         file_handle.block[i] = inode->block[i];
     }
 
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
         IOInternalHandle handle = (IOInternalHandle) self->handle_count++ | self->state.filesystem->fs_code;
         Ext2FileHandlePtr handle_ptr = ptr(Kernel__alloc_kernel(sizeof(Ext2FileHandle)), Ext2FileHandle);
         *handle_ptr = file_handle;
         Ext2FileHandleMap__set(&self->handles, handle, handle_ptr);
-        _cs_return Success(IOInternalHandle, handle);
+        cs_return Success(IOInternalHandle, handle);
     })
 }
 
 static Result(Ext2FileHandlePtr) Ext2FilesystemIOState__get_handle(Ext2FilesystemIOStatePtr self, IOInternalHandle handle)
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
-        Match(Ext2FileHandlePtr, Ext2FileHandleMap__get(&self->handles, handle))
-            IsSome(value, _cs_return Success(Ext2FileHandlePtr, value))
-            IsNone(_cs_return Error(Ext2FileHandlePtr, invalid_handle, IO_UNKNOWN_HANDLE))
-        End
+        match_optional(Ext2FileHandlePtr, Ext2FileHandleMap__get(&self->handles, handle),
+            some(value) { cs_return Success(Ext2FileHandlePtr, value); },
+            none() { cs_return Error(Ext2FileHandlePtr, invalid_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(Ext2FileHandlePtr, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -1856,17 +1914,17 @@ static Result(IOInternalHandle) Ext2FilesystemIOState__delete_handle(
     Ext2FilesystemIOStatePtr self, IOInternalHandle handle
 )
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
-        Match(Ext2FileHandlePtr, Ext2FileHandleMap__get(&self->handles, handle))
-            IsSome(value,
+        match_optional(Ext2FileHandlePtr, Ext2FileHandleMap__get(&self->handles, handle),
+            some(value)
             {
                 Kernel__free(addr(value));
                 Ext2FileHandleMap__delete(&self->handles, handle);
-                _cs_return Success(IOInternalHandle, handle);
-            })
-            IsNone(_cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE))
-        End
+                cs_return Success(IOInternalHandle, handle);
+            },
+            none() { cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -1878,8 +1936,8 @@ static Result(Anything) Ext2FileIO__read_open_block_async(
     KernelContext kernel_context
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
@@ -1895,9 +1953,9 @@ static Result(Anything) Ext2FileIO__read_open_block_async(
             );
             BlockDevice__clear_current_context();
             return read_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -1908,8 +1966,8 @@ static Result(Anything) Ext2FileIO__read_remove_block_async(
     KernelContext kernel_context
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
@@ -1925,9 +1983,9 @@ static Result(Anything) Ext2FileIO__read_remove_block_async(
             );
             BlockDevice__clear_current_context();
             return read_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -1939,8 +1997,8 @@ static Result(Anything) Ext2FileIO__write_remove_block_async(
     KernelContext kernel_context
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
@@ -1957,9 +2015,9 @@ static Result(Anything) Ext2FileIO__write_remove_block_async(
             );
             BlockDevice__clear_current_context();
             return write_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -1970,8 +2028,8 @@ static Result(Anything) Ext2FileIO__read_write_block_async(
     KernelContext kernel_context
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
@@ -1987,9 +2045,9 @@ static Result(Anything) Ext2FileIO__read_write_block_async(
             );
             BlockDevice__clear_current_context();
             return read_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -2001,8 +2059,8 @@ static Result(Anything) Ext2FileIO__write_write_block_async(
     KernelContext kernel_context
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
@@ -2019,9 +2077,9 @@ static Result(Anything) Ext2FileIO__write_write_block_async(
             );
             BlockDevice__clear_current_context();
             return write_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -2032,8 +2090,8 @@ static Result(Anything) Ext2FileIO__read_mkdir_block_async(
     KernelContext kernel_context
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
@@ -2049,9 +2107,9 @@ static Result(Anything) Ext2FileIO__read_mkdir_block_async(
             );
             BlockDevice__clear_current_context();
             return read_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -2063,8 +2121,8 @@ static Result(Anything) Ext2FileIO__write_mkdir_block_async(
     KernelContext kernel_context
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
@@ -2081,9 +2139,9 @@ static Result(Anything) Ext2FileIO__write_mkdir_block_async(
             );
             BlockDevice__clear_current_context();
             return write_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -2094,8 +2152,8 @@ static Result(Anything) Ext2FileIO__read_link_block_async(
     KernelContext kernel_context
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
@@ -2111,9 +2169,9 @@ static Result(Anything) Ext2FileIO__read_link_block_async(
             );
             BlockDevice__clear_current_context();
             return read_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -2125,8 +2183,8 @@ static Result(Anything) Ext2FileIO__write_link_block_async(
     KernelContext kernel_context
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
@@ -2143,9 +2201,9 @@ static Result(Anything) Ext2FileIO__write_link_block_async(
             );
             BlockDevice__clear_current_context();
             return write_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -2194,20 +2252,23 @@ static Result(ByteCount) Ext2FileIO__start_async_write(
         .free_inode_delta = 0,
     };
 
-    if (write_context->segments.len == 0)
+    if (BStringArray__len(&write_context->segments) == 0)
     {
         return Error(ByteCount, invalid_path, IO_INVALID_PATH);
     }
 
-    write_context->parent_segment_count = write_context->segments.len - 1;
-    write_context->leaf_name = write_context->segments.data[write_context->segments.len - 1];
+    write_context->parent_segment_count = BStringArray__len(&write_context->segments) - 1;
+    write_context->leaf_name = Ext2__segment_at(
+        &write_context->segments,
+        BStringArray__len(&write_context->segments) - 1
+    );
     for (size_t i = 0; i < size; i++)
     {
         write_context->write_data[i] = data[i];
     }
 
-    Match(BlockDevicePtr, fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = EMPTY_KERNEL_CONTEXT;
@@ -2215,32 +2276,32 @@ static Result(ByteCount) Ext2FileIO__start_async_write(
 
             if (!fs_state->volume.mounted)
             {
-                ResultMatch(Anything, BlockDevice__read_async(
+                match_result(Anything, BlockDevice__read_async(
                     device,
                     EXT2_SUPERBLOCK_SECTOR,
                     EXT2_BLOCK_SECTORS,
                     block_context,
                     Ext2FileIO__complete_async_write_file
-                ))
-                    IsSuccess(count, return Error(ByteCount, io_error, IO_WAIT_FOR_DATA))
-                    IsError(code, message, return Error(ByteCount, message, code))
-                End
+                ),
+                    success(count) { return Error(ByteCount, io_error, IO_WAIT_FOR_DATA); },
+                    error(code, message) { return Error(ByteCount, message, code); }
+                )
             }
 
-            ResultMatch(Anything, BlockDevice__read_async(
+            match_result(Anything, BlockDevice__read_async(
                 device,
                 (BlockNumber) Ext2Volume__inode_block(&fs_state->volume, write_context->current_inode_number)
                     * EXT2_BLOCK_SECTORS,
                 EXT2_BLOCK_SECTORS,
                 block_context,
                 Ext2FileIO__complete_async_write_file
-            ))
-                IsSuccess(count, return Error(ByteCount, io_error, IO_WAIT_FOR_DATA))
-                IsError(code, message, return Error(ByteCount, message, code))
-            End
-        })
-        IsNone(return Error(ByteCount, invalid_argument, IO_INVALID_PATH))
-    End
+            ),
+                success(count) { return Error(ByteCount, io_error, IO_WAIT_FOR_DATA); },
+                error(code, message) { return Error(ByteCount, message, code); }
+            )
+        },
+        none() { return Error(ByteCount, invalid_argument, IO_INVALID_PATH); }
+    )
 
     return Error(ByteCount, io_error, IO_PANIC);
 }
@@ -2265,44 +2326,45 @@ static Result(IOInternalHandle) Ext2FileIO__start_async_open(
         .phase = fs_state->volume.mounted ? EXT2_ASYNC_LOOKUP_READ_INODE : EXT2_ASYNC_LOOKUP_READ_SUPERBLOCK,
     };
 
-    Match(BlockDevicePtr, fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = EMPTY_KERNEL_CONTEXT;
-            Match(KernelContextPtr, BlockDevice__current_context())
-                IsSome(kernel_context, block_context->kernel_context = *kernel_context)
-            End
+            match_optional(KernelContextPtr, BlockDevice__current_context(),
+                some(kernel_context) { block_context->kernel_context = *kernel_context; },
+                none() {}
+            )
             block_context->owner_context = (Anything) open_context;
 
             if (!fs_state->volume.mounted)
             {
-                ResultMatch(Anything, BlockDevice__read_async(
+                match_result(Anything, BlockDevice__read_async(
                     device,
                     EXT2_SUPERBLOCK_SECTOR,
                     EXT2_BLOCK_SECTORS,
                     block_context,
                     Ext2FileIO__complete_async_open
-                ))
-                    IsSuccess(handle, return Success(IOInternalHandle, handle))
-                    IsError(code, message, return Error(IOInternalHandle, message, code))
-                End
+                ),
+                    success(handle) { return Success(IOInternalHandle, handle); },
+                    error(code, message) { return Error(IOInternalHandle, message, code); }
+                )
             }
 
-            ResultMatch(Anything, BlockDevice__read_async(
+            match_result(Anything, BlockDevice__read_async(
                 device,
                 (BlockNumber) Ext2Volume__inode_block(&fs_state->volume, open_context->current_inode_number)
                     * EXT2_BLOCK_SECTORS,
                 EXT2_BLOCK_SECTORS,
                 block_context,
                 Ext2FileIO__complete_async_open
-            ))
-                IsSuccess(handle, return Success(IOInternalHandle, handle))
-                IsError(code, message, return Error(IOInternalHandle, message, code))
-            End
-        })
-        IsNone(return Error(IOInternalHandle, invalid_argument, IO_INVALID_PATH))
-    End
+            ),
+                success(handle) { return Success(IOInternalHandle, handle); },
+                error(code, message) { return Error(IOInternalHandle, message, code); }
+            )
+        },
+        none() { return Error(IOInternalHandle, invalid_argument, IO_INVALID_PATH); }
+    )
 
     return Error(IOInternalHandle, io_error, IO_PANIC);
 }
@@ -2329,13 +2391,13 @@ static Result(IOStatus) Ext2FileIO__start_async_remove(
         fs_state->volume.mounted ? EXT2_ASYNC_REMOVE_READ_PARENT_INODE : EXT2_ASYNC_REMOVE_READ_SUPERBLOCK
     );
 
-    if (remove_context->segments.len == 0)
+    if (BStringArray__len(&remove_context->segments) == 0)
     {
         return Error(IOStatus, invalid_path, IO_INVALID_PATH);
     }
 
-    Match(BlockDevicePtr, fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = EMPTY_KERNEL_CONTEXT;
@@ -2343,32 +2405,32 @@ static Result(IOStatus) Ext2FileIO__start_async_remove(
 
             if (!fs_state->volume.mounted)
             {
-                ResultMatch(Anything, BlockDevice__read_async(
+                match_result(Anything, BlockDevice__read_async(
                     device,
                     EXT2_SUPERBLOCK_SECTOR,
                     EXT2_BLOCK_SECTORS,
                     block_context,
                     Ext2FileIO__complete_async_remove
-                ))
-                    IsSuccess(count, return Error(IOStatus, io_error, IO_WAIT_FOR_DATA))
-                    IsError(code, message, return Error(IOStatus, message, code))
-                End
+                ),
+                    success(count) { return Error(IOStatus, io_error, IO_WAIT_FOR_DATA); },
+                    error(code, message) { return Error(IOStatus, message, code); }
+                )
             }
 
-            ResultMatch(Anything, BlockDevice__read_async(
+            match_result(Anything, BlockDevice__read_async(
                 device,
                 (BlockNumber) Ext2Volume__inode_block(&fs_state->volume, remove_context->current_inode_number)
                     * EXT2_BLOCK_SECTORS,
                 EXT2_BLOCK_SECTORS,
                 block_context,
                 Ext2FileIO__complete_async_remove
-            ))
-                IsSuccess(count, return Error(IOStatus, io_error, IO_WAIT_FOR_DATA))
-                IsError(code, message, return Error(IOStatus, message, code))
-            End
-        })
-        IsNone(return Error(IOStatus, invalid_argument, IO_INVALID_PATH))
-    End
+            ),
+                success(count) { return Error(IOStatus, io_error, IO_WAIT_FOR_DATA); },
+                error(code, message) { return Error(IOStatus, message, code); }
+            )
+        },
+        none() { return Error(IOStatus, invalid_argument, IO_INVALID_PATH); }
+    )
 
     return Error(IOStatus, io_error, IO_PANIC);
 }
@@ -2402,16 +2464,19 @@ static Result(IOStatus) Ext2FileIO__start_async_mkdir(
         .target_inode_block_number = 0,
     };
 
-    if (mkdir_context->segments.len == 0)
+    if (BStringArray__len(&mkdir_context->segments) == 0)
     {
         return Error(IOStatus, invalid_path, IO_INVALID_PATH);
     }
 
-    mkdir_context->parent_segment_count = mkdir_context->segments.len - 1;
-    mkdir_context->leaf_name = mkdir_context->segments.data[mkdir_context->segments.len - 1];
+    mkdir_context->parent_segment_count = BStringArray__len(&mkdir_context->segments) - 1;
+    mkdir_context->leaf_name = Ext2__segment_at(
+        &mkdir_context->segments,
+        BStringArray__len(&mkdir_context->segments) - 1
+    );
 
-    Match(BlockDevicePtr, fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = EMPTY_KERNEL_CONTEXT;
@@ -2419,32 +2484,32 @@ static Result(IOStatus) Ext2FileIO__start_async_mkdir(
 
             if (!fs_state->volume.mounted)
             {
-                ResultMatch(Anything, BlockDevice__read_async(
+                match_result(Anything, BlockDevice__read_async(
                     device,
                     EXT2_SUPERBLOCK_SECTOR,
                     EXT2_BLOCK_SECTORS,
                     block_context,
                     Ext2FileIO__complete_async_mkdir
-                ))
-                    IsSuccess(count, return Error(IOStatus, io_error, IO_WAIT_FOR_DATA))
-                    IsError(code, message, return Error(IOStatus, message, code))
-                End
+                ),
+                    success(count) { return Error(IOStatus, io_error, IO_WAIT_FOR_DATA); },
+                    error(code, message) { return Error(IOStatus, message, code); }
+                )
             }
 
-            ResultMatch(Anything, BlockDevice__read_async(
+            match_result(Anything, BlockDevice__read_async(
                 device,
                 (BlockNumber) Ext2Volume__inode_block(&fs_state->volume, mkdir_context->current_inode_number)
                     * EXT2_BLOCK_SECTORS,
                 EXT2_BLOCK_SECTORS,
                 block_context,
                 Ext2FileIO__complete_async_mkdir
-            ))
-                IsSuccess(count, return Error(IOStatus, io_error, IO_WAIT_FOR_DATA))
-                IsError(code, message, return Error(IOStatus, message, code))
-            End
-        })
-        IsNone(return Error(IOStatus, invalid_argument, IO_INVALID_PATH))
-    End
+            ),
+                success(count) { return Error(IOStatus, io_error, IO_WAIT_FOR_DATA); },
+                error(code, message) { return Error(IOStatus, message, code); }
+            )
+        },
+        none() { return Error(IOStatus, invalid_argument, IO_INVALID_PATH); }
+    )
 
     return Error(IOStatus, io_error, IO_PANIC);
 }
@@ -2482,52 +2547,56 @@ static Result(IOStatus) Ext2FileIO__start_async_link(
         .insert_uses_empty_slot = false,
     };
 
-    if (link_context->target_segments.len == 0)
+    if (BStringArray__len(&link_context->target_segments) == 0)
     {
         return Error(IOStatus, invalid_path, IO_INVALID_PATH);
     }
 
-    link_context->target_parent_segment_count = link_context->target_segments.len - 1;
-    link_context->target_leaf_name = link_context->target_segments.data[link_context->target_segments.len - 1];
+    link_context->target_parent_segment_count = BStringArray__len(&link_context->target_segments) - 1;
+    link_context->target_leaf_name = Ext2__segment_at(
+        &link_context->target_segments,
+        BStringArray__len(&link_context->target_segments) - 1
+    );
 
-    Match(BlockDevicePtr, fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = EMPTY_KERNEL_CONTEXT;
-            Match(KernelContextPtr, BlockDevice__current_context())
-                IsSome(kernel_context, block_context->kernel_context = *kernel_context)
-            End
+            match_optional(KernelContextPtr, BlockDevice__current_context(),
+                some(kernel_context) { block_context->kernel_context = *kernel_context; },
+                none() {}
+            )
             block_context->owner_context = (Anything) link_context;
 
             if (!fs_state->volume.mounted)
             {
-                ResultMatch(Anything, BlockDevice__read_async(
+                match_result(Anything, BlockDevice__read_async(
                     device,
                     EXT2_SUPERBLOCK_SECTOR,
                     EXT2_BLOCK_SECTORS,
                     block_context,
                     Ext2FileIO__complete_async_link
-                ))
-                    IsSuccess(count, return Error(IOStatus, io_error, IO_WAIT_FOR_DATA))
-                    IsError(code, message, return Error(IOStatus, message, code))
-                End
+                ),
+                    success(count) { return Error(IOStatus, io_error, IO_WAIT_FOR_DATA); },
+                    error(code, message) { return Error(IOStatus, message, code); }
+                )
             }
 
-            ResultMatch(Anything, BlockDevice__read_async(
+            match_result(Anything, BlockDevice__read_async(
                 device,
                 (BlockNumber) Ext2Volume__inode_block(&fs_state->volume, link_context->current_inode_number)
                     * EXT2_BLOCK_SECTORS,
                 EXT2_BLOCK_SECTORS,
                 block_context,
                 Ext2FileIO__complete_async_link
-            ))
-                IsSuccess(count, return Error(IOStatus, io_error, IO_WAIT_FOR_DATA))
-                IsError(code, message, return Error(IOStatus, message, code))
-            End
-        })
-        IsNone(return Error(IOStatus, invalid_argument, IO_INVALID_PATH))
-    End
+            ),
+                success(count) { return Error(IOStatus, io_error, IO_WAIT_FOR_DATA); },
+                error(code, message) { return Error(IOStatus, message, code); }
+            )
+        },
+        none() { return Error(IOStatus, invalid_argument, IO_INVALID_PATH); }
+    )
 
     return Error(IOStatus, io_error, IO_PANIC);
 }
@@ -2553,20 +2622,22 @@ static Result(IOInternalHandle) Ext2FileIO__open(IOStatePtr self, BString path, 
     {
         if (!fs_state->volume.mounted)
         {
-            ResultMatch(Ext2Code, Ext2Volume__mount(&fs_state->volume))
-                IsError(code, message, return Error(IOInternalHandle, message, IO_INVALID_PATH))
-            End
+            match_result(Ext2Code, Ext2Volume__mount(&fs_state->volume),
+                success(_) {},
+                error(code, message) { return Error(IOInternalHandle, message, IO_INVALID_PATH); }
+            )
         }
 
         Result(Ext2Code) find_result = Ext2Volume__find_inode_at_path(&fs_state->volume, path, &inode_number);
-        ResultMatch(Ext2Code, find_result)
-            IsSuccess(code,
+        match_result(Ext2Code, find_result,
+            success(code)
             {
-                ResultMatch(Ext2Code, Ext2Volume__read_inode(&fs_state->volume, inode_number, &inode))
-                    IsError(inner_code, message, return Error(IOInternalHandle, message, IO_INVALID_PATH))
-                End
-            })
-            IsError(code, message,
+                match_result(Ext2Code, Ext2Volume__read_inode(&fs_state->volume, inode_number, &inode),
+                    success(_) {},
+                    error(inner_code, message) { return Error(IOInternalHandle, message, IO_INVALID_PATH); }
+                )
+            },
+            error(code, message)
             {
                 if (code != EXT2_NOT_FOUND)
                 {
@@ -2578,32 +2649,36 @@ static Result(IOInternalHandle) Ext2FileIO__open(IOStatePtr self, BString path, 
                     return Error(IOInternalHandle, message, IO_INVALID_PATH);
                 }
 
-                ResultMatch(Ext2Code, Ext2Volume__resolve_parent(&fs_state->volume, path, &inode_number, &path))
-                    IsError(inner_code, inner_message, return Error(IOInternalHandle, inner_message, IO_INVALID_PATH))
-                End
+                match_result(Ext2Code, Ext2Volume__resolve_parent(&fs_state->volume, path, &inode_number, &path),
+                    success(_) {},
+                    error(inner_code, inner_message) { return Error(IOInternalHandle, inner_message, IO_INVALID_PATH); }
+                )
 
                 Ext2Inode__reset_file(&inode, 0);
                 inode_number = 0;
-            })
-        End
+            }
+        )
 
         return Ext2FilesystemIOState__add_handle(fs_state, path, flags, inode_number, &inode);
     }
 
     if (!fs_state->volume.mounted)
     {
-        ResultMatch(Ext2Code, Ext2Volume__mount(&fs_state->volume))
-            IsError(code, message, return Error(IOInternalHandle, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__mount(&fs_state->volume),
+            success(_) {},
+            error(code, message) { return Error(IOInternalHandle, message, IO_INVALID_PATH); }
+        )
     }
 
-        ResultMatch(Ext2Code, Ext2Volume__find_inode_at_path(&fs_state->volume, path, &inode_number))
-        IsError(code, message, return Error(IOInternalHandle, message, IO_INVALID_PATH))
-    End
+        match_result(Ext2Code, Ext2Volume__find_inode_at_path(&fs_state->volume, path, &inode_number),
+            success(_) {},
+            error(code, message) { return Error(IOInternalHandle, message, IO_INVALID_PATH); }
+        )
 
-    ResultMatch(Ext2Code, Ext2Volume__read_inode(&fs_state->volume, inode_number, &inode))
-        IsError(code, message, return Error(IOInternalHandle, message, IO_INVALID_PATH))
-    End
+    match_result(Ext2Code, Ext2Volume__read_inode(&fs_state->volume, inode_number, &inode),
+        success(_) {},
+        error(code, message) { return Error(IOInternalHandle, message, IO_INVALID_PATH); }
+    )
 
     return Ext2FilesystemIOState__add_handle(fs_state, path, flags, inode_number, &inode);
 }
@@ -2621,8 +2696,8 @@ static Result(IOBufferPtr) Ext2FileIO__read(
 
     if (Ext2FilesystemIOState__uses_userspace_device(fs_state))
     {
-        ResultMatch(Ext2FileHandlePtr, Ext2FilesystemIOState__get_handle(fs_state, handle))
-            IsSuccess(target,
+        match_result(Ext2FileHandlePtr, Ext2FilesystemIOState__get_handle(fs_state, handle),
+            success(target)
             {
                 if ((target->flags & IO_OPEN_READ) == 0)
                 {
@@ -2638,13 +2713,13 @@ static Result(IOBufferPtr) Ext2FileIO__read(
                 }
 
                 return Ext2FileIO__start_async_read(fs_state, target, size, target_buffer);
-            })
-            IsError(code, message, return Error(IOBufferPtr, message, code))
-        End
+            },
+            error(code, message) { return Error(IOBufferPtr, message, code); }
+        )
     }
 
-    ResultMatch(Ext2FileHandlePtr, Ext2FilesystemIOState__get_handle(fs_state, handle))
-        IsSuccess(target,
+    match_result(Ext2FileHandlePtr, Ext2FilesystemIOState__get_handle(fs_state, handle),
+        success(target)
         {
             if ((target->flags & IO_OPEN_READ) == 0)
             {
@@ -2671,9 +2746,10 @@ static Result(IOBufferPtr) Ext2FileIO__read(
             }
 
             Data block[EXT2_BLOCK_SIZE] = { 0 };
-            ResultMatch(Ext2Code, Ext2Volume__read_blocks(&fs_state->volume, target->block[block_index], 1, block))
-                IsError(code, message, return Error(IOBufferPtr, message, IO_INVALID_PATH))
-            End
+            match_result(Ext2Code, Ext2Volume__read_blocks(&fs_state->volume, target->block[block_index], 1, block),
+                success(_) {},
+                error(code, message) { return Error(IOBufferPtr, message, IO_INVALID_PATH); }
+            )
 
             size_t block_offset = target->offset % EXT2_BLOCK_SIZE;
             size_t remaining = target->size - target->offset;
@@ -2687,9 +2763,9 @@ static Result(IOBufferPtr) Ext2FileIO__read(
             IOBuffer__push_all(&target->buffer, &block[block_offset], read_size);
             target->offset += read_size;
             return Success(IOBufferPtr, &target->buffer);
-        })
-        IsError(code, message, return Error(IOBufferPtr, message, code))
-    End
+        },
+        error(code, message) { return Error(IOBufferPtr, message, code); }
+    )
 
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -2736,26 +2812,26 @@ static Result(IOBufferPtr) Ext2FileIO__start_async_read(
         .target_block = file_handle->block[block_index],
     };
 
-    Match(BlockDevicePtr, fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = EMPTY_KERNEL_CONTEXT;
             block_context->owner_context = (Anything) read_context;
 
-            ResultMatch(Anything, BlockDevice__read_async(
+            match_result(Anything, BlockDevice__read_async(
                 device,
                 (BlockNumber) read_context->target_block * EXT2_BLOCK_SECTORS,
                 EXT2_BLOCK_SECTORS,
                 block_context,
                 Ext2FileIO__complete_async_read_file
-            ))
-                IsSuccess(count, return Error(IOBufferPtr, io_error, IO_WAIT_FOR_DATA))
-                IsError(code, message, return Error(IOBufferPtr, message, code))
-            End
-        })
-        IsNone(return Error(IOBufferPtr, invalid_argument, IO_INVALID_PATH))
-    End
+            ),
+                success(count) { return Error(IOBufferPtr, io_error, IO_WAIT_FOR_DATA); },
+                error(code, message) { return Error(IOBufferPtr, message, code); }
+            )
+        },
+        none() { return Error(IOBufferPtr, invalid_argument, IO_INVALID_PATH); }
+    )
 
     return Error(IOBufferPtr, io_error, IO_PANIC);
 }
@@ -2793,18 +2869,20 @@ static Result(Anything) Ext2FileIO__complete_async_open(BlockIOContextPtr block_
 
     if (context->phase == EXT2_ASYNC_LOOKUP_READ_SUPERBLOCK)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_LOOKUP_READ_GROUP_DESC;
         return Ext2FileIO__read_open_block_async(context, 2, block_context->kernel_context);
     }
 
     if (context->phase == EXT2_ASYNC_LOOKUP_READ_GROUP_DESC)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_LOOKUP_READ_INODE;
         return Ext2FileIO__read_open_block_async(
             context,
@@ -2822,18 +2900,18 @@ static Result(Anything) Ext2FileIO__complete_async_open(BlockIOContextPtr block_
             &context->current_inode
         );
 
-        if (context->segment_index >= context->segments.len)
+        if (context->segment_index >= BStringArray__len(&context->segments))
         {
-            ResultMatch(IOInternalHandle, Ext2FilesystemIOState__add_handle(
+            match_result(IOInternalHandle, Ext2FilesystemIOState__add_handle(
                 context->fs_state,
                 context->path,
                 context->flags,
                 context->current_inode_number,
                 &context->current_inode
-            ))
-                IsSuccess(handle, return Success(Anything, handle))
-                IsError(code, message, return Error(Anything, message, code))
-            End
+            ),
+                success(handle) { return Success(Anything, handle); },
+                error(code, message) { return Error(Anything, message, code); }
+            )
         }
 
         if (!Ext2Inode__is_dir(&context->current_inode))
@@ -2865,7 +2943,7 @@ static Result(Anything) Ext2FileIO__complete_async_open(BlockIOContextPtr block_
 
     if (context->phase == EXT2_ASYNC_LOOKUP_READ_DIR_BLOCK)
     {
-        BString target_name = context->segments.data[context->segment_index];
+        BString target_name = Ext2__segment_at(&context->segments, context->segment_index);
         size_t offset = 0;
 
         while (offset + 8 <= EXT2_BLOCK_SIZE)
@@ -2881,13 +2959,7 @@ static Result(Anything) Ext2FileIO__complete_async_open(BlockIOContextPtr block_
 
             if (inode != 0 && name_len > 0)
             {
-                BString entry_name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                }
-                entry_name.len = name_len;
-                entry_name.data[entry_name.len] = '\0';
+                BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                 if (BString__equals(&entry_name, &target_name))
                 {
@@ -2940,18 +3012,20 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
 
     if (context->phase == EXT2_ASYNC_LINK_READ_SUPERBLOCK)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_LINK_READ_GROUP_DESC;
         return Ext2FileIO__read_link_block_async(context, 2, block_context->kernel_context);
     }
 
     if (context->phase == EXT2_ASYNC_LINK_READ_GROUP_DESC)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_LINK_READ_SOURCE_INODE;
         return Ext2FileIO__read_link_block_async(
             context,
@@ -2971,7 +3045,7 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
 
         bool lookup_complete = context->traversing_target_parent
             ? context->segment_index >= context->target_parent_segment_count
-            : context->segment_index >= context->source_segments.len;
+            : context->segment_index >= BStringArray__len(&context->source_segments);
 
         if (lookup_complete)
         {
@@ -3063,7 +3137,7 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
 
         if (traversing_target && context->segment_index >= context->target_parent_segment_count)
         {
-            uint16_t required_len = Ext2__dirent_record_size(context->target_leaf_name.len);
+            uint16_t required_len = Ext2__dirent_record_size(BString__length(&context->target_leaf_name));
             while (offset + 8 <= EXT2_BLOCK_SIZE)
             {
                 Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
@@ -3077,13 +3151,7 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
 
                 if (inode != 0 && name_len > 0)
                 {
-                    BString entry_name = EMPTY_BSTRING;
-                    for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                    {
-                        entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                    }
-                    entry_name.len = name_len;
-                    entry_name.data[entry_name.len] = '\0';
+                    BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                     if (BString__equals(&entry_name, &context->target_leaf_name))
                     {
@@ -3156,8 +3224,8 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
         }
 
         BString target_name = traversing_target
-            ? context->target_segments.data[context->segment_index]
-            : context->source_segments.data[context->segment_index];
+            ? Ext2__segment_at(&context->target_segments, context->segment_index)
+            : Ext2__segment_at(&context->source_segments, context->segment_index);
 
         while (offset + 8 <= EXT2_BLOCK_SIZE)
         {
@@ -3172,13 +3240,7 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
 
             if (inode != 0 && name_len > 0)
             {
-                BString entry_name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                }
-                entry_name.len = name_len;
-                entry_name.data[entry_name.len] = '\0';
+                BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                 if (BString__equals(&entry_name, &target_name))
                 {
@@ -3259,12 +3321,12 @@ static Result(Anything) Ext2FileIO__complete_async_link(BlockIOContextPtr block_
             Ext2__write_u16(context->target_parent_dir_block_buffer, context->insert_offset + 4, new_len);
         }
 
-        context->target_parent_dir_block_buffer[context->insert_offset + 6] = (Data) context->target_leaf_name.len;
+        context->target_parent_dir_block_buffer[context->insert_offset + 6] = (Data) BString__length(&context->target_leaf_name);
         context->target_parent_dir_block_buffer[context->insert_offset + 7] = (Data) EXT2_DIRENT_TYPE_FILE;
-        for (size_t i = 0; i < context->target_leaf_name.len; i++)
+        for (size_t i = 0; i < BString__length(&context->target_leaf_name); i++)
         {
             context->target_parent_dir_block_buffer[context->insert_offset + 8 + i] =
-                (Data) context->target_leaf_name.data[i];
+                (Data) BString__char_at_or(&context->target_leaf_name, (StringPos) i, '\0');
         }
 
         context->phase = EXT2_ASYNC_LINK_WRITE_TARGET_PARENT_DIR_BLOCK;
@@ -3295,18 +3357,20 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
 
     if (context->phase == EXT2_ASYNC_WRITE_READ_SUPERBLOCK)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_WRITE_READ_GROUP_DESC;
         return Ext2FileIO__read_write_block_async(context, 2, block_context->kernel_context);
     }
 
     if (context->phase == EXT2_ASYNC_WRITE_READ_GROUP_DESC)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_WRITE_READ_PARENT_INODE;
         return Ext2FileIO__read_write_block_async(
             context,
@@ -3357,7 +3421,7 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
 
         if (context->segment_index < context->parent_segment_count)
         {
-            BString target_name = context->segments.data[context->segment_index];
+            BString target_name = Ext2__segment_at(&context->segments, context->segment_index);
             while (offset + 8 <= EXT2_BLOCK_SIZE)
             {
                 Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
@@ -3371,13 +3435,7 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
 
                 if (inode != 0 && name_len > 0)
                 {
-                    BString entry_name = EMPTY_BSTRING;
-                    for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                    {
-                        entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                    }
-                    entry_name.len = name_len;
-                    entry_name.data[entry_name.len] = '\0';
+                    BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                     if (BString__equals(&entry_name, &target_name))
                     {
@@ -3416,7 +3474,7 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
             );
         }
 
-        uint16_t required_len = Ext2__dirent_record_size(context->leaf_name.len);
+        uint16_t required_len = Ext2__dirent_record_size(BString__length(&context->leaf_name));
         while (offset + 8 <= EXT2_BLOCK_SIZE)
         {
             Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
@@ -3430,13 +3488,7 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
 
             if (inode != 0 && name_len > 0)
             {
-                BString entry_name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                }
-                entry_name.len = name_len;
-                entry_name.data[entry_name.len] = '\0';
+                BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                 if (BString__equals(&entry_name, &context->leaf_name))
                 {
@@ -3570,13 +3622,14 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
 
         if (context->creating)
         {
-            ResultMatch(Ext2Code, Ext2Volume__allocate_inode_from_bitmap(
+            match_result(Ext2Code, Ext2Volume__allocate_inode_from_bitmap(
                 &context->fs_state->volume,
                 context->inode_bitmap_buffer,
                 &context->target_inode_number
-            ))
-                IsError(code, message, return Error(Anything, message, IO_OPERATION_NOT_SUPPORTED))
-            End
+            ),
+                success(_) {},
+                error(code, message) { return Error(Anything, message, IO_OPERATION_NOT_SUPPORTED); }
+            )
             context->free_inode_delta = -1;
             Ext2Inode__reset_file(&context->target_inode, (Ext2FileSize) context->write_size);
             context->target_inode_block_number =
@@ -3605,13 +3658,14 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
 
         for (size_t i = 0; i < context->blocks_needed; i++)
         {
-            ResultMatch(Ext2Code, Ext2Volume__allocate_block_from_bitmap(
+            match_result(Ext2Code, Ext2Volume__allocate_block_from_bitmap(
                 &context->fs_state->volume,
                 context->block_bitmap_buffer,
                 &context->target_inode.block[i]
-            ))
-                IsError(code, message, return Error(Anything, message, IO_OPERATION_NOT_SUPPORTED))
-            End
+            ),
+                success(_) {},
+                error(code, message) { return Error(Anything, message, IO_OPERATION_NOT_SUPPORTED); }
+            )
             context->free_block_delta--;
         }
         context->target_inode.size = (Ext2FileSize) context->write_size;
@@ -3742,11 +3796,11 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
                 uint16_t rec_len = Ext2__read_u16(context->parent_dir_block_buffer, context->insert_offset + 4);
                 Ext2__write_u32(context->parent_dir_block_buffer, context->insert_offset, context->target_inode_number);
                 Ext2__write_u16(context->parent_dir_block_buffer, context->insert_offset + 4, rec_len);
-                context->parent_dir_block_buffer[context->insert_offset + 6] = (Data) context->leaf_name.len;
+                context->parent_dir_block_buffer[context->insert_offset + 6] = (Data) BString__length(&context->leaf_name);
                 context->parent_dir_block_buffer[context->insert_offset + 7] = (Data) EXT2_DIRENT_TYPE_FILE;
-                for (size_t i = 0; i < context->leaf_name.len; i++)
+                for (size_t i = 0; i < BString__length(&context->leaf_name); i++)
                 {
-                    context->parent_dir_block_buffer[context->insert_offset + 8 + i] = (Data) context->leaf_name.data[i];
+                    context->parent_dir_block_buffer[context->insert_offset + 8 + i] = (Data) BString__char_at_or(&context->leaf_name, (StringPos) i, '\0');
                 }
             }
             else
@@ -3758,11 +3812,11 @@ static Result(Anything) Ext2FileIO__complete_async_write_file(BlockIOContextPtr 
                 Ext2__write_u16(context->parent_dir_block_buffer, context->insert_prev_offset + 4, actual_len);
                 Ext2__write_u32(context->parent_dir_block_buffer, context->insert_offset, context->target_inode_number);
                 Ext2__write_u16(context->parent_dir_block_buffer, context->insert_offset + 4, new_len);
-                context->parent_dir_block_buffer[context->insert_offset + 6] = (Data) context->leaf_name.len;
+                context->parent_dir_block_buffer[context->insert_offset + 6] = (Data) BString__length(&context->leaf_name);
                 context->parent_dir_block_buffer[context->insert_offset + 7] = (Data) EXT2_DIRENT_TYPE_FILE;
-                for (size_t i = 0; i < context->leaf_name.len; i++)
+                for (size_t i = 0; i < BString__length(&context->leaf_name); i++)
                 {
-                    context->parent_dir_block_buffer[context->insert_offset + 8 + i] = (Data) context->leaf_name.data[i];
+                    context->parent_dir_block_buffer[context->insert_offset + 8 + i] = (Data) BString__char_at_or(&context->leaf_name, (StringPos) i, '\0');
                 }
             }
             context->phase = EXT2_ASYNC_WRITE_WRITE_PARENT_DIR_BLOCK;
@@ -3812,18 +3866,20 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
 
     if (context->phase == EXT2_ASYNC_MKDIR_READ_SUPERBLOCK)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_MKDIR_READ_GROUP_DESC;
         return Ext2FileIO__read_mkdir_block_async(context, 2, block_context->kernel_context);
     }
 
     if (context->phase == EXT2_ASYNC_MKDIR_READ_GROUP_DESC)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_MKDIR_READ_PARENT_INODE;
         return Ext2FileIO__read_mkdir_block_async(
             context,
@@ -3874,7 +3930,7 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
 
         if (context->segment_index < context->parent_segment_count)
         {
-            BString target_name = context->segments.data[context->segment_index];
+            BString target_name = Ext2__segment_at(&context->segments, context->segment_index);
             while (offset + 8 <= EXT2_BLOCK_SIZE)
             {
                 Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
@@ -3888,13 +3944,7 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
 
                 if (inode != 0 && name_len > 0)
                 {
-                    BString entry_name = EMPTY_BSTRING;
-                    for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                    {
-                        entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                    }
-                    entry_name.len = name_len;
-                    entry_name.data[entry_name.len] = '\0';
+                    BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                     if (BString__equals(&entry_name, &target_name))
                     {
@@ -3933,7 +3983,7 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
             );
         }
 
-        uint16_t required_len = Ext2__dirent_record_size(context->leaf_name.len);
+        uint16_t required_len = Ext2__dirent_record_size(BString__length(&context->leaf_name));
         while (offset + 8 <= EXT2_BLOCK_SIZE)
         {
             Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
@@ -3947,13 +3997,7 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
 
             if (inode != 0 && name_len > 0)
             {
-                BString entry_name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                }
-                entry_name.len = name_len;
-                entry_name.data[entry_name.len] = '\0';
+                BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                 if (BString__equals(&entry_name, &context->leaf_name))
                 {
@@ -4046,20 +4090,22 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
     {
         Kernel__memcopy(addr(block_context->buffer), addr(context->group_desc_buffer), EXT2_BLOCK_SIZE);
 
-        ResultMatch(Ext2Code, Ext2Volume__allocate_inode_from_bitmap(
+        match_result(Ext2Code, Ext2Volume__allocate_inode_from_bitmap(
             &context->fs_state->volume,
             context->inode_bitmap_buffer,
             &context->target_inode_number
-        ))
-            IsError(code, message, return Error(Anything, message, IO_OPERATION_NOT_SUPPORTED))
-        End
-        ResultMatch(Ext2Code, Ext2Volume__allocate_block_from_bitmap(
+        ),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_OPERATION_NOT_SUPPORTED); }
+        )
+        match_result(Ext2Code, Ext2Volume__allocate_block_from_bitmap(
             &context->fs_state->volume,
             context->block_bitmap_buffer,
             &context->target_inode.block[0]
-        ))
-            IsError(code, message, return Error(Anything, message, IO_OPERATION_NOT_SUPPORTED))
-        End
+        ),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_OPERATION_NOT_SUPPORTED); }
+        )
 
         Ext2Inode__reset_dir(&context->target_inode, context->target_inode.block[0]);
         context->target_inode_block_number =
@@ -4166,11 +4212,11 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
             uint16_t rec_len = Ext2__read_u16(context->parent_dir_block_buffer, context->insert_offset + 4);
             Ext2__write_u32(context->parent_dir_block_buffer, context->insert_offset, context->target_inode_number);
             Ext2__write_u16(context->parent_dir_block_buffer, context->insert_offset + 4, rec_len);
-            context->parent_dir_block_buffer[context->insert_offset + 6] = (Data) context->leaf_name.len;
+            context->parent_dir_block_buffer[context->insert_offset + 6] = (Data) BString__length(&context->leaf_name);
             context->parent_dir_block_buffer[context->insert_offset + 7] = (Data) EXT2_DIRENT_TYPE_DIR;
-            for (size_t i = 0; i < context->leaf_name.len; i++)
+            for (size_t i = 0; i < BString__length(&context->leaf_name); i++)
             {
-                context->parent_dir_block_buffer[context->insert_offset + 8 + i] = (Data) context->leaf_name.data[i];
+                context->parent_dir_block_buffer[context->insert_offset + 8 + i] = (Data) BString__char_at_or(&context->leaf_name, (StringPos) i, '\0');
             }
         }
         else
@@ -4182,11 +4228,11 @@ static Result(Anything) Ext2FileIO__complete_async_mkdir(BlockIOContextPtr block
             Ext2__write_u16(context->parent_dir_block_buffer, context->insert_prev_offset + 4, actual_len);
             Ext2__write_u32(context->parent_dir_block_buffer, context->insert_offset, context->target_inode_number);
             Ext2__write_u16(context->parent_dir_block_buffer, context->insert_offset + 4, new_len);
-            context->parent_dir_block_buffer[context->insert_offset + 6] = (Data) context->leaf_name.len;
+            context->parent_dir_block_buffer[context->insert_offset + 6] = (Data) BString__length(&context->leaf_name);
             context->parent_dir_block_buffer[context->insert_offset + 7] = (Data) EXT2_DIRENT_TYPE_DIR;
-            for (size_t i = 0; i < context->leaf_name.len; i++)
+            for (size_t i = 0; i < BString__length(&context->leaf_name); i++)
             {
-                context->parent_dir_block_buffer[context->insert_offset + 8 + i] = (Data) context->leaf_name.data[i];
+                context->parent_dir_block_buffer[context->insert_offset + 8 + i] = (Data) BString__char_at_or(&context->leaf_name, (StringPos) i, '\0');
             }
         }
 
@@ -4218,18 +4264,20 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
     if (context->phase == EXT2_ASYNC_REMOVE_READ_SUPERBLOCK)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_REMOVE_READ_GROUP_DESC;
         return Ext2FileIO__read_remove_block_async(context, 2, block_context->kernel_context);
     }
 
     if (context->phase == EXT2_ASYNC_REMOVE_READ_GROUP_DESC)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_REMOVE_READ_PARENT_INODE;
         return Ext2FileIO__read_remove_block_async(
             context,
@@ -4280,7 +4328,7 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
         if (context->segment_index < context->parent_segment_count)
         {
-            BString target_name = context->segments.data[context->segment_index];
+            BString target_name = Ext2__segment_at(&context->segments, context->segment_index);
             while (offset + 8 <= EXT2_BLOCK_SIZE)
             {
                 Ext2InodeNumber inode = Ext2__read_u32(block_context->buffer, offset);
@@ -4294,13 +4342,7 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
                 if (inode != 0 && name_len > 0)
                 {
-                    BString entry_name = EMPTY_BSTRING;
-                    for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                    {
-                        entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                    }
-                    entry_name.len = name_len;
-                    entry_name.data[entry_name.len] = '\0';
+                    BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                     if (BString__equals(&entry_name, &target_name))
                     {
@@ -4352,13 +4394,7 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
             if (inode != 0 && name_len > 0)
             {
-                BString entry_name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                }
-                entry_name.len = name_len;
-                entry_name.data[entry_name.len] = '\0';
+                BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                 if (BString__equals(&entry_name, &context->leaf_name))
                 {
@@ -4545,13 +4581,7 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
             if (inode != 0 && name_len > 0)
             {
-                BString entry_name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    entry_name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                }
-                entry_name.len = name_len;
-                entry_name.data[entry_name.len] = '\0';
+                BString entry_name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
                 if (!BString__equals(&entry_name, &BSTRING_NEW(".")) && !BString__equals(&entry_name, &BSTRING_NEW("..")))
                 {
@@ -4561,9 +4591,10 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
                     }
 
                     BString child_path = Ext2__child_path(context->path, entry_name);
-                    ResultMatch(CollectionCode, BStringArray__push(&context->resume_paths, context->path))
-                        IsError(code, message, return Error(Anything, not_supported, IO_OPERATION_NOT_SUPPORTED))
-                    End
+                    match_result(CollectionCode, BStringArray__push(&context->resume_paths, context->path),
+                        success(_) {},
+                        error(code, message) { return Error(Anything, not_supported, IO_OPERATION_NOT_SUPPORTED); }
+                    )
 
                     Ext2AsyncRemoveContext__reset_for_path(
                         context,
@@ -4758,8 +4789,8 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
 
     if (context->phase == EXT2_ASYNC_REMOVE_WRITE_PARENT_DIR_BLOCK)
     {
-        Match(BStringArray__optional, BStringArray__pop(&context->resume_paths))
-            IsSome(resume_path,
+        match_optional(BStringArray__optional, BStringArray__pop(&context->resume_paths),
+            some(resume_path)
             {
                 Ext2AsyncRemoveContext__reset_for_path(
                     context,
@@ -4771,8 +4802,9 @@ static Result(Anything) Ext2FileIO__complete_async_remove(BlockIOContextPtr bloc
                     Ext2Volume__inode_block(&context->fs_state->volume, context->current_inode_number),
                     block_context->kernel_context
                 );
-            })
-        End
+            },
+            none() {}
+        )
         return Success(Anything, IO_OK);
     }
 
@@ -4785,8 +4817,8 @@ static Result(ByteCount) Ext2FileIO__write(IOStatePtr self, IOInternalHandle han
 
     if (Ext2FilesystemIOState__uses_userspace_device(fs_state))
     {
-        ResultMatch(Ext2FileHandlePtr, Ext2FilesystemIOState__get_handle(fs_state, handle))
-            IsSuccess(target,
+        match_result(Ext2FileHandlePtr, Ext2FilesystemIOState__get_handle(fs_state, handle),
+            success(target)
             {
                 if ((target->flags & IO_OPEN_WRITE) == 0 || target->offset != 0)
                 {
@@ -4794,13 +4826,13 @@ static Result(ByteCount) Ext2FileIO__write(IOStatePtr self, IOInternalHandle han
                 }
 
                 return Ext2FileIO__start_async_write(fs_state, target, data, size);
-            })
-            IsError(code, message, return Error(ByteCount, message, code))
-        End
+            },
+            error(code, message) { return Error(ByteCount, message, code); }
+        )
     }
 
-    ResultMatch(Ext2FileHandlePtr, Ext2FilesystemIOState__get_handle(fs_state, handle))
-        IsSuccess(target,
+    match_result(Ext2FileHandlePtr, Ext2FilesystemIOState__get_handle(fs_state, handle),
+        success(target)
         {
             if ((target->flags & IO_OPEN_WRITE) == 0 || target->offset != 0)
             {
@@ -4809,22 +4841,23 @@ static Result(ByteCount) Ext2FileIO__write(IOStatePtr self, IOInternalHandle han
 
             if (!fs_state->volume.mounted)
             {
-                ResultMatch(Ext2Code, Ext2Volume__mount(&fs_state->volume))
-                    IsError(code, message, return Error(ByteCount, message, IO_INVALID_PATH))
-                End
+                match_result(Ext2Code, Ext2Volume__mount(&fs_state->volume),
+                    success(_) {},
+                    error(code, message) { return Error(ByteCount, message, IO_INVALID_PATH); }
+                )
             }
 
             Ext2InodeNumber inode_number = 0;
             Ext2Inode inode = { 0 };
-            ResultMatch(Ext2Code, Ext2Volume__write_file_at_path(
+            match_result(Ext2Code, Ext2Volume__write_file_at_path(
                 &fs_state->volume,
                 target->path,
                 data,
                 size,
                 &inode_number,
                 &inode
-            ))
-                IsSuccess(code,
+            ),
+                success(code)
                 {
                     target->inode_number = inode_number;
                     target->mode = inode.mode;
@@ -4835,12 +4868,10 @@ static Result(ByteCount) Ext2FileIO__write(IOStatePtr self, IOInternalHandle han
                     }
                     target->offset = size;
                     return Success(ByteCount, size);
-                })
-                IsError(code, message, return Error(ByteCount, message, IO_INVALID_PATH))
-            End
-        })
-        IsError(code, message, return Error(ByteCount, message, code))
-    End
+                }, error(code, message) { return Error(ByteCount, message, IO_INVALID_PATH); })
+        },
+        error(code, message) { return Error(ByteCount, message, code); }
+    )
 
     return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -4875,18 +4906,15 @@ static Result(Anything) Ext2FileIO__read_block_async(
     BlockIOContinuation continuation
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             block_context->kernel_context = kernel_context;
             block_context->owner_context = (Anything) context;
 
             bool install_context =
-                block_context->kernel_context.pid.present
-                || block_context->kernel_context.scheduler.present
-                || block_context->kernel_context.result_mapper.present
-                || block_context->kernel_context.next_context.present;
+                KernelContext__has_any_state(&block_context->kernel_context);
 
             if (install_context)
             {
@@ -4904,9 +4932,9 @@ static Result(Anything) Ext2FileIO__read_block_async(
                 BlockDevice__clear_current_context();
             }
             return read_result;
-        })
-        IsNone(return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT))
-    End
+        },
+        none() { return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT); }
+    )
 
     return Error(Anything, invalid_argument, EXT2_INVALID_ARGUMENT);
 }
@@ -4922,9 +4950,10 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
 
     if (context->phase == EXT2_ASYNC_LIST_READ_SUPERBLOCK)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_superblock(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_LIST_READ_GROUP_DESC;
         context->block_to_read = 2;
         return Ext2FileIO__read_root_dir_async(context, block_context->kernel_context);
@@ -4932,9 +4961,10 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
 
     if (context->phase == EXT2_ASYNC_LIST_READ_GROUP_DESC)
     {
-        ResultMatch(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__parse_group_descriptor(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+        )
         context->phase = EXT2_ASYNC_LIST_READ_INODE;
         context->block_to_read = Ext2Volume__inode_block(&context->fs_state->volume, context->current_inode_number);
         return Ext2FileIO__read_root_dir_async(context, block_context->kernel_context);
@@ -4968,7 +4998,7 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
             return Success(Anything, 0);
         }
 
-        if (context->segment_index >= context->segments.len)
+        if (context->segment_index >= BStringArray__len(&context->segments))
         {
             context->count = 0;
             context->phase = EXT2_ASYNC_LIST_READ_DIR_BLOCK_COLLECT;
@@ -4998,15 +5028,10 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
 
             if (inode != 0 && name_len > 0)
             {
-                BString name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    name.data[i] = (char) block_context->buffer[offset + 8 + i];
-                }
-                name.len = name_len;
-                name.data[name.len] = '\0';
+                BString name = BString__from_chars((const char *) &block_context->buffer[offset + 8], name_len);
 
-                if (BString__equals(&name, &context->segments.data[context->segment_index]))
+                BString segment = Ext2__segment_at(&context->segments, context->segment_index);
+                if (BString__equals(&name, &segment))
                 {
                     context->current_inode_number = inode;
                     context->segment_index++;
@@ -5063,13 +5088,7 @@ static Result(Anything) Ext2FileIO__complete_async_list_dir(BlockIOContextPtr bl
 
             if (inode != 0 && name_len > 0)
             {
-                BString name = EMPTY_BSTRING;
-                for (size_t i = 0; i < name_len && i < BSTRING_MAX_SIZE - 1; i++)
-                {
-                    name.data[i] = (char) context->current_dir_block_buffer[offset + 8 + i];
-                }
-                name.len = name_len;
-                name.data[name.len] = '\0';
+                BString name = BString__from_chars((const char *) &context->current_dir_block_buffer[offset + 8], name_len);
 
                 if (!BString__equals(&name, &BSTRING_NEW(".")) && !BString__equals(&name, &BSTRING_NEW("..")))
                 {
@@ -5143,8 +5162,8 @@ static Result(DirectoryEntryCount) Ext2FileIO__copy_entries_to_dirents(
         }
         output[count] = Ext2FileIO__directory_entry_from_ext2_entry(&entry);
         count++;
-    End
 
+    End
     return Success(DirectoryEntryCount, count);
 }
 
@@ -5174,27 +5193,29 @@ static Result(DirectoryEntryCount) Ext2FileIO__list_dir(
             .phase = fs_state->volume.mounted ? EXT2_ASYNC_LIST_READ_INODE : EXT2_ASYNC_LIST_READ_SUPERBLOCK,
         };
 
-        ResultMatch(Anything, Ext2FileIO__read_root_dir_async(context, EMPTY_KERNEL_CONTEXT))
-            IsSuccess(count, return Success(DirectoryEntryCount, count))
-            IsError(code, message, return Error(DirectoryEntryCount, message, code))
-        End
+        match_result(Anything, Ext2FileIO__read_root_dir_async(context, EMPTY_KERNEL_CONTEXT),
+            success(count) { return Success(DirectoryEntryCount, count); },
+            error(code, message) { return Error(DirectoryEntryCount, message, code); }
+        )
     }
 
     if (!fs_state->volume.mounted)
     {
-        ResultMatch(Ext2Code, Ext2Volume__mount(&fs_state->volume))
-            IsError(code, message, return Error(DirectoryEntryCount, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__mount(&fs_state->volume),
+            success(_) {},
+            error(code, message) { return Error(DirectoryEntryCount, message, IO_INVALID_PATH); }
+        )
     }
 
     Ext2InodeNumber inode_number = 0;
-    ResultMatch(Ext2Code, Ext2Volume__find_inode_at_path(&fs_state->volume, path, &inode_number))
-        IsError(code, message, return Error(DirectoryEntryCount, message, IO_INVALID_PATH))
-    End
-    ResultMatch(Ext2DirectoryEntries, Ext2Volume__list_directory_inode(&fs_state->volume, inode_number))
-        IsSuccess(dir_entries, return Ext2FileIO__copy_entries_to_dirents(dir_entries, entries, max_entries))
-        IsError(code, message, return Error(DirectoryEntryCount, message, code))
-    End
+    match_result(Ext2Code, Ext2Volume__find_inode_at_path(&fs_state->volume, path, &inode_number),
+        success(_) {},
+        error(code, message) { return Error(DirectoryEntryCount, message, IO_INVALID_PATH); }
+    )
+    match_result(Ext2DirectoryEntries, Ext2Volume__list_directory_inode(&fs_state->volume, inode_number),
+        success(dir_entries) { return Ext2FileIO__copy_entries_to_dirents(dir_entries, entries, max_entries); },
+        error(code, message) { return Error(DirectoryEntryCount, message, code); }
+    )
 
     return Error(DirectoryEntryCount, invalid_path, IO_INVALID_PATH);
 }
@@ -5210,17 +5231,18 @@ static Result(IOStatus) Ext2FileIO__mkdir(IOStatePtr self, BString path)
 
     if (!fs_state->volume.mounted)
     {
-        ResultMatch(Ext2Code, Ext2Volume__mount(&fs_state->volume))
-            IsError(code, message, return Error(IOStatus, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__mount(&fs_state->volume),
+            success(_) {},
+            error(code, message) { return Error(IOStatus, message, IO_INVALID_PATH); }
+        )
     }
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        ResultMatch(Ext2Code, Ext2Volume__mkdir_at_path(&fs_state->volume, path))
-            IsSuccess(_, _cs_return Success(IOStatus, IO_OK))
-            IsError(code, message, _cs_return Error(IOStatus, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__mkdir_at_path(&fs_state->volume, path),
+            success(_) { cs_return Success(IOStatus, IO_OK); },
+            error(code, message) { cs_return Error(IOStatus, message, IO_INVALID_PATH); }
+        )
     })
 
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
@@ -5236,17 +5258,18 @@ static Result(IOStatus) Ext2FileIO__remove(IOStatePtr self, BString path, Flags 
 
     if (!fs_state->volume.mounted)
     {
-        ResultMatch(Ext2Code, Ext2Volume__mount(&fs_state->volume))
-            IsError(code, message, return Error(IOStatus, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__mount(&fs_state->volume),
+            success(_) {},
+            error(code, message) { return Error(IOStatus, message, IO_INVALID_PATH); }
+        )
     }
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        ResultMatch(Ext2Code, Ext2Volume__remove_at_path(&fs_state->volume, path, flags))
-            IsSuccess(_, _cs_return Success(IOStatus, IO_OK))
-            IsError(code, message, _cs_return Error(IOStatus, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__remove_at_path(&fs_state->volume, path, flags),
+            success(_) { cs_return Success(IOStatus, IO_OK); },
+            error(code, message) { cs_return Error(IOStatus, message, IO_INVALID_PATH); }
+        )
     })
 
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
@@ -5262,17 +5285,18 @@ static Result(IOStatus) Ext2FileIO__link(IOStatePtr self, BString source_path, B
 
     if (!fs_state->volume.mounted)
     {
-        ResultMatch(Ext2Code, Ext2Volume__mount(&fs_state->volume))
-            IsError(code, message, return Error(IOStatus, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__mount(&fs_state->volume),
+            success(_) {},
+            error(code, message) { return Error(IOStatus, message, IO_INVALID_PATH); }
+        )
     }
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        ResultMatch(Ext2Code, Ext2Volume__link_at_path(&fs_state->volume, source_path, target_path))
-            IsSuccess(_, _cs_return Success(IOStatus, IO_OK))
-            IsError(code, message, _cs_return Error(IOStatus, message, IO_INVALID_PATH))
-        End
+        match_result(Ext2Code, Ext2Volume__link_at_path(&fs_state->volume, source_path, target_path),
+            success(_) { cs_return Success(IOStatus, IO_OK); },
+            error(code, message) { cs_return Error(IOStatus, message, IO_INVALID_PATH); }
+        )
     })
 
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
@@ -5289,7 +5313,7 @@ FileIO Ext2FilesystemIO__new()
             .park = Ext2FileIO__park,
             .unpark = Ext2FileIO__unpark,
         },
-        .list_nodes = NULL,
+        .list_nodes = NULL, // hundelint: ignore-no-null
         .list_dir = Ext2FileIO__list_dir,
         .mkdir = Ext2FileIO__mkdir,
         .remove = Ext2FileIO__remove,

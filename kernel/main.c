@@ -35,42 +35,48 @@ static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, 
     );
     Result(IOHandle) open_result = IOSubsystem__open(kernel->io_subsystem, context, path, flags);
     IOContext__dispose(context);
-    ResultMatch(IOHandle, open_result)
-        IsSuccess(handle, __d_printf(IOSUB, "open_stdio_handle success pid=%i flags=%i handle=%p\n", process->pid, flags, handle););
-        IsError(code, message, __d_printf(IOSUB, "open_stdio_handle error pid=%i flags=%i code=%i message=%s\n", process->pid, flags, code, cstr(message)););
-    End
+    match_result(IOHandle, open_result,
+        success(handle)
+        {
+            __d_printf(IOSUB, "open_stdio_handle success pid=%i flags=%i handle=%p\n", process->pid, flags, handle);
+        },
+        error(code, message)
+        {
+            __d_printf(IOSUB, "open_stdio_handle error pid=%i flags=%i code=%i message=%s\n", process->pid, flags, code, cstr(message));
+        }
+    )
     return open_result;
 }
 
 static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, ProcessPtr process)
 {
     __d_printf(IOSUB, "install_default_stdio start pid=%i name=%s\n", process->pid, cstr(process->name));
-    ResultMatch(IOHandle, open_stdio_handle(kernel, process, tty_path, IO_OPEN_READ))
-        IsSuccess(handle,
+    match_result(IOHandle, open_stdio_handle(kernel, process, tty_path, IO_OPEN_READ),
+        success(handle)
         {
             __d_printf(IOSUB, "install_default_stdio fd=0 pid=%i handle=%p\n", process->pid, handle);
             Process__set_file_descriptor(process, 0, handle);
-        });
-        IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP));
-    End
+        },
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    )
 
-    ResultMatch(IOHandle, open_stdio_handle(kernel, process, console_path, IO_OPEN_WRITE))
-        IsSuccess(handle,
+    match_result(IOHandle, open_stdio_handle(kernel, process, console_path, IO_OPEN_WRITE),
+        success(handle)
         {
             __d_printf(IOSUB, "install_default_stdio fd=1 pid=%i handle=%p\n", process->pid, handle);
             Process__set_file_descriptor(process, 1, handle);
-        });
-        IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP));
-    End
+        },
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    )
 
-    ResultMatch(IOHandle, open_stdio_handle(kernel, process, console_path, IO_OPEN_WRITE))
-        IsSuccess(handle,
+    match_result(IOHandle, open_stdio_handle(kernel, process, console_path, IO_OPEN_WRITE),
+        success(handle)
         {
             __d_printf(IOSUB, "install_default_stdio fd=2 pid=%i handle=%p\n", process->pid, handle);
             Process__set_file_descriptor(process, 2, handle);
-        });
-        IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP));
-    End
+        },
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    )
 
     __d_printf(IOSUB, "install_default_stdio done pid=%i name=%s\n", process->pid, cstr(process->name));
     return Success(ProcessSetupStatus, PROCESS_SETUP);
@@ -80,43 +86,42 @@ void schedule_as(KernelPtr kernel, BString name, ProcessClass process_class)
 {
     __d_printf(PROGRESS, "Queuing to scheduler: %s\n", cstr(name));
     Optional(Elf) program = EmbeddedElf__load(name);
-    Match(Elf, program)
-        IsSome(elf,
+    match_optional(Elf, program,
+        some(elf)
         {
-            ResultMatch(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)))
-                IsSuccess(process,
+            match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)),
+                success(process)
                 {
                     __d_printf(PROCESS, "schedule_as setup success pid=%i name=%s process=%p\n", process->pid, cstr(process->name), process);
                     process->process_class = process_class;
                     Exec__apply_builtin_identity_policy(process);
-                    ResultMatch(ProcessSetupStatus, install_default_stdio(kernel, process))
-                        IsSuccess(_,
+                    match_result(ProcessSetupStatus, install_default_stdio(kernel, process),
+                        success(_)
                         {
                             __d_printf(SCHEDULER, "schedule_as scheduling pid=%i name=%s\n", process->pid, cstr(process->name));
                             Scheduler__schedule(kernel->scheduler, process);
-                        });
-                        IsError(code, message,
+                        },
+                        error(code, message)
                         {
-                            Kernel__panic(BString__cstr(&message), NULL);
-                        })
-                    End
-                })
-                IsError(code, message,
+                            Kernel__panic(BString__cstr(&message), NULL); // hundelint: ignore-no-null
+                        }
+                    )
+                },
+                error(code, message)
                 {
                     __d_printf(PANIC, "Program failed: %s\n", cstr(name));
                     BString panic_error = BString__sprintf(&panic_message, cstr(name));
-                    Kernel__panic(cstr(panic_error), NULL);
-                })
-            End
-        });
-        IsNone(
+                    Kernel__panic(cstr(panic_error), NULL); // hundelint: ignore-no-null
+                }
+            )
+        },
+        none()
         {
             __d_printf(PANIC, "Program failed: %s\n", cstr(name));
             BString panic_error = BString__sprintf(&panic_message, cstr(name));
-            Kernel__panic(cstr(panic_error), NULL);
-
-        })
-    End
+            Kernel__panic(cstr(panic_error), NULL); // hundelint: ignore-no-null
+        }
+    );
 }
 
 void schedule(KernelPtr kernel, BString name)
@@ -141,28 +146,29 @@ void Kernel_main(CPUID cpu_id) {
     if (Kernel__init_status(kernel) != INIT_DONE)
     {
         __d_printf(PANIC, "Kernel init failed: %i\n", cpu_id);
-        Kernel__panic("Kernel not initialised", NULL);
+        Kernel__panic("Kernel not initialised", NULL); // hundelint: ignore-no-null
         return;
     }
 
     SystemInfo system_info = (SystemInfo) {};
-    Match(SystemInfo, kernel->system_info)
-        IsSome(value, system_info = value;)
-        IsNone(
+    match_optional(SystemInfo, kernel->system_info,
+        some(value) { system_info = value;; },
+        none()
         {
-            Kernel__panic("Kernel missing system info", NULL);
+            Kernel__panic("Kernel missing system info", NULL); // hundelint: ignore-no-null
             return;
-        })
-    End
+        }
+    )
 
-    ResultMatch(InitCode, CPU__init(&system_info));
-        IsError(code, message,
+    match_result(InitCode, CPU__init(&system_info),
+        success(_) {},
+        error(code, message)
         {
             __d_printf(PANIC, "CPU init failed: %i\n", cpu_id);
-            Kernel__panic(BString__cstr(&message), NULL);
+            Kernel__panic(BString__cstr(&message), NULL); // hundelint: ignore-no-null
             return;
-        });
-    End
+        }
+    );
 
     if (cpu_id == 1)
     {
@@ -172,13 +178,14 @@ void Kernel_main(CPUID cpu_id) {
     }
     else
     {
-        ResultMatch(SchedulerInitStatus, Scheduler__wait_until_ready(kernel->scheduler))
-            IsError(code, message,
+        match_result(SchedulerInitStatus, Scheduler__wait_until_ready(kernel->scheduler),
+            success(_) {},
+            error(code, message)
             {
-                Kernel__panic(BString__cstr(&message), NULL);
+                Kernel__panic(BString__cstr(&message), NULL); // hundelint: ignore-no-null
                 return;
-            });
-        End
+            }
+        );
     }
 
     __d_printf(PROGRESS, "CPU entering main: %i\n", cpu_id);

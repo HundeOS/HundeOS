@@ -126,36 +126,39 @@ static bool file_descriptor_matches_fd(ProcessFileDescriptorPtr descriptor, void
 static ProcessFileDescriptors Process__inherit_file_descriptors(Optional(ProcessPtr) parent)
 {
     ProcessFileDescriptors descriptors = ProcessFileDescriptors__new();
-    Match(ProcessPtr, parent)
-        IsSome(parent_process,
+    match_optional(ProcessPtr, parent,
+        some(parent_process)
         {
             LLIterate(ProcessFileDescriptors, parent_process->file_descriptors, descriptor)
                 ProcessFileDescriptors__push(&descriptors, descriptor);
             End
             return descriptors;
-        })
-    End
+        },
+        none() {}
+    )
 
     return descriptors;
 }
 
 static FileDescriptor Process__inherit_next_file_descriptor(Optional(ProcessPtr) parent)
 {
-    Match(ProcessPtr, parent)
-        IsSome(parent_process, return parent_process->next_file_descriptor)
-    End
+    match_optional(ProcessPtr, parent,
+        some(parent_process) { return parent_process->next_file_descriptor; },
+        none() {}
+    )
 
     return 3;
 }
 
-static size_t Process__copy_arg(char * target, BStringPtr arg)
+static size_t Process__copy_arg(DataPtr target, BStringPtr arg)
 {
-    for (size_t i = 0; i < arg->len; i++)
+    StringPos length = BString__length(arg);
+    for (StringPos i = 0; i < length; i++)
     {
-        target[i] = arg->data[i];
+        target[i] = (Data) BString__char_at_or(arg, i, '\0');
     }
-    target[arg->len] = '\0';
-    return arg->len + 1;
+    target[length] = '\0';
+    return (size_t) length + 1;
 }
 
 static Result(Address) Process__setup_args(
@@ -164,8 +167,8 @@ static Result(Address) Process__setup_args(
     uint64_t * argc
 )
 {
-    ResultMatch(UserAddress, Process__alloc_user_pages(self, PAGE_SIZE))
-        IsSuccess(args_page,
+    match_result(UserAddress, Process__alloc_user_pages(self, PAGE_SIZE),
+        success(args_page)
         {
             Address user_base = args_page.virtual_addr;
             Address kernel_base = args_page.kernel_addr.virtual_addr;
@@ -175,19 +178,19 @@ static Result(Address) Process__setup_args(
 
             size_t cursor = sizeof(Address) * (*argc + 1);
             FAIterate(ProcessArguments, arguments, i, arg)
-                if (cursor + arg.len + 1 > PAGE_SIZE)
+                if (cursor + (size_t) BString__length(&arg) + 1 > PAGE_SIZE)
                 {
                     return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
                 }
                 argv[i] = user_base + cursor;
-                cursor += Process__copy_arg(ptr(kernel_base + cursor, char), &arg);
-            End
+                cursor += Process__copy_arg(ptr(kernel_base + cursor, Data), &arg);
 
+            End
             argv[*argc] = 0;
             return Success(Address, user_base);
-        })
-        IsError(code, message, return Error(Address, message, code))
-    End
+        },
+        error(code, message) { return Error(Address, message, code); }
+    )
 
     return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
 }
@@ -204,7 +207,7 @@ Result(ProcessPtr) Process__new(
 {
     ProcessID pid;
 
-    CriticalSection(pid_lock, pid = ++pid_counter);
+    critical_section(pid_lock, pid = ++pid_counter);
 
     __d_printf(PROCESS, "Creating process with entry point %p\n", entry);
     ProcessPtr proc = ptr(Kernel__alloc_kernel(sizeof(Process)), Process);
@@ -235,14 +238,14 @@ Result(ProcessPtr) Process__new(
     proc->pending_signals = 0;
     proc->child_events = ProcessChildEvents__new();
 
-    Match(ProcessPtr, parent)
-        IsSome(parent_process, Process__set_identity(proc, parent_process->user_id, parent_process->group_id, parent_process->capabilities))
-        IsNone(Process__set_root_identity(proc))
-    End
+    match_optional(ProcessPtr, parent,
+        some(parent_process) { Process__set_identity(proc, parent_process->user_id, parent_process->group_id, parent_process->capabilities); },
+        none() { Process__set_root_identity(proc); }
+    )
 
     uint64_t argc;
-    ResultMatch(Address, Process__setup_args(proc, arguments, &argc))
-        IsSuccess(argv,
+    match_result(Address, Process__setup_args(proc, arguments, &argc),
+        success(argv)
         {
             __d_printf(
                 PROCESS,
@@ -266,21 +269,21 @@ Result(ProcessPtr) Process__new(
                 proc->context
             );
             return Success(ProcessPtr, proc);
-        })
-        IsError(code, message, return Error(ProcessPtr, message, code))
-    End
+        },
+        error(code, message) { return Error(ProcessPtr, message, code); }
+    )
 
     return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG);
 }
 
 Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation)
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        ResultMatch(CollectionCode, ParkedOperations__push(&self->parked_operations, operation))
-            IsSuccess(index, _cs_return Success(CollectionCode, index))
-            IsError(code, message, _cs_return Error(CollectionCode, message, code))
-        End
+        match_result(CollectionCode, ParkedOperations__push(&self->parked_operations, operation),
+            success(index) { cs_return Success(CollectionCode, index); },
+            error(code, message) { cs_return Error(CollectionCode, message, code); }
+        )
     })
 
     return Error(CollectionCode, BSTRING_NEW("Unable to push parked operation"), LINKED_LIST_ALLOCATION_FAILED);
@@ -288,11 +291,12 @@ Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOpe
 
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self)
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        Match(ParkedOperationPtr, ParkedOperations__remove_at(&self->parked_operations, -1))
-            IsSome(parked_operation, _cs_return Some(ParkedOperationPtr, parked_operation))
-        End
+        match_optional(ParkedOperationPtr, ParkedOperations__remove_at(&self->parked_operations, -1),
+            some(parked_operation) { cs_return Some(ParkedOperationPtr, parked_operation); },
+            none() {}
+        )
     })
 
     return None(ParkedOperationPtr);
@@ -300,21 +304,23 @@ Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self)
 
 Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self)
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
         {
-            Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index))
-                IsSome(parked_operation,
+            match_optional(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index),
+                some(parked_operation)
                 {
                     if (ParkedOperation__is_ready(parked_operation))
                     {
-                        Match(ParkedOperationPtr, ParkedOperations__remove_at(&self->parked_operations, index))
-                            IsSome(removed, _cs_return Some(ParkedOperationPtr, removed))
-                        End
+                        match_optional(ParkedOperationPtr, ParkedOperations__remove_at(&self->parked_operations, index),
+                            some(removed) { cs_return Some(ParkedOperationPtr, removed); },
+                            none() {}
+                        )
                     }
-                })
-            End
+                },
+                none() {}
+            )
         }
     })
 
@@ -323,11 +329,12 @@ Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self
 
 Optional(ParkReason) Process__top_park_reason(ProcessPtr self)
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, -1))
-            IsSome(parked_operation, _cs_return Some(ParkReason, parked_operation->park_reason))
-        End
+        match_optional(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, -1),
+            some(parked_operation) { cs_return Some(ParkReason, parked_operation->park_reason); },
+            none() {}
+        )
     })
 
     return None(ParkReason);
@@ -335,16 +342,18 @@ Optional(ParkReason) Process__top_park_reason(ProcessPtr self)
 
 Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self)
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, -1))
-            IsSome(parked_operation,
+        match_optional(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, -1),
+            some(parked_operation)
             {
-                Match(SchedulerPtr, parked_operation->kernel_context->scheduler)
-                    IsSome(scheduler, _cs_return Some(SchedulerPtr, scheduler))
-                End
-            })
-        End
+                match_optional(SchedulerPtr, parked_operation->kernel_context->scheduler,
+                    some(scheduler) { cs_return Some(SchedulerPtr, scheduler); },
+                    none() {}
+                )
+            },
+            none() {}
+        )
     })
 
     return None(SchedulerPtr);
@@ -352,35 +361,37 @@ Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self)
 
 bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key)
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
         {
-            Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index))
-                IsSome(parked_operation,
+            match_optional(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index),
+                some(parked_operation)
                 {
                     if (parked_operation->park_reason != reason)
                     {
                         continue;
                     }
 
-                    Match(OperationKey, operation_key)
-                        IsSome(key,
+                    match_optional(OperationKey, operation_key,
+                        some(key)
                         {
-                            Match(OperationKey, parked_operation->operation_key)
-                                IsSome(parked_key,
+                            match_optional(OperationKey, parked_operation->operation_key,
+                                some(parked_key)
                                 {
                                     if (parked_key == key)
                                     {
-                                        _cs_return true;
+                                        cs_return true;
                                     }
-                                })
-                            End
-                        })
-                        IsNone(_cs_return true)
-                    End
-                })
-            End
+                                },
+                                none() {}
+                            )
+                        },
+                        none() { cs_return true; }
+                    )
+                },
+                none() {}
+            )
         }
     })
 
@@ -391,42 +402,44 @@ bool Process__mark_parked_operation_ready(
     ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key, Optional(ReturnCode) return_code
 )
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
         {
-            Match(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index))
-                IsSome(parked_operation,
+            match_optional(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index),
+                some(parked_operation)
                 {
                     if (parked_operation->park_reason != reason)
                     {
                         continue;
                     }
 
-                    Match(OperationKey, operation_key)
-                        IsSome(key,
+                    match_optional(OperationKey, operation_key,
+                        some(key)
                         {
-                            Match(OperationKey, parked_operation->operation_key)
-                                IsSome(parked_key,
+                            match_optional(OperationKey, parked_operation->operation_key,
+                                some(parked_key)
                                 {
                                     if (parked_key == key)
                                     {
                                         parked_operation->return_code = return_code;
                                         ParkedOperation__mark_ready(parked_operation);
-                                        _cs_return true;
+                                        cs_return true;
                                     }
-                                })
-                            End
-                        })
-                        IsNone(
+                                },
+                                none() {}
+                            )
+                        },
+                        none()
                         {
                             parked_operation->return_code = return_code;
                             ParkedOperation__mark_ready(parked_operation);
-                            _cs_return true;
-                        })
-                    End
-                })
-            End
+                            cs_return true;
+                        }
+                    )
+                },
+                none() {}
+            )
         }
     })
 
@@ -435,9 +448,9 @@ bool Process__mark_parked_operation_ready(
 
 bool Process__is_parked(ProcessPtr self)
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        _cs_return ParkedOperations__len(&self->parked_operations) > 0;
+        cs_return ParkedOperations__len(&self->parked_operations) > 0;
     })
 
     return false;
@@ -445,9 +458,10 @@ bool Process__is_parked(ProcessPtr self)
 
 bool Process__is_handling_service_irq(ProcessPtr self)
 {
-    Match(ServiceEvent, self->service.active_irq_event)
-        IsSome(event, return true)
-    End
+    match_optional(ServiceEvent, self->service.active_irq_event,
+        some(event) { return true; },
+        none() {}
+    )
 
     return false;
 }
@@ -504,27 +518,30 @@ ReturnCode ProcessSignal__exit_code(ProcessSignal signal)
 
 Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr self)
 {
-    if (self == NULL || self->kernel == NULL)
+    if (self == NULL || self->kernel == NULL) // hundelint: ignore-no-null
     {
         return Error(ProcessSetupStatus, argument_too_long, PROCESS_FAILED_TO_SETUP);
     }
 
-    ResultMatch(BlockDeviceCode, BlockDeviceRegistry__dispose_process_resources(self))
-        IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP))
-    End
+    match_result(BlockDeviceCode, BlockDeviceRegistry__dispose_process_resources(self),
+        success(_) {},
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    )
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__dispose_process_resources(self->kernel->irq_dispatcher, self))
-        IsError(code, message, return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP))
-    End
+    match_result(IRQRegistrationStatus, IRQDispatcher__dispose_process_resources(self->kernel->irq_dispatcher, self),
+        success(_) {},
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    )
 
     return Success(ProcessSetupStatus, PROCESS_SETUP);
 }
 
 Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self)
 {
-    Match(ProcessChildEvent, ProcessChildEvents__pop_front(&self->child_events))
-        IsSome(event, return Success(ProcessChildEvent, event))
-    End
+    match_optional(ProcessChildEvent, ProcessChildEvents__pop_front(&self->child_events),
+        some(event) { return Success(ProcessChildEvent, event); },
+        none() {}
+    )
 
     return Error(ProcessChildEvent, bstring("Child event queue empty"), PROCESS_CHILD_EVENT_QUEUE_EMPTY);
 }
@@ -573,37 +590,39 @@ Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Option
     Stack__map(kernel, &stack, v_ptr(page_table, PageTable));
     __d_println(PROCESS, "Stack mapped");
 
-    Match(ExpandedSegment, Elf__entry_segment(binary, &expanded_elf))
-        IsNone(
-        {
-            __d_println(PANIC, cstr(no_entry_point_message));
-            return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
-        });
-        IsSome(entry_point,
+    match_optional(ExpandedSegment, Elf__entry_segment(binary, &expanded_elf),
+        some(entry_point)
         {
             Offset entry_offset = Elf__read_header(binary)->entry - entry_point.address.virtual_addr;
             UserAddress entry_address = UserAddress__relative(&entry_point.address, entry_offset);
             ProcessArguments process_arguments = ProcessArguments__new();
-            ResultMatch(CollectionCode, ProcessArguments__push(&process_arguments, binary.name))
-                IsError(code, message, return Error(ProcessPtr, message, SPAWN_ARG_TOO_LONG))
-            End
-            ResultMatch(CollectionCode, ProcessArguments__push_all(&process_arguments, &arguments))
-                IsError(code, message, return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG))
-            End
+            match_result(CollectionCode, ProcessArguments__push(&process_arguments, binary.name),
+                success(_) {},
+                error(code, message) { return Error(ProcessPtr, message, SPAWN_ARG_TOO_LONG); }
+            )
+            match_result(CollectionCode, ProcessArguments__push_all(&process_arguments, &arguments),
+                success(_) {},
+                error(code, message) { return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG); }
+            )
 
-            ResultMatch(ProcessPtr, Process__new(kernel, binary.name, page_table, entry_address, stack, parent, process_arguments))
-                IsSuccess(proc,
+            match_result(ProcessPtr, Process__new(kernel, binary.name, page_table, entry_address, stack, parent, process_arguments),
+                success(proc)
                 {
                     FAIterate(ExpandedSegmentArray, expanded_elf, segment_index, segment)
                         Process__record_user_allocation(proc, segment.address, segment.size, USER_ALLOCATION_ELF);
                     End
                     Process__record_user_allocation(proc, stack.base, STACK_SIZE, USER_ALLOCATION_STACK);
                     return Success(ProcessPtr, proc);
-                })
-                IsError(code, message, return Error(ProcessPtr, message, code))
-            End
-        })
-    End
+                },
+                error(code, message) { return Error(ProcessPtr, message, code); }
+            )
+        },
+        none()
+        {
+            __d_println(PANIC, cstr(no_entry_point_message));
+            return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
+        }
+    );
 
     return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
 }
@@ -618,17 +637,23 @@ Result(ProcessMemoryCode) Process__record_user_allocation(
         .type = type,
     };
 
-    ResultMatch(CollectionCode, UserAllocations__push(&self->user_allocations, allocation))
-        IsSuccess(_, return Success(ProcessMemoryCode, PROCESS_MEMORY_OK));
-        IsError(code, message, return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL));
-    End
+    match_result(CollectionCode, UserAllocations__push(&self->user_allocations, allocation),
+        success(_)
+        {
+        return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+    },
+        error(code, message)
+        {
+        return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
+    }
+    );
 
     return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
 }
 
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address)
 {
-    if (self == NULL || virtual_address == 0)
+    if (self == NULL || virtual_address == 0) // hundelint: ignore-no-null
     {
         return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
     }
@@ -654,8 +679,8 @@ Result(Address) Process__device_address(ProcessPtr self, Address virtual_address
 
             return Success(Address, address.phys_addr);
         }
-    End
 
+    End
     return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
 
@@ -667,16 +692,18 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     UserAddress allocation = Kernel__alloc_user(virtual_address, allocation_size, true, true, false);
     PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, allocation_size);
 
-    ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
+    match_result(ProcessMemoryCode, Process__record_user_allocation(
         self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC
-    ))
-        IsSuccess(_,
+    ),
+        success(_)
         {
             self->allocation_next += allocation_size;
             return Success(UserAddress, allocation);
+        },
+        error(code, message)
+        {
+            return Error(UserAddress, message, code);
         });
-        IsError(code, message, return Error(UserAddress, message, code));
-    End
 
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
 }
@@ -693,11 +720,12 @@ Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self)
 
     PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, PAGE_SIZE);
 
-    ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
+    match_result(ProcessMemoryCode, Process__record_user_allocation(
         self, allocation, PAGE_SIZE, USER_ALLOCATION_DYNAMIC
-    ))
-        IsError(code, message, return Error(UserAddress, message, code))
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(UserAddress, message, code); }
+    )
 
     self->idle_debug_address = Some(UserAddress, allocation);
     return Success(UserAddress, allocation);
@@ -729,16 +757,18 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
     };
 
     PageTable__map_mmio(v_ptr(self->page_table, PageTable), self->kernel, mapping, size);
-    ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
+    match_result(ProcessMemoryCode, Process__record_user_allocation(
         self, allocation, allocation_size, USER_ALLOCATION_MMIO
-    ))
-        IsSuccess(_,
+    ),
+        success(_)
         {
             self->allocation_next += allocation_size;
             return Success(UserAddress, mapping);
+        },
+        error(code, message)
+        {
+            return Error(UserAddress, message, code);
         });
-        IsError(code, message, return Error(UserAddress, message, code));
-    End
 
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
 }
@@ -776,15 +806,17 @@ Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
         );
 
         PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, allocation_size);
-        ResultMatch(ProcessMemoryCode, Process__record_user_allocation(
+        match_result(ProcessMemoryCode, Process__record_user_allocation(
             self, allocation, allocation_size, USER_ALLOCATION_HEAP
-        ))
-            IsSuccess(_,
+        ),
+            success(_)
             {
                 self->heap_mapped_end = mapped_end;
+            },
+            error(code, message)
+            {
+                return Error(Address, message, code);
             });
-            IsError(code, message, return Error(Address, message, code));
-        End
     }
 
     self->heap_break = new_break;
@@ -793,8 +825,8 @@ Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
 
 static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr self, ListIndex index)
 {
-    Match(UserAllocation, UserAllocations__at(&self->user_allocations, index))
-        IsSome(allocation,
+    match_optional(UserAllocation, UserAllocations__at(&self->user_allocations, index),
+        some(allocation)
         {
             PageTable__unmap(v_ptr(self->page_table, PageTable), self->kernel, allocation.address.virtual_addr, allocation.size);
             Address kernel_virtual = allocation.address.kernel_addr.virtual_addr;
@@ -806,23 +838,25 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
                 return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
             }
 
-            ResultMatch(KAllocCode, Kernel__free(kernel_virtual))
-                IsError(code, message, return Error(ProcessMemoryCode, message, PROCESS_MEMORY_FREE_FAILED));
-            End
+            match_result(KAllocCode, Kernel__free(kernel_virtual),
+                success(_) {},
+                error(code, message) { return Error(ProcessMemoryCode, message, PROCESS_MEMORY_FREE_FAILED); }
+            );
 
             return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
-        })
-    End
+        },
+        none() {}
+    )
 
     return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
 
 Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virtual_address)
 {
-    LLFindResultMatch(UserAllocations, UserAllocations__find(
+    match_optional(UserAllocations__FindResult, UserAllocations__find(
         &self->user_allocations, allocation_matches_virtual, &virtual_address
-    ))
-        IsSome(found,
+    ),
+        some(found)
         {
             if (found.value->type != USER_ALLOCATION_DYNAMIC)
             {
@@ -830,9 +864,7 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
             }
 
             return Process__free_user_allocation_at(self, found.index);
-        })
-        IsNone(return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND))
-    End
+        }, none() { return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND); })
 
     return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
@@ -841,9 +873,10 @@ Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self)
 {
     while (self->user_allocations.len > 0)
     {
-        ResultMatch(ProcessMemoryCode, Process__free_user_allocation_at(self, 0))
-            IsError(code, message, return Error(ProcessMemoryCode, message, code));
-        End
+        match_result(ProcessMemoryCode, Process__free_user_allocation_at(self, 0),
+            success(_) {},
+            error(code, message) { return Error(ProcessMemoryCode, message, code); }
+        );
     }
 
     return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
@@ -851,8 +884,8 @@ Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self)
 
 Result(FileDescriptor) Process__set_file_descriptor(ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle)
 {
-    CriticalSection(self->lock,
-        _cs_return Process__set_file_descriptor_unlocked(self, fd, handle);
+    critical_section(self->lock,
+        cs_return Process__set_file_descriptor_unlocked(self, fd, handle);
     )
 
     return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
@@ -862,10 +895,10 @@ static Result(FileDescriptor) Process__set_file_descriptor_unlocked(
     ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle
 )
 {
-    LLFindResultMatch(ProcessFileDescriptors, ProcessFileDescriptors__find(
+    match_optional(ProcessFileDescriptors__FindResult, ProcessFileDescriptors__find(
         &self->file_descriptors, file_descriptor_matches_fd, &fd
-    ))
-        IsSome(found,
+    ),
+        some(found)
         {
             found.value->handle = handle;
             if (fd >= self->next_file_descriptor)
@@ -873,32 +906,35 @@ static Result(FileDescriptor) Process__set_file_descriptor_unlocked(
                 self->next_file_descriptor = fd + 1;
             }
             return Success(FileDescriptor, fd);
-        })
-    End
+        }, none() {})
 
     ProcessFileDescriptor descriptor = (ProcessFileDescriptor) {
         .fd = fd,
         .handle = handle,
     };
 
-    ResultMatch(CollectionCode, ProcessFileDescriptors__push(&self->file_descriptors, descriptor))
-        IsSuccess(_, {
+    match_result(CollectionCode, ProcessFileDescriptors__push(&self->file_descriptors, descriptor),
+        success(_)
+        {
             if (fd >= self->next_file_descriptor)
             {
                 self->next_file_descriptor = fd + 1;
             }
             return Success(FileDescriptor, fd);
-        });
-        IsError(code, message, return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED));
-    End
+        },
+        error(code, message)
+        {
+            return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
+        }
+    );
 
     return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
 }
 
 Result(FileDescriptor) Process__allocate_file_descriptor(ProcessPtr self, ProcessIOHandle handle)
 {
-    CriticalSection(self->lock,
-        _cs_return Process__allocate_file_descriptor_unlocked(self, handle);
+    critical_section(self->lock,
+        cs_return Process__allocate_file_descriptor_unlocked(self, handle);
     )
 
     return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
@@ -909,11 +945,12 @@ static Result(FileDescriptor) Process__allocate_file_descriptor_unlocked(Process
     FileDescriptor fd = self->next_file_descriptor;
     while (fd < MAX_HANDLES_PER_PROCESS)
     {
-        LLFindResultMatch(ProcessFileDescriptors, ProcessFileDescriptors__find(
+        match_optional(ProcessFileDescriptors__FindResult, ProcessFileDescriptors__find(
             &self->file_descriptors, file_descriptor_matches_fd, &fd
-        ))
-            IsNone(return Process__set_file_descriptor_unlocked(self, fd, handle))
-        End
+        ),
+            some(_) {},
+            none() { return Process__set_file_descriptor_unlocked(self, fd, handle); }
+        )
 
         fd++;
     }
@@ -923,8 +960,8 @@ static Result(FileDescriptor) Process__allocate_file_descriptor_unlocked(Process
 
 Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor fd)
 {
-    CriticalSection(self->lock,
-        _cs_return Process__get_io_handle_unlocked(self, fd);
+    critical_section(self->lock,
+        cs_return Process__get_io_handle_unlocked(self, fd);
     )
 
     return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
@@ -932,12 +969,12 @@ Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor f
 
 static Result(ProcessIOHandle) Process__get_io_handle_unlocked(ProcessPtr self, FileDescriptor fd)
 {
-    LLFindResultMatch(ProcessFileDescriptors, ProcessFileDescriptors__find(
+    match_optional(ProcessFileDescriptors__FindResult, ProcessFileDescriptors__find(
         &self->file_descriptors, file_descriptor_matches_fd, &fd
-    ))
-        IsSome(found, return Success(ProcessIOHandle, found.value->handle))
-        IsNone(return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN))
-    End
+    ),
+        some(found) { return Success(ProcessIOHandle, found.value->handle); },
+        none() { return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN); }
+    )
 
     return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
 }
@@ -946,18 +983,18 @@ Result(FileDescriptor) Process__copy_file_descriptor(
     ProcessPtr self, ProcessPtr source, FileDescriptor target_fd, FileDescriptor source_fd
 )
 {
-    ResultMatch(ProcessIOHandle, Process__get_io_handle(source, source_fd))
-        IsSuccess(handle, return Process__set_file_descriptor(self, target_fd, handle))
-        IsError(code, message, return Error(FileDescriptor, message, code))
-    End
+    match_result(ProcessIOHandle, Process__get_io_handle(source, source_fd),
+        success(handle) { return Process__set_file_descriptor(self, target_fd, handle); },
+        error(code, message) { return Error(FileDescriptor, message, code); }
+    )
 
     return Error(FileDescriptor, file_descriptor_not_found, IO_NOT_OPEN);
 }
 
 Result(ProcessIOHandle) Process__remove_file_descriptor(ProcessPtr self, FileDescriptor fd)
 {
-    CriticalSection(self->lock,
-        _cs_return Process__remove_file_descriptor_unlocked(self, fd);
+    critical_section(self->lock,
+        cs_return Process__remove_file_descriptor_unlocked(self, fd);
     )
 
     return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
@@ -965,22 +1002,26 @@ Result(ProcessIOHandle) Process__remove_file_descriptor(ProcessPtr self, FileDes
 
 static Result(ProcessIOHandle) Process__remove_file_descriptor_unlocked(ProcessPtr self, FileDescriptor fd)
 {
-    ResultMatch(ProcessIOHandle, Process__get_io_handle_unlocked(self, fd))
-        IsSuccess(handle,
+    match_result(ProcessIOHandle, Process__get_io_handle_unlocked(self, fd),
+        success(handle)
         {
-            LLFindResultMatch(ProcessFileDescriptors, ProcessFileDescriptors__find(
+            match_optional(ProcessFileDescriptors__FindResult, ProcessFileDescriptors__find(
                 &self->file_descriptors, file_descriptor_matches_fd, &fd
-            ))
-                IsSome(found, ProcessFileDescriptors__remove_at(&self->file_descriptors, found.index))
-            End
+            ),
+                some(found) { ProcessFileDescriptors__remove_at(&self->file_descriptors, found.index); },
+                none() {}
+            )
             if (fd < self->next_file_descriptor)
             {
                 self->next_file_descriptor = fd;
             }
             return Success(ProcessIOHandle, handle);
-        });
-        IsError(code, message, return Error(ProcessIOHandle, message, code));
-    End
+        },
+        error(code, message)
+        {
+            return Error(ProcessIOHandle, message, code);
+        }
+    );
 
     return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
 }

@@ -17,7 +17,7 @@ static int strlen(const char * str)
 
 void print(const char * str)
 {
-    if (str == NULL)
+    if (str == NULL) // hundelint: ignore-no-null
     {
         str = "(null)";
     }

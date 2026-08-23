@@ -49,9 +49,10 @@ static Result(MemoryDeviceBlockPtr) MemoryBlockDevice__find_or_create_block(
     MemoryBlockDevicePtr self, BlockNumber block
 )
 {
-    LLFindResultMatch(MemoryDeviceBlocks, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block))
-        IsSome(found, return Success(MemoryDeviceBlockPtr, found.value))
-    End
+    match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
+        some(found) { return Success(MemoryDeviceBlockPtr, found.value); },
+        none() {}
+    )
 
     KernelAddress address = Kernel__alloc(BLOCK_DEVICE_BLOCK_SIZE);
     if (!address.valid)
@@ -61,20 +62,17 @@ static Result(MemoryDeviceBlockPtr) MemoryBlockDevice__find_or_create_block(
 
     MemoryBlockDevice__zero(v_ptr(address, Data));
 
-    ResultMatch(CollectionCode, MemoryDeviceBlocks__push(&self->blocks, ((MemoryDeviceBlock) {
+    match_result(CollectionCode, MemoryDeviceBlocks__push(&self->blocks, ((MemoryDeviceBlock) {
         .block = block,
         .address = address,
-    })))
-        IsSuccess(_, {
-            LLFindResultMatch(
-                MemoryDeviceBlocks,
-                MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block)
+    })),
+    success(_)
+    {
+            match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
+                some(found) { return Success(MemoryDeviceBlockPtr, found.value); },
+                none() {}
             )
-                IsSome(found, return Success(MemoryDeviceBlockPtr, found.value))
-            End
-        })
-        IsError(code, message, return Error(MemoryDeviceBlockPtr, message, BLOCK_DEVICE_IO_ERROR))
-    End
+        }, error(code, message) { return Error(MemoryDeviceBlockPtr, message, BLOCK_DEVICE_IO_ERROR); })
 
     return Error(MemoryDeviceBlockPtr, allocation_failed, BLOCK_DEVICE_IO_ERROR);
 }
@@ -84,28 +82,25 @@ Result(BlockCount) MemoryBlockDevice__read(
 )
 {
     MemoryBlockDevicePtr self = (MemoryBlockDevicePtr) context;
-    if (self == NULL || target == NULL || count == 0)
+    if (self == NULL || target == NULL || count == 0) // hundelint: ignore-no-null
     {
         return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         for (BlockCount i = 0; i < count; i++)
         {
             DataPtr block_target = target + (i * BLOCK_DEVICE_BLOCK_SIZE);
             BlockNumber current_block = block + i;
 
-            LLFindResultMatch(
-                MemoryDeviceBlocks,
-                MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &current_block)
+            match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &current_block),
+                some(found) { MemoryBlockDevice__copy(block_target, v_ptr(found.value->address, Data)); },
+                none() { MemoryBlockDevice__zero(block_target); }
             )
-                IsSome(found, MemoryBlockDevice__copy(block_target, v_ptr(found.value->address, Data)))
-                IsNone(MemoryBlockDevice__zero(block_target))
-            End
         }
 
-        _cs_return Success(BlockCount, count);
+        cs_return Success(BlockCount, count);
     });
 }
 
@@ -114,24 +109,25 @@ Result(BlockCount) MemoryBlockDevice__write(
 )
 {
     MemoryBlockDevicePtr self = (MemoryBlockDevicePtr) context;
-    if (self == NULL || source == NULL || count == 0)
+    if (self == NULL || source == NULL || count == 0) // hundelint: ignore-no-null
     {
         return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         for (BlockCount i = 0; i < count; i++)
         {
-            ResultMatch(MemoryDeviceBlockPtr, MemoryBlockDevice__find_or_create_block(self, block + i))
-                IsSuccess(memory_block, {
+            match_result(MemoryDeviceBlockPtr, MemoryBlockDevice__find_or_create_block(self, block + i),
+                success(memory_block)
+                {
                     DataPtr block_source = source + (i * BLOCK_DEVICE_BLOCK_SIZE);
                     MemoryBlockDevice__copy(v_ptr(memory_block->address, Data), block_source);
-                })
-                IsError(code, message, _cs_return Error(BlockCount, message, code))
-            End
+                },
+                error(code, message) { cs_return Error(BlockCount, message, code); }
+            )
         }
 
-        _cs_return Success(BlockCount, count);
+        cs_return Success(BlockCount, count);
     });
 }

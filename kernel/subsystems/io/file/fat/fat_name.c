@@ -27,7 +27,11 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
         return false;
     }
 
-    BString base = Unwrap(BString, BStringArray__at(&parts, 0), EMPTY_BSTRING);
+    BString base = EMPTY_BSTRING;
+    match_optional(BString, BStringArray__at(&parts, 0),
+        some(segment) { base = segment; },
+        none() { return false; }
+    )
     if (BString__length(&base) == 0)
     {
         return false;
@@ -38,7 +42,7 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
     size_t target_index = 0;
     for (StringPos i = 0; i < BString__length(&uppercase_base); i++)
     {
-        char ch = Unwrap(char, BString__char_at(&uppercase_base, i), '\0');
+        char ch = BString__char_at_or(&uppercase_base, i, '\0');
 
         if (!FatName__is_valid_83_char(ch) || target_index >= 8)
         {
@@ -51,7 +55,11 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
 
     if (part_count == 2)
     {
-        BString extension = Unwrap(BString, BStringArray__at(&parts, 1), EMPTY_BSTRING);
+        BString extension = EMPTY_BSTRING;
+        match_optional(BString, BStringArray__at(&parts, 1),
+            some(segment) { extension = segment; },
+            none() { return false; }
+        )
         if (BString__length(&extension) == 0)
         {
             return false;
@@ -62,7 +70,7 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
         target_index = 8;
         for (StringPos i = 0; i < BString__length(&uppercase_extension); i++)
         {
-            char ch = Unwrap(char, BString__char_at(&uppercase_extension, i), '\0');
+            char ch = BString__char_at_or(&uppercase_extension, i, '\0');
 
             if (!FatName__is_valid_83_char(ch) || target_index >= FAT_NAME_83_SIZE)
             {

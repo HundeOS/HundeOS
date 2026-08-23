@@ -39,17 +39,17 @@ static Result(BlockDeviceCode) BlockCache__cache_entry(BlockCachePtr self, Block
         BlockCacheEntries__pop_front(&self->entries);
     }
 
-    ResultMatch(CollectionCode, BlockCacheEntries__push(&self->entries, entry))
-        IsSuccess(_, return Success(BlockDeviceCode, BLOCK_DEVICE_OK))
-        IsError(code, message, return Error(BlockDeviceCode, message, BLOCK_DEVICE_IO_ERROR))
-    End
+    match_result(CollectionCode, BlockCacheEntries__push(&self->entries, entry),
+        success(_) { return Success(BlockDeviceCode, BLOCK_DEVICE_OK); },
+        error(code, message) { return Error(BlockDeviceCode, message, BLOCK_DEVICE_IO_ERROR); }
+    )
 
     return Error(BlockDeviceCode, invalid_argument, BLOCK_DEVICE_IO_ERROR);
 }
 
 Result(BlockDeviceCode) BlockCache__read(BlockCachePtr self, BlockNumber block, DataPtr target)
 {
-    if (self == NULL || self->device == NULL || target == NULL)
+    if (self == NULL || self->device == NULL || target == NULL) // hundelint: ignore-no-null
     {
         return Error(BlockDeviceCode, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
@@ -57,32 +57,34 @@ Result(BlockDeviceCode) BlockCache__read(BlockCachePtr self, BlockNumber block, 
     BlockCacheEntry entry;
     entry.block = block;
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        FindResultMatch(BlockCacheEntries, BlockCacheEntries__find(&self->entries, BlockCache__block_matches, &block))
-            IsSome(found,
+        match_optional(BlockCacheEntries__FindResult, BlockCacheEntries__find(&self->entries, BlockCache__block_matches, &block),
+            some(found)
             {
                 BlockCache__copy(target, found.value->data);
-                _cs_return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
-            })
-        End
+                cs_return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
+            },
+            none() {}
+        )
 
-        ResultMatch(BlockCount, BlockDevice__read(self->device, block, 1, entry.data))
-            IsSuccess(count,
+        match_result(BlockCount, BlockDevice__read(self->device, block, 1, entry.data),
+            success(count)
             {
                 if (count != 1)
                 {
-                    _cs_return Error(BlockDeviceCode, invalid_argument, BLOCK_DEVICE_IO_ERROR);
+                    cs_return Error(BlockDeviceCode, invalid_argument, BLOCK_DEVICE_IO_ERROR);
                 }
-            })
-            IsError(code, message, _cs_return Error(BlockDeviceCode, message, code))
-        End
+            },
+            error(code, message) { cs_return Error(BlockDeviceCode, message, code); }
+        )
 
-        ResultMatch(BlockDeviceCode, BlockCache__cache_entry(self, entry))
-            IsError(code, message, _cs_return Error(BlockDeviceCode, message, code))
-        End
+        match_result(BlockDeviceCode, BlockCache__cache_entry(self, entry),
+            success(_) {},
+            error(code, message) { cs_return Error(BlockDeviceCode, message, code); }
+        )
 
         BlockCache__copy(target, entry.data);
-        _cs_return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
+        cs_return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
     });
 }

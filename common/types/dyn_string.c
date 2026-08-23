@@ -16,8 +16,8 @@ bool dyn_string_equals(void * a, void * b)
 
     for (StringPos i = 0; i < DynString__length(left); i++)
     {
-        char left_ch = Unwrap(char, DynString__char_at(left, i), '\0');
-        char right_ch = Unwrap(char, DynString__char_at(right, i), '\0');
+        char left_ch = DynString__char_at_or(left, i, '\0');
+        char right_ch = DynString__char_at_or(right, i, '\0');
         if (left_ch != right_ch)
         {
             return false;
@@ -31,11 +31,12 @@ void DynStringLines__dispose_all(DynStringLines * self)
 {
     LLIterate(DynStringLines, *self, line)
         DynString__dispose(&line);
-    End
 
-    ResultMatch(CollectionCode, DynStringLines__dispose(self))
-        IsError(code, message, {})
     End
+    match_result(CollectionCode, DynStringLines__dispose(self),
+        success(_) {},
+        error(code, message) {}
+    )
 }
 
 static StringPos DynString__next_capacity(StringPos current, StringPos required)
@@ -102,10 +103,10 @@ Result(DynStringCode) DynString__push_char(DynStringPtr self, char ch)
     StringPos required = self->len + 2;
     if (required > self->capacity)
     {
-        ResultMatch(DynStringCode, DynString__reserve(self, DynString__next_capacity(self->capacity, required)))
-            IsSuccess(code, {})
-            IsError(code, message, return Error(DynStringCode, message, code))
-        End
+        match_result(DynStringCode, DynString__reserve(self, DynString__next_capacity(self->capacity, required)),
+            success(code) {},
+            error(code, message) { return Error(DynStringCode, message, code); }
+        )
     }
 
     self->data[self->len] = ch;
@@ -118,10 +119,10 @@ Result(DynStringCode) DynString__append_cstr(DynStringPtr self, const char * tex
 {
     for (StringPos i = 0; text[i] != '\0'; i++)
     {
-        ResultMatch(DynStringCode, DynString__push_char(self, text[i]))
-            IsSuccess(code, {})
-            IsError(code, message, return Error(DynStringCode, message, code))
-        End
+        match_result(DynStringCode, DynString__push_char(self, text[i]),
+            success(code) {},
+            error(code, message) { return Error(DynStringCode, message, code); }
+        )
     }
 
     return Success(DynStringCode, DYN_STRING_OK);
@@ -130,11 +131,11 @@ Result(DynStringCode) DynString__append_cstr(DynStringPtr self, const char * tex
 Result(DynStringCode) DynString__append_bstring(DynStringPtr self, ConstBStringPtr text)
 {
     BStringIterate(text, i, ch)
-        ResultMatch(DynStringCode, DynString__push_char(self, ch))
-            IsSuccess(code, {})
-            IsError(code, message, return Error(DynStringCode, message, code))
-        End
-    }
+        match_result(DynStringCode, DynString__push_char(self, ch),
+            success(code) {},
+            error(code, message) { return Error(DynStringCode, message, code); }
+        )
+    End
 
     return Success(DynStringCode, DYN_STRING_OK);
 }
@@ -180,12 +181,20 @@ Optional(char) DynString__char_at(ConstDynStringPtr self, StringPos index)
     return Some(char, self->data[index]);
 }
 
+char DynString__char_at_or(ConstDynStringPtr self, StringPos index, char alternate)
+{
+    match_optional(char, DynString__char_at(self, index),
+        some(ch) { return ch; },
+        none() { return alternate; }
+    )
+}
+
 Optional(BString) DynString__bstring(ConstDynStringPtr self)
 {
     BString text = EMPTY_BSTRING;
     for (StringPos i = 0; i < DynString__length(self); i++)
     {
-        char ch = Unwrap(char, DynString__char_at(self, i), '\0');
+        char ch = DynString__char_at_or(self, i, '\0');
         if (!BString__push_char(&text, ch))
         {
             return None(BString);
@@ -197,10 +206,10 @@ Optional(BString) DynString__bstring(ConstDynStringPtr self)
 
 static bool DynString__push_line(DynStringLines * lines, DynString line)
 {
-    ResultMatch(CollectionCode, DynStringLines__push(lines, line))
-        IsSuccess(index, return true)
-        IsError(code, message, return false)
-    End
+    match_result(CollectionCode, DynStringLines__push(lines, line),
+        success(index) { return true; },
+        error(code, message) { return false; }
+    )
 
     return false;
 }
@@ -209,13 +218,14 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
 {
     DynStringLines lines = DynStringLines__new();
     DynString line;
-    ResultMatch(DynStringCode, DynString__init(&line, 16))
-        IsError(code, message, return None(DynStringLines))
-    End
+    match_result(DynStringCode, DynString__init(&line, 16),
+        success(_) {},
+        error(code, message) { return None(DynStringLines); }
+    )
 
     for (StringPos i = 0; i < DynString__length(self); i++)
     {
-        char ch = Unwrap(char, DynString__char_at(self, i), '\0');
+        char ch = DynString__char_at_or(self, i, '\0');
         if (ch == '\n')
         {
             if (!DynString__push_line(&lines, line))
@@ -225,24 +235,26 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
                 return None(DynStringLines);
             }
 
-            ResultMatch(DynStringCode, DynString__init(&line, 16))
-                IsError(code, message,
+            match_result(DynStringCode, DynString__init(&line, 16),
+                success(_) {},
+                error(code, message)
                 {
                     DynStringLines__dispose_all(&lines);
                     return None(DynStringLines);
-                })
-            End
+                }
+            )
             continue;
         }
 
-        ResultMatch(DynStringCode, DynString__push_char(&line, ch))
-            IsError(code, message,
+        match_result(DynStringCode, DynString__push_char(&line, ch),
+            success(_) {},
+            error(code, message)
             {
                 DynString__dispose(&line);
                 DynStringLines__dispose_all(&lines);
                 return None(DynStringLines);
-            })
-        End
+            }
+        )
     }
 
     if (DynString__length(&line) > 0)

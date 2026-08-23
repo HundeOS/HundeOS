@@ -16,11 +16,11 @@ static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
 {
     while (true)
     {
-        Match(ParkedOperationPtr, Process__pop_ready_parked_operation(self))
-            IsSome(parked_operation,
+        match_optional(ParkedOperationPtr, Process__pop_ready_parked_operation(self),
+            some(parked_operation)
             {
-                Match(Continuation, parked_operation->continuation)
-                    IsSome(continuation,
+                match_optional(Continuation, parked_operation->continuation,
+                    some(continuation)
                     {
                         Process__activate_address_space(self);
 
@@ -28,45 +28,47 @@ static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
                         Result(Anything) res = continuation(parked_operation);
                         if (Process__is_parked(self))
                         {
-                            Match(SchedulerPtr, Process__top_parked_operation_scheduler(self))
-                                IsSome(scheduler, Scheduler__yield_waiting(scheduler, self, CPU__id() - 1))
-                            End
+                            match_optional(SchedulerPtr, Process__top_parked_operation_scheduler(self),
+                                some(scheduler) { Scheduler__yield_waiting(scheduler, self, CPU__id() - 1); },
+                                none() {}
+                            )
                         }
 
-                        ResultMatch(Anything, res)
-                            IsSuccess(result_val,
+                        match_result(Anything, res,
+                            success(result_val)
                             {
                                 __d_println(PROCESS, "Set syscall result");
                                 Process__set_syscall_result(self, result_val);
-                            });
-                            IsError(code, message,
+                            },
+                            error(code, message)
                             {
                                 Process__set_syscall_result(self, code);
                                 __d_printf(PANIC, "Continuation error: %s\n", cstr(message));
-                            })
-                        End
+                            }
+                        )
 
                         ParkedOperation__dispose(parked_operation);
-                    })
-                    IsNone(ParkedOperation__dispose(parked_operation))
-                End
-            })
-            IsNone(return Success(Anything, 0))
-        End
+                    },
+                    none() { ParkedOperation__dispose(parked_operation); }
+                )
+            },
+            none() { return Success(Anything, 0); }
+        )
     }
 }
 
 void ContextSwitch__switch(ContextSwitch self)
 {
-    Match(ProcessPtr, self.old_proc)
-        IsSome(proc,
+    match_optional(ProcessPtr, self.old_proc,
+        some(proc)
         {
             if (proc->state != PROC_STATE_DEAD && proc->state != PROC_STATE_WAITING)
             {
                 proc->state = PROC_STATE_INTERRUPTED;
             }
-        })
-    End
+        },
+        none() {}
+    )
 
     ProcessPtr new_proc = self.new_proc;
     __d_printf(

@@ -70,50 +70,50 @@ static AuthTicket AuthTicket__new(AuthTicketID ticket_id, ProcessID issued_to_pi
 
 Result(AuthTicketID) Auth__authenticate(AuthPtr self, ProcessPtr process, BString username, BString password)
 {
-    ResultMatch(UserID, Auth__credential_user_id(username, password))
-        IsSuccess(user_id,
+    match_result(UserID, Auth__credential_user_id(username, password),
+        success(user_id)
         {
-            CriticalSection(self->lock,
+            critical_section(self->lock,
             {
                 AuthTicketID ticket_id = self->next_ticket_id;
                 self->next_ticket_id++;
 
                 AuthTicket ticket = AuthTicket__new(ticket_id, process->pid, user_id);
 
-                ResultMatch(CollectionCode, AuthTickets__push(&self->tickets, ticket))
-                    IsSuccess(_, _cs_return Success(AuthTicketID, ticket_id))
-                    IsError(code, message, _cs_return Error(AuthTicketID, ticket_store_full_message, AUTH_TICKET_STORE_FULL))
-                End
+                match_result(CollectionCode, AuthTickets__push(&self->tickets, ticket),
+                    success(_) { cs_return Success(AuthTicketID, ticket_id); },
+                    error(code, message) { cs_return Error(AuthTicketID, ticket_store_full_message, AUTH_TICKET_STORE_FULL); }
+                )
             });
-        })
-        IsError(code, message, return Error(AuthTicketID, message, code))
-    End
+        },
+        error(code, message) { return Error(AuthTicketID, message, code); }
+    )
 
     return Error(AuthTicketID, invalid_credentials_message, AUTH_INVALID_CREDENTIALS);
 }
 
 Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicketID ticket_id)
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        FindResultMatch(AuthTickets, AuthTickets__find(&self->tickets, Auth__ticket_id_matches, &ticket_id))
-            IsSome(result,
+        match_optional(AuthTickets__FindResult, AuthTickets__find(&self->tickets, Auth__ticket_id_matches, &ticket_id),
+            some(result)
             {
                 AuthTicketPtr ticket = result.value;
                 if (ticket->issued_to_pid != process->pid)
                 {
-                    _cs_return Error(UserID, ticket_process_mismatch_message, AUTH_TICKET_FOR_DIFFERENT_PROCESS);
+                    cs_return Error(UserID, ticket_process_mismatch_message, AUTH_TICKET_FOR_DIFFERENT_PROCESS);
                 }
                 if (ticket->consumed)
                 {
-                    _cs_return Error(UserID, ticket_consumed_message, AUTH_TICKET_CONSUMED);
+                    cs_return Error(UserID, ticket_consumed_message, AUTH_TICKET_CONSUMED);
                 }
 
                 ticket->consumed = true;
-                _cs_return Success(UserID, ticket->user_id);
-            })
-            IsNone(_cs_return Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET))
-        End
+                cs_return Success(UserID, ticket->user_id);
+            },
+            none() { cs_return Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET); }
+        )
     });
 
     return Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET);
@@ -135,21 +135,21 @@ Result(SystemCallResult) Auth__handler(
         return Error(SystemCallResult, invalid_credentials_message, AUTH_INVALID_CREDENTIALS);
     }
 
-    Match(ProcessPtr, proc)
-        IsSome(process,
+    match_optional(ProcessPtr, proc,
+        some(process)
         {
-            ResultMatch(AuthTicketID, Auth__authenticate(
+            match_result(AuthTicketID, Auth__authenticate(
                 &kernel->auth,
                 process,
                 bstring(request->username),
                 bstring(request->password)
-            ))
-                IsSuccess(ticket_id, return Success(SystemCallResult, ticket_id))
-                IsError(code, message, return Error(SystemCallResult, message, code))
-            End
-        })
-        IsNone(return Error(SystemCallResult, no_process_message, AUTH_NO_PROCESS))
-    End
+            ),
+                success(ticket_id) { return Success(SystemCallResult, ticket_id); },
+                error(code, message) { return Error(SystemCallResult, message, code); }
+            )
+        },
+        none() { return Error(SystemCallResult, no_process_message, AUTH_NO_PROCESS); }
+    )
 
     return Error(SystemCallResult, no_process_message, AUTH_NO_PROCESS);
 }

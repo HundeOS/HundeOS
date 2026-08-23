@@ -4,7 +4,7 @@
 FixedArrayBodyDefine(BStringArray);
 #undef FIXED_ARRAY_ALLOC
 
-static bool BString__contains_char(ConstBStringPtr self, char ch)
+bool BString__contains_char(ConstBStringPtr self, char ch)
 {
     for (StringPos i = 0; i < self->len; i++)
     {
@@ -62,10 +62,10 @@ static void BString__append_reversed_mut(BStringPtr self, ConstBStringPtr revers
     while (!BString__is_empty(&copy))
     {
         StringPos last_index = BString__length(&copy) - 1;
-        Match(char, BString__char_at(&copy, last_index))
-            IsSome(ch, BString__push_char(self, ch);)
-            IsNone(return;)
-        End
+        match_optional(char, BString__char_at(&copy, last_index),
+            some(ch) { BString__push_char(self, ch);; },
+            none() { return;; }
+        )
 
         BString__remove_at(&copy, last_index);
     }
@@ -233,6 +233,22 @@ bool BString__insert_char(BStringPtr self, StringPos index, char ch)
     return true;
 }
 
+bool BString__set_char_at(BStringPtr self, StringPos index, char ch)
+{
+    if (index < 0 || index + 1 >= self->max)
+    {
+        return false;
+    }
+
+    self->data[index] = ch;
+    if (index >= self->len)
+    {
+        self->len = index + 1;
+        self->data[self->len] = '\0';
+    }
+    return true;
+}
+
 bool BString__remove_at(BStringPtr self, StringPos index)
 {
     if (index < 0 || index >= self->len)
@@ -345,6 +361,20 @@ bool BString__equals(ConstBStringPtr self, ConstBStringPtr other)
     return true;
 }
 
+BString BString__from_chars(const char * chars, StringPos length)
+{
+    BString result = EMPTY_BSTRING;
+    for (StringPos i = 0; i < length; i++)
+    {
+        if (!BString__push_char(&result, chars[i]))
+        {
+            return result;
+        }
+    }
+
+    return result;
+}
+
 bool bstring_equals(void * a, void * b)
 {
     return BString__equals((ConstBStringPtr) a, (ConstBStringPtr) b);
@@ -386,8 +416,8 @@ BString BString__join(BStringArrayPtr array, char delimiter)
         {
             result = BString__append(&result, &delim);
         }
-    End
 
+    End
     return result;
 }
 
@@ -424,6 +454,14 @@ Optional(char) BString__char_at(ConstBStringPtr self, StringPos index)
     return Some(char, self->data[index]);
 }
 
+char BString__char_at_or(ConstBStringPtr self, StringPos index, char alternate)
+{
+    match_optional(char, BString__char_at(self, index),
+        some(ch) { return ch; },
+        none() { return alternate; }
+    )
+}
+
 StringPos BString__copy_to(ConstBStringPtr self, char * target, StringPos target_size)
 {
     if (target_size == 0)
@@ -451,7 +489,7 @@ BString BString__uppercase(ConstBStringPtr self)
     BString result = EMPTY_BSTRING;
     for (StringPos i = 0; i < BString__length(self); i++)
     {
-        char ch = Unwrap(char, BString__char_at(self, i), '\0');
+        char ch = BString__char_at_or(self, i, '\0');
         if (ch >= 'a' && ch <= 'z')
         {
             ch = (char) (ch - ('a' - 'A'));
@@ -526,18 +564,18 @@ Optional(uint64_t) BString__parse_uint64_base(ConstBStringPtr self, uint64_t bas
     return Some(uint64_t, result);
 }
 
-BString BString__vsprintf(ConstBStringPtr format, va_list args)
+BString BString__vsprintf(ConstBStringPtr self, va_list args)
 {
     BString result = EMPTY_BSTRING;
 
-    if (format == NULL)
+    if (self == NULL)
     {
         return result;
     }
 
-    for (StringPos i = 0; i < BString__length(format); i++)
+    for (StringPos i = 0; i < BString__length(self); i++)
     {
-        char format_char = Unwrap(char, BString__char_at(format, i), '\0');
+        char format_char = BString__char_at_or(self, i, '\0');
         if (format_char != '%')
         {
             BString__push_char(&result, format_char);
@@ -545,27 +583,27 @@ BString BString__vsprintf(ConstBStringPtr format, va_list args)
         }
 
         i++;
-        format_char = Unwrap(char, BString__char_at(format, i), '\0');
-        while (i < BString__length(format) && format_char >= '0' && format_char <= '9')
+        format_char = BString__char_at_or(self, i, '\0');
+        while (i < BString__length(self) && format_char >= '0' && format_char <= '9')
         {
             i++;
-            format_char = Unwrap(char, BString__char_at(format, i), '\0');
+            format_char = BString__char_at_or(self, i, '\0');
         }
 
-        if (i >= BString__length(format))
+        if (i >= BString__length(self))
         {
             break;
         }
 
         int long_count = 0;
-        while (i < BString__length(format) && format_char == 'l' && long_count < 2)
+        while (i < BString__length(self) && format_char == 'l' && long_count < 2)
         {
             long_count++;
             i++;
-            format_char = Unwrap(char, BString__char_at(format, i), '\0');
+            format_char = BString__char_at_or(self, i, '\0');
         }
 
-        if (i >= BString__length(format))
+        if (i >= BString__length(self))
         {
             break;
         }
@@ -675,11 +713,11 @@ BString BString__vsprintf(ConstBStringPtr format, va_list args)
     return result;
 }
 
-BString BString__sprintf(ConstBStringPtr format, ...)
+BString BString__sprintf(ConstBStringPtr self, ...)
 {
     va_list args;
-    va_start(args, format);
-    BString result = BString__vsprintf(format, args);
+    va_start(args, self);
+    BString result = BString__vsprintf(self, args);
     va_end(args);
     return result;
 }

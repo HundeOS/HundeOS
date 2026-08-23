@@ -331,9 +331,10 @@ static Optional(SdhciPciFunction) Sdhci__find_pci_function(ServiceMappedMemoryPt
     {
         for (uint64_t device = 0; device < SDHCI_PCI_DEVICE_COUNT; device++)
         {
-            Match(SdhciPciFunction, Sdhci__find_pci_function_on_device(ecam, config, bus, device))
-                IsSome(function, return Some(SdhciPciFunction, function))
-            End
+            match_optional(SdhciPciFunction, Sdhci__find_pci_function_on_device(ecam, config, bus, device),
+                some(function) { return Some(SdhciPciFunction, function); },
+                none() {}
+            )
         }
     }
 
@@ -355,8 +356,8 @@ static Optional(SdHostConfig) Sdhci__load_pci_host_config(void)
         return None(SdHostConfig);
     }
 
-    Match(SdhciPciFunction, Sdhci__find_pci_function(ecam, &pci_config))
-        IsSome(function,
+    match_optional(SdhciPciFunction, Sdhci__find_pci_function(ecam, &pci_config),
+        some(function)
         {
             void * function_base = Sdhci__pci_function_base(ecam, &pci_config, function);
             uint32_t bar0 = SDHCI_PCI_READ32(function_base, SDHCI_PCI_CONFIG_BAR0);
@@ -387,17 +388,19 @@ static Optional(SdHostConfig) Sdhci__load_pci_host_config(void)
                 .mmio_size = SDHCI_PCI_MMIO_SIZE,
                 .irq = SDHCI_PCI_READ8(function_base, SDHCI_PCI_CONFIG_INTERRUPT_LINE),
             }));
-        })
-    End
+        },
+        none() {}
+    )
 
     return None(SdHostConfig);
 }
 
 static Optional(SdHostConfig) Sdhci__load_host_config(void)
 {
-    Match(SdHostConfig, Sdhci__load_pci_host_config())
-        IsSome(config, return Some(SdHostConfig, config))
-    End
+    match_optional(SdHostConfig, Sdhci__load_pci_host_config(),
+        some(config) { return Some(SdHostConfig, config); },
+        none() {}
+    )
 
     return SDHCI_LOAD_CONFIG();
 }
@@ -855,8 +858,8 @@ int SDHCI_ENTRYPOINT(void)
         return 1;
     }
 
-    Match(SdHostConfig, Sdhci__load_host_config())
-        IsSome(config,
+    match_optional(SdHostConfig, Sdhci__load_host_config(),
+        some(config)
         {
             SdhciDevice device = { 0 };
             if (!Sdhci__bind(&device, config))
@@ -906,8 +909,9 @@ int SDHCI_ENTRYPOINT(void)
             }
 
             return 0;
-        })
-    End
+        },
+        none() {}
+    )
 
     DRIVER_DEBUG("sdhci: no SD host config found\n");
     return 1;

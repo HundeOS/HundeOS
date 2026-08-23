@@ -103,7 +103,7 @@ static int strncpy_len(char* dest, const char* src, int n) {
 
 // Simple printf implementation
 int k_printf(const char* format, ...) {
-    if (format == NULL)
+    if (format == NULL) // hundelint: ignore-no-null
     {
         return 0;
     }
@@ -267,7 +267,7 @@ int k_printf(const char* format, ...) {
                 case 's': {
                     char* str = va_arg(args, char*);
                     print_string(str);
-                    if (str == NULL)
+                    if (str == NULL) // hundelint: ignore-no-null
                     {
                         count += 6;
                     }
@@ -318,12 +318,12 @@ static char hex_digit(unsigned int value)
 
 int k_sprintf_impl(char* str, const char* format, va_list args)
 {
-    if (str == NULL)
+    if (str == NULL) // hundelint: ignore-no-null
     {
         return 0;
     }
 
-    if (format == NULL)
+    if (format == NULL) // hundelint: ignore-no-null
     {
         str[0] = '\0';
         return 0;

@@ -211,13 +211,13 @@ typedef enum RingBufferError {
     { \
         for (size_t i = 0; i < max; i++) \
         {\
-            ResultMatch(Char, alias##__pop(self))\
-                IsSuccess(val, drain[i] = val;)\
-                IsError(code, message, \
+            match_result(Char, alias##__pop(self), \
+                success(val) { drain[i] = val;; }, \
+                error(code, message) { \
                 { \
                     return Success(ItemCount, i);\
-                }); \
-            End \
+                }; } \
+            ); \
         } \
         return Success(ItemCount, max);\
     } \

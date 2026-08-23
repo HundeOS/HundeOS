@@ -52,30 +52,31 @@ typedef int64_t Code;
     } \
 
 
-#define ResultMatch(T, res) \
-{ \
-    typedef Result_##T##_type __ResultValueType __attribute__((unused));\
-    Result_##T ___result = res; \
-
 #define End \
 } \
 
-#define IsSuccess(val_name, block) \
-    if (___result.ok) \
+#define success(val_name) \
     { \
-        __ResultValueType val_name = ___result.success.val; \
-        block; \
-    } \
+        __ResultValueType val_name = __result.success.val;
 
-#define IsError(code_name, message_name, block) \
-    if (!___result.ok) \
+#define error(code_name, message_name) \
     { \
-        BString message_name = ___result.error.error; \
-        Code code_name = ___result.error.code; \
-        block; \
-    } \
+        BString message_name = __result.error.error; \
+        Code code_name = __result.error.code;
 
-#define ResultUnwrap(T, res, alternate_val) \
-    res.ok ? res.success.val : alternate_val\
+#define match_result(T, res, success_branch, error_branch) \
+{ \
+    typedef Result_##T##_type __ResultValueType __attribute__((unused)); \
+    Result_##T __result = res; \
+    if (__result.ok) \
+        success_branch \
+    } \
+    else \
+        error_branch \
+    } \
+} \
+
+#define result_unwrap(T, res, alternate_val) \
+    ((res).ok ? (res).success.val : (alternate_val))\
 
 #endif

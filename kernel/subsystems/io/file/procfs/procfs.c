@@ -96,10 +96,10 @@ static void ProcSysinfoWriter__append_char(ProcSysinfoWriterPtr self, char ch)
 {
     if (self->cursor >= self->target_offset && self->written < self->requested_size && !self->failed)
     {
-        ResultMatch(Pos, IOBuffer__push(self->buffer, ch))
-            IsSuccess(pos, self->written++;)
-            IsError(code, message, self->failed = true;)
-        End
+        match_result(Pos, IOBuffer__push(self->buffer, ch),
+            success(pos) { self->written++;; },
+            error(code, message) { self->failed = true;; }
+        )
     }
 
     self->cursor++;
@@ -109,7 +109,7 @@ static void ProcSysinfoWriter__append_bstring(ProcSysinfoWriterPtr self, ConstBS
 {
     BStringIterate(text, index, ch)
         ProcSysinfoWriter__append_char(self, ch);
-    }
+    End
 }
 
 static void ProcSysinfoWriter__append_key_value_prefix(ProcSysinfoWriterPtr self, ConstBStringPtr key)
@@ -261,17 +261,17 @@ static void ProcSysinfoWriter__append_physical_memory_regions(ProcSysinfoWriterP
     ProcSysinfoWriter__append_dec_line(self, &memory_free_region_count_key, region_count);
     for (uint64_t index = 0; index < region_count; index++)
     {
-        Match(PhysicalMemoryRegions__type_ptr__optional, PhysicalMemoryRegions__ptr_at(regions, index))
-            IsSome(region, ProcSysinfoWriter__append_physical_memory_region(self, index, region);)
-            IsNone({})
-        End
+        match_optional(PhysicalMemoryRegions__type_ptr__optional, PhysicalMemoryRegions__ptr_at(regions, index),
+            some(region) { ProcSysinfoWriter__append_physical_memory_region(self, index, region);; },
+            none() {}
+        )
     }
 }
 
 static void ProcSysinfoWriter__append_framebuffer(ProcSysinfoWriterPtr self, Optional(FramebufferInfo) framebuffer)
 {
-    Match(FramebufferInfo, framebuffer)
-        IsSome(info,
+    match_optional(FramebufferInfo, framebuffer,
+        some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 1);
             ProcSysinfoWriter__append_hex_line(self, &framebuffer_physical_base_key, info.physical_base);
@@ -289,15 +289,15 @@ static void ProcSysinfoWriter__append_framebuffer(ProcSysinfoWriterPtr self, Opt
             ProcSysinfoWriter__append_hex_line(self, &framebuffer_green_mask_key, info.green_mask);
             ProcSysinfoWriter__append_hex_line(self, &framebuffer_blue_mask_key, info.blue_mask);
             ProcSysinfoWriter__append_hex_line(self, &framebuffer_reserved_mask_key, info.reserved_mask);
-        })
-        IsNone(ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 0);)
-    End
+        },
+        none() { ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 0);; }
+    )
 }
 
 static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, Optional(PciInfo) pci)
 {
-    Match(PciInfo, pci)
-        IsSome(info,
+    match_optional(PciInfo, pci,
+        some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 1);
             ProcSysinfoWriter__append_hex_line(self, &pci_ecam_physical_base_key, info.ecam_physical_base);
@@ -305,23 +305,23 @@ static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, Optional(Pc
             ProcSysinfoWriter__append_human_size_line(self, &pci_ecam_size_human_key, info.ecam_size);
             ProcSysinfoWriter__append_dec_line(self, &pci_bus_start_key, info.bus_start);
             ProcSysinfoWriter__append_dec_line(self, &pci_bus_end_key, info.bus_end);
-        })
-        IsNone(ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 0);)
-    End
+        },
+        none() { ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 0);; }
+    )
 }
 
 static void ProcSysinfoWriter__append_sd_host(ProcSysinfoWriterPtr self, Optional(SdHostInfo) sd_host)
 {
-    Match(SdHostInfo, sd_host)
-        IsSome(info,
+    match_optional(SdHostInfo, sd_host,
+        some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 1);
             ProcSysinfoWriter__append_hex_line(self, &sd_host_physical_base_key, info.physical_base);
             ProcSysinfoWriter__append_hex_line(self, &sd_host_mmio_size_key, info.mmio_size);
             ProcSysinfoWriter__append_dec_line(self, &sd_host_irq_key, info.irq);
-        })
-        IsNone(ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 0);)
-    End
+        },
+        none() { ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 0);; }
+    )
 }
 
 static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
@@ -370,12 +370,12 @@ static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
 
 static Result(IOInternalHandle) ProcFilesystemIOState__add_handle(ProcFilesystemIOStatePtr self, BString path)
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
         IOInternalHandle handle = self->next_handle++ | self->state.filesystem->fs_code;
         FileHandleTargetPtr target = FileHandleTarget__heap_new(path);
         FileHandleTargetMap__set(&self->state.handles, handle, target);
-        _cs_return Success(IOInternalHandle, handle);
+        cs_return Success(IOInternalHandle, handle);
     })
 }
 
@@ -383,12 +383,12 @@ static Result(FileHandleTargetPtr) ProcFilesystemIOState__get_handle(
     ProcFilesystemIOStatePtr self, IOInternalHandle handle
 )
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
-        Match(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle))
-            IsSome(target, _cs_return Success(FileHandleTargetPtr, target))
-            IsNone(_cs_return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE))
-        End
+        match_optional(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle),
+            some(target) { cs_return Success(FileHandleTargetPtr, target); },
+            none() { cs_return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -398,17 +398,17 @@ static Result(IOInternalHandle) ProcFilesystemIOState__delete_handle(
     ProcFilesystemIOStatePtr self, IOInternalHandle handle
 )
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
-        Match(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle))
-            IsSome(target,
+        match_optional(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle),
+            some(target)
             {
                 FileHandleTarget__dispose(target);
                 FileHandleTargetMap__delete(&self->state.handles, handle);
-                _cs_return Success(IOInternalHandle, handle);
-            })
-            IsNone(_cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE))
-        End
+                cs_return Success(IOInternalHandle, handle);
+            },
+            none() { cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -435,16 +435,16 @@ static Result(IOBufferPtr) ProcFilesystemIO__read(
 {
     ProcFilesystemIOStatePtr fs_state = (ProcFilesystemIOStatePtr) self;
 
-    ResultMatch(FileHandleTargetPtr, ProcFilesystemIOState__get_handle(fs_state, handle))
-        IsSuccess(target,
+    match_result(FileHandleTargetPtr, ProcFilesystemIOState__get_handle(fs_state, handle),
+        success(target)
         {
             if (!BString__equals(&target->path, &sysinfo_path))
             {
                 return Error(IOBufferPtr, invalid_path, IO_INVALID_PATH);
             }
 
-            Match(SystemInfo, fs_state->kernel->system_info)
-                IsSome(system_info,
+            match_optional(SystemInfo, fs_state->kernel->system_info,
+                some(system_info)
                 {
                     IOBuffer__reset(&target->buffer);
                     ProcSysinfoWriter writer =
@@ -461,12 +461,12 @@ static Result(IOBufferPtr) ProcFilesystemIO__read(
 
                     target->offset += writer.written;
                     return Success(IOBufferPtr, &target->buffer);
-                })
-                IsNone(return Error(IOBufferPtr, missing_system_info, IO_OPERATION_NOT_SUPPORTED);)
-            End
-        })
-        IsError(code, message, return Error(IOBufferPtr, message, code))
-    End
+                },
+                none() { return Error(IOBufferPtr, missing_system_info, IO_OPERATION_NOT_SUPPORTED);; }
+            )
+        },
+        error(code, message) { return Error(IOBufferPtr, message, code); }
+    )
 
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }

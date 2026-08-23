@@ -21,7 +21,7 @@ static BString EmbeddedFileIO__relative_path(BString path)
 
     while (start < end)
     {
-        char ch = Unwrap(char, BString__char_at(&path, start), '\0');
+        char ch = BString__char_at_or(&path, start, '\0');
         if (ch != '/')
         {
             break;
@@ -31,7 +31,7 @@ static BString EmbeddedFileIO__relative_path(BString path)
 
     while (end > start)
     {
-        char ch = Unwrap(char, BString__char_at(&path, end - 1), '\0');
+        char ch = BString__char_at_or(&path, end - 1, '\0');
         if (ch != '/')
         {
             break;
@@ -49,8 +49,8 @@ static bool EmbeddedFileIO__contains_node(FilesystemNodes nodes, BString name)
         {
             return true;
         }
-    End
 
+    End
     return false;
 }
 
@@ -129,7 +129,7 @@ static Optional(FilesystemNodePtr) EmbeddedFileIO__node_for_entry(
             return None(FilesystemNodePtr);
         }
 
-        char separator = Unwrap(char, BString__char_at(&relative_entry, BString__length(&relative_parent)), '\0');
+        char separator = BString__char_at_or(&relative_entry, BString__length(&relative_parent), '\0');
         if (separator != '/')
         {
             return None(FilesystemNodePtr);
@@ -148,7 +148,11 @@ static Optional(FilesystemNodePtr) EmbeddedFileIO__node_for_entry(
         return None(FilesystemNodePtr);
     }
 
-    BString child_name = Unwrap(BString, BStringArray__at(&segments, 0), EMPTY_BSTRING);
+    BString child_name = EMPTY_BSTRING;
+    match_optional(BString, BStringArray__at(&segments, 0),
+        some(segment) { child_name = segment; },
+        none() { return None(FilesystemNodePtr); }
+    )
     bool is_directory = BStringArray__len(&segments) > 1;
     UserID user_id = PROCESS_USER_ROOT;
     GroupID group_id = PROCESS_GROUP_ROOT;
@@ -178,17 +182,18 @@ Result(IOInternalHandle) EmbeddedFileIO__open(IOStatePtr self, BString path, Fla
         return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, cstr(path)), IO_INVALID_PATH);
     }
 
-    Match(Elf, EmbeddedElf__load(relative_path))
-        IsSome(elf,
+    match_optional(Elf, EmbeddedElf__load(relative_path),
+        some(elf)
         {
-            CriticalSection(fs_state->state.lock,
+            critical_section(fs_state->state.lock,
             {
                 IOInternalHandle handle = (IOInternalHandle) fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
                 FileHandleTargetMap__set(&fs_state->state.handles, handle, FileHandleTarget__heap_new(relative_path));
-                _cs_return Success(IOInternalHandle, handle);
+                cs_return Success(IOInternalHandle, handle);
             })
-        })
-    End
+        },
+        none() {}
+    )
 
     return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, cstr(path)), IO_INVALID_PATH);
 }
@@ -206,23 +211,19 @@ Result(IOBufferPtr) EmbeddedFileIO__read(
 
     Optional(FileHandleTargetPtr) target;
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
         target = FileHandleTargetMap__get(&fs_state->state.handles, handle);
     });
-    Match(FileHandleTargetPtr, target)
-        IsNone(
-        {
-            return Error(IOBufferPtr, invalid_file_handle, IO_UNKNOWN_HANDLE);
-        })
-        IsSome(target_ptr,
+    match_optional(FileHandleTargetPtr, target,
+        some(target_ptr)
         {
             if (IOBuffer__item_count(&target_ptr->buffer) < size)
             {
                 size_t free_space = IOBuffer__free_space(&target_ptr->buffer);
 
-                Match(Elf, EmbeddedElf__load(target_ptr->path))
-                    IsSome(elf,
+                match_optional(Elf, EmbeddedElf__load(target_ptr->path),
+                    some(elf)
                     {
                         CharPtr bytes = (CharPtr) elf.start;
                         size_t elf_size = elf.end - elf.start;
@@ -237,20 +238,24 @@ Result(IOBufferPtr) EmbeddedFileIO__read(
 
                         IOBuffer__push_all(&target_ptr->buffer, &bytes[target_ptr->offset], read_size);
                         target_ptr->offset += read_size;
-                    })
-                    IsNone(
+                    },
+                    none()
                     {
                         return Error(IOBufferPtr,
                                      BString__sprintf(&invalid_path_format, cstr(target_ptr->path)),
                                      IO_INVALID_PATH);
-                    })
-                End
+                    }
+                )
 
             }
 
             return Success(IOBufferPtr, &target_ptr->buffer);
-        })
-    End
+        },
+        none()
+        {
+            return Error(IOBufferPtr, invalid_file_handle, IO_UNKNOWN_HANDLE);
+        }
+    )
 
 }
 
@@ -275,17 +280,18 @@ Result(FilesystemNodes) EmbeddedFileIO__list_nodes(IOStatePtr self, FilesystemNo
     FilesystemNodes result = EmptyArray(FilesystemNodes);
     BString relative_path = EmbeddedFileIO__relative_path(path);
     FAIterate(BStringArray, EmbeddedElf__list(), index, entry)
-        Match(FilesystemNodePtr, EmbeddedFileIO__node_for_entry(fs_state->state.filesystem, relative_path, entry))
-            IsSome(node,
+        match_optional(FilesystemNodePtr, EmbeddedFileIO__node_for_entry(fs_state->state.filesystem, relative_path, entry),
+            some(node)
             {
                 if (!EmbeddedFileIO__contains_node(result, node->name))
                 {
                     FilesystemNodes__push(&result, node);
                 }
-            })
-        End
-    End
+            },
+            none() {}
+        )
 
+    End
     return Success(FilesystemNodes, result);
 }
 

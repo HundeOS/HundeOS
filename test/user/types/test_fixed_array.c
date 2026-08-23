@@ -23,9 +23,7 @@ void test_user_fixed_array_heap_new_uses_user_allocator(void)
     TEST_ASSERT_NOT_NULL(array);
     TEST_ASSERT_EQUAL(0, TestArray__len(array));
 
-    ResultMatch(CollectionCode, TestArray__push(array, 10))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(CollectionCode, TestArray__push(array, 10), success(_) {}, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL(10, Unwrap(TestType, TestArray__at(array, 0), (TestType){}));
     free(array);

@@ -37,11 +37,14 @@ typedef struct BStringArray * BStringArrayPtr;
 
 BString BString__new(const char * str);
 BString bstring(const char * str);
+BString BString__from_chars(const char * chars, StringPos length);
 void BString__clear(BStringPtr self);
 bool BString__is_empty(ConstBStringPtr self);
 bool BString__is_whitespace(char ch);
+bool BString__contains_char(ConstBStringPtr self, char ch);
 bool BString__push_char(BStringPtr self, char ch);
 bool BString__insert_char(BStringPtr self, StringPos index, char ch);
+bool BString__set_char_at(BStringPtr self, StringPos index, char ch);
 bool BString__remove_at(BStringPtr self, StringPos index);
 BString BString__strip(ConstBStringPtr self);
 BString BString__slice(ConstBStringPtr self, StringPos start, StringPos end);
@@ -54,13 +57,14 @@ BString BString__join(BStringArrayPtr array, char delimiter);
 bool BString__starts_with(ConstBStringPtr self, ConstBStringPtr prefix);
 StringPos BString__length(ConstBStringPtr self);
 Optional(char) BString__char_at(ConstBStringPtr self, StringPos index);
+char BString__char_at_or(ConstBStringPtr self, StringPos index, char alternate);
 StringPos BString__copy_to(ConstBStringPtr self, char * target, StringPos target_size);
 const char * BString__cstr(ConstBStringPtr self);
 BString BString__uppercase(ConstBStringPtr self);
 Optional(uint64_t) BString__parse_uint64(ConstBStringPtr self);
 Optional(uint64_t) BString__parse_uint64_base(ConstBStringPtr self, uint64_t base);
-BString BString__vsprintf(ConstBStringPtr format, va_list args);
-BString BString__sprintf(ConstBStringPtr format, ...);
+BString BString__vsprintf(ConstBStringPtr self, va_list args);
+BString BString__sprintf(ConstBStringPtr self, ...);
 
 #define EMPTY_BSTRING \
     (BString) { \
@@ -86,6 +90,6 @@ BString BString__sprintf(ConstBStringPtr format, ...);
 #define BStringIterate(self, index, ch) \
     for (StringPos index = 0; index < BString__length(self); index++) \
     { \
-        char ch = Unwrap(char, BString__char_at(self, index), '\0'); \
+        char ch = BString__char_at_or(self, index, '\0'); \
 
 #endif

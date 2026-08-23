@@ -58,12 +58,11 @@ static LLFindResultOptional(MemDirectories) MemFilesystem__find_directory(
 
 static BString MemFilesystem__parent_path(BString path)
 {
-    BString result = EMPTY_BSTRING;
     int64_t last_separator = -1;
 
-    for (StringPos i = 0; i < path.len; i++)
+    for (StringPos i = 0; i < BString__length(&path); i++)
     {
-        if (path.data[i] == '/')
+        if (BString__char_at_or(&path, i, '\0') == '/')
         {
             last_separator = (int64_t) i;
         }
@@ -71,51 +70,38 @@ static BString MemFilesystem__parent_path(BString path)
 
     if (last_separator <= 0)
     {
-        return result;
+        return EMPTY_BSTRING;
     }
 
-    for (int64_t i = 0; i < last_separator && i < (int64_t) result.max - 1; i++)
-    {
-        result.data[i] = path.data[i];
-        result.len++;
-    }
-    result.data[result.len] = '\0';
-
-    return result;
+    return BString__slice(&path, 0, last_separator);
 }
 
 static BString MemFilesystem__basename(BString path)
 {
-    BString result = EMPTY_BSTRING;
     StringPos start = 0;
 
-    for (StringPos i = 0; i < path.len; i++)
+    for (StringPos i = 0; i < BString__length(&path); i++)
     {
-        if (path.data[i] == '/')
+        if (BString__char_at_or(&path, i, '\0') == '/')
         {
             start = i + 1;
         }
     }
 
-    for (StringPos i = start; i < path.len && result.len < result.max - 1; i++)
-    {
-        result.data[result.len++] = path.data[i];
-    }
-    result.data[result.len] = '\0';
-
-    return result;
+    return BString__slice(&path, start, -1);
 }
 
 static bool MemFilesystem__directory_exists(MemFilesystemIOStatePtr self, BStringPtr path)
 {
-    if (path->len == 0)
+    if (BString__is_empty(path))
     {
         return true;
     }
 
-    LLFindResultMatch(MemDirectories, MemFilesystem__find_directory(self, path))
-        IsSome(_, return true)
-    End
+    match_optional(MemDirectories__FindResult, MemFilesystem__find_directory(self, path),
+        some(_) { return true; },
+        none() {}
+    )
 
     return false;
 }
@@ -128,37 +114,34 @@ static bool MemFilesystem__has_child(MemFilesystemIOStatePtr self, BStringPtr pa
         {
             return true;
         }
-    End
 
+    End
     LLIterate(MemFiles, self->files, file)
         BString parent = MemFilesystem__parent_path(file.name);
         if (BString__equals(&parent, path))
         {
             return true;
         }
-    End
 
+    End
     return false;
 }
 
 static bool MemFilesystem__path_is_child_of(BStringPtr child, BStringPtr parent)
 {
-    if (child->len <= parent->len)
+    if (BString__length(child) <= BString__length(parent))
     {
         return false;
     }
 
-    if (parent->len > 0)
+    if (!BString__is_empty(parent))
     {
-        for (StringPos i = 0; i < parent->len; i++)
+        if (!BString__starts_with(child, parent))
         {
-            if (child->data[i] != parent->data[i])
-            {
-                return false;
-            }
+            return false;
         }
 
-        return child->data[parent->len] == '/';
+        return BString__char_at_or(child, BString__length(parent), '\0') == '/';
     }
 
     return true;
@@ -166,30 +149,32 @@ static bool MemFilesystem__path_is_child_of(BStringPtr child, BStringPtr parent)
 
 static Result(IOStatus) MemFilesystem__remove_file(MemFilesystemIOStatePtr self, BStringPtr path)
 {
-    LLFindResultMatch(MemFiles, MemFilesystem__find_file(self, path))
-        IsSome(file_match,
+    match_optional(MemFiles__FindResult, MemFilesystem__find_file(self, path),
+        some(file_match)
         {
-            ResultMatch(CollectionCode, MemFiles__remove(&self->files, *file_match.value))
-                IsSuccess(_, return Success(IOStatus, IO_OK))
-                IsError(code, message, return Error(IOStatus, message, code))
-            End
-        })
-    End
+            match_result(CollectionCode, MemFiles__remove(&self->files, *file_match.value),
+                success(_) { return Success(IOStatus, IO_OK); },
+                error(code, message) { return Error(IOStatus, message, code); }
+            )
+        },
+        none() {}
+    )
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
 }
 
 static Result(IOStatus) MemFilesystem__remove_directory_entry(MemFilesystemIOStatePtr self, BStringPtr path)
 {
-    LLFindResultMatch(MemDirectories, MemFilesystem__find_directory(self, path))
-        IsSome(directory_match,
+    match_optional(MemDirectories__FindResult, MemFilesystem__find_directory(self, path),
+        some(directory_match)
         {
-            ResultMatch(CollectionCode, MemDirectories__remove(&self->directories, *directory_match.value))
-                IsSuccess(_, return Success(IOStatus, IO_OK))
-                IsError(code, message, return Error(IOStatus, message, code))
-            End
-        })
-    End
+            match_result(CollectionCode, MemDirectories__remove(&self->directories, *directory_match.value),
+                success(_) { return Success(IOStatus, IO_OK); },
+                error(code, message) { return Error(IOStatus, message, code); }
+            )
+        },
+        none() {}
+    )
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
 }
@@ -204,14 +189,14 @@ static Result(IOStatus) MemFilesystem__remove_recursive(MemFilesystemIOStatePtr 
         LLIterate(MemFiles, self->files, file)
             if (MemFilesystem__path_is_child_of(&file.name, path))
             {
-                ResultMatch(IOStatus, MemFilesystem__remove_file(self, &file.name))
-                    IsSuccess(_, removed_child = true;)
-                    IsError(code, message, return Error(IOStatus, message, code))
-                End
+                match_result(IOStatus, MemFilesystem__remove_file(self, &file.name),
+                    success(_) { removed_child = true;; },
+                    error(code, message) { return Error(IOStatus, message, code); }
+                )
                 break;
             }
-        End
 
+        End
         if (removed_child)
         {
             continue;
@@ -220,10 +205,10 @@ static Result(IOStatus) MemFilesystem__remove_recursive(MemFilesystemIOStatePtr 
         LLIterate(MemDirectories, self->directories, directory)
             if (MemFilesystem__path_is_child_of(&directory.path, path))
             {
-                ResultMatch(IOStatus, MemFilesystem__remove_directory_entry(self, &directory.path))
-                    IsSuccess(_, removed_child = true;)
-                    IsError(code, message, return Error(IOStatus, message, code))
-                End
+                match_result(IOStatus, MemFilesystem__remove_directory_entry(self, &directory.path),
+                    success(_) { removed_child = true;; },
+                    error(code, message) { return Error(IOStatus, message, code); }
+                )
                 break;
             }
         End
@@ -248,10 +233,10 @@ static Result(CollectionCode) MemFile__ensure_capacity(MemFilePtr self, size_t r
             page_data[i] = 0;
         }
 
-        ResultMatch(CollectionCode, MemFilePages__push(&self->pages, ((MemFilePage) { .address = page })))
-            IsSuccess(_, self->capacity += PAGE_SIZE;)
-            IsError(code, message, return Error(CollectionCode, message, code))
-        End
+        match_result(CollectionCode, MemFilePages__push(&self->pages, ((MemFilePage) { .address = page })),
+            success(_) { self->capacity += PAGE_SIZE;; },
+            error(code, message) { return Error(CollectionCode, message, code); }
+        )
     }
 
     return Success(CollectionCode, 0);
@@ -267,14 +252,14 @@ static Result(CollectionCode) MemFile__copy_from_file(MemFilePtr self, size_t of
     for (size_t i = 0; i < size; i++)
     {
         size_t file_offset = offset + i;
-        Match(MemFilePage, MemFile__page(self, file_offset / PAGE_SIZE))
-            IsNone(return Error(CollectionCode, corrupt_file, IO_INVALID_PATH))
-            IsSome(file_page,
+        match_optional(MemFilePage, MemFile__page(self, file_offset / PAGE_SIZE),
+            some(file_page)
             {
                 DataPtr page = v_ptr(file_page.address, Data);
                 target[i] = page[file_offset % PAGE_SIZE];
-            })
-        End
+            },
+            none() { return Error(CollectionCode, corrupt_file, IO_INVALID_PATH); }
+        )
     }
 
     return Success(CollectionCode, 0);
@@ -285,14 +270,14 @@ static Result(CollectionCode) MemFile__copy_to_file(MemFilePtr self, size_t offs
     for (size_t i = 0; i < size; i++)
     {
         size_t file_offset = offset + i;
-        Match(MemFilePage, MemFile__page(self, file_offset / PAGE_SIZE))
-            IsNone(return Error(CollectionCode, corrupt_file, IO_INVALID_PATH))
-            IsSome(file_page,
+        match_optional(MemFilePage, MemFile__page(self, file_offset / PAGE_SIZE),
+            some(file_page)
             {
                 DataPtr page = v_ptr(file_page.address, Data);
                 page[file_offset % PAGE_SIZE] = source[i];
-            })
-        End
+            },
+            none() { return Error(CollectionCode, corrupt_file, IO_INVALID_PATH); }
+        )
     }
 
     return Success(CollectionCode, 0);
@@ -307,15 +292,16 @@ static Result(MemFilePtr) MemFilesystem__create_file(MemFilesystemIOStatePtr sel
         .pages = MemFilePages__new(),
     };
 
-    ResultMatch(CollectionCode, MemFiles__push(&self->files, file))
-        IsSuccess(_,
+    match_result(CollectionCode, MemFiles__push(&self->files, file),
+        success(_)
         {
-            LLFindResultMatch(MemFiles, MemFilesystem__find_file(self, &path))
-                IsSome(match, return Success(MemFilePtr, match.value))
-            End
-        })
-        IsError(code, message, return Error(MemFilePtr, message, code))
-    End
+            match_optional(MemFiles__FindResult, MemFilesystem__find_file(self, &path),
+                some(match) { return Success(MemFilePtr, match.value); },
+                none() {}
+            )
+        },
+        error(code, message) { return Error(MemFilePtr, message, code); }
+    )
 
     return Error(MemFilePtr, allocation_failed, IO_OPERATION_NOT_SUPPORTED);
 }
@@ -324,8 +310,8 @@ static Result(MemFilePtr) MemFilesystem__get_or_create_file(
     MemFilesystemIOStatePtr self, BString path, Flags flags
 )
 {
-    LLFindResultMatch(MemFiles, MemFilesystem__find_file(self, &path))
-        IsSome(match,
+    match_optional(MemFiles__FindResult, MemFilesystem__find_file(self, &path),
+        some(match)
         {
             if ((flags & IO_OPEN_WRITE) != 0)
             {
@@ -333,8 +319,9 @@ static Result(MemFilePtr) MemFilesystem__get_or_create_file(
             }
 
             return Success(MemFilePtr, match.value);
-        })
-    End
+        },
+        none() {}
+    )
 
     if ((flags & IO_OPEN_WRITE) == 0)
     {
@@ -360,7 +347,7 @@ static MemFileHandlePtr MemFileHandle__heap_new(BString path, Flags flags)
 static Result(BString) MemFilesystem__file_path(BString path)
 {
     BString name = MemFilesystem__basename(path);
-    if (name.len == 0)
+    if (BString__is_empty(&name))
     {
         return Error(BString, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
     }
@@ -372,35 +359,36 @@ Result(IOInternalHandle) MemFileIO__open(IOStatePtr self, BString path, Flags fl
 {
     MemFilesystemIOStatePtr fs_state = (MemFilesystemIOStatePtr) self;
 
-    ResultMatch(BString, MemFilesystem__file_path(path))
-        IsSuccess(file_path,
+    match_result(BString, MemFilesystem__file_path(path),
+        success(file_path)
         {
-            CriticalSection(fs_state->state.lock,
+            critical_section(fs_state->state.lock,
             {
                 BString parent = MemFilesystem__parent_path(file_path);
                 if (!MemFilesystem__directory_exists(fs_state, &parent))
                 {
-                    _cs_return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+                    cs_return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
                 }
 
-                LLFindResultMatch(MemDirectories, MemFilesystem__find_directory(fs_state, &file_path))
-                    IsSome(_, _cs_return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
-                End
+                match_optional(MemDirectories__FindResult, MemFilesystem__find_directory(fs_state, &file_path),
+                    some(_) { cs_return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); },
+                    none() {}
+                )
 
-                ResultMatch(MemFilePtr, MemFilesystem__get_or_create_file(fs_state, file_path, flags))
-                    IsSuccess(_,
+                match_result(MemFilePtr, MemFilesystem__get_or_create_file(fs_state, file_path, flags),
+                    success(_)
                     {
                         IOInternalHandle handle =
                             (IOInternalHandle) fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
                         MemFileHandleMap__set(&fs_state->handles, handle, MemFileHandle__heap_new(file_path, flags));
-                        _cs_return Success(IOInternalHandle, handle);
-                    })
-                    IsError(code, message, _cs_return Error(IOInternalHandle, message, code))
-                End
+                        cs_return Success(IOInternalHandle, handle);
+                    },
+                    error(code, message) { cs_return Error(IOInternalHandle, message, code); }
+                )
             })
-        })
-        IsError(code, message, return Error(IOInternalHandle, message, code))
-    End
+        },
+        error(code, message) { return Error(IOInternalHandle, message, code); }
+    )
 
     return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -409,16 +397,16 @@ Result(IOInternalHandle) MemFileIO__close(IOStatePtr self, IOInternalHandle hand
 {
     MemFilesystemIOStatePtr fs_state = (MemFilesystemIOStatePtr) self;
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        Match(MemFileHandlePtr, MemFileHandleMap__get(&fs_state->handles, handle))
-            IsNone(_cs_return Error(IOInternalHandle, invalid_file_handle, IO_UNKNOWN_HANDLE))
-            IsSome(_,
+        match_optional(MemFileHandlePtr, MemFileHandleMap__get(&fs_state->handles, handle),
+            some(_)
             {
                 MemFileHandleMap__delete(&fs_state->handles, handle);
-                _cs_return Success(IOInternalHandle, handle);
-            })
-        End
+                cs_return Success(IOInternalHandle, handle);
+            },
+            none() { cs_return Error(IOInternalHandle, invalid_file_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(IOInternalHandle, invalid_file_handle, IO_UNKNOWN_HANDLE);
@@ -430,25 +418,23 @@ Result(IOBufferPtr) MemFileIO__read(
 {
     MemFilesystemIOStatePtr fs_state = (MemFilesystemIOStatePtr) self;
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        Match(MemFileHandlePtr, MemFileHandleMap__get(&fs_state->handles, handle))
-            IsNone(_cs_return Error(IOBufferPtr, invalid_file_handle, IO_UNKNOWN_HANDLE))
-            IsSome(target,
+        match_optional(MemFileHandlePtr, MemFileHandleMap__get(&fs_state->handles, handle),
+            some(target)
             {
                 if ((target->flags & IO_OPEN_READ) == 0)
                 {
-                    _cs_return Error(IOBufferPtr, invalid_file_handle, IO_OPERATION_NOT_SUPPORTED);
+                    cs_return Error(IOBufferPtr, invalid_file_handle, IO_OPERATION_NOT_SUPPORTED);
                 }
 
-                LLFindResultMatch(MemFiles, MemFilesystem__find_file(fs_state, &target->path))
-                    IsNone(_cs_return Error(IOBufferPtr, BString__sprintf(&invalid_path_format, &target->path), IO_INVALID_PATH))
-                    IsSome(file_match,
+                match_optional(MemFiles__FindResult, MemFilesystem__find_file(fs_state, &target->path),
+                    some(file_match)
                     {
                         MemFilePtr file = file_match.value;
                         if (target->offset >= file->size)
                         {
-                            _cs_return Error(IOBufferPtr, end_of_file, IO_EOF);
+                            cs_return Error(IOBufferPtr, end_of_file, IO_EOF);
                         }
 
                         size_t remaining = file->size - target->offset;
@@ -460,19 +446,22 @@ Result(IOBufferPtr) MemFileIO__read(
                         while (copied < read_size)
                         {
                             size_t chunk_size = min(PAGE_SIZE, read_size - copied);
-                            ResultMatch(CollectionCode, MemFile__copy_from_file(file, target->offset + copied, buffer, chunk_size))
-                                IsError(code, message, _cs_return Error(IOBufferPtr, message, code))
-                            End
+                            match_result(CollectionCode, MemFile__copy_from_file(file, target->offset + copied, buffer, chunk_size),
+                                success(_) {},
+                                error(code, message) { cs_return Error(IOBufferPtr, message, code); }
+                            )
                             IOBuffer__push_all(&target->buffer, buffer, chunk_size);
                             copied += chunk_size;
                         }
                         target->offset += read_size;
 
-                        _cs_return Success(IOBufferPtr, &target->buffer);
-                    })
-                End
-            })
-        End
+                        cs_return Success(IOBufferPtr, &target->buffer);
+                    },
+                    none() { cs_return Error(IOBufferPtr, BString__sprintf(&invalid_path_format, &target->path), IO_INVALID_PATH); }
+                )
+            },
+            none() { cs_return Error(IOBufferPtr, invalid_file_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(IOBufferPtr, invalid_file_handle, IO_UNKNOWN_HANDLE);
@@ -482,29 +471,29 @@ Result(ByteCount) MemFileIO__write(IOStatePtr self, IOInternalHandle handle, Dat
 {
     MemFilesystemIOStatePtr fs_state = (MemFilesystemIOStatePtr) self;
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        Match(MemFileHandlePtr, MemFileHandleMap__get(&fs_state->handles, handle))
-            IsNone(_cs_return Error(ByteCount, invalid_file_handle, IO_UNKNOWN_HANDLE))
-            IsSome(target,
+        match_optional(MemFileHandlePtr, MemFileHandleMap__get(&fs_state->handles, handle),
+            some(target)
             {
                 if ((target->flags & IO_OPEN_WRITE) == 0)
                 {
-                    _cs_return Error(ByteCount, invalid_file_handle, IO_OPERATION_NOT_SUPPORTED);
+                    cs_return Error(ByteCount, invalid_file_handle, IO_OPERATION_NOT_SUPPORTED);
                 }
 
-                LLFindResultMatch(MemFiles, MemFilesystem__find_file(fs_state, &target->path))
-                    IsNone(_cs_return Error(ByteCount, BString__sprintf(&invalid_path_format, &target->path), IO_INVALID_PATH))
-                    IsSome(file_match,
+                match_optional(MemFiles__FindResult, MemFilesystem__find_file(fs_state, &target->path),
+                    some(file_match)
                     {
                         MemFilePtr file = file_match.value;
-                        ResultMatch(CollectionCode, MemFile__ensure_capacity(file, target->offset + size))
-                            IsError(code, message, _cs_return Error(ByteCount, message, code))
-                        End
+                        match_result(CollectionCode, MemFile__ensure_capacity(file, target->offset + size),
+                            success(_) {},
+                            error(code, message) { cs_return Error(ByteCount, message, code); }
+                        )
 
-                        ResultMatch(CollectionCode, MemFile__copy_to_file(file, target->offset, data, size))
-                            IsError(code, message, _cs_return Error(ByteCount, message, code))
-                        End
+                        match_result(CollectionCode, MemFile__copy_to_file(file, target->offset, data, size),
+                            success(_) {},
+                            error(code, message) { cs_return Error(ByteCount, message, code); }
+                        )
 
                         target->offset += size;
                         if (target->offset > file->size)
@@ -512,11 +501,13 @@ Result(ByteCount) MemFileIO__write(IOStatePtr self, IOInternalHandle handle, Dat
                             file->size = target->offset;
                         }
 
-                        _cs_return Success(ByteCount, size);
-                    })
-                End
-            })
-        End
+                        cs_return Success(ByteCount, size);
+                    },
+                    none() { cs_return Error(ByteCount, BString__sprintf(&invalid_path_format, &target->path), IO_INVALID_PATH); }
+                )
+            },
+            none() { cs_return Error(ByteCount, invalid_file_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(ByteCount, invalid_file_handle, IO_UNKNOWN_HANDLE);
@@ -537,11 +528,11 @@ Result(FilesystemNodes) MemFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr
     MemFilesystemIOStatePtr fs_state = (MemFilesystemIOStatePtr) self;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
         if (!MemFilesystem__directory_exists(fs_state, &path))
         {
-            _cs_return Error(FilesystemNodes, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+            cs_return Error(FilesystemNodes, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
         }
 
         LLIterate(MemDirectories, fs_state->directories, directory)
@@ -553,8 +544,8 @@ Result(FilesystemNodes) MemFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr
                 );
                 FilesystemNodes__push(&result, node);
             }
-        End
 
+        End
         LLIterate(MemFiles, fs_state->files, file)
             BString file_parent = MemFilesystem__parent_path(file.name);
             if (BString__equals(&file_parent, &path))
@@ -579,26 +570,28 @@ Result(IOStatus) MemFileIO__mkdir(IOStatePtr self, BString path)
         return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
     }
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
         BString parent = MemFilesystem__parent_path(directory_path);
         if (!MemFilesystem__directory_exists(fs_state, &parent))
         {
-            _cs_return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+            cs_return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
         }
 
-        LLFindResultMatch(MemDirectories, MemFilesystem__find_directory(fs_state, &directory_path))
-            IsSome(_, _cs_return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
-        End
+        match_optional(MemDirectories__FindResult, MemFilesystem__find_directory(fs_state, &directory_path),
+            some(_) { cs_return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); },
+            none() {}
+        )
 
-        LLFindResultMatch(MemFiles, MemFilesystem__find_file(fs_state, &directory_path))
-            IsSome(_, _cs_return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
-        End
+        match_optional(MemFiles__FindResult, MemFilesystem__find_file(fs_state, &directory_path),
+            some(_) { cs_return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); },
+            none() {}
+        )
 
-        ResultMatch(CollectionCode, MemDirectories__push(&fs_state->directories, ((MemDirectory) { .path = directory_path })))
-            IsSuccess(_, _cs_return Success(IOStatus, IO_OK))
-            IsError(code, message, _cs_return Error(IOStatus, message, code))
-        End
+        match_result(CollectionCode, MemDirectories__push(&fs_state->directories, ((MemDirectory) { .path = directory_path })),
+            success(_) { cs_return Success(IOStatus, IO_OK); },
+            error(code, message) { cs_return Error(IOStatus, message, code); }
+        )
     })
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
@@ -609,30 +602,32 @@ Result(IOStatus) MemFileIO__remove(IOStatePtr self, BString path, Flags flags)
     MemFilesystemIOStatePtr fs_state = (MemFilesystemIOStatePtr) self;
     BString file_path = path;
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        ResultMatch(IOStatus, MemFilesystem__remove_file(fs_state, &file_path))
-            IsSuccess(status, _cs_return Success(IOStatus, status))
-        End
+        match_result(IOStatus, MemFilesystem__remove_file(fs_state, &file_path),
+            success(status) { cs_return Success(IOStatus, status); },
+            error(_code, _message) {}
+        )
 
-        LLFindResultMatch(MemDirectories, MemFilesystem__find_directory(fs_state, &file_path))
-            IsSome(_,
+        match_optional(MemDirectories__FindResult, MemFilesystem__find_directory(fs_state, &file_path),
+            some(_)
             {
                 if ((flags & IO_REMOVE_RECURSIVE) != 0)
                 {
-                    ResultMatch(IOStatus, MemFilesystem__remove_recursive(fs_state, &file_path))
-                        IsSuccess(status, _cs_return Success(IOStatus, status))
-                        IsError(code, message, _cs_return Error(IOStatus, message, code))
-                    End
+                    match_result(IOStatus, MemFilesystem__remove_recursive(fs_state, &file_path),
+                        success(status) { cs_return Success(IOStatus, status); },
+                        error(code, message) { cs_return Error(IOStatus, message, code); }
+                    )
                 }
 
                 if (MemFilesystem__has_child(fs_state, &file_path))
                 {
-                    _cs_return Error(IOStatus, directory_not_empty, IO_OPERATION_NOT_SUPPORTED);
+                    cs_return Error(IOStatus, directory_not_empty, IO_OPERATION_NOT_SUPPORTED);
                 }
-                _cs_return Error(IOStatus, bstring("remove directory not supported"), IO_OPERATION_NOT_SUPPORTED);
-            })
-        End
+                cs_return Error(IOStatus, bstring("remove directory not supported"), IO_OPERATION_NOT_SUPPORTED);
+            },
+            none() {}
+        )
     })
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);

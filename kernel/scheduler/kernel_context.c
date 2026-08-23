@@ -42,11 +42,39 @@ void KernelContext__set_result_mapper(
 
 Result(Anything) KernelContext__map_result(KernelContextPtr self, Result(Anything) result)
 {
-    Match(KernelResultMapper, self->result_mapper)
-        IsSome(mapper, return mapper(result, self->result_mapper_context))
-    End
+    match_optional(KernelResultMapper, self->result_mapper,
+        some(mapper) { return mapper(result, self->result_mapper_context); },
+        none() {}
+    )
 
     return result;
+}
+
+bool KernelContext__has_any_state(KernelContextPtr self)
+{
+    bool has_state = false;
+
+    match_optional(ProcessID, self->pid,
+        some(pid) { has_state = true;; },
+        none() {}
+    )
+
+    match_optional(SchedulerPtr, self->scheduler,
+        some(scheduler) { has_state = true;; },
+        none() {}
+    )
+
+    match_optional(KernelResultMapper, self->result_mapper,
+        some(mapper) { has_state = true;; },
+        none() {}
+    )
+
+    match_optional(KernelContextPtr, self->next_context,
+        some(next_context) { has_state = true;; },
+        none() {}
+    )
+
+    return has_state;
 }
 
 void KernelContext__dispose_heap(KernelContextPtr self)
@@ -57,9 +85,10 @@ void KernelContext__dispose_heap(KernelContextPtr self)
 KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext originating_context)
 {
     Optional(ProcessID) pid = None(ProcessID);
-    Match(ProcessPtr, originating_context.process)
-        IsSome(process, pid = Some(ProcessID, process->pid));
-    End
+    match_optional(ProcessPtr, originating_context.process,
+        some(process) { pid = Some(ProcessID, process->pid); },
+        none() {}
+    );
 
     return KernelContext__heap_new(pid, Some(SchedulerPtr, originating_context.kernel->scheduler));
 }
@@ -67,9 +96,10 @@ KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext
 KernelContext KernelContext__from_originating_context(OriginatingContext originating_context)
 {
     Optional(ProcessID) pid = None(ProcessID);
-    Match(ProcessPtr, originating_context.process)
-        IsSome(process, pid = Some(ProcessID, process->pid));
-    End
+    match_optional(ProcessPtr, originating_context.process,
+        some(process) { pid = Some(ProcessID, process->pid); },
+        none() {}
+    );
 
     return KernelContext__new(pid, Some(SchedulerPtr, originating_context.kernel->scheduler));
 }

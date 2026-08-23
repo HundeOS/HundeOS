@@ -2,7 +2,6 @@
 #include "../../sys/io.h"
 
 #define MAX_ENTRIES 32
-#define PATH_BUFFER_SIZE 512
 
 #ifndef LS_ENTRYPOINT
 #define LS_ENTRYPOINT main
@@ -12,7 +11,7 @@ typedef struct LSOptions
 {
     bool show_all;
     bool long_format;
-    const char * path_arg;
+    Optional(BString) path_arg;
 } LSOptions;
 
 static const char * LS__user_name(UserID user_id)
@@ -45,19 +44,20 @@ static const char * LS__group_name(GroupID group_id)
     }
 }
 
-static void LS__mode_string(FileMode mode, char target[11])
+static BString LS__mode_string(FileMode mode)
 {
-    target[0] = (mode & IO_MODE_TYPE_MASK) == IO_MODE_TYPE_DIR ? 'd' : '-';
-    target[1] = (mode & IO_MODE_OWNER_READ) != 0 ? 'r' : '-';
-    target[2] = (mode & IO_MODE_OWNER_WRITE) != 0 ? 'w' : '-';
-    target[3] = (mode & IO_MODE_OWNER_EXEC) != 0 ? 'x' : '-';
-    target[4] = (mode & IO_MODE_GROUP_READ) != 0 ? 'r' : '-';
-    target[5] = (mode & IO_MODE_GROUP_WRITE) != 0 ? 'w' : '-';
-    target[6] = (mode & IO_MODE_GROUP_EXEC) != 0 ? 'x' : '-';
-    target[7] = (mode & IO_MODE_OTHER_READ) != 0 ? 'r' : '-';
-    target[8] = (mode & IO_MODE_OTHER_WRITE) != 0 ? 'w' : '-';
-    target[9] = (mode & IO_MODE_OTHER_EXEC) != 0 ? 'x' : '-';
-    target[10] = '\0';
+    BString result = EMPTY_BSTRING;
+    BString__push_char(&result, (mode & IO_MODE_TYPE_MASK) == IO_MODE_TYPE_DIR ? 'd' : '-');
+    BString__push_char(&result, (mode & IO_MODE_OWNER_READ) != 0 ? 'r' : '-');
+    BString__push_char(&result, (mode & IO_MODE_OWNER_WRITE) != 0 ? 'w' : '-');
+    BString__push_char(&result, (mode & IO_MODE_OWNER_EXEC) != 0 ? 'x' : '-');
+    BString__push_char(&result, (mode & IO_MODE_GROUP_READ) != 0 ? 'r' : '-');
+    BString__push_char(&result, (mode & IO_MODE_GROUP_WRITE) != 0 ? 'w' : '-');
+    BString__push_char(&result, (mode & IO_MODE_GROUP_EXEC) != 0 ? 'x' : '-');
+    BString__push_char(&result, (mode & IO_MODE_OTHER_READ) != 0 ? 'r' : '-');
+    BString__push_char(&result, (mode & IO_MODE_OTHER_WRITE) != 0 ? 'w' : '-');
+    BString__push_char(&result, (mode & IO_MODE_OTHER_EXEC) != 0 ? 'x' : '-');
+    return result;
 }
 
 static bool LS__is_hidden(DirectoryEntryPtr entry)
@@ -79,9 +79,8 @@ static void LS__print_entry(DirectoryEntryPtr entry, LSOptions options)
         return;
     }
 
-    char mode[11];
-    LS__mode_string(entry->mode, mode);
-    printf("%s %s %s %s\n", mode, LS__user_name(entry->user_id), LS__group_name(entry->group_id), entry->name);
+    BString mode = LS__mode_string(entry->mode);
+    printf("%s %s %s %s\n", BString__cstr(&mode), LS__user_name(entry->user_id), LS__group_name(entry->group_id), entry->name);
 }
 
 static bool LS__matches_option(const char * arg, const char * option)
@@ -104,7 +103,7 @@ static bool LS__parse_options(int argc, char ** argv, LSOptions * options)
     *options = (LSOptions) {
         .show_all = false,
         .long_format = false,
-        .path_arg = NULL,
+        .path_arg = None(BString),
     };
 
     for (int i = 1; i < argc; i++)
@@ -135,41 +134,30 @@ static bool LS__parse_options(int argc, char ** argv, LSOptions * options)
             return false;
         }
 
-        if (options->path_arg != NULL)
-        {
-            printf("ls: too many paths\n");
-            return false;
-        }
+        match_optional(BString, options->path_arg,
+            some(path_arg)
+            {
+                printf("ls: too many paths\n");
+                return false;
+            },
+            none() {}
+        )
 
-        options->path_arg = arg;
+        options->path_arg = Some(BString, BString__new(arg));
     }
 
     return true;
 }
 
-static void path_from_arg(const char * arg, char * path, size_t path_size)
+static BString LS__path_from_options(LSOptions options)
 {
-    for (size_t i = 0; i < path_size; i++)
-    {
-        path[i] = '\0';
-    }
+    match_optional(BString, options.path_arg,
+        some(path_arg) { return IO__path_from_arg(&path_arg); },
+        none() {}
+    )
 
-    if (arg == NULL || arg[0] == '\0')
-    {
-        path[0] = '/';
-        return;
-    }
-
-    size_t position = 0;
-    if (arg[0] != '/' && position < path_size - 1)
-    {
-        path[position++] = '/';
-    }
-
-    for (size_t i = 0; arg[i] != '\0' && position < path_size - 1; i++)
-    {
-        path[position++] = arg[i];
-    }
+    BString root = BSTRING_NEW("/");
+    return root;
 }
 
 int LS_ENTRYPOINT(int argc, char ** argv)
@@ -180,10 +168,9 @@ int LS_ENTRYPOINT(int argc, char ** argv)
         return 1;
     }
 
-    char path[PATH_BUFFER_SIZE];
+    BString path = LS__path_from_options(options);
     DirectoryEntry entries[MAX_ENTRIES];
-    path_from_arg(options.path_arg, path, PATH_BUFFER_SIZE);
-    DirectoryEntryCount count = list_dir(path, entries, MAX_ENTRIES);
+    DirectoryEntryCount count = IO__list_dir(&path, entries, MAX_ENTRIES);
 
     if (count < 0)
     {

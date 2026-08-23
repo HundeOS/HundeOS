@@ -33,13 +33,10 @@ static KernelPtr TestKernel__heap_new(
     kernel->irq_dispatcher = ptr(Kernel__alloc_kernel(sizeof(IRQDispatcher)), IRQDispatcher);
     *kernel->irq_dispatcher = NEW_IRQ_DISPATCHER(scheduler);
     kernel->auth = NEW_AUTH;
-    Match(SystemInfo, kernel->system_info)
-        IsSome(value,
-        {
+    match_optional(SystemInfo, kernel->system_info, some(value) {
             kernel->scheduler->interrupt_controller = Some(InterruptControllerInfo, value.interrupt_controller);
             kernel->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, value.interrupt_controller);
-        })
-    End
+        }, none() {})
 
     return kernel;
 }
@@ -68,9 +65,7 @@ KernelPtr init_test_kernel_with_filesystem(FilesystemPtr filesystem)
     Result(DeviceHandle) register_res = IOSubsystem__register_device(
         kernel->io_subsystem, bstring("/"), &filesystem->file_io.base_io, &filesystem->state->state
     );
-    ResultMatch(DeviceHandle, register_res)
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(DeviceHandle, register_res, success(_) {}, error(code, message) { TEST_FAIL(); })
 
     return kernel;
 }
@@ -84,9 +79,7 @@ KernelPtr init_test_kernel()
     Result(DeviceHandle) register_res = IOSubsystem__register_device(
         kernel->io_subsystem, bstring("/"), &filesystem->file_io.base_io, &filesystem->state->state
     );
-    ResultMatch(DeviceHandle, register_res)
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(DeviceHandle, register_res, success(_) {}, error(code, message) { TEST_FAIL(); })
 
     return kernel;
 }

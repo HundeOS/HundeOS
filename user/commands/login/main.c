@@ -25,7 +25,7 @@ int LOGIN_ENTRYPOINT(void)
             continue;
         }
 
-        SpawnResult result = spawn_with_auth(P_WAIT, (AuthTicketID) ticket, "/sbin/shell", NULL, NULL, NULL);
+        SpawnResult result = spawn_with_auth(P_WAIT, (AuthTicketID) ticket, "/sbin/shell", NULL, NULL, NULL); // hundelint: ignore-no-null
         if (result < 0)
         {
             printf("login: failed to start shell: %i\n", (int) result);

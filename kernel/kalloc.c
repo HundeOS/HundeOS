@@ -17,45 +17,51 @@ inline HeapPtr heap_ptr()
 
 KernelAddress Kernel__from_physical_address(KernelPtr self, Address physical)
 {
-    Match(SystemInfo, self->system_info)
-        IsSome(system_info, {
+    match_optional(SystemInfo, self->system_info,
+        some(system_info)
+        {
             KernelAddress address = SystemInfo__kernel_address_for_physical(&system_info, physical);
             if (address.valid)
             {
                 return address;
             }
-        })
-    End
+        },
+        none() {}
+    )
 
     return Heap__from_physical_address(heap_ptr(), physical);
 }
 
 KernelAddress Kernel__from_virtual_address(KernelPtr self, Address virtual_addr)
 {
-    Match(SystemInfo, self->system_info)
-        IsSome(system_info, {
+    match_optional(SystemInfo, self->system_info,
+        some(system_info)
+        {
             KernelAddress address = SystemInfo__kernel_address_for_virtual(&system_info, virtual_addr);
             if (address.valid)
             {
                 return address;
             }
-        })
-    End
+        },
+        none() {}
+    )
 
     return Heap__from_virtual_address(heap_ptr(), virtual_addr);
 }
 
 KernelAddress Kernel__try_from_virtual_address(KernelPtr self, Address virtual_addr)
 {
-    Match(SystemInfo, self->system_info)
-        IsSome(system_info, {
+    match_optional(SystemInfo, self->system_info,
+        some(system_info)
+        {
             KernelAddress address = SystemInfo__kernel_address_for_virtual(&system_info, virtual_addr);
             if (address.valid)
             {
                 return address;
             }
-        })
-    End
+        },
+        none() {}
+    )
 
     return Heap__try_from_virtual_address(heap_ptr(), virtual_addr);
 }
@@ -99,10 +105,13 @@ Result(KAllocCode) Kernel__free(Address virtual_address)
         return Error(KAllocCode, invalid_address, KALLOC_INVALID_ADDRESS);
     }
 
-    ResultMatch(HeapCode, Heap__free(heap_ptr(), address))
-        IsSuccess(_, return Success(KAllocCode, KALLOC_OK));
-        IsError(code, message, return Error(KAllocCode, message, code));
-    End
+    match_result(HeapCode, Heap__free(heap_ptr(), address),
+        success(_)
+        {
+            return Success(KAllocCode, KALLOC_OK);
+        },
+        error(code, message) { return Error(KAllocCode, message, code); }
+    )
 
     return Error(KAllocCode, not_implemented, KALLOC_NOT_IMPLEMENTED);
 }

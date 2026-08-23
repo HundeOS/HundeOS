@@ -2,10 +2,9 @@
 
 #include <stdarg.h>
 
+#include "../../common/types/bstring.h"
 #include "syscall.h"
 #include "syscalls/calls.h"
-
-int sprintf_impl(char * str, const char * format, va_list args);
 
 SyslogResult kernel_syslog(const char * message)
 {
@@ -19,20 +18,20 @@ SyslogResult kernel_syslog_tag(const char * tag, const char * message)
 
 SyslogResult kernel_syslogf(const char * format, ...)
 {
-    char buffer[SYSLOG_MAX_MESSAGE];
+    BString format_string = BString__new(format);
     va_list args;
     va_start(args, format);
-    sprintf_impl(buffer, format, args);
+    BString message = BString__vsprintf(&format_string, args);
     va_end(args);
-    return kernel_syslog(buffer);
+    return kernel_syslog(BString__cstr(&message));
 }
 
 SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
 {
-    char buffer[SYSLOG_MAX_MESSAGE];
+    BString format_string = BString__new(format);
     va_list args;
     va_start(args, format);
-    sprintf_impl(buffer, format, args);
+    BString message = BString__vsprintf(&format_string, args);
     va_end(args);
-    return kernel_syslog_tag(tag, buffer);
+    return kernel_syslog_tag(tag, BString__cstr(&message));
 }

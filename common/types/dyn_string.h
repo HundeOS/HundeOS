@@ -10,9 +10,10 @@
 #define DYN_STRING_FREE(ptr) \
     { \
         Result(KAllocCode) free_result = Kernel__free(addr(ptr)); \
-        ResultMatch(KAllocCode, free_result) \
-            IsError(code, message, {}) \
-        End \
+        match_result(KAllocCode, free_result, \
+            success(_) {}, \
+            error(code, message) {} \
+        ) \
     }
 #else
 void * malloc(size_t size);
@@ -73,6 +74,7 @@ const char * DynString__cstr(ConstDynStringPtr self);
 StringPos DynString__length(ConstDynStringPtr self);
 StringPos DynString__capacity(ConstDynStringPtr self);
 Optional(char) DynString__char_at(ConstDynStringPtr self, StringPos index);
+char DynString__char_at_or(ConstDynStringPtr self, StringPos index, char alternate);
 Optional(BString) DynString__bstring(ConstDynStringPtr self);
 Optional(DynStringLines) DynString__lines(ConstDynStringPtr self);
 

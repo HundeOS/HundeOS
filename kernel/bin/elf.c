@@ -53,9 +53,10 @@ SectionHeaderArray Elf__read_section_headers(Elf self)
     {
         SectionHeaderPtr header = offset_ptr(start, i * section_header_size, SectionHeader);
 
-        ResultMatch(CollectionCode, SectionHeaderArray__push(&headers, header) );
-            IsError(code, message, __d_println(PANIC, cstr(message));)
-        End
+        match_result(CollectionCode, SectionHeaderArray__push(&headers, header),
+            success(_) {},
+            error(code, message) { __d_println(PANIC, cstr(message));; }
+        )
 
     }
     return headers;
@@ -74,9 +75,10 @@ ProgramHeaderArray Elf__read_program_headers(Elf self)
     {
         ProgramHeaderPtr header = offset_ptr(start, i * program_header_size, ProgramHeader);
 
-        ResultMatch(CollectionCode, ProgramHeaderArray__push(&headers, header));
-            IsError(code, message, __d_println(PANIC, cstr(message));)
-        End
+        match_result(CollectionCode, ProgramHeaderArray__push(&headers, header),
+            success(_) {},
+            error(code, message) { __d_println(PANIC, cstr(message));; }
+        )
     }
     return headers;
 }
@@ -129,12 +131,12 @@ ExpandedSegmentArray Elf__map(const Elf self) {
     ExpandedSegmentArray expanded_segments = ExpandedSegmentArray__new();
     __d_printf(DEBUG, "Mapping segments %i\n", ProgramHeaderArray__len(&headers));
 
-    for (int i = 0; i < headers.len; i++)
+    for (int i = 0; i < (int) ProgramHeaderArray__len(&headers); i++)
     {
-        Match(ProgramHeaderPtr, ProgramHeaderArray__at(&headers, i));
-            IsNone(__d_println(PANIC, "No header");)
-            IsSome(header, Elf__expand_segment(self, header, &expanded_segments);)
-        End
+        match_optional(ProgramHeaderPtr, ProgramHeaderArray__at(&headers, i),
+            some(header) { Elf__expand_segment(self, header, &expanded_segments);; },
+            none() { __d_println(PANIC, "No header");; }
+        )
     }
     return expanded_segments;
 }
@@ -151,7 +153,7 @@ Optional(ExpandedSegment) Elf__entry_segment(Elf self, ExpandedSegmentArrayPtr e
         {
             return Some(ExpandedSegment, segment);
         }
-    End
 
+    End
     return None(ExpandedSegment);
 }

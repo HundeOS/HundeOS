@@ -58,6 +58,35 @@ void test_bstring_insert_char_rejects_out_of_bounds_index(void)
     TEST_ASSERT_EQUAL_STRING("ab", BString__cstr(&str));
 }
 
+void test_bstring_set_char_at_updates_existing_character(void)
+{
+    BString str = bstring("abc");
+
+    TEST_ASSERT_TRUE(BString__set_char_at(&str, 1, 'x'));
+
+    TEST_ASSERT_EQUAL_INT64(3, BString__length(&str));
+    TEST_ASSERT_EQUAL_STRING("axc", BString__cstr(&str));
+}
+
+void test_bstring_set_char_at_extends_length(void)
+{
+    BString str = bstring("ab");
+
+    TEST_ASSERT_TRUE(BString__set_char_at(&str, 2, 'c'));
+
+    TEST_ASSERT_EQUAL_INT64(3, BString__length(&str));
+    TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&str));
+}
+
+void test_bstring_set_char_at_rejects_out_of_bounds_index(void)
+{
+    BString str = bstring("ab");
+
+    TEST_ASSERT_FALSE(BString__set_char_at(&str, BSTRING_MAX_SIZE - 1, 'x'));
+    TEST_ASSERT_EQUAL_INT64(2, BString__length(&str));
+    TEST_ASSERT_EQUAL_STRING("ab", BString__cstr(&str));
+}
+
 void test_bstring_remove_at_removes_requested_position(void)
 {
     BString str = bstring("abc");
@@ -190,30 +219,21 @@ void test_bstring_parse_uint64_returns_value_for_valid_decimal(void)
 {
     BString input = bstring("12345");
 
-    Match(uint64_t, BString__parse_uint64(&input))
-        IsSome(value, TEST_ASSERT_EQUAL_UINT64(12345, value))
-        IsNone(TEST_FAIL())
-    End
+    match_optional(uint64_t, BString__parse_uint64(&input), some(value) { TEST_ASSERT_EQUAL_UINT64(12345, value); }, none() { TEST_FAIL(); })
 }
 
 void test_bstring_parse_uint64_base_zero_accepts_hex_prefix(void)
 {
     BString input = bstring("0xfe340000");
 
-    Match(uint64_t, BString__parse_uint64_base(&input, 0))
-        IsSome(value, TEST_ASSERT_EQUAL_HEX64(0xfe340000, value))
-        IsNone(TEST_FAIL())
-    End
+    match_optional(uint64_t, BString__parse_uint64_base(&input, 0), some(value) { TEST_ASSERT_EQUAL_HEX64(0xfe340000, value); }, none() { TEST_FAIL(); })
 }
 
 void test_bstring_parse_uint64_base_strips_whitespace(void)
 {
     BString input = bstring(" 126\n");
 
-    Match(uint64_t, BString__parse_uint64_base(&input, 0))
-        IsSome(value, TEST_ASSERT_EQUAL_UINT64(126, value))
-        IsNone(TEST_FAIL())
-    End
+    match_optional(uint64_t, BString__parse_uint64_base(&input, 0), some(value) { TEST_ASSERT_EQUAL_UINT64(126, value); }, none() { TEST_FAIL(); })
 }
 
 void test_bstring_parse_uint64_rejects_empty_input(void)
@@ -234,9 +254,7 @@ void test_bstring_parse_uint64_base_rejects_trailing_text(void)
 {
     BString input = bstring("0xfe340000tail");
 
-    Match(uint64_t, BString__parse_uint64_base(&input, 0))
-        IsSome(value, TEST_FAIL())
-    End
+    match_optional(uint64_t, BString__parse_uint64_base(&input, 0), some(value) { TEST_FAIL(); }, none() {})
 }
 
 void test_bstring_uppercase_converts_ascii_lowercase(void)
@@ -259,10 +277,7 @@ void test_bstring_char_at_returns_character_when_in_bounds(void)
 {
     BString input = bstring("hello");
 
-    Match(char, BString__char_at(&input, 1))
-        IsSome(ch, TEST_ASSERT_EQUAL_CHAR('e', ch))
-        IsNone(TEST_FAIL())
-    End
+    match_optional(char, BString__char_at(&input, 1), some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); }, none() { TEST_FAIL(); })
 }
 
 void test_bstring_char_at_returns_none_when_out_of_bounds(void)
@@ -270,6 +285,24 @@ void test_bstring_char_at_returns_none_when_out_of_bounds(void)
     BString input = bstring("hello");
 
     TEST_ASSERT_FALSE(BString__char_at(&input, 5).present);
+}
+
+void test_bstring_contains_char_reports_presence(void)
+{
+    BString input = bstring("hunde");
+
+    TEST_ASSERT_TRUE(BString__contains_char(&input, 'u'));
+    TEST_ASSERT_FALSE(BString__contains_char(&input, 'x'));
+}
+
+void test_bstring_from_chars_copies_requested_length(void)
+{
+    char input[] = { 'h', 'u', 'n', 'd', 'e', 'x' };
+
+    BString result = BString__from_chars(input, 5);
+
+    TEST_ASSERT_EQUAL_INT64(5, BString__length(&result));
+    TEST_ASSERT_EQUAL_STRING("hunde", BString__cstr(&result));
 }
 
 void test_bstring_iterate_visits_each_character(void)

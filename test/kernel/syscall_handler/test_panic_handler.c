@@ -20,26 +20,18 @@ void tearDown(void)
 
 void test_panic_handler_triggers_kernel_panic(void)
 {
-    ResultMatch(SystemCallResult, Panic__handler(kernel, None(ProcessPtr), 0, 0, 0, 0, 0))
-        IsSuccess(code, TEST_FAIL())
-        IsError(code, message, TEST_ASSERT_EQUAL(SYSCALL_FAILURE, code))
-    End
+    match_result(SystemCallResult, Panic__handler(kernel, None(ProcessPtr), 0, 0, 0, 0, 0), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SYSCALL_FAILURE, code); })
 
     TEST_ASSERT_TRUE(panic_occurred());
 }
 
 void test_init_registers_panic_syscall(void)
 {
-    ResultMatch(RegisterResult, Init__syscalls(&kernel->syscall_dispatcher))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(RegisterResult, Init__syscalls(&kernel->syscall_dispatcher), success(_) {}, error(code, message) { TEST_FAIL(); })
 
-    ResultMatch(SystemCallResult, SyscallDispatcher__dispatch(
+    match_result(SystemCallResult, SyscallDispatcher__dispatch(
         &kernel->syscall_dispatcher, kernel, None(ProcessPtr), SYSCALL_PANIC, 0, 0, 0, 0, 0
-    ))
-        IsSuccess(code, TEST_FAIL())
-        IsError(code, message, TEST_ASSERT_EQUAL(SYSCALL_FAILURE, code))
-    End
+    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SYSCALL_FAILURE, code); })
 
     TEST_ASSERT_TRUE(panic_occurred());
 }

@@ -82,11 +82,11 @@ Do not add `(void) name;` statements to suppress unused parameter or unused vari
 ## GOTO no go
 Dont use goto statements, ever.
 
-## CritcalSection
-When using mutexes in the kernel, use the CriticalSection macros along
+## critical_section
+When using mutexes in the kernel, use the critical_section macros along
 with their exit macros (i.e. cs_return)
 
-Never hold a mutex or CriticalSection across an actual context switch. Code
+Never hold a mutex or critical_section across an actual context switch. Code
 that mutates shared scheduling, service, or event state should return an
 explicit result describing whether a reschedule is needed, then release the
 lock before any context switch or preemption path is triggered. Separate
@@ -105,7 +105,7 @@ When possible kernel structures should contain the other structures they use,
 not pointers to structures. This is to make memory allocation/cleanup simpler
 
 ## Critical sections
-In kernel code mutexes should be used along with CriticalSection macros
+In kernel code mutexes should be used along with critical_section macros
 
 Critical sections must not call into code paths that can context switch before
 the mutex is released.

@@ -72,10 +72,7 @@ static BString TestString__from_nullable(const char * value)
 
 static void assert_command_argument(CommandPtr command, StringPos index, const char * expected)
 {
-    Match(BString, CommandArguments__at(&command->args, index))
-        IsSome(argument, TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)))
-        IsNone(TEST_FAIL())
-    End
+    match_optional(BString, CommandArguments__at(&command->args, index), some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); }, none() { TEST_FAIL(); })
 }
 
 static BString TestInputStream__read_line(InputStreamPtr self, bool echo)
@@ -311,10 +308,7 @@ void test_shell_run_once_stores_non_empty_history_entries(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Shell__run_once(&shell));
     TEST_ASSERT_EQUAL_UINT64(1, ShellHistory__len(&shell.history));
 
-    Match(BString, ShellHistory__at(&shell.history, 0))
-        IsSome(entry, TEST_ASSERT_EQUAL_STRING("cat test.txt", BString__cstr(&entry)))
-        IsNone(TEST_FAIL())
-    End
+    match_optional(BString, ShellHistory__at(&shell.history, 0), some(entry) { TEST_ASSERT_EQUAL_STRING("cat test.txt", BString__cstr(&entry)); }, none() { TEST_FAIL(); })
 }
 
 void test_interpreter_interpret_groups_double_quoted_argument(void)

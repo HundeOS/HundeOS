@@ -41,13 +41,9 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
 static DynString dyn_string_from_cstr(const char * text)
 {
     DynString string;
-    ResultMatch(DynStringCode, DynString__init(&string, 128))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(DynStringCode, DynString__init(&string, 128), success(_) {}, error(code, message) { TEST_FAIL(); })
 
-    ResultMatch(DynStringCode, DynString__append_cstr(&string, text))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(DynStringCode, DynString__append_cstr(&string, text), success(_) {}, error(code, message) { TEST_FAIL(); })
 
     return string;
 }
@@ -104,18 +100,14 @@ void test_io_read_dyn_string_returns_file_contents(void)
     next_read_data = "abc";
     next_read_result = 3;
 
-    Match(DynString, IO__read_dyn_string(9, 16))
-        IsSome(text,
-        {
+    match_optional(DynString, IO__read_dyn_string(9, 16), some(text) {
             TEST_ASSERT_EQUAL(IO_CALL, last_call);
             TEST_ASSERT_EQUAL(IO_READ, last_arg1);
             TEST_ASSERT_EQUAL_INT64(9, last_arg2);
             TEST_ASSERT_EQUAL_STRING("abc", DynString__cstr(&text));
             TEST_ASSERT_EQUAL_INT64(3, DynString__length(&text));
             DynString__dispose(&text);
-        })
-        IsNone(TEST_FAIL())
-    End
+        }, none() { TEST_FAIL(); })
 }
 
 void test_io_write_uses_bstring_length(void)
@@ -188,15 +180,11 @@ void test_sd_host_config_parse_reads_present_host(void)
         "sd_host.irq=126\n"
     );
 
-    Match(SdHostConfig, SdHostConfig__parse(&sysinfo))
-        IsSome(config,
-        {
+    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some(config) {
             TEST_ASSERT_EQUAL_HEX64(0xfe340000, config.physical_base);
             TEST_ASSERT_EQUAL_HEX64(0x100, config.mmio_size);
             TEST_ASSERT_EQUAL_UINT64(126, config.irq);
-        })
-        IsNone(TEST_FAIL())
-    End
+        }, none() { TEST_FAIL(); })
 
     DynString__dispose(&sysinfo);
 }
@@ -210,9 +198,7 @@ void test_sd_host_config_parse_returns_none_when_host_absent(void)
         "sd_host.irq=126\n"
     );
 
-    Match(SdHostConfig, SdHostConfig__parse(&sysinfo))
-        IsSome(config, TEST_FAIL())
-    End
+    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some(config) { TEST_FAIL(); }, none() {})
 
     DynString__dispose(&sysinfo);
 }
@@ -226,9 +212,7 @@ void test_sd_host_config_parse_rejects_partial_numeric_values(void)
         "sd_host.irq=126\n"
     );
 
-    Match(SdHostConfig, SdHostConfig__parse(&sysinfo))
-        IsSome(config, TEST_FAIL())
-    End
+    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some(config) { TEST_FAIL(); }, none() {})
 
     DynString__dispose(&sysinfo);
 }

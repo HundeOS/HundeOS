@@ -254,14 +254,16 @@ static void Kernel__panic_screen(const char * message)
 {
     BasicIO__puts(panic_dead_dog_ascii);
     KernelPtr kernel = Kernel__instance();
-    Match(SystemInfo, kernel->system_info)
-        IsSome(system_info,
+    match_optional(SystemInfo, kernel->system_info,
+        some(system_info)
         {
-            Match(FramebufferInfo, system_info.framebuffer)
-                IsSome(framebuffer, PanicScreen__render(&framebuffer);)
-            End
-        })
-    End
+            match_optional(FramebufferInfo, system_info.framebuffer,
+                some(framebuffer) { PanicScreen__render(&framebuffer);; },
+                none() {}
+            )
+        },
+        none() {}
+    )
 }
 
 void Kernel__panic(const char * message, ProcessContext * context) {

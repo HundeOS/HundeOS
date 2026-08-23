@@ -61,28 +61,24 @@
     Result(CollectionCode) alias##__set(alias * self, alias##__K key, alias##__V value) \
     { \
         HashCode hash = alias##__hash(&key) % alias##__table_size;\
-        MapPtrMatch(alias##__table, alias##__table__get_ptr(&self->table, hash))\
-            IsSome(bucket,\
-            { \
-                FindResultMatch(alias##__bucket, alias##__bucket__find(bucket, alias##__entry_match, &key))\
-                    IsSome(find_result, \
-                    { \
-                        ArrayIndex index = find_result.index;\
-                        return alias##__bucket__set(bucket, index, BucketEntry(alias, key, value));\
-                    });\
-                    IsNone(\
-                    {\
-                        return alias##__bucket__push(bucket, BucketEntry(alias, key, value));\
-                    })\
-                End\
-            })\
-            IsNone(\
-            {\
-                alias##__bucket bucket = alias##__bucket__new();\
-                alias##__bucket__push(&bucket, BucketEntry(alias, key, value));\
-                return alias##__table__set(&self->table, hash, bucket);\
-            })\
-        End\
+        match_optional(alias##__table__value_type_ptr, alias##__table__get_ptr(&self->table, hash), \
+            some(bucket) { \
+            match_optional(alias##__bucket__FindResult, alias##__bucket__find(bucket, alias##__entry_match, &key), \
+                some(find_result) { \
+                ArrayIndex index = find_result.index;\
+                return alias##__bucket__set(bucket, index, BucketEntry(alias, key, value));\
+            }, \
+                none() { \
+                return alias##__bucket__push(bucket, BucketEntry(alias, key, value));\
+            } \
+            )\
+        }, \
+            none() { \
+            alias##__bucket bucket = alias##__bucket__new();\
+            alias##__bucket__push(&bucket, BucketEntry(alias, key, value));\
+            return alias##__table__set(&self->table, hash, bucket);\
+        } \
+        )\
         return Error(CollectionCode, bstring("no bucket"), 0); \
     } \
 
@@ -94,19 +90,17 @@
     HashtableOptional(alias) alias##__get(alias * self, alias##__K key) \
     { \
         HashCode hash = alias##__hash(&key) % alias##__table_size;\
-        MapPtrMatch(alias##__table, alias##__table__get_ptr(&self->table, hash))\
-            IsSome(bucket,\
-            { \
-                FindResultMatch(alias##__bucket, alias##__bucket__find(bucket, alias##__entry_match, &key))\
-                    IsSome(find_result, \
-                    { \
-                        return HashtableSome(alias, find_result.value->value); \
-                    })\
-                    IsNone(return HashtableNone(alias))\
-                End\
-            })\
-            IsNone(return HashtableNone(alias))\
-        End\
+        match_optional(alias##__table__value_type_ptr, alias##__table__get_ptr(&self->table, hash), \
+            some(bucket) { \
+            match_optional(alias##__bucket__FindResult, alias##__bucket__find(bucket, alias##__entry_match, &key), \
+                some(find_result) { \
+                return HashtableSome(alias, find_result.value->value); \
+            }, \
+                none() { return HashtableNone(alias); } \
+            )\
+        }, \
+            none() { return HashtableNone(alias); } \
+        )\
         return HashtableNone(alias); \
     } \
     \
@@ -114,16 +108,15 @@
     HashtablePtrOptional(alias) alias##__get_ptr(alias * self, alias##__K key) \
     { \
         HashCode hash = alias##__hash(&key) % alias##__table_size;\
-        MapPtrMatch(alias##__table, alias##__table__get_ptr(&self->table, hash))\
-            IsSome(bucket,\
-            { \
-                FindResultMatch(alias##__bucket, alias##__bucket__find(bucket, alias##__entry_match, &key))\
-                    IsSome(find_result, return HashtablePtrSome(alias, &find_result.value->value));\
-                    IsNone(return HashtablePtrNone(alias))\
-                End\
-            })\
-            IsNone(return HashtablePtrNone(alias))\
-        End\
+        match_optional(alias##__table__value_type_ptr, alias##__table__get_ptr(&self->table, hash), \
+            some(bucket) { \
+            match_optional(alias##__bucket__FindResult, alias##__bucket__find(bucket, alias##__entry_match, &key), \
+                some(find_result) { return HashtablePtrSome(alias, &find_result.value->value); }, \
+                none() { return HashtablePtrNone(alias); } \
+            )\
+        }, \
+            none() { return HashtablePtrNone(alias); } \
+        )\
         return HashtablePtrNone(alias); \
     } \
 

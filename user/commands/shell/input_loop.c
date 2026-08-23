@@ -18,8 +18,8 @@ static const BString EMPTY_LINE = BSTRING_NEW("");
 static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo);
 static void ConsoleInputStream__bind_history(ConsoleInputStreamPtr self, ShellHistoryPtr history);
 static void ConsoleInputStream__redraw_line(ConstBStringPtr line, StringPos cursor, bool echo);
-static bool ConsoleInputStream__read_char(char * target);
-static bool ConsoleInputStream__read_escape_sequence(char * first, char * second);
+static Optional(char) ConsoleInputStream__read_char(void);
+static Optional(BString) ConsoleInputStream__read_escape_sequence(void);
 static bool Shell__should_store_history(ConstBStringPtr line);
 static void Shell__store_history(ShellPtr self, ConstBStringPtr line);
 
@@ -29,7 +29,7 @@ static ConsoleInputStream ConsoleInputStream__new(void)
         .input = {
             .read_line = ConsoleInputStream__read_line
         },
-        .history = NULL,
+        .history = NULL, // hundelint: ignore-no-null
     };
     return input;
 }
@@ -44,17 +44,17 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
     ConsoleInputStreamPtr input = (ConsoleInputStreamPtr) self;
     BString line = EMPTY_BSTRING;
     BString draft = EMPTY_BSTRING;
-    ShellHistory__NodePtr history_cursor = NULL;
+    ShellHistory__NodePtr history_cursor = NULL; // hundelint: ignore-no-null
     bool draft_saved = false;
     StringPos cursor = 0;
 
     while (true)
     {
         char ch = '\0';
-        if (!ConsoleInputStream__read_char(&ch))
-        {
-            return line;
-        }
+        match_optional(char, ConsoleInputStream__read_char(),
+            some(read_ch) { ch = read_ch; },
+            none() { return line;; }
+        )
 
         if (ch == '\r' || ch == '\n')
         {
@@ -63,9 +63,9 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
 
         if (ch == '\b' || ch == 0x7f)
         {
-            if (history_cursor != NULL)
+            if (history_cursor != NULL) // hundelint: ignore-no-null
             {
-                history_cursor = NULL;
+                history_cursor = NULL; // hundelint: ignore-no-null
             }
 
             if (cursor > 0)
@@ -81,13 +81,14 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
 
         if (ch == '\x1b')
         {
-            char first = '\0';
-            char second = '\0';
-            if (!ConsoleInputStream__read_escape_sequence(&first, &second))
-            {
-                continue;
-            }
+            BString escape_sequence = EMPTY_BSTRING;
+            match_optional(BString, ConsoleInputStream__read_escape_sequence(),
+                some(sequence) { escape_sequence = sequence; },
+                none() { continue;; }
+            )
 
+            char first = BString__char_at_or(&escape_sequence, 0, '\0');
+            char second = BString__char_at_or(&escape_sequence, 1, '\0');
             if (first != '[')
             {
                 continue;
@@ -95,7 +96,7 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
 
             if (second == 'A')
             {
-                if (input->history == NULL || ShellHistory__len(input->history) == 0)
+                if (input->history == NULL || ShellHistory__len(input->history) == 0) // hundelint: ignore-no-null
                 {
                     continue;
                 }
@@ -106,56 +107,56 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
                     draft_saved = true;
                 }
 
-                if (history_cursor == NULL)
+                if (history_cursor == NULL) // hundelint: ignore-no-null
                 {
                     history_cursor = input->history->tail;
                 }
-                else if (history_cursor->prev != NULL)
+                else if (history_cursor->prev != NULL) // hundelint: ignore-no-null
                 {
                     history_cursor = history_cursor->prev;
                 }
 
-                if (history_cursor != NULL)
+                if (history_cursor != NULL) // hundelint: ignore-no-null
                 {
                     line = history_cursor->value;
-                    cursor = line.len;
+                    cursor = BString__length(&line);
                     ConsoleInputStream__redraw_line(&line, cursor, echo);
                 }
             }
             else if (second == 'B')
             {
-                if (input->history == NULL || ShellHistory__len(input->history) == 0)
+                if (input->history == NULL || ShellHistory__len(input->history) == 0) // hundelint: ignore-no-null
                 {
                     continue;
                 }
 
-                if (history_cursor == NULL)
+                if (history_cursor == NULL) // hundelint: ignore-no-null
                 {
                     continue;
                 }
 
-                if (history_cursor->next != NULL)
+                if (history_cursor->next != NULL) // hundelint: ignore-no-null
                 {
                     history_cursor = history_cursor->next;
                     line = history_cursor->value;
-                    cursor = line.len;
+                    cursor = BString__length(&line);
                 }
                 else
                 {
-                    history_cursor = NULL;
+                    history_cursor = NULL; // hundelint: ignore-no-null
                     line = draft_saved ? draft : EMPTY_LINE;
-                    cursor = line.len;
+                    cursor = BString__length(&line);
                 }
 
                 ConsoleInputStream__redraw_line(&line, cursor, echo);
             }
             else if (second == 'C')
             {
-                if (cursor < line.len)
+                if (cursor < BString__length(&line))
                 {
-                    if (history_cursor != NULL)
+                    if (history_cursor != NULL) // hundelint: ignore-no-null
                     {
-                        history_cursor = NULL;
+                        history_cursor = NULL; // hundelint: ignore-no-null
                     }
                     cursor++;
                     ConsoleInputStream__redraw_line(&line, cursor, echo);
@@ -165,9 +166,9 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
             {
                 if (cursor > 0)
                 {
-                    if (history_cursor != NULL)
+                    if (history_cursor != NULL) // hundelint: ignore-no-null
                     {
-                        history_cursor = NULL;
+                        history_cursor = NULL; // hundelint: ignore-no-null
                     }
                     cursor--;
                     ConsoleInputStream__redraw_line(&line, cursor, echo);
@@ -177,12 +178,12 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
             continue;
         }
 
-        if (history_cursor != NULL)
+        if (history_cursor != NULL) // hundelint: ignore-no-null
         {
-            history_cursor = NULL;
+            history_cursor = NULL; // hundelint: ignore-no-null
         }
 
-        bool append_at_end = cursor == line.len;
+        bool append_at_end = cursor == BString__length(&line);
         if (BString__insert_char(&line, cursor, ch))
         {
             cursor++;
@@ -190,8 +191,9 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
             {
                 if (echo)
                 {
-                    char output[2] = { ch, '\0' };
-                    print(output);
+                    BString output = EMPTY_BSTRING;
+                    BString__push_char(&output, ch);
+                    print(BString__cstr(&output));
                 }
             }
             else
@@ -202,14 +204,31 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
     }
 }
 
-static bool ConsoleInputStream__read_char(char * target)
+static Optional(char) ConsoleInputStream__read_char(void)
 {
-    return console_read(target, 1) == 1;
+    char target = '\0';
+    if (console_read(&target, 1) != 1)
+    {
+        return None(char);
+    }
+
+    return Some(char, target);
 }
 
-static bool ConsoleInputStream__read_escape_sequence(char * first, char * second)
+static Optional(BString) ConsoleInputStream__read_escape_sequence(void)
 {
-    return ConsoleInputStream__read_char(first) && ConsoleInputStream__read_char(second);
+    BString sequence = EMPTY_BSTRING;
+    match_optional(char, ConsoleInputStream__read_char(),
+        some(first) { BString__push_char(&sequence, first);; },
+        none() { return None(BString);; }
+    )
+
+    match_optional(char, ConsoleInputStream__read_char(),
+        some(second) { BString__push_char(&sequence, second);; },
+        none() { return None(BString);; }
+    )
+
+    return Some(BString, sequence);
 }
 
 static void ConsoleInputStream__redraw_line(ConstBStringPtr line, StringPos cursor, bool echo)
@@ -222,7 +241,7 @@ static void ConsoleInputStream__redraw_line(ConstBStringPtr line, StringPos curs
     print(BString__cstr(&SHELL_REDRAW_PREFIX));
     print(BString__cstr(line));
 
-    StringPos move_left = line->len - cursor;
+    StringPos move_left = BString__length(line) - cursor;
     if (move_left > 0)
     {
         printf("\033[%iD", (int) move_left);
@@ -242,9 +261,10 @@ static void Shell__store_history(ShellPtr self, ConstBStringPtr line)
         return;
     }
 
-    ResultMatch(CollectionCode, ShellHistory__push(&self->history, *line))
-        IsError(code, message, {})
-    End
+    match_result(CollectionCode, ShellHistory__push(&self->history, *line),
+        success(_) {},
+        error(code, message) {}
+    )
 }
 
 static void Shell__handle_result(ConstShellPtr self, ShellResult result)

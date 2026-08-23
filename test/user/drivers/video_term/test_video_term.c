@@ -97,16 +97,13 @@ static void VideoTermTest__seed_emoji_pixel(
     uint8_t blue)
 {
     uint32_t codepoints[1] = { codepoint };
-    Match(VideoTermEmojiEntryPtr, VideoTerm__find_emoji(codepoints, 1))
-        IsSome(emoji, {
+    match_optional(VideoTermEmojiEntryPtr, VideoTerm__find_emoji(codepoints, 1), some(emoji) {
             uint64_t emoji_pixel = emoji->atlas_offset + (((y * VIDEO_TERM_EMOJI_SIZE) + x) * 4);
             fake_emoji_atlas[emoji_pixel] = red;
             fake_emoji_atlas[emoji_pixel + 1] = green;
             fake_emoji_atlas[emoji_pixel + 2] = blue;
             fake_emoji_atlas[emoji_pixel + 3] = 0xff;
-        })
-        IsNone(TEST_FAIL_MESSAGE("generated emoji index should include expected codepoint");)
-    End;
+        }, none() { TEST_FAIL_MESSAGE("generated emoji index should include expected codepoint"); });
 }
 
 void setUp(void)
@@ -208,18 +205,13 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     TEST_ASSERT_EQUAL_INT64(7, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     DynString sysinfo;
-    ResultMatch(DynStringCode, DynString__init(&sysinfo, 128))
-        IsError(code, message, return None(DynString))
-    End
+    match_result(DynStringCode, DynString__init(&sysinfo, 128), success(_) {}, error(code, message) { return None(DynString); })
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
-        ResultMatch(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]))
-            IsError(code, message,
-            {
+        match_result(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]), success(_) {}, error(code, message) {
                 DynString__dispose(&sysinfo);
                 return None(DynString);
             })
-        End
     }
     return Some(DynString, sysinfo);
 }

@@ -22,18 +22,20 @@ static Result(SystemCallResult) SyscallDispatcher__deliver_pending_signal(
     KernelPtr kernel, Optional(ProcessPtr) process_opt, Result(SystemCallResult) syscall_result
 )
 {
-    Match(ProcessPtr, process_opt)
-        IsSome(process,
+    match_optional(ProcessPtr, process_opt,
+        some(process)
         {
-            Match(ProcessSignal, Process__take_pending_signal(process))
-                IsSome(signal,
+            match_optional(ProcessSignal, Process__take_pending_signal(process),
+                some(signal)
                 {
                     Process__dispose_owned_kernel_resources(process);
                     Scheduler__exit(kernel->scheduler, process, ProcessSignal__exit_code(signal));
-                })
-            End
-        })
-    End
+                },
+                none() {}
+            )
+        },
+        none() {}
+    )
 
     return syscall_result;
 }
@@ -41,16 +43,16 @@ static Result(SystemCallResult) SyscallDispatcher__deliver_pending_signal(
 
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler)
 {
-    ResultMatch(CollectionCode, Handlers__set(&self->handlers, syscall, handler));
-        IsError(code, message,
-        {
-            return Error(RegisterResult, message, REGISTER_FAILURE);
-        });
-        IsSuccess(_,
+    match_result(CollectionCode, Handlers__set(&self->handlers, syscall, handler),
+        success(_)
         {
             return Success(RegisterResult, REGISTER_OK);
-        });
-    End
+        },
+        error(code, message)
+        {
+            return Error(RegisterResult, message, REGISTER_FAILURE);
+        }
+    );
 }
 
 Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
@@ -66,18 +68,18 @@ Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
     __d_printf(DEBUG, "SyscallHandler__handle(syscall_id=%i, arg1=%i, arg2=%i, arg3=%i, arg4=%i, arg5=%i)",
                syscall_id, arg1, arg2, arg3, arg4, arg5);
 
-    Match(Handler, Handlers__at(&self->handlers, syscall_id));
-        IsSome(handler,
+    match_optional(Handler, Handlers__at(&self->handlers, syscall_id),
+        some(handler)
         {
             return SyscallDispatcher__deliver_pending_signal(
                 kernel, process_opt, handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5)
             );
-        });
-        IsNone(
+        },
+        none()
         {
             return Error(SystemCallResult, unhandled_syscall, SYSCALL_FAILURE);
-        })
-    End;
+        }
+    )
 
     return Error(SystemCallResult, BString__sprintf(&unhandled_syscall_format, syscall_id), SYSCALL_FAILURE);
 }

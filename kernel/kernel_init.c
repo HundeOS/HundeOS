@@ -45,21 +45,21 @@ void __kernel_panic(KernelPtr self, BStringPtr message)
 {
     __atomic_store_n(&self->status, INIT_FAILED_AND_PANICKED, __ATOMIC_RELEASE);
     mutex_unlock(&self->init_lock);
-    Kernel__panic(cstr_p(message), NULL);
+    Kernel__panic(cstr_p(message), NULL); // hundelint: ignore-no-null
 }
 
 void PanicOnError(Result(SubsystemInitStatus) res, KernelPtr kernel, BStringPtr progress_message)
 {
-    ResultMatch(SubsystemInitStatus, res);
-        IsError(code, message,
-        {
-            __kernel_panic(kernel, &message);
-        });
-        IsSuccess(_,
+    match_result(SubsystemInitStatus, res,
+        success(_)
         {
             __d_println(PROGRESS, BString__cstr(progress_message));
-        });
-    End
+        },
+        error(code, message)
+        {
+            __kernel_panic(kernel, &message);
+        }
+    );
 }
 
 KernelPtr Kernel__instance()
@@ -70,23 +70,25 @@ KernelPtr Kernel__instance()
 Result(SubsystemInitStatus) Kernel__io_subsystem_init(KernelPtr self)
 {
     __d_println(DEBUG, "Kernel__io_subsystem_init");
-    ResultMatch(RegisterCode, IOSubsystem__register(self));
-        IsError(code, message,
+    match_result(RegisterCode, IOSubsystem__register(self),
+        success(_) {},
+        error(code, message)
         {
             return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-        });
-    End
+        }
+    );
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
 Result(SubsystemInitStatus) Kernel__init_syscall_handlers(KernelPtr self)
 {
-    ResultMatch(RegisterResult, Init__syscalls(&self->syscall_dispatcher);)
-        IsError(code, message,
+    match_result(RegisterResult, Init__syscalls(&self->syscall_dispatcher);,
+        success(_) {},
+        error(code, message)
         {
             return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-        });
-    End
+        }
+    );
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
@@ -98,12 +100,13 @@ Result(SubsystemInitStatus) Kernel__init_heap(KernelPtr self)
     }
 
     SystemInfoPtr system_info = &self->system_info.some.val;
-    ResultMatch(HeapCode, Heap__init(&self->heap, system_info);)
-        IsError(code, message,
+    match_result(HeapCode, Heap__init(&self->heap, system_info);,
+        success(_) {},
+        error(code, message)
         {
             return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-        });
-    End
+        }
+    );
 
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
@@ -120,25 +123,27 @@ Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
     self->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
 
     Optional(Elf) idle_opt = EmbeddedElf__load(bstring("idle"));
-    Match(Elf, idle_opt)
-        IsSome(idle,
+    match_optional(Elf, idle_opt,
+        some(idle)
         {
-            ResultMatch(SchedulerInitStatus, Scheduler__init(self, self->scheduler, idle);)
-                IsError(code, message,
+            match_result(SchedulerInitStatus, Scheduler__init(self, self->scheduler, idle);,
+                success(_) {},
+                error(code, message)
                 {
                     return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-                });
-            End
-        })
-        IsNone(
+                }
+            );
+        },
+        none()
         {
             return Error(SubsystemInitStatus, failed_to_find_idle_process, SUBSYSTEM_INIT_FAILED);
-        })
-    End
+        }
+    )
 
-    ResultMatch(SchedulerRegisterCode, Scheduler__register(self))
-        IsError(code, message, return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED));
-    End
+    match_result(SchedulerRegisterCode, Scheduler__register(self),
+        success(_) {},
+        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+    );
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
@@ -185,7 +190,7 @@ Result(InitStatus) Kernel__wait_for_init(KernelPtr self)
     }
     if (status == INIT_FAILED_AND_PANICKED)
     {
-        Kernel__panic(cstr(failed_to_init_msg), NULL);
+        Kernel__panic(cstr(failed_to_init_msg), NULL); // hundelint: ignore-no-null
         return Error(InitStatus, failed_to_init_msg, status);
     }
 

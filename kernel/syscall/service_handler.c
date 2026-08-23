@@ -64,37 +64,37 @@ static Result(Anything) ServiceEvent__copy_to_target(Result(Anything) result, An
 {
     ServiceEventPtr target = ptr(context, ServiceEvent);
 
-    ResultMatch(Anything, result)
-        IsSuccess(event_ptr,
+    match_result(Anything, result,
+        success(event_ptr)
         {
             ServiceEventPtr event = ptr(event_ptr, ServiceEvent);
             *target = *event;
             return Success(Anything, SERVICE_OK);
-        })
-        IsError(code, message, return Error(Anything, message, code))
-    End
+        },
+        error(code, message) { return Error(Anything, message, code); }
+    )
 
     return Error(Anything, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
 }
 
 static Result(Anything) Service__complete_wait_syscall(ParkedOperationPtr parked_operation)
 {
-    ResultMatch(ServiceEvent, Service__complete_wait(parked_operation))
-        IsSuccess(event,
+    match_result(ServiceEvent, Service__complete_wait(parked_operation),
+        success(event)
         {
             return KernelContext__map_result(
                 parked_operation->kernel_context,
                 Success(Anything, (Anything) &event)
             );
-        })
-        IsError(code, message,
+        },
+        error(code, message)
         {
             return KernelContext__map_result(
                 parked_operation->kernel_context,
                 Error(Anything, message, code)
             );
-        })
-    End
+        }
+    )
 
     return KernelContext__map_result(
         parked_operation->kernel_context,
@@ -108,14 +108,15 @@ Result(SystemCallResult) Service__handler(
 )
 {
 
-    Match(ProcessPtr, process_opt)
-        IsSome(process,
+    match_optional(ProcessPtr, process_opt,
+        some(process)
         {
             if (service_operation == SERVICE_BECOME_SERVICE)
             {
-                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_BECOME_SERVICE))
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_BECOME_SERVICE),
+                    success(_) {},
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
                 process->process_class = PROCESS_CLASS_SERVICE;
                 return Success(SystemCallResult, SERVICE_OK);
             }
@@ -144,14 +145,14 @@ Result(SystemCallResult) Service__handler(
                     (Anything) target
                 );
 
-                ResultMatch(ServiceEvent, Scheduler__service_wait_with_context_ownership(
+                match_result(ServiceEvent, Scheduler__service_wait_with_context_ownership(
                     kernel->scheduler,
                     process,
                     kernel_context,
                     Some(Continuation, Service__complete_wait_syscall),
                     true
-                ))
-                    IsSuccess(event,
+                ),
+                    success(event)
                     {
                         Result(Anything) mapped = KernelContext__map_result(
                             kernel_context,
@@ -159,12 +160,12 @@ Result(SystemCallResult) Service__handler(
                         );
                         KernelContext__dispose_heap(kernel_context);
                         __d_printf(IODEV, "service wait return pid=%i code=%i\n", process->pid, SERVICE_OK);
-                        ResultMatch(Anything, mapped)
-                            IsSuccess(mapped_code, return Success(SystemCallResult, mapped_code))
-                            IsError(mapped_code, mapped_message, return Error(SystemCallResult, mapped_message, mapped_code))
-                        End
-                    })
-                    IsError(code, message,
+                        match_result(Anything, mapped,
+                            success(mapped_code) { return Success(SystemCallResult, mapped_code); },
+                            error(mapped_code, mapped_message) { return Error(SystemCallResult, mapped_message, mapped_code); }
+                        )
+                    },
+                    error(code, message)
                     {
                         if (code != SERVICE_EVENT_QUEUE_EMPTY)
                         {
@@ -173,29 +174,29 @@ Result(SystemCallResult) Service__handler(
                         }
                         return Error(SystemCallResult, message, code);
                     })
-                End
             }
 
             if (service_operation == SERVICE_MAP_MMIO)
             {
-                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_MAP_MMIO))
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_MAP_MMIO),
+                    success(_) {},
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
                 ServiceMappedMemoryRequestPtr request = (ServiceMappedMemoryRequestPtr) arg2;
                 if (request == NULL)
                 {
                     return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
                 }
 
-                ResultMatch(UserAddress, Process__map_mmio(process, request->physical_address, request->size))
-                    IsSuccess(address,
+                match_result(UserAddress, Process__map_mmio(process, request->physical_address, request->size),
+                    success(address)
                     {
                         request->driver_address = address.virtual_addr;
                         request->device_address = request->physical_address;
                         return Success(SystemCallResult, SERVICE_OK);
-                    })
-                    IsError(code, message, return Error(SystemCallResult, message, SERVICE_MAP_FAILED))
-                End
+                    },
+                    error(code, message) { return Error(SystemCallResult, message, SERVICE_MAP_FAILED); }
+                )
             }
 
             if (service_operation == SERVICE_DEVICE_ADDRESS)
@@ -206,8 +207,8 @@ Result(SystemCallResult) Service__handler(
                     return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
                 }
 
-                ResultMatch(Address, Process__device_address(process, request->driver_address))
-                    IsSuccess(device_address,
+                match_result(Address, Process__device_address(process, request->driver_address),
+                    success(device_address)
                     {
                         __d_printf(
                             IODEV,
@@ -218,80 +219,75 @@ Result(SystemCallResult) Service__handler(
                         );
                         request->device_address = device_address;
                         return Success(SystemCallResult, SERVICE_OK);
-                    })
-                    IsError(code, message, return Error(SystemCallResult, message, SERVICE_INVALID_BUFFER))
-                End
+                    },
+                    error(code, message) { return Error(SystemCallResult, message, SERVICE_INVALID_BUFFER); }
+                )
             }
 
             if (service_operation == SERVICE_SUBSCRIBE_IRQ)
             {
-                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_SUBSCRIBE_IRQ))
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_SUBSCRIBE_IRQ),
+                    success(_) {},
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
                 uint64_t irq = (uint64_t) arg2;
                 __d_printf(IODEV, "service subscribe irq pid=%i irq=%i\n", process->pid, (int) irq);
-                ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, process))
-                    IsSuccess(_, return Success(SystemCallResult, SERVICE_OK))
-                    IsError(
-                        code,
-                        message,
-                        return Error(SystemCallResult, message, Service__map_irq_registration_status(code))
-                    )
-                End
+                match_result(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, process),
+                    success(_) { return Success(SystemCallResult, SERVICE_OK); },
+                    error(code, message) { return Error(SystemCallResult, message, Service__map_irq_registration_status(code)); }
+                )
             }
 
             if (service_operation == SERVICE_REGISTER_BLOCK_DEVICE)
             {
-                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_REGISTER_BLOCK_DEVICE))
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_REGISTER_BLOCK_DEVICE),
+                    success(_) {},
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
                 ServiceBlockDeviceRegistrationPtr request = (ServiceBlockDeviceRegistrationPtr) arg2;
                 if (request == NULL || request->block_size != BLOCK_DEVICE_BLOCK_SIZE)
                 {
                     return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
                 }
 
-                ResultMatch(BlockDeviceCode, BlockDeviceRegistry__register(
+                match_result(BlockDeviceCode, BlockDeviceRegistry__register(
                     bstring(request->path), process, request->block_count, kernel->message_broker
-                ))
-                    IsSuccess(_,
+                ),
+                    success(_)
                     {
-                        Match(FilesystemPtr, kernel->io_subsystem->root_filesystem)
-                            IsSome(root_fs, FilesystemTable__mount_available_entries(root_fs))
-                        End
+                        match_optional(FilesystemPtr, kernel->io_subsystem->root_filesystem,
+                            some(root_fs) { FilesystemTable__mount_available_entries(root_fs); },
+                            none() {}
+                        )
                         return Success(SystemCallResult, SERVICE_OK);
-                    })
-                    IsError(
-                        code,
-                        message,
-                        return Error(SystemCallResult, message, Service__map_block_registration_status(code))
-                    )
-                End
+                    }, error(code, message) { return Error(SystemCallResult, message, Service__map_block_registration_status(code)); })
             }
 
             if (service_operation == SERVICE_BLOCK_GET_REQUEST)
             {
-                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS))
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS),
+                    success(_) {},
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
                 uint64_t request_id = (uint64_t) arg2;
                 ServiceBlockRequestPtr target = (ServiceBlockRequestPtr) arg3;
-                ResultMatch(ServiceCode, BlockDeviceService__get_request(process, request_id, target))
-                    IsSuccess(code, return Success(SystemCallResult, code))
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(ServiceCode, BlockDeviceService__get_request(process, request_id, target),
+                    success(code) { return Success(SystemCallResult, code); },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
             }
 
             if (service_operation == SERVICE_BLOCK_COMPLETE)
             {
-                ResultMatch(SystemCallResult, Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS))
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS),
+                    success(_) {},
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
                 ServiceBlockCompletionPtr completion = (ServiceBlockCompletionPtr) arg2;
-                ResultMatch(ServiceCode, BlockDeviceService__complete(process, completion))
-                    IsSuccess(code, return Success(SystemCallResult, code))
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(ServiceCode, BlockDeviceService__complete(process, completion),
+                    success(code) { return Success(SystemCallResult, code); },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
             }
 
             if (service_operation == SERVICE_PUBLISH_READY)
@@ -308,10 +304,10 @@ Result(SystemCallResult) Service__handler(
                 }
 
                 BString name = bstring(request->name);
-                ResultMatch(ServiceCode, Scheduler__service_publish_ready(kernel->scheduler, &name))
-                    IsSuccess(code, return Success(SystemCallResult, code))
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(ServiceCode, Scheduler__service_publish_ready(kernel->scheduler, &name),
+                    success(code) { return Success(SystemCallResult, code); },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
             }
 
             if (service_operation == SERVICE_WAIT_READY)
@@ -328,20 +324,20 @@ Result(SystemCallResult) Service__handler(
                     Some(SchedulerPtr, kernel->scheduler)
                 );
 
-                ResultMatch(ServiceCode, Scheduler__service_wait_ready_with_context_ownership(
+                match_result(ServiceCode, Scheduler__service_wait_ready_with_context_ownership(
                     kernel->scheduler,
                     process,
                     &name,
                     kernel_context,
                     Some(Continuation, SystemCall__Complete),
                     true
-                ))
-                    IsSuccess(code,
+                ),
+                    success(code)
                     {
                         KernelContext__dispose_heap(kernel_context);
                         return Success(SystemCallResult, code);
-                    })
-                    IsError(code, message,
+                    },
+                    error(code, message)
                     {
                         if (code != SERVICE_EVENT_QUEUE_EMPTY)
                         {
@@ -349,11 +345,10 @@ Result(SystemCallResult) Service__handler(
                         }
                         return Error(SystemCallResult, message, code);
                     })
-                End
             }
-        })
-        IsNone(return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS))
-    End
+        },
+        none() { return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS); }
+    )
 
     return Error(SystemCallResult, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
 }

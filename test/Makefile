@@ -7,6 +7,8 @@ CC = gcc
 LD = gcc
 
 UNITY = ../vendor/Unity
+UV ?= uv
+PYTHON = $(UV) run python
 # Compiler flags
 CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -ffreestanding -mno-outline-atomics -I../ -I$(UNITY)/src -I$(PLATFORM_INCLUDE)
 
@@ -39,7 +41,7 @@ setup:
 	mkdir -p build
 
 test:
-	python run_tests.py
+	$(PYTHON) run_tests.py
 
 clean:
 	rm -rf build

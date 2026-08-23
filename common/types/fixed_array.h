@@ -134,13 +134,31 @@ OptionalDef(ArrayIndex);
 
 #define FANone(alias) None(alias##__optional)
 #define FAPtrNone(alias) None(alias##__type_ptr__optional)
-#define IsFANone(alias, block) IsNone(alias##__optional, block)
-#define IsFAPtrNone(alias, block) IsNone(alias##__type_ptr__optional, block)
+#define IsFANone(alias, block) \
+    if (!optional.present) \
+    { \
+        block; \
+    }
+#define IsFAPtrNone(alias, block) \
+    if (!optional.present) \
+    { \
+        block; \
+    }
 
 #define FASome(alias, value) Some(alias##__optional, value)
 #define FAPtrSome(alias, value) Some(alias##__type_ptr__optional, value)
-#define IsFASome(alias, value, block) IsSome(alias##__optional, value, block)
-#define IsFAPtrSome(alias, value, block) IsSome(alias##__type_ptr__optional, value, block)
+#define IsFASome(alias, value, block) \
+    if (optional.present) \
+    { \
+        alias##__type value = optional.some.val; \
+        block; \
+    }
+#define IsFAPtrSome(alias, value, block) \
+    if (optional.present) \
+    { \
+        alias##__type_ptr value = optional.some.val; \
+        block; \
+    }
 
 #define FindResult(alias) alias##__FindResult
 #define FindResultCreate(alias, idx, val) \
@@ -305,20 +323,20 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
 #define RemoveDefine(alias_name) \
     Result(CollectionCode) alias_name##__remove(alias_name * self, alias_name##__type value) \
     { \
-        Match(ArrayIndex, alias_name##__find_item(self, value)) \
-            IsSome(pos, \
+        match_optional(ArrayIndex, alias_name##__find_item(self, value), \
+            some(pos) { \
             { \
                 for (int i = pos; i < (self->len - 1); i++) \
                 { \
                     self->data[i] = self->data[i + 1]; \
                 } \
                 self->len--; \
-            }) \
-            IsNone( \
+            }; }, \
+            none() { \
             { \
                 return Error(CollectionCode, FIXED_ARRAY_ERROR(ITEM_NOT_FOUND), ARRAY_ITEM_NOT_FOUND); \
-            }) \
-        End \
+            }; } \
+        ) \
         return Success(CollectionCode, 0); \
     } \
 

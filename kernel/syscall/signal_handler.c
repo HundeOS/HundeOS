@@ -21,9 +21,8 @@ Result(SystemCallResult) Signal__handler(
         return Error(SystemCallResult, invalid_signal_target, PROCESS_SIGNAL_INVALID_ARGUMENT);
     }
 
-    Match(ProcessPtr, Scheduler__find_process_by_pid(kernel->scheduler, pid))
-        IsNone(return Error(SystemCallResult, process_not_found, PROCESS_SIGNAL_PROCESS_NOT_FOUND))
-        IsSome(target,
+    match_optional(ProcessPtr, Scheduler__find_process_by_pid(kernel->scheduler, pid),
+        some(target)
         {
             if (!Process__supports_signal(target, signal))
             {
@@ -38,15 +37,16 @@ Result(SystemCallResult) Signal__handler(
                     return Success(SystemCallResult, PROCESS_SIGNAL_OK);
                 default:
                     Process__dispose_owned_kernel_resources(target);
-                    ResultMatch(ProcessPtr, Scheduler__exit(
+                    match_result(ProcessPtr, Scheduler__exit(
                         kernel->scheduler, target, ProcessSignal__exit_code(signal)
-                    ))
-                        IsSuccess(exited, return Success(SystemCallResult, PROCESS_SIGNAL_OK))
-                        IsError(code, message, return Error(SystemCallResult, message, code))
-                    End
+                    ),
+                        success(exited) { return Success(SystemCallResult, PROCESS_SIGNAL_OK); },
+                        error(code, message) { return Error(SystemCallResult, message, code); }
+                    )
                 }
-        })
-    End
+        },
+        none() { return Error(SystemCallResult, process_not_found, PROCESS_SIGNAL_PROCESS_NOT_FOUND); }
+    )
 
     return Error(SystemCallResult, process_not_found, PROCESS_SIGNAL_PROCESS_NOT_FOUND);
 }

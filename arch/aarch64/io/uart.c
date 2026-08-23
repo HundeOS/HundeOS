@@ -182,12 +182,13 @@ void uart_irq_handler(IOSubsystemPtr io_subsystem)
         // Fill TX FIFO until full or nothing left to send
         while (!(*uart_reg(UART0_FR_OFFSET) & FR_TXFF))
         {
-            ResultMatch(Char, IOBuffer__pop(&console_state.write_buffer))
-                IsSuccess(val,
+            match_result(Char, IOBuffer__pop(&console_state.write_buffer),
+                success(val)
                 {
                     *uart_reg(UART0_DR_OFFSET) = val;
-                });
-            End
+                },
+                error(_code, _message) {}
+            );
 
         }
         // Clear TX
@@ -203,13 +204,13 @@ void uart_irq_handler(IOSubsystemPtr io_subsystem)
     if (received_data)
     {
         // only message io subsystem if there is a parked context
-        Match(IOContextPtr, ParkedContexts__at(&console_state.parked_contexts, -1))
-            IsSome(parked_context,
+        match_optional(IOContextPtr, ParkedContexts__at(&console_state.parked_contexts, -1),
+            some(parked_context)
             {
                 __d_println(IOSUB, "Parked context found");
                 IOSubsystem__data_arrived(io_subsystem, parked_context);
-            })
-            IsNone(__d_println(IOSUB, "NO parked context found");)
-        End
+            },
+            none() { __d_println(IOSUB, "NO parked context found");; }
+        )
     }
 }

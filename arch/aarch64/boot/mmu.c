@@ -217,8 +217,8 @@ __BOOT__(void) map_gicd_gicr(PageTable * table, BootPlatformInfoPtr platform)
 
 __BOOT__(void) map_framebuffer(PageTable * table, BootPlatformInfoPtr platform)
 {
-    Match(FramebufferInfo, platform->framebuffer)
-        IsSome(framebuffer,
+    match_optional(FramebufferInfo, platform->framebuffer,
+        some(framebuffer)
         {
             uint64_t map_size = framebuffer.size;
             if (map_size > BOOT_FRAMEBUFFER_MAP_SIZE)
@@ -232,8 +232,9 @@ __BOOT__(void) map_framebuffer(PageTable * table, BootPlatformInfoPtr platform)
                 (uint64_t)&__framebuffer_start[0],
                 &device_perms
             );
-        })
-    End
+        },
+        none() {}
+    )
 }
 
 __BOOT__(void) map_kernel(SystemInfoPtr system_info)

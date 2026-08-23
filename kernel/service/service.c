@@ -30,9 +30,10 @@ Result(ServiceEvent) Service__pop_next_event(ProcessPtr process)
         return Error(ServiceEvent, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
     }
 
-    Match(ServiceEvent, ServiceEvents__pop_front(&process->service.events))
-        IsSome(event, return Success(ServiceEvent, event))
-    End
+    match_optional(ServiceEvent, ServiceEvents__pop_front(&process->service.events),
+        some(event) { return Success(ServiceEvent, event); },
+        none() {}
+    )
 
     return Error(ServiceEvent, event_queue_empty, SERVICE_EVENT_QUEUE_EMPTY);
 }
@@ -44,31 +45,35 @@ Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent ev
         return Error(ServiceCode, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
     }
 
-    ResultMatch(CollectionCode, ServiceEvents__push(&process->service.events, event))
-        IsError(code, message, return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL))
-    End
+    match_result(CollectionCode, ServiceEvents__push(&process->service.events, event),
+        success(_) {},
+        error(code, message) { return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL); }
+    )
 
     return Success(ServiceCode, SERVICE_OK);
 }
 
 Result(ServiceEvent) Service__complete_wait(ParkedOperationPtr parked_operation)
 {
-    Match(SchedulerPtr, parked_operation->kernel_context->scheduler)
-        IsSome(scheduler,
+    match_optional(SchedulerPtr, parked_operation->kernel_context->scheduler,
+        some(scheduler)
         {
-            Match(ProcessID, parked_operation->kernel_context->pid)
-                IsSome(pid,
+            match_optional(ProcessID, parked_operation->kernel_context->pid,
+                some(pid)
                 {
-                    Match(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid))
-                        IsSome(process,
+                    match_optional(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid),
+                        some(process)
                         {
                             return Scheduler__service_take_next_event(scheduler, process);
-                        })
-                    End
-                })
-            End
-        })
-    End
+                        },
+                        none() {}
+                    )
+                },
+                none() {}
+            )
+        },
+        none() {}
+    )
 
     return Error(ServiceEvent, no_process, SERVICE_SCHEDULER_ERROR);
 }

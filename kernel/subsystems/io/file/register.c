@@ -115,39 +115,43 @@ static Result(IOStatus) Filesystem__mount_resolved_block_device(
         filesystem = Some(FilesystemPtr, ext2_filesystem);
     }
 
-    Match(FilesystemPtr, filesystem)
-        IsSome(mounted_filesystem,
+    match_optional(FilesystemPtr, filesystem,
+        some(mounted_filesystem)
         {
-            ResultMatch(MountResult, Filesystem__mount(root_fs, mountpoint, mounted_filesystem))
-                IsSuccess(_, return Success(IOStatus, IO_OK))
-                IsError(code, message, return Error(IOStatus, message, code))
-            End
-        })
-    End
+            match_result(MountResult, Filesystem__mount(root_fs, mountpoint, mounted_filesystem),
+                success(_) { return Success(IOStatus, IO_OK); },
+                error(code, message) { return Error(IOStatus, message, code); }
+            )
+        },
+        none() {}
+    )
 
     return Error(IOStatus, bstring("Filesystem type not supported"), IO_OPERATION_NOT_SUPPORTED);
 }
 
 Result(IOStatus) Filesystem__mount_block_device(
-    FilesystemPtr root_fs, BString device_path, BString filesystem_type, BString mountpoint
+    FilesystemPtr self, BString device_path, BString filesystem_type, BString mountpoint
 )
 {
-    Match(FilesystemPtr, Mounts__get(&root_fs->mounts, mountpoint))
-        IsSome(existing, return Success(IOStatus, IO_OK))
-    End
+    match_optional(FilesystemPtr, Mounts__get(&self->mounts, mountpoint),
+        some(existing) { return Success(IOStatus, IO_OK); },
+        none() {}
+    )
 
-    Match(BlockDevicePtr, BlockDeviceRegistry__find(device_path))
-        IsSome(device, return Filesystem__mount_resolved_block_device(root_fs, device, filesystem_type, mountpoint))
-    End
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(device_path),
+        some(device) { return Filesystem__mount_resolved_block_device(self, device, filesystem_type, mountpoint); },
+        none() {}
+    )
 
     return Error(IOStatus, bstring("Block device not found"), IO_INVALID_PATH);
 }
 
 static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableEntryPtr entry)
 {
-    Match(FilesystemPtr, Mounts__get(&root_fs->mounts, entry->mountpoint))
-        IsSome(existing, return)
-    End
+    match_optional(FilesystemPtr, Mounts__get(&root_fs->mounts, entry->mountpoint),
+        some(existing) { return; },
+        none() {}
+    )
 
     Optional(BlockDevicePtr) device_match = None(BlockDevicePtr);
     if (entry->match_block_count)
@@ -165,42 +169,43 @@ static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableE
         device_match = BlockDeviceRegistry__find(entry->device_path);
     }
 
-    Match(BlockDevicePtr, device_match)
-        IsSome(device, Filesystem__mount_resolved_block_device(root_fs, device, entry->filesystem_type, entry->mountpoint))
-    End
+    match_optional(BlockDevicePtr, device_match,
+        some(device) { Filesystem__mount_resolved_block_device(root_fs, device, entry->filesystem_type, entry->mountpoint); },
+        none() {}
+    )
 }
 
 static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemTablePtr self)
 {
-    ResultMatch(CollectionCode, FilesystemTable__add(
+    match_result(CollectionCode, FilesystemTable__add(
         self,
         BSTRING_NEW("/dev/virtio1"),
         BSTRING_NEW("ext2"),
         BSTRING_NEW("/")
-    ))
-        IsSuccess(index, {})
-        IsError(code, message, return Error(CollectionCode, message, code))
-    End
+    ),
+        success(index) {},
+        error(code, message) { return Error(CollectionCode, message, code); }
+    )
 
-    ResultMatch(CollectionCode, FilesystemTable__add_by_block_count(
+    match_result(CollectionCode, FilesystemTable__add_by_block_count(
         self,
         BOOT_CONFIG_BLOCK_COUNT,
         BSTRING_NEW("ext2"),
         BSTRING_NEW("/boot/config")
-    ))
-        IsSuccess(index, {})
-        IsError(code, message, return Error(CollectionCode, message, code))
-    End
+    ),
+        success(index) {},
+        error(code, message) { return Error(CollectionCode, message, code); }
+    )
 
-    ResultMatch(CollectionCode, FilesystemTable__add(
+    match_result(CollectionCode, FilesystemTable__add(
         self,
         BSTRING_NEW("/dev/virtio3"),
         BSTRING_NEW("fat32"),
         BSTRING_NEW("/mnt/fs1")
-    ))
-        IsSuccess(index, {})
-        IsError(code, message, return Error(CollectionCode, message, code))
-    End
+    ),
+        success(index) {},
+        error(code, message) { return Error(CollectionCode, message, code); }
+    )
 
     return Success(CollectionCode, 0);
 }
@@ -234,10 +239,10 @@ FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel)
     MemFilesystemIOStatePtr memfs_state = MemFilesystemIOState__heap_new(mem_filesystem);
     Filesystem__mount(root_fs, memfs, mem_filesystem);
 
-    ResultMatch(CollectionCode, FilesystemTable__add_hardcoded_entries(&root_fs->filesystem_table))
-        IsSuccess(_, FilesystemTable__mount_available_entries(root_fs))
-        IsError(code, message, __d_printf(FILESYSTEM, "Filesystem table setup failed %i %s\n", code, cstr(message)))
-    End
+    match_result(CollectionCode, FilesystemTable__add_hardcoded_entries(&root_fs->filesystem_table),
+        success(_) { FilesystemTable__mount_available_entries(root_fs); },
+        error(code, message) { __d_printf(FILESYSTEM, "Filesystem table setup failed %i %s\n", code, cstr(message)); }
+    )
 
     __d_printf(FILESYSTEM, "Root filesystem %p\n", root_fs);
     __d_printf(FILESYSTEM, "Embedded filesystem %p\n", embedded_fs);

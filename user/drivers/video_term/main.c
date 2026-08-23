@@ -768,13 +768,15 @@ static void VideoTerm__flush_emoji_cluster(VideoTermPtr self)
         return;
     }
 
-    Match(VideoTermEmojiEntryPtr, VideoTerm__find_emoji(self->emoji_codepoints, self->emoji_codepoint_count))
-        IsSome(emoji, {
+    match_optional(VideoTermEmojiEntryPtr, VideoTerm__find_emoji(self->emoji_codepoints, self->emoji_codepoint_count),
+        some(emoji)
+        {
             VideoTerm__draw_emoji(self, emoji);
             VideoTerm__clear_emoji_cluster(self);
             return;
-        })
-        IsNone({
+        },
+        none()
+        {
             uint8_t count = self->emoji_codepoint_count;
             uint32_t codepoints[VIDEO_TERM_EMOJI_CLUSTER_CAPACITY];
             for (uint8_t index = 0; index < count; index++)
@@ -786,8 +788,8 @@ static void VideoTerm__flush_emoji_cluster(VideoTermPtr self)
             {
                 VideoTerm__draw_codepoint(self, codepoints[index]);
             }
-        })
-    End;
+        }
+    )
 }
 
 static void VideoTerm__write_text_or_emoji_codepoint(VideoTermPtr self, uint32_t codepoint)

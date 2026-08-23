@@ -35,10 +35,7 @@ void test_linked_list_push_and_at(void)
 {
     TestList list = TestList__new();
 
-    ResultMatch(CollectionCode, TestList__push(&list, 10))
-        IsError(code, message, TEST_FAIL())
-        IsSuccess(index, TEST_ASSERT_EQUAL(0, index))
-    End
+    match_result(CollectionCode, TestList__push(&list, 10), success(index) { TEST_ASSERT_EQUAL(0, index); }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL(1, TestList__len(&list));
     TEST_ASSERT_EQUAL(10, Unwrap(TestListType, TestList__at(&list, 0), (TestListType){}));
@@ -64,14 +61,10 @@ void test_linked_list_find(void)
 
     TestListType expected = 20;
 
-    LLFindResultMatch(TestList, TestList__find(&list, value_matches, &expected))
-        IsNone(TEST_FAIL())
-        IsSome(found,
-        {
+    match_optional(TestList__FindResult, TestList__find(&list, value_matches, &expected), some(found) {
             TEST_ASSERT_EQUAL(1, found.index);
             TEST_ASSERT_EQUAL(20, *found.value);
-        })
-    End
+        }, none() { TEST_FAIL(); })
 }
 
 void test_linked_list_iterate_visits_items_in_order(void)
@@ -115,9 +108,7 @@ void test_linked_list_remove_uses_equals_function(void)
     TestList__push(&list, 20);
     TestList__push(&list, 30);
 
-    ResultMatch(CollectionCode, TestList__remove(&list, 20))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(CollectionCode, TestList__remove(&list, 20), success(_) {}, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL(2, TestList__len(&list));
     TEST_ASSERT_EQUAL(30, Unwrap(TestListType, TestList__at(&list, 1), (TestListType){}));
@@ -129,9 +120,7 @@ void test_linked_list_dispose_removes_all_nodes(void)
     TestList__push(&list, 10);
     TestList__push(&list, 20);
 
-    ResultMatch(CollectionCode, TestList__dispose(&list))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(CollectionCode, TestList__dispose(&list), success(_) {}, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL(0, TestList__len(&list));
     TEST_ASSERT_NULL(list.head);

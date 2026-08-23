@@ -8,6 +8,9 @@ OBJCOPY = $(CROSS_COMPILE)objcopy
 UNITY_PATH=vendor/Unity
 BOOT_PLATFORM ?= qemu_virt
 BSP_DEFINES ?= -DBSP_VIRT
+UV ?= uv
+PYTHON = $(UV) run python
+PYTHON_ENV_STAMP = .venv/.uv-sync
 # Compiler flags
 CFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
            -nostdlib -nostartfiles -mcmodel=large $(BSP_DEFINES) \
@@ -50,18 +53,18 @@ EFI_ESP_SIZE_MB ?= 512
 DISK_IMG = build/disk.img
 DISK_SIZE_MB = 64
 DISK_LABEL = KERNELFS
-DISK_TEST_FILE = tools/disk_test_file.txt
+DISK_TEST_FILE = tools/disk_images/disk_test_file.txt
 DISK_TEST_NAME = TEST.TXT
-DISK_LONG_FILE = tools/disk_long_filename.txt
+DISK_LONG_FILE = tools/disk_images/disk_long_filename.txt
 DISK_LONG_NAME = This is a long filename.txt
-DISK_LARGE_FILE = tools/disk_large_file.txt
+DISK_LARGE_FILE = tools/disk_images/disk_large_file.txt
 DISK_LARGE_NAME = BIGFILE.TXT
 SD_CARD_FAT32_IMG = build/sdcard-fat32.img
 SD_CARD_FAT32_SIZE_MB = 64
 SD_CARD_FAT32_LABEL = TESTSD
-SD_CARD_FAT32_README_FILE = tools/sdcard_fat32_readme.txt
-SD_CARD_FAT32_CONFIG_FILE = tools/sdcard_fat32_config.txt
-SD_CARD_FAT32_NOTE_FILE = tools/sdcard_fat32_note.txt
+SD_CARD_FAT32_README_FILE = tools/disk_images/sdcard_fat32_readme.txt
+SD_CARD_FAT32_CONFIG_FILE = tools/disk_images/sdcard_fat32_config.txt
+SD_CARD_FAT32_NOTE_FILE = tools/disk_images/sdcard_fat32_note.txt
 EXT2_IMG = build/ext2.img
 EXT2_SIZE_MB = 64
 EXT2_LABEL = EXT2FS
@@ -156,24 +159,31 @@ all: $(BIN)
 elf: $(ELF)
 kernel: user_binaries $(BIN)
 
-setup:
+setup: python-venv
 	mkdir -p build
 
-$(DISK_IMG): tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $(DISK_LARGE_FILE)
+$(PYTHON_ENV_STAMP): pyproject.toml
+	$(UV) sync
+	mkdir -p `dirname $@`
+	touch $@
+
+python-venv: $(PYTHON_ENV_STAMP)
+
+$(DISK_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $(DISK_LARGE_FILE)
 	mkdir -p `dirname $@`
 	dd if=/dev/zero of=$@ bs=1048576 count=$(DISK_SIZE_MB)
 	$(MKFS_FAT) -F 32 -S 512 -s 1 -R 32 -n $(DISK_LABEL) $@
-	python3 tools/populate_fat32_image.py $@ $(DISK_TEST_NAME) $(DISK_TEST_FILE)
-	python3 tools/populate_fat32_image.py $@ "$(DISK_LONG_NAME)" $(DISK_LONG_FILE)
-	python3 tools/populate_fat32_image.py $@ $(DISK_LARGE_NAME) $(DISK_LARGE_FILE)
+	$(PYTHON) tools/populate_fat32_image.py $@ $(DISK_TEST_NAME) $(DISK_TEST_FILE)
+	$(PYTHON) tools/populate_fat32_image.py $@ "$(DISK_LONG_NAME)" $(DISK_LONG_FILE)
+	$(PYTHON) tools/populate_fat32_image.py $@ $(DISK_LARGE_NAME) $(DISK_LARGE_FILE)
 
-$(SD_CARD_FAT32_IMG): tools/populate_fat32_image.py $(SD_CARD_FAT32_README_FILE) $(SD_CARD_FAT32_CONFIG_FILE) $(SD_CARD_FAT32_NOTE_FILE)
+$(SD_CARD_FAT32_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(SD_CARD_FAT32_README_FILE) $(SD_CARD_FAT32_CONFIG_FILE) $(SD_CARD_FAT32_NOTE_FILE)
 	mkdir -p `dirname $@`
 	dd if=/dev/zero of=$@ bs=1048576 count=$(SD_CARD_FAT32_SIZE_MB)
 	$(MKFS_FAT) -F 32 -S 512 -s 1 -R 32 -n $(SD_CARD_FAT32_LABEL) $@
-	python3 tools/populate_fat32_image.py $@ README.TXT $(SD_CARD_FAT32_README_FILE)
-	python3 tools/populate_fat32_image.py $@ CONFIG.TXT $(SD_CARD_FAT32_CONFIG_FILE)
-	python3 tools/populate_fat32_image.py $@ DOCS/NOTE.TXT $(SD_CARD_FAT32_NOTE_FILE)
+	$(PYTHON) tools/populate_fat32_image.py $@ README.TXT $(SD_CARD_FAT32_README_FILE)
+	$(PYTHON) tools/populate_fat32_image.py $@ CONFIG.TXT $(SD_CARD_FAT32_CONFIG_FILE)
+	$(PYTHON) tools/populate_fat32_image.py $@ DOCS/NOTE.TXT $(SD_CARD_FAT32_NOTE_FILE)
 
 $(EXT2_IMG): $(shell find $(EXT2_ROOT_DIR) -type f -print)
 	mkdir -p `dirname $@`
@@ -209,13 +219,13 @@ build/boot_config/%.img: $(shell find config -type f -print)
 	fi
 	mv $@.tmp $@
 
-disk: tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $(DISK_LARGE_FILE)
+disk: $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(DISK_TEST_FILE) $(DISK_LONG_FILE) $(DISK_LARGE_FILE)
 	mkdir -p `dirname $(DISK_IMG)`
 	dd if=/dev/zero of=$(DISK_IMG) bs=1048576 count=$(DISK_SIZE_MB)
 	$(MKFS_FAT) -F 32 -S 512 -s 1 -R 32 -n $(DISK_LABEL) $(DISK_IMG)
-	python3 tools/populate_fat32_image.py $(DISK_IMG) $(DISK_TEST_NAME) $(DISK_TEST_FILE)
-	python3 tools/populate_fat32_image.py $(DISK_IMG) "$(DISK_LONG_NAME)" $(DISK_LONG_FILE)
-	python3 tools/populate_fat32_image.py $(DISK_IMG) $(DISK_LARGE_NAME) $(DISK_LARGE_FILE)
+	$(PYTHON) tools/populate_fat32_image.py $(DISK_IMG) $(DISK_TEST_NAME) $(DISK_TEST_FILE)
+	$(PYTHON) tools/populate_fat32_image.py $(DISK_IMG) "$(DISK_LONG_NAME)" $(DISK_LONG_FILE)
+	$(PYTHON) tools/populate_fat32_image.py $(DISK_IMG) $(DISK_LARGE_NAME) $(DISK_LARGE_FILE)
 
 sd-fat32-disk: $(SD_CARD_FAT32_IMG)
 
@@ -229,8 +239,8 @@ $(KERNEL_BUILD_DIR)/%.o: %.s
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(EMBEDDED_FS): $(USER_BINARIES) tools/build_embedded_fs.py
-	python3 tools/build_embedded_fs.py $@ $(EMBEDDED_FS_INPUTS)
+$(EMBEDDED_FS): $(PYTHON_ENV_STAMP) $(USER_BINARIES) tools/build_embedded_fs.py
+	$(PYTHON) tools/build_embedded_fs.py $@ $(EMBEDDED_FS_INPUTS)
 
 $(KERNEL_BUILD_DIR)/./kernel/bin/embedded.o: $(EMBEDDED_FS)
 
@@ -252,8 +262,8 @@ $(USER_VIDEO_TERM_FONT_OBJECT): $(USER_VIDEO_TERM_FONT)
 
 build/user/drivers/video_term/main.o: $(USER_VIDEO_TERM_EMOJI_HEADER)
 
-$(USER_VIDEO_TERM_EMOJI_ATLAS): tools/build_video_term_emoji_atlas.py $(USER_VIDEO_TERM_EMOJI_PNGS)
-	python3 tools/build_video_term_emoji_atlas.py
+$(USER_VIDEO_TERM_EMOJI_ATLAS): $(PYTHON_ENV_STAMP) tools/build_video_term_emoji_atlas.py $(USER_VIDEO_TERM_EMOJI_PNGS)
+	$(PYTHON) tools/build_video_term_emoji_atlas.py
 
 $(USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT): $(USER_VIDEO_TERM_EMOJI_ATLAS)
 	mkdir -p `dirname $@`
@@ -277,13 +287,13 @@ $(PI_UEFI_LOADER_ELF): arch/aarch64/boot/pi_uefi/loader.c
 $(PI_UEFI_EFI): $(PI_UEFI_LOADER_ELF)
 	$(OBJCOPY) -O pei-aarch64-little --subsystem=efi-app -R .comment $< $@
 
-$(PI_UEFI_ESP_IMG): $(PI_UEFI_EFI) $(PI_UEFI_KERNEL_ELF) tools/uefi_startup.nsh
+$(PI_UEFI_ESP_IMG): $(PYTHON_ENV_STAMP) $(PI_UEFI_EFI) $(PI_UEFI_KERNEL_ELF) tools/uefi_startup.nsh
 	mkdir -p `dirname $@`
 	dd if=/dev/zero of=$@ bs=1048576 count=$(EFI_ESP_SIZE_MB)
 	$(MKFS_FAT) -F 32 -S 512 -s 1 -R 32 -n EFIBOOT $@
-	python3 tools/populate_fat32_image.py $@ EFI/BOOT/BOOTAA64.EFI $(PI_UEFI_EFI)
-	python3 tools/populate_fat32_image.py $@ KERNEL.ELF $(PI_UEFI_KERNEL_ELF)
-	python3 tools/populate_fat32_image.py $@ STARTUP.NSH tools/uefi_startup.nsh
+	$(PYTHON) tools/populate_fat32_image.py $@ EFI/BOOT/BOOTAA64.EFI $(PI_UEFI_EFI)
+	$(PYTHON) tools/populate_fat32_image.py $@ KERNEL.ELF $(PI_UEFI_KERNEL_ELF)
+	$(PYTHON) tools/populate_fat32_image.py $@ STARTUP.NSH tools/uefi_startup.nsh
 
 $(QEMU_EFI_VARS): $(QEMU_EFI_VARS_TEMPLATE)
 	mkdir -p `dirname $@`
@@ -297,8 +307,17 @@ $(ELF): $(ASM_OBJECTS) $(OBJECTS) $(COMMON_KERNEL_OBJECTS) $(ARCH_ASM_OBJECTS) $
 clean:
 	rm -rf build
 
-test:
+test: $(PYTHON_ENV_STAMP)
 	make test -C test
+
+hundelint: $(PYTHON_ENV_STAMP)
+	$(PYTHON) tools/hundelint.py --require-tree-sitter
+
+hundelint-strict: $(PYTHON_ENV_STAMP)
+	$(PYTHON) tools/hundelint.py --require-tree-sitter --strict
+
+hundelint-test: $(PYTHON_ENV_STAMP)
+	$(PYTHON) test/tools/test_hundelint.py
 
 test_clean:
 	make clean -C test
@@ -559,4 +578,4 @@ qemu-virt-gdb: clean $(ELF)
 		-S \
 		-gdb tcp::1234
 
-.PHONY: all clean disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace test test_clean
+.PHONY: all clean setup python-venv disk sd-fat32-disk ext2-disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace test hundelint hundelint-strict hundelint-test test_clean

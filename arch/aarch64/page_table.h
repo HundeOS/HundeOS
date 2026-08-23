@@ -183,9 +183,9 @@ inline PageTable * PageTable__zero(PageTable * self)
 }
 
 
-inline PageTableEntry PageTable__make_table_desc(PageTable * next_level_page)
+inline PageTableEntry PageTable__make_table_desc(PageTable * self)
 {
-    return FLAG_PTE_VALID | FLAG_PTE_TABLE | ((uint64_t)next_level_page & MASK_PTE_NEXTADDR);
+    return FLAG_PTE_VALID | FLAG_PTE_TABLE | ((uint64_t) self & MASK_PTE_NEXTADDR);
 }
 
 KernelAddress PageTable__from_virtual_address(KernelPtr kernel, Address virtual_addr);

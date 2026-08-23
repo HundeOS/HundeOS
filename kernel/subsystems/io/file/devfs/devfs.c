@@ -35,28 +35,34 @@ static BString DevFilesystemIO__name_from_path(BString path)
         return path;
     }
 
-    return Unwrap(BString, BStringArray__at(&segments, BStringArray__len(&segments) - 1), path);
+    match_optional(BString, BStringArray__at(&segments, BStringArray__len(&segments) - 1),
+        some(name)
+        {
+            return name;
+        },
+        none() { return path; }
+    )
 }
 
 static Result(IOInternalHandle) DevFilesystemIOState__add_handle(DevFilesystemIOStatePtr self, BString path)
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
         IOInternalHandle handle = self->next_handle++ | self->state.filesystem->fs_code;
         FileHandleTargetPtr target = FileHandleTarget__heap_new(path);
         FileHandleTargetMap__set(&self->state.handles, handle, target);
-        _cs_return Success(IOInternalHandle, handle);
+        cs_return Success(IOInternalHandle, handle);
     })
 }
 
 static Result(FileHandleTargetPtr) DevFilesystemIOState__get_handle(DevFilesystemIOStatePtr self, IOInternalHandle handle)
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
-        Match(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle))
-            IsSome(target, _cs_return Success(FileHandleTargetPtr, target))
-            IsNone(_cs_return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE))
-        End
+        match_optional(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle),
+            some(target) { cs_return Success(FileHandleTargetPtr, target); },
+            none() { cs_return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -64,17 +70,17 @@ static Result(FileHandleTargetPtr) DevFilesystemIOState__get_handle(DevFilesyste
 
 static Result(IOInternalHandle) DevFilesystemIOState__delete_handle(DevFilesystemIOStatePtr self, IOInternalHandle handle)
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
-        Match(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle))
-            IsSome(target,
+        match_optional(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle),
+            some(target)
             {
                 FileHandleTarget__dispose(target);
                 FileHandleTargetMap__delete(&self->state.handles, handle);
-                _cs_return Success(IOInternalHandle, handle);
-            })
-            IsNone(_cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE))
-        End
+                cs_return Success(IOInternalHandle, handle);
+            },
+            none() { cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -84,9 +90,10 @@ static Result(IOInternalHandle) DevFilesystemIO__open(IOStatePtr self, BString p
 {
     DevFilesystemIOStatePtr fs_state = (DevFilesystemIOStatePtr) self;
 
-    Match(BlockDeviceMetadata, BlockDeviceRegistry__metadata(path))
-        IsSome(metadata, return DevFilesystemIOState__add_handle(fs_state, path))
-    End
+    match_optional(BlockDeviceMetadata, BlockDeviceRegistry__metadata(path),
+        some(metadata) { return DevFilesystemIOState__add_handle(fs_state, path); },
+        none() {}
+    )
 
     return Error(IOInternalHandle, invalid_path, IO_INVALID_PATH);
 }
@@ -102,11 +109,11 @@ static Result(IOBufferPtr) DevFilesystemIO__read(
 {
     DevFilesystemIOStatePtr fs_state = (DevFilesystemIOStatePtr) self;
 
-    ResultMatch(FileHandleTargetPtr, DevFilesystemIOState__get_handle(fs_state, handle))
-        IsSuccess(target,
+    match_result(FileHandleTargetPtr, DevFilesystemIOState__get_handle(fs_state, handle),
+        success(target)
         {
-            Match(BlockDeviceMetadata, BlockDeviceRegistry__metadata(target->path))
-                IsSome(metadata,
+            match_optional(BlockDeviceMetadata, BlockDeviceRegistry__metadata(target->path),
+                some(metadata)
                 {
                     BString text = BString__sprintf(
                         &metadata_format,
@@ -116,24 +123,25 @@ static Result(IOBufferPtr) DevFilesystemIO__read(
                         (int) metadata.userspace_service
                     );
 
-                    if (target->offset >= (FilePointer) text.len)
+                    if (target->offset >= (FilePointer) BString__length(&text))
                     {
                         return Error(IOBufferPtr, invalid_path, IO_EOF);
                     }
 
-                    size_t remaining = (size_t) text.len - target->offset;
+                    size_t remaining = (size_t) BString__length(&text) - target->offset;
                     size_t read_size = remaining < size ? remaining : size;
                     IOBuffer__reset(&target->buffer);
-                    IOBuffer__push_all(&target->buffer, ptr(&text.data[target->offset], Char), read_size);
+                    IOBuffer__push_all(&target->buffer, ptr(BString__cstr(&text) + target->offset, Char), read_size);
                     target->offset += read_size;
                     return Success(IOBufferPtr, &target->buffer);
-                })
-            End
+                },
+                none() {}
+            )
 
             return Error(IOBufferPtr, invalid_path, IO_INVALID_PATH);
-        })
-        IsError(code, message, return Error(IOBufferPtr, message, code))
-    End
+        },
+        error(code, message) { return Error(IOBufferPtr, message, code); }
+    )
 
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -166,26 +174,27 @@ static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, File
     BlockDevicePaths paths = BlockDeviceRegistry__paths();
     BlockDeviceMetadataEntries metadata_entries = BlockDeviceRegistry__metadata_entries();
 
-    ResultMatch(CollectionCode, IOSubsystem__append_dev_filesystem_nodes(
+    match_result(CollectionCode, IOSubsystem__append_dev_filesystem_nodes(
         fs_state->io_subsystem, fs_state->state.filesystem, &result
-    ))
-        IsError(code, message, return Error(FilesystemNodes, message, code))
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(FilesystemNodes, message, code); }
+    )
 
     FAIterate(BlockDevicePaths, paths, index, device_path)
         FilesystemNodes__push(
             &result,
             FilesystemNode__heap_new(fs_state->state.filesystem, DevFilesystemIO__name_from_path(device_path), 0)
         );
-    End
 
+    End
     FAIterate(BlockDeviceMetadataEntries, metadata_entries, index, metadata)
         FilesystemNodes__push(
             &result,
             FilesystemNode__heap_new(fs_state->state.filesystem, metadata.alias, 0)
         );
-    End
 
+    End
     return Success(FilesystemNodes, result);
 }
 

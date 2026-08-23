@@ -14,12 +14,13 @@
         \
         Result(DeviceHandle) register_res = IOSubsystem__register_device(io_subsystem, path, (IOPtr) io_ptr, io_state); \
         \
-        ResultMatch(DeviceHandle, register_res); \
-            IsError(code, message, \
+        match_result(DeviceHandle, register_res, /* hundelint: ignore-match-branch-macros */ \
+            success(_) {}, \
+            error(code, message) \
             { \
                 return Error(RegisterCode, message, code); \
-            }) \
-        End \
+            } \
+        ) \
     } \
 
 
@@ -43,8 +44,9 @@ Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
     IO_REGISTER(io_subsystem, BUSINFO_STREAM, Stream__heap_new(), (IOStatePtr) StreamState__heap_new());
     IO_REGISTER(io_subsystem, ROOT, &root_fs->file_io.base_io, (IOStatePtr) root_fs->state);
 
-    ResultMatch(ListenerRegisterResult, IOSubsystem__register_listeners(kernel))
-        IsError(code, message, return Error(RegisterCode, message, IO_REGISTER_FAILED));
-    End
+    match_result(ListenerRegisterResult, IOSubsystem__register_listeners(kernel),
+        success(_) {},
+        error(code, message) { return Error(RegisterCode, message, IO_REGISTER_FAILED); }
+    );
     return Success(RegisterCode, IO_OK);
 }

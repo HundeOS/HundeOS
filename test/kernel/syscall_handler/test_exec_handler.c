@@ -30,7 +30,7 @@ void tearDown(void)
 
 void test_exec_is_called_triggering_new_process()
 {
-    ResultMatch(SystemCallResult, Exec__handler(
+    match_result(SystemCallResult, Exec__handler(
         kernel,
         Some(ProcessPtr, parent),
         (Anything) cstr(exec_path),
@@ -38,17 +38,14 @@ void test_exec_is_called_triggering_new_process()
         0,
         0,
         0
-    ))
-        IsSuccess(code, TEST_ASSERT_GREATER_THAN(0, code))
-        IsError(code, message, TEST_FAIL())
-    End
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->state);
 }
 
 void test_exec_handler_nowait_spawns_without_parking_parent()
 {
-    ResultMatch(SystemCallResult, Exec__handler(
+    match_result(SystemCallResult, Exec__handler(
         kernel,
         Some(ProcessPtr, parent),
         (Anything) cstr(exec_path),
@@ -56,10 +53,7 @@ void test_exec_handler_nowait_spawns_without_parking_parent()
         0,
         0,
         0
-    ))
-        IsSuccess(code, TEST_ASSERT_GREATER_THAN(0, code))
-        IsError(code, message, TEST_FAIL())
-    End
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
 }
@@ -67,7 +61,7 @@ void test_exec_handler_nowait_spawns_without_parking_parent()
 void test_exec_request_handler_can_spawn_as_user(void)
 {
     Process__set_hund_identity(parent);
-    AuthTicketID ticket_id = ResultUnwrap(
+    AuthTicketID ticket_id = result_unwrap(
         AuthTicketID,
         Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user")),
         AUTH_NO_TICKET
@@ -83,7 +77,7 @@ void test_exec_request_handler_can_spawn_as_user(void)
         .arg2 = 0,
     };
 
-    ResultMatch(SystemCallResult, ExecRequest__handler(
+    match_result(SystemCallResult, ExecRequest__handler(
         kernel,
         Some(ProcessPtr, parent),
         (Anything) &request,
@@ -91,15 +85,12 @@ void test_exec_request_handler_can_spawn_as_user(void)
         0,
         0,
         0
-    ))
-        IsSuccess(code, TEST_ASSERT_GREATER_THAN(0, code))
-        IsError(code, message, TEST_FAIL())
-    End
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
 }
 
 void test_exec_request_handler_rejects_reused_auth_ticket(void)
 {
-    AuthTicketID ticket_id = ResultUnwrap(
+    AuthTicketID ticket_id = result_unwrap(
         AuthTicketID,
         Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user")),
         AUTH_NO_TICKET
@@ -115,7 +106,7 @@ void test_exec_request_handler_rejects_reused_auth_ticket(void)
         .arg2 = 0,
     };
 
-    ResultMatch(SystemCallResult, ExecRequest__handler(
+    match_result(SystemCallResult, ExecRequest__handler(
         kernel,
         Some(ProcessPtr, parent),
         (Anything) &request,
@@ -123,12 +114,9 @@ void test_exec_request_handler_rejects_reused_auth_ticket(void)
         0,
         0,
         0
-    ))
-        IsSuccess(code, TEST_ASSERT_GREATER_THAN(0, code))
-        IsError(code, message, TEST_FAIL())
-    End
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
 
-    ResultMatch(SystemCallResult, ExecRequest__handler(
+    match_result(SystemCallResult, ExecRequest__handler(
         kernel,
         Some(ProcessPtr, parent),
         (Anything) &request,
@@ -136,16 +124,13 @@ void test_exec_request_handler_rejects_reused_auth_ticket(void)
         0,
         0,
         0
-    ))
-        IsSuccess(code, TEST_FAIL())
-        IsError(code, message, TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code))
-    End
+    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code); })
 }
 
 void test_exec_request_handler_can_spawn_root_shell_with_auth_ticket(void)
 {
     Process__set_hund_identity(parent);
-    AuthTicketID ticket_id = ResultUnwrap(
+    AuthTicketID ticket_id = result_unwrap(
         AuthTicketID,
         Auth__authenticate(&kernel->auth, parent, bstring("root"), bstring("root")),
         AUTH_NO_TICKET
@@ -161,7 +146,7 @@ void test_exec_request_handler_can_spawn_root_shell_with_auth_ticket(void)
         .arg2 = 0,
     };
 
-    ResultMatch(SystemCallResult, ExecRequest__handler(
+    match_result(SystemCallResult, ExecRequest__handler(
         kernel,
         Some(ProcessPtr, parent),
         (Anything) &request,
@@ -169,10 +154,7 @@ void test_exec_request_handler_can_spawn_root_shell_with_auth_ticket(void)
         0,
         0,
         0
-    ))
-        IsSuccess(code, TEST_ASSERT_GREATER_THAN(0, code))
-        IsError(code, message, TEST_FAIL())
-    End
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
 }
 
 void test_exec_request_handler_can_spawn_with_explicit_stdio(void)
@@ -192,7 +174,7 @@ void test_exec_request_handler_can_spawn_with_explicit_stdio(void)
         .arg2 = 0,
     };
 
-    ResultMatch(SystemCallResult, ExecRequest__handler(
+    match_result(SystemCallResult, ExecRequest__handler(
         kernel,
         Some(ProcessPtr, parent),
         (Anything) &request,
@@ -200,28 +182,11 @@ void test_exec_request_handler_can_spawn_with_explicit_stdio(void)
         0,
         0,
         0
-    ))
-        IsSuccess(pid,
-        {
-            Match(ProcessPtr, Scheduler__find_process_by_pid(kernel->scheduler, pid))
-                IsSome(child,
-                {
-                    ResultMatch(ProcessIOHandle, Process__get_io_handle(child, 0))
-                        IsSuccess(handle, TEST_ASSERT_EQUAL(0x7000, handle))
-                        IsError(code, message, TEST_FAIL())
-                    End
-                    ResultMatch(ProcessIOHandle, Process__get_io_handle(child, 1))
-                        IsSuccess(handle, TEST_ASSERT_EQUAL(0x8000, handle))
-                        IsError(code, message, TEST_FAIL())
-                    End
-                    ResultMatch(ProcessIOHandle, Process__get_io_handle(child, 2))
-                        IsSuccess(handle, TEST_ASSERT_EQUAL(0x9000, handle))
-                        IsError(code, message, TEST_FAIL())
-                    End
-                })
-                IsNone(TEST_FAIL())
-            End
-        })
-        IsError(code, message, TEST_FAIL())
-    End
+    ), success(pid) {
+            match_optional(ProcessPtr, Scheduler__find_process_by_pid(kernel->scheduler, pid), some(child) {
+                    match_result(ProcessIOHandle, Process__get_io_handle(child, 0), success(handle) { TEST_ASSERT_EQUAL(0x7000, handle); }, error(code, message) { TEST_FAIL(); })
+                    match_result(ProcessIOHandle, Process__get_io_handle(child, 1), success(handle) { TEST_ASSERT_EQUAL(0x8000, handle); }, error(code, message) { TEST_FAIL(); })
+                    match_result(ProcessIOHandle, Process__get_io_handle(child, 2), success(handle) { TEST_ASSERT_EQUAL(0x9000, handle); }, error(code, message) { TEST_FAIL(); })
+                }, none() { TEST_FAIL(); })
+        }, error(code, message) { TEST_FAIL(); })
 }

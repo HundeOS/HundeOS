@@ -24,8 +24,8 @@ static Optional(DynString) Humpen__load_fstab(void)
     Optional(DynString) read_result = IO__read_dyn_string(handle, HUMPEN_FSTAB_MAX);
 
     close(handle);
-    Match(DynString, read_result)
-        IsSome(fstab,
+    match_optional(DynString, read_result,
+        some(fstab)
         {
             if (DynString__length(&fstab) <= 0)
             {
@@ -34,8 +34,9 @@ static Optional(DynString) Humpen__load_fstab(void)
             }
 
             return Some(DynString, fstab);
-        })
-    End
+        },
+        none() {}
+    )
 
     return None(DynString);
 }
@@ -50,18 +51,18 @@ static Optional(BString) Humpen__next_token(BStringPtr remaining)
     }
 
     BStringSplit split = BString__split_first_any(&stripped, &humpen_space_delimiters);
-    Match(BString, split.match)
-        IsSome(token,
+    match_optional(BString, split.match,
+        some(token)
         {
             *remaining = split.rest;
             return Some(BString, token);
-        })
-        IsNone(
+        },
+        none()
         {
             *remaining = EMPTY_BSTRING;
             return Some(BString, stripped);
-        })
-    End
+        }
+    )
 
     *remaining = EMPTY_BSTRING;
     return None(BString);
@@ -70,9 +71,10 @@ static Optional(BString) Humpen__next_token(BStringPtr remaining)
 static BString Humpen__line_without_comment(ConstBStringPtr line)
 {
     BStringSplit split = BString__split_first_any(line, &humpen_comment_delimiter);
-    Match(BString, split.match)
-        IsSome(before_comment, return before_comment)
-    End
+    match_optional(BString, split.match,
+        some(before_comment) { return before_comment; },
+        none() {}
+    )
 
     return BString__slice(line, 0, BString__length(line));
 }
@@ -87,10 +89,10 @@ static int Humpen__mount_device_line(BString line)
     }
 
     BString command = EMPTY_BSTRING;
-    Match(BString, Humpen__next_token(&remaining))
-        IsSome(token, command = token)
-        IsNone(return 0)
-    End
+    match_optional(BString, Humpen__next_token(&remaining),
+        some(token) { command = token; },
+        none() { return 0; }
+    )
 
     if (!BString__equals(&command, &humpen_device_command))
     {
@@ -99,42 +101,43 @@ static int Humpen__mount_device_line(BString line)
     }
 
     BString device_path = EMPTY_BSTRING;
-    Match(BString, Humpen__next_token(&remaining))
-        IsSome(token, device_path = token)
-        IsNone(
+    match_optional(BString, Humpen__next_token(&remaining),
+        some(token) { device_path = token; },
+        none()
         {
             printf("humpen: invalid device path\n");
             return 1;
-        })
-    End
+        }
+    )
 
     BString filesystem_type = EMPTY_BSTRING;
-    Match(BString, Humpen__next_token(&remaining))
-        IsSome(token, filesystem_type = token)
-        IsNone(
+    match_optional(BString, Humpen__next_token(&remaining),
+        some(token) { filesystem_type = token; },
+        none()
         {
             printf("humpen: invalid filesystem type\n");
             return 1;
-        })
-    End
+        }
+    )
 
     BString mountpoint = EMPTY_BSTRING;
-    Match(BString, Humpen__next_token(&remaining))
-        IsSome(token, mountpoint = token)
-        IsNone(
+    match_optional(BString, Humpen__next_token(&remaining),
+        some(token) { mountpoint = token; },
+        none()
         {
             printf("humpen: invalid mountpoint\n");
             return 1;
-        })
-    End
+        }
+    )
 
-    Match(BString, Humpen__next_token(&remaining))
-        IsSome(extra,
+    match_optional(BString, Humpen__next_token(&remaining),
+        some(extra)
         {
             printf("humpen: unexpected fstab token\n");
             return 1;
-        })
-    End
+        },
+        none() {}
+    )
 
     IOStatus status = IO__mount_device(&device_path, &filesystem_type, &mountpoint);
     if (status != IO_OK)
@@ -155,28 +158,28 @@ static int Humpen__mount_fstab(ConstDynStringPtr fstab)
 {
     int failures = 0;
 
-    Match(DynStringLines, DynString__lines(fstab))
-        IsSome(lines,
+    match_optional(DynStringLines, DynString__lines(fstab),
+        some(lines)
         {
             LLIterate(DynStringLines, lines, line)
-                Match(BString, DynString__bstring(&line))
-                    IsSome(bstring_line, failures += Humpen__mount_device_line(bstring_line))
-                    IsNone(
+                match_optional(BString, DynString__bstring(&line),
+                    some(bstring_line) { failures += Humpen__mount_device_line(bstring_line); },
+                    none()
                     {
                         printf("humpen: fstab line too long\n");
                         failures++;
-                    })
-                End
-            End
+                    }
+                )
 
+            End
             DynStringLines__dispose_all(&lines);
-        })
-        IsNone(
+        },
+        none()
         {
             printf("humpen: failed to split fstab lines\n");
             failures++;
-        })
-    End
+        }
+    )
 
     return failures;
 }
@@ -184,14 +187,14 @@ static int Humpen__mount_fstab(ConstDynStringPtr fstab)
 int HUMPEN_ENTRYPOINT(void)
 {
     int result = 1;
-    Match(DynString, Humpen__load_fstab())
-        IsSome(fstab,
+    match_optional(DynString, Humpen__load_fstab(),
+        some(fstab)
         {
             result = Humpen__mount_fstab(&fstab) == 0 ? 0 : 1;
             DynString__dispose(&fstab);
-        })
-        IsNone(printf("humpen: no fstab found\n"))
-    End
+        },
+        none() { printf("humpen: no fstab found\n"); }
+    )
 
     return result;
 }

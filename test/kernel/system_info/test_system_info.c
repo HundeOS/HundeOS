@@ -242,14 +242,10 @@ void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
     TEST_ASSERT_EQUAL_UINT64(0xff841000ULL, platform.gic_distributor_physical_base);
     TEST_ASSERT_EQUAL_UINT64(0xff848000ULL, platform.gic_redistributor_physical_base);
     TEST_ASSERT_EQUAL_UINT64(0xff842000ULL, platform.gic_cpu_interface_physical_base);
-    Match(PciInfo, platform.pci)
-        IsSome(info,
-        {
+    match_optional(PciInfo, platform.pci, some(info) {
             TEST_ASSERT_EQUAL_UINT64(0x4010000000ULL, info.ecam_physical_base);
             TEST_ASSERT_EQUAL_UINT64(0x10000000ULL, info.ecam_size);
             TEST_ASSERT_EQUAL_UINT64(0, info.bus_start);
             TEST_ASSERT_EQUAL_UINT64(255, info.bus_end);
-        })
-        IsNone(TEST_FAIL_MESSAGE("UEFI ACPI MCFG should populate PCI info");)
-    End
+        }, none() { TEST_FAIL_MESSAGE("UEFI ACPI MCFG should populate PCI info"); })
 }

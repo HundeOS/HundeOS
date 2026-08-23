@@ -10,16 +10,12 @@ static const Address test_heap_physical_base = 0x70000000ULL;
 
 static void assert_free_success(KernelAddress addr)
 {
-    ResultMatch(HeapCode, Heap__free(&heap, addr))
-        IsError(code, message, TEST_FAIL());
-    End
+    match_result(HeapCode, Heap__free(&heap, addr), success(_) {}, error(code, message) { TEST_FAIL(); })
 }
 
 static void assert_free_fails(KernelAddress addr)
 {
-    ResultMatch(HeapCode, Heap__free(&heap, addr))
-        IsSuccess(code, TEST_FAIL());
-    End
+    match_result(HeapCode, Heap__free(&heap, addr), success(code) { TEST_FAIL(); }, error(code, message) {})
 }
 
 void setUp(void)
@@ -31,9 +27,7 @@ void setUp(void)
             .physical_end = test_heap_physical_base + sizeof(test_heap_memory),
         },
     };
-    ResultMatch(HeapCode, Heap__init(&heap, &system_info))
-        IsError(code, message, TEST_FAIL());
-    End
+    match_result(HeapCode, Heap__init(&heap, &system_info), success(_) {}, error(code, message) { TEST_FAIL(); })
 }
 
 void tearDown(void)

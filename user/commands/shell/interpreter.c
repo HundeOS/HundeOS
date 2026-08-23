@@ -72,30 +72,31 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
     BString remaining = *input;
 
     BStringSplit command_split = Interpreter__parse_token(&remaining);
-    Match(BString, command_split.match)
-        IsSome(parsed_command, self->command.name = parsed_command)
-        IsNone(return self->command)
-    End
+    match_optional(BString, command_split.match,
+        some(parsed_command) { self->command.name = parsed_command; },
+        none() { return self->command; }
+    )
 
     remaining = command_split.rest;
 
     while (CommandArguments__len(&self->command.args) < COMMAND_MAX_ARGS)
     {
         BStringSplit arg_split = Interpreter__parse_token(&remaining);
-        Match(BString, arg_split.match)
-            IsSome(argument,
+        match_optional(BString, arg_split.match,
+            some(argument)
             {
-                ResultMatch(CollectionCode, CommandArguments__push(&self->command.args, argument))
-                    IsError(code, message, return self->command)
-                End
-            })
-            IsNone(break)
-        End
+                match_result(CollectionCode, CommandArguments__push(&self->command.args, argument),
+                    success(_) {},
+                    error(code, message) { return self->command; }
+                )
+            },
+            none() { break; }
+        )
         remaining = arg_split.rest;
     }
 
-    Match(BString, CommandArguments__pop(&self->command.args))
-        IsSome(last_argument,
+    match_optional(BString, CommandArguments__pop(&self->command.args),
+        some(last_argument)
         {
             if (BString__equals(&last_argument, &BACKGROUND_OPERATOR))
             {
@@ -105,8 +106,9 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
             {
                 CommandArguments__push(&self->command.args, last_argument);
             }
-        })
-    End
+        },
+        none() {}
+    )
 
     return self->command;
 }
@@ -130,19 +132,22 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
     }
 
     BString path = Interpreter__command_path(&command->name);
-    const char * arg0 = NULL;
-    const char * arg1 = NULL;
-    const char * arg2 = NULL;
+    const char * arg0 = NULL; // hundelint: ignore-no-null
+    const char * arg1 = NULL; // hundelint: ignore-no-null
+    const char * arg2 = NULL; // hundelint: ignore-no-null
 
-    FAPtrMatch(CommandArguments, CommandArguments__ptr_at(&command->args, 0))
-        IsSome(value, arg0 = BString__cstr(value))
-    End
-    FAPtrMatch(CommandArguments, CommandArguments__ptr_at(&command->args, 1))
-        IsSome(value, arg1 = BString__cstr(value))
-    End
-    FAPtrMatch(CommandArguments, CommandArguments__ptr_at(&command->args, 2))
-        IsSome(value, arg2 = BString__cstr(value))
-    End
+    match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 0),
+        some(value) { arg0 = BString__cstr(value); },
+        none() {}
+    )
+    match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 1),
+        some(value) { arg1 = BString__cstr(value); },
+        none() {}
+    )
+    match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 2),
+        some(value) { arg2 = BString__cstr(value); },
+        none() {}
+    )
     SpawnMode mode = command->background ? P_NOWAIT : P_WAIT;
     SpawnResult result = spawn(mode, BString__cstr(&path), arg0, arg1, arg2);
 

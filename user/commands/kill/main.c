@@ -11,7 +11,7 @@ static bool Kill__matches_signal_name(ConstBStringPtr value, ConstBStringPtr exp
     BString trimmed = *value;
     if (BString__starts_with(&trimmed, &KILL__SIGNAL_PREFIX))
     {
-        trimmed = BString__slice(&trimmed, KILL__SIGNAL_PREFIX.len, trimmed.len);
+        trimmed = BString__slice(&trimmed, BString__length(&KILL__SIGNAL_PREFIX), BString__length(&trimmed));
     }
 
     BString uppercase = BString__uppercase(&trimmed);
@@ -20,12 +20,14 @@ static bool Kill__matches_signal_name(ConstBStringPtr value, ConstBStringPtr exp
 
 static bool Kill__parse_signal_spec(ConstBStringPtr value, ProcessSignal * signal)
 {
-    Match(uint64_t, BString__parse_uint64(value))
-        IsSome(numeric_signal, {
+    match_optional(uint64_t, BString__parse_uint64(value),
+        some(numeric_signal)
+        {
             *signal = (ProcessSignal) numeric_signal;
             return true;
-        })
-    End
+        },
+        none() {}
+    )
 
     if (Kill__matches_signal_name(value, &KILL__TERM_SIGNAL))
     {
@@ -68,7 +70,7 @@ static const char * Kill__signal_result_string(ProcessSignalResult result)
 int main(int argc, char ** argv)
 {
     ProcessSignal signal = PROCESS_SIGNAL_TERMINATE;
-    ConstBStringPtr pid_arg = NULL;
+    ConstBStringPtr pid_arg = NULL; // hundelint: ignore-no-null
     BString pid_storage = EMPTY_BSTRING;
 
     if (argc == 2)
@@ -93,12 +95,9 @@ int main(int argc, char ** argv)
         return 1;
     }
 
-    Match(uint64_t, BString__parse_uint64(pid_arg))
-        IsNone({
-            print("kill: usage kill [-signal] <pid>\n");
-            return 1;
-        })
-        IsSome(pid, {
+    match_optional(uint64_t, BString__parse_uint64(pid_arg),
+        some(pid)
+        {
             ProcessSignalResult result = kill_process(pid, signal);
             if (result != PROCESS_SIGNAL_OK)
             {
@@ -107,8 +106,13 @@ int main(int argc, char ** argv)
             }
 
             return 0;
-        })
-    End
+        },
+        none()
+        {
+            print("kill: usage kill [-signal] <pid>\n");
+            return 1;
+        }
+    )
 
     return 1;
 }

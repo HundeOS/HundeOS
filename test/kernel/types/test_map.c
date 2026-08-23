@@ -18,12 +18,7 @@ void test_kernel_map_wrapper_returns_full_error(void)
 {
     TinyTestMap map = TinyTestMap__new();
 
-    ResultMatch(CollectionCode, TinyTestMap__set(&map, 1, 11))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(CollectionCode, TinyTestMap__set(&map, 1, 11), success(_) {}, error(code, message) { TEST_FAIL(); })
 
-    ResultMatch(CollectionCode, TinyTestMap__set(&map, 2, 12))
-        IsSuccess(index, TEST_FAIL())
-        IsError(code, message, TEST_ASSERT_EQUAL(MAP_FULL, code))
-    End
+    match_result(CollectionCode, TinyTestMap__set(&map, 2, 12), success(index) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(MAP_FULL, code); })
 }

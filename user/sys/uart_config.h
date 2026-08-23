@@ -32,26 +32,28 @@ static bool UartDriverConfig__read_line_value(ConstBStringPtr line, ConstBString
     BStringSplit split = BString__split_first_any(line, &uart_config_delimiter);
     bool matched = false;
 
-    Match(BString, split.match)
-        IsSome(raw_key,
+    match_optional(BString, split.match,
+        some(raw_key)
         {
             BString line_key = BString__strip(&raw_key);
             matched = BString__equals(&line_key, key);
-        })
-    End
+        },
+        none() {}
+    )
 
     if (!matched)
     {
         return false;
     }
 
-    Match(uint64_t, BString__parse_uint64_base(&split.rest, 0))
-        IsSome(parsed,
+    match_optional(uint64_t, BString__parse_uint64_base(&split.rest, 0),
+        some(parsed)
         {
             *value = parsed;
             return true;
-        })
-    End
+        },
+        none() {}
+    )
 
     return false;
 }
@@ -83,24 +85,28 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
     bool found_mmio_size = false;
     bool found_irq = false;
 
-    Match(DynStringLines, DynString__lines(sysinfo))
-        IsSome(lines,
+    match_optional(DynStringLines, DynString__lines(sysinfo),
+        some(lines)
         {
             LLIterate(DynStringLines, lines, line)
-                Match(BString, DynString__bstring(&line))
-                    IsSome(bstring_line, UartDriverConfig__read_config_line(
+                match_optional(BString, DynString__bstring(&line),
+                    some(bstring_line)
+                    {
+                        UartDriverConfig__read_config_line(
                         &bstring_line,
                         self,
                         &found_physical_base,
                         &found_mmio_size,
                         &found_irq
-                    ))
-                End
-            End
+                    ); },
+                    none() {}
+                )
 
+            End
             DynStringLines__dispose_all(&lines);
-        })
-    End
+        },
+        none() {}
+    )
 
     return found_physical_base && found_mmio_size && found_irq;
 }
@@ -116,14 +122,15 @@ static bool UartDriverConfig__load(UartDriverConfigPtr self)
     Optional(DynString) sysinfo = IO__read_dyn_string(handle, UART_CONFIG_MAX);
     close(handle);
 
-    Match(DynString, sysinfo)
-        IsSome(data,
+    match_optional(DynString, sysinfo,
+        some(data)
         {
             bool loaded = UartDriverConfig__read_config(&data, self);
             DynString__dispose(&data);
             return loaded;
-        })
-    End
+        },
+        none() {}
+    )
 
     return false;
 }

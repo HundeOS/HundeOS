@@ -80,9 +80,9 @@ static int Hundeschau__spawn_required_process(
     SpawnResult result = spawn(
         P_NOWAIT,
         BString__cstr(path),
-        BString__is_empty(arg0) ? NULL : BString__cstr(arg0),
-        BString__is_empty(arg1) ? NULL : BString__cstr(arg1),
-        NULL
+        BString__is_empty(arg0) ? NULL : BString__cstr(arg0), // hundelint: ignore-no-null
+        BString__is_empty(arg1) ? NULL : BString__cstr(arg1), // hundelint: ignore-no-null
+        NULL // hundelint: ignore-no-null
     );
     if (result < 0)
     {
@@ -98,9 +98,10 @@ static int Hundeschau__spawn_required_process(
         .arg0 = BString__slice(arg0, 0, BString__length(arg0)),
         .arg1 = BString__slice(arg1, 0, BString__length(arg1)),
     };
-    ResultMatch(CollectionCode, HundeschauRequiredProcesses__push(processes, process))
-        IsError(code, message, {})
-    End
+    match_result(CollectionCode, HundeschauRequiredProcesses__push(processes, process),
+        success(_) {},
+        error(code, message) {}
+    )
 
     return 0;
 }
@@ -114,7 +115,7 @@ static int Hundeschau__spawn_required_process_with_stdio(
     bool respawn
 )
 {
-    SpawnResult result = spawn_with_stdio(P_NOWAIT, BString__cstr(path), stdin_fd, stdout_fd, stderr_fd, NULL, NULL, NULL);
+    SpawnResult result = spawn_with_stdio(P_NOWAIT, BString__cstr(path), stdin_fd, stdout_fd, stderr_fd, NULL, NULL, NULL); // hundelint: ignore-no-null
     if (result < 0)
     {
         printf("hundeschau: failed to start %s: %i\n", BString__cstr(path), (int) result);
@@ -132,9 +133,10 @@ static int Hundeschau__spawn_required_process_with_stdio(
         .arg0 = EMPTY_BSTRING,
         .arg1 = EMPTY_BSTRING,
     };
-    ResultMatch(CollectionCode, HundeschauRequiredProcesses__push(processes, process))
-        IsError(code, message, {})
-    End
+    match_result(CollectionCode, HundeschauRequiredProcesses__push(processes, process),
+        success(_) {},
+        error(code, message) {}
+    )
 
     return 0;
 }
@@ -178,15 +180,16 @@ static Optional(HundeschauRequiredProcessPtr) Hundeschau__find_required_process(
 {
     for (uint64_t i = 0; i < HundeschauRequiredProcesses__len(processes); i++)
     {
-        FAPtrMatch(HundeschauRequiredProcesses, HundeschauRequiredProcesses__ptr_at(processes, i))
-            IsSome(process,
+        match_optional(HundeschauRequiredProcesses__type_ptr, HundeschauRequiredProcesses__ptr_at(processes, i),
+            some(process)
             {
                 if (process->pid == pid)
                 {
                     return Some(HundeschauRequiredProcessPtr, process);
                 }
-            })
-        End
+            },
+            none() {}
+        )
     }
 
     return None(HundeschauRequiredProcessPtr);
@@ -202,18 +205,18 @@ static Optional(BString) Hundeschau__next_token(BStringPtr remaining)
     }
 
     BStringSplit split = BString__split_first_any(&stripped, &hundeschau_space_delimiters);
-    Match(BString, split.match)
-        IsSome(token,
+    match_optional(BString, split.match,
+        some(token)
         {
             *remaining = split.rest;
             return Some(BString, token);
-        })
-        IsNone(
+        },
+        none()
         {
             *remaining = EMPTY_BSTRING;
             return Some(BString, stripped);
-        })
-    End
+        }
+    )
 
     *remaining = EMPTY_BSTRING;
     return None(BString);
@@ -222,9 +225,10 @@ static Optional(BString) Hundeschau__next_token(BStringPtr remaining)
 static BString Hundeschau__line_without_comment(ConstBStringPtr line)
 {
     BStringSplit split = BString__split_first_any(line, &hundeschau_comment_delimiter);
-    Match(BString, split.match)
-        IsSome(before_comment, return before_comment)
-    End
+    match_optional(BString, split.match,
+        some(before_comment) { return before_comment; },
+        none() {}
+    )
 
     return BString__slice(line, 0, BString__length(line));
 }
@@ -240,8 +244,8 @@ static Optional(DynString) Hundeschau__load_config(void)
     Optional(DynString) read_result = IO__read_dyn_string(handle, HUNDESCHAU_CONFIG_MAX);
     close(handle);
 
-    Match(DynString, read_result)
-        IsSome(config,
+    match_optional(DynString, read_result,
+        some(config)
         {
             if (DynString__length(&config) <= 0)
             {
@@ -250,8 +254,9 @@ static Optional(DynString) Hundeschau__load_config(void)
             }
 
             return Some(DynString, config);
-        })
-    End
+        },
+        none() {}
+    )
 
     return None(DynString);
 }
@@ -268,10 +273,10 @@ static int Hundeschau__spawn_configured_driver_line(
     }
 
     BString command = EMPTY_BSTRING;
-    Match(BString, Hundeschau__next_token(&remaining))
-        IsSome(token, command = token)
-        IsNone(return 0)
-    End
+    match_optional(BString, Hundeschau__next_token(&remaining),
+        some(token) { command = token; },
+        none() { return 0; }
+    )
 
     if (!BString__equals(&command, &hundeschau_driver_command))
     {
@@ -279,10 +284,10 @@ static int Hundeschau__spawn_configured_driver_line(
     }
 
     BString path = EMPTY_BSTRING;
-    Match(BString, Hundeschau__next_token(&remaining))
-        IsSome(token, path = token)
-        IsNone(return 1)
-    End
+    match_optional(BString, Hundeschau__next_token(&remaining),
+        some(token) { path = token; },
+        none() { return 1; }
+    )
 
     if (BString__is_empty(&path))
     {
@@ -291,9 +296,10 @@ static int Hundeschau__spawn_configured_driver_line(
 
     bool respawn = true;
     BString option = EMPTY_BSTRING;
-    Match(BString, Hundeschau__next_token(&remaining))
-        IsSome(token, option = token)
-    End
+    match_optional(BString, Hundeschau__next_token(&remaining),
+        some(token) { option = token; },
+        none() {}
+    )
 
     if (!BString__is_empty(&option))
     {
@@ -301,17 +307,19 @@ static int Hundeschau__spawn_configured_driver_line(
         {
             respawn = false;
             option = EMPTY_BSTRING;
-            Match(BString, Hundeschau__next_token(&remaining))
-                IsSome(token, option = token)
-            End
+            match_optional(BString, Hundeschau__next_token(&remaining),
+                some(token) { option = token; },
+                none() {}
+            )
         }
         else if (BString__equals(&option, &hundeschau_respawn_option))
         {
             respawn = true;
             option = EMPTY_BSTRING;
-            Match(BString, Hundeschau__next_token(&remaining))
-                IsSome(token, option = token)
-            End
+            match_optional(BString, Hundeschau__next_token(&remaining),
+                some(token) { option = token; },
+                none() {}
+            )
         }
     }
 
@@ -332,9 +340,10 @@ static int Hundeschau__spawn_configured_driver_line(
         }
 
         option = EMPTY_BSTRING;
-        Match(BString, Hundeschau__next_token(&remaining))
-            IsSome(token, option = token)
-        End
+        match_optional(BString, Hundeschau__next_token(&remaining),
+            some(token) { option = token; },
+            none() {}
+        )
     }
 
     if (!BString__is_empty(&option))
@@ -356,24 +365,26 @@ static int Hundeschau__spawn_configured_drivers(
 {
     int failures = 0;
 
-    Match(DynStringLines, DynString__lines(config))
-        IsSome(lines,
+    match_optional(DynStringLines, DynString__lines(config),
+        some(lines)
         {
             LLIterate(DynStringLines, lines, line)
-                Match(BString, DynString__bstring(&line))
-                    IsSome(bstring_line, failures += Hundeschau__spawn_configured_driver_line(
+                match_optional(BString, DynString__bstring(&line),
+                    some(bstring_line)
+                    {
+                        failures += Hundeschau__spawn_configured_driver_line(
                         processes,
                         bstring_line,
                         framebuffer_present
-                    ))
-                    IsNone(failures++)
-                End
-            End
+                    ); },
+                    none() { failures++; }
+                )
 
+            End
             DynStringLines__dispose_all(&lines);
-        })
-        IsNone(failures++)
-    End
+        },
+        none() { failures++; }
+    )
 
     return failures;
 }
@@ -410,14 +421,14 @@ static int Hundeschau__initialise_required_processes(HundeschauRequiredProcesses
     FramebufferConfig framebuffer_config = { 0 };
     bool framebuffer_present = FramebufferConfig__load(&framebuffer_config);
 
-    Match(DynString, Hundeschau__load_config())
-        IsSome(config,
+    match_optional(DynString, Hundeschau__load_config(),
+        some(config)
         {
             failures += Hundeschau__spawn_configured_drivers(processes, &config, framebuffer_present);
             DynString__dispose(&config);
-        })
-        IsNone(failures += Hundeschau__spawn_default_drivers(processes, framebuffer_present))
-    End
+        },
+        none() { failures += Hundeschau__spawn_default_drivers(processes, framebuffer_present); }
+    )
 
     if (framebuffer_present)
     {
@@ -452,8 +463,8 @@ int HUNDESCHAU_ENTRYPOINT(void)
             return 1;
         }
 
-        Match(HundeschauRequiredProcessPtr, Hundeschau__find_required_process(&required_processes, event.pid))
-            IsSome(process,
+        match_optional(HundeschauRequiredProcessPtr, Hundeschau__find_required_process(&required_processes, event.pid),
+            some(process)
             {
                 if (!process->respawn)
                 {
@@ -467,16 +478,16 @@ int HUNDESCHAU_ENTRYPOINT(void)
                         process->stdin_fd,
                         process->stdout_fd,
                         process->stderr_fd,
-                        NULL,
-                        NULL,
-                        NULL
+                        NULL, // hundelint: ignore-no-null
+                        NULL, // hundelint: ignore-no-null
+                        NULL // hundelint: ignore-no-null
                     )
                     : spawn(
                         P_NOWAIT,
                         BString__cstr(&process->path),
-                        BString__is_empty(&process->arg0) ? NULL : BString__cstr(&process->arg0),
-                        BString__is_empty(&process->arg1) ? NULL : BString__cstr(&process->arg1),
-                        NULL
+                        BString__is_empty(&process->arg0) ? NULL : BString__cstr(&process->arg0), // hundelint: ignore-no-null
+                        BString__is_empty(&process->arg1) ? NULL : BString__cstr(&process->arg1), // hundelint: ignore-no-null
+                        NULL // hundelint: ignore-no-null
                     );
                 if (respawn_result < 0)
                 {
@@ -485,7 +496,8 @@ int HUNDESCHAU_ENTRYPOINT(void)
                 }
 
                 process->pid = (uint64_t) respawn_result;
-            })
-        End
+            },
+            none() {}
+        )
     }
 }

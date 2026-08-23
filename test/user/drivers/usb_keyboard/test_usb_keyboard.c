@@ -128,15 +128,9 @@ void test_usb_keyboard_publishes_pending_bytes(void)
         .pending = UsbKeyboardPendingBuffer__new(),
     };
 
-    ResultMatch(Pos, UsbKeyboardPendingBuffer__push(&keyboard.pending, 'u'))
-        IsError(code, message, TEST_FAIL())
-    End;
-    ResultMatch(Pos, UsbKeyboardPendingBuffer__push(&keyboard.pending, 's'))
-        IsError(code, message, TEST_FAIL())
-    End;
-    ResultMatch(Pos, UsbKeyboardPendingBuffer__push(&keyboard.pending, 'b'))
-        IsError(code, message, TEST_FAIL())
-    End;
+    match_result(Pos, UsbKeyboardPendingBuffer__push(&keyboard.pending, 'u'), success(_) {}, error(code, message) { TEST_FAIL(); });
+    match_result(Pos, UsbKeyboardPendingBuffer__push(&keyboard.pending, 's'), success(_) {}, error(code, message) { TEST_FAIL(); });
+    match_result(Pos, UsbKeyboardPendingBuffer__push(&keyboard.pending, 'b'), success(_) {}, error(code, message) { TEST_FAIL(); });
 
     UsbKeyboard__publish_pending(&keyboard);
 

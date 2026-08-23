@@ -14,17 +14,17 @@ int mutex_trylock(mutex_t *m);
 void mutex_lock(mutex_t *m);
 void mutex_unlock(mutex_t *m);
 
-#define _cs_return\
+#define cs_return\
     mutex_unlock(__mutex); \
     __d_printf(MUTEX, "Returning from critical_section %s:%i\n", __FILE__, __LINE__);\
     return \
 
-#define _cs_exit_then(code)\
+#define cs_exit_then(code)\
     __d_printf(MUTEX, "Early exit from critical_section %s:%i\n", __FILE__, __LINE__);\
     mutex_unlock(__mutex); \
     code; \
 
-#define CriticalSection(m, block) \
+#define critical_section(m, block) \
     { \
         __d_printf(MUTEX, "Entering critical_section (%s) %s:%i\n", #m, __FILE__, __LINE__);\
         mutex_t * __mutex = &m;\
@@ -36,7 +36,7 @@ void mutex_unlock(mutex_t *m);
         __d_printf(MUTEX, "Leaving critical_section (%s) %s:%i\n", #m, __FILE__, __LINE__);\
     }
 
-#define CriticalSectionTry(m, block, failed_block) \
+#define critical_section_try(m, block, failed_block) \
     { \
         __d_printf(MUTEX, "Trying critical_section (%s) %s:%i\n", #m, __FILE__, __LINE__);\
         mutex_t * __mutex = &m;\

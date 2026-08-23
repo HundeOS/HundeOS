@@ -51,10 +51,7 @@ void test_irq_dispatcher_returns_unhandled_when_no_consumer_registered(void)
         .process_context = NULL,
     };
 
-    ResultMatch(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_DISPATCH_UNHANDLED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context), success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_UNHANDLED, status); }, error(code, message) { TEST_FAIL(); })
 }
 
 void test_irq_dispatcher_calls_registered_kernel_consumer(void)
@@ -67,17 +64,11 @@ void test_irq_dispatcher_calls_registered_kernel_consumer(void)
         .process_context = NULL,
     };
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_kernel(
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_kernel(
         kernel->irq_dispatcher, 27, kernel_consumer, &data
-    ))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    ), success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); }, error(code, message) { TEST_FAIL(); })
 
-    ResultMatch(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, 27, &context))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, 27, &context), success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status); }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_TRUE(kernel_consumer_called);
     TEST_ASSERT_EQUAL_UINT64(27, observed_context.irq);
@@ -97,28 +88,19 @@ void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event
         .process_context = NULL,
     };
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, 48, process))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, 48, process), success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__enabled_irq());
     TEST_ASSERT_EQUAL_UINT64(1, Arch__enable_count());
 
-    ResultMatch(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_DISPATCH_RESCHEDULE, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context), success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_RESCHEDULE, status); }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__masked_irq());
     TEST_ASSERT_EQUAL_UINT64(1, Arch__mask_count());
 
     ServiceEvent event = (ServiceEvent) { 0 };
     KernelContext kernel_context = KernelContext__new(Some(ProcessID, process->pid), Some(SchedulerPtr, kernel->scheduler));
-    ResultMatch(ServiceEvent, Scheduler__service_wait(kernel->scheduler, process, &kernel_context, None(Continuation)))
-        IsSuccess(wait_event, event = wait_event)
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(ServiceEvent, Scheduler__service_wait(kernel->scheduler, process, &kernel_context, None(Continuation)), success(wait_event) { event = wait_event; }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);
     TEST_ASSERT_EQUAL_UINT64(48, event.source);
@@ -135,24 +117,15 @@ void test_irq_dispatcher_rejects_duplicate_kernel_registration(void)
         .process_context = NULL,
     };
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_kernel(
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_kernel(
         kernel->irq_dispatcher, 27, kernel_consumer, &first_data
-    ))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    ), success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); }, error(code, message) { TEST_FAIL(); })
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_kernel(
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_kernel(
         kernel->irq_dispatcher, 27, kernel_consumer, &second_data
-    ))
-        IsSuccess(status, TEST_FAIL())
-        IsError(code, message, TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code))
-    End
+    ), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code); })
 
-    ResultMatch(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, 27, &context))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, 27, &context), success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status); }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL_PTR(&first_data, observed_data);
 }
@@ -164,15 +137,9 @@ void test_irq_dispatcher_rejects_duplicate_service_registration(void)
     ProcessPtr second_process = dummy_process(2, 0, PROC_STATE_READY);
     second_process->process_class = PROCESS_CLASS_SERVICE;
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, 48, first_process))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, 48, first_process), success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); }, error(code, message) { TEST_FAIL(); })
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, 48, second_process))
-        IsSuccess(status, TEST_FAIL())
-        IsError(code, message, TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code))
-    End
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, 48, second_process), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code); })
 
     TEST_ASSERT_EQUAL_UINT64(1, Arch__enable_count());
 }
@@ -182,17 +149,11 @@ void test_irq_dispatcher_rejects_service_registration_when_kernel_consumer_exist
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_kernel(
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_kernel(
         kernel->irq_dispatcher, 48, kernel_consumer, NULL
-    ))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    ), success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); }, error(code, message) { TEST_FAIL(); })
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, 48, process))
-        IsSuccess(status, TEST_FAIL())
-        IsError(code, message, TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code))
-    End
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, 48, process), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code); })
 
     TEST_ASSERT_EQUAL_UINT64(0, Arch__enable_count());
 }
@@ -205,23 +166,14 @@ void test_irq_dispatcher_dispose_process_resources_unregisters_service_consumer(
     second_process->process_class = PROCESS_CLASS_SERVICE;
     IRQNumber irq = 48;
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, first_process))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, first_process), success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); }, error(code, message) { TEST_FAIL(); })
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, first_process))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(IRQRegistrationStatus, IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, first_process), success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL_UINT64(irq, Arch__masked_irq());
     TEST_ASSERT_EQUAL_UINT64(1, Arch__mask_count());
 
-    ResultMatch(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, second_process))
-        IsSuccess(status, TEST_ASSERT_EQUAL(IRQ_REGISTERED, status))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, second_process), success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); }, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL_UINT64(2, Arch__enable_count());
 }

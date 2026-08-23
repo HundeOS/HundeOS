@@ -22,12 +22,10 @@ static Result(BString) Syslog__copy_string(Anything string_address, StringPos ma
     StringPos position = 0;
     while (position < max_len && source[position] != '\0')
     {
-        message.data[position] = source[position];
+        BString__push_char(&message, source[position]);
         position++;
     }
 
-    message.data[position] = '\0';
-    message.len = position;
     return Success(BString, message);
 }
 
@@ -48,20 +46,20 @@ static void Syslog__write(BString tag, Optional(ProcessPtr) proc, BString messag
         return;
     }
 
-    Match(ProcessPtr, proc)
-        IsSome(process,
+    match_optional(ProcessPtr, proc,
+        some(process)
         {
             k_printf("cpu=%i - %s - ", CPU__id(), cstr(tag));
             k_printf("pid=%i name=%s: %s", process->pid, cstr(process->name), cstr(message));
             return;
-        })
-        IsNone(
+        },
+        none()
         {
             k_printf("cpu=%i - %s - ", CPU__id(), cstr(tag));
             k_printf("pid=none: %s", cstr(message));
             return;
-        })
-    End
+        }
+    )
 }
 
 Result(SystemCallResult) Syslog__handler(
@@ -74,23 +72,23 @@ Result(SystemCallResult) Syslog__handler(
     Anything arg5
 )
 {
-    ResultMatch(BString, Syslog__copy_message(arg1))
-        IsSuccess(message,
+    match_result(BString, Syslog__copy_message(arg1),
+        success(message)
         {
             BString tag = BSTRING_NEW("SYSLOG");
             if (arg2 != 0)
             {
-                ResultMatch(BString, Syslog__copy_tag(arg2))
-                    IsSuccess(copied_tag, tag = copied_tag)
-                    IsError(code, message, return Error(SystemCallResult, message, code))
-                End
+                match_result(BString, Syslog__copy_tag(arg2),
+                    success(copied_tag) { tag = copied_tag; },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                )
             }
 
             Syslog__write(tag, proc, message);
             return Success(SystemCallResult, SYSLOG_OK);
-        })
-        IsError(code, message, return Error(SystemCallResult, message, code))
-    End
+        },
+        error(code, message) { return Error(SystemCallResult, message, code); }
+    )
 
     return Error(SystemCallResult, invalid_syslog_message, SYSLOG_INVALID_ARGUMENT);
 }

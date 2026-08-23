@@ -67,11 +67,6 @@
         } \
     } \
 
-#define Match(T, opt) \
-{ \
-    typedef opt__##T##__type value_type; \
-    _Optional(T) optional = opt; \
-
 #define End \
 } \
 
@@ -81,20 +76,26 @@
 #define is_nothing(optional) \
     !optional.present
 
-#define IsSome(val_name, block) \
-    if (optional.present) \
+#define some(val_name) \
     { \
-        value_type val_name = optional.some.val; \
-        block; \
-    } \
+        value_type val_name = __optional.some.val;
 
-#define IsNone(block) \
-    if (!optional.present) \
-    { \
-        block; \
+#define none() \
+    {
+
+#define match_optional(T, opt, some_branch, none_branch) \
+{ \
+    typedef opt__##T##__type value_type; \
+    _Optional(T) __optional = opt; \
+    if (__optional.present) \
+        some_branch \
     } \
+    else \
+        none_branch \
+    } \
+} \
 
 #define Unwrap(T, opt, alternate_val) \
-    opt.present ? opt.some.val : alternate_val\
+    ((opt).present ? (opt).some.val : (alternate_val))\
 
 #endif

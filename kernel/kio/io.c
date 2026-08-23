@@ -9,12 +9,6 @@ static BString unreachable_code = BSTRING_NEW("unreachable code");
     IOContext__dispose(context); \
     return res;
 
-#define CallIOMatch(RT, context, block) \
-    Result(RT) res = block; \
-    IOContext__dispose(context); \
-    ResultMatch(RT, res) \
-
-
 // write sets the number of bytes (len) to be written
 ExternalBuffer DataBuffer__convert_to_external_buffer_for_write(DataBufferPtr self)
 {
@@ -51,15 +45,17 @@ Result(ByteCount) read(OriginatingContext context, IOHandle handle, DataBufferPt
     Optional(ExternalBuffer) external_buffer = Some(ExternalBuffer, DataBuffer__convert_to_external_buffer_for_read(buffer));
     IOContextPtr io_context = IOContext__from_originating_context(context, Some(IOHandle, handle), external_buffer);
 
-    CallIOMatch(ByteCount, io_context, IOSubsystem__read(context.kernel->io_subsystem, io_context))
-        IsSuccess(bytes_read,
+    Result(ByteCount) res = IOSubsystem__read(context.kernel->io_subsystem, io_context);
+    IOContext__dispose(io_context);
+    match_result(ByteCount, res,
+        success(bytes_read)
         {
             __d_printf(EXEC, "Read %i bytes\n", bytes_read);
             buffer->len = bytes_read;
             return Success(ByteCount, bytes_read);
-        });
-        IsError(code, message, return Error(ByteCount, message, code));
-    End
+        },
+        error(code, message) { return Error(ByteCount, message, code); }
+    )
 
     return Error(ByteCount, unreachable_code, IO_PANIC);
 }
@@ -69,14 +65,16 @@ Result(ByteCount) read_into(OriginatingContext context, IOHandle handle, DataPtr
     Optional(ExternalBuffer) external_buffer = Some(ExternalBuffer, ExternalBuffer__new(target, size));
     IOContextPtr io_context = IOContext__from_originating_context(context, Some(IOHandle, handle), external_buffer);
 
-    CallIOMatch(ByteCount, io_context, IOSubsystem__read(context.kernel->io_subsystem, io_context))
-        IsSuccess(bytes_read,
+    Result(ByteCount) res = IOSubsystem__read(context.kernel->io_subsystem, io_context);
+    IOContext__dispose(io_context);
+    match_result(ByteCount, res,
+        success(bytes_read)
         {
             __d_printf(EXEC, "Read %i bytes\n", bytes_read);
             return Success(ByteCount, bytes_read);
-        });
-        IsError(code, message, return Error(ByteCount, message, code));
-    End
+        },
+        error(code, message) { return Error(ByteCount, message, code); }
+    )
 
     return Error(ByteCount, unreachable_code, IO_PANIC);
 }

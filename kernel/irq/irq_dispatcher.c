@@ -15,11 +15,11 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_kernel(
     IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, void * data
 )
 {
-    if (self == NULL)
+    if (self == NULL) // hundelint: ignore-no-null
     {
         return Error(IRQRegistrationStatus, missing_dispatcher, IRQ_REGISTRATION_ERROR);
     }
-    if (consumer == NULL)
+    if (consumer == NULL) // hundelint: ignore-no-null
     {
         return Error(IRQRegistrationStatus, missing_kernel_consumer, IRQ_INVALID_CONSUMER);
     }
@@ -28,14 +28,15 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_kernel(
         .type = IRQ_CONSUMER_KERNEL,
         .kernel_consumer = consumer,
         .kernel_data = data,
-        .service_process = NULL,
+        .service_process = NULL, // hundelint: ignore-no-null
     };
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        MapPtrMatch(IRQConsumerMap, IRQConsumerMap__get_ptr(&self->consumers, irq))
-            IsSome(existing, _cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED))
-        End
+        match_optional(IRQConsumerMap__value_type_ptr, IRQConsumerMap__get_ptr(&self->consumers, irq),
+            some(existing) { cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED); },
+            none() {}
+        )
         IRQConsumerMap__set(&self->consumers, irq, irq_consumer);
     });
 
@@ -46,15 +47,15 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(
     IRQDispatcherPtr self, IRQNumber irq, ProcessPtr process
 )
 {
-    if (self == NULL)
+    if (self == NULL) // hundelint: ignore-no-null
     {
         return Error(IRQRegistrationStatus, missing_dispatcher, IRQ_REGISTRATION_ERROR);
     }
-    if (process == NULL)
+    if (process == NULL) // hundelint: ignore-no-null
     {
         return Error(IRQRegistrationStatus, missing_service_process, IRQ_INVALID_CONSUMER);
     }
-    if (self->scheduler == NULL)
+    if (self->scheduler == NULL) // hundelint: ignore-no-null
     {
         return Error(IRQRegistrationStatus, missing_scheduler, IRQ_REGISTRATION_ERROR);
     }
@@ -67,27 +68,30 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(
 
     IRQConsumer irq_consumer = (IRQConsumer) {
         .type = IRQ_CONSUMER_SERVICE,
-        .kernel_consumer = NULL,
-        .kernel_data = NULL,
+        .kernel_consumer = NULL, // hundelint: ignore-no-null
+        .kernel_data = NULL, // hundelint: ignore-no-null
         .service_process = process,
     };
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        MapPtrMatch(IRQConsumerMap, IRQConsumerMap__get_ptr(&self->consumers, irq))
-            IsSome(existing, _cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED))
-        End
+        match_optional(IRQConsumerMap__value_type_ptr, IRQConsumerMap__get_ptr(&self->consumers, irq),
+            some(existing) { cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED); },
+            none() {}
+        )
         IRQConsumerMap__set(&self->consumers, irq, irq_consumer);
     });
     __d_printf(IODEV, "irq register service irq=%i pid=%i name=%s\n", irq, process->pid, cstr(process->name));
 
-    ResultMatch(ServiceCode, Scheduler__subscribe_irq(self->scheduler, process, irq))
-        IsError(code, message, return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR))
-    End
+    match_result(ServiceCode, Scheduler__subscribe_irq(self->scheduler, process, irq),
+        success(_) {},
+        error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
+    )
 
-    ResultMatch(SubsystemInitStatus, Arch__enable_irq(interrupt_controller, irq))
-        IsError(code, message, return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR))
-    End
+    match_result(SubsystemInitStatus, Arch__enable_irq(interrupt_controller, irq),
+        success(_) {},
+        error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
+    )
 
     return Success(IRQRegistrationStatus, IRQ_REGISTERED);
 }
@@ -96,11 +100,11 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(
     IRQDispatcherPtr self, ProcessPtr process
 )
 {
-    if (self == NULL)
+    if (self == NULL) // hundelint: ignore-no-null
     {
         return Error(IRQRegistrationStatus, missing_dispatcher, IRQ_REGISTRATION_ERROR);
     }
-    if (process == NULL)
+    if (process == NULL) // hundelint: ignore-no-null
     {
         return Error(IRQRegistrationStatus, missing_service_process, IRQ_INVALID_CONSUMER);
     }
@@ -113,26 +117,28 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(
 
     IRQNumbers stale_irqs = IRQNumbers__new();
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         MapIterate(IRQConsumerMap, self->consumers, index, irq, consumer)
             if (consumer.type == IRQ_CONSUMER_SERVICE && consumer.service_process == process)
             {
-                ResultMatch(CollectionCode, IRQNumbers__push(&stale_irqs, irq))
-                    IsError(code, message, _cs_return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR))
-                End
+                match_result(CollectionCode, IRQNumbers__push(&stale_irqs, irq),
+                    success(_) {},
+                    error(code, message) { cs_return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
+                )
             }
-        End
 
+        End
         FAIterate(IRQNumbers, stale_irqs, irq_index, irq)
             IRQConsumerMap__delete(&self->consumers, irq);
             Arch__mask_irq(interrupt_controller, irq);
         End
     });
 
-    ResultMatch(ServiceCode, ServiceEventDispatcher__unsubscribe_process(&self->scheduler->service_event_dispatcher, process))
-        IsError(code, message, return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR))
-    End
+    match_result(ServiceCode, ServiceEventDispatcher__unsubscribe_process(&self->scheduler->service_event_dispatcher, process),
+        success(_) {},
+        error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
+    )
 
     return Success(IRQRegistrationStatus, IRQ_REGISTERED);
 }
@@ -145,13 +151,13 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(
     {
         __d_printf(IODEV, "irq dispatcher dispatch irq=%i\n", irq);
     }
-    if (self == NULL)
+    if (self == NULL) // hundelint: ignore-no-null
     {
         return Error(IRQDispatchStatus, missing_dispatcher, IRQ_DISPATCH_ERROR);
     }
 
-    MapPtrMatch(IRQConsumerMap, IRQConsumerMap__get_ptr(&self->consumers, irq))
-        IsSome(consumer,
+    match_optional(IRQConsumerMap__value_type_ptr, IRQConsumerMap__get_ptr(&self->consumers, irq),
+        some(consumer)
         {
             if (consumer->type == IRQ_CONSUMER_KERNEL)
             {
@@ -161,13 +167,14 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(
             if (consumer->type == IRQ_CONSUMER_SERVICE)
             {
                 __d_printf(IODEV, "irq dispatcher service irq=%i\n", irq);
-                ResultMatch(ServiceCode, Scheduler__send_irq_event(self->scheduler, irq))
-                    IsSuccess(_, return Success(IRQDispatchStatus, IRQ_DISPATCH_RESCHEDULE))
-                    IsError(code, message, return Error(IRQDispatchStatus, message, IRQ_DISPATCH_ERROR))
-                End
+                match_result(ServiceCode, Scheduler__send_irq_event(self->scheduler, irq),
+                    success(_) { return Success(IRQDispatchStatus, IRQ_DISPATCH_RESCHEDULE); },
+                    error(code, message) { return Error(IRQDispatchStatus, message, IRQ_DISPATCH_ERROR); }
+                )
             }
-        })
-    End
+        },
+        none() {}
+    )
 
     return Success(IRQDispatchStatus, IRQ_DISPATCH_UNHANDLED);
 }

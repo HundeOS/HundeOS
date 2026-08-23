@@ -7,22 +7,25 @@ code is under `arch/`, userspace code is under `user/`, and unit tests are under
 
 ## Developer Setup
 
-Install the cross compiler, QEMU, Python, and FAT filesystem tools.
+Install the cross compiler, QEMU, uv, and FAT filesystem tools.
 
 On macOS with Homebrew:
 
 ```sh
-brew install aarch64-elf-gcc qemu dosfstools
+brew install aarch64-elf-gcc qemu dosfstools uv
 ```
 
 On Linux:
 
 ```sh
-sudo apt install gcc-aarch64-none-elf qemu-system-arm dosfstools python3
+sudo apt install gcc-aarch64-none-elf qemu-system-arm dosfstools
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 The build expects `mkfs.fat` from `dosfstools` when creating the raw virtio block
-disk image.
+disk image. Python tooling is managed from `pyproject.toml`; run `make
+python-venv` to create or update the local `.venv`, or use any make target that
+invokes Python and it will sync the environment first.
 
 ## Build And Test
 
@@ -57,7 +60,7 @@ make qemu-virt-2cpus-trace
 
 QEMU attaches `build/disk.img` as a raw virtio block device. The Makefile creates
 this as a 64 MiB FAT32 volume labelled `KERNELFS` and copies
-`tools/disk_test_file.txt` into the root directory as `TEST.TXT`.
+`tools/disk_images/disk_test_file.txt` into the root directory as `TEST.TXT`.
 
 Create or recreate the disk image:
 

@@ -24,14 +24,20 @@ static bool Stream__handle_match(IOContextPtr * context_p, void * handle_p)
     IOContextPtr context = *context_p;
     IOInternalHandle handle = *(IOInternalHandle *) handle_p;
 
-    return handle == device_internal_handle(Unwrap(IOHandle, context->handle, -1));
+    match_optional(IOHandle, context->handle,
+        some(context_handle)
+        {
+            return handle == device_internal_handle(context_handle);
+        },
+        none() { return false; }
+    )
 }
 
 static Result(IOInternalHandle) Stream__open(IOStatePtr state, BString path, Flags flags)
 {
     StreamStatePtr self = (StreamStatePtr) state;
     IOInternalHandle handle = -1;
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         handle = ++self->handle_counter;
     });
@@ -42,21 +48,23 @@ static Result(IOInternalHandle) Stream__close(IOStatePtr state, IOInternalHandle
 {
     StreamStatePtr self = (StreamStatePtr) state;
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         IOBuffer__reset(&self->read_buffer);
         IOBuffer__reset(&self->write_buffer);
         self->data_available = false;
         self->eof = false;
 
-        FindResultMatch(StreamParkedContexts, StreamParkedContexts__find(&self->parked_contexts, Stream__handle_match, &handle))
-            IsSome(found,
+        match_optional(StreamParkedContexts__FindResult, StreamParkedContexts__find(&self->parked_contexts, Stream__handle_match, &handle),
+            some(found)
             {
-                ResultMatch(CollectionCode, StreamParkedContexts__remove(&self->parked_contexts, *found.value))
-                    IsError(code, message, __d_println(IODEV, "no parked context found for handle"));
-                End
-            })
-        End
+                match_result(CollectionCode, StreamParkedContexts__remove(&self->parked_contexts, *found.value),
+                    success(_) {},
+                    error(code, message) { __d_println(IODEV, "no parked context found for handle"); }
+                );
+            },
+            none() {}
+        )
     });
 
     return Success(IOInternalHandle, handle);
@@ -84,14 +92,15 @@ static Result(ByteCount) Stream__write(IOStatePtr state, IOInternalHandle handle
     StreamStatePtr self = (StreamStatePtr) state;
     DataPtr cursor = data;
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         self->eof = false;
         for (size_t i = 0; i < size; i++)
         {
-            ResultMatch(Pos, IOBuffer__push(&self->write_buffer, cursor[i]))
-                IsError(code, message, _cs_return Error(ByteCount, message, code))
-            End
+            match_result(Pos, IOBuffer__push(&self->write_buffer, cursor[i]),
+                success(_) {},
+                error(code, message) { cs_return Error(ByteCount, message, code); }
+            )
         }
     });
 
@@ -102,11 +111,12 @@ static Result(ParkStatus) Stream__park(IOStatePtr state, IOContextPtr parked_con
 {
     StreamStatePtr self = (StreamStatePtr) state;
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        ResultMatch(CollectionCode, StreamParkedContexts__push(&self->parked_contexts, parked_context))
-            IsError(code, message, _cs_return Error(ParkStatus, message, code))
-        End
+        match_result(CollectionCode, StreamParkedContexts__push(&self->parked_contexts, parked_context),
+            success(_) {},
+            error(code, message) { cs_return Error(ParkStatus, message, code); }
+        )
         __d_println(IODEV, "parked stream context\n");
     });
 
@@ -117,11 +127,12 @@ static Result(ParkStatus) Stream__unpark(IOStatePtr state)
 {
     StreamStatePtr self = (StreamStatePtr) state;
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        Match(IOContextPtr, StreamParkedContexts__pop(&self->parked_contexts))
-            IsNone(_cs_return Error(ParkStatus, bstring("No parked stream context"), ARRAY_EMPTY))
-        End
+        match_optional(IOContextPtr, StreamParkedContexts__pop(&self->parked_contexts),
+            some(_) {},
+            none() { cs_return Error(ParkStatus, bstring("No parked stream context"), ARRAY_EMPTY); }
+        )
     });
 
     return Success(ParkStatus, IO_UNPARK_OK);
@@ -135,20 +146,21 @@ static Optional(IOContextPtr) Stream__last_parked_context_with_handle(StreamStat
     while (searching)
     {
         searching = false;
-        Match(IOContextPtr, StreamParkedContexts__at(&self->parked_contexts, -1))
-            IsSome(context,
+        match_optional(IOContextPtr, StreamParkedContexts__at(&self->parked_contexts, -1),
+            some(context)
             {
-                Match(IOHandle, context->handle)
-                    IsSome(handle, parked_context = Some(IOContextPtr, context))
-                    IsNone(
+                match_optional(IOHandle, context->handle,
+                    some(handle) { parked_context = Some(IOContextPtr, context); },
+                    none()
                     {
                         __d_printf(IODEV, "stream dropping parked context without handle context=%p\n", context);
                         StreamParkedContexts__pop(&self->parked_contexts);
                         searching = true;
-                    })
-                End
-            })
-        End
+                    }
+                )
+            },
+            none() {}
+        )
     }
 
     return parked_context;
@@ -158,11 +170,11 @@ static Result(IOServerBuffer) Stream__server_buffer(IOStatePtr state)
 {
     StreamStatePtr self = (StreamStatePtr) state;
     IOServerBuffer buffer = (IOServerBuffer) {
-        .data = NULL,
+        .data = NULL, // hundelint: ignore-no-null
         .capacity = 0,
     };
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         size_t write_pos = self->read_buffer.write_pos % self->read_buffer.buffer_size;
         size_t free_space = IOBuffer__free_space(&self->read_buffer);
@@ -179,10 +191,10 @@ static Result(IOServerBuffer) Stream__server_write_buffer(IOStatePtr state)
 {
     StreamStatePtr self = (StreamStatePtr) state;
     IOServerBuffer buffer;
-    buffer.data = NULL;
+    buffer.data = NULL; // hundelint: ignore-no-null
     buffer.capacity = 0;
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         size_t read_pos = self->write_buffer.read_pos % self->write_buffer.buffer_size;
         size_t item_count = IOBuffer__item_count(&self->write_buffer);
@@ -199,7 +211,7 @@ static Optional(IOContextPtr) Stream__data_available(IOStatePtr state, size_t by
     StreamStatePtr self = (StreamStatePtr) state;
     Optional(IOContextPtr) parked_context = None(IOContextPtr);
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         size_t free_space = IOBuffer__free_space(&self->read_buffer);
         if (byte_count > free_space)
@@ -219,7 +231,7 @@ static Optional(IOContextPtr) Stream__data_available(IOStatePtr state, size_t by
 static Result(IOStatus) Stream__data_consumed(IOStatePtr state, size_t byte_count)
 {
     StreamStatePtr self = (StreamStatePtr) state;
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         size_t item_count = IOBuffer__item_count(&self->write_buffer);
         if (byte_count > item_count)
@@ -236,7 +248,7 @@ static Optional(IOContextPtr) Stream__eof(IOStatePtr state)
     StreamStatePtr self = (StreamStatePtr) state;
     Optional(IOContextPtr) parked_context = None(IOContextPtr);
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         self->eof = true;
         self->data_available = true;

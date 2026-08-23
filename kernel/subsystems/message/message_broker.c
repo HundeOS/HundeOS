@@ -179,7 +179,7 @@ MessagePtr Message__heap_new_deferred_with_context_ownership_and_operation_key(
 
 void Message__dispose(MessagePtr self)
 {
-    if (self == NULL)
+    if (self == NULL) // hundelint: ignore-no-null
     {
         return;
     }
@@ -195,7 +195,7 @@ Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message
     __d_printf(BROKER, "delivering message %i %i\n", message->source, message->source_code);
     Listeners clone = Listeners__new();
 
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
         Listeners__push_all(&clone, &self->listeners);
     })
@@ -212,14 +212,15 @@ Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message
 
 Result(ListenerRegisterResult) MessageBroker__register_listener(MessageBrokerPtr self, Listener listener)
 {
-    CriticalSection(self->lock,
+    critical_section(self->lock,
     {
-        ResultMatch(CollectionCode, Listeners__push(&self->listeners, listener))
-            IsError(code, message,
+        match_result(CollectionCode, Listeners__push(&self->listeners, listener),
+            success(_) {},
+            error(code, message)
             {
-                _cs_return Error(ListenerRegisterResult, too_many_listeners, LISTENER_REGISTER_ERROR);
-            })
-        End
+                cs_return Error(ListenerRegisterResult, too_many_listeners, LISTENER_REGISTER_ERROR);
+            }
+        )
     })
     return Success(ListenerRegisterResult, LISTENER_REGISTER_OK);
 }

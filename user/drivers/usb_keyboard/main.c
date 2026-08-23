@@ -41,16 +41,16 @@ static void UsbKeyboard__publish_pending(UsbKeyboardPtr self)
         return;
     }
 
-    ResultMatch(ItemCount, UsbKeyboardPendingBuffer__drain(&self->pending, (CharPtr) buffer.data, buffer.capacity))
-        IsSuccess(byte_count,
+    match_result(ItemCount, UsbKeyboardPendingBuffer__drain(&self->pending, (CharPtr) buffer.data, buffer.capacity),
+        success(byte_count)
         {
             if (byte_count > 0)
             {
                 io_server_data_available(self->keyboard, byte_count);
             }
-        })
-        IsError(code, message, return)
-    End;
+        },
+        error(code, message) { return; }
+    )
 }
 
 static bool UsbKeyboard__init(UsbKeyboardPtr self)

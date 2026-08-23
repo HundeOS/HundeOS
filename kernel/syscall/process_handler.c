@@ -15,46 +15,49 @@ static Result(Anything) ProcessChildEvent__copy_to_target(Result(Anything) resul
         return Error(Anything, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
     }
 
-    ResultMatch(Anything, result)
-        IsSuccess(value,
+    match_result(Anything, result,
+        success(value)
         {
             ProcessChildEventPtr event = (ProcessChildEventPtr) value;
             *target = *event;
             return Success(Anything, PROCESS_CHILD_EVENT_OK);
-        })
-        IsError(code, message, return Error(Anything, message, code))
-    End
+        },
+        error(code, message) { return Error(Anything, message, code); }
+    )
 
     return Error(Anything, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
 }
 
 static Result(Anything) Process__complete_wait_child_event_syscall(ParkedOperationPtr parked_operation)
 {
-    Match(SchedulerPtr, parked_operation->kernel_context->scheduler)
-        IsSome(scheduler,
+    match_optional(SchedulerPtr, parked_operation->kernel_context->scheduler,
+        some(scheduler)
         {
-            Match(ProcessID, parked_operation->kernel_context->pid)
-                IsSome(pid,
+            match_optional(ProcessID, parked_operation->kernel_context->pid,
+                some(pid)
                 {
-                    Match(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid))
-                        IsSome(process,
+                    match_optional(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid),
+                        some(process)
                         {
-                            ResultMatch(ProcessChildEvent, Scheduler__child_take_next_event(scheduler, process))
-                                IsSuccess(event,
+                            match_result(ProcessChildEvent, Scheduler__child_take_next_event(scheduler, process),
+                                success(event)
                                 {
                                     return KernelContext__map_result(
                                         parked_operation->kernel_context,
                                         Success(Anything, (Anything) &event)
                                     );
-                                })
-                                IsError(code, message, return Error(Anything, message, code))
-                            End
-                        })
-                    End
-                })
-            End
-        })
-    End
+                                },
+                                error(code, message) { return Error(Anything, message, code); }
+                            )
+                        },
+                        none() {}
+                    )
+                },
+                none() {}
+            )
+        },
+        none() {}
+    )
 
     return Error(Anything, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
 }
@@ -100,8 +103,8 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
         return Error(SystemCallResult, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
     }
 
-    Match(ProcessPtr, proc)
-        IsSome(process,
+    match_optional(ProcessPtr, proc,
+        some(process)
         {
             ProcessChildEventPtr target = (ProcessChildEventPtr) arg1;
             KernelContextPtr kernel_context = KernelContext__heap_new_with_mapper(
@@ -111,26 +114,26 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
                 (Anything) target
             );
 
-            ResultMatch(ProcessChildEvent, Scheduler__child_wait_with_context_ownership(
+            match_result(ProcessChildEvent, Scheduler__child_wait_with_context_ownership(
                 kernel->scheduler,
                 process,
                 kernel_context,
                 Some(Continuation, Process__complete_wait_child_event_syscall),
                 true
-            ))
-                IsSuccess(event,
+            ),
+                success(event)
                 {
                     Result(Anything) mapped = KernelContext__map_result(
                         kernel_context,
                         Success(Anything, (Anything) &event)
                     );
                     KernelContext__dispose_heap(kernel_context);
-                    ResultMatch(Anything, mapped)
-                        IsSuccess(mapped_code, return Success(SystemCallResult, mapped_code))
-                        IsError(mapped_code, mapped_message, return Error(SystemCallResult, mapped_message, mapped_code))
-                    End
-                })
-                IsError(code, message,
+                    match_result(Anything, mapped,
+                        success(mapped_code) { return Success(SystemCallResult, mapped_code); },
+                        error(mapped_code, mapped_message) { return Error(SystemCallResult, mapped_message, mapped_code); }
+                    )
+                },
+                error(code, message)
                 {
                     if (code != PROCESS_CHILD_EVENT_QUEUE_EMPTY)
                     {
@@ -138,9 +141,9 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
                     }
                     return Error(SystemCallResult, message, code);
                 })
-            End
-        })
-    End
+        },
+        none() {}
+    )
 
     return Error(SystemCallResult, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
 }

@@ -22,35 +22,27 @@ static KernelPtr ProcessFixture__kernel()
 ProcessPtr dummy_process(Tick last_tick, CPUID cpu, ProcessState state)
 {
     Elf hello_world = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(Kernel__instance(), hello_world, None(ProcessPtr)))
-        IsSuccess(process,
-        {
+    match_result(ProcessPtr, Process__setup(Kernel__instance(), hello_world, None(ProcessPtr)), success(process) {
             process->kernel = ProcessFixture__kernel();
             process->last_tick = last_tick;
             process->pid = last_tick * MAX_CPUS + cpu;
             process->state = state;
 
             return process;
-        });
-        IsError(code, message, TEST_FAIL())
-    End
+        }, error(code, message) { TEST_FAIL(); })
     return NULL;
 }
 
 ProcessPtr dummy_process_with_parent(Tick last_tick, CPUID cpu, ProcessState state, ProcessPtr parent)
 {
     Elf hello_world = Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
-    ResultMatch(ProcessPtr, Process__setup(Kernel__instance(), hello_world, Some(ProcessPtr, parent)))
-        IsSuccess(process,
-        {
+    match_result(ProcessPtr, Process__setup(Kernel__instance(), hello_world, Some(ProcessPtr, parent)), success(process) {
             process->kernel = ProcessFixture__kernel();
             process->last_tick = last_tick;
             process->pid = last_tick * MAX_CPUS + cpu;
             process->state = state;
 
             return process;
-        });
-        IsError(code, message, TEST_FAIL())
-    End
+        }, error(code, message) { TEST_FAIL(); })
     return NULL;
 }

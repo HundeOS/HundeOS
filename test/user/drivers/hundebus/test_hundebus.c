@@ -200,18 +200,13 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     TEST_ASSERT_EQUAL_INT(1, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     DynString sysinfo;
-    ResultMatch(DynStringCode, DynString__init(&sysinfo, 128))
-        IsError(code, message, return None(DynString))
-    End
+    match_result(DynStringCode, DynString__init(&sysinfo, 128), success(_) {}, error(code, message) { return None(DynString); })
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
-        ResultMatch(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]))
-            IsError(code, message,
-            {
+        match_result(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]), success(_) {}, error(code, message) {
                 DynString__dispose(&sysinfo);
                 return None(DynString);
             })
-        End
     }
     return Some(DynString, sysinfo);
 }
@@ -326,9 +321,7 @@ void test_hundebus_builds_businfo_from_scan(void)
         .ecam = &fake_ecam_mapping,
         .pci_devices = HundebusPciDevices__new(),
     };
-    ResultMatch(DynStringCode, DynString__init(&hundebus.businfo, HUNDEBUS_BUSINFO_INITIAL_CAPACITY))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(DynStringCode, DynString__init(&hundebus.businfo, HUNDEBUS_BUSINFO_INITIAL_CAPACITY), success(_) {}, error(code, message) { TEST_FAIL(); })
     TestHundebus__seed_device(0, 1, 0, 0x1234, 0x5678, 0x0c, 0x03, 0x30, 0x00);
 
     TEST_ASSERT_EQUAL_UINT64(1, Hundebus__scan_pci(&hundebus));

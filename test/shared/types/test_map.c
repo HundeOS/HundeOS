@@ -25,39 +25,23 @@ void test_map_len_key_set_get_and_delete(void)
     BString hello = BString__new("hello");
     BString world = BString__new("world");
 
-    ResultMatch(CollectionCode, TestMap__set(&map, hello, 12))
-        IsError(code, message, TEST_FAIL())
-    End
-    ResultMatch(CollectionCode, TestMap__set(&map, world, 13))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(CollectionCode, TestMap__set(&map, hello, 12), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CollectionCode, TestMap__set(&map, world, 13), success(_) {}, error(code, message) { TEST_FAIL(); })
 
     TEST_ASSERT_EQUAL(2, TestMap__len(&map));
     TEST_ASSERT_TRUE(BString__equals(&hello, Unwrap(BStringPtr, TestMap__key(&map, 0), (BStringPtr){})));
 
-    Match(TestInt, TestMap__get(&map, hello))
-        IsNone(TEST_FAIL())
-        IsSome(value, TEST_ASSERT_EQUAL(12, value))
-    End
+    match_optional(TestInt, TestMap__get(&map, hello), some(value) { TEST_ASSERT_EQUAL(12, value); }, none() { TEST_FAIL(); })
 
-    ResultMatch(CollectionCode, TestMap__delete(&map, hello))
-        IsError(code, message, TEST_FAIL())
-    End
+    match_result(CollectionCode, TestMap__delete(&map, hello), success(_) {}, error(code, message) { TEST_FAIL(); })
 
-    Match(TestInt, TestMap__get(&map, hello))
-        IsSome(value, TEST_FAIL())
-    End
+    match_optional(TestInt, TestMap__get(&map, hello), some(value) { TEST_FAIL(); }, none() {})
 }
 
 void test_map_full_gives_error(void)
 {
     TinyTestMap map = TinyTestMap__new();
 
-    ResultMatch(CollectionCode, TinyTestMap__set(&map, BString__new("hello"), 12))
-        IsError(code, message, TEST_FAIL())
-    End
-    ResultMatch(CollectionCode, TinyTestMap__set(&map, BString__new("goodbye"), 13))
-        IsSuccess(value, TEST_FAIL())
-        IsError(code, message, TEST_ASSERT_EQUAL(MAP_FULL, code))
-    End
+    match_result(CollectionCode, TinyTestMap__set(&map, BString__new("hello"), 12), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CollectionCode, TinyTestMap__set(&map, BString__new("goodbye"), 13), success(value) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(MAP_FULL, code); })
 }

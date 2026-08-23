@@ -52,10 +52,10 @@ void irq_handler(ProcessContextPtr context, bool current_el)
     if (id != PPI_CNTV && id != PPI_CNTP)
     {
         Optional(ProcessPtr) interrupted_process = Scheduler__save_context(kernel->scheduler, cpu, context);
-        Match(ProcessPtr, interrupted_process)
-            IsSome(proc, __d_printf(IRQ, "IRQ saved context pid=%i name=%s\n", proc->pid, cstr(proc->name));)
-            IsNone(__d_println(IRQ, "IRQ no process context saved");)
-        End
+        match_optional(ProcessPtr, interrupted_process,
+            some(proc) { __d_printf(IRQ, "IRQ saved context pid=%i name=%s\n", proc->pid, cstr(proc->name));; },
+            none() { __d_println(IRQ, "IRQ no process context saved");; }
+        )
     }
 
     icc_eoir1(id);
@@ -78,8 +78,8 @@ void irq_handler(ProcessContextPtr context, bool current_el)
         .process_context = context,
     };
 
-    ResultMatch(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, id, &dispatch_context))
-        IsSuccess(status,
+    match_result(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, id, &dispatch_context),
+        success(status)
         {
             if (id >= 32)
             {
@@ -94,9 +94,9 @@ void irq_handler(ProcessContextPtr context, bool current_el)
                 __d_printf(IODEV, "irq dispatch id=%i requested reschedule cpu=%i\n", id, cpu);
                 Scheduler__preempt(kernel->scheduler, cpu, context);
             }
-        })
-        IsError(code, message, __d_printf(UNHANDLED, "irq dispatch error %i for irq %i\n", code, id))
-    End
+        },
+        error(code, message) { __d_printf(UNHANDLED, "irq dispatch error %i for irq %i\n", code, id); }
+    )
 }
 
 static uint64_t abort_user_process(
@@ -108,8 +108,8 @@ static uint64_t abort_user_process(
     uint64_t ec
 )
 {
-    Match(ProcessPtr, current_process)
-        IsSome(process,
+    match_optional(ProcessPtr, current_process,
+        some(process)
         {
             ProcessAbort abort;
             abort.reason = reason;
@@ -127,20 +127,21 @@ static uint64_t abort_user_process(
             abort.syndrome = esr;
             abort.cpu = CPU__id();
 
-            ResultMatch(ProcessPtr, Scheduler__abort_process(kernel->scheduler, kernel->io_subsystem, process, abort))
-                IsError(code, message, Kernel__panic(cstr(message), context))
-            End
-        })
-        IsNone(Kernel__panic("User exception without a current process", context))
-    End
+            match_result(ProcessPtr, Scheduler__abort_process(kernel->scheduler, kernel->io_subsystem, process, abort),
+                success(_) {},
+                error(code, message) { Kernel__panic(cstr(message), context); }
+            )
+        },
+        none() { Kernel__panic("User exception without a current process", context); }
+    )
 
     return 0;
 }
 
 static bool yield_if_process_parked(KernelPtr kernel, Optional(ProcessPtr) current_process)
 {
-    Match(ProcessPtr, current_process)
-        IsSome(process,
+    match_optional(ProcessPtr, current_process,
+        some(process)
         {
             if (Process__is_parked(process))
             {
@@ -153,8 +154,9 @@ static bool yield_if_process_parked(KernelPtr kernel, Optional(ProcessPtr) curre
                 Scheduler__yield_waiting(kernel->scheduler, process, CPU__id() - 1);
                 return true;
             }
-        })
-    End
+        },
+        none() {}
+    )
 
     return false;
 }
@@ -185,8 +187,8 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
     // Handle synchronous exceptions (e.g., undefined instruction, SVC, data abort)
     switch(ec) {
         case 0x15: // SVC instruction execution
-            Match(ProcessPtr, current_process)
-                IsSome(proc,
+            match_optional(ProcessPtr, current_process,
+                some(proc)
                 {
                     __d_printf(
                         SYSCALL,
@@ -202,8 +204,8 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                         context->x[4],
                         current_el
                     );
-                })
-                IsNone(
+                },
+                none()
                 {
                     __d_printf(
                         SYSCALL,
@@ -212,8 +214,8 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                         context->elr,
                         current_el
                     );
-                })
-            End
+                }
+            )
             __d_printf(SYSCALL, "system call: %p\n", context->x[8]);
             __d_printf(SYSCALL, "system call args: %p %p %p %p %p\n",
                 context->x[0], context->x[1], context->x[2], context->x[3], context->x[4]);
@@ -231,35 +233,39 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                     context->x[3],
                     context->x[4]);
 
-            ResultMatch(SystemCallResult, syscall_result);
-                IsSuccess(call_result,
+            match_result(SystemCallResult, syscall_result,
+                success(call_result)
                 {
-                    Match(ProcessPtr, current_process)
-                        IsSome(proc, __d_printf(
+                    match_optional(ProcessPtr, current_process,
+                        some(proc)
+                        {
+                            __d_printf(
                             SYSCALL,
                             "syscall exit pid=%i name=%s id=%p result=%p\n",
                             proc->pid,
                             cstr(proc->name),
                             context->x[8],
                             call_result
-                        );)
-                        IsNone(__d_printf(SYSCALL, "syscall exit no-current-process id=%p result=%p\n", context->x[8], call_result);)
-                    End
+                        );; },
+                        none() { __d_printf(SYSCALL, "syscall exit no-current-process id=%p result=%p\n", context->x[8], call_result);; }
+                    )
                     __d_printf(SYSCALL, "syscall result: res=%p\n", call_result);
                     if (yield_if_process_parked(kernel, current_process))
                     {
                         return 0;
                     }
                     return call_result;
-                });
-                IsError(code, message,
+                },
+                error(code, message)
                 {
                     if (yield_if_process_parked(kernel, current_process))
                     {
                         return 0;
                     }
-                    Match(ProcessPtr, current_process)
-                        IsSome(proc, __d_printf(
+                    match_optional(ProcessPtr, current_process,
+                        some(proc)
+                        {
+                            __d_printf(
                             SYSCALL,
                             "syscall error pid=%i name=%s id=%p code=%i message=%s\n",
                             proc->pid,
@@ -267,19 +273,21 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                             context->x[8],
                             code,
                             BString__cstr(&message)
-                        );)
-                        IsNone(__d_printf(
+                        );; },
+                        none()
+                        {
+                            __d_printf(
                             SYSCALL,
                             "syscall error no-current-process id=%p code=%i message=%s\n",
                             context->x[8],
                             code,
                             BString__cstr(&message)
-                        );)
-                    End
+                        );; }
+                    )
                     __d_printf(SYSCALL, "syscall error: %s code=%i\n", BString__cstr(&message), code);
                     return code;
-                });
-            End
+                }
+            );
             return 0;
             break;
         case 0x20: // Instruction abort from lower EL

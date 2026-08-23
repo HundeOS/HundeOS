@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "process.h"
+#include "types/bstring.h"
 
 typedef enum IOOperation
 {
@@ -108,5 +109,25 @@ typedef struct DirectoryEntry
 DirectoryEntry;
 
 typedef DirectoryEntry * DirectoryEntryPtr;
+
+static inline DirectoryEntry DirectoryEntry__new(
+    DirectoryEntryAttributes attributes,
+    UserID user_id,
+    GroupID group_id,
+    FileMode mode,
+    ConstBStringPtr name
+)
+{
+    DirectoryEntry entry = (DirectoryEntry) {
+        .attributes = attributes,
+        .user_id = user_id,
+        .group_id = group_id,
+        .mode = mode,
+        .name_len = 0,
+    };
+
+    entry.name_len = (uint64_t) BString__copy_to(name, entry.name, IO_DIRENT_NAME_MAX);
+    return entry;
+}
 
 #endif

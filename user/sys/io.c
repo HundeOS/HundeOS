@@ -24,6 +24,34 @@ IOHandle IO__open(ConstBStringPtr self, Flags flags)
     return open(BString__cstr(self), flags);
 }
 
+BString IO__path_from_arg(ConstBStringPtr arg)
+{
+    BString slash = BSTRING_NEW("/");
+    if (BString__is_empty(arg))
+    {
+        return slash;
+    }
+
+    if (BString__starts_with(arg, &slash))
+    {
+        return *arg;
+    }
+
+    return BString__append(&slash, arg);
+}
+
+BString IO__path_join(ConstBStringPtr base, ConstBStringPtr child)
+{
+    BString slash = BSTRING_NEW("/");
+    if (BString__is_empty(base) || BString__equals(base, &slash))
+    {
+        return BString__append(&slash, child);
+    }
+
+    BString with_slash = BString__append(base, &slash);
+    return BString__append(&with_slash, child);
+}
+
 static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr self, StringPos max_bytes)
 {
     BString__clear(self);
@@ -32,10 +60,10 @@ static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr self, S
         return 0;
     }
 
-    StringPos buffer_max = self->max - 1;
+    StringPos buffer_max = BSTRING_MAX_SIZE - 1;
     StringPos read_max = max_bytes < buffer_max ? max_bytes : buffer_max;
 
-    ByteCount bytes = read(handle, self->data, (size_t) read_max);
+    ByteCount bytes = read(handle, (char *) BString__cstr(self), (size_t) read_max);
     if (bytes <= 0)
     {
         return bytes;
@@ -46,8 +74,7 @@ static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr self, S
         bytes = read_max;
     }
 
-    self->len = bytes;
-    self->data[self->len] = '\0';
+    *self = BString__from_chars(BString__cstr(self), bytes);
     return bytes;
 }
 
@@ -59,9 +86,10 @@ ByteCount IO__read(IOHandle handle, BStringPtr self)
 Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 {
     DynString text;
-    ResultMatch(DynStringCode, DynString__init(&text, max_bytes))
-        IsError(code, message, return None(DynString))
-    End
+    match_result(DynStringCode, DynString__init(&text, max_bytes),
+        success(_) {},
+        error(code, message) { return None(DynString); }
+    )
 
     ByteCount total_read = 0;
     while (total_read < max_bytes)
@@ -74,14 +102,14 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
             break;
         }
 
-        ResultMatch(DynStringCode, DynString__append_bstring(&text, &chunk))
-            IsSuccess(code, {})
-            IsError(code, message,
+        match_result(DynStringCode, DynString__append_bstring(&text, &chunk),
+            success(code) {},
+            error(code, message)
             {
                 DynString__dispose(&text);
                 return None(DynString);
-            })
-        End
+            }
+        )
 
         total_read += bytes;
         if (total_read >= max_bytes)
@@ -100,7 +128,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 
 ByteCount IO__write(IOHandle handle, ConstBStringPtr self)
 {
-    return write(handle, (char *) self->data, (size_t) self->len);
+    return write(handle, (char *) BString__cstr(self), (size_t) BString__length(self));
 }
 
 IOStatus close(IOHandle handle)

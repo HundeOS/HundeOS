@@ -93,8 +93,16 @@ static bool Filesystem__mount_matches(BStringPtr path, BStringPtr mount_path)
 
     for (size_t i = 0; i < BStringArray__len(&mount_segments); i++)
     {
-        BString path_segment = Unwrap(BString, BStringArray__at(&path_segments, i), EMPTY_BSTRING);
-        BString mount_segment = Unwrap(BString, BStringArray__at(&mount_segments, i), EMPTY_BSTRING);
+        BString path_segment = EMPTY_BSTRING;
+        BString mount_segment = EMPTY_BSTRING;
+        match_optional(BString, BStringArray__at(&path_segments, i),
+            some(segment) { path_segment = segment; },
+            none() { return false; }
+        )
+        match_optional(BString, BStringArray__at(&mount_segments, i),
+            some(segment) { mount_segment = segment; },
+            none() { return false; }
+        )
         if (!BString__equals(&path_segment, &mount_segment))
         {
             return false;
@@ -112,7 +120,11 @@ static BString Filesystem__subpath(BStringPtr path, BStringPtr mount_path)
 
     for (size_t i = BStringArray__len(&mount_segments); i < BStringArray__len(&path_segments); i++)
     {
-        BString segment = Unwrap(BString, BStringArray__at(&path_segments, i), EMPTY_BSTRING);
+        BString segment = EMPTY_BSTRING;
+        match_optional(BString, BStringArray__at(&path_segments, i),
+            some(path_segment) { segment = path_segment; },
+            none() {}
+        )
         BStringArray__push(&subpath_segments, segment);
     }
 
@@ -125,17 +137,18 @@ static Optional(MountRoute) Filesystem__find_mount(FilesystemPtr self, BString p
     size_t best_len = 0;
 
     MapIterate(Mounts, self->mounts, index, mount_path, mounted_fs)
-        if (Filesystem__mount_matches(&path, &mount_path) && mount_path.len > best_len)
+        StringPos mount_path_length = BString__length(&mount_path);
+        if (Filesystem__mount_matches(&path, &mount_path) && mount_path_length > (StringPos) best_len)
         {
-            best_len = mount_path.len;
+            best_len = (size_t) mount_path_length;
             best = Some(MountRoute, ((MountRoute) {
                 .filesystem = mounted_fs,
                 .mount_path = mount_path,
                 .subpath = Filesystem__subpath(&path, &mount_path),
             }));
         }
-    End
 
+    End
     return best;
 }
 
@@ -147,8 +160,8 @@ static Result(IOInternalHandle) RootFileIO__delegate_close(FilesystemIOStatePtr 
         {
             return filesys->file_io.base_io.close(&filesys->state->state, handle);
         }
-    End
 
+    End
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
@@ -162,24 +175,24 @@ static Result(ByteCount) RootFileIO__delegate_write(
         {
             return filesys->file_io.base_io.write(&filesys->state->state, handle, data, size);
         }
-    End
 
+    End
     return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
 Result(IOInternalHandle) RootFileIO__open(IOStatePtr self, BString path, Flags flags)
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
-    Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, path))
-        IsSome(route,
+    match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
+        some(route)
         {
             __d_printf(FILESYSTEM, "mount found = %s", cstr(route.mount_path));
             return route.filesystem->file_io.base_io.open(
                 &route.filesystem->state->state, route.subpath, flags
             );
-        })
-        IsNone(return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
-    End
+        },
+        none() { return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); }
+    )
 
     return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -201,8 +214,8 @@ Result(IOBufferPtr) RootFileIO__read(
         {
             return filesys->file_io.base_io.read(&filesys->state->state, handle, size, target_buffer);
         }
-    End
 
+    End
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
@@ -224,22 +237,13 @@ Result(ParkStatus) RootFileIO__unpark(IOStatePtr self)
 
 static DirectoryEntry RootFileIO__directory_entry_from_node(FilesystemNodePtr node)
 {
-    DirectoryEntry entry = (DirectoryEntry) { 0 };
-    entry.attributes = node->attribs;
-    entry.user_id = node->user_id;
-    entry.group_id = node->group_id;
-    entry.mode = node->mode;
-
-    size_t max_name = IO_DIRENT_NAME_MAX - 1;
-    size_t copy_len = node->name.len < max_name ? node->name.len : max_name;
-    for (size_t i = 0; i < copy_len; i++)
-    {
-        entry.name[i] = node->name.data[i];
-    }
-    entry.name[copy_len] = '\0';
-    entry.name_len = copy_len;
-
-    return entry;
+    return DirectoryEntry__new(
+        node->attribs,
+        node->user_id,
+        node->group_id,
+        node->mode,
+        &node->name
+    );
 }
 
 static FilesystemNodePtr RootFileIO__node_from_directory_entry(FilesystemPtr filesystem, DirectoryEntryPtr entry)
@@ -257,14 +261,14 @@ static FilesystemNodePtr RootFileIO__node_from_directory_entry(FilesystemPtr fil
 static BString RootFileIO__trim_path_separators(BString path)
 {
     StringPos start = 0;
-    StringPos end = path.len;
+    StringPos end = BString__length(&path);
 
-    while (start < end && path.data[start] == '/')
+    while (start < end && BString__char_at_or(&path, start, '\0') == '/')
     {
         start++;
     }
 
-    while (end > start && path.data[end - 1] == '/')
+    while (end > start && BString__char_at_or(&path, end - 1, '\0') == '/')
     {
         end--;
     }
@@ -277,16 +281,16 @@ static Optional(BString) RootFileIO__immediate_mount_child(BString path, BString
     BString trimmed_path = RootFileIO__trim_path_separators(path);
     BString trimmed_mount_path = RootFileIO__trim_path_separators(mount_path);
 
-    if (trimmed_mount_path.len == 0)
+    if (BString__is_empty(&trimmed_mount_path))
     {
         return None(BString);
     }
 
-    if (trimmed_path.len == 0)
+    if (BString__is_empty(&trimmed_path))
     {
-        for (StringPos i = 0; i < trimmed_mount_path.len; i++)
+        for (StringPos i = 0; i < BString__length(&trimmed_mount_path); i++)
         {
-            if (trimmed_mount_path.data[i] == '/')
+            if (BString__char_at_or(&trimmed_mount_path, i, '\0') == '/')
             {
                 return Some(BString, BString__slice(&trimmed_mount_path, 0, i));
             }
@@ -300,16 +304,19 @@ static Optional(BString) RootFileIO__immediate_mount_child(BString path, BString
         return None(BString);
     }
 
-    if (trimmed_mount_path.len <= trimmed_path.len || trimmed_mount_path.data[trimmed_path.len] != '/')
+    if (
+        BString__length(&trimmed_mount_path) <= BString__length(&trimmed_path)
+        || BString__char_at_or(&trimmed_mount_path, BString__length(&trimmed_path), '\0') != '/'
+    )
     {
         return None(BString);
     }
 
-    StringPos child_start = trimmed_path.len + 1;
-    StringPos child_end = trimmed_mount_path.len;
-    for (StringPos i = child_start; i < trimmed_mount_path.len; i++)
+    StringPos child_start = BString__length(&trimmed_path) + 1;
+    StringPos child_end = BString__length(&trimmed_mount_path);
+    for (StringPos i = child_start; i < BString__length(&trimmed_mount_path); i++)
     {
-        if (trimmed_mount_path.data[i] == '/')
+        if (BString__char_at_or(&trimmed_mount_path, i, '\0') == '/')
         {
             child_end = i;
             break;
@@ -362,13 +369,7 @@ static DirectoryEntry RootFileIO__directory_entry_from_mount(BString name)
         .name_len = 0,
     };
 
-    size_t max_name = IO_DIRENT_NAME_MAX - 1;
-    size_t copy_len = name.len < (StringPos) max_name ? (size_t) name.len : max_name;
-    for (size_t i = 0; i < copy_len; i++)
-    {
-        entry.name[i] = name.data[i];
-    }
-    entry.name[copy_len] = '\0';
+    size_t copy_len = (size_t) BString__copy_to(&name, entry.name, IO_DIRENT_NAME_MAX);
     entry.name_len = copy_len;
 
     return entry;
@@ -387,8 +388,8 @@ static Result(DirectoryEntryCount) RootFileIO__append_mount_entries(
         {
             __d_printf(FILESYSTEM, "list_dir mount[%i] path=%s mount=%s\n", (int) index, cstr(path), cstr(mount_path));
         }
-        Match(BString, RootFileIO__immediate_mount_child(path, mount_path))
-            IsSome(child,
+        match_optional(BString, RootFileIO__immediate_mount_child(path, mount_path),
+            some(child)
             {
                 if (RootFileIO__trace_list_dir(&path))
                 {
@@ -414,10 +415,11 @@ static Result(DirectoryEntryCount) RootFileIO__append_mount_entries(
                     __d_printf(FILESYSTEM, "list_dir appended mount child entry[%i]=%s\n", (int) count, entries[count].name);
                 }
                 count++;
-            })
-        End
-    End
+            },
+            none() {}
+        )
 
+    End
     return Success(DirectoryEntryCount, count);
 }
 
@@ -426,29 +428,28 @@ static Result(Anything) RootFileIO__complete_async_list_dir(Result(Anything) res
     RootAsyncListDirContextPtr context = ptr(raw_context, RootAsyncListDirContext);
     Result(Anything) mapped = result;
 
-    ResultMatch(Anything, result)
-        IsSuccess(value,
+    match_result(Anything, result,
+        success(value)
         {
             DirectoryEntryCount count = (DirectoryEntryCount) value;
-            ResultMatch(DirectoryEntryCount, RootFileIO__append_mount_entries(
+            match_result(DirectoryEntryCount, RootFileIO__append_mount_entries(
                 context->filesystem, context->path, context->entries, count, context->max_entries
-            ))
-                IsSuccess(merged_count,
+            ),
+                success(merged_count)
                 {
                     mapped = Success(Anything, (Anything) merged_count);
-                })
-                IsError(code, message,
+                },
+                error(code, message)
                 {
                     mapped = Error(Anything, message, code);
                 })
-            End
-        })
-        IsError(code, message,
+        },
+        error(code, message)
         {
-            ResultMatch(DirectoryEntryCount, RootFileIO__append_mount_entries(
+            match_result(DirectoryEntryCount, RootFileIO__append_mount_entries(
                 context->filesystem, context->path, context->entries, 0, context->max_entries
-            ))
-                IsSuccess(merged_count,
+            ),
+                success(merged_count)
                 {
                     if (merged_count > 0)
                     {
@@ -458,22 +459,22 @@ static Result(Anything) RootFileIO__complete_async_list_dir(Result(Anything) res
                     {
                         mapped = Error(Anything, message, code);
                     }
-                })
-                IsError(merge_code, merge_message,
+                },
+                error(merge_code, merge_message)
                 {
                     mapped = Error(Anything, merge_message, merge_code);
                 })
-            End
-        })
-    End
+        }
+    )
 
-    Match(KernelResultMapper, context->parent_mapper)
-        IsSome(parent_mapper,
+    match_optional(KernelResultMapper, context->parent_mapper,
+        some(parent_mapper)
         {
             Kernel__free(addr(context));
             return parent_mapper(mapped, context->parent_mapper_context);
-        })
-    End
+        },
+        none() {}
+    )
 
     Kernel__free(addr(context));
     return mapped;
@@ -483,15 +484,16 @@ static bool RootFileIO__nodes_contain_name(FilesystemNodes * nodes, BStringPtr n
 {
     for (uint64_t index = 0; index < FilesystemNodes__len(nodes); index++)
     {
-        FilesystemNodePtr node = Unwrap(
-            FilesystemNodePtr,
-            FilesystemNodes__at(nodes, index),
-            ((FilesystemNodePtr) 0)
-        );
-        if (BString__equals(&node->name, name))
-        {
-            return true;
-        }
+        match_optional(FilesystemNodePtr, FilesystemNodes__at(nodes, index),
+            some(node)
+            {
+                if (BString__equals(&node->name, name))
+                {
+                    return true;
+                }
+            },
+            none() {}
+        )
     }
 
     return false;
@@ -510,12 +512,12 @@ static Result(CollectionCode) RootFileIO__append_node_if_missing(FilesystemNodes
 static Result(CollectionCode) RootFileIO__append_nodes(FilesystemNodes * target, FilesystemNodes source)
 {
     FAIterate(FilesystemNodes, source, index, node)
-        ResultMatch(CollectionCode, FilesystemNodes__push(target, node))
-            IsSuccess(_, {})
-            IsError(code, message, return Error(CollectionCode, message, code))
-        End
-    End
+        match_result(CollectionCode, FilesystemNodes__push(target, node),
+            success(_) {},
+            error(code, message) { return Error(CollectionCode, message, code); }
+        )
 
+    End
     return Success(CollectionCode, 0);
 }
 
@@ -527,12 +529,12 @@ static Result(FilesystemNodes) RootFileIO__nodes_from_directory_entries(
 
     for (DirectoryEntryCount i = 0; i < count; i++)
     {
-        ResultMatch(CollectionCode, FilesystemNodes__push(
+        match_result(CollectionCode, FilesystemNodes__push(
             &nodes, RootFileIO__node_from_directory_entry(filesystem, &entries[i])
-        ))
-            IsSuccess(_, {})
-            IsError(code, message, return Error(FilesystemNodes, message, code))
-        End
+        ),
+            success(_) {},
+            error(code, message) { return Error(FilesystemNodes, message, code); }
+        )
     }
 
     return Success(FilesystemNodes, nodes);
@@ -543,19 +545,20 @@ static Result(CollectionCode) RootFileIO__append_mount_children(
 )
 {
     MapIterate(Mounts, filesystem->mounts, index, mount_path, mount_fs)
-        Match(BString, RootFileIO__immediate_mount_child(path, mount_path))
-            IsSome(child,
+        match_optional(BString, RootFileIO__immediate_mount_child(path, mount_path),
+            some(child)
             {
-                ResultMatch(CollectionCode, RootFileIO__append_node_if_missing(
+                match_result(CollectionCode, RootFileIO__append_node_if_missing(
                     result, FilesystemNode__heap_new(mount_fs, child, 0)
-                ))
-                    IsSuccess(_, {})
-                    IsError(code, message, return Error(CollectionCode, message, code))
-                End
-            })
-        End
-    End
+                ),
+                    success(_) {},
+                    error(code, message) { return Error(CollectionCode, message, code); }
+                )
+            },
+            none() {}
+        )
 
+    End
     return Success(CollectionCode, 0);
 }
 
@@ -571,8 +574,8 @@ static Result(DirectoryEntryCount) RootFileIO__copy_nodes_to_entries(
         }
         entries[count] = RootFileIO__directory_entry_from_node(node);
         count++;
-    End
 
+    End
     return Success(DirectoryEntryCount, count);
 }
 
@@ -583,58 +586,52 @@ Result(FilesystemNodes) RootFileIO__list_nodes(IOStatePtr self, FilesystemNodePt
     FilesystemPtr filesystem = fs_state->filesystem;
     bool listed_backing = false;
 
-    Match(MountRoute, Filesystem__find_mount(filesystem, path))
-        IsSome(route,
+    match_optional(MountRoute, Filesystem__find_mount(filesystem, path),
+        some(route)
         {
-            if (route.filesystem->file_io.list_nodes != NULL)
+            if (route.filesystem->file_io.list_nodes != NULL) // hundelint: ignore-no-null
             {
-                ResultMatch(FilesystemNodes, route.filesystem->file_io.list_nodes(
+                match_result(FilesystemNodes, route.filesystem->file_io.list_nodes(
                     &route.filesystem->state->state, filesystem->root, route.subpath
-                ))
-                    IsSuccess(nodes,
+                ),
+                    success(nodes)
                     {
                         listed_backing = true;
-                        ResultMatch(CollectionCode, RootFileIO__append_nodes(&result, nodes))
-                            IsSuccess(_, {})
-                            IsError(code, message, return Error(FilesystemNodes, message, code))
-                        End
-                    })
-                    IsError(code, message, {})
-                End
+                        match_result(CollectionCode, RootFileIO__append_nodes(&result, nodes),
+                            success(_) {},
+                            error(code, message) { return Error(FilesystemNodes, message, code); }
+                        )
+                    }, error(code, message) {})
             }
-            else if (route.filesystem->file_io.list_dir != NULL)
+            else if (route.filesystem->file_io.list_dir != NULL) // hundelint: ignore-no-null
             {
                 DirectoryEntry entries[MAX_CHILD_NODES] = { 0 };
-                ResultMatch(DirectoryEntryCount, route.filesystem->file_io.list_dir(
+                match_result(DirectoryEntryCount, route.filesystem->file_io.list_dir(
                     &route.filesystem->state->state, route.subpath, entries, MAX_CHILD_NODES
-                ))
-                    IsSuccess(count,
+                ),
+                    success(count)
                     {
                         listed_backing = true;
-                        ResultMatch(FilesystemNodes, RootFileIO__nodes_from_directory_entries(
+                        match_result(FilesystemNodes, RootFileIO__nodes_from_directory_entries(
                             route.filesystem, entries, count
-                        ))
-                            IsSuccess(nodes,
+                        ),
+                            success(nodes)
                             {
-                                ResultMatch(CollectionCode, RootFileIO__append_nodes(&result, nodes))
-                                    IsSuccess(_, {})
-                                    IsError(code, message, return Error(FilesystemNodes, message, code))
-                                End
-                            })
-                            IsError(code, message, return Error(FilesystemNodes, message, code))
-                        End
-                    })
-                    IsError(code, message, {})
-                End
+                                match_result(CollectionCode, RootFileIO__append_nodes(&result, nodes),
+                                    success(_) {},
+                                    error(code, message) { return Error(FilesystemNodes, message, code); }
+                                )
+                            }, error(code, message) { return Error(FilesystemNodes, message, code); })
+                    }, error(code, message) {})
             }
-        })
-        IsNone({})
-    End
+        },
+        none() {}
+    )
 
-    ResultMatch(CollectionCode, RootFileIO__append_mount_children(filesystem, path, &result))
-        IsSuccess(_, {})
-        IsError(code, message, return Error(FilesystemNodes, message, code))
-    End
+    match_result(CollectionCode, RootFileIO__append_mount_children(filesystem, path, &result),
+        success(_) {},
+        error(code, message) { return Error(FilesystemNodes, message, code); }
+    )
 
     if (listed_backing || FilesystemNodes__len(&result) > 0)
     {
@@ -660,22 +657,22 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
             cstr(path), (int) fs_state->filesystem->mounts.len, (int) max_entries);
     }
 
-    Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, path))
-        IsSome(route,
+    match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
+        some(route)
         {
             if (RootFileIO__trace_list_dir(&path))
             {
                 __d_printf(FILESYSTEM, "list_dir route mount=%s subpath=%s fs=%s\n",
                     cstr(route.mount_path), cstr(route.subpath), cstr(route.filesystem->name));
             }
-            if (route.filesystem->file_io.list_dir != NULL)
+            if (route.filesystem->file_io.list_dir != NULL) // hundelint: ignore-no-null
             {
                 RootAsyncListDirContextPtr async_context = 0;
                 Optional(KernelContextPtr) current_context = BlockDevice__current_context();
                 KernelContext wrapped_context = EMPTY_KERNEL_CONTEXT;
 
-                Match(KernelContextPtr, current_context)
-                    IsSome(existing_context,
+                match_optional(KernelContextPtr, current_context,
+                    some(existing_context)
                     {
                         async_context = ptr(Kernel__alloc_kernel(sizeof(RootAsyncListDirContext)), RootAsyncListDirContext);
                         async_context->filesystem = fs_state->filesystem;
@@ -688,14 +685,14 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
                         wrapped_context.result_mapper = Some(KernelResultMapper, RootFileIO__complete_async_list_dir);
                         wrapped_context.result_mapper_context = (Anything) async_context;
                         BlockDevice__set_current_context(&wrapped_context);
-                    })
-                    IsNone({})
-                End
+                    },
+                    none() {}
+                )
 
-                ResultMatch(DirectoryEntryCount, route.filesystem->file_io.list_dir(
+                match_result(DirectoryEntryCount, route.filesystem->file_io.list_dir(
                     &route.filesystem->state->state, route.subpath, entries, max_entries
-                ))
-                    IsSuccess(backing_count,
+                ),
+                    success(backing_count)
                     {
                         if (async_context != 0)
                         {
@@ -711,8 +708,8 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
                                 __d_printf(FILESYSTEM, "list_dir backing entry[%i]=%s\n", (int) i, entries[i].name);
                             }
                         }
-                    })
-                    IsError(code, message,
+                    },
+                    error(code, message)
                     {
                         if (code == BLOCK_DEVICE_REQUEST_PENDING)
                         {
@@ -728,42 +725,39 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
                             __d_printf(FILESYSTEM, "list_dir backing error code=%i message=%s\n", (int) code, cstr(message));
                         }
                     })
-                End
 
-                Match(KernelContextPtr, current_context)
-                    IsSome(existing_context, BlockDevice__set_current_context(existing_context))
-                    IsNone(BlockDevice__clear_current_context())
-                End
+                match_optional(KernelContextPtr, current_context,
+                    some(existing_context) { BlockDevice__set_current_context(existing_context); },
+                    none() { BlockDevice__clear_current_context(); }
+                )
 
                 if (backing_request_pending)
                 {
                     return Error(DirectoryEntryCount, backing_pending_message, BLOCK_DEVICE_REQUEST_PENDING);
                 }
             }
-            else if (route.filesystem->file_io.list_nodes != NULL)
+            else if (route.filesystem->file_io.list_nodes != NULL) // hundelint: ignore-no-null
             {
-                ResultMatch(FilesystemNodes, route.filesystem->file_io.list_nodes(
+                match_result(FilesystemNodes, route.filesystem->file_io.list_nodes(
                     &route.filesystem->state->state, fs_state->filesystem->root, route.subpath
-                ))
-                    IsSuccess(nodes,
+                ),
+                    success(nodes)
                     {
                         listed_backing = true;
-                        ResultMatch(DirectoryEntryCount, RootFileIO__copy_nodes_to_entries(nodes, entries, max_entries))
-                            IsSuccess(backing_count, count = backing_count)
-                            IsError(code, message, return Error(DirectoryEntryCount, message, code))
-                        End
-                    })
-                    IsError(code, message, {})
-                End
+                        match_result(DirectoryEntryCount, RootFileIO__copy_nodes_to_entries(nodes, entries, max_entries),
+                            success(backing_count) { count = backing_count; },
+                            error(code, message) { return Error(DirectoryEntryCount, message, code); }
+                        )
+                    }, error(code, message) {})
             }
-        })
-        IsNone({})
-    End
+        },
+        none() {}
+    )
 
-    ResultMatch(DirectoryEntryCount, RootFileIO__append_mount_entries(
+    match_result(DirectoryEntryCount, RootFileIO__append_mount_entries(
         fs_state->filesystem, path, entries, count, max_entries
-    ))
-        IsSuccess(merged_count,
+    ),
+        success(merged_count)
         {
             if (RootFileIO__trace_list_dir(&path))
             {
@@ -778,9 +772,7 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
             {
                 return Success(DirectoryEntryCount, merged_count);
             }
-        })
-        IsError(code, message, return Error(DirectoryEntryCount, message, code))
-    End
+        }, error(code, message) { return Error(DirectoryEntryCount, message, code); })
 
     return Error(DirectoryEntryCount, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -788,10 +780,10 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
 Result(IOStatus) RootFileIO__mkdir(IOStatePtr self, BString path)
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
-    Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, path))
-        IsSome(route, return route.filesystem->file_io.mkdir(&route.filesystem->state->state, route.subpath))
-        IsNone(return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
-    End
+    match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
+        some(route) { return route.filesystem->file_io.mkdir(&route.filesystem->state->state, route.subpath); },
+        none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); }
+    )
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -799,10 +791,10 @@ Result(IOStatus) RootFileIO__mkdir(IOStatePtr self, BString path)
 Result(IOStatus) RootFileIO__remove(IOStatePtr self, BString path, Flags flags)
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
-    Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, path))
-        IsSome(route, return route.filesystem->file_io.remove(&route.filesystem->state->state, route.subpath, flags))
-        IsNone(return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH))
-    End
+    match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
+        some(route) { return route.filesystem->file_io.remove(&route.filesystem->state->state, route.subpath, flags); },
+        none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); }
+    )
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -810,11 +802,11 @@ Result(IOStatus) RootFileIO__remove(IOStatePtr self, BString path, Flags flags)
 Result(IOStatus) RootFileIO__link(IOStatePtr self, BString source_path, BString target_path)
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
-    Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, source_path))
-        IsSome(source_route,
+    match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, source_path),
+        some(source_route)
         {
-            Match(MountRoute, Filesystem__find_mount(fs_state->filesystem, target_path))
-                IsSome(target_route,
+            match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, target_path),
+                some(target_route)
                 {
                     if (source_route.filesystem != target_route.filesystem || source_route.filesystem->state != target_route.filesystem->state)
                     {
@@ -826,12 +818,12 @@ Result(IOStatus) RootFileIO__link(IOStatePtr self, BString source_path, BString 
                         source_route.subpath,
                         target_route.subpath
                     );
-                })
-                IsNone(return Error(IOStatus, BString__sprintf(&invalid_path_format, &target_path), IO_INVALID_PATH))
-            End
-        })
-        IsNone(return Error(IOStatus, BString__sprintf(&invalid_path_format, &source_path), IO_INVALID_PATH))
-    End
+                },
+                none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &target_path), IO_INVALID_PATH); }
+            )
+        },
+        none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &source_path), IO_INVALID_PATH); }
+    )
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &source_path), IO_INVALID_PATH);
 }

@@ -84,14 +84,15 @@ Fat32Volume Fat32Volume__new(Optional(BlockDevicePtr) device, BlockCount total_s
 
 static bool Fat32Volume__has_valid_geometry(Fat32VolumePtr self)
 {
-    Match(BlockDevicePtr, self->device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, self->device,
+        some(device)
         {
             return self->total_sectors > self->data_start_sector
                 && self->sectors_per_fat > 0
                 && self->cluster_count > 0;
-        })
-    End
+        },
+        none() {}
+    )
 
     return false;
 }
@@ -151,40 +152,44 @@ static void Fat32__write_u32(DataPtr data, size_t offset, uint32_t value)
 
 static Result(Fat32Code) Fat32Volume__read_sector(Fat32VolumePtr self, BlockNumber sector, DataPtr target)
 {
-    Match(BlockDevicePtr, self->device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, self->device,
+        some(device)
         {
-            ResultMatch(BlockCount, BlockDevice__read(device, sector, 1, target))
-                IsSuccess(count, {
+            match_result(BlockCount, BlockDevice__read(device, sector, 1, target),
+                success(count)
+                {
                     if (count == 1)
                     {
                         return Success(Fat32Code, FAT32_OK);
                     }
-                })
-                IsError(code, message, return Error(Fat32Code, io_error, FAT32_IO_ERROR))
-            End
-        })
-    End
+                },
+                error(code, message) { return Error(Fat32Code, io_error, FAT32_IO_ERROR); }
+            )
+        },
+        none() {}
+    )
 
     return Error(Fat32Code, invalid_argument, FAT32_INVALID_ARGUMENT);
 }
 
 static Result(Fat32Code) Fat32Volume__write_sector(Fat32VolumePtr self, BlockNumber sector, DataPtr source)
 {
-    Match(BlockDevicePtr, self->device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, self->device,
+        some(device)
         {
-            ResultMatch(BlockCount, BlockDevice__write(device, sector, 1, source))
-                IsSuccess(count, {
+            match_result(BlockCount, BlockDevice__write(device, sector, 1, source),
+                success(count)
+                {
                     if (count == 1)
                     {
                         return Success(Fat32Code, FAT32_OK);
                     }
-                })
-                IsError(code, message, return Error(Fat32Code, io_error, FAT32_IO_ERROR))
-            End
-        })
-    End
+                },
+                error(code, message) { return Error(Fat32Code, io_error, FAT32_IO_ERROR); }
+            )
+        },
+        none() {}
+    )
 
     return Error(Fat32Code, invalid_argument, FAT32_INVALID_ARGUMENT);
 }
@@ -206,23 +211,19 @@ static BString Fat32__decode_83_name(DataPtr source)
 
     for (size_t i = 0; i < 8 && source[i] != ' '; i++)
     {
-        result.data[result.len] = (char) source[i];
-        result.len++;
+        BString__push_char(&result, (char) source[i]);
     }
 
     if (source[8] != ' ')
     {
-        result.data[result.len] = '.';
-        result.len++;
+        BString__push_char(&result, '.');
 
         for (size_t i = 8; i < 11 && source[i] != ' '; i++)
         {
-            result.data[result.len] = (char) source[i];
-            result.len++;
+            BString__push_char(&result, (char) source[i]);
         }
     }
 
-    result.data[result.len] = 0;
     return result;
 }
 
@@ -250,12 +251,7 @@ static void Fat32__write_lfn_char(BStringPtr name, size_t index, uint16_t value)
         return;
     }
 
-    name->data[index] = value < 0x80 ? (char) value : '?';
-    if (index >= name->len)
-    {
-        name->len = index + 1;
-        name->data[name->len] = 0;
-    }
+    BString__set_char_at(name, (StringPos) index, value < 0x80 ? (char) value : '?');
 }
 
 static void Fat32__accumulate_lfn(DataPtr entry, BStringPtr name, Fat32ChecksumPtr checksum, Fat32FlagPtr valid)
@@ -289,7 +285,7 @@ static void Fat32__accumulate_lfn(DataPtr entry, BStringPtr name, Fat32ChecksumP
 
 static BString Fat32__entry_name(DataPtr entry, BStringPtr lfn_name, uint8_t checksum, bool lfn_valid)
 {
-    if (lfn_valid && checksum == Fat32__short_name_checksum(entry) && lfn_name->len > 0)
+    if (lfn_valid && checksum == Fat32__short_name_checksum(entry) && !BString__is_empty(lfn_name))
     {
         return *lfn_name;
     }
@@ -320,15 +316,17 @@ static Result(Fat32Code) Fat32Volume__write_fat_entry(Fat32VolumePtr self, uint3
     {
         BlockNumber fat_sector = self->fat_start_sector + (fat * self->sectors_per_fat) + relative_sector;
 
-        ResultMatch(Fat32Code, Fat32Volume__read_sector(self, fat_sector, sector))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        match_result(Fat32Code, Fat32Volume__read_sector(self, fat_sector, sector),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         Fat32__write_u32(sector, sector_offset, value & 0x0fffffff);
 
-        ResultMatch(Fat32Code, Fat32Volume__write_sector(self, fat_sector, sector))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        match_result(Fat32Code, Fat32Volume__write_sector(self, fat_sector, sector),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
     }
 
     return Success(Fat32Code, FAT32_OK);
@@ -341,9 +339,10 @@ static Result(Fat32Code) Fat32Volume__read_fat_entry(Fat32VolumePtr self, uint32
     BlockNumber relative_sector = fat_offset / FAT32_BYTES_PER_SECTOR;
     size_t sector_offset = fat_offset % FAT32_BYTES_PER_SECTOR;
 
-    ResultMatch(Fat32Code, Fat32Volume__read_sector(self, self->fat_start_sector + relative_sector, sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__read_sector(self, self->fat_start_sector + relative_sector, sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     *value = Fat32__read_u32(sector, sector_offset) & 0x0fffffff;
     return Success(Fat32Code, FAT32_OK);
@@ -365,13 +364,15 @@ static Result(Fat32Code) Fat32Volume__free_cluster_chain(Fat32VolumePtr self, ui
     for (uint32_t i = 0; i < self->cluster_count; i++)
     {
         uint32_t next_cluster = FAT32_END_OF_CHAIN;
-        ResultMatch(Fat32Code, Fat32Volume__read_fat_entry(self, cluster, &next_cluster))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        match_result(Fat32Code, Fat32Volume__read_fat_entry(self, cluster, &next_cluster),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
-        ResultMatch(Fat32Code, Fat32Volume__write_fat_entry(self, cluster, FAT32_EMPTY_CLUSTER))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        match_result(Fat32Code, Fat32Volume__write_fat_entry(self, cluster, FAT32_EMPTY_CLUSTER),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         if (Fat32__is_end_of_chain(next_cluster) || next_cluster == FAT32_EMPTY_CLUSTER)
         {
@@ -394,9 +395,10 @@ static Result(Fat32Code) Fat32Volume__find_free_cluster(Fat32VolumePtr self, Fat
     for (uint32_t current = 2; current < self->cluster_count + 2; current++)
     {
         uint32_t value = FAT32_END_OF_CHAIN;
-        ResultMatch(Fat32Code, Fat32Volume__read_fat_entry(self, current, &value))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        match_result(Fat32Code, Fat32Volume__read_fat_entry(self, current, &value),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         if (value == FAT32_EMPTY_CLUSTER)
         {
@@ -450,13 +452,14 @@ static Result(Fat32Code) Fat32Volume__find_directory_entry(
 
     for (uint8_t relative_sector = 0; relative_sector < FAT32_SECTORS_PER_CLUSTER; relative_sector++)
     {
-        ResultMatch(Fat32Code, Fat32Volume__read_sector(
+        match_result(Fat32Code, Fat32Volume__read_sector(
             self,
             directory_sector_start + relative_sector,
             directory_sector
-        ))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        ),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         for (size_t entry_offset = 0; entry_offset < FAT32_BYTES_PER_SECTOR; entry_offset += FAT32_ROOT_ENTRY_SIZE)
         {
@@ -512,13 +515,14 @@ static Result(Fat32Code) Fat32Volume__find_free_directory_entry(
 
     for (uint8_t relative_sector = 0; relative_sector < FAT32_SECTORS_PER_CLUSTER; relative_sector++)
     {
-        ResultMatch(Fat32Code, Fat32Volume__read_sector(
+        match_result(Fat32Code, Fat32Volume__read_sector(
             self,
             directory_sector_start + relative_sector,
             directory_sector
-        ))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        ),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         for (size_t entry_offset = 0; entry_offset < FAT32_BYTES_PER_SECTOR; entry_offset += FAT32_ROOT_ENTRY_SIZE)
         {
@@ -596,9 +600,10 @@ Result(Fat32Code) Fat32Volume__format(Fat32VolumePtr self)
     sector[510] = 0x55;
     sector[511] = 0xaa;
 
-    ResultMatch(Fat32Code, Fat32Volume__write_sector(self, 0, sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__write_sector(self, 0, sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     Fat32__zero(sector, FAT32_BYTES_PER_SECTOR);
     Fat32__write_u32(sector, 0, 0x41615252);
@@ -607,9 +612,10 @@ Result(Fat32Code) Fat32Volume__format(Fat32VolumePtr self)
     Fat32__write_u32(sector, 492, 0xffffffff);
     sector[510] = 0x55;
     sector[511] = 0xaa;
-    ResultMatch(Fat32Code, Fat32Volume__write_sector(self, 1, sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__write_sector(self, 1, sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     for (uint8_t fat = 0; fat < FAT32_FAT_COUNT; fat++)
     {
@@ -623,33 +629,36 @@ Result(Fat32Code) Fat32Volume__format(Fat32VolumePtr self)
                 Fat32__write_u32(sector, 8, FAT32_END_OF_CHAIN);
             }
 
-            ResultMatch(Fat32Code, Fat32Volume__write_sector(
+            match_result(Fat32Code, Fat32Volume__write_sector(
                 self,
                 self->fat_start_sector + (fat * self->sectors_per_fat) + i,
                 sector
-            ))
-                IsError(code, message, return Error(Fat32Code, message, code))
-            End
+            ),
+                success(_) {},
+                error(code, message) { return Error(Fat32Code, message, code); }
+            )
         }
     }
 
     Fat32__zero(sector, FAT32_BYTES_PER_SECTOR);
-    ResultMatch(Fat32Code, Fat32Volume__write_sector(
+    match_result(Fat32Code, Fat32Volume__write_sector(
         self,
         Fat32Volume__cluster_sector(self, self->root_cluster),
         sector
-    ))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Success(Fat32Code, FAT32_OK);
 }
 
 static Result(Fat32Code) Fat32Volume__mount_from_sector(Fat32VolumePtr self, DataPtr sector)
 {
-    Match(BlockDevicePtr, self->device)
-        IsNone(return Error(Fat32Code, invalid_argument, FAT32_INVALID_ARGUMENT))
-    End
+    match_optional(BlockDevicePtr, self->device,
+        some(_) {},
+        none() { return Error(Fat32Code, invalid_argument, FAT32_INVALID_ARGUMENT); }
+    )
 
     if (sector[510] != 0x55
         || sector[511] != 0xaa
@@ -684,9 +693,10 @@ static Result(Fat32Code) Fat32Volume__mount_from_sector(Fat32VolumePtr self, Dat
 Result(Fat32Code) Fat32Volume__mount(Fat32VolumePtr self)
 {
     Data sector[FAT32_BYTES_PER_SECTOR] = { 0 };
-    ResultMatch(Fat32Code, Fat32Volume__read_sector(self, 0, sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__read_sector(self, 0, sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Fat32Volume__mount_from_sector(self, sector);
 }
@@ -712,9 +722,10 @@ static Result(Fat32DirectoryEntries) Fat32Volume__list_directory(Fat32VolumePtr 
 
     for (uint8_t relative_sector = 0; relative_sector < FAT32_SECTORS_PER_CLUSTER; relative_sector++)
     {
-        ResultMatch(Fat32Code, Fat32Volume__read_sector(self, directory_sector + relative_sector, sector))
-            IsError(code, message, return Error(Fat32DirectoryEntries, message, code))
-        End
+        match_result(Fat32Code, Fat32Volume__read_sector(self, directory_sector + relative_sector, sector),
+            success(_) {},
+            error(code, message) { return Error(Fat32DirectoryEntries, message, code); }
+        )
 
         for (size_t offset = 0; offset < FAT32_BYTES_PER_SECTOR; offset += FAT32_ROOT_ENTRY_SIZE)
         {
@@ -748,9 +759,10 @@ static Result(Fat32DirectoryEntries) Fat32Volume__list_directory(Fat32VolumePtr 
                 .size = Fat32__read_u32(sector, offset + 28),
             };
 
-            ResultMatch(CollectionCode, Fat32DirectoryEntries__push(&entries, entry))
-                IsError(code, message, return Error(Fat32DirectoryEntries, message, code))
-            End
+            match_result(CollectionCode, Fat32DirectoryEntries__push(&entries, entry),
+                success(_) {},
+                error(code, message) { return Error(Fat32DirectoryEntries, message, code); }
+            )
             Fat32__clear_lfn(&lfn_name, &lfn_checksum, &lfn_valid);
         }
     }
@@ -763,9 +775,10 @@ static Result(Fat32Code) Fat32Volume__entry_cluster_and_attributes(
 )
 {
     Data directory_sector[FAT32_BYTES_PER_SECTOR] = { 0 };
-    ResultMatch(Fat32Code, Fat32Volume__read_sector(self, sector, directory_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__read_sector(self, sector, directory_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     *cluster = Fat32__read_directory_cluster(&directory_sector[offset]);
     *attributes = directory_sector[offset + 11];
@@ -789,34 +802,49 @@ static Result(Fat32Code) Fat32Volume__resolve_parent(
     }
 
     *parent_cluster = self->root_cluster;
-    *leaf_name = Unwrap(BString, BStringArray__at(&segments, segment_count - 1), EMPTY_BSTRING);
+    match_optional(BString, BStringArray__at(&segments, segment_count - 1),
+        some(segment)
+        {
+            *leaf_name = segment;
+        },
+        none() { return Error(Fat32Code, invalid_argument, FAT32_INVALID_ARGUMENT); }
+    )
 
     for (size_t i = 0; i < segment_count - 1; i++)
     {
-        BString segment = Unwrap(BString, BStringArray__at(&segments, i), EMPTY_BSTRING);
+        BString segment = EMPTY_BSTRING;
+        match_optional(BString, BStringArray__at(&segments, i),
+            some(path_segment)
+            {
+                segment = path_segment;
+            },
+            none() { return Error(Fat32Code, invalid_argument, FAT32_INVALID_ARGUMENT); }
+        )
         BlockNumber entry_sector = 0;
         size_t entry_offset = 0;
-        ResultMatch(Fat32Code, Fat32Volume__find_directory_entry(
+        match_result(Fat32Code, Fat32Volume__find_directory_entry(
             self,
             *parent_cluster,
             segment,
             &entry_sector,
             &entry_offset
-        ))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        ),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         uint32_t next_cluster = 0;
         uint8_t attributes = 0;
-        ResultMatch(Fat32Code, Fat32Volume__entry_cluster_and_attributes(
+        match_result(Fat32Code, Fat32Volume__entry_cluster_and_attributes(
             self,
             entry_sector,
             entry_offset,
             &next_cluster,
             &attributes
-        ))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        ),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         if ((attributes & FAT32_ATTR_DIRECTORY) == 0 || next_cluster < 2)
         {
@@ -844,36 +872,40 @@ static Result(Fat32Code) Fat32Volume__create_file_in_directory(
     }
 
     Fat32ShortName encoded_name = Fat32ShortName__new();
-    ResultMatch(Fat32Code, Fat32__encode_83_name(&name, &encoded_name))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32__encode_83_name(&name, &encoded_name),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     BlockNumber existing_sector = 0;
     size_t existing_offset = 0;
-    ResultMatch(Fat32Code, Fat32Volume__find_directory_entry(
+    match_result(Fat32Code, Fat32Volume__find_directory_entry(
         self,
         directory_cluster,
         name,
         &existing_sector,
         &existing_offset
-    ))
-        IsSuccess(_, return Error(Fat32Code, already_exists, FAT32_ALREADY_EXISTS))
-        IsError(code, message, {
+    ),
+        success(_) { return Error(Fat32Code, already_exists, FAT32_ALREADY_EXISTS); },
+        error(code, message)
+        {
             if (code != FAT32_NOT_FOUND)
             {
                 return Error(Fat32Code, message, code);
             }
-        })
-    End
+        }
+    )
 
     uint32_t cluster = 0;
-    ResultMatch(Fat32Code, Fat32Volume__find_free_cluster(self, &cluster))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__find_free_cluster(self, &cluster),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
-    ResultMatch(Fat32Code, Fat32Volume__write_fat_entry(self, cluster, FAT32_END_OF_CHAIN))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__write_fat_entry(self, cluster, FAT32_END_OF_CHAIN),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     Data file_sector[FAT32_BYTES_PER_SECTOR] = { 0 };
     if (size > 0)
@@ -881,34 +913,38 @@ static Result(Fat32Code) Fat32Volume__create_file_in_directory(
         Fat32__copy(file_sector, data, size);
     }
 
-    ResultMatch(Fat32Code, Fat32Volume__write_sector(self, Fat32Volume__cluster_sector(self, cluster), file_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__write_sector(self, Fat32Volume__cluster_sector(self, cluster), file_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
-    ResultMatch(Fat32Code, Fat32Volume__find_free_directory_entry(
+    match_result(Fat32Code, Fat32Volume__find_free_directory_entry(
         self,
         directory_cluster,
         &entry_sector,
         &entry_offset
-    ))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     Data directory_sector[FAT32_BYTES_PER_SECTOR] = { 0 };
-    ResultMatch(Fat32Code, Fat32Volume__read_sector(self, entry_sector, directory_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__read_sector(self, entry_sector, directory_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     Fat32__copy(&directory_sector[entry_offset], encoded_name.data, FAT32_SHORT_NAME_SIZE);
     directory_sector[entry_offset + 11] = FAT32_ATTR_ARCHIVE;
     Fat32__write_directory_cluster(&directory_sector[entry_offset], cluster);
     Fat32__write_u32(directory_sector, entry_offset + 28, size);
 
-    ResultMatch(Fat32Code, Fat32Volume__write_sector(self, entry_sector, directory_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__write_sector(self, entry_sector, directory_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Success(Fat32Code, FAT32_OK);
 }
@@ -919,9 +955,10 @@ static Result(Fat32Code) Fat32Volume__create_file_at_path(
 {
     uint32_t parent_cluster = 0;
     BString leaf_name = EMPTY_BSTRING;
-    ResultMatch(Fat32Code, Fat32Volume__resolve_parent(self, path, &parent_cluster, &leaf_name))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__resolve_parent(self, path, &parent_cluster, &leaf_name),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Fat32Volume__create_file_in_directory(self, parent_cluster, leaf_name, data, size);
 }
@@ -943,66 +980,74 @@ static Result(Fat32Code) Fat32Volume__create_directory_in_directory(
     }
 
     Fat32ShortName encoded_name = Fat32ShortName__new();
-    ResultMatch(Fat32Code, Fat32__encode_83_name(&name, &encoded_name))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32__encode_83_name(&name, &encoded_name),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     BlockNumber existing_sector = 0;
     size_t existing_offset = 0;
-    ResultMatch(Fat32Code, Fat32Volume__find_directory_entry(
+    match_result(Fat32Code, Fat32Volume__find_directory_entry(
         self,
         directory_cluster,
         name,
         &existing_sector,
         &existing_offset
-    ))
-        IsSuccess(_, return Error(Fat32Code, already_exists, FAT32_ALREADY_EXISTS))
-        IsError(code, message, {
+    ),
+        success(_) { return Error(Fat32Code, already_exists, FAT32_ALREADY_EXISTS); },
+        error(code, message)
+        {
             if (code != FAT32_NOT_FOUND)
             {
                 return Error(Fat32Code, message, code);
             }
-        })
-    End
+        }
+    )
 
     uint32_t cluster = 0;
-    ResultMatch(Fat32Code, Fat32Volume__find_free_cluster(self, &cluster))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__find_free_cluster(self, &cluster),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
-    ResultMatch(Fat32Code, Fat32Volume__write_fat_entry(self, cluster, FAT32_END_OF_CHAIN))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__write_fat_entry(self, cluster, FAT32_END_OF_CHAIN),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     Data directory_data[FAT32_BYTES_PER_SECTOR] = { 0 };
-    ResultMatch(Fat32Code, Fat32Volume__write_sector(self, Fat32Volume__cluster_sector(self, cluster), directory_data))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__write_sector(self, Fat32Volume__cluster_sector(self, cluster), directory_data),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
-    ResultMatch(Fat32Code, Fat32Volume__find_free_directory_entry(
+    match_result(Fat32Code, Fat32Volume__find_free_directory_entry(
         self,
         directory_cluster,
         &entry_sector,
         &entry_offset
-    ))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     Data directory_sector[FAT32_BYTES_PER_SECTOR] = { 0 };
-    ResultMatch(Fat32Code, Fat32Volume__read_sector(self, entry_sector, directory_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__read_sector(self, entry_sector, directory_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     Fat32__copy(&directory_sector[entry_offset], encoded_name.data, FAT32_SHORT_NAME_SIZE);
     directory_sector[entry_offset + 11] = FAT32_ATTR_DIRECTORY;
     Fat32__write_directory_cluster(&directory_sector[entry_offset], cluster);
     Fat32__write_u32(directory_sector, entry_offset + 28, 0);
 
-    ResultMatch(Fat32Code, Fat32Volume__write_sector(self, entry_sector, directory_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__write_sector(self, entry_sector, directory_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Success(Fat32Code, FAT32_OK);
 }
@@ -1011,9 +1056,10 @@ static Result(Fat32Code) Fat32Volume__create_directory_at_path(Fat32VolumePtr se
 {
     uint32_t parent_cluster = 0;
     BString leaf_name = EMPTY_BSTRING;
-    ResultMatch(Fat32Code, Fat32Volume__resolve_parent(self, path, &parent_cluster, &leaf_name))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__resolve_parent(self, path, &parent_cluster, &leaf_name),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Fat32Volume__create_directory_in_directory(self, parent_cluster, leaf_name);
 }
@@ -1049,13 +1095,14 @@ static Result(Fat32Code) Fat32Volume__read_file_chain(
             return Error(Fat32Code, invalid_volume, FAT32_INVALID_VOLUME);
         }
 
-        ResultMatch(Fat32Code, Fat32Volume__read_sector(
+        match_result(Fat32Code, Fat32Volume__read_sector(
             self,
             Fat32Volume__cluster_sector(self, current_cluster),
             file_sector
-        ))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        ),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         uint32_t copy_size = (uint32_t) Fat32__min_size(remaining, FAT32_BYTES_PER_SECTOR);
         Fat32__copy(&target[copied], file_sector, copy_size);
@@ -1069,9 +1116,10 @@ static Result(Fat32Code) Fat32Volume__read_file_chain(
         }
 
         uint32_t next_cluster = FAT32_END_OF_CHAIN;
-        ResultMatch(Fat32Code, Fat32Volume__read_fat_entry(self, current_cluster, &next_cluster))
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+        match_result(Fat32Code, Fat32Volume__read_fat_entry(self, current_cluster, &next_cluster),
+            success(_) {},
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         if (Fat32__is_end_of_chain(next_cluster) || next_cluster == FAT32_EMPTY_CLUSTER)
         {
@@ -1096,9 +1144,10 @@ static Result(Fat32Code) Fat32Volume__find_entry_at_path(
 {
     uint32_t parent_cluster = 0;
     BString leaf_name = EMPTY_BSTRING;
-    ResultMatch(Fat32Code, Fat32Volume__resolve_parent(self, path, &parent_cluster, &leaf_name))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__resolve_parent(self, path, &parent_cluster, &leaf_name),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Fat32Volume__find_directory_entry(self, parent_cluster, leaf_name, sector, offset);
 }
@@ -1108,15 +1157,17 @@ static Result(Fat32Code) Fat32Volume__mark_directory_entry_deleted(
 )
 {
     Data directory_sector[FAT32_BYTES_PER_SECTOR] = { 0 };
-    ResultMatch(Fat32Code, Fat32Volume__read_sector(self, sector, directory_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__read_sector(self, sector, directory_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     directory_sector[offset] = 0xe5;
 
-    ResultMatch(Fat32Code, Fat32Volume__write_sector(self, sector, directory_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__write_sector(self, sector, directory_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Success(Fat32Code, FAT32_OK);
 }
@@ -1129,20 +1180,22 @@ static Result(Fat32Code) Fat32Volume__remove_entry_in_directory(
 {
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
-    ResultMatch(Fat32Code, Fat32Volume__find_directory_entry(
+    match_result(Fat32Code, Fat32Volume__find_directory_entry(
         self,
         directory_cluster,
         name,
         &entry_sector,
         &entry_offset
-    ))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    ),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     Data directory_sector[FAT32_BYTES_PER_SECTOR] = { 0 };
-    ResultMatch(Fat32Code, Fat32Volume__read_sector(self, entry_sector, directory_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__read_sector(self, entry_sector, directory_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     uint8_t attributes = directory_sector[entry_offset + 11];
     uint32_t first_cluster = Fat32__read_directory_cluster(&directory_sector[entry_offset]);
@@ -1153,51 +1206,54 @@ static Result(Fat32Code) Fat32Volume__remove_entry_in_directory(
 
     if ((attributes & FAT32_ATTR_DIRECTORY) != 0)
     {
-        ResultMatch(Fat32DirectoryEntries, Fat32Volume__list_directory(self, first_cluster))
-            IsSuccess(entries,
+        match_result(Fat32DirectoryEntries, Fat32Volume__list_directory(self, first_cluster),
+            success(entries)
             {
                 if (entries.len > 0 && (flags & IO_REMOVE_RECURSIVE) == 0)
                 {
                     return Error(Fat32Code, directory_not_empty, FAT32_ALREADY_EXISTS);
                 }
-            })
-            IsError(code, message, return Error(Fat32Code, message, code))
-        End
+            },
+            error(code, message) { return Error(Fat32Code, message, code); }
+        )
 
         if ((flags & IO_REMOVE_RECURSIVE) != 0)
         {
-            ResultMatch(Fat32Code, Fat32Volume__remove_directory_children(self, first_cluster))
-                IsError(code, message, return Error(Fat32Code, message, code))
-            End
+            match_result(Fat32Code, Fat32Volume__remove_directory_children(self, first_cluster),
+                success(_) {},
+                error(code, message) { return Error(Fat32Code, message, code); }
+            )
         }
     }
 
-    ResultMatch(Fat32Code, Fat32Volume__mark_directory_entry_deleted(self, entry_sector, entry_offset))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__mark_directory_entry_deleted(self, entry_sector, entry_offset),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Fat32Volume__free_cluster_chain(self, first_cluster);
 }
 
 static Result(Fat32Code) Fat32Volume__remove_directory_children(Fat32VolumePtr self, uint32_t directory_cluster)
 {
-    ResultMatch(Fat32DirectoryEntries, Fat32Volume__list_directory(self, directory_cluster))
-        IsSuccess(entries,
+    match_result(Fat32DirectoryEntries, Fat32Volume__list_directory(self, directory_cluster),
+        success(entries)
         {
             FAIterate(Fat32DirectoryEntries, entries, index, entry)
-                ResultMatch(Fat32Code, Fat32Volume__remove_entry_in_directory(
+                match_result(Fat32Code, Fat32Volume__remove_entry_in_directory(
                     self,
                     directory_cluster,
                     entry.name,
                     IO_REMOVE_RECURSIVE
-                ))
-                    IsError(code, message, return Error(Fat32Code, message, code))
-                End
+                ),
+                    success(_) {},
+                    error(code, message) { return Error(Fat32Code, message, code); }
+                )
             End
             return Success(Fat32Code, FAT32_OK);
-        })
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+        },
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Success(Fat32Code, FAT32_OK);
 }
@@ -1206,9 +1262,10 @@ static Result(Fat32Code) Fat32Volume__remove_at_path(Fat32VolumePtr self, BStrin
 {
     uint32_t parent_cluster = 0;
     BString leaf_name = EMPTY_BSTRING;
-    ResultMatch(Fat32Code, Fat32Volume__resolve_parent(self, path, &parent_cluster, &leaf_name))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__resolve_parent(self, path, &parent_cluster, &leaf_name),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     return Fat32Volume__remove_entry_in_directory(self, parent_cluster, leaf_name, flags);
 }
@@ -1224,14 +1281,16 @@ Result(Fat32Code) Fat32Volume__read_root_file(
 
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
-    ResultMatch(Fat32Code, Fat32Volume__find_entry_at_path(self, name, &entry_sector, &entry_offset))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__find_entry_at_path(self, name, &entry_sector, &entry_offset),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     Data directory_sector[FAT32_BYTES_PER_SECTOR] = { 0 };
-    ResultMatch(Fat32Code, Fat32Volume__read_sector(self, entry_sector, directory_sector))
-        IsError(code, message, return Error(Fat32Code, message, code))
-    End
+    match_result(Fat32Code, Fat32Volume__read_sector(self, entry_sector, directory_sector),
+        success(_) {},
+        error(code, message) { return Error(Fat32Code, message, code); }
+    )
 
     uint32_t cluster = Fat32__read_directory_cluster(&directory_sector[entry_offset]);
     uint32_t size = Fat32__read_u32(directory_sector, entry_offset + 28);
@@ -1266,17 +1325,21 @@ static IOStatus Fat32FilesystemIO__status_from_fat32(Fat32Code code)
 
 static bool Fat32FilesystemIO__is_root_path(BString path)
 {
-    return path.len == 0 || (path.len == 1 && path.data[0] == '/');
+    return BString__is_empty(&path)
+        || (BString__length(&path) == 1 && BString__char_at_or(&path, 0, '\0') == '/');
 }
 
 static bool Fat32FilesystemIO__is_root_file_path(BString path)
 {
-    if (path.len == 0)
+    if (BString__is_empty(&path))
     {
         return false;
     }
 
-    if (path.data[0] == '/' || path.data[path.len - 1] == '/')
+    if (
+        BString__char_at_or(&path, 0, '\0') == '/'
+        || BString__char_at_or(&path, BString__length(&path) - 1, '\0') == '/'
+    )
     {
         return false;
     }
@@ -1293,7 +1356,13 @@ static size_t Fat32__path_segment_count(BStringPtr path)
 static BString Fat32__path_segment_at(BStringPtr path, size_t index)
 {
     BStringArray segments = BString__split(path, '/');
-    return Unwrap(BString, BStringArray__at(&segments, index), EMPTY_BSTRING);
+    match_optional(BString, BStringArray__at(&segments, index),
+        some(segment)
+        {
+            return segment;
+        },
+        none() { return EMPTY_BSTRING; }
+    )
 }
 
 static Result(Fat32DirectoryEntry) Fat32__find_entry_in_directory_sector(DataPtr sector, BString name)
@@ -1465,16 +1534,16 @@ static Result(IOBufferPtr) Fat32FileIO__start_async_read_with_device(
         (int) root_sector
     );
 
-    ResultMatch(Anything, BlockDevice__read_async(
+    match_result(Anything, BlockDevice__read_async(
         device,
         root_sector,
         1,
         block_context,
         Fat32FileIO__complete_async_read_directory
-    ))
-        IsSuccess(count, return Error(IOBufferPtr, io_error, IO_WAIT_FOR_DATA))
-        IsError(code, message, return Error(IOBufferPtr, message, code))
-    End
+    ),
+        success(count) { return Error(IOBufferPtr, io_error, IO_WAIT_FOR_DATA); },
+        error(code, message) { return Error(IOBufferPtr, message, code); }
+    )
 
     return Error(IOBufferPtr, io_error, IO_PANIC);
 }
@@ -1486,16 +1555,18 @@ static Result(IOBufferPtr) Fat32FileIO__start_async_read(
     ExternalBuffer target_buffer
 )
 {
-    Match(BlockDevicePtr, fs_state->volume.device)
-        IsSome(device, return Fat32FileIO__start_async_read_with_device(
+    match_optional(BlockDevicePtr, fs_state->volume.device,
+        some(device)
+        {
+            return Fat32FileIO__start_async_read_with_device(
             fs_state,
             file_handle,
             device,
             size,
             target_buffer
-        ))
-        IsNone(return Error(IOBufferPtr, invalid_path, IO_INVALID_PATH))
-    End
+        ); },
+        none() { return Error(IOBufferPtr, invalid_path, IO_INVALID_PATH); }
+    )
 
     return Error(IOBufferPtr, invalid_path, IO_INVALID_PATH);
 }
@@ -1507,8 +1578,8 @@ static Result(Anything) Fat32FileIO__async_read_sector_for_file(
     BlockIOContinuation continuation
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr file_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             file_context->kernel_context = kernel_context;
@@ -1518,9 +1589,9 @@ static Result(Anything) Fat32FileIO__async_read_sector_for_file(
             Result(Anything) read_result = BlockDevice__read_async(device, sector, 1, file_context, continuation);
             BlockDevice__clear_current_context();
             return read_result;
-        })
-        IsNone(return Error(Anything, invalid_path, IO_INVALID_PATH))
-    End
+        },
+        none() { return Error(Anything, invalid_path, IO_INVALID_PATH); }
+    )
 
     return Error(Anything, invalid_path, IO_INVALID_PATH);
 }
@@ -1603,10 +1674,10 @@ static Result(Anything) Fat32FileIO__async_read_sector(
     BlockIOContinuation continuation
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device, return Fat32FileIO__async_read_sector_with_device(context, device, sector, continuation))
-        IsNone(return Error(Anything, invalid_path, IO_INVALID_PATH))
-    End
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device) { return Fat32FileIO__async_read_sector_with_device(context, device, sector, continuation); },
+        none() { return Error(Anything, invalid_path, IO_INVALID_PATH); }
+    )
 
     return Error(Anything, invalid_path, IO_INVALID_PATH);
 }
@@ -1654,16 +1725,18 @@ static Result(Anything) Fat32FileIO__async_write_sector(
     BlockIOContinuation continuation
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device, return Fat32FileIO__async_write_sector_with_device(
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
+        {
+            return Fat32FileIO__async_write_sector_with_device(
             context,
             device,
             sector,
             source,
             continuation
-        ))
-        IsNone(return Error(Anything, invalid_path, IO_INVALID_PATH))
-    End
+        ); },
+        none() { return Error(Anything, invalid_path, IO_INVALID_PATH); }
+    )
 
     return Error(Anything, invalid_path, IO_INVALID_PATH);
 }
@@ -1704,9 +1777,10 @@ static Result(Anything) Fat32FileIO__start_async_write(
     };
 
     context->encoded_name = Fat32ShortName__new();
-    ResultMatch(Fat32Code, Fat32__encode_83_name(&file_handle->path, &context->encoded_name))
-        IsError(code, message, return Error(Anything, message, Fat32FilesystemIO__status_from_fat32(code)))
-    End
+    match_result(Fat32Code, Fat32__encode_83_name(&file_handle->path, &context->encoded_name),
+        success(_) {},
+        error(code, message) { return Error(Anything, message, Fat32FilesystemIO__status_from_fat32(code)); }
+    )
 
     __d_printf(
         FAT32,
@@ -2025,8 +2099,8 @@ static Result(IOInternalHandle) Fat32FileIO__open(IOStatePtr self, BString path,
             return Fat32FilesystemIOState__add_handle(fs_state, path, flags);
         }
 
-        Match(BlockDevicePtr, fs_state->volume.device)
-            IsSome(device,
+        match_optional(BlockDevicePtr, fs_state->volume.device,
+            some(device)
             {
                 Fat32AsyncOpenContextPtr open_context =
                     ptr(Kernel__alloc_kernel(sizeof(Fat32AsyncOpenContext)), Fat32AsyncOpenContext);
@@ -2038,48 +2112,54 @@ static Result(IOInternalHandle) Fat32FileIO__open(IOStatePtr self, BString path,
                 block_context->kernel_context = EMPTY_KERNEL_CONTEXT;
                 block_context->owner_context = (Anything) open_context;
 
-                ResultMatch(Anything, BlockDevice__read_async(
+                match_result(Anything, BlockDevice__read_async(
                     device,
                     0,
                     1,
                     block_context,
                     Fat32FileIO__complete_async_open
-                ))
-                    IsSuccess(handle, return Success(IOInternalHandle, handle))
-                    IsError(code, message, return Error(IOInternalHandle, message, code))
-                End
-            })
-            IsNone(return Error(IOInternalHandle, invalid_path, IO_INVALID_PATH))
-        End
+                ),
+                    success(handle) { return Success(IOInternalHandle, handle); },
+                    error(code, message) { return Error(IOInternalHandle, message, code); }
+                )
+            },
+            none() { return Error(IOInternalHandle, invalid_path, IO_INVALID_PATH); }
+        )
     }
 
     if ((flags & IO_OPEN_READ) != 0)
     {
         BlockNumber entry_sector = 0;
         size_t entry_offset = 0;
-        ResultMatch(Fat32Code, Fat32Volume__find_entry_at_path(&fs_state->volume, path, &entry_sector, &entry_offset))
-            IsError(code, message, return Error(
+        match_result(Fat32Code, Fat32Volume__find_entry_at_path(&fs_state->volume, path, &entry_sector, &entry_offset),
+            success(_) {},
+            error(code, message)
+            {
+                return Error(
                 IOInternalHandle,
                 message,
                 Fat32FilesystemIO__status_from_fat32(code)
-            ))
-        End
+            ); }
+        )
 
         uint32_t cluster = 0;
         uint8_t attributes = 0;
-        ResultMatch(Fat32Code, Fat32Volume__entry_cluster_and_attributes(
+        match_result(Fat32Code, Fat32Volume__entry_cluster_and_attributes(
             &fs_state->volume,
             entry_sector,
             entry_offset,
             &cluster,
             &attributes
-        ))
-            IsError(code, message, return Error(
+        ),
+            success(_) {},
+            error(code, message)
+            {
+                return Error(
                 IOInternalHandle,
                 message,
                 Fat32FilesystemIO__status_from_fat32(code)
-            ))
-        End
+            ); }
+        )
 
         if ((attributes & FAT32_ATTR_DIRECTORY) != 0 || cluster < 2)
         {
@@ -2090,25 +2170,28 @@ static Result(IOInternalHandle) Fat32FileIO__open(IOStatePtr self, BString path,
     {
         uint32_t parent_cluster = 0;
         BString leaf_name = EMPTY_BSTRING;
-        ResultMatch(Fat32Code, Fat32Volume__resolve_parent(
+        match_result(Fat32Code, Fat32Volume__resolve_parent(
             &fs_state->volume,
             path,
             &parent_cluster,
             &leaf_name
-        ))
-            IsError(code, message, return Error(
+        ),
+            success(_) {},
+            error(code, message)
+            {
+                return Error(
                 IOInternalHandle,
                 message,
                 Fat32FilesystemIO__status_from_fat32(code)
-            ))
-        End
+            ); }
+        )
     }
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
         IOInternalHandle handle = (IOInternalHandle) fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
         Fat32FileHandleMap__set(&fs_state->handles, handle, Fat32FileHandle__heap_new(path, flags));
-        _cs_return Success(IOInternalHandle, handle);
+        cs_return Success(IOInternalHandle, handle);
     })
 }
 
@@ -2128,51 +2211,51 @@ static Result(IOBufferPtr) Fat32FileIO__read(
 
     if (Fat32FilesystemIOState__uses_userspace_device(fs_state))
     {
-        ResultMatch(Fat32FileHandlePtr, Fat32FilesystemIOState__get_handle(fs_state, handle))
-            IsSuccess(target,
+        match_result(Fat32FileHandlePtr, Fat32FilesystemIOState__get_handle(fs_state, handle),
+            success(target)
             {
                 if ((target->flags & IO_OPEN_READ) == 0)
                 {
                     return Error(IOBufferPtr, invalid_handle, IO_OPERATION_NOT_SUPPORTED);
                 }
                 return Fat32FileIO__start_async_read(fs_state, target, size, target_buffer);
-            })
-            IsError(code, message, return Error(IOBufferPtr, message, code))
-        End
+            },
+            error(code, message) { return Error(IOBufferPtr, message, code); }
+        )
     }
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        Match(Fat32FileHandlePtr, Fat32FileHandleMap__get(&fs_state->handles, handle))
-            IsNone(_cs_return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE))
-            IsSome(target,
+        match_optional(Fat32FileHandlePtr, Fat32FileHandleMap__get(&fs_state->handles, handle),
+            some(target)
             {
                 if ((target->flags & IO_OPEN_READ) == 0)
                 {
-                    _cs_return Error(IOBufferPtr, invalid_handle, IO_OPERATION_NOT_SUPPORTED);
+                    cs_return Error(IOBufferPtr, invalid_handle, IO_OPERATION_NOT_SUPPORTED);
                 }
 
                 if (Fat32FilesystemIOState__uses_userspace_device(fs_state))
                 {
-                    _cs_return Fat32FileIO__start_async_read(fs_state, target, size, target_buffer);
+                    cs_return Fat32FileIO__start_async_read(fs_state, target, size, target_buffer);
                 }
 
                 DataPtr data = ptr(Kernel__alloc_kernel(FAT32_MAX_READ_SIZE), Data);
                 uint32_t bytes_read = 0;
-                ResultMatch(Fat32Code, Fat32Volume__read_root_file(
+                match_result(Fat32Code, Fat32Volume__read_root_file(
                     &fs_state->volume, target->path, data, FAT32_MAX_READ_SIZE, &bytes_read
-                ))
-                    IsError(code, message,
+                ),
+                    success(_) {},
+                    error(code, message)
                     {
                         Kernel__free(addr(data));
-                        _cs_return Error(IOBufferPtr, message, Fat32FilesystemIO__status_from_fat32(code));
-                    })
-                End
+                        cs_return Error(IOBufferPtr, message, Fat32FilesystemIO__status_from_fat32(code));
+                    }
+                )
 
                 if (target->offset >= bytes_read)
                 {
                     Kernel__free(addr(data));
-                    _cs_return Error(IOBufferPtr, not_found, IO_EOF);
+                    cs_return Error(IOBufferPtr, not_found, IO_EOF);
                 }
 
                 size_t remaining = bytes_read - target->offset;
@@ -2182,9 +2265,10 @@ static Result(IOBufferPtr) Fat32FileIO__read(
                 target->offset += read_size;
                 Kernel__free(addr(data));
 
-                _cs_return Success(IOBufferPtr, &target->buffer);
-            })
-        End
+                cs_return Success(IOBufferPtr, &target->buffer);
+            },
+            none() { cs_return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -2196,55 +2280,58 @@ static Result(ByteCount) Fat32FileIO__write(IOStatePtr self, IOInternalHandle ha
 
     if (Fat32FilesystemIOState__uses_userspace_device(fs_state))
     {
-        ResultMatch(Fat32FileHandlePtr, Fat32FilesystemIOState__get_handle(fs_state, handle))
-            IsSuccess(target,
+        match_result(Fat32FileHandlePtr, Fat32FilesystemIOState__get_handle(fs_state, handle),
+            success(target)
             {
                 if ((target->flags & IO_OPEN_WRITE) == 0 || target->offset != 0)
                 {
                     return Error(ByteCount, invalid_handle, IO_OPERATION_NOT_SUPPORTED);
                 }
 
-                ResultMatch(Anything, Fat32FileIO__start_async_write(fs_state, target, data, size))
-                    IsSuccess(count, return Error(ByteCount, io_error, IO_WAIT_FOR_DATA))
-                    IsError(code, message, return Error(ByteCount, message, code))
-                End
-            })
-            IsError(code, message, return Error(ByteCount, message, code))
-        End
+                match_result(Anything, Fat32FileIO__start_async_write(fs_state, target, data, size),
+                    success(count) { return Error(ByteCount, io_error, IO_WAIT_FOR_DATA); },
+                    error(code, message) { return Error(ByteCount, message, code); }
+                )
+            },
+            error(code, message) { return Error(ByteCount, message, code); }
+        )
     }
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        Match(Fat32FileHandlePtr, Fat32FileHandleMap__get(&fs_state->handles, handle))
-            IsNone(_cs_return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE))
-            IsSome(target,
+        match_optional(Fat32FileHandlePtr, Fat32FileHandleMap__get(&fs_state->handles, handle),
+            some(target)
             {
                 if ((target->flags & IO_OPEN_WRITE) == 0 || target->offset != 0)
                 {
-                    _cs_return Error(ByteCount, invalid_handle, IO_OPERATION_NOT_SUPPORTED);
+                    cs_return Error(ByteCount, invalid_handle, IO_OPERATION_NOT_SUPPORTED);
                 }
 
                 if (Fat32FilesystemIOState__uses_userspace_device(fs_state))
                 {
-                    ResultMatch(Anything, Fat32FileIO__start_async_write(fs_state, target, data, size))
-                        IsSuccess(count, _cs_return Error(ByteCount, io_error, IO_WAIT_FOR_DATA))
-                        IsError(code, message, _cs_return Error(ByteCount, message, code))
-                    End
+                    match_result(Anything, Fat32FileIO__start_async_write(fs_state, target, data, size),
+                        success(count) { cs_return Error(ByteCount, io_error, IO_WAIT_FOR_DATA); },
+                        error(code, message) { cs_return Error(ByteCount, message, code); }
+                    )
                 }
 
-                ResultMatch(Fat32Code, Fat32Volume__create_file_at_path(&fs_state->volume, target->path, data, size))
-                    IsSuccess(_, {
+                match_result(Fat32Code, Fat32Volume__create_file_at_path(&fs_state->volume, target->path, data, size),
+                    success(_)
+                    {
                         target->offset = size;
-                        _cs_return Success(ByteCount, size);
-                    })
-                    IsError(code, message, _cs_return Error(
+                        cs_return Success(ByteCount, size);
+                    },
+                    error(code, message)
+                    {
+                        cs_return Error(
                         ByteCount,
                         message,
                         Fat32FilesystemIO__status_from_fat32(code)
-                    ))
-                End
-            })
-        End
+                    ); }
+                )
+            },
+            none() { cs_return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -2279,37 +2366,43 @@ static Result(FilesystemNodes) Fat32FileIO__list_nodes(IOStatePtr self, Filesyst
 
         BlockNumber entry_sector = 0;
         size_t entry_offset = 0;
-        ResultMatch(Fat32Code, Fat32Volume__find_entry_at_path(&fs_state->volume, path, &entry_sector, &entry_offset))
-            IsError(code, message, return Error(
+        match_result(Fat32Code, Fat32Volume__find_entry_at_path(&fs_state->volume, path, &entry_sector, &entry_offset),
+            success(_) {},
+            error(code, message)
+            {
+                return Error(
                 FilesystemNodes,
                 message,
                 Fat32FilesystemIO__status_from_fat32(code)
-            ))
-        End
+            ); }
+        )
 
         uint32_t cluster = 0;
         uint8_t attributes = 0;
-        ResultMatch(Fat32Code, Fat32Volume__entry_cluster_and_attributes(
+        match_result(Fat32Code, Fat32Volume__entry_cluster_and_attributes(
             &fs_state->volume,
             entry_sector,
             entry_offset,
             &cluster,
             &attributes
-        ))
-            IsError(code, message, return Error(
+        ),
+            success(_) {},
+            error(code, message)
+            {
+                return Error(
                 FilesystemNodes,
                 message,
                 Fat32FilesystemIO__status_from_fat32(code)
-            ))
-        End
+            ); }
+        )
 
         if ((attributes & FAT32_ATTR_DIRECTORY) == 0)
         {
             return Error(FilesystemNodes, invalid_path, IO_INVALID_PATH);
         }
 
-        ResultMatch(Fat32DirectoryEntries, Fat32Volume__list_directory(&fs_state->volume, cluster))
-            IsSuccess(entries,
+        match_result(Fat32DirectoryEntries, Fat32Volume__list_directory(&fs_state->volume, cluster),
+            success(entries)
             {
                 FAIterate(Fat32DirectoryEntries, entries, index, entry)
                     FilesystemNodes__push(
@@ -2318,17 +2411,19 @@ static Result(FilesystemNodes) Fat32FileIO__list_nodes(IOStatePtr self, Filesyst
                     );
                 End
                 return Success(FilesystemNodes, result);
-            })
-            IsError(code, message, return Error(
+            },
+            error(code, message)
+            {
+                return Error(
                 FilesystemNodes,
                 message,
                 Fat32FilesystemIO__status_from_fat32(code)
-            ))
-        End
+            ); }
+        )
     }
 
-    ResultMatch(Fat32DirectoryEntries, Fat32Volume__list_root(&fs_state->volume))
-        IsSuccess(entries,
+    match_result(Fat32DirectoryEntries, Fat32Volume__list_root(&fs_state->volume),
+        success(entries)
         {
             FAIterate(Fat32DirectoryEntries, entries, index, entry)
                 FilesystemNodes__push(
@@ -2337,13 +2432,15 @@ static Result(FilesystemNodes) Fat32FileIO__list_nodes(IOStatePtr self, Filesyst
                 );
             End
             return Success(FilesystemNodes, result);
-        })
-        IsError(code, message, return Error(
+        },
+        error(code, message)
+        {
+            return Error(
             FilesystemNodes,
             message,
             Fat32FilesystemIO__status_from_fat32(code)
-        ))
-    End
+        ); }
+    )
 
     return Success(FilesystemNodes, result);
 }
@@ -2364,9 +2461,10 @@ typedef Fat32ListDirContext * Fat32ListDirContextPtr;
 
 static bool Fat32FilesystemIOState__uses_userspace_device(Fat32FilesystemIOStatePtr self)
 {
-    Match(BlockDevicePtr, self->volume.device)
-        IsSome(device, return device->userspace_service)
-    End
+    match_optional(BlockDevicePtr, self->volume.device,
+        some(device) { return device->userspace_service; },
+        none() {}
+    )
 
     return false;
 }
@@ -2377,11 +2475,11 @@ static Result(IOInternalHandle) Fat32FilesystemIOState__add_handle(
 {
     Fat32FileHandlePtr handle = Fat32FileHandle__heap_new(path, flags);
 
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
         IOInternalHandle io_handle = (IOInternalHandle) self->handle_count++ | self->state.filesystem->fs_code;
         Fat32FileHandleMap__set(&self->handles, io_handle, handle);
-        _cs_return Success(IOInternalHandle, io_handle);
+        cs_return Success(IOInternalHandle, io_handle);
     })
 }
 
@@ -2389,12 +2487,12 @@ static Result(Fat32FileHandlePtr) Fat32FilesystemIOState__get_handle(
     Fat32FilesystemIOStatePtr self, IOInternalHandle handle
 )
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
-        Match(Fat32FileHandlePtr, Fat32FileHandleMap__get(&self->handles, handle))
-            IsSome(file_handle, _cs_return Success(Fat32FileHandlePtr, file_handle))
-            IsNone(_cs_return Error(Fat32FileHandlePtr, invalid_handle, IO_UNKNOWN_HANDLE))
-        End
+        match_optional(Fat32FileHandlePtr, Fat32FileHandleMap__get(&self->handles, handle),
+            some(file_handle) { cs_return Success(Fat32FileHandlePtr, file_handle); },
+            none() { cs_return Error(Fat32FileHandlePtr, invalid_handle, IO_UNKNOWN_HANDLE); }
+        )
     })
 
     return Error(Fat32FileHandlePtr, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -2404,23 +2502,23 @@ static Result(IOInternalHandle) Fat32FilesystemIOState__delete_handle(
     Fat32FilesystemIOStatePtr self, IOInternalHandle handle
 )
 {
-    CriticalSection(self->state.lock,
+    critical_section(self->state.lock,
     {
         __d_printf(FAT32, "Fat32FileIO__close locked handle=%i\n", handle);
-        Match(Fat32FileHandlePtr, Fat32FileHandleMap__get(&self->handles, handle))
-            IsSome(_,
+        match_optional(Fat32FileHandlePtr, Fat32FileHandleMap__get(&self->handles, handle),
+            some(_)
             {
                 __d_printf(FAT32, "Fat32FileIO__close deleting handle=%i\n", handle);
                 Fat32FileHandleMap__delete(&self->handles, handle);
                 __d_printf(FAT32, "Fat32FileIO__close success handle=%i\n", handle);
-                _cs_return Success(IOInternalHandle, handle);
-            })
-            IsNone(
+                cs_return Success(IOInternalHandle, handle);
+            },
+            none()
             {
                 __d_printf(FAT32, "Fat32FileIO__close unknown handle=%i\n", handle);
-                _cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
-            })
-        End
+                cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
+            }
+        )
     })
 
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
@@ -2434,17 +2532,18 @@ static Result(Anything) Fat32FileIO__complete_async_open(BlockIOContextPtr block
         return Error(Anything, io_error, IO_INVALID_PATH);
     }
 
-    ResultMatch(Fat32Code, Fat32Volume__mount_from_sector(&context->fs_state->volume, block_context->buffer))
-        IsError(code, message, return Error(Anything, message, Fat32FilesystemIO__status_from_fat32(code)))
-    End
+    match_result(Fat32Code, Fat32Volume__mount_from_sector(&context->fs_state->volume, block_context->buffer),
+        success(_) {},
+        error(code, message) { return Error(Anything, message, Fat32FilesystemIO__status_from_fat32(code)); }
+    )
     context->fs_state->mounted = true;
 
-    ResultMatch(IOInternalHandle, Fat32FilesystemIOState__add_handle(
+    match_result(IOInternalHandle, Fat32FilesystemIOState__add_handle(
         context->fs_state, context->path, context->flags
-    ))
-        IsSuccess(handle, return Success(Anything, handle))
-        IsError(code, message, return Error(Anything, message, code))
-    End
+    ),
+        success(handle) { return Success(Anything, handle); },
+        error(code, message) { return Error(Anything, message, code); }
+    )
 
     return Error(Anything, invalid_path, IO_INVALID_PATH);
 }
@@ -2464,8 +2563,8 @@ static Result(Anything) Fat32FileIO__complete_async_read_directory(BlockIOContex
     }
 
     BString segment = Fat32__path_segment_at(&context->file_handle->path, context->path_segment_index);
-    ResultMatch(Fat32DirectoryEntry, Fat32__find_entry_in_directory_sector(block_context->buffer, segment))
-        IsSuccess(entry,
+    match_result(Fat32DirectoryEntry, Fat32__find_entry_in_directory_sector(block_context->buffer, segment),
+        success(entry)
         {
             if (context->path_segment_index + 1 < segment_count)
             {
@@ -2520,9 +2619,9 @@ static Result(Anything) Fat32FileIO__complete_async_read_directory(BlockIOContex
             }
 
             return Fat32FileIO__async_read_fat_for_file(context, block_context->kernel_context);
-        })
-        IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-    End
+        },
+        error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+    )
 
     return Error(Anything, not_found, IO_INVALID_PATH);
 }
@@ -2578,36 +2677,12 @@ static Result(Anything) Fat32FileIO__complete_async_read_file(BlockIOContextPtr 
 
 static DirectoryEntry Fat32FileIO__directory_entry_from_fat_entry(Fat32DirectoryEntryPtr node)
 {
-    DirectoryEntry entry = (DirectoryEntry) { 0 };
-    entry.attributes = node->attributes;
-
-    size_t max_name = IO_DIRENT_NAME_MAX - 1;
-    size_t copy_len = node->name.len < max_name ? node->name.len : max_name;
-    for (size_t i = 0; i < copy_len; i++)
-    {
-        entry.name[i] = node->name.data[i];
-    }
-    entry.name[copy_len] = '\0';
-    entry.name_len = copy_len;
-
-    return entry;
+    return DirectoryEntry__new(node->attributes, 0, 0, 0, &node->name);
 }
 
 static DirectoryEntry Fat32FileIO__directory_entry_from_node(FilesystemNodePtr node)
 {
-    DirectoryEntry entry = (DirectoryEntry) { 0 };
-    entry.attributes = node->attribs;
-
-    size_t max_name = IO_DIRENT_NAME_MAX - 1;
-    size_t copy_len = node->name.len < max_name ? node->name.len : max_name;
-    for (size_t i = 0; i < copy_len; i++)
-    {
-        entry.name[i] = node->name.data[i];
-    }
-    entry.name[copy_len] = '\0';
-    entry.name_len = copy_len;
-
-    return entry;
+    return DirectoryEntry__new(node->attribs, 0, 0, 0, &node->name);
 }
 
 static Result(DirectoryEntryCount) Fat32FileIO__copy_nodes_to_dirents(
@@ -2622,8 +2697,8 @@ static Result(DirectoryEntryCount) Fat32FileIO__copy_nodes_to_dirents(
         }
         entries[count] = Fat32FileIO__directory_entry_from_node(node);
         count++;
-    End
 
+    End
     return Success(DirectoryEntryCount, count);
 }
 
@@ -2639,8 +2714,8 @@ static Result(DirectoryEntryCount) Fat32FileIO__copy_entries_to_dirents(
         }
         entries[count] = Fat32FileIO__directory_entry_from_fat_entry(&entry);
         count++;
-    End
 
+    End
     return Success(DirectoryEntryCount, count);
 }
 
@@ -2698,8 +2773,8 @@ static Result(DirectoryEntryCount) Fat32FileIO__copy_directory_sector_to_dirents
 
 static Result(Anything) Fat32FileIO__read_root_dir_async(Fat32ListDirContextPtr context, KernelContext kernel_context)
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr root_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             root_context->kernel_context = kernel_context;
@@ -2731,9 +2806,9 @@ static Result(Anything) Fat32FileIO__read_root_dir_async(Fat32ListDirContextPtr 
             );
             BlockDevice__clear_current_context();
             return read_result;
-        })
-        IsNone(return Error(Anything, invalid_path, IO_INVALID_PATH))
-    End
+        },
+        none() { return Error(Anything, invalid_path, IO_INVALID_PATH); }
+    )
 
     return Error(Anything, invalid_path, IO_INVALID_PATH);
 }
@@ -2742,8 +2817,8 @@ static Result(Anything) Fat32FileIO__read_list_dir_cluster_async(
     Fat32ListDirContextPtr context, KernelContext kernel_context, Fat32Cluster cluster
 )
 {
-    Match(BlockDevicePtr, context->fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, context->fs_state->volume.device,
+        some(device)
         {
             BlockIOContextPtr directory_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
             directory_context->kernel_context = kernel_context;
@@ -2759,9 +2834,9 @@ static Result(Anything) Fat32FileIO__read_list_dir_cluster_async(
             );
             BlockDevice__clear_current_context();
             return read_result;
-        })
-        IsNone(return Error(Anything, invalid_path, IO_INVALID_PATH))
-    End
+        },
+        none() { return Error(Anything, invalid_path, IO_INVALID_PATH); }
+    )
 
     return Error(Anything, invalid_path, IO_INVALID_PATH);
 }
@@ -2786,9 +2861,10 @@ static Result(Anything) Fat32FileIO__complete_async_list_dir(BlockIOContextPtr b
 
     if (context->mount_first)
     {
-        ResultMatch(Fat32Code, Fat32Volume__mount_from_sector(&context->fs_state->volume, block_context->buffer))
-            IsError(code, message, return Error(Anything, message, Fat32FilesystemIO__status_from_fat32(code)))
-        End
+        match_result(Fat32Code, Fat32Volume__mount_from_sector(&context->fs_state->volume, block_context->buffer),
+            success(_) {},
+            error(code, message) { return Error(Anything, message, Fat32FilesystemIO__status_from_fat32(code)); }
+        )
         context->fs_state->mounted = true;
         __d_printf(
             FAT32,
@@ -2805,16 +2881,14 @@ static Result(Anything) Fat32FileIO__complete_async_list_dir(BlockIOContextPtr b
 
     if (Fat32FilesystemIO__is_root_path(context->path) || context->listing_target)
     {
-        ResultMatch(DirectoryEntryCount, Fat32FileIO__copy_directory_sector_to_dirents(
+        match_result(DirectoryEntryCount, Fat32FileIO__copy_directory_sector_to_dirents(
             block_context->buffer, context->entries, context->max_entries
-        ))
-            IsSuccess(count,
+        ),
+            success(count)
             {
                 __d_printf(FAT32, "list decoded count=%i\n", (int) count);
                 return Success(Anything, count);
-            })
-            IsError(code, message, return Error(Anything, message, code))
-        End
+            }, error(code, message) { return Error(Anything, message, code); })
     }
 
     size_t segment_count = Fat32__path_segment_count(&context->path);
@@ -2824,8 +2898,8 @@ static Result(Anything) Fat32FileIO__complete_async_list_dir(BlockIOContextPtr b
     }
 
     BString segment = Fat32__path_segment_at(&context->path, context->path_segment_index);
-    ResultMatch(Fat32DirectoryEntry, Fat32__find_entry_in_directory_sector(block_context->buffer, segment))
-        IsSuccess(entry,
+    match_result(Fat32DirectoryEntry, Fat32__find_entry_in_directory_sector(block_context->buffer, segment),
+        success(entry)
         {
             if ((entry.attributes & FAT32_ATTR_DIRECTORY) == 0 || entry.first_cluster < 2)
             {
@@ -2846,9 +2920,9 @@ static Result(Anything) Fat32FileIO__complete_async_list_dir(BlockIOContextPtr b
                 block_context->kernel_context,
                 entry.first_cluster
             );
-        })
-        IsError(code, message, return Error(Anything, message, IO_INVALID_PATH))
-    End
+        },
+        error(code, message) { return Error(Anything, message, IO_INVALID_PATH); }
+    )
 
     return Error(Anything, io_error, IO_INVALID_PATH);
 }
@@ -2861,18 +2935,20 @@ static Result(DirectoryEntryCount) Fat32FileIO__list_dir(
 
     if (fs_state->mounted && !Fat32FilesystemIOState__uses_userspace_device(fs_state))
     {
-        ResultMatch(FilesystemNodes, Fat32FileIO__list_nodes(self, fs_state->state.filesystem->root, path))
-            IsSuccess(nodes, return Fat32FileIO__copy_nodes_to_dirents(nodes, entries, max_entries))
-            IsError(code, message, return Error(
+        match_result(FilesystemNodes, Fat32FileIO__list_nodes(self, fs_state->state.filesystem->root, path),
+            success(nodes) { return Fat32FileIO__copy_nodes_to_dirents(nodes, entries, max_entries); },
+            error(code, message)
+            {
+                return Error(
                 DirectoryEntryCount,
                 message,
                 code
-            ))
-        End
+            ); }
+        )
     }
 
-    Match(BlockDevicePtr, fs_state->volume.device)
-        IsSome(device,
+    match_optional(BlockDevicePtr, fs_state->volume.device,
+        some(device)
         {
             Fat32ListDirContextPtr list_context =
                 ptr(Kernel__alloc_kernel(sizeof(Fat32ListDirContext)), Fat32ListDirContext);
@@ -2900,19 +2976,19 @@ static Result(DirectoryEntryCount) Fat32FileIO__list_dir(
                 (int) max_entries
             );
 
-            ResultMatch(Anything, BlockDevice__read_async(
+            match_result(Anything, BlockDevice__read_async(
                 device,
                 first_block,
                 1,
                 block_context,
                 Fat32FileIO__complete_async_list_dir
-            ))
-                IsSuccess(count, return Success(DirectoryEntryCount, count))
-                IsError(code, message, return Error(DirectoryEntryCount, message, code))
-            End
-        })
-        IsNone(return Error(DirectoryEntryCount, invalid_path, IO_INVALID_PATH))
-    End
+            ),
+                success(count) { return Success(DirectoryEntryCount, count); },
+                error(code, message) { return Error(DirectoryEntryCount, message, code); }
+            )
+        },
+        none() { return Error(DirectoryEntryCount, invalid_path, IO_INVALID_PATH); }
+    )
 
     return Error(DirectoryEntryCount, invalid_path, IO_INVALID_PATH);
 }
@@ -2925,10 +3001,10 @@ static Result(IOStatus) Fat32FileIO__mkdir(IOStatePtr self, BString path)
         return Error(IOStatus, invalid_path, IO_INVALID_PATH);
     }
 
-    ResultMatch(Fat32Code, Fat32Volume__create_directory_at_path(&fs_state->volume, path))
-        IsSuccess(_, return Success(IOStatus, IO_OK))
-        IsError(code, message, return Error(IOStatus, message, Fat32FilesystemIO__status_from_fat32(code)))
-    End
+    match_result(Fat32Code, Fat32Volume__create_directory_at_path(&fs_state->volume, path),
+        success(_) { return Success(IOStatus, IO_OK); },
+        error(code, message) { return Error(IOStatus, message, Fat32FilesystemIO__status_from_fat32(code)); }
+    )
 
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
 }
@@ -2941,12 +3017,12 @@ static Result(IOStatus) Fat32FileIO__remove(IOStatePtr self, BString path, Flags
         return Error(IOStatus, invalid_path, IO_INVALID_PATH);
     }
 
-    CriticalSection(fs_state->state.lock,
+    critical_section(fs_state->state.lock,
     {
-        ResultMatch(Fat32Code, Fat32Volume__remove_at_path(&fs_state->volume, path, flags))
-            IsSuccess(_, _cs_return Success(IOStatus, IO_OK))
-            IsError(code, message, _cs_return Error(IOStatus, message, Fat32FilesystemIO__status_from_fat32(code)))
-        End
+        match_result(Fat32Code, Fat32Volume__remove_at_path(&fs_state->volume, path, flags),
+            success(_) { cs_return Success(IOStatus, IO_OK); },
+            error(code, message) { cs_return Error(IOStatus, message, Fat32FilesystemIO__status_from_fat32(code)); }
+        )
     })
 
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
@@ -3005,20 +3081,22 @@ Fat32FilesystemIOStatePtr Fat32FilesystemIOState__heap_new(
 
     if (!device->userspace_service)
     {
-        ResultMatch(Fat32Code, Fat32Volume__mount(&io_state->volume))
-            IsSuccess(_, io_state->mounted = true)
-            IsError(mount_code, mount_message,
+        match_result(Fat32Code, Fat32Volume__mount(&io_state->volume),
+            success(_) { io_state->mounted = true; },
+            error(mount_code, mount_message)
             {
-                ResultMatch(Fat32Code, Fat32Volume__format(&io_state->volume))
-                    IsSuccess(_,
+                match_result(Fat32Code, Fat32Volume__format(&io_state->volume),
+                    success(_)
                     {
-                        ResultMatch(Fat32Code, Fat32Volume__mount(&io_state->volume))
-                            IsSuccess(_, io_state->mounted = true)
-                        End
-                    })
-                End
-            })
-        End
+                        match_result(Fat32Code, Fat32Volume__mount(&io_state->volume),
+                            success(_) { io_state->mounted = true; },
+                            error(_code, _message) {}
+                        )
+                    },
+                    error(_code, _message) {}
+                )
+            }
+        )
     }
 
     fs->state = &io_state->state;

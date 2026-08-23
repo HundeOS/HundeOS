@@ -3,11 +3,11 @@
 #include "../../user.h"
 
 static const char * HELLO_PATH = "/dev/hello";
-static char hello_message[] = "hello world\n";
+static const BString hello_message = BSTRING_NEW("hello world\n");
 
 static uint64_t copy_hello(IOServerBufferDataPtr target, uint64_t capacity)
 {
-    uint64_t bytes = sizeof(hello_message) - 1;
+    uint64_t bytes = (uint64_t) BString__length(&hello_message);
     if (bytes > capacity)
     {
         bytes = capacity;
@@ -15,7 +15,7 @@ static uint64_t copy_hello(IOServerBufferDataPtr target, uint64_t capacity)
 
     for (uint64_t i = 0; i < bytes; i++)
     {
-        target[i] = hello_message[i];
+        target[i] = BString__char_at_or(&hello_message, (StringPos) i, '\0');
     }
 
     return bytes;
