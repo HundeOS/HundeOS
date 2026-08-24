@@ -112,25 +112,19 @@ OptionalDef(ArrayIndex);
 #define FAOptional(alias) _Optional(alias##__optional)
 #define FAPtrOptional(alias) _Optional(alias##__type_ptr__optional)
 
-#define FAIterate(alias, array, index, value) \
+#define for_each_fa(alias, array, index, value, ...) \
     for (uint64_t index = 0; index < array.len; index++) \
     { \
        alias##__type value = array.data[index]; \
+       __VA_ARGS__ \
+    }
 
-#define FAPtrIterate(alias, array, index, value) \
+#define for_each_fa_ptr(alias, array, index, value, ...) \
     for (uint64_t index = 0; index < array->len; index++) \
     { \
        alias##__type value = array->data[index]; \
-
-#define FAPtrMatch(alias, opt) \
-    { \
-        typedef alias##__type_ptr value_type; \
-        _Optional(alias##__type_ptr) optional = opt; \
-
-#define FindResultMatch(alias, opt) \
-    { \
-        typedef alias##__FindResult value_type; \
-        _Optional(alias##__FindResult) optional = opt; \
+       __VA_ARGS__ \
+    }
 
 #define FANone(alias) None(alias##__optional)
 #define FAPtrNone(alias) None(alias##__type_ptr__optional)
@@ -336,7 +330,7 @@ alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predi
             { \
                 return Error(CollectionCode, FIXED_ARRAY_ERROR(ITEM_NOT_FOUND), ARRAY_ITEM_NOT_FOUND); \
             }; } \
-        ) \
+        ); \
         return Success(CollectionCode, 0); \
     } \
 

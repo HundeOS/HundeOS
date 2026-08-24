@@ -19,12 +19,12 @@ void tearDown(void)
 
 void test_auth_authenticates_root_and_issues_ticket(void)
 {
-    match_result(AuthTicketID, Auth__authenticate(&kernel->auth, process, bstring("root"), bstring("root")), success(ticket_id) { TEST_ASSERT_GREATER_THAN(AUTH_NO_TICKET, ticket_id); }, error(code, message) { TEST_FAIL(); })
+    match_result(AuthTicketID, Auth__authenticate(&kernel->auth, process, bstring("root"), bstring("root")), success(ticket_id) { TEST_ASSERT_GREATER_THAN(AUTH_NO_TICKET, ticket_id); }, error_test_fail());
 }
 
 void test_auth_rejects_invalid_credentials(void)
 {
-    match_result(AuthTicketID, Auth__authenticate(&kernel->auth, process, bstring("root"), bstring("bad")), success(ticket_id) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(AUTH_INVALID_CREDENTIALS, code); })
+    match_result(AuthTicketID, Auth__authenticate(&kernel->auth, process, bstring("root"), bstring("bad")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(AUTH_INVALID_CREDENTIALS, code); });
 }
 
 void test_auth_consumes_ticket_once(void)
@@ -35,9 +35,9 @@ void test_auth_consumes_ticket_once(void)
         AUTH_NO_TICKET
     );
 
-    match_result(UserID, Auth__consume_ticket(&kernel->auth, process, ticket_id), success(user_id) { TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, user_id); }, error(code, message) { TEST_FAIL(); })
+    match_result(UserID, Auth__consume_ticket(&kernel->auth, process, ticket_id), success(user_id) { TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, user_id); }, error_test_fail());
 
-    match_result(UserID, Auth__consume_ticket(&kernel->auth, process, ticket_id), success(user_id) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code); })
+    match_result(UserID, Auth__consume_ticket(&kernel->auth, process, ticket_id), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code); });
 }
 
 void test_auth_rejects_ticket_for_different_process(void)
@@ -49,5 +49,5 @@ void test_auth_rejects_ticket_for_different_process(void)
         AUTH_NO_TICKET
     );
 
-    match_result(UserID, Auth__consume_ticket(&kernel->auth, other_process, ticket_id), success(user_id) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_FOR_DIFFERENT_PROCESS, code); })
+    match_result(UserID, Auth__consume_ticket(&kernel->auth, other_process, ticket_id), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_FOR_DIFFERENT_PROCESS, code); });
 }

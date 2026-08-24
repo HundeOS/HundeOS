@@ -26,8 +26,8 @@ static bool Kill__parse_signal_spec(ConstBStringPtr value, ProcessSignal * signa
             *signal = (ProcessSignal) numeric_signal;
             return true;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (Kill__matches_signal_name(value, &KILL__TERM_SIGNAL))
     {
@@ -112,7 +112,7 @@ int main(int argc, char ** argv)
             print("kill: usage kill [-signal] <pid>\n");
             return 1;
         }
-    )
+    );
 
     return 1;
 }

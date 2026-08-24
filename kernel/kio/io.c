@@ -55,7 +55,7 @@ Result(ByteCount) read(OriginatingContext context, IOHandle handle, DataBufferPt
             return Success(ByteCount, bytes_read);
         },
         error(code, message) { return Error(ByteCount, message, code); }
-    )
+    );
 
     return Error(ByteCount, unreachable_code, IO_PANIC);
 }
@@ -74,7 +74,7 @@ Result(ByteCount) read_into(OriginatingContext context, IOHandle handle, DataPtr
             return Success(ByteCount, bytes_read);
         },
         error(code, message) { return Error(ByteCount, message, code); }
-    )
+    );
 
     return Error(ByteCount, unreachable_code, IO_PANIC);
 }

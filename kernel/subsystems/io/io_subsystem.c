@@ -58,7 +58,7 @@ static Result(ServiceCode) IOSubsystem__deliver_service_event(
     match_result(AckCode, MessageBroker__deliver(self->message_broker, message),
         success(_) { return Success(ServiceCode, SERVICE_OK); },
         error(code, message) { return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR); }
-    )
+    );
 
     return Error(ServiceCode, unreachable_code, SERVICE_SCHEDULER_ERROR);
 }
@@ -122,26 +122,27 @@ static BString IOSubsystem__dev_name_from_path(BString path)
             return name;
         },
         none() { return path; }
-    )
+    );
 }
 
 Result(CollectionCode) IOSubsystem__append_dev_filesystem_nodes(
     IOSubsystemPtr self, FilesystemPtr filesystem, FilesystemNodes * target
 )
 {
-    FAIterate(IODevicesArray, self->devices, index, registration)
+    for_each_fa(IODevicesArray, self->devices, index, registration,
+    {
         if (IOSubsystem__is_dev_path(&registration.path))
         {
             match_result(CollectionCode, FilesystemNodes__push(
                 target,
                 FilesystemNode__heap_new(filesystem, IOSubsystem__dev_name_from_path(registration.path), 0)
             ),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { return Error(CollectionCode, message, code); }
-            )
+            );
         }
 
-    End
+    });
     return Success(CollectionCode, 0);
 }
 
@@ -169,7 +170,7 @@ Result(IOHandle) IOSubsystem__record_open_handle(
                             PIDHandles__push(&pid_handles, external_handle);
                             ProcessHandleMap__set(&self->process_handles, pid, pid_handles);
                         }
-                    )
+                    );
                 },
                 none()
                 {
@@ -178,7 +179,7 @@ Result(IOHandle) IOSubsystem__record_open_handle(
             );
             return Success(IOHandle, external_handle);
         },
-        none() {}
+        none_do_nothing()
     );
 
     return Error(IOHandle, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
@@ -200,9 +201,9 @@ Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, BS
             match_result(IOInternalHandle, open_result,
                 success(handle) { return IOSubsystem__record_open_handle(self, context, path, handle); },
                 error(code, message) { return Error(IOHandle, message, code); }
-            )
+            );
         },
-        none() {}
+        none_do_nothing()
     );
 
     return error;
@@ -252,20 +253,21 @@ Result(DirectoryEntryCount) IOSubsystem__list_dir(
                 success(nodes)
                 {
                     DirectoryEntryCount count = 0;
-                    FAIterate(FilesystemNodes, nodes, index, node)
+                    for_each_fa(FilesystemNodes, nodes, index, node,
+                    {
                         if ((size_t) count >= max_entries)
                         {
                             return Success(DirectoryEntryCount, count);
                         }
                         entries[count] = DirectoryEntry__from_node(node);
                         count++;
-                    End
+                    });
                     return Success(DirectoryEntryCount, count);
                 },
                 error(code, message) { return Error(DirectoryEntryCount, message, code); }
-            )
+            );
         },
-        none() {}
+        none_do_nothing()
     );
 
     return Error(DirectoryEntryCount, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
@@ -286,7 +288,7 @@ Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, BString path)
             FileIOPtr file_io = (FileIOPtr) registration->device;
             return file_io->mkdir(registration->state, path);
         },
-        none() {}
+        none_do_nothing()
     );
 
     return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
@@ -307,7 +309,7 @@ Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, BString path, Flags fl
             FileIOPtr file_io = (FileIOPtr) registration->device;
             return file_io->remove(registration->state, path, flags);
         },
-        none() {}
+        none_do_nothing()
     );
 
     return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
@@ -339,10 +341,10 @@ Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, BString source_path, BSt
 
                     return source_file_io->link(source_registration->state, source_path, target_path);
                 },
-                none() {}
+                none_do_nothing()
             );
         },
-        none() {}
+        none_do_nothing()
     );
 
     return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(source_path)), IO_NO_DEVICE_FOUND);
@@ -354,8 +356,8 @@ Result(IOStatus) IOSubsystem__mount(
 {
     match_optional(FilesystemPtr, self->root_filesystem,
         some(root_fs) { return Filesystem__mount_block_device(root_fs, device_path, filesystem_type, mountpoint); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOStatus, bstring("No root filesystem"), IO_NO_DEVICE_FOUND);
 }
@@ -394,8 +396,8 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)
                                     {
                                         PIDHandles__remove(proc_handles, handle);
                                     },
-                                    none() {}
-                                )
+                                    none_do_nothing()
+                                );
                             },
                             none()
                             {
@@ -416,7 +418,7 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)
                             }
                         );
                     },
-                    none() {}
+                    none_do_nothing()
                 );
             });
 
@@ -428,7 +430,7 @@ Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context)
         {
             return Error(IOHandle, no_handle_supplied, IO_NOT_OPEN);
         }
-    )
+    );
     return Error(IOHandle, unreachable_code, IO_UNKNOWN_HANDLE);
 }
 
@@ -441,7 +443,7 @@ Result(ByteCount) IOSubsystem__transfer(IOBufferPtr buffer, DataPtr result, size
             return Success(ByteCount, num);
         },
         error(code, message) { return Error(ByteCount, message, code); }
-    )
+    );
 }
 
 Result(IOStatus) IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context)
@@ -457,9 +459,9 @@ Result(IOStatus) IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr par
                 {
                     __d_printf(IOSUB, "IO data arrived device=%p state=%p\n", match->device, match->state);
                     match_result(ParkStatus, match->device->unpark(match->state),
-                        success(_) {},
+                        success_do_nothing(),
                         error(code, message) { return Error(IOStatus, message, code); }
-                    )
+                    );
                     __d_println(IOSUB, "IO data arrived device unpark done");
 
                     match_optional(ProcessID, parked_context->kernel_context.pid,
@@ -479,16 +481,16 @@ Result(IOStatus) IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr par
                                     return Success(IOStatus, IO_OK);
                                 },
                                 error(code, message) { return Error(IOStatus, message, code); }
-                            )
+                            );
                         },
                         none() { return Error(IOStatus, no_pid_found, IO_UNKNOWN_PID); }
                     );
                 },
                 none() { return Error(IOStatus, bstring("No device found for parking context"), IO_NOT_OPEN);; }
-            )
+            );
         },
         none() { return Error(IOStatus, no_handle_supplied, IO_NOT_OPEN); }
-    )
+    );
 
     return Error(IOStatus, unreachable_code, IO_PANIC);
 }
@@ -504,9 +506,9 @@ static Result(ParkStatus) IOSubsystem__park(IOSubsystemPtr self, IOContextPtr io
                 {
                     __d_println(IOSUB, "Parking context to device");
                     match_result(ParkStatus, match->device->park(match->state, io_context),
-                        success(_) {},
+                        success_do_nothing(),
                         error(code, message) { return Error(ParkStatus, message, code); }
-                    )
+                    );
 
                     DeviceHandle handle_device = device_handle(handle);
                     match_optional(ProcessPtr, IOServerProcessMap__get(&self->read_server_processes, handle_device),
@@ -517,20 +519,20 @@ static Result(ParkStatus) IOSubsystem__park(IOSubsystemPtr self, IOContextPtr io
                             event.source = SERVICE_IO_READ_REQUEST;
                             event.data = handle_device;
                             match_result(ServiceCode, IOSubsystem__deliver_service_event(self, server_process, event),
-                                success(_) {},
+                                success_do_nothing(),
                                 error(code, message) { __d_printf(PANIC, "Failed to deliver IO read service event: %s", cstr(message)); }
-                            )
+                            );
                         },
-                        none() {}
-                    )
+                        none_do_nothing()
+                    );
 
                     return Success(ParkStatus, IO_PARK_OK);
                 },
                 none() { return Error(ParkStatus, bstring("No device found for parking context"), IO_NOT_OPEN);; }
-            )
+            );
         },
         none() { return Error(ParkStatus, no_handle_supplied, IO_NOT_OPEN); }
-    )
+    );
 
     return Error(ParkStatus, unreachable_code, IO_NOT_OPEN);
 }
@@ -550,10 +552,10 @@ Result(Anything) IOSubsystem__continue_read(ParkedOperationPtr parked_operation)
                     return Success(Anything, bytes);
                 },
                 error(code, message) { return Error(Anything, message, code); }
-            )
+            );
         },
         none() { return Error(Anything, bstring("no io subsystem found"), IO_PANIC); }
-    )
+    );
 
     return Error(Anything, bstring("unexpected code path"), IO_PANIC);
 }
@@ -565,13 +567,13 @@ static Result(ByteCount) IOSubsystem__request_read_park(IOSubsystemPtr self, IOC
     IOContextPtr parked_context = IOContext__from_io_context(context, context->handle);
 
     match_result(ParkStatus, IOSubsystem__park(self, parked_context),
-        success(_) {},
+        success_do_nothing(),
         error(code, message)
         {
             IOContext__dispose(parked_context);
             return Error(ByteCount, message, code);
         }
-    )
+    );
 
     match_optional(ProcessID, parked_context->kernel_context.pid,
         some(pid)
@@ -593,13 +595,13 @@ static Result(ByteCount) IOSubsystem__request_read_park(IOSubsystemPtr self, IOC
                     match_result(AckCode, MessageBroker__deliver(self->message_broker, message),
                         success(_) { return Error(ByteCount, bstring("IO read parked"), IO_WAIT_FOR_DATA); },
                         error(code, message) { return Error(ByteCount, message, code); }
-                    )
+                    );
                 },
                 none() { return Error(ByteCount, no_handle_supplied, IO_NOT_OPEN); }
-            )
+            );
         },
         none() { return Error(ByteCount, no_pid_found, IO_UNKNOWN_PID); }
-    )
+    );
 
     return Error(ByteCount, unreachable_code, IO_PANIC);
 }
@@ -614,7 +616,7 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
             critical_section(self->lock,
             {
                 device_opt = IOHandlesMap__get(&self->handles, handle);
-            })
+            });
             match_optional(DeviceRegistrationPtr, device_opt,
                 some(registration)
                 {
@@ -646,7 +648,7 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
                                             return Success(ByteCount, bytes);
                                         },
                                         error(code, message) { return Error(ByteCount, message, code); }
-                                    )
+                                    );
                                 },
                                 error(code, error_message)
                                 {
@@ -656,9 +658,9 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
                                     }
                                     return Error(ByteCount, error_message, code);
                                 }
-                            )
+                            );
                         },
-                        none() {}
+                        none_do_nothing()
                     );
                 },
                 none() { __d_println(PANIC, "No device found for handle"); }
@@ -668,7 +670,7 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
         {
             return Error(ByteCount, no_handle_supplied, IO_NOT_OPEN);
         }
-    )
+    );
     return Error(ByteCount, unreachable_code, IO_NOT_OPEN);
 }
 
@@ -697,16 +699,16 @@ Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context)
                                             event.source = SERVICE_IO_WRITE_REQUEST;
                                             event.data = device_handle(handle);
                                             match_result(ServiceCode, IOSubsystem__deliver_service_event(self, server_process, event),
-                                                success(_) {},
+                                                success_do_nothing(),
                                                 error(code, message) { __d_printf(PANIC, "Failed to deliver IO write service event: %s", cstr(message)); }
-                                            )
+                                            );
                                         },
-                                        none() {}
-                                    )
+                                        none_do_nothing()
+                                    );
                                     return Success(ByteCount, count);
                                 },
                                 error(code, message) { return Error(ByteCount, message, code); }
-                            )
+                            );
                         },
                         none()
                         {
@@ -714,11 +716,11 @@ Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context)
                         }
                     );
                 },
-                none() {}
+                none_do_nothing()
             );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(ByteCount, no_handle_supplied, IO_NOT_OPEN);
 }
@@ -742,15 +744,15 @@ Result(IOHandle) IOSubsystem__server_register(
                 event.source = SERVICE_IO_READ_REQUEST;
                 event.data = device_handle(handle);
                 match_result(ServiceCode, IOSubsystem__deliver_service_event(self, process, event),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { return Error(IOHandle, message, code); }
-                )
+                );
             }
             IOServerRoleMap__set(&self->server_roles, handle, role);
             return Success(IOHandle, handle);
         },
         error(code, message) { return Error(IOHandle, message, code); }
-    )
+    );
 
     return Error(IOHandle, no_handle_supplied, IO_NOT_OPEN);
 }
@@ -793,7 +795,7 @@ static Result(IOServerBuffer) IOSubsystem__map_server_buffer(ProcessPtr process,
             }));
         },
         error(code, message) { return Error(IOServerBuffer, message, code); }
-    )
+    );
 
     return Error(IOServerBuffer, no_buffer_supplied, IO_UNKNOWN_BUFFER);
 }
@@ -819,8 +821,8 @@ Result(IOStatus) IOSubsystem__server_get_buffer(
                         {
                             role = registered_role;
                         },
-                        none() {}
-                    )
+                        none_do_nothing()
+                    );
                     IO_server_buffer buffer_getter = registration->device->server_buffer;
                     if (role == IO_SERVER_WRITE)
                     {
@@ -842,16 +844,16 @@ Result(IOStatus) IOSubsystem__server_get_buffer(
                                     return Success(IOStatus, IO_OK);
                                 },
                                 error(code, message) { return Error(IOStatus, message, code); }
-                            )
+                            );
                         },
                         error(code, message) { return Error(IOStatus, message, code); }
-                    )
+                    );
                 },
-                none() {}
+                none_do_nothing()
             );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOStatus, no_handle_supplied, IO_NOT_OPEN);
 }
@@ -875,18 +877,18 @@ Result(IOStatus) IOSubsystem__server_data_available(IOSubsystemPtr self, IOConte
                             match_result(IOStatus, IOSubsystem__data_arrived(self, parked_context),
                                 success(status) { return Success(IOStatus, status); },
                                 error(code, message) { return Error(IOStatus, message, code); }
-                            )
+                            );
                         },
-                        none() {}
-                    )
+                        none_do_nothing()
+                    );
 
                     return Success(IOStatus, IO_OK);
                 },
-                none() {}
+                none_do_nothing()
             );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOStatus, no_handle_supplied, IO_NOT_OPEN);
 }
@@ -905,11 +907,11 @@ Result(IOStatus) IOSubsystem__server_data_consumed(IOSubsystemPtr self, IOContex
                     }
                     return registration->device->data_consumed(registration->state, byte_count);
                 },
-                none() {}
+                none_do_nothing()
             );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOStatus, no_handle_supplied, IO_NOT_OPEN);
 }
@@ -933,18 +935,18 @@ Result(IOStatus) IOSubsystem__server_eof(IOSubsystemPtr self, IOContextPtr conte
                             match_result(IOStatus, IOSubsystem__data_arrived(self, parked_context),
                                 success(status) { return Success(IOStatus, status); },
                                 error(code, message) { return Error(IOStatus, message, code); }
-                            )
+                            );
                         },
-                        none() {}
-                    )
+                        none_do_nothing()
+                    );
 
                     return Success(IOStatus, IO_OK);
                 },
-                none() {}
+                none_do_nothing()
             );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOStatus, no_handle_supplied, IO_NOT_OPEN);
 }
@@ -958,18 +960,19 @@ Result(Anything) IOSubsystem__dispose_of_process_resources(IOSubsystemPtr self, 
             match_optional(ProcessHandleMap__value_type, ProcessHandleMap__get(&self->process_handles, pid),
                 some(handles)
                 {
-                    FAIterate(PIDHandles, handles, index, handle)
+                    for_each_fa(PIDHandles, handles, index, handle,
+                    {
                         IOContextPtr handle_context = IOContext__from_io_context(context, Some(IOHandle, handle));
                         IOSubsystem__close(self, handle_context);
-                    End
+                    });
                 },
-                none() {}
-            )
+                none_do_nothing()
+            );
             ProcessHandleMap__delete(&self->process_handles, pid);
             return Success(Anything, pid);
         },
         none() { __d_println(PANIC, "No PID found for close all"); }
-    )
+    );
 
     return Error(Anything, no_pid_found, IO_UNKNOWN_PID);
 
@@ -992,8 +995,8 @@ void IOSubsystem__message_received(KernelListenerPtr listener, MessagePtr messag
                 IOContext__dispose(context);
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 }
 
 

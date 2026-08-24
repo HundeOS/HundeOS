@@ -59,7 +59,7 @@ static void Syslog__write(BString tag, Optional(ProcessPtr) proc, BString messag
             k_printf("pid=none: %s", cstr(message));
             return;
         }
-    )
+    );
 }
 
 Result(SystemCallResult) Syslog__handler(
@@ -81,14 +81,14 @@ Result(SystemCallResult) Syslog__handler(
                 match_result(BString, Syslog__copy_tag(arg2),
                     success(copied_tag) { tag = copied_tag; },
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
             }
 
             Syslog__write(tag, proc, message);
             return Success(SystemCallResult, SYSLOG_OK);
         },
         error(code, message) { return Error(SystemCallResult, message, code); }
-    )
+    );
 
     return Error(SystemCallResult, invalid_syslog_message, SYSLOG_INVALID_ARGUMENT);
 }

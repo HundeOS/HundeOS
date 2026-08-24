@@ -44,8 +44,8 @@ Result(Anything) KernelContext__map_result(KernelContextPtr self, Result(Anythin
 {
     match_optional(KernelResultMapper, self->result_mapper,
         some(mapper) { return mapper(result, self->result_mapper_context); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return result;
 }
@@ -56,23 +56,23 @@ bool KernelContext__has_any_state(KernelContextPtr self)
 
     match_optional(ProcessID, self->pid,
         some(pid) { has_state = true;; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     match_optional(SchedulerPtr, self->scheduler,
         some(scheduler) { has_state = true;; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     match_optional(KernelResultMapper, self->result_mapper,
         some(mapper) { has_state = true;; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     match_optional(KernelContextPtr, self->next_context,
         some(next_context) { has_state = true;; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return has_state;
 }
@@ -87,7 +87,7 @@ KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext
     Optional(ProcessID) pid = None(ProcessID);
     match_optional(ProcessPtr, originating_context.process,
         some(process) { pid = Some(ProcessID, process->pid); },
-        none() {}
+        none_do_nothing()
     );
 
     return KernelContext__heap_new(pid, Some(SchedulerPtr, originating_context.kernel->scheduler));
@@ -98,7 +98,7 @@ KernelContext KernelContext__from_originating_context(OriginatingContext origina
     Optional(ProcessID) pid = None(ProcessID);
     match_optional(ProcessPtr, originating_context.process,
         some(process) { pid = Some(ProcessID, process->pid); },
-        none() {}
+        none_do_nothing()
     );
 
     return KernelContext__new(pid, Some(SchedulerPtr, originating_context.kernel->scheduler));

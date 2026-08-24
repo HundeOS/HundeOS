@@ -121,7 +121,7 @@ static void install_open_fd(FileDescriptor fd)
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, context, path, FLAGS), success(handle) {
             TEST_ASSERT_EQUAL(RAW_HANDLE, handle);
             Process__set_file_descriptor(&process, fd, handle);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     IOContext__dispose(context);
     opened = false;
@@ -142,7 +142,7 @@ void setUp(void)
     write_data = NULL;
     write_size = 0;
 
-    match_result(DeviceHandle, IOSubsystem__register_device(kernel->io_subsystem, path, &test_io, &state), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(DeviceHandle, IOSubsystem__register_device(kernel->io_subsystem, path, &test_io, &state), success_do_nothing(), error_test_fail());
 }
 
 void tearDown(void)
@@ -159,8 +159,8 @@ void test_io_handler_open_returns_process_file_descriptor(void)
             TEST_ASSERT_EQUAL(EXPECTED_FD, fd);
             TEST_ASSERT_EQUAL(1, process.file_descriptors.len);
 
-            match_result(ProcessIOHandle, Process__get_io_handle(&process, EXPECTED_FD), success(handle) { TEST_ASSERT_EQUAL(RAW_HANDLE, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(ProcessIOHandle, Process__get_io_handle(&process, EXPECTED_FD), success(handle) { TEST_ASSERT_EQUAL(RAW_HANDLE, handle); }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_io_handler_write_translates_file_descriptor_to_io_handle(void)
@@ -176,14 +176,14 @@ void test_io_handler_write_translates_file_descriptor_to_io_handle(void)
             TEST_ASSERT_EQUAL(INTERNAL_HANDLE, write_handle);
             TEST_ASSERT_EQUAL(data, write_data);
             TEST_ASSERT_EQUAL(sizeof(data) - 1, write_size);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_io_handler_open_rejects_missing_path_at_syscall_boundary(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, &process), IO_OPEN, 0, FLAGS, 0, 0
-    ), success(fd) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_io_handler_close_removes_file_descriptor(void)
@@ -195,9 +195,9 @@ void test_io_handler_close_removes_file_descriptor(void)
     ), success(fd) {
             TEST_ASSERT_TRUE(closed);
             TEST_ASSERT_EQUAL(EXPECTED_FD, fd);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
-    match_result(ProcessIOHandle, Process__get_io_handle(&process, EXPECTED_FD), success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_NOT_OPEN, code); })
+    match_result(ProcessIOHandle, Process__get_io_handle(&process, EXPECTED_FD), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_NOT_OPEN, code); });
 }
 
 void test_io_handler_list_dir_rejects_missing_path_at_syscall_boundary(void)
@@ -206,36 +206,36 @@ void test_io_handler_list_dir_rejects_missing_path_at_syscall_boundary(void)
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, &process), IO_LIST_DIR, 0, (Anything) entries, 2, 0
-    ), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_io_handler_list_dir_rejects_missing_entries_at_syscall_boundary(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, &process), IO_LIST_DIR, (Anything) cstr(path), 0, 2, 0
-    ), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_io_handler_mkdir_rejects_missing_path_at_syscall_boundary(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, &process), IO_MKDIR, 0, 0, 0, 0
-    ), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_io_handler_mount_rejects_missing_arguments_at_syscall_boundary(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, &process), IO_MOUNT, 0, (Anything) "ext2", (Anything) "/", 0
-    ), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, &process), IO_MOUNT, (Anything) "/dev/virtio1", 0, (Anything) "/", 0
-    ), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, &process), IO_MOUNT, (Anything) "/dev/virtio1", (Anything) "ext2", 0, 0
-    ), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_io_handler_mount_requires_mount_capability(void)
@@ -250,7 +250,7 @@ void test_io_handler_mount_requires_mount_capability(void)
         (Anything) "ext2",
         (Anything) "/",
         0
-    ), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, code); });
 }
 
 void test_io_handler_server_data_available_translates_file_descriptor_to_io_handle(void)
@@ -262,7 +262,7 @@ void test_io_handler_server_data_available_translates_file_descriptor_to_io_hand
     ), success(status) {
             TEST_ASSERT_TRUE(data_available);
             TEST_ASSERT_EQUAL(IO_OK, status);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_io_handler_server_register_fd_can_be_used_for_get_buffer(void)
@@ -275,7 +275,7 @@ void test_io_handler_server_register_fd_can_be_used_for_get_buffer(void)
     ), success(fd) {
             TEST_ASSERT_EQUAL(EXPECTED_FD, fd);
 
-            match_result(ProcessIOHandle, Process__get_io_handle(service_process, (FileDescriptor) fd), success(handle) { TEST_ASSERT_EQUAL(RAW_HANDLE, handle); }, error(code, message) { TEST_FAIL(); })
+            match_result(ProcessIOHandle, Process__get_io_handle(service_process, (FileDescriptor) fd), success(handle) { TEST_ASSERT_EQUAL(RAW_HANDLE, handle); }, error_test_fail());
 
             match_result(SystemCallResult, Syslog__handler(
                 kernel,
@@ -285,7 +285,7 @@ void test_io_handler_server_register_fd_can_be_used_for_get_buffer(void)
                 0,
                 0,
                 0
-            ), success(status) { TEST_ASSERT_EQUAL(SYSLOG_OK, status); }, error(code, message) { TEST_FAIL(); })
+            ), success(status) { TEST_ASSERT_EQUAL(SYSLOG_OK, status); }, error_test_fail());
 
             match_result(SystemCallResult, Syslog__handler(
                 kernel,
@@ -295,7 +295,7 @@ void test_io_handler_server_register_fd_can_be_used_for_get_buffer(void)
                 0,
                 0,
                 0
-            ), success(status) { TEST_ASSERT_EQUAL(SYSLOG_OK, status); }, error(code, message) { TEST_FAIL(); })
+            ), success(status) { TEST_ASSERT_EQUAL(SYSLOG_OK, status); }, error_test_fail());
 
             match_result(SystemCallResult, IO__handler(
                 kernel,
@@ -309,8 +309,8 @@ void test_io_handler_server_register_fd_can_be_used_for_get_buffer(void)
                     TEST_ASSERT_EQUAL(IO_OK, status);
                     TEST_ASSERT_EQUAL_UINT64(sizeof(server_buffer_data), server_buffer.capacity);
                     TEST_ASSERT_NOT_NULL(server_buffer.data);
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_io_handler_server_eof_translates_file_descriptor_to_io_handle(void)
@@ -322,5 +322,5 @@ void test_io_handler_server_eof_translates_file_descriptor_to_io_handle(void)
     ), success(status) {
             TEST_ASSERT_TRUE(eof);
             TEST_ASSERT_EQUAL(IO_OK, status);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }

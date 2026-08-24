@@ -41,7 +41,7 @@ static BString DevFilesystemIO__name_from_path(BString path)
             return name;
         },
         none() { return path; }
-    )
+    );
 }
 
 static Result(IOInternalHandle) DevFilesystemIOState__add_handle(DevFilesystemIOStatePtr self, BString path)
@@ -52,7 +52,7 @@ static Result(IOInternalHandle) DevFilesystemIOState__add_handle(DevFilesystemIO
         FileHandleTargetPtr target = FileHandleTarget__heap_new(path);
         FileHandleTargetMap__set(&self->state.handles, handle, target);
         cs_return Success(IOInternalHandle, handle);
-    })
+    });
 }
 
 static Result(FileHandleTargetPtr) DevFilesystemIOState__get_handle(DevFilesystemIOStatePtr self, IOInternalHandle handle)
@@ -62,8 +62,8 @@ static Result(FileHandleTargetPtr) DevFilesystemIOState__get_handle(DevFilesyste
         match_optional(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle),
             some(target) { cs_return Success(FileHandleTargetPtr, target); },
             none() { cs_return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -80,8 +80,8 @@ static Result(IOInternalHandle) DevFilesystemIOState__delete_handle(DevFilesyste
                 cs_return Success(IOInternalHandle, handle);
             },
             none() { cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -92,8 +92,8 @@ static Result(IOInternalHandle) DevFilesystemIO__open(IOStatePtr self, BString p
 
     match_optional(BlockDeviceMetadata, BlockDeviceRegistry__metadata(path),
         some(metadata) { return DevFilesystemIOState__add_handle(fs_state, path); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOInternalHandle, invalid_path, IO_INVALID_PATH);
 }
@@ -135,13 +135,13 @@ static Result(IOBufferPtr) DevFilesystemIO__read(
                     target->offset += read_size;
                     return Success(IOBufferPtr, &target->buffer);
                 },
-                none() {}
-            )
+                none_do_nothing()
+            );
 
             return Error(IOBufferPtr, invalid_path, IO_INVALID_PATH);
         },
         error(code, message) { return Error(IOBufferPtr, message, code); }
-    )
+    );
 
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -177,24 +177,26 @@ static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, File
     match_result(CollectionCode, IOSubsystem__append_dev_filesystem_nodes(
         fs_state->io_subsystem, fs_state->state.filesystem, &result
     ),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(FilesystemNodes, message, code); }
-    )
+    );
 
-    FAIterate(BlockDevicePaths, paths, index, device_path)
+    for_each_fa(BlockDevicePaths, paths, index, device_path,
+    {
         FilesystemNodes__push(
             &result,
             FilesystemNode__heap_new(fs_state->state.filesystem, DevFilesystemIO__name_from_path(device_path), 0)
         );
 
-    End
-    FAIterate(BlockDeviceMetadataEntries, metadata_entries, index, metadata)
+    });
+    for_each_fa(BlockDeviceMetadataEntries, metadata_entries, index, metadata,
+    {
         FilesystemNodes__push(
             &result,
             FilesystemNode__heap_new(fs_state->state.filesystem, metadata.alias, 0)
         );
 
-    End
+    });
     return Success(FilesystemNodes, result);
 }
 

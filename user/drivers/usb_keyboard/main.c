@@ -49,8 +49,12 @@ static void UsbKeyboard__publish_pending(UsbKeyboardPtr self)
                 io_server_data_available(self->keyboard, byte_count);
             }
         },
-        error(code, message) { return; }
-    )
+        error(code, message)
+        {
+            DRIVER_DEBUG("usb_keyboard: pending drain failed: %s (%i)\n", BString__cstr(&message), (int) code);
+            return;
+        }
+    );
 }
 
 static bool UsbKeyboard__init(UsbKeyboardPtr self)

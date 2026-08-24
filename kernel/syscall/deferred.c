@@ -6,8 +6,8 @@ Result(Anything) SystemCall__Complete(ParkedOperationPtr parked_operation)
 {
     match_optional(ReturnCode, parked_operation->return_code,
         some(code) { return Success(Anything, code);; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(Anything, missing_return_code, SYSCALL_FAILURE);
 }

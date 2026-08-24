@@ -85,7 +85,7 @@ static Result(DirectoryEntryCount) AsyncListDirFilesystemIO__list_dir(
     match_optional(KernelContextPtr, BlockDevice__current_context(), some(current_context) {
             state->captured_context = true;
             state->continuation_context = *current_context;
-        }, none() { state->captured_context = false; })
+        }, none() { state->captured_context = false; });
 
     return Error(DirectoryEntryCount, async_list_pending, BLOCK_DEVICE_REQUEST_PENDING);
 }
@@ -165,12 +165,13 @@ static const uint64_t HELLO_WORLD_SIZE = 66840;
 
 static bool FilesystemNodes__has_name(FilesystemNodes * self, BString name)
 {
-    FAPtrIterate(FilesystemNodes, self, index, node)
+    for_each_fa_ptr(FilesystemNodes, self, index, node,
+    {
         if (BString__equals(&name, &node->name))
         {
             return true;
         }
-    End
+    });
 
     return false;
 }
@@ -223,9 +224,7 @@ void test_it_can_list_files_from_root(void)
             TEST_ASSERT_TRUE(BString__equals(&fat16, &fat16_node->name));
             FilesystemNodePtr fat32_node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 5), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&fat32, &fat32_node->name));
-        }, error(code, message) {
-            TEST_FAIL();
-        })
+        }, error_test_fail());
 }
 
 void test_devfs_lists_registered_block_devices(void)
@@ -238,9 +237,9 @@ void test_devfs_lists_registered_block_devices(void)
         bstring("/dev/businfo"),
         (IOPtr) Stream__heap_new(),
         (IOStatePtr) StreamState__heap_new()
-    ), success(_) {}, error(code, message) { TEST_FAIL(); })
+    ), success_do_nothing(), error_test_fail());
 
-    match_result(BlockDeviceCode, BlockDeviceRegistry__register(BSTRING_NEW("/dev/virtio1"), service, 128, kernel->message_broker), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockDeviceCode, BlockDeviceRegistry__register(BSTRING_NEW("/dev/virtio1"), service, 128, kernel->message_broker), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error_test_fail());
 
     Result(FilesystemNodes) nodes = root->file_io.list_nodes(root_state, NULL, bstring("/dev"));
 
@@ -249,7 +248,7 @@ void test_devfs_lists_registered_block_devices(void)
             TEST_ASSERT_TRUE(FilesystemNodes__has_name(&result, bstring("businfo")));
             TEST_ASSERT_TRUE(FilesystemNodes__has_name(&result, bstring("virtio1")));
             TEST_ASSERT_TRUE(FilesystemNodes__has_name(&result, bstring("hd0")));
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_devfs_can_open_and_read_block_device_metadata(void)
@@ -257,7 +256,7 @@ void test_devfs_can_open_and_read_block_device_metadata(void)
     ProcessPtr service = dummy_process(200, 11, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
 
-    match_result(BlockDeviceCode, BlockDeviceRegistry__register(BSTRING_NEW("/dev/virtio1"), service, 128, kernel->message_broker), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockDeviceCode, BlockDeviceRegistry__register(BSTRING_NEW("/dev/virtio1"), service, 128, kernel->message_broker), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error_test_fail());
 
     Result(IOHandle) metadata_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/dev/hd0"), IO_OPEN_READ);
@@ -270,8 +269,8 @@ void test_devfs_can_open_and_read_block_device_metadata(void)
                         "path=/dev/virtio1\nblock_size=512\nblock_count=128\nuserspace_service=1\n",
                         buffer
                     );
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_procfs_can_open_and_read_system_info(void)
@@ -312,7 +311,7 @@ void test_procfs_can_open_and_read_system_info(void)
                         {
                             TEST_FAIL();
                         }
-                    })
+                    });
             }
             buffer[total] = '\0';
 
@@ -350,7 +349,7 @@ void test_procfs_can_open_and_read_system_info(void)
                 buffer,
                 "interrupt_controller.distributor_physical_base=0x8000000\n"
             ));
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_procfs_can_read_system_info_from_non_zero_offset(void)
@@ -377,7 +376,7 @@ void test_procfs_can_read_system_info_from_non_zero_offset(void)
             char skipped[128];
             match_result(ByteCount, IOSubsystem__read(
                 mounted_kernel->io_subsystem, rw_context(handle, (DataPtr) skipped, sizeof(skipped))
-            ), success(bytes) { TEST_ASSERT_EQUAL_UINT64(128, bytes); }, error(code, message) { TEST_FAIL(); })
+            ), success(bytes) { TEST_ASSERT_EQUAL_UINT64(128, bytes); }, error_test_fail());
 
             char buffer[4096];
             ByteCount total = 0;
@@ -396,7 +395,7 @@ void test_procfs_can_read_system_info_from_non_zero_offset(void)
                         {
                             TEST_FAIL();
                         }
-                    })
+                    });
             }
             buffer[total] = '\0';
 
@@ -404,7 +403,7 @@ void test_procfs_can_read_system_info_from_non_zero_offset(void)
             TEST_ASSERT_GREATER_THAN(896, total);
             TEST_ASSERT_NOT_NULL(strstr(buffer, "memory.free_region.11.physical_end=0x4c000000\n"));
             TEST_ASSERT_NOT_NULL(strstr(buffer, "interrupt_controller.kind=2\n"));
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_procfs_can_read_framebuffer_system_info(void)
@@ -451,8 +450,8 @@ void test_procfs_can_read_framebuffer_system_info(void)
                     TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.green_mask=0xff00\n"));
                     TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.blue_mask=0xff\n"));
                     TEST_ASSERT_NOT_NULL(strstr(buffer, "framebuffer.reserved_mask=0xff000000\n"));
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_procfs_returns_eof_after_streaming_system_info(void)
@@ -470,15 +469,15 @@ void test_procfs_returns_eof_after_streaming_system_info(void)
             match_result(ByteCount, IOSubsystem__read(
                 mounted_kernel->io_subsystem,
                 rw_context(handle, (DataPtr) buffer, sizeof(buffer))
-            ), success(bytes) {}, error(code, message) { TEST_FAIL(); })
+            ), success_do_nothing(), error_test_fail());
 
             match_result(ByteCount, IOSubsystem__read(
                 mounted_kernel->io_subsystem,
                 rw_context(handle, (DataPtr) buffer, sizeof(buffer))
-            ), success(bytes) { TEST_FAIL(); }, error(code, message) {
+            ), success_test_fail(), error(code, message) {
                     TEST_ASSERT_EQUAL_INT64(IO_EOF, code);
-                })
-        }, error(code, message) { TEST_FAIL(); })
+                });
+        }, error_test_fail());
 }
 
 void test_it_can_list_files_to_subdir(void)
@@ -489,9 +488,7 @@ void test_it_can_list_files_to_subdir(void)
             TEST_ASSERT_EQUAL_INT(7, FilesystemNodes__len(&result));
             FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&hello_world, &node->name));
-        }, error(code, message) {
-            TEST_FAIL();
-        })
+        }, error_test_fail());
 }
 
 void test_it_can_list_nested_mount_parent(void)
@@ -502,9 +499,7 @@ void test_it_can_list_nested_mount_parent(void)
             TEST_ASSERT_EQUAL_INT(1, FilesystemNodes__len(&result));
             FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&memfs, &node->name));
-        }, error(code, message) {
-            TEST_FAIL();
-        })
+        }, error_test_fail());
 }
 
 void test_filesystem_table_adds_mount_entries(void)
@@ -519,7 +514,7 @@ void test_filesystem_table_adds_mount_entries(void)
         device_path,
         filesystem_type,
         mountpoint
-    ), success(index) { TEST_ASSERT_EQUAL(0, index); }, error(code, message) { TEST_FAIL(); })
+    ), success(index) { TEST_ASSERT_EQUAL(0, index); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(1, FilesystemTableEntries__len(&table.entries));
     match_optional(FilesystemTableEntries__type_ptr__optional, FilesystemTableEntries__ptr_at(&table.entries, 0), some(entry) {
@@ -528,7 +523,7 @@ void test_filesystem_table_adds_mount_entries(void)
             TEST_ASSERT_TRUE(BString__equals(&entry->mountpoint, &mountpoint));
             TEST_ASSERT_FALSE(entry->match_block_count);
             TEST_ASSERT_EQUAL_UINT64(0, entry->block_count);
-        }, none() { TEST_FAIL(); })
+        }, none_test_fail());
 }
 
 void test_filesystem_table_adds_block_count_mount_entries(void)
@@ -543,7 +538,7 @@ void test_filesystem_table_adds_block_count_mount_entries(void)
         block_count,
         filesystem_type,
         mountpoint
-    ), success(index) { TEST_ASSERT_EQUAL(0, index); }, error(code, message) { TEST_FAIL(); })
+    ), success(index) { TEST_ASSERT_EQUAL(0, index); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(1, FilesystemTableEntries__len(&table.entries));
     match_optional(FilesystemTableEntries__type_ptr__optional, FilesystemTableEntries__ptr_at(&table.entries, 0), some(entry) {
@@ -552,7 +547,7 @@ void test_filesystem_table_adds_block_count_mount_entries(void)
             TEST_ASSERT_TRUE(BString__equals(&entry->mountpoint, &mountpoint));
             TEST_ASSERT_TRUE(entry->match_block_count);
             TEST_ASSERT_EQUAL_UINT64(block_count, entry->block_count);
-        }, none() { TEST_FAIL(); })
+        }, none_test_fail());
 }
 
 void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
@@ -568,12 +563,8 @@ void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
 
             match_result(ByteCount, res, success(bytes) {
                     TEST_ASSERT_EQUAL(HELLO_WORLD_SIZE, bytes);
-                }, error(code, message) {
-                    TEST_FAIL();
-                })
-        }, error(code, message) {
-            TEST_FAIL();
-        })
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_io_list_dir_lists_root_mounts(void)
@@ -590,7 +581,7 @@ void test_io_list_dir_lists_root_mounts(void)
             TEST_ASSERT_EQUAL_STRING("tmp", entries[3].name);
             TEST_ASSERT_EQUAL_STRING("fat16", entries[4].name);
             TEST_ASSERT_EQUAL_STRING("fat32", entries[5].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
@@ -601,17 +592,17 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/docs", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/hello.txt"), IO_OPEN_WRITE);
 
     match_result(IOHandle, write_handle, success(write_hand) {
             char data[] = "root";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 4)), success(bytes) { TEST_ASSERT_EQUAL_INT(4, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 4)), success(bytes) { TEST_ASSERT_EQUAL_INT(4, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error_test_fail());
+        }, error_test_fail());
 
     DirectoryEntry entries[8] = { 0 };
     match_result(SystemCallResult, IO__handler(
@@ -671,7 +662,7 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
             TEST_ASSERT_TRUE(saw_tmp);
             TEST_ASSERT_TRUE(saw_fat16);
             TEST_ASSERT_TRUE(saw_fat32);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
@@ -683,7 +674,7 @@ void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
     DirectoryEntry entries[8] = { 0 };
 
     BlockDevice__set_current_context(&kernel_context);
-    match_result(DirectoryEntryCount, root->file_io.list_dir(root_state, bstring("/"), entries, 8), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(DirectoryEntryCount, root->file_io.list_dir(root_state, bstring("/"), entries, 8), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     TEST_ASSERT_TRUE(async_state->captured_context);
@@ -751,8 +742,8 @@ void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
                     TEST_ASSERT_TRUE(saw_tmp);
                     TEST_ASSERT_TRUE(saw_fat16);
                     TEST_ASSERT_TRUE(saw_fat32);
-                }, error(code, message) { TEST_FAIL(); })
-        }, none() { TEST_FAIL(); })
+                }, error_test_fail());
+        }, none_test_fail());
 }
 
 void test_root_async_list_dir_synthesizes_mount_parent_on_backing_invalid_path(void)
@@ -765,7 +756,7 @@ void test_root_async_list_dir_synthesizes_mount_parent_on_backing_invalid_path(v
     DirectoryEntry mnt_entries[4] = { 0 };
 
     BlockDevice__set_current_context(&kernel_context);
-    match_result(DirectoryEntryCount, root->file_io.list_dir(root_state, bstring("/tmp"), tmp_entries, 4), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(DirectoryEntryCount, root->file_io.list_dir(root_state, bstring("/tmp"), tmp_entries, 4), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     TEST_ASSERT_TRUE(async_state->captured_context);
@@ -779,15 +770,15 @@ void test_root_async_list_dir_synthesizes_mount_parent_on_backing_invalid_path(v
                     DirectoryEntryCount count = (DirectoryEntryCount) value;
                     TEST_ASSERT_EQUAL_INT(1, count);
                     TEST_ASSERT_EQUAL_STRING("memfs", tmp_entries[0].name);
-                }, error(code, message) { TEST_FAIL(); })
-        }, none() { TEST_FAIL(); })
+                }, error_test_fail());
+        }, none_test_fail());
 
     FilesystemPtr mnt_filesystem = Filesystem__heap_new(bstring("mnt/fs1"), MemFilesystemIO__new());
     MemFilesystemIOState__heap_new(mnt_filesystem);
     Filesystem__mount(root, bstring("mnt/fs1"), mnt_filesystem);
 
     BlockDevice__set_current_context(&kernel_context);
-    match_result(DirectoryEntryCount, root->file_io.list_dir(root_state, bstring("/mnt"), mnt_entries, 4), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(DirectoryEntryCount, root->file_io.list_dir(root_state, bstring("/mnt"), mnt_entries, 4), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     TEST_ASSERT_TRUE(async_state->captured_context);
@@ -801,8 +792,8 @@ void test_root_async_list_dir_synthesizes_mount_parent_on_backing_invalid_path(v
                     DirectoryEntryCount count = (DirectoryEntryCount) value;
                     TEST_ASSERT_EQUAL_INT(1, count);
                     TEST_ASSERT_EQUAL_STRING("fs1", mnt_entries[0].name);
-                }, error(code, message) { TEST_FAIL(); })
-        }, none() { TEST_FAIL(); })
+                }, error_test_fail());
+        }, none_test_fail());
 }
 
 void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(void)
@@ -826,7 +817,7 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
 
     match_result(SystemCallResult, IO__handler(
         mounted_kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/docs", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
         IOSubsystem__open(mounted_kernel->io_subsystem, mounted_open_context, bstring("/hello.txt"), IO_OPEN_WRITE);
@@ -846,10 +837,10 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
                 None(ExternalBuffer)
             );
 
-            match_result(ByteCount, IOSubsystem__write(mounted_kernel->io_subsystem, mounted_rw_context), success(bytes) { TEST_ASSERT_EQUAL_INT(4, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(mounted_kernel->io_subsystem, mounted_rw_context), success(bytes) { TEST_ASSERT_EQUAL_INT(4, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(mounted_kernel->io_subsystem, mounted_close_context), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(mounted_kernel->io_subsystem, mounted_close_context), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error_test_fail());
+        }, error_test_fail());
 
     DirectoryEntry root_entries[8] = { 0 };
     match_result(SystemCallResult, IO__handler(
@@ -897,7 +888,7 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
             TEST_ASSERT_TRUE(saw_dev);
             TEST_ASSERT_TRUE(saw_proc);
             TEST_ASSERT_TRUE(saw_tmp);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_build_root_and_mounts_lists_tmp_mount_parent_when_backing_root_is_mounted(void)
@@ -917,7 +908,7 @@ void test_build_root_and_mounts_lists_tmp_mount_parent_when_backing_root_is_moun
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("memfs", tmp_entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_io_list_dir_lists_ebin_files(void)
@@ -931,7 +922,7 @@ void test_io_list_dir_lists_ebin_files(void)
             TEST_ASSERT_EQUAL_STRING("hello_world", entries[0].name);
             TEST_ASSERT_EQUAL_STRING("services", entries[5].name);
             TEST_ASSERT_EQUAL_STRING("drivers", entries[6].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_io_list_dir_marks_services_as_hund_owned(void)
@@ -949,7 +940,7 @@ void test_io_list_dir_marks_services_as_hund_owned(void)
                 IO_MODE_TYPE_FILE | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC,
                 entries[0].mode
             );
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_io_list_dir_lists_tmp_mounts(void)
@@ -961,7 +952,7 @@ void test_io_list_dir_lists_tmp_mounts(void)
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("memfs", entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_io_list_dir_lists_empty_memfs(void)
@@ -970,7 +961,7 @@ void test_io_list_dir_lists_empty_memfs(void)
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) entries, 4, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
 void test_io_list_dir_lists_empty_fat16(void)
@@ -979,7 +970,7 @@ void test_io_list_dir_lists_empty_fat16(void)
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat16", (Anything) entries, 4, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
 void test_io_list_dir_lists_empty_fat32(void)
@@ -988,7 +979,7 @@ void test_io_list_dir_lists_empty_fat32(void)
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32", (Anything) entries, 4, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
 void test_fat16_write_read_and_list_root_file(void)
@@ -998,10 +989,10 @@ void test_fat16_write_read_and_list_root_file(void)
 
     match_result(IOHandle, write_handle, success(write_hand) {
             char data[] = "hello fat16";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 11)), success(bytes) { TEST_ASSERT_EQUAL_INT(11, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 11)), success(bytes) { TEST_ASSERT_EQUAL_INT(11, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error_test_fail());
+        }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
@@ -1009,7 +1000,7 @@ void test_fat16_write_read_and_list_root_file(void)
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("NOTE.TXT", entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     Result(IOHandle) read_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat16/NOTE.TXT"), IO_OPEN_READ);
@@ -1020,19 +1011,19 @@ void test_fat16_write_read_and_list_root_file(void)
                     TEST_ASSERT_EQUAL_INT(11, bytes);
                     buffer[11] = '\0';
                     TEST_ASSERT_EQUAL_STRING("hello fat16", buffer);
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_fat16_mkdir_lists_root_directory_and_empty_directory(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/", (Anything) ((DirectoryEntry[5]) { 0 }), 5, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(5, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(5, count); }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat16/dir", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry root_entries[4];
     match_result(SystemCallResult, IO__handler(
@@ -1041,12 +1032,12 @@ void test_fat16_mkdir_lists_root_directory_and_empty_directory(void)
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("DIR", root_entries[0].name);
             TEST_ASSERT_EQUAL_INT(FAT16_ATTR_DIRECTORY, root_entries[0].attributes);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     DirectoryEntry dir_entries[4];
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat16/dir", (Anything) dir_entries, 4, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
 void test_fat32_write_read_and_list_root_file(void)
@@ -1056,10 +1047,10 @@ void test_fat32_write_read_and_list_root_file(void)
 
     match_result(IOHandle, write_handle, success(write_hand) {
             char data[] = "hello fat32";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 11)), success(bytes) { TEST_ASSERT_EQUAL_INT(11, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 11)), success(bytes) { TEST_ASSERT_EQUAL_INT(11, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error_test_fail());
+        }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
@@ -1067,7 +1058,7 @@ void test_fat32_write_read_and_list_root_file(void)
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("NOTE.TXT", entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     Result(IOHandle) read_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat32/NOTE.TXT"), IO_OPEN_READ);
@@ -1078,15 +1069,15 @@ void test_fat32_write_read_and_list_root_file(void)
                     TEST_ASSERT_EQUAL_INT(11, bytes);
                     buffer[11] = '\0';
                     TEST_ASSERT_EQUAL_STRING("hello fat32", buffer);
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_fat32_mkdir_lists_root_directory_and_empty_directory(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/dir", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry root_entries[4];
     match_result(SystemCallResult, IO__handler(
@@ -1095,40 +1086,40 @@ void test_fat32_mkdir_lists_root_directory_and_empty_directory(void)
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("DIR", root_entries[0].name);
             TEST_ASSERT_EQUAL_INT(FAT32_ATTR_DIRECTORY, root_entries[0].attributes);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     DirectoryEntry dir_entries[4];
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32/dir", (Anything) dir_entries, 4, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
 void test_fat32_nested_open_missing_parent_fails_cleanly_repeatedly(void)
 {
     Result(IOHandle) first =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat32/bin/file.txt"), IO_OPEN_WRITE);
-    match_result(IOHandle, first, success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); })
+    match_result(IOHandle, first, success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
 
     Result(IOHandle) second =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat32/bin/file.txt"), IO_OPEN_WRITE);
-    match_result(IOHandle, second, success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); })
+    match_result(IOHandle, second, success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
 }
 
 void test_fat32_write_read_and_list_nested_file(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/bin", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat32/bin/file.txt"), IO_OPEN_WRITE);
 
     match_result(IOHandle, write_handle, success(write_hand) {
             char data[] = "nested fat32";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 12)), success(bytes) { TEST_ASSERT_EQUAL_INT(12, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 12)), success(bytes) { TEST_ASSERT_EQUAL_INT(12, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error_test_fail());
+        }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
@@ -1136,7 +1127,7 @@ void test_fat32_write_read_and_list_nested_file(void)
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("FILE.TXT", entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     Result(IOHandle) read_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat32/bin/file.txt"), IO_OPEN_READ);
@@ -1147,19 +1138,19 @@ void test_fat32_write_read_and_list_nested_file(void)
                     TEST_ASSERT_EQUAL_INT(12, bytes);
                     buffer[12] = '\0';
                     TEST_ASSERT_EQUAL_STRING("nested fat32", buffer);
-                }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
 
-            match_result(ByteCount, IOSubsystem__read(kernel->io_subsystem, rw_context(read_hand, (DataPtr) buffer, 12)), success(bytes) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_EOF, code); })
+            match_result(ByteCount, IOSubsystem__read(kernel->io_subsystem, rw_context(read_hand, (DataPtr) buffer, 12)), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_EOF, code); });
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(read_hand)), success(handle) { TEST_ASSERT_EQUAL(read_hand, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(read_hand)), success(handle) { TEST_ASSERT_EQUAL(read_hand, handle); }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_fat32_nested_file_read_returns_eof_through_syscall_handler(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/dir", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_OPEN, (Anything) "/fat32/dir/file.txt", IO_OPEN_WRITE, 0, 0
@@ -1167,12 +1158,12 @@ void test_fat32_nested_file_read_returns_eof_through_syscall_handler(void)
             char data[] = "hello";
             match_result(SystemCallResult, IO__handler(
                 kernel, Some(ProcessPtr, dummy_proc), IO_WRITE, fd, (Anything) data, 5, 0
-            ), success(bytes) { TEST_ASSERT_EQUAL_INT(5, bytes); }, error(code, message) { TEST_FAIL(); })
+            ), success(bytes) { TEST_ASSERT_EQUAL_INT(5, bytes); }, error_test_fail());
 
             match_result(SystemCallResult, IO__handler(
                 kernel, Some(ProcessPtr, dummy_proc), IO_CLOSE, fd, 0, 0, 0
-            ), success(closed_fd) { TEST_ASSERT_EQUAL_INT(fd, closed_fd); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            ), success(closed_fd) { TEST_ASSERT_EQUAL_INT(fd, closed_fd); }, error_test_fail());
+        }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_OPEN, (Anything) "/fat32/dir/file.txt", IO_OPEN_READ, 0, 0
@@ -1184,16 +1175,16 @@ void test_fat32_nested_file_read_returns_eof_through_syscall_handler(void)
                     TEST_ASSERT_EQUAL_INT(5, bytes);
                     buffer[5] = '\0';
                     TEST_ASSERT_EQUAL_STRING("hello", buffer);
-                }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
 
             match_result(SystemCallResult, IO__handler(
                 kernel, Some(ProcessPtr, dummy_proc), IO_READ, fd, (Anything) buffer, 512, 0
-            ), success(bytes) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_EOF, code); })
+            ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_EOF, code); });
 
             match_result(SystemCallResult, IO__handler(
                 kernel, Some(ProcessPtr, dummy_proc), IO_CLOSE, fd, 0, 0, 0
-            ), success(closed_fd) { TEST_ASSERT_EQUAL_INT(fd, closed_fd); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            ), success(closed_fd) { TEST_ASSERT_EQUAL_INT(fd, closed_fd); }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_memfs_write_read_and_list_file(void)
@@ -1203,10 +1194,10 @@ void test_memfs_write_read_and_list_file(void)
 
     match_result(IOHandle, write_handle, success(write_hand) {
             char data[] = "hello memfs";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 11)), success(bytes) { TEST_ASSERT_EQUAL_INT(11, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 11)), success(bytes) { TEST_ASSERT_EQUAL_INT(11, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error_test_fail());
+        }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
@@ -1214,7 +1205,7 @@ void test_memfs_write_read_and_list_file(void)
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("notes", entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     Result(IOHandle) read_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/notes"), IO_OPEN_READ);
@@ -1225,15 +1216,15 @@ void test_memfs_write_read_and_list_file(void)
                     TEST_ASSERT_EQUAL_INT(11, bytes);
                     buffer[11] = '\0';
                     TEST_ASSERT_EQUAL_STRING("hello memfs", buffer);
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_memfs_mkdir_lists_directory_and_allows_file_inside(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/tmp/memfs/docs", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry root_entries[4];
     match_result(SystemCallResult, IO__handler(
@@ -1241,15 +1232,15 @@ void test_memfs_mkdir_lists_directory_and_allows_file_inside(void)
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("docs", root_entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     Result(IOHandle) write_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/docs/notes"), IO_OPEN_WRITE);
 
     match_result(IOHandle, write_handle, success(write_hand) {
             char data[] = "nested";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error_test_fail());
+        }, error_test_fail());
 
     DirectoryEntry docs_entries[4];
     match_result(SystemCallResult, IO__handler(
@@ -1257,137 +1248,137 @@ void test_memfs_mkdir_lists_directory_and_allows_file_inside(void)
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("notes", docs_entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_fat32_rm_removes_nested_file(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/dir", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat32/dir/file.txt"), IO_OPEN_WRITE);
 
     match_result(IOHandle, write_handle, success(write_hand) {
             char data[] = "hi";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 2)), success(bytes) { TEST_ASSERT_EQUAL_INT(2, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 2)), success(bytes) { TEST_ASSERT_EQUAL_INT(2, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error_test_fail());
+        }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/fat32/dir/file.txt", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32/dir", (Anything) entries, 4, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 
     Result(IOHandle) read_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat32/dir/file.txt"), IO_OPEN_READ);
 
-    match_result(IOHandle, read_handle, success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); })
+    match_result(IOHandle, read_handle, success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
 }
 
 void test_fat32_rm_recursive_removes_directory_tree(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/dir", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat32/dir/file.txt"), IO_OPEN_WRITE);
 
     match_result(IOHandle, write_handle, success(write_hand) {
             char data[] = "hi";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 2)), success(bytes) { TEST_ASSERT_EQUAL_INT(2, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, 2)), success(bytes) { TEST_ASSERT_EQUAL_INT(2, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); }, error_test_fail());
+        }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/fat32/dir", IO_REMOVE_RECURSIVE, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32", (Anything) entries, 4, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 
     Result(IOHandle) read_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/fat32/dir/file.txt"), IO_OPEN_READ);
 
-    match_result(IOHandle, read_handle, success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); })
+    match_result(IOHandle, read_handle, success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
 }
 
 void test_memfs_rm_removes_file_from_directory(void)
 {
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/remove-me"), IO_OPEN_WRITE), success(write_hand) {
             char data[] = "delete";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error_test_fail());
+        }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/tmp/memfs/remove-me", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) entries, 4, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 
-    match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/remove-me"), IO_OPEN_READ), success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); })
+    match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/remove-me"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
 }
 
 void test_memfs_rm_directory_returns_unsupported(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/tmp/memfs/docs", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/tmp/memfs/docs", 0, 0, 0
-    ), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code); });
 }
 
 void test_memfs_rm_recursive_removes_directory_tree(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/tmp/memfs/docs", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/tmp/memfs/docs/nested", 0, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/docs/nested/notes"), IO_OPEN_WRITE), success(write_hand) {
             char data[] = "nested";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error_test_fail());
+        }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/tmp/memfs/docs", IO_REMOVE_RECURSIVE, 0, 0
-    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) entries, 4, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 
-    match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/docs/nested/notes"), IO_OPEN_READ), success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); })
+    match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/docs/nested/notes"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
 }
 
 void test_mkdir_and_rm_on_embeddedfs_return_unsupported(void)
 {
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/sbin/newdir", 0, 0, 0
-    ), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code); });
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/sbin/hello_world", 0, 0, 0
-    ), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code); });
 }
 
 void test_memfs_file_can_grow_beyond_one_page(void)
@@ -1402,8 +1393,8 @@ void test_memfs_file_can_grow_beyond_one_page(void)
                 data[i] = 'a' + (i % 26);
             }
 
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data))), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data), bytes); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data))), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data), bytes); }, error_test_fail());
+        }, error_test_fail());
 
     Result(IOHandle) read_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/big"), IO_OPEN_READ);
@@ -1416,57 +1407,56 @@ void test_memfs_file_can_grow_beyond_one_page(void)
                     {
                         TEST_ASSERT_EQUAL_CHAR('a' + (i % 26), buffer[i]);
                     }
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_memfs_read_returns_error_when_file_pages_are_missing(void)
 {
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/corrupt"), IO_OPEN_WRITE), success(write_hand) {
             char data[] = "data";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(closed) { TEST_ASSERT_EQUAL(write_hand, closed); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(closed) { TEST_ASSERT_EQUAL(write_hand, closed); }, error_test_fail());
+        }, error_test_fail());
 
     match_optional(FilesystemPtr, Mounts__get(&root->mounts, bstring("tmp/memfs")),
         some(mounted_fs) {
             MemFilesystemIOStatePtr mem_state = (MemFilesystemIOStatePtr) mounted_fs->state;
-            LLIterate(MemFiles, mem_state->files, file)
+            for_each_ll(MemFiles, mem_state->files, file,
+            {
                 if (BString__equals(&file.name, &corrupt))
                 {
                     file__node->value.pages = MemFilePages__new();
                     file__node->value.capacity = PAGE_SIZE;
                     file__node->value.size = sizeof("data") - 1;
                 }
-            End
+            });
         },
-        none() {
-            TEST_FAIL();
-        }
-    )
+        none_test_fail()
+    );
 
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/corrupt"), IO_OPEN_READ), success(read_hand) {
             char buffer[8];
-            match_result(ByteCount, IOSubsystem__read(kernel->io_subsystem, rw_context(read_hand, (DataPtr) buffer, sizeof(buffer))), success(bytes) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__read(kernel->io_subsystem, rw_context(read_hand, (DataPtr) buffer, sizeof(buffer))), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
+        }, error_test_fail());
 }
 
 void test_memfs_write_open_truncates_existing_file(void)
 {
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/truncate"), IO_OPEN_WRITE), success(write_hand) {
             char data[] = "longer value";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(closed) { TEST_ASSERT_EQUAL(write_hand, closed); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(closed) { TEST_ASSERT_EQUAL(write_hand, closed); }, error_test_fail());
+        }, error_test_fail());
 
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/truncate"), IO_OPEN_WRITE), success(write_hand) {
             char data[] = "short";
-            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error(code, message) { TEST_FAIL(); })
+            match_result(ByteCount, IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr) data, sizeof(data) - 1)), success(bytes) { TEST_ASSERT_EQUAL_INT(sizeof(data) - 1, bytes); }, error_test_fail());
 
-            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(closed) { TEST_ASSERT_EQUAL(write_hand, closed); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)), success(closed) { TEST_ASSERT_EQUAL(write_hand, closed); }, error_test_fail());
+        }, error_test_fail());
 
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/truncate"), IO_OPEN_READ), success(read_hand) {
             char buffer[16];
@@ -1474,8 +1464,8 @@ void test_memfs_write_open_truncates_existing_file(void)
                     TEST_ASSERT_EQUAL_INT(5, bytes);
                     buffer[5] = '\0';
                     TEST_ASSERT_EQUAL_STRING("short", buffer);
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_memfs_can_create_more_than_sixty_four_files(void)
@@ -1484,14 +1474,14 @@ void test_memfs_can_create_more_than_sixty_four_files(void)
     {
         BString path = numbered_memfs_path(i);
         match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), path, IO_OPEN_WRITE), success(handle) {
-                match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(handle)), success(closed) { TEST_ASSERT_EQUAL(handle, closed); }, error(code, message) { TEST_FAIL(); })
-            }, error(code, message) { TEST_FAIL(); })
+                match_result(IOHandle, IOSubsystem__close(kernel->io_subsystem, close_context(handle)), success(closed) { TEST_ASSERT_EQUAL(handle, closed); }, error_test_fail());
+            }, error_test_fail());
     }
 
     DirectoryEntry entries[70];
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) entries, 70, 0
-    ), success(count) { TEST_ASSERT_EQUAL_INT(65, count); }, error(code, message) { TEST_FAIL(); })
+    ), success(count) { TEST_ASSERT_EQUAL_INT(65, count); }, error_test_fail());
 }
 
 void test_io_list_dir_invalid_path_returns_error(void)
@@ -1500,5 +1490,5 @@ void test_io_list_dir_invalid_path_returns_error(void)
 
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/missing", (Anything) entries, 4, 0
-    ), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
 }

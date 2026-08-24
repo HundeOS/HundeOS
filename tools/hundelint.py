@@ -35,6 +35,21 @@ PROTECTED_OPTIONAL_RESULT_FIELDS = ("present", "some", "none", "ok", "success", 
 PROTECTED_COLLECTION_DECLARATION_MACRO = re.compile(
     r"\b(?P<macro>FixedArrayDefine|LinkedListDefine|MapDefine|RingBufferDefine)\s*\((?P<args>[^;]+)\)"
 )
+BLOCK_STATEMENT_MACROS = (
+    "match_optional",
+    "match_result",
+    "critical_section",
+    "critical_section_try",
+    "for_each_ll",
+    "for_each_ll_ptr",
+    "for_each_fa",
+    "for_each_fa_ptr",
+    "for_each_map",
+    "for_each_map_ptr",
+    "for_each_bstring",
+    "for_each_ring_buffer",
+    "for_each_ring_buffer_ptr",
+)
 
 
 RULES = (
@@ -136,6 +151,12 @@ RULES = (
         pattern=re.compile(r"\b(?:CriticalSection|CriticalSectionTry)\s*\("),
     ),
     Rule(
+        name="test-fail-branch-outside-tests",
+        message="use *_test_fail branch macros only in tests",
+        pattern=re.compile(r"\b(?:some|none|success|error)_test_fail\s*\("),
+        allow_paths=("test/**",),
+    ),
+    Rule(
         name="critical-section-control-flow",
         message="use cs_return or cs_exit_then for early exits inside critical_section",
         pattern=re.compile(r"(?!)"),
@@ -182,6 +203,16 @@ RULES = (
             "kernel/types/ring_buffer.h",
         ),
     ),
+    Rule(
+        name="trivial-error-branch",
+        message="error branches must log, trace, return an error, or use an explicit ignore",
+        pattern=re.compile(r"(?!)"),
+    ),
+    Rule(
+        name="block-macro-semicolon",
+        message="put a semicolon after block-style macro calls",
+        pattern=re.compile(r"(?!)"),
+    ),
 )
 
 AST_RULE_NAMES = {
@@ -198,7 +229,9 @@ MEMBER_FIRST_ARG_RULE = next(rule for rule in RULES if rule.name == "member-firs
 MATCH_BRANCH_RULE = next(rule for rule in RULES if rule.name == "match-branch-macros")
 MATCH_BRANCH_FORMAT_RULE = next(rule for rule in RULES if rule.name == "match-branch-format")
 MATCH_BRANCH_BLOCK_FORMAT_RULE = next(rule for rule in RULES if rule.name == "match-branch-block-format")
+TRIVIAL_ERROR_BRANCH_RULE = next(rule for rule in RULES if rule.name == "trivial-error-branch")
 CRITICAL_SECTION_CONTROL_FLOW_RULE = next(rule for rule in RULES if rule.name == "critical-section-control-flow")
+BLOCK_MACRO_SEMICOLON_RULE = next(rule for rule in RULES if rule.name == "block-macro-semicolon")
 
 
 def _load_tree_sitter():
@@ -239,6 +272,10 @@ def _is_allowed(rule: Rule, path: Path) -> bool:
 def _is_ignored_path(path: Path) -> bool:
     normalised = _normalise(path)
     return any(fnmatch.fnmatch(normalised, ignored) for ignored in IGNORED_PATHS)
+
+
+def _is_test_path(path: Path) -> bool:
+    return fnmatch.fnmatch(_normalise(path), "test/**")
 
 
 def _line_ignores(raw_line: str) -> set[str]:
@@ -905,7 +942,7 @@ def _split_macro_args_with_offsets(args_text: str) -> list[tuple[str, int]]:
     return args
 
 
-def _iter_macro_calls(source: str, macro_name: str):
+def _iter_macro_call_ranges(source: str, macro_name: str):
     search = f"{macro_name}("
     position = 0
     while True:
@@ -927,12 +964,17 @@ def _iter_macro_calls(source: str, macro_name: str):
             elif char == ")":
                 depth -= 1
                 if depth == 0:
-                    yield start, source[open_paren + 1:index]
+                    yield start, source[open_paren + 1:index], index + 1
                     position = start + 1
                     break
             index += 1
         else:
             return
+
+
+def _iter_macro_calls(source: str, macro_name: str):
+    for start, args_text, _end in _iter_macro_call_ranges(source, macro_name):
+        yield start, args_text
 
 
 def _mask_macro_calls(source: str, macro_name: str) -> str:
@@ -1065,7 +1107,8 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
     branch_allowed = _is_allowed(MATCH_BRANCH_RULE, path)
     format_allowed = _is_allowed(MATCH_BRANCH_FORMAT_RULE, path)
     block_format_allowed = _is_allowed(MATCH_BRANCH_BLOCK_FORMAT_RULE, path)
-    if branch_allowed and format_allowed and block_format_allowed:
+    trivial_error_allowed = _is_allowed(TRIVIAL_ERROR_BRANCH_RULE, path)
+    if branch_allowed and format_allowed and block_format_allowed and trivial_error_allowed:
         return []
 
     clean_source = "\n".join(_sanitise_source(source))
@@ -1073,18 +1116,28 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
     line_starts = _line_starts(clean_source)
     findings = []
 
+    success_result_branches = ("success(", "success_do_nothing(")
+    error_result_branches = ("error(",)
+    some_optional_branches = ("some(", "some_do_nothing(")
+    none_optional_branches = ("none(", "none_do_nothing(")
+    if _is_test_path(path):
+        success_result_branches += ("success_test_fail(",)
+        error_result_branches += ("error_test_fail(", "error_test_ok(")
+        some_optional_branches += ("some_test_fail(",)
+        none_optional_branches += ("none_test_fail(",)
+
     checks = (
-        ("match_result", "success(", "error("),
-        ("match_optional", "some(", "none("),
+        ("match_result", success_result_branches, error_result_branches),
+        ("match_optional", some_optional_branches, none_optional_branches),
     )
-    for macro_name, success_branch, error_branch in checks:
+    for macro_name, success_branches, error_branches in checks:
         for offset, args_text in _iter_macro_calls(clean_source, macro_name):
             args_with_offsets = _split_macro_args_with_offsets(args_text)
             args = [arg for arg, _start in args_with_offsets]
             valid = (
                 len(args) == 4
-                and args[2].lstrip().startswith(success_branch)
-                and args[3].lstrip().startswith(error_branch)
+                and args[2].lstrip().startswith(success_branches)
+                and args[3].lstrip().startswith(error_branches)
             )
             line_number, column = _line_column_for_offset(line_starts, offset)
             raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
@@ -1132,7 +1185,61 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
                                 message=MATCH_BRANCH_BLOCK_FORMAT_RULE.message,
                             )
                         )
-                        break
+
+            if (
+                valid
+                and macro_name == "match_result"
+                and not trivial_error_allowed
+                and TRIVIAL_ERROR_BRANCH_RULE.name not in _line_ignores(raw_line)
+            ):
+                error_arg = args[3].strip()
+                if error_arg.startswith("error(") and re.search(r"\)\s*\{\s*(?:(?:return|break|continue)\s*;)?\s*\}\s*$", error_arg):
+                    findings.append(
+                        Finding(
+                            path=path,
+                            line=line_number,
+                            column=column,
+                            rule=TRIVIAL_ERROR_BRANCH_RULE.name,
+                            message=TRIVIAL_ERROR_BRANCH_RULE.message,
+                        )
+                    )
+
+    return findings
+
+
+def _lint_block_macro_semicolons(path: Path, source: str) -> list[Finding]:
+    if _is_allowed(BLOCK_MACRO_SEMICOLON_RULE, path):
+        return []
+
+    clean_source = "\n".join(_sanitise_source(source))
+    raw_lines = source.splitlines()
+    line_starts = _line_starts(clean_source)
+    findings = []
+
+    for macro_name in BLOCK_STATEMENT_MACROS:
+        for offset, _args_text, end_offset in _iter_macro_call_ranges(clean_source, macro_name):
+            line_number, column = _line_column_for_offset(line_starts, offset)
+            raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+            if raw_line.lstrip().startswith("#"):
+                continue
+            if BLOCK_MACRO_SEMICOLON_RULE.name in _line_ignores(raw_line):
+                continue
+
+            next_offset = end_offset
+            while next_offset < len(clean_source) and clean_source[next_offset].isspace():
+                next_offset += 1
+            if next_offset < len(clean_source) and clean_source[next_offset] == ";":
+                continue
+
+            findings.append(
+                Finding(
+                    path=path,
+                    line=line_number,
+                    column=column,
+                    rule=BLOCK_MACRO_SEMICOLON_RULE.name,
+                    message=BLOCK_MACRO_SEMICOLON_RULE.message,
+                )
+            )
 
     return findings
 
@@ -1167,6 +1274,7 @@ def lint_source(path: Path, source: str, tree=None) -> list[Finding]:
 
     findings.extend(_lint_match_branch_macros(path, source))
     findings.extend(_lint_critical_section_control_flow(path, source))
+    findings.extend(_lint_block_macro_semicolons(path, source))
 
     if tree is not None:
         findings.extend(_lint_constructor_required(path, source, tree))

@@ -259,11 +259,11 @@ static void Kernel__panic_screen(const char * message)
         {
             match_optional(FramebufferInfo, system_info.framebuffer,
                 some(framebuffer) { PanicScreen__render(&framebuffer);; },
-                none() {}
-            )
+                none_do_nothing()
+            );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 }
 
 void Kernel__panic(const char * message, ProcessContext * context) {

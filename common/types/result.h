@@ -64,6 +64,8 @@ typedef int64_t Code;
         BString message_name = __result.error.error; \
         Code code_name = __result.error.code;
 
+#define success_do_nothing() success(_) {}
+
 #define match_result(T, res, success_branch, error_branch) \
 { \
     typedef Result_##T##_type __ResultValueType __attribute__((unused)); \

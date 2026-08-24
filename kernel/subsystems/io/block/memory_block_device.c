@@ -51,8 +51,8 @@ static Result(MemoryDeviceBlockPtr) MemoryBlockDevice__find_or_create_block(
 {
     match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
         some(found) { return Success(MemoryDeviceBlockPtr, found.value); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     KernelAddress address = Kernel__alloc(BLOCK_DEVICE_BLOCK_SIZE);
     if (!address.valid)
@@ -70,9 +70,9 @@ static Result(MemoryDeviceBlockPtr) MemoryBlockDevice__find_or_create_block(
     {
             match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
                 some(found) { return Success(MemoryDeviceBlockPtr, found.value); },
-                none() {}
-            )
-        }, error(code, message) { return Error(MemoryDeviceBlockPtr, message, BLOCK_DEVICE_IO_ERROR); })
+                none_do_nothing()
+            );
+        }, error(code, message) { return Error(MemoryDeviceBlockPtr, message, BLOCK_DEVICE_IO_ERROR); });
 
     return Error(MemoryDeviceBlockPtr, allocation_failed, BLOCK_DEVICE_IO_ERROR);
 }
@@ -97,7 +97,7 @@ Result(BlockCount) MemoryBlockDevice__read(
             match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &current_block),
                 some(found) { MemoryBlockDevice__copy(block_target, v_ptr(found.value->address, Data)); },
                 none() { MemoryBlockDevice__zero(block_target); }
-            )
+            );
         }
 
         cs_return Success(BlockCount, count);
@@ -125,7 +125,7 @@ Result(BlockCount) MemoryBlockDevice__write(
                     MemoryBlockDevice__copy(v_ptr(memory_block->address, Data), block_source);
                 },
                 error(code, message) { cs_return Error(BlockCount, message, code); }
-            )
+            );
         }
 
         cs_return Success(BlockCount, count);

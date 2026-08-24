@@ -6,14 +6,15 @@
 
 #ifdef DYN_STRING_USE_KERNEL_ALLOC
 #include "../../kernel/kalloc.h"
+#include "../../kernel/panic.h"
 #define DYN_STRING_ALLOC(size) ((void *) Kernel__alloc(size).virtual_addr)
 #define DYN_STRING_FREE(ptr) \
     { \
         Result(KAllocCode) free_result = Kernel__free(addr(ptr)); \
         match_result(KAllocCode, free_result, \
-            success(_) {}, \
-            error(code, message) {} \
-        ) \
+            success_do_nothing(), \
+            error(code, message) { Kernel__panic(BString__cstr(&message), NULL); } /* hundelint: ignore-no-null */ \
+        ); \
     }
 #else
 void * malloc(size_t size);

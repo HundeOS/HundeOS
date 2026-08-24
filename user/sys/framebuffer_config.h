@@ -39,6 +39,24 @@ FramebufferConfig;
 
 typedef FramebufferConfig * FramebufferConfigPtr;
 
+typedef struct FramebufferConfigFields
+{
+    bool present;
+    bool physical_base;
+    bool physical_size;
+    bool width;
+    bool height;
+    bool pixels_per_scanline;
+    bool pixel_format;
+    bool red_mask;
+    bool green_mask;
+    bool blue_mask;
+    bool reserved_mask;
+}
+FramebufferConfigFields;
+
+typedef FramebufferConfigFields * FramebufferConfigFieldsPtr;
+
 static const BString framebuffer_config_delimiter = BSTRING_NEW("=");
 static const BString framebuffer_config_present_key = BSTRING_NEW("framebuffer.present");
 static const BString framebuffer_config_physical_base_key = BSTRING_NEW("framebuffer.physical_base");
@@ -52,7 +70,12 @@ static const BString framebuffer_config_green_mask_key = BSTRING_NEW("framebuffe
 static const BString framebuffer_config_blue_mask_key = BSTRING_NEW("framebuffer.blue_mask");
 static const BString framebuffer_config_reserved_mask_key = BSTRING_NEW("framebuffer.reserved_mask");
 
-static bool FramebufferConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key, uint64_t * value)
+static FramebufferConfigFields FramebufferConfigFields__new()
+{
+    return (FramebufferConfigFields) { 0 };
+}
+
+static Optional(uint64_t) FramebufferConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key)
 {
     BStringSplit split = BString__split_first_any(line, &framebuffer_config_delimiter);
     bool matched = false;
@@ -63,112 +86,155 @@ static bool FramebufferConfig__read_line_value(ConstBStringPtr line, ConstBStrin
             BString line_key = BString__strip(&raw_key);
             matched = BString__equals(&line_key, key);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (!matched)
     {
-        return false;
+        return None(uint64_t);
     }
 
-    match_optional(uint64_t, BString__parse_uint64_base(&split.rest, 0),
-        some(parsed)
-        {
-            *value = parsed;
-            return true;
-        },
-        none() {}
-    )
-
-    return false;
+    return BString__parse_uint64_base(&split.rest, 0);
 }
 
-static void FramebufferConfig__read_config_line(
+static void FramebufferConfigFields__read_config_line(
+    FramebufferConfigFieldsPtr self,
     ConstBStringPtr line,
-    FramebufferConfigPtr self,
-    bool * found_present,
-    bool * found_physical_base,
-    bool * found_physical_size,
-    bool * found_width,
-    bool * found_height,
-    bool * found_pixels_per_scanline,
-    bool * found_pixel_format,
-    bool * found_red_mask,
-    bool * found_green_mask,
-    bool * found_blue_mask,
-    bool * found_reserved_mask)
+    FramebufferConfigPtr config)
 {
-    uint64_t parsed = 0;
-
-    if (!*found_present && FramebufferConfig__read_line_value(line, &framebuffer_config_present_key, &parsed))
+    if (!self->present)
     {
-        *found_present = parsed == 1;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_present_key),
+            some(parsed)
+            {
+                self->present = parsed == 1;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_physical_base && FramebufferConfig__read_line_value(line, &framebuffer_config_physical_base_key, &self->physical_base))
+    if (!self->physical_base)
     {
-        *found_physical_base = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_physical_base_key),
+            some(parsed)
+            {
+                config->physical_base = parsed;
+                self->physical_base = true;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_physical_size && FramebufferConfig__read_line_value(line, &framebuffer_config_physical_size_key, &self->physical_size))
+    if (!self->physical_size)
     {
-        *found_physical_size = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_physical_size_key),
+            some(parsed)
+            {
+                config->physical_size = parsed;
+                self->physical_size = true;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_width && FramebufferConfig__read_line_value(line, &framebuffer_config_width_key, &self->width))
+    if (!self->width)
     {
-        *found_width = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_width_key),
+            some(parsed)
+            {
+                config->width = parsed;
+                self->width = true;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_height && FramebufferConfig__read_line_value(line, &framebuffer_config_height_key, &self->height))
+    if (!self->height)
     {
-        *found_height = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_height_key),
+            some(parsed)
+            {
+                config->height = parsed;
+                self->height = true;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_pixels_per_scanline
-        && FramebufferConfig__read_line_value(line, &framebuffer_config_pixels_per_scanline_key, &self->pixels_per_scanline))
+    if (!self->pixels_per_scanline)
     {
-        *found_pixels_per_scanline = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_pixels_per_scanline_key),
+            some(parsed)
+            {
+                config->pixels_per_scanline = parsed;
+                self->pixels_per_scanline = true;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_pixel_format && FramebufferConfig__read_line_value(line, &framebuffer_config_pixel_format_key, &parsed))
+    if (!self->pixel_format)
     {
-        self->pixel_format = (FramebufferConfigPixelFormat) parsed;
-        *found_pixel_format = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_pixel_format_key),
+            some(parsed)
+            {
+                config->pixel_format = (FramebufferConfigPixelFormat) parsed;
+                self->pixel_format = true;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_red_mask && FramebufferConfig__read_line_value(line, &framebuffer_config_red_mask_key, &self->red_mask))
+    if (!self->red_mask)
     {
-        *found_red_mask = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_red_mask_key),
+            some(parsed)
+            {
+                config->red_mask = parsed;
+                self->red_mask = true;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_green_mask && FramebufferConfig__read_line_value(line, &framebuffer_config_green_mask_key, &self->green_mask))
+    if (!self->green_mask)
     {
-        *found_green_mask = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_green_mask_key),
+            some(parsed)
+            {
+                config->green_mask = parsed;
+                self->green_mask = true;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_blue_mask && FramebufferConfig__read_line_value(line, &framebuffer_config_blue_mask_key, &self->blue_mask))
+    if (!self->blue_mask)
     {
-        *found_blue_mask = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_blue_mask_key),
+            some(parsed)
+            {
+                config->blue_mask = parsed;
+                self->blue_mask = true;
+            },
+            none_do_nothing()
+        );
     }
-    if (!*found_reserved_mask && FramebufferConfig__read_line_value(line, &framebuffer_config_reserved_mask_key, &self->reserved_mask))
+    if (!self->reserved_mask)
     {
-        *found_reserved_mask = true;
+        match_optional(uint64_t, FramebufferConfig__read_line_value(line, &framebuffer_config_reserved_mask_key),
+            some(parsed)
+            {
+                config->reserved_mask = parsed;
+                self->reserved_mask = true;
+            },
+            none_do_nothing()
+        );
     }
 }
 
 static bool FramebufferConfig__has_required_fields(
     FramebufferConfigPtr self,
-    bool found_present,
-    bool found_physical_base,
-    bool found_physical_size,
-    bool found_width,
-    bool found_height,
-    bool found_pixels_per_scanline,
-    bool found_pixel_format,
-    bool found_red_mask,
-    bool found_green_mask,
-    bool found_blue_mask,
-    bool found_reserved_mask)
+    FramebufferConfigFields fields)
 {
-    bool found_required_config = found_present
-        && found_physical_base
-        && found_physical_size
-        && found_width
-        && found_height
-        && found_pixels_per_scanline
-        && found_pixel_format;
+    bool found_required_config = fields.present
+        && fields.physical_base
+        && fields.physical_size
+        && fields.width
+        && fields.height
+        && fields.pixels_per_scanline
+        && fields.pixel_format;
 
     if (!found_required_config)
     {
@@ -177,10 +243,10 @@ static bool FramebufferConfig__has_required_fields(
 
     if (self->pixel_format == FRAMEBUFFER_CONFIG_PIXEL_FORMAT_BIT_MASK)
     {
-        return found_red_mask
-            && found_green_mask
-            && found_blue_mask
-            && found_reserved_mask;
+        return fields.red_mask
+            && fields.green_mask
+            && fields.blue_mask
+            && fields.reserved_mask;
     }
 
     return true;
@@ -188,62 +254,27 @@ static bool FramebufferConfig__has_required_fields(
 
 static bool FramebufferConfig__read_config(ConstDynStringPtr sysinfo, FramebufferConfigPtr self)
 {
-    bool found_present = false;
-    bool found_physical_base = false;
-    bool found_physical_size = false;
-    bool found_width = false;
-    bool found_height = false;
-    bool found_pixels_per_scanline = false;
-    bool found_pixel_format = false;
-    bool found_red_mask = false;
-    bool found_green_mask = false;
-    bool found_blue_mask = false;
-    bool found_reserved_mask = false;
+    FramebufferConfigFields fields = FramebufferConfigFields__new();
 
     match_optional(DynStringLines, DynString__lines(sysinfo),
         some(lines)
         {
-            LLIterate(DynStringLines, lines, line)
+            for_each_ll(DynStringLines, lines, line,
+            {
                 match_optional(BString, DynString__bstring(&line),
                     some(bstring_line)
                     {
-                        FramebufferConfig__read_config_line(
-                        &bstring_line,
-                        self,
-                        &found_present,
-                        &found_physical_base,
-                        &found_physical_size,
-                        &found_width,
-                        &found_height,
-                        &found_pixels_per_scanline,
-                        &found_pixel_format,
-                        &found_red_mask,
-                        &found_green_mask,
-                        &found_blue_mask,
-                        &found_reserved_mask
-                    ); },
-                    none() {}
-                )
-
-            End
+                        FramebufferConfigFields__read_config_line(&fields, &bstring_line, self);
+                    },
+                    none_do_nothing()
+                );
+            });
             DynStringLines__dispose_all(&lines);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
-    return FramebufferConfig__has_required_fields(
-        self,
-        found_present,
-        found_physical_base,
-        found_physical_size,
-        found_width,
-        found_height,
-        found_pixels_per_scanline,
-        found_pixel_format,
-        found_red_mask,
-        found_green_mask,
-        found_blue_mask,
-        found_reserved_mask);
+    return FramebufferConfig__has_required_fields(self, fields);
 }
 
 static bool FramebufferConfig__load(FramebufferConfigPtr self)
@@ -264,8 +295,8 @@ static bool FramebufferConfig__load(FramebufferConfigPtr self)
             DynString__dispose(&data);
             return loaded;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return false;
 }

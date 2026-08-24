@@ -36,7 +36,7 @@ static KernelPtr TestKernel__heap_new(
     match_optional(SystemInfo, kernel->system_info, some(value) {
             kernel->scheduler->interrupt_controller = Some(InterruptControllerInfo, value.interrupt_controller);
             kernel->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, value.interrupt_controller);
-        }, none() {})
+        }, none_do_nothing());
 
     return kernel;
 }
@@ -65,7 +65,7 @@ KernelPtr init_test_kernel_with_filesystem(FilesystemPtr filesystem)
     Result(DeviceHandle) register_res = IOSubsystem__register_device(
         kernel->io_subsystem, bstring("/"), &filesystem->file_io.base_io, &filesystem->state->state
     );
-    match_result(DeviceHandle, register_res, success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(DeviceHandle, register_res, success_do_nothing(), error_test_fail());
 
     return kernel;
 }
@@ -79,7 +79,7 @@ KernelPtr init_test_kernel()
     Result(DeviceHandle) register_res = IOSubsystem__register_device(
         kernel->io_subsystem, bstring("/"), &filesystem->file_io.base_io, &filesystem->state->state
     );
-    match_result(DeviceHandle, register_res, success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(DeviceHandle, register_res, success_do_nothing(), error_test_fail());
 
     return kernel;
 }

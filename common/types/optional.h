@@ -83,6 +83,9 @@
 #define none() \
     {
 
+#define some_do_nothing() some(_) {}
+#define none_do_nothing() none() {}
+
 #define match_optional(T, opt, some_branch, none_branch) \
 { \
     typedef opt__##T##__type value_type; \

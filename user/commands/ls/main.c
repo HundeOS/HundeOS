@@ -140,8 +140,8 @@ static bool LS__parse_options(int argc, char ** argv, LSOptions * options)
                 printf("ls: too many paths\n");
                 return false;
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
 
         options->path_arg = Some(BString, BString__new(arg));
     }
@@ -153,8 +153,8 @@ static BString LS__path_from_options(LSOptions options)
 {
     match_optional(BString, options.path_arg,
         some(path_arg) { return IO__path_from_arg(&path_arg); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     BString root = BSTRING_NEW("/");
     return root;

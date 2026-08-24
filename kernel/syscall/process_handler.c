@@ -23,7 +23,7 @@ static Result(Anything) ProcessChildEvent__copy_to_target(Result(Anything) resul
             return Success(Anything, PROCESS_CHILD_EVENT_OK);
         },
         error(code, message) { return Error(Anything, message, code); }
-    )
+    );
 
     return Error(Anything, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
 }
@@ -48,16 +48,16 @@ static Result(Anything) Process__complete_wait_child_event_syscall(ParkedOperati
                                     );
                                 },
                                 error(code, message) { return Error(Anything, message, code); }
-                            )
+                            );
                         },
-                        none() {}
-                    )
+                        none_do_nothing()
+                    );
                 },
-                none() {}
-            )
+                none_do_nothing()
+            );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(Anything, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
 }
@@ -131,7 +131,7 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
                     match_result(Anything, mapped,
                         success(mapped_code) { return Success(SystemCallResult, mapped_code); },
                         error(mapped_code, mapped_message) { return Error(SystemCallResult, mapped_message, mapped_code); }
-                    )
+                    );
                 },
                 error(code, message)
                 {
@@ -140,10 +140,10 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
                         KernelContext__dispose_heap(kernel_context);
                     }
                     return Error(SystemCallResult, message, code);
-                })
+                });
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(SystemCallResult, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
 }

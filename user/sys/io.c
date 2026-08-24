@@ -87,9 +87,9 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 {
     DynString text;
     match_result(DynStringCode, DynString__init(&text, max_bytes),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return None(DynString); }
-    )
+    );
 
     ByteCount total_read = 0;
     while (total_read < max_bytes)
@@ -103,13 +103,13 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
         }
 
         match_result(DynStringCode, DynString__append_bstring(&text, &chunk),
-            success(code) {},
+            success_do_nothing(),
             error(code, message)
             {
                 DynString__dispose(&text);
                 return None(DynString);
             }
-        )
+        );
 
         total_read += bytes;
         if (total_read >= max_bytes)

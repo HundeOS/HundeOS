@@ -121,10 +121,10 @@ static Result(IOStatus) Filesystem__mount_resolved_block_device(
             match_result(MountResult, Filesystem__mount(root_fs, mountpoint, mounted_filesystem),
                 success(_) { return Success(IOStatus, IO_OK); },
                 error(code, message) { return Error(IOStatus, message, code); }
-            )
+            );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOStatus, bstring("Filesystem type not supported"), IO_OPERATION_NOT_SUPPORTED);
 }
@@ -135,13 +135,13 @@ Result(IOStatus) Filesystem__mount_block_device(
 {
     match_optional(FilesystemPtr, Mounts__get(&self->mounts, mountpoint),
         some(existing) { return Success(IOStatus, IO_OK); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     match_optional(BlockDevicePtr, BlockDeviceRegistry__find(device_path),
         some(device) { return Filesystem__mount_resolved_block_device(self, device, filesystem_type, mountpoint); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOStatus, bstring("Block device not found"), IO_INVALID_PATH);
 }
@@ -150,19 +150,20 @@ static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableE
 {
     match_optional(FilesystemPtr, Mounts__get(&root_fs->mounts, entry->mountpoint),
         some(existing) { return; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     Optional(BlockDevicePtr) device_match = None(BlockDevicePtr);
     if (entry->match_block_count)
     {
         BlockDeviceMetadataEntries metadata_entries = BlockDeviceRegistry__metadata_entries();
-        FAIterate(BlockDeviceMetadataEntries, metadata_entries, index, metadata)
+        for_each_fa(BlockDeviceMetadataEntries, metadata_entries, index, metadata,
+        {
             if (metadata.block_count == entry->block_count)
             {
                 device_match = BlockDeviceRegistry__find(metadata.path);
             }
-        End
+        });
     }
     else
     {
@@ -171,8 +172,8 @@ static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableE
 
     match_optional(BlockDevicePtr, device_match,
         some(device) { Filesystem__mount_resolved_block_device(root_fs, device, entry->filesystem_type, entry->mountpoint); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 }
 
 static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemTablePtr self)
@@ -183,9 +184,9 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
         BSTRING_NEW("ext2"),
         BSTRING_NEW("/")
     ),
-        success(index) {},
+        success_do_nothing(),
         error(code, message) { return Error(CollectionCode, message, code); }
-    )
+    );
 
     match_result(CollectionCode, FilesystemTable__add_by_block_count(
         self,
@@ -193,9 +194,9 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
         BSTRING_NEW("ext2"),
         BSTRING_NEW("/boot/config")
     ),
-        success(index) {},
+        success_do_nothing(),
         error(code, message) { return Error(CollectionCode, message, code); }
-    )
+    );
 
     match_result(CollectionCode, FilesystemTable__add(
         self,
@@ -203,18 +204,19 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
         BSTRING_NEW("fat32"),
         BSTRING_NEW("/mnt/fs1")
     ),
-        success(index) {},
+        success_do_nothing(),
         error(code, message) { return Error(CollectionCode, message, code); }
-    )
+    );
 
     return Success(CollectionCode, 0);
 }
 
 void FilesystemTable__mount_available_entries(FilesystemPtr root_fs)
 {
-    LLIterate(FilesystemTableEntries, root_fs->filesystem_table.entries, entry)
+    for_each_ll(FilesystemTableEntries, root_fs->filesystem_table.entries, entry,
+    {
         FilesystemTable__mount_entry(root_fs, &entry);
-    End
+    });
 }
 
 FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel)
@@ -242,7 +244,7 @@ FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel)
     match_result(CollectionCode, FilesystemTable__add_hardcoded_entries(&root_fs->filesystem_table),
         success(_) { FilesystemTable__mount_available_entries(root_fs); },
         error(code, message) { __d_printf(FILESYSTEM, "Filesystem table setup failed %i %s\n", code, cstr(message)); }
-    )
+    );
 
     __d_printf(FILESYSTEM, "Root filesystem %p\n", root_fs);
     __d_printf(FILESYSTEM, "Embedded filesystem %p\n", embedded_fs);

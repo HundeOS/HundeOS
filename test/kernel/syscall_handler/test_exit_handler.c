@@ -68,17 +68,17 @@ void test_exit_handler_interrupts_and_removes_process_from_scheduler(void)
     setup_test_process();
     Optional(ProcessPtr) current_opt = Scheduler__current_process(kernel->scheduler, cpu);
 
-    match_optional(ProcessPtr, current_opt, some(current) { TEST_ASSERT_EQUAL(process, current); }, none() { TEST_FAIL(); })
+    match_optional(ProcessPtr, current_opt, some(current) { TEST_ASSERT_EQUAL(process, current); }, none_test_fail());
 
     Exit__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0);
 
     TEST_ASSERT_EQUAL(PROC_STATE_DEAD, process->state);
 
-    match_optional(ProcessPtr, Scheduler__current_process(kernel->scheduler, cpu), some(current) { TEST_ASSERT_EQUAL(idle, current); }, none() { TEST_FAIL(); })
+    match_optional(ProcessPtr, Scheduler__current_process(kernel->scheduler, cpu), some(current) { TEST_ASSERT_EQUAL(idle, current); }, none_test_fail());
 
     ProcessTablePtr processes = Scheduler__all_processes(kernel->scheduler, cpu);
 
-    match_optional(ArrayIndex, ProcessTable__find_item(processes, process), some(val) { TEST_FAIL(); }, none() {})
+    match_optional(ArrayIndex, ProcessTable__find_item(processes, process), some_test_fail(), none_do_nothing());
 }
 
 void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_process(void)
@@ -87,7 +87,7 @@ void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_
     ProcessPtr child = setup_test_process_waiting_on_child_process(parent);
     Optional(ProcessPtr) current_opt = Scheduler__current_process(kernel->scheduler, cpu);
 
-    match_optional(ProcessPtr, current_opt, some(current) { TEST_ASSERT_EQUAL(child, current); }, none() { TEST_FAIL(); })
+    match_optional(ProcessPtr, current_opt, some(current) { TEST_ASSERT_EQUAL(child, current); }, none_test_fail());
 
     Exit__handler(kernel, Some(ProcessPtr, child), 0, 0, 0, 0, 0);
     Scheduler__preempt(kernel->scheduler, cpu, context); // make sure the parent is woken up ( it was waiting on the child
@@ -97,11 +97,11 @@ void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_
             TEST_ASSERT_NOT_EQUAL(idle, current);
             TEST_ASSERT_EQUAL(parent, current);
             TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
-        }, none() { TEST_FAIL(); })
+        }, none_test_fail());
 
     ProcessTablePtr processes = Scheduler__all_processes(kernel->scheduler, cpu);
 
-    match_optional(ArrayIndex, ProcessTable__find_item(processes, child), some(val) { TEST_FAIL(); }, none() {})
+    match_optional(ArrayIndex, ProcessTable__find_item(processes, child), some_test_fail(), none_do_nothing());
 
     TEST_ASSERT_TRUE(cont_called);
 }

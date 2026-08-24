@@ -38,8 +38,8 @@ static bool UartDriverConfig__read_line_value(ConstBStringPtr line, ConstBString
             BString line_key = BString__strip(&raw_key);
             matched = BString__equals(&line_key, key);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (!matched)
     {
@@ -52,8 +52,8 @@ static bool UartDriverConfig__read_line_value(ConstBStringPtr line, ConstBString
             *value = parsed;
             return true;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return false;
 }
@@ -88,7 +88,8 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
     match_optional(DynStringLines, DynString__lines(sysinfo),
         some(lines)
         {
-            LLIterate(DynStringLines, lines, line)
+            for_each_ll(DynStringLines, lines, line,
+            {
                 match_optional(BString, DynString__bstring(&line),
                     some(bstring_line)
                     {
@@ -99,14 +100,13 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
                         &found_mmio_size,
                         &found_irq
                     ); },
-                    none() {}
-                )
-
-            End
+                    none_do_nothing()
+                );
+            });
             DynStringLines__dispose_all(&lines);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return found_physical_base && found_mmio_size && found_irq;
 }
@@ -129,8 +129,8 @@ static bool UartDriverConfig__load(UartDriverConfigPtr self)
             DynString__dispose(&data);
             return loaded;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return false;
 }

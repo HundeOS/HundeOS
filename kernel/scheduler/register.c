@@ -23,7 +23,7 @@ void action_park_message(KernelListenerPtr self, MessagePtr message)
                 );
 
                 match_result(ProcessID, pid_res,
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { __d_printf(PANIC, "Failed to park process: %s", cstr(message)); }
                 );
             }
@@ -57,7 +57,7 @@ void action_unpark_message(KernelListenerPtr self, MessagePtr message)
                         __d_printf(SCHEDULER, "scheduler unpark message success pid=%i\n", unparked_pid);
                     },
                     error(code, message) { __d_printf(PANIC, "Failed to unpark process: %s", cstr(message)); }
-                )
+                );
             }
             else
             {
@@ -97,13 +97,13 @@ void Scheduler__io_event(KernelListenerPtr self, MessagePtr message)
                     );
 
                     match_result(ProcessID, pid_res,
-                        success(_) {},
+                        success_do_nothing(),
                         error(code, error_message) { __d_printf(PANIC, "Failed to unpark process: %s", cstr(error_message)); }
                     );
                 }
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 
 }
@@ -125,7 +125,7 @@ void Scheduler__service_event(KernelListenerPtr self, MessagePtr message)
                     payload.service_event_delivery.process,
                     payload.service_event_delivery.event
                 ),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { __d_printf(PANIC, "Failed to enqueue service event: %s", cstr(message)); }
                 );
             }
@@ -145,7 +145,7 @@ Result(SchedulerRegisterCode) Scheduler__register(KernelPtr kernel)
     Listener service_listener = KernelListener__new(kernel, SOURCE_SERVICE, Scheduler__service_event);
 
     match_result(ListenerRegisterResult, MessageBroker__register_listener(broker, io_listener),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(SchedulerRegisterCode, message, code); }
     );
 
@@ -155,7 +155,7 @@ Result(SchedulerRegisterCode) Scheduler__register(KernelPtr kernel)
             return Success(SchedulerRegisterCode, res);
         },
         error(code, message) { return Error(SchedulerRegisterCode, message, code); }
-    )
+    );
 
     return Success(SchedulerRegisterCode, LISTENER_REGISTER_OK);
 }

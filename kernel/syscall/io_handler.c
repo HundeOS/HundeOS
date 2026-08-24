@@ -60,13 +60,13 @@ static Result(Anything) IO__complete_async_open(Result(Anything) open_result, An
                             IOContext__dispose(close_context);
                             return Error(Anything, message, code);
                         }
-                    )
+                    );
                 },
                 error(code, message) { return Error(Anything, message, code); }
-            )
+            );
         },
         error(code, message) { return Error(Anything, message, code); }
-    )
+    );
 
     return Error(Anything, no_process, IO_UNKNOWN_PID);
 }
@@ -94,7 +94,7 @@ void BlockDevice__clear_current_context()
         { \
             return Error(SystemCallResult, message, code); \
         } \
-    ) \
+    ); \
 
 
 Result(SystemCallResult) IO__handler(
@@ -111,7 +111,7 @@ Result(SystemCallResult) IO__handler(
             process = current_process;
             pid = Some(ProcessID, process->pid);
         },
-        none() {}
+        none_do_nothing()
     );
 
     if (process == NULL)
@@ -476,7 +476,7 @@ Result(SystemCallResult) IO__handler(
                 match_result(IOStatus, status_result,
                     success(status) { return Success(SystemCallResult, status); },
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
         },
             error(code, message)
             {
@@ -503,7 +503,7 @@ Result(SystemCallResult) IO__handler(
                 match_result(IOStatus, status_result,
                     success(status) { return Success(SystemCallResult, status); },
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
         },
             error(code, message)
             {
@@ -529,7 +529,7 @@ Result(SystemCallResult) IO__handler(
                 match_result(IOStatus, status_result,
                     success(status) { return Success(SystemCallResult, status); },
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
         },
             error(code, message)
             {

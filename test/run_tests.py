@@ -20,7 +20,7 @@ UNITY = {unity_dir}
 UNITY_SOURCE = $(UNITY)/src/unity.c
 UNITY_OBJECT = {unity_object}
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -mno-outline-atomics -I{kernel_dir} -I{common_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
+CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -mno-outline-atomics -include {hundetest_header} -I{kernel_dir} -I{common_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
 
 # Assembler flags
 ASFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -nostdlib -latomic -I{stubs_dir} -I{fixtures_dir}
@@ -260,6 +260,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                                            stubs_dir=stubs_dir_relative,
                                            fixtures_dir=fixtures_dir_relative,
                                            common_includes=common_includes,
+                                           hundetest_header=os.path.join(project_dir, "test", "hundetest.h"),
                                            unity_object=unity_object,
                                            runner_bins=join(runner_bins),
                                            runner_tasks="\n".join(runner_tasks)))

@@ -100,30 +100,32 @@ static bool MemFilesystem__directory_exists(MemFilesystemIOStatePtr self, BStrin
 
     match_optional(MemDirectories__FindResult, MemFilesystem__find_directory(self, path),
         some(_) { return true; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return false;
 }
 
 static bool MemFilesystem__has_child(MemFilesystemIOStatePtr self, BStringPtr path)
 {
-    LLIterate(MemDirectories, self->directories, directory)
+    for_each_ll(MemDirectories, self->directories, directory,
+    {
         BString parent = MemFilesystem__parent_path(directory.path);
         if (BString__equals(&parent, path))
         {
             return true;
         }
+    });
 
-    End
-    LLIterate(MemFiles, self->files, file)
+    for_each_ll(MemFiles, self->files, file,
+    {
         BString parent = MemFilesystem__parent_path(file.name);
         if (BString__equals(&parent, path))
         {
             return true;
         }
+    });
 
-    End
     return false;
 }
 
@@ -155,10 +157,10 @@ static Result(IOStatus) MemFilesystem__remove_file(MemFilesystemIOStatePtr self,
             match_result(CollectionCode, MemFiles__remove(&self->files, *file_match.value),
                 success(_) { return Success(IOStatus, IO_OK); },
                 error(code, message) { return Error(IOStatus, message, code); }
-            )
+            );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
 }
@@ -171,10 +173,10 @@ static Result(IOStatus) MemFilesystem__remove_directory_entry(MemFilesystemIOSta
             match_result(CollectionCode, MemDirectories__remove(&self->directories, *directory_match.value),
                 success(_) { return Success(IOStatus, IO_OK); },
                 error(code, message) { return Error(IOStatus, message, code); }
-            )
+            );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
 }
@@ -186,32 +188,34 @@ static Result(IOStatus) MemFilesystem__remove_recursive(MemFilesystemIOStatePtr 
     {
         removed_child = false;
 
-        LLIterate(MemFiles, self->files, file)
+        for_each_ll(MemFiles, self->files, file,
+        {
             if (MemFilesystem__path_is_child_of(&file.name, path))
             {
                 match_result(IOStatus, MemFilesystem__remove_file(self, &file.name),
                     success(_) { removed_child = true;; },
                     error(code, message) { return Error(IOStatus, message, code); }
-                )
+                );
                 break;
             }
+        });
 
-        End
         if (removed_child)
         {
             continue;
         }
 
-        LLIterate(MemDirectories, self->directories, directory)
+        for_each_ll(MemDirectories, self->directories, directory,
+        {
             if (MemFilesystem__path_is_child_of(&directory.path, path))
             {
                 match_result(IOStatus, MemFilesystem__remove_directory_entry(self, &directory.path),
                     success(_) { removed_child = true;; },
                     error(code, message) { return Error(IOStatus, message, code); }
-                )
+                );
                 break;
             }
-        End
+        });
     }
 
     return MemFilesystem__remove_directory_entry(self, path);
@@ -236,7 +240,7 @@ static Result(CollectionCode) MemFile__ensure_capacity(MemFilePtr self, size_t r
         match_result(CollectionCode, MemFilePages__push(&self->pages, ((MemFilePage) { .address = page })),
             success(_) { self->capacity += PAGE_SIZE;; },
             error(code, message) { return Error(CollectionCode, message, code); }
-        )
+        );
     }
 
     return Success(CollectionCode, 0);
@@ -259,7 +263,7 @@ static Result(CollectionCode) MemFile__copy_from_file(MemFilePtr self, size_t of
                 target[i] = page[file_offset % PAGE_SIZE];
             },
             none() { return Error(CollectionCode, corrupt_file, IO_INVALID_PATH); }
-        )
+        );
     }
 
     return Success(CollectionCode, 0);
@@ -277,7 +281,7 @@ static Result(CollectionCode) MemFile__copy_to_file(MemFilePtr self, size_t offs
                 page[file_offset % PAGE_SIZE] = source[i];
             },
             none() { return Error(CollectionCode, corrupt_file, IO_INVALID_PATH); }
-        )
+        );
     }
 
     return Success(CollectionCode, 0);
@@ -297,11 +301,11 @@ static Result(MemFilePtr) MemFilesystem__create_file(MemFilesystemIOStatePtr sel
         {
             match_optional(MemFiles__FindResult, MemFilesystem__find_file(self, &path),
                 some(match) { return Success(MemFilePtr, match.value); },
-                none() {}
-            )
+                none_do_nothing()
+            );
         },
         error(code, message) { return Error(MemFilePtr, message, code); }
-    )
+    );
 
     return Error(MemFilePtr, allocation_failed, IO_OPERATION_NOT_SUPPORTED);
 }
@@ -320,8 +324,8 @@ static Result(MemFilePtr) MemFilesystem__get_or_create_file(
 
             return Success(MemFilePtr, match.value);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if ((flags & IO_OPEN_WRITE) == 0)
     {
@@ -372,8 +376,8 @@ Result(IOInternalHandle) MemFileIO__open(IOStatePtr self, BString path, Flags fl
 
                 match_optional(MemDirectories__FindResult, MemFilesystem__find_directory(fs_state, &file_path),
                     some(_) { cs_return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); },
-                    none() {}
-                )
+                    none_do_nothing()
+                );
 
                 match_result(MemFilePtr, MemFilesystem__get_or_create_file(fs_state, file_path, flags),
                     success(_)
@@ -384,11 +388,11 @@ Result(IOInternalHandle) MemFileIO__open(IOStatePtr self, BString path, Flags fl
                         cs_return Success(IOInternalHandle, handle);
                     },
                     error(code, message) { cs_return Error(IOInternalHandle, message, code); }
-                )
-            })
+                );
+            });
         },
         error(code, message) { return Error(IOInternalHandle, message, code); }
-    )
+    );
 
     return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -406,8 +410,8 @@ Result(IOInternalHandle) MemFileIO__close(IOStatePtr self, IOInternalHandle hand
                 cs_return Success(IOInternalHandle, handle);
             },
             none() { cs_return Error(IOInternalHandle, invalid_file_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(IOInternalHandle, invalid_file_handle, IO_UNKNOWN_HANDLE);
 }
@@ -447,9 +451,9 @@ Result(IOBufferPtr) MemFileIO__read(
                         {
                             size_t chunk_size = min(PAGE_SIZE, read_size - copied);
                             match_result(CollectionCode, MemFile__copy_from_file(file, target->offset + copied, buffer, chunk_size),
-                                success(_) {},
+                                success_do_nothing(),
                                 error(code, message) { cs_return Error(IOBufferPtr, message, code); }
-                            )
+                            );
                             IOBuffer__push_all(&target->buffer, buffer, chunk_size);
                             copied += chunk_size;
                         }
@@ -458,11 +462,11 @@ Result(IOBufferPtr) MemFileIO__read(
                         cs_return Success(IOBufferPtr, &target->buffer);
                     },
                     none() { cs_return Error(IOBufferPtr, BString__sprintf(&invalid_path_format, &target->path), IO_INVALID_PATH); }
-                )
+                );
             },
             none() { cs_return Error(IOBufferPtr, invalid_file_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(IOBufferPtr, invalid_file_handle, IO_UNKNOWN_HANDLE);
 }
@@ -486,14 +490,14 @@ Result(ByteCount) MemFileIO__write(IOStatePtr self, IOInternalHandle handle, Dat
                     {
                         MemFilePtr file = file_match.value;
                         match_result(CollectionCode, MemFile__ensure_capacity(file, target->offset + size),
-                            success(_) {},
+                            success_do_nothing(),
                             error(code, message) { cs_return Error(ByteCount, message, code); }
-                        )
+                        );
 
                         match_result(CollectionCode, MemFile__copy_to_file(file, target->offset, data, size),
-                            success(_) {},
+                            success_do_nothing(),
                             error(code, message) { cs_return Error(ByteCount, message, code); }
-                        )
+                        );
 
                         target->offset += size;
                         if (target->offset > file->size)
@@ -504,11 +508,11 @@ Result(ByteCount) MemFileIO__write(IOStatePtr self, IOInternalHandle handle, Dat
                         cs_return Success(ByteCount, size);
                     },
                     none() { cs_return Error(ByteCount, BString__sprintf(&invalid_path_format, &target->path), IO_INVALID_PATH); }
-                )
+                );
             },
             none() { cs_return Error(ByteCount, invalid_file_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(ByteCount, invalid_file_handle, IO_UNKNOWN_HANDLE);
 }
@@ -535,7 +539,8 @@ Result(FilesystemNodes) MemFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr
             cs_return Error(FilesystemNodes, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
         }
 
-        LLIterate(MemDirectories, fs_state->directories, directory)
+        for_each_ll(MemDirectories, fs_state->directories, directory,
+        {
             BString directory_parent = MemFilesystem__parent_path(directory.path);
             if (BString__equals(&directory_parent, &path))
             {
@@ -544,9 +549,10 @@ Result(FilesystemNodes) MemFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr
                 );
                 FilesystemNodes__push(&result, node);
             }
+        });
 
-        End
-        LLIterate(MemFiles, fs_state->files, file)
+        for_each_ll(MemFiles, fs_state->files, file,
+        {
             BString file_parent = MemFilesystem__parent_path(file.name);
             if (BString__equals(&file_parent, &path))
             {
@@ -555,8 +561,8 @@ Result(FilesystemNodes) MemFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr
                 );
                 FilesystemNodes__push(&result, node);
             }
-        End
-    })
+        });
+    });
 
     return Success(FilesystemNodes, result);
 }
@@ -580,19 +586,19 @@ Result(IOStatus) MemFileIO__mkdir(IOStatePtr self, BString path)
 
         match_optional(MemDirectories__FindResult, MemFilesystem__find_directory(fs_state, &directory_path),
             some(_) { cs_return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); },
-            none() {}
-        )
+            none_do_nothing()
+        );
 
         match_optional(MemFiles__FindResult, MemFilesystem__find_file(fs_state, &directory_path),
             some(_) { cs_return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); },
-            none() {}
-        )
+            none_do_nothing()
+        );
 
         match_result(CollectionCode, MemDirectories__push(&fs_state->directories, ((MemDirectory) { .path = directory_path })),
             success(_) { cs_return Success(IOStatus, IO_OK); },
             error(code, message) { cs_return Error(IOStatus, message, code); }
-        )
-    })
+        );
+    });
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -606,8 +612,14 @@ Result(IOStatus) MemFileIO__remove(IOStatePtr self, BString path, Flags flags)
     {
         match_result(IOStatus, MemFilesystem__remove_file(fs_state, &file_path),
             success(status) { cs_return Success(IOStatus, status); },
-            error(_code, _message) {}
-        )
+            error(code, message)
+            {
+                if (code != IO_INVALID_PATH)
+                {
+                    cs_return Error(IOStatus, message, code);
+                }
+            }
+        );
 
         match_optional(MemDirectories__FindResult, MemFilesystem__find_directory(fs_state, &file_path),
             some(_)
@@ -617,7 +629,7 @@ Result(IOStatus) MemFileIO__remove(IOStatePtr self, BString path, Flags flags)
                     match_result(IOStatus, MemFilesystem__remove_recursive(fs_state, &file_path),
                         success(status) { cs_return Success(IOStatus, status); },
                         error(code, message) { cs_return Error(IOStatus, message, code); }
-                    )
+                    );
                 }
 
                 if (MemFilesystem__has_child(fs_state, &file_path))
@@ -626,9 +638,9 @@ Result(IOStatus) MemFileIO__remove(IOStatePtr self, BString path, Flags flags)
                 }
                 cs_return Error(IOStatus, bstring("remove directory not supported"), IO_OPERATION_NOT_SUPPORTED);
             },
-            none() {}
-        )
-    })
+            none_do_nothing()
+        );
+    });
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }

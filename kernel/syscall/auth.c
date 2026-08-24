@@ -83,11 +83,11 @@ Result(AuthTicketID) Auth__authenticate(AuthPtr self, ProcessPtr process, BStrin
                 match_result(CollectionCode, AuthTickets__push(&self->tickets, ticket),
                     success(_) { cs_return Success(AuthTicketID, ticket_id); },
                     error(code, message) { cs_return Error(AuthTicketID, ticket_store_full_message, AUTH_TICKET_STORE_FULL); }
-                )
+                );
             });
         },
         error(code, message) { return Error(AuthTicketID, message, code); }
-    )
+    );
 
     return Error(AuthTicketID, invalid_credentials_message, AUTH_INVALID_CREDENTIALS);
 }
@@ -113,7 +113,7 @@ Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicket
                 cs_return Success(UserID, ticket->user_id);
             },
             none() { cs_return Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET); }
-        )
+        );
     });
 
     return Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET);
@@ -146,10 +146,10 @@ Result(SystemCallResult) Auth__handler(
             ),
                 success(ticket_id) { return Success(SystemCallResult, ticket_id); },
                 error(code, message) { return Error(SystemCallResult, message, code); }
-            )
+            );
         },
         none() { return Error(SystemCallResult, no_process_message, AUTH_NO_PROCESS); }
-    )
+    );
 
     return Error(SystemCallResult, no_process_message, AUTH_NO_PROCESS);
 }

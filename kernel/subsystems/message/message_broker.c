@@ -198,14 +198,15 @@ Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message
     critical_section(self->lock,
     {
         Listeners__push_all(&clone, &self->listeners);
-    })
+    });
 
-    FAIterate(Listeners, clone, index, listener)
+    for_each_fa(Listeners, clone, index, listener,
+    {
         if (listener.source == message->source)
         {
             listener.dispatch(&listener, message);
         }
-    End
+    });
     Message__dispose(message);
     return Success(AckCode, ACK_OK);
 }
@@ -215,13 +216,13 @@ Result(ListenerRegisterResult) MessageBroker__register_listener(MessageBrokerPtr
     critical_section(self->lock,
     {
         match_result(CollectionCode, Listeners__push(&self->listeners, listener),
-            success(_) {},
+            success_do_nothing(),
             error(code, message)
             {
                 cs_return Error(ListenerRegisterResult, too_many_listeners, LISTENER_REGISTER_ERROR);
             }
-        )
-    })
+        );
+    });
     return Success(ListenerRegisterResult, LISTENER_REGISTER_OK);
 }
 

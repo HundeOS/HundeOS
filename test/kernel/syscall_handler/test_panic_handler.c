@@ -20,18 +20,18 @@ void tearDown(void)
 
 void test_panic_handler_triggers_kernel_panic(void)
 {
-    match_result(SystemCallResult, Panic__handler(kernel, None(ProcessPtr), 0, 0, 0, 0, 0), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SYSCALL_FAILURE, code); })
+    match_result(SystemCallResult, Panic__handler(kernel, None(ProcessPtr), 0, 0, 0, 0, 0), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SYSCALL_FAILURE, code); });
 
     TEST_ASSERT_TRUE(panic_occurred());
 }
 
 void test_init_registers_panic_syscall(void)
 {
-    match_result(RegisterResult, Init__syscalls(&kernel->syscall_dispatcher), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(RegisterResult, Init__syscalls(&kernel->syscall_dispatcher), success_do_nothing(), error_test_fail());
 
     match_result(SystemCallResult, SyscallDispatcher__dispatch(
         &kernel->syscall_dispatcher, kernel, None(ProcessPtr), SYSCALL_PANIC, 0, 0, 0, 0, 0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SYSCALL_FAILURE, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SYSCALL_FAILURE, code); });
 
     TEST_ASSERT_TRUE(panic_occurred());
 }

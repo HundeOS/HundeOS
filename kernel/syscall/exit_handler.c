@@ -21,5 +21,5 @@ Result(SystemCallResult) Exit__handler(
             return Success(SystemCallResult, SYSCALL_OK);
         },
         none() { return Error(SystemCallResult, process_not_found, SYSCALL_FAILURE); }
-    )
+    );
 }

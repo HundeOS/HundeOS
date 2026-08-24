@@ -1,6 +1,7 @@
 #include "fat16.h"
 #include "../fat/fat_name.h"
 #include "../../../../kalloc.h"
+#include "../../../../panic.h"
 
 FixedArrayBodyDefine(Fat16DirectoryEntries);
 MapBodyDefine(Fat16FileHandleMap);
@@ -145,7 +146,7 @@ static Result(Fat16Code) Fat16Volume__read_sector(Fat16VolumePtr self, BlockNumb
             }
         },
         error(code, message) { return Error(Fat16Code, io_error, FAT16_IO_ERROR); }
-    )
+    );
 
     return Error(Fat16Code, io_error, FAT16_IO_ERROR);
 }
@@ -161,7 +162,7 @@ static Result(Fat16Code) Fat16Volume__write_sector(Fat16VolumePtr self, BlockNum
             }
         },
         error(code, message) { return Error(Fat16Code, io_error, FAT16_IO_ERROR); }
-    )
+    );
 
     return Error(Fat16Code, io_error, FAT16_IO_ERROR);
 }
@@ -210,16 +211,16 @@ static Result(Fat16Code) Fat16Volume__write_fat_entry(Fat16VolumePtr self, uint1
         BlockNumber fat_sector = self->fat_start_sector + (fat * self->sectors_per_fat) + relative_sector;
 
         match_result(Fat16Code, Fat16Volume__read_sector(self, fat_sector, sector),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
-        )
+        );
 
         Fat16__write_u16(sector, sector_offset, value);
 
         match_result(Fat16Code, Fat16Volume__write_sector(self, fat_sector, sector),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
-        )
+        );
     }
 
     return Success(Fat16Code, FAT16_OK);
@@ -233,9 +234,9 @@ static Result(Fat16Code) Fat16Volume__read_fat_entry(Fat16VolumePtr self, uint16
     size_t sector_offset = fat_offset % FAT16_BYTES_PER_SECTOR;
 
     match_result(Fat16Code, Fat16Volume__read_sector(self, self->fat_start_sector + relative_sector, sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     *value = Fat16__read_u16(sector, sector_offset);
     return Success(Fat16Code, FAT16_OK);
@@ -247,9 +248,9 @@ static Result(Fat16Code) Fat16Volume__find_free_cluster(Fat16VolumePtr self, uin
     {
         uint16_t value = FAT16_END_OF_CHAIN;
         match_result(Fat16Code, Fat16Volume__read_fat_entry(self, current, &value),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
-        )
+        );
 
         if (value == FAT16_EMPTY_CLUSTER)
         {
@@ -272,9 +273,9 @@ static Result(Fat16Code) Fat16Volume__find_root_entry(
 {
     Data encoded_name[11] = { 0 };
     match_result(Fat16Code, Fat16__encode_83_name(&name, encoded_name),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
 
@@ -285,9 +286,9 @@ static Result(Fat16Code) Fat16Volume__find_root_entry(
             self->root_dir_start_sector + relative_sector,
             directory_sector
         ),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
-        )
+        );
 
         for (size_t entry_offset = 0; entry_offset < FAT16_BYTES_PER_SECTOR; entry_offset += FAT16_ROOT_ENTRY_SIZE)
         {
@@ -336,9 +337,9 @@ static Result(Fat16Code) Fat16Volume__find_free_root_entry(
             self->root_dir_start_sector + relative_sector,
             directory_sector
         ),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
-        )
+        );
 
         for (size_t entry_offset = 0; entry_offset < FAT16_BYTES_PER_SECTOR; entry_offset += FAT16_ROOT_ENTRY_SIZE)
         {
@@ -417,9 +418,9 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
     sector[511] = 0xaa;
 
     match_result(Fat16Code, Fat16Volume__write_sector(self, 0, sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     for (uint8_t fat = 0; fat < FAT16_FAT_COUNT; fat++)
     {
@@ -437,9 +438,9 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
                 self->fat_start_sector + (fat * self->sectors_per_fat) + i,
                 sector
             ),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { return Error(Fat16Code, message, code); }
-            )
+            );
         }
     }
 
@@ -447,9 +448,9 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
     for (uint16_t i = 0; i < self->root_dir_sectors; i++)
     {
         match_result(Fat16Code, Fat16Volume__write_sector(self, self->root_dir_start_sector + i, sector),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
-        )
+        );
     }
 
     return Success(Fat16Code, FAT16_OK);
@@ -464,9 +465,9 @@ Result(Fat16Code) Fat16Volume__mount(Fat16VolumePtr self)
 
     Data sector[FAT16_BYTES_PER_SECTOR] = { 0 };
     match_result(Fat16Code, Fat16Volume__read_sector(self, 0, sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     if (sector[510] != 0x55
         || sector[511] != 0xaa
@@ -515,9 +516,9 @@ Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self)
     for (uint16_t relative_sector = 0; relative_sector < self->root_dir_sectors; relative_sector++)
     {
         match_result(Fat16Code, Fat16Volume__read_sector(self, self->root_dir_start_sector + relative_sector, sector),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { return Error(Fat16DirectoryEntries, message, code); }
-        )
+        );
 
         for (size_t offset = 0; offset < FAT16_BYTES_PER_SECTOR; offset += FAT16_ROOT_ENTRY_SIZE)
         {
@@ -539,9 +540,9 @@ Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self)
             };
 
             match_result(CollectionCode, Fat16DirectoryEntries__push(&entries, entry),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { return Error(Fat16DirectoryEntries, message, code); }
-            )
+            );
         }
     }
 
@@ -564,9 +565,9 @@ Result(Fat16Code) Fat16Volume__create_root_file(
 
     Data encoded_name[11] = { 0 };
     match_result(Fat16Code, Fat16__encode_83_name(&name, encoded_name),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     BlockNumber existing_sector = 0;
     size_t existing_offset = 0;
@@ -579,18 +580,18 @@ Result(Fat16Code) Fat16Volume__create_root_file(
                 return Error(Fat16Code, message, code);
             }
         }
-    )
+    );
 
     uint16_t cluster = 0;
     match_result(Fat16Code, Fat16Volume__find_free_cluster(self, &cluster),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     match_result(Fat16Code, Fat16Volume__write_fat_entry(self, cluster, FAT16_END_OF_CHAIN),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     Data file_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
     if (size > 0)
@@ -599,22 +600,22 @@ Result(Fat16Code) Fat16Volume__create_root_file(
     }
 
     match_result(Fat16Code, Fat16Volume__write_sector(self, Fat16Volume__cluster_sector(self, cluster), file_sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
     match_result(Fat16Code, Fat16Volume__find_free_root_entry(self, &entry_sector, &entry_offset),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
     match_result(Fat16Code, Fat16Volume__read_sector(self, entry_sector, directory_sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     Fat16__copy(&directory_sector[entry_offset], encoded_name, 11);
     directory_sector[entry_offset + 11] = FAT16_ATTR_ARCHIVE;
@@ -622,9 +623,9 @@ Result(Fat16Code) Fat16Volume__create_root_file(
     Fat16__write_u32(directory_sector, entry_offset + 28, size);
 
     match_result(Fat16Code, Fat16Volume__write_sector(self, entry_sector, directory_sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     return Success(Fat16Code, FAT16_OK);
 }
@@ -638,9 +639,9 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, BStrin
 
     Data encoded_name[11] = { 0 };
     match_result(Fat16Code, Fat16__encode_83_name(&name, encoded_name),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     BlockNumber existing_sector = 0;
     size_t existing_offset = 0;
@@ -653,37 +654,37 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, BStrin
                 return Error(Fat16Code, message, code);
             }
         }
-    )
+    );
 
     uint16_t cluster = 0;
     match_result(Fat16Code, Fat16Volume__find_free_cluster(self, &cluster),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     match_result(Fat16Code, Fat16Volume__write_fat_entry(self, cluster, FAT16_END_OF_CHAIN),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     Data directory_data[FAT16_BYTES_PER_SECTOR] = { 0 };
     match_result(Fat16Code, Fat16Volume__write_sector(self, Fat16Volume__cluster_sector(self, cluster), directory_data),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
     match_result(Fat16Code, Fat16Volume__find_free_root_entry(self, &entry_sector, &entry_offset),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
     match_result(Fat16Code, Fat16Volume__read_sector(self, entry_sector, directory_sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     Fat16__copy(&directory_sector[entry_offset], encoded_name, 11);
     directory_sector[entry_offset + 11] = FAT16_ATTR_DIRECTORY;
@@ -691,9 +692,9 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, BStrin
     Fat16__write_u32(directory_sector, entry_offset + 28, 0);
 
     match_result(Fat16Code, Fat16Volume__write_sector(self, entry_sector, directory_sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     return Success(Fat16Code, FAT16_OK);
 }
@@ -710,15 +711,15 @@ Result(Fat16Code) Fat16Volume__read_root_file(
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
     match_result(Fat16Code, Fat16Volume__find_root_entry(self, name, &entry_sector, &entry_offset),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
     match_result(Fat16Code, Fat16Volume__read_sector(self, entry_sector, directory_sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     uint16_t cluster = Fat16__read_u16(directory_sector, entry_offset + 26);
     uint32_t size = Fat16__read_u32(directory_sector, entry_offset + 28);
@@ -729,9 +730,9 @@ Result(Fat16Code) Fat16Volume__read_root_file(
 
     Data file_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
     match_result(Fat16Code, Fat16Volume__read_sector(self, Fat16Volume__cluster_sector(self, cluster), file_sector),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
-    )
+    );
 
     Fat16__copy(target, file_sector, size);
     *bytes_read = size;
@@ -809,7 +810,7 @@ static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, BString path,
         Data data[FAT16_MAX_FILE_SIZE] = { 0 };
         uint32_t bytes_read = 0;
         match_result(Fat16Code, Fat16Volume__read_root_file(&fs_state->volume, path, data, sizeof(data), &bytes_read),
-            success(_) {},
+            success_do_nothing(),
             error(code, message)
             {
                 return Error(
@@ -817,7 +818,7 @@ static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, BString path,
                 message,
                 Fat16FilesystemIO__status_from_fat16(code)
             ); }
-        )
+        );
     }
 
     critical_section(fs_state->state.lock,
@@ -825,7 +826,7 @@ static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, BString path,
         IOInternalHandle handle = (IOInternalHandle) fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
         Fat16FileHandleMap__set(&fs_state->handles, handle, Fat16FileHandle__heap_new(path, flags));
         cs_return Success(IOInternalHandle, handle);
-    })
+    });
 }
 
 static Result(IOInternalHandle) Fat16FileIO__close(IOStatePtr self, IOInternalHandle handle)
@@ -841,8 +842,8 @@ static Result(IOInternalHandle) Fat16FileIO__close(IOStatePtr self, IOInternalHa
                 cs_return Success(IOInternalHandle, handle);
             },
             none() { cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -868,7 +869,7 @@ static Result(IOBufferPtr) Fat16FileIO__read(
                 match_result(Fat16Code, Fat16Volume__read_root_file(
                     &fs_state->volume, target->path, data, sizeof(data), &bytes_read
                 ),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message)
                     {
                         cs_return Error(
@@ -876,7 +877,7 @@ static Result(IOBufferPtr) Fat16FileIO__read(
                         message,
                         Fat16FilesystemIO__status_from_fat16(code)
                     ); }
-                )
+                );
 
                 if (target->offset >= bytes_read)
                 {
@@ -892,8 +893,8 @@ static Result(IOBufferPtr) Fat16FileIO__read(
                 cs_return Success(IOBufferPtr, &target->buffer);
             },
             none() { cs_return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -925,11 +926,11 @@ static Result(ByteCount) Fat16FileIO__write(IOStatePtr self, IOInternalHandle ha
                         message,
                         Fat16FilesystemIO__status_from_fat16(code)
                     ); }
-                )
+                );
             },
             none() { cs_return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -964,7 +965,7 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
         BlockNumber entry_sector = 0;
         size_t entry_offset = 0;
         match_result(Fat16Code, Fat16Volume__find_root_entry(&fs_state->volume, path, &entry_sector, &entry_offset),
-            success(_) {},
+            success_do_nothing(),
             error(code, message)
             {
                 return Error(
@@ -972,11 +973,11 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
                 message,
                 Fat16FilesystemIO__status_from_fat16(code)
             ); }
-        )
+        );
 
         Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
         match_result(Fat16Code, Fat16Volume__read_sector(&fs_state->volume, entry_sector, directory_sector),
-            success(_) {},
+            success_do_nothing(),
             error(code, message)
             {
                 return Error(
@@ -984,7 +985,7 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
                 message,
                 Fat16FilesystemIO__status_from_fat16(code)
             ); }
-        )
+        );
 
         if ((directory_sector[entry_offset + 11] & FAT16_ATTR_DIRECTORY) == 0)
         {
@@ -997,12 +998,13 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
     match_result(Fat16DirectoryEntries, Fat16Volume__list_root(&fs_state->volume),
         success(entries)
         {
-            FAIterate(Fat16DirectoryEntries, entries, index, entry)
+            for_each_fa(Fat16DirectoryEntries, entries, index, entry,
+            {
                 FilesystemNodes__push(
                     &result,
                     FilesystemNode__heap_new(fs_state->state.filesystem, entry.name, entry.attributes)
                 );
-            End
+            });
             return Success(FilesystemNodes, result);
         },
         error(code, message)
@@ -1012,7 +1014,7 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
             message,
             Fat16FilesystemIO__status_from_fat16(code)
         ); }
-    )
+    );
 
     return Success(FilesystemNodes, result);
 }
@@ -1028,7 +1030,7 @@ static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, BString path)
     match_result(Fat16Code, Fat16Volume__create_root_directory(&fs_state->volume, path),
         success(_) { return Success(IOStatus, IO_OK); },
         error(code, message) { return Error(IOStatus, message, Fat16FilesystemIO__status_from_fat16(code)); }
-    )
+    );
 
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
 }
@@ -1093,11 +1095,17 @@ Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(
         {
             match_result(Fat16Code, Fat16Volume__mount(&io_state->volume),
                 success(_) { io_state->mounted = true; },
-                error(_code, _message) {}
-            )
+                error(code, message)
+                {
+                    Kernel__panic(BString__cstr(&message), NULL); // hundelint: ignore-no-null
+                }
+            );
         },
-        error(_code, _message) {}
-    )
+        error(code, message)
+        {
+            Kernel__panic(BString__cstr(&message), NULL); // hundelint: ignore-no-null
+        }
+    );
 
     fs->state = &io_state->state;
 

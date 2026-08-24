@@ -333,8 +333,8 @@ static Optional(SdhciPciFunction) Sdhci__find_pci_function(ServiceMappedMemoryPt
         {
             match_optional(SdhciPciFunction, Sdhci__find_pci_function_on_device(ecam, config, bus, device),
                 some(function) { return Some(SdhciPciFunction, function); },
-                none() {}
-            )
+                none_do_nothing()
+            );
         }
     }
 
@@ -389,8 +389,8 @@ static Optional(SdHostConfig) Sdhci__load_pci_host_config(void)
                 .irq = SDHCI_PCI_READ8(function_base, SDHCI_PCI_CONFIG_INTERRUPT_LINE),
             }));
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return None(SdHostConfig);
 }
@@ -399,8 +399,8 @@ static Optional(SdHostConfig) Sdhci__load_host_config(void)
 {
     match_optional(SdHostConfig, Sdhci__load_pci_host_config(),
         some(config) { return Some(SdHostConfig, config); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return SDHCI_LOAD_CONFIG();
 }
@@ -910,8 +910,8 @@ int SDHCI_ENTRYPOINT(void)
 
             return 0;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     DRIVER_DEBUG("sdhci: no SD host config found\n");
     return 1;

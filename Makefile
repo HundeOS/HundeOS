@@ -157,7 +157,7 @@ all: $(BIN)
 
 # Semihosting version (better for QEMU debugging)
 elf: $(ELF)
-kernel: user_binaries $(BIN)
+kernel: hundelint user_binaries $(BIN)
 
 setup: python-venv
 	mkdir -p build

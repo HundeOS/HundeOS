@@ -17,7 +17,7 @@ static const CPUID cpu = 0;
 
 static bool scheduler_contains_process(ProcessID pid)
 {
-    match_optional(ProcessPtr, Scheduler__find_process_by_pid(kernel->scheduler, pid), some(process) { return true; }, none() {})
+    match_optional(ProcessPtr, Scheduler__find_process_by_pid(kernel->scheduler, pid), some(process) { return true; }, none_do_nothing());
 
     return false;
 }
@@ -84,7 +84,7 @@ void test_process_list_handler_returns_scheduled_processes(void)
             TEST_ASSERT_EQUAL_STRING("PARK_WAIT_SERVICE_READY", entries[3].wait_reason);
             TEST_ASSERT_EQUAL_STRING("service", entries[3].class_name);
             TEST_ASSERT_EQUAL_STRING("hund", entries[3].user_name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_process_list_handler_respects_entry_limit(void)
@@ -107,7 +107,7 @@ void test_process_list_handler_respects_entry_limit(void)
             TEST_ASSERT_EQUAL_UINT64(1, count);
             TEST_ASSERT_EQUAL_STRING("hello_world", entries[0].name);
             TEST_ASSERT_EQUAL_STRING("root", entries[0].user_name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_process_list_handler_rejects_missing_request(void)
@@ -116,7 +116,7 @@ void test_process_list_handler_rejects_missing_request(void)
 
     match_result(SystemCallResult, ProcessList__handler(
         kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0
-    ), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(PROCESS_LIST_INVALID_ARGUMENT, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(PROCESS_LIST_INVALID_ARGUMENT, code); });
 }
 
 void test_signal_handler_terminates_ready_process_immediately(void)
@@ -133,7 +133,7 @@ void test_signal_handler_terminates_ready_process_immediately(void)
             TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, result);
             TEST_ASSERT_EQUAL(PROC_STATE_DEAD, target->state);
             TEST_ASSERT_FALSE(scheduler_contains_process(target->pid));
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_signal_handler_queues_running_process_until_next_syscall_boundary(void)
@@ -149,7 +149,7 @@ void test_signal_handler_queues_running_process_until_next_syscall_boundary(void
             TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, result);
             TEST_ASSERT_TRUE(Process__has_pending_signal(target));
             TEST_ASSERT_TRUE(scheduler_contains_process(target->pid));
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     match_result(SystemCallResult, SyscallDispatcher__dispatch(
         &kernel->syscall_dispatcher, kernel, Some(ProcessPtr, target), PING, 0, 0, 0, 0, 0
@@ -158,7 +158,7 @@ void test_signal_handler_queues_running_process_until_next_syscall_boundary(void
             TEST_ASSERT_EQUAL(PROC_STATE_DEAD, target->state);
             TEST_ASSERT_FALSE(Process__has_pending_signal(target));
             TEST_ASSERT_FALSE(scheduler_contains_process(target->pid));
-        }, error(code, message) { TEST_FAIL_MESSAGE(BString__cstr(&message)); })
+        }, error(code, message) { TEST_FAIL_MESSAGE(BString__cstr(&message)); });
 }
 
 void test_signal_handler_rejects_unsupported_signal(void)
@@ -171,7 +171,7 @@ void test_signal_handler_rejects_unsupported_signal(void)
 
     match_result(SystemCallResult, Signal__handler(
         kernel, Some(ProcessPtr, sender), (Anything) target->pid, (Anything) 99, 0, 0, 0
-    ), success(result) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(PROCESS_SIGNAL_UNSUPPORTED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(PROCESS_SIGNAL_UNSUPPORTED, code); });
 }
 
 void test_process_wait_child_event_handler_returns_queued_child_event(void)
@@ -184,7 +184,7 @@ void test_process_wait_child_event_handler_returns_queued_child_event(void)
     };
 
     Scheduler__schedule(kernel->scheduler, parent);
-    match_result(CollectionCode, Process__push_child_event(parent, event), success(result) { TEST_ASSERT_EQUAL_UINT8(0, result); }, error(code, message) { TEST_FAIL(); })
+    match_result(CollectionCode, Process__push_child_event(parent, event), success(result) { TEST_ASSERT_EQUAL_UINT8(0, result); }, error_test_fail());
 
     ProcessChildEvent target = ProcessChildEvent__new();
 
@@ -195,7 +195,7 @@ void test_process_wait_child_event_handler_returns_queued_child_event(void)
             TEST_ASSERT_EQUAL_UINT64(event.pid, target.pid);
             TEST_ASSERT_EQUAL_INT64(event.status, target.status);
             TEST_ASSERT_EQUAL_UINT64(event.type, target.type);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_shutdown_handler_invokes_system_shutdown(void)
@@ -204,8 +204,8 @@ void test_shutdown_handler_invokes_system_shutdown(void)
 
     match_result(SystemCallResult, Shutdown__handler(
         kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0
-    ), success(result) { TEST_FAIL(); }, error(code, message) {
+    ), success_test_fail(), error(code, message) {
             TEST_ASSERT_EQUAL(SYSCALL_FAILURE, code);
             TEST_ASSERT_TRUE(system_shutdown_called());
-        })
+        });
 }

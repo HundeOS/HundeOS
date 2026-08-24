@@ -153,7 +153,7 @@ static bool Hundebus__record_pci_device(HundebusPtr self, HundebusPciDevice devi
     match_result(CollectionCode, HundebusPciDevices__push(&self->pci_devices, device),
         success(code) { return true; },
         error(code, message) { return false; }
-    )
+    );
     return false;
 }
 
@@ -205,7 +205,7 @@ static bool Hundebus__append_line(HundebusPtr self, ConstBStringPtr format, uint
     match_result(DynStringCode, DynString__append_bstring(&self->businfo, &line),
         success(code) { return true; },
         error(code, message) { return false; }
-    )
+    );
     return false;
 }
 
@@ -215,7 +215,7 @@ static bool Hundebus__append_device_line(HundebusPtr self, ConstBStringPtr forma
     match_result(DynStringCode, DynString__append_bstring(&self->businfo, &line),
         success(code) { return true; },
         error(code, message) { return false; }
-    )
+    );
     return false;
 }
 
@@ -231,9 +231,9 @@ static bool Hundebus__append_pci_device(HundebusPtr self, uint64_t index, Hundeb
 
     BString bdf = BString__sprintf(&bdf_format, index, device->bus, device->device, device->function);
     match_result(DynStringCode, DynString__append_bstring(&self->businfo, &bdf),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return false; }
-    )
+    );
 
     return Hundebus__append_device_line(self, &vendor_format, index, device->vendor_id)
         && Hundebus__append_device_line(self, &device_format, index, device->device_id)
@@ -259,12 +259,13 @@ static bool Hundebus__build_businfo(HundebusPtr self)
     }
 
     HundebusPciDevices * devices = &self->pci_devices;
-    FAPtrIterate(HundebusPciDevices, devices, index, device)
+    for_each_fa_ptr(HundebusPciDevices, devices, index, device,
+    {
         if (!Hundebus__append_pci_device(self, index, &device))
         {
             return false;
         }
-    End
+    });
 
     return true;
 }
@@ -317,9 +318,9 @@ static bool Hundebus__init(HundebusPtr self)
     };
 
     match_result(DynStringCode, DynString__init(&self->businfo, HUNDEBUS_BUSINFO_INITIAL_CAPACITY),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return false; }
-    )
+    );
 
     if (!service_ok(service_become_service()))
     {

@@ -31,7 +31,7 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
     match_optional(BString, BStringArray__at(&parts, 0),
         some(segment) { base = segment; },
         none() { return false; }
-    )
+    );
     if (BString__length(&base) == 0)
     {
         return false;
@@ -59,7 +59,7 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
         match_optional(BString, BStringArray__at(&parts, 1),
             some(segment) { extension = segment; },
             none() { return false; }
-        )
+        );
         if (BString__length(&extension) == 0)
         {
             return false;

@@ -55,7 +55,7 @@ void irq_handler(ProcessContextPtr context, bool current_el)
         match_optional(ProcessPtr, interrupted_process,
             some(proc) { __d_printf(IRQ, "IRQ saved context pid=%i name=%s\n", proc->pid, cstr(proc->name));; },
             none() { __d_println(IRQ, "IRQ no process context saved");; }
-        )
+        );
     }
 
     icc_eoir1(id);
@@ -96,7 +96,7 @@ void irq_handler(ProcessContextPtr context, bool current_el)
             }
         },
         error(code, message) { __d_printf(UNHANDLED, "irq dispatch error %i for irq %i\n", code, id); }
-    )
+    );
 }
 
 static uint64_t abort_user_process(
@@ -128,12 +128,12 @@ static uint64_t abort_user_process(
             abort.cpu = CPU__id();
 
             match_result(ProcessPtr, Scheduler__abort_process(kernel->scheduler, kernel->io_subsystem, process, abort),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { Kernel__panic(cstr(message), context); }
-            )
+            );
         },
         none() { Kernel__panic("User exception without a current process", context); }
-    )
+    );
 
     return 0;
 }
@@ -155,8 +155,8 @@ static bool yield_if_process_parked(KernelPtr kernel, Optional(ProcessPtr) curre
                 return true;
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return false;
 }
@@ -215,7 +215,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                         current_el
                     );
                 }
-            )
+            );
             __d_printf(SYSCALL, "system call: %p\n", context->x[8]);
             __d_printf(SYSCALL, "system call args: %p %p %p %p %p\n",
                 context->x[0], context->x[1], context->x[2], context->x[3], context->x[4]);
@@ -248,7 +248,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                             call_result
                         );; },
                         none() { __d_printf(SYSCALL, "syscall exit no-current-process id=%p result=%p\n", context->x[8], call_result);; }
-                    )
+                    );
                     __d_printf(SYSCALL, "syscall result: res=%p\n", call_result);
                     if (yield_if_process_parked(kernel, current_process))
                     {
@@ -283,7 +283,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                             code,
                             BString__cstr(&message)
                         );; }
-                    )
+                    );
                     __d_printf(SYSCALL, "syscall error: %s code=%i\n", BString__cstr(&message), code);
                     return code;
                 }

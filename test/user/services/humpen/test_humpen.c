@@ -52,14 +52,14 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     TEST_ASSERT_EQUAL(3, handle);
 
     DynString text;
-    match_result(DynStringCode, DynString__init(&text, max_bytes), success(_) {}, error(code, message) { return None(DynString); })
+    match_result(DynStringCode, DynString__init(&text, max_bytes), success_do_nothing(), error(code, message) { return None(DynString); });
 
     while (next_fstab[next_fstab_position] != '\0' && next_fstab_position < max_bytes)
     {
-        match_result(DynStringCode, DynString__push_char(&text, next_fstab[next_fstab_position]), success(code) {}, error(code, message) {
+        match_result(DynStringCode, DynString__push_char(&text, next_fstab[next_fstab_position]), success_do_nothing(), error(code, message) {
                 DynString__dispose(&text);
                 return None(DynString);
-            })
+            });
 
         next_fstab_position++;
     }

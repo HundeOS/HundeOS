@@ -44,7 +44,7 @@ static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, 
         {
             __d_printf(IOSUB, "open_stdio_handle error pid=%i flags=%i code=%i message=%s\n", process->pid, flags, code, cstr(message));
         }
-    )
+    );
     return open_result;
 }
 
@@ -58,7 +58,7 @@ static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, Proces
             Process__set_file_descriptor(process, 0, handle);
         },
         error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
-    )
+    );
 
     match_result(IOHandle, open_stdio_handle(kernel, process, console_path, IO_OPEN_WRITE),
         success(handle)
@@ -67,7 +67,7 @@ static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, Proces
             Process__set_file_descriptor(process, 1, handle);
         },
         error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
-    )
+    );
 
     match_result(IOHandle, open_stdio_handle(kernel, process, console_path, IO_OPEN_WRITE),
         success(handle)
@@ -76,7 +76,7 @@ static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, Proces
             Process__set_file_descriptor(process, 2, handle);
         },
         error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
-    )
+    );
 
     __d_printf(IOSUB, "install_default_stdio done pid=%i name=%s\n", process->pid, cstr(process->name));
     return Success(ProcessSetupStatus, PROCESS_SETUP);
@@ -105,7 +105,7 @@ void schedule_as(KernelPtr kernel, BString name, ProcessClass process_class)
                         {
                             Kernel__panic(BString__cstr(&message), NULL); // hundelint: ignore-no-null
                         }
-                    )
+                    );
                 },
                 error(code, message)
                 {
@@ -113,7 +113,7 @@ void schedule_as(KernelPtr kernel, BString name, ProcessClass process_class)
                     BString panic_error = BString__sprintf(&panic_message, cstr(name));
                     Kernel__panic(cstr(panic_error), NULL); // hundelint: ignore-no-null
                 }
-            )
+            );
         },
         none()
         {
@@ -158,10 +158,10 @@ void Kernel_main(CPUID cpu_id) {
             Kernel__panic("Kernel missing system info", NULL); // hundelint: ignore-no-null
             return;
         }
-    )
+    );
 
     match_result(InitCode, CPU__init(&system_info),
-        success(_) {},
+        success_do_nothing(),
         error(code, message)
         {
             __d_printf(PANIC, "CPU init failed: %i\n", cpu_id);
@@ -179,7 +179,7 @@ void Kernel_main(CPUID cpu_id) {
     else
     {
         match_result(SchedulerInitStatus, Scheduler__wait_until_ready(kernel->scheduler),
-            success(_) {},
+            success_do_nothing(),
             error(code, message)
             {
                 Kernel__panic(BString__cstr(&message), NULL); // hundelint: ignore-no-null

@@ -29,14 +29,18 @@ bool dyn_string_equals(void * a, void * b)
 
 void DynStringLines__dispose_all(DynStringLines * self)
 {
-    LLIterate(DynStringLines, *self, line)
+    for_each_ll(DynStringLines, *self, line,
+    {
         DynString__dispose(&line);
+    });
 
-    End
-    match_result(CollectionCode, DynStringLines__dispose(self),
-        success(_) {},
-        error(code, message) {}
-    )
+    match_result(CollectionCode, DynStringLines__dispose(self), // hundelint: ignore-trivial-error-branch
+        success_do_nothing(),
+        error(code, message)
+        {
+            return;
+        }
+    );
 }
 
 static StringPos DynString__next_capacity(StringPos current, StringPos required)
@@ -104,9 +108,9 @@ Result(DynStringCode) DynString__push_char(DynStringPtr self, char ch)
     if (required > self->capacity)
     {
         match_result(DynStringCode, DynString__reserve(self, DynString__next_capacity(self->capacity, required)),
-            success(code) {},
+            success_do_nothing(),
             error(code, message) { return Error(DynStringCode, message, code); }
-        )
+        );
     }
 
     self->data[self->len] = ch;
@@ -120,9 +124,9 @@ Result(DynStringCode) DynString__append_cstr(DynStringPtr self, const char * tex
     for (StringPos i = 0; text[i] != '\0'; i++)
     {
         match_result(DynStringCode, DynString__push_char(self, text[i]),
-            success(code) {},
+            success_do_nothing(),
             error(code, message) { return Error(DynStringCode, message, code); }
-        )
+        );
     }
 
     return Success(DynStringCode, DYN_STRING_OK);
@@ -130,12 +134,13 @@ Result(DynStringCode) DynString__append_cstr(DynStringPtr self, const char * tex
 
 Result(DynStringCode) DynString__append_bstring(DynStringPtr self, ConstBStringPtr text)
 {
-    BStringIterate(text, i, ch)
+    for_each_bstring(text, i, ch,
+    {
         match_result(DynStringCode, DynString__push_char(self, ch),
-            success(code) {},
+            success_do_nothing(),
             error(code, message) { return Error(DynStringCode, message, code); }
-        )
-    End
+        );
+    });
 
     return Success(DynStringCode, DYN_STRING_OK);
 }
@@ -186,7 +191,7 @@ char DynString__char_at_or(ConstDynStringPtr self, StringPos index, char alterna
     match_optional(char, DynString__char_at(self, index),
         some(ch) { return ch; },
         none() { return alternate; }
-    )
+    );
 }
 
 Optional(BString) DynString__bstring(ConstDynStringPtr self)
@@ -209,7 +214,7 @@ static bool DynString__push_line(DynStringLines * lines, DynString line)
     match_result(CollectionCode, DynStringLines__push(lines, line),
         success(index) { return true; },
         error(code, message) { return false; }
-    )
+    );
 
     return false;
 }
@@ -219,9 +224,9 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
     DynStringLines lines = DynStringLines__new();
     DynString line;
     match_result(DynStringCode, DynString__init(&line, 16),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return None(DynStringLines); }
-    )
+    );
 
     for (StringPos i = 0; i < DynString__length(self); i++)
     {
@@ -236,25 +241,25 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
             }
 
             match_result(DynStringCode, DynString__init(&line, 16),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message)
                 {
                     DynStringLines__dispose_all(&lines);
                     return None(DynStringLines);
                 }
-            )
+            );
             continue;
         }
 
         match_result(DynStringCode, DynString__push_char(&line, ch),
-            success(_) {},
+            success_do_nothing(),
             error(code, message)
             {
                 DynString__dispose(&line);
                 DynStringLines__dispose_all(&lines);
                 return None(DynStringLines);
             }
-        )
+        );
     }
 
     if (DynString__length(&line) > 0)

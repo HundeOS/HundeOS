@@ -24,8 +24,8 @@ Optional(Elf) EmbeddedElf__load(BString name)
         {
             return Some(Elf, Elf__new(file.start, file.end, file.name));
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return None(Elf);
 }

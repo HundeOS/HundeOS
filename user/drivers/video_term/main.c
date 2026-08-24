@@ -789,7 +789,7 @@ static void VideoTerm__flush_emoji_cluster(VideoTermPtr self)
                 VideoTerm__draw_codepoint(self, codepoints[index]);
             }
         }
-    )
+    );
 }
 
 static void VideoTerm__write_text_or_emoji_codepoint(VideoTermPtr self, uint32_t codepoint)

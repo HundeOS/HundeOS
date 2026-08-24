@@ -216,14 +216,14 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     }
 
     DynString config;
-    match_result(DynStringCode, DynString__init(&config, max_bytes), success(_) {}, error(code, message) { return None(DynString); })
+    match_result(DynStringCode, DynString__init(&config, max_bytes), success_do_nothing(), error(code, message) { return None(DynString); });
 
     for (StringPos index = 0; source[index] != '\0' && index < max_bytes; index++)
     {
-        match_result(DynStringCode, DynString__push_char(&config, source[index]), success(_) {}, error(code, message) {
+        match_result(DynStringCode, DynString__push_char(&config, source[index]), success_do_nothing(), error(code, message) {
                 DynString__dispose(&config);
                 return None(DynString);
-            })
+            });
     }
 
     return Some(DynString, config);

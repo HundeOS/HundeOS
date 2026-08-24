@@ -41,7 +41,7 @@ Result(ServiceCode) ServiceEventDispatcher__subscribe_irq(
     critical_section(self->lock,
     {
         IRQServiceMap__set(&self->irq_services, irq, service);
-    })
+    });
     return Success(ServiceCode, SERVICE_OK);
 }
 
@@ -63,10 +63,10 @@ Result(ServiceCode) ServiceEventDispatcher__enqueue(
     critical_section(self->lock,
     {
         match_result(ServiceCode, Service__push_next_event(process, event),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { cs_return Error(ServiceCode, message, code); }
-        )
-    })
+        );
+    });
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -120,15 +120,15 @@ Result(ServiceEventDispatch) ServiceEventDispatcher__dispatch_irq(
                 event.data = service->coalesced_count;
 
                 match_result(ServiceCode, Service__push_next_event(service->process, event),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { cs_return Error(ServiceEventDispatch, message, code); }
-                )
+                );
 
                 cs_return Success(ServiceEventDispatch, dispatch);
             },
-            none() {}
-        )
-    })
+            none_do_nothing()
+        );
+    });
 
     __d_printf(IODEV, "service event dispatcher no irq service irq=%i\n", irq);
     return Success(ServiceEventDispatch, no_dispatch);
@@ -152,8 +152,8 @@ static void ServiceEventDispatcher__mark_active_irq_event_locked(
                 process->service.active_irq_event = Some(ServiceEvent, event);
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 }
 
 Result(ServiceEvent) ServiceEventDispatcher__take_next(ServiceEventDispatcherPtr self, ProcessPtr process)
@@ -167,8 +167,8 @@ Result(ServiceEvent) ServiceEventDispatcher__take_next(ServiceEventDispatcherPtr
                 cs_return Success(ServiceEvent, event);
             },
             error(code, message) { cs_return Error(ServiceEvent, message, code); }
-        )
-    })
+        );
+    });
 
     return Error(ServiceEvent, service_event_queue_empty, SERVICE_EVENT_QUEUE_EMPTY);
 }
@@ -195,13 +195,13 @@ Result(ServiceCode) ServiceEventDispatcher__complete_active_irq(
                             cs_return Success(ServiceCode, SERVICE_OK);
                         }
                     },
-                    none() {}
-                )
+                    none_do_nothing()
+                );
                 process->service.active_irq_event = None(ServiceEvent);
             },
-            none() {}
-        )
-    })
+            none_do_nothing()
+        );
+    });
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -214,22 +214,24 @@ Result(ServiceCode) ServiceEventDispatcher__unsubscribe_process(
 
     critical_section(self->lock,
     {
-        MapIterate(IRQServiceMap, self->irq_services, index, irq, service)
+        for_each_map(IRQServiceMap, self->irq_services, index, irq, service,
+        {
             if (service.process == process)
             {
                 match_result(CollectionCode, ServiceIRQNumbers__push(&stale_irqs, irq),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { cs_return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL); }
-                )
+                );
             }
 
-        End
-        FAIterate(ServiceIRQNumbers, stale_irqs, irq_index, irq)
+        });
+        for_each_fa(ServiceIRQNumbers, stale_irqs, irq_index, irq,
+        {
             IRQServiceMap__delete(&self->irq_services, irq);
 
-        End
+        });
         process->service.active_irq_event = None(ServiceEvent);
-    })
+    });
 
     return ServiceEventDispatcher__remove_ready_waiter(self, process);
 }
@@ -256,9 +258,9 @@ bool ServiceEventDispatcher__is_ready(ServiceEventDispatcherPtr self, ConstBStri
             &self->ready_names, ServiceReadyNames__matches, (void *) name
         ),
             some(match) { ready = true; },
-            none() {}
-        )
-    })
+            none_do_nothing()
+        );
+    });
 
     return ready;
 }
@@ -272,36 +274,37 @@ Result(ServiceCode) ServiceEventDispatcher__publish_ready(
         match_optional(ServiceReadyNames__FindResult, ServiceReadyNames__find(
             &self->ready_names, ServiceReadyNames__matches, (void *) name
         ),
-            some(_) {},
+            some_do_nothing(),
             none()
             {
                 BString ready_name = BString__slice(name, 0, BString__length(name));
                 match_result(CollectionCode, ServiceReadyNames__push(&self->ready_names, ready_name),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { cs_return Error(ServiceCode, service_ready_names_full, SERVICE_EVENT_QUEUE_FULL); }
-                )
+                );
             }
-        )
+        );
 
         ServiceReadyWaiters retained_waiters = ServiceReadyWaiters__new();
-        FAIterate(ServiceReadyWaiters, self->ready_waiters, index, waiter)
+        for_each_fa(ServiceReadyWaiters, self->ready_waiters, index, waiter,
+        {
             if (BString__equals(&waiter.name, name))
             {
                 match_result(CollectionCode, ServiceReadyProcesses__push(ready_processes, waiter.process),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL); }
-                )
+                );
             }
             else
             {
                 match_result(CollectionCode, ServiceReadyWaiters__push(&retained_waiters, waiter),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL); }
-                )
+                );
             }
-        End
+        });
         self->ready_waiters = retained_waiters;
-    })
+    });
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -316,18 +319,18 @@ Result(ServiceCode) ServiceEventDispatcher__wait_ready(
             &self->ready_names, ServiceReadyNames__matches, (void *) name
         ),
             some(match) { cs_return Success(ServiceCode, SERVICE_OK); },
-            none() {}
-        )
+            none_do_nothing()
+        );
 
         ServiceReadyWaiter waiter;
         waiter.process = process;
         waiter.name = BString__slice(name, 0, BString__length(name));
 
         match_result(CollectionCode, ServiceReadyWaiters__push(&self->ready_waiters, waiter),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL); }
-        )
-    })
+        );
+    });
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -344,12 +347,12 @@ Result(ServiceCode) ServiceEventDispatcher__remove_ready_waiter(ServiceEventDisp
                 some(match)
                 {
                     match_result(CollectionCode, ServiceReadyWaiters__remove(&self->ready_waiters, *match.value),
-                        success(_) {},
+                        success_do_nothing(),
                         error(code, message) { cs_return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR); }
-                    )
-                }, none() { cs_return Success(ServiceCode, SERVICE_OK); })
+                    );
+                }, none() { cs_return Success(ServiceCode, SERVICE_OK); });
         }
-    })
+    });
 
     return Success(ServiceCode, SERVICE_OK);
 }

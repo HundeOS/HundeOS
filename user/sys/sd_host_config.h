@@ -42,8 +42,8 @@ static bool SdHostConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr 
             BString line_key = BString__strip(&raw_key);
             matched = BString__equals(&line_key, key);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (!matched)
     {
@@ -56,8 +56,8 @@ static bool SdHostConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr 
             *value = parsed;
             return true;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return false;
 }
@@ -101,7 +101,8 @@ static Optional(SdHostConfig) SdHostConfig__parse(ConstDynStringPtr sysinfo)
     match_optional(DynStringLines, DynString__lines(sysinfo),
         some(lines)
         {
-            LLIterate(DynStringLines, lines, line)
+            for_each_ll(DynStringLines, lines, line,
+            {
                 match_optional(BString, DynString__bstring(&line),
                     some(bstring_line)
                     {
@@ -113,14 +114,13 @@ static Optional(SdHostConfig) SdHostConfig__parse(ConstDynStringPtr sysinfo)
                         &found_mmio_size,
                         &found_irq
                     ); },
-                    none() {}
-                )
-
-            End
+                    none_do_nothing()
+                );
+            });
             DynStringLines__dispose_all(&lines);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (found_present && found_physical_base && found_mmio_size && found_irq)
     {
@@ -148,8 +148,8 @@ static Optional(SdHostConfig) SdHostConfig__load(void)
             DynString__dispose(&data);
             return config;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return None(SdHostConfig);
 }

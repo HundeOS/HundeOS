@@ -233,8 +233,8 @@ __BOOT__(void) map_framebuffer(PageTable * table, BootPlatformInfoPtr platform)
                 &device_perms
             );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 }
 
 __BOOT__(void) map_kernel(SystemInfoPtr system_info)

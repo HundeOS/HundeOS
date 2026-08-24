@@ -87,9 +87,11 @@ BString BString__sprintf(ConstBStringPtr self, ...);
 #define cstr_p(bstrptr) \
     BString__cstr(bstrptr)
 
-#define BStringIterate(self, index, ch) \
+#define for_each_bstring(self, index, ch, ...) \
     for (StringPos index = 0; index < BString__length(self); index++) \
     { \
         char ch = BString__char_at_or(self, index, '\0'); \
+        __VA_ARGS__ \
+    }
 
 #endif

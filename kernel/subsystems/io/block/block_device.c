@@ -130,13 +130,15 @@ void BlockDeviceRegistry__reset(void)
 {
     if (registry_initialized)
     {
-        MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
+        for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
+        {
             Kernel__free(addr(device));
 
-        End
-        MapIterate(BlockRequestMap, requests, request_index, request_id, request)
+        });
+        for_each_map(BlockRequestMap, requests, request_index, request_id, request,
+        {
             Kernel__free(addr(request));
-        End
+        });
     }
 
     registry = BlockDeviceRegistryMap__new();
@@ -166,7 +168,7 @@ static Result(ServiceCode) UserspaceBlockDevice__deliver_service_event(
     match_result(AckCode, MessageBroker__deliver(self->message_broker, message),
         success(_) { return Success(ServiceCode, SERVICE_OK); },
         error(code, message) { return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR); }
-    )
+    );
 
     return Error(ServiceCode, request_failed, SERVICE_SCHEDULER_ERROR);
 }
@@ -204,23 +206,23 @@ static Result(Anything) UserspaceBlockDevice__complete_wait(ParkedOperationPtr p
                             continuation_result,
                             request->io_context->kernel_context.result_mapper_context
                         ); },
-                        none() {}
-                    )
+                        none_do_nothing()
+                    );
                     return continuation_result;
                 },
-                none() {}
-            )
+                none_do_nothing()
+            );
 
             Result(Anything) completed_blocks = Success(Anything, request->completed_blocks);
             match_optional(KernelResultMapper, block_context->kernel_context.result_mapper,
                 some(mapper) { return mapper(completed_blocks, block_context->kernel_context.result_mapper_context); },
-                none() {}
-            )
+                none_do_nothing()
+            );
 
             return completed_blocks;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(Anything, request_not_found, BLOCK_DEVICE_IO_ERROR);
 }
@@ -229,7 +231,7 @@ static void UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr requ
 {
     Optional(KernelContextPtr) park_context = BlockDevice__current_context();
     match_optional(KernelContextPtr, park_context,
-        some(_) {},
+        some_do_nothing(),
         none()
         {
             if (request->io_context != 0)
@@ -237,7 +239,7 @@ static void UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr requ
                 park_context = Some(KernelContextPtr, &request->io_context->kernel_context);
             }
         }
-    )
+    );
 
     match_optional(KernelContextPtr, park_context,
         some(context)
@@ -271,7 +273,7 @@ static void UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr requ
                     message->payload.some.val.deferred.operation_key = Some(OperationKey, request->request_id);
 
                     match_result(AckCode, MessageBroker__deliver(request->device->message_broker, message),
-                        success(_) {},
+                        success_do_nothing(),
                         error(code, message)
                         {
                             __d_printf(PANIC, "Park message failed %s\n", cstr(message));
@@ -279,11 +281,11 @@ static void UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr requ
                         }
                     );
                 },
-                none() {}
-            )
+                none_do_nothing()
+            );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 }
 
 static Result(BlockCount) UserspaceBlockDevice__create_request(
@@ -341,9 +343,9 @@ static Result(BlockCount) UserspaceBlockDevice__create_request(
             request->waiting_pid = None(ProcessID);
 
             match_result(CollectionCode, BlockRequestMap__set(&requests, request->request_id, request),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { return Error(BlockCount, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
-            )
+            );
 
             __d_printf(
                 IODEV,
@@ -367,16 +369,16 @@ static Result(BlockCount) UserspaceBlockDevice__create_request(
             event.data = 0;
 
             match_result(ServiceCode, UserspaceBlockDevice__deliver_service_event(self, event),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR); }
-            )
+            );
 
             UserspaceBlockDevice__park_for_request(request);
 
             return Error(BlockCount, request_pending, BLOCK_DEVICE_REQUEST_PENDING);
         },
         error(code, message) { return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR); }
-    )
+    );
 
     return Error(BlockCount, request_failed, BLOCK_DEVICE_IO_ERROR);
 }
@@ -460,8 +462,8 @@ Result(Anything) BlockDevice__read_async(
     context->buffer_size = count * BLOCK_DEVICE_BLOCK_SIZE;
     match_optional(KernelContextPtr, BlockDevice__current_context(),
         some(kernel_context) { context->kernel_context = *kernel_context; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (!self->userspace_service)
     {
@@ -474,7 +476,7 @@ Result(Anything) BlockDevice__read_async(
                 return continuation(context);
             },
             error(code, message) { return Error(Anything, message, code); }
-        )
+        );
     }
 
     match_result(UserAddress, Process__alloc_user_pages(((UserspaceBlockDevicePtr) self->context)->service_process, context->buffer_size),
@@ -501,9 +503,9 @@ Result(Anything) BlockDevice__read_async(
             context->request_id = Some(BlockRequestID, request->request_id);
 
             match_result(CollectionCode, BlockRequestMap__set(&requests, request->request_id, request),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { return Error(Anything, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
-            )
+            );
 
             __d_printf(
                 IODEV,
@@ -525,15 +527,15 @@ Result(Anything) BlockDevice__read_async(
             event.data = 0;
 
             match_result(ServiceCode, UserspaceBlockDevice__deliver_service_event(userspace_device, event),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { return Error(Anything, message, BLOCK_DEVICE_IO_ERROR); }
-            )
+            );
 
             UserspaceBlockDevice__park_for_request(request);
             return Error(Anything, request_pending, BLOCK_DEVICE_REQUEST_PENDING);
         },
         error(code, message) { return Error(Anything, message, BLOCK_DEVICE_IO_ERROR); }
-    )
+    );
 
     return Error(Anything, request_failed, BLOCK_DEVICE_IO_ERROR);
 }
@@ -557,8 +559,8 @@ Result(Anything) BlockDevice__write_async(
     context->request_id = None(BlockRequestID);
     match_optional(KernelContextPtr, BlockDevice__current_context(),
         some(kernel_context) { context->kernel_context = *kernel_context; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (self->userspace_service)
     {
@@ -573,7 +575,7 @@ Result(Anything) BlockDevice__write_async(
         ),
             success(blocks) { return Success(Anything, blocks); },
             error(code, message) { return Error(Anything, message, code); }
-        )
+        );
     }
 
     match_result(BlockCount, self->write(self->context, block, count, source),
@@ -584,7 +586,7 @@ Result(Anything) BlockDevice__write_async(
             return continuation(context);
         },
         error(code, message) { return Error(Anything, message, code); }
-    )
+    );
 
     return Error(Anything, request_failed, BLOCK_DEVICE_IO_ERROR);
 }
@@ -617,8 +619,8 @@ Result(BlockDeviceCode) BlockDeviceRegistry__register(
 
     match_optional(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry, path),
         some(existing) { return Error(BlockDeviceCode, already_registered, BLOCK_DEVICE_ALREADY_REGISTERED); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     UserspaceBlockDevicePtr device = ptr(Kernel__alloc_kernel(sizeof(UserspaceBlockDevice)), UserspaceBlockDevice);
     *device = (UserspaceBlockDevice) {
@@ -634,7 +636,7 @@ Result(BlockDeviceCode) BlockDeviceRegistry__register(
     match_result(CollectionCode, BlockDeviceRegistryMap__set(&registry, path, device),
         success(_) { return Success(BlockDeviceCode, BLOCK_DEVICE_OK); },
         error(code, message) { return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
-    )
+    );
 
     return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
 }
@@ -649,43 +651,47 @@ Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPt
     BlockDeviceRegistry__init();
 
     BlockRequestIDs stale_request_ids = BlockRequestIDs__new();
-    MapIterate(BlockRequestMap, requests, index, request_id, request)
+    for_each_map(BlockRequestMap, requests, index, request_id, request,
+    {
         if (request->device->service_process == process)
         {
             match_result(CollectionCode, BlockRequestIDs__push(&stale_request_ids, request_id),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
-            )
+            );
         }
 
-    End
-    FAIterate(BlockRequestIDs, stale_request_ids, request_index, stale_request_id)
+    });
+    for_each_fa(BlockRequestIDs, stale_request_ids, request_index, stale_request_id,
+    {
         match_optional(UserspaceBlockRequestPtr, BlockRequestMap__get(&requests, stale_request_id),
             some(request) { Kernel__free(addr(request)); },
-            none() {}
-        )
+            none_do_nothing()
+        );
         BlockRequestMap__delete(&requests, stale_request_id);
 
-    End
+    });
     BlockDevicePaths stale_paths = EmptyArray(BlockDevicePaths);
-    MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
+    for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
+    {
         if (device->service_process == process)
         {
             match_result(CollectionCode, BlockDevicePaths__push(&stale_paths, path),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
-            )
+            );
         }
 
-    End
-    FAIterate(BlockDevicePaths, stale_paths, path_index, stale_path)
+    });
+    for_each_fa(BlockDevicePaths, stale_paths, path_index, stale_path,
+    {
         match_optional(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry, stale_path),
             some(device) { Kernel__free(addr(device)); },
-            none() {}
-        )
+            none_do_nothing()
+        );
         BlockDeviceRegistryMap__delete(&registry, stale_path);
 
-    End
+    });
     return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
 }
 
@@ -718,8 +724,8 @@ Result(ServiceCode) BlockDeviceService__get_request(
             target->buffer_size = request->block_count * BLOCK_DEVICE_BLOCK_SIZE;
             return Success(ServiceCode, SERVICE_OK);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
 }
@@ -779,17 +785,20 @@ Result(ServiceCode) BlockDeviceService__complete(
                         SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid, request->request_id
                     );
                     match_result(AckCode, MessageBroker__deliver(request->device->message_broker, message),
-                        success(_) {},
-                        error(code, message) {}
-                    )
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return Error(ServiceCode, message, code);
+                        }
+                    );
                 },
-                none() {}
-            )
+                none_do_nothing()
+            );
 
             return Success(ServiceCode, SERVICE_OK);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
 }
@@ -800,8 +809,8 @@ Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path)
 
     match_optional(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry, path),
         some(device) { return Some(BlockDevicePtr, &device->block_device); },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return None(BlockDevicePtr);
 }
@@ -811,10 +820,11 @@ BlockDevicePaths BlockDeviceRegistry__paths()
     BlockDeviceRegistry__init();
 
     BlockDevicePaths paths = EmptyArray(BlockDevicePaths);
-    MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
+    for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
+    {
         BlockDevicePaths__push(&paths, path);
 
-    End
+    });
     return paths;
 }
 
@@ -823,7 +833,8 @@ BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
     BlockDeviceRegistry__init();
 
     BlockDeviceMetadataEntries entries = EmptyArray(BlockDeviceMetadataEntries);
-    MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
+    for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
+    {
         BlockDeviceMetadataEntries__push(&entries, ((BlockDeviceMetadata) {
             .alias = device->alias,
             .path = device->path,
@@ -832,7 +843,7 @@ BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
             .userspace_service = device->block_device.userspace_service,
         }));
 
-    End
+    });
     return entries;
 }
 
@@ -840,7 +851,8 @@ Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias)
 {
     BlockDeviceRegistry__init();
 
-    MapIterate(BlockDeviceRegistryMap, registry, index, path, device)
+    for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
+    {
         if (BString__equals(&device->alias, &alias))
         {
             return Some(BlockDeviceMetadata, ((BlockDeviceMetadata) {
@@ -852,6 +864,6 @@ Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias)
             }));
         }
 
-    End
+    });
     return None(BlockDeviceMetadata);
 }

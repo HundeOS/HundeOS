@@ -89,7 +89,7 @@ void setUp(void)
     current_process_reset();
     Arch__reset_irq_tracking();
     kernel = init_test_kernel_without_filesystem();
-    match_result(SchedulerRegisterCode, Scheduler__register(kernel), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(SchedulerRegisterCode, Scheduler__register(kernel), success_do_nothing(), error_test_fail());
     async_continuation_called = false;
     async_continuation_blocks = 0;
     async_continuation_has_buffer = false;
@@ -116,7 +116,7 @@ void test_service_handler_wait_copies_queued_event(void)
     };
     ServiceEvent target = (ServiceEvent) { 0 };
 
-    match_result(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, queued), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, queued), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything) &target, 0, 0, 0
@@ -125,7 +125,7 @@ void test_service_handler_wait_copies_queued_event(void)
             TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, target.type);
             TEST_ASSERT_EQUAL(44, target.source);
             TEST_ASSERT_EQUAL(99, target.data);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_service_handler_become_service_marks_process_as_service(void)
@@ -135,7 +135,7 @@ void test_service_handler_become_service_marks_process_as_service(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_BECOME_SERVICE, 0, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROCESS_CLASS_SERVICE, process->process_class);
 }
@@ -148,7 +148,7 @@ void test_service_handler_become_service_denies_unprivileged_process(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_BECOME_SERVICE, 0, 0, 0, 0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code); });
 
     TEST_ASSERT_EQUAL(PROCESS_CLASS_NORMAL, process->process_class);
 }
@@ -166,7 +166,7 @@ void test_service_handler_map_mmio_denies_unprivileged_process(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_MAP_MMIO, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code); });
 }
 
 void test_service_handler_translates_service_user_address_to_device_address(void)
@@ -187,7 +187,7 @@ void test_service_handler_translates_service_user_address_to_device_address(void
     ), success(code) {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
             TEST_ASSERT_EQUAL_UINT64(allocation.kernel_addr.phys_addr + 128, request.device_address);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
@@ -200,7 +200,7 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything) &target, 0, 0, 0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code); });
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, process->state);
 
@@ -210,7 +210,7 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
         .data = 11,
     };
 
-    match_result(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, queued), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, queued), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, process->state);
 
@@ -232,11 +232,11 @@ void test_service_handler_wait_ready_returns_immediately_when_name_was_published
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_PUBLISH_READY, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_WAIT_READY, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 }
 
 void test_service_handler_publish_ready_unparks_waiter(void)
@@ -251,13 +251,13 @@ void test_service_handler_publish_ready_unparks_waiter(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, waiter), SERVICE_WAIT_READY, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code); });
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, waiter->state);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, publisher), SERVICE_PUBLISH_READY, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, waiter->state);
 
@@ -275,15 +275,15 @@ void test_service_handler_wait_completes_previous_irq_before_next_wait(void)
 
     Scheduler__schedule(kernel->scheduler, process);
 
-    match_result(ServiceCode, Scheduler__subscribe_irq(kernel->scheduler, process, irq), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(ServiceCode, Scheduler__subscribe_irq(kernel->scheduler, process, irq), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
-    match_result(ServiceCode, Scheduler__send_irq_event(kernel->scheduler, irq), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(ServiceCode, Scheduler__send_irq_event(kernel->scheduler, irq), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(1, Arch__mask_count());
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything) &target, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, target.type);
     TEST_ASSERT_EQUAL(irq, target.source);
@@ -292,7 +292,7 @@ void test_service_handler_wait_completes_previous_irq_before_next_wait(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything) &target, 0, 0, 0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code); });
 
     TEST_ASSERT_EQUAL(1, Arch__unmask_count());
     TEST_ASSERT_FALSE(Process__is_handling_service_irq(process));
@@ -306,7 +306,7 @@ void test_service_handler_subscribe_irq_registers_service_consumer(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL_UINT64(irq, Arch__enabled_irq());
     TEST_ASSERT_EQUAL_UINT64(1, Arch__enable_count());
@@ -318,12 +318,12 @@ void test_service_handler_subscribe_irq_registers_service_consumer(void)
         .process_context = NULL,
     };
 
-    match_result(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, irq, &context), success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_RESCHEDULE, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, irq, &context), success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_RESCHEDULE, status); }, error_test_fail());
 
     ServiceEvent event = (ServiceEvent) { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything) &event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);
     TEST_ASSERT_EQUAL_UINT64(irq, event.source);
@@ -339,11 +339,11 @@ void test_service_handler_subscribe_irq_maps_duplicate_registration_to_service_c
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, first_process), SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, second_process), SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SERVICE_IRQ_ALREADY_REGISTERED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SERVICE_IRQ_ALREADY_REGISTERED, code); });
 
     TEST_ASSERT_EQUAL_UINT64(1, Arch__enable_count());
 }
@@ -360,10 +360,10 @@ void test_service_handler_registers_block_device_for_service_process(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     BString path = bstring("/dev/virtio1");
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(path), some(device) { TEST_ASSERT_NOT_NULL(device); }, none() { TEST_FAIL(); })
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(path), some(device) { TEST_ASSERT_NOT_NULL(device); }, none_test_fail());
 }
 
 void test_service_handler_registering_block_device_mounts_matching_filesystem_table_entry(void)
@@ -375,10 +375,10 @@ void test_service_handler_registering_block_device_mounts_matching_filesystem_ta
         bstring("/dev/virtio-table"),
         bstring("fat32"),
         bstring("/mnt/fs1")
-    ), success(index) {}, error(code, message) { TEST_FAIL(); })
+    ), success_do_nothing(), error_test_fail());
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
 
-    match_optional(FilesystemPtr, Mounts__get(&root->mounts, bstring("/mnt/fs1")), some(mounted) { TEST_FAIL(); }, none() {})
+    match_optional(FilesystemPtr, Mounts__get(&root->mounts, bstring("/mnt/fs1")), some_test_fail(), none_do_nothing());
 
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
@@ -390,9 +390,9 @@ void test_service_handler_registering_block_device_mounts_matching_filesystem_ta
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
-    match_optional(FilesystemPtr, Mounts__get(&root->mounts, bstring("/mnt/fs1")), some(mounted) { TEST_ASSERT_NOT_NULL(mounted); }, none() { TEST_FAIL(); })
+    match_optional(FilesystemPtr, Mounts__get(&root->mounts, bstring("/mnt/fs1")), some(mounted) { TEST_ASSERT_NOT_NULL(mounted); }, none_test_fail());
 }
 
 void test_service_handler_registering_block_device_mounts_root_filesystem_table_entry(void)
@@ -404,10 +404,10 @@ void test_service_handler_registering_block_device_mounts_root_filesystem_table_
         bstring("/dev/virtio-root"),
         bstring("ext2"),
         bstring("/")
-    ), success(index) {}, error(code, message) { TEST_FAIL(); })
+    ), success_do_nothing(), error_test_fail());
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
 
-    match_optional(FilesystemPtr, Mounts__get(&root->mounts, bstring("/")), some(mounted) { TEST_FAIL(); }, none() {})
+    match_optional(FilesystemPtr, Mounts__get(&root->mounts, bstring("/")), some_test_fail(), none_do_nothing());
 
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
@@ -419,9 +419,9 @@ void test_service_handler_registering_block_device_mounts_root_filesystem_table_
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
-    match_optional(FilesystemPtr, Mounts__get(&root->mounts, bstring("/")), some(mounted) { TEST_ASSERT_NOT_NULL(mounted); }, none() { TEST_FAIL(); })
+    match_optional(FilesystemPtr, Mounts__get(&root->mounts, bstring("/")), some(mounted) { TEST_ASSERT_NOT_NULL(mounted); }, none_test_fail());
 }
 
 void test_service_handler_rejects_duplicate_block_device_registration(void)
@@ -436,11 +436,11 @@ void test_service_handler_rejects_duplicate_block_device_registration(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SERVICE_DEVICE_ALREADY_REGISTERED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SERVICE_DEVICE_ALREADY_REGISTERED, code); });
 }
 
 void test_service_handler_process_cleanup_unregisters_block_device(void)
@@ -457,17 +457,17 @@ void test_service_handler_process_cleanup_unregisters_block_device(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, first_process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")), some(device) { TEST_ASSERT_NOT_NULL(device); }, none() { TEST_FAIL(); })
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")), some(device) { TEST_ASSERT_NOT_NULL(device); }, none_test_fail());
 
-    match_result(ProcessSetupStatus, Process__dispose_owned_kernel_resources(first_process), success(status) { TEST_ASSERT_EQUAL(PROCESS_SETUP, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(ProcessSetupStatus, Process__dispose_owned_kernel_resources(first_process), success(status) { TEST_ASSERT_EQUAL(PROCESS_SETUP, status); }, error_test_fail());
 
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")), some(device) { TEST_FAIL(); }, none() {})
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")), some_test_fail(), none_do_nothing());
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, second_process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 }
 
 void test_service_handler_gets_and_completes_block_write_request(void)
@@ -482,19 +482,19 @@ void test_service_handler_gets_and_completes_block_write_request(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-protocol")), some(found) { device = found; }, none() { TEST_FAIL(); })
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-protocol")), some(found) { device = found; }, none_test_fail());
 
     Data source[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
     source[0] = 42;
-    match_result(BlockCount, BlockDevice__write(device, 7, 1, source), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(BlockCount, BlockDevice__write(device, 7, 1, source), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 
     ServiceEvent event = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything) &event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(SERVICE_EVENT_BLOCK_IO, event.type);
     TEST_ASSERT_NOT_EQUAL(0, event.source);
@@ -502,7 +502,7 @@ void test_service_handler_gets_and_completes_block_write_request(void)
     ServiceBlockRequest request = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_BLOCK_GET_REQUEST, event.source, (Anything) &request, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(event.source, request.request_id);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio-protocol", request.device_path);
@@ -520,7 +520,7 @@ void test_service_handler_gets_and_completes_block_write_request(void)
     };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_BLOCK_COMPLETE, (Anything) &completion, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 }
 
 void test_service_handler_block_completion_unparks_waiting_reader(void)
@@ -535,18 +535,18 @@ void test_service_handler_block_completion_unparks_waiting_reader(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ProcessPtr reader = dummy_process(2, cpu, PROC_STATE_READY);
-    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success(scheduled_cpu) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-park")), some(found) { device = found; }, none() { TEST_FAIL(); })
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-park")), some(found) { device = found; }, none_test_fail());
 
     KernelContext context = KernelContext__new(Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler));
     Data target[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
     BlockDevice__set_current_context(&context);
-    match_result(BlockCount, BlockDevice__read(device, 9, 1, target), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(BlockCount, BlockDevice__read(device, 9, 1, target), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, reader->state);
@@ -554,12 +554,12 @@ void test_service_handler_block_completion_unparks_waiting_reader(void)
     ServiceEvent event = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockRequest request = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_GET_REQUEST, event.source, (Anything) &request, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockCompletion completion = {
         .request_id = request.request_id,
@@ -568,7 +568,7 @@ void test_service_handler_block_completion_unparks_waiting_reader(void)
     };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &completion, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
 }
@@ -631,13 +631,13 @@ void test_service_handler_block_completion_runs_async_read_continuation_with_ker
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ProcessPtr reader = dummy_process(2, cpu, PROC_STATE_READY);
-    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success(scheduled_cpu) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-async")), some(found) { device = found; }, none() { TEST_FAIL(); })
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-async")), some(found) { device = found; }, none_test_fail());
 
     BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
     block_context->kernel_context = KernelContext__new(
@@ -646,7 +646,7 @@ void test_service_handler_block_completion_runs_async_read_continuation_with_ker
     block_context->owner_context = 0;
 
     BlockDevice__set_current_context(&block_context->kernel_context);
-    match_result(Anything, BlockDevice__read_async(device, 9, 1, block_context, async_read_continuation), success(result) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(Anything, BlockDevice__read_async(device, 9, 1, block_context, async_read_continuation), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, reader->state);
@@ -654,12 +654,12 @@ void test_service_handler_block_completion_runs_async_read_continuation_with_ker
     ServiceEvent event = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockRequest request = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_GET_REQUEST, event.source, (Anything) &request, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockCompletion completion = {
         .request_id = request.request_id,
@@ -668,7 +668,7 @@ void test_service_handler_block_completion_runs_async_read_continuation_with_ker
     };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &completion, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
 
@@ -692,13 +692,13 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ProcessPtr reader = dummy_process(2, cpu, PROC_STATE_READY);
-    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success(scheduled_cpu) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-chain")), some(found) { device = found; }, none() { TEST_FAIL(); })
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-chain")), some(found) { device = found; }, none_test_fail());
 
     BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
     block_context->kernel_context = KernelContext__new(
@@ -707,7 +707,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     block_context->owner_context = (Anything) device;
 
     BlockDevice__set_current_context(&block_context->kernel_context);
-    match_result(Anything, BlockDevice__read_async(device, 9, 1, block_context, chained_async_read_continuation), success(result) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(Anything, BlockDevice__read_async(device, 9, 1, block_context, chained_async_read_continuation), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, reader->state);
@@ -715,7 +715,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     ServiceEvent first_event = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &first_event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockRequest first_request = { 0 };
     match_result(SystemCallResult, Service__handler(
@@ -723,7 +723,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     ), success(code) {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
             TEST_ASSERT_EQUAL(9, first_request.block);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     ServiceBlockCompletion first_completion = {
         .request_id = first_request.request_id,
@@ -732,7 +732,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &first_completion, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
     test_resume_process(reader);
@@ -741,7 +741,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     ServiceEvent second_event = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &second_event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockRequest second_request = { 0 };
     match_result(SystemCallResult, Service__handler(
@@ -749,7 +749,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     ), success(code) {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
             TEST_ASSERT_EQUAL(10, second_request.block);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     ServiceBlockCompletion second_completion = {
         .request_id = second_request.request_id,
@@ -758,7 +758,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &second_completion, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
     test_resume_process(reader);
@@ -780,13 +780,13 @@ void test_service_handler_parallel_async_reads_complete_out_of_order_without_res
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ProcessPtr reader = dummy_process(2, cpu, PROC_STATE_READY);
-    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success(scheduled_cpu) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-parallel")), some(found) { device = found; }, none() { TEST_FAIL(); })
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-parallel")), some(found) { device = found; }, none_test_fail());
 
     BlockIOContextPtr first_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
     first_context->kernel_context = KernelContext__new(
@@ -801,8 +801,8 @@ void test_service_handler_parallel_async_reads_complete_out_of_order_without_res
     second_context->owner_context = 0;
 
     BlockDevice__set_current_context(&first_context->kernel_context);
-    match_result(Anything, BlockDevice__read_async(device, 9, 1, first_context, first_parallel_async_continuation), success(result) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
-    match_result(Anything, BlockDevice__read_async(device, 10, 1, second_context, second_parallel_async_continuation), success(result) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(Anything, BlockDevice__read_async(device, 9, 1, first_context, first_parallel_async_continuation), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+    match_result(Anything, BlockDevice__read_async(device, 10, 1, second_context, second_parallel_async_continuation), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, reader->state);
@@ -810,22 +810,22 @@ void test_service_handler_parallel_async_reads_complete_out_of_order_without_res
     ServiceEvent first_event = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &first_event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceEvent second_event = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &second_event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockRequest first_request = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_GET_REQUEST, first_event.source, (Anything) &first_request, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockRequest second_request = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_GET_REQUEST, second_event.source, (Anything) &second_request, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(9, first_request.block);
     TEST_ASSERT_EQUAL(10, second_request.block);
@@ -837,7 +837,7 @@ void test_service_handler_parallel_async_reads_complete_out_of_order_without_res
     };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &second_completion, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
     test_resume_process(reader);
@@ -856,7 +856,7 @@ void test_service_handler_parallel_async_reads_complete_out_of_order_without_res
     };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &first_completion, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
     test_resume_process(reader);
@@ -879,18 +879,18 @@ void test_service_handler_failed_block_completion_unparks_waiting_reader_with_er
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ProcessPtr reader = dummy_process(2, cpu, PROC_STATE_READY);
-    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success(scheduled_cpu) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-park-fail")), some(found) { device = found; }, none() { TEST_FAIL(); })
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-park-fail")), some(found) { device = found; }, none_test_fail());
 
     KernelContext context = KernelContext__new(Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler));
     Data target[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
     BlockDevice__set_current_context(&context);
-    match_result(BlockCount, BlockDevice__read(device, 9, 1, target), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(BlockCount, BlockDevice__read(device, 9, 1, target), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, reader->state);
@@ -898,7 +898,7 @@ void test_service_handler_failed_block_completion_unparks_waiting_reader_with_er
     ServiceEvent event = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockCompletion completion = {
         .request_id = event.source,
@@ -907,7 +907,7 @@ void test_service_handler_failed_block_completion_unparks_waiting_reader_with_er
     };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &completion, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
 
@@ -927,13 +927,13 @@ void test_service_handler_block_completion_runs_async_write_continuation(void)
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ProcessPtr writer = dummy_process(2, cpu, PROC_STATE_READY);
-    match_result(CPUID, Scheduler__schedule(kernel->scheduler, writer), success(scheduled_cpu) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, writer), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-async-write")), some(found) { device = found; }, none() { TEST_FAIL(); })
+    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-async-write")), some(found) { device = found; }, none_test_fail());
 
     Data source[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
     source[0] = 0x5a;
@@ -944,7 +944,7 @@ void test_service_handler_block_completion_runs_async_write_continuation(void)
     block_context->owner_context = 0;
 
     BlockDevice__set_current_context(&block_context->kernel_context);
-    match_result(Anything, BlockDevice__write_async(device, 12, 1, source, block_context, async_write_continuation), success(result) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(Anything, BlockDevice__write_async(device, 12, 1, source, block_context, async_write_continuation), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, writer->state);
@@ -952,7 +952,7 @@ void test_service_handler_block_completion_runs_async_write_continuation(void)
     ServiceEvent event = { 0 };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &event, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     ServiceBlockRequest request = { 0 };
     match_result(SystemCallResult, Service__handler(
@@ -962,7 +962,7 @@ void test_service_handler_block_completion_runs_async_write_continuation(void)
             TEST_ASSERT_EQUAL(SERVICE_BLOCK_WRITE, request.operation);
             TEST_ASSERT_EQUAL(12, request.block);
             TEST_ASSERT_EQUAL(1, request.block_count);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     ServiceBlockCompletion completion = {
         .request_id = request.request_id,
@@ -971,7 +971,7 @@ void test_service_handler_block_completion_runs_async_write_continuation(void)
     };
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &completion, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, writer->state);
 

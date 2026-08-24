@@ -187,7 +187,11 @@ void uart_irq_handler(IOSubsystemPtr io_subsystem)
                 {
                     *uart_reg(UART0_DR_OFFSET) = val;
                 },
-                error(_code, _message) {}
+                error(code, message)
+                {
+                    __d_printf(IRQ, "UART TX pop failed: %s (%i)\n", BString__cstr(&message), (int) code);
+                    break;
+                }
             );
 
         }
@@ -211,6 +215,6 @@ void uart_irq_handler(IOSubsystemPtr io_subsystem)
                 IOSubsystem__data_arrived(io_subsystem, parked_context);
             },
             none() { __d_println(IOSUB, "NO parked context found");; }
-        )
+        );
     }
 }

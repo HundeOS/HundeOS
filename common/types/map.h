@@ -195,36 +195,20 @@ typedef enum MapError
         return Some(alias##__key_type_ptr, &self->entries[index].key);\
     } \
 
-#define MapIterate(alias, map, index, k, v) \
+#define for_each_map(alias, map, index, k, v, ...) \
     for (int index = 0; index < map.len; index++) \
     { \
        alias##__key_type k = map.entries[index].key; \
        alias##__value_type v = map.entries[index].value; \
+       __VA_ARGS__ \
+    }
 
-#define MapPtrIterate(alias, map, index, k, v) \
+#define for_each_map_ptr(alias, map, index, k, v, ...) \
     for (int index = 0; index < map->len; index++) \
     { \
        alias##__key_type_ptr k = map->entries[index].key; \
        alias##__value_type_ptr v = map->entries[index].value; \
-
-#define MapPtrMatch(alias, opt) \
-{ \
-    typedef alias##__value_type_ptr value_type; \
-    _Optional(alias##__value_type_ptr) optional = opt; \
-
-#define MapKeyPtrMatch(alias, opt) \
-{ \
-    typedef alias##__key_type_ptr value_type; \
-    _Optional(alias##__key_type_ptr) optional = opt; \
-
-#define MapMatch(alias, opt) \
-{ \
-    typedef alias##__value_type value_type; \
-    _Optional(alias##__value_type) optional = opt; \
-
-#define MapKeyMatch(alias, opt) \
-{ \
-    typedef alias##__key_type value_type; \
-    _Optional(alias##__key_type) optional = opt; \
+       __VA_ARGS__ \
+    }
 
 #endif

@@ -30,7 +30,7 @@ bool handle_match(IOContextPtr * context_p, void * handle_p)
             return handle == device_internal_handle(context_handle);
         },
         none() { return false; }
-    )
+    );
 }
 
 static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandle handle)
@@ -46,12 +46,12 @@ static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandl
             some(found)
             {
                 match_result(CollectionCode, ParkedContexts__remove(&self->parked_contexts, *found.value),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { __d_println(IODEV, "no parked context found for handle"); }
                 );
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     });
 
     return Success(IOInternalHandle, handle);
@@ -82,9 +82,9 @@ static Result(ByteCount) Console__write(IOStatePtr state, IOInternalHandle handl
             out[0] = cursor[i];
             out[1] = '\0';
             match_result(Pos, IOBuffer__push(&self->write_buffer, cursor[i]),
-                success(_) {},
+                success_do_nothing(),
                 error(code, message) { cs_return Error(ByteCount, message, code); }
-            )
+            );
             BasicIO__puts(out);
         }
     });
@@ -134,9 +134,9 @@ static Result(ParkStatus) Console__park(IOStatePtr state, IOContextPtr parked_co
     critical_section(self->lock,
     {
         match_result(CollectionCode, ParkedContexts__push(&self->parked_contexts, parked_context),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { cs_return Error(ParkStatus, message, code); }
-        )
+        );
         __d_println(IODEV, "parked console context\n");
     });
 
@@ -150,9 +150,9 @@ static Result(ParkStatus) Console__unpark(IOStatePtr state)
     critical_section(self->lock,
     {
         match_optional(IOContextPtr, ParkedContexts__pop(&self->parked_contexts),
-            some(_) {},
+            some_do_nothing(),
             none() { cs_return Error(ParkStatus, bstring("No parked console context"), ARRAY_EMPTY); }
-        )
+        );
     });
 
     return Success(ParkStatus, IO_UNPARK_OK);

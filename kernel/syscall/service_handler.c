@@ -72,7 +72,7 @@ static Result(Anything) ServiceEvent__copy_to_target(Result(Anything) result, An
             return Success(Anything, SERVICE_OK);
         },
         error(code, message) { return Error(Anything, message, code); }
-    )
+    );
 
     return Error(Anything, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
 }
@@ -94,7 +94,7 @@ static Result(Anything) Service__complete_wait_syscall(ParkedOperationPtr parked
                 Error(Anything, message, code)
             );
         }
-    )
+    );
 
     return KernelContext__map_result(
         parked_operation->kernel_context,
@@ -114,9 +114,9 @@ Result(SystemCallResult) Service__handler(
             if (service_operation == SERVICE_BECOME_SERVICE)
             {
                 match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_BECOME_SERVICE),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
                 process->process_class = PROCESS_CLASS_SERVICE;
                 return Success(SystemCallResult, SERVICE_OK);
             }
@@ -163,7 +163,7 @@ Result(SystemCallResult) Service__handler(
                         match_result(Anything, mapped,
                             success(mapped_code) { return Success(SystemCallResult, mapped_code); },
                             error(mapped_code, mapped_message) { return Error(SystemCallResult, mapped_message, mapped_code); }
-                        )
+                        );
                     },
                     error(code, message)
                     {
@@ -173,15 +173,15 @@ Result(SystemCallResult) Service__handler(
                             __d_printf(IODEV, "service wait error pid=%i code=%i\n", process->pid, code);
                         }
                         return Error(SystemCallResult, message, code);
-                    })
+                    });
             }
 
             if (service_operation == SERVICE_MAP_MMIO)
             {
                 match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_MAP_MMIO),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
                 ServiceMappedMemoryRequestPtr request = (ServiceMappedMemoryRequestPtr) arg2;
                 if (request == NULL)
                 {
@@ -196,7 +196,7 @@ Result(SystemCallResult) Service__handler(
                         return Success(SystemCallResult, SERVICE_OK);
                     },
                     error(code, message) { return Error(SystemCallResult, message, SERVICE_MAP_FAILED); }
-                )
+                );
             }
 
             if (service_operation == SERVICE_DEVICE_ADDRESS)
@@ -221,29 +221,29 @@ Result(SystemCallResult) Service__handler(
                         return Success(SystemCallResult, SERVICE_OK);
                     },
                     error(code, message) { return Error(SystemCallResult, message, SERVICE_INVALID_BUFFER); }
-                )
+                );
             }
 
             if (service_operation == SERVICE_SUBSCRIBE_IRQ)
             {
                 match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_SUBSCRIBE_IRQ),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
                 uint64_t irq = (uint64_t) arg2;
                 __d_printf(IODEV, "service subscribe irq pid=%i irq=%i\n", process->pid, (int) irq);
                 match_result(IRQRegistrationStatus, IRQDispatcher__register_service(kernel->irq_dispatcher, irq, process),
                     success(_) { return Success(SystemCallResult, SERVICE_OK); },
                     error(code, message) { return Error(SystemCallResult, message, Service__map_irq_registration_status(code)); }
-                )
+                );
             }
 
             if (service_operation == SERVICE_REGISTER_BLOCK_DEVICE)
             {
                 match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_REGISTER_BLOCK_DEVICE),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
                 ServiceBlockDeviceRegistrationPtr request = (ServiceBlockDeviceRegistrationPtr) arg2;
                 if (request == NULL || request->block_size != BLOCK_DEVICE_BLOCK_SIZE)
                 {
@@ -257,37 +257,37 @@ Result(SystemCallResult) Service__handler(
                     {
                         match_optional(FilesystemPtr, kernel->io_subsystem->root_filesystem,
                             some(root_fs) { FilesystemTable__mount_available_entries(root_fs); },
-                            none() {}
-                        )
+                            none_do_nothing()
+                        );
                         return Success(SystemCallResult, SERVICE_OK);
-                    }, error(code, message) { return Error(SystemCallResult, message, Service__map_block_registration_status(code)); })
+                    }, error(code, message) { return Error(SystemCallResult, message, Service__map_block_registration_status(code)); });
             }
 
             if (service_operation == SERVICE_BLOCK_GET_REQUEST)
             {
                 match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
                 uint64_t request_id = (uint64_t) arg2;
                 ServiceBlockRequestPtr target = (ServiceBlockRequestPtr) arg3;
                 match_result(ServiceCode, BlockDeviceService__get_request(process, request_id, target),
                     success(code) { return Success(SystemCallResult, code); },
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
             }
 
             if (service_operation == SERVICE_BLOCK_COMPLETE)
             {
                 match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
                 ServiceBlockCompletionPtr completion = (ServiceBlockCompletionPtr) arg2;
                 match_result(ServiceCode, BlockDeviceService__complete(process, completion),
                     success(code) { return Success(SystemCallResult, code); },
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
             }
 
             if (service_operation == SERVICE_PUBLISH_READY)
@@ -307,7 +307,7 @@ Result(SystemCallResult) Service__handler(
                 match_result(ServiceCode, Scheduler__service_publish_ready(kernel->scheduler, &name),
                     success(code) { return Success(SystemCallResult, code); },
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
             }
 
             if (service_operation == SERVICE_WAIT_READY)
@@ -344,11 +344,11 @@ Result(SystemCallResult) Service__handler(
                             KernelContext__dispose_heap(kernel_context);
                         }
                         return Error(SystemCallResult, message, code);
-                    })
+                    });
             }
         },
         none() { return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS); }
-    )
+    );
 
     return Error(SystemCallResult, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
 }

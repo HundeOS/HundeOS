@@ -32,5 +32,5 @@ void test_block_device_current_context_is_cpu_local(void)
     BlockDevice__clear_current_context();
 
     set_cpu_id(1);
-    match_optional(KernelContextPtr, BlockDevice__current_context(), some(context) { TEST_ASSERT_EQUAL_PTR(&first_context, context); }, none() { TEST_FAIL(); })
+    match_optional(KernelContextPtr, BlockDevice__current_context(), some(context) { TEST_ASSERT_EQUAL_PTR(&first_context, context); }, none_test_fail());
 }

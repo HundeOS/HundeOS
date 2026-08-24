@@ -55,7 +55,7 @@ Result(CollectionCode) ParkedOperation__add_blocked_operation(
             return Success(CollectionCode, index);
         },
         error(code, message) { return Error(CollectionCode, message, code); }
-    )
+    );
 
     return Error(CollectionCode, bstring("Unable to add blocked operation"), LINKED_LIST_ALLOCATION_FAILED);
 }
@@ -74,7 +74,7 @@ Result(CollectionCode) ParkedOperation__resolve_blocked_operation(
             return Success(CollectionCode, index);
         },
         error(code, message) { return Error(CollectionCode, message, code); }
-    )
+    );
 
     return Error(CollectionCode, bstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND);
 }
@@ -104,8 +104,8 @@ void ParkedOperation__dispose(ParkedOperationPtr self)
     {
         match_optional(ParkedOperationPtr, BlockedParkedOperations__remove_at(&self->blocked_operations, 0),
             some(blocked_operation) { ParkedOperation__dispose(blocked_operation); },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
     BlockedParkedOperations__dispose(&self->blocked_operations);
     if (self->owns_kernel_context)

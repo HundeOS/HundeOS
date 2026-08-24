@@ -118,9 +118,13 @@ static int Hundeschule__spawn_required_process(
         .arg1 = BString__slice(arg1, 0, BString__length(arg1)),
     };
     match_result(CollectionCode, HundeschuleRequiredProcesses__push(processes, process),
-        success(_) {},
-        error(code, message) {}
-    )
+        success_do_nothing(),
+        error(code, message)
+        {
+            printf("hundeschule: failed to track process: %s\n", BString__cstr(&message));
+            return 1;
+        }
+    );
 
     return 0;
 }
@@ -139,8 +143,8 @@ static Optional(HundeschuleRequiredProcessPtr) Hundeschule__find_required_proces
                     return Some(HundeschuleRequiredProcessPtr, process);
                 }
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 
     return None(HundeschuleRequiredProcessPtr);
@@ -174,11 +178,11 @@ static int Hundeschule__wait_for_bootstrap_block_devices(HundeschuleRequiredProc
                             failures++;
                         }
                     },
-                    none() {}
-                )
+                    none_do_nothing()
+                );
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 
     return failures;
@@ -241,7 +245,7 @@ static Optional(BString) Hundeschule__next_token(BStringPtr remaining)
             *remaining = EMPTY_BSTRING;
             return Some(BString, stripped);
         }
-    )
+    );
 
     *remaining = EMPTY_BSTRING;
     return None(BString);
@@ -252,8 +256,8 @@ static BString Hundeschule__line_without_comment(ConstBStringPtr line)
     BStringSplit split = BString__split_first_any(line, &hundeschule_comment_delimiter);
     match_optional(BString, split.match,
         some(before_comment) { return before_comment; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return BString__slice(line, 0, BString__length(line));
 }
@@ -280,8 +284,8 @@ static Optional(DynString) Hundeschule__load_config(void)
 
             return Some(DynString, config);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return None(DynString);
 }
@@ -301,7 +305,7 @@ static int Hundeschule__spawn_configured_driver_line(
     match_optional(BString, Hundeschule__next_token(&remaining),
         some(token) { command = token; },
         none() { return 0; }
-    )
+    );
 
     if (!BString__equals(&command, &hundeschule_driver_command))
     {
@@ -312,7 +316,7 @@ static int Hundeschule__spawn_configured_driver_line(
     match_optional(BString, Hundeschule__next_token(&remaining),
         some(token) { path = token; },
         none() { return 1; }
-    )
+    );
 
     if (BString__is_empty(&path))
     {
@@ -323,8 +327,8 @@ static int Hundeschule__spawn_configured_driver_line(
     BString option = EMPTY_BSTRING;
     match_optional(BString, Hundeschule__next_token(&remaining),
         some(token) { option = token; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (!BString__is_empty(&option))
     {
@@ -334,8 +338,8 @@ static int Hundeschule__spawn_configured_driver_line(
             option = EMPTY_BSTRING;
             match_optional(BString, Hundeschule__next_token(&remaining),
                 some(token) { option = token; },
-                none() {}
-            )
+                none_do_nothing()
+            );
         }
         else if (BString__equals(&option, &hundeschule_respawn_option))
         {
@@ -343,8 +347,8 @@ static int Hundeschule__spawn_configured_driver_line(
             option = EMPTY_BSTRING;
             match_optional(BString, Hundeschule__next_token(&remaining),
                 some(token) { option = token; },
-                none() {}
-            )
+                none_do_nothing()
+            );
         }
     }
 
@@ -367,8 +371,8 @@ static int Hundeschule__spawn_configured_driver_line(
         option = EMPTY_BSTRING;
         match_optional(BString, Hundeschule__next_token(&remaining),
             some(token) { option = token; },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 
     if (!BString__is_empty(&option))
@@ -393,7 +397,8 @@ static int Hundeschule__spawn_configured_drivers(
     match_optional(DynStringLines, DynString__lines(config),
         some(lines)
         {
-            LLIterate(DynStringLines, lines, line)
+            for_each_ll(DynStringLines, lines, line,
+            {
                 match_optional(BString, DynString__bstring(&line),
                     some(bstring_line)
                     {
@@ -403,13 +408,12 @@ static int Hundeschule__spawn_configured_drivers(
                         framebuffer_present
                     ); },
                     none() { failures++; }
-                )
-
-            End
+                );
+            });
             DynStringLines__dispose_all(&lines);
         },
         none() { failures++; }
-    )
+    );
 
     return failures;
 }
@@ -478,7 +482,7 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
             DynString__dispose(&config);
         },
         none() { failures += Hundeschule__spawn_default_drivers(processes, framebuffer_present); }
-    )
+    );
 
     if (failures != 0)
     {
@@ -546,7 +550,7 @@ int HUNDESCHULE_ENTRYPOINT(void)
 
                 process->pid = (uint64_t) respawn_result;
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 }

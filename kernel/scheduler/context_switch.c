@@ -30,8 +30,8 @@ static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
                         {
                             match_optional(SchedulerPtr, Process__top_parked_operation_scheduler(self),
                                 some(scheduler) { Scheduler__yield_waiting(scheduler, self, CPU__id() - 1); },
-                                none() {}
-                            )
+                                none_do_nothing()
+                            );
                         }
 
                         match_result(Anything, res,
@@ -45,15 +45,15 @@ static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
                                 Process__set_syscall_result(self, code);
                                 __d_printf(PANIC, "Continuation error: %s\n", cstr(message));
                             }
-                        )
+                        );
 
                         ParkedOperation__dispose(parked_operation);
                     },
                     none() { ParkedOperation__dispose(parked_operation); }
-                )
+                );
             },
             none() { return Success(Anything, 0); }
-        )
+        );
     }
 }
 
@@ -67,8 +67,8 @@ void ContextSwitch__switch(ContextSwitch self)
                 proc->state = PROC_STATE_INTERRUPTED;
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     ProcessPtr new_proc = self.new_proc;
     __d_printf(

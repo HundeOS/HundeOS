@@ -219,21 +219,21 @@ void test_bstring_parse_uint64_returns_value_for_valid_decimal(void)
 {
     BString input = bstring("12345");
 
-    match_optional(uint64_t, BString__parse_uint64(&input), some(value) { TEST_ASSERT_EQUAL_UINT64(12345, value); }, none() { TEST_FAIL(); })
+    match_optional(uint64_t, BString__parse_uint64(&input), some(value) { TEST_ASSERT_EQUAL_UINT64(12345, value); }, none_test_fail());
 }
 
 void test_bstring_parse_uint64_base_zero_accepts_hex_prefix(void)
 {
     BString input = bstring("0xfe340000");
 
-    match_optional(uint64_t, BString__parse_uint64_base(&input, 0), some(value) { TEST_ASSERT_EQUAL_HEX64(0xfe340000, value); }, none() { TEST_FAIL(); })
+    match_optional(uint64_t, BString__parse_uint64_base(&input, 0), some(value) { TEST_ASSERT_EQUAL_HEX64(0xfe340000, value); }, none_test_fail());
 }
 
 void test_bstring_parse_uint64_base_strips_whitespace(void)
 {
     BString input = bstring(" 126\n");
 
-    match_optional(uint64_t, BString__parse_uint64_base(&input, 0), some(value) { TEST_ASSERT_EQUAL_UINT64(126, value); }, none() { TEST_FAIL(); })
+    match_optional(uint64_t, BString__parse_uint64_base(&input, 0), some(value) { TEST_ASSERT_EQUAL_UINT64(126, value); }, none_test_fail());
 }
 
 void test_bstring_parse_uint64_rejects_empty_input(void)
@@ -254,7 +254,7 @@ void test_bstring_parse_uint64_base_rejects_trailing_text(void)
 {
     BString input = bstring("0xfe340000tail");
 
-    match_optional(uint64_t, BString__parse_uint64_base(&input, 0), some(value) { TEST_FAIL(); }, none() {})
+    match_optional(uint64_t, BString__parse_uint64_base(&input, 0), some_test_fail(), none_do_nothing());
 }
 
 void test_bstring_uppercase_converts_ascii_lowercase(void)
@@ -277,7 +277,7 @@ void test_bstring_char_at_returns_character_when_in_bounds(void)
 {
     BString input = bstring("hello");
 
-    match_optional(char, BString__char_at(&input, 1), some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); }, none() { TEST_FAIL(); })
+    match_optional(char, BString__char_at(&input, 1), some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); }, none_test_fail());
 }
 
 void test_bstring_char_at_returns_none_when_out_of_bounds(void)
@@ -310,9 +310,10 @@ void test_bstring_iterate_visits_each_character(void)
     BString input = bstring("abc");
     BString output = EMPTY_BSTRING;
 
-    BStringIterate(&input, index, ch)
+    for_each_bstring(&input, index, ch,
+    {
         BString__push_char(&output, ch);
-    }
+    });
 
     TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&output));
 }

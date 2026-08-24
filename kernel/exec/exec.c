@@ -56,8 +56,8 @@ static bool Exec__can_execute(OriginatingContext context, ConstBStringPtr path)
 
     match_optional(ProcessPtr, context.process,
         some(process) { return process->group_id == PROCESS_GROUP_HUND; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return true;
 }
@@ -79,8 +79,8 @@ static bool Exec__can_spawn_as(OriginatingContext context, UserID requested_user
 
             return process->user_id == requested_user_id;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return false;
 }
@@ -105,8 +105,8 @@ static void Exec__apply_requested_identity(ProcessPtr self, Optional(UserID) req
                     return;
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 }
 
 static Result(ProcessPtr) Exec__launch(
@@ -135,24 +135,24 @@ static Result(ProcessPtr) Exec__launch(
                         match_result(FileDescriptor, Process__copy_file_descriptor(
                             new_proc, parent, 0, (FileDescriptor) SpawnStdio__stdin_fd(stdio)
                         ),
-                            success(_) {},
+                            success_do_nothing(),
                             error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
-                        )
+                        );
                         match_result(FileDescriptor, Process__copy_file_descriptor(
                             new_proc, parent, 1, (FileDescriptor) SpawnStdio__stdout_fd(stdio)
                         ),
-                            success(_) {},
+                            success_do_nothing(),
                             error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
-                        )
+                        );
                         match_result(FileDescriptor, Process__copy_file_descriptor(
                             new_proc, parent, 2, (FileDescriptor) SpawnStdio__stderr_fd(stdio)
                         ),
-                            success(_) {},
+                            success_do_nothing(),
                             error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
-                        )
+                        );
                     },
                     none() { return Error(ProcessPtr, bstring("No parent process for stdio"), SPAWN_FAILED); }
-                )
+                );
             }
             match_optional(ProcessPtr, context.process,
                 some(parent)
@@ -169,13 +169,13 @@ static Result(ProcessPtr) Exec__launch(
                                 schedule_result = Scheduler__schedule_on_cpu(kernel->scheduler, new_proc, parent_cpu);
                             },
                             error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
-                        )
+                        );
                     }
 
                     match_result(CPUID, schedule_result,
-                        success(_) {},
+                        success_do_nothing(),
                         error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
-                    )
+                    );
 
                     if (wait)
                     {
@@ -206,14 +206,14 @@ static Result(ProcessPtr) Exec__launch(
 
                     return Success(ProcessPtr, new_proc);
                 },
-                none() {}
-            )
+                none_do_nothing()
+            );
         },
         error(code, message)
         {
             return Error(ProcessPtr, message, SPAWN_FAILED);
         }
-    )
+    );
     return Error(ProcessPtr, unreachable_code, SPAWN_FAILED);
 }
 
@@ -282,7 +282,7 @@ static Result(ByteCount) Exec__read_remaining_elf(
                 total_read += chunk_size;
             },
             error(code, message) { return Error(ByteCount, message, code); }
-        )
+        );
     }
 
     return Success(ByteCount, total_read);
@@ -299,8 +299,8 @@ static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, B
             DataPtr elf_data = DataBuffer__data(buffer);
             match_optional(ByteCount, Exec__required_elf_size(elf_data, bytes_read),
                 some(size) { required_size = size; },
-                none() {}
-            )
+                none_do_nothing()
+            );
 
             __d_printf(EXEC, "Copying elf %i/%i %s\n", bytes_read, required_size, cstr(path));
             Address elf_start = Kernel__alloc_kernel(required_size);
@@ -313,7 +313,7 @@ static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, B
                     return Success(Elf, elf);
                 },
                 error(code, message) { return Error(Elf, message, code); }
-            )
+            );
         },
         error(code, message)
         {
@@ -323,7 +323,7 @@ static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, B
             }
             return Error(Elf, message, code);
         }
-    )
+    );
 
     return Error(Elf, unreachable_code, SPAWN_FAILED);
 }
@@ -358,8 +358,8 @@ static Result(ProcessPtr) Exec__exec_as_checked(
                 return Error(ProcessPtr, permission_denied_message, SPAWN_FAILED);
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     match_result(IOHandle, open(context, path, IO_OPEN_READ),
         success(handle)
@@ -376,14 +376,14 @@ static Result(ProcessPtr) Exec__exec_as_checked(
                     __d_printf(EXEC, "loading elf %s failed: %s\n", cstr(path), cstr(message));
                     return Error(ProcessPtr, message, SPAWN_FAILED);
                 }
-            )
+            );
         },
         error(code, message)
         {
             __d_printf(EXEC, "Failed to open elf %s\n", cstr(path));
             return Error(ProcessPtr, message, SPAWN_NO_FILE);
         }
-    )
+    );
     return Error(ProcessPtr, unreachable_code, SPAWN_FAILED);
 }
 

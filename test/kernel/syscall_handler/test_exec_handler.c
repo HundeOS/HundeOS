@@ -38,7 +38,7 @@ void test_exec_is_called_triggering_new_process()
         0,
         0,
         0
-    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->state);
 }
@@ -53,7 +53,7 @@ void test_exec_handler_nowait_spawns_without_parking_parent()
         0,
         0,
         0
-    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
 }
@@ -85,7 +85,7 @@ void test_exec_request_handler_can_spawn_as_user(void)
         0,
         0,
         0
-    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error_test_fail());
 }
 
 void test_exec_request_handler_rejects_reused_auth_ticket(void)
@@ -114,7 +114,7 @@ void test_exec_request_handler_rejects_reused_auth_ticket(void)
         0,
         0,
         0
-    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error_test_fail());
 
     match_result(SystemCallResult, ExecRequest__handler(
         kernel,
@@ -124,7 +124,7 @@ void test_exec_request_handler_rejects_reused_auth_ticket(void)
         0,
         0,
         0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code); });
 }
 
 void test_exec_request_handler_can_spawn_root_shell_with_auth_ticket(void)
@@ -154,7 +154,7 @@ void test_exec_request_handler_can_spawn_root_shell_with_auth_ticket(void)
         0,
         0,
         0
-    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error_test_fail());
 }
 
 void test_exec_request_handler_can_spawn_with_explicit_stdio(void)
@@ -184,9 +184,9 @@ void test_exec_request_handler_can_spawn_with_explicit_stdio(void)
         0
     ), success(pid) {
             match_optional(ProcessPtr, Scheduler__find_process_by_pid(kernel->scheduler, pid), some(child) {
-                    match_result(ProcessIOHandle, Process__get_io_handle(child, 0), success(handle) { TEST_ASSERT_EQUAL(0x7000, handle); }, error(code, message) { TEST_FAIL(); })
-                    match_result(ProcessIOHandle, Process__get_io_handle(child, 1), success(handle) { TEST_ASSERT_EQUAL(0x8000, handle); }, error(code, message) { TEST_FAIL(); })
-                    match_result(ProcessIOHandle, Process__get_io_handle(child, 2), success(handle) { TEST_ASSERT_EQUAL(0x9000, handle); }, error(code, message) { TEST_FAIL(); })
-                }, none() { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                    match_result(ProcessIOHandle, Process__get_io_handle(child, 0), success(handle) { TEST_ASSERT_EQUAL(0x7000, handle); }, error_test_fail());
+                    match_result(ProcessIOHandle, Process__get_io_handle(child, 1), success(handle) { TEST_ASSERT_EQUAL(0x8000, handle); }, error_test_fail());
+                    match_result(ProcessIOHandle, Process__get_io_handle(child, 2), success(handle) { TEST_ASSERT_EQUAL(0x9000, handle); }, error_test_fail());
+                }, none_test_fail());
+        }, error_test_fail());
 }

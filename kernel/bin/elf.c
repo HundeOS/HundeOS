@@ -54,9 +54,9 @@ SectionHeaderArray Elf__read_section_headers(Elf self)
         SectionHeaderPtr header = offset_ptr(start, i * section_header_size, SectionHeader);
 
         match_result(CollectionCode, SectionHeaderArray__push(&headers, header),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { __d_println(PANIC, cstr(message));; }
-        )
+        );
 
     }
     return headers;
@@ -76,9 +76,9 @@ ProgramHeaderArray Elf__read_program_headers(Elf self)
         ProgramHeaderPtr header = offset_ptr(start, i * program_header_size, ProgramHeader);
 
         match_result(CollectionCode, ProgramHeaderArray__push(&headers, header),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { __d_println(PANIC, cstr(message));; }
-        )
+        );
     }
     return headers;
 }
@@ -136,7 +136,7 @@ ExpandedSegmentArray Elf__map(const Elf self) {
         match_optional(ProgramHeaderPtr, ProgramHeaderArray__at(&headers, i),
             some(header) { Elf__expand_segment(self, header, &expanded_segments);; },
             none() { __d_println(PANIC, "No header");; }
-        )
+        );
     }
     return expanded_segments;
 }
@@ -146,7 +146,8 @@ Optional(ExpandedSegment) Elf__entry_segment(Elf self, ExpandedSegmentArrayPtr e
     Address entry = Elf__read_header(self)->entry;
     ExpandedSegmentArray segments = *expanded_segments;
 
-    FAIterate(ExpandedSegmentArray, segments, i, segment)
+    for_each_fa(ExpandedSegmentArray, segments, i, segment,
+    {
         Address start = segment.address.virtual_addr;
         Address end = start + segment.size;
         if (entry >= start && entry < end)
@@ -154,6 +155,6 @@ Optional(ExpandedSegment) Elf__entry_segment(Elf self, ExpandedSegmentArrayPtr e
             return Some(ExpandedSegment, segment);
         }
 
-    End
+    });
     return None(ExpandedSegment);
 }

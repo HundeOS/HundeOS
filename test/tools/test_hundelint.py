@@ -203,17 +203,18 @@ class HundelintTest(unittest.TestCase):
             "    match_optional(BString, value,\n"
             "        some(text) { use(text); },\n"
             "        none() { return; }\n"
-            "    )\n"
+            "    );\n"
             "    match_result(ByteCount, result,\n"
             "        success(count)\n"
             "        {\n"
             "            use(count);\n"
             "        },\n"
-            "        error(code, message)\n"
-            "        {\n"
-            "            return;\n"
-            "        }\n"
-            "    )\n"
+        "        error(code, message)\n"
+        "        {\n"
+        "            report(code);\n"
+        "            return;\n"
+        "        }\n"
+            "    );\n"
             "}\n"
         )
         rules = self.rules_for(source)
@@ -222,13 +223,99 @@ class HundelintTest(unittest.TestCase):
         self.assertNotIn("match-branch-format", rules)
         self.assertNotIn("match-branch-block-format", rules)
 
+    def test_allows_explicit_do_nothing_and_test_branch_macros_in_tests(self):
+        source = (
+            "void example(Optional(BString) value, Result(ByteCount) result) {\n"
+            "    match_optional(BString, value,\n"
+            "        some_do_nothing(),\n"
+            "        none_test_fail()\n"
+            "    );\n"
+            "    match_result(ByteCount, result,\n"
+            "        success_do_nothing(),\n"
+            "        error_test_ok()\n"
+            "    );\n"
+            "}\n"
+        )
+        rules = self.rules_for(source, "test/example.c")
+        self.assertNotIn("match-branch-macros", rules)
+        self.assertNotIn("match-branch-format", rules)
+        self.assertNotIn("match-branch-block-format", rules)
+        self.assertNotIn("test-fail-branch-outside-tests", rules)
+
+    def test_rejects_test_fail_branch_macros_outside_tests(self):
+        source = (
+            "void example(Optional(BString) value, Result(ByteCount) result) {\n"
+            "    match_optional(BString, value,\n"
+            "        some_test_fail(),\n"
+            "        none_do_nothing()\n"
+            "    );\n"
+            "    match_result(ByteCount, result,\n"
+            "        success_do_nothing(),\n"
+            "        error_test_fail()\n"
+            "    );\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertEqual(2, rules.count("test-fail-branch-outside-tests"))
+        self.assertEqual(2, rules.count("match-branch-macros"))
+
+    def test_rejects_error_do_nothing_and_empty_error_blocks(self):
+        source = (
+            "void example(Result(ByteCount) result) {\n"
+            "    match_result(ByteCount, result,\n"
+            "        success_do_nothing(),\n"
+            "        error_do_nothing()\n"
+            "    );\n"
+            "    match_result(ByteCount, result,\n"
+            "        success_do_nothing(),\n"
+            "        error(code, message) {}\n"
+            "    );\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertEqual(1, rules.count("match-branch-macros"))
+        self.assertEqual(1, rules.count("trivial-error-branch"))
+
+    def test_rejects_trivial_error_return_break_and_continue_blocks(self):
+        source = (
+            "void example(Result(ByteCount) result) {\n"
+            "    match_result(ByteCount, result,\n"
+            "        success_do_nothing(),\n"
+            "        error(code, message) { return; }\n"
+            "    );\n"
+            "    match_result(ByteCount, result,\n"
+            "        success_do_nothing(),\n"
+            "        error(code, message) { break; }\n"
+            "    );\n"
+            "    match_result(ByteCount, result,\n"
+            "        success_do_nothing(),\n"
+            "        error(code, message) { continue; }\n"
+            "    );\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertEqual(3, rules.count("trivial-error-branch"))
+
+    def test_allows_trivial_error_branch_with_explicit_ignore(self):
+        source = (
+            "void example(Result(ByteCount) result) {\n"
+            "    match_result(ByteCount, result, // hundelint: ignore-trivial-error-branch\n"
+            "        success_do_nothing(),\n"
+            "        error(code, message) { return; }\n"
+            "    );\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertNotIn("match-branch-macros", rules)
+        self.assertNotIn("trivial-error-branch", rules)
+
     def test_reports_inline_match_branch_macros(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    match_optional(BString, value, some(text) { use(text); }, none() { return; })\n"
+            "    match_optional(BString, value, some(text) { use(text); }, none() { return; });\n"
             "    match_result(ByteCount, result,\n"
-            "        success(count) { use(count); }, error(code, message) { return; }\n"
-            "    )\n"
+            "        success(count) { use(count); }, error(code, message) { report(code); return; }\n"
+            "    );\n"
             "}\n"
         )
         rules = self.rules_for(source)
@@ -242,7 +329,7 @@ class HundelintTest(unittest.TestCase):
             "            use(count);\n"
             "        },\n"
             "        error(code, message) { return; }\n"
-            "    )\n"
+            "    );\n"
             "}\n"
         )
         rules = self.rules_for(source)
@@ -251,10 +338,10 @@ class HundelintTest(unittest.TestCase):
     def test_reports_match_without_branch_macros(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    match_optional(BString, value, text, { use(text); }, { return; })\n"
-            "    match_result(ByteCount, result, count, { use(count); }, code, message, { return; })\n"
-            "    match_optional(BString, value, some(text), { use(text); }, none(), { return; })\n"
-            "    match_result(ByteCount, result, success(count), { use(count); }, error(code, message), { return; })\n"
+            "    match_optional(BString, value, text, { use(text); }, { return; });\n"
+            "    match_result(ByteCount, result, count, { use(count); }, code, message, { return; });\n"
+            "    match_optional(BString, value, some(text), { use(text); }, none(), { return; });\n"
+            "    match_result(ByteCount, result, success(count), { use(count); }, error(code, message), { return; });\n"
             "}\n"
         )
         rules = self.rules_for(source)
@@ -293,7 +380,7 @@ class HundelintTest(unittest.TestCase):
             "        if (failed) { return 1; }\n"
             "        if (done) { break; }\n"
             "        continue;\n"
-            "    })\n"
+            "    });\n"
             "    return 0;\n"
             "}\n"
         )
@@ -307,12 +394,44 @@ class HundelintTest(unittest.TestCase):
             "    {\n"
             "        if (failed) { cs_return 1; }\n"
             "        if (done) { cs_exit_then(return 2); }\n"
-            "    })\n"
+            "    });\n"
             "    return 0;\n"
             "}\n"
         )
         rules = self.rules_for(source)
         self.assertNotIn("critical-section-control-flow", rules)
+
+    def test_reports_block_macro_without_semicolon(self):
+        source = (
+            "void example(Optional(BString) value, TestList list) {\n"
+            "    match_optional(BString, value,\n"
+            "        some(text) { use(text); },\n"
+            "        none() {}\n"
+            "    )\n"
+            "    for_each_ll(TestList, list, item,\n"
+            "    {\n"
+            "        use(item);\n"
+            "    })\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertEqual(2, rules.count("block-macro-semicolon"))
+
+    def test_allows_block_macro_with_semicolon(self):
+        source = (
+            "void example(Optional(BString) value, TestList list) {\n"
+            "    match_optional(BString, value,\n"
+            "        some(text) { use(text); },\n"
+            "        none() {}\n"
+            "    );\n"
+            "    for_each_ll(TestList, list, item,\n"
+            "    {\n"
+            "        use(item);\n"
+            "    });\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertNotIn("block-macro-semicolon", rules)
 
     def test_reports_unwrap_macros(self):
         source = (

@@ -75,7 +75,7 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
     match_optional(BString, command_split.match,
         some(parsed_command) { self->command.name = parsed_command; },
         none() { return self->command; }
-    )
+    );
 
     remaining = command_split.rest;
 
@@ -86,12 +86,12 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
             some(argument)
             {
                 match_result(CollectionCode, CommandArguments__push(&self->command.args, argument),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { return self->command; }
-                )
+                );
             },
             none() { break; }
-        )
+        );
         remaining = arg_split.rest;
     }
 
@@ -107,8 +107,8 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
                 CommandArguments__push(&self->command.args, last_argument);
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return self->command;
 }
@@ -138,16 +138,16 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
 
     match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 0),
         some(value) { arg0 = BString__cstr(value); },
-        none() {}
-    )
+        none_do_nothing()
+    );
     match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 1),
         some(value) { arg1 = BString__cstr(value); },
-        none() {}
-    )
+        none_do_nothing()
+    );
     match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 2),
         some(value) { arg2 = BString__cstr(value); },
-        none() {}
-    )
+        none_do_nothing()
+    );
     SpawnMode mode = command->background ? P_NOWAIT : P_WAIT;
     SpawnResult result = spawn(mode, BString__cstr(&path), arg0, arg1, arg2);
 

@@ -32,7 +32,7 @@ void test_match_optional_runs_some_branch(void)
         TEST_ASSERT_EQUAL(MATCH_MACRO_OK, value);
     }, none() {
         saw_none = true;
-    })
+    });
 
     TEST_ASSERT_TRUE(saw_some);
     TEST_ASSERT_FALSE(saw_none);
@@ -47,7 +47,7 @@ void test_match_optional_runs_none_branch(void)
         saw_some = true;
     }, none() {
         saw_none = true;
-    })
+    });
 
     TEST_ASSERT_FALSE(saw_some);
     TEST_ASSERT_TRUE(saw_none);
@@ -71,7 +71,7 @@ void test_match_result_runs_ok_branch(void)
         TEST_ASSERT_EQUAL(MATCH_MACRO_OK, value);
     }, error(code, message) {
         saw_error = true;
-    })
+    });
 
     TEST_ASSERT_TRUE(saw_ok);
     TEST_ASSERT_FALSE(saw_error);
@@ -89,7 +89,7 @@ void test_match_result_runs_error_branch(void)
         saw_error = true;
         TEST_ASSERT_EQUAL(MATCH_MACRO_FAILED, code);
         TEST_ASSERT_TRUE(BString__equals(&expected, &message));
-    })
+    });
 
     TEST_ASSERT_FALSE(saw_ok);
     TEST_ASSERT_TRUE(saw_error);
@@ -111,7 +111,7 @@ void test_critical_section_runs_block(void)
     critical_section(lock,
     {
         value = 7;
-    })
+    });
 
     TEST_ASSERT_EQUAL(7, value);
 }
@@ -121,7 +121,7 @@ static int returns_from_critical_section(mutex_t * lock)
     critical_section(*lock,
     {
         cs_return 11;
-    })
+    });
 
     return 0;
 }
@@ -140,7 +140,7 @@ static int exits_from_critical_section(mutex_t * lock)
     critical_section(*lock,
     {
         cs_exit_then(return 13);
-    })
+    });
 
     return 0;
 }

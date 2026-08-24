@@ -31,7 +31,7 @@
             __d_println(DEBUG, "Init__syscalls() - error"); \
             return Error(RegisterResult, message, code); \
         } \
-    ) \
+    ); \
 
 
 Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)

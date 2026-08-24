@@ -55,8 +55,8 @@ static Optional(uint64_t) PciConfig__read_line_value(ConstBStringPtr line, Const
             BString line_key = BString__strip(&raw_key);
             matched = BString__equals(&line_key, key);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (!matched)
     {
@@ -79,8 +79,8 @@ static PciConfigParseState PciConfigParseState__read_config_line(PciConfigParseS
     {
         match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_present_key),
             some(parsed) { self.found_present = parsed == 1; },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
     if (!self.found_ecam_physical_base)
     {
@@ -90,8 +90,8 @@ static PciConfigParseState PciConfigParseState__read_config_line(PciConfigParseS
                 self.config.ecam_physical_base = parsed;
                 self.found_ecam_physical_base = true;
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
     if (!self.found_ecam_size)
     {
@@ -101,8 +101,8 @@ static PciConfigParseState PciConfigParseState__read_config_line(PciConfigParseS
                 self.config.ecam_size = parsed;
                 self.found_ecam_size = true;
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
     if (!self.found_bus_start)
     {
@@ -112,8 +112,8 @@ static PciConfigParseState PciConfigParseState__read_config_line(PciConfigParseS
                 self.config.bus_start = parsed;
                 self.found_bus_start = true;
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
     if (!self.found_bus_end)
     {
@@ -123,8 +123,8 @@ static PciConfigParseState PciConfigParseState__read_config_line(PciConfigParseS
                 self.config.bus_end = parsed;
                 self.found_bus_end = true;
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 
     return self;
@@ -146,17 +146,17 @@ static bool PciConfig__read_config(ConstDynStringPtr sysinfo, PciConfigPtr self)
     match_optional(DynStringLines, DynString__lines(sysinfo),
         some(lines)
         {
-            LLIterate(DynStringLines, lines, line)
+            for_each_ll(DynStringLines, lines, line,
+            {
                 match_optional(BString, DynString__bstring(&line),
                     some(bstring_line) { state = PciConfigParseState__read_config_line(state, &bstring_line); },
-                    none() {}
-                )
-
-            End
+                    none_do_nothing()
+                );
+            });
             DynStringLines__dispose_all(&lines);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (!PciConfigParseState__has_required_fields(&state))
     {
@@ -186,8 +186,8 @@ static bool PciConfig__load(PciConfigPtr self)
             DynString__dispose(&data);
             return loaded;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return false;
 }

@@ -30,11 +30,11 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
 
-    match_result(ServiceCode, ServiceEventDispatcher__subscribe_irq(&dispatcher, process, 48), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(ServiceCode, ServiceEventDispatcher__subscribe_irq(&dispatcher, process, 48), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     match_result(ServiceEventDispatch, ServiceEventDispatcher__dispatch_irq(&dispatcher, &interrupt_controller, 48), success(dispatch) {
-            match_optional(ProcessPtr, dispatch.process, some(target) { TEST_ASSERT_EQUAL_PTR(process, target); }, none() { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            match_optional(ProcessPtr, dispatch.process, some(target) { TEST_ASSERT_EQUAL_PTR(process, target); }, none_test_fail());
+        }, error_test_fail());
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__masked_irq());
     TEST_ASSERT_EQUAL_UINT64(1, Arch__mask_count());
@@ -43,9 +43,9 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
     match_result(ServiceEvent, ServiceEventDispatcher__take_next(&dispatcher, process), success(event) {
             TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);
             TEST_ASSERT_EQUAL_UINT64(48, event.source);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
-    match_result(ServiceCode, ServiceEventDispatcher__complete_active_irq(&dispatcher, &interrupt_controller, process), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(ServiceCode, ServiceEventDispatcher__complete_active_irq(&dispatcher, &interrupt_controller, process), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__unmasked_irq());
     TEST_ASSERT_EQUAL_UINT64(1, Arch__unmask_count());

@@ -100,6 +100,10 @@ An example namespacing for a function would be `EmbeddedFileIO__remove`
 Additionally the object being acted on should be the first argument to the function and be named `self` so
 as to clearly indicate it is the object being acted on while not clashing with the c++ `this`.
 
+## Return values
+Do not pass multiple pointers to a function just to return several values. It
+is a smell and should not be done. Return a struct with named fields instead.
+
 ## Key kernel structures
 When possible kernel structures should contain the other structures they use,
 not pointers to structures. This is to make memory allocation/cleanup simpler

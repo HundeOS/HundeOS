@@ -71,14 +71,14 @@
                 none() { \
                 return alias##__bucket__push(bucket, BucketEntry(alias, key, value));\
             } \
-            )\
+            );\
         }, \
             none() { \
             alias##__bucket bucket = alias##__bucket__new();\
             alias##__bucket__push(&bucket, BucketEntry(alias, key, value));\
             return alias##__table__set(&self->table, hash, bucket);\
         } \
-        )\
+        );\
         return Error(CollectionCode, bstring("no bucket"), 0); \
     } \
 
@@ -97,10 +97,10 @@
                 return HashtableSome(alias, find_result.value->value); \
             }, \
                 none() { return HashtableNone(alias); } \
-            )\
+            );\
         }, \
             none() { return HashtableNone(alias); } \
-        )\
+        );\
         return HashtableNone(alias); \
     } \
     \
@@ -113,10 +113,10 @@
             match_optional(alias##__bucket__FindResult, alias##__bucket__find(bucket, alias##__entry_match, &key), \
                 some(find_result) { return HashtablePtrSome(alias, &find_result.value->value); }, \
                 none() { return HashtablePtrNone(alias); } \
-            )\
+            );\
         }, \
             none() { return HashtablePtrNone(alias); } \
-        )\
+        );\
         return HashtablePtrNone(alias); \
     } \
 

@@ -54,7 +54,7 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
         match_optional(char, ConsoleInputStream__read_char(),
             some(read_ch) { ch = read_ch; },
             none() { return line;; }
-        )
+        );
 
         if (ch == '\r' || ch == '\n')
         {
@@ -85,7 +85,7 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
             match_optional(BString, ConsoleInputStream__read_escape_sequence(),
                 some(sequence) { escape_sequence = sequence; },
                 none() { continue;; }
-            )
+            );
 
             char first = BString__char_at_or(&escape_sequence, 0, '\0');
             char second = BString__char_at_or(&escape_sequence, 1, '\0');
@@ -221,12 +221,12 @@ static Optional(BString) ConsoleInputStream__read_escape_sequence(void)
     match_optional(char, ConsoleInputStream__read_char(),
         some(first) { BString__push_char(&sequence, first);; },
         none() { return None(BString);; }
-    )
+    );
 
     match_optional(char, ConsoleInputStream__read_char(),
         some(second) { BString__push_char(&sequence, second);; },
         none() { return None(BString);; }
-    )
+    );
 
     return Some(BString, sequence);
 }
@@ -262,9 +262,13 @@ static void Shell__store_history(ShellPtr self, ConstBStringPtr line)
     }
 
     match_result(CollectionCode, ShellHistory__push(&self->history, *line),
-        success(_) {},
-        error(code, message) {}
-    )
+        success_do_nothing(),
+        error(code, message)
+        {
+            printf("shell: failed to store history: %s (%i)\n", BString__cstr(&message), (int) code);
+            return;
+        }
+    );
 }
 
 static void Shell__handle_result(ConstShellPtr self, ShellResult result)

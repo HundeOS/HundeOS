@@ -42,7 +42,7 @@ static Result(BlockDeviceCode) BlockCache__cache_entry(BlockCachePtr self, Block
     match_result(CollectionCode, BlockCacheEntries__push(&self->entries, entry),
         success(_) { return Success(BlockDeviceCode, BLOCK_DEVICE_OK); },
         error(code, message) { return Error(BlockDeviceCode, message, BLOCK_DEVICE_IO_ERROR); }
-    )
+    );
 
     return Error(BlockDeviceCode, invalid_argument, BLOCK_DEVICE_IO_ERROR);
 }
@@ -65,8 +65,8 @@ Result(BlockDeviceCode) BlockCache__read(BlockCachePtr self, BlockNumber block, 
                 BlockCache__copy(target, found.value->data);
                 cs_return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
 
         match_result(BlockCount, BlockDevice__read(self->device, block, 1, entry.data),
             success(count)
@@ -77,12 +77,12 @@ Result(BlockDeviceCode) BlockCache__read(BlockCachePtr self, BlockNumber block, 
                 }
             },
             error(code, message) { cs_return Error(BlockDeviceCode, message, code); }
-        )
+        );
 
         match_result(BlockDeviceCode, BlockCache__cache_entry(self, entry),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { cs_return Error(BlockDeviceCode, message, code); }
-        )
+        );
 
         BlockCache__copy(target, entry.data);
         cs_return Success(BlockDeviceCode, BLOCK_DEVICE_OK);

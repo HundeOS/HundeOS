@@ -298,8 +298,8 @@ KernelAddress Heap__alloc_size(HeapPtr self, size_t size)
             Heap__record_allocated(self, block.start, block.pages_allocated);
             return block.start;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Heap__alloc_fresh_size(self, size);
 }
@@ -316,8 +316,8 @@ Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr)
             AllocatedBlocks__set(&self->free_blocks, free_block.start.virtual_addr, free_block);
             return Success(HeapCode, HEAP_OK);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Error(HeapCode, bstring("address not allocated"), HEAP_NOT_IMPLEMENTED);
 }

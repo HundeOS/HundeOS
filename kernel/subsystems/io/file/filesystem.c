@@ -98,11 +98,11 @@ static bool Filesystem__mount_matches(BStringPtr path, BStringPtr mount_path)
         match_optional(BString, BStringArray__at(&path_segments, i),
             some(segment) { path_segment = segment; },
             none() { return false; }
-        )
+        );
         match_optional(BString, BStringArray__at(&mount_segments, i),
             some(segment) { mount_segment = segment; },
             none() { return false; }
-        )
+        );
         if (!BString__equals(&path_segment, &mount_segment))
         {
             return false;
@@ -123,8 +123,8 @@ static BString Filesystem__subpath(BStringPtr path, BStringPtr mount_path)
         BString segment = EMPTY_BSTRING;
         match_optional(BString, BStringArray__at(&path_segments, i),
             some(path_segment) { segment = path_segment; },
-            none() {}
-        )
+            none_do_nothing()
+        );
         BStringArray__push(&subpath_segments, segment);
     }
 
@@ -136,7 +136,8 @@ static Optional(MountRoute) Filesystem__find_mount(FilesystemPtr self, BString p
     Optional(MountRoute) best = None(MountRoute);
     size_t best_len = 0;
 
-    MapIterate(Mounts, self->mounts, index, mount_path, mounted_fs)
+    for_each_map(Mounts, self->mounts, index, mount_path, mounted_fs,
+    {
         StringPos mount_path_length = BString__length(&mount_path);
         if (Filesystem__mount_matches(&path, &mount_path) && mount_path_length > (StringPos) best_len)
         {
@@ -148,20 +149,21 @@ static Optional(MountRoute) Filesystem__find_mount(FilesystemPtr self, BString p
             }));
         }
 
-    End
+    });
     return best;
 }
 
 static Result(IOInternalHandle) RootFileIO__delegate_close(FilesystemIOStatePtr self, IOInternalHandle handle)
 {
     FilesystemCode code = (handle & FS_CODE_MASK);
-    MapIterate(Mounts, self->filesystem->mounts, index, name, filesys)
+    for_each_map(Mounts, self->filesystem->mounts, index, name, filesys,
+    {
         if (filesys->fs_code == code)
         {
             return filesys->file_io.base_io.close(&filesys->state->state, handle);
         }
 
-    End
+    });
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
@@ -170,13 +172,14 @@ static Result(ByteCount) RootFileIO__delegate_write(
 )
 {
     FilesystemCode code = (handle & FS_CODE_MASK);
-    MapIterate(Mounts, self->filesystem->mounts, index, name, filesys)
+    for_each_map(Mounts, self->filesystem->mounts, index, name, filesys,
+    {
         if (filesys->fs_code == code)
         {
             return filesys->file_io.base_io.write(&filesys->state->state, handle, data, size);
         }
 
-    End
+    });
     return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
@@ -192,7 +195,7 @@ Result(IOInternalHandle) RootFileIO__open(IOStatePtr self, BString path, Flags f
             );
         },
         none() { return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); }
-    )
+    );
 
     return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -209,13 +212,14 @@ Result(IOBufferPtr) RootFileIO__read(
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
     FilesystemCode code = (handle & FS_CODE_MASK);
-    MapIterate(Mounts, fs_state->filesystem->mounts, index, name, filesys)
+    for_each_map(Mounts, fs_state->filesystem->mounts, index, name, filesys,
+    {
         if (filesys->fs_code == code)
         {
             return filesys->file_io.base_io.read(&filesys->state->state, handle, size, target_buffer);
         }
 
-    End
+    });
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
@@ -383,7 +387,8 @@ static Result(DirectoryEntryCount) RootFileIO__append_mount_entries(
     size_t max_entries
 )
 {
-    MapIterate(Mounts, filesystem->mounts, index, mount_path, mount_fs)
+    for_each_map(Mounts, filesystem->mounts, index, mount_path, mount_fs,
+    {
         if (RootFileIO__trace_list_dir(&path))
         {
             __d_printf(FILESYSTEM, "list_dir mount[%i] path=%s mount=%s\n", (int) index, cstr(path), cstr(mount_path));
@@ -416,10 +421,10 @@ static Result(DirectoryEntryCount) RootFileIO__append_mount_entries(
                 }
                 count++;
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
 
-    End
+    });
     return Success(DirectoryEntryCount, count);
 }
 
@@ -442,7 +447,7 @@ static Result(Anything) RootFileIO__complete_async_list_dir(Result(Anything) res
                 error(code, message)
                 {
                     mapped = Error(Anything, message, code);
-                })
+                });
         },
         error(code, message)
         {
@@ -463,9 +468,9 @@ static Result(Anything) RootFileIO__complete_async_list_dir(Result(Anything) res
                 error(merge_code, merge_message)
                 {
                     mapped = Error(Anything, merge_message, merge_code);
-                })
+                });
         }
-    )
+    );
 
     match_optional(KernelResultMapper, context->parent_mapper,
         some(parent_mapper)
@@ -473,8 +478,8 @@ static Result(Anything) RootFileIO__complete_async_list_dir(Result(Anything) res
             Kernel__free(addr(context));
             return parent_mapper(mapped, context->parent_mapper_context);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     Kernel__free(addr(context));
     return mapped;
@@ -492,8 +497,8 @@ static bool RootFileIO__nodes_contain_name(FilesystemNodes * nodes, BStringPtr n
                     return true;
                 }
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 
     return false;
@@ -511,13 +516,14 @@ static Result(CollectionCode) RootFileIO__append_node_if_missing(FilesystemNodes
 
 static Result(CollectionCode) RootFileIO__append_nodes(FilesystemNodes * target, FilesystemNodes source)
 {
-    FAIterate(FilesystemNodes, source, index, node)
+    for_each_fa(FilesystemNodes, source, index, node,
+    {
         match_result(CollectionCode, FilesystemNodes__push(target, node),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { return Error(CollectionCode, message, code); }
-        )
+        );
 
-    End
+    });
     return Success(CollectionCode, 0);
 }
 
@@ -532,9 +538,9 @@ static Result(FilesystemNodes) RootFileIO__nodes_from_directory_entries(
         match_result(CollectionCode, FilesystemNodes__push(
             &nodes, RootFileIO__node_from_directory_entry(filesystem, &entries[i])
         ),
-            success(_) {},
+            success_do_nothing(),
             error(code, message) { return Error(FilesystemNodes, message, code); }
-        )
+        );
     }
 
     return Success(FilesystemNodes, nodes);
@@ -544,21 +550,22 @@ static Result(CollectionCode) RootFileIO__append_mount_children(
     FilesystemPtr filesystem, BString path, FilesystemNodes * result
 )
 {
-    MapIterate(Mounts, filesystem->mounts, index, mount_path, mount_fs)
+    for_each_map(Mounts, filesystem->mounts, index, mount_path, mount_fs,
+    {
         match_optional(BString, RootFileIO__immediate_mount_child(path, mount_path),
             some(child)
             {
                 match_result(CollectionCode, RootFileIO__append_node_if_missing(
                     result, FilesystemNode__heap_new(mount_fs, child, 0)
                 ),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { return Error(CollectionCode, message, code); }
-                )
+                );
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
 
-    End
+    });
     return Success(CollectionCode, 0);
 }
 
@@ -567,7 +574,8 @@ static Result(DirectoryEntryCount) RootFileIO__copy_nodes_to_entries(
 )
 {
     DirectoryEntryCount count = 0;
-    FAIterate(FilesystemNodes, nodes, index, node)
+    for_each_fa(FilesystemNodes, nodes, index, node,
+    {
         if ((size_t) count >= max_entries)
         {
             return Success(DirectoryEntryCount, count);
@@ -575,7 +583,7 @@ static Result(DirectoryEntryCount) RootFileIO__copy_nodes_to_entries(
         entries[count] = RootFileIO__directory_entry_from_node(node);
         count++;
 
-    End
+    });
     return Success(DirectoryEntryCount, count);
 }
 
@@ -598,10 +606,10 @@ Result(FilesystemNodes) RootFileIO__list_nodes(IOStatePtr self, FilesystemNodePt
                     {
                         listed_backing = true;
                         match_result(CollectionCode, RootFileIO__append_nodes(&result, nodes),
-                            success(_) {},
+                            success_do_nothing(),
                             error(code, message) { return Error(FilesystemNodes, message, code); }
-                        )
-                    }, error(code, message) {})
+                        );
+                    }, error(code, message) { listed_backing = false; });
             }
             else if (route.filesystem->file_io.list_dir != NULL) // hundelint: ignore-no-null
             {
@@ -618,20 +626,20 @@ Result(FilesystemNodes) RootFileIO__list_nodes(IOStatePtr self, FilesystemNodePt
                             success(nodes)
                             {
                                 match_result(CollectionCode, RootFileIO__append_nodes(&result, nodes),
-                                    success(_) {},
+                                    success_do_nothing(),
                                     error(code, message) { return Error(FilesystemNodes, message, code); }
-                                )
-                            }, error(code, message) { return Error(FilesystemNodes, message, code); })
-                    }, error(code, message) {})
+                                );
+                            }, error(code, message) { return Error(FilesystemNodes, message, code); });
+                    }, error(code, message) { listed_backing = false; });
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     match_result(CollectionCode, RootFileIO__append_mount_children(filesystem, path, &result),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(FilesystemNodes, message, code); }
-    )
+    );
 
     if (listed_backing || FilesystemNodes__len(&result) > 0)
     {
@@ -686,8 +694,8 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
                         wrapped_context.result_mapper_context = (Anything) async_context;
                         BlockDevice__set_current_context(&wrapped_context);
                     },
-                    none() {}
-                )
+                    none_do_nothing()
+                );
 
                 match_result(DirectoryEntryCount, route.filesystem->file_io.list_dir(
                     &route.filesystem->state->state, route.subpath, entries, max_entries
@@ -724,12 +732,12 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
                         {
                             __d_printf(FILESYSTEM, "list_dir backing error code=%i message=%s\n", (int) code, cstr(message));
                         }
-                    })
+                    });
 
                 match_optional(KernelContextPtr, current_context,
                     some(existing_context) { BlockDevice__set_current_context(existing_context); },
                     none() { BlockDevice__clear_current_context(); }
-                )
+                );
 
                 if (backing_request_pending)
                 {
@@ -747,12 +755,12 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
                         match_result(DirectoryEntryCount, RootFileIO__copy_nodes_to_entries(nodes, entries, max_entries),
                             success(backing_count) { count = backing_count; },
                             error(code, message) { return Error(DirectoryEntryCount, message, code); }
-                        )
-                    }, error(code, message) {})
+                        );
+                    }, error(code, message) { listed_backing = false; });
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     match_result(DirectoryEntryCount, RootFileIO__append_mount_entries(
         fs_state->filesystem, path, entries, count, max_entries
@@ -772,7 +780,7 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
             {
                 return Success(DirectoryEntryCount, merged_count);
             }
-        }, error(code, message) { return Error(DirectoryEntryCount, message, code); })
+        }, error(code, message) { return Error(DirectoryEntryCount, message, code); });
 
     return Error(DirectoryEntryCount, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -783,7 +791,7 @@ Result(IOStatus) RootFileIO__mkdir(IOStatePtr self, BString path)
     match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
         some(route) { return route.filesystem->file_io.mkdir(&route.filesystem->state->state, route.subpath); },
         none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); }
-    )
+    );
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -794,7 +802,7 @@ Result(IOStatus) RootFileIO__remove(IOStatePtr self, BString path, Flags flags)
     match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
         some(route) { return route.filesystem->file_io.remove(&route.filesystem->state->state, route.subpath, flags); },
         none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); }
-    )
+    );
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
@@ -820,10 +828,10 @@ Result(IOStatus) RootFileIO__link(IOStatePtr self, BString source_path, BString 
                     );
                 },
                 none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &target_path), IO_INVALID_PATH); }
-            )
+            );
         },
         none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &source_path), IO_INVALID_PATH); }
-    )
+    );
 
     return Error(IOStatus, BString__sprintf(&invalid_path_format, &source_path), IO_INVALID_PATH);
 }

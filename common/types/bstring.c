@@ -65,7 +65,7 @@ static void BString__append_reversed_mut(BStringPtr self, ConstBStringPtr revers
         match_optional(char, BString__char_at(&copy, last_index),
             some(ch) { BString__push_char(self, ch);; },
             none() { return;; }
-        )
+        );
 
         BString__remove_at(&copy, last_index);
     }
@@ -410,14 +410,15 @@ BString BString__join(BStringArrayPtr array, char delimiter)
     BString delim = EMPTY_BSTRING;
     BString__push_char(&delim, delimiter);
 
-    FAPtrIterate(BStringArray, array, index, segment)
+    for_each_fa_ptr(BStringArray, array, index, segment,
+    {
         result = BString__append(&result, &segment);
         if (index + 1 < BStringArray__len(array))
         {
             result = BString__append(&result, &delim);
         }
 
-    End
+    });
     return result;
 }
 
@@ -459,7 +460,7 @@ char BString__char_at_or(ConstBStringPtr self, StringPos index, char alternate)
     match_optional(char, BString__char_at(self, index),
         some(ch) { return ch; },
         none() { return alternate; }
-    )
+    );
 }
 
 StringPos BString__copy_to(ConstBStringPtr self, char * target, StringPos target_size)

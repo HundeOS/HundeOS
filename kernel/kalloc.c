@@ -26,8 +26,8 @@ KernelAddress Kernel__from_physical_address(KernelPtr self, Address physical)
                 return address;
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Heap__from_physical_address(heap_ptr(), physical);
 }
@@ -43,8 +43,8 @@ KernelAddress Kernel__from_virtual_address(KernelPtr self, Address virtual_addr)
                 return address;
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Heap__from_virtual_address(heap_ptr(), virtual_addr);
 }
@@ -60,8 +60,8 @@ KernelAddress Kernel__try_from_virtual_address(KernelPtr self, Address virtual_a
                 return address;
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Heap__try_from_virtual_address(heap_ptr(), virtual_addr);
 }
@@ -111,7 +111,7 @@ Result(KAllocCode) Kernel__free(Address virtual_address)
             return Success(KAllocCode, KALLOC_OK);
         },
         error(code, message) { return Error(KAllocCode, message, code); }
-    )
+    );
 
     return Error(KAllocCode, not_implemented, KALLOC_NOT_IMPLEMENTED);
 }

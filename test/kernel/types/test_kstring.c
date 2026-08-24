@@ -130,14 +130,14 @@ void test_kstring_char_at_returns_character_when_in_bounds(void)
 {
     BString str = bstring("hello");
 
-    match_optional(char, BString__char_at(&str, 1), some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); }, none() { TEST_FAIL(); })
+    match_optional(char, BString__char_at(&str, 1), some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); }, none_test_fail());
 }
 
 void test_kstring_char_at_returns_none_when_out_of_bounds(void)
 {
     BString str = bstring("hello");
 
-    match_optional(char, BString__char_at(&str, 5), some(ch) { TEST_FAIL(); }, none() { TEST_ASSERT_TRUE(true); })
+    match_optional(char, BString__char_at(&str, 5), some_test_fail(), none() { TEST_ASSERT_TRUE(true); });
 }
 
 void test_kstring_uppercase(void)

@@ -28,7 +28,7 @@ void test_syslog_handler_writes_process_message_to_kernel_logger(void)
 
     match_result(SystemCallResult, Syslog__handler(
         NULL, Some(ProcessPtr, process), (Anything) message, 0, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); }, error_test_fail());
 
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "SYSLOG"));
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "virtio_blk: probe failed"));
@@ -43,7 +43,7 @@ void test_syslog_handler_writes_tagged_process_message_to_kernel_logger(void)
 
     match_result(SystemCallResult, Syslog__handler(
         NULL, Some(ProcessPtr, process), (Anything) message, (Anything) tag, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); }, error(code, message) { TEST_FAIL(); })
+    ), success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); }, error_test_fail());
 
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "VIRTIO-BLK"));
     TEST_ASSERT_NULL(strstr(BasicIO__output(), "SYSLOG"));
@@ -57,5 +57,5 @@ void test_syslog_handler_rejects_missing_message(void)
 
     match_result(SystemCallResult, Syslog__handler(
         NULL, Some(ProcessPtr, process), 0, 0, 0, 0, 0
-    ), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(SYSLOG_INVALID_ARGUMENT, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SYSLOG_INVALID_ARGUMENT, code); });
 }

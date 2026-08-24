@@ -43,7 +43,7 @@ Result(SystemCallResult) Exec__handler(
             __d_printf(EXEC, "exec handler error path=%s code=%i message=%s\n", cstr(path), code, cstr(message));
             return Error(SystemCallResult, message, code);
         }
-    )
+    );
 
     return Error(SystemCallResult, bstring("Exec handler failed"), SPAWN_FAILED);
 }
@@ -102,10 +102,10 @@ Result(SystemCallResult) ExecRequest__handler(
                 match_result(UserID, Auth__consume_ticket(&kernel->auth, process, request->auth_ticket_id),
                     success(user_id) { requested_user_id = Some(UserID, user_id);; },
                     error(code, message) { return Error(SystemCallResult, message, code); }
-                )
+                );
             },
             none() { return Error(SystemCallResult, bstring("No process"), AUTH_NO_PROCESS); }
-        )
+        );
     }
 
     Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(
@@ -122,7 +122,7 @@ Result(SystemCallResult) ExecRequest__handler(
             __d_printf(EXEC, "exec request handler error path=%s code=%i message=%s\n", cstr(path), code, cstr(message));
             return Error(SystemCallResult, message, code);
         }
-    )
+    );
 
     return Error(SystemCallResult, bstring("Exec request handler failed"), SPAWN_FAILED);
 }

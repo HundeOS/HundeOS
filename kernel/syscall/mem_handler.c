@@ -85,7 +85,7 @@ Result(SystemCallResult) Mem__handler(
             return Error(SystemCallResult, unsupported_operation, MEM_OPERATION_NOT_SUPPORTED);
         },
         none() { return Error(SystemCallResult, no_process, MEM_NO_PROCESS); }
-    )
+    );
 
     return Error(SystemCallResult, unsupported_operation, MEM_OPERATION_NOT_SUPPORTED);
 }

@@ -31,11 +31,11 @@ static Result(SystemCallResult) SyscallDispatcher__deliver_pending_signal(
                     Process__dispose_owned_kernel_resources(process);
                     Scheduler__exit(kernel->scheduler, process, ProcessSignal__exit_code(signal));
                 },
-                none() {}
-            )
+                none_do_nothing()
+            );
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return syscall_result;
 }
@@ -79,7 +79,7 @@ Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
         {
             return Error(SystemCallResult, unhandled_syscall, SYSCALL_FAILURE);
         }
-    )
+    );
 
     return Error(SystemCallResult, BString__sprintf(&unhandled_syscall_format, syscall_id), SYSCALL_FAILURE);
 }

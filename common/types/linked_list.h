@@ -68,20 +68,19 @@ typedef enum LinkedListError
 
 #define LLFindResultOptional(alias) _Optional(alias##__FindResult)
 
-#define LLIterate(alias, list, item) \
+#define for_each_ll(alias, list, item, ...) \
     for (alias##__NodePtr item##__node = (list).head; item##__node != NULL; item##__node = item##__node->next) \
     { \
-        alias##__type item = item##__node->value;
+        alias##__type item = item##__node->value; \
+        __VA_ARGS__ \
+    }
 
-#define LLPtrIterate(alias, list, item) \
+#define for_each_ll_ptr(alias, list, item, ...) \
     for (alias##__NodePtr item##__node = (list)->head; item##__node != NULL; item##__node = item##__node->next) \
     { \
-        alias##__type item = item##__node->value;
-
-#define LLFindResultMatch(alias, opt) \
-    { \
-        typedef alias##__FindResult value_type; \
-        _Optional(alias##__FindResult) optional = opt; \
+        alias##__type item = item##__node->value; \
+        __VA_ARGS__ \
+    }
 
 #define LinkedListConstructorPreDefine(alias_name) \
     alias_name alias_name##__new(); \

@@ -42,11 +42,11 @@ Result(SystemCallResult) Signal__handler(
                     ),
                         success(exited) { return Success(SystemCallResult, PROCESS_SIGNAL_OK); },
                         error(code, message) { return Error(SystemCallResult, message, code); }
-                    )
+                    );
                 }
         },
         none() { return Error(SystemCallResult, process_not_found, PROCESS_SIGNAL_PROCESS_NOT_FOUND); }
-    )
+    );
 
     return Error(SystemCallResult, process_not_found, PROCESS_SIGNAL_PROCESS_NOT_FOUND);
 }

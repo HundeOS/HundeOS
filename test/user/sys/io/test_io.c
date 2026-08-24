@@ -41,9 +41,9 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
 static DynString dyn_string_from_cstr(const char * text)
 {
     DynString string;
-    match_result(DynStringCode, DynString__init(&string, 128), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(DynStringCode, DynString__init(&string, 128), success_do_nothing(), error_test_fail());
 
-    match_result(DynStringCode, DynString__append_cstr(&string, text), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(DynStringCode, DynString__append_cstr(&string, text), success_do_nothing(), error_test_fail());
 
     return string;
 }
@@ -107,7 +107,7 @@ void test_io_read_dyn_string_returns_file_contents(void)
             TEST_ASSERT_EQUAL_STRING("abc", DynString__cstr(&text));
             TEST_ASSERT_EQUAL_INT64(3, DynString__length(&text));
             DynString__dispose(&text);
-        }, none() { TEST_FAIL(); })
+        }, none_test_fail());
 }
 
 void test_io_write_uses_bstring_length(void)
@@ -184,7 +184,7 @@ void test_sd_host_config_parse_reads_present_host(void)
             TEST_ASSERT_EQUAL_HEX64(0xfe340000, config.physical_base);
             TEST_ASSERT_EQUAL_HEX64(0x100, config.mmio_size);
             TEST_ASSERT_EQUAL_UINT64(126, config.irq);
-        }, none() { TEST_FAIL(); })
+        }, none_test_fail());
 
     DynString__dispose(&sysinfo);
 }
@@ -198,7 +198,7 @@ void test_sd_host_config_parse_returns_none_when_host_absent(void)
         "sd_host.irq=126\n"
     );
 
-    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some(config) { TEST_FAIL(); }, none() {})
+    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some_test_fail(), none_do_nothing());
 
     DynString__dispose(&sysinfo);
 }
@@ -212,7 +212,7 @@ void test_sd_host_config_parse_rejects_partial_numeric_values(void)
         "sd_host.irq=126\n"
     );
 
-    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some(config) { TEST_FAIL(); }, none() {})
+    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some_test_fail(), none_do_nothing());
 
     DynString__dispose(&sysinfo);
 }

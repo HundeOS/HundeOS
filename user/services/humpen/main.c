@@ -35,8 +35,8 @@ static Optional(DynString) Humpen__load_fstab(void)
 
             return Some(DynString, fstab);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return None(DynString);
 }
@@ -62,7 +62,7 @@ static Optional(BString) Humpen__next_token(BStringPtr remaining)
             *remaining = EMPTY_BSTRING;
             return Some(BString, stripped);
         }
-    )
+    );
 
     *remaining = EMPTY_BSTRING;
     return None(BString);
@@ -73,8 +73,8 @@ static BString Humpen__line_without_comment(ConstBStringPtr line)
     BStringSplit split = BString__split_first_any(line, &humpen_comment_delimiter);
     match_optional(BString, split.match,
         some(before_comment) { return before_comment; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return BString__slice(line, 0, BString__length(line));
 }
@@ -92,7 +92,7 @@ static int Humpen__mount_device_line(BString line)
     match_optional(BString, Humpen__next_token(&remaining),
         some(token) { command = token; },
         none() { return 0; }
-    )
+    );
 
     if (!BString__equals(&command, &humpen_device_command))
     {
@@ -108,7 +108,7 @@ static int Humpen__mount_device_line(BString line)
             printf("humpen: invalid device path\n");
             return 1;
         }
-    )
+    );
 
     BString filesystem_type = EMPTY_BSTRING;
     match_optional(BString, Humpen__next_token(&remaining),
@@ -118,7 +118,7 @@ static int Humpen__mount_device_line(BString line)
             printf("humpen: invalid filesystem type\n");
             return 1;
         }
-    )
+    );
 
     BString mountpoint = EMPTY_BSTRING;
     match_optional(BString, Humpen__next_token(&remaining),
@@ -128,7 +128,7 @@ static int Humpen__mount_device_line(BString line)
             printf("humpen: invalid mountpoint\n");
             return 1;
         }
-    )
+    );
 
     match_optional(BString, Humpen__next_token(&remaining),
         some(extra)
@@ -136,8 +136,8 @@ static int Humpen__mount_device_line(BString line)
             printf("humpen: unexpected fstab token\n");
             return 1;
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     IOStatus status = IO__mount_device(&device_path, &filesystem_type, &mountpoint);
     if (status != IO_OK)
@@ -161,7 +161,8 @@ static int Humpen__mount_fstab(ConstDynStringPtr fstab)
     match_optional(DynStringLines, DynString__lines(fstab),
         some(lines)
         {
-            LLIterate(DynStringLines, lines, line)
+            for_each_ll(DynStringLines, lines, line,
+            {
                 match_optional(BString, DynString__bstring(&line),
                     some(bstring_line) { failures += Humpen__mount_device_line(bstring_line); },
                     none()
@@ -169,9 +170,8 @@ static int Humpen__mount_fstab(ConstDynStringPtr fstab)
                         printf("humpen: fstab line too long\n");
                         failures++;
                     }
-                )
-
-            End
+                );
+            });
             DynStringLines__dispose_all(&lines);
         },
         none()
@@ -179,7 +179,7 @@ static int Humpen__mount_fstab(ConstDynStringPtr fstab)
             printf("humpen: failed to split fstab lines\n");
             failures++;
         }
-    )
+    );
 
     return failures;
 }
@@ -194,7 +194,7 @@ int HUMPEN_ENTRYPOINT(void)
             DynString__dispose(&fstab);
         },
         none() { printf("humpen: no fstab found\n"); }
-    )
+    );
 
     return result;
 }

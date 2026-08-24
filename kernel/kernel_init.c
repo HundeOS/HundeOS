@@ -71,7 +71,7 @@ Result(SubsystemInitStatus) Kernel__io_subsystem_init(KernelPtr self)
 {
     __d_println(DEBUG, "Kernel__io_subsystem_init");
     match_result(RegisterCode, IOSubsystem__register(self),
-        success(_) {},
+        success_do_nothing(),
         error(code, message)
         {
             return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
@@ -83,7 +83,7 @@ Result(SubsystemInitStatus) Kernel__io_subsystem_init(KernelPtr self)
 Result(SubsystemInitStatus) Kernel__init_syscall_handlers(KernelPtr self)
 {
     match_result(RegisterResult, Init__syscalls(&self->syscall_dispatcher);,
-        success(_) {},
+        success_do_nothing(),
         error(code, message)
         {
             return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
@@ -101,7 +101,7 @@ Result(SubsystemInitStatus) Kernel__init_heap(KernelPtr self)
 
     SystemInfoPtr system_info = &self->system_info.some.val;
     match_result(HeapCode, Heap__init(&self->heap, system_info);,
-        success(_) {},
+        success_do_nothing(),
         error(code, message)
         {
             return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
@@ -127,7 +127,7 @@ Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
         some(idle)
         {
             match_result(SchedulerInitStatus, Scheduler__init(self, self->scheduler, idle);,
-                success(_) {},
+                success_do_nothing(),
                 error(code, message)
                 {
                     return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
@@ -138,10 +138,10 @@ Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
         {
             return Error(SubsystemInitStatus, failed_to_find_idle_process, SUBSYSTEM_INIT_FAILED);
         }
-    )
+    );
 
     match_result(SchedulerRegisterCode, Scheduler__register(self),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
     );
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);

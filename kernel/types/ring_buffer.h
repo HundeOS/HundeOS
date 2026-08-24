@@ -35,15 +35,19 @@ typedef enum RingBufferError {
         .buffer_size = RingBuffer__##alias##__size, \
     } \
 
-#define RingBufferIterate(alias, ring_buffer, index, value) \
+#define for_each_ring_buffer(alias, ring_buffer, index, value, ...) \
     for (size_t index = 0; index < alias##__item_count(&(ring_buffer)); index++) \
     { \
         Char value = (ring_buffer).buffer[((ring_buffer).read_pos + index) % (ring_buffer).buffer_size]; \
+        __VA_ARGS__ \
+    }
 
-#define RingBufferPtrIterate(alias, ring_buffer, index, value) \
+#define for_each_ring_buffer_ptr(alias, ring_buffer, index, value, ...) \
     for (size_t index = 0; index < alias##__item_count(ring_buffer); index++) \
     { \
         Char value = (ring_buffer)->buffer[((ring_buffer)->read_pos + index) % (ring_buffer)->buffer_size]; \
+        __VA_ARGS__ \
+    }
 
 #define RingBufferDefine(size, alias) \
     static const size_t RingBuffer__##alias##__size = size; \

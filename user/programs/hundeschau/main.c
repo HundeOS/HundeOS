@@ -99,9 +99,13 @@ static int Hundeschau__spawn_required_process(
         .arg1 = BString__slice(arg1, 0, BString__length(arg1)),
     };
     match_result(CollectionCode, HundeschauRequiredProcesses__push(processes, process),
-        success(_) {},
-        error(code, message) {}
-    )
+        success_do_nothing(),
+        error(code, message)
+        {
+            printf("hundeschau: failed to track process: %s\n", BString__cstr(&message));
+            return 1;
+        }
+    );
 
     return 0;
 }
@@ -134,9 +138,13 @@ static int Hundeschau__spawn_required_process_with_stdio(
         .arg1 = EMPTY_BSTRING,
     };
     match_result(CollectionCode, HundeschauRequiredProcesses__push(processes, process),
-        success(_) {},
-        error(code, message) {}
-    )
+        success_do_nothing(),
+        error(code, message)
+        {
+            printf("hundeschau: failed to track process: %s\n", BString__cstr(&message));
+            return 1;
+        }
+    );
 
     return 0;
 }
@@ -188,8 +196,8 @@ static Optional(HundeschauRequiredProcessPtr) Hundeschau__find_required_process(
                     return Some(HundeschauRequiredProcessPtr, process);
                 }
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 
     return None(HundeschauRequiredProcessPtr);
@@ -216,7 +224,7 @@ static Optional(BString) Hundeschau__next_token(BStringPtr remaining)
             *remaining = EMPTY_BSTRING;
             return Some(BString, stripped);
         }
-    )
+    );
 
     *remaining = EMPTY_BSTRING;
     return None(BString);
@@ -227,8 +235,8 @@ static BString Hundeschau__line_without_comment(ConstBStringPtr line)
     BStringSplit split = BString__split_first_any(line, &hundeschau_comment_delimiter);
     match_optional(BString, split.match,
         some(before_comment) { return before_comment; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return BString__slice(line, 0, BString__length(line));
 }
@@ -255,8 +263,8 @@ static Optional(DynString) Hundeschau__load_config(void)
 
             return Some(DynString, config);
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return None(DynString);
 }
@@ -276,7 +284,7 @@ static int Hundeschau__spawn_configured_driver_line(
     match_optional(BString, Hundeschau__next_token(&remaining),
         some(token) { command = token; },
         none() { return 0; }
-    )
+    );
 
     if (!BString__equals(&command, &hundeschau_driver_command))
     {
@@ -287,7 +295,7 @@ static int Hundeschau__spawn_configured_driver_line(
     match_optional(BString, Hundeschau__next_token(&remaining),
         some(token) { path = token; },
         none() { return 1; }
-    )
+    );
 
     if (BString__is_empty(&path))
     {
@@ -298,8 +306,8 @@ static int Hundeschau__spawn_configured_driver_line(
     BString option = EMPTY_BSTRING;
     match_optional(BString, Hundeschau__next_token(&remaining),
         some(token) { option = token; },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     if (!BString__is_empty(&option))
     {
@@ -309,8 +317,8 @@ static int Hundeschau__spawn_configured_driver_line(
             option = EMPTY_BSTRING;
             match_optional(BString, Hundeschau__next_token(&remaining),
                 some(token) { option = token; },
-                none() {}
-            )
+                none_do_nothing()
+            );
         }
         else if (BString__equals(&option, &hundeschau_respawn_option))
         {
@@ -318,8 +326,8 @@ static int Hundeschau__spawn_configured_driver_line(
             option = EMPTY_BSTRING;
             match_optional(BString, Hundeschau__next_token(&remaining),
                 some(token) { option = token; },
-                none() {}
-            )
+                none_do_nothing()
+            );
         }
     }
 
@@ -342,8 +350,8 @@ static int Hundeschau__spawn_configured_driver_line(
         option = EMPTY_BSTRING;
         match_optional(BString, Hundeschau__next_token(&remaining),
             some(token) { option = token; },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 
     if (!BString__is_empty(&option))
@@ -368,7 +376,8 @@ static int Hundeschau__spawn_configured_drivers(
     match_optional(DynStringLines, DynString__lines(config),
         some(lines)
         {
-            LLIterate(DynStringLines, lines, line)
+            for_each_ll(DynStringLines, lines, line,
+            {
                 match_optional(BString, DynString__bstring(&line),
                     some(bstring_line)
                     {
@@ -378,13 +387,12 @@ static int Hundeschau__spawn_configured_drivers(
                         framebuffer_present
                     ); },
                     none() { failures++; }
-                )
-
-            End
+                );
+            });
             DynStringLines__dispose_all(&lines);
         },
         none() { failures++; }
-    )
+    );
 
     return failures;
 }
@@ -428,7 +436,7 @@ static int Hundeschau__initialise_required_processes(HundeschauRequiredProcesses
             DynString__dispose(&config);
         },
         none() { failures += Hundeschau__spawn_default_drivers(processes, framebuffer_present); }
-    )
+    );
 
     if (framebuffer_present)
     {
@@ -497,7 +505,7 @@ int HUNDESCHAU_ENTRYPOINT(void)
 
                 process->pid = (uint64_t) respawn_result;
             },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 }

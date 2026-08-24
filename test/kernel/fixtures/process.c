@@ -29,7 +29,7 @@ ProcessPtr dummy_process(Tick last_tick, CPUID cpu, ProcessState state)
             process->state = state;
 
             return process;
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
     return NULL;
 }
 
@@ -43,6 +43,6 @@ ProcessPtr dummy_process_with_parent(Tick last_tick, CPUID cpu, ProcessState sta
             process->state = state;
 
             return process;
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
     return NULL;
 }

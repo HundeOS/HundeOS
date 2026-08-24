@@ -91,7 +91,7 @@ void test_block_cache_reads_block_from_device(void)
 {
     Data target[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
 
-    match_result(BlockDeviceCode, BlockCache__read(&cache, 3, target), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockDeviceCode, BlockCache__read(&cache, 3, target), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(3, fake.last_read_block);
     TEST_ASSERT_EQUAL(1, fake.read_count);
@@ -104,11 +104,11 @@ void test_block_cache_serves_second_read_from_cache(void)
     Data first[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
     Data second[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
 
-    match_result(BlockDeviceCode, BlockCache__read(&cache, 2, first), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(BlockDeviceCode, BlockCache__read(&cache, 2, first), success_do_nothing(), error_test_fail());
 
     fake.blocks[2][0] = 99;
 
-    match_result(BlockDeviceCode, BlockCache__read(&cache, 2, second), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(BlockDeviceCode, BlockCache__read(&cache, 2, second), success_do_nothing(), error_test_fail());
 
     TEST_ASSERT_EQUAL(1, fake.read_count);
     TEST_ASSERT_EQUAL(first[0], second[0]);
@@ -119,16 +119,16 @@ void test_block_cache_rejects_invalid_arguments(void)
 {
     Data target[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
 
-    match_result(BlockDeviceCode, BlockCache__read(NULL, 0, target), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_INVALID_ARGUMENT, code); })
+    match_result(BlockDeviceCode, BlockCache__read(NULL, 0, target), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_INVALID_ARGUMENT, code); });
 
-    match_result(BlockDeviceCode, BlockCache__read(&cache, 0, NULL), success(code) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_INVALID_ARGUMENT, code); })
+    match_result(BlockDeviceCode, BlockCache__read(&cache, 0, NULL), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_INVALID_ARGUMENT, code); });
 }
 
 void test_memory_block_device_reads_unwritten_blocks_as_zero(void)
 {
     Data target[BLOCK_DEVICE_BLOCK_SIZE] = { 7 };
 
-    match_result(BlockCount, BlockDevice__read(&memory_block_device, 4, 1, target), success(count) { TEST_ASSERT_EQUAL(1, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockCount, BlockDevice__read(&memory_block_device, 4, 1, target), success(count) { TEST_ASSERT_EQUAL(1, count); }, error_test_fail());
 
     for (size_t i = 0; i < BLOCK_DEVICE_BLOCK_SIZE; i++)
     {
@@ -146,9 +146,9 @@ void test_memory_block_device_writes_and_reads_single_block(void)
         source[i] = (Data) (255 - (i % 256));
     }
 
-    match_result(BlockCount, BlockDevice__write(&memory_block_device, 2, 1, source), success(count) { TEST_ASSERT_EQUAL(1, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockCount, BlockDevice__write(&memory_block_device, 2, 1, source), success(count) { TEST_ASSERT_EQUAL(1, count); }, error_test_fail());
 
-    match_result(BlockCount, BlockDevice__read(&memory_block_device, 2, 1, target), success(count) { TEST_ASSERT_EQUAL(1, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockCount, BlockDevice__read(&memory_block_device, 2, 1, target), success(count) { TEST_ASSERT_EQUAL(1, count); }, error_test_fail());
 
     TEST_ASSERT_EQUAL_MEMORY(source, target, BLOCK_DEVICE_BLOCK_SIZE);
     TEST_ASSERT_EQUAL(1, MemoryDeviceBlocks__len(&memory_device.blocks));
@@ -164,9 +164,9 @@ void test_memory_block_device_writes_and_reads_multiple_blocks(void)
         source[i] = (Data) (i % 251);
     }
 
-    match_result(BlockCount, BlockDevice__write(&memory_block_device, 5, 2, source), success(count) { TEST_ASSERT_EQUAL(2, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockCount, BlockDevice__write(&memory_block_device, 5, 2, source), success(count) { TEST_ASSERT_EQUAL(2, count); }, error_test_fail());
 
-    match_result(BlockCount, BlockDevice__read(&memory_block_device, 5, 2, target), success(count) { TEST_ASSERT_EQUAL(2, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockCount, BlockDevice__read(&memory_block_device, 5, 2, target), success(count) { TEST_ASSERT_EQUAL(2, count); }, error_test_fail());
 
     TEST_ASSERT_EQUAL_MEMORY(source, target, BLOCK_DEVICE_BLOCK_SIZE * 2);
     TEST_ASSERT_EQUAL(2, MemoryDeviceBlocks__len(&memory_device.blocks));
@@ -178,9 +178,9 @@ void test_memory_block_device_rewrites_existing_block_without_allocating_another
     Data replacement[BLOCK_DEVICE_BLOCK_SIZE] = { 2 };
     Data target[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
 
-    match_result(BlockCount, BlockDevice__write(&memory_block_device, 1, 1, source), success(_) {}, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__write(&memory_block_device, 1, 1, replacement), success(_) {}, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&memory_block_device, 1, 1, target), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(BlockCount, BlockDevice__write(&memory_block_device, 1, 1, source), success_do_nothing(), error_test_fail());
+    match_result(BlockCount, BlockDevice__write(&memory_block_device, 1, 1, replacement), success_do_nothing(), error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&memory_block_device, 1, 1, target), success_do_nothing(), error_test_fail());
 
     TEST_ASSERT_EQUAL_MEMORY(replacement, target, BLOCK_DEVICE_BLOCK_SIZE);
     TEST_ASSERT_EQUAL(1, MemoryDeviceBlocks__len(&memory_device.blocks));

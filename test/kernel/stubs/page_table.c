@@ -61,18 +61,20 @@ void PageTable__map_mmio(PageTablePtr self, KernelPtr kernel, UserAddress addres
 
 void PageTable__unmap(PageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
 {
-    FAIterate(MapRequestArray, self->mapped_addresses, i, mapped_address)
+    for_each_fa(MapRequestArray, self->mapped_addresses, i, mapped_address,
+    {
         if (MapRequest__is_covered_by_unmap(&mapped_address, virtual_address, size))
         {
             MapRequestArray__remove(&self->mapped_addresses, mapped_address);
             return;
         }
-    End
+    });
 }
 
 bool check_address_mapped(PageTable *page_table, Address virtual_address, bool read, bool write, bool execute, size_t size)
 {
-    FAIterate(MapRequestArray, page_table->mapped_addresses, i, mapped_address)
+    for_each_fa(MapRequestArray, page_table->mapped_addresses, i, mapped_address,
+    {
         UserAddress mapped = mapped_address.address;
         __d_printf(PROGRESS,
             "Checking %i mapped address calls vaddr=%p mapped=%p size=%i expected_size=%i rwx=%i%i%i expected rwx=%i%i%i\n",
@@ -87,7 +89,7 @@ bool check_address_mapped(PageTable *page_table, Address virtual_address, bool r
         if (match) {
             return true;
         }
-    End
+    });
 
     return false;
 }

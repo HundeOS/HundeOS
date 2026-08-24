@@ -36,7 +36,7 @@ void test_fixed_array_push_and_at(void)
 {
     TestArray array = TestArray__new();
 
-    match_result(CollectionCode, TestArray__push(&array, 10), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CollectionCode, TestArray__push(&array, 10), success_do_nothing(), error_test_fail());
 
     TEST_ASSERT_EQUAL(1, TestArray__len(&array));
     TEST_ASSERT_EQUAL(10, Unwrap(TestType, TestArray__at(&array, 0), (TestType){}));
@@ -53,7 +53,7 @@ void test_fixed_array_push_all_and_negative_index(void)
     }
 
     TestArray__push(&array, 123);
-    match_result(CollectionCode, TestArray__push_all(&array, &other), success(index) { TEST_ASSERT_EQUAL(1, index); }, error(code, message) { TEST_FAIL(); })
+    match_result(CollectionCode, TestArray__push_all(&array, &other), success(index) { TEST_ASSERT_EQUAL(1, index); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(11, TestArray__len(&array));
     TEST_ASSERT_EQUAL(9, Unwrap(TestType, TestArray__at(&array, -1), (TestType){}));
@@ -67,18 +67,18 @@ void test_fixed_array_find_remove_and_pop_front(void)
         TestArray__push(&array, i + 100);
     }
 
-    match_optional(ArrayIndex, TestArray__find_item(&array, 107), some(value) { TEST_ASSERT_EQUAL(7, value); }, none() { TEST_FAIL(); })
+    match_optional(ArrayIndex, TestArray__find_item(&array, 107), some(value) { TEST_ASSERT_EQUAL(7, value); }, none_test_fail());
 
-    match_result(CollectionCode, TestArray__remove(&array, 107), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CollectionCode, TestArray__remove(&array, 107), success_do_nothing(), error_test_fail());
 
-    match_optional(TestType, TestArray__pop_front(&array), some(value) { TEST_ASSERT_EQUAL(100, value); }, none() { TEST_FAIL(); })
+    match_optional(TestType, TestArray__pop_front(&array), some(value) { TEST_ASSERT_EQUAL(100, value); }, none_test_fail());
 }
 
 void test_fixed_array_set_sort_and_filter(void)
 {
     TestArray array = TestArray__new();
 
-    match_result(CollectionCode, TestArray__set(&array, TEST_ARRAY_SIZE - 1, 10), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CollectionCode, TestArray__set(&array, TEST_ARRAY_SIZE - 1, 10), success_do_nothing(), error_test_fail());
 
     TEST_ASSERT_EQUAL(TEST_ARRAY_SIZE, TestArray__len(&array));
 
@@ -100,7 +100,7 @@ void test_fixed_array_push_when_full_gives_error(void)
 {
     TinyTestArray array = TinyTestArray__new();
 
-    match_result(CollectionCode, TinyTestArray__push(&array, 10), success(_) {}, error(code, message) { TEST_FAIL(); })
+    match_result(CollectionCode, TinyTestArray__push(&array, 10), success_do_nothing(), error_test_fail());
 
-    match_result(CollectionCode, TinyTestArray__push(&array, 10), success(value) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(ARRAY_FULL, code); })
+    match_result(CollectionCode, TinyTestArray__push(&array, 10), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(ARRAY_FULL, code); });
 }

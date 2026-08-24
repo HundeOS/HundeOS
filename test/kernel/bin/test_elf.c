@@ -52,7 +52,7 @@ static void check_section(
                 TEST_ASSERT_EQUAL_UINT(entry_size, section->entry_size);
                 TEST_ASSERT_EQUAL_UINT(alignment, section->alignment);
                 TEST_ASSERT_EQUAL_UINT(type, section->type);
-            }, none() { TEST_FAIL(); });
+            }, none_test_fail());
 }
 
 void __test__sections(void)
@@ -98,7 +98,7 @@ void test_map_binary_runnable(void)
                 TEST_ASSERT_FALSE(segment.address.write);
                 TEST_ASSERT_EQUAL_UINT(0x400000, segment.address.virtual_addr);
                 TEST_ASSERT_EQUAL_UINT(4096, segment.size);
-            }, none() { TEST_FAIL(); });
+            }, none_test_fail());
 }
 
 void test_map_zeroes_load_segment_memory_beyond_file_size(void)
@@ -143,7 +143,7 @@ void test_map_zeroes_load_segment_memory_beyond_file_size(void)
             {
                 TEST_ASSERT_EQUAL_UINT8(0, mapped[index]);
             }
-        }, none() { TEST_FAIL(); })
+        }, none_test_fail());
 }
 
 void test_map_handles_unaligned_load_segment_memory(void)
@@ -195,7 +195,7 @@ void test_map_handles_unaligned_load_segment_memory(void)
             {
                 TEST_ASSERT_EQUAL_UINT8(0, mapped[index]);
             }
-        }, none() { TEST_FAIL(); })
+        }, none_test_fail());
 }
 
 void test_program_header(void)
@@ -219,7 +219,7 @@ void test_program_header(void)
                 TEST_ASSERT_EQUAL_UINT(0x65, header->file_size);
                 TEST_ASSERT_EQUAL_UINT(0x65, header->memory_size);
                 TEST_ASSERT_EQUAL_UINT(0x10000, header->alignment);
-            }, none() { TEST_FAIL(); })
+            }, none_test_fail());
 }
 
 void test_parse_elf_header(void)

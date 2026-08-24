@@ -99,7 +99,7 @@ static void ProcSysinfoWriter__append_char(ProcSysinfoWriterPtr self, char ch)
         match_result(Pos, IOBuffer__push(self->buffer, ch),
             success(pos) { self->written++;; },
             error(code, message) { self->failed = true;; }
-        )
+        );
     }
 
     self->cursor++;
@@ -107,9 +107,10 @@ static void ProcSysinfoWriter__append_char(ProcSysinfoWriterPtr self, char ch)
 
 static void ProcSysinfoWriter__append_bstring(ProcSysinfoWriterPtr self, ConstBStringPtr text)
 {
-    BStringIterate(text, index, ch)
+    for_each_bstring(text, index, ch,
+    {
         ProcSysinfoWriter__append_char(self, ch);
-    End
+    });
 }
 
 static void ProcSysinfoWriter__append_key_value_prefix(ProcSysinfoWriterPtr self, ConstBStringPtr key)
@@ -263,8 +264,8 @@ static void ProcSysinfoWriter__append_physical_memory_regions(ProcSysinfoWriterP
     {
         match_optional(PhysicalMemoryRegions__type_ptr__optional, PhysicalMemoryRegions__ptr_at(regions, index),
             some(region) { ProcSysinfoWriter__append_physical_memory_region(self, index, region);; },
-            none() {}
-        )
+            none_do_nothing()
+        );
     }
 }
 
@@ -291,7 +292,7 @@ static void ProcSysinfoWriter__append_framebuffer(ProcSysinfoWriterPtr self, Opt
             ProcSysinfoWriter__append_hex_line(self, &framebuffer_reserved_mask_key, info.reserved_mask);
         },
         none() { ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 0);; }
-    )
+    );
 }
 
 static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, Optional(PciInfo) pci)
@@ -307,7 +308,7 @@ static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, Optional(Pc
             ProcSysinfoWriter__append_dec_line(self, &pci_bus_end_key, info.bus_end);
         },
         none() { ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 0);; }
-    )
+    );
 }
 
 static void ProcSysinfoWriter__append_sd_host(ProcSysinfoWriterPtr self, Optional(SdHostInfo) sd_host)
@@ -321,7 +322,7 @@ static void ProcSysinfoWriter__append_sd_host(ProcSysinfoWriterPtr self, Optiona
             ProcSysinfoWriter__append_dec_line(self, &sd_host_irq_key, info.irq);
         },
         none() { ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 0);; }
-    )
+    );
 }
 
 static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
@@ -376,7 +377,7 @@ static Result(IOInternalHandle) ProcFilesystemIOState__add_handle(ProcFilesystem
         FileHandleTargetPtr target = FileHandleTarget__heap_new(path);
         FileHandleTargetMap__set(&self->state.handles, handle, target);
         cs_return Success(IOInternalHandle, handle);
-    })
+    });
 }
 
 static Result(FileHandleTargetPtr) ProcFilesystemIOState__get_handle(
@@ -388,8 +389,8 @@ static Result(FileHandleTargetPtr) ProcFilesystemIOState__get_handle(
         match_optional(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle),
             some(target) { cs_return Success(FileHandleTargetPtr, target); },
             none() { cs_return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -408,8 +409,8 @@ static Result(IOInternalHandle) ProcFilesystemIOState__delete_handle(
                 cs_return Success(IOInternalHandle, handle);
             },
             none() { cs_return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE); }
-        )
-    })
+        );
+    });
 
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
@@ -463,10 +464,10 @@ static Result(IOBufferPtr) ProcFilesystemIO__read(
                     return Success(IOBufferPtr, &target->buffer);
                 },
                 none() { return Error(IOBufferPtr, missing_system_info, IO_OPERATION_NOT_SUPPORTED);; }
-            )
+            );
         },
         error(code, message) { return Error(IOBufferPtr, message, code); }
-    )
+    );
 
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }

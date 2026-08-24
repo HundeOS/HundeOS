@@ -60,7 +60,7 @@ static void set_bitmap_bit(DataPtr data, uint32_t index)
 
 static void write_block(Ext2Block block, DataPtr data)
 {
-    match_result(BlockCount, BlockDevice__write(&block_device, block * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, data), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockCount, BlockDevice__write(&block_device, block * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, data), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
 }
 
 static void write_inode(
@@ -277,12 +277,12 @@ static void add_empty_docs_directory(void)
     Data superblock[EXT2_BLOCK_SIZE] = { 0 };
     Data group_desc[EXT2_BLOCK_SIZE] = { 0 };
 
-    match_result(BlockCount, BlockDevice__read(&block_device, 5 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, inode_table), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 7 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, root_dir), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 3 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, block_bitmap), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 4 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, inode_bitmap), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 1 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, superblock), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 2 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, group_desc), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockCount, BlockDevice__read(&block_device, 5 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, inode_table), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 7 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, root_dir), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 3 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, block_bitmap), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 4 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, inode_bitmap), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 1 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, superblock), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 2 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, group_desc), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
 
     write_inode(inode_table, 4, EXT2_INODE_MODE_DIR | 0755, EXT2_BLOCK_SIZE, 9, 2);
     write_dirent(root_dir, 24, 4, 16, "docs", 2);
@@ -318,12 +318,12 @@ static void add_docs_directory_with_readme(void)
     Data group_desc[EXT2_BLOCK_SIZE] = { 0 };
     Data readme_block[EXT2_BLOCK_SIZE] = { 0 };
 
-    match_result(BlockCount, BlockDevice__read(&block_device, 5 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, inode_table), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 7 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, root_dir), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 3 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, block_bitmap), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 4 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, inode_bitmap), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 1 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, superblock), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
-    match_result(BlockCount, BlockDevice__read(&block_device, 2 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, group_desc), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(BlockCount, BlockDevice__read(&block_device, 5 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, inode_table), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 7 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, root_dir), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 3 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, block_bitmap), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 4 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, inode_bitmap), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 1 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, superblock), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
+    match_result(BlockCount, BlockDevice__read(&block_device, 2 * EXT2_BLOCK_SECTORS, EXT2_BLOCK_SECTORS, group_desc), success(count) { TEST_ASSERT_EQUAL(EXT2_BLOCK_SECTORS, count); }, error_test_fail());
 
     write_inode(inode_table, 4, EXT2_INODE_MODE_DIR | 0755, EXT2_BLOCK_SIZE, 9, 2);
     write_inode(inode_table, 5, EXT2_INODE_MODE_FILE | 0644, 6, 10, 1);
@@ -376,13 +376,13 @@ void tearDown(void)
 
 void test_ext2_mounts_and_lists_root_directory(void)
 {
-    match_result(Ext2Code, Ext2Volume__mount(&volume), success(code) { TEST_ASSERT_EQUAL(EXT2_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(Ext2Code, Ext2Volume__mount(&volume), success(code) { TEST_ASSERT_EQUAL(EXT2_OK, code); }, error_test_fail());
 
     match_result(Ext2DirectoryEntries, Ext2Volume__list_root(&volume), success(entries) {
             TEST_ASSERT_EQUAL(1, entries.len);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries.data[0].name.data);
             TEST_ASSERT_EQUAL_UINT16(EXT2_INODE_MODE_FILE | 0644, entries.data[0].mode);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_ext2_reads_root_file_contents(void)
@@ -403,9 +403,9 @@ void test_ext2_reads_root_file_contents(void)
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 5), success(bytes_read) {
                             TEST_ASSERT_EQUAL(5, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("hello", output, 5);
-                        }, error(code, message) { TEST_FAIL(); })
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                        }, error_test_fail());
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_ext2_reads_root_file_contents_in_chunks(void)
@@ -425,17 +425,17 @@ void test_ext2_reads_root_file_contents_in_chunks(void)
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 2), success(bytes_read) {
                             TEST_ASSERT_EQUAL(2, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("he", output, 2);
-                        }, error(code, message) { TEST_FAIL(); })
-                }, error(code, message) { TEST_FAIL(); })
+                        }, error_test_fail());
+                }, error_test_fail());
 
             match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, handle, 3, target), success(buffer) {
                     TEST_ASSERT_EQUAL(3, IOBuffer__item_count(buffer));
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 3), success(bytes_read) {
                             TEST_ASSERT_EQUAL(3, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("llo", output, 3);
-                        }, error(code, message) { TEST_FAIL(); })
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                        }, error_test_fail());
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_ext2_reads_file_contents_from_later_inode_group(void)
@@ -459,9 +459,9 @@ void test_ext2_reads_file_contents_from_later_inode_group(void)
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 5), success(bytes_read) {
                             TEST_ASSERT_EQUAL(5, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("hello", output, 5);
-                        }, error(code, message) { TEST_FAIL(); })
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                        }, error_test_fail());
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_ext2_list_dir_uses_async_mount_then_root_read_when_unmounted(void)
@@ -478,7 +478,7 @@ void test_ext2_list_dir_uses_async_mount_then_root_read_when_unmounted(void)
             TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_ROOT, entries[0].user_id);
             TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_ROOT, entries[0].group_id);
             TEST_ASSERT_EQUAL_UINT16(IO_MODE_TYPE_FILE | 0644, entries[0].mode);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     TEST_ASSERT_TRUE(state->volume.mounted);
 }
@@ -503,7 +503,7 @@ void test_ext2_userspace_open_starts_async_inode_lookup(void)
 
     match_result(IOInternalHandle, fs->file_io.base_io.open(
         &state->state.state, bstring("hello.txt"), IO_OPEN_READ
-    ), success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_root_filesystem_can_mount_ext2_at_root_and_list_mount_overlays(void)
@@ -518,20 +518,20 @@ void test_root_filesystem_can_mount_ext2_at_root_and_list_mount_overlays(void)
     Ext2FilesystemIOState__heap_new(ext2_fs, &block_device, 0);
     MemFilesystemIOState__heap_new(memfs);
 
-    match_result(MountResult, Filesystem__mount(root_fs, bstring("/"), ext2_fs), success(code) { TEST_ASSERT_EQUAL(MOUNT_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(MountResult, Filesystem__mount(root_fs, bstring("/"), ext2_fs), success(code) { TEST_ASSERT_EQUAL(MOUNT_OK, code); }, error_test_fail());
 
-    match_result(MountResult, Filesystem__mount(root_fs, bstring("/tmp/memfs"), memfs), success(code) { TEST_ASSERT_EQUAL(MOUNT_OK, code); }, error(code, message) { TEST_FAIL(); })
+    match_result(MountResult, Filesystem__mount(root_fs, bstring("/tmp/memfs"), memfs), success(code) { TEST_ASSERT_EQUAL(MOUNT_OK, code); }, error_test_fail());
 
     match_result(DirectoryEntryCount, root_fs->file_io.list_dir(&root_state->state, bstring("/"), root_entries, 4), success(count) {
             TEST_ASSERT_EQUAL(2, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", root_entries[0].name);
             TEST_ASSERT_EQUAL_STRING("tmp", root_entries[1].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
     match_result(DirectoryEntryCount, root_fs->file_io.list_dir(&root_state->state, bstring("/tmp"), tmp_entries, 2), success(count) {
             TEST_ASSERT_EQUAL(1, count);
             TEST_ASSERT_EQUAL_STRING("memfs", tmp_entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 }
 
 void test_ext2_userspace_list_dir_starts_async_when_mounted(void)
@@ -553,7 +553,7 @@ void test_ext2_userspace_list_dir_starts_async_when_mounted(void)
     state->volume.mounted = true;
 
     DirectoryEntry entries[4] = { 0 };
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_remove_deletes_regular_file_and_frees_root_entry(void)
@@ -561,12 +561,12 @@ void test_ext2_remove_deletes_regular_file_and_frees_root_entry(void)
     FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error_test_fail());
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("hello.txt"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_ext2_remove_deletes_empty_directory(void)
@@ -576,15 +576,15 @@ void test_ext2_remove_deletes_empty_directory(void)
     FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("docs"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("docs"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
     match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) {
             TEST_ASSERT_EQUAL(1, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("docs"), IO_OPEN_READ), success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("docs"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_ext2_write_open_creates_new_file_and_reads_back(void)
@@ -604,17 +604,17 @@ void test_ext2_write_open_creates_new_file_and_reads_back(void)
                 write_handle,
                 input,
                 sizeof(input) - 1
-            ), success(bytes) { TEST_ASSERT_EQUAL(4, bytes); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            ), success(bytes) { TEST_ASSERT_EQUAL(4, bytes); }, error_test_fail());
+        }, error_test_fail());
 
     match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("notes.txt"), IO_OPEN_READ), success(read_handle) {
             match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, read_handle, 4, target), success(buffer) {
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 4), success(bytes_read) {
                             TEST_ASSERT_EQUAL(4, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("woof", output, 4);
-                        }, error(code, message) { TEST_FAIL(); })
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                        }, error_test_fail());
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_ext2_write_open_truncates_existing_file(void)
@@ -634,17 +634,17 @@ void test_ext2_write_open_truncates_existing_file(void)
                 write_handle,
                 input,
                 sizeof(input) - 1
-            ), success(bytes) { TEST_ASSERT_EQUAL(2, bytes); }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+            ), success(bytes) { TEST_ASSERT_EQUAL(2, bytes); }, error_test_fail());
+        }, error_test_fail());
 
     match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(read_handle) {
             match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, read_handle, 16, target), success(buffer) {
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 2), success(bytes_read) {
                             TEST_ASSERT_EQUAL(2, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("yo", output, 2);
-                        }, error(code, message) { TEST_FAIL(); })
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                        }, error_test_fail());
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_ext2_mkdir_creates_empty_directory(void)
@@ -654,7 +654,7 @@ void test_ext2_mkdir_creates_empty_directory(void)
     DirectoryEntry root_entries[4] = { 0 };
     DirectoryEntry docs_entries[4] = { 0 };
 
-    match_result(IOStatus, fs->file_io.mkdir(&state->state.state, bstring("docs")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(IOStatus, fs->file_io.mkdir(&state->state.state, bstring("docs")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), root_entries, 4), success(count) {
             TEST_ASSERT_EQUAL(2, count);
@@ -664,9 +664,9 @@ void test_ext2_mkdir_creates_empty_directory(void)
             TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_ROOT, root_entries[1].user_id);
             TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_ROOT, root_entries[1].group_id);
             TEST_ASSERT_EQUAL_UINT16(IO_MODE_TYPE_DIR | 0755, root_entries[1].mode);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("docs"), docs_entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("docs"), docs_entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error_test_fail());
 }
 
 void test_ext2_remove_recursive_deletes_directory_tree(void)
@@ -676,15 +676,15 @@ void test_ext2_remove_recursive_deletes_directory_tree(void)
     FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("docs"), IO_REMOVE_RECURSIVE), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("docs"), IO_REMOVE_RECURSIVE), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
     match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) {
             TEST_ASSERT_EQUAL(1, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries[0].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("docs/readme.txt"), IO_OPEN_READ), success(handle) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); })
+    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("docs/readme.txt"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_ext2_userspace_remove_starts_async_inode_lookup(void)
@@ -705,7 +705,7 @@ void test_ext2_userspace_remove_starts_async_inode_lookup(void)
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_userspace_recursive_remove_starts_async_inode_lookup(void)
@@ -726,7 +726,7 @@ void test_ext2_userspace_recursive_remove_starts_async_inode_lookup(void)
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("docs"), IO_REMOVE_RECURSIVE), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("docs"), IO_REMOVE_RECURSIVE), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_userspace_write_starts_async_for_new_file(void)
@@ -756,8 +756,8 @@ void test_ext2_userspace_write_starts_async_for_new_file(void)
                 handle,
                 input,
                 sizeof(input) - 1
-            ), success(bytes) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
-        }, error(code, message) { TEST_FAIL(); })
+            ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+        }, error_test_fail());
 }
 
 void test_ext2_userspace_write_starts_async_for_existing_file(void)
@@ -787,8 +787,8 @@ void test_ext2_userspace_write_starts_async_for_existing_file(void)
                 handle,
                 input,
                 sizeof(input) - 1
-            ), success(bytes) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
-        }, error(code, message) { TEST_FAIL(); })
+            ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+        }, error_test_fail());
 }
 
 void test_ext2_userspace_mkdir_starts_async(void)
@@ -809,7 +809,7 @@ void test_ext2_userspace_mkdir_starts_async(void)
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOStatus, fs->file_io.mkdir(&state->state.state, bstring("docs")), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(IOStatus, fs->file_io.mkdir(&state->state.state, bstring("docs")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_link_creates_hard_link_and_preserves_file_after_single_remove(void)
@@ -822,25 +822,25 @@ void test_ext2_link_creates_hard_link_and_preserves_file_after_single_remove(voi
         .len = sizeof(output),
     };
 
-    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
     match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) {
             TEST_ASSERT_EQUAL(2, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries[0].name);
             TEST_ASSERT_EQUAL_STRING("copy.txt", entries[1].name);
-        }, error(code, message) { TEST_FAIL(); })
+        }, error_test_fail());
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("copy.txt"), IO_OPEN_READ), success(read_handle) {
             match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, read_handle, 5, target), success(buffer) {
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 5), success(bytes_read) {
                             TEST_ASSERT_EQUAL(5, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("hello", output, 5);
-                        }, error(code, message) { TEST_FAIL(); })
-                }, error(code, message) { TEST_FAIL(); })
-        }, error(code, message) { TEST_FAIL(); })
+                        }, error_test_fail());
+                }, error_test_fail());
+        }, error_test_fail());
 }
 
 void test_ext2_link_remove_last_link_deletes_file(void)
@@ -848,13 +848,13 @@ void test_ext2_link_remove_last_link_deletes_file(void)
     FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("copy.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error(code, message) { TEST_FAIL(); })
+    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("copy.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error(code, message) { TEST_FAIL(); })
+    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error_test_fail());
 }
 
 void test_ext2_userspace_link_starts_async(void)
@@ -875,7 +875,7 @@ void test_ext2_userspace_link_starts_async(void)
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_userspace_link_preserves_live_kernel_context_on_first_request(void)
@@ -898,7 +898,7 @@ void test_ext2_userspace_link_preserves_live_kernel_context_on_first_request(voi
 
     KernelContext kernel_context = KernelContext__new(Some(ProcessID, 77), Some(SchedulerPtr, userspace.scheduler));
     BlockDevice__set_current_context(&kernel_context);
-    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_FAIL(); }, error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); })
+    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     Optional(KernelContextPtr) current_context = BlockDevice__current_context();

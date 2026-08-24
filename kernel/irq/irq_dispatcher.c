@@ -35,8 +35,8 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_kernel(
     {
         match_optional(IRQConsumerMap__value_type_ptr, IRQConsumerMap__get_ptr(&self->consumers, irq),
             some(existing) { cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED); },
-            none() {}
-        )
+            none_do_nothing()
+        );
         IRQConsumerMap__set(&self->consumers, irq, irq_consumer);
     });
 
@@ -77,21 +77,21 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(
     {
         match_optional(IRQConsumerMap__value_type_ptr, IRQConsumerMap__get_ptr(&self->consumers, irq),
             some(existing) { cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED); },
-            none() {}
-        )
+            none_do_nothing()
+        );
         IRQConsumerMap__set(&self->consumers, irq, irq_consumer);
     });
     __d_printf(IODEV, "irq register service irq=%i pid=%i name=%s\n", irq, process->pid, cstr(process->name));
 
     match_result(ServiceCode, Scheduler__subscribe_irq(self->scheduler, process, irq),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
-    )
+    );
 
     match_result(SubsystemInitStatus, Arch__enable_irq(interrupt_controller, irq),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
-    )
+    );
 
     return Success(IRQRegistrationStatus, IRQ_REGISTERED);
 }
@@ -119,26 +119,28 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(
 
     critical_section(self->lock,
     {
-        MapIterate(IRQConsumerMap, self->consumers, index, irq, consumer)
+        for_each_map(IRQConsumerMap, self->consumers, index, irq, consumer,
+        {
             if (consumer.type == IRQ_CONSUMER_SERVICE && consumer.service_process == process)
             {
                 match_result(CollectionCode, IRQNumbers__push(&stale_irqs, irq),
-                    success(_) {},
+                    success_do_nothing(),
                     error(code, message) { cs_return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
-                )
+                );
             }
 
-        End
-        FAIterate(IRQNumbers, stale_irqs, irq_index, irq)
+        });
+        for_each_fa(IRQNumbers, stale_irqs, irq_index, irq,
+        {
             IRQConsumerMap__delete(&self->consumers, irq);
             Arch__mask_irq(interrupt_controller, irq);
-        End
+        });
     });
 
     match_result(ServiceCode, ServiceEventDispatcher__unsubscribe_process(&self->scheduler->service_event_dispatcher, process),
-        success(_) {},
+        success_do_nothing(),
         error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
-    )
+    );
 
     return Success(IRQRegistrationStatus, IRQ_REGISTERED);
 }
@@ -170,11 +172,11 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(
                 match_result(ServiceCode, Scheduler__send_irq_event(self->scheduler, irq),
                     success(_) { return Success(IRQDispatchStatus, IRQ_DISPATCH_RESCHEDULE); },
                     error(code, message) { return Error(IRQDispatchStatus, message, IRQ_DISPATCH_ERROR); }
-                )
+                );
             }
         },
-        none() {}
-    )
+        none_do_nothing()
+    );
 
     return Success(IRQDispatchStatus, IRQ_DISPATCH_UNHANDLED);
 }
