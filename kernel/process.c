@@ -448,6 +448,42 @@ bool Process__mark_parked_operation_ready(
     return false;
 }
 
+bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
+{
+    critical_section(self->lock,
+    {
+        for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+        {
+            match_optional(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index),
+                some(parked_operation)
+                {
+                    if (parked_operation->park_reason != PARK_SLEEP)
+                    {
+                        continue;
+                    }
+
+                    match_optional(OperationKey, parked_operation->operation_key,
+                        some(deadline)
+                        {
+                            if (current_tick >= deadline)
+                            {
+                                parked_operation->return_code = Some(ReturnCode, PROCESS_SLEEP_OK);
+                                ParkedOperation__mark_ready(parked_operation);
+                                self->state = PROC_STATE_INTERRUPTED;
+                                cs_return true;
+                            }
+                        },
+                        none_do_nothing()
+                    );
+                },
+                none_do_nothing()
+            );
+        }
+    });
+
+    return false;
+}
+
 bool Process__is_parked(ProcessPtr self)
 {
     critical_section(self->lock,

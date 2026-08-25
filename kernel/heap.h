@@ -10,8 +10,8 @@
 #include "memory_page.h"
 #include "system_info.h"
 
-#define BUCKET_SIZE 1024
-#define TABLE_SIZE (MAX_BLOCKS / BUCKET_SIZE)
+#define BLOCK_TABLE_SIZE 256
+#define BLOCK_BUCKET_SIZE 256
 
 typedef struct MemoryBlock
 {
@@ -25,10 +25,22 @@ typedef MemoryBlock * MemoryBlockPtr;
 OptionalDef(MemoryBlock);
 ResultDef(MemoryBlock);
 
-HashtableDefine(Address, MemoryBlock, TABLE_SIZE, BUCKET_SIZE, AllocatedBlocks, hash__uint64, SimpleEquals(uint64_t), never__equals);
+HashCode Heap__hash_address(Address * self);
+
+HashtableDefine(
+    Address,
+    MemoryBlock,
+    BLOCK_TABLE_SIZE,
+    BLOCK_BUCKET_SIZE,
+    AllocatedBlocks,
+    Heap__hash_address,
+    SimpleEquals(uint64_t),
+    never__equals
+);
 
 typedef struct Heap
 {
+    mutex_t lock;
     Address start;
     Address end;
     Address phys_start;
@@ -70,6 +82,7 @@ KernelAddress Heap__try_from_virtual_address(HeapPtr self, Address virtual);
 
 #define NEW_HEAP \
     (Heap) { \
+        .lock = MUTEX_INIT, \
         .start = 0, \
         .end = 0, \
         .phys_start = 0,\

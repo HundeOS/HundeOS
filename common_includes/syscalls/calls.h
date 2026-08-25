@@ -19,6 +19,7 @@ typedef enum SystemCall
     SYSCALL_EXEC_REQUEST = 0x89,
     SYSCALL_AUTH = 0x8A,
     SYSCALL_PANIC = 0x8B,
+    SYSCALL_SLEEP = 0x8C,
     PING = 0xFF,
 } SystemCall;
 

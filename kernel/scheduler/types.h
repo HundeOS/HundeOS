@@ -14,6 +14,7 @@ typedef enum ParkReasons
     PARK_WAIT_SERVICE_EVENT = 3,
     PARK_WAIT_CHILD_EVENT = 4,
     PARK_WAIT_SERVICE_READY = 5,
+    PARK_SLEEP = 6,
 } ParkReasons;
 
 typedef struct Scheduler Scheduler;

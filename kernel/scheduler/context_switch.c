@@ -62,7 +62,7 @@ void ContextSwitch__switch(ContextSwitch self)
     match_optional(ProcessPtr, self.old_proc,
         some(proc)
         {
-            if (proc->state != PROC_STATE_DEAD && proc->state != PROC_STATE_WAITING)
+            if (proc->state != PROC_STATE_DEAD && proc->state != PROC_STATE_WAITING && proc->state != PROC_STATE_SLEEPING)
             {
                 proc->state = PROC_STATE_INTERRUPTED;
             }

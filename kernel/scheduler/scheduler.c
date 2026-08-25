@@ -9,6 +9,7 @@
 #include "../kernel_core.h"
 #include "../spin.h"
 #include "parked.h"
+#include "../syscall/deferred.h"
 #include "../subsystems/message/subsystem_codes.h"
 #include "../subsystems/io/io_subsystem.h"
 #include "../service/service.h"
@@ -70,6 +71,19 @@ static Result(ProcessPtr) CPUScheduler__unpark_with_operation_key(
     CPUSchedulerPtr self, ProcessPtr proc, ParkReason reason,
     Optional(ReturnCode) return_code, Optional(OperationKey) operation_key
 );
+static Tick CPUScheduler__sleep_ticks_from_usec(uint64_t usec)
+{
+    Tick ticks = (usec + 999ULL) / 1000ULL;
+    return ticks == 0 ? 1 : ticks;
+}
+
+static void CPUScheduler__wake_expired_sleepers(CPUSchedulerPtr self)
+{
+    for_each_fa(ProcessTable, self->processes, index, proc,
+    {
+        Process__wake_expired_sleep(proc, self->last_tick);
+    });
+}
 
 static Result(AckCode) Scheduler__publish_process_state(SchedulerPtr self, ProcessPtr proc)
 {
@@ -233,7 +247,7 @@ Result(ProcessPtr) CPUScheduler__park(
                 kernel_context, kernel_continuation, reason, owns_kernel_context
             );
             parked->operation_key = operation_key;
-            proc->state = PROC_STATE_WAITING;
+            proc->state = reason == PARK_SLEEP ? PROC_STATE_SLEEPING : PROC_STATE_WAITING;
             __d_printf(SCHEDULER, "CPUScheduler__park - context %i\n", parked);
             match_result(CollectionCode, Process__push_parked_operation(proc, parked),
                 success_do_nothing(),
@@ -306,6 +320,7 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, ProcessCon
 
     Optional(ProcessPtr) current = CPUScheduler__current_process(self);
     critical_section(self->scheduler_lock, self->last_tick++;);
+    CPUScheduler__wake_expired_sleepers(self);
 
     match_optional(ProcessPtr, current,
         some(proc)
@@ -877,6 +892,38 @@ Result(ProcessID) Scheduler__unpark_by_pid_with_operation_key(
 Result(ProcessPtr) Scheduler__unpark(SchedulerPtr self, ProcessPtr proc, ParkReason reason, Optional(ReturnCode) return_code)
 {
     return Scheduler__unpark_with_operation_key(self, proc, reason, return_code, None(OperationKey));
+}
+
+Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, uint64_t usec)
+{
+    for_each_fa(CPUSchedulers, self->schedulers, cpu, sched,
+    {
+        match_optional(ArrayIndex, ProcessTable__find_item(&sched->processes, process),
+            some(index)
+            {
+                Tick deadline = sched->last_tick + CPUScheduler__sleep_ticks_from_usec(usec) + 1ULL;
+                KernelContextPtr kernel_context = KernelContext__heap_new(
+                    Some(ProcessID, process->pid),
+                    Some(SchedulerPtr, self)
+                );
+
+                return Scheduler__park_with_context_ownership_and_operation_key(
+                    self,
+                    process,
+                    kernel_context,
+                    Some(Continuation, SystemCall__Complete),
+                    PARK_SLEEP,
+                    true,
+                    Some(OperationKey, deadline)
+                );
+            },
+            none_do_nothing()
+        );
+    });
+
+    BString no_scheduler_format = bstring("No scheduler found for process: %i\n");
+    BString no_scheduler = BString__sprintf(&no_scheduler_format, process->pid);
+    return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
 static Result(ProcessPtr) Scheduler__unpark_with_operation_key(

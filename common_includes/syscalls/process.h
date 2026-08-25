@@ -12,6 +12,7 @@
 typedef int64_t ProcessListResult;
 typedef int64_t ProcessSignalResult;
 typedef int64_t ProcessChildEventResult;
+typedef int64_t ProcessSleepResult;
 
 typedef uint64_t ProcessSignal;
 typedef uint64_t ProcessSignalMask;
@@ -94,6 +95,13 @@ typedef enum ProcessChildEventResults
     PROCESS_CHILD_EVENT_INVALID_ARGUMENT = -1,
     PROCESS_CHILD_EVENT_QUEUE_EMPTY = -2,
 } ProcessChildEventResults;
+
+typedef enum ProcessSleepResults
+{
+    PROCESS_SLEEP_OK = 0,
+    PROCESS_SLEEP_INVALID_ARGUMENT = -1,
+    PROCESS_SLEEP_FAILED = -2,
+} ProcessSleepResults;
 
 typedef struct ProcessInfo
 {

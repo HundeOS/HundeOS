@@ -598,6 +598,32 @@ void test_scheduler_unpark_switches_process_back_to_ready(void)
         }, error_test_fail());
 }
 
+void test_scheduler_sleep_usec_wakes_after_rounded_timer_ticks(void)
+{
+    ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessContext context = {0};
+
+    Scheduler__schedule(scheduler, proc);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, &context);
+
+    match_result(ProcessPtr, Scheduler__sleep_usec(scheduler, proc, 2500), success(sleeping) {
+            TEST_ASSERT_EQUAL(proc, sleeping);
+            TEST_ASSERT_EQUAL(PROC_STATE_SLEEPING, sleeping->state);
+        }, error_test_fail());
+
+    Scheduler__preempt(scheduler, cpu_id, &context);
+    TEST_ASSERT_EQUAL(PROC_STATE_SLEEPING, proc->state);
+
+    Scheduler__preempt(scheduler, cpu_id, &context);
+    TEST_ASSERT_EQUAL(PROC_STATE_SLEEPING, proc->state);
+
+    Scheduler__preempt(scheduler, cpu_id, &context);
+    TEST_ASSERT_EQUAL(proc, current_running_process());
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc->state);
+    TEST_ASSERT_EQUAL(PROCESS_SLEEP_OK, result_unwrap(Anything, deferred_syscall_result(), (Anything){}));
+}
+
 void test_scheduler_context_switch_finalises_ready_parked_operation_before_resume(void)
 {
     ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);

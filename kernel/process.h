@@ -254,6 +254,7 @@ bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, Optional(
 bool Process__mark_parked_operation_ready(
     ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key, Optional(ReturnCode) return_code
 );
+bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick);
 bool Process__is_parked(ProcessPtr self);
 bool Process__is_handling_service_irq(ProcessPtr self);
 void Process__set_identity(ProcessPtr self, UserID user_id, GroupID group_id, ProcessCapabilities capabilities);

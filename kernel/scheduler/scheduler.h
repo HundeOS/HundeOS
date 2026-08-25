@@ -101,6 +101,7 @@ Result(ProcessID) Scheduler__park_by_pid_with_context_ownership_and_operation_ke
 );
 
 Result(ProcessPtr) Scheduler__unpark(SchedulerPtr self, ProcessPtr proc, ParkReason reason, Optional(ReturnCode) return_code);
+Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, uint64_t usec);
 
 Result(ProcessID) Scheduler__unpark_by_pid(SchedulerPtr self, ProcessID pid, ParkReason reason, Optional(ReturnCode) return_code);
 Result(ProcessID) Scheduler__unpark_by_pid_with_operation_key(

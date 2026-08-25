@@ -6,6 +6,8 @@
 
 static BString invalid_process_list_request = BSTRING_NEW("Invalid process list request");
 static BString invalid_child_event_request = BSTRING_NEW("Invalid child event request");
+static BString invalid_sleep_request = BSTRING_NEW("Invalid sleep request");
+static BString sleep_pending = BSTRING_NEW("Sleep pending");
 
 static Result(Anything) ProcessChildEvent__copy_to_target(Result(Anything) result, Anything context)
 {
@@ -146,4 +148,28 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
     );
 
     return Error(SystemCallResult, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
+}
+
+Result(SystemCallResult) ProcessSleep__handler(
+    KernelPtr kernel,
+    Optional(ProcessPtr) proc,
+    Anything arg1,
+    Anything arg2,
+    Anything arg3,
+    Anything arg4,
+    Anything arg5
+)
+{
+    match_optional(ProcessPtr, proc,
+        some(process)
+        {
+            match_result(ProcessPtr, Scheduler__sleep_usec(kernel->scheduler, process, (uint64_t) arg1),
+                success(sleeping) { return Error(SystemCallResult, sleep_pending, SYSCALL_IO_BLOCK); },
+                error(code, message) { return Error(SystemCallResult, message, PROCESS_SLEEP_FAILED); }
+            );
+        },
+        none_do_nothing()
+    );
+
+    return Error(SystemCallResult, invalid_sleep_request, PROCESS_SLEEP_INVALID_ARGUMENT);
 }

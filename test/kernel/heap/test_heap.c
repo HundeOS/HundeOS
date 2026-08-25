@@ -5,7 +5,11 @@
 
 Heap heap = NEW_HEAP;
 
-static uint8_t test_heap_memory[PAGE_SIZE * 16];
+#define TEST_HEAP_PAGES 1200
+#define MANY_LIVE_ALLOCATIONS 1100
+
+static uint8_t test_heap_memory[PAGE_SIZE * TEST_HEAP_PAGES];
+static KernelAddress many_live_allocations[MANY_LIVE_ALLOCATIONS];
 static const Address test_heap_physical_base = 0x70000000ULL;
 
 static void assert_free_success(KernelAddress addr)
@@ -130,4 +134,26 @@ void test_reused_multi_page_alloc_is_zeroed(void)
     TEST_ASSERT_EQUAL(vaddr(addr), vaddr(reused));
     TEST_ASSERT_EQUAL(0, reused_bytes[0]);
     TEST_ASSERT_EQUAL(0, reused_bytes[PAGE_SIZE]);
+}
+
+void test_heap_tracks_more_than_one_old_bucket_of_live_allocations(void)
+{
+    for (uint64_t i = 0; i < MANY_LIVE_ALLOCATIONS; i++)
+    {
+        many_live_allocations[i] = Heap__alloc(&heap);
+        TEST_ASSERT_TRUE(many_live_allocations[i].valid);
+    }
+
+    for (uint64_t i = 0; i < MANY_LIVE_ALLOCATIONS; i++)
+    {
+        assert_free_success(many_live_allocations[i]);
+    }
+}
+
+void test_heap_hashes_page_addresses_by_page_number(void)
+{
+    Address first = 0xfffff00017201000;
+    Address second = first + PAGE_SIZE;
+
+    TEST_ASSERT_EQUAL_UINT64(Heap__hash_address(&first) + 1, Heap__hash_address(&second));
 }

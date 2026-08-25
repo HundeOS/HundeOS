@@ -2,6 +2,7 @@
 #include "../fat/fat_name.h"
 #include "../../../../kalloc.h"
 #include "../../../../debug.h"
+#include "../../../../panic.h"
 
 FixedArrayBodyDefine(Fat32DirectoryEntries);
 FixedArrayBodyDefine(Fat32ShortName);

@@ -2,6 +2,11 @@
 #include "../../sys/process.h"
 
 #define PS_MAX_PROCESSES 32
+#define PS_PID_WIDTH 5
+#define PS_STATE_WIDTH 28
+#define PS_WAIT_WIDTH 24
+#define PS_CLASS_WIDTH 8
+#define PS_USER_WIDTH 8
 
 #ifndef PS_ENTRYPOINT
 #define PS_ENTRYPOINT main
@@ -17,15 +22,37 @@ int PS_ENTRYPOINT(void)
         return 1;
     }
 
-    printf("PID %s WAIT CLASS USER NAME\n", "STATE");
+    printf(
+        "%-*s %-*s %-*s %-*s %-*s %s\n",
+        PS_PID_WIDTH,
+        "PID",
+        PS_STATE_WIDTH,
+        "STATE",
+        PS_WAIT_WIDTH,
+        "WAIT",
+        PS_CLASS_WIDTH,
+        "CLASS",
+        PS_USER_WIDTH,
+        "USER",
+        "NAME"
+    );
     for (ProcessListResult i = 0; i < count; i++)
     {
         printf(
-            "%i %s %s %s %s %s\n",
+            "%-*i %-*.*s %-*.*s %-*.*s %-*.*s %s\n",
+            PS_PID_WIDTH,
             (int) processes[i].pid,
+            PS_STATE_WIDTH,
+            PS_STATE_WIDTH,
             processes[i].state,
+            PS_WAIT_WIDTH,
+            PS_WAIT_WIDTH,
             processes[i].wait_reason,
+            PS_CLASS_WIDTH,
+            PS_CLASS_WIDTH,
             processes[i].class_name,
+            PS_USER_WIDTH,
+            PS_USER_WIDTH,
             processes[i].user_name,
             processes[i].name
         );

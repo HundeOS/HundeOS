@@ -57,6 +57,7 @@ Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
             REGISTER(self, SYSCALL_SHUTDOWN, &Shutdown__handler);
             REGISTER(self, SYSCALL_AUTH, &Auth__handler);
             REGISTER(self, SYSCALL_PANIC, &Panic__handler);
+            REGISTER(self, SYSCALL_SLEEP, &ProcessSleep__handler);
             self->init_done = true;
             __d_println(SYSCALL, "Init__syscalls() - done ok");
         }

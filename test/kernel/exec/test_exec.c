@@ -7,6 +7,7 @@
 #include "../fixtures/process.h"
 #include "../fixtures/kernel.h"
 #include "../stubs/cpu.h"
+#include "../stubs/kalloc.h"
 #include "../stubs/process.h"
 #include "../../../kernel/types/types.h"
 
@@ -21,6 +22,7 @@ static const CPUID cpu = 0;
 
 void setUp(void)
 {
+    KAllocStub__reset_allocation_tracking();
     reset_cpu_count();
     kernel = init_test_kernel();
     parent = dummy_process(0, cpu, PROC_STATE_RUNNING);
@@ -52,6 +54,20 @@ void test_exec_spawns_process_and_puts_parent_in_wait()
             TEST_ASSERT_EQUAL(parent, spawned_parent);
             TEST_ASSERT_EQUAL(2, Scheduler__process_count(kernel->scheduler));
         }, error_test_fail());
+}
+
+void test_exec_does_not_copy_full_elf_past_loaded_segment_buffer(void)
+{
+    TEST_ASSERT_FALSE(KAllocStub__memcopy_overflow_occurred());
+
+    match_result(ProcessPtr, Exec__exec(context, exec_path, false, ProcessArguments__new()),
+        success(spawned_process)
+        {
+            TEST_ASSERT_NOT_NULL(spawned_process);
+            TEST_ASSERT_FALSE(KAllocStub__memcopy_overflow_occurred());
+        },
+        error_test_fail()
+    );
 }
 
 void test_exec_spawns_process_and_sets_up_a_defferred_return()

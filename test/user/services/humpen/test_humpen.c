@@ -6,14 +6,16 @@
 #include "unity.h"
 
 #include "../../../../common_includes/syscalls/io.h"
+#include "../../../../common_includes/syscalls/spawn.h"
 
 static const char * next_fstab;
 static int64_t next_fstab_position;
-static IOStatus next_mount_status;
-static uint64_t mount_count;
-static char mounted_devices[4][96];
-static char mounted_filesystems[4][96];
-static char mounted_mountpoints[4][96];
+static SpawnResult next_spawn_result;
+static uint64_t spawn_count;
+static char spawned_paths[4][96];
+static char spawned_arg0[4][96];
+static char spawned_arg1[4][96];
+static char spawned_arg2[4][96];
 static char output[512];
 static uint64_t output_position;
 
@@ -24,15 +26,16 @@ void setUp(void)
 {
     next_fstab = "";
     next_fstab_position = 0;
-    next_mount_status = IO_OK;
-    mount_count = 0;
+    next_spawn_result = 42;
+    spawn_count = 0;
     output_position = 0;
     output[0] = '\0';
     for (uint64_t i = 0; i < 4; i++)
     {
-        mounted_devices[i][0] = '\0';
-        mounted_filesystems[i][0] = '\0';
-        mounted_mountpoints[i][0] = '\0';
+        spawned_paths[i][0] = '\0';
+        spawned_arg0[i][0] = '\0';
+        spawned_arg1[i][0] = '\0';
+        spawned_arg2[i][0] = '\0';
     }
 }
 
@@ -73,14 +76,16 @@ IOStatus close(IOHandle handle)
     return IO_OK;
 }
 
-IOStatus IO__mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
+SpawnResult spawn(SpawnMode mode, const char * path, const char * arg0, const char * arg1, const char * arg2)
 {
-    TEST_ASSERT_LESS_THAN_UINT64(4, mount_count);
-    snprintf(mounted_devices[mount_count], sizeof(mounted_devices[mount_count]), "%s", BString__cstr(device_path));
-    snprintf(mounted_filesystems[mount_count], sizeof(mounted_filesystems[mount_count]), "%s", BString__cstr(filesystem_type));
-    snprintf(mounted_mountpoints[mount_count], sizeof(mounted_mountpoints[mount_count]), "%s", BString__cstr(mountpoint));
-    mount_count++;
-    return next_mount_status;
+    TEST_ASSERT_EQUAL(P_NOWAIT, mode);
+    TEST_ASSERT_LESS_THAN_UINT64(4, spawn_count);
+    snprintf(spawned_paths[spawn_count], sizeof(spawned_paths[spawn_count]), "%s", path);
+    snprintf(spawned_arg0[spawn_count], sizeof(spawned_arg0[spawn_count]), "%s", arg0);
+    snprintf(spawned_arg1[spawn_count], sizeof(spawned_arg1[spawn_count]), "%s", arg1);
+    snprintf(spawned_arg2[spawn_count], sizeof(spawned_arg2[spawn_count]), "%s", arg2);
+    spawn_count++;
+    return next_spawn_result;
 }
 
 void print(const char * str)
@@ -105,7 +110,7 @@ int printf(const char * format, ...)
     return written;
 }
 
-void test_humpen_mounts_device_entries_from_fstab(void)
+void test_humpen_starts_watchdogs_for_device_entries_from_fstab(void)
 {
     next_fstab =
         "# device <path> <filesystem> <mountpoint>\n"
@@ -115,23 +120,25 @@ void test_humpen_mounts_device_entries_from_fstab(void)
 
     TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
 
-    TEST_ASSERT_EQUAL_UINT64(2, mount_count);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio1", mounted_devices[0]);
-    TEST_ASSERT_EQUAL_STRING("ext2", mounted_filesystems[0]);
-    TEST_ASSERT_EQUAL_STRING("/", mounted_mountpoints[0]);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio3", mounted_devices[1]);
-    TEST_ASSERT_EQUAL_STRING("fat32", mounted_filesystems[1]);
-    TEST_ASSERT_EQUAL_STRING("/mnt/fs1", mounted_mountpoints[1]);
+    TEST_ASSERT_EQUAL_UINT64(2, spawn_count);
+    TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, spawned_paths[0]);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio1", spawned_arg0[0]);
+    TEST_ASSERT_EQUAL_STRING("ext2", spawned_arg1[0]);
+    TEST_ASSERT_EQUAL_STRING("/", spawned_arg2[0]);
+    TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, spawned_paths[1]);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio3", spawned_arg0[1]);
+    TEST_ASSERT_EQUAL_STRING("fat32", spawned_arg1[1]);
+    TEST_ASSERT_EQUAL_STRING("/mnt/fs1", spawned_arg2[1]);
 }
 
-void test_humpen_returns_failure_when_mount_fails(void)
+void test_humpen_returns_failure_when_watchdog_spawn_fails(void)
 {
     next_fstab = "device /dev/virtio3 fat32 /mnt/fs1\n";
-    next_mount_status = IO_INVALID_PATH;
+    next_spawn_result = SPAWN_FAILED;
 
     TEST_ASSERT_EQUAL_INT(1, humpen_main_under_test());
-    TEST_ASSERT_EQUAL_UINT64(1, mount_count);
-    TEST_ASSERT_NOT_NULL(strstr(output, "failed to mount"));
+    TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
+    TEST_ASSERT_NOT_NULL(strstr(output, "failed to start wachhund"));
 }
 
 void test_humpen_handles_comments_blank_lines_and_missing_final_newline(void)
@@ -143,10 +150,10 @@ void test_humpen_handles_comments_blank_lines_and_missing_final_newline(void)
 
     TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
 
-    TEST_ASSERT_EQUAL_UINT64(1, mount_count);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio1", mounted_devices[0]);
-    TEST_ASSERT_EQUAL_STRING("ext2", mounted_filesystems[0]);
-    TEST_ASSERT_EQUAL_STRING("/", mounted_mountpoints[0]);
+    TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio1", spawned_arg0[0]);
+    TEST_ASSERT_EQUAL_STRING("ext2", spawned_arg1[0]);
+    TEST_ASSERT_EQUAL_STRING("/", spawned_arg2[0]);
 }
 
 void test_humpen_rejects_trailing_tokens_before_mounting(void)
@@ -155,5 +162,5 @@ void test_humpen_rejects_trailing_tokens_before_mounting(void)
 
     TEST_ASSERT_EQUAL_INT(1, humpen_main_under_test());
 
-    TEST_ASSERT_EQUAL_UINT64(0, mount_count);
+    TEST_ASSERT_EQUAL_UINT64(0, spawn_count);
 }

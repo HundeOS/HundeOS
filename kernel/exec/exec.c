@@ -302,8 +302,16 @@ static Result(Elf) Exec__read_elf(OriginatingContext context, IOHandle handle, B
                 none_do_nothing()
             );
 
-            __d_printf(EXEC, "Copying elf %i/%i %s\n", bytes_read, required_size, cstr(path));
-            Address elf_start = Kernel__alloc_kernel(required_size);
+            ByteCount buffer_size = bytes_read > required_size ? bytes_read : required_size;
+            __d_printf(
+                EXEC,
+                "Copying elf read=%i required=%i buffer=%i %s\n",
+                bytes_read,
+                required_size,
+                buffer_size,
+                cstr(path)
+            );
+            Address elf_start = Kernel__alloc_kernel(buffer_size);
             Kernel__memcopy(addr(elf_data), elf_start, bytes_read);
 
             match_result(ByteCount, Exec__read_remaining_elf(context, handle, elf_start, bytes_read, required_size),

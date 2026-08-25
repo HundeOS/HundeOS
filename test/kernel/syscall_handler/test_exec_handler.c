@@ -61,11 +61,8 @@ void test_exec_handler_nowait_spawns_without_parking_parent()
 void test_exec_request_handler_can_spawn_as_user(void)
 {
     Process__set_hund_identity(parent);
-    AuthTicketID ticket_id = result_unwrap(
-        AuthTicketID,
-        Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user")),
-        AUTH_NO_TICKET
-    );
+    Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user"));
+    AuthTicketID ticket_id = result_unwrap(AuthTicketID, auth_result, AUTH_NO_TICKET);
 
     SpawnRequest request = (SpawnRequest) {
         .path = "/sbin/shell",
@@ -90,11 +87,8 @@ void test_exec_request_handler_can_spawn_as_user(void)
 
 void test_exec_request_handler_rejects_reused_auth_ticket(void)
 {
-    AuthTicketID ticket_id = result_unwrap(
-        AuthTicketID,
-        Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user")),
-        AUTH_NO_TICKET
-    );
+    Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user"));
+    AuthTicketID ticket_id = result_unwrap(AuthTicketID, auth_result, AUTH_NO_TICKET);
 
     SpawnRequest request = (SpawnRequest) {
         .path = "/sbin/shell",
@@ -130,11 +124,8 @@ void test_exec_request_handler_rejects_reused_auth_ticket(void)
 void test_exec_request_handler_can_spawn_root_shell_with_auth_ticket(void)
 {
     Process__set_hund_identity(parent);
-    AuthTicketID ticket_id = result_unwrap(
-        AuthTicketID,
-        Auth__authenticate(&kernel->auth, parent, bstring("root"), bstring("root")),
-        AUTH_NO_TICKET
-    );
+    Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, bstring("root"), bstring("root"));
+    AuthTicketID ticket_id = result_unwrap(AuthTicketID, auth_result, AUTH_NO_TICKET);
 
     SpawnRequest request = (SpawnRequest) {
         .path = "/sbin/shell",

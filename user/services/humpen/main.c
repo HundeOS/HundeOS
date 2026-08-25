@@ -1,5 +1,6 @@
 #include "../../../common/types/dyn_string.h"
 #include "../../sys/io.h"
+#include "../../sys/spawn.h"
 #include "../../user.h"
 
 #ifndef HUMPEN_ENTRYPOINT
@@ -8,10 +9,12 @@
 
 #define HUMPEN_FSTAB_PATH "/boot/config/fstab"
 #define HUMPEN_FSTAB_MAX 2048U
+#define HUMPEN_WACHHUND_PATH "/sbin/services/humpen-wachhund"
 
 static BString humpen_space_delimiters = BSTRING_NEW(" \t\r\n");
 static BString humpen_comment_delimiter = BSTRING_NEW("#");
 static BString humpen_device_command = BSTRING_NEW("device");
+static BString humpen_wachhund_path = BSTRING_NEW(HUMPEN_WACHHUND_PATH);
 
 static Optional(DynString) Humpen__load_fstab(void)
 {
@@ -79,7 +82,7 @@ static BString Humpen__line_without_comment(ConstBStringPtr line)
     return BString__slice(line, 0, BString__length(line));
 }
 
-static int Humpen__mount_device_line(BString line)
+static int Humpen__spawn_watchdog_line(BString line)
 {
     BString command_line = Humpen__line_without_comment(&line);
     BString remaining = BString__strip(&command_line);
@@ -139,14 +142,20 @@ static int Humpen__mount_device_line(BString line)
         none_do_nothing()
     );
 
-    IOStatus status = IO__mount_device(&device_path, &filesystem_type, &mountpoint);
-    if (status != IO_OK)
+    SpawnResult result = spawn(
+        P_NOWAIT,
+        BString__cstr(&humpen_wachhund_path),
+        BString__cstr(&device_path),
+        BString__cstr(&filesystem_type),
+        BString__cstr(&mountpoint)
+    );
+    if (result < 0)
     {
         printf(
-            "humpen: failed to mount %s on %s: %i\n",
+            "humpen: failed to start wachhund for %s on %s: %i\n",
             BString__cstr(&device_path),
             BString__cstr(&mountpoint),
-            (int) status
+            (int) result
         );
         return 1;
     }
@@ -164,7 +173,7 @@ static int Humpen__mount_fstab(ConstDynStringPtr fstab)
             for_each_ll(DynStringLines, lines, line,
             {
                 match_optional(BString, DynString__bstring(&line),
-                    some(bstring_line) { failures += Humpen__mount_device_line(bstring_line); },
+                    some(bstring_line) { failures += Humpen__spawn_watchdog_line(bstring_line); },
                     none()
                     {
                         printf("humpen: fstab line too long\n");
