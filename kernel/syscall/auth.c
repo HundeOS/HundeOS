@@ -6,12 +6,12 @@
 
 FixedArrayBodyDefine(AuthTickets);
 
-static BString invalid_credentials_message = BSTRING_NEW("Invalid credentials");
-static BString no_process_message = BSTRING_NEW("No process");
-static BString ticket_store_full_message = BSTRING_NEW("Auth ticket store full");
-static BString invalid_ticket_message = BSTRING_NEW("Invalid auth ticket");
-static BString ticket_process_mismatch_message = BSTRING_NEW("Auth ticket belongs to different process");
-static BString ticket_consumed_message = BSTRING_NEW("Auth ticket consumed");
+static BString invalid_credentials_message = bstr("Invalid credentials");
+static BString no_process_message = bstr("No process");
+static BString ticket_store_full_message = bstr("Auth ticket store full");
+static BString invalid_ticket_message = bstr("Invalid auth ticket");
+static BString ticket_process_mismatch_message = bstr("Auth ticket belongs to different process");
+static BString ticket_consumed_message = bstr("Auth ticket consumed");
 
 typedef struct AuthCredential
 {
@@ -21,9 +21,9 @@ typedef struct AuthCredential
 } AuthCredential;
 
 static AuthCredential credentials[] = {
-    { BSTRING_NEW("root"), BSTRING_NEW("root"), PROCESS_USER_ROOT },
-    { BSTRING_NEW("hund"), BSTRING_NEW("hund"), PROCESS_USER_HUND },
-    { BSTRING_NEW("user"), BSTRING_NEW("user"), PROCESS_USER_USER },
+    { bstr("root"), bstr("root"), PROCESS_USER_ROOT },
+    { bstr("hund"), bstr("hund"), PROCESS_USER_HUND },
+    { bstr("user"), bstr("user"), PROCESS_USER_USER },
 };
 
 bool AuthTicket__equals(void * a, void * b)
@@ -135,10 +135,6 @@ Result(SystemCallResult) Auth__handler(
     }
 
     AuthRequestPtr request = (AuthRequestPtr) arg1;
-    if (request->username == 0 || request->password == 0)
-    {
-        return Error(SystemCallResult, invalid_credentials_message, AUTH_INVALID_CREDENTIALS);
-    }
 
     match_optional(ProcessPtr, proc,
         some(process)
@@ -146,8 +142,8 @@ Result(SystemCallResult) Auth__handler(
             match_result(AuthTicketID, Auth__authenticate(
                 &kernel->auth,
                 process,
-                bstring(request->username),
-                bstring(request->password)
+                request->username,
+                request->password
             ),
                 success(ticket_id) { return Success(SystemCallResult, ticket_id); },
                 error(code, message) { return Error(SystemCallResult, message, code); }

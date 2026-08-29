@@ -1,6 +1,6 @@
 #include "../../../kernel/scheduler/scheduler.h"
 
-static BString scheduler_not_linked = BSTRING_NEW("Scheduler not linked for this test");
+static BString scheduler_not_linked = bstr("Scheduler not linked for this test");
 
 Result(ProcessID) Scheduler__park_by_pid(
     SchedulerPtr self, ProcessID pid, KernelContextPtr kernel_context,

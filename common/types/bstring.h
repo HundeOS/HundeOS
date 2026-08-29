@@ -49,6 +49,7 @@ bool BString__remove_at(BStringPtr self, StringPos index);
 BString BString__strip(ConstBStringPtr self);
 BString BString__slice(ConstBStringPtr self, StringPos start, StringPos end);
 BStringSplit BString__split_first_any(ConstBStringPtr self, ConstBStringPtr delimiters);
+BStringSplit BString__split_first_token(ConstBStringPtr self, ConstBStringPtr delimiters);
 BStringArray BString__split(ConstBStringPtr self, char delimiter);
 bool BString__equals(ConstBStringPtr self, ConstBStringPtr other);
 bool bstring_equals(void * a, void * b);
@@ -80,6 +81,12 @@ BString BString__sprintf(ConstBStringPtr self, ...);
         .len = BString__STRLEN(chars), \
         .data = chars, \
     } \
+
+#define bstr(chars) \
+    BSTRING_NEW(chars)
+
+#define empty_bstr() \
+    EMPTY_BSTRING
 
 #define cstr(bstr) \
     BString__cstr(&(bstr))

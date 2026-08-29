@@ -175,6 +175,29 @@ typedef SdhciPciFunction * SdhciPciFunctionPtr;
 
 OptionalDef(SdhciPciFunction);
 
+static SdhciCommand SdhciCommand__new(
+    uint32_t index, uint32_t argument, uint16_t response_type, uint16_t transfer_mode, bool data_present
+)
+{
+    return (SdhciCommand) {
+        .index = index,
+        .argument = argument,
+        .response_type = response_type,
+        .transfer_mode = transfer_mode,
+        .data_present = data_present,
+    };
+}
+
+static SdhciDevice SdhciDevice__new(ServiceMappedMemoryPtr mapping, SdhciMmioPtr mmio, uint64_t irq, BString path)
+{
+    return (SdhciDevice) {
+        .mapping = mapping,
+        .mmio = mmio,
+        .irq = irq,
+        .path = path,
+    };
+}
+
 #if !defined(SDHCI_READ8) || !defined(SDHCI_WRITE8)
 static SdhciRegister8Ptr Sdhci__reg8(SdhciMmioPtr base, uint64_t offset)
 {
@@ -250,13 +273,6 @@ static SdhciPciConfig32Ptr Sdhci__pci_reg32(void * base, uint64_t offset)
 #ifndef SDHCI_PCI_WRITE16
 #define SDHCI_PCI_WRITE16(base, offset, value) (*Sdhci__pci_reg16((base), (offset)) = (uint16_t) (value))
 #endif
-
-static bool Sdhci__paths_equal(ConstBStringPtr left, const char * right)
-{
-    BString right_bstring = BString__new(right);
-
-    return BString__equals(left, &right_bstring);
-}
 
 static uint64_t Sdhci__pci_config_offset(PciConfigPtr config, SdhciPciFunction function)
 {
@@ -383,11 +399,11 @@ static Optional(SdHostConfig) Sdhci__load_pci_host_config(void)
                 command | SDHCI_PCI_COMMAND_MEMORY_SPACE | SDHCI_PCI_COMMAND_BUS_MASTER
             );
 
-            return Some(SdHostConfig, ((SdHostConfig) {
-                .physical_base = physical_base,
-                .mmio_size = SDHCI_PCI_MMIO_SIZE,
-                .irq = SDHCI_PCI_READ8(function_base, SDHCI_PCI_CONFIG_INTERRUPT_LINE),
-            }));
+            return Some(SdHostConfig, SdHostConfig__new(
+                physical_base,
+                SDHCI_PCI_MMIO_SIZE,
+                SDHCI_PCI_READ8(function_base, SDHCI_PCI_CONFIG_INTERRUPT_LINE)
+            ));
         },
         none_do_nothing()
     );
@@ -595,11 +611,10 @@ static SdhciCommandResult Sdhci__send_command(SdhciDevicePtr self, SdhciCommand 
 
 static bool Sdhci__send_app_command(SdhciDevicePtr self, uint32_t argument)
 {
-    SdhciCommandResult result = Sdhci__send_command(self, (SdhciCommand) {
-        .index = SD_CMD_APP_CMD,
-        .argument = argument,
-        .response_type = SDHCI_CMD_RESP_48,
-    });
+    SdhciCommandResult result = Sdhci__send_command(
+        self,
+        SdhciCommand__new(SD_CMD_APP_CMD, argument, SDHCI_CMD_RESP_48, 0, false)
+    );
 
     return result.ok;
 }
@@ -627,16 +642,9 @@ static uint64_t Sdhci__card_block_count_from_csd(SdhciCommandResult csd)
 
 static bool Sdhci__init_card(SdhciDevicePtr self)
 {
-    Sdhci__send_command(self, (SdhciCommand) {
-        .index = SD_CMD_GO_IDLE_STATE,
-        .response_type = SDHCI_CMD_RESP_NONE,
-    });
+    Sdhci__send_command(self, SdhciCommand__new(SD_CMD_GO_IDLE_STATE, 0, SDHCI_CMD_RESP_NONE, 0, false));
 
-    Sdhci__send_command(self, (SdhciCommand) {
-        .index = SD_CMD_SEND_IF_COND,
-        .argument = 0x1aa,
-        .response_type = SDHCI_CMD_RESP_48,
-    });
+    Sdhci__send_command(self, SdhciCommand__new(SD_CMD_SEND_IF_COND, 0x1aa, SDHCI_CMD_RESP_48, 0, false));
 
     SdhciCommandResult op_cond = { 0 };
     for (uint64_t retry = 0; retry < SDHCI_APP_CMD_RETRIES; retry++)
@@ -645,11 +653,10 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
         {
             return false;
         }
-        op_cond = Sdhci__send_command(self, (SdhciCommand) {
-            .index = SD_ACMD_SD_SEND_OP_COND,
-            .argument = SD_ACMD41_ARGUMENT,
-            .response_type = SDHCI_CMD_RESP_48,
-        });
+        op_cond = Sdhci__send_command(
+            self,
+            SdhciCommand__new(SD_ACMD_SD_SEND_OP_COND, SD_ACMD41_ARGUMENT, SDHCI_CMD_RESP_48, 0, false)
+        );
         if (op_cond.ok && (op_cond.response[0] & SD_OCR_READY) != 0)
         {
             self->high_capacity = (op_cond.response[0] & SD_OCR_HIGH_CAPACITY) != 0;
@@ -663,30 +670,29 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
         return false;
     }
 
-    SdhciCommandResult cid = Sdhci__send_command(self, (SdhciCommand) {
-        .index = SD_CMD_ALL_SEND_CID,
-        .response_type = SDHCI_CMD_RESP_136,
-    });
+    SdhciCommandResult cid = Sdhci__send_command(
+        self,
+        SdhciCommand__new(SD_CMD_ALL_SEND_CID, 0, SDHCI_CMD_RESP_136, 0, false)
+    );
     if (!cid.ok)
     {
         return false;
     }
 
-    SdhciCommandResult rca = Sdhci__send_command(self, (SdhciCommand) {
-        .index = SD_CMD_SEND_RELATIVE_ADDR,
-        .response_type = SDHCI_CMD_RESP_48,
-    });
+    SdhciCommandResult rca = Sdhci__send_command(
+        self,
+        SdhciCommand__new(SD_CMD_SEND_RELATIVE_ADDR, 0, SDHCI_CMD_RESP_48, 0, false)
+    );
     if (!rca.ok)
     {
         return false;
     }
     self->rca = (uint16_t) (rca.response[0] >> 16);
 
-    SdhciCommandResult csd = Sdhci__send_command(self, (SdhciCommand) {
-        .index = SD_CMD_SEND_CSD,
-        .argument = ((uint32_t) self->rca) << 16,
-        .response_type = SDHCI_CMD_RESP_136,
-    });
+    SdhciCommandResult csd = Sdhci__send_command(
+        self,
+        SdhciCommand__new(SD_CMD_SEND_CSD, ((uint32_t) self->rca) << 16, SDHCI_CMD_RESP_136, 0, false)
+    );
     if (!csd.ok)
     {
         return false;
@@ -698,11 +704,10 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
         return false;
     }
 
-    SdhciCommandResult select = Sdhci__send_command(self, (SdhciCommand) {
-        .index = SD_CMD_SELECT_CARD,
-        .argument = ((uint32_t) self->rca) << 16,
-        .response_type = SDHCI_CMD_RESP_48_BUSY,
-    });
+    SdhciCommandResult select = Sdhci__send_command(
+        self,
+        SdhciCommand__new(SD_CMD_SELECT_CARD, ((uint32_t) self->rca) << 16, SDHCI_CMD_RESP_48_BUSY, 0, false)
+    );
     if (!select.ok)
     {
         return false;
@@ -713,11 +718,10 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
         return false;
     }
 
-    SdhciCommandResult block_len = Sdhci__send_command(self, (SdhciCommand) {
-        .index = SD_CMD_SET_BLOCKLEN,
-        .argument = SDHCI_BLOCK_SIZE,
-        .response_type = SDHCI_CMD_RESP_48,
-    });
+    SdhciCommandResult block_len = Sdhci__send_command(
+        self,
+        SdhciCommand__new(SD_CMD_SET_BLOCKLEN, SDHCI_BLOCK_SIZE, SDHCI_CMD_RESP_48, 0, false)
+    );
 
     return block_len.ok;
 }
@@ -731,12 +735,7 @@ static bool Sdhci__bind(SdhciDevicePtr self, SdHostConfig config)
         return false;
     }
 
-    *self = (SdhciDevice) {
-        .mapping = mapping,
-        .mmio = driver_ptr(mapping),
-        .irq = config.irq,
-        .path = BSTRING_NEW(SDHCI_DEVICE_PATH),
-    };
+    *self = SdhciDevice__new(mapping, driver_ptr(mapping), config.irq, bstr(SDHCI_DEVICE_PATH));
 
     uint32_t host_version = SDHCI_READ32(self->mmio, SDHCI_HOST_VERSION);
     DRIVER_DEBUG(
@@ -775,14 +774,17 @@ static ServiceCode Sdhci__read_blocks(SdhciDevicePtr self, ServiceBlockRequestPt
     SDHCI_WRITE16(self->mmio, SDHCI_BLOCK_COUNT_REG, (uint16_t) request->block_count);
 
     bool multi_block = request->block_count > 1;
-    SdhciCommandResult read = Sdhci__send_command(self, (SdhciCommand) {
-        .index = multi_block ? SD_CMD_READ_MULTIPLE_BLOCK : SD_CMD_READ_SINGLE_BLOCK,
-        .argument = Sdhci__block_argument(self, request->block),
-        .response_type = SDHCI_CMD_RESP_48,
-        .transfer_mode = SDHCI_TRANSFER_READ
-            | (multi_block ? SDHCI_TRANSFER_MULTI_BLOCK | SDHCI_TRANSFER_BLOCK_COUNT_ENABLE : 0),
-        .data_present = true,
-    });
+    SdhciCommandResult read = Sdhci__send_command(
+        self,
+        SdhciCommand__new(
+            multi_block ? SD_CMD_READ_MULTIPLE_BLOCK : SD_CMD_READ_SINGLE_BLOCK,
+            Sdhci__block_argument(self, request->block),
+            SDHCI_CMD_RESP_48,
+            SDHCI_TRANSFER_READ
+                | (multi_block ? SDHCI_TRANSFER_MULTI_BLOCK | SDHCI_TRANSFER_BLOCK_COUNT_ENABLE : 0),
+            true
+        )
+    );
     if (!read.ok)
     {
         return SERVICE_BLOCK_REQUEST_FAILED;
@@ -812,6 +814,23 @@ static ServiceCode Sdhci__read_blocks(SdhciDevicePtr self, ServiceBlockRequestPt
         return SERVICE_BLOCK_REQUEST_FAILED;
     }
 
+    if (request->buffer_size >= 8)
+    {
+        DRIVER_DEBUG(
+            "sdhci: read request id=%i block=%i driver_buffer_first_bytes=%i,%i,%i,%i,%i,%i,%i,%i\n",
+            (int) request->request_id,
+            (int) request->block,
+            (int) target[0],
+            (int) target[1],
+            (int) target[2],
+            (int) target[3],
+            (int) target[4],
+            (int) target[5],
+            (int) target[6],
+            (int) target[7]
+        );
+    }
+
     return SERVICE_OK;
 }
 
@@ -825,7 +844,7 @@ static void Sdhci__handle_block_request(SdhciDevicePtr self, uint64_t request_id
         return;
     }
 
-    if (!Sdhci__paths_equal(&self->path, request.device_path))
+    if (!BString__equals(&self->path, &request.device_path))
     {
         service_block_complete(request.request_id, SERVICE_BLOCK_REQUEST_FAILED, 0);
         return;
@@ -868,7 +887,7 @@ int SDHCI_ENTRYPOINT(void)
                 return 1;
             }
 
-            if (!service_ok(service_register_block_device(BString__cstr(&device.path), SDHCI_BLOCK_SIZE, device.block_count)))
+            if (!service_ok(service_register_block_device(&device.path, SDHCI_BLOCK_SIZE, device.block_count)))
             {
                 DRIVER_DEBUG("sdhci: block device registration failed\n");
                 return 1;

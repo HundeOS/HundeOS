@@ -4,7 +4,7 @@
 
 FixedArrayBodyDefine(Listeners);
 
-static BString too_many_listeners = BSTRING_NEW("too many listeners already registered");
+static BString too_many_listeners = bstr("too many listeners already registered");
 
 
 MessageBroker MessageBroker__new()

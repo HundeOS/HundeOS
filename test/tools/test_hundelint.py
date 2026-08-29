@@ -123,7 +123,7 @@ class HundelintTest(unittest.TestCase):
         rules = self.ast_rules_for(source)
         self.assertIn("constructor-required", rules)
 
-    def test_does_not_report_zero_initializer_without_field_assignments(self):
+    def test_reports_zero_initializer_without_field_assignments(self):
         source = (
             "void example(void) {\n"
             "    DirectoryEntry entry = (DirectoryEntry) { 0 };\n"
@@ -131,7 +131,7 @@ class HundelintTest(unittest.TestCase):
             "}\n"
         )
         rules = self.ast_rules_for(source)
-        self.assertNotIn("constructor-required", rules)
+        self.assertIn("constructor-required", rules)
 
     def test_allows_constructor_required_ignore_comment(self):
         source = (
@@ -140,6 +140,61 @@ class HundelintTest(unittest.TestCase):
             "    entry.attributes = node->attributes;\n"
             "}\n"
         )
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("constructor-required", rules)
+
+    def test_reports_direct_named_type_compound_literal(self):
+        source = (
+            "void example(void) {\n"
+            "    Fat32fsDirectoryEntryLocation location = "
+            "(Fat32fsDirectoryEntryLocation) { .sector = 1, .offset = 2 };\n"
+            "    use(location);\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertIn("constructor-required", rules)
+
+    def test_reports_direct_named_type_compound_literal_without_explicit_allowlist(self):
+        source = (
+            "void example(void) {\n"
+            "    Fat32fsVolume volume = (Fat32fsVolume) { .root_cluster = 2 };\n"
+            "    use(volume);\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertIn("constructor-required", rules)
+
+    def test_allows_named_type_compound_literal_inside_constructor(self):
+        source = (
+            "Fat32fsDirectoryEntryLocation Fat32fsDirectoryEntryLocation__new(uint32_t sector, size_t offset) {\n"
+            "    return (Fat32fsDirectoryEntryLocation) { .sector = sector, .offset = offset };\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("constructor-required", rules)
+
+    def test_allows_named_type_compound_literal_inside_constructor_variant(self):
+        source = (
+            "Message Message__new_anything(uint64_t source) {\n"
+            "    return (Message) { .source = source };\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("constructor-required", rules)
+
+    def test_allows_named_type_compound_literal_inside_heap_constructor_variant(self):
+        source = (
+            "NodePtr Node__heap_new_with_metadata(BString name) {\n"
+            "    NodePtr node = alloc();\n"
+            "    *node = (Node) { .name = name };\n"
+            "    return node;\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("constructor-required", rules)
+
+    def test_allows_array_compound_literal(self):
+        source = "void example(void) { char * value = (char[]) { 'o', 'k', 0 }; }\n"
         rules = self.ast_rules_for(source)
         self.assertNotIn("constructor-required", rules)
 
@@ -164,12 +219,17 @@ class HundelintTest(unittest.TestCase):
         self.assertNotIn("member-first-arg-self", rules)
 
     def test_allows_member_constructor_with_no_args(self):
-        source = "BString BString__new() { return EMPTY_BSTRING; }\n"
+        source = "BString BString__new() { return empty_bstr(); }\n"
         rules = self.ast_rules_for(source)
         self.assertNotIn("member-first-arg-self", rules)
 
     def test_allows_namespaced_function_when_first_arg_is_not_member_type(self):
         source = "IOHandle IO__open(ConstBStringPtr path, Flags flags) { return 0; }\n"
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("member-first-arg-self", rules)
+
+    def test_allows_namespaced_function_with_non_receiver_argument_not_named_self(self):
+        source = "DirectoryEntryCount IO__list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries) { return 0; }\n"
         rules = self.ast_rules_for(source)
         self.assertNotIn("member-first-arg-self", rules)
 
@@ -372,6 +432,31 @@ class HundelintTest(unittest.TestCase):
         rules = self.rules_for(source)
         self.assertEqual(2, rules.count("legacy-critical-section-macros"))
 
+    def test_rejects_unscoped_user_print_calls(self):
+        source = "void example(void) { printf(\"hello\\n\"); print(\"bye\\n\"); }\n"
+        rules = self.rules_for(source, "user/example.c")
+        self.assertEqual(2, rules.count("legacy-user-print"))
+
+    def test_allows_scoped_user_print_calls(self):
+        source = "void example(void) { IO__printf(&format); IO__print(&message); }\n"
+        rules = self.rules_for(source, "user/example.c")
+        self.assertNotIn("legacy-user-print", rules)
+
+    def test_rejects_legacy_user_print_bridge(self):
+        source = "void print(const char * text) { IO__print(&btext); }\n"
+        rules = self.rules_for(source, "user/sys/print.c")
+        self.assertIn("legacy-user-print", rules)
+
+    def test_rejects_legacy_user_printf_bridge(self):
+        source = "int printf(const char * format, ...) { return IO__printf(&bformat); }\n"
+        rules = self.rules_for(source, "user/sys/print.c")
+        self.assertIn("legacy-user-print", rules)
+
+    def test_allows_non_user_print_calls(self):
+        source = "void example(void) { print(\"boot\\n\"); }\n"
+        rules = self.rules_for(source, "arch/aarch64/boot/print.c")
+        self.assertNotIn("legacy-user-print", rules)
+
     def test_reports_raw_control_flow_in_critical_section(self):
         source = (
             "int example(mutex_t lock) {\n"
@@ -436,7 +521,7 @@ class HundelintTest(unittest.TestCase):
     def test_reports_unwrap_macros(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    BString text = Unwrap(BString, value, EMPTY_BSTRING);\n"
+            "    BString text = Unwrap(BString, value, empty_bstr());\n"
             "    ByteCount count = ResultUnwrap(ByteCount, result, 0);\n"
             "}\n"
         )

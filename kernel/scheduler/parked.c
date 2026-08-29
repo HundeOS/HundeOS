@@ -4,6 +4,24 @@
 
 LinkedListBodyDefine(BlockedParkedOperations);
 
+static ParkedOperation ParkedOperation__new(
+    KernelContextPtr kernel_context, Optional(Continuation) continuation,
+    ParkReason park_reason, bool owns_kernel_context
+)
+{
+    return (ParkedOperation) {
+        .kernel_context = kernel_context,
+        .owns_kernel_context = owns_kernel_context,
+        .ready = false,
+        .continuation = continuation,
+        .operation_key = None(OperationKey),
+        .park_reason = park_reason,
+        .blocked_operations = BlockedParkedOperations__new(),
+        .pending_operations = 0,
+        .return_code = None(ReturnCode),
+    };
+}
+
 ParkedOperationPtr ParkedOperation__heap_new(
     KernelContextPtr kernel_context, Optional(Continuation) continuation, ParkReason park_reason
 )
@@ -19,17 +37,7 @@ ParkedOperationPtr ParkedOperation__heap_new_with_context_ownership(
 )
 {
     ParkedOperationPtr context = ptr(Kernel__alloc_kernel(sizeof(ParkedOperation)), ParkedOperation);
-    *context = (ParkedOperation) {
-        .kernel_context = kernel_context,
-        .owns_kernel_context = owns_kernel_context,
-        .ready = false,
-        .continuation = continuation,
-        .operation_key = None(OperationKey),
-        .park_reason = park_reason,
-        .blocked_operations = BlockedParkedOperations__new(),
-        .pending_operations = 0,
-        .return_code = None(ReturnCode),
-    };
+    *context = ParkedOperation__new(kernel_context, continuation, park_reason, owns_kernel_context);
 
     return context;
 }
@@ -84,19 +92,19 @@ BString ParkReason__to_string(ParkReason reason)
     switch (reason)
     {
         case PARK_WAIT_CHILD:
-            return BSTRING_NEW("PARK_WAIT_CHILD");
+            return bstr("PARK_WAIT_CHILD");
         case PARK_WAIT_IO:
-            return BSTRING_NEW("PARK_WAIT_IO");
+            return bstr("PARK_WAIT_IO");
         case PARK_WAIT_SERVICE_EVENT:
-            return BSTRING_NEW("PARK_WAIT_SERVICE_EVENT");
+            return bstr("PARK_WAIT_SERVICE_EVENT");
         case PARK_WAIT_CHILD_EVENT:
-            return BSTRING_NEW("PARK_WAIT_CHILD_EVENT");
+            return bstr("PARK_WAIT_CHILD_EVENT");
         case PARK_WAIT_SERVICE_READY:
-            return BSTRING_NEW("PARK_WAIT_SERVICE_READY");
+            return bstr("PARK_WAIT_SERVICE_READY");
         case PARK_SLEEP:
-            return BSTRING_NEW("PARK_SLEEP");
+            return bstr("PARK_SLEEP");
         default:
-            return BSTRING_NEW("PARK_WAIT_UNKNOWN");
+            return bstr("PARK_WAIT_UNKNOWN");
     }
 }
 

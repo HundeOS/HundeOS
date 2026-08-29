@@ -3,41 +3,7 @@
 #include "../debug.h"
 #include "syscalls/syslog.h"
 
-static BString invalid_syslog_message = BSTRING_NEW("Invalid syslog message");
-
-static Result(BString) Syslog__copy_string(Anything string_address, StringPos max_len)
-{
-    if (string_address == 0)
-    {
-        return Error(BString, invalid_syslog_message, SYSLOG_INVALID_ARGUMENT);
-    }
-
-    char * source = (char *) string_address;
-    BString message = EMPTY_BSTRING;
-    if (max_len > message.max - 1)
-    {
-        max_len = message.max - 1;
-    }
-
-    StringPos position = 0;
-    while (position < max_len && source[position] != '\0')
-    {
-        BString__push_char(&message, source[position]);
-        position++;
-    }
-
-    return Success(BString, message);
-}
-
-static Result(BString) Syslog__copy_message(Anything message_address)
-{
-    return Syslog__copy_string(message_address, SYSLOG_MAX_MESSAGE - 1);
-}
-
-static Result(BString) Syslog__copy_tag(Anything tag_address)
-{
-    return Syslog__copy_string(tag_address, SYSLOG_MAX_TAG - 1);
-}
+static BString invalid_syslog_message = bstr("Invalid syslog message");
 
 static void Syslog__write(BString tag, Optional(ProcessPtr) proc, BString message)
 {
@@ -72,23 +38,18 @@ Result(SystemCallResult) Syslog__handler(
     Anything arg5
 )
 {
-    match_result(BString, Syslog__copy_message(arg1),
-        success(message)
-        {
-            BString tag = BSTRING_NEW("SYSLOG");
-            if (arg2 != 0)
-            {
-                match_result(BString, Syslog__copy_tag(arg2),
-                    success(copied_tag) { tag = copied_tag; },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
+    if (arg1 == 0)
+    {
+        return Error(SystemCallResult, invalid_syslog_message, SYSLOG_INVALID_ARGUMENT);
+    }
 
-            Syslog__write(tag, proc, message);
-            return Success(SystemCallResult, SYSLOG_OK);
-        },
-        error(code, message) { return Error(SystemCallResult, message, code); }
+    SyslogRequestPtr request = (SyslogRequestPtr) arg1;
+    BString tag = bstr("SYSLOG");
+    match_optional(BString, request->tag,
+        some(copied_tag) { tag = copied_tag; },
+        none_do_nothing()
     );
 
-    return Error(SystemCallResult, invalid_syslog_message, SYSLOG_INVALID_ARGUMENT);
+    Syslog__write(tag, proc, request->message);
+    return Success(SystemCallResult, SYSLOG_OK);
 }

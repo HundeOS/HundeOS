@@ -99,6 +99,13 @@ typedef Ext2DirectoryEntry * Ext2DirectoryEntryPtr;
 
 OptionalDef(Ext2DirectoryEntry);
 bool Ext2DirectoryEntry__equals(Ext2DirectoryEntryPtr self, Ext2DirectoryEntryPtr other);
+Ext2DirectoryEntry Ext2DirectoryEntry__new(
+    BString name,
+    Ext2DirectoryEntryType file_type,
+    Ext2InodeNumber inode,
+    Ext2InodeMode mode,
+    Ext2FileSize size
+);
 FixedArrayDefine(
     Ext2DirectoryEntry,
     EXT2_MAX_ROOT_ENTRIES,

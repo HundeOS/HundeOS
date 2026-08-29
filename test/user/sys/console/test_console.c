@@ -23,10 +23,9 @@ ByteCount read(IOHandle handle, char * buf, size_t size)
     return copied;
 }
 
-void print(const char * str)
+void IO__print(ConstBStringPtr text)
 {
-    BString text = bstring(str);
-    printed_output = BString__append(&printed_output, &text);
+    printed_output = BString__append(&printed_output, text);
 }
 
 #include "../../../../user/sys/console.c"
@@ -35,7 +34,7 @@ void setUp(void)
 {
     next_input = "";
     next_input_size = 0;
-    printed_output = EMPTY_BSTRING;
+    printed_output = empty_bstr();
 }
 
 void tearDown(void)

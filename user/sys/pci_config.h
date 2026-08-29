@@ -37,12 +37,12 @@ PciConfigParseState;
 typedef PciConfigParseState * PciConfigParseStatePtr;
 typedef const PciConfigParseState * ConstPciConfigParseStatePtr;
 
-static const BString pci_config_delimiter = BSTRING_NEW("=");
-static const BString pci_config_present_key = BSTRING_NEW("pci.present");
-static const BString pci_config_ecam_physical_base_key = BSTRING_NEW("pci.ecam.physical_base");
-static const BString pci_config_ecam_size_key = BSTRING_NEW("pci.ecam.size");
-static const BString pci_config_bus_start_key = BSTRING_NEW("pci.bus.start");
-static const BString pci_config_bus_end_key = BSTRING_NEW("pci.bus.end");
+static const BString pci_config_delimiter = bstr("=");
+static const BString pci_config_present_key = bstr("pci.present");
+static const BString pci_config_ecam_physical_base_key = bstr("pci.ecam.physical_base");
+static const BString pci_config_ecam_size_key = bstr("pci.ecam.size");
+static const BString pci_config_bus_start_key = bstr("pci.bus.start");
+static const BString pci_config_bus_end_key = bstr("pci.bus.end");
 
 static Optional(uint64_t) PciConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key)
 {
@@ -170,7 +170,8 @@ static bool PciConfig__read_config(ConstDynStringPtr sysinfo, PciConfigPtr self)
 
 static bool PciConfig__load(PciConfigPtr self)
 {
-    IOHandle handle = open(PCI_CONFIG_PATH, IO_OPEN_READ);
+    BString config_path = bstr(PCI_CONFIG_PATH);
+    IOHandle handle = open(&config_path, IO_OPEN_READ);
     if (handle < 0)
     {
         return false;

@@ -9,11 +9,11 @@ int PANIC_ENTRYPOINT(int argc, char ** argv)
 {
     if (argc != 1)
     {
-        print("panic: usage panic\n");
+        IO__print(&bstr("panic: usage panic\n"));
         return 1;
     }
 
     SystemCallResult result = panic_system();
-    printf("panic: syscall returned %i\n", (int) result);
+    IO__printf(&bstr("panic: syscall returned %i\n"), (int) result);
     return 1;
 }

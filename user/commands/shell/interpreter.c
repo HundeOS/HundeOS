@@ -5,18 +5,18 @@
 
 #define SPAWN_ARG_LIMIT 3
 
-static const BString CMD_EXIT = BSTRING_NEW("exit");
-static const BString COMMAND_SEARCH_PATH = BSTRING_NEW("/sbin");
-static const BString QUOTE_DELIMITER = BSTRING_NEW("\"");
-static const BString TOKEN_DELIMITERS = BSTRING_NEW(" \t\n\r");
-static const BString BACKGROUND_OPERATOR = BSTRING_NEW("&");
+static const BString CMD_EXIT = bstr("exit");
+static const BString COMMAND_SEARCH_PATH = bstr("/sbin");
+static const BString QUOTE_DELIMITER = bstr("\"");
+static const BString TOKEN_DELIMITERS = bstr(" \t\n\r");
+static const BString BACKGROUND_OPERATOR = bstr("&");
 
 FixedArrayBodyDefine(CommandArguments);
 
 static Command Command__new(void)
 {
     Command command = {
-        .name = EMPTY_BSTRING,
+        .name = empty_bstr(),
         .args = { 0 },
         .background = false,
     };
@@ -45,7 +45,7 @@ static bool Interpreter__matches(ConstBStringPtr str, ConstBStringPtr cmd)
 
 static BString Interpreter__command_path(ConstBStringPtr cmd)
 {
-    BString root_prefix = BSTRING_NEW("/");
+    BString root_prefix = bstr("/");
 
     if (BString__starts_with(cmd, &root_prefix))
     {
@@ -132,28 +132,28 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
     }
 
     BString path = Interpreter__command_path(&command->name);
-    const char * arg0 = NULL; // hundelint: ignore-no-null
-    const char * arg1 = NULL; // hundelint: ignore-no-null
-    const char * arg2 = NULL; // hundelint: ignore-no-null
+    Optional(BString) arg0 = SPAWN_NO_ARG;
+    Optional(BString) arg1 = SPAWN_NO_ARG;
+    Optional(BString) arg2 = SPAWN_NO_ARG;
 
     match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 0),
-        some(value) { arg0 = BString__cstr(value); },
+        some(value) { arg0 = Some(BString, *value); },
         none_do_nothing()
     );
     match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 1),
-        some(value) { arg1 = BString__cstr(value); },
+        some(value) { arg1 = Some(BString, *value); },
         none_do_nothing()
     );
     match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 2),
-        some(value) { arg2 = BString__cstr(value); },
+        some(value) { arg2 = Some(BString, *value); },
         none_do_nothing()
     );
     SpawnMode mode = command->background ? P_NOWAIT : P_WAIT;
-    SpawnResult result = spawn(mode, BString__cstr(&path), arg0, arg1, arg2);
+    SpawnResult result = spawn(mode, &path, arg0, arg1, arg2);
 
     if (result != SPAWN_SUCCESS)
     {
-        printf("result = %i\n", (int) result);
+        IO__printf(&bstr("result = %i\n"), (int) result);
     }
 
     switch (result)

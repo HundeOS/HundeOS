@@ -17,23 +17,33 @@ HashCode Heap__hash_address(Address * self)
     return *self / PAGE_SIZE;
 }
 
-Result(HeapCode) Heap__init(HeapPtr self, SystemInfoPtr system_info)
+static MemoryBlock MemoryBlock__new(KernelAddress start, uint64_t pages_allocated)
 {
-    MemoryRegionPtr kernel_heap = &system_info->kernel_heap;
+    return (MemoryBlock) {
+        .start = start,
+        .block_lock = MUTEX_INIT,
+        .pages_allocated = pages_allocated,
+    };
+}
 
-    *self = (Heap) {
+static Heap Heap__new(MemoryRegionPtr kernel_heap)
+{
+    return (Heap) {
         .lock = MUTEX_INIT,
         .start = kernel_heap->virtual_start,
         .end = kernel_heap->virtual_start + (kernel_heap->physical_end - kernel_heap->physical_start),
         .phys_start = kernel_heap->physical_start,
-        .current_block = (MemoryBlock) {
-            .start = KERNEL_ADDR(kernel_heap->virtual_start, kernel_heap->physical_start),
-            .pages_allocated = 0,
-            .block_lock = MUTEX_INIT,
-        },
+        .current_block = MemoryBlock__new(KERNEL_ADDR(kernel_heap->virtual_start, kernel_heap->physical_start), 0),
         .allocated_blocks = AllocatedBlocks__new(),
         .free_blocks = AllocatedBlocks__new(),
     };
+}
+
+Result(HeapCode) Heap__init(HeapPtr self, SystemInfoPtr system_info)
+{
+    MemoryRegionPtr kernel_heap = &system_info->kernel_heap;
+
+    *self = Heap__new(kernel_heap);
     return Success(HeapCode, 0);
 }
 
@@ -55,11 +65,7 @@ static void MemoryBlock__advance(MemoryBlockPtr self, Address heap_end) {
         Kernel__panic("out of heap", NULL); // hundelint: ignore-no-null
     }
 
-    *self = (MemoryBlock) {
-        .pages_allocated = 0,
-        .start = KERNEL_ADDR(next_virtual_addr, next_phys_addr),
-        .block_lock = MUTEX_INIT,
-    };
+    *self = MemoryBlock__new(KERNEL_ADDR(next_virtual_addr, next_phys_addr), 0);
 }
 
 static KernelAddress MemoryBlock__next_page(MemoryBlockPtr self, Address heap_end)
@@ -200,11 +206,7 @@ static Optional(MemoryBlock) Heap__take_free_block(HeapPtr self, uint64_t pages)
                         block.start.virtual_addr + (pages * PAGE_SIZE),
                         block.start.phys_addr + (pages * PAGE_SIZE)
                     );
-                    MemoryBlock remainder = (MemoryBlock) {
-                        .start = remainder_start,
-                        .block_lock = MUTEX_INIT,
-                        .pages_allocated = block.pages_allocated - pages,
-                    };
+                    MemoryBlock remainder = MemoryBlock__new(remainder_start, block.pages_allocated - pages);
                     AllocatedBlocks__set(&self->free_blocks, remainder.start.virtual_addr, remainder);
                     block.pages_allocated = pages;
                 }
@@ -218,11 +220,7 @@ static Optional(MemoryBlock) Heap__take_free_block(HeapPtr self, uint64_t pages)
 
 static Result(HeapCode) Heap__record_allocated(HeapPtr self, KernelAddress start, uint64_t pages)
 {
-    MemoryBlock block = (MemoryBlock) {
-        .start = start,
-        .block_lock = MUTEX_INIT,
-        .pages_allocated = pages,
-    };
+    MemoryBlock block = MemoryBlock__new(start, pages);
 
     match_result(CollectionCode, AllocatedBlocks__set(&self->allocated_blocks, start.virtual_addr, block),
         success(_) { return Success(HeapCode, HEAP_OK); },

@@ -1,7 +1,7 @@
 #include "dyn_string.h"
 
-static BString allocation_failed = BSTRING_NEW("DynString allocation failed");
-static BString invalid_capacity = BSTRING_NEW("DynString invalid capacity");
+static BString allocation_failed = bstr("DynString allocation failed");
+static BString invalid_capacity = bstr("DynString invalid capacity");
 
 LinkedListBodyDefine(DynStringLines);
 
@@ -196,7 +196,7 @@ char DynString__char_at_or(ConstDynStringPtr self, StringPos index, char alterna
 
 Optional(BString) DynString__bstring(ConstDynStringPtr self)
 {
-    BString text = EMPTY_BSTRING;
+    BString text = empty_bstr();
     for (StringPos i = 0; i < DynString__length(self); i++)
     {
         char ch = DynString__char_at_or(self, i, '\0');

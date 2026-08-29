@@ -1,10 +1,12 @@
 #ifndef _COMMON_INCLUDES_SYSCALLS_SERVICE_H
 #define _COMMON_INCLUDES_SYSCALLS_SERVICE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
-#define SERVICE_DEVICE_PATH_MAX 256ULL
-#define SERVICE_READY_NAME_MAX 256ULL
+#include "io.h"
+#include "types/address.h"
+#include "types/bstring.h"
 
 typedef enum ServiceOperation
 {
@@ -15,9 +17,14 @@ typedef enum ServiceOperation
     SERVICE_REGISTER_BLOCK_DEVICE,
     SERVICE_BLOCK_GET_REQUEST,
     SERVICE_BLOCK_COMPLETE,
+    SERVICE_BLOCK_READ_DEVICE,
+    SERVICE_BLOCK_WRITE_DEVICE,
     SERVICE_DEVICE_ADDRESS,
     SERVICE_PUBLISH_READY,
     SERVICE_WAIT_READY,
+    SERVICE_REGISTER_FILESYSTEM,
+    SERVICE_FILESYSTEM_GET_REQUEST,
+    SERVICE_FILESYSTEM_COMPLETE,
 } ServiceOperation;
 
 typedef enum ServiceEventType
@@ -27,6 +34,7 @@ typedef enum ServiceEventType
     SERVICE_EVENT_IO = 3,
     SERVICE_EVENT_BLOCK_IO = 4,
     SERVICE_EVENT_READY = 5,
+    SERVICE_EVENT_FILESYSTEM_IO = 6,
 } ServiceEventType;
 
 typedef enum ServiceIOEvent
@@ -43,6 +51,15 @@ typedef struct ServiceEvent
 } ServiceEvent;
 
 typedef ServiceEvent * ServiceEventPtr;
+
+static inline ServiceEvent ServiceEvent__new(ServiceEventType type, uint64_t source, uint64_t data)
+{
+    return (ServiceEvent) {
+        .type = type,
+        .source = source,
+        .data = data,
+    };
+}
 
 typedef enum ServiceCode
 {
@@ -64,7 +81,21 @@ typedef enum ServiceCode
     SERVICE_BLOCK_REQUEST_NOT_FOUND = -13,
     SERVICE_BLOCK_REQUEST_FAILED = -14,
     SERVICE_PERMISSION_DENIED = -15,
+    SERVICE_FILESYSTEM_REQUEST_NOT_FOUND = -16,
+    SERVICE_FILESYSTEM_REQUEST_FAILED = -17,
 } ServiceCode;
+
+typedef enum ServiceFilesystemOperation
+{
+    SERVICE_FILESYSTEM_LIST_DIR = 1,
+    SERVICE_FILESYSTEM_OPEN = 2,
+    SERVICE_FILESYSTEM_READ = 3,
+    SERVICE_FILESYSTEM_CLOSE = 4,
+    SERVICE_FILESYSTEM_WRITE = 5,
+    SERVICE_FILESYSTEM_MKDIR = 6,
+    SERVICE_FILESYSTEM_REMOVE = 7,
+}
+ServiceFilesystemOperation;
 
 typedef enum ServiceBlockOperation
 {
@@ -76,17 +107,40 @@ ServiceBlockOperation;
 typedef struct ServiceBlockRequest
 {
     uint64_t request_id;
-    char device_path[SERVICE_DEVICE_PATH_MAX];
+    BString device_path;
     ServiceBlockOperation operation;
     uint64_t block;
     uint64_t block_count;
     uint64_t block_size;
-    void * buffer;
-    uint64_t buffer_size;
+    Address buffer;
+    size_t buffer_size;
 }
 ServiceBlockRequest;
 
 typedef ServiceBlockRequest * ServiceBlockRequestPtr;
+
+static inline ServiceBlockRequest ServiceBlockRequest__new(
+    uint64_t request_id,
+    BString device_path,
+    ServiceBlockOperation operation,
+    uint64_t block,
+    uint64_t block_count,
+    uint64_t block_size,
+    Address buffer,
+    size_t buffer_size
+)
+{
+    return (ServiceBlockRequest) {
+        .request_id = request_id,
+        .device_path = device_path,
+        .operation = operation,
+        .block = block,
+        .block_count = block_count,
+        .block_size = block_size,
+        .buffer = buffer,
+        .buffer_size = buffer_size,
+    };
+}
 
 typedef struct ServiceBlockCompletion
 {
@@ -98,13 +152,27 @@ ServiceBlockCompletion;
 
 typedef ServiceBlockCompletion * ServiceBlockCompletionPtr;
 
+typedef int64_t ServiceBlockReadResult;
+
+typedef struct ServiceBlockReadRequest
+{
+    BString device_path;
+    uint64_t block;
+    uint64_t block_count;
+    Address buffer;
+    size_t buffer_size;
+}
+ServiceBlockReadRequest;
+
+typedef ServiceBlockReadRequest * ServiceBlockReadRequestPtr;
+
 typedef struct ServiceMappedMemory ServiceMappedMemory;
 typedef ServiceMappedMemory * ServiceMappedMemoryPtr;
 
 typedef struct ServiceDeviceAddressRequest
 {
-    uint64_t driver_address;
-    uint64_t device_address;
+    Address driver_address;
+    Address device_address;
 }
 ServiceDeviceAddressRequest;
 
@@ -112,7 +180,7 @@ typedef ServiceDeviceAddressRequest * ServiceDeviceAddressRequestPtr;
 
 typedef struct ServiceBlockDeviceRegistration
 {
-    char path[SERVICE_DEVICE_PATH_MAX];
+    BString path;
     uint64_t block_size;
     uint64_t block_count;
 }
@@ -122,10 +190,155 @@ typedef ServiceBlockDeviceRegistration * ServiceBlockDeviceRegistrationPtr;
 
 typedef struct ServiceReadyRequest
 {
-    char name[SERVICE_READY_NAME_MAX];
+    BString name;
 }
 ServiceReadyRequest;
 
 typedef ServiceReadyRequest * ServiceReadyRequestPtr;
+
+typedef struct ServiceFilesystemRegistration
+{
+    BString device_path;
+    BString filesystem_type;
+    BString mountpoint;
+}
+ServiceFilesystemRegistration;
+
+typedef ServiceFilesystemRegistration * ServiceFilesystemRegistrationPtr;
+
+typedef struct ServiceFilesystemRequest
+{
+    uint64_t request_id;
+    ServiceFilesystemOperation operation;
+    BString device_path;
+    BString path;
+    uint32_t handle;
+    Flags flags;
+    uint64_t block;
+    uint64_t block_offset;
+    Address buffer;
+    size_t size;
+    Address entries;
+    size_t max_entries;
+}
+ServiceFilesystemRequest;
+
+typedef ServiceFilesystemRequest * ServiceFilesystemRequestPtr;
+
+typedef struct ServiceFilesystemCompletion
+{
+    uint64_t request_id;
+    ServiceCode status;
+    int64_t result;
+    FileMode mode;
+    uint64_t size;
+    uint32_t block[12];
+}
+ServiceFilesystemCompletion;
+
+typedef ServiceFilesystemCompletion * ServiceFilesystemCompletionPtr;
+
+static inline ServiceBlockDeviceRegistration ServiceBlockDeviceRegistration__new(
+    ConstBStringPtr path, uint64_t block_size, uint64_t block_count
+)
+{
+    return (ServiceBlockDeviceRegistration) {
+        .path = *path,
+        .block_size = block_size,
+        .block_count = block_count,
+    };
+}
+
+static inline ServiceBlockCompletion ServiceBlockCompletion__new(
+    uint64_t request_id, ServiceCode status, uint64_t block_count
+)
+{
+    return (ServiceBlockCompletion) {
+        .request_id = request_id,
+        .status = status,
+        .block_count = block_count,
+    };
+}
+
+static inline ServiceBlockReadRequest ServiceBlockReadRequest__new(
+    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
+)
+{
+    return (ServiceBlockReadRequest) {
+        .device_path = *path,
+        .block = block,
+        .block_count = block_count,
+        .buffer = buffer,
+        .buffer_size = buffer_size,
+    };
+}
+
+static inline ServiceDeviceAddressRequest ServiceDeviceAddressRequest__new(Address driver_address)
+{
+    return (ServiceDeviceAddressRequest) {
+        .driver_address = driver_address,
+        .device_address = 0,
+    };
+}
+
+static inline ServiceReadyRequest ServiceReadyRequest__new(ConstBStringPtr name)
+{
+    return (ServiceReadyRequest) {
+        .name = *name,
+    };
+}
+
+static inline ServiceFilesystemRegistration ServiceFilesystemRegistration__new(
+    ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
+)
+{
+    return (ServiceFilesystemRegistration) {
+        .device_path = *device_path,
+        .filesystem_type = *filesystem_type,
+        .mountpoint = *mountpoint,
+    };
+}
+
+static inline ServiceFilesystemRequest ServiceFilesystemRequest__new(
+    uint64_t request_id,
+    ServiceFilesystemOperation operation,
+    ConstBStringPtr device_path,
+    ConstBStringPtr path,
+    uint32_t handle,
+    Flags flags,
+    uint64_t block,
+    uint64_t block_offset,
+    Address buffer,
+    size_t size,
+    Address entries,
+    size_t max_entries
+)
+{
+    return (ServiceFilesystemRequest) {
+        .request_id = request_id,
+        .operation = operation,
+        .device_path = *device_path,
+        .path = *path,
+        .handle = handle,
+        .flags = flags,
+        .block = block,
+        .block_offset = block_offset,
+        .buffer = buffer,
+        .size = size,
+        .entries = entries,
+        .max_entries = max_entries,
+    };
+}
+
+static inline ServiceFilesystemCompletion ServiceFilesystemCompletion__new(
+    uint64_t request_id, ServiceCode status, int64_t result
+)
+{
+    return (ServiceFilesystemCompletion) {
+        .request_id = request_id,
+        .status = status,
+        .result = result,
+    };
+}
 
 #endif

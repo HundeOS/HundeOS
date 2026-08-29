@@ -8,16 +8,22 @@
 
 FixedArrayBodyDefine(StreamParkedContexts);
 
-static StreamState stream_state = (StreamState) {
-    .state = NEW_IO_STATE,
-    .write_buffer = EmptyRingBuffer(IOBuffer),
-    .read_buffer = EmptyRingBuffer(IOBuffer),
-    .data_available = false,
-    .eof = false,
-    .parked_contexts = EmptyArray(StreamParkedContexts),
-    .lock = MUTEX_INIT,
-    .handle_counter = 0,
-};
+static StreamState stream_state;
+static bool stream_state_initialized = false;
+
+static StreamState StreamState__new()
+{
+    return (StreamState) {
+        .state = IOState__new(),
+        .write_buffer = EmptyRingBuffer(IOBuffer),
+        .read_buffer = EmptyRingBuffer(IOBuffer),
+        .data_available = false,
+        .eof = false,
+        .parked_contexts = EmptyArray(StreamParkedContexts),
+        .lock = MUTEX_INIT,
+        .handle_counter = 0,
+    };
+}
 
 static bool Stream__handle_match(IOContextPtr * context_p, void * handle_p)
 {
@@ -169,10 +175,10 @@ static Optional(IOContextPtr) Stream__last_parked_context_with_handle(StreamStat
 static Result(IOServerBuffer) Stream__server_buffer(IOStatePtr state)
 {
     StreamStatePtr self = (StreamStatePtr) state;
-    IOServerBuffer buffer = (IOServerBuffer) {
-        .data = NULL, // hundelint: ignore-no-null
-        .capacity = 0,
-    };
+    IOServerBuffer buffer = IOServerBuffer__new(
+        NULL, // hundelint: ignore-no-null
+        0
+    );
 
     critical_section(self->lock,
     {
@@ -262,38 +268,36 @@ IOPtr Stream__heap_new()
 {
     IOPtr result = v_ptr(Kernel__alloc(sizeof(IO)), IO);
 
-    *result = (IO) {
-        .read = Stream__read,
-        .write = Stream__write,
-        .open = Stream__open,
-        .close = Stream__close,
-        .park = Stream__park,
-        .unpark = Stream__unpark,
-        .server_buffer = Stream__server_buffer,
-        .server_write_buffer = Stream__server_write_buffer,
-        .data_available = Stream__data_available,
-        .data_consumed = Stream__data_consumed,
-        .eof = Stream__eof,
-    };
+    *result = IO__new(
+        Stream__open,
+        Stream__read,
+        Stream__write,
+        Stream__close,
+        Stream__park,
+        Stream__unpark,
+        Stream__server_buffer,
+        Stream__server_write_buffer,
+        Stream__data_available,
+        Stream__data_consumed,
+        Stream__eof
+    );
 
     return result;
 }
 
 StreamStatePtr StreamState__instance()
 {
+    if (!stream_state_initialized)
+    {
+        stream_state = StreamState__new();
+        stream_state_initialized = true;
+    }
     return &stream_state;
 }
 
 StreamStatePtr StreamState__heap_new()
 {
     StreamStatePtr result = ptr(Kernel__alloc_kernel(sizeof(StreamState)), StreamState);
-    result->state = NEW_IO_STATE;
-    result->write_buffer = EmptyRingBuffer(IOBuffer);
-    result->read_buffer = EmptyRingBuffer(IOBuffer);
-    result->data_available = false;
-    result->eof = false;
-    result->parked_contexts = EmptyArray(StreamParkedContexts);
-    result->lock = MUTEX_INIT;
-    result->handle_counter = 0;
+    *result = StreamState__new();
     return result;
 }

@@ -63,17 +63,18 @@ ProcessListResult process_list(ProcessInfoPtr entries, size_t max_entries)
     return (ProcessListResult) count;
 }
 
-int printf(const char * format, ...)
+int IO__printf(ConstBStringPtr format, ...)
 {
     va_list args;
     va_start(args, format);
-    int written = vsnprintf(output + output_position, sizeof(output) - output_position, format, args);
+    BString formatted = BString__vsprintf(format, args);
     va_end(args);
+    StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
         output_position += (uint64_t) written;
     }
-    return written;
+    return (int) written;
 }
 
 void test_ps_prints_process_snapshot(void)

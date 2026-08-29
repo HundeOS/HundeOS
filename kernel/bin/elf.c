@@ -32,6 +32,14 @@ Elf Elf__new(const Address start, const Address end, const BString name)
     };
 }
 
+ExpandedSegment ExpandedSegment__new(UserAddress address, size_t size)
+{
+    return (ExpandedSegment) {
+        .address = address,
+        .size = size,
+    };
+}
+
 Elf64Header * Elf__read_header(Elf self)
 {
     return ptr(self.start, Elf64Header);
@@ -117,10 +125,10 @@ static void Elf__expand_segment(
     if (header->type == Load)
     {
         UserAddress address = Elf__explode(self, header);
-        ExpandedSegment segment = (ExpandedSegment) {
-            .address = address,
-            .size = Elf__page_allocation_size(header->virtual_address, header->memory_size),
-        };
+        ExpandedSegment segment = ExpandedSegment__new(
+            address,
+            Elf__page_allocation_size(header->virtual_address, header->memory_size)
+        );
         ExpandedSegmentArray__push(expanded_segments, segment);
     }
 

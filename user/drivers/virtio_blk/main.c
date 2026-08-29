@@ -61,7 +61,7 @@ typedef struct VirtioBlkDevice
     uint64_t slot;
     uint64_t irq_id;
     uint64_t block_count;
-    char path[SERVICE_DEVICE_PATH_MAX];
+    BString path;
     uint16_t last_used_idx;
 }
 VirtioBlkDevice, * VirtioBlkDevicePtr;
@@ -109,6 +109,45 @@ VirtioBlkOuthdr;
 static uint8_t virtio_queue_area[VIRTIO_BLK_QUEUE_BYTES] __attribute__((aligned(VIRTIO_BLK_QUEUE_ALIGN)));
 static VirtioBlkOuthdr virtio_blk_header;
 static uint8_t virtio_blk_status;
+
+static VirtioBlkDevice VirtioBlkDevice__new(
+    ServiceMappedMemoryPtr mapping,
+    void * mmio,
+    uint64_t slot,
+    uint64_t irq_id,
+    uint64_t block_count,
+    BString path
+)
+{
+    return (VirtioBlkDevice) {
+        .mapping = mapping,
+        .mmio = mmio,
+        .slot = slot,
+        .irq_id = irq_id,
+        .block_count = block_count,
+        .path = path,
+        .last_used_idx = 0,
+    };
+}
+
+static VirtqDesc VirtqDesc__new(uint64_t addr, uint32_t len, uint16_t flags, uint16_t next)
+{
+    return (VirtqDesc) {
+        .addr = addr,
+        .len = len,
+        .flags = flags,
+        .next = next,
+    };
+}
+
+static VirtioBlkOuthdr VirtioBlkOuthdr__new(uint32_t type, uint64_t sector)
+{
+    return (VirtioBlkOuthdr) {
+        .type = type,
+        .reserved = 0,
+        .sector = sector,
+    };
+}
 
 static void zero_bytes(void * target, uint64_t size)
 {
@@ -187,19 +226,6 @@ static uint64_t VirtioBlk__read_u64_config(void * mmio, uint64_t offset)
     return low | (high << 32);
 }
 
-static void VirtioBlk__copy_string(char target[SERVICE_DEVICE_PATH_MAX], const char * source)
-{
-    uint64_t i = 0;
-    if (source != 0)
-    {
-        for (; source[i] != '\0' && i < SERVICE_DEVICE_PATH_MAX - 1; i++)
-        {
-            target[i] = source[i];
-        }
-    }
-    target[i] = '\0';
-}
-
 static bool VirtioBlk__parse_u64(const char * value, uint64_t * target)
 {
     if (value == 0 || value[0] == '\0')
@@ -245,18 +271,17 @@ static bool VirtioBlk__bind_device(VirtioBlkDevicePtr self, uint64_t slot, const
         return false;
     }
 
-    *self = (VirtioBlkDevice) {
-        .mapping = mapping,
-        .mmio = mmio,
-        .slot = slot,
-        .irq_id = VIRTIO_MMIO_FIRST_IRQ_ID + slot,
-        .block_count = VirtioBlk__read_u64_config(mmio, 0),
-        .last_used_idx = 0,
-    };
-    VirtioBlk__copy_string(self->path, path);
+    *self = VirtioBlkDevice__new(
+        mapping,
+        mmio,
+        slot,
+        VIRTIO_MMIO_FIRST_IRQ_ID + slot,
+        VirtioBlk__read_u64_config(mmio, 0),
+        BString__new(path)
+    );
     DRIVER_DEBUG(
         "virtio_blk: discovered path=%s slot=%i irq=%i block_count=%i\n",
-        self->path,
+        BString__cstr(&self->path),
         (int) self->slot,
         (int) self->irq_id,
         (int) self->block_count
@@ -287,7 +312,7 @@ static bool VirtioBlk__setup_queue(VirtioBlkDevicePtr self)
     }
 
     zero_bytes(virtio_queue_area, VIRTIO_BLK_QUEUE_BYTES);
-    virtio_blk_header = (VirtioBlkOuthdr) { 0 };
+    virtio_blk_header = VirtioBlkOuthdr__new(0, 0);
     virtio_blk_status = 0;
 
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_GUEST_PAGE_SIZE, VIRTIO_BLK_QUEUE_ALIGN);
@@ -375,18 +400,17 @@ static ServiceCode VirtioBlk__execute_request(VirtioBlkDevicePtr self, ServiceBl
     uint64_t buffer_device_address = 0;
     uint64_t status_device_address = 0;
     if (!service_ok(service_device_address(&virtio_blk_header, &header_device_address))
-        || !service_ok(service_device_address(request->buffer, &buffer_device_address))
+        || !service_ok(service_device_address((void *) request->buffer, &buffer_device_address))
         || !service_ok(service_device_address(&virtio_blk_status, &status_device_address)))
     {
         return SERVICE_INVALID_BUFFER;
     }
 
     virtio_blk_status = VIRTIO_BLK_S_IOERR;
-    virtio_blk_header = (VirtioBlkOuthdr) {
-        .type = request->operation == SERVICE_BLOCK_WRITE ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN,
-        .reserved = 0,
-        .sector = request->block * (request->block_size / 512),
-    };
+    virtio_blk_header = VirtioBlkOuthdr__new(
+        request->operation == SERVICE_BLOCK_WRITE ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN,
+        request->block * (request->block_size / 512)
+    );
 
     VirtqDesc * descs = VirtioBlk__descs(self);
     VirtqAvail * avail = VirtioBlk__avail(self);
@@ -399,7 +423,7 @@ static ServiceCode VirtioBlk__execute_request(VirtioBlkDevicePtr self, ServiceBl
         (int) request->operation,
         (int) virtio_blk_header.sector,
         &virtio_blk_header,
-        request->buffer,
+        (void *) request->buffer,
         &virtio_blk_status,
         (unsigned int) header_device_address,
         (unsigned int) buffer_device_address,
@@ -409,24 +433,14 @@ static ServiceCode VirtioBlk__execute_request(VirtioBlkDevicePtr self, ServiceBl
         (int) self->last_used_idx
     );
 
-    descs[0] = (VirtqDesc) {
-        .addr = header_device_address,
-        .len = sizeof(VirtioBlkOuthdr),
-        .flags = VIRTQ_DESC_F_NEXT,
-        .next = 1,
-    };
-    descs[1] = (VirtqDesc) {
-        .addr = buffer_device_address,
-        .len = (uint32_t) request->buffer_size,
-        .flags = request->operation == SERVICE_BLOCK_READ ? (VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE) : VIRTQ_DESC_F_NEXT,
-        .next = 2,
-    };
-    descs[2] = (VirtqDesc) {
-        .addr = status_device_address,
-        .len = 1,
-        .flags = VIRTQ_DESC_F_WRITE,
-        .next = 0,
-    };
+    descs[0] = VirtqDesc__new(header_device_address, sizeof(VirtioBlkOuthdr), VIRTQ_DESC_F_NEXT, 1);
+    descs[1] = VirtqDesc__new(
+        buffer_device_address,
+        (uint32_t) request->buffer_size,
+        request->operation == SERVICE_BLOCK_READ ? (VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE) : VIRTQ_DESC_F_NEXT,
+        2
+    );
+    descs[2] = VirtqDesc__new(status_device_address, 1, VIRTQ_DESC_F_WRITE, 0);
 
     avail->ring[avail->idx % VIRTIO_BLK_QUEUE_SIZE] = 0;
     __sync_boundary();
@@ -452,7 +466,7 @@ static ServiceCode VirtioBlk__execute_request(VirtioBlkDevicePtr self, ServiceBl
     {
         uint8_t * buffer = (uint8_t *) request->buffer;
         DRIVER_DEBUG(
-            "virtio_blk: read request id=%i sector=%i first_bytes=%i,%i,%i,%i,%i,%i,%i,%i\n",
+            "virtio_blk: read request id=%i sector=%i driver_buffer_first_bytes=%i,%i,%i,%i,%i,%i,%i,%i\n",
             (int) request->request_id,
             (int) virtio_blk_header.sector,
             (int) buffer[0],
@@ -476,21 +490,6 @@ static ServiceCode VirtioBlk__execute_request(VirtioBlkDevicePtr self, ServiceBl
     return virtio_blk_status == VIRTIO_BLK_S_OK ? SERVICE_OK : SERVICE_BLOCK_REQUEST_FAILED;
 }
 
-static bool VirtioBlk__paths_equal(const char * left, const char * right)
-{
-    uint64_t i = 0;
-    while (left[i] != '\0' && right[i] != '\0')
-    {
-        if (left[i] != right[i])
-        {
-            return false;
-        }
-        i++;
-    }
-
-    return left[i] == right[i];
-}
-
 static void VirtioBlk__handle_block_request(VirtioBlkDevicePtr self, uint64_t request_id)
 {
     ServiceBlockRequest request;
@@ -502,13 +501,13 @@ static void VirtioBlk__handle_block_request(VirtioBlkDevicePtr self, uint64_t re
         return;
     }
 
-    if (!VirtioBlk__paths_equal(request.device_path, self->path))
+    if (!BString__equals(&request.device_path, &self->path))
     {
         DRIVER_DEBUG(
             "virtio_blk: no device for request id=%i path=%s active_path=%s\n",
             (int) request.request_id,
-            request.device_path,
-            self->path
+            BString__cstr(&request.device_path),
+            BString__cstr(&self->path)
         );
         service_block_complete(request.request_id, SERVICE_BLOCK_REQUEST_FAILED, 0);
         return;
@@ -517,8 +516,8 @@ static void VirtioBlk__handle_block_request(VirtioBlkDevicePtr self, uint64_t re
     DRIVER_DEBUG(
         "virtio_blk: route request id=%i req_path=%s dev_path=%s slot=%i irq=%i block_count=%i\n",
         (int) request.request_id,
-        request.device_path,
-        self->path,
+        BString__cstr(&request.device_path),
+        BString__cstr(&self->path),
         (int) self->slot,
         (int) self->irq_id,
         (int) self->block_count
@@ -527,11 +526,11 @@ static void VirtioBlk__handle_block_request(VirtioBlkDevicePtr self, uint64_t re
     DRIVER_DEBUG(
         "virtio_blk: block request id=%i path=%s op=%i block=%i count=%i buffer=%p size=%i\n",
         (int) request.request_id,
-        request.device_path,
+        BString__cstr(&request.device_path),
         (int) request.operation,
         (int) request.block,
         (int) request.block_count,
-        request.buffer,
+        (void *) request.buffer,
         (int) request.buffer_size
     );
 
@@ -583,27 +582,26 @@ int VIRTIO_BLK_ENTRYPOINT(int argc, char ** argv)
     VirtioBlk__acknowledge_driver(device.mmio);
     if (!VirtioBlk__setup_queue(&device))
     {
-        DRIVER_DEBUG("virtio_blk: queue setup failed path=%s\n", device.path);
+        DRIVER_DEBUG("virtio_blk: queue setup failed path=%s\n", BString__cstr(&device.path));
         return 1;
     }
     VIRTIO_BLK_TEST_DEVICE_READY(&device);
 
-    if (!service_ok(service_register_block_device(device.path, 512, device.block_count)))
+    if (!service_ok(service_register_block_device(&device.path, 512, device.block_count)))
     {
-        DRIVER_DEBUG("virtio_blk: block device registration failed path=%s\n", device.path);
+        DRIVER_DEBUG("virtio_blk: block device registration failed path=%s\n", BString__cstr(&device.path));
         return 1;
     }
 
-    BString ready_path = bstring(device.path);
-    if (!service_ok(service_publish_ready(&ready_path)))
+    if (!service_ok(service_publish_ready(&device.path)))
     {
-        DRIVER_DEBUG("virtio_blk: ready publish failed path=%s\n", device.path);
+        DRIVER_DEBUG("virtio_blk: ready publish failed path=%s\n", BString__cstr(&device.path));
         return 1;
     }
 
     if (!service_ok(service_subscribe_irq(device.irq_id)))
     {
-        DRIVER_DEBUG("virtio_blk: irq subscribe failed path=%s\n", device.path);
+        DRIVER_DEBUG("virtio_blk: irq subscribe failed path=%s\n", BString__cstr(&device.path));
         return 1;
     }
 

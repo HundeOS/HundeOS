@@ -1,10 +1,10 @@
 #include "../../user.h"
 #include "../../sys/process.h"
 
-static const BString KILL__SIGNAL_PREFIX = BSTRING_NEW("SIG");
-static const BString KILL__TERM_SIGNAL = BSTRING_NEW("TERM");
-static const BString KILL__KILL_SIGNAL = BSTRING_NEW("KILL");
-static const BString KILL__INT_SIGNAL = BSTRING_NEW("INT");
+static const BString KILL__SIGNAL_PREFIX = bstr("SIG");
+static const BString KILL__TERM_SIGNAL = bstr("TERM");
+static const BString KILL__KILL_SIGNAL = bstr("KILL");
+static const BString KILL__INT_SIGNAL = bstr("INT");
 
 static bool Kill__matches_signal_name(ConstBStringPtr value, ConstBStringPtr expected)
 {
@@ -71,7 +71,7 @@ int main(int argc, char ** argv)
 {
     ProcessSignal signal = PROCESS_SIGNAL_TERMINATE;
     ConstBStringPtr pid_arg = NULL; // hundelint: ignore-no-null
-    BString pid_storage = EMPTY_BSTRING;
+    BString pid_storage = empty_bstr();
 
     if (argc == 2)
     {
@@ -83,7 +83,7 @@ int main(int argc, char ** argv)
         BString signal_arg = BString__new(argv[1] + 1);
         if (!Kill__parse_signal_spec(&signal_arg, &signal))
         {
-            print("kill: usage kill [-signal] <pid>\n");
+            IO__print(&bstr("kill: usage kill [-signal] <pid>\n"));
             return 1;
         }
         pid_storage = BString__new(argv[2]);
@@ -91,7 +91,7 @@ int main(int argc, char ** argv)
     }
     else
     {
-        print("kill: usage kill [-signal] <pid>\n");
+        IO__print(&bstr("kill: usage kill [-signal] <pid>\n"));
         return 1;
     }
 
@@ -101,7 +101,7 @@ int main(int argc, char ** argv)
             ProcessSignalResult result = kill_process(pid, signal);
             if (result != PROCESS_SIGNAL_OK)
             {
-                printf("kill: error %s (%i)\n", Kill__signal_result_string(result), (int) result);
+                IO__printf(&bstr("kill: error %s (%i)\n"), Kill__signal_result_string(result), (int) result);
                 return 1;
             }
 
@@ -109,7 +109,7 @@ int main(int argc, char ** argv)
         },
         none()
         {
-            print("kill: usage kill [-signal] <pid>\n");
+            IO__print(&bstr("kill: usage kill [-signal] <pid>\n"));
             return 1;
         }
     );

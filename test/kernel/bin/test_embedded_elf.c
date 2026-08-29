@@ -20,13 +20,13 @@ void test_elf_lookup(void)
 
 void test_elf_list_uses_embedded_index(void)
 {
-    BString hello_world = BSTRING_NEW("hello_world");
-    BString idle = BSTRING_NEW("idle");
-    BString shell = BSTRING_NEW("shell");
-    BString hundeschule = BSTRING_NEW("hundeschule");
-    BString hundeschau = BSTRING_NEW("hundeschau");
-    BString humpen = BSTRING_NEW("services/humpen");
-    BString virtio_blk = BSTRING_NEW("drivers/virtio_blk");
+    BString hello_world = bstr("hello_world");
+    BString idle = bstr("idle");
+    BString shell = bstr("shell");
+    BString hundeschule = bstr("hundeschule");
+    BString hundeschau = bstr("hundeschau");
+    BString humpen = bstr("services/humpen");
+    BString virtio_blk = bstr("drivers/virtio_blk");
     BStringArray files = EmbeddedElf__list();
 
     TEST_ASSERT_EQUAL_UINT(9, files.len);

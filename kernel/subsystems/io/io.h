@@ -124,6 +124,22 @@ OptionalDef(DeviceRegistrationPtr);
 MapDefine(IOHandle, DeviceRegistrationPtr, 1024, IOHandlesMap, SimpleEquals(uint64_t));
 FixedArrayDefine(DeviceRegistration, IO_MAX_DEVICES, IODevicesArray, SimpleEquals(uint64_t));
 
+IOState IOState__new();
+IO IO__new(
+    IO_open open,
+    IO_read read,
+    IO_write write,
+    IO_close close,
+    IO_park park,
+    IO_unpark unpark,
+    IO_server_buffer server_buffer,
+    IO_server_write_buffer server_write_buffer,
+    IO_data_available data_available,
+    IO_data_consumed data_consumed,
+    IO_eof eof
+);
+DeviceRegistration DeviceRegistration__new(IOPtr device, BString path, IOStatePtr state);
+
 IOContext IOContext__new(
     KernelContext kernel_context, Optional(IOSubsystemPtr) io_subsystem,
     Optional(IOHandle) handle, Optional(ExternalBuffer) buffer

@@ -11,7 +11,7 @@ struct ServiceMappedMemory
 {
     void * driver_address;
     uint64_t device_address;
-    uint64_t size;
+    size_t size;
 };
 
 static char fake_io_buffer[64];
@@ -54,12 +54,12 @@ ServiceCode service_become_service()
     return SERVICE_OK;
 }
 
-ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
+ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)
 {
     return SERVICE_MAP_FAILED;
 }
 
-ServiceCode service_device_address(void * driver_address, uint64_t * device_address)
+ServiceCode service_device_address(void * driver_address, Address * device_address)
 {
     return SERVICE_MAP_FAILED;
 }
@@ -79,7 +79,7 @@ void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
     return 0;
 }
 
-IOHandle io_server_register(const char * path, IOServerRole role)
+IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
 {
     return 5;
 }

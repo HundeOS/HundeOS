@@ -61,6 +61,7 @@ typedef EmbeddedFsFile * EmbeddedFsFilePtr;
 OptionalDef(EmbeddedFsFile);
 
 EmbeddedFs EmbeddedFs__new(Address start, Address end);
+EmbeddedFsFile EmbeddedFsFile__new(Address start, Address end, BString name);
 bool EmbeddedFs__is_valid(EmbeddedFsPtr self);
 Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, BString name);
 BStringArray EmbeddedFs__list(EmbeddedFsPtr self);

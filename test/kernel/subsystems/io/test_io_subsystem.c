@@ -49,13 +49,13 @@ static Flags FLAGS = 1234;
 
 static Char expected[] = {1, 2, 3, 4};
 
-static BString path = BSTRING_NEW(":test:");
-static BString second_path = BSTRING_NEW(":test2:");
-static BString console_path = BSTRING_NEW(":console:");
-static BString tty_path = BSTRING_NEW(":tty:");
-static BString hello_stream_path = BSTRING_NEW("/dev/hello");
-static BString businfo_stream_path = BSTRING_NEW("/dev/businfo");
-static BString invalid_path = BSTRING_NEW("/sss");
+static BString path = bstr(":test:");
+static BString second_path = bstr(":test2:");
+static BString console_path = bstr(":console:");
+static BString tty_path = bstr(":tty:");
+static BString hello_stream_path = bstr("/dev/hello");
+static BString businfo_stream_path = bstr("/dev/businfo");
+static BString invalid_path = bstr("/sss");
 
 #define NEW_FAKE_IO_STATE \
     (FakeIOState) { \

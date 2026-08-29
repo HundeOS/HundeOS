@@ -26,21 +26,22 @@ LinkedListBodyDefine(ParkedOperations);
 static ProcessID pid_counter = 0;
 static mutex_t pid_lock = MUTEX_INIT;
 
-static BString no_entry_point_message = BSTRING_NEW("No entry point found in ELF");
-static BString user_allocation_not_found = BSTRING_NEW("User allocation not found");
-static BString static_user_allocation = BSTRING_NEW("Cannot free static user allocation");
-static BString user_allocation_full = BSTRING_NEW("Too many user allocations");
-static BString invalid_heap_break = BSTRING_NEW("Invalid heap break");
-static BString file_descriptor_full = BSTRING_NEW("Too many file descriptors");
-static BString file_descriptor_not_found = BSTRING_NEW("File descriptor not found");
-static BString argument_too_long = BSTRING_NEW("Argument too long");
+static BString no_entry_point_message = bstr("No entry point found in ELF");
+static BString user_allocation_not_found = bstr("User allocation not found");
+static BString static_user_allocation = bstr("Cannot free static user allocation");
+static BString user_allocation_full = bstr("Too many user allocations");
+static BString invalid_heap_break = bstr("Invalid heap break");
+static BString file_descriptor_full = bstr("Too many file descriptors");
+static BString file_descriptor_not_found = bstr("File descriptor not found");
+static BString argument_too_long = bstr("Argument too long");
 static const ProcessCapabilities PROCESS__HUND_CAPABILITIES =
     PROCESS_CAP_BECOME_SERVICE
     | PROCESS_CAP_MAP_MMIO
     | PROCESS_CAP_SUBSCRIBE_IRQ
     | PROCESS_CAP_REGISTER_BLOCK_DEVICE
     | PROCESS_CAP_HANDLE_BLOCK_REQUESTS
-    | PROCESS_CAP_MOUNT_FILESYSTEM;
+    | PROCESS_CAP_MOUNT_FILESYSTEM
+    | PROCESS_CAP_USE_BLOCK_DEVICES;
 
 static ProcessSignalMask ProcessSignal__mask(ProcessSignal signal)
 {
@@ -115,6 +116,52 @@ static bool allocation_matches_virtual(UserAllocationPtr allocation, void * cont
 {
     Address virtual_address = *(Address *) context;
     return allocation->address.virtual_addr == virtual_address;
+}
+
+typedef struct UserAllocationRangeMatch
+{
+    Address virtual_address;
+    size_t size;
+}
+UserAllocationRangeMatch;
+
+typedef UserAllocationRangeMatch * UserAllocationRangeMatchPtr;
+
+static UserAllocationRangeMatch UserAllocationRangeMatch__new(Address virtual_address, size_t size)
+{
+    return (UserAllocationRangeMatch) {
+        .virtual_address = virtual_address,
+        .size = size,
+    };
+}
+
+static UserAllocation UserAllocation__new(UserAddress address, size_t size, UserAllocationType type)
+{
+    return (UserAllocation) {
+        .address = address,
+        .size = size,
+        .type = type,
+    };
+}
+
+static ProcessFileDescriptor ProcessFileDescriptor__new(FileDescriptor fd, ProcessIOHandle handle)
+{
+    return (ProcessFileDescriptor) {
+        .fd = fd,
+        .handle = handle,
+    };
+}
+
+static bool allocation_contains_range(UserAllocationPtr allocation, void * context)
+{
+    UserAllocationRangeMatchPtr range = (UserAllocationRangeMatchPtr) context;
+    Address allocation_start = allocation->address.virtual_addr;
+    Address allocation_end = allocation_start + allocation->size;
+    Address range_end = range->virtual_address + range->size;
+
+    return range->virtual_address >= allocation_start
+        && range_end <= allocation_end
+        && range_end >= range->virtual_address;
 }
 
 static bool file_descriptor_matches_fd(ProcessFileDescriptorPtr descriptor, void * context)
@@ -288,7 +335,7 @@ Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOpe
         );
     });
 
-    return Error(CollectionCode, BSTRING_NEW("Unable to push parked operation"), LINKED_LIST_ALLOCATION_FAILED);
+    return Error(CollectionCode, bstr("Unable to push parked operation"), LINKED_LIST_ALLOCATION_FAILED);
 }
 
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self)
@@ -452,6 +499,11 @@ bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
 {
     critical_section(self->lock,
     {
+        if (self->state != PROC_STATE_SLEEPING)
+        {
+            cs_return false;
+        }
+
         for (int64_t index = (int64_t) ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
         {
             match_optional(ParkedOperationPtr, ParkedOperations__at(&self->parked_operations, index),
@@ -671,11 +723,7 @@ Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 )
 {
-    UserAllocation allocation = (UserAllocation) {
-        .address = address,
-        .size = Process__page_aligned_size(size),
-        .type = type,
-    };
+    UserAllocation allocation = UserAllocation__new(address, Process__page_aligned_size(size), type);
 
     match_result(CollectionCode, UserAllocations__push(&self->user_allocations, allocation),
         success(_)
@@ -748,6 +796,73 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
 }
 
+Result(UserAddress) Process__map_shared_user_pages(
+    ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size
+)
+{
+    if (self == NULL || source == NULL || source_virtual_address == 0 || size == 0) // hundelint: ignore-no-null
+    {
+        return Error(UserAddress, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+    }
+
+    Address source_base = Process__page_base(source_virtual_address);
+    Offset source_offset = source_virtual_address - source_base;
+    size_t allocation_size = Process__page_aligned_size(source_offset + size);
+    UserAllocationRangeMatch range = UserAllocationRangeMatch__new(source_base, allocation_size);
+
+    match_optional(UserAllocations__FindResult, UserAllocations__find(
+        &source->user_allocations, allocation_contains_range, &range
+    ),
+        some(found)
+        {
+            Offset backing_offset = source_base - found.value->address.virtual_addr;
+            Address target_base = self->allocation_next;
+            KernelAddress mapping_kernel_address = KERNEL_ADDR(
+                found.value->address.kernel_addr.virtual_addr + backing_offset + source_offset,
+                found.value->address.kernel_addr.phys_addr + backing_offset + source_offset
+            );
+            mapping_kernel_address.valid = found.value->address.kernel_addr.valid;
+            UserAddress mapping = UserAddress__new(
+                target_base + source_offset,
+                mapping_kernel_address,
+                true,
+                true,
+                false,
+                true
+            );
+
+            KernelAddress allocation_kernel_address = KERNEL_ADDR(
+                found.value->address.kernel_addr.virtual_addr + backing_offset,
+                found.value->address.kernel_addr.phys_addr + backing_offset
+            );
+            allocation_kernel_address.valid = found.value->address.kernel_addr.valid;
+            UserAddress allocation = UserAddress__new(
+                target_base,
+                allocation_kernel_address,
+                true,
+                true,
+                false,
+                true
+            );
+
+            PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, allocation_size);
+            match_result(ProcessMemoryCode, Process__record_user_allocation(
+                self, allocation, allocation_size, USER_ALLOCATION_SHARED
+            ),
+                success(_)
+                {
+                    self->allocation_next += allocation_size;
+                    return Success(UserAddress, mapping);
+                },
+                error(code, message) { return Error(UserAddress, message, code); }
+            );
+        },
+        none_do_nothing()
+    );
+
+    return Error(UserAddress, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+}
+
 Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self)
 {
     UserAddress allocation = Kernel__alloc_user(
@@ -779,22 +894,22 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
     Address virtual_base = self->allocation_next;
     Address virtual_address = virtual_base + physical_offset;
 
-    UserAddress mapping = (UserAddress) {
-        .virtual_addr = virtual_address,
-        .kernel_addr = KERNEL_ADDR(physical, physical),
-        .read = true,
-        .write = true,
-        .execute = false,
-        .valid = true,
-    };
-    UserAddress allocation = (UserAddress) {
-        .virtual_addr = virtual_base,
-        .kernel_addr = KERNEL_ADDR(physical_base, physical_base),
-        .read = true,
-        .write = true,
-        .execute = false,
-        .valid = true,
-    };
+    UserAddress mapping = UserAddress__new(
+        virtual_address,
+        KERNEL_ADDR(physical, physical),
+        true,
+        true,
+        false,
+        true
+    );
+    UserAddress allocation = UserAddress__new(
+        virtual_base,
+        KERNEL_ADDR(physical_base, physical_base),
+        true,
+        true,
+        false,
+        true
+    );
 
     PageTable__map_mmio(v_ptr(self->page_table, PageTable), self->kernel, mapping, size);
     match_result(ProcessMemoryCode, Process__record_user_allocation(
@@ -873,7 +988,7 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
 
             UserAllocations__remove_at(&self->user_allocations, index);
 
-            if (allocation.type == USER_ALLOCATION_MMIO)
+            if (allocation.type == USER_ALLOCATION_MMIO || allocation.type == USER_ALLOCATION_SHARED)
             {
                 return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
             }
@@ -898,7 +1013,11 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
     ),
         some(found)
         {
-            if (found.value->type != USER_ALLOCATION_DYNAMIC)
+            if (
+                found.value->type == USER_ALLOCATION_ELF
+                || found.value->type == USER_ALLOCATION_STACK
+                || found.value->type == USER_ALLOCATION_HEAP
+            )
             {
                 return Error(ProcessMemoryCode, static_user_allocation, PROCESS_MEMORY_STATIC_ALLOCATION);
             }
@@ -948,10 +1067,7 @@ static Result(FileDescriptor) Process__set_file_descriptor_unlocked(
             return Success(FileDescriptor, fd);
         }, none_do_nothing());
 
-    ProcessFileDescriptor descriptor = (ProcessFileDescriptor) {
-        .fd = fd,
-        .handle = handle,
-    };
+    ProcessFileDescriptor descriptor = ProcessFileDescriptor__new(fd, handle);
 
     match_result(CollectionCode, ProcessFileDescriptors__push(&self->file_descriptors, descriptor),
         success(_)

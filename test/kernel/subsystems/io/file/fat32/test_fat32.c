@@ -196,7 +196,7 @@ void test_fat32_filesystem_state_mounts_existing_volume_without_formatting(void)
     TEST_ASSERT_TRUE(state->mounted);
 
     match_result(Fat32DirectoryEntries, Fat32Volume__list_root(&state->volume), success(entries) {
-            BString expected = BSTRING_NEW("KEEP.TXT");
+            BString expected = bstr("KEEP.TXT");
             TEST_ASSERT_EQUAL(1, entries.len);
             TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
         }, error_test_fail());
@@ -241,7 +241,7 @@ void test_fat32_creates_lists_and_reads_root_file(void)
     match_result(Fat32Code, Fat32Volume__create_root_file(&volume, bstring("hello.txt"), content, sizeof(content)), success(code) { TEST_ASSERT_EQUAL(FAT32_OK, code); }, error_test_fail());
 
     match_result(Fat32DirectoryEntries, Fat32Volume__list_root(&volume), success(entries) {
-            BString expected = BSTRING_NEW("HELLO.TXT");
+            BString expected = bstr("HELLO.TXT");
             TEST_ASSERT_EQUAL(1, entries.len);
             TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
             TEST_ASSERT_EQUAL(FAT32_ATTR_ARCHIVE, entries.data[0].attributes);
@@ -263,7 +263,7 @@ void test_fat32_creates_lists_and_reads_root_file(void)
 
 void test_fat32_lists_and_reads_long_filename_root_file(void)
 {
-    BString long_name = BSTRING_NEW("This is a long filename.txt");
+    BString long_name = bstr("This is a long filename.txt");
     Data short_name[11] = { 'L', 'O', 'N', 'G', 'F', 'I', '~', '1', 'T', 'X', 'T' };
     Data content[] = { 'l', 'o', 'n', 'g', ' ', 'n', 'a', 'm', 'e' };
     Data target[32] = { 0 };
@@ -387,7 +387,7 @@ void test_fat32_userspace_async_write_does_not_hold_handle_lock(void)
 {
     Data content[] = { 'h', 'i' };
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_FAT32_SECTORS,
@@ -423,7 +423,7 @@ void test_fat32_creates_and_lists_root_directory(void)
     match_result(Fat32Code, Fat32Volume__create_root_directory(&volume, bstring("docs")), success(code) { TEST_ASSERT_EQUAL(FAT32_OK, code); }, error_test_fail());
 
     match_result(Fat32DirectoryEntries, Fat32Volume__list_root(&volume), success(entries) {
-            BString expected = BSTRING_NEW("DOCS");
+            BString expected = bstr("DOCS");
             TEST_ASSERT_EQUAL(1, entries.len);
             TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
             TEST_ASSERT_EQUAL(FAT32_ATTR_DIRECTORY, entries.data[0].attributes);

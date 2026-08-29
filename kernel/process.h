@@ -159,6 +159,7 @@ typedef enum UserAllocationType
     USER_ALLOCATION_HEAP,
     USER_ALLOCATION_DYNAMIC,
     USER_ALLOCATION_MMIO,
+    USER_ALLOCATION_SHARED,
 } UserAllocationType;
 
 typedef struct UserAllocation
@@ -276,6 +277,9 @@ Result(ProcessMemoryCode) Process__record_user_allocation(
 );
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
+Result(UserAddress) Process__map_shared_user_pages(
+    ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size
+);
 Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self);
 Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size);
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment);

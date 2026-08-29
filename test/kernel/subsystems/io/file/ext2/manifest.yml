@@ -16,5 +16,6 @@ manifest:
     - test/kernel/stubs/cpu.c
     - test/kernel/stubs/kalloc.c
     - test/kernel/stubs/panic.c
+    - test/kernel/isolated_stubs/process_shared_pages.c
     - test/kernel/isolated_stubs/scheduler.c
     - test/kernel/isolated_stubs/message_broker.c

@@ -4,26 +4,30 @@
 
 #include "unity.h"
 
+#include "../../../../common/types/bstring.h"
 #include "../../../../common_includes/syscalls/io.h"
 
-ByteCount write(IOHandle handle, char * buf, size_t size)
+static char output[256];
+static size_t output_position;
+
+ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
 {
+    const char * buf = BString__cstr(text);
+    size_t size = (size_t) BString__length(text);
+    for (size_t i = 0; i < size && output_position + 1 < sizeof(output); i++)
+    {
+        output[output_position++] = buf[i];
+    }
+    output[output_position] = '\0';
     return (ByteCount) size;
 }
 
 #include "../../../../user/sys/print.c"
 
-static int format(char * buffer, const char * fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-    int count = sprintf_impl(buffer, fmt, args);
-    va_end(args);
-    return count;
-}
-
 void setUp(void)
 {
+    output_position = 0;
+    output[0] = '\0';
 }
 
 void tearDown(void)
@@ -32,20 +36,20 @@ void tearDown(void)
 
 void test_sprintf_formats_hex_without_global_digit_pointer(void)
 {
-    char buffer[64];
+    BString format = bstr("magic=0x%x");
 
-    int count = format(buffer, "magic=0x%x", 0x74726976U);
+    int count = IO__printf(&format, 0x74726976U);
 
-    TEST_ASSERT_EQUAL_STRING("magic=0x74726976", buffer);
+    TEST_ASSERT_EQUAL_STRING("magic=0x74726976", output);
     TEST_ASSERT_EQUAL_INT(16, count);
 }
 
 void test_sprintf_formats_pointer_hex_prefix(void)
 {
-    char buffer[64];
+    BString format = bstr("ptr=%p");
 
-    int count = format(buffer, "ptr=%p", 0xFEU);
+    int count = IO__printf(&format, (uintptr_t) 0xFEU);
 
-    TEST_ASSERT_EQUAL_STRING("ptr=0xFE", buffer);
+    TEST_ASSERT_EQUAL_STRING("ptr=0xfe", output);
     TEST_ASSERT_EQUAL_INT(8, count);
 }

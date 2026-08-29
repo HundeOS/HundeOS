@@ -50,7 +50,7 @@ __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = {
     .uart_virtual_base = BOOT_MMIO_VIRT_BASE,
     .uart_irq = PI4_UART_IRQ_ID,
     .framebuffer = None(FramebufferInfo),
-    .sd_host = Some(SdHostInfo, ((SdHostInfo) {
+    .sd_host = Some(SdHostInfo, ((SdHostInfo) { // hundelint: ignore-constructor-required
         .physical_base = PI4_EMMC2_PHYS_BASE,
         .mmio_size = PI4_EMMC2_MMIO_SIZE,
         .irq = PI4_EMMC2_IRQ_ID,
@@ -90,26 +90,26 @@ __BOOT__(void) pi_uefi_set_entry_args(
         pi_uefi_platform_info.physical_memory_regions.len = region_count;
         for (uint64_t index = 0; index < region_count; index++)
         {
-            pi_uefi_platform_info.physical_memory_regions.data[index] = (PhysicalMemoryRegion) {
-                .physical_start = handoff->physical_memory_regions[index].physical_start,
-                .physical_end = handoff->physical_memory_regions[index].physical_end,
-            };
+            pi_uefi_platform_info.physical_memory_regions.data[index] = PhysicalMemoryRegion__new(
+                handoff->physical_memory_regions[index].physical_start,
+                handoff->physical_memory_regions[index].physical_end
+            );
         }
 
         if (handoff->framebuffer_present != 0)
         {
-            pi_uefi_platform_info.framebuffer = Some(FramebufferInfo, ((FramebufferInfo) {
-                .physical_base = handoff->framebuffer.physical_base,
-                .size = handoff->framebuffer.size,
-                .width = handoff->framebuffer.width,
-                .height = handoff->framebuffer.height,
-                .pixels_per_scanline = handoff->framebuffer.pixels_per_scanline,
-                .pixel_format = (FramebufferPixelFormat) handoff->framebuffer.pixel_format,
-                .red_mask = handoff->framebuffer.red_mask,
-                .green_mask = handoff->framebuffer.green_mask,
-                .blue_mask = handoff->framebuffer.blue_mask,
-                .reserved_mask = handoff->framebuffer.reserved_mask,
-            }));
+            pi_uefi_platform_info.framebuffer = Some(FramebufferInfo, FramebufferInfo__new(
+                handoff->framebuffer.physical_base,
+                handoff->framebuffer.size,
+                handoff->framebuffer.width,
+                handoff->framebuffer.height,
+                handoff->framebuffer.pixels_per_scanline,
+                (FramebufferPixelFormat) handoff->framebuffer.pixel_format,
+                handoff->framebuffer.red_mask,
+                handoff->framebuffer.green_mask,
+                handoff->framebuffer.blue_mask,
+                handoff->framebuffer.reserved_mask
+            ));
         }
     }
 }

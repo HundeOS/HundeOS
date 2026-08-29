@@ -5,11 +5,13 @@
 
 #include "auth.h"
 #include "process.h"
+#include "types/bstring.h"
 
 #define SPAWN_MAX_ARGS 3
 #define SPAWN_INHERIT_USER_ID UINT64_MAX
 #define SPAWN_INHERIT_AUTH_TICKET AUTH_NO_TICKET
 #define SPAWN_STDIO_DEFAULT ((SpawnStdio) { 0 })
+#define SPAWN_NO_ARG None(BString)
 
 typedef enum SpawnModes
 {
@@ -80,16 +82,49 @@ static inline SpawnFileDescriptor SpawnStdio__stderr_fd(SpawnStdio self)
 
 typedef struct SpawnRequest
 {
-    const char * path;
+    BString path;
     SpawnMode mode;
     UserID requested_user_id;
     AuthTicketID auth_ticket_id;
     SpawnStdio stdio;
-    const char * arg0;
-    const char * arg1;
-    const char * arg2;
+    Optional(BString) arg0;
+    Optional(BString) arg1;
+    Optional(BString) arg2;
 } SpawnRequest;
 
 typedef SpawnRequest * SpawnRequestPtr;
+
+static inline Optional(BString) SpawnArg__from_bstring(ConstBStringPtr value)
+{
+    if (BString__is_empty(value))
+    {
+        return None(BString);
+    }
+
+    return Some(BString, *value);
+}
+
+static inline SpawnRequest SpawnRequest__new(
+    SpawnMode mode,
+    ConstBStringPtr path,
+    UserID requested_user_id,
+    AuthTicketID auth_ticket_id,
+    SpawnStdio stdio,
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
+)
+{
+    return (SpawnRequest) {
+        .path = *path,
+        .mode = mode,
+        .requested_user_id = requested_user_id,
+        .auth_ticket_id = auth_ticket_id,
+        .stdio = stdio,
+        .arg0 = arg0,
+        .arg1 = arg1,
+        .arg2 = arg2,
+    };
+}
 
 #endif

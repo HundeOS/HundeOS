@@ -90,19 +90,19 @@ static void queue_console_input(const char * value)
     console_inputs[console_input_count++] = BString__new(value);
 }
 
-AuthResult auth(const char * username, const char * password)
+AuthResult auth(ConstBStringPtr username, ConstBStringPtr password)
 {
-    copy_text(last_auth_username, sizeof(last_auth_username), username);
-    copy_text(last_auth_password, sizeof(last_auth_password), password);
-    if (strcmp(username, "root") == 0 && strcmp(password, "root") == 0)
+    copy_text(last_auth_username, sizeof(last_auth_username), BString__cstr(username));
+    copy_text(last_auth_password, sizeof(last_auth_password), BString__cstr(password));
+    if (strcmp(BString__cstr(username), "root") == 0 && strcmp(BString__cstr(password), "root") == 0)
     {
         return 42;
     }
-    if (strcmp(username, "hund") == 0 && strcmp(password, "hund") == 0)
+    if (strcmp(BString__cstr(username), "hund") == 0 && strcmp(BString__cstr(password), "hund") == 0)
     {
         return 42;
     }
-    if (strcmp(username, "user") == 0 && strcmp(password, "user") == 0)
+    if (strcmp(BString__cstr(username), "user") == 0 && strcmp(BString__cstr(password), "user") == 0)
     {
         return 42;
     }
@@ -112,23 +112,24 @@ AuthResult auth(const char * username, const char * password)
 SpawnResult spawn_with_auth(
     SpawnMode mode,
     AuthTicketID auth_ticket_id,
-    const char* path,
-    const char* arg0,
-    const char* arg1,
-    const char* arg2
+    ConstBStringPtr path,
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
 )
 {
     last_mode = mode;
     last_auth_ticket_id = auth_ticket_id;
-    copy_text(last_path, sizeof(last_path), path);
-    TEST_ASSERT_NULL(arg0);
-    TEST_ASSERT_NULL(arg1);
-    TEST_ASSERT_NULL(arg2);
+    copy_text(last_path, sizeof(last_path), BString__cstr(path));
+    match_optional(BString, arg0, some_test_fail(), none_do_nothing());
+    match_optional(BString, arg1, some_test_fail(), none_do_nothing());
+    match_optional(BString, arg2, some_test_fail(), none_do_nothing());
     return next_spawn_result;
 }
 
-void print(const char * str)
+void IO__print(ConstBStringPtr message)
 {
+    const char * str = BString__cstr(message);
     while (*str != '\0' && output_position + 1 < sizeof(output))
     {
         output[output_position++] = *str++;
@@ -136,17 +137,18 @@ void print(const char * str)
     output[output_position] = '\0';
 }
 
-int printf(const char * format, ...)
+int IO__printf(ConstBStringPtr format, ...)
 {
     va_list args;
     va_start(args, format);
-    int written = vsnprintf(output + output_position, sizeof(output) - output_position, format, args);
+    BString formatted = BString__vsprintf(format, args);
     va_end(args);
+    StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
         output_position += (uint64_t) written;
     }
-    return written;
+    return (int) written;
 }
 
 BString Console__read_line(bool echo)

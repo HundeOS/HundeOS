@@ -43,6 +43,7 @@ typedef enum ProcessCapabilityBits
     PROCESS_CAP_REGISTER_BLOCK_DEVICE = 1ULL << 3,
     PROCESS_CAP_HANDLE_BLOCK_REQUESTS = 1ULL << 4,
     PROCESS_CAP_MOUNT_FILESYSTEM = 1ULL << 5,
+    PROCESS_CAP_USE_BLOCK_DEVICES = 1ULL << 6,
     PROCESS_CAP_ALL = UINT64_MAX,
 } ProcessCapabilityBits;
 
@@ -116,6 +117,13 @@ ProcessInfo;
 
 typedef ProcessInfo * ProcessInfoPtr;
 
+static inline ProcessInfo ProcessInfo__new(uint64_t pid)
+{
+    return (ProcessInfo) {
+        .pid = pid,
+    };
+}
+
 typedef struct ProcessListRequest
 {
     ProcessInfoPtr entries;
@@ -124,5 +132,13 @@ typedef struct ProcessListRequest
 ProcessListRequest;
 
 typedef ProcessListRequest * ProcessListRequestPtr;
+
+static inline ProcessListRequest ProcessListRequest__new(ProcessInfoPtr entries, uint64_t max_entries)
+{
+    return (ProcessListRequest) {
+        .entries = entries,
+        .max_entries = max_entries,
+    };
+}
 
 #endif

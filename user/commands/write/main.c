@@ -8,7 +8,7 @@ static Optional(BString) Write__split_path_value(ConstBStringPtr arg, BStringPtr
         return None(BString);
     }
 
-    BString delimiter = BSTRING_NEW("=");
+    BString delimiter = bstr("=");
     BStringSplit split = BString__split_first_any(arg, &delimiter);
     match_optional(BString, split.match,
         some(raw_path) { *path = IO__path_from_arg(&raw_path); },
@@ -19,8 +19,8 @@ static Optional(BString) Write__split_path_value(ConstBStringPtr arg, BStringPtr
 
 static BString Write__value_from_args(int argc, char ** argv)
 {
-    BString value = EMPTY_BSTRING;
-    BString space = BSTRING_NEW(" ");
+    BString value = empty_bstr();
+    BString space = bstr(" ");
     for (int i = 2; i < argc; i++)
     {
         if (i > 2)
@@ -39,11 +39,11 @@ int main(int argc, char ** argv)
 {
     if (argc < 2)
     {
-        print("write: usage write <path>=<text>\n");
+        IO__print(&bstr("write: usage write <path>=<text>\n"));
         return 1;
     }
 
-    BString path = EMPTY_BSTRING;
+    BString path = empty_bstr();
     Optional(BString) value = None(BString);
     if (argc > 2)
     {
@@ -63,14 +63,14 @@ int main(int argc, char ** argv)
             IOHandle handle = IO__open(&path, IO_OPEN_WRITE);
             if (handle < 0)
             {
-                printf("write: open error %i\n", (int) handle);
+                IO__printf(&bstr("write: open error %i\n"), (int) handle);
                 return 1;
             }
 
             ByteCount bytes = IO__write(handle, &text);
             if (bytes < 0)
             {
-                printf("write: write error %i\n", (int) bytes);
+                IO__printf(&bstr("write: write error %i\n"), (int) bytes);
                 close(handle);
                 return 1;
             }
@@ -81,7 +81,7 @@ int main(int argc, char ** argv)
         none_do_nothing()
     );
 
-    print("write: usage write <path>=<text>\n");
-    print("write: usage write <path> <text>\n");
+    IO__print(&bstr("write: usage write <path>=<text>\n"));
+    IO__print(&bstr("write: usage write <path> <text>\n"));
     return 1;
 }

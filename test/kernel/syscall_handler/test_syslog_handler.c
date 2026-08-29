@@ -24,10 +24,11 @@ void tearDown(void)
 void test_syslog_handler_writes_process_message_to_kernel_logger(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
-    char message[] = "virtio_blk: probe failed\n";
+    BString message = bstr("virtio_blk: probe failed\n");
+    SyslogRequest request = SyslogRequest__new(&message, None(BString));
 
     match_result(SystemCallResult, Syslog__handler(
-        NULL, Some(ProcessPtr, process), (Anything) message, 0, 0, 0, 0
+        NULL, Some(ProcessPtr, process), (Anything) &request, 0, 0, 0, 0
     ), success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); }, error_test_fail());
 
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "SYSLOG"));
@@ -38,11 +39,12 @@ void test_syslog_handler_writes_process_message_to_kernel_logger(void)
 void test_syslog_handler_writes_tagged_process_message_to_kernel_logger(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
-    char tag[] = "VIRTIO-BLK";
-    char message[] = "probe failed\n";
+    BString tag = bstr("VIRTIO-BLK");
+    BString message = bstr("probe failed\n");
+    SyslogRequest request = SyslogRequest__new(&message, Some(BString, tag));
 
     match_result(SystemCallResult, Syslog__handler(
-        NULL, Some(ProcessPtr, process), (Anything) message, (Anything) tag, 0, 0, 0
+        NULL, Some(ProcessPtr, process), (Anything) &request, 0, 0, 0, 0
     ), success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); }, error_test_fail());
 
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "VIRTIO-BLK"));

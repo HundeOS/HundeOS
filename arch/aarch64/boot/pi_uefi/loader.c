@@ -511,7 +511,7 @@ static void fill_framebuffer_handoff(EfiSystemTable * system_table, PiUefiHandof
     }
 
     handoff->framebuffer_present = 1;
-    handoff->framebuffer = (PiUefiFramebuffer) {
+    handoff->framebuffer = (PiUefiFramebuffer) { // hundelint: ignore-constructor-required
         .physical_base = mode->framebuffer_base,
         .size = mode->framebuffer_size,
         .width = info->horizontal_resolution,
@@ -576,7 +576,7 @@ static void fill_free_physical_regions_from_map(
             if (region_end > descriptor->physical_start)
             {
                 uint64_t index = handoff->physical_memory_region_count;
-                handoff->physical_memory_regions[index] = (PiUefiPhysicalMemoryRegion) {
+                handoff->physical_memory_regions[index] = (PiUefiPhysicalMemoryRegion) { // hundelint: ignore-constructor-required
                     .physical_start = descriptor->physical_start,
                     .physical_end = region_end,
                 };

@@ -71,12 +71,7 @@ void irq_handler(ProcessContextPtr context, bool current_el)
         return;
     }
 
-    IRQDispatchContext dispatch_context = (IRQDispatchContext) {
-        .irq = id,
-        .cpu = cpu,
-        .current_el = current_el,
-        .process_context = context,
-    };
+    IRQDispatchContext dispatch_context = IRQDispatchContext__new(id, cpu, current_el, context);
 
     match_result(IRQDispatchStatus, IRQDispatcher__dispatch(kernel->irq_dispatcher, id, &dispatch_context),
         success(status)

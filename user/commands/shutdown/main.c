@@ -5,14 +5,14 @@ int main(int argc, char ** argv)
 {
     if (argc != 1)
     {
-        print("shutdown: usage shutdown\n");
+        IO__print(&bstr("shutdown: usage shutdown\n"));
         return 1;
     }
 
     SystemCallResult result = shutdown_system();
     if (result != SYSCALL_OK)
     {
-        printf("shutdown: error %i\n", (int) result);
+        IO__printf(&bstr("shutdown: error %i\n"), (int) result);
         return 1;
     }
 

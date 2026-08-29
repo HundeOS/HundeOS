@@ -9,19 +9,33 @@
 
 ServiceCode service_become_service();
 ServiceCode service_wait(ServiceEventPtr event);
-ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory);
+ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory);
 ServiceCode service_subscribe_irq(uint64_t irq);
-ServiceCode service_register_block_device(const char * path, uint64_t block_size, uint64_t block_count);
+ServiceCode service_register_block_device(ConstBStringPtr path, uint64_t block_size, uint64_t block_count);
+ServiceBlockReadResult service_block_read_device(
+    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
+);
+ServiceBlockReadResult service_block_write_device(
+    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
+);
 ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPtr request);
 ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint64_t block_count);
-ServiceCode service_device_address(void * driver_address, uint64_t * device_address);
+ServiceCode service_register_filesystem(
+    ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
+);
+ServiceCode service_filesystem_get_request(uint64_t request_id, ServiceFilesystemRequestPtr request);
+ServiceCode service_filesystem_complete(uint64_t request_id, ServiceCode status, int64_t result);
+ServiceCode service_filesystem_complete_open(
+    uint64_t request_id, ServiceCode status, int64_t result, FileMode mode, uint64_t size, uint32_t * blocks
+);
+ServiceCode service_device_address(void * driver_address, Address * device_address);
 ServiceCode service_publish_ready(ConstBStringPtr name);
 ServiceCode service_wait_ready(ConstBStringPtr name);
 void * driver_ptr(ServiceMappedMemoryPtr memory);
-uint64_t device_ptr(ServiceMappedMemoryPtr memory);
+Address device_ptr(ServiceMappedMemoryPtr memory);
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset);
-uint64_t device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset);
-uint64_t mapped_size(ServiceMappedMemoryPtr memory);
+Address device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset);
+size_t mapped_size(ServiceMappedMemoryPtr memory);
 
 static inline bool service_alive(ServiceCode wait_status)
 {

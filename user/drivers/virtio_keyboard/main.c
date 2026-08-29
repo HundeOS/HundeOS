@@ -119,6 +119,33 @@ VirtioKeyboard;
 
 typedef VirtioKeyboard * VirtioKeyboardPtr;
 
+static VirtqDesc VirtqDesc__new(uint64_t addr, uint32_t len, uint16_t flags, uint16_t next)
+{
+    return (VirtqDesc) {
+        .addr = addr,
+        .len = len,
+        .flags = flags,
+        .next = next,
+    };
+}
+
+static VirtioKeyboard VirtioKeyboard__new(void)
+{
+    return (VirtioKeyboard) {
+        .mapping = 0,
+        .mmio = 0,
+        .slot = 0,
+        .irq_id = 0,
+        .queue_size = 0,
+        .last_used_idx = 0,
+        .keyboard = -1,
+        .shift = false,
+        .pending = { 0 },
+        .pending_read = 0,
+        .pending_write = 0,
+    };
+}
+
 static uint8_t virtio_keyboard_queue_area[VIRTIO_INPUT_QUEUE_BYTES] __attribute__((aligned(VIRTIO_INPUT_QUEUE_ALIGN)));
 static VirtioInputEvent virtio_keyboard_events[VIRTIO_INPUT_QUEUE_SIZE] __attribute__((aligned(8)));
 
@@ -419,12 +446,7 @@ static bool VirtioKeyboard__setup_event_queue(VirtioKeyboardPtr self)
             DRIVER_DEBUG("virtio_keyboard: event address translation failed\n");
             return false;
         }
-        descs[index] = (VirtqDesc) {
-            .addr = event_device_address,
-            .len = sizeof(VirtioInputEvent),
-            .flags = VIRTQ_DESC_F_WRITE,
-            .next = 0,
-        };
+        descs[index] = VirtqDesc__new(event_device_address, sizeof(VirtioInputEvent), VIRTQ_DESC_F_WRITE, 0);
         avail->ring[index] = index;
     }
 
@@ -510,19 +532,7 @@ static void VirtioKeyboard__publish_pending(VirtioKeyboardPtr self)
 
 static bool VirtioKeyboard__init(VirtioKeyboardPtr self)
 {
-    *self = (VirtioKeyboard) {
-        .mapping = 0,
-        .mmio = 0,
-        .slot = 0,
-        .irq_id = 0,
-        .queue_size = 0,
-        .last_used_idx = 0,
-        .keyboard = -1,
-        .shift = false,
-        .pending = { 0 },
-        .pending_read = 0,
-        .pending_write = 0,
-    };
+    *self = VirtioKeyboard__new();
 
     if (!service_ok(service_become_service()))
     {
@@ -545,7 +555,8 @@ static bool VirtioKeyboard__init(VirtioKeyboardPtr self)
         return false;
     }
 
-    self->keyboard = io_server_register(VIRTIO_KEYBOARD_PATH, IO_SERVER_READ);
+    BString keyboard_path = bstr(VIRTIO_KEYBOARD_PATH);
+    self->keyboard = io_server_register(&keyboard_path, IO_SERVER_READ);
     if (self->keyboard < 0)
     {
         DRIVER_DEBUG("virtio_keyboard: register failed %i\n", (int) self->keyboard);

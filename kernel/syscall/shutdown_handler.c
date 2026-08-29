@@ -2,7 +2,7 @@
 
 #include "../arch/system.h"
 
-static BString shutdown_returned = BSTRING_NEW("Shutdown returned unexpectedly");
+static BString shutdown_returned = bstr("Shutdown returned unexpectedly");
 
 Result(SystemCallResult) Shutdown__handler(
     KernelPtr kernel,

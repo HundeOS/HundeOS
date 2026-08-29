@@ -29,6 +29,19 @@ static BlockDevice fat32_block_device;
 static KernelPtr kernel = NULL;
 static ProcessPtr dummy_proc = NULL;
 
+#define TEST_IO_PATH_REQUEST(raw_path, request_flags) \
+    (Anything) &(IOPathRequest) { \
+        .path = bstr(raw_path), \
+        .flags = request_flags, \
+    }
+
+#define TEST_IO_LIST_DIR_REQUEST(raw_path, target_entries, target_max_entries) \
+    (Anything) &(IOListDirRequest) { \
+        .path = bstr(raw_path), \
+        .entries = target_entries, \
+        .max_entries = target_max_entries, \
+    }
+
 static KernelContext kernel_context = EMPTY_KERNEL_CONTEXT;
 static SystemInfo fake_system_info = {
     .cpu_count = 4,
@@ -64,8 +77,8 @@ static SystemInfo fake_system_info = {
     })),
 };
 
-static BString async_list_pending = BSTRING_NEW("Async list pending");
-static BString async_invalid_path = BSTRING_NEW("Invalid path");
+static BString async_list_pending = bstr("Async list pending");
+static BString async_invalid_path = bstr("Invalid path");
 
 typedef struct AsyncListDirFilesystemIOState
 {
@@ -151,15 +164,15 @@ void tearDown(void)
 
 }
 
-static BString embedded = BSTRING_NEW("sbin");
-static BString dev = BSTRING_NEW("dev");
-static BString proc = BSTRING_NEW("proc");
-static BString tmp = BSTRING_NEW("tmp");
-static BString memfs = BSTRING_NEW("memfs");
-static BString fat16 = BSTRING_NEW("fat16");
-static BString fat32 = BSTRING_NEW("fat32");
-static BString hello_world = BSTRING_NEW("hello_world");
-static BString corrupt = BSTRING_NEW("corrupt");
+static BString embedded = bstr("sbin");
+static BString dev = bstr("dev");
+static BString proc = bstr("proc");
+static BString tmp = bstr("tmp");
+static BString memfs = bstr("memfs");
+static BString fat16 = bstr("fat16");
+static BString fat32 = bstr("fat32");
+static BString hello_world = bstr("hello_world");
+static BString corrupt = bstr("corrupt");
 
 static const uint64_t HELLO_WORLD_SIZE = 66840;
 
@@ -239,7 +252,7 @@ void test_devfs_lists_registered_block_devices(void)
         (IOStatePtr) StreamState__heap_new()
     ), success_do_nothing(), error_test_fail());
 
-    match_result(BlockDeviceCode, BlockDeviceRegistry__register(BSTRING_NEW("/dev/virtio1"), service, 128, kernel->message_broker), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error_test_fail());
+    match_result(BlockDeviceCode, BlockDeviceRegistry__register(bstr("/dev/virtio1"), service, 128, kernel->message_broker), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error_test_fail());
 
     Result(FilesystemNodes) nodes = root->file_io.list_nodes(root_state, NULL, bstring("/dev"));
 
@@ -256,7 +269,7 @@ void test_devfs_can_open_and_read_block_device_metadata(void)
     ProcessPtr service = dummy_process(200, 11, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
 
-    match_result(BlockDeviceCode, BlockDeviceRegistry__register(BSTRING_NEW("/dev/virtio1"), service, 128, kernel->message_broker), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error_test_fail());
+    match_result(BlockDeviceCode, BlockDeviceRegistry__register(bstr("/dev/virtio1"), service, 128, kernel->message_broker), success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); }, error_test_fail());
 
     Result(IOHandle) metadata_handle =
         IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/dev/hd0"), IO_OPEN_READ);
@@ -542,7 +555,7 @@ void test_filesystem_table_adds_block_count_mount_entries(void)
 
     TEST_ASSERT_EQUAL(1, FilesystemTableEntries__len(&table.entries));
     match_optional(FilesystemTableEntries__type_ptr__optional, FilesystemTableEntries__ptr_at(&table.entries, 0), some(entry) {
-            TEST_ASSERT_TRUE(BString__equals(&entry->device_path, &EMPTY_BSTRING));
+            TEST_ASSERT_TRUE(BString__equals(&entry->device_path, &empty_bstr()));
             TEST_ASSERT_TRUE(BString__equals(&entry->filesystem_type, &filesystem_type));
             TEST_ASSERT_TRUE(BString__equals(&entry->mountpoint, &mountpoint));
             TEST_ASSERT_TRUE(entry->match_block_count);
@@ -572,7 +585,7 @@ void test_io_list_dir_lists_root_mounts(void)
     DirectoryEntry entries[6];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/", (Anything) entries, 6, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/", entries, 6), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(6, count);
             TEST_ASSERT_EQUAL_STRING("sbin", entries[0].name);
@@ -591,7 +604,7 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
     Filesystem__mount(root, bstring("/"), backing_root);
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/docs", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/docs", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
@@ -606,7 +619,7 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
 
     DirectoryEntry entries[8] = { 0 };
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/", (Anything) entries, 8, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/", entries, 8), 0, 0, 0
     ), success(count) {
             bool saw_docs = false;
             bool saw_hello = false;
@@ -680,10 +693,10 @@ void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
     TEST_ASSERT_TRUE(async_state->captured_context);
     TEST_ASSERT_TRUE(async_state->continuation_context.result_mapper.present);
 
-    strcpy(entries[0].name, "docs");
-    entries[0].name_len = 4;
-    strcpy(entries[1].name, "hello.txt");
-    entries[1].name_len = 9;
+    BString docs_name = bstr("docs");
+    BString hello_name = bstr("hello.txt");
+    entries[0] = DirectoryEntry__new(0, 0, 0, 0, &docs_name);
+    entries[1] = DirectoryEntry__new(0, 0, 0, 0, &hello_name);
 
     match_optional(KernelResultMapper, async_state->continuation_context.result_mapper, some(mapper) {
             match_result(Anything, mapper(Success(Anything, (Anything) 2), async_state->continuation_context.result_mapper_context), success(value) {
@@ -816,7 +829,7 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
     );
 
     match_result(SystemCallResult, IO__handler(
-        mounted_kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/docs", 0, 0, 0
+        mounted_kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/docs", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
@@ -844,7 +857,7 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
 
     DirectoryEntry root_entries[8] = { 0 };
     match_result(SystemCallResult, IO__handler(
-        mounted_kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/", (Anything) root_entries, 8, 0
+        mounted_kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/", root_entries, 8), 0, 0, 0
     ), success(count) {
             bool saw_docs = false;
             bool saw_hello = false;
@@ -904,7 +917,7 @@ void test_build_root_and_mounts_lists_tmp_mount_parent_when_backing_root_is_moun
 
     DirectoryEntry tmp_entries[4] = { 0 };
     match_result(SystemCallResult, IO__handler(
-        mounted_kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp", (Anything) tmp_entries, 4, 0
+        mounted_kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/tmp", tmp_entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("memfs", tmp_entries[0].name);
@@ -916,7 +929,7 @@ void test_io_list_dir_lists_ebin_files(void)
     DirectoryEntry entries[7];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/sbin", (Anything) entries, 7, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/sbin", entries, 7), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(7, count);
             TEST_ASSERT_EQUAL_STRING("hello_world", entries[0].name);
@@ -930,7 +943,7 @@ void test_io_list_dir_marks_services_as_hund_owned(void)
     DirectoryEntry entries[1];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/sbin/services", (Anything) entries, 1, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/sbin/services", entries, 1), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("humpen", entries[0].name);
@@ -948,7 +961,7 @@ void test_io_list_dir_lists_tmp_mounts(void)
     DirectoryEntry entries[4];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/tmp", entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("memfs", entries[0].name);
@@ -960,7 +973,7 @@ void test_io_list_dir_lists_empty_memfs(void)
     DirectoryEntry entries[4];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/tmp/memfs", entries, 4), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
@@ -969,7 +982,7 @@ void test_io_list_dir_lists_empty_fat16(void)
     DirectoryEntry entries[4];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat16", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat16", entries, 4), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
@@ -978,7 +991,7 @@ void test_io_list_dir_lists_empty_fat32(void)
     DirectoryEntry entries[4];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32", entries, 4), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
@@ -996,7 +1009,7 @@ void test_fat16_write_read_and_list_root_file(void)
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat16", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat16", entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("NOTE.TXT", entries[0].name);
@@ -1018,16 +1031,16 @@ void test_fat16_write_read_and_list_root_file(void)
 void test_fat16_mkdir_lists_root_directory_and_empty_directory(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/", (Anything) ((DirectoryEntry[5]) { 0 }), 5, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/", ((DirectoryEntry[5]) { 0 }), 5), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(5, count); }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat16/dir", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat16/dir", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry root_entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat16", (Anything) root_entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat16", root_entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("DIR", root_entries[0].name);
@@ -1036,7 +1049,7 @@ void test_fat16_mkdir_lists_root_directory_and_empty_directory(void)
 
     DirectoryEntry dir_entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat16/dir", (Anything) dir_entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat16/dir", dir_entries, 4), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
@@ -1054,7 +1067,7 @@ void test_fat32_write_read_and_list_root_file(void)
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32", entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("NOTE.TXT", entries[0].name);
@@ -1076,12 +1089,12 @@ void test_fat32_write_read_and_list_root_file(void)
 void test_fat32_mkdir_lists_root_directory_and_empty_directory(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/dir", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/dir", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry root_entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32", (Anything) root_entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32", root_entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("DIR", root_entries[0].name);
@@ -1090,7 +1103,7 @@ void test_fat32_mkdir_lists_root_directory_and_empty_directory(void)
 
     DirectoryEntry dir_entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32/dir", (Anything) dir_entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32/dir", dir_entries, 4), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 }
 
@@ -1108,7 +1121,7 @@ void test_fat32_nested_open_missing_parent_fails_cleanly_repeatedly(void)
 void test_fat32_write_read_and_list_nested_file(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/bin", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/bin", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
@@ -1123,7 +1136,7 @@ void test_fat32_write_read_and_list_nested_file(void)
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32/bin", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32/bin", entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("FILE.TXT", entries[0].name);
@@ -1149,11 +1162,11 @@ void test_fat32_write_read_and_list_nested_file(void)
 void test_fat32_nested_file_read_returns_eof_through_syscall_handler(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/dir", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/dir", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_OPEN, (Anything) "/fat32/dir/file.txt", IO_OPEN_WRITE, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_OPEN, TEST_IO_PATH_REQUEST("/fat32/dir/file.txt", IO_OPEN_WRITE), 0, 0, 0
     ), success(fd) {
             char data[] = "hello";
             match_result(SystemCallResult, IO__handler(
@@ -1166,7 +1179,7 @@ void test_fat32_nested_file_read_returns_eof_through_syscall_handler(void)
         }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_OPEN, (Anything) "/fat32/dir/file.txt", IO_OPEN_READ, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_OPEN, TEST_IO_PATH_REQUEST("/fat32/dir/file.txt", IO_OPEN_READ), 0, 0, 0
     ), success(fd) {
             char buffer[513];
             match_result(SystemCallResult, IO__handler(
@@ -1201,7 +1214,7 @@ void test_memfs_write_read_and_list_file(void)
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/tmp/memfs", entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("notes", entries[0].name);
@@ -1223,12 +1236,12 @@ void test_memfs_write_read_and_list_file(void)
 void test_memfs_mkdir_lists_directory_and_allows_file_inside(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/tmp/memfs/docs", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/tmp/memfs/docs", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry root_entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) root_entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/tmp/memfs", root_entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("docs", root_entries[0].name);
@@ -1244,7 +1257,7 @@ void test_memfs_mkdir_lists_directory_and_allows_file_inside(void)
 
     DirectoryEntry docs_entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs/docs", (Anything) docs_entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/tmp/memfs/docs", docs_entries, 4), 0, 0, 0
     ), success(count) {
             TEST_ASSERT_EQUAL_INT(1, count);
             TEST_ASSERT_EQUAL_STRING("notes", docs_entries[0].name);
@@ -1254,7 +1267,7 @@ void test_memfs_mkdir_lists_directory_and_allows_file_inside(void)
 void test_fat32_rm_removes_nested_file(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/dir", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/dir", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
@@ -1268,12 +1281,12 @@ void test_fat32_rm_removes_nested_file(void)
         }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/fat32/dir/file.txt", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, TEST_IO_PATH_REQUEST("/fat32/dir/file.txt", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32/dir", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32/dir", entries, 4), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 
     Result(IOHandle) read_handle =
@@ -1285,7 +1298,7 @@ void test_fat32_rm_removes_nested_file(void)
 void test_fat32_rm_recursive_removes_directory_tree(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/fat32/dir", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/dir", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     Result(IOHandle) write_handle =
@@ -1299,12 +1312,12 @@ void test_fat32_rm_recursive_removes_directory_tree(void)
         }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/fat32/dir", IO_REMOVE_RECURSIVE, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, TEST_IO_PATH_REQUEST("/fat32/dir", IO_REMOVE_RECURSIVE), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/fat32", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32", entries, 4), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 
     Result(IOHandle) read_handle =
@@ -1321,12 +1334,12 @@ void test_memfs_rm_removes_file_from_directory(void)
         }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/tmp/memfs/remove-me", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, TEST_IO_PATH_REQUEST("/tmp/memfs/remove-me", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/tmp/memfs", entries, 4), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/remove-me"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
@@ -1335,22 +1348,22 @@ void test_memfs_rm_removes_file_from_directory(void)
 void test_memfs_rm_directory_returns_unsupported(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/tmp/memfs/docs", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/tmp/memfs/docs", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/tmp/memfs/docs", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, TEST_IO_PATH_REQUEST("/tmp/memfs/docs", 0), 0, 0, 0
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code); });
 }
 
 void test_memfs_rm_recursive_removes_directory_tree(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/tmp/memfs/docs", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/tmp/memfs/docs", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/tmp/memfs/docs/nested", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/tmp/memfs/docs/nested", 0), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/docs/nested/notes"), IO_OPEN_WRITE), success(write_hand) {
@@ -1359,12 +1372,12 @@ void test_memfs_rm_recursive_removes_directory_tree(void)
         }, error_test_fail());
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/tmp/memfs/docs", IO_REMOVE_RECURSIVE, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, TEST_IO_PATH_REQUEST("/tmp/memfs/docs", IO_REMOVE_RECURSIVE), 0, 0, 0
     ), success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/tmp/memfs", entries, 4), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(0, count); }, error_test_fail());
 
     match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, open_context(), bstring("/tmp/memfs/docs/nested/notes"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
@@ -1373,11 +1386,11 @@ void test_memfs_rm_recursive_removes_directory_tree(void)
 void test_mkdir_and_rm_on_embeddedfs_return_unsupported(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, (Anything) "/sbin/newdir", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/sbin/newdir", 0), 0, 0, 0
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code); });
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, (Anything) "/sbin/hello_world", 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, TEST_IO_PATH_REQUEST("/sbin/hello_world", 0), 0, 0, 0
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_OPERATION_NOT_SUPPORTED, code); });
 }
 
@@ -1480,7 +1493,7 @@ void test_memfs_can_create_more_than_sixty_four_files(void)
 
     DirectoryEntry entries[70];
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/tmp/memfs", (Anything) entries, 70, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/tmp/memfs", entries, 70), 0, 0, 0
     ), success(count) { TEST_ASSERT_EQUAL_INT(65, count); }, error_test_fail());
 }
 
@@ -1489,6 +1502,6 @@ void test_io_list_dir_invalid_path_returns_error(void)
     DirectoryEntry entries[4];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, (Anything) "/missing", (Anything) entries, 4, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/missing", entries, 4), 0, 0, 0
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); });
 }

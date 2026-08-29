@@ -15,8 +15,8 @@
 
 FixedArrayBodyDefine(Handlers);
 
-static BString unhandled_syscall = BSTRING_NEW("Unhandled syscall");
-static BString unhandled_syscall_format = BSTRING_NEW("Unhandled syscall %i");
+static BString unhandled_syscall = bstr("Unhandled syscall");
+static BString unhandled_syscall_format = bstr("Unhandled syscall %i");
 
 static Result(SystemCallResult) SyscallDispatcher__deliver_pending_signal(
     KernelPtr kernel, Optional(ProcessPtr) process_opt, Result(SystemCallResult) syscall_result

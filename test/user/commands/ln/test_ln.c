@@ -10,8 +10,7 @@
 static IOStatus fake_result;
 static SystemCall last_call;
 static Anything last_arg1;
-static Anything last_arg2;
-static Anything last_arg3;
+static IOLinkRequest last_link_request;
 static char output[512];
 static uint64_t output_position;
 
@@ -24,8 +23,7 @@ void setUp(void)
     fake_result = IO_OK;
     last_call = 0;
     last_arg1 = 0;
-    last_arg2 = 0;
-    last_arg3 = 0;
+    last_link_request = (IOLinkRequest) { 0 };
     output_position = 0;
     output[0] = '\0';
 }
@@ -38,13 +36,13 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 {
     last_call = call;
     last_arg1 = arg1;
-    last_arg2 = arg2;
-    last_arg3 = arg3;
+    last_link_request = *((IOLinkRequestPtr) arg2);
     return fake_result;
 }
 
-void print(const char * str)
+void IO__print(ConstBStringPtr message)
 {
+    const char * str = BString__cstr(message);
     while (*str != '\0' && output_position + 1 < sizeof(output))
     {
         output[output_position++] = *str++;
@@ -52,17 +50,18 @@ void print(const char * str)
     output[output_position] = '\0';
 }
 
-int printf(const char * format, ...)
+int IO__printf(ConstBStringPtr format, ...)
 {
     va_list args;
     va_start(args, format);
-    int written = vsnprintf(output + output_position, sizeof(output) - output_position, format, args);
+    BString formatted = BString__vsprintf(format, args);
     va_end(args);
+    StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
         output_position += (uint64_t) written;
     }
-    return written;
+    return (int) written;
 }
 
 void test_ln_calls_link_syscall_for_two_paths(void)
@@ -72,8 +71,8 @@ void test_ln_calls_link_syscall_for_two_paths(void)
     TEST_ASSERT_EQUAL_INT(0, ln_main_under_test(3, argv));
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_LINK, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/src.txt", (const char *) last_arg2);
-    TEST_ASSERT_EQUAL_STRING("/dst.txt", (const char *) last_arg3);
+    TEST_ASSERT_EQUAL_STRING("/src.txt", BString__cstr(&last_link_request.source_path));
+    TEST_ASSERT_EQUAL_STRING("/dst.txt", BString__cstr(&last_link_request.target_path));
 }
 
 void test_ln_prints_named_error(void)

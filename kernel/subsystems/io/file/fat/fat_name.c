@@ -27,7 +27,7 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
         return false;
     }
 
-    BString base = EMPTY_BSTRING;
+    BString base = empty_bstr();
     match_optional(BString, BStringArray__at(&parts, 0),
         some(segment) { base = segment; },
         none() { return false; }
@@ -55,7 +55,7 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
 
     if (part_count == 2)
     {
-        BString extension = EMPTY_BSTRING;
+        BString extension = empty_bstr();
         match_optional(BString, BStringArray__at(&parts, 1),
             some(segment) { extension = segment; },
             none() { return false; }

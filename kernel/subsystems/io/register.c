@@ -24,12 +24,12 @@
     } \
 
 
-static BString CONSOLE = BSTRING_NEW(":console:");
-static BString TTY = BSTRING_NEW(":tty:");
-static BString KEYBOARD = BSTRING_NEW(":keyboard:");
-static BString HELLO_STREAM = BSTRING_NEW("/dev/hello");
-static BString BUSINFO_STREAM = BSTRING_NEW("/dev/businfo");
-static BString ROOT = BSTRING_NEW("/");
+static BString CONSOLE = bstr(":console:");
+static BString TTY = bstr(":tty:");
+static BString KEYBOARD = bstr(":keyboard:");
+static BString HELLO_STREAM = bstr("/dev/hello");
+static BString BUSINFO_STREAM = bstr("/dev/businfo");
+static BString ROOT = bstr("/");
 
 Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
 {

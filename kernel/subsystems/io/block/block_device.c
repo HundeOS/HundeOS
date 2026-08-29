@@ -13,21 +13,16 @@
 #include "../../../subsystems/message/subsystem_codes.h"
 #include "../../../types/map.h"
 
-static BString invalid_argument = BSTRING_NEW("Invalid block device argument");
-static BString already_registered = BSTRING_NEW("Block device already registered");
-static BString registry_full = BSTRING_NEW("Block device registry full");
-static BString request_pending = BSTRING_NEW("Userspace block IO request pending");
-static BString request_not_found = BSTRING_NEW("Userspace block IO request not found");
-static BString request_failed = BSTRING_NEW("Userspace block IO request failed");
-static BString request_not_complete = BSTRING_NEW("Userspace block IO request is not complete");
+static BString invalid_argument = bstr("Invalid block device argument");
+static BString already_registered = bstr("Block device already registered");
+static BString registry_full = bstr("Block device registry full");
+static BString request_pending = bstr("Userspace block IO request pending");
+static BString request_not_found = bstr("Userspace block IO request not found");
+static BString request_failed = bstr("Userspace block IO request failed");
+static BString request_not_complete = bstr("Userspace block IO request is not complete");
+static BString allocation_failed = bstr("Userspace block IO allocation failed");
 
 #define MAX_BLOCK_REQUESTS IO_MAX_DEVICES
-
-Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size) __attribute__((weak));
-Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
-{
-    return Error(UserAddress, invalid_argument, BLOCK_DEVICE_IO_ERROR);
-}
 
 typedef struct UserspaceBlockDevice
 {
@@ -43,6 +38,8 @@ UserspaceBlockDevice;
 typedef UserspaceBlockDevice * UserspaceBlockDevicePtr;
 
 OptionalDef(UserspaceBlockDevicePtr);
+OptionalDef(DataPtr);
+OptionalDef(BlockIOContextPtr);
 FixedArrayBodyDefine(BlockDeviceMetadataEntries);
 FixedArrayDefine(BlockRequestID, MAX_BLOCK_REQUESTS, BlockRequestIDs, SimpleEquals(uint64_t));
 FixedArrayBodyDefine(BlockRequestIDs);
@@ -55,8 +52,8 @@ typedef struct UserspaceBlockRequest
     BlockNumber block;
     BlockCount block_count;
     UserAddress buffer;
-    DataPtr caller_buffer;
-    BlockIOContextPtr io_context;
+    Optional(DataPtr) caller_buffer;
+    Optional(BlockIOContextPtr) io_context;
     Optional(BlockIOContinuation) continuation;
     bool completed;
     ServiceCode status;
@@ -77,19 +74,47 @@ BlockDeviceParkContext;
 typedef BlockDeviceParkContext * BlockDeviceParkContextPtr;
 
 OptionalDef(UserspaceBlockRequestPtr);
+OptionalDef(MessageBrokerPtr);
+ResultDef(UserspaceBlockDevicePtr);
+ResultDef(UserspaceBlockRequestPtr);
+ResultDef(BlockDeviceParkContextPtr);
 FixedArrayBodyDefine(BlockDevicePaths);
+FixedArrayDefine(UserspaceBlockRequestPtr, MAX_BLOCK_REQUESTS, BlockRequests, Ptr__equals);
+FixedArrayBodyDefine(BlockRequests);
 MapDefine(BString, UserspaceBlockDevicePtr, IO_MAX_DEVICES, BlockDeviceRegistryMap, bstring_equals);
 MapBodyDefine(BlockDeviceRegistryMap);
 MapDefine(BlockRequestID, UserspaceBlockRequestPtr, MAX_BLOCK_REQUESTS, BlockRequestMap, SimpleEquals(uint64_t));
 MapBodyDefine(BlockRequestMap);
 
-static BlockDeviceRegistryMap registry = EmptyMap(BlockDeviceRegistryMap);
-static BlockRequestMap requests = EmptyMap(BlockRequestMap);
-static bool registry_initialized = false;
-static uint64_t next_request_id = 1;
-static uint64_t next_device_id = 0;
+typedef struct BlockDeviceRegistryState
+{
+    mutex_t lock;
+    BlockDeviceRegistryMap devices;
+    BlockRequestMap requests;
+    uint64_t next_request_id;
+    uint64_t next_device_id;
+}
+BlockDeviceRegistryState;
+
+#define BLOCK_DEVICE_REGISTRY_STATE_INIT \
+    (BlockDeviceRegistryState) { \
+        .lock = MUTEX_INIT, \
+        .devices = EmptyMap(BlockDeviceRegistryMap), \
+        .requests = EmptyMap(BlockRequestMap), \
+        .next_request_id = 1, \
+        .next_device_id = 0, \
+    }
+
+static BlockDeviceRegistryState registry = BLOCK_DEVICE_REGISTRY_STATE_INIT;
 static Optional(KernelContextPtr) current_contexts[MAX_CPUS] = { 0 };
-static BString hd_alias_format = BSTRING_NEW("hd%i");
+static BString hd_alias_format = bstr("hd%i");
+
+static Result(BlockCount) UserspaceBlockDevice__read(
+    BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr target
+);
+static Result(BlockCount) UserspaceBlockDevice__write(
+    BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr source
+);
 
 static CPUID BlockDevice__current_context_index()
 {
@@ -108,44 +133,259 @@ static CPUID BlockDevice__current_context_index()
     return index;
 }
 
-static void UserspaceBlockDevice__copy_path(char target[SERVICE_DEVICE_PATH_MAX], BString source)
+static UserspaceBlockDevice UserspaceBlockDevice__new(
+    BString alias,
+    BString path,
+    ProcessPtr service_process,
+    MessageBrokerPtr message_broker,
+    BlockCount block_count,
+    BlockDevice block_device
+)
 {
-    BString__copy_to(&source, target, SERVICE_DEVICE_PATH_MAX);
+    return (UserspaceBlockDevice) {
+        .alias = alias,
+        .path = path,
+        .service_process = service_process,
+        .message_broker = message_broker,
+        .block_count = block_count,
+        .block_device = block_device,
+    };
 }
 
-static void BlockDeviceRegistry__init()
+static BlockDevice UserspaceBlockDevice__block_device(UserspaceBlockDevicePtr self)
 {
-    if (registry_initialized)
+    BlockDevice block_device = BlockDevice__new(self, UserspaceBlockDevice__read, UserspaceBlockDevice__write);
+    block_device.userspace_service = true;
+    return block_device;
+}
+
+static Result(UserspaceBlockDevicePtr) UserspaceBlockDevice__heap_new(
+    BString alias,
+    BString path,
+    ProcessPtr service_process,
+    MessageBrokerPtr message_broker,
+    BlockCount block_count
+)
+{
+    KernelAddress address = Kernel__alloc(sizeof(UserspaceBlockDevice));
+    if (!address.valid)
     {
-        return;
+        return Error(UserspaceBlockDevicePtr, allocation_failed, BLOCK_DEVICE_IO_ERROR);
     }
 
-    registry = BlockDeviceRegistryMap__new();
-    requests = BlockRequestMap__new();
-    next_device_id = 0;
-    registry_initialized = true;
+    UserspaceBlockDevicePtr self = ptr(address.virtual_addr, UserspaceBlockDevice);
+    *self = UserspaceBlockDevice__new(
+        alias,
+        path,
+        service_process,
+        message_broker,
+        block_count,
+        UserspaceBlockDevice__block_device(self)
+    );
+    return Success(UserspaceBlockDevicePtr, self);
+}
+
+static UserspaceBlockRequest UserspaceBlockRequest__new(
+    uint64_t request_id,
+    UserspaceBlockDevicePtr device,
+    ServiceBlockOperation operation,
+    BlockNumber block,
+    BlockCount block_count,
+    UserAddress buffer,
+    Optional(DataPtr) caller_buffer,
+    Optional(BlockIOContextPtr) io_context,
+    Optional(BlockIOContinuation) continuation
+)
+{
+    return (UserspaceBlockRequest) {
+        .request_id = request_id,
+        .device = device,
+        .operation = operation,
+        .block = block,
+        .block_count = block_count,
+        .buffer = buffer,
+        .caller_buffer = caller_buffer,
+        .io_context = io_context,
+        .continuation = continuation,
+        .completed = false,
+        .status = SERVICE_EVENT_QUEUE_EMPTY,
+        .completed_blocks = 0,
+        .waiting_pid = None(ProcessID),
+    };
+}
+
+static Result(UserspaceBlockRequestPtr) UserspaceBlockRequest__heap_new(
+    UserspaceBlockDevicePtr device,
+    ServiceBlockOperation operation,
+    BlockNumber block,
+    BlockCount block_count,
+    UserAddress buffer,
+    Optional(DataPtr) caller_buffer,
+    Optional(BlockIOContextPtr) io_context,
+    Optional(BlockIOContinuation) continuation
+)
+{
+    KernelAddress address = Kernel__alloc(sizeof(UserspaceBlockRequest));
+    if (!address.valid)
+    {
+        return Error(UserspaceBlockRequestPtr, allocation_failed, BLOCK_DEVICE_IO_ERROR);
+    }
+
+    UserspaceBlockRequestPtr self = ptr(address.virtual_addr, UserspaceBlockRequest);
+    *self = UserspaceBlockRequest__new(
+        0, device, operation, block, block_count, buffer, caller_buffer, io_context, continuation
+    );
+    return Success(UserspaceBlockRequestPtr, self);
+}
+
+static BlockDeviceParkContext BlockDeviceParkContext__new(
+    ProcessID pid, Optional(SchedulerPtr) scheduler, uint64_t request_id
+)
+{
+    return (BlockDeviceParkContext) {
+        .kernel_context = KernelContext__new(Some(ProcessID, pid), scheduler),
+        .request_id = request_id,
+    };
+}
+
+static Result(BlockDeviceParkContextPtr) BlockDeviceParkContext__heap_new(
+    ProcessID pid, Optional(SchedulerPtr) scheduler, uint64_t request_id
+)
+{
+    KernelAddress address = Kernel__alloc(sizeof(BlockDeviceParkContext));
+    if (!address.valid)
+    {
+        return Error(BlockDeviceParkContextPtr, allocation_failed, BLOCK_DEVICE_IO_ERROR);
+    }
+
+    BlockDeviceParkContextPtr self = ptr(address.virtual_addr, BlockDeviceParkContext);
+    *self = BlockDeviceParkContext__new(pid, scheduler, request_id);
+    return Success(BlockDeviceParkContextPtr, self);
+}
+
+static ServiceEvent UserspaceBlockRequest__service_event(UserspaceBlockRequestPtr self)
+{
+    return ServiceEvent__new(SERVICE_EVENT_BLOCK_IO, self->request_id, 0);
+}
+
+static ServiceBlockRequest UserspaceBlockRequest__service_request(UserspaceBlockRequestPtr self)
+{
+    return ServiceBlockRequest__new(
+        self->request_id,
+        self->device->path,
+        self->operation,
+        self->block,
+        self->block_count,
+        BLOCK_DEVICE_BLOCK_SIZE,
+        self->buffer.virtual_addr,
+        self->block_count * BLOCK_DEVICE_BLOCK_SIZE
+    );
+}
+
+static bool UserspaceBlockRequest__has_continuation(UserspaceBlockRequestPtr self)
+{
+    bool result = false;
+    match_optional(BlockIOContinuation, self->continuation,
+        some(_) { result = true; },
+        none_do_nothing()
+    );
+    return result;
+}
+
+static bool BlockIOContinuation__is_some(Optional(BlockIOContinuation) continuation)
+{
+    bool result = false;
+    match_optional(BlockIOContinuation, continuation,
+        some(_) { result = true; },
+        none_do_nothing()
+    );
+    return result;
+}
+
+static BlockDeviceMetadata BlockDeviceMetadata__from_device(UserspaceBlockDevicePtr self)
+{
+    return BlockDeviceMetadata__new(
+        self->alias,
+        self->path,
+        self->block_device.block_size,
+        self->block_count,
+        self->block_device.userspace_service
+    );
+}
+
+static void UserspaceBlockRequest__release(UserspaceBlockRequestPtr self)
+{
+    match_result(ProcessMemoryCode, Process__free_user_pages(self->device->service_process, self->buffer.virtual_addr),
+        success_do_nothing(),
+        error(code, message)
+        {
+            __d_printf(IODEV, "block request free failed id=%i code=%i\n", (int) self->request_id, (int) code);
+        }
+    );
+
+    Kernel__free(addr(self));
+}
+
+static void BlockDeviceRegistry__remove_request(UserspaceBlockRequestPtr request)
+{
+    critical_section(registry.lock,
+        match_result(CollectionCode, BlockRequestMap__delete(&registry.requests, request->request_id),
+            success_do_nothing(),
+            error(code, message)
+            {
+                __d_printf(IODEV, "block request delete failed id=%i code=%i\n", (int) request->request_id, (int) code);
+            }
+        );
+    );
 }
 
 void BlockDeviceRegistry__reset(void)
 {
-    if (registry_initialized)
-    {
-        for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
+    BlockRequests stale_requests = BlockRequests__new();
+
+    critical_section(registry.lock,
+        for_each_map(BlockDeviceRegistryMap, registry.devices, index, path, device,
         {
             Kernel__free(addr(device));
-
         });
-        for_each_map(BlockRequestMap, requests, request_index, request_id, request,
+        for_each_map(BlockRequestMap, registry.requests, request_index, request_id, request,
         {
-            Kernel__free(addr(request));
+            match_result(CollectionCode, BlockRequests__push(&stale_requests, request),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    __d_printf(IODEV, "block request reset collect failed code=%i\n", (int) code);
+                }
+            );
         });
-    }
 
-    registry = BlockDeviceRegistryMap__new();
-    requests = BlockRequestMap__new();
-    next_device_id = 0;
-    next_request_id = 1;
-    registry_initialized = true;
+        registry.devices = BlockDeviceRegistryMap__new();
+        registry.requests = BlockRequestMap__new();
+        registry.next_device_id = 0;
+        registry.next_request_id = 1;
+    );
+
+    for_each_fa(BlockRequests, stale_requests, request_index, request,
+    {
+        UserspaceBlockRequest__release(request);
+    });
+}
+
+BlockDeviceMetadata BlockDeviceMetadata__new(
+    BString alias,
+    BString path,
+    size_t block_size,
+    BlockCount block_count,
+    bool userspace_service
+)
+{
+    return (BlockDeviceMetadata) {
+        .alias = alias,
+        .path = path,
+        .block_size = block_size,
+        .block_count = block_count,
+        .userspace_service = userspace_service,
+    };
 }
 
 bool BlockDeviceMetadata__equals(BlockDeviceMetadataPtr self, BlockDeviceMetadataPtr other)
@@ -176,68 +416,122 @@ static Result(ServiceCode) UserspaceBlockDevice__deliver_service_event(
 static Result(Anything) UserspaceBlockDevice__complete_wait(ParkedOperationPtr parked_operation)
 {
     BlockDeviceParkContextPtr block_context = (BlockDeviceParkContextPtr) parked_operation->kernel_context;
+    Optional(UserspaceBlockRequestPtr) completed_request = None(UserspaceBlockRequestPtr);
+    Result(Anything) wait_result = Error(Anything, request_not_found, BLOCK_DEVICE_IO_ERROR);
 
-    match_optional(UserspaceBlockRequestPtr, BlockRequestMap__get(&requests, block_context->request_id),
+    critical_section(registry.lock,
+        match_optional(UserspaceBlockRequestPtr, BlockRequestMap__get(&registry.requests, block_context->request_id),
+            some(request)
+            {
+                if (!request->completed)
+                {
+                    wait_result = Error(Anything, request_not_complete, BLOCK_DEVICE_REQUEST_PENDING);
+                }
+                else
+                {
+                    match_result(CollectionCode, BlockRequestMap__delete(&registry.requests, request->request_id),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            __d_printf(
+                                IODEV,
+                                "block request delete failed id=%i code=%i\n",
+                                (int) request->request_id,
+                                (int) code
+                            );
+                        }
+                    );
+                    completed_request = Some(UserspaceBlockRequestPtr, request);
+                }
+            },
+            none()
+            {
+                wait_result = Error(Anything, request_not_found, BLOCK_DEVICE_IO_ERROR);
+            }
+        );
+    );
+
+    match_optional(UserspaceBlockRequestPtr, completed_request,
         some(request)
         {
-            if (!request->completed)
-            {
-                return Error(Anything, request_not_complete, BLOCK_DEVICE_REQUEST_PENDING);
-            }
-
             if (request->status != SERVICE_OK)
             {
+                UserspaceBlockRequest__release(request);
                 return Error(Anything, request_failed, BLOCK_DEVICE_IO_ERROR);
             }
 
             match_optional(BlockIOContinuation, request->continuation,
                 some(continuation)
                 {
-                    request->io_context->buffer = ptr(request->buffer.kernel_addr.virtual_addr, Data);
-                    request->io_context->buffer_size = request->block_count * BLOCK_DEVICE_BLOCK_SIZE;
-                    request->io_context->completed_blocks = request->completed_blocks;
-                    request->io_context->status = BLOCK_DEVICE_OK;
-                    request->io_context->request_id = Some(BlockRequestID, request->request_id);
-                    Result(Anything) continuation_result = continuation(request->io_context);
-                    match_optional(KernelResultMapper, request->io_context->kernel_context.result_mapper,
-                        some(mapper)
+                    match_optional(BlockIOContextPtr, request->io_context,
+                        some(io_context)
                         {
-                            return mapper(
-                            continuation_result,
-                            request->io_context->kernel_context.result_mapper_context
-                        ); },
-                        none_do_nothing()
+                            io_context->buffer = ptr(request->buffer.kernel_addr.virtual_addr, Data);
+                            io_context->buffer_size = request->block_count * BLOCK_DEVICE_BLOCK_SIZE;
+                            io_context->completed_blocks = request->completed_blocks;
+                            io_context->status = BLOCK_DEVICE_OK;
+                            io_context->request_id = Some(BlockRequestID, request->request_id);
+                            Result(Anything) continuation_result = continuation(io_context);
+                            match_optional(KernelResultMapper, io_context->kernel_context.result_mapper,
+                                some(mapper)
+                                {
+                                    Result(Anything) mapped_result = mapper(
+                                        continuation_result,
+                                        io_context->kernel_context.result_mapper_context
+                                    );
+                                    UserspaceBlockRequest__release(request);
+                                    return mapped_result;
+                                },
+                                none_do_nothing()
+                            );
+                            UserspaceBlockRequest__release(request);
+                            return continuation_result;
+                        },
+                        none()
+                        {
+                            UserspaceBlockRequest__release(request);
+                            return Error(Anything, request_failed, BLOCK_DEVICE_IO_ERROR);
+                        }
                     );
-                    return continuation_result;
                 },
                 none_do_nothing()
             );
 
             Result(Anything) completed_blocks = Success(Anything, request->completed_blocks);
             match_optional(KernelResultMapper, block_context->kernel_context.result_mapper,
-                some(mapper) { return mapper(completed_blocks, block_context->kernel_context.result_mapper_context); },
+                some(mapper)
+                {
+                    Result(Anything) mapped_result =
+                        mapper(completed_blocks, block_context->kernel_context.result_mapper_context);
+                    UserspaceBlockRequest__release(request);
+                    return mapped_result;
+                },
                 none_do_nothing()
             );
 
+            UserspaceBlockRequest__release(request);
             return completed_blocks;
         },
         none_do_nothing()
     );
 
-    return Error(Anything, request_not_found, BLOCK_DEVICE_IO_ERROR);
+    return wait_result;
 }
 
-static void UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr request)
+static Result(ServiceCode) UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr request)
 {
     Optional(KernelContextPtr) park_context = BlockDevice__current_context();
     match_optional(KernelContextPtr, park_context,
         some_do_nothing(),
         none()
         {
-            if (request->io_context != 0)
-            {
-                park_context = Some(KernelContextPtr, &request->io_context->kernel_context);
-            }
+            match_optional(BlockIOContextPtr, request->io_context,
+                some(io_context)
+                {
+                    park_context = Some(KernelContextPtr, &io_context->kernel_context);
+                },
+                none_do_nothing()
+            );
         }
     );
 
@@ -247,45 +541,44 @@ static void UserspaceBlockDevice__park_for_request(UserspaceBlockRequestPtr requ
             match_optional(ProcessID, context->pid,
                 some(pid)
                 {
-                    __d_printf(
-                        IODEV,
-                        "block request park id=%i pid=%i io_context=%p continuation=%i\n",
-                        (int) request->request_id,
-                        (int) pid,
-                        request->io_context,
-                        (int) request->continuation.present
-                    );
+	                    match_result(BlockDeviceParkContextPtr, BlockDeviceParkContext__heap_new(
+	                        pid, context->scheduler, request->request_id
+	                    ),
+	                        success(block_context)
+	                        {
+	                            critical_section(registry.lock,
+	                                request->waiting_pid = Some(ProcessID, pid);
+	                            );
 
-                    BlockDeviceParkContextPtr block_context =
-                        ptr(Kernel__alloc_kernel(sizeof(BlockDeviceParkContext)), BlockDeviceParkContext);
-                    block_context->kernel_context = KernelContext__new(Some(ProcessID, pid), context->scheduler);
-                    block_context->request_id = request->request_id;
-                    request->waiting_pid = Some(ProcessID, pid);
+	                            MessagePtr message = Message__heap_new_deferred_with_context_ownership_and_operation_key(
+                                SOURCE_IO,
+                                SUBSYS_IO_PARK,
+                                pid,
+                                &block_context->kernel_context,
+                                UserspaceBlockDevice__complete_wait,
+                                true,
+                                Some(OperationKey, request->request_id)
+                            );
 
-                    MessagePtr message = Message__heap_new_deferred_with_context_ownership(
-                        SOURCE_IO,
-                        SUBSYS_IO_PARK,
-                        pid,
-                        (KernelContextPtr) block_context,
-                        UserspaceBlockDevice__complete_wait,
-                        true
+                            match_result(AckCode, MessageBroker__deliver(request->device->message_broker, message),
+                                success(_) { return Success(ServiceCode, SERVICE_OK); },
+                                error(code, message)
+                                {
+                                    Kernel__free(addr(block_context));
+                                    return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR);
+                                }
+                            );
+                        },
+                        error(code, message) { return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR); }
                     );
-                    message->payload.some.val.deferred.operation_key = Some(OperationKey, request->request_id);
+	                },
+	                none() { return Success(ServiceCode, SERVICE_OK); }
+	            );
+	        },
+	        none() { return Success(ServiceCode, SERVICE_OK); }
+	    );
 
-                    match_result(AckCode, MessageBroker__deliver(request->device->message_broker, message),
-                        success_do_nothing(),
-                        error(code, message)
-                        {
-                            __d_printf(PANIC, "Park message failed %s\n", cstr(message));
-                            Kernel__panic(cstr(message), NULL); // hundelint: ignore-no-null
-                        }
-                    );
-                },
-                none_do_nothing()
-            );
-        },
-        none_do_nothing()
-    );
+    return Error(ServiceCode, request_failed, SERVICE_SCHEDULER_ERROR);
 }
 
 static Result(BlockCount) UserspaceBlockDevice__create_request(
@@ -293,8 +586,8 @@ static Result(BlockCount) UserspaceBlockDevice__create_request(
     ServiceBlockOperation operation,
     BlockNumber block,
     BlockCount count,
-    DataPtr caller_buffer,
-    BlockIOContextPtr io_context,
+    Optional(DataPtr) caller_buffer,
+    Optional(BlockIOContextPtr) io_context,
     Optional(BlockIOContinuation) continuation
 )
 {
@@ -303,12 +596,12 @@ static Result(BlockCount) UserspaceBlockDevice__create_request(
         return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
-    if (caller_buffer == NULL && is_nothing(continuation)) // hundelint: ignore-no-null
+    if (self->block_count != 0 && block + count > self->block_count)
     {
         return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
-    if (self->block_count != 0 && block + count > self->block_count)
+    if (BlockIOContinuation__is_some(continuation) && is_nothing(io_context))
     {
         return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
@@ -320,62 +613,99 @@ static Result(BlockCount) UserspaceBlockDevice__create_request(
             if (operation == SERVICE_BLOCK_WRITE)
             {
                 DataPtr kernel_buffer = ptr(buffer.kernel_addr.virtual_addr, Data);
-                for (size_t i = 0; i < buffer_size; i++)
-                {
-                    kernel_buffer[i] = caller_buffer[i];
-                }
+                match_optional(DataPtr, caller_buffer,
+                    some(source)
+                    {
+                        for (size_t i = 0; i < buffer_size; i++)
+                        {
+                            kernel_buffer[i] = source[i];
+                        }
+                    },
+                    none()
+                    {
+                        match_result(ProcessMemoryCode, Process__free_user_pages(self->service_process, buffer.virtual_addr),
+                            success_do_nothing(),
+                            error(free_code, free_message)
+                            {
+                                __d_printf(IODEV, "block write buffer cleanup failed code=%i\n", (int) free_code);
+                            }
+                        );
+                        return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+                    }
+                );
             }
 
-            UserspaceBlockRequestPtr request =
-                ptr(Kernel__alloc_kernel(sizeof(UserspaceBlockRequest)), UserspaceBlockRequest);
-            request->request_id = next_request_id++;
-            request->device = self;
-            request->operation = operation;
-            request->block = block;
-            request->block_count = count;
-            request->buffer = buffer;
-            request->caller_buffer = caller_buffer;
-            request->io_context = io_context;
-            request->continuation = continuation;
-            request->completed = false;
-            request->status = SERVICE_EVENT_QUEUE_EMPTY;
-            request->completed_blocks = 0;
-            request->waiting_pid = None(ProcessID);
+            match_result(UserspaceBlockRequestPtr, UserspaceBlockRequest__heap_new(
+                self, operation, block, count, buffer, caller_buffer, io_context, continuation
+            ),
+                success(request)
+                {
+                    Result(CollectionCode) set_result = Error(CollectionCode, registry_full, MAP_FULL);
+                    critical_section(registry.lock,
+                        request->request_id = registry.next_request_id++;
+                        set_result = BlockRequestMap__set(&registry.requests, request->request_id, request);
+                    );
 
-            match_result(CollectionCode, BlockRequestMap__set(&requests, request->request_id, request),
-                success_do_nothing(),
-                error(code, message) { return Error(BlockCount, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
+                    match_result(CollectionCode, set_result,
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            UserspaceBlockRequest__release(request);
+                            return Error(BlockCount, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
+                        }
+                    );
+
+                    __d_printf(
+                        IODEV,
+                        "block request create id=%i op=%i block=%i count=%i continuation=%i "
+                        "buffer_user=0x%x buffer_kernel=0x%x buffer_phys=0x%x size=%i\n",
+                        (int) request->request_id,
+                        (int) request->operation,
+                        (int) request->block,
+                        (int) request->block_count,
+                        (int) UserspaceBlockRequest__has_continuation(request),
+                        (unsigned int) request->buffer.virtual_addr,
+                        (unsigned int) request->buffer.kernel_addr.virtual_addr,
+                        (unsigned int) request->buffer.kernel_addr.phys_addr,
+                        (int) buffer_size
+                    );
+
+                    match_result(ServiceCode, UserspaceBlockDevice__deliver_service_event(
+                        self, UserspaceBlockRequest__service_event(request)
+                    ),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            BlockDeviceRegistry__remove_request(request);
+                            UserspaceBlockRequest__release(request);
+                            return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR);
+                        }
+                    );
+
+                    match_result(ServiceCode, UserspaceBlockDevice__park_for_request(request),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            BlockDeviceRegistry__remove_request(request);
+                            UserspaceBlockRequest__release(request);
+                            return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR);
+                        }
+                    );
+
+                    return Error(BlockCount, request_pending, BLOCK_DEVICE_REQUEST_PENDING);
+                },
+                error(code, message)
+                {
+                    match_result(ProcessMemoryCode, Process__free_user_pages(self->service_process, buffer.virtual_addr),
+                        success_do_nothing(),
+                        error(free_code, free_message)
+                        {
+                            __d_printf(IODEV, "block request buffer cleanup failed code=%i\n", (int) free_code);
+                        }
+                    );
+                    return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR);
+                }
             );
-
-            __d_printf(
-                IODEV,
-                "block request create id=%i op=%i block=%i count=%i io_context=%p continuation=%i "
-                "buffer_user=0x%x buffer_kernel=0x%x buffer_phys=0x%x size=%i\n",
-                (int) request->request_id,
-                (int) request->operation,
-                (int) request->block,
-                (int) request->block_count,
-                request->io_context,
-                (int) request->continuation.present,
-                (unsigned int) request->buffer.virtual_addr,
-                (unsigned int) request->buffer.kernel_addr.virtual_addr,
-                (unsigned int) request->buffer.kernel_addr.phys_addr,
-                (int) buffer_size
-            );
-
-            ServiceEvent event;
-            event.type = SERVICE_EVENT_BLOCK_IO;
-            event.source = request->request_id;
-            event.data = 0;
-
-            match_result(ServiceCode, UserspaceBlockDevice__deliver_service_event(self, event),
-                success_do_nothing(),
-                error(code, message) { return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR); }
-            );
-
-            UserspaceBlockDevice__park_for_request(request);
-
-            return Error(BlockCount, request_pending, BLOCK_DEVICE_REQUEST_PENDING);
         },
         error(code, message) { return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR); }
     );
@@ -392,8 +722,8 @@ static Result(BlockCount) UserspaceBlockDevice__read(
         SERVICE_BLOCK_READ,
         block,
         count,
-        target,
-        NULL, // hundelint: ignore-no-null
+        Some(DataPtr, target),
+        None(BlockIOContextPtr),
         None(BlockIOContinuation)
     );
 }
@@ -407,8 +737,8 @@ static Result(BlockCount) UserspaceBlockDevice__write(
         SERVICE_BLOCK_WRITE,
         block,
         count,
-        source,
-        NULL, // hundelint: ignore-no-null
+        Some(DataPtr, source),
+        None(BlockIOContextPtr),
         None(BlockIOContinuation)
     );
 }
@@ -483,56 +813,87 @@ Result(Anything) BlockDevice__read_async(
         success(buffer)
         {
             UserspaceBlockDevicePtr userspace_device = (UserspaceBlockDevicePtr) self->context;
-            UserspaceBlockRequestPtr request =
-                ptr(Kernel__alloc_kernel(sizeof(UserspaceBlockRequest)), UserspaceBlockRequest);
-            request->request_id = next_request_id++;
-            request->device = userspace_device;
-            request->operation = SERVICE_BLOCK_READ;
-            request->block = block;
-            request->block_count = count;
-            request->buffer = buffer;
-            request->caller_buffer = NULL; // hundelint: ignore-no-null
-            request->io_context = context;
-            request->continuation = Some(BlockIOContinuation, continuation);
-            request->completed = false;
-            request->status = SERVICE_EVENT_QUEUE_EMPTY;
-            request->completed_blocks = 0;
-            request->waiting_pid = None(ProcessID);
+            match_result(UserspaceBlockRequestPtr, UserspaceBlockRequest__heap_new(
+                userspace_device,
+                SERVICE_BLOCK_READ,
+                block,
+                count,
+                buffer,
+                None(DataPtr),
+                Some(BlockIOContextPtr, context),
+                Some(BlockIOContinuation, continuation)
+            ),
+                success(request)
+                {
+                    Result(CollectionCode) set_result = Error(CollectionCode, registry_full, MAP_FULL);
+                    critical_section(registry.lock,
+                        request->request_id = registry.next_request_id++;
+                        set_result = BlockRequestMap__set(&registry.requests, request->request_id, request);
+                    );
 
-            context->buffer = ptr(buffer.kernel_addr.virtual_addr, Data);
-            context->request_id = Some(BlockRequestID, request->request_id);
+                    match_result(CollectionCode, set_result,
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            UserspaceBlockRequest__release(request);
+                            return Error(Anything, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
+                        }
+                    );
 
-            match_result(CollectionCode, BlockRequestMap__set(&requests, request->request_id, request),
-                success_do_nothing(),
-                error(code, message) { return Error(Anything, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
+                    context->buffer = ptr(buffer.kernel_addr.virtual_addr, Data);
+                    context->request_id = Some(BlockRequestID, request->request_id);
+
+                    __d_printf(
+                        IODEV,
+                        "block async request create id=%i block=%i count=%i buffer_user=0x%x "
+                        "buffer_kernel=0x%x buffer_phys=0x%x size=%i io_context=%p\n",
+                        (int) request->request_id,
+                        (int) request->block,
+                        (int) request->block_count,
+                        (unsigned int) request->buffer.virtual_addr,
+                        (unsigned int) request->buffer.kernel_addr.virtual_addr,
+                        (unsigned int) request->buffer.kernel_addr.phys_addr,
+                        (int) context->buffer_size,
+                        context
+                    );
+
+                    match_result(ServiceCode, UserspaceBlockDevice__deliver_service_event(
+                        userspace_device, UserspaceBlockRequest__service_event(request)
+                    ),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            BlockDeviceRegistry__remove_request(request);
+                            UserspaceBlockRequest__release(request);
+                            return Error(Anything, message, BLOCK_DEVICE_IO_ERROR);
+                        }
+                    );
+
+                    match_result(ServiceCode, UserspaceBlockDevice__park_for_request(request),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            BlockDeviceRegistry__remove_request(request);
+                            UserspaceBlockRequest__release(request);
+                            return Error(Anything, message, BLOCK_DEVICE_IO_ERROR);
+                        }
+                    );
+                    return Error(Anything, request_pending, BLOCK_DEVICE_REQUEST_PENDING);
+                },
+                error(code, message)
+                {
+                    match_result(ProcessMemoryCode, Process__free_user_pages(
+                        ((UserspaceBlockDevicePtr) self->context)->service_process, buffer.virtual_addr
+                    ),
+                        success_do_nothing(),
+                        error(free_code, free_message)
+                        {
+                            __d_printf(IODEV, "block async buffer cleanup failed code=%i\n", (int) free_code);
+                        }
+                    );
+                    return Error(Anything, message, BLOCK_DEVICE_IO_ERROR);
+                }
             );
-
-            __d_printf(
-                IODEV,
-                "block async request create id=%i block=%i count=%i buffer_user=0x%x "
-                "buffer_kernel=0x%x buffer_phys=0x%x size=%i io_context=%p\n",
-                (int) request->request_id,
-                (int) request->block,
-                (int) request->block_count,
-                (unsigned int) request->buffer.virtual_addr,
-                (unsigned int) request->buffer.kernel_addr.virtual_addr,
-                (unsigned int) request->buffer.kernel_addr.phys_addr,
-                (int) context->buffer_size,
-                request->io_context
-            );
-
-            ServiceEvent event;
-            event.type = SERVICE_EVENT_BLOCK_IO;
-            event.source = request->request_id;
-            event.data = 0;
-
-            match_result(ServiceCode, UserspaceBlockDevice__deliver_service_event(userspace_device, event),
-                success_do_nothing(),
-                error(code, message) { return Error(Anything, message, BLOCK_DEVICE_IO_ERROR); }
-            );
-
-            UserspaceBlockDevice__park_for_request(request);
-            return Error(Anything, request_pending, BLOCK_DEVICE_REQUEST_PENDING);
         },
         error(code, message) { return Error(Anything, message, BLOCK_DEVICE_IO_ERROR); }
     );
@@ -569,8 +930,8 @@ Result(Anything) BlockDevice__write_async(
             SERVICE_BLOCK_WRITE,
             block,
             count,
-            source,
-            context,
+            Some(DataPtr, source),
+            Some(BlockIOContextPtr, context),
             Some(BlockIOContinuation, continuation)
         ),
             success(blocks) { return Success(Anything, blocks); },
@@ -615,30 +976,223 @@ Result(BlockDeviceCode) BlockDeviceRegistry__register(
         return Error(BlockDeviceCode, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
-    BlockDeviceRegistry__init();
+    match_result(UserspaceBlockDevicePtr, UserspaceBlockDevice__heap_new(
+        empty_bstr(), path, service_process, message_broker, block_count
+    ),
+        success(device)
+        {
+            Result(BlockDeviceCode) register_result = Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
+            critical_section(registry.lock,
+                match_optional(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry.devices, path),
+                    some(existing)
+                    {
+                        register_result = Error(BlockDeviceCode, already_registered, BLOCK_DEVICE_ALREADY_REGISTERED);
+                    },
+                    none()
+                    {
+                        device->alias = BString__sprintf(&hd_alias_format, (int) registry.next_device_id++);
+                        match_result(CollectionCode, BlockDeviceRegistryMap__set(&registry.devices, path, device),
+                            success(_) { register_result = Success(BlockDeviceCode, BLOCK_DEVICE_OK); },
+                            error(code, message)
+                            {
+                                register_result = Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
+                            }
+                        );
+                    }
+                );
+            );
 
-    match_optional(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry, path),
-        some(existing) { return Error(BlockDeviceCode, already_registered, BLOCK_DEVICE_ALREADY_REGISTERED); },
-        none_do_nothing()
-    );
-
-    UserspaceBlockDevicePtr device = ptr(Kernel__alloc_kernel(sizeof(UserspaceBlockDevice)), UserspaceBlockDevice);
-    *device = (UserspaceBlockDevice) {
-        .alias = BString__sprintf(&hd_alias_format, (int) next_device_id++),
-        .path = path,
-        .service_process = service_process,
-        .message_broker = message_broker,
-        .block_count = block_count,
-    };
-    device->block_device = BlockDevice__new(device, UserspaceBlockDevice__read, UserspaceBlockDevice__write);
-    device->block_device.userspace_service = true;
-
-    match_result(CollectionCode, BlockDeviceRegistryMap__set(&registry, path, device),
-        success(_) { return Success(BlockDeviceCode, BLOCK_DEVICE_OK); },
-        error(code, message) { return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
+            match_result(BlockDeviceCode, register_result,
+                success(code) { return Success(BlockDeviceCode, code); },
+                error(code, message)
+                {
+                    Kernel__free(addr(device));
+                    return Error(BlockDeviceCode, message, code);
+                }
+            );
+        },
+        error(code, message) { return Error(BlockDeviceCode, message, code); }
     );
 
     return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
+}
+
+static Result(BlockCount) UserspaceBlockDevice__create_shared_read_request(
+    UserspaceBlockDevicePtr self,
+    ProcessPtr requester,
+    BlockNumber block,
+    BlockCount count,
+    DataPtr requester_buffer,
+    size_t buffer_size
+)
+{
+    if (self == NULL || requester == NULL || requester_buffer == NULL || count == 0) // hundelint: ignore-no-null
+    {
+        return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+    }
+
+    size_t required_size = count * BLOCK_DEVICE_BLOCK_SIZE;
+    if (buffer_size < required_size)
+    {
+        return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+    }
+
+    if (self->block_count != 0 && block + count > self->block_count)
+    {
+        return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+    }
+
+    match_result(UserAddress, Process__map_shared_user_pages(
+        self->service_process, requester, addr(requester_buffer), required_size
+    ),
+        success(buffer)
+        {
+            match_result(UserspaceBlockRequestPtr, UserspaceBlockRequest__heap_new(
+                self,
+                SERVICE_BLOCK_READ,
+	                block,
+	                count,
+	                buffer,
+	                None(DataPtr),
+	                None(BlockIOContextPtr),
+	                None(BlockIOContinuation)
+	            ),
+                success(request)
+                {
+                    Result(CollectionCode) set_result = Error(CollectionCode, registry_full, MAP_FULL);
+                    critical_section(registry.lock,
+                        request->request_id = registry.next_request_id++;
+                        set_result = BlockRequestMap__set(&registry.requests, request->request_id, request);
+                    );
+
+                    match_result(CollectionCode, set_result,
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            UserspaceBlockRequest__release(request);
+                            return Error(BlockCount, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
+                        }
+                    );
+
+                    match_result(ServiceCode, UserspaceBlockDevice__deliver_service_event(
+                        self, UserspaceBlockRequest__service_event(request)
+                    ),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            BlockDeviceRegistry__remove_request(request);
+                            UserspaceBlockRequest__release(request);
+                            return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR);
+                        }
+                    );
+
+                    match_result(ServiceCode, UserspaceBlockDevice__park_for_request(request),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            BlockDeviceRegistry__remove_request(request);
+                            UserspaceBlockRequest__release(request);
+                            return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR);
+                        }
+                    );
+                    return Error(BlockCount, request_pending, BLOCK_DEVICE_REQUEST_PENDING);
+                },
+                error(code, message)
+                {
+                    match_result(ProcessMemoryCode, Process__free_user_pages(self->service_process, buffer.virtual_addr),
+                        success_do_nothing(),
+                        error(free_code, free_message)
+                        {
+                            __d_printf(IODEV, "block shared buffer cleanup failed code=%i\n", (int) free_code);
+                        }
+                    );
+                    return Error(BlockCount, message, BLOCK_DEVICE_IO_ERROR);
+                }
+            );
+        },
+        error(code, message) { return Error(BlockCount, message, BLOCK_DEVICE_INVALID_ARGUMENT); }
+    );
+
+    return Error(BlockCount, request_failed, BLOCK_DEVICE_IO_ERROR);
+}
+
+Result(BlockCount) BlockDeviceRegistry__read_from_process(
+    ProcessPtr requester,
+    BString path,
+    BlockNumber block,
+    BlockCount count,
+    DataPtr requester_buffer,
+    size_t buffer_size,
+    MessageBrokerPtr message_broker
+)
+{
+    if (requester == NULL || BString__is_empty(&path) || message_broker == NULL) // hundelint: ignore-no-null
+    {
+        return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+    }
+
+    Optional(UserspaceBlockDevicePtr) device_result = None(UserspaceBlockDevicePtr);
+    critical_section(registry.lock,
+        device_result = BlockDeviceRegistryMap__get(&registry.devices, path);
+    );
+
+    match_optional(UserspaceBlockDevicePtr, device_result,
+        some(device)
+        {
+            if (device->message_broker != message_broker)
+            {
+                return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+            }
+
+            return UserspaceBlockDevice__create_shared_read_request(
+                device, requester, block, count, requester_buffer, buffer_size
+            );
+        },
+        none_do_nothing()
+    );
+
+    return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+}
+
+Result(BlockCount) BlockDeviceRegistry__write_from_process(
+    ProcessPtr requester,
+    BString path,
+    BlockNumber block,
+    BlockCount count,
+    DataPtr requester_buffer,
+    size_t buffer_size,
+    MessageBrokerPtr message_broker
+)
+{
+    if (requester == NULL || BString__is_empty(&path) || requester_buffer == NULL || message_broker == NULL) // hundelint: ignore-no-null
+    {
+        return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+    }
+
+    Optional(UserspaceBlockDevicePtr) device_result = None(UserspaceBlockDevicePtr);
+    critical_section(registry.lock,
+        device_result = BlockDeviceRegistryMap__get(&registry.devices, path);
+    );
+
+    match_optional(UserspaceBlockDevicePtr, device_result,
+        some(device)
+        {
+            if (device->message_broker != message_broker)
+            {
+                return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+            }
+
+            if (buffer_size < count * BLOCK_DEVICE_BLOCK_SIZE)
+            {
+                return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+            }
+
+            return BlockDevice__write(&device->block_device, block, count, requester_buffer);
+        },
+        none_do_nothing()
+    );
+
+    return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
 }
 
 Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPtr process)
@@ -648,222 +1202,242 @@ Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPt
         return Error(BlockDeviceCode, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
-    BlockDeviceRegistry__init();
-
     BlockRequestIDs stale_request_ids = BlockRequestIDs__new();
-    for_each_map(BlockRequestMap, requests, index, request_id, request,
-    {
-        if (request->device->service_process == process)
-        {
-            match_result(CollectionCode, BlockRequestIDs__push(&stale_request_ids, request_id),
-                success_do_nothing(),
-                error(code, message) { return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
-            );
-        }
-
-    });
-    for_each_fa(BlockRequestIDs, stale_request_ids, request_index, stale_request_id,
-    {
-        match_optional(UserspaceBlockRequestPtr, BlockRequestMap__get(&requests, stale_request_id),
-            some(request) { Kernel__free(addr(request)); },
-            none_do_nothing()
-        );
-        BlockRequestMap__delete(&requests, stale_request_id);
-
-    });
+    BlockRequests stale_requests = BlockRequests__new();
     BlockDevicePaths stale_paths = EmptyArray(BlockDevicePaths);
-    for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
-    {
-        if (device->service_process == process)
+
+    critical_section(registry.lock,
+        for_each_map(BlockRequestMap, registry.requests, index, request_id, request,
         {
-            match_result(CollectionCode, BlockDevicePaths__push(&stale_paths, path),
-                success_do_nothing(),
-                error(code, message) { return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
+            if (request->device->service_process == process)
+            {
+                match_result(CollectionCode, BlockRequestIDs__push(&stale_request_ids, request_id),
+                    success_do_nothing(),
+                    error(code, message) { cs_return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
+                );
+            }
+        });
+        for_each_map(BlockDeviceRegistryMap, registry.devices, index, path, device,
+        {
+            if (device->service_process == process)
+            {
+                match_result(CollectionCode, BlockDevicePaths__push(&stale_paths, path),
+                    success_do_nothing(),
+                    error(code, message) { cs_return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL); }
+                );
+            }
+        });
+        for_each_fa(BlockDevicePaths, stale_paths, path_index, stale_path,
+        {
+            match_optional(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry.devices, stale_path),
+                some(device)
+                {
+                    BlockDeviceRegistryMap__delete(&registry.devices, stale_path);
+                    Kernel__free(addr(device));
+                },
+                none_do_nothing()
             );
-        }
+        });
+        for_each_fa(BlockRequestIDs, stale_request_ids, request_index, stale_request_id,
+        {
+            match_optional(UserspaceBlockRequestPtr, BlockRequestMap__get(&registry.requests, stale_request_id),
+                some(request)
+                {
+                    match_result(CollectionCode, BlockRequests__push(&stale_requests, request),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            cs_return Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
+                        }
+                    );
+                    match_result(CollectionCode, BlockRequestMap__delete(&registry.requests, stale_request_id),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            __d_printf(
+                                IODEV,
+                                "block request stale delete failed id=%i code=%i\n",
+                                (int) stale_request_id,
+                                (int) code
+                            );
+                        }
+                    );
+                },
+                none_do_nothing()
+            );
+        });
+    );
 
-    });
-    for_each_fa(BlockDevicePaths, stale_paths, path_index, stale_path,
+    for_each_fa(BlockRequests, stale_requests, request_index, request,
     {
-        match_optional(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry, stale_path),
-            some(device) { Kernel__free(addr(device)); },
-            none_do_nothing()
-        );
-        BlockDeviceRegistryMap__delete(&registry, stale_path);
-
+        UserspaceBlockRequest__release(request);
     });
+
     return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
 }
 
-Result(ServiceCode) BlockDeviceService__get_request(
-    ProcessPtr service_process, uint64_t request_id, ServiceBlockRequestPtr target
-)
+Result(ServiceBlockRequest) BlockDeviceRegistry__get_request(ProcessPtr service_process, uint64_t request_id)
 {
-    if (service_process == NULL || target == NULL) // hundelint: ignore-no-null
-    {
-        return Error(ServiceCode, invalid_argument, SERVICE_INVALID_BUFFER);
-    }
+    Result(ServiceBlockRequest) request_result =
+        Error(ServiceBlockRequest, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
 
-    BlockDeviceRegistry__init();
-
-    match_optional(UserspaceBlockRequestPtr, BlockRequestMap__get(&requests, request_id),
-        some(request)
-        {
-            if (request->device->service_process != service_process)
+    critical_section(registry.lock,
+        match_optional(UserspaceBlockRequestPtr, BlockRequestMap__get(&registry.requests, request_id),
+            some(request)
             {
-                return Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
+                if (request->device->service_process != service_process)
+                {
+                    request_result = Error(ServiceBlockRequest, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
+                }
+                else
+                {
+                    request_result = Success(ServiceBlockRequest, UserspaceBlockRequest__service_request(request));
+                }
+            },
+            none()
+            {
+                request_result = Error(ServiceBlockRequest, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
             }
-
-            target->request_id = request->request_id;
-            UserspaceBlockDevice__copy_path(target->device_path, request->device->path);
-            target->operation = request->operation;
-            target->block = request->block;
-            target->block_count = request->block_count;
-            target->block_size = BLOCK_DEVICE_BLOCK_SIZE;
-            target->buffer = ptr(request->buffer.virtual_addr, void);
-            target->buffer_size = request->block_count * BLOCK_DEVICE_BLOCK_SIZE;
-            return Success(ServiceCode, SERVICE_OK);
-        },
-        none_do_nothing()
+        );
     );
 
-    return Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
+    return request_result;
 }
 
 Result(ServiceCode) BlockDeviceService__complete(
     ProcessPtr service_process, ServiceBlockCompletionPtr completion
 )
 {
-    if (service_process == NULL || completion == NULL) // hundelint: ignore-no-null
-    {
-        return Error(ServiceCode, invalid_argument, SERVICE_INVALID_BUFFER);
-    }
+    Optional(ProcessID) waiting_pid = None(ProcessID);
+    Optional(MessageBrokerPtr) message_broker = None(MessageBrokerPtr);
+    Result(ServiceCode) completion_result = Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
 
-    BlockDeviceRegistry__init();
-
-    match_optional(UserspaceBlockRequestPtr, BlockRequestMap__get(&requests, completion->request_id),
-        some(request)
-        {
-            if (request->device->service_process != service_process)
+    critical_section(registry.lock,
+        match_optional(UserspaceBlockRequestPtr, BlockRequestMap__get(&registry.requests, completion->request_id),
+            some(request)
             {
-                return Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
-            }
-
-            if (completion->block_count > request->block_count)
-            {
-                return Error(ServiceCode, request_failed, SERVICE_BLOCK_REQUEST_FAILED);
-            }
-
-            if (completion->status == SERVICE_OK && request->operation == SERVICE_BLOCK_READ && request->caller_buffer != NULL) // hundelint: ignore-no-null
-            {
-                size_t byte_count = completion->block_count * BLOCK_DEVICE_BLOCK_SIZE;
-                DataPtr kernel_buffer = ptr(request->buffer.kernel_addr.virtual_addr, Data);
-                for (size_t i = 0; i < byte_count; i++)
+                if (request->device->service_process != service_process)
                 {
-                    request->caller_buffer[i] = kernel_buffer[i];
+                    completion_result = Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
                 }
+                else if (completion->block_count > request->block_count)
+                {
+                    completion_result = Error(ServiceCode, request_failed, SERVICE_BLOCK_REQUEST_FAILED);
+                }
+                else
+                {
+                    if (completion->status == SERVICE_OK && request->operation == SERVICE_BLOCK_READ)
+                    {
+                        match_optional(DataPtr, request->caller_buffer,
+                            some(caller_buffer)
+                            {
+                                size_t byte_count = completion->block_count * BLOCK_DEVICE_BLOCK_SIZE;
+                                DataPtr kernel_buffer = ptr(request->buffer.kernel_addr.virtual_addr, Data);
+                                for (size_t i = 0; i < byte_count; i++)
+                                {
+                                    caller_buffer[i] = kernel_buffer[i];
+                                }
+                            },
+                            none_do_nothing()
+                        );
+                    }
+
+                    request->completed = true;
+                    request->status = completion->status;
+                    request->completed_blocks = completion->block_count;
+                    waiting_pid = request->waiting_pid;
+                    message_broker = Some(MessageBrokerPtr, request->device->message_broker);
+                    completion_result = Success(ServiceCode, SERVICE_OK);
+                }
+            },
+            none()
+            {
+                completion_result = Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
             }
+        );
+    );
 
-            request->completed = true;
-            request->status = completion->status;
-            request->completed_blocks = completion->block_count;
+    match_result(ServiceCode, completion_result,
+        success_do_nothing(),
+        error(code, message) { return Error(ServiceCode, message, code); }
+    );
 
-            __d_printf(
-                IODEV,
-                "block request complete id=%i op=%i status=%i completed=%i waiting=%i\n",
-                (int) request->request_id,
-                (int) request->operation,
-                (int) request->status,
-                (int) request->completed_blocks,
-                (int) request->waiting_pid.present
-            );
-
-            match_optional(ProcessID, request->waiting_pid,
-                some(pid)
+    match_optional(ProcessID, waiting_pid,
+        some(pid)
+        {
+            match_optional(MessageBrokerPtr, message_broker,
+                some(broker)
                 {
                     MessagePtr message = Message__heap_new_io_operation(
-                        SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid, request->request_id
+                        SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid, completion->request_id
                     );
-                    match_result(AckCode, MessageBroker__deliver(request->device->message_broker, message),
+                    match_result(AckCode, MessageBroker__deliver(broker, message),
                         success_do_nothing(),
-                        error(code, message)
-                        {
-                            return Error(ServiceCode, message, code);
-                        }
+                        error(code, message) { return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR); }
                     );
                 },
-                none_do_nothing()
+                none()
+                {
+                    return Error(ServiceCode, request_failed, SERVICE_SCHEDULER_ERROR);
+                }
             );
-
-            return Success(ServiceCode, SERVICE_OK);
         },
         none_do_nothing()
     );
 
-    return Error(ServiceCode, request_not_found, SERVICE_BLOCK_REQUEST_NOT_FOUND);
+    return Success(ServiceCode, SERVICE_OK);
 }
 
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path)
 {
-    BlockDeviceRegistry__init();
+    Optional(BlockDevicePtr) device_result = None(BlockDevicePtr);
 
-    match_optional(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry, path),
-        some(device) { return Some(BlockDevicePtr, &device->block_device); },
-        none_do_nothing()
+    critical_section(registry.lock,
+        match_optional(UserspaceBlockDevicePtr, BlockDeviceRegistryMap__get(&registry.devices, path),
+            some(device) { device_result = Some(BlockDevicePtr, &device->block_device); },
+            none_do_nothing()
+        );
     );
 
-    return None(BlockDevicePtr);
+    return device_result;
 }
 
 BlockDevicePaths BlockDeviceRegistry__paths()
 {
-    BlockDeviceRegistry__init();
-
     BlockDevicePaths paths = EmptyArray(BlockDevicePaths);
-    for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
-    {
-        BlockDevicePaths__push(&paths, path);
-
-    });
+    critical_section(registry.lock,
+        for_each_map(BlockDeviceRegistryMap, registry.devices, index, path, device,
+        {
+            BlockDevicePaths__push(&paths, path);
+        });
+    );
     return paths;
 }
 
 BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
 {
-    BlockDeviceRegistry__init();
-
     BlockDeviceMetadataEntries entries = EmptyArray(BlockDeviceMetadataEntries);
-    for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
-    {
-        BlockDeviceMetadataEntries__push(&entries, ((BlockDeviceMetadata) {
-            .alias = device->alias,
-            .path = device->path,
-            .block_size = device->block_device.block_size,
-            .block_count = device->block_count,
-            .userspace_service = device->block_device.userspace_service,
-        }));
-
-    });
+    critical_section(registry.lock,
+        for_each_map(BlockDeviceRegistryMap, registry.devices, index, path, device,
+        {
+            BlockDeviceMetadataEntries__push(&entries, BlockDeviceMetadata__from_device(device));
+        });
+    );
     return entries;
 }
 
 Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias)
 {
-    BlockDeviceRegistry__init();
+    Optional(BlockDeviceMetadata) metadata = None(BlockDeviceMetadata);
 
-    for_each_map(BlockDeviceRegistryMap, registry, index, path, device,
-    {
-        if (BString__equals(&device->alias, &alias))
+    critical_section(registry.lock,
+        for_each_map(BlockDeviceRegistryMap, registry.devices, index, path, device,
         {
-            return Some(BlockDeviceMetadata, ((BlockDeviceMetadata) {
-                .alias = device->alias,
-                .path = device->path,
-                .block_size = device->block_device.block_size,
-                .block_count = device->block_count,
-                .userspace_service = device->block_device.userspace_service,
-            }));
-        }
-
-    });
-    return None(BlockDeviceMetadata);
+            if (BString__equals(&device->alias, &alias))
+            {
+                metadata = Some(BlockDeviceMetadata, BlockDeviceMetadata__from_device(device));
+            }
+        });
+    );
+    return metadata;
 }

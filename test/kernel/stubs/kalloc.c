@@ -11,6 +11,7 @@ static Address virtual_translation_end = 0;
 static Address virtual_translation_physical_start = 0;
 static bool alloc_fill_enabled = false;
 static uint8_t alloc_fill_value = 0;
+static bool memcopy_overflow_occurred = false;
 
 void KAllocStub__reset_virtual_translation(void)
 {
@@ -32,6 +33,16 @@ void KAllocStub__set_alloc_fill(bool enabled, uint8_t value)
 {
     alloc_fill_enabled = enabled;
     alloc_fill_value = value;
+}
+
+void KAllocStub__reset_allocation_tracking(void)
+{
+    memcopy_overflow_occurred = false;
+}
+
+bool KAllocStub__memcopy_overflow_occurred(void)
+{
+    return memcopy_overflow_occurred;
 }
 
 KernelAddress Kernel__alloc(size_t size)

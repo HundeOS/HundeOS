@@ -27,28 +27,28 @@ FixedArrayBodyDefine(CPUSchedulers);
         .started = false, \
     }
 
-BString unreachable_code = BSTRING_NEW("Unreachable code reached\n");
-BString process_not_found = BSTRING_NEW("Process not found\n");
-BString reason_mismatch_format = BSTRING_NEW("Process was parked for reason %i, not %i\n");
-BString process_wasnt_parked = BSTRING_NEW("Process wasn't parked\n");
-static BString abort_format = BSTRING_NEW(
+BString unreachable_code = bstr("Unreachable code reached\n");
+BString process_not_found = bstr("Process not found\n");
+BString reason_mismatch_format = bstr("Process was parked for reason %i, not %i\n");
+BString process_wasnt_parked = bstr("Process wasn't parked\n");
+static BString abort_format = bstr(
     "process fault: %s exception=%s fsc=%i:%s access=%s pc=0x%x far=0x%x esr=0x%x ec=0x%x cpu=%i\n"
 );
-static const BString data_abort_reason = BSTRING_NEW("data abort");
-static const BString instruction_abort_reason = BSTRING_NEW("instruction abort");
-static const BString undefined_instruction_reason = BSTRING_NEW("undefined instruction");
-static const BString alignment_fault_reason = BSTRING_NEW("alignment fault");
-static const BString bad_syscall_reason = BSTRING_NEW("bad syscall");
-static const BString unknown_user_exception_reason = BSTRING_NEW("unknown user exception");
-static const BString unknown_fault_reason = BSTRING_NEW("unknown fault");
-static BString service_event_queue_empty = BSTRING_NEW("Service event queue is empty");
-static BString child_event_queue_empty = BSTRING_NEW("Child event queue is empty");
-static BString missing_interrupt_controller = BSTRING_NEW("Missing interrupt controller info");
-static BString no_cpus_available = BSTRING_NEW("No CPUs available");
-static BString process_user_root = BSTRING_NEW("root");
-static BString process_user_hund = BSTRING_NEW("hund");
-static BString process_user_user = BSTRING_NEW("user");
-static BString process_user_unknown = BSTRING_NEW("unknown");
+static const BString data_abort_reason = bstr("data abort");
+static const BString instruction_abort_reason = bstr("instruction abort");
+static const BString undefined_instruction_reason = bstr("undefined instruction");
+static const BString alignment_fault_reason = bstr("alignment fault");
+static const BString bad_syscall_reason = bstr("bad syscall");
+static const BString unknown_user_exception_reason = bstr("unknown user exception");
+static const BString unknown_fault_reason = bstr("unknown fault");
+static BString service_event_queue_empty = bstr("Service event queue is empty");
+static BString child_event_queue_empty = bstr("Child event queue is empty");
+static BString missing_interrupt_controller = bstr("Missing interrupt controller info");
+static BString no_cpus_available = bstr("No CPUs available");
+static BString process_user_root = bstr("root");
+static BString process_user_hund = bstr("hund");
+static BString process_user_user = bstr("user");
+static BString process_user_unknown = bstr("unknown");
 
 static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
 static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
@@ -319,8 +319,11 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, ProcessCon
     ProcessState ready_state = PROC_STATE_READY | PROC_STATE_INTERRUPTED;
 
     Optional(ProcessPtr) current = CPUScheduler__current_process(self);
-    critical_section(self->scheduler_lock, self->last_tick++;);
-    CPUScheduler__wake_expired_sleepers(self);
+    critical_section(self->scheduler_lock,
+    {
+        self->last_tick++;
+        CPUScheduler__wake_expired_sleepers(self);
+    });
 
     match_optional(ProcessPtr, current,
         some(proc)
@@ -460,12 +463,12 @@ static BString ProcessClass__snapshot_name(ProcessClass process_class)
     switch (process_class)
     {
         case PROCESS_CLASS_REALTIME_SERVICE:
-            return BSTRING_NEW("rt-service");
+            return bstr("rt-service");
         case PROCESS_CLASS_SERVICE:
-            return BSTRING_NEW("service");
+            return bstr("service");
         case PROCESS_CLASS_NORMAL:
         default:
-            return BSTRING_NEW("normal");
+            return bstr("normal");
     }
 }
 
@@ -489,11 +492,9 @@ static BString Process__snapshot_user_name(ProcessPtr process)
 
 static ProcessInfo ProcessInfo__from_process_locked(ProcessPtr process)
 {
-    ProcessInfo info = (ProcessInfo) {
-        .pid = process->pid,
-    };
+    ProcessInfo info = ProcessInfo__new(process->pid);
     BString state = bstring(ProcessState__to_string(process->state));
-    BString no_wait_reason = BSTRING_NEW("-");
+    BString no_wait_reason = bstr("-");
     BString class_name = ProcessClass__snapshot_name(process->process_class);
     BString user_name = Process__snapshot_user_name(process);
 

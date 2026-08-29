@@ -2,7 +2,7 @@
 
 FixedArrayBodyDefine(DataBuffer);
 
-static BString unreachable_code = BSTRING_NEW("unreachable code");
+static BString unreachable_code = bstr("unreachable code");
 
 #define CallIOReturn(RT, context, block) \
     Result(RT) res = block; \
@@ -12,19 +12,13 @@ static BString unreachable_code = BSTRING_NEW("unreachable code");
 // write sets the number of bytes (len) to be written
 ExternalBuffer DataBuffer__convert_to_external_buffer_for_write(DataBufferPtr self)
 {
-    return (ExternalBuffer) {
-        .data = self->data,
-        .len = self->len,
-    };
+    return ExternalBuffer__new(self->data, self->len);
 }
 
 // read sets the max size that can be read (buffer max size)
 ExternalBuffer DataBuffer__convert_to_external_buffer_for_read(DataBufferPtr self)
 {
-    return (ExternalBuffer) {
-        .data = self->data,
-        .len = DataBuffer__max_size,
-    };
+    return ExternalBuffer__new(self->data, DataBuffer__max_size);
 }
 
 DataPtr DataBuffer__data(DataBufferPtr self)

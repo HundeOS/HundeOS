@@ -1,15 +1,30 @@
 #include "irq_dispatcher.h"
 
-static BString missing_dispatcher = BSTRING_NEW("Missing IRQ dispatcher");
-static BString missing_kernel_consumer = BSTRING_NEW("Missing IRQ kernel consumer");
-static BString missing_service_process = BSTRING_NEW("Missing IRQ service process");
-static BString missing_scheduler = BSTRING_NEW("Missing scheduler for IRQ service consumer");
-static BString missing_interrupt_controller = BSTRING_NEW("Missing interrupt controller info");
-static BString irq_already_registered = BSTRING_NEW("IRQ already registered");
+static BString missing_dispatcher = bstr("Missing IRQ dispatcher");
+static BString missing_kernel_consumer = bstr("Missing IRQ kernel consumer");
+static BString missing_service_process = bstr("Missing IRQ service process");
+static BString missing_scheduler = bstr("Missing scheduler for IRQ service consumer");
+static BString missing_interrupt_controller = bstr("Missing interrupt controller info");
+static BString irq_already_registered = bstr("IRQ already registered");
 
 MapBodyDefine(IRQConsumerMap);
 FixedArrayDefine(IRQNumber, 256, IRQNumbers, SimpleEquals(uint64_t));
 FixedArrayBodyDefine(IRQNumbers);
+
+static IRQConsumer IRQConsumer__new(
+    IRQConsumerType type,
+    IRQKernelConsumer kernel_consumer,
+    void * kernel_data,
+    ProcessPtr service_process
+)
+{
+    return (IRQConsumer) {
+        .type = type,
+        .kernel_consumer = kernel_consumer,
+        .kernel_data = kernel_data,
+        .service_process = service_process,
+    };
+}
 
 Result(IRQRegistrationStatus) IRQDispatcher__register_kernel(
     IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, void * data
@@ -24,12 +39,12 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_kernel(
         return Error(IRQRegistrationStatus, missing_kernel_consumer, IRQ_INVALID_CONSUMER);
     }
 
-    IRQConsumer irq_consumer = (IRQConsumer) {
-        .type = IRQ_CONSUMER_KERNEL,
-        .kernel_consumer = consumer,
-        .kernel_data = data,
-        .service_process = NULL, // hundelint: ignore-no-null
-    };
+    IRQConsumer irq_consumer = IRQConsumer__new(
+        IRQ_CONSUMER_KERNEL,
+        consumer,
+        data,
+        NULL // hundelint: ignore-no-null
+    );
 
     critical_section(self->lock,
     {
@@ -66,12 +81,12 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(
 
     InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
 
-    IRQConsumer irq_consumer = (IRQConsumer) {
-        .type = IRQ_CONSUMER_SERVICE,
-        .kernel_consumer = NULL, // hundelint: ignore-no-null
-        .kernel_data = NULL, // hundelint: ignore-no-null
-        .service_process = process,
-    };
+    IRQConsumer irq_consumer = IRQConsumer__new(
+        IRQ_CONSUMER_SERVICE,
+        NULL, // hundelint: ignore-no-null
+        NULL, // hundelint: ignore-no-null
+        process
+    );
 
     critical_section(self->lock,
     {

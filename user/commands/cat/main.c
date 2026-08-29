@@ -5,7 +5,7 @@ int main(int argc, char ** argv)
 {
     if (argc < 2)
     {
-        print("cat: missing path\n");
+        IO__print(&bstr("cat: missing path\n"));
         return 1;
     }
 
@@ -15,13 +15,13 @@ int main(int argc, char ** argv)
     IOHandle handle = IO__open(&path, IO_OPEN_READ);
     if (handle < 0)
     {
-        printf("cat: open error %i\n", (int) handle);
+        IO__printf(&bstr("cat: open error %i\n"), (int) handle);
         return 1;
     }
 
     for (;;)
     {
-        BString buffer = EMPTY_BSTRING;
+        BString buffer = empty_bstr();
         ByteCount bytes = IO__read(handle, &buffer);
         if (bytes == IO_EOF)
         {
@@ -30,7 +30,7 @@ int main(int argc, char ** argv)
 
         if (bytes < 0)
         {
-            printf("cat: read error %i\n", (int) bytes);
+            IO__printf(&bstr("cat: read error %i\n"), (int) bytes);
             close(handle);
             return 1;
         }
@@ -40,7 +40,7 @@ int main(int argc, char ** argv)
             break;
         }
 
-        print(BString__cstr(&buffer));
+        IO__print(&buffer);
     }
 
     close(handle);

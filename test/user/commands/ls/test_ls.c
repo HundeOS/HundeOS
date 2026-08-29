@@ -50,15 +50,16 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 {
     TEST_ASSERT_EQUAL(IO_CALL, call);
     TEST_ASSERT_EQUAL(IO_LIST_DIR, arg1);
-    copy_text(requested_path, (const char *) arg2, sizeof(requested_path));
+    IOListDirRequestPtr request = (IOListDirRequestPtr) arg2;
+    copy_text(requested_path, BString__cstr(&request->path), sizeof(requested_path));
 
     if (fake_result < 0)
     {
         return fake_result;
     }
 
-    DirectoryEntryPtr entries = (DirectoryEntryPtr) arg3;
-    uint64_t max_entries = (uint64_t) arg4;
+    DirectoryEntryPtr entries = request->entries;
+    uint64_t max_entries = request->max_entries;
     uint64_t count = fake_count;
     if (count > max_entries)
     {
@@ -73,8 +74,9 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
     return (Anything) count;
 }
 
-void print(const char * str)
+void IO__print(ConstBStringPtr message)
 {
+    const char * str = BString__cstr(message);
     uint64_t i = 0;
     while (str[i] != '\0' && output_position + 1 < sizeof(output))
     {
@@ -83,24 +85,27 @@ void print(const char * str)
     output[output_position] = '\0';
 }
 
-int printf(const char * format, ...)
+int IO__printf(ConstBStringPtr format, ...)
 {
     va_list args;
     va_start(args, format);
-    int written = vsnprintf(output + output_position, sizeof(output) - output_position, format, args);
+    BString formatted = BString__vsprintf(format, args);
     va_end(args);
+    StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
         output_position += (uint64_t) written;
     }
-    return written;
+    return (int) written;
 }
 
 void test_ls_prints_entries_for_directory(void)
 {
     fake_count = 2;
-    copy_text(fake_entries[0].name, "one", IO_DIRENT_NAME_MAX);
-    copy_text(fake_entries[1].name, "two", IO_DIRENT_NAME_MAX);
+    BString one = bstr("one");
+    BString two = bstr("two");
+    fake_entries[0] = DirectoryEntry__new(0, 0, 0, 0, &one);
+    fake_entries[1] = DirectoryEntry__new(0, 0, 0, 0, &two);
 
     char * argv[] = { "ls", "/mnt" };
 
@@ -122,10 +127,14 @@ void test_ls_prints_named_io_error(void)
 void test_ls_long_format_prints_mode_owner_group_and_name(void)
 {
     fake_count = 1;
-    fake_entries[0].user_id = PROCESS_USER_HUND;
-    fake_entries[0].group_id = PROCESS_GROUP_HUND;
-    fake_entries[0].mode = IO_MODE_TYPE_DIR | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC;
-    copy_text(fake_entries[0].name, "drivers", IO_DIRENT_NAME_MAX);
+    BString drivers = bstr("drivers");
+    fake_entries[0] = DirectoryEntry__new(
+        0,
+        PROCESS_USER_HUND,
+        PROCESS_GROUP_HUND,
+        IO_MODE_TYPE_DIR | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC,
+        &drivers
+    );
 
     char * argv[] = { "ls", "-l", "/sbin" };
 
@@ -137,8 +146,10 @@ void test_ls_long_format_prints_mode_owner_group_and_name(void)
 void test_ls_a_hides_dot_entries_unless_requested(void)
 {
     fake_count = 2;
-    copy_text(fake_entries[0].name, ".hidden", IO_DIRENT_NAME_MAX);
-    copy_text(fake_entries[1].name, "shown", IO_DIRENT_NAME_MAX);
+    BString hidden = bstr(".hidden");
+    BString shown = bstr("shown");
+    fake_entries[0] = DirectoryEntry__new(0, 0, 0, 0, &hidden);
+    fake_entries[1] = DirectoryEntry__new(0, 0, 0, 0, &shown);
 
     char * argv[] = { "ls", "/" };
     TEST_ASSERT_EQUAL_INT(0, ls_main_under_test(2, argv));

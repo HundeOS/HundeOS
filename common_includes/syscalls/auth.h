@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "types/bstring.h"
+
 typedef uint64_t AuthTicketID;
 typedef int64_t AuthResult;
 
@@ -20,10 +22,18 @@ typedef enum AuthResults
 
 typedef struct AuthRequest
 {
-    const char * username;
-    const char * password;
+    BString username;
+    BString password;
 } AuthRequest;
 
 typedef AuthRequest * AuthRequestPtr;
+
+static inline AuthRequest AuthRequest__new(ConstBStringPtr username, ConstBStringPtr password)
+{
+    return (AuthRequest) {
+        .username = *username,
+        .password = *password,
+    };
+}
 
 #endif

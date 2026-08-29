@@ -4,9 +4,9 @@
 #include "../scheduler/scheduler.h"
 #include "syscalls/process.h"
 
-static BString process_not_found = BSTRING_NEW("Process not found");
-static BString unsupported_signal = BSTRING_NEW("Unsupported signal");
-static BString invalid_signal_target = BSTRING_NEW("Invalid signal target");
+static BString process_not_found = bstr("Process not found");
+static BString unsupported_signal = bstr("Unsupported signal");
+static BString invalid_signal_target = bstr("Invalid signal target");
 
 Result(SystemCallResult) Signal__handler(
     KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,

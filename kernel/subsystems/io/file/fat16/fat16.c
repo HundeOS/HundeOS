@@ -6,17 +6,17 @@
 FixedArrayBodyDefine(Fat16DirectoryEntries);
 MapBodyDefine(Fat16FileHandleMap);
 
-static BString invalid_argument = BSTRING_NEW("Invalid FAT16 argument");
-static BString io_error = BSTRING_NEW("FAT16 block IO failed");
-static BString invalid_volume = BSTRING_NEW("Invalid FAT16 volume");
-static BString no_space = BSTRING_NEW("FAT16 volume has no free space");
-static BString not_found = BSTRING_NEW("FAT16 file not found");
-static BString already_exists = BSTRING_NEW("FAT16 file already exists");
-static BString unsupported_name = BSTRING_NEW("FAT16 only supports 8.3 root names");
-static BString file_too_large = BSTRING_NEW("FAT16 file is too large for this operation");
-static BString invalid_path = BSTRING_NEW("Invalid FAT16 path");
-static BString invalid_handle = BSTRING_NEW("Invalid FAT16 handle");
-static BString not_implemented = BSTRING_NEW("FAT16 operation not implemented");
+static BString invalid_argument = bstr("Invalid FAT16 argument");
+static BString io_error = bstr("FAT16 block IO failed");
+static BString invalid_volume = bstr("Invalid FAT16 volume");
+static BString no_space = bstr("FAT16 volume has no free space");
+static BString not_found = bstr("FAT16 file not found");
+static BString already_exists = bstr("FAT16 file already exists");
+static BString unsupported_name = bstr("FAT16 only supports 8.3 root names");
+static BString file_too_large = bstr("FAT16 file is too large for this operation");
+static BString invalid_path = bstr("Invalid FAT16 path");
+static BString invalid_handle = bstr("Invalid FAT16 handle");
+static BString not_implemented = bstr("FAT16 operation not implemented");
 
 #define FAT16_DEFAULT_MEMORY_SECTORS 256
 
@@ -179,7 +179,7 @@ static Result(Fat16Code) Fat16__encode_83_name(BStringPtr name, Data target[11])
 
 static BString Fat16__decode_83_name(DataPtr source)
 {
-    BString result = EMPTY_BSTRING;
+    BString result = empty_bstr();
 
     for (size_t i = 0; i < 8 && source[i] != ' '; i++)
     {

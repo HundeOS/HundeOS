@@ -149,7 +149,7 @@ Result(InitCode) uart_enable_irqs(UartInfoPtr info)
     return Success(InitCode, ARCH_INIT_OK);
 }
 
-ConsoleState console_state = (ConsoleState) {
+ConsoleState console_state = (ConsoleState) { // hundelint: ignore-constructor-required
     .state = NEW_IO_STATE,
     .write_buffer = EmptyRingBuffer(IOBuffer),
     .read_buffer = EmptyRingBuffer(IOBuffer),

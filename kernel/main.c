@@ -17,9 +17,9 @@
 #include "../arch/aarch64/io/uart.h"
 #include "system_info.h"
 
-BString panic_message = BSTRING_NEW("Program failed: %s\n");
-static BString console_path = BSTRING_NEW(":console:");
-static BString tty_path = BSTRING_NEW(":tty:");
+BString panic_message = bstr("Program failed: %B\n");
+static BString console_path = bstr(":console:");
+static BString tty_path = bstr(":tty:");
 
 static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, BString path, Flags flags)
 {
@@ -110,7 +110,7 @@ void schedule_as(KernelPtr kernel, BString name, ProcessClass process_class)
                 error(code, message)
                 {
                     __d_printf(PANIC, "Program failed: %s\n", cstr(name));
-                    BString panic_error = BString__sprintf(&panic_message, cstr(name));
+                    BString panic_error = BString__sprintf(&panic_message, &name);
                     Kernel__panic(cstr(panic_error), NULL); // hundelint: ignore-no-null
                 }
             );
@@ -118,7 +118,7 @@ void schedule_as(KernelPtr kernel, BString name, ProcessClass process_class)
         none()
         {
             __d_printf(PANIC, "Program failed: %s\n", cstr(name));
-            BString panic_error = BString__sprintf(&panic_message, cstr(name));
+            BString panic_error = BString__sprintf(&panic_message, &name);
             Kernel__panic(cstr(panic_error), NULL); // hundelint: ignore-no-null
         }
     );
@@ -150,7 +150,7 @@ void Kernel_main(CPUID cpu_id) {
         return;
     }
 
-    SystemInfo system_info = (SystemInfo) {};
+    SystemInfo system_info = SystemInfo__new();
     match_optional(SystemInfo, kernel->system_info,
         some(value) { system_info = value;; },
         none()

@@ -12,9 +12,9 @@ ConsoleInputStream;
 
 typedef ConsoleInputStream * ConsoleInputStreamPtr;
 
-static const BString SHELL_PROMPT = BSTRING_NEW("\n> ");
-static const BString SHELL_REDRAW_PREFIX = BSTRING_NEW("\r\033[2K> ");
-static const BString EMPTY_LINE = BSTRING_NEW("");
+static const BString SHELL_PROMPT = bstr("\n> ");
+static const BString SHELL_REDRAW_PREFIX = bstr("\r\033[2K> ");
+static const BString EMPTY_LINE = bstr("");
 static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo);
 static void ConsoleInputStream__bind_history(ConsoleInputStreamPtr self, ShellHistoryPtr history);
 static void ConsoleInputStream__redraw_line(ConstBStringPtr line, StringPos cursor, bool echo);
@@ -42,8 +42,8 @@ static void ConsoleInputStream__bind_history(ConsoleInputStreamPtr self, ShellHi
 static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
 {
     ConsoleInputStreamPtr input = (ConsoleInputStreamPtr) self;
-    BString line = EMPTY_BSTRING;
-    BString draft = EMPTY_BSTRING;
+    BString line = empty_bstr();
+    BString draft = empty_bstr();
     ShellHistory__NodePtr history_cursor = NULL; // hundelint: ignore-no-null
     bool draft_saved = false;
     StringPos cursor = 0;
@@ -81,7 +81,7 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
 
         if (ch == '\x1b')
         {
-            BString escape_sequence = EMPTY_BSTRING;
+            BString escape_sequence = empty_bstr();
             match_optional(BString, ConsoleInputStream__read_escape_sequence(),
                 some(sequence) { escape_sequence = sequence; },
                 none() { continue;; }
@@ -191,9 +191,9 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
             {
                 if (echo)
                 {
-                    BString output = EMPTY_BSTRING;
+                    BString output = empty_bstr();
                     BString__push_char(&output, ch);
-                    print(BString__cstr(&output));
+                    IO__print(&output);
                 }
             }
             else
@@ -217,7 +217,7 @@ static Optional(char) ConsoleInputStream__read_char(void)
 
 static Optional(BString) ConsoleInputStream__read_escape_sequence(void)
 {
-    BString sequence = EMPTY_BSTRING;
+    BString sequence = empty_bstr();
     match_optional(char, ConsoleInputStream__read_char(),
         some(first) { BString__push_char(&sequence, first);; },
         none() { return None(BString);; }
@@ -238,13 +238,13 @@ static void ConsoleInputStream__redraw_line(ConstBStringPtr line, StringPos curs
         return;
     }
 
-    print(BString__cstr(&SHELL_REDRAW_PREFIX));
-    print(BString__cstr(line));
+    IO__print(&SHELL_REDRAW_PREFIX);
+    IO__print(line);
 
     StringPos move_left = BString__length(line) - cursor;
     if (move_left > 0)
     {
-        printf("\033[%iD", (int) move_left);
+        IO__printf(&bstr("\033[%iD"), (int) move_left);
     }
 }
 
@@ -265,7 +265,7 @@ static void Shell__store_history(ShellPtr self, ConstBStringPtr line)
         success_do_nothing(),
         error(code, message)
         {
-            printf("shell: failed to store history: %s (%i)\n", BString__cstr(&message), (int) code);
+            IO__printf(&bstr("shell: failed to store history: %B (%i)\n"), &message, (int) code);
             return;
         }
     );
@@ -276,13 +276,13 @@ static void Shell__handle_result(ConstShellPtr self, ShellResult result)
     switch (result)
     {
         case EXIT:
-            print("Shell exiting\n");
+            IO__print(&bstr("Shell exiting\n"));
             break;
         case COMMAND_NOT_FOUND:
-            print("Command not found\n");
+            IO__print(&bstr("Command not found\n"));
             break;
         case COMMAND_FAILED:
-            print("Command failed\n");
+            IO__print(&bstr("Command failed\n"));
             break;
         case COMMAND_EXECUTED:
         case COMMAND_SUCCESS:
@@ -307,9 +307,9 @@ Shell Shell__new(InputStreamPtr input)
 
 ShellResult Shell__run_once(ShellPtr self)
 {
-    print(BString__cstr(&SHELL_PROMPT));
+    IO__print(&SHELL_PROMPT);
     BString line = InputStream__read_line(self->input, true);
-    print("\n");
+    IO__print(&bstr("\n"));
 
     ShellResult result = Interpreter__interpret(&self->interpreter, &line);
     Shell__store_history(self, &line);

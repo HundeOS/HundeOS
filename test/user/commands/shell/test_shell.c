@@ -44,15 +44,15 @@ void setUp(void)
     spawn_call_count = 0;
     next_spawn_result = SPAWN_SUCCESS;
     last_spawn_call = (SpawnCall) {
-        .path = EMPTY_BSTRING,
-        .arg0 = EMPTY_BSTRING,
-        .arg1 = EMPTY_BSTRING,
-        .arg2 = EMPTY_BSTRING,
+        .path = empty_bstr(),
+        .arg0 = empty_bstr(),
+        .arg1 = empty_bstr(),
+        .arg2 = empty_bstr(),
     };
-    printed_output = EMPTY_BSTRING;
+    printed_output = empty_bstr();
     exit_called = false;
     exit_code = -1;
-    console_input = EMPTY_BSTRING;
+    console_input = empty_bstr();
     console_input_pos = 0;
 }
 
@@ -64,7 +64,7 @@ static BString TestString__from_nullable(const char * value)
 {
     if (value == NULL)
     {
-        return EMPTY_BSTRING;
+        return empty_bstr();
     }
 
     return BString__new(value);
@@ -87,30 +87,36 @@ static void set_console_input(const char * value)
     console_input_pos = 0;
 }
 
-SpawnResult spawn(SpawnMode mode, const char* path, const char* arg0, const char* arg1, const char* arg2)
+SpawnResult spawn(
+    SpawnMode mode,
+    ConstBStringPtr path,
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
+)
 {
     spawn_call_count++;
     last_spawn_call.mode = mode;
-    last_spawn_call.path = TestString__from_nullable(path);
-    last_spawn_call.arg0 = TestString__from_nullable(arg0);
-    last_spawn_call.arg1 = TestString__from_nullable(arg1);
-    last_spawn_call.arg2 = TestString__from_nullable(arg2);
+    last_spawn_call.path = *path;
+    match_optional(BString, arg0, some(value) { last_spawn_call.arg0 = value; }, none_do_nothing());
+    match_optional(BString, arg1, some(value) { last_spawn_call.arg1 = value; }, none_do_nothing());
+    match_optional(BString, arg2, some(value) { last_spawn_call.arg2 = value; }, none_do_nothing());
     return next_spawn_result;
 }
 
-int printf(const char * format, ...)
+int IO__printf(ConstBStringPtr format, ...)
 {
-    char buffer[256];
     va_list args;
     va_start(args, format);
-    int written = vsnprintf(buffer, sizeof(buffer), format, args);
+    BString text = BString__vsprintf(format, args);
     va_end(args);
-    print(buffer);
-    return written;
+    IO__print(&text);
+    return (int) BString__length(&text);
 }
 
-void print(const char * str)
+void IO__print(ConstBStringPtr message)
 {
+    const char * str = BString__cstr(message);
     BString text = BString__new(str);
     BString next = BString__append(&printed_output, &text);
     printed_output = next;
@@ -130,7 +136,7 @@ ByteCount console_read(char * buffer, uint64_t size)
 
 BString Console__read_line(bool echo)
 {
-    return EMPTY_BSTRING;
+    return empty_bstr();
 }
 
 void fake_exit(int code)

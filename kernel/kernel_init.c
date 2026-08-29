@@ -14,14 +14,14 @@
 #include "scheduler/scheduler.h"
 
 
-static BString failed_to_find_idle_process = BSTRING_NEW("failed to find idle process");
-static BString heap_init_progress = BSTRING_NEW("heap initialised");
-static BString syscall_init_progress = BSTRING_NEW("syscall handlers initialised");
-static BString io_init_progress = BSTRING_NEW("io subsystem initialised");
-static BString scheduler_init_progress = BSTRING_NEW("scheduler initialised");
-static BString arch_init_progress = BSTRING_NEW("architecture specific components initialised");
-static BString failed_to_init_msg = BSTRING_NEW("failed to initialise kernel");
-static BString missing_system_info = BSTRING_NEW("missing system info");
+static BString failed_to_find_idle_process = bstr("failed to find idle process");
+static BString heap_init_progress = bstr("heap initialised");
+static BString syscall_init_progress = bstr("syscall handlers initialised");
+static BString io_init_progress = bstr("io subsystem initialised");
+static BString scheduler_init_progress = bstr("scheduler initialised");
+static BString arch_init_progress = bstr("architecture specific components initialised");
+static BString failed_to_init_msg = bstr("failed to initialise kernel");
+static BString missing_system_info = bstr("missing system info");
 
 static MessageBroker message_broker = NEW_BROKER;
 static Scheduler scheduler = NEW_SCHEDULER(&message_broker);

@@ -15,9 +15,9 @@ typedef size_t ItemCount;
 ResultDef(Pos);
 ResultDef(ItemCount);
 
-static BString OVERFLOW_ERROR = BSTRING_NEW("Ring buffer overflow");
-static BString OVERFLOW_AVOIDED_ERROR = BSTRING_NEW("Ring buffer overflow would occur");
-static BString UNDERFLOW_ERROR = BSTRING_NEW("Ring buffer underflow");
+static BString OVERFLOW_ERROR = bstr("Ring buffer overflow");
+static BString OVERFLOW_AVOIDED_ERROR = bstr("Ring buffer overflow would occur");
+static BString UNDERFLOW_ERROR = bstr("Ring buffer underflow");
 
 #ifndef RING_BUFFER_DEBUG_PRINTF
 #define RING_BUFFER_DEBUG_PRINTF(level, str, ...) __d_printf(level, str, ##__VA_ARGS__)

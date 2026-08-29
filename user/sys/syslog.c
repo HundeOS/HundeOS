@@ -6,14 +6,16 @@
 #include "syscall.h"
 #include "syscalls/calls.h"
 
-SyslogResult kernel_syslog(const char * message)
+SyslogResult kernel_syslog(ConstBStringPtr message)
 {
-    return (SyslogResult) syscall(SYSCALL_SYSLOG, (Anything) message, 0, 0, 0, 0);
+    SyslogRequest request = SyslogRequest__new(message, None(BString));
+    return (SyslogResult) syscall(SYSCALL_SYSLOG, (Anything) &request, 0, 0, 0, 0);
 }
 
-SyslogResult kernel_syslog_tag(const char * tag, const char * message)
+SyslogResult kernel_syslog_tag(ConstBStringPtr tag, ConstBStringPtr message)
 {
-    return (SyslogResult) syscall(SYSCALL_SYSLOG, (Anything) message, (Anything) tag, 0, 0, 0);
+    SyslogRequest request = SyslogRequest__new(message, Some(BString, *tag));
+    return (SyslogResult) syscall(SYSCALL_SYSLOG, (Anything) &request, 0, 0, 0, 0);
 }
 
 SyslogResult kernel_syslogf(const char * format, ...)
@@ -23,7 +25,7 @@ SyslogResult kernel_syslogf(const char * format, ...)
     va_start(args, format);
     BString message = BString__vsprintf(&format_string, args);
     va_end(args);
-    return kernel_syslog(BString__cstr(&message));
+    return kernel_syslog(&message);
 }
 
 SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
@@ -33,5 +35,6 @@ SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
     va_start(args, format);
     BString message = BString__vsprintf(&format_string, args);
     va_end(args);
-    return kernel_syslog_tag(tag, BString__cstr(&message));
+    BString tag_string = BString__new(tag);
+    return kernel_syslog_tag(&tag_string, &message);
 }

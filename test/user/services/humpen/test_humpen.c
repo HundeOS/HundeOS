@@ -43,9 +43,9 @@ void tearDown(void)
 {
 }
 
-IOHandle open(const char * path, Flags flags)
+IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    TEST_ASSERT_EQUAL_STRING(HUMPEN_FSTAB_PATH, path);
+    TEST_ASSERT_EQUAL_STRING(HUMPEN_FSTAB_PATH, BString__cstr(path));
     TEST_ASSERT_EQUAL(IO_OPEN_READ, flags);
     return 3;
 }
@@ -76,20 +76,53 @@ IOStatus close(IOHandle handle)
     return IO_OK;
 }
 
-SpawnResult spawn(SpawnMode mode, const char * path, const char * arg0, const char * arg1, const char * arg2)
+SpawnResult spawn(
+    SpawnMode mode,
+    ConstBStringPtr path,
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
+)
 {
     TEST_ASSERT_EQUAL(P_NOWAIT, mode);
     TEST_ASSERT_LESS_THAN_UINT64(4, spawn_count);
-    snprintf(spawned_paths[spawn_count], sizeof(spawned_paths[spawn_count]), "%s", path);
-    snprintf(spawned_arg0[spawn_count], sizeof(spawned_arg0[spawn_count]), "%s", arg0);
-    snprintf(spawned_arg1[spawn_count], sizeof(spawned_arg1[spawn_count]), "%s", arg1);
-    snprintf(spawned_arg2[spawn_count], sizeof(spawned_arg2[spawn_count]), "%s", arg2);
+    snprintf(spawned_paths[spawn_count], sizeof(spawned_paths[spawn_count]), "%s", BString__cstr(path));
+    match_optional(BString, arg0,
+        some(value) { snprintf(spawned_arg0[spawn_count], sizeof(spawned_arg0[spawn_count]), "%s", BString__cstr(&value)); },
+        none_do_nothing()
+    );
+    match_optional(BString, arg1,
+        some(value) { snprintf(spawned_arg1[spawn_count], sizeof(spawned_arg1[spawn_count]), "%s", BString__cstr(&value)); },
+        none_do_nothing()
+    );
+    match_optional(BString, arg2,
+        some(value) { snprintf(spawned_arg2[spawn_count], sizeof(spawned_arg2[spawn_count]), "%s", BString__cstr(&value)); },
+        none_do_nothing()
+    );
     spawn_count++;
     return next_spawn_result;
 }
 
-void print(const char * str)
+Result(SpawnResult) OS__spawn(
+    SpawnMode mode,
+    ConstBStringPtr path,
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
+)
 {
+    SpawnResult result = spawn(mode, path, arg0, arg1, arg2);
+    if (result >= 0)
+    {
+        return Success(SpawnResult, result);
+    }
+
+    return Error(SpawnResult, bstr("spawn failed"), result);
+}
+
+void IO__print(ConstBStringPtr message)
+{
+    const char * str = BString__cstr(message);
     while (*str != '\0' && output_position + 1 < sizeof(output))
     {
         output[output_position++] = *str++;
@@ -97,20 +130,21 @@ void print(const char * str)
     output[output_position] = '\0';
 }
 
-int printf(const char * format, ...)
+int IO__printf(ConstBStringPtr format, ...)
 {
     va_list args;
     va_start(args, format);
-    int written = vsnprintf(output + output_position, sizeof(output) - output_position, format, args);
+    BString formatted = BString__vsprintf(format, args);
     va_end(args);
+    StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
         output_position += (uint64_t) written;
     }
-    return written;
+    return (int) written;
 }
 
-void test_humpen_starts_watchdogs_for_device_entries_from_fstab(void)
+void test_humpen_starts_mount_handlers_for_device_entries_from_fstab(void)
 {
     next_fstab =
         "# device <path> <filesystem> <mountpoint>\n"
@@ -138,7 +172,7 @@ void test_humpen_returns_failure_when_watchdog_spawn_fails(void)
 
     TEST_ASSERT_EQUAL_INT(1, humpen_main_under_test());
     TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
-    TEST_ASSERT_NOT_NULL(strstr(output, "failed to start wachhund"));
+    TEST_ASSERT_NOT_NULL(strstr(output, "spawn failed"));
 }
 
 void test_humpen_handles_comments_blank_lines_and_missing_final_newline(void)
@@ -151,6 +185,7 @@ void test_humpen_handles_comments_blank_lines_and_missing_final_newline(void)
     TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
+    TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, spawned_paths[0]);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", spawned_arg0[0]);
     TEST_ASSERT_EQUAL_STRING("ext2", spawned_arg1[0]);
     TEST_ASSERT_EQUAL_STRING("/", spawned_arg2[0]);
@@ -163,4 +198,49 @@ void test_humpen_rejects_trailing_tokens_before_mounting(void)
     TEST_ASSERT_EQUAL_INT(1, humpen_main_under_test());
 
     TEST_ASSERT_EQUAL_UINT64(0, spawn_count);
+}
+
+void test_humpen_parse_mount_command_returns_error_for_missing_device_path(void)
+{
+    BString line = bstr("device");
+
+    match_result(HumpenMountCommand, Humpen__parse_mount_command(line),
+        success(command)
+        {
+            TEST_FAIL();
+        },
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL_INT(HUMPEN_PARSE_ERROR, code);
+            TEST_ASSERT_TRUE(BString__equals(&message, &humpen_invalid_device_path));
+        }
+    );
+}
+
+void test_humpen_parse_mount_command_builds_watchdog_spawn_command_for_ext2(void)
+{
+    BString line = bstr("device /dev/virtio1 ext2 /");
+
+    match_result(HumpenMountCommand, Humpen__parse_mount_command(line),
+        success(command)
+        {
+            TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, BString__cstr(command.driver_path));
+            TEST_ASSERT_EQUAL_STRING("/dev/virtio1", BString__cstr(&command.device_path));
+            TEST_ASSERT_EQUAL_STRING("ext2", BString__cstr(&command.filesystem_type));
+            TEST_ASSERT_EQUAL_STRING("/", BString__cstr(&command.mountpoint));
+            match_optional(BString, command.arg0,
+                some(arg) { TEST_ASSERT_EQUAL_STRING("/dev/virtio1", BString__cstr(&arg)); },
+                none_test_fail()
+            );
+            match_optional(BString, command.arg1,
+                some(arg) { TEST_ASSERT_EQUAL_STRING("ext2", BString__cstr(&arg)); },
+                none_test_fail()
+            );
+            match_optional(BString, command.arg2,
+                some(arg) { TEST_ASSERT_EQUAL_STRING("/", BString__cstr(&arg)); },
+                none_test_fail()
+            );
+        },
+        error_test_fail()
+    );
 }

@@ -35,8 +35,9 @@ ProcessSignalResult kill_process(uint64_t pid, ProcessSignal signal)
     return fake_result;
 }
 
-void print(const char * str)
+void IO__print(ConstBStringPtr message)
 {
+    const char * str = BString__cstr(message);
     while (*str != '\0' && output_position + 1 < sizeof(output))
     {
         output[output_position++] = *str++;
@@ -44,17 +45,18 @@ void print(const char * str)
     output[output_position] = '\0';
 }
 
-int printf(const char * format, ...)
+int IO__printf(ConstBStringPtr format, ...)
 {
     va_list args;
     va_start(args, format);
-    int written = vsnprintf(output + output_position, sizeof(output) - output_position, format, args);
+    BString formatted = BString__vsprintf(format, args);
     va_end(args);
+    StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
         output_position += (uint64_t) written;
     }
-    return written;
+    return (int) written;
 }
 
 void test_kill_defaults_to_terminate_signal(void)

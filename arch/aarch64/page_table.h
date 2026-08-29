@@ -92,6 +92,22 @@ typedef struct {
     int pxn;           // 1 => EL1 cannot execute this page
 } MappingPermissions;
 
+static inline MappingPermissions MappingPermissions__new(
+    MairAttribute memory_type,
+    ShareAttribute shareability,
+    AccessAttribute access,
+    int uxn,
+    int pxn)
+{
+    return (MappingPermissions) {
+        .memory_type = memory_type,
+        .shareability = shareability,
+        .access = access,
+        .uxn = uxn,
+        .pxn = pxn,
+    };
+}
+
 
 int PageTable__map_2M_block(PageTable * self,
                             KernelPtr kernel,

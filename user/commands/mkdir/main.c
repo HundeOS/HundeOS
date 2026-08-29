@@ -5,7 +5,7 @@ int main(int argc, char ** argv)
 {
     if (argc < 2)
     {
-        print("mkdir: missing path\n");
+        IO__print(&bstr("mkdir: missing path\n"));
         return 1;
     }
 
@@ -15,7 +15,7 @@ int main(int argc, char ** argv)
     IOStatus status = IO__make_dir(&path);
     if (status < 0)
     {
-        printf("mkdir: error %i\n", (int) status);
+        IO__printf(&bstr("mkdir: error %i\n"), (int) status);
         return 1;
     }
 

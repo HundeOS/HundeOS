@@ -95,10 +95,10 @@ static Result(ByteCount) Console__write(IOStatePtr state, IOInternalHandle handl
 static Result(IOServerBuffer) Console__server_write_buffer(IOStatePtr state)
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
-    IOServerBuffer buffer = (IOServerBuffer) {
-        .data = NULL, // hundelint: ignore-no-null
-        .capacity = 0,
-    };
+    IOServerBuffer buffer = IOServerBuffer__new(
+        NULL, // hundelint: ignore-no-null
+        0
+    );
 
     critical_section(self->lock,
     {
@@ -162,16 +162,19 @@ IOPtr Console__heap_new()
 {
     IOPtr result = v_ptr(Kernel__alloc(sizeof(IO)), IO);
 
-    *result = (IO) {
-        .read = Console__read,
-        .write = Console__write,
-        .open = Console__open,
-        .close = Console__close,
-        .park = Console__park,
-        .unpark = Console__unpark,
-        .server_write_buffer = Console__server_write_buffer,
-        .data_consumed = Console__data_consumed,
-    };
+    *result = IO__new(
+        Console__open,
+        Console__read,
+        Console__write,
+        Console__close,
+        Console__park,
+        Console__unpark,
+        NULL, // hundelint: ignore-no-null
+        Console__server_write_buffer,
+        NULL, // hundelint: ignore-no-null
+        Console__data_consumed,
+        NULL // hundelint: ignore-no-null
+    );
 
     return result;
 }

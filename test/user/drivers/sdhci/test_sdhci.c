@@ -16,7 +16,7 @@ struct ServiceMappedMemory
 {
     void * driver_address;
     uint64_t device_address;
-    uint64_t size;
+    size_t size;
 };
 
 typedef struct FakeSdhciHost
@@ -71,6 +71,7 @@ static bool fake_sdhci_load_pci_config(PciConfigPtr config);
 #define FAKE_PCI_ECAM_SIZE 0x100000ULL
 #define FAKE_PCI_SD_HOST_PHYSICAL_BASE 0x4020000000ULL
 #define FAKE_PCI_SD_HOST_IRQ 42ULL
+#define TEST_SERVICE_DEVICE_PATH_MAX 256ULL
 
 static FakeSdhciHost fake_host;
 static ServiceMappedMemory fake_mapping;
@@ -88,7 +89,7 @@ static bool fake_block_request_fetched;
 static bool fake_block_completed;
 static bool fake_logged;
 static const char * fake_log_tag;
-static char fake_registered_path[SERVICE_DEVICE_PATH_MAX];
+static char fake_registered_path[TEST_SERVICE_DEVICE_PATH_MAX];
 static BString fake_ready_name;
 static uint64_t fake_registered_block_size;
 static uint64_t fake_registered_block_count;
@@ -131,16 +132,6 @@ static void fake_add_pci_sdhci_function(uint64_t device)
     );
     fake_write_pci32(offset + SDHCI_PCI_CONFIG_BAR0 + 4, (uint32_t) (FAKE_PCI_SD_HOST_PHYSICAL_BASE >> 32));
     fake_write_pci8(offset + SDHCI_PCI_CONFIG_INTERRUPT_LINE, FAKE_PCI_SD_HOST_IRQ);
-}
-
-static void fake_copy_path(char target[SERVICE_DEVICE_PATH_MAX], const char * source)
-{
-    uint64_t index = 0;
-    for (; index < SERVICE_DEVICE_PATH_MAX - 1 && source[index] != '\0'; index++)
-    {
-        target[index] = source[index];
-    }
-    target[index] = '\0';
 }
 
 static void fake_set_response_for_command(uint32_t command_index)
@@ -415,11 +406,11 @@ void setUp(void)
         .block = 3,
         .block_count = 1,
         .block_size = SDHCI_BLOCK_SIZE,
-        .buffer = fake_request_buffer,
+        .buffer = (Address) fake_request_buffer,
         .buffer_size = sizeof(fake_request_buffer),
+        .device_path = bstr(SDHCI_DEVICE_PATH),
     };
-    fake_copy_path(fake_block_request.device_path, SDHCI_DEVICE_PATH);
-    fake_ready_name = EMPTY_BSTRING;
+    fake_ready_name = empty_bstr();
 }
 
 void tearDown(void)
@@ -445,7 +436,7 @@ ServiceCode service_become_service()
     return SERVICE_OK;
 }
 
-ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
+ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)
 {
     if (physical_address == FAKE_PCI_ECAM_PHYSICAL_BASE)
     {
@@ -480,14 +471,14 @@ uint64_t device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
     return memory->device_address + offset;
 }
 
-uint64_t mapped_size(ServiceMappedMemoryPtr memory)
+size_t mapped_size(ServiceMappedMemoryPtr memory)
 {
     return memory->size;
 }
 
-ServiceCode service_register_block_device(const char * path, uint64_t block_size, uint64_t block_count)
+ServiceCode service_register_block_device(ConstBStringPtr path, uint64_t block_size, uint64_t block_count)
 {
-    fake_copy_path(fake_registered_path, path);
+    BString__copy_to(path, fake_registered_path, TEST_SERVICE_DEVICE_PATH_MAX);
     fake_registered_block_size = block_size;
     fake_registered_block_count = block_count;
     fake_block_registered = true;
@@ -525,7 +516,7 @@ ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint
     return SERVICE_OK;
 }
 
-ServiceCode service_device_address(void * driver_address, uint64_t * device_address)
+ServiceCode service_device_address(void * driver_address, Address * device_address)
 {
     *device_address = (uint64_t) driver_address;
     return SERVICE_OK;

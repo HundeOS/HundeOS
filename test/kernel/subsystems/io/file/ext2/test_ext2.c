@@ -486,7 +486,7 @@ void test_ext2_list_dir_uses_async_mount_then_root_read_when_unmounted(void)
 void test_ext2_userspace_open_starts_async_inode_lookup(void)
 {
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_EXT2_SECTORS,
@@ -537,7 +537,7 @@ void test_root_filesystem_can_mount_ext2_at_root_and_list_mount_overlays(void)
 void test_ext2_userspace_list_dir_starts_async_when_mounted(void)
 {
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_EXT2_SECTORS,
@@ -690,7 +690,7 @@ void test_ext2_remove_recursive_deletes_directory_tree(void)
 void test_ext2_userspace_remove_starts_async_inode_lookup(void)
 {
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_EXT2_SECTORS,
@@ -711,7 +711,7 @@ void test_ext2_userspace_remove_starts_async_inode_lookup(void)
 void test_ext2_userspace_recursive_remove_starts_async_inode_lookup(void)
 {
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_EXT2_SECTORS,
@@ -732,7 +732,7 @@ void test_ext2_userspace_recursive_remove_starts_async_inode_lookup(void)
 void test_ext2_userspace_write_starts_async_for_new_file(void)
 {
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_EXT2_SECTORS,
@@ -763,7 +763,7 @@ void test_ext2_userspace_write_starts_async_for_new_file(void)
 void test_ext2_userspace_write_starts_async_for_existing_file(void)
 {
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_EXT2_SECTORS,
@@ -794,7 +794,7 @@ void test_ext2_userspace_write_starts_async_for_existing_file(void)
 void test_ext2_userspace_mkdir_starts_async(void)
 {
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_EXT2_SECTORS,
@@ -860,7 +860,7 @@ void test_ext2_link_remove_last_link_deletes_file(void)
 void test_ext2_userspace_link_starts_async(void)
 {
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 1,
         .block_count = TEST_EXT2_SECTORS,
@@ -881,7 +881,7 @@ void test_ext2_userspace_link_starts_async(void)
 void test_ext2_userspace_link_preserves_live_kernel_context_on_first_request(void)
 {
     FakeUserspaceBlockDevice userspace = {
-        .path = BSTRING_NEW("/dev/test"),
+        .path = bstr("/dev/test"),
         .service_process = (ProcessPtr) 1,
         .scheduler = (SchedulerPtr) 0x44,
         .block_count = TEST_EXT2_SECTORS,

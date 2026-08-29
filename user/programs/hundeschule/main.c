@@ -25,21 +25,21 @@
 #define HUNDESCHULE_CONFIG_PATH "/boot/config/hundeschule.conf"
 #define HUNDESCHULE_CONFIG_MAX 2048U
 
-static BString hundeschule_empty = EMPTY_BSTRING;
-static BString hundeschule_hundeschau_path = BSTRING_NEW("/sbin/hundeschau");
-static BString hundeschule_hundebus_path = BSTRING_NEW("/sbin/drivers/hundebus");
-static BString hundeschule_virtio_keyboard_path = BSTRING_NEW("/sbin/drivers/virtio_keyboard");
-static BString hundeschule_uart_rx_path = BSTRING_NEW("/sbin/drivers/uart_rx");
-static BString hundeschule_uart_tx_path = BSTRING_NEW("/sbin/drivers/uart_tx");
-static BString hundeschule_virtio_blk_path = BSTRING_NEW("/sbin/drivers/virtio_blk");
-static BString hundeschule_space_delimiters = BSTRING_NEW(" \t\r");
-static BString hundeschule_comment_delimiter = BSTRING_NEW("#");
-static BString hundeschule_driver_command = BSTRING_NEW("driver");
-static BString hundeschule_once_option = BSTRING_NEW("once");
-static BString hundeschule_respawn_option = BSTRING_NEW("respawn");
-static BString hundeschule_framebuffer_condition = BSTRING_NEW("framebuffer");
-static BString hundeschule_no_framebuffer_condition = BSTRING_NEW("no-framebuffer");
-static BString hundeschule_always_condition = BSTRING_NEW("always");
+static BString hundeschule_empty = empty_bstr();
+static BString hundeschule_hundeschau_path = bstr("/sbin/hundeschau");
+static BString hundeschule_hundebus_path = bstr("/sbin/drivers/hundebus");
+static BString hundeschule_virtio_keyboard_path = bstr("/sbin/drivers/virtio_keyboard");
+static BString hundeschule_uart_rx_path = bstr("/sbin/drivers/uart_rx");
+static BString hundeschule_uart_tx_path = bstr("/sbin/drivers/uart_tx");
+static BString hundeschule_virtio_blk_path = bstr("/sbin/drivers/virtio_blk");
+static BString hundeschule_space_delimiters = bstr(" \t\r");
+static BString hundeschule_comment_delimiter = bstr("#");
+static BString hundeschule_driver_command = bstr("driver");
+static BString hundeschule_once_option = bstr("once");
+static BString hundeschule_respawn_option = bstr("respawn");
+static BString hundeschule_framebuffer_condition = bstr("framebuffer");
+static BString hundeschule_no_framebuffer_condition = bstr("no-framebuffer");
+static BString hundeschule_always_condition = bstr("always");
 
 typedef struct HundeschuleRequiredProcess
 {
@@ -83,13 +83,13 @@ static uint32_t Hundeschule__read32(void * base, uint64_t offset)
 
 static BString Hundeschule__u64_bstring(uint64_t value)
 {
-    BString format = BSTRING_NEW("%llu");
+    BString format = bstr("%llu");
     return BString__sprintf(&format, value);
 }
 
 static BString Hundeschule__virtio_path(uint64_t ordinal)
 {
-    BString format = BSTRING_NEW("/dev/virtio%llu");
+    BString format = bstr("/dev/virtio%llu");
     return BString__sprintf(&format, ordinal);
 }
 
@@ -99,14 +99,14 @@ static int Hundeschule__spawn_required_process(
 {
     SpawnResult result = spawn(
         P_NOWAIT,
-        BString__cstr(path),
-        BString__is_empty(arg0) ? NULL : BString__cstr(arg0), // hundelint: ignore-no-null
-        BString__is_empty(arg1) ? NULL : BString__cstr(arg1), // hundelint: ignore-no-null
-        NULL // hundelint: ignore-no-null
+        path,
+        SpawnArg__from_bstring(arg0),
+        SpawnArg__from_bstring(arg1),
+        SPAWN_NO_ARG
     );
     if (result < 0)
     {
-        printf("hundeschule: failed to start %s: %i\n", BString__cstr(path), (int) result);
+        IO__printf(&bstr("hundeschule: failed to start %B: %i\n"), path, (int) result);
         return 1;
     }
 
@@ -121,7 +121,7 @@ static int Hundeschule__spawn_required_process(
         success_do_nothing(),
         error(code, message)
         {
-            printf("hundeschule: failed to track process: %s\n", BString__cstr(&message));
+            IO__printf(&bstr("hundeschule: failed to track process: %B\n"), &message);
             return 1;
         }
     );
@@ -174,7 +174,7 @@ static int Hundeschule__wait_for_bootstrap_block_devices(HundeschuleRequiredProc
                         ServiceCode result = service_wait_ready(&ready_path);
                         if (!service_ok(result))
                         {
-                            printf("hundeschule: failed waiting for %s: %i\n", BString__cstr(&ready_path), (int) result);
+                            IO__printf(&bstr("hundeschule: failed waiting for %B: %i\n"), &ready_path, (int) result);
                             failures++;
                         }
                     },
@@ -193,7 +193,7 @@ static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesP
     ServiceMappedMemoryPtr mapping = 0;
     if (!service_ok(service_map_mmio(VIRTIO_MMIO_FIRST_PHYS_BASE, VIRTIO_MMIO_REGION_SIZE, &mapping)))
     {
-        printf("hundeschule: failed to probe virtio mmio\n");
+        IO__printf(&bstr("hundeschule: failed to probe virtio mmio\n"));
         return 1;
     }
 
@@ -229,7 +229,7 @@ static Optional(BString) Hundeschule__next_token(BStringPtr remaining)
     BString stripped = BString__strip(remaining);
     if (BString__is_empty(&stripped))
     {
-        *remaining = EMPTY_BSTRING;
+        *remaining = empty_bstr();
         return None(BString);
     }
 
@@ -242,12 +242,12 @@ static Optional(BString) Hundeschule__next_token(BStringPtr remaining)
         },
         none()
         {
-            *remaining = EMPTY_BSTRING;
+            *remaining = empty_bstr();
             return Some(BString, stripped);
         }
     );
 
-    *remaining = EMPTY_BSTRING;
+    *remaining = empty_bstr();
     return None(BString);
 }
 
@@ -264,7 +264,8 @@ static BString Hundeschule__line_without_comment(ConstBStringPtr line)
 
 static Optional(DynString) Hundeschule__load_config(void)
 {
-    IOHandle handle = open(HUNDESCHULE_CONFIG_PATH, IO_OPEN_READ);
+    BString config_path = bstr(HUNDESCHULE_CONFIG_PATH);
+    IOHandle handle = open(&config_path, IO_OPEN_READ);
     if (handle < 0)
     {
         return None(DynString);
@@ -301,7 +302,7 @@ static int Hundeschule__spawn_configured_driver_line(
         return 0;
     }
 
-    BString command = EMPTY_BSTRING;
+    BString command = empty_bstr();
     match_optional(BString, Hundeschule__next_token(&remaining),
         some(token) { command = token; },
         none() { return 0; }
@@ -312,7 +313,7 @@ static int Hundeschule__spawn_configured_driver_line(
         return 1;
     }
 
-    BString path = EMPTY_BSTRING;
+    BString path = empty_bstr();
     match_optional(BString, Hundeschule__next_token(&remaining),
         some(token) { path = token; },
         none() { return 1; }
@@ -324,7 +325,7 @@ static int Hundeschule__spawn_configured_driver_line(
     }
 
     bool respawn = true;
-    BString option = EMPTY_BSTRING;
+    BString option = empty_bstr();
     match_optional(BString, Hundeschule__next_token(&remaining),
         some(token) { option = token; },
         none_do_nothing()
@@ -335,7 +336,7 @@ static int Hundeschule__spawn_configured_driver_line(
         if (BString__equals(&option, &hundeschule_once_option))
         {
             respawn = false;
-            option = EMPTY_BSTRING;
+            option = empty_bstr();
             match_optional(BString, Hundeschule__next_token(&remaining),
                 some(token) { option = token; },
                 none_do_nothing()
@@ -344,7 +345,7 @@ static int Hundeschule__spawn_configured_driver_line(
         else if (BString__equals(&option, &hundeschule_respawn_option))
         {
             respawn = true;
-            option = EMPTY_BSTRING;
+            option = empty_bstr();
             match_optional(BString, Hundeschule__next_token(&remaining),
                 some(token) { option = token; },
                 none_do_nothing()
@@ -368,7 +369,7 @@ static int Hundeschule__spawn_configured_driver_line(
             return 1;
         }
 
-        option = EMPTY_BSTRING;
+        option = empty_bstr();
         match_optional(BString, Hundeschule__next_token(&remaining),
             some(token) { option = token; },
             none_do_nothing()
@@ -469,7 +470,7 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
 
     if (!service_ok(service_become_service()))
     {
-        printf("hundeschule: service registration failed\n");
+        IO__printf(&bstr("hundeschule: service registration failed\n"));
         return 1;
     }
 
@@ -510,7 +511,7 @@ int HUNDESCHULE_ENTRYPOINT(void)
 {
     HundeschuleRequiredProcesses required_processes = HundeschuleRequiredProcesses__new();
 
-    printf("HundeOS: hundeschule begins\n");
+    IO__printf(&bstr("HundeOS: hundeschule begins\n"));
 
     if (Hundeschule__initialise_required_processes(&required_processes) != 0)
     {
@@ -523,7 +524,7 @@ int HUNDESCHULE_ENTRYPOINT(void)
         ProcessChildEventResult result = wait_for_child_event(&event);
         if (result < 0)
         {
-            printf("hundeschule: wait child event failed: %i\n", (int) result);
+            IO__printf(&bstr("hundeschule: wait child event failed: %i\n"), (int) result);
             return 1;
         }
 
@@ -537,14 +538,14 @@ int HUNDESCHULE_ENTRYPOINT(void)
 
                 SpawnResult respawn_result = spawn(
                     P_NOWAIT,
-                    BString__cstr(&process->path),
-                    BString__is_empty(&process->arg0) ? NULL : BString__cstr(&process->arg0), // hundelint: ignore-no-null
-                    BString__is_empty(&process->arg1) ? NULL : BString__cstr(&process->arg1), // hundelint: ignore-no-null
-                    NULL // hundelint: ignore-no-null
+                    &process->path,
+                    SpawnArg__from_bstring(&process->arg0),
+                    SpawnArg__from_bstring(&process->arg1),
+                    SPAWN_NO_ARG
                 );
                 if (respawn_result < 0)
                 {
-                    printf("hundeschule: failed to start %s: %i\n", BString__cstr(&process->path), (int) respawn_result);
+                    IO__printf(&bstr("hundeschule: failed to start %B: %i\n"), &process->path, (int) respawn_result);
                     return 1;
                 }
 

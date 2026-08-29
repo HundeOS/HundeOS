@@ -57,18 +57,18 @@ FramebufferConfigFields;
 
 typedef FramebufferConfigFields * FramebufferConfigFieldsPtr;
 
-static const BString framebuffer_config_delimiter = BSTRING_NEW("=");
-static const BString framebuffer_config_present_key = BSTRING_NEW("framebuffer.present");
-static const BString framebuffer_config_physical_base_key = BSTRING_NEW("framebuffer.physical_base");
-static const BString framebuffer_config_physical_size_key = BSTRING_NEW("framebuffer.physical_size");
-static const BString framebuffer_config_width_key = BSTRING_NEW("framebuffer.width");
-static const BString framebuffer_config_height_key = BSTRING_NEW("framebuffer.height");
-static const BString framebuffer_config_pixels_per_scanline_key = BSTRING_NEW("framebuffer.pixels_per_scanline");
-static const BString framebuffer_config_pixel_format_key = BSTRING_NEW("framebuffer.pixel_format");
-static const BString framebuffer_config_red_mask_key = BSTRING_NEW("framebuffer.red_mask");
-static const BString framebuffer_config_green_mask_key = BSTRING_NEW("framebuffer.green_mask");
-static const BString framebuffer_config_blue_mask_key = BSTRING_NEW("framebuffer.blue_mask");
-static const BString framebuffer_config_reserved_mask_key = BSTRING_NEW("framebuffer.reserved_mask");
+static const BString framebuffer_config_delimiter = bstr("=");
+static const BString framebuffer_config_present_key = bstr("framebuffer.present");
+static const BString framebuffer_config_physical_base_key = bstr("framebuffer.physical_base");
+static const BString framebuffer_config_physical_size_key = bstr("framebuffer.physical_size");
+static const BString framebuffer_config_width_key = bstr("framebuffer.width");
+static const BString framebuffer_config_height_key = bstr("framebuffer.height");
+static const BString framebuffer_config_pixels_per_scanline_key = bstr("framebuffer.pixels_per_scanline");
+static const BString framebuffer_config_pixel_format_key = bstr("framebuffer.pixel_format");
+static const BString framebuffer_config_red_mask_key = bstr("framebuffer.red_mask");
+static const BString framebuffer_config_green_mask_key = bstr("framebuffer.green_mask");
+static const BString framebuffer_config_blue_mask_key = bstr("framebuffer.blue_mask");
+static const BString framebuffer_config_reserved_mask_key = bstr("framebuffer.reserved_mask");
 
 static FramebufferConfigFields FramebufferConfigFields__new()
 {
@@ -279,7 +279,8 @@ static bool FramebufferConfig__read_config(ConstDynStringPtr sysinfo, Framebuffe
 
 static bool FramebufferConfig__load(FramebufferConfigPtr self)
 {
-    IOHandle handle = open(FRAMEBUFFER_CONFIG_PATH, IO_OPEN_READ);
+    BString config_path = bstr(FRAMEBUFFER_CONFIG_PATH);
+    IOHandle handle = open(&config_path, IO_OPEN_READ);
     if (handle < 0)
     {
         return false;

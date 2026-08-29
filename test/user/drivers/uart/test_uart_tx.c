@@ -18,7 +18,7 @@ struct ServiceMappedMemory
 {
     void * driver_address;
     uint64_t device_address;
-    uint64_t size;
+    size_t size;
 };
 
 static ServiceMappedMemory fake_uart_mapping;
@@ -100,7 +100,7 @@ ServiceCode service_become_service()
     return SERVICE_OK;
 }
 
-ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
+ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)
 {
     TEST_ASSERT_EQUAL_UINT64(UART_PHYS_BASE, physical_address);
     TEST_ASSERT_EQUAL_UINT64(0x1000ULL, size);
@@ -108,9 +108,9 @@ ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMa
     return SERVICE_OK;
 }
 
-IOHandle open(const char * path, Flags flags)
+IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    TEST_ASSERT_EQUAL_STRING("/proc/sysinfo", path);
+    TEST_ASSERT_EQUAL_STRING("/proc/sysinfo", BString__cstr(path));
     TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
     fake_sysinfo_opened = true;
     return 7;
@@ -172,14 +172,14 @@ uint64_t device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
     return memory->device_address + offset;
 }
 
-uint64_t mapped_size(ServiceMappedMemoryPtr memory)
+size_t mapped_size(ServiceMappedMemoryPtr memory)
 {
     return memory->size;
 }
 
-IOHandle io_server_register(const char * path, IOServerRole role)
+IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
 {
-    TEST_ASSERT_EQUAL_STRING(":tty:", path);
+    TEST_ASSERT_EQUAL_STRING(":tty:", BString__cstr(path));
     TEST_ASSERT_EQUAL_INT(IO_SERVER_WRITE, role);
     return 43;
 }

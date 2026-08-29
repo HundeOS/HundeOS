@@ -7,9 +7,9 @@
 
 FixedArrayBodyDefine(ServiceEvents);
 
-static BString not_service_process = BSTRING_NEW("Process is not a service process");
-static BString event_queue_empty = BSTRING_NEW("Service event queue is empty");
-static BString no_process = BSTRING_NEW("No process for service wait");
+static BString not_service_process = bstr("Process is not a service process");
+static BString event_queue_empty = bstr("Service event queue is empty");
+static BString no_process = bstr("No process for service wait");
 bool ServiceEvent__equals(ServiceEventPtr self, ServiceEventPtr other)
 {
     return self->type == other->type && self->source == other->source && self->data == other->data;

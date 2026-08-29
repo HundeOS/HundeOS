@@ -202,6 +202,7 @@ ProgramHeaderArray Elf__read_program_headers(Elf self);
 Elf64Header * Elf__read_header(Elf self);
 
 Elf Elf__new(Address start, Address end, BString name);
+ExpandedSegment ExpandedSegment__new(UserAddress address, size_t size);
 
 FixedArrayDefine(ExpandedSegment, 64, ExpandedSegmentArray, &Ptr__equals);
 

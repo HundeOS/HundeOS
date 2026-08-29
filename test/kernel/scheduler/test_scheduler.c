@@ -36,8 +36,8 @@ uint64_t Arch__unmasked_irq();
 uint64_t Arch__mask_count();
 uint64_t Arch__unmask_count();
 
-static BString no_return_code = BSTRING_NEW("no return code");
-static BString abort_stderr_path = BSTRING_NEW(":abort-stderr:");
+static BString no_return_code = bstr("no return code");
+static BString abort_stderr_path = bstr(":abort-stderr:");
 
 static Result(IOInternalHandle) abort_stderr_open(IOStatePtr state, BString path, Flags flags)
 {

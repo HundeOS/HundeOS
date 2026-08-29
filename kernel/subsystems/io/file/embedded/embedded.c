@@ -5,14 +5,14 @@
 #include "../../../../utils/math.h"
 #include "../../../../kalloc.h"
 
-static BString invalid_path_format = BSTRING_NEW("Invalid path %s");
-static BString invalid_file_handle = BSTRING_NEW("Invalid file handle");
-static BString not_implemented = BSTRING_NEW("Operation not implemented");
-static BString end_of_file = BSTRING_NEW("End pf file");
-static const BString drivers_name = BSTRING_NEW("drivers");
-static const BString drivers_prefix = BSTRING_NEW("drivers/");
-static const BString services_name = BSTRING_NEW("services");
-static const BString services_prefix = BSTRING_NEW("services/");
+static BString invalid_path_format = bstr("Invalid path %B");
+static BString invalid_file_handle = bstr("Invalid file handle");
+static BString not_implemented = bstr("Operation not implemented");
+static BString end_of_file = bstr("End pf file");
+static const BString drivers_name = bstr("drivers");
+static const BString drivers_prefix = bstr("drivers/");
+static const BString services_name = bstr("services");
+static const BString services_prefix = bstr("services/");
 
 static BString EmbeddedFileIO__relative_path(BString path)
 {
@@ -149,7 +149,7 @@ static Optional(FilesystemNodePtr) EmbeddedFileIO__node_for_entry(
         return None(FilesystemNodePtr);
     }
 
-    BString child_name = EMPTY_BSTRING;
+    BString child_name = empty_bstr();
     match_optional(BString, BStringArray__at(&segments, 0),
         some(segment) { child_name = segment; },
         none() { return None(FilesystemNodePtr); }
@@ -180,7 +180,7 @@ Result(IOInternalHandle) EmbeddedFileIO__open(IOStatePtr self, BString path, Fla
 
     if (BString__length(&relative_path) == 0)
     {
-        return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, cstr(path)), IO_INVALID_PATH);
+        return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
     }
 
     match_optional(Elf, EmbeddedElf__load(relative_path),
@@ -196,7 +196,7 @@ Result(IOInternalHandle) EmbeddedFileIO__open(IOStatePtr self, BString path, Fla
         none_do_nothing()
     );
 
-    return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, cstr(path)), IO_INVALID_PATH);
+    return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
 }
 
 Result(IOInternalHandle) EmbeddedFileIO__close(IOStatePtr self, IOInternalHandle handle)
@@ -243,7 +243,7 @@ Result(IOBufferPtr) EmbeddedFileIO__read(
                     none()
                     {
                         return Error(IOBufferPtr,
-                                     BString__sprintf(&invalid_path_format, cstr(target_ptr->path)),
+                                     BString__sprintf(&invalid_path_format, &target_ptr->path),
                                      IO_INVALID_PATH);
                     }
                 );

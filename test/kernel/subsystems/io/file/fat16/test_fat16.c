@@ -65,7 +65,7 @@ void test_fat16_creates_lists_and_reads_root_file(void)
     match_result(Fat16Code, Fat16Volume__create_root_file(&volume, bstring("hello.txt"), content, sizeof(content)), success(code) { TEST_ASSERT_EQUAL(FAT16_OK, code); }, error_test_fail());
 
     match_result(Fat16DirectoryEntries, Fat16Volume__list_root(&volume), success(entries) {
-            BString expected = BSTRING_NEW("HELLO.TXT");
+            BString expected = bstr("HELLO.TXT");
             TEST_ASSERT_EQUAL(1, entries.len);
             TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
             TEST_ASSERT_EQUAL(FAT16_ATTR_ARCHIVE, entries.data[0].attributes);
@@ -93,7 +93,7 @@ void test_fat16_creates_and_lists_root_directory(void)
     match_result(Fat16Code, Fat16Volume__create_root_directory(&volume, bstring("docs")), success(code) { TEST_ASSERT_EQUAL(FAT16_OK, code); }, error_test_fail());
 
     match_result(Fat16DirectoryEntries, Fat16Volume__list_root(&volume), success(entries) {
-            BString expected = BSTRING_NEW("DOCS");
+            BString expected = bstr("DOCS");
             TEST_ASSERT_EQUAL(1, entries.len);
             TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
             TEST_ASSERT_EQUAL(FAT16_ATTR_DIRECTORY, entries.data[0].attributes);

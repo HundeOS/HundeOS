@@ -13,6 +13,10 @@ static Anything last_arg2;
 static Anything last_arg3;
 static Anything last_arg4;
 static Anything last_arg5;
+static IOPathRequest last_path_request;
+static IOListDirRequest last_list_dir_request;
+static IOLinkRequest last_link_request;
+static IOMountRequest last_mount_request;
 static const char * next_read_data;
 static ByteCount next_read_result;
 static SystemCallResult next_result;
@@ -25,6 +29,26 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
     last_arg3 = arg3;
     last_arg4 = arg4;
     last_arg5 = arg5;
+
+    if (num == IO_CALL)
+    {
+        if (arg1 == IO_OPEN || arg1 == IO_MKDIR || arg1 == IO_REMOVE)
+        {
+            last_path_request = *((IOPathRequestPtr) arg2);
+        }
+        if (arg1 == IO_LIST_DIR)
+        {
+            last_list_dir_request = *((IOListDirRequestPtr) arg2);
+        }
+        if (arg1 == IO_LINK)
+        {
+            last_link_request = *((IOLinkRequestPtr) arg2);
+        }
+        if (arg1 == IO_MOUNT)
+        {
+            last_mount_request = *((IOMountRequestPtr) arg2);
+        }
+    }
 
     if (num == IO_CALL && arg1 == IO_READ && next_read_result > 0)
     {
@@ -56,6 +80,10 @@ void setUp(void)
     last_arg3 = 0;
     last_arg4 = 0;
     last_arg5 = 0;
+    last_path_request = (IOPathRequest) { 0 };
+    last_list_dir_request = (IOListDirRequest) { 0 };
+    last_link_request = (IOLinkRequest) { 0 };
+    last_mount_request = (IOMountRequest) { 0 };
     next_read_data = NULL;
     next_read_result = 0;
     next_result = 0;
@@ -75,8 +103,8 @@ void test_io_open_uses_bstring_path(void)
     TEST_ASSERT_EQUAL_INT64(42, handle);
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_OPEN, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/mnt/fs1/test.txt", (const char *) last_arg2);
-    TEST_ASSERT_EQUAL(IO_OPEN_READ, last_arg3);
+    TEST_ASSERT_EQUAL_STRING("/mnt/fs1/test.txt", BString__cstr(&last_path_request.path));
+    TEST_ASSERT_EQUAL(IO_OPEN_READ, last_path_request.flags);
 }
 
 void test_io_read_populates_bstring_and_sets_length(void)
@@ -135,7 +163,7 @@ void test_io_make_dir_uses_bstring_path(void)
     TEST_ASSERT_EQUAL(IO_OK, status);
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_MKDIR, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/mnt/fs1/newdir", (const char *) last_arg2);
+    TEST_ASSERT_EQUAL_STRING("/mnt/fs1/newdir", BString__cstr(&last_path_request.path));
 }
 
 void test_io_link_uses_bstring_paths(void)
@@ -149,8 +177,8 @@ void test_io_link_uses_bstring_paths(void)
     TEST_ASSERT_EQUAL(IO_OK, status);
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_LINK, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/mnt/ext2fs/hello.txt", (const char *) last_arg2);
-    TEST_ASSERT_EQUAL_STRING("/mnt/ext2fs/copy.txt", (const char *) last_arg3);
+    TEST_ASSERT_EQUAL_STRING("/mnt/ext2fs/hello.txt", BString__cstr(&last_link_request.source_path));
+    TEST_ASSERT_EQUAL_STRING("/mnt/ext2fs/copy.txt", BString__cstr(&last_link_request.target_path));
 }
 
 void test_io_mount_uses_bstring_paths(void)
@@ -165,9 +193,9 @@ void test_io_mount_uses_bstring_paths(void)
     TEST_ASSERT_EQUAL(IO_OK, status);
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_MOUNT, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio3", (const char *) last_arg2);
-    TEST_ASSERT_EQUAL_STRING("fat32", (const char *) last_arg3);
-    TEST_ASSERT_EQUAL_STRING("/mnt/fs1", (const char *) last_arg4);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio3", BString__cstr(&last_mount_request.device_path));
+    TEST_ASSERT_EQUAL_STRING("fat32", BString__cstr(&last_mount_request.filesystem_type));
+    TEST_ASSERT_EQUAL_STRING("/mnt/fs1", BString__cstr(&last_mount_request.mountpoint));
 }
 
 void test_sd_host_config_parse_reads_present_host(void)

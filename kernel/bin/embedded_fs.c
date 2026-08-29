@@ -21,6 +21,15 @@ EmbeddedFs EmbeddedFs__new(Address start, Address end)
     };
 }
 
+EmbeddedFsFile EmbeddedFsFile__new(Address start, Address end, BString name)
+{
+    return (EmbeddedFsFile) {
+        .start = start,
+        .end = end,
+        .name = name,
+    };
+}
+
 bool EmbeddedFs__is_valid(EmbeddedFsPtr self)
 {
     if (self->start == 0 || self->end <= self->start)
@@ -106,11 +115,14 @@ Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, BString name)
         BString entry_name = EmbeddedFs__entry_name(self, entry);
         if (BString__equals(&entry_name, &name))
         {
-            return Some(EmbeddedFsFile, ((EmbeddedFsFile) {
-                .start = self->start + entry->data_offset,
-                .end = self->start + entry->data_offset + entry->data_len,
-                .name = entry_name,
-            }));
+            return Some(
+                EmbeddedFsFile,
+                EmbeddedFsFile__new(
+                    self->start + entry->data_offset,
+                    self->start + entry->data_offset + entry->data_len,
+                    entry_name
+                )
+            );
         }
     }
 

@@ -13,7 +13,7 @@ struct ServiceMappedMemory
 {
     void * driver_address;
     uint64_t device_address;
-    uint64_t size;
+    size_t size;
 };
 
 #define TEST_PCI_ECAM_SIZE 0x200000ULL
@@ -43,9 +43,9 @@ static const char * fake_sysinfo =
     "pci.bus.end=1\n";
 
 #define HUNDEBUS_ENTRYPOINT hundebus_main_under_test
-#define printf test_printf
+#define IO__printf test_printf
 #include "../../../../user/drivers/hundebus/main.c"
-#undef printf
+#undef IO__printf
 
 static uint64_t TestHundebus__function_offset(uint64_t bus, uint64_t device, uint64_t function)
 {
@@ -142,7 +142,7 @@ ServiceCode service_become_service()
     return SERVICE_OK;
 }
 
-ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
+ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)
 {
     TEST_ASSERT_EQUAL_UINT64(0x4010000000, physical_address);
     TEST_ASSERT_EQUAL_UINT64(TEST_PCI_ECAM_SIZE, size);
@@ -168,9 +168,14 @@ void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
     return (void *) ((uint64_t) memory->driver_address + offset);
 }
 
-IOHandle open(const char * path, Flags flags)
+size_t mapped_size(ServiceMappedMemoryPtr memory)
 {
-    TEST_ASSERT_EQUAL_STRING("/proc/sysinfo", path);
+    return memory->size;
+}
+
+IOHandle open(ConstBStringPtr path, Flags flags)
+{
+    TEST_ASSERT_EQUAL_STRING("/proc/sysinfo", BString__cstr(path));
     TEST_ASSERT_EQUAL_INT(IO_OPEN_READ, flags);
     fake_sysinfo_opened = true;
     return 1;
@@ -211,9 +216,9 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     return Some(DynString, sysinfo);
 }
 
-IOHandle io_server_register(const char * path, IOServerRole role)
+IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
 {
-    TEST_ASSERT_EQUAL_STRING("/dev/businfo", path);
+    TEST_ASSERT_EQUAL_STRING("/dev/businfo", BString__cstr(path));
     TEST_ASSERT_EQUAL_INT(IO_SERVER_READ, role);
     fake_businfo_registered = true;
     return 7;
@@ -251,14 +256,14 @@ IOStatus io_server_eof(IOHandle handle)
     return IO_OK;
 }
 
-int test_printf(const char * format, ...)
+int test_printf(ConstBStringPtr format, ...)
 {
     va_list args;
     va_start(args, format);
     int count = vsnprintf(
         &printed_output[printed_output_len],
         sizeof(printed_output) - printed_output_len,
-        format,
+        BString__cstr(format),
         args
     );
     va_end(args);
@@ -307,6 +312,27 @@ void test_hundebus_scan_enumerates_single_and_multifunction_devices(void)
 
     TEST_ASSERT_EQUAL_UINT64(3, found);
     TEST_ASSERT_EQUAL_UINT64(3, HundebusPciDevices__len(&hundebus.pci_devices));
+}
+
+void test_hundebus_scan_stops_at_mapped_ecam_size(void)
+{
+    Hundebus hundebus = {
+        .pci_config = {
+            .ecam_physical_base = 0x4010000000,
+            .ecam_size = 0xffff,
+            .bus_start = 0,
+            .bus_end = 1,
+        },
+        .ecam = &fake_ecam_mapping,
+        .pci_devices = HundebusPciDevices__new(),
+    };
+    fake_ecam_mapping.size = 0xffff;
+    TestHundebus__seed_device(0, 1, 0, 0x1234, 0x5678, 0x0c, 0x03, 0x30, 0x00);
+
+    uint64_t found = Hundebus__scan_pci(&hundebus);
+
+    TEST_ASSERT_EQUAL_UINT64(1, found);
+    TEST_ASSERT_EQUAL_UINT64(1, HundebusPciDevices__len(&hundebus.pci_devices));
 }
 
 void test_hundebus_builds_businfo_from_scan(void)

@@ -2,7 +2,7 @@
 
 #include "../panic.h"
 
-static BString panic_returned = BSTRING_NEW("Panic returned unexpectedly");
+static BString panic_returned = bstr("Panic returned unexpectedly");
 
 Result(SystemCallResult) Panic__handler(
     KernelPtr kernel,

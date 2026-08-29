@@ -3,7 +3,7 @@
 
 int main(void)
 {
-    print("service_test: started\n");
+    IO__print(&bstr("service_test: started\n"));
 
     while (true)
     {
@@ -11,12 +11,11 @@ int main(void)
         ServiceCode result = service_wait(&event);
         if (!service_ok(result))
         {
-            printf("service_test: wait error %i\n", (int) result);
+            IO__printf(&bstr("service_test: wait error %i\n"), (int) result);
             continue;
         }
 
-        printf(
-            "service_test: event type=%i source=%i data=%i\n",
+        IO__printf(&bstr("service_test: event type=%i source=%i data=%i\n"),
             (int) event.type,
             (int) event.source,
             (int) event.data

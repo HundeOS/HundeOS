@@ -12,13 +12,31 @@ FixedArrayBodyDefine(ServiceReadyNames);
 FixedArrayBodyDefine(ServiceReadyWaiters);
 FixedArrayBodyDefine(ServiceReadyProcesses);
 
-static BString service_event_queue_empty = BSTRING_NEW("Service event queue is empty");
-static BString service_ready_waiters_full = BSTRING_NEW("Service ready waiter queue is full");
-static BString service_ready_names_full = BSTRING_NEW("Service ready name table is full");
+static BString service_event_queue_empty = bstr("Service event queue is empty");
+static BString service_ready_waiters_full = bstr("Service ready waiter queue is full");
+static BString service_ready_names_full = bstr("Service ready name table is full");
 
 bool ServiceReadyWaiter__equals(ServiceReadyWaiterPtr self, ServiceReadyWaiterPtr other)
 {
     return self->process == other->process && BString__equals(&self->name, &other->name);
+}
+
+static IRQService IRQService__new(ProcessPtr process)
+{
+    return (IRQService) {
+        .process = process,
+        .pending = false,
+        .enabled = true,
+        .delivery_count = 0,
+        .coalesced_count = 0,
+    };
+}
+
+static ServiceEventDispatch ServiceEventDispatch__new(Optional(ProcessPtr) process)
+{
+    return (ServiceEventDispatch) {
+        .process = process,
+    };
 }
 
 ServiceEventDispatcher ServiceEventDispatcher__new()
@@ -31,13 +49,7 @@ Result(ServiceCode) ServiceEventDispatcher__subscribe_irq(
 )
 {
     __d_printf(IODEV, "service event dispatcher subscribe irq=%i pid=%i name=%s\n", irq, process->pid, cstr(process->name));
-    IRQService service = (IRQService) {
-        .process = process,
-        .pending = false,
-        .enabled = true,
-        .delivery_count = 0,
-        .coalesced_count = 0,
-    };
+    IRQService service = IRQService__new(process);
     critical_section(self->lock,
     {
         IRQServiceMap__set(&self->irq_services, irq, service);
@@ -76,9 +88,7 @@ Result(ServiceEventDispatch) ServiceEventDispatcher__dispatch_irq(
 )
 {
     __d_printf(IODEV, "service event dispatcher irq=%i\n", irq);
-    ServiceEventDispatch no_dispatch = (ServiceEventDispatch) {
-        .process = None(ProcessPtr),
-    };
+    ServiceEventDispatch no_dispatch = ServiceEventDispatch__new(None(ProcessPtr));
 
     critical_section(self->lock,
     {
@@ -114,10 +124,7 @@ Result(ServiceEventDispatch) ServiceEventDispatcher__dispatch_irq(
                 service->delivery_count++;
                 Arch__mask_irq(interrupt_controller, irq);
 
-                ServiceEvent event;
-                event.type = SERVICE_EVENT_IRQ;
-                event.source = irq;
-                event.data = service->coalesced_count;
+                ServiceEvent event = ServiceEvent__new(SERVICE_EVENT_IRQ, irq, service->coalesced_count);
 
                 match_result(ServiceCode, Service__push_next_event(service->process, event),
                     success_do_nothing(),

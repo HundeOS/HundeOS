@@ -1047,7 +1047,8 @@ int VIDEO_TERM_ENTRYPOINT(void)
 
     VideoTerm terminal = VideoTerm__new(config, driver_ptr(framebuffer_mapping), mapped_size(framebuffer_mapping));
 
-    IOHandle video = io_server_register(VIDEO_TERM_PATH, IO_SERVER_WRITE);
+    BString video_path = bstr(VIDEO_TERM_PATH);
+    IOHandle video = io_server_register(&video_path, IO_SERVER_WRITE);
     if (video < 0)
     {
         DRIVER_DEBUG("video_term: register error %i\n", (int) video);

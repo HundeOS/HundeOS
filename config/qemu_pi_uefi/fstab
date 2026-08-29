@@ -1,2 +1,3 @@
 # device <path> <filesystem> <mountpoint>
-device /dev/virtio1 ext2 /
+device /dev/virtio2 ext2 /
+device /dev/virtio2 ext2 /mnt/ext2user

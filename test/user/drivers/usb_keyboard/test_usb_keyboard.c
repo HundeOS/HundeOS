@@ -66,9 +66,9 @@ ServiceCode service_wait(ServiceEventPtr event)
     return SERVICE_ABORT;
 }
 
-IOHandle io_server_register(const char * path, IOServerRole role)
+IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
 {
-    TEST_ASSERT_EQUAL_STRING(":keyboard:", path);
+    TEST_ASSERT_EQUAL_STRING(":keyboard:", BString__cstr(path));
     TEST_ASSERT_EQUAL_INT(IO_SERVER_READ, role);
     fake_registered_keyboard = true;
     return fake_register_result;

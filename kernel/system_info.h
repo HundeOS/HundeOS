@@ -18,6 +18,14 @@ typedef struct PhysicalMemoryRegion {
     Address physical_end;
 } PhysicalMemoryRegion;
 
+static inline PhysicalMemoryRegion PhysicalMemoryRegion__new(Address physical_start, Address physical_end)
+{
+    return (PhysicalMemoryRegion) {
+        .physical_start = physical_start,
+        .physical_end = physical_end,
+    };
+}
+
 OptionalDef(PhysicalMemoryRegion);
 
 bool PhysicalMemoryRegion__equals(void * a, void * b);
@@ -55,6 +63,32 @@ typedef struct FramebufferInfo {
     uint32_t reserved_mask;
 } FramebufferInfo;
 
+static inline FramebufferInfo FramebufferInfo__new(
+    Address physical_base,
+    uint64_t size,
+    uint32_t width,
+    uint32_t height,
+    uint32_t pixels_per_scanline,
+    FramebufferPixelFormat pixel_format,
+    uint32_t red_mask,
+    uint32_t green_mask,
+    uint32_t blue_mask,
+    uint32_t reserved_mask)
+{
+    return (FramebufferInfo) {
+        .physical_base = physical_base,
+        .size = size,
+        .width = width,
+        .height = height,
+        .pixels_per_scanline = pixels_per_scanline,
+        .pixel_format = pixel_format,
+        .red_mask = red_mask,
+        .green_mask = green_mask,
+        .blue_mask = blue_mask,
+        .reserved_mask = reserved_mask,
+    };
+}
+
 OptionalDef(FramebufferInfo);
 
 typedef struct PciInfo {
@@ -64,6 +98,20 @@ typedef struct PciInfo {
     uint64_t bus_end;
 } PciInfo;
 
+static inline PciInfo PciInfo__new(
+    Address ecam_physical_base,
+    uint64_t ecam_size,
+    uint64_t bus_start,
+    uint64_t bus_end)
+{
+    return (PciInfo) {
+        .ecam_physical_base = ecam_physical_base,
+        .ecam_size = ecam_size,
+        .bus_start = bus_start,
+        .bus_end = bus_end,
+    };
+}
+
 OptionalDef(PciInfo);
 
 typedef struct SdHostInfo {
@@ -71,6 +119,15 @@ typedef struct SdHostInfo {
     uint64_t mmio_size;
     uint64_t irq;
 } SdHostInfo;
+
+static inline SdHostInfo SdHostInfo__new(Address physical_base, uint64_t mmio_size, uint64_t irq)
+{
+    return (SdHostInfo) {
+        .physical_base = physical_base,
+        .mmio_size = mmio_size,
+        .irq = irq,
+    };
+}
 
 OptionalDef(SdHostInfo);
 
@@ -133,6 +190,11 @@ typedef GicInfo * GicInfoPtr;
 typedef PhysicalMemoryInfo * PhysicalMemoryInfoPtr;
 typedef InterruptControllerInfo * InterruptControllerInfoPtr;
 typedef SystemInfo * SystemInfoPtr;
+
+inline SystemInfo SystemInfo__new()
+{
+    return (SystemInfo) {};
+}
 
 KernelAddress SystemInfo__kernel_address_for_physical(SystemInfoPtr self, Address physical);
 KernelAddress SystemInfo__kernel_address_for_virtual(SystemInfoPtr self, Address virtual_addr);

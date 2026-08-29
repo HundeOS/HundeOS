@@ -28,6 +28,14 @@ UsbKeyboard;
 
 typedef UsbKeyboard * UsbKeyboardPtr;
 
+static UsbKeyboard UsbKeyboard__new(void)
+{
+    return (UsbKeyboard) {
+        .keyboard = -1,
+        .pending = UsbKeyboardPendingBuffer__new(),
+    };
+}
+
 static void UsbKeyboard__publish_pending(UsbKeyboardPtr self)
 {
     if (UsbKeyboardPendingBuffer__item_count(&self->pending) == 0)
@@ -59,10 +67,7 @@ static void UsbKeyboard__publish_pending(UsbKeyboardPtr self)
 
 static bool UsbKeyboard__init(UsbKeyboardPtr self)
 {
-    *self = (UsbKeyboard) {
-        .keyboard = -1,
-        .pending = UsbKeyboardPendingBuffer__new(),
-    };
+    *self = UsbKeyboard__new();
 
     if (!service_ok(service_become_service()))
     {
@@ -70,7 +75,8 @@ static bool UsbKeyboard__init(UsbKeyboardPtr self)
         return false;
     }
 
-    self->keyboard = io_server_register(USB_KEYBOARD_PATH, IO_SERVER_READ);
+    BString keyboard_path = bstr(USB_KEYBOARD_PATH);
+    self->keyboard = io_server_register(&keyboard_path, IO_SERVER_READ);
     if (self->keyboard < 0)
     {
         DRIVER_DEBUG("usb_keyboard: register failed %i\n", (int) self->keyboard);

@@ -56,6 +56,94 @@ static void BString__append_cstr_mut(BStringPtr self, const char * text)
     }
 }
 
+static void BString__append_bstring_mut(BStringPtr self, ConstBStringPtr text)
+{
+    if (text == NULL)
+    {
+        BString__append_cstr_mut(self, "(null)");
+        return;
+    }
+
+    for (StringPos i = 0; i < BString__length(text); i++)
+    {
+        if (!BString__push_char(self, BString__char_at_or(text, i, '\0')))
+        {
+            return;
+        }
+    }
+}
+
+static void BString__append_cstr_limited_mut(BStringPtr self, const char * text, int precision)
+{
+    if (text == NULL)
+    {
+        text = "(null)";
+    }
+
+    for (StringPos i = 0; text[i] != '\0' && (precision < 0 || i < precision); i++)
+    {
+        if (!BString__push_char(self, text[i]))
+        {
+            return;
+        }
+    }
+}
+
+static void BString__append_bstring_limited_mut(BStringPtr self, ConstBStringPtr text, int precision)
+{
+    if (text == NULL)
+    {
+        BString__append_cstr_limited_mut(self, "(null)", precision);
+        return;
+    }
+
+    for (StringPos i = 0; i < BString__length(text) && (precision < 0 || i < precision); i++)
+    {
+        if (!BString__push_char(self, BString__char_at_or(text, i, '\0')))
+        {
+            return;
+        }
+    }
+}
+
+static void BString__append_padding_mut(BStringPtr self, StringPos count, char ch)
+{
+    for (StringPos i = 0; i < count; i++)
+    {
+        if (!BString__push_char(self, ch))
+        {
+            return;
+        }
+    }
+}
+
+static void BString__append_formatted_field_mut(
+    BStringPtr self,
+    ConstBStringPtr field,
+    int width,
+    bool left_align,
+    bool zero_pad
+)
+{
+    StringPos padding = 0;
+    if (width > BString__length(field))
+    {
+        padding = width - BString__length(field);
+    }
+
+    if (!left_align)
+    {
+        BString__append_padding_mut(self, padding, zero_pad ? '0' : ' ');
+    }
+
+    BString__append_bstring_mut(self, field);
+
+    if (left_align)
+    {
+        BString__append_padding_mut(self, padding, ' ');
+    }
+}
+
 static void BString__append_reversed_mut(BStringPtr self, ConstBStringPtr reversed)
 {
     BString copy = *reversed;
@@ -73,7 +161,7 @@ static void BString__append_reversed_mut(BStringPtr self, ConstBStringPtr revers
 
 static void BString__append_uint64_dec_mut(BStringPtr self, uint64_t value)
 {
-    BString reversed = EMPTY_BSTRING;
+    BString reversed = empty_bstr();
 
     if (value == 0)
     {
@@ -104,7 +192,7 @@ static void BString__append_int64_dec_mut(BStringPtr self, int64_t value)
 
 static void BString__append_uint64_hex_mut(BStringPtr self, uint64_t value)
 {
-    BString reversed = EMPTY_BSTRING;
+    BString reversed = empty_bstr();
 
     if (value == 0)
     {
@@ -122,7 +210,7 @@ static void BString__append_uint64_hex_mut(BStringPtr self, uint64_t value)
 
 BString BString__slice(ConstBStringPtr self, StringPos start, StringPos end)
 {
-    BString result = EMPTY_BSTRING;
+    BString result = empty_bstr();
 
     if (end == -1)
     {
@@ -167,7 +255,7 @@ BString BString__slice(ConstBStringPtr self, StringPos start, StringPos end)
 
 BString BString__new(const char * str)
 {
-    BString result = EMPTY_BSTRING;
+    BString result = empty_bstr();
     StringPos max_without_nul = result.max - 1;
     StringPos len = 0;
 
@@ -189,7 +277,7 @@ BString bstring(const char * str)
 
 void BString__clear(BStringPtr self)
 {
-    *self = EMPTY_BSTRING;
+    *self = empty_bstr();
 }
 
 bool BString__is_empty(ConstBStringPtr self)
@@ -288,7 +376,7 @@ BStringSplit BString__split_first_any(ConstBStringPtr self, ConstBStringPtr deli
 {
     BStringSplit result;
     result.match = None(BString);
-    result.rest = EMPTY_BSTRING;
+    result.rest = empty_bstr();
 
     if (self->len == 0)
     {
@@ -307,6 +395,12 @@ BStringSplit BString__split_first_any(ConstBStringPtr self, ConstBStringPtr deli
 
     result.match = Some(BString, *self);
     return result;
+}
+
+BStringSplit BString__split_first_token(ConstBStringPtr self, ConstBStringPtr delimiters)
+{
+    BString stripped = BString__strip(self);
+    return BString__split_first_any(&stripped, delimiters);
 }
 
 BStringArray BString__split(ConstBStringPtr self, char delimiter)
@@ -363,7 +457,7 @@ bool BString__equals(ConstBStringPtr self, ConstBStringPtr other)
 
 BString BString__from_chars(const char * chars, StringPos length)
 {
-    BString result = EMPTY_BSTRING;
+    BString result = empty_bstr();
     for (StringPos i = 0; i < length; i++)
     {
         if (!BString__push_char(&result, chars[i]))
@@ -382,7 +476,7 @@ bool bstring_equals(void * a, void * b)
 
 BString BString__append(ConstBStringPtr self, ConstBStringPtr other)
 {
-    BString result = EMPTY_BSTRING;
+    BString result = empty_bstr();
     StringPos target = self->len + other->len;
     if (target >= result.max)
     {
@@ -406,8 +500,8 @@ BString BString__append(ConstBStringPtr self, ConstBStringPtr other)
 
 BString BString__join(BStringArrayPtr array, char delimiter)
 {
-    BString result = EMPTY_BSTRING;
-    BString delim = EMPTY_BSTRING;
+    BString result = empty_bstr();
+    BString delim = empty_bstr();
     BString__push_char(&delim, delimiter);
 
     for_each_fa_ptr(BStringArray, array, index, segment,
@@ -487,7 +581,7 @@ const char * BString__cstr(ConstBStringPtr self)
 
 BString BString__uppercase(ConstBStringPtr self)
 {
-    BString result = EMPTY_BSTRING;
+    BString result = empty_bstr();
     for (StringPos i = 0; i < BString__length(self); i++)
     {
         char ch = BString__char_at_or(self, i, '\0');
@@ -567,7 +661,7 @@ Optional(uint64_t) BString__parse_uint64_base(ConstBStringPtr self, uint64_t bas
 
 BString BString__vsprintf(ConstBStringPtr self, va_list args)
 {
-    BString result = EMPTY_BSTRING;
+    BString result = empty_bstr();
 
     if (self == NULL)
     {
@@ -585,10 +679,79 @@ BString BString__vsprintf(ConstBStringPtr self, va_list args)
 
         i++;
         format_char = BString__char_at_or(self, i, '\0');
-        while (i < BString__length(self) && format_char >= '0' && format_char <= '9')
+        bool left_align = false;
+        bool zero_pad = false;
+        while (i < BString__length(self) && (format_char == '-' || format_char == '0'))
         {
+            if (format_char == '-')
+            {
+                left_align = true;
+            }
+            if (format_char == '0')
+            {
+                zero_pad = true;
+            }
             i++;
             format_char = BString__char_at_or(self, i, '\0');
+        }
+
+        if (i >= BString__length(self))
+        {
+            break;
+        }
+
+        int width = 0;
+        if (format_char == '*')
+        {
+            width = va_arg(args, int);
+            if (width < 0)
+            {
+                left_align = true;
+                width = -width;
+            }
+            i++;
+            format_char = BString__char_at_or(self, i, '\0');
+        }
+        else
+        {
+            while (i < BString__length(self) && format_char >= '0' && format_char <= '9')
+            {
+                width = (width * 10) + (format_char - '0');
+                i++;
+                format_char = BString__char_at_or(self, i, '\0');
+            }
+        }
+
+        if (i >= BString__length(self))
+        {
+            break;
+        }
+
+        int precision = -1;
+        if (format_char == '.')
+        {
+            precision = 0;
+            i++;
+            format_char = BString__char_at_or(self, i, '\0');
+            if (format_char == '*')
+            {
+                precision = va_arg(args, int);
+                if (precision < 0)
+                {
+                    precision = -1;
+                }
+                i++;
+                format_char = BString__char_at_or(self, i, '\0');
+            }
+            else
+            {
+                while (i < BString__length(self) && format_char >= '0' && format_char <= '9')
+                {
+                    precision = (precision * 10) + (format_char - '0');
+                    i++;
+                    format_char = BString__char_at_or(self, i, '\0');
+                }
+            }
         }
 
         if (i >= BString__length(self))
@@ -614,6 +777,7 @@ BString BString__vsprintf(ConstBStringPtr self, va_list args)
             case 'd':
             case 'i':
             {
+                BString field = empty_bstr();
                 int64_t value;
                 if (long_count == 0)
                 {
@@ -628,12 +792,14 @@ BString BString__vsprintf(ConstBStringPtr self, va_list args)
                     value = va_arg(args, long long);
                 }
 
-                BString__append_int64_dec_mut(&result, value);
+                BString__append_int64_dec_mut(&field, value);
+                BString__append_formatted_field_mut(&result, &field, width, left_align, zero_pad);
                 break;
             }
 
             case 'u':
             {
+                BString field = empty_bstr();
                 uint64_t value;
                 if (long_count == 0)
                 {
@@ -648,31 +814,42 @@ BString BString__vsprintf(ConstBStringPtr self, va_list args)
                     value = va_arg(args, unsigned long long);
                 }
 
-                BString__append_uint64_dec_mut(&result, value);
+                BString__append_uint64_dec_mut(&field, value);
+                BString__append_formatted_field_mut(&result, &field, width, left_align, zero_pad);
                 break;
             }
 
             case 's':
             {
+                BString field = empty_bstr();
                 char * str = va_arg(args, char *);
-                if (str == NULL)
-                {
-                    str = "(null)";
-                }
-                BString__append_cstr_mut(&result, str);
+                BString__append_cstr_limited_mut(&field, str, precision);
+                BString__append_formatted_field_mut(&result, &field, width, left_align, zero_pad);
+                break;
+            }
+
+            case 'B':
+            {
+                BString field = empty_bstr();
+                ConstBStringPtr str = va_arg(args, ConstBStringPtr);
+                BString__append_bstring_limited_mut(&field, str, precision);
+                BString__append_formatted_field_mut(&result, &field, width, left_align, zero_pad);
                 break;
             }
 
             case 'c':
             {
+                BString field = empty_bstr();
                 int ch = va_arg(args, int);
-                BString__push_char(&result, (char) ch);
+                BString__push_char(&field, (char) ch);
+                BString__append_formatted_field_mut(&result, &field, width, left_align, zero_pad);
                 break;
             }
 
             case 'p':
             case 'x':
             {
+                BString field = empty_bstr();
                 uint64_t value;
                 if (format_char == 'p')
                 {
@@ -693,16 +870,18 @@ BString BString__vsprintf(ConstBStringPtr self, va_list args)
 
                 if (format_char == 'p')
                 {
-                    BString__append_cstr_mut(&result, "0x");
+                    BString__append_cstr_mut(&field, "0x");
                 }
 
-                BString__append_uint64_hex_mut(&result, value);
+                BString__append_uint64_hex_mut(&field, value);
+                BString__append_formatted_field_mut(&result, &field, width, left_align, zero_pad);
                 break;
             }
 
             case '%':
             {
-                BString__push_char(&result, '%');
+                BString field = bstr("%");
+                BString__append_formatted_field_mut(&result, &field, width, left_align, zero_pad);
                 break;
             }
 

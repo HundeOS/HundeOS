@@ -139,9 +139,4 @@ IOInternalHandle device_internal_handle(IOHandle handle);
         MapInit(IOServerRoleMap, subsystem.server_roles);\
         subsystem.root_filesystem = None(FilesystemPtr);\
 
-#define NEW_IO_STATE \
-    (IOState) { \
-        .handles = EmptyArray(IOHandleArray) \
-    }
-
 #endif

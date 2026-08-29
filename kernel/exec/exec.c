@@ -10,20 +10,20 @@
 
 FixedArrayBodyDefine(ElfReadBuffer);
 
-static BString unreachable_code = BSTRING_NEW("unreachable code");
-static BString permission_denied_message = BSTRING_NEW("Permission denied");
-static BString incomplete_elf_message = BSTRING_NEW("Incomplete ELF");
-static const BString drivers_prefix = BSTRING_NEW("/sbin/drivers/");
-static const BString services_prefix = BSTRING_NEW("/sbin/services/");
-static const BString hundeschule_program = BSTRING_NEW("/sbin/hundeschule");
-static const BString hundeschule_boot_program = BSTRING_NEW("hundeschule");
-static const BString hundeschau_program = BSTRING_NEW("/sbin/hundeschau");
-static const BString hundeschau_boot_program = BSTRING_NEW("hundeschau");
-static const BString hundebus_program = BSTRING_NEW("/sbin/drivers/hundebus");
-static const BString virtio_blk_program = BSTRING_NEW("/sbin/drivers/virtio_blk");
-static const BString sdhci_program = BSTRING_NEW("/sbin/drivers/sdhci");
-static const BString uart_rx_program = BSTRING_NEW("/sbin/drivers/uart_rx");
-static const BString uart_tx_program = BSTRING_NEW("/sbin/drivers/uart_tx");
+static BString unreachable_code = bstr("unreachable code");
+static BString permission_denied_message = bstr("Permission denied");
+static BString incomplete_elf_message = bstr("Incomplete ELF");
+static const BString drivers_prefix = bstr("/sbin/drivers/");
+static const BString services_prefix = bstr("/sbin/services/");
+static const BString hundeschule_program = bstr("/sbin/hundeschule");
+static const BString hundeschule_boot_program = bstr("hundeschule");
+static const BString hundeschau_program = bstr("/sbin/hundeschau");
+static const BString hundeschau_boot_program = bstr("hundeschau");
+static const BString hundebus_program = bstr("/sbin/drivers/hundebus");
+static const BString virtio_blk_program = bstr("/sbin/drivers/virtio_blk");
+static const BString sdhci_program = bstr("/sbin/drivers/sdhci");
+static const BString uart_rx_program = bstr("/sbin/drivers/uart_rx");
+static const BString uart_tx_program = bstr("/sbin/drivers/uart_tx");
 
 static bool Exec__is_hund_owned_program(ConstBStringPtr path)
 {

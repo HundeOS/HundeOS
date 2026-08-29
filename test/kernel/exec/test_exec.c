@@ -14,11 +14,26 @@
 static KernelPtr kernel = NULL;
 static ProcessPtr parent = NULL;
 
-static BString exec_path = BSTRING_NEW("/sbin/hello_world");
+static BString exec_path = bstr("/sbin/hello_world");
+static SpawnRequest exec_request;
 
 static OriginatingContext context;
 
 static const CPUID cpu = 0;
+
+static SpawnRequest test_spawn_request(ConstBStringPtr path)
+{
+    return SpawnRequest__new(
+        P_WAIT,
+        path,
+        SPAWN_INHERIT_USER_ID,
+        SPAWN_INHERIT_AUTH_TICKET,
+        SPAWN_STDIO_DEFAULT,
+        SPAWN_NO_ARG,
+        SPAWN_NO_ARG,
+        SPAWN_NO_ARG
+    );
+}
 
 void setUp(void)
 {
@@ -27,8 +42,9 @@ void setUp(void)
     kernel = init_test_kernel();
     parent = dummy_process(0, cpu, PROC_STATE_RUNNING);
 
+    exec_request = test_spawn_request(&exec_path);
     CallContext syscall_context = CallContext__new(
-        Some(ProcessPtr, parent), SYSCALL_EXEC, (Anything) cstr(exec_path), 0, 0, 0, 0
+        Some(ProcessPtr, parent), SYSCALL_EXEC, (Anything) &exec_request, 0, 0, 0, 0
     );
 
     context = OriginatingContext__syscall(kernel, syscall_context);
@@ -90,9 +106,10 @@ void test_exec_wait_schedules_child_on_parent_cpu(void)
     Scheduler__start(kernel->scheduler, 1);
 
     ProcessPtr cpu1_parent = dummy_process(1, 1, PROC_STATE_RUNNING);
-    BString path = BSTRING_NEW("/sbin/hello_world");
+    BString path = bstr("/sbin/hello_world");
+    SpawnRequest request = test_spawn_request(&path);
     CallContext syscall_context = CallContext__new(
-        Some(ProcessPtr, cpu1_parent), SYSCALL_EXEC, (Anything) cstr(path), 0, 0, 0, 0
+        Some(ProcessPtr, cpu1_parent), SYSCALL_EXEC, (Anything) &request, 0, 0, 0, 0
     );
     OriginatingContext cpu1_context = OriginatingContext__syscall(kernel, syscall_context);
 
@@ -109,9 +126,10 @@ void test_exec_wait_schedules_child_on_parent_cpu(void)
 
 void test_exec_marks_hundeschau_as_hund_identity(void)
 {
-    BString path = BSTRING_NEW("/sbin/hundeschau");
+    BString path = bstr("/sbin/hundeschau");
+    SpawnRequest request = test_spawn_request(&path);
     CallContext syscall_context = CallContext__new(
-        Some(ProcessPtr, parent), SYSCALL_EXEC, (Anything) cstr(path), 0, 0, 0, 0
+        Some(ProcessPtr, parent), SYSCALL_EXEC, (Anything) &request, 0, 0, 0, 0
     );
     OriginatingContext hundeschau_context = OriginatingContext__syscall(kernel, syscall_context);
 
@@ -124,7 +142,7 @@ void test_exec_marks_hundeschau_as_hund_identity(void)
 void test_exec_apply_builtin_identity_policy_marks_boot_hundeschau_as_hund(void)
 {
     ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
-    process->name = BSTRING_NEW("hundeschau");
+    process->name = bstr("hundeschau");
 
     Exec__apply_builtin_identity_policy(process);
 
@@ -135,7 +153,7 @@ void test_exec_apply_builtin_identity_policy_marks_boot_hundeschau_as_hund(void)
 void test_exec_apply_builtin_identity_policy_marks_boot_hundeschule_as_hund(void)
 {
     ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
-    process->name = BSTRING_NEW("hundeschule");
+    process->name = bstr("hundeschule");
 
     Exec__apply_builtin_identity_policy(process);
 
@@ -146,7 +164,7 @@ void test_exec_apply_builtin_identity_policy_marks_boot_hundeschule_as_hund(void
 void test_exec_apply_builtin_identity_policy_marks_sdhci_as_hund(void)
 {
     ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
-    process->name = BSTRING_NEW("/sbin/drivers/sdhci");
+    process->name = bstr("/sbin/drivers/sdhci");
 
     Exec__apply_builtin_identity_policy(process);
 
@@ -156,7 +174,7 @@ void test_exec_apply_builtin_identity_policy_marks_sdhci_as_hund(void)
 
 void test_exec_as_can_spawn_shell_as_user(void)
 {
-    BString path = BSTRING_NEW("/sbin/shell");
+    BString path = bstr("/sbin/shell");
 
     match_result(ProcessPtr, Exec__exec_as(
         context,
@@ -173,7 +191,7 @@ void test_exec_as_can_spawn_shell_as_user(void)
 void test_exec_as_denies_unprivileged_identity_switch(void)
 {
     Process__set_user_identity(parent);
-    BString path = BSTRING_NEW("/sbin/shell");
+    BString path = bstr("/sbin/shell");
 
     match_result(ProcessPtr, Exec__exec_as(
         context,
@@ -187,7 +205,7 @@ void test_exec_as_denies_unprivileged_identity_switch(void)
 void test_exec_denies_service_path_to_user_process(void)
 {
     Process__set_user_identity(parent);
-    BString path = BSTRING_NEW("/sbin/services/humpen");
+    BString path = bstr("/sbin/services/humpen");
 
     match_result(ProcessPtr, Exec__exec(context, path, false, ProcessArguments__new()), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SPAWN_FAILED, code); });
 }
@@ -195,7 +213,7 @@ void test_exec_denies_service_path_to_user_process(void)
 void test_exec_allows_service_path_to_hund_process(void)
 {
     Process__set_hund_identity(parent);
-    BString path = BSTRING_NEW("/sbin/services/humpen");
+    BString path = bstr("/sbin/services/humpen");
 
     match_result(ProcessPtr, Exec__exec(context, path, false, ProcessArguments__new()), success(spawned_process) {
             TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, spawned_process->user_id);

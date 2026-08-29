@@ -3,8 +3,8 @@
 #include "../../../kernel/types/bstring_additional_types.h"
 #include "../../../kernel/print.h"
 
-BString hello = BSTRING_NEW("hello");
-BString world = BSTRING_NEW("world");
+BString hello = bstr("hello");
+BString world = bstr("world");
 
 #define TEST_KSTRING_EQUALS(expected, actual) \
     bool equal = BString__equals(&expected, &actual); \
@@ -100,8 +100,8 @@ void test_bstring_equals_when_not_equal_same_length(void)
     TEST_ASSERT_FALSE(BString__equals(&str1, &str2));
 }
 
-BString delimited_string = BSTRING_NEW("hello/world/how/are/you");
-BString rejoined_string = BSTRING_NEW("hello:world:how:are:you");
+BString delimited_string = bstr("hello/world/how/are/you");
+BString rejoined_string = bstr("hello:world:how:are:you");
 void test_kstring_join(void)
 {
     BStringArray strs = BString__split(&delimited_string, '/');

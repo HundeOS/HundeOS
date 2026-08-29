@@ -9,8 +9,25 @@
 
 static KernelPtr kernel = NULL;
 static ProcessPtr parent = NULL;
-static BString exec_path = BSTRING_NEW("/sbin/hello_world");
+static BString exec_path = bstr("/sbin/hello_world");
 static const CPUID cpu = 0;
+
+static SpawnRequest test_spawn_request(
+    const char * raw_path, SpawnMode mode, AuthTicketID auth_ticket_id, SpawnStdio stdio
+)
+{
+    BString path = bstring(raw_path);
+    return SpawnRequest__new(
+        mode,
+        &path,
+        SPAWN_INHERIT_USER_ID,
+        auth_ticket_id,
+        stdio,
+        SPAWN_NO_ARG,
+        SPAWN_NO_ARG,
+        SPAWN_NO_ARG
+    );
+}
 
 void setUp(void)
 {
@@ -30,11 +47,13 @@ void tearDown(void)
 
 void test_exec_is_called_triggering_new_process()
 {
+    SpawnRequest request = test_spawn_request(cstr(exec_path), P_WAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
+
     match_result(SystemCallResult, Exec__handler(
         kernel,
         Some(ProcessPtr, parent),
-        (Anything) cstr(exec_path),
-        P_WAIT,
+        (Anything) &request,
+        0,
         0,
         0,
         0
@@ -45,11 +64,13 @@ void test_exec_is_called_triggering_new_process()
 
 void test_exec_handler_nowait_spawns_without_parking_parent()
 {
+    SpawnRequest request = test_spawn_request(cstr(exec_path), P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
+
     match_result(SystemCallResult, Exec__handler(
         kernel,
         Some(ProcessPtr, parent),
-        (Anything) cstr(exec_path),
-        P_NOWAIT,
+        (Anything) &request,
+        0,
         0,
         0,
         0
@@ -64,15 +85,12 @@ void test_exec_request_handler_can_spawn_as_user(void)
     Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user"));
     AuthTicketID ticket_id = result_unwrap(AuthTicketID, auth_result, AUTH_NO_TICKET);
 
-    SpawnRequest request = (SpawnRequest) {
-        .path = "/sbin/shell",
-        .mode = P_NOWAIT,
-        .requested_user_id = SPAWN_INHERIT_USER_ID,
-        .auth_ticket_id = ticket_id,
-        .arg0 = 0,
-        .arg1 = 0,
-        .arg2 = 0,
-    };
+    SpawnRequest request = test_spawn_request(
+        "/sbin/shell",
+        P_NOWAIT,
+        ticket_id,
+        SPAWN_STDIO_DEFAULT
+    );
 
     match_result(SystemCallResult, ExecRequest__handler(
         kernel,
@@ -90,15 +108,12 @@ void test_exec_request_handler_rejects_reused_auth_ticket(void)
     Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user"));
     AuthTicketID ticket_id = result_unwrap(AuthTicketID, auth_result, AUTH_NO_TICKET);
 
-    SpawnRequest request = (SpawnRequest) {
-        .path = "/sbin/shell",
-        .mode = P_NOWAIT,
-        .requested_user_id = SPAWN_INHERIT_USER_ID,
-        .auth_ticket_id = ticket_id,
-        .arg0 = 0,
-        .arg1 = 0,
-        .arg2 = 0,
-    };
+    SpawnRequest request = test_spawn_request(
+        "/sbin/shell",
+        P_NOWAIT,
+        ticket_id,
+        SPAWN_STDIO_DEFAULT
+    );
 
     match_result(SystemCallResult, ExecRequest__handler(
         kernel,
@@ -127,15 +142,12 @@ void test_exec_request_handler_can_spawn_root_shell_with_auth_ticket(void)
     Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, bstring("root"), bstring("root"));
     AuthTicketID ticket_id = result_unwrap(AuthTicketID, auth_result, AUTH_NO_TICKET);
 
-    SpawnRequest request = (SpawnRequest) {
-        .path = "/sbin/shell",
-        .mode = P_NOWAIT,
-        .requested_user_id = SPAWN_INHERIT_USER_ID,
-        .auth_ticket_id = ticket_id,
-        .arg0 = 0,
-        .arg1 = 0,
-        .arg2 = 0,
-    };
+    SpawnRequest request = test_spawn_request(
+        "/sbin/shell",
+        P_NOWAIT,
+        ticket_id,
+        SPAWN_STDIO_DEFAULT
+    );
 
     match_result(SystemCallResult, ExecRequest__handler(
         kernel,
@@ -154,16 +166,12 @@ void test_exec_request_handler_can_spawn_with_explicit_stdio(void)
     Process__set_file_descriptor(parent, 8, 0x8000);
     Process__set_file_descriptor(parent, 9, 0x9000);
 
-    SpawnRequest request = (SpawnRequest) {
-        .path = "/sbin/shell",
-        .mode = P_NOWAIT,
-        .requested_user_id = SPAWN_INHERIT_USER_ID,
-        .auth_ticket_id = SPAWN_INHERIT_AUTH_TICKET,
-        .stdio = SpawnStdio__new(7, 8, 9),
-        .arg0 = 0,
-        .arg1 = 0,
-        .arg2 = 0,
-    };
+    SpawnRequest request = test_spawn_request(
+        "/sbin/shell",
+        P_NOWAIT,
+        SPAWN_INHERIT_AUTH_TICKET,
+        SpawnStdio__new(7, 8, 9)
+    );
 
     match_result(SystemCallResult, ExecRequest__handler(
         kernel,

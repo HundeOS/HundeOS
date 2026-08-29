@@ -1,45 +1,60 @@
 #include "service.h"
 
 #include "syscall.h"
+#include "../types/fixed_array.h"
 
-#define MAX_SERVICE_MAPPED_MEMORY 32
+#define MAX_SERVICE_MAPPED_MEMORY 256
 
 typedef struct ServiceMappedMemoryRequest
 {
-    uint64_t physical_address;
-    uint64_t size;
-    uint64_t driver_address;
-    uint64_t device_address;
+    Address physical_address;
+    size_t size;
+    Address driver_address;
+    Address device_address;
 }
 ServiceMappedMemoryRequest;
 
+static ServiceMappedMemoryRequest ServiceMappedMemoryRequest__new(Address physical_address, size_t size)
+{
+    return (ServiceMappedMemoryRequest) {
+        .physical_address = physical_address,
+        .size = size,
+        .driver_address = 0,
+        .device_address = physical_address,
+    };
+}
+
 struct ServiceMappedMemory
 {
-    uint64_t driver_address;
-    uint64_t device_address;
-    uint64_t size;
+    Address driver_address;
+    Address device_address;
+    size_t size;
 };
 
-static ServiceMappedMemory mapped_memory[MAX_SERVICE_MAPPED_MEMORY];
-static uint64_t mapped_memory_count = 0;
-
-static void service_copy_path(char target[SERVICE_DEVICE_PATH_MAX], const char * source)
+static ServiceMappedMemory ServiceMappedMemory__new(Address driver_address, Address device_address, size_t size)
 {
-    uint64_t i = 0;
-    if (source != 0)
-    {
-        for (; i < SERVICE_DEVICE_PATH_MAX - 1 && source[i] != '\0'; i++)
-        {
-            target[i] = source[i];
-        }
-    }
-    target[i] = '\0';
+    return (ServiceMappedMemory) {
+        .driver_address = driver_address,
+        .device_address = device_address,
+        .size = size,
+    };
 }
 
-static void service_copy_bstring(char target[SERVICE_READY_NAME_MAX], ConstBStringPtr source)
+OptionalDef(ServiceMappedMemory);
+
+static bool ServiceMappedMemory__equals(void * self, void * other)
 {
-    BString__copy_to(source, target, SERVICE_READY_NAME_MAX);
+    ServiceMappedMemoryPtr left = (ServiceMappedMemoryPtr) self;
+    ServiceMappedMemoryPtr right = (ServiceMappedMemoryPtr) other;
+    return left->driver_address == right->driver_address
+        && left->device_address == right->device_address
+        && left->size == right->size;
 }
+
+FixedArrayDefine(ServiceMappedMemory, MAX_SERVICE_MAPPED_MEMORY, ServiceMappedMemoryArray, ServiceMappedMemory__equals);
+FixedArrayBodyDefine(ServiceMappedMemoryArray);
+
+static ServiceMappedMemoryArray mapped_memory = EmptyArray(ServiceMappedMemoryArray);
 
 ServiceCode service_wait(ServiceEventPtr event)
 {
@@ -51,19 +66,14 @@ ServiceCode service_become_service()
     return (ServiceCode) syscall(SERVICE_CALL, SERVICE_BECOME_SERVICE, 0, 0, 0, 0);
 }
 
-ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
+ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)
 {
-    if (memory == 0 || mapped_memory_count >= MAX_SERVICE_MAPPED_MEMORY)
+    if (memory == 0)
     {
         return SERVICE_INVALID_BUFFER;
     }
 
-    ServiceMappedMemoryRequest request = {
-        .physical_address = physical_address,
-        .size = size,
-        .driver_address = 0,
-        .device_address = physical_address,
-    };
+    ServiceMappedMemoryRequest request = ServiceMappedMemoryRequest__new(physical_address, size);
 
     ServiceCode result = (ServiceCode) syscall(SERVICE_CALL, SERVICE_MAP_MMIO, (Anything) &request, 0, 0, 0);
     if (result != SERVICE_OK)
@@ -71,12 +81,25 @@ ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMa
         return result;
     }
 
-    ServiceMappedMemoryPtr target = &mapped_memory[mapped_memory_count++];
-    target->driver_address = request.driver_address;
-    target->device_address = request.device_address;
-    target->size = request.size;
-    *memory = target;
-    return SERVICE_OK;
+    ServiceMappedMemory target =
+        ServiceMappedMemory__new(request.driver_address, request.device_address, request.size);
+
+    match_result(CollectionCode, ServiceMappedMemoryArray__push(&mapped_memory, target),
+        success(index)
+        {
+            match_optional(ServiceMappedMemoryArray__type_ptr, ServiceMappedMemoryArray__ptr_at(&mapped_memory, index),
+                some(stored)
+                {
+                    *memory = stored;
+                    return SERVICE_OK;
+                },
+                none_do_nothing()
+            );
+        },
+        error(code, message) { return SERVICE_INVALID_BUFFER; }
+    );
+
+    return SERVICE_INVALID_BUFFER;
 }
 
 ServiceCode service_subscribe_irq(uint64_t irq)
@@ -84,15 +107,29 @@ ServiceCode service_subscribe_irq(uint64_t irq)
     return (ServiceCode) syscall(SERVICE_CALL, SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0);
 }
 
-ServiceCode service_register_block_device(const char * path, uint64_t block_size, uint64_t block_count)
+ServiceCode service_register_block_device(ConstBStringPtr path, uint64_t block_size, uint64_t block_count)
 {
-    ServiceBlockDeviceRegistration request = {
-        .block_size = block_size,
-        .block_count = block_count,
-    };
-    service_copy_path(request.path, path);
-
+    ServiceBlockDeviceRegistration request =
+        ServiceBlockDeviceRegistration__new(path, block_size, block_count);
     return (ServiceCode) syscall(SERVICE_CALL, SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0);
+}
+
+ServiceBlockReadResult service_block_read_device(
+    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
+)
+{
+    ServiceBlockReadRequest request =
+        ServiceBlockReadRequest__new(path, block, block_count, buffer, buffer_size);
+    return (ServiceBlockReadResult) syscall(SERVICE_CALL, SERVICE_BLOCK_READ_DEVICE, (Anything) &request, 0, 0, 0);
+}
+
+ServiceBlockReadResult service_block_write_device(
+    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
+)
+{
+    ServiceBlockReadRequest request =
+        ServiceBlockReadRequest__new(path, block, block_count, buffer, buffer_size);
+    return (ServiceBlockReadResult) syscall(SERVICE_CALL, SERVICE_BLOCK_WRITE_DEVICE, (Anything) &request, 0, 0, 0);
 }
 
 ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPtr request)
@@ -102,26 +139,59 @@ ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPt
 
 ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint64_t block_count)
 {
-    ServiceBlockCompletion completion = {
-        .request_id = request_id,
-        .status = status,
-        .block_count = block_count,
-    };
+    ServiceBlockCompletion completion = ServiceBlockCompletion__new(request_id, status, block_count);
 
     return (ServiceCode) syscall(SERVICE_CALL, SERVICE_BLOCK_COMPLETE, (Anything) &completion, 0, 0, 0);
 }
 
-ServiceCode service_device_address(void * driver_address, uint64_t * device_address)
+ServiceCode service_register_filesystem(
+    ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
+)
+{
+    ServiceFilesystemRegistration request =
+        ServiceFilesystemRegistration__new(device_path, filesystem_type, mountpoint);
+
+    return (ServiceCode) syscall(SERVICE_CALL, SERVICE_REGISTER_FILESYSTEM, (Anything) &request, 0, 0, 0);
+}
+
+ServiceCode service_filesystem_get_request(uint64_t request_id, ServiceFilesystemRequestPtr request)
+{
+    return (ServiceCode) syscall(SERVICE_CALL, SERVICE_FILESYSTEM_GET_REQUEST, request_id, (Anything) request, 0, 0);
+}
+
+ServiceCode service_filesystem_complete(uint64_t request_id, ServiceCode status, int64_t result)
+{
+    ServiceFilesystemCompletion completion = ServiceFilesystemCompletion__new(request_id, status, result);
+
+    return (ServiceCode) syscall(SERVICE_CALL, SERVICE_FILESYSTEM_COMPLETE, (Anything) &completion, 0, 0, 0);
+}
+
+ServiceCode service_filesystem_complete_open(
+    uint64_t request_id, ServiceCode status, int64_t result, FileMode mode, uint64_t size, uint32_t * blocks
+)
+{
+    ServiceFilesystemCompletion completion = ServiceFilesystemCompletion__new(request_id, status, result);
+    completion.mode = mode;
+    completion.size = size;
+    if (blocks != 0)
+    {
+        for (size_t i = 0; i < 12; i++)
+        {
+            completion.block[i] = blocks[i];
+        }
+    }
+
+    return (ServiceCode) syscall(SERVICE_CALL, SERVICE_FILESYSTEM_COMPLETE, (Anything) &completion, 0, 0, 0);
+}
+
+ServiceCode service_device_address(void * driver_address, Address * device_address)
 {
     if (driver_address == 0 || device_address == 0)
     {
         return SERVICE_INVALID_BUFFER;
     }
 
-    ServiceDeviceAddressRequest request = {
-        .driver_address = (uint64_t) driver_address,
-        .device_address = 0,
-    };
+    ServiceDeviceAddressRequest request = ServiceDeviceAddressRequest__new((Address) driver_address);
 
     ServiceCode result = (ServiceCode) syscall(SERVICE_CALL, SERVICE_DEVICE_ADDRESS, (Anything) &request, 0, 0, 0);
     if (result != SERVICE_OK)
@@ -140,8 +210,7 @@ ServiceCode service_publish_ready(ConstBStringPtr name)
         return SERVICE_INVALID_BUFFER;
     }
 
-    ServiceReadyRequest request = {};
-    service_copy_bstring(request.name, name);
+    ServiceReadyRequest request = ServiceReadyRequest__new(name);
 
     return (ServiceCode) syscall(SERVICE_CALL, SERVICE_PUBLISH_READY, (Anything) &request, 0, 0, 0);
 }
@@ -153,8 +222,7 @@ ServiceCode service_wait_ready(ConstBStringPtr name)
         return SERVICE_INVALID_BUFFER;
     }
 
-    ServiceReadyRequest request = {};
-    service_copy_bstring(request.name, name);
+    ServiceReadyRequest request = ServiceReadyRequest__new(name);
 
     return (ServiceCode) syscall(SERVICE_CALL, SERVICE_WAIT_READY, (Anything) &request, 0, 0, 0);
 }
@@ -168,7 +236,7 @@ void * driver_ptr(ServiceMappedMemoryPtr memory)
     return (void *) memory->driver_address;
 }
 
-uint64_t device_ptr(ServiceMappedMemoryPtr memory)
+Address device_ptr(ServiceMappedMemoryPtr memory)
 {
     if (memory == 0)
     {
@@ -179,23 +247,23 @@ uint64_t device_ptr(ServiceMappedMemoryPtr memory)
 
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
-    if (memory == 0 || offset > memory->size)
+    if (memory == 0 || offset >= memory->size)
     {
         return 0;
     }
     return (void *) (memory->driver_address + offset);
 }
 
-uint64_t device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
+Address device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
-    if (memory == 0 || offset > memory->size)
+    if (memory == 0 || offset >= memory->size)
     {
         return 0;
     }
     return memory->device_address + offset;
 }
 
-uint64_t mapped_size(ServiceMappedMemoryPtr memory)
+size_t mapped_size(ServiceMappedMemoryPtr memory)
 {
     if (memory == 0)
     {

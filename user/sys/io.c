@@ -4,9 +4,10 @@
 
 #include "syscall.h"
 
-IOHandle open(const char *path, Flags flags)
+IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    return syscall(IO_CALL, IO_OPEN, any(path), flags, 0, 0);
+    IOPathRequest request = IOPathRequest__new(path, flags);
+    return syscall(IO_CALL, IO_OPEN, any(&request), 0, 0, 0);
 }
 
 ByteCount read(IOHandle handle, char *buf, size_t size)
@@ -19,14 +20,14 @@ ByteCount write(IOHandle handle, char *buf, size_t size)
     return syscall(IO_CALL, IO_WRITE, handle, any(buf), size, 0);
 }
 
-IOHandle IO__open(ConstBStringPtr self, Flags flags)
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
-    return open(BString__cstr(self), flags);
+    return open(path, flags);
 }
 
 BString IO__path_from_arg(ConstBStringPtr arg)
 {
-    BString slash = BSTRING_NEW("/");
+    BString slash = bstr("/");
     if (BString__is_empty(arg))
     {
         return slash;
@@ -42,7 +43,7 @@ BString IO__path_from_arg(ConstBStringPtr arg)
 
 BString IO__path_join(ConstBStringPtr base, ConstBStringPtr child)
 {
-    BString slash = BSTRING_NEW("/");
+    BString slash = bstr("/");
     if (BString__is_empty(base) || BString__equals(base, &slash))
     {
         return BString__append(&slash, child);
@@ -52,9 +53,9 @@ BString IO__path_join(ConstBStringPtr base, ConstBStringPtr child)
     return BString__append(&with_slash, child);
 }
 
-static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr self, StringPos max_bytes)
+static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr buffer, StringPos max_bytes)
 {
-    BString__clear(self);
+    BString__clear(buffer);
     if (max_bytes <= 0)
     {
         return 0;
@@ -63,7 +64,7 @@ static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr self, S
     StringPos buffer_max = BSTRING_MAX_SIZE - 1;
     StringPos read_max = max_bytes < buffer_max ? max_bytes : buffer_max;
 
-    ByteCount bytes = read(handle, (char *) BString__cstr(self), (size_t) read_max);
+    ByteCount bytes = read(handle, (char *) BString__cstr(buffer), (size_t) read_max);
     if (bytes <= 0)
     {
         return bytes;
@@ -74,13 +75,13 @@ static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr self, S
         bytes = read_max;
     }
 
-    *self = BString__from_chars(BString__cstr(self), bytes);
+    *buffer = BString__from_chars(BString__cstr(buffer), bytes);
     return bytes;
 }
 
-ByteCount IO__read(IOHandle handle, BStringPtr self)
+ByteCount IO__read(IOHandle handle, BStringPtr buffer)
 {
-    return IO__read_bstring_with_limit(handle, self, BSTRING_MAX_SIZE - 1);
+    return IO__read_bstring_with_limit(handle, buffer, BSTRING_MAX_SIZE - 1);
 }
 
 Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
@@ -94,7 +95,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     ByteCount total_read = 0;
     while (total_read < max_bytes)
     {
-        BString chunk = EMPTY_BSTRING;
+        BString chunk = empty_bstr();
         ByteCount remaining_capacity = max_bytes - total_read;
         ByteCount bytes = IO__read_bstring_with_limit(handle, &chunk, remaining_capacity);
         if (bytes <= 0)
@@ -126,9 +127,9 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     return Some(DynString, text);
 }
 
-ByteCount IO__write(IOHandle handle, ConstBStringPtr self)
+ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
 {
-    return write(handle, (char *) BString__cstr(self), (size_t) BString__length(self));
+    return write(handle, (char *) BString__cstr(text), (size_t) BString__length(text));
 }
 
 IOStatus close(IOHandle handle)
@@ -142,14 +143,15 @@ IOStatus close(IOHandle handle)
     return result;
 }
 
-DirectoryEntryCount list_dir(const char * path, DirectoryEntryPtr entries, size_t max_entries)
+DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
 {
-    return syscall(IO_CALL, IO_LIST_DIR, any(path), any(entries), max_entries, 0);
+    IOListDirRequest request = IOListDirRequest__new(path, entries, max_entries);
+    return syscall(IO_CALL, IO_LIST_DIR, any(&request), 0, 0, 0);
 }
 
-DirectoryEntryCount IO__list_dir(ConstBStringPtr self, DirectoryEntryPtr entries, size_t max_entries)
+DirectoryEntryCount IO__list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
 {
-    return list_dir(BString__cstr(self), entries, max_entries);
+    return list_dir(path, entries, max_entries);
 }
 
 const char * io_status_string(IOStatus status)
@@ -191,52 +193,56 @@ const char * io_status_string(IOStatus status)
     return "IO_UNKNOWN_ERROR";
 }
 
-IOStatus make_dir(const char * path)
+IOStatus make_dir(ConstBStringPtr path)
 {
-    return syscall(IO_CALL, IO_MKDIR, any(path), 0, 0, 0);
+    IOPathRequest request = IOPathRequest__new(path, 0);
+    return syscall(IO_CALL, IO_MKDIR, any(&request), 0, 0, 0);
 }
 
-IOStatus IO__make_dir(ConstBStringPtr self)
+IOStatus IO__make_dir(ConstBStringPtr path)
 {
-    return make_dir(BString__cstr(self));
+    return make_dir(path);
 }
 
-IOStatus remove_file(const char * path)
+IOStatus remove_file(ConstBStringPtr path)
 {
     return remove_file_with_flags(path, 0);
 }
 
-IOStatus IO__remove_file(ConstBStringPtr self)
+IOStatus IO__remove_file(ConstBStringPtr path)
 {
-    return remove_file(BString__cstr(self));
+    return remove_file(path);
 }
 
-IOStatus remove_file_with_flags(const char * path, Flags flags)
+IOStatus remove_file_with_flags(ConstBStringPtr path, Flags flags)
 {
-    return syscall(IO_CALL, IO_REMOVE, any(path), flags, 0, 0);
+    IOPathRequest request = IOPathRequest__new(path, flags);
+    return syscall(IO_CALL, IO_REMOVE, any(&request), 0, 0, 0);
 }
 
-IOStatus IO__remove_file_with_flags(ConstBStringPtr self, Flags flags)
+IOStatus IO__remove_file_with_flags(ConstBStringPtr path, Flags flags)
 {
-    return remove_file_with_flags(BString__cstr(self), flags);
+    return remove_file_with_flags(path, flags);
 }
 
-IOStatus link_file(const char * source_path, const char * target_path)
+IOStatus link_file(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
-    return syscall(IO_CALL, IO_LINK, any(source_path), any(target_path), 0, 0);
+    IOLinkRequest request = IOLinkRequest__new(source_path, target_path);
+    return syscall(IO_CALL, IO_LINK, any(&request), 0, 0, 0);
 }
 
 IOStatus IO__link_file(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
-    return link_file(BString__cstr(source_path), BString__cstr(target_path));
+    return link_file(source_path, target_path);
 }
 
-IOStatus mount_device(const char * device_path, const char * filesystem_type, const char * mountpoint)
+IOStatus mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
 {
-    return syscall(IO_CALL, IO_MOUNT, any(device_path), any(filesystem_type), any(mountpoint), 0);
+    IOMountRequest request = IOMountRequest__new(device_path, filesystem_type, mountpoint);
+    return syscall(IO_CALL, IO_MOUNT, any(&request), 0, 0, 0);
 }
 
 IOStatus IO__mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
 {
-    return mount_device(BString__cstr(device_path), BString__cstr(filesystem_type), BString__cstr(mountpoint));
+    return mount_device(device_path, filesystem_type, mountpoint);
 }

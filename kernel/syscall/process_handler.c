@@ -4,10 +4,10 @@
 #include "../scheduler/kernel_context.h"
 #include "../scheduler/scheduler.h"
 
-static BString invalid_process_list_request = BSTRING_NEW("Invalid process list request");
-static BString invalid_child_event_request = BSTRING_NEW("Invalid child event request");
-static BString invalid_sleep_request = BSTRING_NEW("Invalid sleep request");
-static BString sleep_pending = BSTRING_NEW("Sleep pending");
+static BString invalid_process_list_request = bstr("Invalid process list request");
+static BString invalid_child_event_request = bstr("Invalid child event request");
+static BString invalid_sleep_request = bstr("Invalid sleep request");
+static BString sleep_pending = bstr("Sleep pending");
 
 static Result(Anything) ProcessChildEvent__copy_to_target(Result(Anything) result, Anything context)
 {

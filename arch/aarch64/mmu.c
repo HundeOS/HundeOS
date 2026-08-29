@@ -8,8 +8,7 @@
 
 #include "page_table.h"
 
-static PageTable null_table = (PageTable){
-};
+static PageTable null_table;
 
 mutex_t init_mutex = MUTEX_INIT;
 

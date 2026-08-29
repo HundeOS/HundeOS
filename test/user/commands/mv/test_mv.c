@@ -86,8 +86,9 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 
     if (op == IO_OPEN)
     {
-        const char * path = (const char *) arg2;
-        Flags flags = (Flags) arg3;
+        IOPathRequestPtr request = (IOPathRequestPtr) arg2;
+        const char * path = BString__cstr(&request->path);
+        Flags flags = request->flags;
         record_call(op, path, NULL, flags, 0, 0);
 
         if (scenario == MV_SCENARIO_FILE)
@@ -123,15 +124,17 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 
     if (op == IO_LIST_DIR)
     {
-        const char * path = (const char *) arg2;
-        record_call(op, path, NULL, 0, 0, (size_t) arg4);
+        IOListDirRequestPtr request = (IOListDirRequestPtr) arg2;
+        const char * path = BString__cstr(&request->path);
+        record_call(op, path, NULL, 0, 0, request->max_entries);
 
         if (scenario == MV_SCENARIO_DIR)
         {
-            DirectoryEntryPtr entries = (DirectoryEntryPtr) arg3;
+            DirectoryEntryPtr entries = request->entries;
             if (strcmp(path, "/srcdir") == 0)
             {
-                strcpy(entries[0].name, "file.txt");
+                BString file_name = bstr("file.txt");
+                entries[0] = DirectoryEntry__new(0, 0, 0, 0, &file_name);
                 return 1;
             }
             if (strcmp(path, "/srcdir/file.txt") == 0)
@@ -193,15 +196,17 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 
     if (op == IO_MKDIR)
     {
-        const char * path = (const char *) arg2;
+        IOPathRequestPtr request = (IOPathRequestPtr) arg2;
+        const char * path = BString__cstr(&request->path);
         record_call(op, path, NULL, 0, 0, 0);
         return IO_OK;
     }
 
     if (op == IO_REMOVE)
     {
-        const char * path = (const char *) arg2;
-        Flags flags = (Flags) arg3;
+        IOPathRequestPtr request = (IOPathRequestPtr) arg2;
+        const char * path = BString__cstr(&request->path);
+        Flags flags = request->flags;
         record_call(op, path, NULL, flags, 0, 0);
         return IO_OK;
     }
@@ -209,8 +214,9 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
     return IO_PANIC;
 }
 
-void print(const char * str)
+void IO__print(ConstBStringPtr message)
 {
+    const char * str = BString__cstr(message);
     while (*str != '\0' && output_position + 1 < sizeof(output))
     {
         output[output_position++] = *str++;
@@ -218,17 +224,18 @@ void print(const char * str)
     output[output_position] = '\0';
 }
 
-int printf(const char * format, ...)
+int IO__printf(ConstBStringPtr format, ...)
 {
     va_list args;
     va_start(args, format);
-    int written = vsnprintf(output + output_position, sizeof(output) - output_position, format, args);
+    BString formatted = BString__vsprintf(format, args);
     va_end(args);
+    StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
         output_position += (uint64_t) written;
     }
-    return written;
+    return (int) written;
 }
 
 void test_mv_moves_a_file_via_copy_then_remove(void)

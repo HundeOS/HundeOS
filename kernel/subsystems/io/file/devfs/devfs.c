@@ -4,10 +4,10 @@
 #include "../../io_subsystem.h"
 #include "../../block/block_device.h"
 
-static BString invalid_path = BSTRING_NEW("Invalid devfs path");
-static BString not_supported = BSTRING_NEW("Devfs operation not supported");
-static BString invalid_handle = BSTRING_NEW("Invalid devfs handle");
-static BString metadata_format = BSTRING_NEW("path=%s\nblock_size=%i\nblock_count=%i\nuserspace_service=%i\n");
+static BString invalid_path = bstr("Invalid devfs path");
+static BString not_supported = bstr("Devfs operation not supported");
+static BString invalid_handle = bstr("Invalid devfs handle");
+static BString metadata_format = bstr("path=%B\nblock_size=%i\nblock_count=%i\nuserspace_service=%i\n");
 
 BlockDevicePaths BlockDeviceRegistry__paths() __attribute__((weak));
 BlockDevicePaths BlockDeviceRegistry__paths()
@@ -117,7 +117,7 @@ static Result(IOBufferPtr) DevFilesystemIO__read(
                 {
                     BString text = BString__sprintf(
                         &metadata_format,
-                        cstr(metadata.path),
+                        &metadata.path,
                         (int) metadata.block_size,
                         (int) metadata.block_count,
                         (int) metadata.userspace_service

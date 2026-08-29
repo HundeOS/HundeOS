@@ -3,6 +3,6 @@
 
 #include "syscalls/auth.h"
 
-AuthResult auth(const char * username, const char * password);
+AuthResult auth(ConstBStringPtr username, ConstBStringPtr password);
 
 #endif

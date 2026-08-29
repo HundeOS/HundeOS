@@ -131,12 +131,12 @@ RULES = (
     ),
     Rule(
         name="constructor-required",
-        message="use a Type__new method instead of zero-initializer plus field assignments",
+        message="use a Type__new method instead of direct struct literals or zero-initializer plus field assignments",
         pattern=re.compile(r"$^"),
     ),
     Rule(
         name="member-first-arg-self",
-        message="first argument to a non-static Type__method function must be named self",
+        message="first argument to a non-static Type__method function must be named self when it has the Type receiver",
         pattern=re.compile(r"$^"),
     ),
     Rule(
@@ -149,6 +149,11 @@ RULES = (
         name="legacy-critical-section-macros",
         message="use critical_section/critical_section_try instead of CriticalSection/CriticalSectionTry",
         pattern=re.compile(r"\b(?:CriticalSection|CriticalSectionTry)\s*\("),
+    ),
+    Rule(
+        name="legacy-user-print",
+        message="use IO__print/IO__printf instead of unscoped print/printf",
+        pattern=re.compile(r"\b(?:print|printf)\s*\("),
     ),
     Rule(
         name="test-fail-branch-outside-tests",
@@ -276,6 +281,10 @@ def _is_ignored_path(path: Path) -> bool:
 
 def _is_test_path(path: Path) -> bool:
     return fnmatch.fnmatch(_normalise(path), "test/**")
+
+
+def _is_user_path(path: Path) -> bool:
+    return fnmatch.fnmatch(_normalise(path), "user/**")
 
 
 def _line_ignores(raw_line: str) -> set[str]:
@@ -634,6 +643,61 @@ def _is_zero_compound_literal(source: bytes, node) -> bool:
     return any(_is_zero_initializer_list(source, child) for child in node.children)
 
 
+def _compound_literal_type_name(source: bytes, node) -> str:
+    if node.type != "compound_literal_expression":
+        return ""
+
+    for child in node.children:
+        if child.type == "type_descriptor":
+            return _normalise_type_name(_node_text(source, child))
+
+    return ""
+
+
+def _compound_literal_requires_constructor(source: bytes, node) -> bool:
+    if node.type != "compound_literal_expression":
+        return False
+
+    for child in node.children:
+        if child.type != "type_descriptor":
+            continue
+
+        type_text = _node_text(source, child)
+        if "[" in type_text or "]" in type_text:
+            return False
+
+        return any(grandchild.type in {"type_identifier", "struct_specifier"} for grandchild in child.children)
+
+    return False
+
+
+def _enclosing_function_name(source: bytes, node) -> str:
+    ancestor = node.parent
+    while ancestor is not None and ancestor.type != "function_definition":
+        ancestor = ancestor.parent
+
+    if ancestor is None:
+        return ""
+
+    declarator = ancestor.child_by_field_name("declarator")
+    if declarator is None:
+        return ""
+
+    identifier = _function_declarator_identifier(declarator)
+    if identifier is None:
+        return ""
+
+    return _node_text(source, identifier)
+
+
+def _is_in_constructor_function(source: bytes, node) -> bool:
+    name = _enclosing_function_name(source, node)
+    if "__" not in name:
+        return False
+    method_name = name.split("__", 1)[1]
+    return "new" in method_name.split("_")
+
+
 def _assignment_writes_field_on_symbol(source: bytes, node, symbol: str) -> bool:
     if node.type != "expression_statement":
         return False
@@ -686,6 +750,24 @@ def _lint_constructor_required(path: Path, source_text: str, tree) -> list[Findi
     findings = []
 
     for node in _walk(tree.root_node):
+        if node.type == "compound_literal_expression":
+            if _compound_literal_requires_constructor(source, node) and not _is_in_constructor_function(source, node):
+                line_number, column = _line_column_for_offset(line_starts, node.start_byte)
+                raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+                if CONSTRUCTOR_RULE.name in _line_ignores(raw_line):
+                    continue
+
+                findings.append(
+                    Finding(
+                        path=path,
+                        line=line_number,
+                        column=column,
+                        rule=CONSTRUCTOR_RULE.name,
+                        message=CONSTRUCTOR_RULE.message,
+                    )
+                )
+            continue
+
         if node.type != "compound_statement":
             continue
 
@@ -1250,6 +1332,8 @@ def lint_source(path: Path, source: str, tree=None) -> list[Finding]:
     findings = []
 
     for rule in TEXT_RULES:
+        if rule.name == "legacy-user-print" and not _is_user_path(path):
+            continue
         if _is_allowed(rule, path):
             continue
         for line_number, clean_line in enumerate(clean_lines, start=1):

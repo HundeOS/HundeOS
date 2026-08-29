@@ -1,6 +1,8 @@
 #include "unity.h"
+#include <string.h>
 
 #include "../../../kernel/syscall/service_handler.h"
+#include "../../../kernel/syscall/io_handler.h"
 #include "../../../kernel/service/service.h"
 #include "../../../kernel/scheduler/context_switch.h"
 #include "../../../kernel/scheduler/register.h"
@@ -26,10 +28,10 @@ static bool second_parallel_async_called = false;
 
 typedef struct TestServiceMappedMemoryRequest
 {
-    uint64_t physical_address;
-    uint64_t size;
-    uint64_t driver_address;
-    uint64_t device_address;
+    Address physical_address;
+    size_t size;
+    Address driver_address;
+    Address device_address;
 }
 TestServiceMappedMemoryRequest;
 
@@ -40,10 +42,32 @@ static void test_resume_process(ProcessPtr process)
 
 static ServiceReadyRequest test_ready_request(const char * name)
 {
-    ServiceReadyRequest request = {};
     BString ready_name = bstring(name);
-    BString__copy_to(&ready_name, request.name, SERVICE_READY_NAME_MAX);
-    return request;
+    return ServiceReadyRequest__new(&ready_name);
+}
+
+static ServiceBlockDeviceRegistration test_block_registration(const char * path, BlockCount block_count)
+{
+    BString device_path = bstring(path);
+    return ServiceBlockDeviceRegistration__new(&device_path, BLOCK_DEVICE_BLOCK_SIZE, block_count);
+}
+
+static ServiceFilesystemRegistration test_filesystem_registration(
+    const char * device_path, const char * filesystem_type, const char * mountpoint
+)
+{
+    BString device = bstring(device_path);
+    BString type = bstring(filesystem_type);
+    BString mount = bstring(mountpoint);
+    return ServiceFilesystemRegistration__new(&device, &type, &mount);
+}
+
+static IOListDirRequest test_list_dir_request(
+    const char * path, DirectoryEntryPtr entries, size_t max_entries
+)
+{
+    BString list_path = bstring(path);
+    return IOListDirRequest__new(&list_path, entries, max_entries);
 }
 
 void Arch__reset_irq_tracking();
@@ -177,10 +201,8 @@ void test_service_handler_translates_service_user_address_to_device_address(void
     Result(UserAddress) allocation_result = Process__alloc_user_pages(process, 512);
     TEST_ASSERT_TRUE(allocation_result.ok);
     UserAddress allocation = result_unwrap(UserAddress, allocation_result, NULL_USER_ADDRESS);
-    ServiceDeviceAddressRequest request = {
-        .driver_address = allocation.virtual_addr + 128,
-        .device_address = 0,
-    };
+    ServiceDeviceAddressRequest request =
+        ServiceDeviceAddressRequest__new(allocation.virtual_addr + 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_DEVICE_ADDRESS, (Anything) &request, 0, 0, 0
@@ -352,11 +374,7 @@ void test_service_handler_registers_block_device_for_service_process(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration request = {
-        .path = "/dev/virtio1",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration request = test_block_registration("/dev/virtio1", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
@@ -382,11 +400,7 @@ void test_service_handler_registering_block_device_mounts_matching_filesystem_ta
 
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration request = {
-        .path = "/dev/virtio-table",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration request = test_block_registration("/dev/virtio-table", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
@@ -411,11 +425,7 @@ void test_service_handler_registering_block_device_mounts_root_filesystem_table_
 
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration request = {
-        .path = "/dev/virtio-root",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration request = test_block_registration("/dev/virtio-root", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
@@ -428,11 +438,7 @@ void test_service_handler_rejects_duplicate_block_device_registration(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration request = {
-        .path = "/dev/virtio-duplicate",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration request = test_block_registration("/dev/virtio-duplicate", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
@@ -449,11 +455,7 @@ void test_service_handler_process_cleanup_unregisters_block_device(void)
     first_process->process_class = PROCESS_CLASS_SERVICE;
     ProcessPtr second_process = dummy_process(2, cpu, PROC_STATE_READY);
     second_process->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration request = {
-        .path = "/dev/virtio-cleanup",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration request = test_block_registration("/dev/virtio-cleanup", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, first_process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
@@ -474,11 +476,7 @@ void test_service_handler_gets_and_completes_block_write_request(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration registration = {
-        .path = "/dev/virtio-protocol",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration registration = test_block_registration("/dev/virtio-protocol", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
@@ -505,13 +503,13 @@ void test_service_handler_gets_and_completes_block_write_request(void)
     ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(event.source, request.request_id);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio-protocol", request.device_path);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio-protocol", BString__cstr(&request.device_path));
     TEST_ASSERT_EQUAL(SERVICE_BLOCK_WRITE, request.operation);
     TEST_ASSERT_EQUAL_UINT64(7, request.block);
     TEST_ASSERT_EQUAL_UINT64(1, request.block_count);
     TEST_ASSERT_EQUAL_UINT64(BLOCK_DEVICE_BLOCK_SIZE, request.block_size);
     TEST_ASSERT_EQUAL_UINT64(BLOCK_DEVICE_BLOCK_SIZE, request.buffer_size);
-    TEST_ASSERT_NOT_NULL(request.buffer);
+    TEST_ASSERT_NOT_EQUAL(0, request.buffer);
 
     ServiceBlockCompletion completion = {
         .request_id = request.request_id,
@@ -527,11 +525,7 @@ void test_service_handler_block_completion_unparks_waiting_reader(void)
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration registration = {
-        .path = "/dev/virtio-park",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration registration = test_block_registration("/dev/virtio-park", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
@@ -571,6 +565,555 @@ void test_service_handler_block_completion_unparks_waiting_reader(void)
     ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
+}
+
+void test_service_handler_block_read_device_maps_requester_buffer_into_block_service(void)
+{
+    ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
+    service->process_class = PROCESS_CLASS_SERVICE;
+    ServiceBlockDeviceRegistration registration = test_block_registration("/dev/virtio-shared-read", 128);
+
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+
+    ProcessPtr reader = dummy_process(2, cpu, PROC_STATE_READY);
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
+
+    UserAddress reader_buffer =
+        result_unwrap(UserAddress, Process__alloc_user_pages(reader, BLOCK_DEVICE_BLOCK_SIZE), NULL_USER_ADDRESS);
+    BString read_path = bstring("/dev/virtio-shared-read");
+    ServiceBlockReadRequest read_request = ServiceBlockReadRequest__new(
+        &read_path, 13, 1, reader_buffer.virtual_addr, BLOCK_DEVICE_BLOCK_SIZE
+    );
+
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, reader), SERVICE_BLOCK_READ_DEVICE, (Anything) &read_request, 0, 0, 0
+    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, reader->state);
+
+    ServiceEvent event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &event, 0, 0, 0
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+
+    ServiceBlockRequest block_request = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_BLOCK_GET_REQUEST, event.source, (Anything) &block_request, 0, 0
+    ), success(code) {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+            TEST_ASSERT_EQUAL(SERVICE_BLOCK_READ, block_request.operation);
+            TEST_ASSERT_EQUAL(13, block_request.block);
+            TEST_ASSERT_EQUAL(1, block_request.block_count);
+            TEST_ASSERT_NOT_EQUAL(read_request.buffer, block_request.buffer);
+        }, error_test_fail());
+
+    match_result(Address, Process__device_address(reader, (Address) read_request.buffer),
+        success(reader_phys)
+        {
+            match_result(Address, Process__device_address(service, (Address) block_request.buffer),
+                success(service_phys) { TEST_ASSERT_EQUAL(reader_phys, service_phys); },
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+
+    ServiceBlockCompletion completion = {
+        .request_id = block_request.request_id,
+        .status = SERVICE_OK,
+        .block_count = 1,
+    };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &completion, 0, 0, 0
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, reader->state);
+
+    test_resume_process(reader);
+    TEST_ASSERT_EQUAL(1, result_unwrap(Anything, deferred_syscall_result(), (Anything) -999));
+
+    match_result(Address, Process__device_address(service, (Address) block_request.buffer),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_MEMORY_NOT_FOUND, code); }
+    );
+}
+
+void test_service_handler_userspace_filesystem_list_dir_uses_shared_entries_buffer(void)
+{
+    FilesystemPtr root = RootFilesystem__heap_new();
+    FilesystemIOState__heap_new(root);
+    kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
+    match_result(DeviceHandle, IOSubsystem__register_device(
+        kernel->io_subsystem, bstring("/"), &root->file_io.base_io, &root->state->state
+    ),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    ProcessPtr filesystem_service = dummy_process(1, cpu, PROC_STATE_READY);
+    filesystem_service->process_class = PROCESS_CLASS_SERVICE;
+    ServiceFilesystemRegistration registration =
+        test_filesystem_registration("/dev/virtio-fs", "ext2", "/");
+
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_REGISTER_FILESYSTEM, (Anything) &registration, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ProcessPtr requester = dummy_process(2, cpu, PROC_STATE_READY);
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, requester),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    UserAddress entries_buffer =
+        result_unwrap(UserAddress, Process__alloc_user_pages(requester, sizeof(DirectoryEntry) * 4), NULL_USER_ADDRESS);
+    IOListDirRequest list_request = test_list_dir_request(
+        "/",
+        (DirectoryEntryPtr) entries_buffer.virtual_addr,
+        4
+    );
+
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, requester), IO_LIST_DIR, (Anything) &list_request, 0, 0, 0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, requester->state);
+
+    ServiceEvent event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_WAIT, (Anything) &event, 0, 0, 0
+    ),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+            TEST_ASSERT_EQUAL(SERVICE_EVENT_FILESYSTEM_IO, event.type);
+        },
+        error_test_fail()
+    );
+
+    ServiceFilesystemRequest filesystem_request = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_FILESYSTEM_GET_REQUEST, event.source, (Anything) &filesystem_request, 0, 0
+    ),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+            TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_LIST_DIR, filesystem_request.operation);
+            TEST_ASSERT_EQUAL_STRING("/dev/virtio-fs", BString__cstr(&filesystem_request.device_path));
+            TEST_ASSERT_EQUAL_STRING("", BString__cstr(&filesystem_request.path));
+            TEST_ASSERT_NOT_EQUAL((Address) entries_buffer.virtual_addr, filesystem_request.entries);
+        },
+        error_test_fail()
+    );
+
+    match_result(Address, Process__device_address(requester, entries_buffer.virtual_addr),
+        success(requester_phys)
+        {
+            match_result(Address, Process__device_address(filesystem_service, filesystem_request.entries),
+                success(service_phys) { TEST_ASSERT_EQUAL(requester_phys, service_phys); },
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+
+    DirectoryEntryPtr entries = ptr(entries_buffer.kernel_addr.virtual_addr, DirectoryEntry);
+    entries[0] = DirectoryEntry__new(
+        IO_DIRENT_ATTR_NONE,
+        PROCESS_USER_ROOT,
+        PROCESS_GROUP_ROOT,
+        IO_MODE_TYPE_FILE | 0644,
+        &bstr("HELLO.TXT")
+    );
+
+    ServiceFilesystemCompletion completion =
+        ServiceFilesystemCompletion__new(filesystem_request.request_id, SERVICE_OK, 1);
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_FILESYSTEM_COMPLETE, (Anything) &completion, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, requester->state);
+
+    test_resume_process(requester);
+    TEST_ASSERT_EQUAL(1, result_unwrap(Anything, deferred_syscall_result(), (Anything) -999));
+    TEST_ASSERT_EQUAL_STRING("HELLO.TXT", entries[0].name);
+
+    match_result(Address, Process__device_address(filesystem_service, filesystem_request.entries),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_MEMORY_NOT_FOUND, code); }
+    );
+}
+
+void test_service_handler_userspace_filesystem_open_read_close_file(void)
+{
+    FilesystemPtr root = RootFilesystem__heap_new();
+    FilesystemIOState__heap_new(root);
+    kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
+    match_result(DeviceHandle, IOSubsystem__register_device(
+        kernel->io_subsystem, bstring("/"), &root->file_io.base_io, &root->state->state
+    ),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    ProcessPtr filesystem_service = dummy_process(1, cpu, PROC_STATE_READY);
+    filesystem_service->process_class = PROCESS_CLASS_SERVICE;
+    ServiceFilesystemRegistration registration =
+        test_filesystem_registration("/dev/virtio-fs", "ext2", "/");
+
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_REGISTER_FILESYSTEM, (Anything) &registration, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ProcessPtr requester = dummy_process(2, cpu, PROC_STATE_READY);
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, requester),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    BString open_path = bstring("/hello.txt");
+    IOPathRequest open_request = IOPathRequest__new(&open_path, IO_OPEN_READ);
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, requester), IO_OPEN, (Anything) &open_request, 0, 0, 0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+
+    ServiceEvent open_event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_WAIT, (Anything) &open_event, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ServiceFilesystemRequest filesystem_request = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_FILESYSTEM_GET_REQUEST, open_event.source, (Anything) &filesystem_request, 0, 0
+    ),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+            TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_OPEN, filesystem_request.operation);
+            TEST_ASSERT_EQUAL_STRING("hello.txt", BString__cstr(&filesystem_request.path));
+            TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, filesystem_request.flags);
+        },
+        error_test_fail()
+    );
+
+    ServiceFilesystemCompletion open_completion =
+        ServiceFilesystemCompletion__new(filesystem_request.request_id, SERVICE_OK, 0);
+    open_completion.mode = IO_MODE_TYPE_FILE | 0644;
+    open_completion.size = 12;
+    open_completion.block[0] = 12;
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_FILESYSTEM_COMPLETE, (Anything) &open_completion, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, requester->state);
+    test_resume_process(requester);
+    FileDescriptor fd = (FileDescriptor) result_unwrap(Anything, deferred_syscall_result(), (Anything) -999);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, fd);
+
+    UserAddress read_buffer = result_unwrap(UserAddress, Process__alloc_user_pages(requester, 16), NULL_USER_ADDRESS);
+    match_result(SystemCallResult, IO__handler(
+        kernel,
+        Some(ProcessPtr, requester),
+        IO_READ,
+        (Anything) fd,
+        read_buffer.virtual_addr,
+        5,
+        0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+
+    ServiceEvent read_event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_WAIT, (Anything) &read_event, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ServiceFilesystemRequest read_request = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_FILESYSTEM_GET_REQUEST, read_event.source, (Anything) &read_request, 0, 0
+    ),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+            TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_READ, read_request.operation);
+            TEST_ASSERT_EQUAL_UINT64(12, read_request.block);
+            TEST_ASSERT_EQUAL_UINT64(0, read_request.block_offset);
+            TEST_ASSERT_EQUAL_UINT64(5, read_request.size);
+            TEST_ASSERT_NOT_EQUAL(read_buffer.virtual_addr, read_request.buffer);
+        },
+        error_test_fail()
+    );
+
+    match_result(Address, Process__device_address(requester, read_buffer.virtual_addr),
+        success(requester_phys)
+        {
+            match_result(Address, Process__device_address(filesystem_service, read_request.buffer),
+                success(service_phys) { TEST_ASSERT_EQUAL(requester_phys, service_phys); },
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+
+    DataPtr data = ptr(read_buffer.kernel_addr.virtual_addr, Data);
+    memcpy(data, "hello", 5);
+    ServiceFilesystemCompletion read_completion =
+        ServiceFilesystemCompletion__new(read_request.request_id, SERVICE_OK, 5);
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_FILESYSTEM_COMPLETE, (Anything) &read_completion, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, requester->state);
+    test_resume_process(requester);
+    TEST_ASSERT_EQUAL(5, result_unwrap(Anything, deferred_syscall_result(), (Anything) -999));
+    TEST_ASSERT_EQUAL_MEMORY("hello", data, 5);
+
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, requester), IO_CLOSE, (Anything) fd, 0, 0, 0
+    ),
+        success(result) { TEST_ASSERT_EQUAL(fd, result); },
+        error_test_fail()
+    );
+}
+
+void test_service_handler_userspace_filesystem_write_mkdir_and_remove(void)
+{
+    FilesystemPtr root = RootFilesystem__heap_new();
+    FilesystemIOState__heap_new(root);
+    kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
+    match_result(DeviceHandle, IOSubsystem__register_device(
+        kernel->io_subsystem, bstring("/"), &root->file_io.base_io, &root->state->state
+    ),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    ProcessPtr filesystem_service = dummy_process(1, cpu, PROC_STATE_READY);
+    filesystem_service->process_class = PROCESS_CLASS_SERVICE;
+    ServiceFilesystemRegistration registration =
+        test_filesystem_registration("/dev/virtio-fs", "ext2", "/");
+
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_REGISTER_FILESYSTEM, (Anything) &registration, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ProcessPtr requester = dummy_process(2, cpu, PROC_STATE_READY);
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, requester),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    BString open_path = bstring("/new.txt");
+    IOPathRequest open_request = IOPathRequest__new(&open_path, IO_OPEN_WRITE);
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, requester), IO_OPEN, (Anything) &open_request, 0, 0, 0
+    ),
+        success(fd_any)
+        {
+            FileDescriptor fd = (FileDescriptor) fd_any;
+            UserAddress write_buffer = result_unwrap(UserAddress, Process__alloc_user_pages(requester, 16), NULL_USER_ADDRESS);
+            DataPtr data = ptr(write_buffer.kernel_addr.virtual_addr, Data);
+            memcpy(data, "new data", 8);
+
+            match_result(SystemCallResult, IO__handler(
+                kernel,
+                Some(ProcessPtr, requester),
+                IO_WRITE,
+                (Anything) fd,
+                write_buffer.virtual_addr,
+                8,
+                0
+            ),
+                success_test_fail(),
+                error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+            );
+
+            ServiceEvent write_event = { 0 };
+            match_result(SystemCallResult, Service__handler(
+                kernel, Some(ProcessPtr, filesystem_service), SERVICE_WAIT, (Anything) &write_event, 0, 0, 0
+            ),
+                success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+                error_test_fail()
+            );
+
+            ServiceFilesystemRequest write_request = { 0 };
+            match_result(SystemCallResult, Service__handler(
+                kernel,
+                Some(ProcessPtr, filesystem_service),
+                SERVICE_FILESYSTEM_GET_REQUEST,
+                write_event.source,
+                (Anything) &write_request,
+                0,
+                0
+            ),
+                success(code)
+                {
+                    TEST_ASSERT_EQUAL(SERVICE_OK, code);
+                    TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_WRITE, write_request.operation);
+                    TEST_ASSERT_EQUAL_STRING("new.txt", BString__cstr(&write_request.path));
+                    TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE, write_request.flags);
+                    TEST_ASSERT_EQUAL_UINT64(8, write_request.size);
+                    TEST_ASSERT_NOT_EQUAL(write_buffer.virtual_addr, write_request.buffer);
+                },
+                error_test_fail()
+            );
+
+            match_result(Address, Process__device_address(requester, write_buffer.virtual_addr),
+                success(requester_phys)
+                {
+                    match_result(Address, Process__device_address(filesystem_service, write_request.buffer),
+                        success(service_phys) { TEST_ASSERT_EQUAL(requester_phys, service_phys); },
+                        error_test_fail()
+                    );
+                },
+                error_test_fail()
+            );
+
+            ServiceFilesystemCompletion write_completion =
+                ServiceFilesystemCompletion__new(write_request.request_id, SERVICE_OK, 8);
+            write_completion.mode = IO_MODE_TYPE_FILE | 0644;
+            write_completion.size = 8;
+            write_completion.block[0] = 13;
+            match_result(SystemCallResult, Service__handler(
+                kernel, Some(ProcessPtr, filesystem_service), SERVICE_FILESYSTEM_COMPLETE, (Anything) &write_completion, 0, 0, 0
+            ),
+                success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+                error_test_fail()
+            );
+
+            TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, requester->state);
+            test_resume_process(requester);
+            TEST_ASSERT_EQUAL(8, result_unwrap(Anything, deferred_syscall_result(), (Anything) -999));
+        },
+        error_test_fail()
+    );
+
+    BString dir_path = bstring("/docs");
+    IOPathRequest mkdir_request = IOPathRequest__new(&dir_path, 0);
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, requester), IO_MKDIR, (Anything) &mkdir_request, 0, 0, 0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+
+    ServiceEvent mkdir_event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_WAIT, (Anything) &mkdir_event, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ServiceFilesystemRequest mkdir_service_request = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel,
+        Some(ProcessPtr, filesystem_service),
+        SERVICE_FILESYSTEM_GET_REQUEST,
+        mkdir_event.source,
+        (Anything) &mkdir_service_request,
+        0,
+        0
+    ),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+            TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_MKDIR, mkdir_service_request.operation);
+            TEST_ASSERT_EQUAL_STRING("docs", BString__cstr(&mkdir_service_request.path));
+        },
+        error_test_fail()
+    );
+
+    ServiceFilesystemCompletion mkdir_completion =
+        ServiceFilesystemCompletion__new(mkdir_service_request.request_id, SERVICE_OK, IO_OK);
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_FILESYSTEM_COMPLETE, (Anything) &mkdir_completion, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+    test_resume_process(requester);
+    TEST_ASSERT_EQUAL(IO_OK, result_unwrap(Anything, deferred_syscall_result(), (Anything) -999));
+
+    IOPathRequest remove_request = IOPathRequest__new(&dir_path, IO_REMOVE_RECURSIVE);
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, requester), IO_REMOVE, (Anything) &remove_request, 0, 0, 0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+
+    ServiceEvent remove_event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_WAIT, (Anything) &remove_event, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ServiceFilesystemRequest remove_service_request = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel,
+        Some(ProcessPtr, filesystem_service),
+        SERVICE_FILESYSTEM_GET_REQUEST,
+        remove_event.source,
+        (Anything) &remove_service_request,
+        0,
+        0
+    ),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+            TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_REMOVE, remove_service_request.operation);
+            TEST_ASSERT_EQUAL_STRING("docs", BString__cstr(&remove_service_request.path));
+            TEST_ASSERT_EQUAL_UINT64(IO_REMOVE_RECURSIVE, remove_service_request.flags);
+        },
+        error_test_fail()
+    );
+
+    ServiceFilesystemCompletion remove_completion =
+        ServiceFilesystemCompletion__new(remove_service_request.request_id, SERVICE_OK, IO_OK);
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, filesystem_service), SERVICE_FILESYSTEM_COMPLETE, (Anything) &remove_completion, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+    test_resume_process(requester);
+    TEST_ASSERT_EQUAL(IO_OK, result_unwrap(Anything, deferred_syscall_result(), (Anything) -999));
 }
 
 static Result(Anything) async_read_continuation(BlockIOContextPtr context)
@@ -623,11 +1166,7 @@ void test_service_handler_block_completion_runs_async_read_continuation_with_ker
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration registration = {
-        .path = "/dev/virtio-async",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration registration = test_block_registration("/dev/virtio-async", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
@@ -684,11 +1223,7 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration registration = {
-        .path = "/dev/virtio-chain",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration registration = test_block_registration("/dev/virtio-chain", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
@@ -772,11 +1307,7 @@ void test_service_handler_parallel_async_reads_complete_out_of_order_without_res
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration registration = {
-        .path = "/dev/virtio-parallel",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration registration = test_block_registration("/dev/virtio-parallel", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
@@ -871,11 +1402,7 @@ void test_service_handler_failed_block_completion_unparks_waiting_reader_with_er
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration registration = {
-        .path = "/dev/virtio-park-fail",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration registration = test_block_registration("/dev/virtio-park-fail", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
@@ -919,11 +1446,7 @@ void test_service_handler_block_completion_runs_async_write_continuation(void)
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration registration = {
-        .path = "/dev/virtio-async-write",
-        .block_size = BLOCK_DEVICE_BLOCK_SIZE,
-        .block_count = 128,
-    };
+    ServiceBlockDeviceRegistration registration = test_block_registration("/dev/virtio-async-write", 128);
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0

@@ -22,10 +22,10 @@ UartDriverConfig;
 
 typedef UartDriverConfig * UartDriverConfigPtr;
 
-static const BString uart_config_delimiter = BSTRING_NEW("=");
-static const BString uart_config_physical_base_key = BSTRING_NEW("uart.physical_base");
-static const BString uart_config_mmio_size_key = BSTRING_NEW("uart.mmio_size");
-static const BString uart_config_irq_key = BSTRING_NEW("uart.irq");
+static const BString uart_config_delimiter = bstr("=");
+static const BString uart_config_physical_base_key = bstr("uart.physical_base");
+static const BString uart_config_mmio_size_key = bstr("uart.mmio_size");
+static const BString uart_config_irq_key = bstr("uart.irq");
 
 static bool UartDriverConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key, uint64_t * value)
 {
@@ -113,7 +113,8 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
 
 static bool UartDriverConfig__load(UartDriverConfigPtr self)
 {
-    IOHandle handle = open(UART_CONFIG_PATH, IO_OPEN_READ);
+    BString config_path = bstr(UART_CONFIG_PATH);
+    IOHandle handle = open(&config_path, IO_OPEN_READ);
     if (handle < 0)
     {
         return false;

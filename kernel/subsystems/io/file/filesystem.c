@@ -6,10 +6,10 @@ MapBodyDefine(Mounts);
 MapBodyDefine(FileHandleTargetMap);
 LinkedListBodyDefine(FilesystemTableEntries);
 
-static BString invalid_path_format = BSTRING_NEW("Invalid path %s");
-static BString not_implemented = BSTRING_NEW("Operation not implemented");
-static BString invalid_handle = BSTRING_NEW("Unknown handle");
-static BString root_path = BSTRING_NEW("/");
+static BString invalid_path_format = bstr("Invalid path %B");
+static BString not_implemented = bstr("Operation not implemented");
+static BString invalid_handle = bstr("Unknown handle");
+static BString root_path = bstr("/");
 
 #define CODE_SHIFT 20
 static const FilesystemCode FS_CODE_MASK = (0xFFFFULL << CODE_SHIFT);
@@ -23,6 +23,23 @@ bool FilesystemTableEntry__equals(FilesystemTableEntryPtr self, FilesystemTableE
         && self->block_count == other->block_count;
 }
 
+FilesystemTableEntry FilesystemTableEntry__new(
+    BString device_path,
+    BString filesystem_type,
+    BString mountpoint,
+    bool match_block_count,
+    uint64_t block_count
+)
+{
+    return (FilesystemTableEntry) {
+        .device_path = device_path,
+        .filesystem_type = filesystem_type,
+        .mountpoint = mountpoint,
+        .match_block_count = match_block_count,
+        .block_count = block_count,
+    };
+}
+
 FilesystemTable FilesystemTable__new()
 {
     return (FilesystemTable) {
@@ -34,26 +51,20 @@ Result(CollectionCode) FilesystemTable__add(
     FilesystemTablePtr self, BString device_path, BString filesystem_type, BString mountpoint
 )
 {
-    return FilesystemTableEntries__push(&self->entries, ((FilesystemTableEntry) {
-        .device_path = device_path,
-        .filesystem_type = filesystem_type,
-        .mountpoint = mountpoint,
-        .match_block_count = false,
-        .block_count = 0,
-    }));
+    return FilesystemTableEntries__push(
+        &self->entries,
+        FilesystemTableEntry__new(device_path, filesystem_type, mountpoint, false, 0)
+    );
 }
 
 Result(CollectionCode) FilesystemTable__add_by_block_count(
     FilesystemTablePtr self, uint64_t block_count, BString filesystem_type, BString mountpoint
 )
 {
-    return FilesystemTableEntries__push(&self->entries, ((FilesystemTableEntry) {
-        .device_path = EMPTY_BSTRING,
-        .filesystem_type = filesystem_type,
-        .mountpoint = mountpoint,
-        .match_block_count = true,
-        .block_count = block_count,
-    }));
+    return FilesystemTableEntries__push(
+        &self->entries,
+        FilesystemTableEntry__new(empty_bstr(), filesystem_type, mountpoint, true, block_count)
+    );
 }
 
 typedef struct MountRoute
@@ -65,6 +76,15 @@ typedef struct MountRoute
 MountRoute;
 
 OptionalDef(MountRoute);
+
+static MountRoute MountRoute__new(FilesystemPtr filesystem, BString mount_path, BString subpath)
+{
+    return (MountRoute) {
+        .filesystem = filesystem,
+        .mount_path = mount_path,
+        .subpath = subpath,
+    };
+}
 
 typedef struct RootAsyncListDirContext
 {
@@ -93,8 +113,8 @@ static bool Filesystem__mount_matches(BStringPtr path, BStringPtr mount_path)
 
     for (size_t i = 0; i < BStringArray__len(&mount_segments); i++)
     {
-        BString path_segment = EMPTY_BSTRING;
-        BString mount_segment = EMPTY_BSTRING;
+        BString path_segment = empty_bstr();
+        BString mount_segment = empty_bstr();
         match_optional(BString, BStringArray__at(&path_segments, i),
             some(segment) { path_segment = segment; },
             none() { return false; }
@@ -120,7 +140,7 @@ static BString Filesystem__subpath(BStringPtr path, BStringPtr mount_path)
 
     for (size_t i = BStringArray__len(&mount_segments); i < BStringArray__len(&path_segments); i++)
     {
-        BString segment = EMPTY_BSTRING;
+        BString segment = empty_bstr();
         match_optional(BString, BStringArray__at(&path_segments, i),
             some(path_segment) { segment = path_segment; },
             none_do_nothing()
@@ -142,11 +162,7 @@ static Optional(MountRoute) Filesystem__find_mount(FilesystemPtr self, BString p
         if (Filesystem__mount_matches(&path, &mount_path) && mount_path_length > (StringPos) best_len)
         {
             best_len = (size_t) mount_path_length;
-            best = Some(MountRoute, ((MountRoute) {
-                .filesystem = mounted_fs,
-                .mount_path = mount_path,
-                .subpath = Filesystem__subpath(&path, &mount_path),
-            }));
+            best = Some(MountRoute, MountRoute__new(mounted_fs, mount_path, Filesystem__subpath(&path, &mount_path)));
         }
 
     });
@@ -362,21 +378,16 @@ static bool RootFileIO__entries_contain_name(
 
 static DirectoryEntry RootFileIO__directory_entry_from_mount(BString name)
 {
-    DirectoryEntry entry = (DirectoryEntry) {
-        .attributes = 0,
-        .user_id = PROCESS_USER_ROOT,
-        .group_id = PROCESS_GROUP_ROOT,
-        .mode = IO_MODE_TYPE_DIR
+    return DirectoryEntry__new(
+        0,
+        PROCESS_USER_ROOT,
+        PROCESS_GROUP_ROOT,
+        IO_MODE_TYPE_DIR
             | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC
             | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC
             | IO_MODE_OTHER_READ | IO_MODE_OTHER_EXEC,
-        .name_len = 0,
-    };
-
-    size_t copy_len = (size_t) BString__copy_to(&name, entry.name, IO_DIRENT_NAME_MAX);
-    entry.name_len = copy_len;
-
-    return entry;
+        &name
+    );
 }
 
 static Result(DirectoryEntryCount) RootFileIO__append_mount_entries(
@@ -657,7 +668,7 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
     DirectoryEntryCount count = 0;
     bool listed_backing = false;
     bool backing_request_pending = false;
-    BString backing_pending_message = EMPTY_BSTRING;
+    BString backing_pending_message = empty_bstr();
 
     if (RootFileIO__trace_list_dir(&path))
     {

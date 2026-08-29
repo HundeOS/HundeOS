@@ -33,6 +33,7 @@ typedef enum BlockDeviceCode
 
 ResultDef(BlockDeviceCode);
 ResultDef(BlockCount);
+ResultDef(ServiceBlockRequest);
 
 typedef struct BlockDevice BlockDevice;
 typedef BlockDevice * BlockDevicePtr;
@@ -60,6 +61,13 @@ typedef BlockDeviceMetadata * BlockDeviceMetadataPtr;
 
 OptionalDef(BlockDeviceMetadata);
 bool BlockDeviceMetadata__equals(BlockDeviceMetadataPtr self, BlockDeviceMetadataPtr other);
+BlockDeviceMetadata BlockDeviceMetadata__new(
+    BString alias,
+    BString path,
+    size_t block_size,
+    BlockCount block_count,
+    bool userspace_service
+);
 FixedArrayDefine(
     BlockDeviceMetadata,
     IO_MAX_DEVICES,
@@ -123,14 +131,30 @@ void BlockDeviceRegistry__reset(void);
 Result(BlockDeviceCode) BlockDeviceRegistry__register(
     BString path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
 );
+Result(BlockCount) BlockDeviceRegistry__read_from_process(
+    ProcessPtr requester,
+    BString path,
+    BlockNumber block,
+    BlockCount count,
+    DataPtr requester_buffer,
+    size_t buffer_size,
+    MessageBrokerPtr message_broker
+);
+Result(BlockCount) BlockDeviceRegistry__write_from_process(
+    ProcessPtr requester,
+    BString path,
+    BlockNumber block,
+    BlockCount count,
+    DataPtr requester_buffer,
+    size_t buffer_size,
+    MessageBrokerPtr message_broker
+);
 Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPtr process);
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(BString path);
 BlockDevicePaths BlockDeviceRegistry__paths();
 BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries();
 Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias);
-Result(ServiceCode) BlockDeviceService__get_request(
-    ProcessPtr service_process, uint64_t request_id, ServiceBlockRequestPtr target
-);
+Result(ServiceBlockRequest) BlockDeviceRegistry__get_request(ProcessPtr service_process, uint64_t request_id);
 Result(ServiceCode) BlockDeviceService__complete(
     ProcessPtr service_process, ServiceBlockCompletionPtr completion
 );

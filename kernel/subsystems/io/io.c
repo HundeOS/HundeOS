@@ -5,6 +5,50 @@
 FixedArrayBodyDefine(IODevicesArray);
 MapBodyDefine(IOHandlesMap);
 
+IOState IOState__new()
+{
+    return (IOState) {
+        .handles = EmptyArray(IOHandleArray),
+    };
+}
+
+IO IO__new(
+    IO_open open,
+    IO_read read,
+    IO_write write,
+    IO_close close,
+    IO_park park,
+    IO_unpark unpark,
+    IO_server_buffer server_buffer,
+    IO_server_write_buffer server_write_buffer,
+    IO_data_available data_available,
+    IO_data_consumed data_consumed,
+    IO_eof eof
+)
+{
+    return (IO) {
+        .open = open,
+        .read = read,
+        .write = write,
+        .close = close,
+        .park = park,
+        .unpark = unpark,
+        .server_buffer = server_buffer,
+        .server_write_buffer = server_write_buffer,
+        .data_available = data_available,
+        .data_consumed = data_consumed,
+        .eof = eof,
+    };
+}
+
+DeviceRegistration DeviceRegistration__new(IOPtr device, BString path, IOStatePtr state)
+{
+    return (DeviceRegistration) {
+        .device = device,
+        .path = path,
+        .state = state,
+    };
+}
 
 IOContext IOContext__new(
     KernelContext kernel_context, Optional(IOSubsystemPtr) io_subsystem,

@@ -3,13 +3,13 @@
 #include "../../../../kalloc.h"
 #include "../../../../utils/math.h"
 
-static BString invalid_path_format = BSTRING_NEW("Invalid path %s");
-static BString invalid_file_handle = BSTRING_NEW("Invalid file handle");
-static BString not_implemented = BSTRING_NEW("Operation not implemented");
-static BString end_of_file = BSTRING_NEW("End of file");
-static BString allocation_failed = BSTRING_NEW("Allocation failed");
-static BString corrupt_file = BSTRING_NEW("Corrupt file");
-static BString directory_not_empty = BSTRING_NEW("Directory not empty");
+static BString invalid_path_format = bstr("Invalid path %B");
+static BString invalid_file_handle = bstr("Invalid file handle");
+static BString not_implemented = bstr("Operation not implemented");
+static BString end_of_file = bstr("End of file");
+static BString allocation_failed = bstr("Allocation failed");
+static BString corrupt_file = bstr("Corrupt file");
+static BString directory_not_empty = bstr("Directory not empty");
 
 bool MemFilePage__equals(MemFilePagePtr self, MemFilePagePtr other)
 {
@@ -26,6 +26,30 @@ bool MemFile__equals(MemFilePtr self, MemFilePtr other)
 LinkedListBodyDefine(MemFiles);
 LinkedListBodyDefine(MemDirectories);
 MapBodyDefine(MemFileHandleMap);
+
+static MemFilePage MemFilePage__new(KernelAddress address)
+{
+    return (MemFilePage) {
+        .address = address,
+    };
+}
+
+static MemFile MemFile__new(BString name)
+{
+    return (MemFile) {
+        .name = name,
+        .size = 0,
+        .capacity = 0,
+        .pages = MemFilePages__new(),
+    };
+}
+
+static MemDirectory MemDirectory__new(BString path)
+{
+    return (MemDirectory) {
+        .path = path,
+    };
+}
 
 static bool MemFile__matches_name(MemFilePtr file, void * context)
 {
@@ -70,7 +94,7 @@ static BString MemFilesystem__parent_path(BString path)
 
     if (last_separator <= 0)
     {
-        return EMPTY_BSTRING;
+        return empty_bstr();
     }
 
     return BString__slice(&path, 0, last_separator);
@@ -237,7 +261,7 @@ static Result(CollectionCode) MemFile__ensure_capacity(MemFilePtr self, size_t r
             page_data[i] = 0;
         }
 
-        match_result(CollectionCode, MemFilePages__push(&self->pages, ((MemFilePage) { .address = page })),
+        match_result(CollectionCode, MemFilePages__push(&self->pages, MemFilePage__new(page)),
             success(_) { self->capacity += PAGE_SIZE;; },
             error(code, message) { return Error(CollectionCode, message, code); }
         );
@@ -289,12 +313,7 @@ static Result(CollectionCode) MemFile__copy_to_file(MemFilePtr self, size_t offs
 
 static Result(MemFilePtr) MemFilesystem__create_file(MemFilesystemIOStatePtr self, BString path)
 {
-    MemFile file = (MemFile) {
-        .name = path,
-        .size = 0,
-        .capacity = 0,
-        .pages = MemFilePages__new(),
-    };
+    MemFile file = MemFile__new(path);
 
     match_result(CollectionCode, MemFiles__push(&self->files, file),
         success(_)
@@ -594,7 +613,7 @@ Result(IOStatus) MemFileIO__mkdir(IOStatePtr self, BString path)
             none_do_nothing()
         );
 
-        match_result(CollectionCode, MemDirectories__push(&fs_state->directories, ((MemDirectory) { .path = directory_path })),
+        match_result(CollectionCode, MemDirectories__push(&fs_state->directories, MemDirectory__new(directory_path)),
             success(_) { cs_return Success(IOStatus, IO_OK); },
             error(code, message) { cs_return Error(IOStatus, message, code); }
         );

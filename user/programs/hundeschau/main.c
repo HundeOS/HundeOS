@@ -16,21 +16,21 @@
 #define HUNDESCHAU_KEYBOARD_INPUT ":keyboard:"
 #define HUNDESCHAU_TERMINAL_OUTPUT ":console:"
 
-static BString hundeschau_empty = EMPTY_BSTRING;
-static BString hundeschau_login_path = BSTRING_NEW("/sbin/login");
-static BString hundeschau_humpen_path = BSTRING_NEW("/sbin/services/humpen");
-static BString hundeschau_video_term_path = BSTRING_NEW("/sbin/drivers/video_term");
-static BString hundeschau_terminal_input = BSTRING_NEW(HUNDESCHAU_TERMINAL_INPUT);
-static BString hundeschau_keyboard_input = BSTRING_NEW(HUNDESCHAU_KEYBOARD_INPUT);
-static BString hundeschau_terminal_output = BSTRING_NEW(HUNDESCHAU_TERMINAL_OUTPUT);
-static BString hundeschau_space_delimiters = BSTRING_NEW(" \t\r");
-static BString hundeschau_comment_delimiter = BSTRING_NEW("#");
-static BString hundeschau_driver_command = BSTRING_NEW("driver");
-static BString hundeschau_once_option = BSTRING_NEW("once");
-static BString hundeschau_respawn_option = BSTRING_NEW("respawn");
-static BString hundeschau_framebuffer_condition = BSTRING_NEW("framebuffer");
-static BString hundeschau_no_framebuffer_condition = BSTRING_NEW("no-framebuffer");
-static BString hundeschau_always_condition = BSTRING_NEW("always");
+static BString hundeschau_empty = empty_bstr();
+static BString hundeschau_login_path = bstr("/sbin/login");
+static BString hundeschau_humpen_path = bstr("/sbin/services/humpen");
+static BString hundeschau_video_term_path = bstr("/sbin/drivers/video_term");
+static BString hundeschau_terminal_input = bstr(HUNDESCHAU_TERMINAL_INPUT);
+static BString hundeschau_keyboard_input = bstr(HUNDESCHAU_KEYBOARD_INPUT);
+static BString hundeschau_terminal_output = bstr(HUNDESCHAU_TERMINAL_OUTPUT);
+static BString hundeschau_space_delimiters = bstr(" \t\r");
+static BString hundeschau_comment_delimiter = bstr("#");
+static BString hundeschau_driver_command = bstr("driver");
+static BString hundeschau_once_option = bstr("once");
+static BString hundeschau_respawn_option = bstr("respawn");
+static BString hundeschau_framebuffer_condition = bstr("framebuffer");
+static BString hundeschau_no_framebuffer_condition = bstr("no-framebuffer");
+static BString hundeschau_always_condition = bstr("always");
 
 typedef struct HundeschauRequiredProcess
 {
@@ -79,14 +79,14 @@ static int Hundeschau__spawn_required_process(
 {
     SpawnResult result = spawn(
         P_NOWAIT,
-        BString__cstr(path),
-        BString__is_empty(arg0) ? NULL : BString__cstr(arg0), // hundelint: ignore-no-null
-        BString__is_empty(arg1) ? NULL : BString__cstr(arg1), // hundelint: ignore-no-null
-        NULL // hundelint: ignore-no-null
+        path,
+        SpawnArg__from_bstring(arg0),
+        SpawnArg__from_bstring(arg1),
+        SPAWN_NO_ARG
     );
     if (result < 0)
     {
-        printf("hundeschau: failed to start %s: %i\n", BString__cstr(path), (int) result);
+        IO__printf(&bstr("hundeschau: failed to start %B: %i\n"), path, (int) result);
         return 1;
     }
 
@@ -102,7 +102,7 @@ static int Hundeschau__spawn_required_process(
         success_do_nothing(),
         error(code, message)
         {
-            printf("hundeschau: failed to track process: %s\n", BString__cstr(&message));
+            IO__printf(&bstr("hundeschau: failed to track process: %B\n"), &message);
             return 1;
         }
     );
@@ -119,10 +119,19 @@ static int Hundeschau__spawn_required_process_with_stdio(
     bool respawn
 )
 {
-    SpawnResult result = spawn_with_stdio(P_NOWAIT, BString__cstr(path), stdin_fd, stdout_fd, stderr_fd, NULL, NULL, NULL); // hundelint: ignore-no-null
+    SpawnResult result = spawn_with_stdio(
+        P_NOWAIT,
+        path,
+        stdin_fd,
+        stdout_fd,
+        stderr_fd,
+        SPAWN_NO_ARG,
+        SPAWN_NO_ARG,
+        SPAWN_NO_ARG
+    );
     if (result < 0)
     {
-        printf("hundeschau: failed to start %s: %i\n", BString__cstr(path), (int) result);
+        IO__printf(&bstr("hundeschau: failed to start %B: %i\n"), path, (int) result);
         return 1;
     }
 
@@ -134,14 +143,14 @@ static int Hundeschau__spawn_required_process_with_stdio(
         .stdout_fd = stdout_fd,
         .stderr_fd = stderr_fd,
         .path = BString__slice(path, 0, BString__length(path)),
-        .arg0 = EMPTY_BSTRING,
-        .arg1 = EMPTY_BSTRING,
+        .arg0 = empty_bstr(),
+        .arg1 = empty_bstr(),
     };
     match_result(CollectionCode, HundeschauRequiredProcesses__push(processes, process),
         success_do_nothing(),
         error(code, message)
         {
-            printf("hundeschau: failed to track process: %s\n", BString__cstr(&message));
+            IO__printf(&bstr("hundeschau: failed to track process: %B\n"), &message);
             return 1;
         }
     );
@@ -151,24 +160,24 @@ static int Hundeschau__spawn_required_process_with_stdio(
 
 static int Hundeschau__spawn_login(HundeschauRequiredProcessesPtr processes, ConstBStringPtr input_path)
 {
-    IOHandle stdin_fd = open(BString__cstr(input_path), IO_OPEN_READ);
+    IOHandle stdin_fd = open(input_path, IO_OPEN_READ);
     if (stdin_fd < 0)
     {
-        printf("hundeschau: failed to open terminal input: %i\n", (int) stdin_fd);
+        IO__printf(&bstr("hundeschau: failed to open terminal input: %i\n"), (int) stdin_fd);
         return 1;
     }
 
-    IOHandle stdout_fd = open(BString__cstr(&hundeschau_terminal_output), IO_OPEN_WRITE);
+    IOHandle stdout_fd = open(&hundeschau_terminal_output, IO_OPEN_WRITE);
     if (stdout_fd < 0)
     {
-        printf("hundeschau: failed to open terminal output: %i\n", (int) stdout_fd);
+        IO__printf(&bstr("hundeschau: failed to open terminal output: %i\n"), (int) stdout_fd);
         return 1;
     }
 
-    IOHandle stderr_fd = open(BString__cstr(&hundeschau_terminal_output), IO_OPEN_WRITE);
+    IOHandle stderr_fd = open(&hundeschau_terminal_output, IO_OPEN_WRITE);
     if (stderr_fd < 0)
     {
-        printf("hundeschau: failed to open terminal error output: %i\n", (int) stderr_fd);
+        IO__printf(&bstr("hundeschau: failed to open terminal error output: %i\n"), (int) stderr_fd);
         return 1;
     }
 
@@ -208,7 +217,7 @@ static Optional(BString) Hundeschau__next_token(BStringPtr remaining)
     BString stripped = BString__strip(remaining);
     if (BString__is_empty(&stripped))
     {
-        *remaining = EMPTY_BSTRING;
+        *remaining = empty_bstr();
         return None(BString);
     }
 
@@ -221,12 +230,12 @@ static Optional(BString) Hundeschau__next_token(BStringPtr remaining)
         },
         none()
         {
-            *remaining = EMPTY_BSTRING;
+            *remaining = empty_bstr();
             return Some(BString, stripped);
         }
     );
 
-    *remaining = EMPTY_BSTRING;
+    *remaining = empty_bstr();
     return None(BString);
 }
 
@@ -243,7 +252,8 @@ static BString Hundeschau__line_without_comment(ConstBStringPtr line)
 
 static Optional(DynString) Hundeschau__load_config(void)
 {
-    IOHandle handle = open(HUNDESCHAU_CONFIG_PATH, IO_OPEN_READ);
+    BString config_path = bstr(HUNDESCHAU_CONFIG_PATH);
+    IOHandle handle = open(&config_path, IO_OPEN_READ);
     if (handle < 0)
     {
         return None(DynString);
@@ -280,7 +290,7 @@ static int Hundeschau__spawn_configured_driver_line(
         return 0;
     }
 
-    BString command = EMPTY_BSTRING;
+    BString command = empty_bstr();
     match_optional(BString, Hundeschau__next_token(&remaining),
         some(token) { command = token; },
         none() { return 0; }
@@ -291,7 +301,7 @@ static int Hundeschau__spawn_configured_driver_line(
         return 1;
     }
 
-    BString path = EMPTY_BSTRING;
+    BString path = empty_bstr();
     match_optional(BString, Hundeschau__next_token(&remaining),
         some(token) { path = token; },
         none() { return 1; }
@@ -303,7 +313,7 @@ static int Hundeschau__spawn_configured_driver_line(
     }
 
     bool respawn = true;
-    BString option = EMPTY_BSTRING;
+    BString option = empty_bstr();
     match_optional(BString, Hundeschau__next_token(&remaining),
         some(token) { option = token; },
         none_do_nothing()
@@ -314,7 +324,7 @@ static int Hundeschau__spawn_configured_driver_line(
         if (BString__equals(&option, &hundeschau_once_option))
         {
             respawn = false;
-            option = EMPTY_BSTRING;
+            option = empty_bstr();
             match_optional(BString, Hundeschau__next_token(&remaining),
                 some(token) { option = token; },
                 none_do_nothing()
@@ -323,7 +333,7 @@ static int Hundeschau__spawn_configured_driver_line(
         else if (BString__equals(&option, &hundeschau_respawn_option))
         {
             respawn = true;
-            option = EMPTY_BSTRING;
+            option = empty_bstr();
             match_optional(BString, Hundeschau__next_token(&remaining),
                 some(token) { option = token; },
                 none_do_nothing()
@@ -347,7 +357,7 @@ static int Hundeschau__spawn_configured_driver_line(
             return 1;
         }
 
-        option = EMPTY_BSTRING;
+        option = empty_bstr();
         match_optional(BString, Hundeschau__next_token(&remaining),
             some(token) { option = token; },
             none_do_nothing()
@@ -454,7 +464,7 @@ int HUNDESCHAU_ENTRYPOINT(void)
 {
     HundeschauRequiredProcesses required_processes = HundeschauRequiredProcesses__new();
 
-    printf("🐶 HundeOS: hundeschau begins 🐾\n");
+    IO__printf(&bstr("🐶 HundeOS: hundeschau begins 🐾\n"));
 
     if (Hundeschau__initialise_required_processes(&required_processes) != 0)
     {
@@ -467,7 +477,7 @@ int HUNDESCHAU_ENTRYPOINT(void)
         ProcessChildEventResult result = wait_for_child_event(&event);
         if (result < 0)
         {
-            printf("hundeschau: wait child event failed: %i\n", (int) result);
+            IO__printf(&bstr("hundeschau: wait child event failed: %i\n"), (int) result);
             return 1;
         }
 
@@ -482,24 +492,24 @@ int HUNDESCHAU_ENTRYPOINT(void)
                 SpawnResult respawn_result = process->has_stdio
                     ? spawn_with_stdio(
                         P_NOWAIT,
-                        BString__cstr(&process->path),
+                        &process->path,
                         process->stdin_fd,
                         process->stdout_fd,
                         process->stderr_fd,
-                        NULL, // hundelint: ignore-no-null
-                        NULL, // hundelint: ignore-no-null
-                        NULL // hundelint: ignore-no-null
+                        SPAWN_NO_ARG,
+                        SPAWN_NO_ARG,
+                        SPAWN_NO_ARG
                     )
                     : spawn(
                         P_NOWAIT,
-                        BString__cstr(&process->path),
-                        BString__is_empty(&process->arg0) ? NULL : BString__cstr(&process->arg0), // hundelint: ignore-no-null
-                        BString__is_empty(&process->arg1) ? NULL : BString__cstr(&process->arg1), // hundelint: ignore-no-null
-                        NULL // hundelint: ignore-no-null
+                        &process->path,
+                        SpawnArg__from_bstring(&process->arg0),
+                        SpawnArg__from_bstring(&process->arg1),
+                        SPAWN_NO_ARG
                     );
                 if (respawn_result < 0)
                 {
-                    printf("hundeschau: failed to start %s: %i\n", BString__cstr(&process->path), (int) respawn_result);
+                    IO__printf(&bstr("hundeschau: failed to start %B: %i\n"), &process->path, (int) respawn_result);
                     return 1;
                 }
 

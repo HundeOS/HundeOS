@@ -104,6 +104,14 @@ as to clearly indicate it is the object being acted on while not clashing with t
 Do not pass multiple pointers to a function just to return several values. It
 is a smell and should not be done. Return a struct with named fields instead.
 
+Do not use `bool` status returns with pointer out-parameters for fallible
+operations. If a function can fail and needs to return data, return
+`Result(ValueType)` or `Optional(ValueType)` as appropriate. If several values
+must be returned, define a small named result struct and wrap that in
+`Result(...)`. Pointer parameters are acceptable for buffers that the caller
+owns and the function fills, but not for ordinary scalar/result values such as
+ids, offsets, entries, handles, or parsed metadata.
+
 ## Key kernel structures
 When possible kernel structures should contain the other structures they use,
 not pointers to structures. This is to make memory allocation/cleanup simpler

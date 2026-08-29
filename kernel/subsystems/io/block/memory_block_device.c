@@ -2,8 +2,16 @@
 
 LinkedListBodyDefine(MemoryDeviceBlocks);
 
-static BString invalid_argument = BSTRING_NEW("Invalid memory block device argument");
-static BString allocation_failed = BSTRING_NEW("Memory block device allocation failed");
+static BString invalid_argument = bstr("Invalid memory block device argument");
+static BString allocation_failed = bstr("Memory block device allocation failed");
+
+static MemoryDeviceBlock MemoryDeviceBlock__new(BlockNumber block, KernelAddress address)
+{
+    return (MemoryDeviceBlock) {
+        .block = block,
+        .address = address,
+    };
+}
 
 bool MemoryDeviceBlock__equals(MemoryDeviceBlockPtr self, MemoryDeviceBlockPtr other)
 {
@@ -62,10 +70,7 @@ static Result(MemoryDeviceBlockPtr) MemoryBlockDevice__find_or_create_block(
 
     MemoryBlockDevice__zero(v_ptr(address, Data));
 
-    match_result(CollectionCode, MemoryDeviceBlocks__push(&self->blocks, ((MemoryDeviceBlock) {
-        .block = block,
-        .address = address,
-    })),
+    match_result(CollectionCode, MemoryDeviceBlocks__push(&self->blocks, MemoryDeviceBlock__new(block, address)),
     success(_)
     {
             match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),

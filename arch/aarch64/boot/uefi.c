@@ -297,12 +297,12 @@ static __BOOT__(void) UefiAcpi__apply_mcfg(BootPlatformInfoPtr platform, uint64_
 
         if (ecam_base != 0 && bus_end >= bus_start)
         {
-            platform->pci = Some(PciInfo, ((PciInfo) {
-                .ecam_physical_base = ecam_base,
-                .ecam_size = ((bus_end - bus_start) + 1ULL) * ACPI_PCI_ECAM_BUS_SIZE,
-                .bus_start = bus_start,
-                .bus_end = bus_end,
-            }));
+            platform->pci = Some(PciInfo, PciInfo__new(
+                ecam_base,
+                ((bus_end - bus_start) + 1ULL) * ACPI_PCI_ECAM_BUS_SIZE,
+                bus_start,
+                bus_end
+            ));
             return;
         }
 

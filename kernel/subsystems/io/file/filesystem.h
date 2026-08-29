@@ -39,6 +39,13 @@ typedef FilesystemTableEntry * FilesystemTableEntryPtr;
 
 OptionalDef(FilesystemTableEntry);
 bool FilesystemTableEntry__equals(FilesystemTableEntryPtr self, FilesystemTableEntryPtr other);
+FilesystemTableEntry FilesystemTableEntry__new(
+    BString device_path,
+    BString filesystem_type,
+    BString mountpoint,
+    bool match_block_count,
+    uint64_t block_count
+);
 LinkedListDefine(FilesystemTableEntry, FilesystemTableEntries, (EqualFunction) FilesystemTableEntry__equals);
 
 typedef struct FilesystemTable

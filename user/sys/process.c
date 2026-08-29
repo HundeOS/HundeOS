@@ -5,10 +5,7 @@
 
 ProcessListResult process_list(ProcessInfoPtr entries, size_t max_entries)
 {
-    ProcessListRequest request = (ProcessListRequest) {
-        .entries = entries,
-        .max_entries = max_entries,
-    };
+    ProcessListRequest request = ProcessListRequest__new(entries, max_entries);
     return (ProcessListResult) syscall(SYSCALL_PROCESS_LIST, (Anything) &request, 0, 0, 0, 0);
 }
 

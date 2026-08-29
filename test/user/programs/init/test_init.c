@@ -24,7 +24,7 @@ struct ServiceMappedMemory
 {
     uint64_t driver_address;
     uint64_t device_address;
-    uint64_t size;
+    size_t size;
 };
 
 static SpawnCall spawn_calls[10];
@@ -47,9 +47,9 @@ static bool fake_config_closed;
 static bool fake_expect_keyboard_input;
 
 #define HUNDESCHAU_ENTRYPOINT hundeschau_main_under_test
-#define printf test_printf
+#define IO__printf test_printf
 #include "../../../../user/programs/hundeschau/main.c"
-#undef printf
+#undef IO__printf
 
 void setUp(void)
 {
@@ -131,16 +131,22 @@ static void copy_string(char * target, uint64_t size, const char * source)
     target[i] = '\0';
 }
 
-SpawnResult spawn(SpawnMode mode, const char* path, const char* arg0, const char* arg1, const char* arg2)
+SpawnResult spawn(
+    SpawnMode mode,
+    ConstBStringPtr path,
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
+)
 {
     TEST_ASSERT_LESS_THAN_UINT64(10, spawn_call_count);
     spawn_calls[spawn_call_count].mode = mode;
-    copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), path);
-    copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), arg0);
-    copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), arg1);
+    copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), BString__cstr(path));
+    match_optional(BString, arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(BString, arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
     spawn_call_count++;
 
-    if (failing_path != NULL && strings_equal(path, failing_path))
+    if (failing_path != NULL && strings_equal(BString__cstr(path), failing_path))
     {
         return SPAWN_NO_FILE;
     }
@@ -150,13 +156,13 @@ SpawnResult spawn(SpawnMode mode, const char* path, const char* arg0, const char
 
 SpawnResult spawn_with_stdio(
     SpawnMode mode,
-    const char* path,
+    ConstBStringPtr path,
     SpawnFileDescriptor stdin_fd,
     SpawnFileDescriptor stdout_fd,
     SpawnFileDescriptor stderr_fd,
-    const char* arg0,
-    const char* arg1,
-    const char* arg2
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
 )
 {
     TEST_ASSERT_LESS_THAN_UINT64(10, spawn_call_count);
@@ -165,12 +171,12 @@ SpawnResult spawn_with_stdio(
     spawn_calls[spawn_call_count].stdin_fd = stdin_fd;
     spawn_calls[spawn_call_count].stdout_fd = stdout_fd;
     spawn_calls[spawn_call_count].stderr_fd = stderr_fd;
-    copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), path);
-    copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), arg0);
-    copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), arg1);
+    copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), BString__cstr(path));
+    match_optional(BString, arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(BString, arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
     spawn_call_count++;
 
-    if (failing_path != NULL && strings_equal(path, failing_path))
+    if (failing_path != NULL && strings_equal(BString__cstr(path), failing_path))
     {
         return SPAWN_NO_FILE;
     }
@@ -181,26 +187,26 @@ SpawnResult spawn_with_stdio(
 SpawnResult spawn_as(
     SpawnMode mode,
     UserID requested_user_id,
-    const char* path,
-    const char* arg0,
-    const char* arg1,
-    const char* arg2
+    ConstBStringPtr path,
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
 )
 {
     TEST_FAIL();
     return SPAWN_FAILED;
 }
 
-IOHandle open(const char * path, Flags flags)
+IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    if (strings_equal(path, "/proc/sysinfo"))
+    if (strings_equal(BString__cstr(path), "/proc/sysinfo"))
     {
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
         fake_sysinfo_opened = true;
         return 1;
     }
 
-    if (strings_equal(path, "/boot/config/hundeschau.conf"))
+    if (strings_equal(BString__cstr(path), "/boot/config/hundeschau.conf"))
     {
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
         if (fake_config == NULL)
@@ -213,17 +219,17 @@ IOHandle open(const char * path, Flags flags)
 
     if (fake_open_count == 0)
     {
-        TEST_ASSERT_EQUAL_STRING(fake_expect_keyboard_input ? ":keyboard:" : ":tty:", path);
+        TEST_ASSERT_EQUAL_STRING(fake_expect_keyboard_input ? ":keyboard:" : ":tty:", BString__cstr(path));
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
     }
     else if (fake_open_count == 1)
     {
-        TEST_ASSERT_EQUAL_STRING(":console:", path);
+        TEST_ASSERT_EQUAL_STRING(":console:", BString__cstr(path));
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE, flags);
     }
     else
     {
-        TEST_ASSERT_EQUAL_STRING(":console:", path);
+        TEST_ASSERT_EQUAL_STRING(":console:", BString__cstr(path));
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE, flags);
     }
 
@@ -305,7 +311,7 @@ IOStatus close(IOHandle handle)
     return IO_OK;
 }
 
-ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
+ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)
 {
     TEST_ASSERT_EQUAL_UINT64(0x0a000000ULL, physical_address);
     TEST_ASSERT_EQUAL_UINT64(sizeof(fake_virtio_region), size);
@@ -318,12 +324,13 @@ void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
     return (void *) (memory->driver_address + offset);
 }
 
-int test_printf(const char * format, ...)
+int test_printf(ConstBStringPtr format, ...)
 {
+    const char * text = BString__cstr(format);
     uint64_t i = 0;
-    while (format[i] != '\0' && printed_output_len + 1 < sizeof(printed_output))
+    while (text[i] != '\0' && printed_output_len + 1 < sizeof(printed_output))
     {
-        printed_output[printed_output_len++] = format[i++];
+        printed_output[printed_output_len++] = text[i++];
     }
     printed_output[printed_output_len] = '\0';
     return (int) i;

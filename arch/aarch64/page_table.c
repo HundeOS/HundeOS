@@ -90,13 +90,13 @@ void PageTable__map(PageTablePtr self, KernelPtr kernel, UserAddress address, si
         access = ACCESS_EL1_RW_EL0_RW;
     }
 
-    MappingPermissions perms = (MappingPermissions) {
-        .memory_type = ATTR_INDEX_NORMAL,
-        .shareability = SHARE_INNER,
-        .access = access,
-        .uxn = !address.execute,
-        .pxn = 0
-    };
+    MappingPermissions perms = MappingPermissions__new(
+        ATTR_INDEX_NORMAL,
+        SHARE_INNER,
+        access,
+        !address.execute,
+        0
+    );
     __d_printf(MMU, "Mapping pages = %i\n", pages);
     for (int page = 0; page < pages; page++)
     {
@@ -124,13 +124,13 @@ void PageTable__map_mmio(PageTablePtr self, KernelPtr kernel, UserAddress addres
     uint64_t pages = adjusted_range / PAGE_SIZE;
     pages += adjusted_range % PAGE_SIZE ? 1 : 0;
 
-    MappingPermissions perms = (MappingPermissions) {
-        .memory_type = ATTR_INDEX_DEVICE,
-        .shareability = SHARE_OUTER,
-        .access = ACCESS_EL1_RW_EL0_RW,
-        .uxn = 1,
-        .pxn = 1
-    };
+    MappingPermissions perms = MappingPermissions__new(
+        ATTR_INDEX_DEVICE,
+        SHARE_OUTER,
+        ACCESS_EL1_RW_EL0_RW,
+        1,
+        1
+    );
 
     for (int page = 0; page < pages; page++)
     {

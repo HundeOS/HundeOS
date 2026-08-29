@@ -6,11 +6,10 @@
 #include <stddef.h>
 
 #include "../common/types/bstring.h"
+#include "sys/print.h"
 
 typedef int64_t ByteCount;
 
-void print(const char * str);
-int printf(const char * format, ...);
 void * _sbrk(ptrdiff_t increment);
 void * malloc(size_t size);
 void free(void * address);

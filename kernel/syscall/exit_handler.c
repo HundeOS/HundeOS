@@ -3,7 +3,7 @@
 #include "../kernel_core.h"
 #include "syscalls/calls.h"
 
-static BString process_not_found = BSTRING_NEW("Process not found");
+static BString process_not_found = bstr("Process not found");
 
 Result(SystemCallResult) Exit__handler(
     KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,

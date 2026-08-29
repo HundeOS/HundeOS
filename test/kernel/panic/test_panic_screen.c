@@ -56,7 +56,13 @@ void test_panic_screen_mapped_rows_is_zero_without_scanline(void)
     TEST_ASSERT_EQUAL_UINT64(0, PanicScreen__mapped_rows(&framebuffer, PANIC_SCREEN_FRAMEBUFFER_MAP_SIZE));
 }
 
-void test_panic_screen_font_can_render_rip_hund(void)
+void test_panic_screen_font_can_render_panic_labels(void)
 {
-    TEST_ASSERT_TRUE(PanicScreen__can_render_text("RIP HUND"));
+    TEST_ASSERT_TRUE(PanicScreen__can_render_text("kernel panik"));
+    TEST_ASSERT_TRUE(PanicScreen__can_render_text("Hund tot"));
+}
+
+void test_panic_screen_font_can_render_fault_cause(void)
+{
+    TEST_ASSERT_TRUE(PanicScreen__can_render_text("Data abort from current EL"));
 }

@@ -7,6 +7,8 @@
 #include "../../../../common_includes/syscalls/service.h"
 #include "../../../../common_includes/syscalls/spawn.h"
 
+#define TEST_SERVICE_READY_NAME_MAX 256ULL
+
 typedef struct SpawnCall
 {
     SpawnMode mode;
@@ -20,7 +22,7 @@ struct ServiceMappedMemory
 {
     uint64_t driver_address;
     uint64_t device_address;
-    uint64_t size;
+    size_t size;
 };
 
 static SpawnCall spawn_calls[16];
@@ -38,12 +40,12 @@ static const char * fake_config;
 static bool fake_config_opened;
 static bool fake_config_closed;
 static uint64_t fake_wait_ready_count;
-static char fake_wait_ready_paths[8][SERVICE_READY_NAME_MAX];
+static char fake_wait_ready_paths[8][TEST_SERVICE_READY_NAME_MAX];
 
 #define HUNDESCHULE_ENTRYPOINT hundeschule_main_under_test
-#define printf test_printf
+#define IO__printf test_printf
 #include "../../../../user/programs/hundeschule/main.c"
-#undef printf
+#undef IO__printf
 
 void setUp(void)
 {
@@ -128,16 +130,22 @@ static void copy_string(char * target, uint64_t size, const char * source)
     target[i] = '\0';
 }
 
-SpawnResult spawn(SpawnMode mode, const char* path, const char* arg0, const char* arg1, const char* arg2)
+SpawnResult spawn(
+    SpawnMode mode,
+    ConstBStringPtr path,
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
+)
 {
     TEST_ASSERT_LESS_THAN_UINT64(16, spawn_call_count);
     spawn_calls[spawn_call_count].mode = mode;
-    copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), path);
-    copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), arg0);
-    copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), arg1);
+    copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), BString__cstr(path));
+    match_optional(BString, arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(BString, arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
     spawn_call_count++;
 
-    if (failing_path != NULL && strings_equal(path, failing_path))
+    if (failing_path != NULL && strings_equal(BString__cstr(path), failing_path))
     {
         return SPAWN_NO_FILE;
     }
@@ -147,13 +155,13 @@ SpawnResult spawn(SpawnMode mode, const char* path, const char* arg0, const char
 
 SpawnResult spawn_with_stdio(
     SpawnMode mode,
-    const char* path,
+    ConstBStringPtr path,
     SpawnFileDescriptor stdin_fd,
     SpawnFileDescriptor stdout_fd,
     SpawnFileDescriptor stderr_fd,
-    const char* arg0,
-    const char* arg1,
-    const char* arg2
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
 )
 {
     TEST_FAIL();
@@ -163,26 +171,26 @@ SpawnResult spawn_with_stdio(
 SpawnResult spawn_as(
     SpawnMode mode,
     UserID requested_user_id,
-    const char* path,
-    const char* arg0,
-    const char* arg1,
-    const char* arg2
+    ConstBStringPtr path,
+    Optional(BString) arg0,
+    Optional(BString) arg1,
+    Optional(BString) arg2
 )
 {
     TEST_FAIL();
     return SPAWN_FAILED;
 }
 
-IOHandle open(const char * path, Flags flags)
+IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    if (strings_equal(path, "/proc/sysinfo"))
+    if (strings_equal(BString__cstr(path), "/proc/sysinfo"))
     {
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
         fake_sysinfo_opened = true;
         return 1;
     }
 
-    if (strings_equal(path, "/boot/config/hundeschule.conf"))
+    if (strings_equal(BString__cstr(path), "/boot/config/hundeschule.conf"))
     {
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
         if (fake_config == NULL)
@@ -252,7 +260,7 @@ IOStatus close(IOHandle handle)
     return IO_OK;
 }
 
-ServiceCode service_map_mmio(uint64_t physical_address, uint64_t size, ServiceMappedMemoryPtr * memory)
+ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)
 {
     TEST_ASSERT_EQUAL_UINT64(0x0a000000ULL, physical_address);
     TEST_ASSERT_EQUAL_UINT64(sizeof(fake_virtio_region), size);
@@ -268,7 +276,7 @@ ServiceCode service_become_service()
 ServiceCode service_wait_ready(ConstBStringPtr name)
 {
     TEST_ASSERT_LESS_THAN_UINT64(8, fake_wait_ready_count);
-    BString__copy_to(name, fake_wait_ready_paths[fake_wait_ready_count], SERVICE_READY_NAME_MAX);
+    BString__copy_to(name, fake_wait_ready_paths[fake_wait_ready_count], TEST_SERVICE_READY_NAME_MAX);
     fake_wait_ready_count++;
     return SERVICE_OK;
 }
@@ -278,7 +286,7 @@ void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
     return (void *) (memory->driver_address + offset);
 }
 
-int test_printf(const char * format, ...)
+int test_printf(ConstBStringPtr format, ...)
 {
     return 0;
 }

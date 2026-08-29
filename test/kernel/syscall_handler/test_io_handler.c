@@ -15,7 +15,7 @@ static const IOInternalHandle INTERNAL_HANDLE = 0x42;
 static const IOHandle RAW_HANDLE = 0x0000000100000042;
 static const FileDescriptor EXPECTED_FD = 3;
 static const Flags FLAGS = IO_OPEN_WRITE;
-static BString path = BSTRING_NEW(":test:");
+static BString path = bstr(":test:");
 
 static KernelPtr kernel = NULL;
 static Process process = STUB_PROCESS(PID);
@@ -29,6 +29,36 @@ static IOInternalHandle write_handle = 0;
 static DataPtr write_data = NULL;
 static size_t write_size = 0;
 static char server_buffer_data[16] = { 0 };
+
+static IOPathRequest test_io_path_request(const char * raw_path, Flags flags)
+{
+    BString request_path = bstring(raw_path);
+    return IOPathRequest__new(&request_path, flags);
+}
+
+static IOListDirRequest test_io_list_dir_request(
+    const char * raw_path, DirectoryEntryPtr entries, size_t max_entries
+)
+{
+    BString request_path = bstring(raw_path);
+    return IOListDirRequest__new(&request_path, entries, max_entries);
+}
+
+static IOMountRequest test_io_mount_request(
+    const char * raw_device_path, const char * raw_filesystem_type, const char * raw_mountpoint
+)
+{
+    BString device_path = bstring(raw_device_path);
+    BString filesystem_type = bstring(raw_filesystem_type);
+    BString mountpoint = bstring(raw_mountpoint);
+    return IOMountRequest__new(&device_path, &filesystem_type, &mountpoint);
+}
+
+static IOServerRegisterRequest test_io_server_register_request(const char * raw_path, IOServerRole role)
+{
+    BString request_path = bstring(raw_path);
+    return IOServerRegisterRequest__new(&request_path, role);
+}
 
 static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, BString open_path, Flags flags)
 {
@@ -152,8 +182,10 @@ void tearDown(void)
 
 void test_io_handler_open_returns_process_file_descriptor(void)
 {
+    IOPathRequest request = test_io_path_request(cstr(path), FLAGS);
+
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, &process), IO_OPEN, (Anything) cstr(path), FLAGS, 0, 0
+        kernel, Some(ProcessPtr, &process), IO_OPEN, (Anything) &request, 0, 0, 0
     ), success(fd) {
             TEST_ASSERT_TRUE(opened);
             TEST_ASSERT_EQUAL(EXPECTED_FD, fd);
@@ -211,8 +243,10 @@ void test_io_handler_list_dir_rejects_missing_path_at_syscall_boundary(void)
 
 void test_io_handler_list_dir_rejects_missing_entries_at_syscall_boundary(void)
 {
+    IOListDirRequest request = test_io_list_dir_request(cstr(path), NULL, 2);
+
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, &process), IO_LIST_DIR, (Anything) cstr(path), 0, 2, 0
+        kernel, Some(ProcessPtr, &process), IO_LIST_DIR, (Anything) &request, 0, 0, 0
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
@@ -226,29 +260,22 @@ void test_io_handler_mkdir_rejects_missing_path_at_syscall_boundary(void)
 void test_io_handler_mount_rejects_missing_arguments_at_syscall_boundary(void)
 {
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, &process), IO_MOUNT, 0, (Anything) "ext2", (Anything) "/", 0
-    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
-
-    match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, &process), IO_MOUNT, (Anything) "/dev/virtio1", 0, (Anything) "/", 0
-    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
-
-    match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, &process), IO_MOUNT, (Anything) "/dev/virtio1", (Anything) "ext2", 0, 0
+        kernel, Some(ProcessPtr, &process), IO_MOUNT, 0, 0, 0, 0
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_io_handler_mount_requires_mount_capability(void)
 {
     Process__set_user_identity(&process);
+    IOMountRequest request = test_io_mount_request("/dev/virtio1", "ext2", "/");
 
     match_result(SystemCallResult, IO__handler(
         kernel,
         Some(ProcessPtr, &process),
         IO_MOUNT,
-        (Anything) "/dev/virtio1",
-        (Anything) "ext2",
-        (Anything) "/",
+        (Anything) &request,
+        0,
+        0,
         0
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, code); });
 }
@@ -269,29 +296,35 @@ void test_io_handler_server_register_fd_can_be_used_for_get_buffer(void)
 {
     ProcessPtr service_process = dummy_process(100, 1, PROC_STATE_RUNNING);
     IOServerBuffer server_buffer = { 0 };
+    IOServerRegisterRequest request = test_io_server_register_request(cstr(path), IO_SERVER_READ);
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, service_process), IO_SERVER_REGISTER, (Anything) cstr(path), IO_SERVER_READ, 0, 0
+        kernel, Some(ProcessPtr, service_process), IO_SERVER_REGISTER, (Anything) &request, 0, 0, 0
     ), success(fd) {
             TEST_ASSERT_EQUAL(EXPECTED_FD, fd);
 
             match_result(ProcessIOHandle, Process__get_io_handle(service_process, (FileDescriptor) fd), success(handle) { TEST_ASSERT_EQUAL(RAW_HANDLE, handle); }, error_test_fail());
 
+            BString first_message = bstr("uart_rx: wait_status=0 event_type=3 event_source=1 event_data=2\n");
+            BString syslog_tag = bstr("UART-RX");
+            SyslogRequest first_syslog = SyslogRequest__new(&first_message, Some(BString, syslog_tag));
             match_result(SystemCallResult, Syslog__handler(
                 kernel,
                 Some(ProcessPtr, service_process),
-                (Anything) "uart_rx: wait_status=0 event_type=3 event_source=1 event_data=2\n",
-                (Anything) "UART-RX",
+                (Anything) &first_syslog,
+                0,
                 0,
                 0,
                 0
             ), success(status) { TEST_ASSERT_EQUAL(SYSLOG_OK, status); }, error_test_fail());
 
+            BString second_message = bstr("uart_rx: uart_irq=0 read_request=1\n");
+            SyslogRequest second_syslog = SyslogRequest__new(&second_message, Some(BString, syslog_tag));
             match_result(SystemCallResult, Syslog__handler(
                 kernel,
                 Some(ProcessPtr, service_process),
-                (Anything) "uart_rx: uart_irq=0 read_request=1\n",
-                (Anything) "UART-RX",
+                (Anything) &second_syslog,
+                0,
                 0,
                 0,
                 0

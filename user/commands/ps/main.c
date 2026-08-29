@@ -18,12 +18,11 @@ int PS_ENTRYPOINT(void)
     ProcessListResult count = process_list(processes, PS_MAX_PROCESSES);
     if (count < 0)
     {
-        printf("ps: error %i\n", (int) count);
+        IO__printf(&bstr("ps: error %i\n"), (int) count);
         return 1;
     }
 
-    printf(
-        "%-*s %-*s %-*s %-*s %-*s %s\n",
+    IO__printf(&bstr("%-*s %-*s %-*s %-*s %-*s %s\n"),
         PS_PID_WIDTH,
         "PID",
         PS_STATE_WIDTH,
@@ -38,8 +37,7 @@ int PS_ENTRYPOINT(void)
     );
     for (ProcessListResult i = 0; i < count; i++)
     {
-        printf(
-            "%-*i %-*.*s %-*.*s %-*.*s %-*.*s %s\n",
+        IO__printf(&bstr("%-*i %-*.*s %-*.*s %-*.*s %-*.*s %s\n"),
             PS_PID_WIDTH,
             (int) processes[i].pid,
             PS_STATE_WIDTH,

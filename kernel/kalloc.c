@@ -6,8 +6,8 @@
 #include "address.h"
 #include "kernel_core.h"
 
-static BString not_implemented = BSTRING_NEW("Not implemented");
-static BString invalid_address = BSTRING_NEW("Invalid address");
+static BString not_implemented = bstr("Not implemented");
+static BString invalid_address = bstr("Invalid address");
 
 inline HeapPtr heap_ptr()
 {
@@ -86,14 +86,7 @@ UserAddress Kernel__alloc_user(Address virtual_address,
 {
     __d_println(DEBUG, "Kernel__alloc(size)");
     KernelAddress address = Kernel__alloc(size);
-    UserAddress allocated = (UserAddress) {
-        .virtual_addr = virtual_address,
-        .kernel_addr = address,
-        .read = read,
-        .write = write,
-        .execute = execute,
-        .valid = true,
-    };
+    UserAddress allocated = UserAddress__new(virtual_address, address, read, write, execute, true);
     return allocated;
 }
 

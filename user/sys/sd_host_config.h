@@ -25,11 +25,20 @@ typedef uint64_t * UInt64Ptr;
 
 OptionalDef(SdHostConfig);
 
-static const BString sd_host_config_delimiter = BSTRING_NEW("=");
-static const BString sd_host_config_present_key = BSTRING_NEW("sd_host.present");
-static const BString sd_host_config_physical_base_key = BSTRING_NEW("sd_host.physical_base");
-static const BString sd_host_config_mmio_size_key = BSTRING_NEW("sd_host.mmio_size");
-static const BString sd_host_config_irq_key = BSTRING_NEW("sd_host.irq");
+static SdHostConfig SdHostConfig__new(uint64_t physical_base, uint64_t mmio_size, uint64_t irq)
+{
+    return (SdHostConfig) {
+        .physical_base = physical_base,
+        .mmio_size = mmio_size,
+        .irq = irq,
+    };
+}
+
+static const BString sd_host_config_delimiter = bstr("=");
+static const BString sd_host_config_present_key = bstr("sd_host.present");
+static const BString sd_host_config_physical_base_key = bstr("sd_host.physical_base");
+static const BString sd_host_config_mmio_size_key = bstr("sd_host.mmio_size");
+static const BString sd_host_config_irq_key = bstr("sd_host.irq");
 
 static bool SdHostConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key, UInt64Ptr value)
 {
@@ -132,7 +141,8 @@ static Optional(SdHostConfig) SdHostConfig__parse(ConstDynStringPtr sysinfo)
 
 static Optional(SdHostConfig) SdHostConfig__load(void)
 {
-    IOHandle handle = open(SD_HOST_CONFIG_PATH, IO_OPEN_READ);
+    BString config_path = bstr(SD_HOST_CONFIG_PATH);
+    IOHandle handle = open(&config_path, IO_OPEN_READ);
     if (handle < 0)
     {
         return None(SdHostConfig);

@@ -23,14 +23,14 @@ MapBodyDefine(IOServerProcessMap);
 MapBodyDefine(IOServerRoleMap);
 
 
-static BString no_device_found_format = BSTRING_NEW("No device found %s\n");
-static BString failed_to_register_format = BSTRING_NEW("Failed to register device %s\n");
-static BString unknown_handle_format = BSTRING_NEW("Unknown handle %i\n");
-static BString no_handle_supplied = BSTRING_NEW("No handle supplied");
-static BString unreachable_code = BSTRING_NEW("IO unreachable code path");
-static BString no_buffer_supplied = BSTRING_NEW("No buffer supplied");
-static BString no_pid_found = BSTRING_NEW("No pid found");
-static BString tty_path = BSTRING_NEW(":tty:");
+static BString no_device_found_format = bstr("No device found %B\n");
+static BString failed_to_register_format = bstr("Failed to register device %B\n");
+static BString unknown_handle_format = bstr("Unknown handle %i\n");
+static BString no_handle_supplied = bstr("No handle supplied");
+static BString unreachable_code = bstr("IO unreachable code path");
+static BString no_buffer_supplied = bstr("No buffer supplied");
+static BString no_pid_found = bstr("No pid found");
+static BString tty_path = bstr(":tty:");
 
 DeviceHandle _to_device_handle(ArrayIndex index)
 {
@@ -67,11 +67,7 @@ Result(DeviceHandle) IOSubsystem__register_device(
     IOSubsystemPtr self, BString path, IOPtr device, IOStatePtr device_state
 )
 {
-    DeviceRegistration reg = (DeviceRegistration) {
-        .device = device,
-        .path = path,
-        .state = device_state
-    };
+    DeviceRegistration reg = DeviceRegistration__new(device, path, device_state);
 
     Result(CollectionCode) index_res = IODevicesArray__push(&self->devices, reg);
 
@@ -87,7 +83,7 @@ Result(DeviceHandle) IOSubsystem__register_device(
     );
 
 
-    return Error(DeviceHandle, BString__sprintf(&failed_to_register_format, path), IO_REGISTER_FAILED);
+    return Error(DeviceHandle, BString__sprintf(&failed_to_register_format, &path), IO_REGISTER_FAILED);
 }
 
 bool path_match(DeviceRegistration * device, void * v_path)
@@ -104,7 +100,7 @@ static FindResultOptional(IODevicesArray) IOSubsystem__find_device(IOSubsystemPt
 
 static bool IOSubsystem__is_dev_path(ConstBStringPtr path)
 {
-    BString dev_prefix = BSTRING_NEW("/dev/");
+    BString dev_prefix = bstr("/dev/");
     return BString__starts_with(path, &dev_prefix);
 }
 
@@ -182,13 +178,13 @@ Result(IOHandle) IOSubsystem__record_open_handle(
         none_do_nothing()
     );
 
-    return Error(IOHandle, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    return Error(IOHandle, BString__sprintf(&no_device_found_format, &path), IO_NO_DEVICE_FOUND);
 }
 
 Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, BString path, Flags flags)
 {
     __d_printf(IOSUB, "Opening %p\n", self);
-    Result(IOHandle) error = Error(IOHandle, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    Result(IOHandle) error = Error(IOHandle, BString__sprintf(&no_device_found_format, &path), IO_NO_DEVICE_FOUND);
 
     match_optional(IODevicesArray__FindResult, IOSubsystem__find_device(self, &path),
         some(match)
@@ -224,7 +220,7 @@ Result(DirectoryEntryCount) IOSubsystem__list_dir(
     IOSubsystemPtr self, BString path, DirectoryEntryPtr entries, size_t max_entries
 )
 {
-    BString root_path = BSTRING_NEW("/");
+    BString root_path = bstr("/");
     if (BString__equals(&path, &root_path))
     {
         __d_printf(IOSUB, "IOSubsystem__list_dir root path=%s max=%i\n", cstr(path), (int) max_entries);
@@ -270,12 +266,12 @@ Result(DirectoryEntryCount) IOSubsystem__list_dir(
         none_do_nothing()
     );
 
-    return Error(DirectoryEntryCount, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    return Error(DirectoryEntryCount, BString__sprintf(&no_device_found_format, &path), IO_NO_DEVICE_FOUND);
 }
 
 Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, BString path)
 {
-    BString root_path = BSTRING_NEW("/");
+    BString root_path = bstr("/");
     match_optional(IODevicesArray__FindResult, IOSubsystem__find_device(self, &path),
         some(match)
         {
@@ -291,12 +287,12 @@ Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, BString path)
         none_do_nothing()
     );
 
-    return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    return Error(IOStatus, BString__sprintf(&no_device_found_format, &path), IO_NO_DEVICE_FOUND);
 }
 
 Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, BString path, Flags flags)
 {
-    BString root_path = BSTRING_NEW("/");
+    BString root_path = bstr("/");
     match_optional(IODevicesArray__FindResult, IOSubsystem__find_device(self, &path),
         some(match)
         {
@@ -312,12 +308,12 @@ Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, BString path, Flags fl
         none_do_nothing()
     );
 
-    return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(path)), IO_NO_DEVICE_FOUND);
+    return Error(IOStatus, BString__sprintf(&no_device_found_format, &path), IO_NO_DEVICE_FOUND);
 }
 
 Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, BString source_path, BString target_path)
 {
-    BString root_path = BSTRING_NEW("/");
+    BString root_path = bstr("/");
     match_optional(IODevicesArray__FindResult, IOSubsystem__find_device(self, &source_path),
         some(source_match)
         {
@@ -347,7 +343,7 @@ Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, BString source_path, BSt
         none_do_nothing()
     );
 
-    return Error(IOStatus, BString__sprintf(&no_device_found_format, cstr(source_path)), IO_NO_DEVICE_FOUND);
+    return Error(IOStatus, BString__sprintf(&no_device_found_format, &source_path), IO_NO_DEVICE_FOUND);
 }
 
 Result(IOStatus) IOSubsystem__mount(
@@ -623,6 +619,24 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
                     match_optional(ExternalBuffer, context->buffer,
                         some(ext_buffer)
                         {
+                            bool was_parked_before_read = false;
+                            match_optional(ProcessID, context->kernel_context.pid,
+                                some(pid)
+                                {
+                                    match_optional(SchedulerPtr, context->kernel_context.scheduler,
+                                        some(scheduler)
+                                        {
+                                            match_optional(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid),
+                                                some(process) { was_parked_before_read = Process__is_parked(process); },
+                                                none_do_nothing()
+                                            );
+                                        },
+                                        none_do_nothing()
+                                    );
+                                },
+                                none_do_nothing()
+                            );
+
                             Result(IOBufferPtr) read_res = registration->device->read(
                                 registration->state, device_internal_handle(handle), ext_buffer.len, ext_buffer
                             );
@@ -654,7 +668,32 @@ Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context)
                                 {
                                     if (code == IO_WAIT_FOR_DATA && registration->device->park != NULL) // hundelint: ignore-no-null
                                     {
-                                        return IOSubsystem__request_read_park(self, context);
+                                        bool parked_by_device_read = false;
+                                        match_optional(ProcessID, context->kernel_context.pid,
+                                            some(pid)
+                                            {
+                                                match_optional(SchedulerPtr, context->kernel_context.scheduler,
+                                                    some(scheduler)
+                                                    {
+                                                        match_optional(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid),
+                                                            some(process)
+                                                            {
+                                                                parked_by_device_read =
+                                                                    !was_parked_before_read && Process__is_parked(process);
+                                                            },
+                                                            none_do_nothing()
+                                                        );
+                                                    },
+                                                    none_do_nothing()
+                                                );
+                                            },
+                                            none_do_nothing()
+                                        );
+
+                                        if (!parked_by_device_read)
+                                        {
+                                            return IOSubsystem__request_read_park(self, context);
+                                        }
                                     }
                                     return Error(ByteCount, error_message, code);
                                 }
@@ -775,24 +814,24 @@ static Result(IOServerBuffer) IOSubsystem__map_server_buffer(ProcessPtr process,
     size_t map_size = IOSubsystem__align_up_page(offset + buffer.capacity);
     Address user_page = process->allocation_next;
 
-    UserAddress user_address = (UserAddress) {
-        .virtual_addr = user_page,
-        .kernel_addr = Kernel__from_virtual_address(Kernel__instance(), kernel_page),
-        .read = true,
-        .write = true,
-        .execute = false,
-        .valid = true,
-    };
+    UserAddress user_address = UserAddress__new(
+        user_page,
+        Kernel__from_virtual_address(Kernel__instance(), kernel_page),
+        true,
+        true,
+        false,
+        true
+    );
 
     PageTable__map(v_ptr(process->page_table, PageTable), Kernel__instance(), user_address, map_size);
     match_result(ProcessMemoryCode, Process__record_user_allocation(process, user_address, map_size, USER_ALLOCATION_DYNAMIC),
         success(_)
         {
             process->allocation_next += map_size;
-            return Success(IOServerBuffer, ((IOServerBuffer) {
-                .data = (IOServerBufferDataPtr) (user_page + offset),
-                .capacity = buffer.capacity,
-            }));
+            return Success(
+                IOServerBuffer,
+                IOServerBuffer__new((IOServerBufferDataPtr) (user_page + offset), buffer.capacity)
+            );
         },
         error(code, message) { return Error(IOServerBuffer, message, code); }
     );

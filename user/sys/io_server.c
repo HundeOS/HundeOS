@@ -2,9 +2,10 @@
 
 #include "syscall.h"
 
-IOHandle io_server_register(const char * path, IOServerRole role)
+IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
 {
-    return syscall(IO_CALL, IO_SERVER_REGISTER, any(path), role, 0, 0);
+    IOServerRegisterRequest request = IOServerRegisterRequest__new(path, role);
+    return syscall(IO_CALL, IO_SERVER_REGISTER, any(&request), 0, 0, 0);
 }
 
 IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)

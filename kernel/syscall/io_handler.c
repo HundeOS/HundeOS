@@ -7,9 +7,9 @@
 #include <stdint.h>
 
 
-static BString unhandled_operation_format = BSTRING_NEW("Unhandled io operation: %p");
-static BString no_process = BSTRING_NEW("No process for IO syscall");
-static BString invalid_path_argument = BSTRING_NEW("Invalid path argument");
+static BString unhandled_operation_format = bstr("Unhandled io operation: %p");
+static BString no_process = bstr("No process for IO syscall");
+static BString invalid_path_argument = bstr("Invalid path argument");
 
 typedef struct IOOpenCompletionContext
 {
@@ -21,6 +21,18 @@ typedef struct IOOpenCompletionContext
 IOOpenCompletionContext;
 
 typedef IOOpenCompletionContext * IOOpenCompletionContextPtr;
+
+static IOOpenCompletionContext IOOpenCompletionContext__new(
+    KernelContext kernel_context, IOSubsystemPtr io_subsystem, ProcessPtr process, BString path
+)
+{
+    return (IOOpenCompletionContext) {
+        .kernel_context = kernel_context,
+        .io_subsystem = io_subsystem,
+        .process = process,
+        .path = path,
+    };
+}
 
 static Result(Anything) IO__complete_async_open(Result(Anything) open_result, Anything raw_context)
 {
@@ -124,21 +136,16 @@ Result(SystemCallResult) IO__handler(
 
     if (io_operation == IO_OPEN)
     {
+        IOPathRequestPtr request = (IOPathRequestPtr) arg2;
         if (arg2 == 0)
         {
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        Flags flags = (Flags) arg3;
-        BString path = bstring((const char *) arg2);
         IOOpenCompletionContextPtr open_completion_context =
             ptr(Kernel__alloc_kernel(sizeof(IOOpenCompletionContext)), IOOpenCompletionContext);
-        *open_completion_context = (IOOpenCompletionContext) {
-            .kernel_context = kernel_context,
-            .io_subsystem = io_subsystem,
-            .process = process,
-            .path = path,
-        };
+        *open_completion_context =
+            IOOpenCompletionContext__new(kernel_context, io_subsystem, process, request->path);
         kernel_context.result_mapper = Some(KernelResultMapper, IO__complete_async_open);
         kernel_context.result_mapper_context = (Anything) open_completion_context;
 
@@ -148,7 +155,12 @@ Result(SystemCallResult) IO__handler(
             );
 
         BlockDevice__set_current_context(&kernel_context);
-        Result(IOHandle) open_result = IOSubsystem__open(io_subsystem, context, path, flags);
+        Result(IOHandle) open_result = IOSubsystem__open(
+            io_subsystem,
+            context,
+            request->path,
+            request->flags
+        );
         BlockDevice__clear_current_context();
         IOContext__dispose(context);
 
@@ -249,17 +261,19 @@ Result(SystemCallResult) IO__handler(
 
     if (io_operation == IO_LIST_DIR)
     {
-        if (arg2 == 0 || arg3 == 0)
+        IOListDirRequestPtr request = (IOListDirRequestPtr) arg2;
+        if (arg2 == 0 || request->entries == NULL)
         {
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        BString path = bstring((const char *) arg2);
-        DirectoryEntryPtr entries = (DirectoryEntryPtr) arg3;
-        size_t max_entries = (size_t) arg4;
-
         BlockDevice__set_current_context(&kernel_context);
-        Result(DirectoryEntryCount) list_result = IOSubsystem__list_dir(io_subsystem, path, entries, max_entries);
+        Result(DirectoryEntryCount) list_result = IOSubsystem__list_dir(
+            io_subsystem,
+            request->path,
+            request->entries,
+            request->max_entries
+        );
         BlockDevice__clear_current_context();
         match_result(DirectoryEntryCount, list_result,
             success(count)
@@ -275,14 +289,14 @@ Result(SystemCallResult) IO__handler(
 
     if (io_operation == IO_MKDIR)
     {
+        IOPathRequestPtr request = (IOPathRequestPtr) arg2;
         if (arg2 == 0)
         {
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        BString path = bstring((const char *) arg2);
         BlockDevice__set_current_context(&kernel_context);
-        Result(IOStatus) mkdir_result = IOSubsystem__mkdir(io_subsystem, path);
+        Result(IOStatus) mkdir_result = IOSubsystem__mkdir(io_subsystem, request->path);
         BlockDevice__clear_current_context();
         match_result(IOStatus, mkdir_result,
             success(status)
@@ -298,15 +312,14 @@ Result(SystemCallResult) IO__handler(
 
     if (io_operation == IO_REMOVE)
     {
+        IOPathRequestPtr request = (IOPathRequestPtr) arg2;
         if (arg2 == 0)
         {
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        BString path = bstring((const char *) arg2);
-        Flags flags = (Flags) arg3;
         BlockDevice__set_current_context(&kernel_context);
-        Result(IOStatus) remove_result = IOSubsystem__remove(io_subsystem, path, flags);
+        Result(IOStatus) remove_result = IOSubsystem__remove(io_subsystem, request->path, request->flags);
         BlockDevice__clear_current_context();
         match_result(IOStatus, remove_result,
             success(status)
@@ -322,15 +335,18 @@ Result(SystemCallResult) IO__handler(
 
     if (io_operation == IO_LINK)
     {
-        if (arg2 == 0 || arg3 == 0)
+        IOLinkRequestPtr request = (IOLinkRequestPtr) arg2;
+        if (arg2 == 0)
         {
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        BString source_path = bstring((const char *) arg2);
-        BString target_path = bstring((const char *) arg3);
         BlockDevice__set_current_context(&kernel_context);
-        Result(IOStatus) link_result = IOSubsystem__link(io_subsystem, source_path, target_path);
+        Result(IOStatus) link_result = IOSubsystem__link(
+            io_subsystem,
+            request->source_path,
+            request->target_path
+        );
         BlockDevice__clear_current_context();
         match_result(IOStatus, link_result,
             success(status)
@@ -346,7 +362,8 @@ Result(SystemCallResult) IO__handler(
 
     if (io_operation == IO_MOUNT)
     {
-        if (arg2 == 0 || arg3 == 0 || arg4 == 0)
+        IOMountRequestPtr request = (IOMountRequestPtr) arg2;
+        if (arg2 == 0)
         {
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
@@ -356,12 +373,13 @@ Result(SystemCallResult) IO__handler(
             return Error(SystemCallResult, bstring("Permission denied"), IO_PERMISSION_DENIED);
         }
 
-        BString device_path = bstring((const char *) arg2);
-        BString filesystem_type = bstring((const char *) arg3);
-        BString mountpoint = bstring((const char *) arg4);
-
         BlockDevice__set_current_context(&kernel_context);
-        Result(IOStatus) mount_result = IOSubsystem__mount(io_subsystem, device_path, filesystem_type, mountpoint);
+        Result(IOStatus) mount_result = IOSubsystem__mount(
+            io_subsystem,
+            request->device_path,
+            request->filesystem_type,
+            request->mountpoint
+        );
         BlockDevice__clear_current_context();
         match_result(IOStatus, mount_result,
             success(status)
@@ -401,18 +419,18 @@ Result(SystemCallResult) IO__handler(
 
     if (io_operation == IO_SERVER_REGISTER)
     {
+        IOServerRegisterRequestPtr request = (IOServerRegisterRequestPtr) arg2;
         if (arg2 == 0)
         {
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        BString path = bstring((const char *) arg2);
-        IOServerRole role = (IOServerRole) arg3;
         context = IOContext__heap_new(
             kernel_context, Some(IOSubsystemPtr, io_subsystem), None(IOHandle), None(ExternalBuffer)
         );
 
-        Result(IOHandle) register_result = IOSubsystem__server_register(io_subsystem, context, process, path, role);
+        Result(IOHandle) register_result =
+            IOSubsystem__server_register(io_subsystem, context, process, request->path, request->role);
         IOContext__dispose(context);
 
         match_result(IOHandle, register_result,

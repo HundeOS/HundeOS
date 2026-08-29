@@ -6,9 +6,63 @@
 #include "arch/basic_io.h"
 #include "../common/types/bstring.h"
 
+#define K_PRINTF_AARCH64_GR_SAVE_BYTES 64U
+
+#if defined(__aarch64__) && defined(__ELF__)
+typedef struct KPrintfAArch64VaList
+{
+    void * stack;
+    void * gr_top;
+    void * vr_top;
+    int gr_offs;
+    int vr_offs;
+}
+KPrintfAArch64VaList;
+
+typedef KPrintfAArch64VaList * KPrintfAArch64VaListPtr;
+#endif
+
 static void trace_puts(const char * str)
 {
     DebugTrace__puts(str);
+}
+
+static bool k_printf__has_general_arg(va_list args)
+{
+#if defined(__aarch64__) && defined(__ELF__)
+    KPrintfAArch64VaListPtr state = (KPrintfAArch64VaListPtr) &args;
+    if (state->gr_offs < 0)
+    {
+        if (state->gr_top == NULL) // hundelint: ignore-no-null
+        {
+            return false;
+        }
+
+        uintptr_t gr_top = (uintptr_t) state->gr_top;
+        uintptr_t cursor = gr_top + (uintptr_t) state->gr_offs;
+        return cursor >= (gr_top - K_PRINTF_AARCH64_GR_SAVE_BYTES)
+            && (cursor + sizeof(uint64_t)) <= gr_top
+            && (cursor & (sizeof(uint64_t) - 1U)) == 0;
+    }
+
+    return state->stack != NULL // hundelint: ignore-no-null
+        && (((uintptr_t) state->stack) & (sizeof(uint64_t) - 1U)) == 0;
+#else
+    return true;
+#endif
+}
+
+static bool k_printf__require_general_arg(va_list args, const char * conversion)
+{
+    if (k_printf__has_general_arg(args))
+    {
+        return true;
+    }
+
+    trace_puts("k_printf warning: invalid varargs for %");
+    trace_puts(conversion);
+    trace_puts("\n");
+    return false;
 }
 
 void k_println(const char * str) {
@@ -160,6 +214,12 @@ int k_printf(const char* format, ...) {
             switch (format[i]) {
                 case 'd':
                 case 'i': {
+                    if (!k_printf__require_general_arg(args, "i"))
+                    {
+                        va_end(args);
+                        return count;
+                    }
+
                     int value = va_arg(args, int);
                     print_signed(value);
                     
@@ -177,6 +237,12 @@ int k_printf(const char* format, ...) {
                 }
                 
                 case 'u': {
+                    if (!k_printf__require_general_arg(args, "u"))
+                    {
+                        va_end(args);
+                        return count;
+                    }
+
                     unsigned int value = va_arg(args, unsigned int);
                     print_unsigned(value, 10, false);
                     
@@ -193,6 +259,12 @@ int k_printf(const char* format, ...) {
                 }
                 
                 case 'x': {
+                    if (!k_printf__require_general_arg(args, "x"))
+                    {
+                        va_end(args);
+                        return count;
+                    }
+
                     unsigned int value = va_arg(args, unsigned int);
                     print_unsigned(value, 16, false);
                     
@@ -209,6 +281,12 @@ int k_printf(const char* format, ...) {
                 }
                 
                 case 'X': {
+                    if (!k_printf__require_general_arg(args, "X"))
+                    {
+                        va_end(args);
+                        return count;
+                    }
+
                     unsigned int value = va_arg(args, unsigned int);
                     print_unsigned(value, 16, true);
                     
@@ -225,6 +303,12 @@ int k_printf(const char* format, ...) {
                 }
                 
                 case 'o': {
+                    if (!k_printf__require_general_arg(args, "o"))
+                    {
+                        va_end(args);
+                        return count;
+                    }
+
                     unsigned int value = va_arg(args, unsigned int);
                     print_unsigned(value, 8, false);
                     
@@ -241,6 +325,12 @@ int k_printf(const char* format, ...) {
                 }
                 
                 case 'p': {
+                    if (!k_printf__require_general_arg(args, "p"))
+                    {
+                        va_end(args);
+                        return count;
+                    }
+
                     void* ptr = va_arg(args, void*);
                     print_pointer(ptr);
                     count += 2;  // "0x"
@@ -258,6 +348,12 @@ int k_printf(const char* format, ...) {
                 }
                 
                 case 'c': {
+                    if (!k_printf__require_general_arg(args, "c"))
+                    {
+                        va_end(args);
+                        return count;
+                    }
+
                     int c = va_arg(args, int);
                     putchar((char)c);
                     count++;
@@ -265,6 +361,12 @@ int k_printf(const char* format, ...) {
                 }
                 
                 case 's': {
+                    if (!k_printf__require_general_arg(args, "s"))
+                    {
+                        va_end(args);
+                        return count;
+                    }
+
                     char* str = va_arg(args, char*);
                     print_string(str);
                     if (str == NULL) // hundelint: ignore-no-null

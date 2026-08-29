@@ -74,13 +74,13 @@ BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
     return EmptyArray(BlockDeviceMetadataEntries);
 }
 
-BString embedded = BSTRING_NEW("sbin");
-BString dev = BSTRING_NEW("dev");
-BString fat16 = BSTRING_NEW("fat16");
-BString fat32 = BSTRING_NEW("fat32");
-BString ext2 = BSTRING_NEW("ext2");
-BString memfs = BSTRING_NEW("tmp/memfs");
-BString proc = BSTRING_NEW("proc");
+BString embedded = bstr("sbin");
+BString dev = bstr("dev");
+BString fat16 = bstr("fat16");
+BString fat32 = bstr("fat32");
+BString ext2 = bstr("ext2");
+BString memfs = bstr("tmp/memfs");
+BString proc = bstr("proc");
 
 #define BOOT_CONFIG_BLOCK_COUNT ((uint64_t) 8 * 1024 * 1024 / BLOCK_DEVICE_BLOCK_SIZE)
 
@@ -180,9 +180,9 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
 {
     match_result(CollectionCode, FilesystemTable__add(
         self,
-        BSTRING_NEW("/dev/virtio1"),
-        BSTRING_NEW("ext2"),
-        BSTRING_NEW("/")
+        bstr("/dev/virtio1"),
+        bstr("ext2"),
+        bstr("/")
     ),
         success_do_nothing(),
         error(code, message) { return Error(CollectionCode, message, code); }
@@ -191,18 +191,8 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
     match_result(CollectionCode, FilesystemTable__add_by_block_count(
         self,
         BOOT_CONFIG_BLOCK_COUNT,
-        BSTRING_NEW("ext2"),
-        BSTRING_NEW("/boot/config")
-    ),
-        success_do_nothing(),
-        error(code, message) { return Error(CollectionCode, message, code); }
-    );
-
-    match_result(CollectionCode, FilesystemTable__add(
-        self,
-        BSTRING_NEW("/dev/virtio3"),
-        BSTRING_NEW("fat32"),
-        BSTRING_NEW("/mnt/fs1")
+        bstr("ext2"),
+        bstr("/boot/config")
     ),
         success_do_nothing(),
         error(code, message) { return Error(CollectionCode, message, code); }

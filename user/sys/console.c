@@ -3,15 +3,13 @@
 
 #include "../../common/types/bstring.h"
 #include "io.h"
+#include "print.h"
 #include "../user.h"
-
-extern void print(const char * str);
 
 enum
 {
     BUFFER_SIZE = 1024
 };
-static const char backspace_sequence[] = "\b \b";
 
 ByteCount console_read(char * buf, uint64_t size)
 {
@@ -52,7 +50,8 @@ ByteCount console_read_line(char * buf, bool echo, uint64_t size)
                     buf[pos] = '\0';
                     if (echo)
                     {
-                        print(backspace_sequence);
+                        BString backspace_sequence = bstr("\b \b");
+                        IO__print(&backspace_sequence);
                     }
                 }
                 continue;
@@ -69,8 +68,8 @@ ByteCount console_read_line(char * buf, bool echo, uint64_t size)
 
             if (echo)
             {
-                char out[2] = { c, '\0' };
-                print(out);
+                BString output = BString__from_chars(&c, 1);
+                IO__print(&output);
             }
         }
     }
@@ -86,7 +85,7 @@ BString Console__read(void)
 
     if (read <= 0)
     {
-        return EMPTY_BSTRING;
+        return empty_bstr();
     }
 
     return BString__from_chars(buffer, read);
@@ -99,7 +98,7 @@ BString Console__read_line(bool echo)
 
     if (read <= 0)
     {
-        return EMPTY_BSTRING;
+        return empty_bstr();
     }
 
     return BString__from_chars(buffer, read);

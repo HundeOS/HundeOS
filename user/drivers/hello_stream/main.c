@@ -3,7 +3,7 @@
 #include "../../user.h"
 
 static const char * HELLO_PATH = "/dev/hello";
-static const BString hello_message = BSTRING_NEW("hello world\n");
+static const BString hello_message = bstr("hello world\n");
 
 static uint64_t copy_hello(IOServerBufferDataPtr target, uint64_t capacity)
 {
@@ -27,7 +27,7 @@ static void publish_hello(IOHandle handle)
     IOStatus status = io_server_get_buffer(handle, &buffer);
     if (status != IO_OK)
     {
-        printf("hello_stream: get buffer error %i\n", (int) status);
+        IO__printf(&bstr("hello_stream: get buffer error %i\n"), (int) status);
         return;
     }
 
@@ -35,23 +35,24 @@ static void publish_hello(IOHandle handle)
     status = io_server_data_available(handle, byte_count);
     if (status != IO_OK)
     {
-        printf("hello_stream: data available error %i\n", (int) status);
+        IO__printf(&bstr("hello_stream: data available error %i\n"), (int) status);
         return;
     }
 
     status = io_server_eof(handle);
     if (status != IO_OK)
     {
-        printf("hello_stream: eof error %i\n", (int) status);
+        IO__printf(&bstr("hello_stream: eof error %i\n"), (int) status);
     }
 }
 
 int main(void)
 {
-    IOHandle handle = io_server_register(HELLO_PATH, IO_SERVER_READ);
+    BString hello_path = bstring(HELLO_PATH);
+    IOHandle handle = io_server_register(&hello_path, IO_SERVER_READ);
     if (handle < 0)
     {
-        printf("hello_stream: register error %i\n", (int) handle);
+        IO__printf(&bstr("hello_stream: register error %i\n"), (int) handle);
         return 1;
     }
 

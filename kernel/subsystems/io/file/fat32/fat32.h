@@ -90,6 +90,12 @@ typedef Fat32DirectoryEntry * Fat32DirectoryEntryPtr;
 OptionalDef(Fat32DirectoryEntry);
 ResultDef(Fat32DirectoryEntry);
 bool Fat32DirectoryEntry__equals(Fat32DirectoryEntryPtr self, Fat32DirectoryEntryPtr other);
+Fat32DirectoryEntry Fat32DirectoryEntry__new(
+    BString name,
+    uint8_t attributes,
+    uint32_t first_cluster,
+    uint32_t size
+);
 FixedArrayDefine(
     Fat32DirectoryEntry,
     FAT32_MAX_ROOT_ENTRIES,

@@ -27,7 +27,7 @@ inline SMCCCRes smc_call(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
     __asm__ volatile("smc #0"
                      : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
                      : : "x4","x5","x6","x7","memory","cc");
-    return (SMCCCRes){ (int64_t) r0, (int64_t) r1, (int64_t) r2, (int64_t) r3 };
+    return (SMCCCRes){ (int64_t) r0, (int64_t) r1, (int64_t) r2, (int64_t) r3 }; // hundelint: ignore-constructor-required
 }
 
 inline SMCCCRes smccc_hvc(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
@@ -39,7 +39,7 @@ inline SMCCCRes smccc_hvc(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
     __asm__ volatile("hvc #0"
         : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
         : : "x4","x5","x6","x7","memory","cc");
-    return (SMCCCRes){ (int64_t) r0, (int64_t) r1, (int64_t) r2, (int64_t) r3 };
+    return (SMCCCRes){ (int64_t) r0, (int64_t) r1, (int64_t) r2, (int64_t) r3 }; // hundelint: ignore-constructor-required
 }
 
 #endif

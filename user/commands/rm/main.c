@@ -5,7 +5,7 @@ int main(int argc, char ** argv)
 {
     if (argc < 2)
     {
-        print("rm: usage rm [-r] <path>\n");
+        IO__print(&bstr("rm: usage rm [-r] <path>\n"));
         return 1;
     }
 
@@ -22,7 +22,7 @@ int main(int argc, char ** argv)
     IOStatus status = IO__remove_file_with_flags(&path, flags);
     if (status < 0)
     {
-        printf("rm: error %i\n", (int) status);
+        IO__printf(&bstr("rm: error %i\n"), (int) status);
         return 1;
     }
 

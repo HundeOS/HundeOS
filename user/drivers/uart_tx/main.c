@@ -59,7 +59,8 @@ int UART_TX_ENTRYPOINT(void)
     }
     void * uart = driver_ptr(uart_mapping);
 
-    IOHandle tty = io_server_register(":tty:", IO_SERVER_WRITE);
+    BString tty_path = bstr(":tty:");
+    IOHandle tty = io_server_register(&tty_path, IO_SERVER_WRITE);
     if (tty < 0)
     {
         DRIVER_DEBUG("uart_tx: register error %i\n", (int) tty);

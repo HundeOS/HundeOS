@@ -16,7 +16,7 @@ static IOStatus Mv__move_file(IOHandle source_handle, ConstBStringPtr source_pat
 
     while (true)
     {
-        BString buffer = EMPTY_BSTRING;
+        BString buffer = empty_bstr();
         ByteCount read_bytes = IO__read(source_handle, &buffer);
         if (read_bytes == IO_EOF || read_bytes == 0)
         {
@@ -94,7 +94,7 @@ int main(int argc, char ** argv)
 {
     if (argc != 3)
     {
-        print("mv: usage mv <source> <target>\n");
+        IO__print(&bstr("mv: usage mv <source> <target>\n"));
         return 1;
     }
 
@@ -106,7 +106,7 @@ int main(int argc, char ** argv)
     IOStatus status = Mv__move_path(&source_path, &target_path);
     if (status != IO_OK)
     {
-        printf("mv: error %s (%i)\n", io_status_string(status), (int) status);
+        IO__printf(&bstr("mv: error %s (%i)\n"), io_status_string(status), (int) status);
         return 1;
     }
 
