@@ -740,6 +740,52 @@ def _declaration_zero_initialized_symbols(source: bytes, node) -> list:
     return result
 
 
+def _declaration_uses_direct_struct_initializer(source: bytes, node) -> bool:
+    if node.type != "declaration":
+        return False
+
+    type_name = _normalise_type_name(_declaration_type_text(source, node))
+    if not type_name:
+        return False
+
+    primitive_names = {
+        "bool",
+        "char",
+        "double",
+        "float",
+        "int",
+        "int8_t",
+        "int16_t",
+        "int32_t",
+        "int64_t",
+        "long",
+        "short",
+        "size_t",
+        "uint8_t",
+        "uint16_t",
+        "uint32_t",
+        "uint64_t",
+        "unsigned",
+        "void",
+    }
+    if type_name in primitive_names:
+        return False
+
+    for child in node.children:
+        if child.type != "init_declarator":
+            continue
+
+        declarator = child.child_by_field_name("declarator")
+        if declarator is None or any(descendant.type == "array_declarator" for descendant in _walk(declarator)):
+            continue
+
+        value = _init_declarator_value(child)
+        if value is not None and value.type == "initializer_list":
+            return True
+
+    return False
+
+
 def _lint_constructor_required(path: Path, source_text: str, tree) -> list[Finding]:
     if _is_allowed(CONSTRUCTOR_RULE, path):
         return []
@@ -766,6 +812,26 @@ def _lint_constructor_required(path: Path, source_text: str, tree) -> list[Findi
                         message=CONSTRUCTOR_RULE.message,
                     )
                 )
+            continue
+
+        if node.type == "declaration" and _declaration_uses_direct_struct_initializer(source, node):
+            if _is_in_constructor_function(source, node):
+                continue
+
+            line_number, column = _line_column_for_offset(line_starts, node.start_byte)
+            raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+            if CONSTRUCTOR_RULE.name in _line_ignores(raw_line):
+                continue
+
+            findings.append(
+                Finding(
+                    path=path,
+                    line=line_number,
+                    column=column,
+                    rule=CONSTRUCTOR_RULE.name,
+                    message=CONSTRUCTOR_RULE.message,
+                )
+            )
             continue
 
         if node.type != "compound_statement":

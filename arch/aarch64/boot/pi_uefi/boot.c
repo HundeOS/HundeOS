@@ -42,7 +42,7 @@ extern const uint64_t __gicd_start[];
 #define PI4_EMMC2_IRQ_ID 126ULL
 #define PI_UEFI_GICD_BASE ((uint64_t)&__gicd_start[0])
 #define PI_UEFI_GICR_BASE (PI_UEFI_GICD_BASE + GICR_OFFSET)
-__BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = {
+__BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = { // hundelint: ignore-constructor-required
     .cpu_count = 4,
     .memory_physical_start = 0,
     .memory_physical_end = 4ULL * 1024ULL * 1024ULL * 1024ULL,

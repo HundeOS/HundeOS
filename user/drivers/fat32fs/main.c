@@ -129,6 +129,14 @@ Fat32fsResolvedParent;
 
 ResultDef(Fat32fsResolvedParent);
 
+static Fat32fsResolvedParent Fat32fsResolvedParent__new(uint32_t parent_cluster, BString leaf_name)
+{
+    return (Fat32fsResolvedParent) {
+        .parent_cluster = parent_cluster,
+        .leaf_name = leaf_name,
+    };
+}
+
 typedef struct Fat32fsClusterOffset
 {
     uint32_t cluster;
@@ -137,6 +145,14 @@ typedef struct Fat32fsClusterOffset
 Fat32fsClusterOffset;
 
 ResultDef(Fat32fsClusterOffset);
+
+static Fat32fsClusterOffset Fat32fsClusterOffset__new(uint32_t cluster, uint64_t offset)
+{
+    return (Fat32fsClusterOffset) {
+        .cluster = cluster,
+        .offset = offset,
+    };
+}
 
 typedef struct Fat32fsVolume
 {
@@ -710,10 +726,7 @@ static Result(Fat32fsResolvedParent) Fat32fsVolume__resolve_parent(Fat32fsVolume
         return Error(Fat32fsResolvedParent, fat32fs_invalid_path, FAT32FS_INVALID_PATH);
     }
 
-    Fat32fsResolvedParent resolved = {
-        .parent_cluster = self->root_cluster,
-        .leaf_name = empty_bstr(),
-    };
+    Fat32fsResolvedParent resolved = Fat32fsResolvedParent__new(self->root_cluster, empty_bstr());
     match_optional(BString, BStringArray__at(&segments, segment_count - 1),
         some(segment) { resolved.leaf_name = segment; },
         none() { return Error(Fat32fsResolvedParent, fat32fs_invalid_path, FAT32FS_INVALID_PATH); }
@@ -788,10 +801,7 @@ static Result(Fat32fsClusterOffset) Fat32fsVolume__cluster_for_offset(
         );
     }
 
-    Fat32fsClusterOffset result = {
-        .cluster = current,
-        .offset = offset % FAT32FS_BYTES_PER_SECTOR,
-    };
+    Fat32fsClusterOffset result = Fat32fsClusterOffset__new(current, offset % FAT32FS_BYTES_PER_SECTOR);
     return Success(Fat32fsClusterOffset, result);
 }
 

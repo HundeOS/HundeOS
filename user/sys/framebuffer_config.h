@@ -39,6 +39,11 @@ FramebufferConfig;
 
 typedef FramebufferConfig * FramebufferConfigPtr;
 
+static FramebufferConfig FramebufferConfig__new(void)
+{
+    return (FramebufferConfig) { 0 };
+}
+
 typedef struct FramebufferConfigFields
 {
     bool present;

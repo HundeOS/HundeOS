@@ -768,12 +768,12 @@ static Result(Fat32DirectoryEntries) Fat32Volume__list_directory(Fat32VolumePtr 
                 continue;
             }
 
-            Fat32DirectoryEntry entry = {
-                .name = Fat32__entry_name(&sector[offset], &lfn_name, lfn_checksum, lfn_valid),
-                .attributes = sector[offset + 11],
-                .first_cluster = Fat32__read_directory_cluster(&sector[offset]),
-                .size = Fat32__read_u32(sector, offset + 28),
-            };
+            Fat32DirectoryEntry entry = Fat32DirectoryEntry__new(
+                Fat32__entry_name(&sector[offset], &lfn_name, lfn_checksum, lfn_valid),
+                sector[offset + 11],
+                Fat32__read_directory_cluster(&sector[offset]),
+                Fat32__read_u32(sector, offset + 28)
+            );
 
             match_result(CollectionCode, Fat32DirectoryEntries__push(&entries, entry),
                 success_do_nothing(),
@@ -2797,12 +2797,12 @@ static Result(DirectoryEntryCount) Fat32FileIO__copy_directory_sector_to_dirents
             return Success(DirectoryEntryCount, count);
         }
 
-        Fat32DirectoryEntry fat_entry = {
-            .name = Fat32__entry_name(&sector[offset], &lfn_name, lfn_checksum, lfn_valid),
-            .attributes = sector[offset + 11],
-            .first_cluster = Fat32__read_directory_cluster(&sector[offset]),
-            .size = Fat32__read_u32(sector, offset + 28),
-        };
+        Fat32DirectoryEntry fat_entry = Fat32DirectoryEntry__new(
+            Fat32__entry_name(&sector[offset], &lfn_name, lfn_checksum, lfn_valid),
+            sector[offset + 11],
+            Fat32__read_directory_cluster(&sector[offset]),
+            Fat32__read_u32(sector, offset + 28)
+        );
         entries[count] = Fat32FileIO__directory_entry_from_fat_entry(&fat_entry);
         count++;
         Fat32__clear_lfn(&lfn_name, &lfn_checksum, &lfn_valid);

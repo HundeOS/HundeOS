@@ -1025,7 +1025,7 @@ int VIDEO_TERM_ENTRYPOINT(void)
         return 1;
     }
 
-    FramebufferConfig config = { 0 };
+    FramebufferConfig config = FramebufferConfig__new();
     if (!FramebufferConfig__load(&config))
     {
         DRIVER_DEBUG("video_term: framebuffer config not present\n");

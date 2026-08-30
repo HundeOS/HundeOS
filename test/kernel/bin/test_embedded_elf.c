@@ -21,10 +21,10 @@ void test_elf_lookup(void)
 void test_elf_list_uses_embedded_index(void)
 {
     BString hello_world = bstr("hello_world");
-    BString idle = bstr("idle");
+    BString idle = bstr("services/idle");
     BString shell = bstr("shell");
-    BString hundeschule = bstr("hundeschule");
-    BString hundeschau = bstr("hundeschau");
+    BString hundeschule = bstr("services/hundeschule");
+    BString hundeschau = bstr("services/hundeschau");
     BString humpen = bstr("services/humpen");
     BString virtio_blk = bstr("drivers/virtio_blk");
     BStringArray files = EmbeddedElf__list();

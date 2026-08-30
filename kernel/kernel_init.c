@@ -28,7 +28,7 @@ static Scheduler scheduler = NEW_SCHEDULER(&message_broker);
 static IRQDispatcher irq_dispatcher = NEW_IRQ_DISPATCHER(&scheduler);
 static IOSubsystem io_subsystem = NEW_IO_SUBSYSTEM(&scheduler, &message_broker);
 
-static Kernel instance = {
+static Kernel instance = { // hundelint: ignore-constructor-required
     .status = INIT_NOT_STARTED,
     .init_lock = MUTEX_INIT,
     .syscall_dispatcher = NEW_SYSCALL_DISPATCHER,
@@ -122,7 +122,7 @@ Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
     self->scheduler->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
     self->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
 
-    Optional(Elf) idle_opt = EmbeddedElf__load(bstring("idle"));
+    Optional(Elf) idle_opt = EmbeddedElf__load(bstring("services/idle"));
     match_optional(Elf, idle_opt,
         some(idle)
         {

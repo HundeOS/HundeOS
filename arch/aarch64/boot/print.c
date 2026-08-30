@@ -4,7 +4,7 @@
 
 static __BOOT_DATA__(uint64_t) boot_uart_physical_base = BOOT_UART0_PHYS_BASE;
 
-static __BOOT_DATA__(boot_mutex) print_lock = {
+static __BOOT_DATA__(boot_mutex) print_lock = { // hundelint: ignore-constructor-required
     .lock = 0
 };
 

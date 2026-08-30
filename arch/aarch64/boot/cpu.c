@@ -18,7 +18,7 @@ __BOOT_ALLOCATION__(static uint8_t) __attribute__((aligned(16))) boot_cpu_stacks
 __BOOT_DATA__(static uint64_t) cpus_online = 1;
 __BOOT_DATA__(static uint64_t) messaged = 1;
 
-static volatile __BOOT_DATA__(boot_mutex) mutex = {
+static volatile __BOOT_DATA__(boot_mutex) mutex = { // hundelint: ignore-constructor-required
     .lock = 0
 };
 

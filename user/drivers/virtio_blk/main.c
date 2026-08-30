@@ -130,6 +130,11 @@ static VirtioBlkDevice VirtioBlkDevice__new(
     };
 }
 
+static VirtioBlkDevice VirtioBlkDevice__new_empty(void)
+{
+    return VirtioBlkDevice__new(0, 0, 0, 0, 0, bstr(""));
+}
+
 static VirtqDesc VirtqDesc__new(uint64_t addr, uint32_t len, uint16_t flags, uint16_t next)
 {
     return (VirtqDesc) {
@@ -572,7 +577,7 @@ int VIRTIO_BLK_ENTRYPOINT(int argc, char ** argv)
         return 1;
     }
 
-    VirtioBlkDevice device = { 0 };
+    VirtioBlkDevice device = VirtioBlkDevice__new_empty();
     if (!VirtioBlk__bind_device(&device, slot, argv[2]))
     {
         DRIVER_DEBUG("virtio_blk: block device bind failed slot=%i path=%s\n", (int) slot, argv[2]);

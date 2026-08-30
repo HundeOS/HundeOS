@@ -39,7 +39,7 @@ extern const uint64_t __gicd_start[];
 #define QEMU_VIRT_PCI_BUS_START      0ULL
 #define QEMU_VIRT_PCI_BUS_END        255ULL
 
-__BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = {
+__BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = { // hundelint: ignore-constructor-required
     .cpu_count = 4,
     .memory_physical_start = 0,
     .memory_physical_end = 4ULL * 1024ULL * 1024ULL * 1024ULL,

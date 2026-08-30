@@ -37,6 +37,16 @@ PciConfigParseState;
 typedef PciConfigParseState * PciConfigParseStatePtr;
 typedef const PciConfigParseState * ConstPciConfigParseStatePtr;
 
+static PciConfig PciConfig__new(uint64_t ecam_physical_base, uint64_t ecam_size, uint64_t bus_start, uint64_t bus_end)
+{
+    return (PciConfig) {
+        .ecam_physical_base = ecam_physical_base,
+        .ecam_size = ecam_size,
+        .bus_start = bus_start,
+        .bus_end = bus_end,
+    };
+}
+
 static const BString pci_config_delimiter = bstr("=");
 static const BString pci_config_present_key = bstr("pci.present");
 static const BString pci_config_ecam_physical_base_key = bstr("pci.ecam.physical_base");

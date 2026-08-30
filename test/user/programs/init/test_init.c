@@ -48,7 +48,7 @@ static bool fake_expect_keyboard_input;
 
 #define HUNDESCHAU_ENTRYPOINT hundeschau_main_under_test
 #define IO__printf test_printf
-#include "../../../../user/programs/hundeschau/main.c"
+#include "../../../../user/services/hundeschau/main.c"
 #undef IO__printf
 
 void setUp(void)

@@ -48,7 +48,7 @@ extern char __table_phys_end[];
 extern char __table_virt_start[];
 extern char __table_virt_end[];
 
-static __BOOT_DATA__(MappingPermissions) stack_heap_perms = {
+static __BOOT_DATA__(MappingPermissions) stack_heap_perms = { // hundelint: ignore-constructor-required
     .access = ACCESS_EL1_RW_EL0_NO,
     .shareability = SHARE_INNER,
     .memory_type = ATTR_INDEX_NORMAL,
@@ -56,7 +56,7 @@ static __BOOT_DATA__(MappingPermissions) stack_heap_perms = {
     .pxn = 1
 };
 
-static __BOOT_DATA__(MappingPermissions) kernel_perms = {
+static __BOOT_DATA__(MappingPermissions) kernel_perms = { // hundelint: ignore-constructor-required
     .access = ACCESS_EL1_RW_EL0_NO,
     .shareability = SHARE_INNER,
     .memory_type = ATTR_INDEX_NORMAL,
@@ -64,7 +64,7 @@ static __BOOT_DATA__(MappingPermissions) kernel_perms = {
     .pxn = 0
 };
 
-static __BOOT_DATA__(MappingPermissions) kernel_rw_perms = {
+static __BOOT_DATA__(MappingPermissions) kernel_rw_perms = { // hundelint: ignore-constructor-required
     .access = ACCESS_EL1_RW_EL0_NO,
     .shareability = SHARE_INNER,
     .memory_type = ATTR_INDEX_NORMAL,
@@ -72,7 +72,7 @@ static __BOOT_DATA__(MappingPermissions) kernel_rw_perms = {
     .pxn = 1
 };
 
-static __BOOT_DATA__(MappingPermissions) device_perms = {
+static __BOOT_DATA__(MappingPermissions) device_perms = { // hundelint: ignore-constructor-required
     .memory_type = ATTR_INDEX_DEVICE,
     .access = ACCESS_EL1_RW_EL0_NO,
     .shareability = SHARE_OUTER,
@@ -80,7 +80,7 @@ static __BOOT_DATA__(MappingPermissions) device_perms = {
     .pxn = 1
 };
 
-static __BOOT_DATA__(MappingPermissions) embedded_binaries_perms = {
+static __BOOT_DATA__(MappingPermissions) embedded_binaries_perms = { // hundelint: ignore-constructor-required
     .memory_type = ATTR_INDEX_NORMAL,
     .access = ACCESS_EL1_RO_EL0_NO,
     .shareability = SHARE_INNER,

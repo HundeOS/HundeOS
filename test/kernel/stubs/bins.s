@@ -84,13 +84,13 @@ embedded_names:
 embedded_name_hello_world:
     .asciz "hello_world"
 embedded_name_idle:
-    .asciz "idle"
+    .asciz "services/idle"
 embedded_name_shell:
     .asciz "shell"
 embedded_name_hundeschule:
-    .asciz "hundeschule"
+    .asciz "services/hundeschule"
 embedded_name_hundeschau:
-    .asciz "hundeschau"
+    .asciz "services/hundeschau"
 embedded_name_humpen:
     .asciz "services/humpen"
 embedded_name_virtio_blk:

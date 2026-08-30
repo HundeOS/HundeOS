@@ -50,6 +50,44 @@ typedef HundeschauRequiredProcess * HundeschauRequiredProcessPtr;
 OptionalDef(HundeschauRequiredProcess);
 OptionalDef(HundeschauRequiredProcessPtr);
 
+static HundeschauRequiredProcess HundeschauRequiredProcess__new(
+    uint64_t pid,
+    bool respawn,
+    BString path,
+    BString arg0,
+    BString arg1)
+{
+    return (HundeschauRequiredProcess) {
+        .pid = pid,
+        .respawn = respawn,
+        .has_stdio = false,
+        .path = path,
+        .arg0 = arg0,
+        .arg1 = arg1,
+    };
+}
+
+static HundeschauRequiredProcess HundeschauRequiredProcess__new_with_stdio(
+    uint64_t pid,
+    bool respawn,
+    SpawnFileDescriptor stdin_fd,
+    SpawnFileDescriptor stdout_fd,
+    SpawnFileDescriptor stderr_fd,
+    BString path)
+{
+    return (HundeschauRequiredProcess) {
+        .pid = pid,
+        .respawn = respawn,
+        .has_stdio = true,
+        .stdin_fd = stdin_fd,
+        .stdout_fd = stdout_fd,
+        .stderr_fd = stderr_fd,
+        .path = path,
+        .arg0 = empty_bstr(),
+        .arg1 = empty_bstr(),
+    };
+}
+
 static bool HundeschauRequiredProcess__equals(HundeschauRequiredProcessPtr self, HundeschauRequiredProcessPtr other)
 {
     return self->pid == other->pid;
@@ -90,14 +128,13 @@ static int Hundeschau__spawn_required_process(
         return 1;
     }
 
-    HundeschauRequiredProcess process = {
-        .pid = (uint64_t) result,
-        .respawn = respawn,
-        .has_stdio = false,
-        .path = BString__slice(path, 0, BString__length(path)),
-        .arg0 = BString__slice(arg0, 0, BString__length(arg0)),
-        .arg1 = BString__slice(arg1, 0, BString__length(arg1)),
-    };
+    HundeschauRequiredProcess process = HundeschauRequiredProcess__new(
+        (uint64_t) result,
+        respawn,
+        BString__slice(path, 0, BString__length(path)),
+        BString__slice(arg0, 0, BString__length(arg0)),
+        BString__slice(arg1, 0, BString__length(arg1))
+    );
     match_result(CollectionCode, HundeschauRequiredProcesses__push(processes, process),
         success_do_nothing(),
         error(code, message)
@@ -135,17 +172,14 @@ static int Hundeschau__spawn_required_process_with_stdio(
         return 1;
     }
 
-    HundeschauRequiredProcess process = {
-        .pid = (uint64_t) result,
-        .respawn = respawn,
-        .has_stdio = true,
-        .stdin_fd = stdin_fd,
-        .stdout_fd = stdout_fd,
-        .stderr_fd = stderr_fd,
-        .path = BString__slice(path, 0, BString__length(path)),
-        .arg0 = empty_bstr(),
-        .arg1 = empty_bstr(),
-    };
+    HundeschauRequiredProcess process = HundeschauRequiredProcess__new_with_stdio(
+        (uint64_t) result,
+        respawn,
+        stdin_fd,
+        stdout_fd,
+        stderr_fd,
+        BString__slice(path, 0, BString__length(path))
+    );
     match_result(CollectionCode, HundeschauRequiredProcesses__push(processes, process),
         success_do_nothing(),
         error(code, message)
@@ -436,7 +470,7 @@ static int Hundeschau__spawn_default_drivers(
 static int Hundeschau__initialise_required_processes(HundeschauRequiredProcessesPtr processes)
 {
     int failures = 0;
-    FramebufferConfig framebuffer_config = { 0 };
+    FramebufferConfig framebuffer_config = FramebufferConfig__new();
     bool framebuffer_present = FramebufferConfig__load(&framebuffer_config);
 
     match_optional(DynString, Hundeschau__load_config(),

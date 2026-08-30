@@ -101,7 +101,7 @@ static void SdHostConfig__read_config_line(
 
 static Optional(SdHostConfig) SdHostConfig__parse(ConstDynStringPtr sysinfo)
 {
-    SdHostConfig config = { 0 };
+    SdHostConfig config = SdHostConfig__new(0, 0, 0);
     bool found_present = false;
     bool found_physical_base = false;
     bool found_mmio_size = false;

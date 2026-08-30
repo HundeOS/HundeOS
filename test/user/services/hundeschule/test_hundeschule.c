@@ -44,7 +44,7 @@ static char fake_wait_ready_paths[8][TEST_SERVICE_READY_NAME_MAX];
 
 #define HUNDESCHULE_ENTRYPOINT hundeschule_main_under_test
 #define IO__printf test_printf
-#include "../../../../user/programs/hundeschule/main.c"
+#include "../../../../user/services/hundeschule/main.c"
 #undef IO__printf
 
 void setUp(void)
@@ -317,7 +317,7 @@ void test_hundeschule_starts_bootstrap_drivers_then_hundeschau(void)
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[2].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[3].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[4].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/hundeschau", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[5].path);
     TEST_ASSERT_EQUAL_UINT64(2, fake_wait_ready_count);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_wait_ready_paths[0]);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio2", fake_wait_ready_paths[1]);
@@ -351,7 +351,7 @@ void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[2].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sdhci", spawn_calls[3].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_keyboard", spawn_calls[4].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/hundeschau", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[5].path);
     TEST_ASSERT_EQUAL_UINT64(2, fake_wait_ready_count);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_wait_ready_paths[0]);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio2", fake_wait_ready_paths[1]);

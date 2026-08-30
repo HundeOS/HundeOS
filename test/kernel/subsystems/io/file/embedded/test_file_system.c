@@ -498,7 +498,7 @@ void test_it_can_list_files_to_subdir(void)
     Result(FilesystemNodes) nodes = root->file_io.list_nodes(root_state, NULL, bstring("/sbin/"));
 
     match_result(FilesystemNodes, nodes, success(result) {
-            TEST_ASSERT_EQUAL_INT(7, FilesystemNodes__len(&result));
+            TEST_ASSERT_EQUAL_INT(4, FilesystemNodes__len(&result));
             FilesystemNodePtr node = Unwrap(FilesystemNodePtr, FilesystemNodes__at(&result, 0), (FilesystemNodePtr){});
             TEST_ASSERT_TRUE(BString__equals(&hello_world, &node->name));
         }, error_test_fail());
@@ -926,33 +926,40 @@ void test_build_root_and_mounts_lists_tmp_mount_parent_when_backing_root_is_moun
 
 void test_io_list_dir_lists_ebin_files(void)
 {
-    DirectoryEntry entries[7];
+    DirectoryEntry entries[4];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/sbin", entries, 7), 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/sbin", entries, 4), 0, 0, 0
     ), success(count) {
-            TEST_ASSERT_EQUAL_INT(7, count);
+            TEST_ASSERT_EQUAL_INT(4, count);
             TEST_ASSERT_EQUAL_STRING("hello_world", entries[0].name);
-            TEST_ASSERT_EQUAL_STRING("services", entries[5].name);
-            TEST_ASSERT_EQUAL_STRING("drivers", entries[6].name);
+            TEST_ASSERT_EQUAL_STRING("services", entries[1].name);
+            TEST_ASSERT_EQUAL_STRING("shell", entries[2].name);
+            TEST_ASSERT_EQUAL_STRING("drivers", entries[3].name);
         }, error_test_fail());
 }
 
 void test_io_list_dir_marks_services_as_hund_owned(void)
 {
-    DirectoryEntry entries[1];
+    DirectoryEntry entries[4];
 
     match_result(SystemCallResult, IO__handler(
-        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/sbin/services", entries, 1), 0, 0, 0
+        kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/sbin/services", entries, 4), 0, 0, 0
     ), success(count) {
-            TEST_ASSERT_EQUAL_INT(1, count);
-            TEST_ASSERT_EQUAL_STRING("humpen", entries[0].name);
-            TEST_ASSERT_EQUAL(PROCESS_USER_HUND, entries[0].user_id);
-            TEST_ASSERT_EQUAL(PROCESS_GROUP_HUND, entries[0].group_id);
-            TEST_ASSERT_EQUAL(
-                IO_MODE_TYPE_FILE | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC,
-                entries[0].mode
-            );
+            TEST_ASSERT_EQUAL_INT(4, count);
+            TEST_ASSERT_EQUAL_STRING("idle", entries[0].name);
+            TEST_ASSERT_EQUAL_STRING("hundeschule", entries[1].name);
+            TEST_ASSERT_EQUAL_STRING("hundeschau", entries[2].name);
+            TEST_ASSERT_EQUAL_STRING("humpen", entries[3].name);
+            for (DirectoryEntryCount index = 0; index < count; index++)
+            {
+                TEST_ASSERT_EQUAL(PROCESS_USER_HUND, entries[index].user_id);
+                TEST_ASSERT_EQUAL(PROCESS_GROUP_HUND, entries[index].group_id);
+                TEST_ASSERT_EQUAL(
+                    IO_MODE_TYPE_FILE | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC,
+                    entries[index].mode
+                );
+            }
         }, error_test_fail());
 }
 

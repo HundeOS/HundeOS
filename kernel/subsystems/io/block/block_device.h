@@ -96,6 +96,15 @@ typedef struct BlockIOContext
 }
 BlockIOContext;
 
+static inline BlockIOContext BlockIOContext__new(KernelContext kernel_context, Anything owner_context)
+{
+    return (BlockIOContext) {
+        .kernel_context = kernel_context,
+        .owner_context = owner_context,
+        .request_id = None(BlockRequestID),
+    };
+}
+
 typedef Result(BlockCount) (* BlockDeviceRead)(
     BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr target
 );

@@ -154,6 +154,37 @@ class HundelintTest(unittest.TestCase):
         rules = self.ast_rules_for(source)
         self.assertIn("constructor-required", rules)
 
+    def test_reports_direct_named_type_initializer_list(self):
+        source = (
+            "void example(uint64_t bus, uint64_t device) {\n"
+            "    SdhciPciFunction function = { .bus = bus, .device = device, .function = 0 };\n"
+            "    use(function);\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertIn("constructor-required", rules)
+
+    def test_allows_direct_named_type_initializer_list_inside_constructor(self):
+        source = (
+            "SdhciPciFunction SdhciPciFunction__new(uint64_t bus, uint64_t device, uint64_t function) {\n"
+            "    SdhciPciFunction result = { .bus = bus, .device = device, .function = function };\n"
+            "    return result;\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("constructor-required", rules)
+
+    def test_allows_direct_named_type_initializer_list_with_ignore_comment(self):
+        source = (
+            "void example(uint64_t bus, uint64_t device) {\n"
+            "    SdhciPciFunction function = { .bus = bus, .device = device, .function = 0 }; "
+            "// hundelint: ignore-constructor-required\n"
+            "    use(function);\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("constructor-required", rules)
+
     def test_reports_direct_named_type_compound_literal_without_explicit_allowlist(self):
         source = (
             "void example(void) {\n"

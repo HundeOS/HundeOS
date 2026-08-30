@@ -291,28 +291,28 @@ typedef struct LoadedKernel
 }
 LoadedKernel;
 
-static const EfiGuid loaded_image_protocol_guid = {
+static const EfiGuid loaded_image_protocol_guid = { // hundelint: ignore-constructor-required
     .data1 = 0x5b1b31a1,
     .data2 = 0x9562,
     .data3 = 0x11d2,
     .data4 = { 0x8e, 0x3f, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b },
 };
 
-static const EfiGuid simple_file_system_protocol_guid = {
+static const EfiGuid simple_file_system_protocol_guid = { // hundelint: ignore-constructor-required
     .data1 = 0x0964e5b22,
     .data2 = 0x6459,
     .data3 = 0x11d2,
     .data4 = { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b },
 };
 
-static const EfiGuid file_info_guid = {
+static const EfiGuid file_info_guid = { // hundelint: ignore-constructor-required
     .data1 = 0x09576e92,
     .data2 = 0x6d3f,
     .data3 = 0x11d2,
     .data4 = { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b },
 };
 
-static const EfiGuid graphics_output_protocol_guid = {
+static const EfiGuid graphics_output_protocol_guid = { // hundelint: ignore-constructor-required
     .data1 = 0x9042a9de,
     .data2 = 0x23dc,
     .data3 = 0x4a38,
@@ -942,7 +942,7 @@ EfiStatus efi_main(EfiHandle image_handle, EfiSystemTable * system_table)
     if (status == EFI_SUCCESS)
     {
         print(system_table, kernel_sized);
-        LoadedKernel loaded_kernel = { 0 };
+        LoadedKernel loaded_kernel = { 0 }; // hundelint: ignore-constructor-required
         status = load_kernel_elf(system_table, kernel_file, file_size, &loaded_kernel);
         if (status == EFI_SUCCESS)
         {

@@ -70,6 +70,7 @@ typedef Fat16DirectoryEntry * Fat16DirectoryEntryPtr;
 
 OptionalDef(Fat16DirectoryEntry);
 bool Fat16DirectoryEntry__equals(Fat16DirectoryEntryPtr self, Fat16DirectoryEntryPtr other);
+Fat16DirectoryEntry Fat16DirectoryEntry__new(BString name, uint8_t attributes, uint16_t first_cluster, uint32_t size);
 FixedArrayDefine(
     Fat16DirectoryEntry,
     FAT16_MAX_ROOT_ENTRIES,

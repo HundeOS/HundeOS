@@ -28,6 +28,16 @@ bool Fat16DirectoryEntry__equals(Fat16DirectoryEntryPtr self, Fat16DirectoryEntr
         && self->size == other->size;
 }
 
+Fat16DirectoryEntry Fat16DirectoryEntry__new(BString name, uint8_t attributes, uint16_t first_cluster, uint32_t size)
+{
+    return (Fat16DirectoryEntry) {
+        .name = name,
+        .attributes = attributes,
+        .first_cluster = first_cluster,
+        .size = size,
+    };
+}
+
 Fat16Volume Fat16Volume__new(BlockDevicePtr device, BlockCount total_sectors)
 {
     uint16_t root_dir_sectors =
@@ -532,12 +542,12 @@ Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self)
                 continue;
             }
 
-            Fat16DirectoryEntry entry = {
-                .name = Fat16__decode_83_name(&sector[offset]),
-                .attributes = sector[offset + 11],
-                .first_cluster = Fat16__read_u16(sector, offset + 26),
-                .size = Fat16__read_u32(sector, offset + 28),
-            };
+            Fat16DirectoryEntry entry = Fat16DirectoryEntry__new(
+                Fat16__decode_83_name(&sector[offset]),
+                sector[offset + 11],
+                Fat16__read_u16(sector, offset + 26),
+                Fat16__read_u32(sector, offset + 28)
+            );
 
             match_result(CollectionCode, Fat16DirectoryEntries__push(&entries, entry),
                 success_do_nothing(),

@@ -188,6 +188,19 @@ static SdhciCommand SdhciCommand__new(
     };
 }
 
+static SdhciCommandResult SdhciCommandResult__new(
+    bool ok,
+    uint32_t response0,
+    uint32_t response1,
+    uint32_t response2,
+    uint32_t response3)
+{
+    return (SdhciCommandResult) {
+        .ok = ok,
+        .response = { response0, response1, response2, response3 },
+    };
+}
+
 static SdhciDevice SdhciDevice__new(ServiceMappedMemoryPtr mapping, SdhciMmioPtr mmio, uint64_t irq, BString path)
 {
     return (SdhciDevice) {
@@ -195,6 +208,20 @@ static SdhciDevice SdhciDevice__new(ServiceMappedMemoryPtr mapping, SdhciMmioPtr
         .mmio = mmio,
         .irq = irq,
         .path = path,
+    };
+}
+
+static SdhciDevice SdhciDevice__new_empty(void)
+{
+    return SdhciDevice__new(0, 0, 0, bstr(""));
+}
+
+static SdhciPciFunction SdhciPciFunction__new(uint64_t bus, uint64_t device, uint64_t function)
+{
+    return (SdhciPciFunction) {
+        .bus = bus,
+        .device = device,
+        .function = function,
     };
 }
 
@@ -303,11 +330,7 @@ static Optional(SdhciPciFunction) Sdhci__find_pci_function_on_device(
     uint64_t bus,
     uint64_t device)
 {
-    SdhciPciFunction first_function = {
-        .bus = bus,
-        .device = device,
-        .function = 0,
-    };
+    SdhciPciFunction first_function = SdhciPciFunction__new(bus, device, 0);
     void * first_base = Sdhci__pci_function_base(ecam, config, first_function);
     if (!Sdhci__pci_function_present(first_base))
     {
@@ -326,11 +349,7 @@ static Optional(SdhciPciFunction) Sdhci__find_pci_function_on_device(
 
     for (uint64_t function = 1; function < SDHCI_PCI_FUNCTION_COUNT; function++)
     {
-        SdhciPciFunction candidate = {
-            .bus = bus,
-            .device = device,
-            .function = function,
-        };
+        SdhciPciFunction candidate = SdhciPciFunction__new(bus, device, function);
         void * candidate_base = Sdhci__pci_function_base(ecam, config, candidate);
         if (Sdhci__pci_function_present(candidate_base) && Sdhci__pci_function_is_sdhci(candidate_base))
         {
@@ -359,7 +378,7 @@ static Optional(SdhciPciFunction) Sdhci__find_pci_function(ServiceMappedMemoryPt
 
 static Optional(SdHostConfig) Sdhci__load_pci_host_config(void)
 {
-    PciConfig pci_config = { 0 };
+    PciConfig pci_config = PciConfig__new(0, 0, 0, 0);
     if (!SDHCI_LOAD_PCI_CONFIG(&pci_config))
     {
         return None(SdHostConfig);
@@ -572,7 +591,7 @@ static uint16_t SdhciCommand__value(SdhciCommand command)
 
 static SdhciCommandResult Sdhci__send_command(SdhciDevicePtr self, SdhciCommand command)
 {
-    SdhciCommandResult result = { 0 };
+    SdhciCommandResult result = SdhciCommandResult__new(false, 0, 0, 0, 0);
     uint32_t inhibit = SDHCI_PRESENT_CMD_INHIBIT;
     if (command.data_present)
     {
@@ -646,7 +665,7 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
 
     Sdhci__send_command(self, SdhciCommand__new(SD_CMD_SEND_IF_COND, 0x1aa, SDHCI_CMD_RESP_48, 0, false));
 
-    SdhciCommandResult op_cond = { 0 };
+    SdhciCommandResult op_cond = SdhciCommandResult__new(false, 0, 0, 0, 0);
     for (uint64_t retry = 0; retry < SDHCI_APP_CMD_RETRIES; retry++)
     {
         if (!Sdhci__send_app_command(self, 0))
@@ -880,7 +899,7 @@ int SDHCI_ENTRYPOINT(void)
     match_optional(SdHostConfig, Sdhci__load_host_config(),
         some(config)
         {
-            SdhciDevice device = { 0 };
+            SdhciDevice device = SdhciDevice__new_empty();
             if (!Sdhci__bind(&device, config))
             {
                 DRIVER_DEBUG("sdhci: bind failed\n");

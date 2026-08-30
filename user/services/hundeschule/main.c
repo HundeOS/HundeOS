@@ -26,7 +26,7 @@
 #define HUNDESCHULE_CONFIG_MAX 2048U
 
 static BString hundeschule_empty = empty_bstr();
-static BString hundeschule_hundeschau_path = bstr("/sbin/hundeschau");
+static BString hundeschule_hundeschau_path = bstr("/sbin/services/hundeschau");
 static BString hundeschule_hundebus_path = bstr("/sbin/drivers/hundebus");
 static BString hundeschule_virtio_keyboard_path = bstr("/sbin/drivers/virtio_keyboard");
 static BString hundeschule_uart_rx_path = bstr("/sbin/drivers/uart_rx");
@@ -54,6 +54,22 @@ typedef HundeschuleRequiredProcess * HundeschuleRequiredProcessPtr;
 
 OptionalDef(HundeschuleRequiredProcess);
 OptionalDef(HundeschuleRequiredProcessPtr);
+
+static HundeschuleRequiredProcess HundeschuleRequiredProcess__new(
+    uint64_t pid,
+    bool respawn,
+    BString path,
+    BString arg0,
+    BString arg1)
+{
+    return (HundeschuleRequiredProcess) {
+        .pid = pid,
+        .respawn = respawn,
+        .path = path,
+        .arg0 = arg0,
+        .arg1 = arg1,
+    };
+}
 
 static bool HundeschuleRequiredProcess__equals_fixed_array(void * self, void * other)
 {
@@ -110,13 +126,13 @@ static int Hundeschule__spawn_required_process(
         return 1;
     }
 
-    HundeschuleRequiredProcess process = {
-        .pid = (uint64_t) result,
-        .respawn = respawn,
-        .path = BString__slice(path, 0, BString__length(path)),
-        .arg0 = BString__slice(arg0, 0, BString__length(arg0)),
-        .arg1 = BString__slice(arg1, 0, BString__length(arg1)),
-    };
+    HundeschuleRequiredProcess process = HundeschuleRequiredProcess__new(
+        (uint64_t) result,
+        respawn,
+        BString__slice(path, 0, BString__length(path)),
+        BString__slice(arg0, 0, BString__length(arg0)),
+        BString__slice(arg1, 0, BString__length(arg1))
+    );
     match_result(CollectionCode, HundeschuleRequiredProcesses__push(processes, process),
         success_do_nothing(),
         error(code, message)
@@ -465,7 +481,7 @@ static int Hundeschule__spawn_default_drivers(
 static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcessesPtr processes)
 {
     int failures = 0;
-    FramebufferConfig framebuffer_config = { 0 };
+    FramebufferConfig framebuffer_config = FramebufferConfig__new();
     bool framebuffer_present = FramebufferConfig__load(&framebuffer_config);
 
     if (!service_ok(service_become_service()))

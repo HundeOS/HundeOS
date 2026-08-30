@@ -126,7 +126,8 @@ void test_exec_wait_schedules_child_on_parent_cpu(void)
 
 void test_exec_marks_hundeschau_as_hund_identity(void)
 {
-    BString path = bstr("/sbin/hundeschau");
+    Process__set_hund_identity(parent);
+    BString path = bstr("/sbin/services/hundeschau");
     SpawnRequest request = test_spawn_request(&path);
     CallContext syscall_context = CallContext__new(
         Some(ProcessPtr, parent), SYSCALL_EXEC, (Anything) &request, 0, 0, 0, 0
@@ -142,7 +143,7 @@ void test_exec_marks_hundeschau_as_hund_identity(void)
 void test_exec_apply_builtin_identity_policy_marks_boot_hundeschau_as_hund(void)
 {
     ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
-    process->name = bstr("hundeschau");
+    process->name = bstr("services/hundeschau");
 
     Exec__apply_builtin_identity_policy(process);
 
@@ -153,7 +154,7 @@ void test_exec_apply_builtin_identity_policy_marks_boot_hundeschau_as_hund(void)
 void test_exec_apply_builtin_identity_policy_marks_boot_hundeschule_as_hund(void)
 {
     ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
-    process->name = bstr("hundeschule");
+    process->name = bstr("services/hundeschule");
 
     Exec__apply_builtin_identity_policy(process);
 

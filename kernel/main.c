@@ -173,7 +173,7 @@ void Kernel_main(CPUID cpu_id) {
     if (cpu_id == 1)
     {
         __d_printf(PROGRESS, "Kernel starting loading program: %i\n", cpu_id);
-        schedule(kernel, bstring("hundeschule"));
+        schedule(kernel, bstring("services/hundeschule"));
         Scheduler__mark_ready(kernel->scheduler);
     }
     else
