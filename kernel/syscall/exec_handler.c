@@ -5,14 +5,6 @@
 #include "../types/bstring_additional_types.h"
 #include "auth.h"
 
-static void ExecRequest__push_arg(ProcessArgumentsPtr arguments, OptionalPtr(BString) arg)
-{
-    match_optional(BString, *arg,
-        some(value) { ProcessArguments__push(arguments, value); },
-        none_do_nothing()
-    );
-}
-
 Result(SystemCallResult) Exec__handler(
     KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
@@ -44,9 +36,14 @@ Result(SystemCallResult) ExecRequest__handler(
     );
 
     ProcessArguments arguments = ProcessArguments__new();
-    ExecRequest__push_arg(&arguments, &request->arg0);
-    ExecRequest__push_arg(&arguments, &request->arg1);
-    ExecRequest__push_arg(&arguments, &request->arg2);
+    SpawnArguments requested_arguments = request->arguments;
+    for_each_fa(SpawnArguments, requested_arguments, argument_index, argument,
+    {
+        match_result(CollectionCode, ProcessArguments__push(&arguments, argument),
+            success_do_nothing(),
+            error(code, message) { return Error(SystemCallResult, message, SPAWN_ARG_TOO_LONG); }
+        );
+    });
 
     CallContext call_context = CallContext__new(proc, EXEC, arg1, arg2, arg3, arg4, arg5);
     OriginatingContext originating_context = OriginatingContext__syscall(kernel, &call_context);

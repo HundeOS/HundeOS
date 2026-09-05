@@ -7,11 +7,27 @@
 #include "process.h"
 #include "types/bstring.h"
 
-#define SPAWN_MAX_ARGS 3
+#ifndef FIXED_ARRAY_ALLOC
+#define FIXED_ARRAY_ALLOC(size) ((void *) 0)
+#define __SPAWN_FIXED_ARRAY_ALLOC_DEFINED
+#endif
+
+#include "../../common/types/fixed_array.h"
+
+#ifdef __SPAWN_FIXED_ARRAY_ALLOC_DEFINED
+#undef FIXED_ARRAY_ALLOC
+#undef __SPAWN_FIXED_ARRAY_ALLOC_DEFINED
+#endif
+
+#define SPAWN_MAX_ARGS 16
 #define SPAWN_INHERIT_USER_ID UINT64_MAX
 #define SPAWN_INHERIT_AUTH_TICKET AUTH_NO_TICKET
 #define SPAWN_STDIO_DEFAULT ((SpawnStdio) { 0 })
 #define SPAWN_NO_ARG None(BString)
+
+FixedArrayDefine(BString, SPAWN_MAX_ARGS, SpawnArguments, bstring_equals);
+typedef SpawnArguments * SpawnArgumentsPtr;
+typedef const SpawnArguments * ConstSpawnArgumentsPtr;
 
 typedef enum SpawnModes
 {
@@ -88,9 +104,7 @@ typedef struct SpawnRequest
     UserID requested_user_id;
     AuthTicketID auth_ticket_id;
     SpawnStdio stdio;
-    Optional(BString) arg0;
-    Optional(BString) arg1;
-    Optional(BString) arg2;
+    SpawnArguments arguments;
 } SpawnRequest;
 
 typedef SpawnRequest * SpawnRequestPtr;
@@ -111,9 +125,7 @@ static inline SpawnRequest SpawnRequest__new(
     UserID requested_user_id,
     AuthTicketID auth_ticket_id,
     SpawnStdio stdio,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    ConstSpawnArgumentsPtr arguments
 )
 {
     return (SpawnRequest) {
@@ -122,9 +134,7 @@ static inline SpawnRequest SpawnRequest__new(
         .requested_user_id = requested_user_id,
         .auth_ticket_id = auth_ticket_id,
         .stdio = stdio,
-        .arg0 = arg0,
-        .arg1 = arg1,
-        .arg2 = arg2,
+        .arguments = *arguments,
     };
 }
 

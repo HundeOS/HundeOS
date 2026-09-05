@@ -3,7 +3,7 @@
 #include "../../user.h"
 #include "sys/spawn.h"
 
-#define SPAWN_ARG_LIMIT 3
+#define SPAWN_ARG_LIMIT SPAWN_MAX_ARGS
 
 static const BString CMD_EXIT = bstr("exit");
 static const BString COMMAND_SEARCH_PATH = bstr("/sbin");
@@ -131,24 +131,17 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
     }
 
     BString path = Interpreter__command_path(&command->name);
-    Optional(BString) arg0 = SPAWN_NO_ARG;
-    Optional(BString) arg1 = SPAWN_NO_ARG;
-    Optional(BString) arg2 = SPAWN_NO_ARG;
-
-    match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 0),
-        some(value) { arg0 = Some(BString, *value); },
-        none_do_nothing()
-    );
-    match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 1),
-        some(value) { arg1 = Some(BString, *value); },
-        none_do_nothing()
-    );
-    match_optional(CommandArguments__type_ptr, CommandArguments__ptr_at(&command->args, 2),
-        some(value) { arg2 = Some(BString, *value); },
-        none_do_nothing()
-    );
+    SpawnArguments arguments = SpawnArguments__new();
+    CommandArguments command_arguments = command->args;
+    for_each_fa(CommandArguments, command_arguments, argument_index, argument,
+    {
+        match_result(CollectionCode, SpawnArguments__push(&arguments, argument),
+            success_do_nothing(),
+            error(code, message) { return COMMAND_FAILED; }
+        );
+    });
     SpawnMode mode = command->background ? P_NOWAIT : P_WAIT;
-    SpawnResult result = spawn(mode, &path, &arg0, &arg1, &arg2);
+    SpawnResult result = spawn_argv(mode, &path, &arguments);
 
     if (result >= SPAWN_SUCCESS)
     {

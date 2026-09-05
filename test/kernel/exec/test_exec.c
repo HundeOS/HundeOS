@@ -46,15 +46,14 @@ static size_t test_hello_world_elf_size(void)
 
 static SpawnRequest test_spawn_request(ConstBStringPtr path)
 {
+    SpawnArguments arguments = SpawnArguments__new();
     return SpawnRequest__new(
         P_WAIT,
         path,
         SPAWN_INHERIT_USER_ID,
         SPAWN_INHERIT_AUTH_TICKET,
         SPAWN_STDIO_DEFAULT,
-        SPAWN_NO_ARG,
-        SPAWN_NO_ARG,
-        SPAWN_NO_ARG
+        &arguments
     );
 }
 

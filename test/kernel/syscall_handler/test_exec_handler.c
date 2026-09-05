@@ -20,16 +20,25 @@ static SpawnRequest test_spawn_request(
 )
 {
     BString path = bstring(raw_path);
+    SpawnArguments arguments = SpawnArguments__new();
     return SpawnRequest__new(
         mode,
         &path,
         SPAWN_INHERIT_USER_ID,
         auth_ticket_id,
         stdio,
-        SPAWN_NO_ARG,
-        SPAWN_NO_ARG,
-        SPAWN_NO_ARG
+        &arguments
     );
+}
+
+static UserAllocation allocation_at(ProcessPtr process, uint64_t index)
+{
+    match_optional(UserAllocation, UserAllocations__at(&process->user_allocations, index),
+        some(allocation) { return allocation; },
+        none() { TEST_FAIL(); }
+    );
+
+    return (UserAllocation) { 0 };
 }
 
 void setUp(void)
@@ -80,6 +89,48 @@ void test_exec_handler_nowait_spawns_without_parking_parent()
     ), success(code) { TEST_ASSERT_GREATER_THAN(0, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
+}
+
+void test_exec_request_handler_passes_spawn_arguments_to_process_argv(void)
+{
+    SpawnArguments arguments = SpawnArguments__new();
+    match_result(CollectionCode, SpawnArguments__push(&arguments, bstring("one")), success_do_nothing(), error_test_fail());
+    match_result(CollectionCode, SpawnArguments__push(&arguments, bstring("two")), success_do_nothing(), error_test_fail());
+    match_result(CollectionCode, SpawnArguments__push(&arguments, bstring("three")), success_do_nothing(), error_test_fail());
+    match_result(CollectionCode, SpawnArguments__push(&arguments, bstring("four")), success_do_nothing(), error_test_fail());
+    BString path = bstring("/sbin/hello_world");
+    SpawnRequest request = SpawnRequest__new(
+        P_NOWAIT,
+        &path,
+        SPAWN_INHERIT_USER_ID,
+        SPAWN_INHERIT_AUTH_TICKET,
+        SPAWN_STDIO_DEFAULT,
+        &arguments
+    );
+
+    match_result(SystemCallResult, ExecRequest__handler(
+        kernel,
+        Some(ProcessPtr, parent),
+        (Anything) &request,
+        0,
+        0,
+        0,
+        0
+    ), success(pid) {
+            match_optional(ProcessPtr, Scheduler__find_process_by_pid(kernel->scheduler, pid), some(child) {
+                    UserAllocation args = allocation_at(child, 0);
+                    Address * argv = ptr(args.address.kernel_addr.virtual_addr, Address);
+                    Address user_base = args.address.virtual_addr;
+                    Address kernel_base = args.address.kernel_addr.virtual_addr;
+
+                    TEST_ASSERT_EQUAL(0, argv[5]);
+                    TEST_ASSERT_EQUAL_STRING("/sbin/hello_world", ptr(kernel_base + (argv[0] - user_base), char));
+                    TEST_ASSERT_EQUAL_STRING("one", ptr(kernel_base + (argv[1] - user_base), char));
+                    TEST_ASSERT_EQUAL_STRING("two", ptr(kernel_base + (argv[2] - user_base), char));
+                    TEST_ASSERT_EQUAL_STRING("three", ptr(kernel_base + (argv[3] - user_base), char));
+                    TEST_ASSERT_EQUAL_STRING("four", ptr(kernel_base + (argv[4] - user_base), char));
+                }, none_test_fail());
+        }, error_test_fail());
 }
 
 void test_exec_request_handler_can_spawn_as_user(void)

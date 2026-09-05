@@ -18,6 +18,7 @@
 
 FixedArrayBodyDefine(ProcessTable);
 FixedArrayBodyDefine(ProcessArguments);
+FixedArrayBodyDefine(SpawnArguments);
 FixedArrayBodyDefine(ProcessChildEvents);
 LinkedListBodyDefine(UserAllocations);
 LinkedListBodyDefine(ProcessFileDescriptors);

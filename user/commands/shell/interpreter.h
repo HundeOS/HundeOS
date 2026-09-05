@@ -5,7 +5,7 @@
 #include "../../../common/types/bstring.h"
 #include "types/fixed_array.h"
 
-#define COMMAND_MAX_ARGS 16
+#define COMMAND_MAX_ARGS 32
 
 OptionalDef(ConstBStringPtr);
 FixedArrayDefine(BString, COMMAND_MAX_ARGS, CommandArguments, bstring_equals);
