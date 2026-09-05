@@ -57,8 +57,8 @@ void test_unwrap_parenthesizes_value_for_comparisons(void)
 {
     Optional(char) value = Some(char, 's');
 
-    TEST_ASSERT_FALSE(Unwrap(char, value, '\0') == '/');
-    TEST_ASSERT_TRUE(Unwrap(char, value, '\0') == 's');
+    TEST_ASSERT_FALSE(unwrap(char, value, '\0') == '/');
+    TEST_ASSERT_TRUE(unwrap(char, value, '\0') == 's');
 }
 
 void test_match_result_runs_ok_branch(void)

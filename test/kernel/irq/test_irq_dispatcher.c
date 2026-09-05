@@ -99,8 +99,8 @@ void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event
     TEST_ASSERT_EQUAL_UINT64(1, Arch__mask_count());
 
     ServiceEvent event = (ServiceEvent) { 0 };
-    KernelContext kernel_context = KernelContext__new(Some(ProcessID, process->pid), Some(SchedulerPtr, kernel->scheduler));
-    match_result(ServiceEvent, Scheduler__service_wait(kernel->scheduler, process, &kernel_context, None(Continuation)), success(wait_event) { event = wait_event; }, error_test_fail());
+    KernelContext kernel_context = KernelContext__new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
+    match_result(ServiceEvent, Scheduler__service_wait(kernel->scheduler, process, &kernel_context, &None(Continuation)), success(wait_event) { event = wait_event; }, error_test_fail());
 
     TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);
     TEST_ASSERT_EQUAL_UINT64(48, event.source);

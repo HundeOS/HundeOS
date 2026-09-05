@@ -4,11 +4,11 @@
 #include <stdint.h>
 
 #include "../../../common/types/dyn_string.h"
-#include "../../sys/debug.h"
-#include "../../sys/io_server.h"
-#include "../../sys/pci_config.h"
-#include "../../sys/service.h"
-#include "../../types/fixed_array.h"
+#include "sys/debug.h"
+#include "sys/io_server.h"
+#include "sys/pci_config.h"
+#include "sys/service.h"
+#include "types/fixed_array.h"
 #include "../../user.h"
 
 #ifndef HUNDEBUS_ENTRYPOINT
@@ -51,6 +51,7 @@ typedef struct HundebusPciDevice
 HundebusPciDevice;
 
 typedef HundebusPciDevice * HundebusPciDevicePtr;
+typedef const HundebusPciDevice * ConstHundebusPciDevicePtr;
 
 OptionalDef(HundebusPciDevice);
 
@@ -95,7 +96,7 @@ FixedArrayBodyDefine(HundebusPciDevices);
 typedef struct Hundebus
 {
     PciConfig pci_config;
-    ServiceMappedMemoryPtr ecam;
+    Optional(ServiceMappedMemoryPtr) ecam;
     HundebusPciDevices pci_devices;
     DynString businfo;
     IOHandle businfo_handle;
@@ -108,7 +109,7 @@ static Hundebus Hundebus__new(void)
 {
     return (Hundebus) {
         .pci_config = { 0 },
-        .ecam = 0,
+        .ecam = None(ServiceMappedMemoryPtr),
         .pci_devices = HundebusPciDevices__new(),
         .businfo = { 0 },
         .businfo_handle = -1,
@@ -144,10 +145,17 @@ static uint64_t Hundebus__config_offset(PciConfigPtr config, uint64_t bus, uint6
 
 static bool Hundebus__config_range_available(HundebusPtr self, uint64_t offset, uint64_t byte_count)
 {
-    return offset <= self->pci_config.ecam_size
-        && byte_count <= self->pci_config.ecam_size - offset
-        && offset <= mapped_size(self->ecam)
-        && byte_count <= mapped_size(self->ecam) - offset;
+    match_optional(ServiceMappedMemoryPtr, self->ecam,
+        some(ecam)
+        {
+            size_t mapped_ecam_size = mapped_size(ecam);
+            return offset <= self->pci_config.ecam_size
+                && byte_count <= self->pci_config.ecam_size - offset
+                && offset <= mapped_ecam_size
+                && byte_count <= mapped_ecam_size - offset;
+        },
+        none() { return false; }
+    );
 }
 
 static bool Hundebus__read_pci_device(
@@ -164,31 +172,37 @@ static bool Hundebus__read_pci_device(
         return false;
     }
 
-    void * function_base = driver_ptr_offset(self->ecam, function_offset);
-    uint16_t vendor_id = HUNDEBUS_PCI_READ16(function_base, PCI_CONFIG_VENDOR_ID);
-    if (vendor_id == PCI_VENDOR_INVALID)
-    {
-        return false;
-    }
+    match_optional(ServiceMappedMemoryPtr, self->ecam,
+        some(ecam)
+        {
+            void * function_base = driver_ptr_offset(ecam, function_offset);
+            uint16_t vendor_id = HUNDEBUS_PCI_READ16(function_base, PCI_CONFIG_VENDOR_ID);
+            if (vendor_id == PCI_VENDOR_INVALID)
+            {
+                return false;
+            }
 
-    *target = HundebusPciDevice__new(
-        bus,
-        device,
-        function,
-        vendor_id,
-        HUNDEBUS_PCI_READ16(function_base, PCI_CONFIG_DEVICE_ID),
-        HUNDEBUS_PCI_READ8(function_base, PCI_CONFIG_CLASS_CODE),
-        HUNDEBUS_PCI_READ8(function_base, PCI_CONFIG_SUBCLASS),
-        HUNDEBUS_PCI_READ8(function_base, PCI_CONFIG_PROG_IF),
-        HUNDEBUS_PCI_READ8(function_base, PCI_CONFIG_HEADER_TYPE)
+            *target = HundebusPciDevice__new(
+                bus,
+                device,
+                function,
+                vendor_id,
+                HUNDEBUS_PCI_READ16(function_base, PCI_CONFIG_DEVICE_ID),
+                HUNDEBUS_PCI_READ8(function_base, PCI_CONFIG_CLASS_CODE),
+                HUNDEBUS_PCI_READ8(function_base, PCI_CONFIG_SUBCLASS),
+                HUNDEBUS_PCI_READ8(function_base, PCI_CONFIG_PROG_IF),
+                HUNDEBUS_PCI_READ8(function_base, PCI_CONFIG_HEADER_TYPE)
+            );
+
+            return true;
+        },
+        none() { return false; }
     );
-
-    return true;
 }
 
-static bool Hundebus__record_pci_device(HundebusPtr self, HundebusPciDevice device)
+static bool Hundebus__record_pci_device(HundebusPtr self, ConstHundebusPciDevicePtr device)
 {
-    match_result(CollectionCode, HundebusPciDevices__push(&self->pci_devices, device),
+    match_result(CollectionCode, HundebusPciDevices__push(&self->pci_devices, *device),
         success(code) { return true; },
         error(code, message) { return false; }
     );
@@ -204,7 +218,7 @@ static uint64_t Hundebus__scan_pci_device(HundebusPtr self, uint64_t bus, uint64
     }
 
     uint64_t found = 1;
-    Hundebus__record_pci_device(self, pci_device);
+    Hundebus__record_pci_device(self, &pci_device);
 
     if ((pci_device.header_type & PCI_HEADER_TYPE_MULTIFUNCTION) == 0)
     {
@@ -216,7 +230,7 @@ static uint64_t Hundebus__scan_pci_device(HundebusPtr self, uint64_t bus, uint64
         if (Hundebus__read_pci_device(self, bus, device, function, &pci_device))
         {
             found++;
-            Hundebus__record_pci_device(self, pci_device);
+            Hundebus__record_pci_device(self, &pci_device);
         }
     }
 
@@ -259,39 +273,30 @@ static bool Hundebus__append_device_line(HundebusPtr self, ConstBStringPtr forma
 
 static bool Hundebus__append_pci_device(HundebusPtr self, uint64_t index, HundebusPciDevicePtr device)
 {
-    BString bdf_format = bstr("pci.device.%llu.bdf=%llu:%llu.%llu\n");
-    BString vendor_format = bstr("pci.device.%llu.vendor_id=0x%llx\n");
-    BString device_format = bstr("pci.device.%llu.device_id=0x%llx\n");
-    BString class_format = bstr("pci.device.%llu.class=0x%llx\n");
-    BString subclass_format = bstr("pci.device.%llu.subclass=0x%llx\n");
-    BString prog_if_format = bstr("pci.device.%llu.prog_if=0x%llx\n");
-    BString header_format = bstr("pci.device.%llu.header=0x%llx\n");
 
-    BString bdf = BString__sprintf(&bdf_format, index, device->bus, device->device, device->function);
+    BString bdf = BString__sprintf(&bstr("pci.device.%llu.bdf=%llu:%llu.%llu\n"), index, device->bus, device->device, device->function);
     match_result(DynStringCode, DynString__append_bstring(&self->businfo, &bdf),
         success_do_nothing(),
         error(code, message) { return false; }
     );
 
-    return Hundebus__append_device_line(self, &vendor_format, index, device->vendor_id)
-        && Hundebus__append_device_line(self, &device_format, index, device->device_id)
-        && Hundebus__append_device_line(self, &class_format, index, device->class_code)
-        && Hundebus__append_device_line(self, &subclass_format, index, device->subclass)
-        && Hundebus__append_device_line(self, &prog_if_format, index, device->prog_if)
-        && Hundebus__append_device_line(self, &header_format, index, device->header_type);
+    return Hundebus__append_device_line(self, &bstr("pci.device.%llu.vendor_id=0x%llx\n"), index, device->vendor_id)
+        && Hundebus__append_device_line(self, &bstr("pci.device.%llu.device_id=0x%llx\n"), index, device->device_id)
+        && Hundebus__append_device_line(self, &bstr("pci.device.%llu.class=0x%llx\n"), index, device->class_code)
+        && Hundebus__append_device_line(self, &bstr("pci.device.%llu.subclass=0x%llx\n"), index, device->subclass)
+        && Hundebus__append_device_line(self, &bstr("pci.device.%llu.prog_if=0x%llx\n"), index, device->prog_if)
+        && Hundebus__append_device_line(self, &bstr("pci.device.%llu.header=0x%llx\n"), index, device->header_type);
 }
 
 static bool Hundebus__build_businfo(HundebusPtr self)
 {
-    BString present_format = bstr("pci.present=%llu\n");
-    BString count_format = bstr("pci.device.count=%llu\n");
 
     DynString__clear(&self->businfo);
-    if (!Hundebus__append_line(self, &present_format, 1))
+    if (!Hundebus__append_line(self, &bstr("pci.present=%llu\n"), 1))
     {
         return false;
     }
-    if (!Hundebus__append_line(self, &count_format, HundebusPciDevices__len(&self->pci_devices)))
+    if (!Hundebus__append_line(self, &bstr("pci.device.count=%llu\n"), HundebusPciDevices__len(&self->pci_devices)))
     {
         return false;
     }
@@ -366,11 +371,13 @@ static bool Hundebus__init(HundebusPtr self)
         return false;
     }
 
-    if (!service_ok(service_map_mmio(self->pci_config.ecam_physical_base, self->pci_config.ecam_size, &self->ecam)))
+    ServiceMappedMemoryPtr ecam;
+    if (!service_ok(service_map_mmio(self->pci_config.ecam_physical_base, self->pci_config.ecam_size, &ecam)))
     {
         DRIVER_DEBUG("hundebus: ecam map failed\n");
         return false;
     }
+    self->ecam = Some(ServiceMappedMemoryPtr, ecam);
 
     uint64_t found = Hundebus__scan_pci(self);
     DRIVER_DEBUG("hundebus: found %i pci device functions\n", (int) found);
@@ -381,8 +388,7 @@ static bool Hundebus__init(HundebusPtr self)
         return false;
     }
 
-    BString businfo_path = bstr(HUNDEBUS_BUSINFO_PATH);
-    self->businfo_handle = io_server_register(&businfo_path, IO_SERVER_READ);
+    self->businfo_handle = io_server_register(&bstr(HUNDEBUS_BUSINFO_PATH), IO_SERVER_READ);
     if (self->businfo_handle < 0)
     {
         IO__printf(&bstr("hundebus: businfo register error %i\n"), (int) self->businfo_handle);

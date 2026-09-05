@@ -6,7 +6,7 @@ static BString panic_returned = bstr("Panic returned unexpectedly");
 
 Result(SystemCallResult) Panic__handler(
     KernelPtr kernel,
-    Optional(ProcessPtr) proc,
+    OptionalPtr(ProcessPtr) proc,
     Anything arg1,
     Anything arg2,
     Anything arg3,

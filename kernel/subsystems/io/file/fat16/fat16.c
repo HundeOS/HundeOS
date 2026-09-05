@@ -28,10 +28,15 @@ bool Fat16DirectoryEntry__equals(Fat16DirectoryEntryPtr self, Fat16DirectoryEntr
         && self->size == other->size;
 }
 
-Fat16DirectoryEntry Fat16DirectoryEntry__new(BString name, uint8_t attributes, uint16_t first_cluster, uint32_t size)
+Fat16DirectoryEntry Fat16DirectoryEntry__new(
+    ConstBStringPtr name,
+    uint8_t attributes,
+    uint16_t first_cluster,
+    uint32_t size
+)
 {
     return (Fat16DirectoryEntry) {
-        .name = name,
+        .name = *name,
         .attributes = attributes,
         .first_cluster = first_cluster,
         .size = size,
@@ -85,9 +90,7 @@ Fat16Volume Fat16Volume__new(BlockDevicePtr device, BlockCount total_sectors)
 
 static bool Fat16Volume__has_valid_geometry(Fat16VolumePtr self)
 {
-    return self != 0
-        && self->device != 0
-        && self->total_sectors > self->data_start_sector
+    return self->total_sectors > self->data_start_sector
         && self->sectors_per_fat > 0
         && self->cluster_count > 0;
 }
@@ -278,11 +281,11 @@ static BlockNumber Fat16Volume__cluster_sector(Fat16VolumePtr self, uint16_t clu
 }
 
 static Result(Fat16Code) Fat16Volume__find_root_entry(
-    Fat16VolumePtr self, BString name, BlockNumber * sector, size_t * offset
+    Fat16VolumePtr self, ConstBStringPtr name, BlockNumber * sector, size_t * offset
 )
 {
     Data encoded_name[11] = { 0 };
-    match_result(Fat16Code, Fat16__encode_83_name(&name, encoded_name),
+    match_result(Fat16Code, Fat16__encode_83_name(name, encoded_name),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -468,11 +471,6 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
 
 Result(Fat16Code) Fat16Volume__mount(Fat16VolumePtr self)
 {
-    if (self == 0 || self->device == 0)
-    {
-        return Error(Fat16Code, invalid_argument, FAT16_INVALID_ARGUMENT);
-    }
-
     Data sector[FAT16_BYTES_PER_SECTOR] = { 0 };
     match_result(Fat16Code, Fat16Volume__read_sector(self, 0, sector),
         success_do_nothing(),
@@ -542,8 +540,9 @@ Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self)
                 continue;
             }
 
+            BString entry_name = Fat16__decode_83_name(&sector[offset]);
             Fat16DirectoryEntry entry = Fat16DirectoryEntry__new(
-                Fat16__decode_83_name(&sector[offset]),
+                &entry_name,
                 sector[offset + 11],
                 Fat16__read_u16(sector, offset + 26),
                 Fat16__read_u32(sector, offset + 28)
@@ -560,10 +559,10 @@ Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self)
 }
 
 Result(Fat16Code) Fat16Volume__create_root_file(
-    Fat16VolumePtr self, BString name, DataPtr data, uint32_t size
+    Fat16VolumePtr self, ConstBStringPtr name, DataPtr data, uint32_t size
 )
 {
-    if (!Fat16Volume__has_valid_geometry(self) || (data == 0 && size > 0))
+    if (!Fat16Volume__has_valid_geometry(self))
     {
         return Error(Fat16Code, invalid_argument, FAT16_INVALID_ARGUMENT);
     }
@@ -574,7 +573,7 @@ Result(Fat16Code) Fat16Volume__create_root_file(
     }
 
     Data encoded_name[11] = { 0 };
-    match_result(Fat16Code, Fat16__encode_83_name(&name, encoded_name),
+    match_result(Fat16Code, Fat16__encode_83_name(name, encoded_name),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -640,7 +639,7 @@ Result(Fat16Code) Fat16Volume__create_root_file(
     return Success(Fat16Code, FAT16_OK);
 }
 
-Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, BString name)
+Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, ConstBStringPtr name)
 {
     if (!Fat16Volume__has_valid_geometry(self))
     {
@@ -648,7 +647,7 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, BStrin
     }
 
     Data encoded_name[11] = { 0 };
-    match_result(Fat16Code, Fat16__encode_83_name(&name, encoded_name),
+    match_result(Fat16Code, Fat16__encode_83_name(name, encoded_name),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -710,10 +709,10 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, BStrin
 }
 
 Result(Fat16Code) Fat16Volume__read_root_file(
-    Fat16VolumePtr self, BString name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
+    Fat16VolumePtr self, ConstBStringPtr name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
 )
 {
-    if (!Fat16Volume__has_valid_geometry(self) || target == 0 || bytes_read == 0)
+    if (!Fat16Volume__has_valid_geometry(self))
     {
         return Error(Fat16Code, invalid_argument, FAT16_INVALID_ARGUMENT);
     }
@@ -769,22 +768,22 @@ static IOStatus Fat16FilesystemIO__status_from_fat16(Fat16Code code)
     return IO_OPERATION_NOT_SUPPORTED;
 }
 
-static bool Fat16FilesystemIO__is_root_path(BString path)
+static bool Fat16FilesystemIO__is_root_path(ConstBStringPtr path)
 {
-    return BString__is_empty(&path)
-        || (BString__length(&path) == 1 && BString__char_at_or(&path, 0, '\0') == '/');
+    return BString__is_empty(path)
+        || (BString__length(path) == 1 && BString__char_at_or(path, 0, '\0') == '/');
 }
 
-static bool Fat16FilesystemIO__is_root_file_path(BString path)
+static bool Fat16FilesystemIO__is_root_file_path(ConstBStringPtr path)
 {
-    if (BString__is_empty(&path))
+    if (BString__is_empty(path))
     {
         return false;
     }
 
-    for (StringPos i = 0; i < BString__length(&path); i++)
+    for (StringPos i = 0; i < BString__length(path); i++)
     {
-        if (BString__char_at_or(&path, i, '\0') == '/')
+        if (BString__char_at_or(path, i, '\0') == '/')
         {
             return false;
         }
@@ -793,11 +792,11 @@ static bool Fat16FilesystemIO__is_root_file_path(BString path)
     return true;
 }
 
-static Fat16FileHandlePtr Fat16FileHandle__heap_new(BString path, Flags flags)
+static Fat16FileHandlePtr Fat16FileHandle__heap_new(ConstBStringPtr path, Flags flags)
 {
     Fat16FileHandlePtr handle = ptr(Kernel__alloc_kernel(sizeof(Fat16FileHandle)), Fat16FileHandle);
     *handle = (Fat16FileHandle) {
-        .path = path,
+        .path = *path,
         .offset = 0,
         .buffer = EmptyRingBuffer(IOBuffer),
         .flags = flags,
@@ -806,11 +805,12 @@ static Fat16FileHandlePtr Fat16FileHandle__heap_new(BString path, Flags flags)
     return handle;
 }
 
-static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, BString path, Flags flags)
+static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, ConstBStringPtr path, Flags flags)
 {
     Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
+    BString open_path = *path;
 
-    if (fs_state == 0 || !fs_state->mounted || !Fat16FilesystemIO__is_root_file_path(path))
+    if (!fs_state->mounted || !Fat16FilesystemIO__is_root_file_path(&open_path))
     {
         return Error(IOInternalHandle, invalid_path, IO_INVALID_PATH);
     }
@@ -819,7 +819,7 @@ static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, BString path,
     {
         Data data[FAT16_MAX_FILE_SIZE] = { 0 };
         uint32_t bytes_read = 0;
-        match_result(Fat16Code, Fat16Volume__read_root_file(&fs_state->volume, path, data, sizeof(data), &bytes_read),
+        match_result(Fat16Code, Fat16Volume__read_root_file(&fs_state->volume, &open_path, data, sizeof(data), &bytes_read),
             success_do_nothing(),
             error(code, message)
             {
@@ -834,7 +834,7 @@ static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, BString path,
     critical_section(fs_state->state.lock,
     {
         IOInternalHandle handle = (IOInternalHandle) fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
-        Fat16FileHandleMap__set(&fs_state->handles, handle, Fat16FileHandle__heap_new(path, flags));
+        Fat16FileHandleMap__set(&fs_state->handles, handle, Fat16FileHandle__heap_new(&open_path, flags));
         cs_return Success(IOInternalHandle, handle);
     });
 }
@@ -859,7 +859,7 @@ static Result(IOInternalHandle) Fat16FileIO__close(IOStatePtr self, IOInternalHa
 }
 
 static Result(IOBufferPtr) Fat16FileIO__read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer
 )
 {
     Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
@@ -877,7 +877,7 @@ static Result(IOBufferPtr) Fat16FileIO__read(
                 Data data[FAT16_MAX_FILE_SIZE] = { 0 };
                 uint32_t bytes_read = 0;
                 match_result(Fat16Code, Fat16Volume__read_root_file(
-                    &fs_state->volume, target->path, data, sizeof(data), &bytes_read
+                    &fs_state->volume, &target->path, data, sizeof(data), &bytes_read
                 ),
                     success_do_nothing(),
                     error(code, message)
@@ -923,7 +923,7 @@ static Result(ByteCount) Fat16FileIO__write(IOStatePtr self, IOInternalHandle ha
                     cs_return Error(ByteCount, invalid_handle, IO_OPERATION_NOT_SUPPORTED);
                 }
 
-                match_result(Fat16Code, Fat16Volume__create_root_file(&fs_state->volume, target->path, data, size),
+                match_result(Fat16Code, Fat16Volume__create_root_file(&fs_state->volume, &target->path, data, size),
                     success(_)
                     {
                         target->offset = size;
@@ -955,26 +955,27 @@ static Result(ParkStatus) Fat16FileIO__unpark(IOStatePtr self)
     return Error(ParkStatus, not_implemented, IO_OPERATION_NOT_IMPLEMENTED);
 }
 
-static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, BString path)
+static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, ConstBStringPtr path)
 {
     Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
+    BString list_path = *path;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
 
-    if (fs_state == 0 || !fs_state->mounted)
+    if (!fs_state->mounted)
     {
         return Error(FilesystemNodes, invalid_path, IO_INVALID_PATH);
     }
 
-    if (!Fat16FilesystemIO__is_root_path(path))
+    if (!Fat16FilesystemIO__is_root_path(&list_path))
     {
-        if (!Fat16FilesystemIO__is_root_file_path(path))
+        if (!Fat16FilesystemIO__is_root_file_path(&list_path))
         {
             return Error(FilesystemNodes, invalid_path, IO_INVALID_PATH);
         }
 
         BlockNumber entry_sector = 0;
         size_t entry_offset = 0;
-        match_result(Fat16Code, Fat16Volume__find_root_entry(&fs_state->volume, path, &entry_sector, &entry_offset),
+        match_result(Fat16Code, Fat16Volume__find_root_entry(&fs_state->volume, &list_path, &entry_sector, &entry_offset),
             success_do_nothing(),
             error(code, message)
             {
@@ -1012,7 +1013,7 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
             {
                 FilesystemNodes__push(
                     &result,
-                    FilesystemNode__heap_new(fs_state->state.filesystem, entry.name, entry.attributes)
+                    FilesystemNode__heap_new(fs_state->state.filesystem, &entry.name, entry.attributes)
                 );
             });
             return Success(FilesystemNodes, result);
@@ -1029,15 +1030,16 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
     return Success(FilesystemNodes, result);
 }
 
-static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, BString path)
+static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, ConstBStringPtr path)
 {
     Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
-    if (fs_state == 0 || !fs_state->mounted || !Fat16FilesystemIO__is_root_file_path(path))
+    BString mkdir_path = *path;
+    if (!fs_state->mounted || !Fat16FilesystemIO__is_root_file_path(&mkdir_path))
     {
         return Error(IOStatus, invalid_path, IO_INVALID_PATH);
     }
 
-    match_result(Fat16Code, Fat16Volume__create_root_directory(&fs_state->volume, path),
+    match_result(Fat16Code, Fat16Volume__create_root_directory(&fs_state->volume, &mkdir_path),
         success(_) { return Success(IOStatus, IO_OK); },
         error(code, message) { return Error(IOStatus, message, Fat16FilesystemIO__status_from_fat16(code)); }
     );
@@ -1045,31 +1047,28 @@ static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, BString path)
     return Error(IOStatus, invalid_path, IO_INVALID_PATH);
 }
 
-static Result(IOStatus) Fat16FileIO__remove(IOStatePtr self, BString path, Flags flags)
-{
-    return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOStatus) Fat16FileIO__link(IOStatePtr self, BString source_path, BString target_path)
-{
-    return Error(IOStatus, not_implemented, IO_OPERATION_NOT_SUPPORTED);
-}
-
 FileIO Fat16FilesystemIO__new()
 {
     return (FileIO) {
-        .base_io = (IO) {
-            .read = Fat16FileIO__read,
-            .write = Fat16FileIO__write,
-            .open = Fat16FileIO__open,
-            .close = Fat16FileIO__close,
-            .park = Fat16FileIO__park,
-            .unpark = Fat16FileIO__unpark,
-        },
+        .base_io = IO__new(
+            Fat16FileIO__open,
+            Fat16FileIO__read,
+            Fat16FileIO__write,
+            IO__unsupported_accept,
+            Fat16FileIO__close,
+            Fat16FileIO__park,
+            Fat16FileIO__unpark,
+            IO__unsupported_server_buffer,
+            IO__unsupported_server_write_buffer,
+            IO__unsupported_data_available,
+            IO__unsupported_data_consumed,
+            IO__unsupported_eof
+        ),
         .list_nodes = Fat16FileIO__list_nodes,
+        .list_dir = FileIO__unsupported_list_dir,
         .mkdir = Fat16FileIO__mkdir,
-        .remove = Fat16FileIO__remove,
-        .link = Fat16FileIO__link,
+        .remove = FileIO__unsupported_remove,
+        .link = FileIO__unsupported_link,
     };
 }
 

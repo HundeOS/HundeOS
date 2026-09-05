@@ -10,6 +10,9 @@
 #include "../stubs.h"
 #include "../stubs/panic.h"
 
+#define IO__handler(kernel, proc, ...) IO__handler((kernel), &(proc), __VA_ARGS__)
+#define Syslog__handler(kernel, proc, ...) Syslog__handler((kernel), &(proc), __VA_ARGS__)
+
 static const ProcessID PID = 44;
 static const IOInternalHandle INTERNAL_HANDLE = 0x42;
 static const IOHandle RAW_HANDLE = 0x0000000100000042;
@@ -60,10 +63,10 @@ static IOServerRegisterRequest test_io_server_register_request(const char * raw_
     return IOServerRegisterRequest__new(&request_path, role);
 }
 
-static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, BString open_path, Flags flags)
+static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, ConstBStringPtr open_path, Flags flags)
 {
     TEST_ASSERT_EQUAL(&state, state_ptr);
-    TEST_ASSERT_TRUE(BString__equals(&path, &open_path));
+    TEST_ASSERT_TRUE(BString__equals(&path, open_path));
     TEST_ASSERT_EQUAL(FLAGS, flags);
     opened = true;
     return Success(IOInternalHandle, INTERNAL_HANDLE);
@@ -87,7 +90,7 @@ static Result(IOInternalHandle) fake_close(IOStatePtr state_ptr, IOInternalHandl
 }
 
 static Result(IOBufferPtr) fake_read(
-    IOStatePtr state_ptr, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+    IOStatePtr state_ptr, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer
 )
 {
     return Error(IOBufferPtr, bstring("not implemented"), IO_OPERATION_NOT_IMPLEMENTED);
@@ -142,13 +145,16 @@ static IO test_io = {
 static void install_open_fd(FileDescriptor fd)
 {
     KernelContext kernel_context = KernelContext__new(
-        Some(ProcessID, process.pid), Some(SchedulerPtr, kernel->scheduler)
+        &Some(ProcessID, process.pid), &Some(SchedulerPtr, kernel->scheduler)
     );
     IOContextPtr context = IOContext__heap_new(
-        kernel_context, Some(IOSubsystemPtr, kernel->io_subsystem), None(IOHandle), None(ExternalBuffer)
+        &kernel_context,
+        &Some(IOSubsystemPtr, kernel->io_subsystem),
+        &None(IOHandle),
+        &None(ExternalBuffer)
     );
 
-    match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, context, path, FLAGS), success(handle) {
+    match_result(IOHandle, IOSubsystem__open(kernel->io_subsystem, context, &path, FLAGS), success(handle) {
             TEST_ASSERT_EQUAL(RAW_HANDLE, handle);
             Process__set_file_descriptor(&process, fd, handle);
         }, error_test_fail());
@@ -172,7 +178,7 @@ void setUp(void)
     write_data = NULL;
     write_size = 0;
 
-    match_result(DeviceHandle, IOSubsystem__register_device(kernel->io_subsystem, path, &test_io, &state), success_do_nothing(), error_test_fail());
+    match_result(DeviceHandle, IOSubsystem__register_device(kernel->io_subsystem, &path, &test_io, &state), success_do_nothing(), error_test_fail());
 }
 
 void tearDown(void)
@@ -305,9 +311,8 @@ void test_io_handler_server_register_fd_can_be_used_for_get_buffer(void)
 
             match_result(ProcessIOHandle, Process__get_io_handle(service_process, (FileDescriptor) fd), success(handle) { TEST_ASSERT_EQUAL(RAW_HANDLE, handle); }, error_test_fail());
 
-            BString first_message = bstr("uart_rx: wait_status=0 event_type=3 event_source=1 event_data=2\n");
             BString syslog_tag = bstr("UART-RX");
-            SyslogRequest first_syslog = SyslogRequest__new(&first_message, Some(BString, syslog_tag));
+            SyslogRequest first_syslog = SyslogRequest__new(&bstr("uart_rx: wait_status=0 event_type=3 event_source=1 event_data=2\n"), Some(BString, syslog_tag));
             match_result(SystemCallResult, Syslog__handler(
                 kernel,
                 Some(ProcessPtr, service_process),
@@ -318,8 +323,7 @@ void test_io_handler_server_register_fd_can_be_used_for_get_buffer(void)
                 0
             ), success(status) { TEST_ASSERT_EQUAL(SYSLOG_OK, status); }, error_test_fail());
 
-            BString second_message = bstr("uart_rx: uart_irq=0 read_request=1\n");
-            SyslogRequest second_syslog = SyslogRequest__new(&second_message, Some(BString, syslog_tag));
+            SyslogRequest second_syslog = SyslogRequest__new(&bstr("uart_rx: uart_irq=0 read_request=1\n"), Some(BString, syslog_tag));
             match_result(SystemCallResult, Syslog__handler(
                 kernel,
                 Some(ProcessPtr, service_process),

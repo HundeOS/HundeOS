@@ -100,7 +100,7 @@ typedef Ext2DirectoryEntry * Ext2DirectoryEntryPtr;
 OptionalDef(Ext2DirectoryEntry);
 bool Ext2DirectoryEntry__equals(Ext2DirectoryEntryPtr self, Ext2DirectoryEntryPtr other);
 Ext2DirectoryEntry Ext2DirectoryEntry__new(
-    BString name,
+    ConstBStringPtr name,
     Ext2DirectoryEntryType file_type,
     Ext2InodeNumber inode,
     Ext2InodeMode mode,
@@ -144,7 +144,7 @@ Ext2FilesystemIOState;
 
 typedef Ext2FilesystemIOState * Ext2FilesystemIOStatePtr;
 
-Ext2Volume Ext2Volume__new(Optional(BlockDevicePtr) device, BlockCount total_sectors);
+Ext2Volume Ext2Volume__new(OptionalPtr(BlockDevicePtr) device, BlockCount total_sectors);
 Result(Ext2Code) Ext2Volume__mount(Ext2VolumePtr self);
 Result(Ext2DirectoryEntries) Ext2Volume__list_root(Ext2VolumePtr self);
 

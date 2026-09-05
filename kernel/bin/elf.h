@@ -138,6 +138,9 @@ typedef struct Elf64Header
     NameIndex section_name_index;
 } Elf64Header;
 
+typedef Elf64Header * Elf64HeaderPtr;
+typedef const Elf64Header * ConstElf64HeaderPtr;
+
 typedef struct ProgramHeader {
     ProgramHeaderType type;
     ProgramHeaderFlags flags;
@@ -184,6 +187,7 @@ typedef struct ExpandedSegment
 } ExpandedSegment;
 
 typedef Elf * ElfPtr;
+typedef const Elf * ConstElfPtr;
 
 ResultDef(Elf);
 ResultDef(ElfPtr);
@@ -197,18 +201,18 @@ OptionalDef(ExpandedSegment);
 FixedArrayDefine(SectionHeaderPtr, 64, SectionHeaderArray, &Ptr__equals);
 FixedArrayDefine(ProgramHeaderPtr, 64, ProgramHeaderArray, &Ptr__equals);
 
-SectionHeaderArray Elf__read_section_headers(Elf self);
-ProgramHeaderArray Elf__read_program_headers(Elf self);
-Elf64Header * Elf__read_header(Elf self);
+SectionHeaderArray Elf__read_section_headers(ConstElfPtr self);
+ProgramHeaderArray Elf__read_program_headers(ConstElfPtr self);
+ConstElf64HeaderPtr Elf__read_header(ConstElfPtr self);
 
-Elf Elf__new(Address start, Address end, BString name);
+Elf Elf__new(Address start, Address end, ConstBStringPtr name);
 ExpandedSegment ExpandedSegment__new(UserAddress address, size_t size);
 
 FixedArrayDefine(ExpandedSegment, 64, ExpandedSegmentArray, &Ptr__equals);
 
 typedef ExpandedSegmentArray * ExpandedSegmentArrayPtr;
 
-ExpandedSegmentArray Elf__map(Elf self);
-Optional(ExpandedSegment) Elf__entry_segment(Elf self, ExpandedSegmentArrayPtr expanded_segments);
+ExpandedSegmentArray Elf__map(ConstElfPtr self);
+Optional(ExpandedSegment) Elf__entry_segment(ConstElfPtr self, ExpandedSegmentArrayPtr expanded_segments);
 
 #endif

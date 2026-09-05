@@ -46,6 +46,7 @@ typedef struct UserspaceFilesystemRequestState
     size_t size;
     UserAddress entries;
     size_t max_entries;
+    UserAddress shared_buffer_allocation;
     bool has_shared_buffer;
     OperationKey wake_key;
     bool completed;
@@ -113,6 +114,8 @@ typedef struct UserspaceFilesystemRequestStart
     ServiceEvent event;
 }
 UserspaceFilesystemRequestStart;
+
+typedef const UserspaceFilesystemRequestStart * ConstUserspaceFilesystemRequestStartPtr;
 
 OptionalDef(UserspaceFilesystemPtr);
 OptionalDef(UserspaceFilesystemRequestStatePtr);
@@ -199,15 +202,16 @@ static UserspaceFilesystemRequestState UserspaceFilesystemRequestState__new(
     uint64_t request_id,
     UserspaceFilesystemPtr filesystem,
     ServiceFilesystemOperation operation,
-    BString path,
+    ConstBStringPtr path,
     IOInternalHandle handle,
     Flags flags,
     uint64_t block,
     uint64_t block_offset,
-    UserAddress buffer,
+    const UserAddress * buffer,
     size_t size,
-    UserAddress entries,
+    const UserAddress * entries,
     size_t max_entries,
+    const UserAddress * shared_buffer_allocation,
     bool has_shared_buffer,
     OperationKey wake_key,
     ProcessID waiting_pid
@@ -217,15 +221,16 @@ static UserspaceFilesystemRequestState UserspaceFilesystemRequestState__new(
         .request_id = request_id,
         .filesystem = filesystem,
         .operation = operation,
-        .path = path,
+        .path = *path,
         .handle = handle,
         .flags = flags,
         .block = block,
         .block_offset = block_offset,
-        .buffer = buffer,
+        .buffer = *buffer,
         .size = size,
-        .entries = entries,
+        .entries = *entries,
         .max_entries = max_entries,
+        .shared_buffer_allocation = *shared_buffer_allocation,
         .has_shared_buffer = has_shared_buffer,
         .wake_key = wake_key,
         .completed = false,
@@ -241,15 +246,16 @@ static UserspaceFilesystemRequestState UserspaceFilesystemRequestState__new(
 static Result(UserspaceFilesystemRequestStatePtr) UserspaceFilesystemRequestState__heap_new(
     UserspaceFilesystemPtr filesystem,
     ServiceFilesystemOperation operation,
-    BString path,
+    ConstBStringPtr path,
     IOInternalHandle handle,
     Flags flags,
     uint64_t block,
     uint64_t block_offset,
-    UserAddress buffer,
+    const UserAddress * buffer,
     size_t size,
-    UserAddress entries,
+    const UserAddress * entries,
     size_t max_entries,
+    const UserAddress * shared_buffer_allocation,
     bool has_shared_buffer,
     OperationKey wake_key,
     ProcessID waiting_pid
@@ -275,6 +281,7 @@ static Result(UserspaceFilesystemRequestStatePtr) UserspaceFilesystemRequestStat
         size,
         entries,
         max_entries,
+        shared_buffer_allocation,
         has_shared_buffer,
         wake_key,
         waiting_pid
@@ -347,7 +354,7 @@ static UserspaceFilesystemIOStatePtr UserspaceFilesystem__io_state(UserspaceFile
 
 static Result(IOInternalHandle) UserspaceFilesystemIOState__add_handle(
     UserspaceFilesystemIOStatePtr self,
-    BString path,
+    ConstBStringPtr path,
     Flags flags,
     FileMode mode,
     uint64_t size,
@@ -357,7 +364,7 @@ static Result(IOInternalHandle) UserspaceFilesystemIOState__add_handle(
     critical_section(self->state.lock,
     {
         UserspaceFilesystemFileHandle handle;
-        handle.path = path;
+        handle.path = *path;
         handle.handle = self->next_handle++ | self->state.filesystem->fs_code;
         handle.flags = flags;
         handle.mode = mode;
@@ -429,8 +436,9 @@ static void UserspaceFilesystemRequestState__release(UserspaceFilesystemRequestS
 {
     if (self->has_shared_buffer)
     {
-        UserAddress buffer = self->operation == SERVICE_FILESYSTEM_LIST_DIR ? self->entries : self->buffer;
-        match_result(ProcessMemoryCode, Process__free_user_pages(self->filesystem->service_process, buffer.virtual_addr),
+        match_result(ProcessMemoryCode, Process__free_user_pages(
+            self->filesystem->service_process, self->shared_buffer_allocation.virtual_addr
+        ),
             success_do_nothing(),
             error(code, message)
             {
@@ -543,9 +551,11 @@ static Result(Anything) UserspaceFilesystem__complete_wait(ParkedOperationPtr pa
 
             if (status != SERVICE_OK)
             {
+                Result(Anything) mapped_result =
+                    Error(Anything, request_failed, UserspaceFilesystem__io_status_from_service_status(status));
                 return KernelContext__map_result(
                     &park_context->kernel_context,
-                    Error(Anything, request_failed, UserspaceFilesystem__io_status_from_service_status(status))
+                    &mapped_result
                 );
             }
 
@@ -553,7 +563,7 @@ static Result(Anything) UserspaceFilesystem__complete_wait(ParkedOperationPtr pa
             {
                 match_result(IOInternalHandle, UserspaceFilesystemIOState__add_handle(
                     UserspaceFilesystem__io_state(filesystem),
-                    path,
+                    &path,
                     flags,
                     mode,
                     file_size,
@@ -561,16 +571,18 @@ static Result(Anything) UserspaceFilesystem__complete_wait(ParkedOperationPtr pa
                 ),
                     success(open_handle)
                     {
+                        Result(Anything) mapped_result = Success(Anything, open_handle);
                         return KernelContext__map_result(
                             &park_context->kernel_context,
-                            Success(Anything, open_handle)
+                            &mapped_result
                         );
                     },
                     error(code, message)
                     {
+                        Result(Anything) mapped_result = Error(Anything, message, code);
                         return KernelContext__map_result(
                             &park_context->kernel_context,
-                            Error(Anything, message, code)
+                            &mapped_result
                         );
                     }
                 );
@@ -586,16 +598,18 @@ static Result(Anything) UserspaceFilesystem__complete_wait(ParkedOperationPtr pa
                         critical_section(UserspaceFilesystem__io_state(filesystem)->state.lock,
                             file_handle->offset += (uint64_t) result;
                         );
+                        Result(Anything) mapped_result = Success(Anything, result);
                         return KernelContext__map_result(
                             &park_context->kernel_context,
-                            Success(Anything, result)
+                            &mapped_result
                         );
                     },
                     error(code, message)
                     {
+                        Result(Anything) mapped_result = Error(Anything, message, code);
                         return KernelContext__map_result(
                             &park_context->kernel_context,
-                            Error(Anything, message, code)
+                            &mapped_result
                         );
                     }
                 );
@@ -617,83 +631,30 @@ static Result(Anything) UserspaceFilesystem__complete_wait(ParkedOperationPtr pa
                                 file_handle->block[i] = blocks[i];
                             }
                         );
+                        Result(Anything) mapped_result = Success(Anything, result);
                         return KernelContext__map_result(
                             &park_context->kernel_context,
-                            Success(Anything, result)
+                            &mapped_result
                         );
                     },
                     error(code, message)
                     {
+                        Result(Anything) mapped_result = Error(Anything, message, code);
                         return KernelContext__map_result(
                             &park_context->kernel_context,
-                            Error(Anything, message, code)
+                            &mapped_result
                         );
                     }
                 );
             }
 
-            return KernelContext__map_result(&park_context->kernel_context, Success(Anything, result));
+            Result(Anything) mapped_result = Success(Anything, result);
+            return KernelContext__map_result(&park_context->kernel_context, &mapped_result);
         },
         none_do_nothing()
     );
 
     return wait_result;
-}
-
-static Result(IOInternalHandle) UserspaceFilesystem__unsupported_open(IOStatePtr self, BString path, Flags flags)
-{
-    return Error(IOInternalHandle, request_failed, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOInternalHandle) UserspaceFilesystem__unsupported_close(IOStatePtr self, IOInternalHandle handle)
-{
-    return Error(IOInternalHandle, request_failed, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOBufferPtr) UserspaceFilesystem__unsupported_read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target
-)
-{
-    return Error(IOBufferPtr, request_failed, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(ByteCount) UserspaceFilesystem__unsupported_write(
-    IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size
-)
-{
-    return Error(ByteCount, request_failed, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(ParkStatus) UserspaceFilesystem__unsupported_park(IOStatePtr self, IOContextPtr parked_context)
-{
-    return Error(ParkStatus, request_failed, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(ParkStatus) UserspaceFilesystem__unsupported_unpark(IOStatePtr self)
-{
-    return Error(ParkStatus, request_failed, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(FilesystemNodes) UserspaceFilesystem__unsupported_list_nodes(
-    IOStatePtr self, FilesystemNodePtr parent, BString path
-)
-{
-    return Error(FilesystemNodes, request_failed, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOStatus) UserspaceFilesystem__unsupported_status(IOStatePtr self, BString path)
-{
-    return Error(IOStatus, request_failed, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOStatus) UserspaceFilesystem__unsupported_remove(IOStatePtr self, BString path, Flags flags)
-{
-    return Error(IOStatus, request_failed, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOStatus) UserspaceFilesystem__unsupported_link(IOStatePtr self, BString source_path, BString target_path)
-{
-    return Error(IOStatus, request_failed, IO_OPERATION_NOT_SUPPORTED);
 }
 
 static Result(UserspaceFilesystemRequestStart) UserspaceFilesystemRegistry__start_request(
@@ -747,16 +708,16 @@ static Result(ServiceCode) UserspaceFilesystem__submit_started_request(
     UserspaceFilesystemIOStatePtr state,
     UserspaceFilesystemRegistryPtr registry,
     ProcessID pid,
-    UserspaceFilesystemRequestStart start
+    ConstUserspaceFilesystemRequestStartPtr start
 )
 {
-    match_result(ServiceCode, UserspaceFilesystem__deliver_service_event(state->filesystem, start.event),
+    match_result(ServiceCode, UserspaceFilesystem__deliver_service_event(state->filesystem, start->event),
         success_do_nothing(),
         error(code, message)
         {
-            UserspaceFilesystemRegistry__remove_request(registry, start.request);
-            UserspaceFilesystemRequestState__release(start.request);
-            Kernel__free(addr(start.park_context));
+            UserspaceFilesystemRegistry__remove_request(registry, start->request);
+            UserspaceFilesystemRequestState__release(start->request);
+            Kernel__free(addr(start->park_context));
             return Error(ServiceCode, message, SERVICE_FILESYSTEM_REQUEST_FAILED);
         }
     );
@@ -766,18 +727,18 @@ static Result(ServiceCode) UserspaceFilesystem__submit_started_request(
             SOURCE_IO,
             SUBSYS_IO_PARK,
             pid,
-            &start.park_context->kernel_context,
+            &start->park_context->kernel_context,
             UserspaceFilesystem__complete_wait,
             true,
-            Some(OperationKey, start.request->wake_key)
+            &Some(OperationKey, start->request->wake_key)
         );
     match_result(AckCode, MessageBroker__deliver(state->filesystem->message_broker, message),
         success(_) { return Success(ServiceCode, SERVICE_OK); },
         error(code, message)
         {
-            UserspaceFilesystemRegistry__remove_request(registry, start.request);
-            UserspaceFilesystemRequestState__release(start.request);
-            Kernel__free(addr(start.park_context));
+            UserspaceFilesystemRegistry__remove_request(registry, start->request);
+            UserspaceFilesystemRequestState__release(start->request);
+            Kernel__free(addr(start->park_context));
             return Error(ServiceCode, message, SERVICE_FILESYSTEM_REQUEST_FAILED);
         }
     );
@@ -785,7 +746,7 @@ static Result(ServiceCode) UserspaceFilesystem__submit_started_request(
     return Error(ServiceCode, request_failed, SERVICE_FILESYSTEM_REQUEST_FAILED);
 }
 
-static Result(IOInternalHandle) UserspaceFilesystem__open(IOStatePtr self, BString path, Flags flags)
+static Result(IOInternalHandle) UserspaceFilesystem__open(IOStatePtr self, ConstBStringPtr path, Flags flags)
 {
     UserspaceFilesystemIOStatePtr state = (UserspaceFilesystemIOStatePtr) self;
 
@@ -799,9 +760,10 @@ static Result(IOInternalHandle) UserspaceFilesystem__open(IOStatePtr self, BStri
         some(kernel_context)
         {
             match_optional(ProcessID, kernel_context->pid,
-                some(pid)
-                {
-                    match_result(UserspaceFilesystemRequestStatePtr, UserspaceFilesystemRequestState__heap_new(
+	                some(pid)
+	                {
+	                    UserAddress null_user_address = NULL_USER_ADDRESS;
+	                    match_result(UserspaceFilesystemRequestStatePtr, UserspaceFilesystemRequestState__heap_new(
                         state->filesystem,
                         SERVICE_FILESYSTEM_OPEN,
                         path,
@@ -809,10 +771,11 @@ static Result(IOInternalHandle) UserspaceFilesystem__open(IOStatePtr self, BStri
                         flags,
                         0,
                         0,
-                        NULL_USER_ADDRESS,
+	                        &null_user_address,
                         0,
-                        NULL_USER_ADDRESS,
+	                        &null_user_address,
                         0,
+	                        &null_user_address,
                         false,
                         0,
                         pid
@@ -826,7 +789,7 @@ static Result(IOInternalHandle) UserspaceFilesystem__open(IOStatePtr self, BStri
                                 success(start)
                                 {
                                     match_result(ServiceCode, UserspaceFilesystem__submit_started_request(
-                                        state, registry, pid, start
+                                        state, registry, pid, &start
                                     ),
                                         success(_) { return Error(IOInternalHandle, request_pending, IO_WAIT_FOR_DATA); },
                                         error(code, message) { return Error(IOInternalHandle, message, IO_INVALID_PATH); }
@@ -853,7 +816,7 @@ static Result(IOInternalHandle) UserspaceFilesystem__close(IOStatePtr self, IOIn
 }
 
 static Result(IOBufferPtr) UserspaceFilesystem__read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target
+    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target
 )
 {
     UserspaceFilesystemIOStatePtr state = (UserspaceFilesystemIOStatePtr) self;
@@ -886,9 +849,9 @@ static Result(IOBufferPtr) UserspaceFilesystem__read(
             size_t remaining_file = (size_t) (file_handle->size - file_handle->offset);
             size_t remaining_block = 1024U - (size_t) block_offset;
             size_t read_size = size;
-            if (read_size > target.len)
+            if (read_size > target->len)
             {
-                read_size = target.len;
+                read_size = target->len;
             }
             if (read_size > remaining_file)
             {
@@ -911,26 +874,28 @@ static Result(IOBufferPtr) UserspaceFilesystem__read(
                                     match_optional(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid),
                                         some(requester)
                                         {
-                                            match_result(UserAddress, Process__map_shared_user_pages(
+                                            match_result(SharedUserPages, Process__map_shared_user_pages_with_allocation(
                                                 state->filesystem->service_process,
                                                 requester,
-                                                addr(target.data),
+                                                addr(target->data),
                                                 read_size
                                             ),
-                                                success(mapped_buffer)
-                                                {
-                                                    match_result(UserspaceFilesystemRequestStatePtr, UserspaceFilesystemRequestState__heap_new(
+	                                                success(shared)
+	                                                {
+	                                                    UserAddress null_user_address = NULL_USER_ADDRESS;
+	                                                    match_result(UserspaceFilesystemRequestStatePtr, UserspaceFilesystemRequestState__heap_new(
                                                         state->filesystem,
                                                         SERVICE_FILESYSTEM_READ,
-                                                        bstr(""),
+	                                                        &bstr(""),
                                                         handle,
                                                         file_handle->flags,
                                                         file_handle->block[block_index],
                                                         block_offset,
-                                                        mapped_buffer,
+                                                        &shared.mapping,
                                                         read_size,
-                                                        NULL_USER_ADDRESS,
+	                                                        &null_user_address,
                                                         0,
+                                                        &shared.allocation,
                                                         true,
                                                         0,
                                                         pid
@@ -945,7 +910,7 @@ static Result(IOBufferPtr) UserspaceFilesystem__read(
                                                                 success(start)
                                                                 {
                                                                     match_result(ServiceCode, UserspaceFilesystem__submit_started_request(
-                                                                        state, registry, pid, start
+                                                                        state, registry, pid, &start
                                                                     ),
                                                                         success(_) { return Error(IOBufferPtr, request_pending, IO_WAIT_FOR_DATA); },
                                                                         error(code, message) { return Error(IOBufferPtr, message, IO_INVALID_PATH); }
@@ -958,7 +923,7 @@ static Result(IOBufferPtr) UserspaceFilesystem__read(
                                                         {
                                                             match_result(ProcessMemoryCode, Process__free_user_pages(
                                                                 state->filesystem->service_process,
-                                                                mapped_buffer.virtual_addr
+                                                                shared.allocation.virtual_addr
                                                             ),
                                                                 success_do_nothing(),
                                                                 error(free_code, free_message)
@@ -1021,26 +986,28 @@ static Result(ByteCount) UserspaceFilesystem__write(
                                     match_optional(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid),
                                         some(requester)
                                         {
-                                            match_result(UserAddress, Process__map_shared_user_pages(
+                                            match_result(SharedUserPages, Process__map_shared_user_pages_with_allocation(
                                                 state->filesystem->service_process,
                                                 requester,
                                                 addr(data),
                                                 size
                                             ),
-                                                success(mapped_buffer)
-                                                {
-                                                    match_result(UserspaceFilesystemRequestStatePtr, UserspaceFilesystemRequestState__heap_new(
+	                                                success(shared)
+	                                                {
+	                                                    UserAddress null_user_address = NULL_USER_ADDRESS;
+	                                                    match_result(UserspaceFilesystemRequestStatePtr, UserspaceFilesystemRequestState__heap_new(
                                                         state->filesystem,
                                                         SERVICE_FILESYSTEM_WRITE,
-                                                        file_handle->path,
+                                                        &file_handle->path,
                                                         handle,
                                                         file_handle->flags,
                                                         0,
                                                         0,
-                                                        mapped_buffer,
+                                                        &shared.mapping,
                                                         size,
-                                                        NULL_USER_ADDRESS,
+	                                                        &null_user_address,
                                                         0,
+                                                        &shared.allocation,
                                                         true,
                                                         0,
                                                         pid
@@ -1055,7 +1022,7 @@ static Result(ByteCount) UserspaceFilesystem__write(
                                                                 success(start)
                                                                 {
                                                                     match_result(ServiceCode, UserspaceFilesystem__submit_started_request(
-                                                                        state, registry, pid, start
+                                                                        state, registry, pid, &start
                                                                     ),
                                                                         success(_) { return Error(ByteCount, request_pending, IO_WAIT_FOR_DATA); },
                                                                         error(code, message) { return Error(ByteCount, message, IO_INVALID_PATH); }
@@ -1068,7 +1035,7 @@ static Result(ByteCount) UserspaceFilesystem__write(
                                                         {
                                                             match_result(ProcessMemoryCode, Process__free_user_pages(
                                                                 state->filesystem->service_process,
-                                                                mapped_buffer.virtual_addr
+                                                                shared.allocation.virtual_addr
                                                             ),
                                                                 success_do_nothing(),
                                                                 error(free_code, free_message)
@@ -1106,7 +1073,7 @@ static Result(ByteCount) UserspaceFilesystem__write(
 }
 
 static Result(IOStatus) UserspaceFilesystem__status_operation(
-    IOStatePtr self, BString path, Flags flags, ServiceFilesystemOperation operation
+    IOStatePtr self, ConstBStringPtr path, Flags flags, ServiceFilesystemOperation operation
 )
 {
     UserspaceFilesystemIOStatePtr state = (UserspaceFilesystemIOStatePtr) self;
@@ -1115,9 +1082,10 @@ static Result(IOStatus) UserspaceFilesystem__status_operation(
         some(kernel_context)
         {
             match_optional(ProcessID, kernel_context->pid,
-                some(pid)
-                {
-                    match_result(UserspaceFilesystemRequestStatePtr, UserspaceFilesystemRequestState__heap_new(
+	                some(pid)
+	                {
+	                    UserAddress null_user_address = NULL_USER_ADDRESS;
+	                    match_result(UserspaceFilesystemRequestStatePtr, UserspaceFilesystemRequestState__heap_new(
                         state->filesystem,
                         operation,
                         path,
@@ -1125,10 +1093,11 @@ static Result(IOStatus) UserspaceFilesystem__status_operation(
                         flags,
                         0,
                         0,
-                        NULL_USER_ADDRESS,
+	                        &null_user_address,
                         0,
-                        NULL_USER_ADDRESS,
+	                        &null_user_address,
                         0,
+	                        &null_user_address,
                         false,
                         0,
                         pid
@@ -1142,7 +1111,7 @@ static Result(IOStatus) UserspaceFilesystem__status_operation(
                                 success(start)
                                 {
                                     match_result(ServiceCode, UserspaceFilesystem__submit_started_request(
-                                        state, registry, pid, start
+                                        state, registry, pid, &start
                                     ),
                                         success(_) { return Error(IOStatus, request_pending, IO_WAIT_FOR_DATA); },
                                         error(code, message) { return Error(IOStatus, message, IO_INVALID_PATH); }
@@ -1163,18 +1132,18 @@ static Result(IOStatus) UserspaceFilesystem__status_operation(
     return Error(IOStatus, invalid_argument, IO_INVALID_PATH);
 }
 
-static Result(IOStatus) UserspaceFilesystem__mkdir(IOStatePtr self, BString path)
+static Result(IOStatus) UserspaceFilesystem__mkdir(IOStatePtr self, ConstBStringPtr path)
 {
     return UserspaceFilesystem__status_operation(self, path, 0, SERVICE_FILESYSTEM_MKDIR);
 }
 
-static Result(IOStatus) UserspaceFilesystem__remove(IOStatePtr self, BString path, Flags flags)
+static Result(IOStatus) UserspaceFilesystem__remove(IOStatePtr self, ConstBStringPtr path, Flags flags)
 {
     return UserspaceFilesystem__status_operation(self, path, flags, SERVICE_FILESYSTEM_REMOVE);
 }
 
 static Result(DirectoryEntryCount) UserspaceFilesystem__list_dir(
-    IOStatePtr self, BString path, DirectoryEntryPtr entries, size_t max_entries
+    IOStatePtr self, ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries
 )
 {
     UserspaceFilesystemIOStatePtr state = (UserspaceFilesystemIOStatePtr) self;
@@ -1197,15 +1166,16 @@ static Result(DirectoryEntryCount) UserspaceFilesystem__list_dir(
                                 some(requester)
                                 {
                                     size_t buffer_size = max_entries * sizeof(DirectoryEntry);
-                                    match_result(UserAddress, Process__map_shared_user_pages(
+                                    match_result(SharedUserPages, Process__map_shared_user_pages_with_allocation(
                                         state->filesystem->service_process,
                                         requester,
                                         addr(entries),
                                         buffer_size
                                     ),
-                                        success(mapped_entries)
-                                        {
-                                            UserspaceFilesystemRegistryPtr registry =
+	                                        success(shared)
+	                                        {
+	                                            UserAddress null_user_address = NULL_USER_ADDRESS;
+	                                            UserspaceFilesystemRegistryPtr registry =
                                                 UserspaceFilesystemRegistry__shared();
                                             match_result(UserspaceFilesystemRequestStatePtr, UserspaceFilesystemRequestState__heap_new(
                                                 state->filesystem,
@@ -1215,10 +1185,11 @@ static Result(DirectoryEntryCount) UserspaceFilesystem__list_dir(
                                                 0,
                                                 0,
                                                 0,
-                                                NULL_USER_ADDRESS,
+	                                                &null_user_address,
                                                 0,
-                                                mapped_entries,
+                                                &shared.mapping,
                                                 max_entries,
+                                                &shared.allocation,
                                                 true,
                                                 0,
                                                 pid
@@ -1231,7 +1202,7 @@ static Result(DirectoryEntryCount) UserspaceFilesystem__list_dir(
                                                         success(start)
                                                         {
                                                             match_result(ServiceCode, UserspaceFilesystem__submit_started_request(
-                                                                state, registry, pid, start
+                                                                state, registry, pid, &start
                                                             ),
                                                                 success(_) { return Error(DirectoryEntryCount, request_pending, IO_WAIT_FOR_DATA); },
                                                                 error(code, message) { return Error(DirectoryEntryCount, message, IO_INVALID_PATH); }
@@ -1244,7 +1215,7 @@ static Result(DirectoryEntryCount) UserspaceFilesystem__list_dir(
                                                 {
                                                     match_result(ProcessMemoryCode, Process__free_user_pages(
                                                         state->filesystem->service_process,
-                                                        mapped_entries.virtual_addr
+                                                        shared.allocation.virtual_addr
                                                     ),
                                                         success_do_nothing(),
                                                         error(free_code, free_message)
@@ -1293,19 +1264,25 @@ static Result(DirectoryEntryCount) UserspaceFilesystem__list_dir(
 static FileIO UserspaceFilesystemIO__new(void)
 {
     return (FileIO) {
-        .base_io = (IO) {
-            .open = UserspaceFilesystem__open,
-            .close = UserspaceFilesystem__close,
-            .read = UserspaceFilesystem__read,
-            .write = UserspaceFilesystem__write,
-            .park = NULL, // hundelint: ignore-no-null
-            .unpark = NULL, // hundelint: ignore-no-null
-        },
-        .list_nodes = UserspaceFilesystem__unsupported_list_nodes,
+        .base_io = IO__new(
+            UserspaceFilesystem__open,
+            UserspaceFilesystem__read,
+            UserspaceFilesystem__write,
+            IO__unsupported_accept,
+            UserspaceFilesystem__close,
+            IO__unsupported_park,
+            IO__unsupported_unpark,
+            IO__unsupported_server_buffer,
+            IO__unsupported_server_write_buffer,
+            IO__unsupported_data_available,
+            IO__unsupported_data_consumed,
+            IO__unsupported_eof
+        ),
+        .list_nodes = FileIO__unsupported_list_nodes,
         .list_dir = UserspaceFilesystem__list_dir,
         .mkdir = UserspaceFilesystem__mkdir,
         .remove = UserspaceFilesystem__remove,
-        .link = UserspaceFilesystem__unsupported_link,
+        .link = FileIO__unsupported_link,
     };
 }
 
@@ -1345,7 +1322,8 @@ Result(ServiceCode) UserspaceFilesystemRegistry__register(
     MessageBrokerPtr message_broker
 )
 {
-    FilesystemPtr mounted_filesystem = Filesystem__heap_new(registration->mountpoint, UserspaceFilesystemIO__new());
+    FileIO file_io = UserspaceFilesystemIO__new();
+    FilesystemPtr mounted_filesystem = Filesystem__heap_new(&registration->mountpoint, &file_io);
     match_result(UserspaceFilesystemPtr, UserspaceFilesystem__heap_new(
         &registration->device_path,
         &registration->filesystem_type,
@@ -1386,7 +1364,7 @@ Result(ServiceCode) UserspaceFilesystemRegistry__register(
                 }
             );
 
-            match_result(MountResult, Filesystem__mount(root_filesystem, registration->mountpoint, mounted_filesystem),
+            match_result(MountResult, Filesystem__mount(root_filesystem, &registration->mountpoint, mounted_filesystem),
                 success(_) { return Success(ServiceCode, SERVICE_OK); },
                 error(code, message)
                 {

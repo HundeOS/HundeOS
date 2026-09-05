@@ -18,8 +18,8 @@ void action_park_message(KernelListenerPtr self, MessagePtr message)
                 __d_printf(SCHEDULER, "io parking process %p\n", self->kernel);
                 Result(ProcessID) pid_res = Scheduler__park_by_pid_with_context_ownership_and_operation_key(
                     self->kernel->scheduler, deferred.anything,
-                    deferred.context, Some(Continuation, deferred.continuation),
-                    PARK_WAIT_IO, deferred.owns_context, deferred.operation_key
+                    deferred.context, &Some(Continuation, deferred.continuation),
+                    PARK_WAIT_IO, deferred.owns_context, &deferred.operation_key
                 );
 
                 match_result(ProcessID, pid_res,
@@ -48,7 +48,7 @@ void action_unpark_message(KernelListenerPtr self, MessagePtr message)
                 ProcessID pid = payload.process_id;
                 __d_printf(SCHEDULER, "scheduler unpark message pid=%i\n", pid);
                 Result(ProcessID) pid_res = Scheduler__unpark_by_pid(
-                    self->kernel->scheduler, pid, PARK_WAIT_IO, None(ReturnCode)
+                    self->kernel->scheduler, pid, PARK_WAIT_IO, &None(ReturnCode)
                 );
 
                 match_result(ProcessID, pid_res,
@@ -92,8 +92,8 @@ void Scheduler__io_event(KernelListenerPtr self, MessagePtr message)
                         self->kernel->scheduler,
                         payload.io_operation.pid,
                         PARK_WAIT_IO,
-                        None(ReturnCode),
-                        Some(OperationKey, payload.io_operation.operation_key)
+                        &None(ReturnCode),
+                        &Some(OperationKey, payload.io_operation.operation_key)
                     );
 
                     match_result(ProcessID, pid_res,
@@ -123,7 +123,7 @@ void Scheduler__service_event(KernelListenerPtr self, MessagePtr message)
                 match_result(ServiceCode, Scheduler__service_enqueue(
                     self->kernel->scheduler,
                     payload.service_event_delivery.process,
-                    payload.service_event_delivery.event
+                    &payload.service_event_delivery.event
                 ),
                     success_do_nothing(),
                     error(code, message) { __d_printf(PANIC, "Failed to enqueue service event: %s", cstr(message)); }
@@ -144,12 +144,12 @@ Result(SchedulerRegisterCode) Scheduler__register(KernelPtr kernel)
     Listener io_listener = KernelListener__new(kernel, SOURCE_IO, Scheduler__io_event);
     Listener service_listener = KernelListener__new(kernel, SOURCE_SERVICE, Scheduler__service_event);
 
-    match_result(ListenerRegisterResult, MessageBroker__register_listener(broker, io_listener),
+    match_result(ListenerRegisterResult, MessageBroker__register_listener(broker, &io_listener),
         success_do_nothing(),
         error(code, message) { return Error(SchedulerRegisterCode, message, code); }
     );
 
-    match_result(ListenerRegisterResult, MessageBroker__register_listener(broker, service_listener),
+    match_result(ListenerRegisterResult, MessageBroker__register_listener(broker, &service_listener),
         success(res)
         {
             return Success(SchedulerRegisterCode, res);

@@ -4,6 +4,7 @@
 #include "address.h"
 #include "types/fixed_array.h"
 #include "types/optional.h"
+#include "hardware/ethernet.h"
 
 #define MAX_PHYSICAL_MEMORY_REGIONS 64
 
@@ -131,6 +132,29 @@ static inline SdHostInfo SdHostInfo__new(Address physical_base, uint64_t mmio_si
 
 OptionalDef(SdHostInfo);
 
+typedef struct EthernetMacInfo {
+    EthernetMacKind kind;
+    Address physical_base;
+    uint64_t mmio_size;
+    uint64_t irq;
+} EthernetMacInfo;
+
+static inline EthernetMacInfo EthernetMacInfo__new(
+    EthernetMacKind kind,
+    Address physical_base,
+    uint64_t mmio_size,
+    uint64_t irq)
+{
+    return (EthernetMacInfo) {
+        .kind = kind,
+        .physical_base = physical_base,
+        .mmio_size = mmio_size,
+        .irq = irq,
+    };
+}
+
+OptionalDef(EthernetMacInfo);
+
 typedef struct GicInfo {
     Address distributor_physical_base;
     Address distributor_virtual_base;
@@ -164,6 +188,7 @@ OptionalDef(InterruptControllerInfo);
 
 typedef struct SystemInfo {
     uint64_t cpu_count;
+    size_t heap_coarse_block_size;
     PhysicalMemoryInfo physical_memory;
     MemoryRegion kernel_image;
     MemoryRegion kernel_heap;
@@ -174,6 +199,7 @@ typedef struct SystemInfo {
     Optional(FramebufferInfo) framebuffer;
     Optional(PciInfo) pci;
     Optional(SdHostInfo) sd_host;
+    Optional(EthernetMacInfo) ethernet_mac;
     GicInfo gic;
     InterruptControllerInfo interrupt_controller;
 } SystemInfo;
@@ -186,14 +212,22 @@ typedef UartInfo * UartInfoPtr;
 typedef FramebufferInfo * FramebufferInfoPtr;
 typedef PciInfo * PciInfoPtr;
 typedef SdHostInfo * SdHostInfoPtr;
+typedef EthernetMacInfo * EthernetMacInfoPtr;
 typedef GicInfo * GicInfoPtr;
 typedef PhysicalMemoryInfo * PhysicalMemoryInfoPtr;
 typedef InterruptControllerInfo * InterruptControllerInfoPtr;
 typedef SystemInfo * SystemInfoPtr;
 
-inline SystemInfo SystemInfo__new()
+static inline size_t SystemInfo__default_heap_coarse_block_size(void)
 {
-    return (SystemInfo) {};
+    return 4ULL * 1024ULL * 1024ULL;
+}
+
+static inline SystemInfo SystemInfo__new()
+{
+    SystemInfo info = {};
+    info.heap_coarse_block_size = SystemInfo__default_heap_coarse_block_size();
+    return info;
 }
 
 KernelAddress SystemInfo__kernel_address_for_physical(SystemInfoPtr self, Address physical);

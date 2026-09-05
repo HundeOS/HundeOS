@@ -32,10 +32,10 @@ static IRQService IRQService__new(ProcessPtr process)
     };
 }
 
-static ServiceEventDispatch ServiceEventDispatch__new(Optional(ProcessPtr) process)
+static ServiceEventDispatch ServiceEventDispatch__new(OptionalPtr(ProcessPtr) process)
 {
     return (ServiceEventDispatch) {
-        .process = process,
+        .process = *process,
     };
 }
 
@@ -88,7 +88,7 @@ Result(ServiceEventDispatch) ServiceEventDispatcher__dispatch_irq(
 )
 {
     __d_printf(IODEV, "service event dispatcher irq=%i\n", irq);
-    ServiceEventDispatch no_dispatch = ServiceEventDispatch__new(None(ProcessPtr));
+    ServiceEventDispatch no_dispatch = ServiceEventDispatch__new(&None(ProcessPtr));
 
     critical_section(self->lock,
     {
@@ -261,7 +261,7 @@ bool ServiceEventDispatcher__is_ready(ServiceEventDispatcherPtr self, ConstBStri
 
     critical_section(self->lock,
     {
-        match_optional(ServiceReadyNames__FindResult, ServiceReadyNames__find(
+        match_find_result(ServiceReadyNames, ServiceReadyNames__find(
             &self->ready_names, ServiceReadyNames__matches, (void *) name
         ),
             some(match) { ready = true; },
@@ -278,7 +278,7 @@ Result(ServiceCode) ServiceEventDispatcher__publish_ready(
 {
     critical_section(self->lock,
     {
-        match_optional(ServiceReadyNames__FindResult, ServiceReadyNames__find(
+        match_find_result(ServiceReadyNames, ServiceReadyNames__find(
             &self->ready_names, ServiceReadyNames__matches, (void *) name
         ),
             some_do_nothing(),
@@ -322,7 +322,7 @@ Result(ServiceCode) ServiceEventDispatcher__wait_ready(
 {
     critical_section(self->lock,
     {
-        match_optional(ServiceReadyNames__FindResult, ServiceReadyNames__find(
+        match_find_result(ServiceReadyNames, ServiceReadyNames__find(
             &self->ready_names, ServiceReadyNames__matches, (void *) name
         ),
             some(match) { cs_return Success(ServiceCode, SERVICE_OK); },
@@ -348,12 +348,12 @@ Result(ServiceCode) ServiceEventDispatcher__remove_ready_waiter(ServiceEventDisp
     {
         while (true)
         {
-            match_optional(ServiceReadyWaiters__FindResult, ServiceReadyWaiters__find(
+            match_find_result(ServiceReadyWaiters, ServiceReadyWaiters__find(
                 &self->ready_waiters, ServiceReadyWaiter__matches_process, process
             ),
-                some(match)
+                some(waiter)
                 {
-                    match_result(CollectionCode, ServiceReadyWaiters__remove(&self->ready_waiters, *match.value),
+                    match_result(CollectionCode, ServiceReadyWaiters__remove(&self->ready_waiters, waiter),
                         success_do_nothing(),
                         error(code, message) { cs_return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR); }
                     );

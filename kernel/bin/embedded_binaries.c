@@ -16,13 +16,13 @@ static EmbeddedFs EmbeddedElf__filesystem()
     return EmbeddedFs__new((Address) __embedded_binaries_start, (Address) __embedded_binaries_end);
 }
 
-Optional(Elf) EmbeddedElf__load(BString name)
+Optional(Elf) EmbeddedElf__load(ConstBStringPtr name)
 {
     EmbeddedFs filesystem = EmbeddedElf__filesystem();
     match_optional(EmbeddedFsFile, EmbeddedFs__find(&filesystem, name),
         some(file)
         {
-            return Some(Elf, Elf__new(file.start, file.end, file.name));
+            return Some(Elf, Elf__new(file.start, file.end, &file.name));
         },
         none_do_nothing()
     );

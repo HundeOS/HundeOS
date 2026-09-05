@@ -81,14 +81,14 @@ MessagePtr Message__heap_new_deferred_with_context_ownership(
 )
 {
     return Message__heap_new_deferred_with_context_ownership_and_operation_key(
-        source, source_code, anything, context, continuation, owns_context, None(OperationKey)
+        source, source_code, anything, context, continuation, owns_context, &None(OperationKey)
     );
 }
 
 MessagePtr Message__heap_new_deferred_with_context_ownership_and_operation_key(
     Source source, SourceCode source_code, Anything anything,
     KernelContextPtr context, Continuation continuation,
-    bool owns_context, Optional(OperationKey) operation_key
+    bool owns_context, OptionalPtr(OperationKey) operation_key
 )
 {
     Payload payload = (Payload) {
@@ -98,7 +98,7 @@ MessagePtr Message__heap_new_deferred_with_context_ownership_and_operation_key(
             .continuation = continuation,
             .context = context,
             .owns_context = owns_context,
-            .operation_key = operation_key,
+            .operation_key = *operation_key,
         }
     };
     stub_message = (Message) {

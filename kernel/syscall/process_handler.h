@@ -6,7 +6,7 @@
 
 Result(SystemCallResult) ProcessList__handler(
     KernelPtr kernel,
-    Optional(ProcessPtr) proc,
+    OptionalPtr(ProcessPtr) proc,
     Anything arg1,
     Anything arg2,
     Anything arg3,
@@ -15,7 +15,7 @@ Result(SystemCallResult) ProcessList__handler(
 );
 Result(SystemCallResult) ProcessWaitChildEvent__handler(
     KernelPtr kernel,
-    Optional(ProcessPtr) proc,
+    OptionalPtr(ProcessPtr) proc,
     Anything arg1,
     Anything arg2,
     Anything arg3,
@@ -24,7 +24,7 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
 );
 Result(SystemCallResult) ProcessSleep__handler(
     KernelPtr kernel,
-    Optional(ProcessPtr) proc,
+    OptionalPtr(ProcessPtr) proc,
     Anything arg1,
     Anything arg2,
     Anything arg3,

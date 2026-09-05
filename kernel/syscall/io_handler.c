@@ -22,35 +22,101 @@ IOOpenCompletionContext;
 
 typedef IOOpenCompletionContext * IOOpenCompletionContextPtr;
 
+typedef struct IOAcceptCompletionContext
+{
+    KernelContext kernel_context;
+    IOSubsystemPtr io_subsystem;
+    ProcessPtr process;
+}
+IOAcceptCompletionContext;
+
+typedef IOAcceptCompletionContext * IOAcceptCompletionContextPtr;
+
 static IOOpenCompletionContext IOOpenCompletionContext__new(
-    KernelContext kernel_context, IOSubsystemPtr io_subsystem, ProcessPtr process, BString path
+    const KernelContext * kernel_context, IOSubsystemPtr io_subsystem, ProcessPtr process, ConstBStringPtr path
 )
 {
     return (IOOpenCompletionContext) {
-        .kernel_context = kernel_context,
+        .kernel_context = *kernel_context,
         .io_subsystem = io_subsystem,
         .process = process,
-        .path = path,
+        .path = *path,
     };
 }
 
-static Result(Anything) IO__complete_async_open(Result(Anything) open_result, Anything raw_context)
+static IOAcceptCompletionContext IOAcceptCompletionContext__new(
+    const KernelContext * kernel_context, IOSubsystemPtr io_subsystem, ProcessPtr process
+)
+{
+    return (IOAcceptCompletionContext) {
+        .kernel_context = *kernel_context,
+        .io_subsystem = io_subsystem,
+        .process = process,
+    };
+}
+
+static IOContextPtr IO__heap_context(
+    KernelContextPtr kernel_context,
+    IOSubsystemPtr io_subsystem,
+    OptionalPtr(IOHandle) handle,
+    OptionalPtr(ExternalBuffer) buffer
+)
+{
+    return IOContext__heap_new(kernel_context, &Some(IOSubsystemPtr, io_subsystem), handle, buffer);
+}
+
+static IOContextPtr IO__heap_context_without_handle(KernelContextPtr kernel_context, IOSubsystemPtr io_subsystem)
+{
+    return IO__heap_context(kernel_context, io_subsystem, &None(IOHandle), &None(ExternalBuffer));
+}
+
+static IOContextPtr IO__heap_context_with_handle(
+    KernelContextPtr kernel_context, IOSubsystemPtr io_subsystem, IOHandle handle
+)
+{
+    return IO__heap_context(kernel_context, io_subsystem, &Some(IOHandle, handle), &None(ExternalBuffer));
+}
+
+static IOContextPtr IO__heap_context_with_handle_and_buffer(
+    KernelContextPtr kernel_context, IOSubsystemPtr io_subsystem, IOHandle handle, ConstExternalBufferPtr buffer
+)
+{
+    return IO__heap_context(kernel_context, io_subsystem, &Some(IOHandle, handle), &Some(ExternalBuffer, *buffer));
+}
+
+static Result(Anything) IO__allocate_fd_for_handle(
+    KernelContextPtr kernel_context,
+    IOSubsystemPtr io_subsystem,
+    ProcessPtr process,
+    IOHandle handle
+)
+{
+    match_result(FileDescriptor, Process__allocate_file_descriptor(process, (ProcessIOHandle) handle),
+        success(fd) { return Success(Anything, fd); },
+        error(code, message)
+        {
+            IOContextPtr close_context = IO__heap_context_with_handle(kernel_context, io_subsystem, handle);
+            IOSubsystem__close(io_subsystem, close_context);
+            IOContext__dispose(close_context);
+            return Error(Anything, message, code);
+        }
+    );
+}
+
+static Result(Anything) IO__complete_async_open(ResultPtr(Anything) open_result, Anything raw_context)
 {
     IOOpenCompletionContextPtr context = ptr(raw_context, IOOpenCompletionContext);
-    match_result(Anything, open_result,
+    match_result(Anything, *open_result,
         success(internal_handle)
         {
-            IOContextPtr io_context = IOContext__heap_new(
-                context->kernel_context,
-                Some(IOSubsystemPtr, context->io_subsystem),
-                None(IOHandle),
-                None(ExternalBuffer)
+            IOContextPtr io_context = IO__heap_context_without_handle(
+                &context->kernel_context, context->io_subsystem
             );
 
             Result(IOHandle) handle_result = IOSubsystem__record_open_handle(
                 context->io_subsystem,
                 io_context,
-                context->path,
+                &context->path,
                 (IOInternalHandle) internal_handle
             );
             IOContext__dispose(io_context);
@@ -58,20 +124,8 @@ static Result(Anything) IO__complete_async_open(Result(Anything) open_result, An
             match_result(IOHandle, handle_result,
                 success(handle)
                 {
-                    match_result(FileDescriptor, Process__allocate_file_descriptor(context->process, (ProcessIOHandle) handle),
-                        success(fd) { return Success(Anything, fd); },
-                        error(code, message)
-                        {
-                            IOContextPtr close_context = IOContext__heap_new(
-                                context->kernel_context,
-                                Some(IOSubsystemPtr, context->io_subsystem),
-                                Some(IOHandle, handle),
-                                None(ExternalBuffer)
-                            );
-                            IOSubsystem__close(context->io_subsystem, close_context);
-                            IOContext__dispose(close_context);
-                            return Error(Anything, message, code);
-                        }
+                    return IO__allocate_fd_for_handle(
+                        &context->kernel_context, context->io_subsystem, context->process, handle
                     );
                 },
                 error(code, message) { return Error(Anything, message, code); }
@@ -81,6 +135,28 @@ static Result(Anything) IO__complete_async_open(Result(Anything) open_result, An
     );
 
     return Error(Anything, no_process, IO_UNKNOWN_PID);
+}
+
+static Result(Anything) IO__complete_async_accept(ResultPtr(Anything) accept_result, Anything raw_context)
+{
+    IOAcceptCompletionContextPtr context = ptr(raw_context, IOAcceptCompletionContext);
+    Result(Anything) result = Error(Anything, no_process, IO_UNKNOWN_PID);
+
+    match_result(Anything, *accept_result,
+        success(handle)
+        {
+            result = IO__allocate_fd_for_handle(
+                &context->kernel_context,
+                context->io_subsystem,
+                context->process,
+                (IOHandle) handle
+            );
+        },
+        error(code, message) { result = Error(Anything, message, code); }
+    );
+
+    Kernel__free(addr(context));
+    return result;
 }
 
 void BlockDevice__set_current_context(KernelContextPtr context) __attribute__((weak));
@@ -110,14 +186,14 @@ void BlockDevice__clear_current_context()
 
 
 Result(SystemCallResult) IO__handler(
-    KernelPtr kernel, Optional(ProcessPtr) proc, Anything io_operation,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything io_operation,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 )
 {
     IOSubsystemPtr io_subsystem = kernel->io_subsystem;
     Optional(ProcessID) pid = None(ProcessID);
     ProcessPtr process = NULL;
-    match_optional(ProcessPtr, proc,
+    match_optional(ProcessPtr, *proc,
         some(current_process)
         {
             process = current_process;
@@ -131,7 +207,7 @@ Result(SystemCallResult) IO__handler(
         return Error(SystemCallResult, no_process, IO_UNKNOWN_PID);
     }
 
-    KernelContext kernel_context = KernelContext__new(pid, Some(SchedulerPtr, kernel->scheduler));
+    KernelContext kernel_context = KernelContext__new(&pid, &Some(SchedulerPtr, kernel->scheduler));
     IOContextPtr context = NULL;
 
     if (io_operation == IO_OPEN)
@@ -145,20 +221,17 @@ Result(SystemCallResult) IO__handler(
         IOOpenCompletionContextPtr open_completion_context =
             ptr(Kernel__alloc_kernel(sizeof(IOOpenCompletionContext)), IOOpenCompletionContext);
         *open_completion_context =
-            IOOpenCompletionContext__new(kernel_context, io_subsystem, process, request->path);
+            IOOpenCompletionContext__new(&kernel_context, io_subsystem, process, &request->path);
         kernel_context.result_mapper = Some(KernelResultMapper, IO__complete_async_open);
         kernel_context.result_mapper_context = (Anything) open_completion_context;
 
-        context =
-            IOContext__heap_new(
-                kernel_context, Some(IOSubsystemPtr, io_subsystem), None(IOHandle), None(ExternalBuffer)
-            );
+        context = IO__heap_context_without_handle(&kernel_context, io_subsystem);
 
         BlockDevice__set_current_context(&kernel_context);
         Result(IOHandle) open_result = IOSubsystem__open(
             io_subsystem,
             context,
-            request->path,
+            &request->path,
             request->flags
         );
         BlockDevice__clear_current_context();
@@ -174,10 +247,7 @@ Result(SystemCallResult) IO__handler(
             },
                 error(code, message)
                 {
-                IOContextPtr close_context = IOContext__heap_new(
-                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
-                    Some(IOHandle, handle), None(ExternalBuffer)
-                );
+                IOContextPtr close_context = IO__heap_context_with_handle(&kernel_context, io_subsystem, handle);
                 IOSubsystem__close(io_subsystem, close_context);
                 IOContext__dispose(close_context);
                 return Error(SystemCallResult, message, code);
@@ -200,9 +270,7 @@ Result(SystemCallResult) IO__handler(
             success(handle)
             {
             __d_printf(IOSUB, "IO_CLOSE fd lookup success pid=%i fd=%i handle=%i\n", process->pid, fd, handle);
-            context = IOContext__heap_new(
-                kernel_context, Some(IOSubsystemPtr, io_subsystem), Some(IOHandle, (IOHandle) handle), None(ExternalBuffer)
-            );
+            context = IO__heap_context_with_handle(&kernel_context, io_subsystem, (IOHandle) handle);
 
             __d_printf(IOSUB, "IO_CLOSE calling IOSubsystem__close pid=%i fd=%i handle=%i context=%p\n", process->pid, fd, handle, context);
             BlockDevice__set_current_context(&kernel_context);
@@ -234,6 +302,55 @@ Result(SystemCallResult) IO__handler(
         );
     }
 
+    if (io_operation == IO_ACCEPT)
+    {
+        FileDescriptor fd = (FileDescriptor) arg2;
+        Result(ProcessIOHandle) handle_result = Process__get_io_handle(process, fd);
+        match_result(ProcessIOHandle, handle_result,
+            success(handle)
+            {
+                IOAcceptCompletionContextPtr accept_completion_context =
+                    ptr(Kernel__alloc_kernel(sizeof(IOAcceptCompletionContext)), IOAcceptCompletionContext);
+                *accept_completion_context =
+                    IOAcceptCompletionContext__new(&kernel_context, io_subsystem, process);
+                kernel_context.result_mapper = Some(KernelResultMapper, IO__complete_async_accept);
+                kernel_context.result_mapper_context = (Anything) accept_completion_context;
+
+                context = IO__heap_context_with_handle(&kernel_context, io_subsystem, (IOHandle) handle);
+
+                Result(IOHandle) accept_result = IOSubsystem__accept(io_subsystem, context);
+                IOContext__dispose(context);
+                match_result(IOHandle, accept_result,
+                    success(accepted_handle)
+                    {
+                        Kernel__free(addr(accept_completion_context));
+                        match_result(Anything, IO__allocate_fd_for_handle(
+                            &kernel_context,
+                            io_subsystem,
+                            process,
+                            accepted_handle
+                        ),
+                            success(accepted_fd) { return Success(SystemCallResult, accepted_fd); },
+                            error(code, message) { return Error(SystemCallResult, message, code); }
+                        );
+                    },
+                    error(code, message)
+                    {
+                        if (code != IO_WAIT_FOR_DATA)
+                        {
+                            Kernel__free(addr(accept_completion_context));
+                        }
+                        return Error(SystemCallResult, message, code);
+                    }
+                );
+            },
+            error(code, message)
+            {
+                return Error(SystemCallResult, message, code);
+            }
+        );
+    }
+
     if (io_operation == IO_READ)
     {
         FileDescriptor fd = (FileDescriptor) arg2;
@@ -243,11 +360,9 @@ Result(SystemCallResult) IO__handler(
             {
             ExternalBuffer buffer = ExternalBuffer__new((DataPtr) arg3, (size_t) arg4);
 
-            context =
-                IOContext__heap_new(
-                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
-                    Some(IOHandle, (IOHandle) handle), Some(ExternalBuffer, buffer)
-                );
+            context = IO__heap_context_with_handle_and_buffer(
+                &kernel_context, io_subsystem, (IOHandle) handle, &buffer
+            );
 
             BlockDevice__set_current_context(&kernel_context);
             CompleteCall(ByteCount, context, IOSubsystem__read(io_subsystem, context));
@@ -270,7 +385,7 @@ Result(SystemCallResult) IO__handler(
         BlockDevice__set_current_context(&kernel_context);
         Result(DirectoryEntryCount) list_result = IOSubsystem__list_dir(
             io_subsystem,
-            request->path,
+            &request->path,
             request->entries,
             request->max_entries
         );
@@ -296,7 +411,7 @@ Result(SystemCallResult) IO__handler(
         }
 
         BlockDevice__set_current_context(&kernel_context);
-        Result(IOStatus) mkdir_result = IOSubsystem__mkdir(io_subsystem, request->path);
+        Result(IOStatus) mkdir_result = IOSubsystem__mkdir(io_subsystem, &request->path);
         BlockDevice__clear_current_context();
         match_result(IOStatus, mkdir_result,
             success(status)
@@ -319,7 +434,7 @@ Result(SystemCallResult) IO__handler(
         }
 
         BlockDevice__set_current_context(&kernel_context);
-        Result(IOStatus) remove_result = IOSubsystem__remove(io_subsystem, request->path, request->flags);
+        Result(IOStatus) remove_result = IOSubsystem__remove(io_subsystem, &request->path, request->flags);
         BlockDevice__clear_current_context();
         match_result(IOStatus, remove_result,
             success(status)
@@ -344,8 +459,8 @@ Result(SystemCallResult) IO__handler(
         BlockDevice__set_current_context(&kernel_context);
         Result(IOStatus) link_result = IOSubsystem__link(
             io_subsystem,
-            request->source_path,
-            request->target_path
+            &request->source_path,
+            &request->target_path
         );
         BlockDevice__clear_current_context();
         match_result(IOStatus, link_result,
@@ -376,9 +491,9 @@ Result(SystemCallResult) IO__handler(
         BlockDevice__set_current_context(&kernel_context);
         Result(IOStatus) mount_result = IOSubsystem__mount(
             io_subsystem,
-            request->device_path,
-            request->filesystem_type,
-            request->mountpoint
+            &request->device_path,
+            &request->filesystem_type,
+            &request->mountpoint
         );
         BlockDevice__clear_current_context();
         match_result(IOStatus, mount_result,
@@ -401,11 +516,9 @@ Result(SystemCallResult) IO__handler(
             success(handle)
             {
             ExternalBuffer buffer = ExternalBuffer__new((DataPtr) arg3, (size_t) arg4);
-            context =
-                IOContext__heap_new(
-                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
-                    Some(IOHandle, (IOHandle) handle), Some(ExternalBuffer, buffer)
-                );
+            context = IO__heap_context_with_handle_and_buffer(
+                &kernel_context, io_subsystem, (IOHandle) handle, &buffer
+            );
 
             BlockDevice__set_current_context(&kernel_context);
             CompleteCall(ByteCount, context, IOSubsystem__write(io_subsystem, context));
@@ -425,12 +538,10 @@ Result(SystemCallResult) IO__handler(
             return Error(SystemCallResult, invalid_path_argument, IO_INVALID_PATH);
         }
 
-        context = IOContext__heap_new(
-            kernel_context, Some(IOSubsystemPtr, io_subsystem), None(IOHandle), None(ExternalBuffer)
-        );
+        context = IO__heap_context_without_handle(&kernel_context, io_subsystem);
 
         Result(IOHandle) register_result =
-            IOSubsystem__server_register(io_subsystem, context, process, request->path, request->role);
+            IOSubsystem__server_register(io_subsystem, context, process, &request->path, request->role);
         IOContext__dispose(context);
 
         match_result(IOHandle, register_result,
@@ -462,10 +573,7 @@ Result(SystemCallResult) IO__handler(
         match_result(ProcessIOHandle, handle_result,
             success(handle)
             {
-                context = IOContext__heap_new(
-                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
-                    Some(IOHandle, (IOHandle) handle), None(ExternalBuffer)
-                );
+                context = IO__heap_context_with_handle(&kernel_context, io_subsystem, (IOHandle) handle);
 
                 CompleteCall(IOStatus, context, IOSubsystem__server_get_buffer(io_subsystem, context, process, target));
         },
@@ -484,10 +592,7 @@ Result(SystemCallResult) IO__handler(
         match_result(ProcessIOHandle, handle_result,
             success(handle)
             {
-                context = IOContext__heap_new(
-                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
-                    Some(IOHandle, (IOHandle) handle), None(ExternalBuffer)
-                );
+                context = IO__heap_context_with_handle(&kernel_context, io_subsystem, (IOHandle) handle);
 
                 Result(IOStatus) status_result = IOSubsystem__server_data_available(io_subsystem, context, byte_count);
                 IOContext__dispose(context);
@@ -511,10 +616,7 @@ Result(SystemCallResult) IO__handler(
         match_result(ProcessIOHandle, handle_result,
             success(handle)
             {
-                context = IOContext__heap_new(
-                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
-                    Some(IOHandle, (IOHandle) handle), None(ExternalBuffer)
-                );
+                context = IO__heap_context_with_handle(&kernel_context, io_subsystem, (IOHandle) handle);
 
                 Result(IOStatus) status_result = IOSubsystem__server_data_consumed(io_subsystem, context, byte_count);
                 IOContext__dispose(context);
@@ -537,10 +639,7 @@ Result(SystemCallResult) IO__handler(
         match_result(ProcessIOHandle, handle_result,
             success(handle)
             {
-                context = IOContext__heap_new(
-                    kernel_context, Some(IOSubsystemPtr, io_subsystem),
-                    Some(IOHandle, (IOHandle) handle), None(ExternalBuffer)
-                );
+                context = IO__heap_context_with_handle(&kernel_context, io_subsystem, (IOHandle) handle);
 
                 Result(IOStatus) status_result = IOSubsystem__server_eof(io_subsystem, context);
                 IOContext__dispose(context);

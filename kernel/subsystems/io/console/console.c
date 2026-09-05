@@ -8,7 +8,7 @@
 
 FixedArrayBodyDefine(ParkedContexts);
 
-static Result(IOInternalHandle) Console__open(IOStatePtr state, BString path, Flags flags)
+static Result(IOInternalHandle) Console__open(IOStatePtr state, ConstBStringPtr path, Flags flags)
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
     IOInternalHandle handle = -1;
@@ -42,10 +42,10 @@ static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandl
         IOBuffer__reset(&self->read_buffer);
         IOBuffer__reset(&self->write_buffer);
 
-        match_optional(ParkedContexts__FindResult, ParkedContexts__find(&self->parked_contexts, handle_match, &handle),
-            some(found)
+        match_find_result(ParkedContexts, ParkedContexts__find(&self->parked_contexts, handle_match, &handle),
+            some(context)
             {
-                match_result(CollectionCode, ParkedContexts__remove(&self->parked_contexts, *found.value),
+                match_result(CollectionCode, ParkedContexts__remove(&self->parked_contexts, context),
                     success_do_nothing(),
                     error(code, message) { __d_println(IODEV, "no parked context found for handle"); }
                 );
@@ -58,7 +58,7 @@ static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandl
 }
 
 static Result(IOBufferPtr) Console__read(
-    IOStatePtr state, IOInternalHandle handle, size_t size, ExternalBuffer target
+    IOStatePtr state, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target
 )
 {
     ConsoleStatePtr self = (ConsoleStatePtr) state;
@@ -166,14 +166,15 @@ IOPtr Console__heap_new()
         Console__open,
         Console__read,
         Console__write,
+        IO__unsupported_accept,
         Console__close,
         Console__park,
         Console__unpark,
-        NULL, // hundelint: ignore-no-null
+        IO__unsupported_server_buffer,
         Console__server_write_buffer,
-        NULL, // hundelint: ignore-no-null
+        IO__unsupported_data_available,
         Console__data_consumed,
-        NULL // hundelint: ignore-no-null
+        IO__unsupported_eof
     );
 
     return result;

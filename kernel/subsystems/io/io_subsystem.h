@@ -66,17 +66,21 @@ ResultDef(DirectoryEntryCount);
 ResultDef(IOStatus);
 #endif
 
-Result(DeviceHandle) IOSubsystem__register_device(IOSubsystemPtr self, BString path, IOPtr device, IOStatePtr device_state);
+Result(DeviceHandle) IOSubsystem__register_device(
+    IOSubsystemPtr self, ConstBStringPtr path, IOPtr device, IOStatePtr device_state
+);
+Optional(DeviceRegistrationPtr) IOSubsystem__find_registered_device(IOSubsystemPtr self, ConstBStringPtr path);
 
 Result(IOHandle) IOSubsystem__record_open_handle(
-    IOSubsystemPtr self, IOContextPtr context, BString path, IOInternalHandle handle
+    IOSubsystemPtr self, IOContextPtr context, ConstBStringPtr path, IOInternalHandle handle
 );
-Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, BString path, Flags flags);
+Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, ConstBStringPtr path, Flags flags);
+Result(IOHandle) IOSubsystem__accept(IOSubsystemPtr self, IOContextPtr context);
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context);
 Result(IOHandle) IOSubsystem__server_register(
-    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, BString path, IOServerRole role
+    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, ConstBStringPtr path, IOServerRole role
 );
 Result(IOStatus) IOSubsystem__server_get_buffer(
     IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, IOServerBufferPtr target
@@ -89,23 +93,23 @@ Result(IOStatus) IOSubsystem__server_data_consumed(
 );
 Result(IOStatus) IOSubsystem__server_eof(IOSubsystemPtr self, IOContextPtr context);
 Result(DirectoryEntryCount) IOSubsystem__list_dir(
-    IOSubsystemPtr self, BString path, DirectoryEntryPtr entries, size_t max_entries
+    IOSubsystemPtr self, ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries
 );
 Result(CollectionCode) IOSubsystem__append_dev_filesystem_nodes(
     IOSubsystemPtr self, FilesystemPtr filesystem, FilesystemNodes * target
 );
-Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, BString path);
-Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, BString path, Flags flags);
-Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, BString source_path, BString target_path);
+Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, ConstBStringPtr path);
+Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, ConstBStringPtr path, Flags flags);
+Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, ConstBStringPtr source_path, ConstBStringPtr target_path);
 Result(IOStatus) IOSubsystem__mount(
-    IOSubsystemPtr self, BString device_path, BString filesystem_type, BString mountpoint
+    IOSubsystemPtr self, ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
 );
 
 Result(IOStatus) IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context);
 void IOSubsystem__message_received(KernelListenerPtr listener, MessagePtr message);
 
 // called by IRQs
-Result(IOHandle) IOSubsystem__async_receive(IOSubsystemPtr self, BString path, Flags flags);
+Result(IOHandle) IOSubsystem__async_receive(IOSubsystemPtr self, ConstBStringPtr path, Flags flags);
 
 // registering message broker listeners
 Result(ListenerRegisterResult) IOSubsystem__register_listeners(KernelPtr kernel);

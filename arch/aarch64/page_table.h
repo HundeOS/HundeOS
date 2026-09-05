@@ -92,6 +92,8 @@ typedef struct {
     int pxn;           // 1 => EL1 cannot execute this page
 } MappingPermissions;
 
+typedef const MappingPermissions * ConstMappingPermissionsPtr;
+
 static inline MappingPermissions MappingPermissions__new(
     MairAttribute memory_type,
     ShareAttribute shareability,
@@ -109,17 +111,17 @@ static inline MappingPermissions MappingPermissions__new(
 }
 
 
-int PageTable__map_2M_block(PageTable * self,
-                            KernelPtr kernel,
-                            uint64_t virtual_address,
-                            uint64_t phys_addr,
-                            MappingPermissions perms);
+int PageTable__map_2M_block(ProcessPageTablePtr self,
+                                     KernelPtr kernel,
+                                     uint64_t virtual_address,
+                                     uint64_t phys_addr,
+                                     ConstMappingPermissionsPtr perms);
 
-int PageTable__map_4k_page(PageTable * self,
-                           KernelPtr kernel,
-                           uint64_t virtual_address,
-                           uint64_t phys_addr,
-                           MappingPermissions perms);
+int PageTable__map_4k_page(ProcessPageTablePtr self,
+                                    KernelPtr kernel,
+                                    uint64_t virtual_address,
+                                    uint64_t phys_addr,
+                                    ConstMappingPermissionsPtr perms);
 
 /**
  * make_page_desc_4k - Build a 4 KiB leaf PTE (VA→PA) with given attributes.

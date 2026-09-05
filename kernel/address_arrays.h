@@ -6,9 +6,6 @@
 #include "types/comparison.h"
 
 OptionalDef(UserAddress);
-SimpleEqualsWrapperDef(UserAddress__equals)
-
-FixedArrayDefine(UserAddress, 1024, UserAddressArray, SimpleEqualsWrapper(UserAddress__equals));
 
 bool Ptr__equals(void *, void *);
 

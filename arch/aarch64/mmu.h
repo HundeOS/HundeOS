@@ -47,9 +47,11 @@
 #define SCTLR_SA    (1ULL << 3)
 #define SCTLR_SA0   (1ULL<<4)
 #define SCTLR_I     (1ULL << 12)
+#define SCTLR_UCT   (1ULL << 15)
 #define SCTLR_NTWI  (1ULL << 16)
 #define SCTLR_NTWE  (1ULL << 18)
 #define SCTLR_WXN   (1ULL<<19)
+#define SCTLR_UCI   (1ULL << 26)
 #define SCTLR_RES1  ((1ULL<<11)|(1ULL<<20)|(1ULL<<22)|(1ULL<<23)|(1ULL<<28)|(1ULL<<29))
 
 

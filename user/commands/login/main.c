@@ -1,6 +1,6 @@
 #include "../../user.h"
-#include "../../sys/auth.h"
-#include "../../sys/spawn.h"
+#include "sys/auth.h"
+#include "sys/spawn.h"
 
 #ifndef LOGIN_ENTRYPOINT
 #define LOGIN_ENTRYPOINT main
@@ -25,14 +25,13 @@ int LOGIN_ENTRYPOINT(void)
             continue;
         }
 
-        BString shell_path = bstr("/sbin/shell");
         SpawnResult result = spawn_with_auth(
             P_WAIT,
             (AuthTicketID) ticket,
-            &shell_path,
-            SPAWN_NO_ARG,
-            SPAWN_NO_ARG,
-            SPAWN_NO_ARG
+            &bstr("/sbin/shell"),
+            &SPAWN_NO_ARG,
+            &SPAWN_NO_ARG,
+            &SPAWN_NO_ARG
         );
         if (result < 0)
         {

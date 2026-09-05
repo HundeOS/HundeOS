@@ -40,9 +40,9 @@ typedef FilesystemTableEntry * FilesystemTableEntryPtr;
 OptionalDef(FilesystemTableEntry);
 bool FilesystemTableEntry__equals(FilesystemTableEntryPtr self, FilesystemTableEntryPtr other);
 FilesystemTableEntry FilesystemTableEntry__new(
-    BString device_path,
-    BString filesystem_type,
-    BString mountpoint,
+    ConstBStringPtr device_path,
+    ConstBStringPtr filesystem_type,
+    ConstBStringPtr mountpoint,
     bool match_block_count,
     uint64_t block_count
 );
@@ -58,10 +58,10 @@ typedef FilesystemTable * FilesystemTablePtr;
 
 FilesystemTable FilesystemTable__new();
 Result(CollectionCode) FilesystemTable__add(
-    FilesystemTablePtr self, BString device_path, BString filesystem_type, BString mountpoint
+    FilesystemTablePtr self, ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
 );
 Result(CollectionCode) FilesystemTable__add_by_block_count(
-    FilesystemTablePtr self, uint64_t block_count, BString filesystem_type, BString mountpoint
+    FilesystemTablePtr self, uint64_t block_count, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
 );
 
 OptionalDef(FilesystemPtr);
@@ -116,13 +116,13 @@ FilesystemIOState;
 
 typedef FilesystemIOState * FilesystemIOStatePtr;
 
-FileHandleTargetPtr FileHandleTarget__heap_new(BString path);
+FileHandleTargetPtr FileHandleTarget__heap_new(ConstBStringPtr path);
 void FileHandleTarget__dispose(FileHandleTargetPtr self);
 
-FilesystemPtr Filesystem__heap_new(BString name, FileIO file_io);
+FilesystemPtr Filesystem__heap_new(ConstBStringPtr name, const FileIO * file_io);
 FilesystemPtr RootFilesystem__heap_new();
 
-Result(MountResult) Filesystem__mount(FilesystemPtr root, BString path, FilesystemPtr filesystem);
+Result(MountResult) Filesystem__mount(FilesystemPtr root, ConstBStringPtr path, FilesystemPtr filesystem);
 
 FilesystemIOState FilesystemIOState__new(FilesystemPtr filesystem);
 FilesystemIOStatePtr FilesystemIOState__heap_new(FilesystemPtr filesystem);

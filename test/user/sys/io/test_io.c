@@ -59,8 +59,8 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
     return next_result;
 }
 
-#include "../../../../user/sys/io.c"
-#include "../../../../user/sys/sd_host_config.h"
+#include "../../../../user/lib/sys/io.c"
+#include "../../../../user/lib/sys/sd_host_config.h"
 
 static DynString dyn_string_from_cstr(const char * text)
 {
@@ -140,10 +140,9 @@ void test_io_read_dyn_string_returns_file_contents(void)
 
 void test_io_write_uses_bstring_length(void)
 {
-    BString value = bstring("hello");
     next_result = 5;
 
-    ByteCount written = IO__write(7, &value);
+    ByteCount written = IO__write(7, &bstr("hello"));
 
     TEST_ASSERT_EQUAL_INT64(5, written);
     TEST_ASSERT_EQUAL(IO_CALL, last_call);

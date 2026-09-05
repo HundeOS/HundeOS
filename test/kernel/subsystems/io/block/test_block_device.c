@@ -9,8 +9,8 @@ static KernelContext second_context = EMPTY_KERNEL_CONTEXT;
 void setUp(void)
 {
     reset_cpu_id();
-    first_context = KernelContext__new(Some(ProcessID, 10), None(SchedulerPtr));
-    second_context = KernelContext__new(Some(ProcessID, 20), None(SchedulerPtr));
+    first_context = KernelContext__new(&Some(ProcessID, 10), &None(SchedulerPtr));
+    second_context = KernelContext__new(&Some(ProcessID, 20), &None(SchedulerPtr));
 }
 
 void tearDown(void)

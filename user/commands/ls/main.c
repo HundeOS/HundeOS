@@ -1,5 +1,5 @@
 #include "../../user.h"
-#include "../../sys/io.h"
+#include "sys/io.h"
 
 #define MAX_ENTRIES 32
 
@@ -13,6 +13,8 @@ typedef struct LSOptions
     bool long_format;
     Optional(BString) path_arg;
 } LSOptions;
+
+typedef LSOptions * LSOptionsPtr;
 
 static LSOptions LSOptions__new(void)
 {
@@ -74,14 +76,14 @@ static bool LS__is_hidden(DirectoryEntryPtr entry)
     return (entry->attributes & IO_DIRENT_ATTR_HIDDEN) != 0 || entry->name[0] == '.';
 }
 
-static void LS__print_entry(DirectoryEntryPtr entry, LSOptions options)
+static void LS__print_entry(DirectoryEntryPtr entry, LSOptionsPtr options)
 {
-    if (!options.show_all && LS__is_hidden(entry))
+    if (!options->show_all && LS__is_hidden(entry))
     {
         return;
     }
 
-    if (!options.long_format)
+    if (!options->long_format)
     {
         BString name = bstring(entry->name);
         IO__print(&name);
@@ -155,9 +157,9 @@ static bool LS__parse_options(int argc, char ** argv, LSOptions * options)
     return true;
 }
 
-static BString LS__path_from_options(LSOptions options)
+static BString LS__path_from_options(LSOptionsPtr options)
 {
-    match_optional(BString, options.path_arg,
+    match_optional(BString, options->path_arg,
         some(path_arg) { return IO__path_from_arg(&path_arg); },
         none_do_nothing()
     );
@@ -174,7 +176,7 @@ int LS_ENTRYPOINT(int argc, char ** argv)
         return 1;
     }
 
-    BString path = LS__path_from_options(options);
+    BString path = LS__path_from_options(&options);
     DirectoryEntry entries[MAX_ENTRIES];
     DirectoryEntryCount count = IO__list_dir(&path, entries, MAX_ENTRIES);
 
@@ -186,7 +188,7 @@ int LS_ENTRYPOINT(int argc, char ** argv)
 
     for (DirectoryEntryCount i = 0; i < count; i++)
     {
-        LS__print_entry(&entries[i], options);
+        LS__print_entry(&entries[i], &options);
     }
 
     return 0;

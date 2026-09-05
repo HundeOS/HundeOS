@@ -5,7 +5,7 @@
 #include "syscalls/mem.h"
 
 Result(SystemCallResult) Mem__handler(
-    KernelPtr kernel, Optional(ProcessPtr) proc, Anything mem_operation,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything mem_operation,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 );
 

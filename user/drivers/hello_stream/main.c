@@ -1,5 +1,5 @@
-#include "../../sys/io_server.h"
-#include "../../sys/service.h"
+#include "sys/io_server.h"
+#include "sys/service.h"
 #include "../../user.h"
 
 static const char * HELLO_PATH = "/dev/hello";

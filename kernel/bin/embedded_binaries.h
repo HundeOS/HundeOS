@@ -3,7 +3,7 @@
 
 #include "elf.h"
 
-Optional(Elf) EmbeddedElf__load(BString name);
+Optional(Elf) EmbeddedElf__load(ConstBStringPtr name);
 BStringArray EmbeddedElf__list();
 
 #endif

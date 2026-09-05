@@ -9,7 +9,7 @@ static BString unsupported_signal = bstr("Unsupported signal");
 static BString invalid_signal_target = bstr("Invalid signal target");
 
 Result(SystemCallResult) Signal__handler(
-    KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 )
 {
@@ -37,10 +37,10 @@ Result(SystemCallResult) Signal__handler(
                     return Success(SystemCallResult, PROCESS_SIGNAL_OK);
                 default:
                     Process__dispose_owned_kernel_resources(target);
-                    match_result(ProcessPtr, Scheduler__exit(
+                    match_result(ProcessID, Scheduler__exit(
                         kernel->scheduler, target, ProcessSignal__exit_code(signal)
                     ),
-                        success(exited) { return Success(SystemCallResult, PROCESS_SIGNAL_OK); },
+                        success(process_id) { return Success(SystemCallResult, PROCESS_SIGNAL_OK); },
                         error(code, message) { return Error(SystemCallResult, message, code); }
                     );
                 }

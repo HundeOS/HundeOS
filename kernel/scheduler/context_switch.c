@@ -4,11 +4,11 @@
 #include "../debug.h"
 #include "scheduler/scheduler.h"
 
-ContextSwitch ContextSwitch__new(ProcessPtr new_proc, Optional(ProcessPtr) old_proc)
+ContextSwitch ContextSwitch__new(ProcessPtr new_proc, OptionalPtr(ProcessPtr) old_proc)
 {
     return (ContextSwitch) {
         .new_proc = new_proc,
-        .old_proc = old_proc
+        .old_proc = *old_proc
     };
 }
 
@@ -57,9 +57,9 @@ static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
     }
 }
 
-void ContextSwitch__switch(ContextSwitch self)
+void ContextSwitch__switch(const ContextSwitch * self)
 {
-    match_optional(ProcessPtr, self.old_proc,
+    match_optional(ProcessPtr, self->old_proc,
         some(proc)
         {
             if (proc->state != PROC_STATE_DEAD && proc->state != PROC_STATE_WAITING && proc->state != PROC_STATE_SLEEPING)
@@ -70,7 +70,7 @@ void ContextSwitch__switch(ContextSwitch self)
         none_do_nothing()
     );
 
-    ProcessPtr new_proc = self.new_proc;
+    ProcessPtr new_proc = self->new_proc;
     __d_printf(
         PROCESS_SWITCH,
         "ContextSwitch__switch target pid=%i name=%s state=%s context=%p page_table=%p\n",
@@ -78,7 +78,7 @@ void ContextSwitch__switch(ContextSwitch self)
         cstr(new_proc->name),
         ProcessState__to_string(new_proc->state),
         new_proc->context,
-        paddr(new_proc->page_table)
+        paddr(ProcessPageTable__root(&new_proc->page_table))
     );
     __d_printf(PROCESS_SWITCH, "Switch to proc: %i %s - %s.\n",
         new_proc->pid,

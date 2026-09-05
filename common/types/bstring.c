@@ -880,8 +880,7 @@ BString BString__vsprintf(ConstBStringPtr self, va_list args)
 
             case '%':
             {
-                BString field = bstr("%");
-                BString__append_formatted_field_mut(&result, &field, width, left_align, zero_pad);
+                BString__append_formatted_field_mut(&result, &bstr("%"), width, left_align, zero_pad);
                 break;
             }
 

@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include "../../../common/types/result.h"
 #include "../../../common/types/dyn_string.h"
-#include "../../sys/io.h"
-#include "../../sys/spawn.h"
+#include "sys/io.h"
+#include "sys/spawn.h"
 #include "../../user.h"
 
 #ifndef HUMPEN_ENTRYPOINT
@@ -46,19 +46,19 @@ HumpenMountCommand;
 ResultDef(HumpenMountCommand);
 
 static HumpenMountCommand HumpenMountCommand__new(
-    BString device_path,
-    BString filesystem_type,
-    BString mountpoint
+    ConstBStringPtr device_path,
+    ConstBStringPtr filesystem_type,
+    ConstBStringPtr mountpoint
 )
 {
     HumpenMountCommand command = {
         .driver_path = &humpen_wachhund_path,
-        .device_path = device_path,
-        .filesystem_type = filesystem_type,
-        .mountpoint = mountpoint,
-        .arg0 = Some(BString, device_path),
-        .arg1 = Some(BString, filesystem_type),
-        .arg2 = Some(BString, mountpoint),
+        .device_path = *device_path,
+        .filesystem_type = *filesystem_type,
+        .mountpoint = *mountpoint,
+        .arg0 = Some(BString, *device_path),
+        .arg1 = Some(BString, *filesystem_type),
+        .arg2 = Some(BString, *mountpoint),
     };
 
     return command;
@@ -66,8 +66,7 @@ static HumpenMountCommand HumpenMountCommand__new(
 
 static Optional(DynString) Humpen__load_fstab(void)
 {
-    BString fstab_path = bstr(HUMPEN_FSTAB_PATH);
-    IOHandle handle = open(&fstab_path, IO_OPEN_READ);
+    IOHandle handle = open(&bstr(HUMPEN_FSTAB_PATH), IO_OPEN_READ);
     if (handle < 0)
     {
         return None(DynString);
@@ -104,8 +103,9 @@ static BString Humpen__line_without_comment(ConstBStringPtr line)
     return BString__slice(line, 0, BString__length(line));
 }
 
-static Result(HumpenMountCommand) Humpen__parse_mount_command(BString remaining)
+static Result(HumpenMountCommand) Humpen__parse_mount_command(ConstBStringPtr input)
 {
+    BString remaining = *input;
     BString device_path = empty_bstr();
     BString filesystem_type = empty_bstr();
     BString mountpoint = empty_bstr();
@@ -175,27 +175,33 @@ static Result(HumpenMountCommand) Humpen__parse_mount_command(BString remaining)
         none_do_nothing()
     );
 
-    return Success(HumpenMountCommand, HumpenMountCommand__new(device_path, filesystem_type, mountpoint));
+    return Success(HumpenMountCommand, HumpenMountCommand__new(&device_path, &filesystem_type, &mountpoint));
 }
 
-static Result(SpawnResult) Humpen__spawn_watchdog_line(BString line)
+static Result(SpawnResult) Humpen__spawn_watchdog_line(ConstBStringPtr line)
 {
-    BString command_line = Humpen__line_without_comment(&line);
+    BString command_line = Humpen__line_without_comment(line);
     BString remaining = BString__strip(&command_line);
     if (BString__is_empty(&remaining))
     {
         return Success(SpawnResult, 0);
     }
 
-    match_result(HumpenMountCommand, Humpen__parse_mount_command(remaining),
+    match_result(HumpenMountCommand, Humpen__parse_mount_command(&remaining),
         success(command)
         {
+            IO__printf(
+                &bstr("humpen: mounting %B as %B on %B\n"),
+                &command.device_path,
+                &command.filesystem_type,
+                &command.mountpoint
+            );
             return OS__spawn(
                 P_NOWAIT,
                 command.driver_path,
-                command.arg0,
-                command.arg1,
-                command.arg2
+                &command.arg0,
+                &command.arg1,
+                &command.arg2
             );
         },
         error(code, message)
@@ -217,7 +223,7 @@ static Result(MountResult) Humpen__mount_fstab(ConstDynStringPtr fstab)
                 match_optional(BString, DynString__bstring(&line),
                     some(bstring_line)
                     {
-                        match_result(SpawnResult, Humpen__spawn_watchdog_line(bstring_line),
+                        match_result(SpawnResult, Humpen__spawn_watchdog_line(&bstring_line),
                             success_do_nothing(),
                             error(code, message)
                             {

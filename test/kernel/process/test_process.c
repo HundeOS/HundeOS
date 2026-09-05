@@ -16,7 +16,7 @@ static KernelPtr kernel;
 
 static Elf load_hello_world_elf(void)
 {
-    match_optional(Elf, EmbeddedElf__load(bstring("hello_world")), some(elf) { return elf; }, none() {
+    match_optional(Elf, EmbeddedElf__load(&bstr("hello_world")), some(elf) { return elf; }, none() {
             TEST_FAIL();
             return (Elf) {};
         });
@@ -35,7 +35,7 @@ static UserAddress alloc_user_pages_for_test(ProcessPtr process, size_t size)
     match_result(UserAddress, Process__alloc_user_pages(process, size), success(address) { return address; }, error(code, message) {
             TEST_FAIL();
             return (UserAddress) {};
-        });
+    });
 }
 
 void setUp(void)
@@ -43,6 +43,7 @@ void setUp(void)
     clear_panic_state();
     reset_mmu_state();
     KAllocStub__reset_virtual_translation();
+    KAllocStub__reset_allocation_tracking();
     kernel = init_test_kernel_without_filesystem();
 }
 
@@ -54,15 +55,15 @@ void tearDown(void)
 void test_setup_from_elf(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
-            TEST_ASSERT_EQUAL(Elf__read_header(elf)->entry, process->entry_point.virtual_addr);
-            TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
+            TEST_ASSERT_EQUAL(Elf__read_header(&elf)->entry, process->entry_point.virtual_addr);
+            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                 0x400000,
                 true,
                 false,
                 true,
                 PAGE_SIZE));
-            TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
+            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                 BASE_STACK,
                 true,
                 true,
@@ -74,7 +75,7 @@ void test_setup_from_elf(void)
 void test_setup_tracks_static_user_allocations(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             TEST_ASSERT_EQUAL(3, process->user_allocations.len);
             Optional(UserAllocation) args_allocation = UserAllocations__at(&process->user_allocations, 0);
             Optional(UserAllocation) elf_allocation = UserAllocations__at(&process->user_allocations, 1);
@@ -97,7 +98,7 @@ void test_setup_with_args_sets_up_multiple_argv_entries(void)
     ProcessArguments__push(&arguments, bstring("two"));
     ProcessArguments__push(&arguments, bstring("three"));
 
-    match_result(ProcessPtr, Process__setup_with_args(kernel, elf, None(ProcessPtr), arguments), success(process) {
+    match_result(ProcessPtr, Process__setup_with_args(kernel, &elf, &None(ProcessPtr), &arguments), success(process) {
             UserAllocation args = allocation_at(process, 0);
             Address * argv = ptr(args.address.kernel_addr.virtual_addr, Address);
             Address user_base = args.address.virtual_addr;
@@ -114,14 +115,14 @@ void test_setup_with_args_sets_up_multiple_argv_entries(void)
 void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             match_result(UserAddress, Process__alloc_user_pages(process, 123), success(address) {
                     TEST_ASSERT_EQUAL(USER_ALLOC_BASE + PAGE_SIZE, address.virtual_addr);
                     UserAllocation allocation = allocation_at(process, 3);
                     TEST_ASSERT_EQUAL(4, process->user_allocations.len);
                     TEST_ASSERT_EQUAL(USER_ALLOCATION_DYNAMIC, allocation.type);
                     TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
-                    TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
+                    TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                         USER_ALLOC_BASE + PAGE_SIZE,
                         true,
                         true,
@@ -131,11 +132,27 @@ void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
         }, error_test_fail());
 }
 
+void test_process_alloc_user_pages_returns_memory_full_when_user_allocation_fails(void)
+{
+    Elf elf = load_hello_world_elf();
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
+            KAllocStub__set_user_alloc_failure(true);
+            match_result(UserAddress, Process__alloc_user_pages(process, 123),
+                success_test_fail(),
+                error(code, message)
+                {
+                    TEST_ASSERT_EQUAL(PROCESS_MEMORY_FULL, code);
+                    TEST_ASSERT_EQUAL(3, UserAllocations__len(&process->user_allocations));
+                }
+            );
+        }, error_test_fail());
+}
+
 void test_process_map_shared_user_pages_maps_source_pages_into_target_process(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(source) {
-            match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(target) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(source) {
+            match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(target) {
                     UserAddress source_address = alloc_user_pages_for_test(source, PAGE_SIZE * 2);
                     match_result(UserAddress, Process__map_shared_user_pages(
                         target, source, source_address.virtual_addr, PAGE_SIZE * 2
@@ -149,7 +166,7 @@ void test_process_map_shared_user_pages_maps_source_pages_into_target_process(vo
                             UserAllocation allocation = allocation_at(target, 3);
                             TEST_ASSERT_EQUAL(USER_ALLOCATION_SHARED, allocation.type);
                             TEST_ASSERT_EQUAL(PAGE_SIZE * 2, allocation.size);
-                            TEST_ASSERT(check_address_mapped(v_ptr(target->page_table, PageTable),
+                            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&target->page_table),
                                 USER_ALLOC_BASE + PAGE_SIZE,
                                 true,
                                 true,
@@ -165,8 +182,8 @@ void test_process_map_shared_user_pages_maps_source_pages_into_target_process(vo
 void test_process_map_shared_user_pages_preserves_offset_inside_source_page(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(source) {
-            match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(target) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(source) {
+            match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(target) {
                     UserAddress source_address = alloc_user_pages_for_test(source, PAGE_SIZE);
                     Address source_offset_address = source_address.virtual_addr + 128;
 
@@ -180,7 +197,7 @@ void test_process_map_shared_user_pages_preserves_offset_inside_source_page(void
                             UserAllocation allocation = allocation_at(target, 3);
                             TEST_ASSERT_EQUAL(USER_ALLOCATION_SHARED, allocation.type);
                             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
-                            TEST_ASSERT(check_address_mapped(v_ptr(target->page_table, PageTable),
+                            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&target->page_table),
                                 USER_ALLOC_BASE + PAGE_SIZE,
                                 true,
                                 true,
@@ -196,8 +213,8 @@ void test_process_map_shared_user_pages_preserves_offset_inside_source_page(void
 void test_process_map_shared_user_pages_maps_offset_range_spanning_next_page(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(source) {
-            match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(target) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(source) {
+            match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(target) {
                     UserAddress source_address = alloc_user_pages_for_test(source, PAGE_SIZE * 2);
                     Address source_offset_address = source_address.virtual_addr + PAGE_SIZE - 16;
 
@@ -211,7 +228,7 @@ void test_process_map_shared_user_pages_maps_offset_range_spanning_next_page(voi
                             UserAllocation allocation = allocation_at(target, 3);
                             TEST_ASSERT_EQUAL(USER_ALLOCATION_SHARED, allocation.type);
                             TEST_ASSERT_EQUAL(PAGE_SIZE * 2, allocation.size);
-                            TEST_ASSERT(check_address_mapped(v_ptr(target->page_table, PageTable),
+                            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&target->page_table),
                                 USER_ALLOC_BASE + PAGE_SIZE,
                                 true,
                                 true,
@@ -227,8 +244,8 @@ void test_process_map_shared_user_pages_maps_offset_range_spanning_next_page(voi
 void test_process_map_shared_user_pages_rejects_unallocated_source_range(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(source) {
-            match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(target) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(source) {
+            match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(target) {
                     match_result(UserAddress, Process__map_shared_user_pages(target, source, 0x900000000, PAGE_SIZE),
                         success_test_fail(),
                         error(code, message) { TEST_ASSERT_EQUAL(PROCESS_MEMORY_NOT_FOUND, code); }
@@ -240,8 +257,8 @@ void test_process_map_shared_user_pages_rejects_unallocated_source_range(void)
 void test_process_free_user_pages_unmaps_shared_allocation_without_freeing_source(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(source) {
-            match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(target) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(source) {
+            match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(target) {
                     UserAddress source_address = alloc_user_pages_for_test(source, PAGE_SIZE);
 
                     match_result(UserAddress, Process__map_shared_user_pages(
@@ -255,7 +272,7 @@ void test_process_free_user_pages_unmaps_shared_allocation_without_freeing_sourc
                             );
 
                             TEST_ASSERT_FALSE(check_address_mapped(
-                                v_ptr(target->page_table, PageTable),
+                                ProcessPageTable__root_table(&target->page_table),
                                 shared.virtual_addr,
                                 true,
                                 true,
@@ -273,10 +290,48 @@ void test_process_free_user_pages_unmaps_shared_allocation_without_freeing_sourc
         }, error_test_fail());
 }
 
+void test_process_map_shared_user_pages_with_allocation_returns_mapping_and_allocation_base(void)
+{
+    Elf elf = load_hello_world_elf();
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(source) {
+            match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(target) {
+                    UserAddress source_address = alloc_user_pages_for_test(source, PAGE_SIZE * 2);
+                    Address source_offset_address = source_address.virtual_addr + 123;
+
+                    match_result(SharedUserPages, Process__map_shared_user_pages_with_allocation(
+                        target, source, source_offset_address, PAGE_SIZE
+                    ),
+                        success(shared)
+                        {
+                            TEST_ASSERT_EQUAL(USER_ALLOC_BASE + PAGE_SIZE, shared.allocation.virtual_addr);
+                            TEST_ASSERT_EQUAL(USER_ALLOC_BASE + PAGE_SIZE + 123, shared.mapping.virtual_addr);
+
+                            match_result(ProcessMemoryCode, Process__free_user_pages(
+                                target, shared.allocation.virtual_addr
+                            ),
+                                success(status) { TEST_ASSERT_EQUAL(PROCESS_MEMORY_OK, status); },
+                                error_test_fail()
+                            );
+
+                            TEST_ASSERT_FALSE(check_address_mapped(
+                                ProcessPageTable__root_table(&target->page_table),
+                                shared.allocation.virtual_addr,
+                                true,
+                                true,
+                                false,
+                                PAGE_SIZE * 2
+                            ));
+                        },
+                        error_test_fail()
+                    );
+                }, error_test_fail());
+        }, error_test_fail());
+}
+
 void test_process_device_address_resolves_each_kernel_virtual_page_to_physical(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             match_result(UserAddress, Process__alloc_user_pages(process, PAGE_SIZE * 2), success(address) {
                     Address second_kernel_page = address.kernel_addr.virtual_addr + PAGE_SIZE;
                     Address second_physical_page = 0x12345000;
@@ -290,13 +345,13 @@ void test_process_device_address_resolves_each_kernel_virtual_page_to_physical(v
 void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             UserAddress address = alloc_user_pages_for_test(process, PAGE_SIZE);
 
             match_result(ProcessMemoryCode, Process__free_user_pages(process, address.virtual_addr), success(code) { TEST_ASSERT_EQUAL(PROCESS_MEMORY_OK, code); }, error_test_fail());
 
             TEST_ASSERT_EQUAL(3, process->user_allocations.len);
-            TEST_ASSERT_FALSE(check_address_mapped(v_ptr(process->page_table, PageTable),
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                 USER_ALLOC_BASE + PAGE_SIZE,
                 true,
                 true,
@@ -308,7 +363,7 @@ void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
 void test_process_free_user_pages_rejects_static_allocation(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             match_result(ProcessMemoryCode, Process__free_user_pages(process, BASE_STACK), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(PROCESS_MEMORY_STATIC_ALLOCATION, code); });
         }, error_test_fail());
 }
@@ -316,25 +371,25 @@ void test_process_free_user_pages_rejects_static_allocation(void)
 void test_process_dispose_user_allocations_unmaps_all_user_allocations(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             Process__alloc_user_pages(process, PAGE_SIZE);
 
             match_result(ProcessMemoryCode, Process__dispose_user_allocations(process), success_do_nothing(), error_test_fail());
 
             TEST_ASSERT_EQUAL(0, process->user_allocations.len);
-            TEST_ASSERT_FALSE(check_address_mapped(v_ptr(process->page_table, PageTable),
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                 0x400000,
                 true,
                 false,
                 true,
                 101));
-            TEST_ASSERT_FALSE(check_address_mapped(v_ptr(process->page_table, PageTable),
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                 BASE_STACK,
                 true,
                 true,
                 false,
                 STACK_SIZE));
-            TEST_ASSERT_FALSE(check_address_mapped(v_ptr(process->page_table, PageTable),
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                 USER_ALLOC_BASE,
                 true,
                 true,
@@ -343,10 +398,32 @@ void test_process_dispose_user_allocations_unmaps_all_user_allocations(void)
         }, error_test_fail());
 }
 
+void test_process_dispose_page_table_frees_owned_pages_and_tracking_nodes(void)
+{
+    Elf elf = load_hello_world_elf();
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)),
+        success(process)
+        {
+            size_t page_count = ProcessPageTable__page_count(&process->page_table);
+            size_t free_count_before = KAllocStub__free_count();
+
+            match_result(KAllocCode, Process__dispose_page_table(process),
+                success_do_nothing(),
+                error_test_fail()
+            );
+
+            TEST_ASSERT_EQUAL(free_count_before + (page_count * 2), KAllocStub__free_count());
+            TEST_ASSERT_EQUAL(0, ProcessPageTable__page_count(&process->page_table));
+            TEST_ASSERT_FALSE(ProcessPageTable__root(&process->page_table).valid);
+        },
+        error_test_fail()
+    );
+}
+
 void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             Address physical = 0x0a000000;
             match_result(UserAddress, Process__map_mmio(process, physical, PAGE_SIZE), success(mmio) {
                     match_optional(UserAllocation, UserAllocations__at(&process->user_allocations, process->user_allocations.len - 1), some(allocation) {
@@ -355,7 +432,7 @@ void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void
                             TEST_ASSERT_EQUAL(physical, allocation.address.kernel_addr.virtual_addr);
                         }, none_test_fail());
 
-                    TEST_ASSERT_TRUE(check_address_mapped(v_ptr(process->page_table, PageTable),
+                    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                         mmio.virtual_addr,
                         true,
                         true,
@@ -365,7 +442,7 @@ void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void
                     match_result(ProcessMemoryCode, Process__dispose_user_allocations(process), success(code) { TEST_ASSERT_EQUAL(PROCESS_MEMORY_OK, code); }, error_test_fail());
 
                     TEST_ASSERT_EQUAL(0, process->user_allocations.len);
-                    TEST_ASSERT_FALSE(check_address_mapped(v_ptr(process->page_table, PageTable),
+                    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                         mmio.virtual_addr,
                         true,
                         true,
@@ -378,7 +455,7 @@ void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void
 void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             Address physical = 0x0a000200;
             match_result(UserAddress, Process__map_mmio(process, physical, 0x200), success(mmio) {
                     Address expected_base = USER_ALLOC_BASE + PAGE_SIZE;
@@ -392,7 +469,7 @@ void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
                             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
                         }, none_test_fail());
 
-                    TEST_ASSERT_TRUE(check_address_mapped(v_ptr(process->page_table, PageTable),
+                    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                         mmio.virtual_addr,
                         true,
                         true,
@@ -405,7 +482,7 @@ void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
 void test_process_sbrk_maps_pages_at_heap_break(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             match_result(Address, Process__sbrk(process, 123), success(old_break) { TEST_ASSERT_EQUAL(USER_HEAP_BASE, old_break); }, error_test_fail());
 
             TEST_ASSERT_EQUAL(USER_HEAP_BASE + 123, process->heap_break);
@@ -415,7 +492,7 @@ void test_process_sbrk_maps_pages_at_heap_break(void)
             UserAllocation allocation = allocation_at(process, 3);
             TEST_ASSERT_EQUAL(USER_ALLOCATION_HEAP, allocation.type);
             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
-            TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
+            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                 USER_HEAP_BASE,
                 true,
                 true,
@@ -427,7 +504,7 @@ void test_process_sbrk_maps_pages_at_heap_break(void)
 void test_process_sbrk_growth_inside_mapped_page_does_not_map_more_pages(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             Process__sbrk(process, 123);
 
             match_result(Address, Process__sbrk(process, 100), success(old_break) { TEST_ASSERT_EQUAL(USER_HEAP_BASE + 123, old_break); }, error_test_fail());
@@ -441,7 +518,7 @@ void test_process_sbrk_growth_inside_mapped_page_does_not_map_more_pages(void)
 void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             Process__sbrk(process, 123);
             Process__sbrk(process, PAGE_SIZE);
 
@@ -451,7 +528,7 @@ void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
             UserAllocation allocation = allocation_at(process, 4);
             TEST_ASSERT_EQUAL(USER_ALLOCATION_HEAP, allocation.type);
             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
-            TEST_ASSERT(check_address_mapped(v_ptr(process->page_table, PageTable),
+            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                 USER_HEAP_BASE + PAGE_SIZE,
                 true,
                 true,
@@ -463,7 +540,7 @@ void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
 void test_process_sbrk_can_shrink_without_unmapping_pages(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             Process__sbrk(process, PAGE_SIZE);
 
             match_result(Address, Process__sbrk(process, -100), success(old_break) { TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, old_break); }, error_test_fail());
@@ -476,8 +553,25 @@ void test_process_sbrk_can_shrink_without_unmapping_pages(void)
 void test_process_sbrk_rejects_shrink_below_heap_base(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             match_result(Address, Process__sbrk(process, -1), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(PROCESS_MEMORY_INVALID_SIZE, code); });
+        }, error_test_fail());
+}
+
+void test_process_sbrk_returns_memory_full_when_user_allocation_fails(void)
+{
+    Elf elf = load_hello_world_elf();
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
+            KAllocStub__set_user_alloc_failure(true);
+            match_result(Address, Process__sbrk(process, 123),
+                success_test_fail(),
+                error(code, message)
+                {
+                    TEST_ASSERT_EQUAL(PROCESS_MEMORY_FULL, code);
+                    TEST_ASSERT_EQUAL(USER_HEAP_BASE, process->heap_break);
+                    TEST_ASSERT_EQUAL(USER_HEAP_BASE, process->heap_mapped_end);
+                }
+            );
         }, error_test_fail());
 }
 
@@ -493,7 +587,7 @@ void test_process_file_descriptors_allocate_from_three(void)
 void test_process_setup_defaults_to_root_identity(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(process) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(process) {
             TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_ROOT, process->user_id);
             TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_ROOT, process->group_id);
             TEST_ASSERT_TRUE(Process__is_root(process));
@@ -504,10 +598,10 @@ void test_process_setup_defaults_to_root_identity(void)
 void test_process_child_inherits_parent_identity(void)
 {
     Elf elf = load_hello_world_elf();
-    match_result(ProcessPtr, Process__setup(kernel, elf, None(ProcessPtr)), success(parent) {
+    match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)), success(parent) {
             Process__set_hund_identity(parent);
 
-            match_result(ProcessPtr, Process__setup(kernel, elf, Some(ProcessPtr, parent)), success(child) {
+            match_result(ProcessPtr, Process__setup(kernel, &elf, &Some(ProcessPtr, parent)), success(child) {
                     TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, child->user_id);
                     TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_HUND, child->group_id);
                     TEST_ASSERT_FALSE(Process__is_root(child));
@@ -562,10 +656,10 @@ void test_process_can_copy_file_descriptor_from_parent(void)
 void test_process_mark_parked_operation_ready_matches_operation_key(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
-    KernelContext first_context = KernelContext__new(None(ProcessID), None(SchedulerPtr));
-    KernelContext second_context = KernelContext__new(None(ProcessID), None(SchedulerPtr));
-    ParkedOperationPtr first = ParkedOperation__heap_new(&first_context, None(Continuation), PARK_WAIT_IO);
-    ParkedOperationPtr second = ParkedOperation__heap_new(&second_context, None(Continuation), PARK_WAIT_IO);
+    KernelContext first_context = KernelContext__new(&None(ProcessID), &None(SchedulerPtr));
+    KernelContext second_context = KernelContext__new(&None(ProcessID), &None(SchedulerPtr));
+    ParkedOperationPtr first = ParkedOperation__heap_new(&first_context, &None(Continuation), PARK_WAIT_IO);
+    ParkedOperationPtr second = ParkedOperation__heap_new(&second_context, &None(Continuation), PARK_WAIT_IO);
     first->operation_key = Some(OperationKey, 10);
     second->operation_key = Some(OperationKey, 20);
 
@@ -573,7 +667,7 @@ void test_process_mark_parked_operation_ready_matches_operation_key(void)
     match_result(CollectionCode, Process__push_parked_operation(process, second), success_do_nothing(), error_test_fail());
 
     TEST_ASSERT_TRUE(Process__mark_parked_operation_ready(
-        process, PARK_WAIT_IO, Some(OperationKey, 20), Some(ReturnCode, 123)
+        process, PARK_WAIT_IO, &Some(OperationKey, 20), &Some(ReturnCode, 123)
     ));
 
     match_optional(ParkedOperationPtr, Process__pop_ready_parked_operation(process), some(ready) {
@@ -595,8 +689,8 @@ void test_process_mark_parked_operation_ready_matches_operation_key(void)
 void test_process_wake_expired_sleep_ignores_process_that_is_not_sleeping(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
-    KernelContext context = KernelContext__new(None(ProcessID), None(SchedulerPtr));
-    ParkedOperationPtr sleep = ParkedOperation__heap_new(&context, None(Continuation), PARK_SLEEP);
+    KernelContext context = KernelContext__new(&None(ProcessID), &None(SchedulerPtr));
+    ParkedOperationPtr sleep = ParkedOperation__heap_new(&context, &None(Continuation), PARK_SLEEP);
     sleep->operation_key = Some(OperationKey, 1);
 
     match_result(CollectionCode, Process__push_parked_operation(process, sleep), success_do_nothing(), error_test_fail());

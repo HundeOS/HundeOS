@@ -39,7 +39,7 @@ void test_fixed_array_push_and_at(void)
     match_result(CollectionCode, TestArray__push(&array, 10), success_do_nothing(), error_test_fail());
 
     TEST_ASSERT_EQUAL(1, TestArray__len(&array));
-    TEST_ASSERT_EQUAL(10, Unwrap(TestType, TestArray__at(&array, 0), (TestType){}));
+    TEST_ASSERT_EQUAL(10, unwrap(TestType, TestArray__at(&array, 0), (TestType){}));
 }
 
 void test_fixed_array_push_all_and_negative_index(void)
@@ -56,7 +56,7 @@ void test_fixed_array_push_all_and_negative_index(void)
     match_result(CollectionCode, TestArray__push_all(&array, &other), success(index) { TEST_ASSERT_EQUAL(1, index); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(11, TestArray__len(&array));
-    TEST_ASSERT_EQUAL(9, Unwrap(TestType, TestArray__at(&array, -1), (TestType){}));
+    TEST_ASSERT_EQUAL(9, unwrap(TestType, TestArray__at(&array, -1), (TestType){}));
 }
 
 void test_fixed_array_find_remove_and_pop_front(void)
@@ -74,6 +74,55 @@ void test_fixed_array_find_remove_and_pop_front(void)
     match_optional(TestType, TestArray__pop_front(&array), some(value) { TEST_ASSERT_EQUAL(100, value); }, none_test_fail());
 }
 
+void test_fixed_array_match_find_result_unwraps_found_value(void)
+{
+    TestArray array = TestArray__new();
+    TestArray__push(&array, 100);
+    TestArray__push(&array, 200);
+    TestType threshold = 150;
+
+    match_find_result(TestArray, TestArray__find(&array, greater_than, &threshold),
+        some(value)
+        {
+            TEST_ASSERT_EQUAL(200, value);
+        },
+        none_test_fail()
+    );
+}
+
+void test_fixed_array_match_find_result_runs_none_branch(void)
+{
+    TestArray array = TestArray__new();
+    TestArray__push(&array, 100);
+    TestType threshold = 150;
+
+    match_find_result(TestArray, TestArray__find(&array, greater_than, &threshold),
+        some_test_fail(),
+        none()
+        {
+            TEST_ASSERT_TRUE(true);
+        }
+    );
+}
+
+void test_fixed_array_match_find_result_ptr_unwraps_found_pointer(void)
+{
+    TestArray array = TestArray__new();
+    TestArray__push(&array, 100);
+    TestArray__push(&array, 200);
+    TestType threshold = 150;
+
+    match_find_result_ptr(TestArray, TestArray__find(&array, greater_than, &threshold),
+        some(value)
+        {
+            *value = 300;
+        },
+        none_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(300, unwrap(TestType, TestArray__at(&array, 1), (TestType){}));
+}
+
 void test_fixed_array_set_sort_and_filter(void)
 {
     TestArray array = TestArray__new();
@@ -89,7 +138,7 @@ void test_fixed_array_set_sort_and_filter(void)
     }
 
     TestArray sorted = TestArray__sort_asc(&unsorted, compare_uint64);
-    TEST_ASSERT_EQUAL(1, Unwrap(TestType, TestArray__at(&sorted, 0), (TestType){}));
+    TEST_ASSERT_EQUAL(1, unwrap(TestType, TestArray__at(&sorted, 0), (TestType){}));
 
     TestType five = 5;
     TestArray filtered = TestArray__filter(&unsorted, greater_than, &five);

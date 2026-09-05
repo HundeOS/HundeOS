@@ -1,8 +1,8 @@
 #define DRIVER_LOG_TAG "VIRTIO-BLK"
 
-#include "../../sys/debug.h"
-#include "../../sys/service.h"
-#include "../../sys/sync.h"
+#include "sys/debug.h"
+#include "sys/service.h"
+#include "sys/sync.h"
 
 #ifndef VIRTIO_BLK_ENTRYPOINT
 #define VIRTIO_BLK_ENTRYPOINT main
@@ -116,7 +116,7 @@ static VirtioBlkDevice VirtioBlkDevice__new(
     uint64_t slot,
     uint64_t irq_id,
     uint64_t block_count,
-    BString path
+    ConstBStringPtr path
 )
 {
     return (VirtioBlkDevice) {
@@ -125,14 +125,14 @@ static VirtioBlkDevice VirtioBlkDevice__new(
         .slot = slot,
         .irq_id = irq_id,
         .block_count = block_count,
-        .path = path,
+        .path = *path,
         .last_used_idx = 0,
     };
 }
 
 static VirtioBlkDevice VirtioBlkDevice__new_empty(void)
 {
-    return VirtioBlkDevice__new(0, 0, 0, 0, 0, bstr(""));
+    return VirtioBlkDevice__new(0, 0, 0, 0, 0, &bstr(""));
 }
 
 static VirtqDesc VirtqDesc__new(uint64_t addr, uint32_t len, uint16_t flags, uint16_t next)
@@ -187,6 +187,16 @@ static VirtqUsed * VirtioBlk__used(VirtioBlkDevicePtr self)
     return (VirtqUsed *) (virtio_queue_area + used_offset);
 }
 
+static void VirtioBlk__clean_queue(void)
+{
+    __sync_cache_clean(virtio_queue_area, VIRTIO_BLK_QUEUE_BYTES);
+}
+
+static void VirtioBlk__invalidate_used(VirtioBlkDevicePtr self)
+{
+    __sync_cache_invalidate(VirtioBlk__used(self), sizeof(VirtqUsed));
+}
+
 #if !defined(VIRTIO_READ32) || !defined(VIRTIO_WRITE32)
 static volatile uint32_t * reg32(void * base, uint64_t offset)
 {
@@ -233,7 +243,7 @@ static uint64_t VirtioBlk__read_u64_config(void * mmio, uint64_t offset)
 
 static bool VirtioBlk__parse_u64(const char * value, uint64_t * target)
 {
-    if (value == 0 || value[0] == '\0')
+    if (value[0] == '\0')
     {
         return false;
     }
@@ -276,13 +286,14 @@ static bool VirtioBlk__bind_device(VirtioBlkDevicePtr self, uint64_t slot, const
         return false;
     }
 
+    BString device_path = BString__new(path);
     *self = VirtioBlkDevice__new(
         mapping,
         mmio,
         slot,
         VIRTIO_MMIO_FIRST_IRQ_ID + slot,
         VirtioBlk__read_u64_config(mmio, 0),
-        BString__new(path)
+        &device_path
     );
     DRIVER_DEBUG(
         "virtio_blk: discovered path=%s slot=%i irq=%i block_count=%i\n",
@@ -319,6 +330,9 @@ static bool VirtioBlk__setup_queue(VirtioBlkDevicePtr self)
     zero_bytes(virtio_queue_area, VIRTIO_BLK_QUEUE_BYTES);
     virtio_blk_header = VirtioBlkOuthdr__new(0, 0);
     virtio_blk_status = 0;
+    __sync_cache_clean(&virtio_blk_header, sizeof(virtio_blk_header));
+    __sync_cache_clean(&virtio_blk_status, sizeof(virtio_blk_status));
+    VirtioBlk__clean_queue();
 
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_GUEST_PAGE_SIZE, VIRTIO_BLK_QUEUE_ALIGN);
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_SEL, VIRTIO_BLK_QUEUE_INDEX);
@@ -333,6 +347,7 @@ static bool VirtioBlk__setup_queue(VirtioBlkDevicePtr self)
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_ALIGN, VIRTIO_BLK_QUEUE_ALIGN);
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_PFN, queue_device_address / VIRTIO_BLK_QUEUE_ALIGN);
 
+    VirtioBlk__invalidate_used(self);
     self->last_used_idx = VirtioBlk__used(self)->idx;
     VIRTIO_WRITE32(self->mmio, VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_DRIVER_OK);
     return true;
@@ -354,6 +369,7 @@ static void VirtioBlk__ack_interrupt(void * mmio)
 static bool VirtioBlk__wait_for_used(VirtioBlkDevicePtr self)
 {
     ServiceEvent event;
+    VirtioBlk__invalidate_used(self);
     DRIVER_DEBUG(
         "virtio_blk: wait used start last=%i used=%i irq=%i\n",
         (int) self->last_used_idx,
@@ -361,9 +377,11 @@ static bool VirtioBlk__wait_for_used(VirtioBlkDevicePtr self)
         (int) self->irq_id
     );
 
+    VirtioBlk__invalidate_used(self);
     while (VirtioBlk__used(self)->idx == self->last_used_idx)
     {
         ServiceCode wait_status = service_wait(&event);
+        VirtioBlk__invalidate_used(self);
         DRIVER_DEBUG(
             "virtio_blk: wait returned status=%i event_type=%i source=%i data=%i used=%i last=%i\n",
             (int) wait_status,
@@ -382,10 +400,12 @@ static bool VirtioBlk__wait_for_used(VirtioBlkDevicePtr self)
         if (service_ok(wait_status) && event.type == SERVICE_EVENT_IRQ && event.source == self->irq_id)
         {
             VirtioBlk__ack_interrupt(self->mmio);
+            VirtioBlk__invalidate_used(self);
         }
     }
 
     self->last_used_idx = VirtioBlk__used(self)->idx;
+    __sync_cache_invalidate(&virtio_blk_status, sizeof(virtio_blk_status));
     DRIVER_DEBUG(
         "virtio_blk: wait used done last=%i status=%i\n",
         (int) self->last_used_idx,
@@ -448,8 +468,20 @@ static ServiceCode VirtioBlk__execute_request(VirtioBlkDevicePtr self, ServiceBl
     descs[2] = VirtqDesc__new(status_device_address, 1, VIRTQ_DESC_F_WRITE, 0);
 
     avail->ring[avail->idx % VIRTIO_BLK_QUEUE_SIZE] = 0;
+    if (request->operation == SERVICE_BLOCK_WRITE)
+    {
+        __sync_cache_clean((void *) request->buffer, request->buffer_size);
+    }
+    else
+    {
+        __sync_cache_clean_invalidate((void *) request->buffer, request->buffer_size);
+    }
+    __sync_cache_clean(&virtio_blk_header, sizeof(virtio_blk_header));
+    __sync_cache_clean_invalidate(&virtio_blk_status, sizeof(virtio_blk_status));
+    VirtioBlk__clean_queue();
     __sync_boundary();
     avail->idx++;
+    VirtioBlk__clean_queue();
     __sync_boundary();
     DRIVER_DEBUG(
         "virtio_blk: notify request id=%i avail=%i used=%i last=%i ring_slot=%i\n",
@@ -465,6 +497,12 @@ static ServiceCode VirtioBlk__execute_request(VirtioBlkDevicePtr self, ServiceBl
     {
         DRIVER_DEBUG("virtio_blk: request id=%i wait failed\n", (int) request->request_id);
         return SERVICE_BLOCK_REQUEST_FAILED;
+    }
+
+    __sync_cache_invalidate(&virtio_blk_status, sizeof(virtio_blk_status));
+    if (request->operation == SERVICE_BLOCK_READ)
+    {
+        __sync_cache_invalidate((void *) request->buffer, request->buffer_size);
     }
 
     if (request->operation == SERVICE_BLOCK_READ && request->buffer_size >= 8)

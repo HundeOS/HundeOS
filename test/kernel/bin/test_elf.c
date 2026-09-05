@@ -25,7 +25,7 @@ void tearDown(void)
 
 static Elf load_test_elf()
 {
-    return Unwrap(Elf, EmbeddedElf__load(bstring("hello_world")), (Elf){});
+    return unwrap(Elf, EmbeddedElf__load(&bstr("hello_world")), (Elf){});
 }
 
 static void check_section(
@@ -59,7 +59,7 @@ void __test__sections(void)
 {
     Elf elf = load_test_elf();
 
-    SectionHeaderArray sections = Elf__read_section_headers(elf);
+    SectionHeaderArray sections = Elf__read_section_headers(&elf);
 
     TEST_ASSERT_EQUAL_UINT(7, sections.len);
     Optional(SectionHeaderPtr) section_0 = SectionHeaderArray__at(&sections, 0);
@@ -88,7 +88,7 @@ void __test__sections(void)
 void test_map_binary_runnable(void)
 {
     Elf elf = load_test_elf();
-    ExpandedSegmentArray addresses = Elf__map(elf);
+    ExpandedSegmentArray addresses = Elf__map(&elf);
 
     TEST_ASSERT_EQUAL_UINT(1, addresses.len);
     Optional(ExpandedSegment) segment_opt = ExpandedSegmentArray__at(&addresses, 0);
@@ -104,7 +104,7 @@ void test_map_binary_runnable(void)
 void test_map_zeroes_load_segment_memory_beyond_file_size(void)
 {
     uint8_t image[256] = {0};
-    Elf64Header * header = ptr(image, Elf64Header);
+    Elf64HeaderPtr header = ptr(image, Elf64Header);
     ProgramHeaderPtr program_header = ptr(&image[64], ProgramHeader);
     uint8_t * file_data = &image[128];
 
@@ -129,7 +129,8 @@ void test_map_zeroes_load_segment_memory_beyond_file_size(void)
     };
 
     KAllocStub__set_alloc_fill(true, 0xaa);
-    ExpandedSegmentArray segments = Elf__map(Elf__new((Address) image, (Address) &image[sizeof(image)], bstring("bss_test")));
+    Elf elf = Elf__new((Address) image, (Address) &image[sizeof(image)], &bstr("bss_test"));
+    ExpandedSegmentArray segments = Elf__map(&elf);
     KAllocStub__set_alloc_fill(false, 0);
 
     TEST_ASSERT_EQUAL_UINT(1, ExpandedSegmentArray__len(&segments));
@@ -149,7 +150,7 @@ void test_map_zeroes_load_segment_memory_beyond_file_size(void)
 void test_map_handles_unaligned_load_segment_memory(void)
 {
     uint8_t image[256] = {0};
-    Elf64Header * header = ptr(image, Elf64Header);
+    Elf64HeaderPtr header = ptr(image, Elf64Header);
     ProgramHeaderPtr program_header = ptr(&image[64], ProgramHeader);
     uint8_t * file_data = &image[128];
 
@@ -174,7 +175,8 @@ void test_map_handles_unaligned_load_segment_memory(void)
     };
 
     KAllocStub__set_alloc_fill(true, 0xaa);
-    ExpandedSegmentArray segments = Elf__map(Elf__new((Address) image, (Address) &image[sizeof(image)], bstring("unaligned_bss_test")));
+    Elf elf = Elf__new((Address) image, (Address) &image[sizeof(image)], &bstr("unaligned_bss_test"));
+    ExpandedSegmentArray segments = Elf__map(&elf);
     KAllocStub__set_alloc_fill(false, 0);
 
     TEST_ASSERT_EQUAL_UINT(1, ExpandedSegmentArray__len(&segments));
@@ -202,7 +204,7 @@ void test_program_header(void)
 {
     Elf elf = load_test_elf();
 
-    ProgramHeaderArray headers = Elf__read_program_headers(elf);
+    ProgramHeaderArray headers = Elf__read_program_headers(&elf);
 
     TEST_ASSERT_EQUAL_UINT(1, headers.len);
 
@@ -225,7 +227,7 @@ void test_program_header(void)
 void test_parse_elf_header(void)
 {
     Elf elf = load_test_elf();
-    Elf64Header * header = Elf__read_header(elf);
+    ConstElf64HeaderPtr header = Elf__read_header(&elf);
     byte expected_magic[] = {0x7f, 0x45, 0x4c, 0x46};
     TEST_ASSERT_EQUAL_UINT(2, header->klass);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_magic, header->magic, 4);

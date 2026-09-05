@@ -2,7 +2,7 @@
 
 #include "unity.h"
 
-#include "../../../user/types/fixed_array.h"
+#include "../../../user/lib/types/fixed_array.h"
 
 typedef uint64_t TestType;
 
@@ -25,6 +25,6 @@ void test_user_fixed_array_heap_new_uses_user_allocator(void)
 
     match_result(CollectionCode, TestArray__push(array, 10), success_do_nothing(), error_test_fail());
 
-    TEST_ASSERT_EQUAL(10, Unwrap(TestType, TestArray__at(array, 0), (TestType){}));
+    TEST_ASSERT_EQUAL(10, unwrap(TestType, TestArray__at(array, 0), (TestType){}));
     free(array);
 }

@@ -12,6 +12,11 @@
 #include "../stubs/panic.h"
 #include "../stubs/system.h"
 
+#define ProcessList__handler(kernel, proc, ...) ProcessList__handler((kernel), &(proc), __VA_ARGS__)
+#define Signal__handler(kernel, proc, ...) Signal__handler((kernel), &(proc), __VA_ARGS__)
+#define ProcessWaitChildEvent__handler(kernel, proc, ...) ProcessWaitChildEvent__handler((kernel), &(proc), __VA_ARGS__)
+#define Shutdown__handler(kernel, proc, ...) Shutdown__handler((kernel), &(proc), __VA_ARGS__)
+
 static KernelPtr kernel = NULL;
 static const CPUID cpu = 0;
 
@@ -48,10 +53,13 @@ void test_process_list_handler_returns_scheduled_processes(void)
     Scheduler__schedule(kernel->scheduler, init);
     Scheduler__schedule(kernel->scheduler, driver);
     Scheduler__schedule(kernel->scheduler, ready_waiter);
-    KernelContext kernel_context = KernelContext__new(Some(ProcessID, driver->pid), Some(SchedulerPtr, kernel->scheduler));
-    Scheduler__park(kernel->scheduler, driver, &kernel_context, None(Continuation), PARK_WAIT_SERVICE_EVENT);
-    KernelContext ready_context = KernelContext__new(Some(ProcessID, ready_waiter->pid), Some(SchedulerPtr, kernel->scheduler));
-    Scheduler__park(kernel->scheduler, ready_waiter, &ready_context, None(Continuation), PARK_WAIT_SERVICE_READY);
+    KernelContext kernel_context = KernelContext__new(&Some(ProcessID, driver->pid), &Some(SchedulerPtr, kernel->scheduler));
+    Scheduler__park(kernel->scheduler, driver, &kernel_context, &None(Continuation), PARK_WAIT_SERVICE_EVENT);
+    KernelContext ready_context = KernelContext__new(
+        &Some(ProcessID, ready_waiter->pid),
+        &Some(SchedulerPtr, kernel->scheduler)
+    );
+    Scheduler__park(kernel->scheduler, ready_waiter, &ready_context, &None(Continuation), PARK_WAIT_SERVICE_READY);
 
     ProcessInfo entries[4];
     ProcessListRequest request = (ProcessListRequest) {
@@ -152,7 +160,7 @@ void test_signal_handler_queues_running_process_until_next_syscall_boundary(void
         }, error_test_fail());
 
     match_result(SystemCallResult, SyscallDispatcher__dispatch(
-        &kernel->syscall_dispatcher, kernel, Some(ProcessPtr, target), PING, 0, 0, 0, 0, 0
+        &kernel->syscall_dispatcher, kernel, &Some(ProcessPtr, target), PING, 0, 0, 0, 0, 0
     ), success(result) {
             TEST_ASSERT_EQUAL(SYSCALL_OK, result);
             TEST_ASSERT_EQUAL(PROC_STATE_DEAD, target->state);
@@ -184,7 +192,7 @@ void test_process_wait_child_event_handler_returns_queued_child_event(void)
     };
 
     Scheduler__schedule(kernel->scheduler, parent);
-    match_result(CollectionCode, Process__push_child_event(parent, event), success(result) { TEST_ASSERT_EQUAL_UINT8(0, result); }, error_test_fail());
+    match_result(CollectionCode, Process__push_child_event(parent, &event), success(result) { TEST_ASSERT_EQUAL_UINT8(0, result); }, error_test_fail());
 
     ProcessChildEvent target = ProcessChildEvent__new();
 

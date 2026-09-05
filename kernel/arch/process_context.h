@@ -21,6 +21,7 @@ ProcessContextPtr ProcessContext__init(KernelPtr kernel,
                                        KernelAddress page_table,
                                        uint64_t argc,
                                        Address argv);
+void ProcessContext__dispose(ProcessContextPtr self);
 void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self);
 
 #endif

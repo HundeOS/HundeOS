@@ -7,9 +7,24 @@
 #include "../../../../common/types/bstring.h"
 #include "../../../../common_includes/syscalls/service.h"
 
-#include "../../../../user/sys/sync.h"
+#include "../../../../user/lib/sys/sync.h"
 
 void __sync_boundary()
+{
+
+}
+
+void __sync_cache_clean(void *, size_t)
+{
+
+}
+
+void __sync_cache_invalidate(void *, size_t)
+{
+
+}
+
+void __sync_cache_clean_invalidate(void *, size_t)
 {
 
 }
@@ -481,8 +496,7 @@ void test_virtio_blk_main_maps_first_mmio_slot_and_acknowledges_irq(void)
     TEST_ASSERT_TRUE(fake_irq_subscribed);
     TEST_ASSERT_EQUAL_UINT64(1, fake_registered_paths_count);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_registered_paths[0]);
-    BString expected_ready_name = bstr("/dev/virtio1");
-    TEST_ASSERT_TRUE(BString__equals(&fake_ready_name, &expected_ready_name));
+    TEST_ASSERT_TRUE(BString__equals(&fake_ready_name, &bstr("/dev/virtio1")));
     TEST_ASSERT_EQUAL_UINT64(1024, fake_registered_block_counts[0]);
     TEST_ASSERT_EQUAL_UINT64(1, fake_map_count);
     TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);

@@ -53,7 +53,7 @@ inline KernelAddress KernelAddress__new(Address virtual_addr, Address phys_addr,
 
 inline UserAddress UserAddress__new(
     Address virtual_addr,
-    KernelAddress kernel_addr,
+    KernelAddressPtr kernel_addr,
     bool read,
     bool write,
     bool execute,
@@ -62,13 +62,17 @@ inline UserAddress UserAddress__new(
 {
     return (UserAddress) {
         .virtual_addr = virtual_addr,
-        .kernel_addr = kernel_addr,
+        .kernel_addr = *kernel_addr,
         .read = read,
         .write = write,
         .execute = execute,
         .valid = valid,
     };
 }
+
+#define UserAddress__new(virtual_addr, kernel_addr, read, write, execute, valid) \
+    ({ KernelAddress __kernel_addr = (kernel_addr); \
+        UserAddress__new((virtual_addr), &__kernel_addr, (read), (write), (execute), (valid)); })
 
 #define KERNEL_ADDR(virt, phys) \
     (KernelAddress) { \

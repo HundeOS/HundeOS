@@ -28,7 +28,7 @@ void IO__print(ConstBStringPtr text)
     printed_output = BString__append(&printed_output, text);
 }
 
-#include "../../../../user/sys/console.c"
+#include "../../../../user/lib/sys/console.c"
 
 void setUp(void)
 {

@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "bstring.h"
+#include "find_result.h"
 #include "optional.h"
 #include "result.h"
 

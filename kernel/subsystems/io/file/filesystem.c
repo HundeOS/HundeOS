@@ -8,6 +8,7 @@ LinkedListBodyDefine(FilesystemTableEntries);
 
 static BString invalid_path_format = bstr("Invalid path %B");
 static BString not_implemented = bstr("Operation not implemented");
+static BString file_operation_not_supported = bstr("File operation not supported");
 static BString invalid_handle = bstr("Unknown handle");
 static BString root_path = bstr("/");
 
@@ -24,17 +25,17 @@ bool FilesystemTableEntry__equals(FilesystemTableEntryPtr self, FilesystemTableE
 }
 
 FilesystemTableEntry FilesystemTableEntry__new(
-    BString device_path,
-    BString filesystem_type,
-    BString mountpoint,
+    ConstBStringPtr device_path,
+    ConstBStringPtr filesystem_type,
+    ConstBStringPtr mountpoint,
     bool match_block_count,
     uint64_t block_count
 )
 {
     return (FilesystemTableEntry) {
-        .device_path = device_path,
-        .filesystem_type = filesystem_type,
-        .mountpoint = mountpoint,
+        .device_path = *device_path,
+        .filesystem_type = *filesystem_type,
+        .mountpoint = *mountpoint,
         .match_block_count = match_block_count,
         .block_count = block_count,
     };
@@ -48,7 +49,7 @@ FilesystemTable FilesystemTable__new()
 }
 
 Result(CollectionCode) FilesystemTable__add(
-    FilesystemTablePtr self, BString device_path, BString filesystem_type, BString mountpoint
+    FilesystemTablePtr self, ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
 )
 {
     return FilesystemTableEntries__push(
@@ -58,12 +59,13 @@ Result(CollectionCode) FilesystemTable__add(
 }
 
 Result(CollectionCode) FilesystemTable__add_by_block_count(
-    FilesystemTablePtr self, uint64_t block_count, BString filesystem_type, BString mountpoint
+    FilesystemTablePtr self, uint64_t block_count, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
 )
 {
+    BString empty_path = empty_bstr();
     return FilesystemTableEntries__push(
         &self->entries,
-        FilesystemTableEntry__new(empty_bstr(), filesystem_type, mountpoint, true, block_count)
+        FilesystemTableEntry__new(&empty_path, filesystem_type, mountpoint, true, block_count)
     );
 }
 
@@ -77,12 +79,39 @@ MountRoute;
 
 OptionalDef(MountRoute);
 
-static MountRoute MountRoute__new(FilesystemPtr filesystem, BString mount_path, BString subpath)
+Result(FilesystemNodes) FileIO__unsupported_list_nodes(IOStatePtr self, FilesystemNodePtr parent, ConstBStringPtr path)
+{
+    return Error(FilesystemNodes, file_operation_not_supported, IO_OPERATION_NOT_SUPPORTED);
+}
+
+Result(DirectoryEntryCount) FileIO__unsupported_list_dir(
+    IOStatePtr self, ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries
+)
+{
+    return Error(DirectoryEntryCount, file_operation_not_supported, IO_OPERATION_NOT_SUPPORTED);
+}
+
+Result(IOStatus) FileIO__unsupported_mkdir(IOStatePtr self, ConstBStringPtr path)
+{
+    return Error(IOStatus, file_operation_not_supported, IO_OPERATION_NOT_SUPPORTED);
+}
+
+Result(IOStatus) FileIO__unsupported_remove(IOStatePtr self, ConstBStringPtr path, Flags flags)
+{
+    return Error(IOStatus, file_operation_not_supported, IO_OPERATION_NOT_SUPPORTED);
+}
+
+Result(IOStatus) FileIO__unsupported_link(IOStatePtr self, ConstBStringPtr source_path, ConstBStringPtr target_path)
+{
+    return Error(IOStatus, file_operation_not_supported, IO_OPERATION_NOT_SUPPORTED);
+}
+
+static MountRoute MountRoute__new(FilesystemPtr filesystem, ConstBStringPtr mount_path, ConstBStringPtr subpath)
 {
     return (MountRoute) {
         .filesystem = filesystem,
-        .mount_path = mount_path,
-        .subpath = subpath,
+        .mount_path = *mount_path,
+        .subpath = *subpath,
     };
 }
 
@@ -99,7 +128,9 @@ RootAsyncListDirContext;
 
 typedef RootAsyncListDirContext * RootAsyncListDirContextPtr;
 
-static Result(Anything) RootFileIO__complete_async_list_dir(Result(Anything) result, Anything raw_context);
+OptionalDef(RootAsyncListDirContextPtr);
+
+static Result(Anything) RootFileIO__complete_async_list_dir(ResultPtr(Anything) result, Anything raw_context);
 
 static bool Filesystem__mount_matches(BStringPtr path, BStringPtr mount_path)
 {
@@ -151,7 +182,7 @@ static BString Filesystem__subpath(BStringPtr path, BStringPtr mount_path)
     return BString__join(&subpath_segments, '/');
 }
 
-static Optional(MountRoute) Filesystem__find_mount(FilesystemPtr self, BString path)
+static Optional(MountRoute) Filesystem__find_mount(FilesystemPtr self, ConstBStringPtr path)
 {
     Optional(MountRoute) best = None(MountRoute);
     size_t best_len = 0;
@@ -159,10 +190,11 @@ static Optional(MountRoute) Filesystem__find_mount(FilesystemPtr self, BString p
     for_each_map(Mounts, self->mounts, index, mount_path, mounted_fs,
     {
         StringPos mount_path_length = BString__length(&mount_path);
-        if (Filesystem__mount_matches(&path, &mount_path) && mount_path_length > (StringPos) best_len)
+        if (Filesystem__mount_matches((BStringPtr) path, &mount_path) && mount_path_length > (StringPos) best_len)
         {
             best_len = (size_t) mount_path_length;
-            best = Some(MountRoute, MountRoute__new(mounted_fs, mount_path, Filesystem__subpath(&path, &mount_path)));
+            BString subpath = Filesystem__subpath((BStringPtr) path, &mount_path);
+            best = Some(MountRoute, MountRoute__new(mounted_fs, &mount_path, &subpath));
         }
 
     });
@@ -199,7 +231,7 @@ static Result(ByteCount) RootFileIO__delegate_write(
     return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-Result(IOInternalHandle) RootFileIO__open(IOStatePtr self, BString path, Flags flags)
+Result(IOInternalHandle) RootFileIO__open(IOStatePtr self, ConstBStringPtr path, Flags flags)
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
     match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
@@ -207,13 +239,13 @@ Result(IOInternalHandle) RootFileIO__open(IOStatePtr self, BString path, Flags f
         {
             __d_printf(FILESYSTEM, "mount found = %s", cstr(route.mount_path));
             return route.filesystem->file_io.base_io.open(
-                &route.filesystem->state->state, route.subpath, flags
+                &route.filesystem->state->state, &route.subpath, flags
             );
         },
-        none() { return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); }
+        none() { return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH); }
     );
 
-    return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+    return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
 }
 
 Result(IOInternalHandle) RootFileIO__close(IOStatePtr self, IOInternalHandle handle)
@@ -223,7 +255,7 @@ Result(IOInternalHandle) RootFileIO__close(IOStatePtr self, IOInternalHandle han
 }
 
 Result(IOBufferPtr) RootFileIO__read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer
 )
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
@@ -268,9 +300,10 @@ static DirectoryEntry RootFileIO__directory_entry_from_node(FilesystemNodePtr no
 
 static FilesystemNodePtr RootFileIO__node_from_directory_entry(FilesystemPtr filesystem, DirectoryEntryPtr entry)
 {
+    BString name = bstring(entry->name);
     return FilesystemNode__heap_new_with_metadata(
         filesystem,
-        bstring(entry->name),
+        &bstr("root"),
         entry->attributes,
         entry->user_id,
         entry->group_id,
@@ -278,25 +311,25 @@ static FilesystemNodePtr RootFileIO__node_from_directory_entry(FilesystemPtr fil
     );
 }
 
-static BString RootFileIO__trim_path_separators(BString path)
+static BString RootFileIO__trim_path_separators(ConstBStringPtr path)
 {
     StringPos start = 0;
-    StringPos end = BString__length(&path);
+    StringPos end = BString__length(path);
 
-    while (start < end && BString__char_at_or(&path, start, '\0') == '/')
+    while (start < end && BString__char_at_or(path, start, '\0') == '/')
     {
         start++;
     }
 
-    while (end > start && BString__char_at_or(&path, end - 1, '\0') == '/')
+    while (end > start && BString__char_at_or(path, end - 1, '\0') == '/')
     {
         end--;
     }
 
-    return BString__slice(&path, start, end);
+    return BString__slice(path, start, end);
 }
 
-static Optional(BString) RootFileIO__immediate_mount_child(BString path, BString mount_path)
+static Optional(BString) RootFileIO__immediate_mount_child(ConstBStringPtr path, ConstBStringPtr mount_path)
 {
     BString trimmed_path = RootFileIO__trim_path_separators(path);
     BString trimmed_mount_path = RootFileIO__trim_path_separators(mount_path);
@@ -376,7 +409,7 @@ static bool RootFileIO__entries_contain_name(
     return false;
 }
 
-static DirectoryEntry RootFileIO__directory_entry_from_mount(BString name)
+static DirectoryEntry RootFileIO__directory_entry_from_mount(ConstBStringPtr name)
 {
     return DirectoryEntry__new(
         0,
@@ -386,13 +419,13 @@ static DirectoryEntry RootFileIO__directory_entry_from_mount(BString name)
             | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC
             | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC
             | IO_MODE_OTHER_READ | IO_MODE_OTHER_EXEC,
-        &name
+        name
     );
 }
 
 static Result(DirectoryEntryCount) RootFileIO__append_mount_entries(
     FilesystemPtr filesystem,
-    BString path,
+    ConstBStringPtr path,
     DirectoryEntryPtr entries,
     DirectoryEntryCount count,
     size_t max_entries
@@ -400,20 +433,20 @@ static Result(DirectoryEntryCount) RootFileIO__append_mount_entries(
 {
     for_each_map(Mounts, filesystem->mounts, index, mount_path, mount_fs,
     {
-        if (RootFileIO__trace_list_dir(&path))
+        if (RootFileIO__trace_list_dir((BStringPtr) path))
         {
-            __d_printf(FILESYSTEM, "list_dir mount[%i] path=%s mount=%s\n", (int) index, cstr(path), cstr(mount_path));
+            __d_printf(FILESYSTEM, "list_dir mount[%i] path=%s mount=%s\n", (int) index, cstr_p(path), cstr(mount_path));
         }
-        match_optional(BString, RootFileIO__immediate_mount_child(path, mount_path),
+        match_optional(BString, RootFileIO__immediate_mount_child(path, &mount_path),
             some(child)
             {
-                if (RootFileIO__trace_list_dir(&path))
+                if (RootFileIO__trace_list_dir((BStringPtr) path))
                 {
                     __d_printf(FILESYSTEM, "list_dir child match mount=%s child=%s\n", cstr(mount_path), cstr(child));
                 }
                 if (child.len == 0 || RootFileIO__entries_contain_name(entries, count, cstr(child)))
                 {
-                    if (RootFileIO__trace_list_dir(&path))
+                    if (RootFileIO__trace_list_dir((BStringPtr) path))
                     {
                         __d_printf(FILESYSTEM, "list_dir child skipped child=%s existing=%i\n", cstr(child), (int) count);
                     }
@@ -425,8 +458,8 @@ static Result(DirectoryEntryCount) RootFileIO__append_mount_entries(
                     return Success(DirectoryEntryCount, count);
                 }
 
-                entries[count] = RootFileIO__directory_entry_from_mount(child);
-                if (RootFileIO__trace_list_dir(&path))
+                entries[count] = RootFileIO__directory_entry_from_mount(&child);
+                if (RootFileIO__trace_list_dir((BStringPtr) path))
                 {
                     __d_printf(FILESYSTEM, "list_dir appended mount child entry[%i]=%s\n", (int) count, entries[count].name);
                 }
@@ -439,17 +472,17 @@ static Result(DirectoryEntryCount) RootFileIO__append_mount_entries(
     return Success(DirectoryEntryCount, count);
 }
 
-static Result(Anything) RootFileIO__complete_async_list_dir(Result(Anything) result, Anything raw_context)
+static Result(Anything) RootFileIO__complete_async_list_dir(ResultPtr(Anything) result, Anything raw_context)
 {
     RootAsyncListDirContextPtr context = ptr(raw_context, RootAsyncListDirContext);
-    Result(Anything) mapped = result;
+    Result(Anything) mapped = *result;
 
-    match_result(Anything, result,
+    match_result(Anything, *result,
         success(value)
         {
             DirectoryEntryCount count = (DirectoryEntryCount) value;
             match_result(DirectoryEntryCount, RootFileIO__append_mount_entries(
-                context->filesystem, context->path, context->entries, count, context->max_entries
+                context->filesystem, &context->path, context->entries, count, context->max_entries
             ),
                 success(merged_count)
                 {
@@ -463,7 +496,7 @@ static Result(Anything) RootFileIO__complete_async_list_dir(Result(Anything) res
         error(code, message)
         {
             match_result(DirectoryEntryCount, RootFileIO__append_mount_entries(
-                context->filesystem, context->path, context->entries, 0, context->max_entries
+                context->filesystem, &context->path, context->entries, 0, context->max_entries
             ),
                 success(merged_count)
                 {
@@ -487,7 +520,7 @@ static Result(Anything) RootFileIO__complete_async_list_dir(Result(Anything) res
         some(parent_mapper)
         {
             Kernel__free(addr(context));
-            return parent_mapper(mapped, context->parent_mapper_context);
+            return parent_mapper(&mapped, context->parent_mapper_context);
         },
         none_do_nothing()
     );
@@ -558,16 +591,16 @@ static Result(FilesystemNodes) RootFileIO__nodes_from_directory_entries(
 }
 
 static Result(CollectionCode) RootFileIO__append_mount_children(
-    FilesystemPtr filesystem, BString path, FilesystemNodes * result
+    FilesystemPtr filesystem, ConstBStringPtr path, FilesystemNodes * result
 )
 {
     for_each_map(Mounts, filesystem->mounts, index, mount_path, mount_fs,
     {
-        match_optional(BString, RootFileIO__immediate_mount_child(path, mount_path),
+        match_optional(BString, RootFileIO__immediate_mount_child(path, &mount_path),
             some(child)
             {
                 match_result(CollectionCode, RootFileIO__append_node_if_missing(
-                    result, FilesystemNode__heap_new(mount_fs, child, 0)
+                    result, FilesystemNode__heap_new(mount_fs, &child, 0)
                 ),
                     success_do_nothing(),
                     error(code, message) { return Error(CollectionCode, message, code); }
@@ -581,11 +614,11 @@ static Result(CollectionCode) RootFileIO__append_mount_children(
 }
 
 static Result(DirectoryEntryCount) RootFileIO__copy_nodes_to_entries(
-    FilesystemNodes nodes, DirectoryEntryPtr entries, size_t max_entries
+    const FilesystemNodes * nodes, DirectoryEntryPtr entries, size_t max_entries
 )
 {
     DirectoryEntryCount count = 0;
-    for_each_fa(FilesystemNodes, nodes, index, node,
+    for_each_fa_ptr(FilesystemNodes, nodes, index, node,
     {
         if ((size_t) count >= max_entries)
         {
@@ -598,7 +631,7 @@ static Result(DirectoryEntryCount) RootFileIO__copy_nodes_to_entries(
     return Success(DirectoryEntryCount, count);
 }
 
-Result(FilesystemNodes) RootFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, BString path)
+Result(FilesystemNodes) RootFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, ConstBStringPtr path)
 {
     FilesystemNodes result = EmptyArray(FilesystemNodes);
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
@@ -608,25 +641,31 @@ Result(FilesystemNodes) RootFileIO__list_nodes(IOStatePtr self, FilesystemNodePt
     match_optional(MountRoute, Filesystem__find_mount(filesystem, path),
         some(route)
         {
-            if (route.filesystem->file_io.list_nodes != NULL) // hundelint: ignore-no-null
-            {
-                match_result(FilesystemNodes, route.filesystem->file_io.list_nodes(
-                    &route.filesystem->state->state, filesystem->root, route.subpath
-                ),
-                    success(nodes)
+            bool list_nodes_unsupported = false;
+            match_result(FilesystemNodes, route.filesystem->file_io.list_nodes(
+                &route.filesystem->state->state, filesystem->root, &route.subpath
+            ),
+                success(nodes)
+                {
+                    listed_backing = true;
+                    match_result(CollectionCode, RootFileIO__append_nodes(&result, nodes),
+                        success_do_nothing(),
+                        error(code, message) { return Error(FilesystemNodes, message, code); }
+                    );
+                },
+                error(code, message)
+                {
+                    listed_backing = false;
+                    if (code == IO_OPERATION_NOT_SUPPORTED)
                     {
-                        listed_backing = true;
-                        match_result(CollectionCode, RootFileIO__append_nodes(&result, nodes),
-                            success_do_nothing(),
-                            error(code, message) { return Error(FilesystemNodes, message, code); }
-                        );
-                    }, error(code, message) { listed_backing = false; });
-            }
-            else if (route.filesystem->file_io.list_dir != NULL) // hundelint: ignore-no-null
+                        list_nodes_unsupported = true;
+                    }
+                });
+            if (list_nodes_unsupported)
             {
                 DirectoryEntry entries[MAX_CHILD_NODES] = { 0 };
                 match_result(DirectoryEntryCount, route.filesystem->file_io.list_dir(
-                    &route.filesystem->state->state, route.subpath, entries, MAX_CHILD_NODES
+                    &route.filesystem->state->state, &route.subpath, entries, MAX_CHILD_NODES
                 ),
                     success(count)
                     {
@@ -657,11 +696,11 @@ Result(FilesystemNodes) RootFileIO__list_nodes(IOStatePtr self, FilesystemNodePt
         return Success(FilesystemNodes, result);
     }
 
-    return Error(FilesystemNodes, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+    return Error(FilesystemNodes, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
 }
 
 Result(DirectoryEntryCount) RootFileIO__list_dir(
-    IOStatePtr self, BString path, DirectoryEntryPtr entries, size_t max_entries
+    IOStatePtr self, ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries
 )
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
@@ -670,100 +709,108 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
     bool backing_request_pending = false;
     BString backing_pending_message = empty_bstr();
 
-    if (RootFileIO__trace_list_dir(&path))
+    if (RootFileIO__trace_list_dir((BStringPtr) path))
     {
         __d_printf(FILESYSTEM, "list_dir start path=%s mounts=%i max=%i\n",
-            cstr(path), (int) fs_state->filesystem->mounts.len, (int) max_entries);
+            cstr_p(path), (int) fs_state->filesystem->mounts.len, (int) max_entries);
     }
 
     match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
         some(route)
         {
-            if (RootFileIO__trace_list_dir(&path))
+            if (RootFileIO__trace_list_dir((BStringPtr) path))
             {
                 __d_printf(FILESYSTEM, "list_dir route mount=%s subpath=%s fs=%s\n",
                     cstr(route.mount_path), cstr(route.subpath), cstr(route.filesystem->name));
             }
-            if (route.filesystem->file_io.list_dir != NULL) // hundelint: ignore-no-null
-            {
-                RootAsyncListDirContextPtr async_context = 0;
-                Optional(KernelContextPtr) current_context = BlockDevice__current_context();
-                KernelContext wrapped_context = EMPTY_KERNEL_CONTEXT;
+            bool list_dir_unsupported = false;
+            Optional(RootAsyncListDirContextPtr) async_context = None(RootAsyncListDirContextPtr);
+            Optional(KernelContextPtr) current_context = BlockDevice__current_context();
+            KernelContext wrapped_context = EMPTY_KERNEL_CONTEXT;
 
-                match_optional(KernelContextPtr, current_context,
-                    some(existing_context)
-                    {
-                        async_context = ptr(Kernel__alloc_kernel(sizeof(RootAsyncListDirContext)), RootAsyncListDirContext);
-                        async_context->filesystem = fs_state->filesystem;
-                        async_context->path = path;
-                        async_context->entries = entries;
-                        async_context->max_entries = max_entries;
-                        async_context->parent_mapper = existing_context->result_mapper;
-                        async_context->parent_mapper_context = existing_context->result_mapper_context;
-                        wrapped_context = *existing_context;
-                        wrapped_context.result_mapper = Some(KernelResultMapper, RootFileIO__complete_async_list_dir);
-                        wrapped_context.result_mapper_context = (Anything) async_context;
-                        BlockDevice__set_current_context(&wrapped_context);
-                    },
-                    none_do_nothing()
-                );
-
-                match_result(DirectoryEntryCount, route.filesystem->file_io.list_dir(
-                    &route.filesystem->state->state, route.subpath, entries, max_entries
-                ),
-                    success(backing_count)
-                    {
-                        if (async_context != 0)
-                        {
-                            Kernel__free(addr(async_context));
-                        }
-                        count = backing_count;
-                        listed_backing = true;
-                        if (RootFileIO__trace_list_dir(&path))
-                        {
-                            __d_printf(FILESYSTEM, "list_dir backing count=%i\n", (int) backing_count);
-                            for (DirectoryEntryCount i = 0; i < backing_count; i++)
-                            {
-                                __d_printf(FILESYSTEM, "list_dir backing entry[%i]=%s\n", (int) i, entries[i].name);
-                            }
-                        }
-                    },
-                    error(code, message)
-                    {
-                        if (code == BLOCK_DEVICE_REQUEST_PENDING)
-                        {
-                            backing_request_pending = true;
-                            backing_pending_message = message;
-                        }
-                        if (code != BLOCK_DEVICE_REQUEST_PENDING && async_context != 0)
-                        {
-                            Kernel__free(addr(async_context));
-                        }
-                        if (RootFileIO__trace_list_dir(&path))
-                        {
-                            __d_printf(FILESYSTEM, "list_dir backing error code=%i message=%s\n", (int) code, cstr(message));
-                        }
-                    });
-
-                match_optional(KernelContextPtr, current_context,
-                    some(existing_context) { BlockDevice__set_current_context(existing_context); },
-                    none() { BlockDevice__clear_current_context(); }
-                );
-
-                if (backing_request_pending)
+            match_optional(KernelContextPtr, current_context,
+                some(existing_context)
                 {
-                    return Error(DirectoryEntryCount, backing_pending_message, BLOCK_DEVICE_REQUEST_PENDING);
-                }
+                    RootAsyncListDirContextPtr allocated_context =
+                        ptr(Kernel__alloc_kernel(sizeof(RootAsyncListDirContext)), RootAsyncListDirContext);
+                    allocated_context->filesystem = fs_state->filesystem;
+                    allocated_context->path = *path;
+                    allocated_context->entries = entries;
+                    allocated_context->max_entries = max_entries;
+                    allocated_context->parent_mapper = existing_context->result_mapper;
+                    allocated_context->parent_mapper_context = existing_context->result_mapper_context;
+                    wrapped_context = *existing_context;
+                    wrapped_context.result_mapper = Some(KernelResultMapper, RootFileIO__complete_async_list_dir);
+                    wrapped_context.result_mapper_context = (Anything) allocated_context;
+                    async_context = Some(RootAsyncListDirContextPtr, allocated_context);
+                    BlockDevice__set_current_context(&wrapped_context);
+                },
+                none_do_nothing()
+            );
+
+            match_result(DirectoryEntryCount, route.filesystem->file_io.list_dir(
+                &route.filesystem->state->state, &route.subpath, entries, max_entries
+            ),
+                success(backing_count)
+                {
+                    match_optional(RootAsyncListDirContextPtr, async_context,
+                        some(context) { Kernel__free(addr(context)); },
+                        none_do_nothing()
+                    );
+                    count = backing_count;
+                    listed_backing = true;
+                    if (RootFileIO__trace_list_dir((BStringPtr) path))
+                    {
+                        __d_printf(FILESYSTEM, "list_dir backing count=%i\n", (int) backing_count);
+                        for (DirectoryEntryCount i = 0; i < backing_count; i++)
+                        {
+                            __d_printf(FILESYSTEM, "list_dir backing entry[%i]=%s\n", (int) i, entries[i].name);
+                        }
+                    }
+                },
+                error(code, message)
+                {
+                    if (code == BLOCK_DEVICE_REQUEST_PENDING)
+                    {
+                        backing_request_pending = true;
+                        backing_pending_message = message;
+                    }
+                    if (code != BLOCK_DEVICE_REQUEST_PENDING)
+                    {
+                        match_optional(RootAsyncListDirContextPtr, async_context,
+                            some(context) { Kernel__free(addr(context)); },
+                            none_do_nothing()
+                        );
+                    }
+                    if (code == IO_OPERATION_NOT_SUPPORTED)
+                    {
+                        list_dir_unsupported = true;
+                    }
+                    if (RootFileIO__trace_list_dir((BStringPtr) path))
+                    {
+                        __d_printf(FILESYSTEM, "list_dir backing error code=%i message=%s\n", (int) code, cstr(message));
+                    }
+                });
+
+            match_optional(KernelContextPtr, current_context,
+                some(existing_context) { BlockDevice__set_current_context(existing_context); },
+                none() { BlockDevice__clear_current_context(); }
+            );
+
+            if (backing_request_pending)
+            {
+                return Error(DirectoryEntryCount, backing_pending_message, BLOCK_DEVICE_REQUEST_PENDING);
             }
-            else if (route.filesystem->file_io.list_nodes != NULL) // hundelint: ignore-no-null
+
+            if (list_dir_unsupported)
             {
                 match_result(FilesystemNodes, route.filesystem->file_io.list_nodes(
-                    &route.filesystem->state->state, fs_state->filesystem->root, route.subpath
+                    &route.filesystem->state->state, fs_state->filesystem->root, &route.subpath
                 ),
                     success(nodes)
                     {
                         listed_backing = true;
-                        match_result(DirectoryEntryCount, RootFileIO__copy_nodes_to_entries(nodes, entries, max_entries),
+                        match_result(DirectoryEntryCount, RootFileIO__copy_nodes_to_entries(&nodes, entries, max_entries),
                             success(backing_count) { count = backing_count; },
                             error(code, message) { return Error(DirectoryEntryCount, message, code); }
                         );
@@ -778,7 +825,7 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
     ),
         success(merged_count)
         {
-            if (RootFileIO__trace_list_dir(&path))
+            if (RootFileIO__trace_list_dir((BStringPtr) path))
             {
                 __d_printf(FILESYSTEM, "list_dir merged count=%i listed_backing=%i\n",
                     (int) merged_count, (int) listed_backing);
@@ -793,32 +840,32 @@ Result(DirectoryEntryCount) RootFileIO__list_dir(
             }
         }, error(code, message) { return Error(DirectoryEntryCount, message, code); });
 
-    return Error(DirectoryEntryCount, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+    return Error(DirectoryEntryCount, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
 }
 
-Result(IOStatus) RootFileIO__mkdir(IOStatePtr self, BString path)
+Result(IOStatus) RootFileIO__mkdir(IOStatePtr self, ConstBStringPtr path)
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
     match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
-        some(route) { return route.filesystem->file_io.mkdir(&route.filesystem->state->state, route.subpath); },
-        none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); }
+        some(route) { return route.filesystem->file_io.mkdir(&route.filesystem->state->state, &route.subpath); },
+        none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH); }
     );
 
-    return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+    return Error(IOStatus, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
 }
 
-Result(IOStatus) RootFileIO__remove(IOStatePtr self, BString path, Flags flags)
+Result(IOStatus) RootFileIO__remove(IOStatePtr self, ConstBStringPtr path, Flags flags)
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
     match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, path),
-        some(route) { return route.filesystem->file_io.remove(&route.filesystem->state->state, route.subpath, flags); },
-        none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH); }
+        some(route) { return route.filesystem->file_io.remove(&route.filesystem->state->state, &route.subpath, flags); },
+        none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH); }
     );
 
-    return Error(IOStatus, BString__sprintf(&invalid_path_format, &path), IO_INVALID_PATH);
+    return Error(IOStatus, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
 }
 
-Result(IOStatus) RootFileIO__link(IOStatePtr self, BString source_path, BString target_path)
+Result(IOStatus) RootFileIO__link(IOStatePtr self, ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
     FilesystemIOStatePtr fs_state = (FilesystemIOStatePtr) self;
     match_optional(MountRoute, Filesystem__find_mount(fs_state->filesystem, source_path),
@@ -834,17 +881,17 @@ Result(IOStatus) RootFileIO__link(IOStatePtr self, BString source_path, BString 
 
                     return source_route.filesystem->file_io.link(
                         &source_route.filesystem->state->state,
-                        source_route.subpath,
-                        target_route.subpath
+                        &source_route.subpath,
+                        &target_route.subpath
                     );
                 },
-                none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &target_path), IO_INVALID_PATH); }
+                none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, target_path), IO_INVALID_PATH); }
             );
         },
-        none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, &source_path), IO_INVALID_PATH); }
+        none() { return Error(IOStatus, BString__sprintf(&invalid_path_format, source_path), IO_INVALID_PATH); }
     );
 
-    return Error(IOStatus, BString__sprintf(&invalid_path_format, &source_path), IO_INVALID_PATH);
+    return Error(IOStatus, BString__sprintf(&invalid_path_format, source_path), IO_INVALID_PATH);
 }
 
 
@@ -871,14 +918,20 @@ FilesystemIOStatePtr FilesystemIOState__heap_new(FilesystemPtr filesystem)
 FileIO RootFilesystemIO__new()
 {
     FileIO root_file_io = (FileIO) {
-        .base_io = (IO) {
-            .open = RootFileIO__open,
-            .close = RootFileIO__close,
-            .read = RootFileIO__read,
-            .write = RootFileIO__write,
-            .park = RootFileIO__park,
-            .unpark = RootFileIO__unpark,
-        },
+        .base_io = IO__new(
+            RootFileIO__open,
+            RootFileIO__read,
+            RootFileIO__write,
+            IO__unsupported_accept,
+            RootFileIO__close,
+            RootFileIO__park,
+            RootFileIO__unpark,
+            IO__unsupported_server_buffer,
+            IO__unsupported_server_write_buffer,
+            IO__unsupported_data_available,
+            IO__unsupported_data_consumed,
+            IO__unsupported_eof
+        ),
         .list_nodes = RootFileIO__list_nodes,
         .list_dir = RootFileIO__list_dir,
         .mkdir = RootFileIO__mkdir,
@@ -892,16 +945,16 @@ FileIO RootFilesystemIO__new()
 static FilesystemCode fs_codes = 0x01;
 
 
-FilesystemPtr Filesystem__heap_new(BString name, FileIO file_io)
+FilesystemPtr Filesystem__heap_new(ConstBStringPtr name, const FileIO * file_io)
 {
     FilesystemPtr fs = ptr(Kernel__alloc_kernel(sizeof(Filesystem)), Filesystem);
     FilesystemCode code = fs_codes++;
 
     *fs = (Filesystem) {
-        .name = name,
+        .name = *name,
         .mounts = Mounts__new(),
         .filesystem_table = FilesystemTable__new(),
-        .file_io = file_io,
+        .file_io = *file_io,
         .fs_code = (code << CODE_SHIFT),
     };
     __d_printf(FILESYSTEM, "Created filesystem %x %p with code %x", sizeof(Filesystem), fs, code);
@@ -910,21 +963,22 @@ FilesystemPtr Filesystem__heap_new(BString name, FileIO file_io)
 
 FilesystemPtr RootFilesystem__heap_new()
 {
-    return Filesystem__heap_new(bstring("root"), RootFilesystemIO__new());
+    FileIO file_io = RootFilesystemIO__new();
+    return Filesystem__heap_new(&bstr("root"), &file_io);
 }
 
-Result(MountResult) Filesystem__mount(FilesystemPtr self, BString path, FilesystemPtr filesystem)
+Result(MountResult) Filesystem__mount(FilesystemPtr self, ConstBStringPtr path, FilesystemPtr filesystem)
 {
-    Mounts__set(&self->mounts, path, filesystem);
+    Mounts__set(&self->mounts, *path, filesystem);
 
     return Success(MountResult, MOUNT_OK);
 }
 
-FileHandleTargetPtr FileHandleTarget__heap_new(BString path)
+FileHandleTargetPtr FileHandleTarget__heap_new(ConstBStringPtr path)
 {
     FileHandleTargetPtr target = ptr(Kernel__alloc_kernel(sizeof(FileHandleTarget)), FileHandleTarget);
     *target = (FileHandleTarget) {
-        .path = path,
+        .path = *path,
         .offset = 0,
         .buffer = EmptyRingBuffer(IOBuffer),
     };
@@ -934,5 +988,5 @@ FileHandleTargetPtr FileHandleTarget__heap_new(BString path)
 
 void FileHandleTarget__dispose(FileHandleTargetPtr self)
 {
-    // TODO we need to implement a free
+    Kernel__free(addr(self));
 }

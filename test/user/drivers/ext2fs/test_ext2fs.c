@@ -105,7 +105,7 @@ void tearDown(void)
 {
 }
 
-ServiceBlockReadResult service_block_read_device(
+Result(ServiceBlockReadResult) IO__block_read(
     ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
 )
 {
@@ -116,10 +116,28 @@ ServiceBlockReadResult service_block_read_device(
     uint64_t ext2_block = block / EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK;
     TEST_ASSERT_LESS_THAN_UINT64(TEST_EXT2FS_BLOCK_COUNT, ext2_block);
     memcpy((void *) buffer, disk[ext2_block], EXT2FS_BLOCK_SIZE);
-    return block_count;
+    return Success(ServiceBlockReadResult, block_count);
 }
 
-ServiceBlockReadResult service_block_write_device(
+ServiceBlockReadResult service_block_read_device(
+    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
+)
+{
+    match_result(ServiceBlockReadResult, IO__block_read(path, block, block_count, buffer, buffer_size),
+        success(result)
+        {
+            return result;
+        },
+        error(code, message)
+        {
+            return (ServiceBlockReadResult) code;
+        }
+    );
+
+    return SERVICE_BLOCK_REQUEST_FAILED;
+}
+
+Result(ServiceBlockReadResult) IO__block_write(
     ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
 )
 {
@@ -130,7 +148,51 @@ ServiceBlockReadResult service_block_write_device(
     uint64_t ext2_block = block / EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK;
     TEST_ASSERT_LESS_THAN_UINT64(TEST_EXT2FS_BLOCK_COUNT, ext2_block);
     memcpy(disk[ext2_block], (void *) buffer, EXT2FS_BLOCK_SIZE);
-    return block_count;
+    return Success(ServiceBlockReadResult, block_count);
+}
+
+ServiceBlockReadResult service_block_write_device(
+    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
+)
+{
+    match_result(ServiceBlockReadResult, IO__block_write(path, block, block_count, buffer, buffer_size),
+        success(result)
+        {
+            return result;
+        },
+        error(code, message)
+        {
+            return (ServiceBlockReadResult) code;
+        }
+    );
+
+    return SERVICE_BLOCK_REQUEST_FAILED;
+}
+
+AsyncIO AsyncIO__new(Anything service_context, AsyncIORequestService request_service)
+{
+    return (AsyncIO) {
+        .service_context = service_context,
+        .request_service = request_service,
+    };
+}
+
+Result(AsyncIOCode) AsyncIO__start(
+    AsyncIOPtr self,
+    AsyncIORegisterService register_service,
+    Anything service_context,
+    AsyncIORequestService request_service
+)
+{
+    match_result(AsyncIOCode, register_service(service_context),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(AsyncIOCode, message, code);
+        }
+    );
+
+    return Success(AsyncIOCode, ASYNC_IO_WAIT_COMPLETE);
 }
 
 ServiceCode service_become_service(void)
@@ -142,6 +204,9 @@ ServiceCode service_register_filesystem(
     ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
 )
 {
+    TEST_ASSERT_TRUE(BString__equals(device_path, &expected_device_path));
+    TEST_ASSERT_EQUAL_STRING("ext2", BString__cstr(filesystem_type));
+    TEST_ASSERT_EQUAL_STRING("/", BString__cstr(mountpoint));
     return SERVICE_OK;
 }
 
@@ -189,9 +254,27 @@ ServiceCode service_filesystem_complete_open(
     return status;
 }
 
+ServiceCode service_filesystem_complete_open_without_blocks(
+    uint64_t request_id, ServiceCode status, int64_t result, FileMode mode, uint64_t size
+)
+{
+    last_filesystem_completion = ServiceFilesystemCompletion__new(request_id, status, result);
+    last_filesystem_completion.mode = mode;
+    last_filesystem_completion.size = size;
+    return status;
+}
+
 SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
 {
     return SYSLOG_OK;
+}
+
+static void assert_ext2fs_code_success(Result(Ext2fsCode) result)
+{
+    match_result(Ext2fsCode, result,
+        success(code) { TEST_ASSERT_EQUAL(EXT2FS_OK, code); },
+        error(code, message) { TEST_FAIL_MESSAGE(BString__cstr(&message)); }
+    );
 }
 
 void test_ext2fs_lists_root_directory_from_block_device(void)
@@ -199,11 +282,10 @@ void test_ext2fs_lists_root_directory_from_block_device(void)
     Ext2fsVolume volume = (Ext2fsVolume) {
         .device_path = expected_device_path,
     };
-    BString root = bstr("/");
     DirectoryEntry entries[4] = { 0 };
 
-    TEST_ASSERT_TRUE(Ext2fsVolume__mount(&volume));
-    TEST_ASSERT_EQUAL_INT64(2, Ext2fsVolume__list_dir(&volume, &root, entries, 4));
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    TEST_ASSERT_EQUAL_INT64(2, Ext2fsVolume__list_dir(&volume, &bstr("/"), entries, 4));
     TEST_ASSERT_EQUAL_STRING("HELLO.TXT", entries[0].name);
     TEST_ASSERT_EQUAL_STRING("DOCS", entries[1].name);
     TEST_ASSERT_EQUAL_UINT16(IO_MODE_TYPE_FILE | 0644, entries[0].mode);
@@ -222,7 +304,7 @@ void test_ext2fs_handles_open_request_with_direct_blocks(void)
     Ext2fsVolume volume = (Ext2fsVolume) {
         .device_path = expected_device_path,
     };
-    TEST_ASSERT_TRUE(Ext2fsVolume__mount(&volume));
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
 
     next_filesystem_request = ServiceFilesystemRequest__new(
         42,
@@ -255,7 +337,7 @@ void test_ext2fs_handles_read_request_into_mapped_buffer(void)
         .device_path = expected_device_path,
     };
     char buffer[6] = { 0 };
-    TEST_ASSERT_TRUE(Ext2fsVolume__mount(&volume));
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
 
     next_filesystem_request = ServiceFilesystemRequest__new(
         43,
@@ -286,7 +368,7 @@ void test_ext2fs_handles_write_request_creating_file(void)
         .device_path = expected_device_path,
     };
     char content[] = "new data";
-    TEST_ASSERT_TRUE(Ext2fsVolume__mount(&volume));
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
 
     next_filesystem_request = ServiceFilesystemRequest__new(
         44,
@@ -322,7 +404,7 @@ void test_ext2fs_handles_mkdir_request_creating_directory(void)
     Ext2fsVolume volume = (Ext2fsVolume) {
         .device_path = expected_device_path,
     };
-    TEST_ASSERT_TRUE(Ext2fsVolume__mount(&volume));
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
 
     next_filesystem_request = ServiceFilesystemRequest__new(
         45,
@@ -356,8 +438,8 @@ void test_ext2fs_handles_remove_request_deleting_directory(void)
     Ext2fsVolume volume = (Ext2fsVolume) {
         .device_path = expected_device_path,
     };
-    TEST_ASSERT_TRUE(Ext2fsVolume__mount(&volume));
-    TEST_ASSERT_TRUE(Ext2fsVolume__mkdir_at_path(&volume, &bstr("NEWDIR")));
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    assert_ext2fs_code_success(Ext2fsVolume__mkdir_at_path(&volume, &bstr("NEWDIR")));
 
     next_filesystem_request = ServiceFilesystemRequest__new(
         46,

@@ -57,8 +57,8 @@ static Result(MemoryDeviceBlockPtr) MemoryBlockDevice__find_or_create_block(
     MemoryBlockDevicePtr self, BlockNumber block
 )
 {
-    match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
-        some(found) { return Success(MemoryDeviceBlockPtr, found.value); },
+    match_find_result_ptr(MemoryDeviceBlocks, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
+        some(found) { return Success(MemoryDeviceBlockPtr, found); },
         none_do_nothing()
     );
 
@@ -73,8 +73,8 @@ static Result(MemoryDeviceBlockPtr) MemoryBlockDevice__find_or_create_block(
     match_result(CollectionCode, MemoryDeviceBlocks__push(&self->blocks, MemoryDeviceBlock__new(block, address)),
     success(_)
     {
-            match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
-                some(found) { return Success(MemoryDeviceBlockPtr, found.value); },
+            match_find_result_ptr(MemoryDeviceBlocks, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
+                some(found) { return Success(MemoryDeviceBlockPtr, found); },
                 none_do_nothing()
             );
         }, error(code, message) { return Error(MemoryDeviceBlockPtr, message, BLOCK_DEVICE_IO_ERROR); });
@@ -99,8 +99,8 @@ Result(BlockCount) MemoryBlockDevice__read(
             DataPtr block_target = target + (i * BLOCK_DEVICE_BLOCK_SIZE);
             BlockNumber current_block = block + i;
 
-            match_optional(MemoryDeviceBlocks__FindResult, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &current_block),
-                some(found) { MemoryBlockDevice__copy(block_target, v_ptr(found.value->address, Data)); },
+            match_find_result_ptr(MemoryDeviceBlocks, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &current_block),
+                some(found) { MemoryBlockDevice__copy(block_target, v_ptr(found->address, Data)); },
                 none() { MemoryBlockDevice__zero(block_target); }
             );
         }

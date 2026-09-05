@@ -9,12 +9,18 @@
 #include "../../../kernel/arch/process.h"
 #include "../../../kernel/kalloc.h"
 #include "../../../kernel/subsystems/io/block/block_device.h"
+#include "../../../kernel/subsystems/io/register.h"
 #include "../../../kernel/subsystems/io/file/memfs/memfs.h"
+#include "../../../kernel/subsystems/io/socket/socket.h"
 #include "../../../common_includes/syscalls/service.h"
+#include "../../../common_includes/syscalls/socket.h"
 #include "../fixtures/kernel.h"
 #include "../fixtures/process.h"
 #include "../stubs/panic.h"
 #include "../stubs/process.h"
+
+#define Service__handler(kernel, process, ...) Service__handler((kernel), &(process), __VA_ARGS__)
+#define IO__handler(kernel, process, ...) IO__handler((kernel), &(process), __VA_ARGS__)
 
 static KernelPtr kernel = NULL;
 static const CPUID cpu = 0;
@@ -25,6 +31,11 @@ static bool async_write_continuation_called = false;
 static bool chained_async_continuation_called = false;
 static bool first_parallel_async_called = false;
 static bool second_parallel_async_called = false;
+
+static Optional(BlockDevicePtr) TestBlockDeviceRegistry__find(BString path)
+{
+    return BlockDeviceRegistry__find(&path);
+}
 
 typedef struct TestServiceMappedMemoryRequest
 {
@@ -37,7 +48,13 @@ TestServiceMappedMemoryRequest;
 
 static void test_resume_process(ProcessPtr process)
 {
-    ContextSwitch__switch(ContextSwitch__new(process, None(ProcessPtr)));
+    ContextSwitch context_switch = ContextSwitch__new(process, &None(ProcessPtr));
+    ContextSwitch__switch(&context_switch);
+}
+
+static KernelContext test_kernel_context_for_process(ProcessPtr process)
+{
+    return KernelContext__new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
 }
 
 static ServiceReadyRequest test_ready_request(const char * name)
@@ -68,6 +85,59 @@ static IOListDirRequest test_list_dir_request(
 {
     BString list_path = bstring(path);
     return IOListDirRequest__new(&list_path, entries, max_entries);
+}
+
+static Result(Anything) test_socket_complete_identity(
+    IOSocketRouterRequestPtr request,
+    IOSocketRouterCompletionPtr completion,
+    Anything context
+)
+{
+    if (completion->status != IO_SOCKET_OK)
+    {
+        return Error(Anything, bstr("socket failed"), completion->status);
+    }
+
+    return Success(Anything, completion->result);
+}
+
+static IOSocketRouterRequest test_socket_router_take_request(ProcessPtr router)
+{
+    ServiceEvent event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, router), SERVICE_WAIT, (Anything) &event, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(SERVICE_EVENT_SOCKET_IO, event.type);
+
+    IOSocketRouterRequest request = IOSocketRouterRequest__new(
+        0, IO_SOCKET_ROUTER_LISTEN, &bstr(""), 0, 0
+    );
+    match_result(SystemCallResult, Service__handler(
+        kernel,
+        Some(ProcessPtr, router),
+        SERVICE_SOCKET_GET_REQUEST,
+        ServiceEvent__request_id(&event),
+        (Anything) &request,
+        0,
+        0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    return request;
+}
+
+static SocketRegistryPtr test_socket_registry(void)
+{
+    match_result(SocketRegistryPtr, SocketIO__registered_registry(kernel->io_subsystem),
+        success(registry) { return registry; },
+        error_test_fail()
+    );
 }
 
 void Arch__reset_irq_tracking();
@@ -140,7 +210,7 @@ void test_service_handler_wait_copies_queued_event(void)
     };
     ServiceEvent target = (ServiceEvent) { 0 };
 
-    match_result(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, queued), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+    match_result(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, &queued), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything) &target, 0, 0, 0
@@ -232,7 +302,7 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
         .data = 11,
     };
 
-    match_result(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, queued), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+    match_result(ServiceCode, Scheduler__service_enqueue(kernel->scheduler, process, &queued), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, process->state);
 
@@ -381,18 +451,21 @@ void test_service_handler_registers_block_device_for_service_process(void)
     ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     BString path = bstring("/dev/virtio1");
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(path), some(device) { TEST_ASSERT_NOT_NULL(device); }, none_test_fail());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(path), some(device) { TEST_ASSERT_NOT_NULL(device); }, none_test_fail());
 }
 
 void test_service_handler_registering_block_device_mounts_matching_filesystem_table_entry(void)
 {
     FilesystemPtr root = RootFilesystem__heap_new();
     FilesystemIOState__heap_new(root);
+    BString device_path = bstring("/dev/virtio-table");
+    BString filesystem_type = bstring("fat32");
+    BString mountpoint = bstring("/mnt/fs1");
     match_result(CollectionCode, FilesystemTable__add(
         &root->filesystem_table,
-        bstring("/dev/virtio-table"),
-        bstring("fat32"),
-        bstring("/mnt/fs1")
+        &device_path,
+        &bstr("fat32"),
+        &bstr("/mnt/fs1")
     ), success_do_nothing(), error_test_fail());
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
 
@@ -413,11 +486,12 @@ void test_service_handler_registering_block_device_mounts_root_filesystem_table_
 {
     FilesystemPtr root = RootFilesystem__heap_new();
     FilesystemIOState__heap_new(root);
+    BString device_path = bstring("/dev/virtio-root");
     match_result(CollectionCode, FilesystemTable__add(
         &root->filesystem_table,
-        bstring("/dev/virtio-root"),
-        bstring("ext2"),
-        bstring("/")
+        &device_path,
+        &bstr("ext2"),
+        &bstr("/")
     ), success_do_nothing(), error_test_fail());
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
 
@@ -461,11 +535,11 @@ void test_service_handler_process_cleanup_unregisters_block_device(void)
         kernel, Some(ProcessPtr, first_process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
     ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")), some(device) { TEST_ASSERT_NOT_NULL(device); }, none_test_fail());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")), some(device) { TEST_ASSERT_NOT_NULL(device); }, none_test_fail());
 
     match_result(ProcessSetupStatus, Process__dispose_owned_kernel_resources(first_process), success(status) { TEST_ASSERT_EQUAL(PROCESS_SETUP, status); }, error_test_fail());
 
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")), some_test_fail(), none_do_nothing());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")), some_test_fail(), none_do_nothing());
 
     match_result(SystemCallResult, Service__handler(
         kernel, Some(ProcessPtr, second_process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &request, 0, 0, 0
@@ -483,7 +557,7 @@ void test_service_handler_gets_and_completes_block_write_request(void)
     ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-protocol")), some(found) { device = found; }, none_test_fail());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(bstring("/dev/virtio-protocol")), some(found) { device = found; }, none_test_fail());
 
     Data source[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
     source[0] = 42;
@@ -535,9 +609,9 @@ void test_service_handler_block_completion_unparks_waiting_reader(void)
     match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-park")), some(found) { device = found; }, none_test_fail());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(bstring("/dev/virtio-park")), some(found) { device = found; }, none_test_fail());
 
-    KernelContext context = KernelContext__new(Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler));
+    KernelContext context = test_kernel_context_for_process(reader);
     Data target[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
     BlockDevice__set_current_context(&context);
     match_result(BlockCount, BlockDevice__read(device, 9, 1, target), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
@@ -640,13 +714,393 @@ void test_service_handler_block_read_device_maps_requester_buffer_into_block_ser
     );
 }
 
+void test_service_handler_async_block_read_returns_request_id_and_response_event(void)
+{
+    ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
+    service->process_class = PROCESS_CLASS_SERVICE;
+    ServiceBlockDeviceRegistration registration = test_block_registration("/dev/virtio-async-user", 128);
+
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_REGISTER_BLOCK_DEVICE, (Anything) &registration, 0, 0, 0
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+
+    ProcessPtr requester = dummy_process(2, cpu, PROC_STATE_READY);
+    requester->process_class = PROCESS_CLASS_SERVICE;
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, requester), success_do_nothing(), error_test_fail());
+
+    UserAddress requester_buffer =
+        result_unwrap(UserAddress, Process__alloc_user_pages(requester, BLOCK_DEVICE_BLOCK_SIZE), NULL_USER_ADDRESS);
+    ServiceBlockReadRequest read_request = ServiceBlockReadRequest__new(
+        &bstr("/dev/virtio-async-user"), 21, 1, requester_buffer.virtual_addr, BLOCK_DEVICE_BLOCK_SIZE
+    );
+
+    uint64_t request_id = 0;
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, requester), SERVICE_BLOCK_READ_DEVICE_ASYNC, (Anything) &read_request, 0, 0, 0
+    ),
+        success(value) { request_id = value; },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_NOT_EQUAL(0, request_id);
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, requester->state);
+
+    ServiceEvent request_event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_WAIT, (Anything) &request_event, 0, 0, 0
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+
+    TEST_ASSERT_EQUAL(SERVICE_EVENT_REQUEST, ServiceEvent__kind(&request_event));
+    TEST_ASSERT_EQUAL(request_id, ServiceEvent__request_id(&request_event));
+
+    ServiceBlockRequest block_request = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_BLOCK_GET_REQUEST, request_id, (Anything) &block_request, 0, 0
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+
+    TEST_ASSERT_EQUAL(SERVICE_BLOCK_READ, block_request.operation);
+    TEST_ASSERT_EQUAL(21, block_request.block);
+
+    ServiceBlockCompletion completion = ServiceBlockCompletion__new(request_id, SERVICE_OK, 1);
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, service), SERVICE_BLOCK_COMPLETE, (Anything) &completion, 0, 0, 0
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+
+    ServiceEvent response_event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, requester), SERVICE_WAIT, (Anything) &response_event, 0, 0, 0
+    ), success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); }, error_test_fail());
+
+    TEST_ASSERT_EQUAL(SERVICE_EVENT_RESPONSE, ServiceEvent__kind(&response_event));
+    TEST_ASSERT_EQUAL(SERVICE_EVENT_BLOCK_IO, response_event.type);
+    TEST_ASSERT_EQUAL(request_id, ServiceEvent__request_id(&response_event));
+    TEST_ASSERT_EQUAL(1, response_event.data);
+}
+
+void test_service_handler_socket_router_gets_and_completes_request(void)
+{
+    match_result(RegisterCode, IOSubsystem__register(kernel),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    SocketRegistryPtr registry = test_socket_registry();
+    SocketRegistry__reset(registry);
+
+    ProcessPtr router = dummy_process(1, cpu, PROC_STATE_READY);
+    router->process_class = PROCESS_CLASS_SERVICE;
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, router), success_do_nothing(), error_test_fail());
+
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, router), SERVICE_REGISTER_SOCKET_ROUTER, 0, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ProcessPtr requester = dummy_process(2, cpu, PROC_STATE_READY);
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, requester), success_do_nothing(), error_test_fail());
+
+    BString uri = bstring("socket://proc/sock1");
+    IOSocketRouterRequest request =
+        IOSocketRouterRequest__new(0, IO_SOCKET_ROUTER_LISTEN, &uri, 42, 4);
+    KernelContext kernel_context = test_kernel_context_for_process(requester);
+
+    match_result(ServiceCode, SocketRegistry__start_request(
+        registry, request, kernel_context, test_socket_complete_identity, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, requester->state);
+
+    ServiceEvent event = { 0 };
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, router), SERVICE_WAIT, (Anything) &event, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(SERVICE_EVENT_SOCKET_IO, event.type);
+    TEST_ASSERT_EQUAL(SERVICE_EVENT_REQUEST, ServiceEvent__kind(&event));
+
+    IOSocketRouterRequest fetched_request = IOSocketRouterRequest__new(
+        0, IO_SOCKET_ROUTER_LISTEN, &bstr(""), 0, 0
+    );
+    match_result(SystemCallResult, Service__handler(
+        kernel,
+        Some(ProcessPtr, router),
+        SERVICE_SOCKET_GET_REQUEST,
+        ServiceEvent__request_id(&event),
+        (Anything) &fetched_request,
+        0,
+        0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(ServiceEvent__request_id(&event), fetched_request.request_id);
+    TEST_ASSERT_EQUAL(IO_SOCKET_ROUTER_LISTEN, fetched_request.operation);
+    TEST_ASSERT_EQUAL_INT64(42, fetched_request.handle);
+    TEST_ASSERT_EQUAL_UINT64(4, fetched_request.backlog);
+    TEST_ASSERT_EQUAL_STRING("socket://proc/sock1", BString__cstr(&fetched_request.uri));
+
+    IOSocketRouterCompletion completion =
+        IOSocketRouterCompletion__new(fetched_request.request_id, IO_SOCKET_OK, 42);
+    match_result(SystemCallResult, Service__handler(
+        kernel,
+        Some(ProcessPtr, router),
+        SERVICE_SOCKET_COMPLETE,
+        (Anything) &completion,
+        0,
+        0,
+        0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, requester->state);
+    test_resume_process(requester);
+    TEST_ASSERT_EQUAL(42, result_unwrap(Anything, deferred_syscall_result(), (Anything) -999));
+}
+
+void test_service_handler_socket_open_accept_write_and_read(void)
+{
+    match_result(RegisterCode, IOSubsystem__register(kernel),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    SocketRegistry__reset(test_socket_registry());
+
+    ProcessPtr router = dummy_process(1, cpu, PROC_STATE_READY);
+    router->process_class = PROCESS_CLASS_SERVICE;
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, router), success_do_nothing(), error_test_fail());
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, router), SERVICE_REGISTER_SOCKET_ROUTER, 0, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ProcessPtr process = dummy_process(2, cpu, PROC_STATE_READY);
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, process), success_do_nothing(), error_test_fail());
+    BString uri = bstring("socket://proc/sock1");
+
+    IOPathRequest listen_path = IOPathRequest__new(&bstr("socket://proc/waiting"), IO_OPEN_BIND | IO_OPEN_LISTEN);
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, process), IO_OPEN, (Anything) &listen_path, 0, 0, 0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+
+    IOSocketRouterRequest listen_request = test_socket_router_take_request(router);
+    TEST_ASSERT_EQUAL(IO_SOCKET_ROUTER_LISTEN, listen_request.operation);
+    IOSocketRouterCompletion listen_completion =
+        IOSocketRouterCompletion__new(listen_request.request_id, IO_SOCKET_OK, listen_request.handle);
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, router), SERVICE_SOCKET_COMPLETE, (Anything) &listen_completion, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+    test_resume_process(process);
+    FileDescriptor listener_fd = (FileDescriptor) result_unwrap(
+        Anything, deferred_syscall_result(), (Anything) -999
+    );
+
+    IOPathRequest connect_path = IOPathRequest__new(&bstr("socket://proc/waiting"), IO_OPEN_READ | IO_OPEN_WRITE);
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, process), IO_OPEN, (Anything) &connect_path, 0, 0, 0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+
+    IOSocketRouterRequest connect_request = test_socket_router_take_request(router);
+    TEST_ASSERT_EQUAL(IO_SOCKET_ROUTER_CONNECT, connect_request.operation);
+    IOSocketRouterCompletion connect_completion =
+        IOSocketRouterCompletion__new(connect_request.request_id, IO_SOCKET_OK, listen_request.handle);
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, router), SERVICE_SOCKET_COMPLETE, (Anything) &connect_completion, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+    test_resume_process(process);
+    FileDescriptor client_fd = (FileDescriptor) result_unwrap(
+        Anything, deferred_syscall_result(), (Anything) -999
+    );
+
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, process), IO_ACCEPT, listener_fd, 0, 0, 0
+    ),
+        success(accepted_fd)
+        {
+            BString text = bstring("ping");
+            match_result(SystemCallResult, IO__handler(
+                kernel,
+                Some(ProcessPtr, process),
+                IO_WRITE,
+                client_fd,
+                (Anything) BString__cstr(&bstr("ping")),
+                BString__length(&bstr("ping")),
+                0
+            ),
+                success(bytes) { TEST_ASSERT_EQUAL(4, bytes); },
+                error_test_fail()
+            );
+
+            char read_buffer[8] = { 0 };
+            match_result(SystemCallResult, IO__handler(
+                kernel,
+                Some(ProcessPtr, process),
+                IO_READ,
+                accepted_fd,
+                (Anything) read_buffer,
+                4,
+                0
+            ),
+                success(bytes)
+                {
+                    TEST_ASSERT_EQUAL(4, bytes);
+                    TEST_ASSERT_EQUAL_MEMORY("ping", read_buffer, 4);
+                },
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+}
+
+void test_service_handler_socket_accept_waits_for_client_connect(void)
+{
+    match_result(RegisterCode, IOSubsystem__register(kernel),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    SocketRegistry__reset(test_socket_registry());
+
+    ProcessPtr router = dummy_process(1, cpu, PROC_STATE_READY);
+    router->process_class = PROCESS_CLASS_SERVICE;
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, router), success_do_nothing(), error_test_fail());
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, router), SERVICE_REGISTER_SOCKET_ROUTER, 0, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    ProcessPtr listener_process = dummy_process(2, cpu, PROC_STATE_READY);
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, listener_process), success_do_nothing(), error_test_fail());
+
+    IOPathRequest listen_path = IOPathRequest__new(&bstr("socket://proc/waiting"), IO_OPEN_BIND | IO_OPEN_LISTEN);
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, listener_process), IO_OPEN, (Anything) &listen_path, 0, 0, 0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+
+    IOSocketRouterRequest listen_request = test_socket_router_take_request(router);
+    IOSocketRouterCompletion listen_completion =
+        IOSocketRouterCompletion__new(listen_request.request_id, IO_SOCKET_OK, listen_request.handle);
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, router), SERVICE_SOCKET_COMPLETE, (Anything) &listen_completion, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+    test_resume_process(listener_process);
+    FileDescriptor listener_fd = (FileDescriptor) result_unwrap(
+        Anything, deferred_syscall_result(), (Anything) -999
+    );
+    clear_deferred_syscall_result();
+
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, listener_process), IO_ACCEPT, listener_fd, 0, 0, 0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, listener_process->state);
+
+    ProcessPtr client_process = dummy_process(3, cpu, PROC_STATE_READY);
+    match_result(CPUID, Scheduler__schedule(kernel->scheduler, client_process), success_do_nothing(), error_test_fail());
+
+    IOPathRequest connect_path = IOPathRequest__new(&bstr("socket://proc/waiting"), IO_OPEN_READ | IO_OPEN_WRITE);
+    match_result(SystemCallResult, IO__handler(
+        kernel, Some(ProcessPtr, client_process), IO_OPEN, (Anything) &connect_path, 0, 0, 0
+    ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, code); }
+    );
+
+    IOSocketRouterRequest connect_request = test_socket_router_take_request(router);
+    TEST_ASSERT_EQUAL(IO_SOCKET_ROUTER_CONNECT, connect_request.operation);
+    IOSocketRouterCompletion connect_completion =
+        IOSocketRouterCompletion__new(connect_request.request_id, IO_SOCKET_OK, listen_request.handle);
+    match_result(SystemCallResult, Service__handler(
+        kernel, Some(ProcessPtr, router), SERVICE_SOCKET_COMPLETE, (Anything) &connect_completion, 0, 0, 0
+    ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+
+    test_resume_process(client_process);
+    FileDescriptor client_fd = (FileDescriptor) result_unwrap(
+        Anything, deferred_syscall_result(), (Anything) -999
+    );
+    clear_deferred_syscall_result();
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, listener_process->state);
+
+    test_resume_process(listener_process);
+    FileDescriptor accepted_fd = (FileDescriptor) result_unwrap(
+        Anything, deferred_syscall_result(), (Anything) -999
+    );
+
+    match_result(SystemCallResult, IO__handler(
+        kernel,
+        Some(ProcessPtr, client_process),
+        IO_WRITE,
+        client_fd,
+        (Anything) BString__cstr(&bstr("ping")),
+        BString__length(&bstr("ping")),
+        0
+    ),
+        success(bytes) { TEST_ASSERT_EQUAL(4, bytes); },
+        error_test_fail()
+    );
+
+    char read_buffer[8] = { 0 };
+    match_result(SystemCallResult, IO__handler(
+        kernel,
+        Some(ProcessPtr, listener_process),
+        IO_READ,
+        accepted_fd,
+        (Anything) read_buffer,
+        4,
+        0
+    ),
+        success(bytes)
+        {
+            TEST_ASSERT_EQUAL(4, bytes);
+            TEST_ASSERT_EQUAL_MEMORY("ping", read_buffer, 4);
+        },
+        error_test_fail()
+    );
+}
+
 void test_service_handler_userspace_filesystem_list_dir_uses_shared_entries_buffer(void)
 {
     FilesystemPtr root = RootFilesystem__heap_new();
     FilesystemIOState__heap_new(root);
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
     match_result(DeviceHandle, IOSubsystem__register_device(
-        kernel->io_subsystem, bstring("/"), &root->file_io.base_io, &root->state->state
+        kernel->io_subsystem, &bstr("/"), &root->file_io.base_io, &root->state->state
     ),
         success_do_nothing(),
         error_test_fail()
@@ -761,7 +1215,7 @@ void test_service_handler_userspace_filesystem_open_read_close_file(void)
     FilesystemIOState__heap_new(root);
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
     match_result(DeviceHandle, IOSubsystem__register_device(
-        kernel->io_subsystem, bstring("/"), &root->file_io.base_io, &root->state->state
+        kernel->io_subsystem, &bstr("/"), &root->file_io.base_io, &root->state->state
     ),
         success_do_nothing(),
         error_test_fail()
@@ -912,7 +1366,7 @@ void test_service_handler_userspace_filesystem_write_mkdir_and_remove(void)
     FilesystemIOState__heap_new(root);
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
     match_result(DeviceHandle, IOSubsystem__register_device(
-        kernel->io_subsystem, bstring("/"), &root->file_io.base_io, &root->state->state
+        kernel->io_subsystem, &bstr("/"), &root->file_io.base_io, &root->state->state
     ),
         success_do_nothing(),
         error_test_fail()
@@ -936,8 +1390,7 @@ void test_service_handler_userspace_filesystem_write_mkdir_and_remove(void)
         error_test_fail()
     );
 
-    BString open_path = bstring("/new.txt");
-    IOPathRequest open_request = IOPathRequest__new(&open_path, IO_OPEN_WRITE);
+    IOPathRequest open_request = IOPathRequest__new(&bstr("/new.txt"), IO_OPEN_WRITE);
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, requester), IO_OPEN, (Anything) &open_request, 0, 0, 0
     ),
@@ -1021,8 +1474,7 @@ void test_service_handler_userspace_filesystem_write_mkdir_and_remove(void)
         error_test_fail()
     );
 
-    BString dir_path = bstring("/docs");
-    IOPathRequest mkdir_request = IOPathRequest__new(&dir_path, 0);
+    IOPathRequest mkdir_request = IOPathRequest__new(&bstr("/docs"), 0);
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, requester), IO_MKDIR, (Anything) &mkdir_request, 0, 0, 0
     ),
@@ -1068,7 +1520,7 @@ void test_service_handler_userspace_filesystem_write_mkdir_and_remove(void)
     test_resume_process(requester);
     TEST_ASSERT_EQUAL(IO_OK, result_unwrap(Anything, deferred_syscall_result(), (Anything) -999));
 
-    IOPathRequest remove_request = IOPathRequest__new(&dir_path, IO_REMOVE_RECURSIVE);
+    IOPathRequest remove_request = IOPathRequest__new(&bstr("/docs"), IO_REMOVE_RECURSIVE);
     match_result(SystemCallResult, IO__handler(
         kernel, Some(ProcessPtr, requester), IO_REMOVE, (Anything) &remove_request, 0, 0, 0
     ),
@@ -1176,12 +1628,10 @@ void test_service_handler_block_completion_runs_async_read_continuation_with_ker
     match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-async")), some(found) { device = found; }, none_test_fail());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(bstring("/dev/virtio-async")), some(found) { device = found; }, none_test_fail());
 
     BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
-    block_context->kernel_context = KernelContext__new(
-        Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler)
-    );
+    block_context->kernel_context = test_kernel_context_for_process(reader);
     block_context->owner_context = 0;
 
     BlockDevice__set_current_context(&block_context->kernel_context);
@@ -1233,12 +1683,10 @@ void test_service_handler_chained_async_read_parks_from_block_context(void)
     match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-chain")), some(found) { device = found; }, none_test_fail());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(bstring("/dev/virtio-chain")), some(found) { device = found; }, none_test_fail());
 
     BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
-    block_context->kernel_context = KernelContext__new(
-        Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler)
-    );
+    block_context->kernel_context = test_kernel_context_for_process(reader);
     block_context->owner_context = (Anything) device;
 
     BlockDevice__set_current_context(&block_context->kernel_context);
@@ -1317,18 +1765,14 @@ void test_service_handler_parallel_async_reads_complete_out_of_order_without_res
     match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-parallel")), some(found) { device = found; }, none_test_fail());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(bstring("/dev/virtio-parallel")), some(found) { device = found; }, none_test_fail());
 
     BlockIOContextPtr first_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
-    first_context->kernel_context = KernelContext__new(
-        Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler)
-    );
+    first_context->kernel_context = test_kernel_context_for_process(reader);
     first_context->owner_context = 0;
 
     BlockIOContextPtr second_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
-    second_context->kernel_context = KernelContext__new(
-        Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler)
-    );
+    second_context->kernel_context = test_kernel_context_for_process(reader);
     second_context->owner_context = 0;
 
     BlockDevice__set_current_context(&first_context->kernel_context);
@@ -1412,9 +1856,9 @@ void test_service_handler_failed_block_completion_unparks_waiting_reader_with_er
     match_result(CPUID, Scheduler__schedule(kernel->scheduler, reader), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-park-fail")), some(found) { device = found; }, none_test_fail());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(bstring("/dev/virtio-park-fail")), some(found) { device = found; }, none_test_fail());
 
-    KernelContext context = KernelContext__new(Some(ProcessID, reader->pid), Some(SchedulerPtr, kernel->scheduler));
+    KernelContext context = test_kernel_context_for_process(reader);
     Data target[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
     BlockDevice__set_current_context(&context);
     match_result(BlockCount, BlockDevice__read(device, 9, 1, target), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
@@ -1456,14 +1900,12 @@ void test_service_handler_block_completion_runs_async_write_continuation(void)
     match_result(CPUID, Scheduler__schedule(kernel->scheduler, writer), success_do_nothing(), error_test_fail());
 
     BlockDevicePtr device = NULL;
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(bstring("/dev/virtio-async-write")), some(found) { device = found; }, none_test_fail());
+    match_optional(BlockDevicePtr, TestBlockDeviceRegistry__find(bstring("/dev/virtio-async-write")), some(found) { device = found; }, none_test_fail());
 
     Data source[BLOCK_DEVICE_BLOCK_SIZE] = { 0 };
     source[0] = 0x5a;
     BlockIOContextPtr block_context = ptr(Kernel__alloc_kernel(sizeof(BlockIOContext)), BlockIOContext);
-    block_context->kernel_context = KernelContext__new(
-        Some(ProcessID, writer->pid), Some(SchedulerPtr, kernel->scheduler)
-    );
+    block_context->kernel_context = test_kernel_context_for_process(writer);
     block_context->owner_context = 0;
 
     BlockDevice__set_current_context(&block_context->kernel_context);

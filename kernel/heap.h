@@ -44,6 +44,8 @@ typedef struct Heap
     Address start;
     Address end;
     Address phys_start;
+    size_t coarse_block_size;
+    uint64_t pages_per_block;
     MemoryBlock current_block;
     AllocatedBlocks allocated_blocks;
     AllocatedBlocks free_blocks;
@@ -53,6 +55,7 @@ Heap;
 typedef enum HeapCodes
 {
     HEAP_NOT_IMPLEMENTED = -1,
+    HEAP_OUT_OF_MEMORY = -2,
     HEAP_OK = 0,
 }
 HeapCodes;
@@ -65,6 +68,7 @@ Result(HeapCode) Heap__init(HeapPtr self, SystemInfoPtr system_info);
 
 KernelAddress Heap__alloc(HeapPtr self);
 KernelAddress Heap__alloc_size(HeapPtr self, size_t size);
+KernelAddress Heap__try_alloc_size(HeapPtr self, size_t size);
 
 Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr);
 
@@ -86,6 +90,8 @@ KernelAddress Heap__try_from_virtual_address(HeapPtr self, Address virtual);
         .start = 0, \
         .end = 0, \
         .phys_start = 0,\
+        .coarse_block_size = 0,\
+        .pages_per_block = 0,\
         .current_block = NEW_BLOCK, \
         .allocated_blocks = EmptyHashtable(AllocatedBlocks),\
         .free_blocks = EmptyHashtable(AllocatedBlocks),\

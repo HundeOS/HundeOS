@@ -1,12 +1,12 @@
 #include "syscall.h"
 
 CallContext CallContext__new(
-    Optional(ProcessPtr) process, SystemCall syscall_id, Anything arg1, Anything arg2,
+    OptionalPtr(ProcessPtr) process, SystemCall syscall_id, Anything arg1, Anything arg2,
     Anything arg3, Anything arg4, Anything arg5
 )
 {
     return (CallContext) {
-        .process_opt = process,
+        .process_opt = *process,
         .syscall_id = syscall_id,
         .arg1 = arg1,
         .arg2 = arg2,
@@ -15,4 +15,3 @@ CallContext CallContext__new(
         .arg5 = arg5
     };
 }
-

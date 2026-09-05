@@ -38,6 +38,8 @@ PROTECTED_COLLECTION_DECLARATION_MACRO = re.compile(
 BLOCK_STATEMENT_MACROS = (
     "match_optional",
     "match_result",
+    "match_find_result",
+    "match_find_result_ptr",
     "critical_section",
     "critical_section_try",
     "for_each_ll",
@@ -55,7 +57,7 @@ BLOCK_STATEMENT_MACROS = (
 RULES = (
     Rule(
         name="no-null",
-        message="use Optional/Result instead of NULL",
+        message="use Optional/Result instead of NULL or pointer-zero comparisons",
         pattern=re.compile(r"\bNULL\b"),
         allow_paths=(
             "arch/**",
@@ -90,13 +92,13 @@ RULES = (
             "kernel/subsystems/io/block/block_device.c",
             "kernel/subsystems/io/console/console.c",
             "kernel/syscall/syslog_handler.c",
-            "user/arch/**",
-            "user/sys/console.c",
-            "user/sys/io.c",
-            "user/sys/io.h",
-            "user/sys/print.c",
-            "user/sys/service.c",
-            "user/sys/service.h",
+            "user/lib/arch/**",
+            "user/lib/sys/console.c",
+            "user/lib/sys/io.c",
+            "user/lib/sys/io.h",
+            "user/lib/sys/print.c",
+            "user/lib/sys/service.c",
+            "user/lib/sys/service.h",
             "user/user.h",
             "user/drivers/virtio_blk/main.c",
             "user/drivers/virtio_keyboard/main.c",
@@ -108,7 +110,7 @@ RULES = (
         pattern=re.compile(
             r"(?:\.|->)(?:present|some|none|ok|success)\b|(?:\.|->)error\s*(?:\.|->)(?:code|error)\b"
         ),
-        allow_paths=("common/types/optional.h", "common/types/result.h"),
+        allow_paths=("common/types/find_result.h", "common/types/optional.h", "common/types/result.h"),
     ),
     Rule(
         name="no-collection-internals",
@@ -119,14 +121,15 @@ RULES = (
             "common/types/bstring.h",
             "common/types/dyn_string.c",
             "common/types/dyn_string.h",
+            "common/types/find_result.h",
             "common/types/fixed_array.h",
             "common/types/hash_table.h",
             "common/types/linked_list.h",
             "common/types/map.h",
             "kernel/types/ring_buffer.h",
-            "user/types/fixed_array.h",
-            "user/types/linked_list.h",
-            "user/types/map.h",
+            "user/lib/types/fixed_array.h",
+            "user/lib/types/linked_list.h",
+            "user/lib/types/map.h",
         ),
     ),
     Rule(
@@ -140,10 +143,19 @@ RULES = (
         pattern=re.compile(r"$^"),
     ),
     Rule(
-        name="legacy-match-macros",
-        message="use match_optional/match_result so both branches are handled",
-        pattern=re.compile(r"\b(?:Match|ResultMatch|IsSome|IsNone|IsSuccess|IsError|Unwrap|ResultUnwrap)\s*\("),
-        allow_paths=("common/types/optional.h", "common/types/result.h"),
+        name="no-struct-param-by-value",
+        message="pass structs, strings, and collections as const/non-const pointers instead of by value",
+        pattern=re.compile(r"$^"),
+    ),
+    Rule(
+        name="optional-result-pointer-param-macro",
+        message="use OptionalPtr or ResultPtr/ConstResultPtr for Optional/Result pointer parameters",
+        pattern=re.compile(r"$^"),
+    ),
+    Rule(
+        name="raw-struct-pointer",
+        message="use TypeNamePtr/ConstTypeNamePtr typedefs instead of raw struct pointers",
+        pattern=re.compile(r"$^"),
     ),
     Rule(
         name="legacy-critical-section-macros",
@@ -168,10 +180,11 @@ RULES = (
     ),
     Rule(
         name="match-branch-macros",
-        message="use success/error or some/none branch macros in match_result/match_optional",
+        message="use success/error or some/none branch macros in match_result/match_optional/match_find_result/match_find_result_ptr",
         pattern=re.compile(r"(?!)"),
         allow_paths=(
             "common/types/dyn_string.h",
+            "common/types/find_result.h",
             "common/types/fixed_array.h",
             "common/types/optional.h",
             "common/types/result.h",
@@ -186,6 +199,7 @@ RULES = (
         pattern=re.compile(r"(?!)"),
         allow_paths=(
             "common/types/dyn_string.h",
+            "common/types/find_result.h",
             "common/types/fixed_array.h",
             "common/types/optional.h",
             "common/types/result.h",
@@ -218,25 +232,44 @@ RULES = (
         message="put a semicolon after block-style macro calls",
         pattern=re.compile(r"(?!)"),
     ),
+    Rule(
+        name="find-result-matcher",
+        message="use match_find_result/match_find_result_ptr instead of matching FindResult internals directly",
+        pattern=re.compile(r"(?!)"),
+        allow_paths=(
+            "common/types/find_result.h",
+            "common/types/fixed_array.h",
+            "common/types/linked_list.h",
+            "kernel/types/hashtable.h",
+        ),
+    ),
 )
 
 AST_RULE_NAMES = {
     "constructor-required",
     "member-first-arg-self",
+    "no-struct-param-by-value",
+    "optional-result-pointer-param-macro",
+    "raw-struct-pointer",
     "no-collection-internals",
     "no-optional-result-internals",
 }
 TEXT_RULES = tuple(rule for rule in RULES if rule.name not in AST_RULE_NAMES)
+NO_NULL_RULE = next(rule for rule in RULES if rule.name == "no-null")
 COLLECTION_RULE = next(rule for rule in RULES if rule.name == "no-collection-internals")
 OPTIONAL_RESULT_RULE = next(rule for rule in RULES if rule.name == "no-optional-result-internals")
 CONSTRUCTOR_RULE = next(rule for rule in RULES if rule.name == "constructor-required")
 MEMBER_FIRST_ARG_RULE = next(rule for rule in RULES if rule.name == "member-first-arg-self")
+STRUCT_PARAM_BY_VALUE_RULE = next(rule for rule in RULES if rule.name == "no-struct-param-by-value")
+OPTIONAL_RESULT_POINTER_PARAM_RULE = next(rule for rule in RULES if rule.name == "optional-result-pointer-param-macro")
+RAW_STRUCT_POINTER_RULE = next(rule for rule in RULES if rule.name == "raw-struct-pointer")
 MATCH_BRANCH_RULE = next(rule for rule in RULES if rule.name == "match-branch-macros")
 MATCH_BRANCH_FORMAT_RULE = next(rule for rule in RULES if rule.name == "match-branch-format")
 MATCH_BRANCH_BLOCK_FORMAT_RULE = next(rule for rule in RULES if rule.name == "match-branch-block-format")
 TRIVIAL_ERROR_BRANCH_RULE = next(rule for rule in RULES if rule.name == "trivial-error-branch")
 CRITICAL_SECTION_CONTROL_FLOW_RULE = next(rule for rule in RULES if rule.name == "critical-section-control-flow")
 BLOCK_MACRO_SEMICOLON_RULE = next(rule for rule in RULES if rule.name == "block-macro-semicolon")
+FIND_RESULT_MATCHER_RULE = next(rule for rule in RULES if rule.name == "find-result-matcher")
 
 
 def _load_tree_sitter():
@@ -392,6 +425,46 @@ def _is_optional_result_type(type_name: str) -> bool:
     )
 
 
+def _is_pointer_type(type_name: str) -> bool:
+    return "*" in type_name or _normalise_type_name(type_name).endswith("Ptr")
+
+
+def _is_parameter_pointer_like(node) -> bool:
+    declarator = node.child_by_field_name("declarator")
+    if declarator is None:
+        return False
+    return any(
+        descendant.type in {"pointer_declarator", "abstract_pointer_declarator", "array_declarator"}
+        for descendant in _walk(declarator)
+    )
+
+
+def _is_function_parameter(node) -> bool:
+    parent = node.parent
+    if parent is None or parent.type != "parameter_list":
+        return False
+    return parent.parent is not None and parent.parent.type == "function_declarator"
+
+
+def _is_nullish_storage_type(type_name: str) -> bool:
+    return _is_pointer_type(type_name) or _normalise_type_name(type_name) == "Address"
+
+
+def _is_zero_literal(source: bytes, node) -> bool:
+    return node.type == "number_literal" and _node_text(source, node) == "0"
+
+
+def _comparison_identifier_name(source: bytes, node) -> str | None:
+    if node.type == "identifier":
+        return _node_text(source, node)
+    if node.type in {"parenthesized_expression", "subscript_expression"}:
+        for child in node.children:
+            name = _comparison_identifier_name(source, child)
+            if name is not None:
+                return name
+    return None
+
+
 def _declaration_type_text(source: bytes, node) -> str:
     type_node = node.child_by_field_name("type")
     if type_node is not None:
@@ -413,7 +486,7 @@ def _declarator_identifiers(node) -> list:
     if node.type == "field_identifier":
         return []
     if node.type == "function_declarator":
-        return []
+        return _declarator_identifiers(node.child_by_field_name("declarator"))
     if node.type == "identifier":
         return [node]
     declarator = node.child_by_field_name("declarator")
@@ -432,7 +505,7 @@ def _record_declaration_symbols(
     symbols: dict[str, str],
 ) -> None:
     type_name = _declaration_type_text(source, node)
-    if not type_name or not type_matches(type_name):
+    if not type_name:
         return
 
     declarator = node.child_by_field_name("declarator")
@@ -440,7 +513,19 @@ def _record_declaration_symbols(
         return
 
     for identifier in _declarator_identifiers(declarator):
-        symbols[_node_text(source, identifier)] = type_name
+        symbol_type_name = type_name
+        current = identifier.parent
+        while current is not None:
+            if current == node:
+                break
+            if current.type == "pointer_declarator":
+                symbol_type_name = f"{symbol_type_name} *"
+                break
+            if current == declarator:
+                break
+            current = current.parent
+        if type_matches(symbol_type_name):
+            symbols[_node_text(source, identifier)] = symbol_type_name
 
 
 def _symbol_table(source: bytes, tree, type_matches) -> dict[str, str]:
@@ -449,6 +534,112 @@ def _symbol_table(source: bytes, tree, type_matches) -> dict[str, str]:
         if node.type in {"declaration", "parameter_declaration"}:
             _record_declaration_symbols(source, node, type_matches, symbols)
     return symbols
+
+
+def _enclosing_function(node):
+    current = node.parent
+    while current is not None:
+        if current.type == "function_definition":
+            return current
+        current = current.parent
+    return None
+
+
+def _scoped_symbol_table(source: bytes, tree, node, type_matches) -> dict[str, str]:
+    symbols = _symbol_table(source, tree, type_matches)
+    function = _enclosing_function(node)
+    if function is None:
+        return symbols
+
+    for scoped_node in _walk(function):
+        if scoped_node.start_byte > node.start_byte:
+            continue
+        if scoped_node.type in {"declaration", "parameter_declaration"}:
+            _record_declaration_symbols(source, scoped_node, type_matches, symbols)
+    return symbols
+
+
+def _field_declarator_identifiers(node) -> list:
+    if node.type == "field_identifier":
+        return [node]
+    declarator = node.child_by_field_name("declarator")
+    if declarator is not None:
+        return _field_declarator_identifiers(declarator)
+    result = []
+    for child in node.children:
+        result.extend(_field_declarator_identifiers(child))
+    return result
+
+
+def _struct_field_type_table(source: bytes, tree) -> dict[str, dict[str, str]]:
+    structs = {}
+    for node in _walk(tree.root_node):
+        if node.type != "struct_specifier":
+            continue
+
+        name_node = next((child for child in node.children if child.type == "type_identifier"), None)
+        if name_node is None:
+            continue
+
+        struct_name = _normalise_type_name(_node_text(source, name_node))
+        fields = structs.setdefault(struct_name, {})
+        for field in _walk(node):
+            if field.type != "field_declaration":
+                continue
+
+            type_name = _declaration_type_text(source, field)
+            if not type_name:
+                continue
+
+            for identifier in _field_declarator_identifiers(field):
+                symbol_type_name = type_name
+                current = identifier.parent
+                while current is not None:
+                    if current == field:
+                        break
+                    if current.type == "pointer_declarator":
+                        symbol_type_name = f"{symbol_type_name} *"
+                        break
+                    current = current.parent
+                fields[_node_text(source, identifier)] = symbol_type_name
+
+    return structs
+
+
+def _struct_like_type_names(source_text: str, tree) -> set[str]:
+    source = source_text.encode("utf-8")
+    protected_types = _protected_collection_types(source_text)
+    names = {
+        _normalise_type_name(type_name)
+        for type_name in protected_types
+        if not _normalise_type_name(type_name).endswith("Ptr")
+    }
+
+    for node in _walk(tree.root_node):
+        if node.type != "type_definition":
+            continue
+
+        has_struct_type = False
+        for child in node.children:
+            if child.type == "struct_specifier":
+                has_struct_type = True
+                break
+            if child.type in {"type_identifier", "macro_type_specifier"}:
+                type_name = _normalise_type_name(_node_text(source, child))
+                if _is_protected_collection_type(type_name, protected_types) or _is_optional_result_type(type_name):
+                    has_struct_type = True
+                    break
+
+        if not has_struct_type:
+            continue
+
+        for child in node.children:
+            if child.type == "type_identifier":
+                type_name = _normalise_type_name(_node_text(source, child))
+                if not type_name.endswith("Ptr"):
+                    names.add(type_name)
+
+    return names
 
 
 def _field_expression_parts(source: bytes, node):
@@ -603,6 +794,170 @@ def _lint_member_first_arg_self(path: Path, source_text: str, tree) -> list[Find
                 column=column,
                 rule=MEMBER_FIRST_ARG_RULE.name,
                 message=MEMBER_FIRST_ARG_RULE.message,
+            )
+        )
+
+    return findings
+
+
+def _parameter_uses_struct_by_value(source: bytes, node, struct_like_types: set[str], protected_types: set[str]) -> bool:
+    if node.type != "parameter_declaration":
+        return False
+    if _is_parameter_pointer_like(node):
+        return False
+
+    type_text = _declaration_type_text(source, node)
+    if not type_text:
+        return False
+    if _is_pointer_type(type_text):
+        return False
+
+    type_name = _normalise_type_name(type_text)
+    if type_name == "void":
+        return False
+    if _is_protected_collection_type(type_text, protected_types):
+        return True
+    if _is_optional_result_type(type_text):
+        return True
+    if any(child.type == "struct_specifier" for child in node.children):
+        return True
+
+    return type_name in struct_like_types
+
+
+def _parameter_uses_raw_optional_result_pointer(source: bytes, node) -> bool:
+    if node.type != "parameter_declaration":
+        return False
+    if not _is_parameter_pointer_like(node):
+        return False
+
+    type_text = _declaration_type_text(source, node)
+    if not type_text:
+        return False
+
+    return re.search(r"\b(?:_?Optional|Result)\s*\(", type_text) is not None
+
+
+def _declaration_uses_raw_struct_pointer(source: bytes, node, struct_like_types: set[str]) -> bool:
+    if node.type not in {"declaration", "parameter_declaration"}:
+        return False
+
+    type_text = _declaration_type_text(source, node)
+    if not type_text:
+        return False
+
+    type_name = _normalise_type_name(type_text)
+    if type_name.endswith("Ptr"):
+        return False
+    if type_name not in struct_like_types:
+        return False
+
+    declarator = node.child_by_field_name("declarator")
+    if declarator is None:
+        return False
+    if node.type == "declaration" and declarator.type == "function_declarator":
+        return False
+
+    return any(
+        descendant.type in {"pointer_declarator", "abstract_pointer_declarator"}
+        for descendant in _walk(declarator)
+    )
+
+
+def _lint_optional_result_pointer_params(path: Path, source_text: str, tree) -> list[Finding]:
+    if _is_allowed(OPTIONAL_RESULT_POINTER_PARAM_RULE, path):
+        return []
+
+    source = source_text.encode("utf-8")
+    raw_lines = source_text.splitlines()
+    line_starts = _line_starts(source_text)
+    findings = []
+
+    for node in _walk(tree.root_node):
+        if not _is_function_parameter(node):
+            continue
+        if not _parameter_uses_raw_optional_result_pointer(source, node):
+            continue
+
+        line_number, column = _line_column_for_offset(line_starts, node.start_byte)
+        raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+        if OPTIONAL_RESULT_POINTER_PARAM_RULE.name in _line_ignores(raw_line):
+            continue
+
+        findings.append(
+            Finding(
+                path=path,
+                line=line_number,
+                column=column,
+                rule=OPTIONAL_RESULT_POINTER_PARAM_RULE.name,
+                message=OPTIONAL_RESULT_POINTER_PARAM_RULE.message,
+            )
+        )
+
+    return findings
+
+
+def _lint_raw_struct_pointers(path: Path, source_text: str, tree) -> list[Finding]:
+    if _is_allowed(RAW_STRUCT_POINTER_RULE, path):
+        return []
+
+    source = source_text.encode("utf-8")
+    raw_lines = source_text.splitlines()
+    line_starts = _line_starts(source_text)
+    struct_like_types = _struct_like_type_names(source_text, tree)
+    findings = []
+
+    for node in _walk(tree.root_node):
+        if not _declaration_uses_raw_struct_pointer(source, node, struct_like_types):
+            continue
+
+        line_number, column = _line_column_for_offset(line_starts, node.start_byte)
+        raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+        if RAW_STRUCT_POINTER_RULE.name in _line_ignores(raw_line):
+            continue
+
+        findings.append(
+            Finding(
+                path=path,
+                line=line_number,
+                column=column,
+                rule=RAW_STRUCT_POINTER_RULE.name,
+                message=RAW_STRUCT_POINTER_RULE.message,
+            )
+        )
+
+    return findings
+
+
+def _lint_struct_params_by_value(path: Path, source_text: str, tree) -> list[Finding]:
+    if _is_allowed(STRUCT_PARAM_BY_VALUE_RULE, path):
+        return []
+
+    source = source_text.encode("utf-8")
+    raw_lines = source_text.splitlines()
+    line_starts = _line_starts(source_text)
+    protected_types = _protected_collection_types(source_text)
+    struct_like_types = _struct_like_type_names(source_text, tree)
+    findings = []
+
+    for node in _walk(tree.root_node):
+        if not _is_function_parameter(node):
+            continue
+        if not _parameter_uses_struct_by_value(source, node, struct_like_types, protected_types):
+            continue
+
+        line_number, column = _line_column_for_offset(line_starts, node.start_byte)
+        raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+        if STRUCT_PARAM_BY_VALUE_RULE.name in _line_ignores(raw_line):
+            continue
+
+        findings.append(
+            Finding(
+                path=path,
+                line=line_number,
+                column=column,
+                rule=STRUCT_PARAM_BY_VALUE_RULE.name,
+                message=STRUCT_PARAM_BY_VALUE_RULE.message,
             )
         )
 
@@ -974,6 +1329,121 @@ def _lint_optional_result_internals(path: Path, source_text: str, tree) -> list[
     return findings
 
 
+def _lint_pointer_zero_comparisons(path: Path, source_text: str, tree) -> list[Finding]:
+    if _is_allowed(NO_NULL_RULE, path):
+        return []
+
+    source = source_text.encode("utf-8")
+    raw_lines = source_text.splitlines()
+    line_starts = _line_starts(source_text)
+    findings = []
+
+    for node in _walk(tree.root_node):
+        if node.type != "binary_expression":
+            continue
+
+        children = [child for child in node.children if child.type not in {"==", "!="}]
+        operator = next((child for child in node.children if child.type in {"==", "!="}), None)
+        if operator is None or len(children) != 2:
+            continue
+
+        left, right = children
+        pointer_side = None
+        if _is_zero_literal(source, left):
+            pointer_side = right
+        elif _is_zero_literal(source, right):
+            pointer_side = left
+        else:
+            continue
+
+        symbols = _scoped_symbol_table(source, tree, node, lambda type_name: True)
+        identifier = _comparison_identifier_name(source, pointer_side)
+        if identifier is None or identifier not in symbols or not _is_pointer_type(symbols[identifier]):
+            continue
+
+        line_number, column = _line_column_for_offset(line_starts, node.start_byte)
+        raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+        if NO_NULL_RULE.name in _line_ignores(raw_line):
+            continue
+
+        findings.append(
+            Finding(
+                path=path,
+                line=line_number,
+                column=column,
+                rule=NO_NULL_RULE.name,
+                message=NO_NULL_RULE.message,
+            )
+        )
+
+    return findings
+
+
+def _initializer_pair_parts(source: bytes, node):
+    field_name = None
+    value = None
+
+    for child in node.children:
+        if child.type == "field_designator":
+            field_identifier = next((grandchild for grandchild in child.children if grandchild.type == "field_identifier"), None)
+            if field_identifier is not None:
+                field_name = _node_text(source, field_identifier)
+            continue
+        if child.type not in {"=", ","} and field_name is not None:
+            value = child
+
+    return field_name, value
+
+
+def _lint_zero_null_initializers(path: Path, source_text: str, tree) -> list[Finding]:
+    if _is_allowed(NO_NULL_RULE, path):
+        return []
+
+    source = source_text.encode("utf-8")
+    raw_lines = source_text.splitlines()
+    line_starts = _line_starts(source_text)
+    struct_fields = _struct_field_type_table(source, tree)
+    findings = []
+
+    for node in _walk(tree.root_node):
+        if node.type != "compound_literal_expression":
+            continue
+
+        type_name = _compound_literal_type_name(source, node)
+        fields = struct_fields.get(type_name)
+        if fields is None:
+            continue
+
+        for initializer_pair in _walk(node):
+            if initializer_pair.type != "initializer_pair":
+                continue
+
+            field_name, value = _initializer_pair_parts(source, initializer_pair)
+            if field_name is None or value is None:
+                continue
+            if not _is_zero_literal(source, value):
+                continue
+            if not _is_nullish_storage_type(fields.get(field_name, "")):
+                continue
+
+            line_number, column = _line_column_for_offset(line_starts, initializer_pair.start_byte)
+            raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+            if NO_NULL_RULE.name in _line_ignores(raw_line):
+                continue
+
+            findings.append(
+                Finding(
+                    path=path,
+                    line=line_number,
+                    column=column,
+                    rule=NO_NULL_RULE.name,
+                    message=NO_NULL_RULE.message,
+                )
+            )
+
+    return findings
+
+
 def _sanitise_source(source: str) -> list[str]:
     result = []
     in_block_comment = False
@@ -1277,6 +1747,8 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
     checks = (
         ("match_result", success_result_branches, error_result_branches),
         ("match_optional", some_optional_branches, none_optional_branches),
+        ("match_find_result", some_optional_branches, none_optional_branches),
+        ("match_find_result_ptr", some_optional_branches, none_optional_branches),
     )
     for macro_name, success_branches, error_branches in checks:
         for offset, args_text in _iter_macro_calls(clean_source, macro_name):
@@ -1392,6 +1864,40 @@ def _lint_block_macro_semicolons(path: Path, source: str) -> list[Finding]:
     return findings
 
 
+def _lint_find_result_matching(path: Path, source: str) -> list[Finding]:
+    if _is_allowed(FIND_RESULT_MATCHER_RULE, path):
+        return []
+
+    clean_source = "\n".join(_sanitise_source(source))
+    raw_lines = source.splitlines()
+    line_starts = _line_starts(clean_source)
+    findings = []
+
+    for offset, args_text in _iter_macro_calls(clean_source, "match_optional"):
+        args = _split_macro_args(args_text)
+        if len(args) != 4:
+            continue
+        if not re.search(r"\b[A-Za-z_][A-Za-z0-9_]*__FindResult\b", args[0]):
+            continue
+
+        line_number, column = _line_column_for_offset(line_starts, offset)
+        raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+        if FIND_RESULT_MATCHER_RULE.name in _line_ignores(raw_line):
+            continue
+
+        findings.append(
+            Finding(
+                path=path,
+                line=line_number,
+                column=column,
+                rule=FIND_RESULT_MATCHER_RULE.name,
+                message=FIND_RESULT_MATCHER_RULE.message,
+            )
+        )
+
+    return findings
+
+
 def lint_source(path: Path, source: str, tree=None) -> list[Finding]:
     raw_lines = source.splitlines()
     clean_lines = _sanitise_source(source)
@@ -1425,10 +1931,16 @@ def lint_source(path: Path, source: str, tree=None) -> list[Finding]:
     findings.extend(_lint_match_branch_macros(path, source))
     findings.extend(_lint_critical_section_control_flow(path, source))
     findings.extend(_lint_block_macro_semicolons(path, source))
+    findings.extend(_lint_find_result_matching(path, source))
 
     if tree is not None:
         findings.extend(_lint_constructor_required(path, source, tree))
         findings.extend(_lint_member_first_arg_self(path, source, tree))
+        findings.extend(_lint_optional_result_pointer_params(path, source, tree))
+        findings.extend(_lint_raw_struct_pointers(path, source, tree))
+        findings.extend(_lint_struct_params_by_value(path, source, tree))
+        findings.extend(_lint_pointer_zero_comparisons(path, source, tree))
+        findings.extend(_lint_zero_null_initializers(path, source, tree))
         findings.extend(_lint_optional_result_internals(path, source, tree))
         findings.extend(_lint_collection_internals(path, source, tree))
 

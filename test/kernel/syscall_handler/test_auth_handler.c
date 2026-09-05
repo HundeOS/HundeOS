@@ -19,19 +19,25 @@ void tearDown(void)
 
 void test_auth_authenticates_root_and_issues_ticket(void)
 {
-    match_result(AuthTicketID, Auth__authenticate(&kernel->auth, process, bstring("root"), bstring("root")), success(ticket_id) { TEST_ASSERT_GREATER_THAN(AUTH_NO_TICKET, ticket_id); }, error_test_fail());
+    BString username = bstring("root");
+    BString password = bstring("root");
+    match_result(AuthTicketID, Auth__authenticate(&kernel->auth, process, &bstr("root"), &bstr("root")), success(ticket_id) { TEST_ASSERT_GREATER_THAN(AUTH_NO_TICKET, ticket_id); }, error_test_fail());
 }
 
 void test_auth_rejects_invalid_credentials(void)
 {
-    match_result(AuthTicketID, Auth__authenticate(&kernel->auth, process, bstring("root"), bstring("bad")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(AUTH_INVALID_CREDENTIALS, code); });
+    BString username = bstring("root");
+    BString password = bstring("bad");
+    match_result(AuthTicketID, Auth__authenticate(&kernel->auth, process, &bstr("root"), &bstr("bad")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(AUTH_INVALID_CREDENTIALS, code); });
 }
 
 void test_auth_consumes_ticket_once(void)
 {
+    BString username = bstring("hund");
+    BString password = bstring("hund");
     AuthTicketID ticket_id = result_unwrap(
         AuthTicketID,
-        Auth__authenticate(&kernel->auth, process, bstring("hund"), bstring("hund")),
+        Auth__authenticate(&kernel->auth, process, &bstr("hund"), &bstr("hund")),
         AUTH_NO_TICKET
     );
 
@@ -45,7 +51,7 @@ void test_auth_rejects_ticket_for_different_process(void)
     ProcessPtr other_process = dummy_process(78, 0, PROC_STATE_RUNNING);
     AuthTicketID ticket_id = result_unwrap(
         AuthTicketID,
-        Auth__authenticate(&kernel->auth, process, bstring("user"), bstring("user")),
+        Auth__authenticate(&kernel->auth, process, &bstr("user"), &bstr("user")),
         AUTH_NO_TICKET
     );
 

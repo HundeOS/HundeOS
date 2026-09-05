@@ -5,7 +5,7 @@
 LinkedListBodyDefine(BlockedParkedOperations);
 
 static ParkedOperation ParkedOperation__new(
-    KernelContextPtr kernel_context, Optional(Continuation) continuation,
+    KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation,
     ParkReason park_reason, bool owns_kernel_context
 )
 {
@@ -13,7 +13,7 @@ static ParkedOperation ParkedOperation__new(
         .kernel_context = kernel_context,
         .owns_kernel_context = owns_kernel_context,
         .ready = false,
-        .continuation = continuation,
+        .continuation = *continuation,
         .operation_key = None(OperationKey),
         .park_reason = park_reason,
         .blocked_operations = BlockedParkedOperations__new(),
@@ -23,7 +23,7 @@ static ParkedOperation ParkedOperation__new(
 }
 
 ParkedOperationPtr ParkedOperation__heap_new(
-    KernelContextPtr kernel_context, Optional(Continuation) continuation, ParkReason park_reason
+    KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation, ParkReason park_reason
 )
 {
     return ParkedOperation__heap_new_with_context_ownership(
@@ -32,7 +32,7 @@ ParkedOperationPtr ParkedOperation__heap_new(
 }
 
 ParkedOperationPtr ParkedOperation__heap_new_with_context_ownership(
-    KernelContextPtr kernel_context, Optional(Continuation) continuation,
+    KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation,
     ParkReason park_reason, bool owns_kernel_context
 )
 {

@@ -2,9 +2,10 @@
 
 #include <string.h>
 
-#include "../../sys/debug.h"
-#include "../../sys/service.h"
-#include "../../types/fixed_array.h"
+#include "sys/debug.h"
+#include "sys/service.h"
+#include "async_io/async_io.h"
+#include "types/fixed_array.h"
 #include "../../user.h"
 #include "../../../common/types/bstring_additional_types.h"
 
@@ -58,11 +59,11 @@ OptionalDef(Fat32fsDirectoryEntry);
 ResultDef(uint32_t);
 
 static Fat32fsDirectoryEntry Fat32fsDirectoryEntry__new(
-    BString name, uint8_t attributes, uint32_t first_cluster, uint32_t size
+    ConstBStringPtr name, uint8_t attributes, uint32_t first_cluster, uint32_t size
 )
 {
     return (Fat32fsDirectoryEntry) {
-        .name = name,
+        .name = *name,
         .attributes = attributes,
         .first_cluster = first_cluster,
         .size = size,
@@ -129,11 +130,11 @@ Fat32fsResolvedParent;
 
 ResultDef(Fat32fsResolvedParent);
 
-static Fat32fsResolvedParent Fat32fsResolvedParent__new(uint32_t parent_cluster, BString leaf_name)
+static Fat32fsResolvedParent Fat32fsResolvedParent__new(uint32_t parent_cluster, ConstBStringPtr leaf_name)
 {
     return (Fat32fsResolvedParent) {
         .parent_cluster = parent_cluster,
-        .leaf_name = leaf_name,
+        .leaf_name = *leaf_name,
     };
 }
 
@@ -163,15 +164,36 @@ typedef struct Fat32fsVolume
     uint32_t data_start_sector;
     uint32_t root_cluster;
     uint32_t cluster_count;
+    bool use_async_io;
 }
 Fat32fsVolume;
 
 typedef Fat32fsVolume * Fat32fsVolumePtr;
 
-static Fat32fsVolume Fat32fsVolume__new(BString device_path)
+typedef struct Fat32fsServiceContext
+{
+    Fat32fsVolume volume;
+    BString filesystem_type;
+    BString mountpoint;
+}
+Fat32fsServiceContext;
+
+typedef Fat32fsServiceContext * Fat32fsServiceContextPtr;
+
+static Fat32fsVolume Fat32fsVolume__new(ConstBStringPtr device_path)
 {
     return (Fat32fsVolume) {
-        .device_path = device_path,
+        .device_path = *device_path,
+        .use_async_io = false,
+    };
+}
+
+static Fat32fsServiceContext Fat32fsServiceContext__new(ConstBStringPtr device_path, ConstBStringPtr mountpoint)
+{
+    return (Fat32fsServiceContext) {
+        .volume = Fat32fsVolume__new(device_path),
+        .filesystem_type = bstr("fat32"),
+        .mountpoint = *mountpoint,
     };
 }
 
@@ -215,34 +237,84 @@ static void Fat32fs__write_u32(uint8_t * data, size_t offset, uint32_t value)
 static Result(Fat32fsSectorData) Fat32fs__read_sector(Fat32fsVolumePtr self, uint32_t sector)
 {
     Fat32fsSectorData target;
-    ServiceBlockReadResult result = service_block_read_device(
+    if (!self->use_async_io)
+    {
+        ServiceBlockReadResult result = service_block_read_device(
+            &self->device_path,
+            sector,
+            1,
+            (Address) &target.data,
+            FAT32FS_BYTES_PER_SECTOR
+        );
+        if (result != 1)
+        {
+            return Error(Fat32fsSectorData, fat32fs_io_error, FAT32FS_IO_ERROR);
+        }
+
+        return Success(Fat32fsSectorData, target);
+    }
+
+    match_result(ServiceBlockReadResult, IO__block_read(
         &self->device_path,
         sector,
         1,
         (Address) &target.data,
         FAT32FS_BYTES_PER_SECTOR
+    ),
+        success(result)
+        {
+            if (result != 1)
+            {
+                return Error(Fat32fsSectorData, fat32fs_io_error, FAT32FS_IO_ERROR);
+            }
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsSectorData, message, code);
+        }
     );
-    if (result != 1)
-    {
-        return Error(Fat32fsSectorData, fat32fs_io_error, FAT32FS_IO_ERROR);
-    }
 
     return Success(Fat32fsSectorData, target);
 }
 
 static Result(Fat32fsCode) Fat32fs__write_sector(Fat32fsVolumePtr self, uint32_t sector, Fat32fsSectorPtr source)
 {
-    ServiceBlockReadResult result = service_block_write_device(
+    if (!self->use_async_io)
+    {
+        ServiceBlockReadResult result = service_block_write_device(
+            &self->device_path,
+            sector,
+            1,
+            (Address) source,
+            FAT32FS_BYTES_PER_SECTOR
+        );
+        if (result != 1)
+        {
+            return Error(Fat32fsCode, fat32fs_io_error, FAT32FS_IO_ERROR);
+        }
+
+        return Success(Fat32fsCode, FAT32FS_OK);
+    }
+
+    match_result(ServiceBlockReadResult, IO__block_write(
         &self->device_path,
         sector,
         1,
         (Address) source,
         FAT32FS_BYTES_PER_SECTOR
+    ),
+        success(result)
+        {
+            if (result != 1)
+            {
+                return Error(Fat32fsCode, fat32fs_io_error, FAT32FS_IO_ERROR);
+            }
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
-    if (result != 1)
-    {
-        return Error(Fat32fsCode, fat32fs_io_error, FAT32FS_IO_ERROR);
-    }
 
     return Success(Fat32fsCode, FAT32FS_OK);
 }
@@ -574,7 +646,7 @@ static Result(Fat32fsCode) Fat32fsVolume__free_cluster_chain(Fat32fsVolumePtr se
 }
 
 static Result(Fat32fsDirectoryEntryLocation) Fat32fsVolume__find_directory_entry(
-    Fat32fsVolumePtr self, uint32_t directory_cluster, BString name
+    Fat32fsVolumePtr self, uint32_t directory_cluster, ConstBStringPtr name
 )
 {
     uint32_t directory_sector_start = Fat32fsVolume__cluster_sector(self, directory_cluster);
@@ -613,7 +685,7 @@ static Result(Fat32fsDirectoryEntryLocation) Fat32fsVolume__find_directory_entry
             }
 
             BString entry_name = Fat32fs__entry_name(&directory_sector.data[entry_offset], &lfn_name, lfn_checksum, lfn_valid);
-            if (Fat32fs__names_equal(&entry_name, &name))
+            if (Fat32fs__names_equal(&entry_name, name))
             {
                 Fat32fsDirectoryEntryLocation location = Fat32fsDirectoryEntryLocation__new(
                     directory_sector_start + relative_sector,
@@ -696,8 +768,9 @@ static Result(Fat32fsDirectoryEntries) Fat32fsVolume__list_directory(Fat32fsVolu
                 continue;
             }
 
+            BString entry_name = Fat32fs__entry_name(&sector.data[offset], &lfn_name, lfn_checksum, lfn_valid);
             Fat32fsDirectoryEntry entry = Fat32fsDirectoryEntry__new(
-                Fat32fs__entry_name(&sector.data[offset], &lfn_name, lfn_checksum, lfn_valid),
+                &entry_name,
                 Fat32fsDirectorySector__entry_attributes(&sector, offset),
                 Fat32fs__read_directory_cluster(&sector.data[offset]),
                 Fat32fs__read_u32(sector.data, offset + 28)
@@ -726,7 +799,8 @@ static Result(Fat32fsResolvedParent) Fat32fsVolume__resolve_parent(Fat32fsVolume
         return Error(Fat32fsResolvedParent, fat32fs_invalid_path, FAT32FS_INVALID_PATH);
     }
 
-    Fat32fsResolvedParent resolved = Fat32fsResolvedParent__new(self->root_cluster, empty_bstr());
+    BString empty_name = empty_bstr();
+    Fat32fsResolvedParent resolved = Fat32fsResolvedParent__new(self->root_cluster, &empty_name);
     match_optional(BString, BStringArray__at(&segments, segment_count - 1),
         some(segment) { resolved.leaf_name = segment; },
         none() { return Error(Fat32fsResolvedParent, fat32fs_invalid_path, FAT32FS_INVALID_PATH); }
@@ -742,7 +816,7 @@ static Result(Fat32fsResolvedParent) Fat32fsVolume__resolve_parent(Fat32fsVolume
 
         Fat32fsDirectoryEntryLocation location;
         match_result(Fat32fsDirectoryEntryLocation, Fat32fsVolume__find_directory_entry(
-            self, resolved.parent_cluster, segment
+            self, resolved.parent_cluster, &segment
         ),
             success(found) { location = found; },
             error(code, message) { return Error(Fat32fsResolvedParent, message, code); }
@@ -774,7 +848,7 @@ static Result(Fat32fsDirectoryEntryLocation) Fat32fsVolume__entry_at_path(Fat32f
     match_result(Fat32fsResolvedParent, Fat32fsVolume__resolve_parent(self, path),
         success(resolved)
         {
-            return Fat32fsVolume__find_directory_entry(self, resolved.parent_cluster, resolved.leaf_name);
+            return Fat32fsVolume__find_directory_entry(self, resolved.parent_cluster, &resolved.leaf_name);
         },
         error(code, message) { return Error(Fat32fsDirectoryEntryLocation, message, code); }
     );
@@ -860,7 +934,7 @@ static Result(uint32_t) Fat32fsVolume__create_file_at_path(
     uint32_t first_cluster = 0;
     Fat32fsDirectoryEntryLocation entry_location = Fat32fsDirectoryEntryLocation__new(0, 0);
     match_result(Fat32fsDirectoryEntryLocation, Fat32fsVolume__find_directory_entry(
-        self, resolved.parent_cluster, resolved.leaf_name
+        self, resolved.parent_cluster, &resolved.leaf_name
     ),
         success(existing_location)
         {
@@ -957,7 +1031,7 @@ static Result(Fat32fsCode) Fat32fsVolume__create_directory_at_path(Fat32fsVolume
     }
 
     match_result(Fat32fsDirectoryEntryLocation, Fat32fsVolume__find_directory_entry(
-        self, resolved.parent_cluster, resolved.leaf_name
+        self, resolved.parent_cluster, &resolved.leaf_name
     ),
         success(existing) { return Error(Fat32fsCode, fat32fs_already_exists, FAT32FS_ALREADY_EXISTS); },
         error(code, message)
@@ -1005,7 +1079,7 @@ static Result(Fat32fsCode) Fat32fsVolume__create_directory_at_path(Fat32fsVolume
 }
 
 static Result(Fat32fsCode) Fat32fsVolume__remove_entry_in_directory(
-    Fat32fsVolumePtr self, uint32_t directory_cluster, BString name, Flags flags
+    Fat32fsVolumePtr self, uint32_t directory_cluster, ConstBStringPtr name, Flags flags
 );
 
 static Result(Fat32fsCode) Fat32fsVolume__remove_directory_children(Fat32fsVolumePtr self, uint32_t directory_cluster)
@@ -1019,7 +1093,7 @@ static Result(Fat32fsCode) Fat32fsVolume__remove_directory_children(Fat32fsVolum
     for_each_fa(Fat32fsDirectoryEntries, entries, index, entry,
     {
         match_result(Fat32fsCode, Fat32fsVolume__remove_entry_in_directory(
-            self, directory_cluster, entry.name, IO_REMOVE_RECURSIVE
+            self, directory_cluster, &entry.name, IO_REMOVE_RECURSIVE
         ),
             success_do_nothing(),
             error(code, message) { return Error(Fat32fsCode, message, code); }
@@ -1030,7 +1104,7 @@ static Result(Fat32fsCode) Fat32fsVolume__remove_directory_children(Fat32fsVolum
 }
 
 static Result(Fat32fsCode) Fat32fsVolume__remove_entry_in_directory(
-    Fat32fsVolumePtr self, uint32_t directory_cluster, BString name, Flags flags
+    Fat32fsVolumePtr self, uint32_t directory_cluster, ConstBStringPtr name, Flags flags
 )
 {
     Fat32fsDirectoryEntryLocation entry_location;
@@ -1084,7 +1158,7 @@ static Result(Fat32fsCode) Fat32fsVolume__remove_at_path(Fat32fsVolumePtr self, 
     match_result(Fat32fsResolvedParent, Fat32fsVolume__resolve_parent(self, path),
         success(resolved)
         {
-            return Fat32fsVolume__remove_entry_in_directory(self, resolved.parent_cluster, resolved.leaf_name, flags);
+            return Fat32fsVolume__remove_entry_in_directory(self, resolved.parent_cluster, &resolved.leaf_name, flags);
         },
         error(code, message) { return Error(Fat32fsCode, message, code); }
     );
@@ -1157,8 +1231,8 @@ static ServiceCode Fat32fs__handle_open(Fat32fsVolumePtr volume, ServiceFilesyst
                     request->request_id, SERVICE_OK, 0, IO_MODE_TYPE_FILE | 0644, 0, blocks
                 );
             }
-            return service_filesystem_complete_open(
-                request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0, 0
+            return service_filesystem_complete_open_without_blocks(
+                request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0
             );
         }
     );
@@ -1166,16 +1240,16 @@ static ServiceCode Fat32fs__handle_open(Fat32fsVolumePtr volume, ServiceFilesyst
         success(data) { sector = data; },
         error(code, message)
         {
-            return service_filesystem_complete_open(
-                request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0, 0
+            return service_filesystem_complete_open_without_blocks(
+                request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0
             );
         }
     );
 
     if (Fat32fsDirectorySector__entry_is_directory(&sector, location.offset))
     {
-        return service_filesystem_complete_open(
-            request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0, 0
+        return service_filesystem_complete_open_without_blocks(
+            request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0
         );
     }
 
@@ -1185,8 +1259,8 @@ static ServiceCode Fat32fs__handle_open(Fat32fsVolumePtr volume, ServiceFilesyst
         success_do_nothing(),
         error(code, message)
         {
-            return service_filesystem_complete_open(
-                request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0, 0
+            return service_filesystem_complete_open_without_blocks(
+                request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0
             );
         }
     );
@@ -1244,8 +1318,8 @@ static ServiceCode Fat32fs__handle_write(Fat32fsVolumePtr volume, ServiceFilesys
         success(cluster) { first_cluster = cluster; },
         error(code, message)
         {
-            return service_filesystem_complete_open(
-                request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0, 0
+            return service_filesystem_complete_open_without_blocks(
+                request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0
             );
         }
     );
@@ -1349,6 +1423,75 @@ static void Fat32fs__handle_request(Fat32fsVolumePtr volume, uint64_t request_id
     service_filesystem_complete(request.request_id, SERVICE_OPERATION_NOT_SUPPORTED, 0);
 }
 
+static Result(AsyncIOCode) Fat32fs__register_service(Anything service_context)
+{
+    Fat32fsServiceContextPtr context = (Fat32fsServiceContextPtr) service_context;
+    DRIVER_DEBUG(
+        "fat32fs: starting device=%B mountpoint=%B\n",
+        &context->volume.device_path,
+        &context->mountpoint
+    );
+    if (!service_ok(service_become_service()))
+    {
+        DRIVER_DEBUG("fat32fs: service registration failed\n");
+        return Error(AsyncIOCode, fat32fs_io_error, ASYNC_IO_REGISTER_FAILED);
+    }
+
+    return Success(AsyncIOCode, ASYNC_IO_OK);
+}
+
+static Result(FiberCode) Fat32fs__init_service(FiberPtr self, Anything service_context)
+{
+    Fat32fsServiceContextPtr context = (Fat32fsServiceContextPtr) service_context;
+    context->volume.use_async_io = true;
+
+    match_result(Fat32fsCode, Fat32fsVolume__mount(&context->volume),
+        success_do_nothing(),
+        error(code, message)
+        {
+            DRIVER_DEBUG(
+                "fat32fs: mount failed device=%B mountpoint=%B error=%B code=%i\n",
+                &context->volume.device_path,
+                &context->mountpoint,
+                &message,
+                (int) code
+            );
+            return Error(FiberCode, message, FIBER_INVALID_STATE);
+        }
+    );
+
+    ServiceCode register_status = service_register_filesystem(
+        &context->volume.device_path,
+        &context->filesystem_type,
+        &context->mountpoint
+    );
+    if (!service_ok(register_status))
+    {
+        DRIVER_DEBUG("fat32fs: filesystem registration failed status=%i\n", (int) register_status);
+        return Error(FiberCode, fat32fs_io_error, FIBER_INVALID_STATE);
+    }
+
+    ServiceCode ready_status = service_publish_ready(&context->mountpoint);
+    if (!service_ok(ready_status))
+    {
+        DRIVER_DEBUG("fat32fs: ready publish failed status=%i\n", (int) ready_status);
+        return Error(FiberCode, fat32fs_io_error, FIBER_INVALID_STATE);
+    }
+
+    return Success(FiberCode, FIBER_OK);
+}
+
+static Result(FiberCode) Fat32fs__request_service(FiberPtr self, Anything service_context, ServiceEvent request)
+{
+    Fat32fsServiceContextPtr context = (Fat32fsServiceContextPtr) service_context;
+    if (request.type == SERVICE_EVENT_FILESYSTEM_IO)
+    {
+        Fat32fs__handle_request(&context->volume, request.source);
+    }
+
+    return Success(FiberCode, FIBER_OK);
+}
+
 int FAT32FS_ENTRYPOINT(int argc, char ** argv)
 {
     if (argc != FAT32FS_ARG_COUNT)
@@ -1357,54 +1500,28 @@ int FAT32FS_ENTRYPOINT(int argc, char ** argv)
         return 1;
     }
 
-    BString filesystem_type = bstr("fat32");
-    Fat32fsVolume volume = Fat32fsVolume__new(BString__new(argv[1]));
+    BString device_path = BString__new(argv[1]);
     BString mountpoint = BString__new(argv[2]);
+    Fat32fsServiceContext context = Fat32fsServiceContext__new(&device_path, &mountpoint);
+    AsyncIO async_io = AsyncIO__new((Anything) &context, Fat32fs__request_service);
 
-    DRIVER_DEBUG("fat32fs: starting device=%B mountpoint=%B\n", &volume.device_path, &mountpoint);
-    if (!service_ok(service_become_service()))
-    {
-        DRIVER_DEBUG("fat32fs: service registration failed\n");
-        return 1;
-    }
-
-    match_result(Fat32fsCode, Fat32fsVolume__mount(&volume),
-        success_do_nothing(),
+    match_result(AsyncIOCode, AsyncIO__start_with_init(
+        &async_io,
+        Fat32fs__register_service,
+        (Anything) &context,
+        Fat32fs__init_service,
+        Fat32fs__request_service
+    ),
+        success(code)
+        {
+            return code == ASYNC_IO_WAIT_COMPLETE ? 0 : 1;
+        },
         error(code, message)
         {
-            DRIVER_DEBUG(
-                "fat32fs: mount failed device=%B mountpoint=%B error=%B code=%i\n",
-                &volume.device_path,
-                &mountpoint,
-                &message,
-                (int) code
-            );
+            DRIVER_DEBUG("fat32fs: async io failed error=%B code=%i\n", &message, (int) code);
             return 1;
         }
     );
 
-    ServiceCode register_status = service_register_filesystem(&volume.device_path, &filesystem_type, &mountpoint);
-    if (!service_ok(register_status))
-    {
-        DRIVER_DEBUG("fat32fs: filesystem registration failed status=%i\n", (int) register_status);
-        return 1;
-    }
-
-    ServiceCode ready_status = service_publish_ready(&mountpoint);
-    if (!service_ok(ready_status))
-    {
-        DRIVER_DEBUG("fat32fs: ready publish failed status=%i\n", (int) ready_status);
-        return 1;
-    }
-
-    ServiceEvent event;
-    for (ServiceCode status = service_wait(&event); service_alive(status); status = service_wait(&event))
-    {
-        if (service_ok(status) && event.type == SERVICE_EVENT_FILESYSTEM_IO)
-        {
-            Fat32fs__handle_request(&volume, event.source);
-        }
-    }
-
-    return 0;
+    return 1;
 }

@@ -1,9 +1,9 @@
 #define DRIVER_LOG_TAG "VIDEO-TERM"
 
-#include "../../sys/debug.h"
-#include "../../sys/framebuffer_config.h"
-#include "../../sys/io_server.h"
-#include "../../sys/service.h"
+#include "sys/debug.h"
+#include "sys/framebuffer_config.h"
+#include "sys/io_server.h"
+#include "sys/service.h"
 #include "types/optional.h"
 #include "emoji_atlas.h"
 #include "spleen_font.h"
@@ -1047,8 +1047,7 @@ int VIDEO_TERM_ENTRYPOINT(void)
 
     VideoTerm terminal = VideoTerm__new(config, driver_ptr(framebuffer_mapping), mapped_size(framebuffer_mapping));
 
-    BString video_path = bstr(VIDEO_TERM_PATH);
-    IOHandle video = io_server_register(&video_path, IO_SERVER_WRITE);
+    IOHandle video = io_server_register(&bstr(VIDEO_TERM_PATH), IO_SERVER_WRITE);
     if (video < 0)
     {
         DRIVER_DEBUG("video_term: register error %i\n", (int) video);

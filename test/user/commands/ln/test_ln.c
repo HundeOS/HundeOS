@@ -4,7 +4,7 @@
 
 #include "unity.h"
 
-#include "../../../../user/sys/syscall.h"
+#include "../../../../user/lib/sys/syscall.h"
 #include "../../../../common_includes/syscalls/io.h"
 
 static IOStatus fake_result;
@@ -16,7 +16,7 @@ static uint64_t output_position;
 
 #define main ln_main_under_test
 #include "../../../../user/commands/ln/main.c"
-#include "../../../../user/sys/io.c"
+#include "../../../../user/lib/sys/io.c"
 
 void setUp(void)
 {

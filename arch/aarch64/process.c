@@ -12,6 +12,10 @@
 #include <stdint.h>
 
 
+static BString invalid_context_format = bstr(
+    "Invalid userspace context pid=%i name=%s context=%p elr=%p sp=%p spsr=%p page_table=%p\n"
+);
+
 /* Build SPSR for entering EL0t.
  *  M[3:0]=0000 (EL0t)
  *  DAIF: 0 = unmask (enable) Debug/SError/IRQ/FIQ on entry
@@ -80,6 +84,11 @@ ProcessContextPtr ProcessContext__init(
     return context;
 }
 
+void ProcessContext__dispose(ProcessContextPtr self)
+{
+    Kernel__free(addr(self));
+}
+
 extern void asm_switch_context(ProcessContextPtr context, Address pagetable);
 extern void asm_switch_kernel_context(ProcessContextPtr context, Address pagetable);
 
@@ -112,6 +121,27 @@ void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
     }
 }
 
+static void Process__assert_context_ready(ProcessPtr self)
+{
+    ProcessContextPtr context = self->context;
+    uint64_t mode = context->spsr & 0xf;
+
+    if (context->elr == 0 || context->sp == 0 || mode != 0)
+    {
+        BString message = BString__sprintf(
+            &invalid_context_format,
+            self->pid,
+            cstr(self->name),
+            context,
+            context->elr,
+            context->sp,
+            context->spsr,
+            paddr(ProcessPageTable__root(&self->page_table))
+        );
+        Kernel__panic(cstr(message), context);
+    }
+}
+
 __attribute__((noreturn))
 void Process__context_switch(ProcessPtr self)
 {
@@ -121,7 +151,7 @@ void Process__context_switch(ProcessPtr self)
     __d_printf(PROCESS_SWITCH, "Process context switch name=%s sp=%p tbbr0=%p spsr_el1=%p x0=%p x1=%p x8=%p elr=%p\n",
         name,
         self->context->sp,
-        paddr(self->page_table),
+        paddr(ProcessPageTable__root(&self->page_table)),
         self->context->spsr,
         self->context->x[0],
         self->context->x[1],
@@ -150,18 +180,19 @@ void Process__context_switch(ProcessPtr self)
         context->elr,
         context->sp,
         context->x[8],
-        paddr(self->page_table)
+        paddr(ProcessPageTable__root(&self->page_table))
     );
+    Process__assert_context_ready(self);
     ProcessContext__assert_user_irqs_unmasked(context);
     __d_println(PROCESS_SWITCH, "Irqs OK");
-    asm_switch_context(context, paddr(self->page_table));
+    asm_switch_context(context, paddr(ProcessPageTable__root(&self->page_table)));
     __builtin_unreachable();
 }
 
 void Process__activate_address_space(ProcessPtr self)
 {
     ProcessContextPtr context = self->context;
-    asm_switch_kernel_context(context, paddr(self->page_table));
+    asm_switch_kernel_context(context, paddr(ProcessPageTable__root(&self->page_table)));
 }
 
 void Process__save_context(ProcessPtr self, ProcessContextPtr context)

@@ -70,6 +70,27 @@ bool UserAllocation__equals(UserAllocationPtr self, UserAllocationPtr other)
     return self->address.virtual_addr == other->address.virtual_addr;
 }
 
+static const char * UserAllocationType__name(UserAllocationType type)
+{
+    switch (type)
+    {
+        case USER_ALLOCATION_ELF:
+            return "ELF";
+        case USER_ALLOCATION_STACK:
+            return "STACK";
+        case USER_ALLOCATION_HEAP:
+            return "HEAP";
+        case USER_ALLOCATION_DYNAMIC:
+            return "DYNAMIC";
+        case USER_ALLOCATION_MMIO:
+            return "MMIO";
+        case USER_ALLOCATION_SHARED:
+            return "SHARED";
+    }
+
+    return "UNKNOWN";
+}
+
 bool ProcessFileDescriptor__equals(ProcessFileDescriptorPtr self, ProcessFileDescriptorPtr other)
 {
     return self->fd == other->fd;
@@ -170,10 +191,10 @@ static bool file_descriptor_matches_fd(ProcessFileDescriptorPtr descriptor, void
     return descriptor->fd == fd;
 }
 
-static ProcessFileDescriptors Process__inherit_file_descriptors(Optional(ProcessPtr) parent)
+static ProcessFileDescriptors Process__inherit_file_descriptors(OptionalPtr(ProcessPtr) parent)
 {
     ProcessFileDescriptors descriptors = ProcessFileDescriptors__new();
-    match_optional(ProcessPtr, parent,
+    match_optional(ProcessPtr, *parent,
         some(parent_process)
         {
             for_each_ll(ProcessFileDescriptors, parent_process->file_descriptors, descriptor,
@@ -188,9 +209,9 @@ static ProcessFileDescriptors Process__inherit_file_descriptors(Optional(Process
     return descriptors;
 }
 
-static FileDescriptor Process__inherit_next_file_descriptor(Optional(ProcessPtr) parent)
+static FileDescriptor Process__inherit_next_file_descriptor(OptionalPtr(ProcessPtr) parent)
 {
-    match_optional(ProcessPtr, parent,
+    match_optional(ProcessPtr, *parent,
         some(parent_process) { return parent_process->next_file_descriptor; },
         none_do_nothing()
     );
@@ -211,7 +232,7 @@ static size_t Process__copy_arg(DataPtr target, BStringPtr arg)
 
 static Result(Address) Process__setup_args(
     ProcessPtr self,
-    ProcessArguments arguments,
+    ConstProcessArgumentsPtr arguments,
     uint64_t * argc
 )
 {
@@ -221,11 +242,12 @@ static Result(Address) Process__setup_args(
             Address user_base = args_page.virtual_addr;
             Address kernel_base = args_page.kernel_addr.virtual_addr;
             Address * argv = ptr(kernel_base, Address);
+            ProcessArguments arguments_copy = *arguments;
 
-            *argc = arguments.len;
+            *argc = ProcessArguments__len(&arguments_copy);
 
             size_t cursor = sizeof(Address) * (*argc + 1);
-            for_each_fa(ProcessArguments, arguments, i, arg,
+            for_each_fa(ProcessArguments, arguments_copy, i, arg,
             {
                 if (cursor + (size_t) BString__length(&arg) + 1 > PAGE_SIZE)
                 {
@@ -246,12 +268,12 @@ static Result(Address) Process__setup_args(
 
 Result(ProcessPtr) Process__new(
     KernelPtr kernel,
-    BString name,
-    KernelAddress page_table,
-    UserAddress entry,
-    Stack stack,
-    Optional(ProcessPtr) parent,
-    ProcessArguments arguments
+    ConstBStringPtr name,
+    const ProcessPageTable * page_table,
+    const UserAddress * entry,
+    const Stack * stack,
+    OptionalPtr(ProcessPtr) parent,
+    ConstProcessArgumentsPtr arguments
 )
 {
     ProcessID pid;
@@ -262,15 +284,15 @@ Result(ProcessPtr) Process__new(
     ProcessPtr proc = ptr(Kernel__alloc_kernel(sizeof(Process)), Process);
     proc->lock = MUTEX_INIT;
     proc->kernel = kernel;
-    proc->entry_point = entry;
-    proc->page_table = page_table;
+    proc->entry_point = *entry;
+    proc->page_table = *page_table;
     proc->state = PROC_STATE_NEW;
     proc->pid = pid;
-    proc->stack = stack;
+    proc->stack = *stack;
     proc->last_tick = 0;
-    proc->name = name;
+    proc->name = *name;
     proc->parked_operations = ParkedOperations__new();
-    proc->parent = parent;
+    proc->parent = *parent;
     proc->heap_break = USER_HEAP_BASE;
     proc->heap_mapped_end = USER_HEAP_BASE;
     proc->allocation_next = USER_ALLOC_BASE;
@@ -287,7 +309,7 @@ Result(ProcessPtr) Process__new(
     proc->pending_signals = 0;
     proc->child_events = ProcessChildEvents__new();
 
-    match_optional(ProcessPtr, parent,
+    match_optional(ProcessPtr, *parent,
         some(parent_process) { Process__set_identity(proc, parent_process->user_id, parent_process->group_id, parent_process->capabilities); },
         none() { Process__set_root_identity(proc); }
     );
@@ -306,10 +328,11 @@ Result(ProcessPtr) Process__new(
                 proc->stack.top.virtual_addr,
                 argc,
                 argv,
-                entry.virtual_addr,
-                page_table.phys_addr
+                entry->virtual_addr,
+                ProcessPageTable__root(&proc->page_table).phys_addr
             );
-            proc->context = ProcessContext__init(kernel, proc->pid, &proc->stack, entry, page_table, argc, argv);
+            KernelAddress root = ProcessPageTable__root(&proc->page_table);
+            proc->context = ProcessContext__init(kernel, proc->pid, &proc->stack, *entry, root, argc, argv);
             __d_printf(
                 PROCESS,
                 "Process__new after context init pid=%i proc=%p context=%p\n",
@@ -408,7 +431,7 @@ Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self)
     return None(SchedulerPtr);
 }
 
-bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key)
+bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
 {
     critical_section(self->lock,
     {
@@ -422,7 +445,7 @@ bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, Optional(
                         continue;
                     }
 
-                    match_optional(OperationKey, operation_key,
+                    match_optional(OperationKey, *operation_key,
                         some(key)
                         {
                             match_optional(OperationKey, parked_operation->operation_key,
@@ -448,7 +471,10 @@ bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, Optional(
 }
 
 bool Process__mark_parked_operation_ready(
-    ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key, Optional(ReturnCode) return_code
+    ProcessPtr self,
+    ParkReason reason,
+    OptionalPtr(OperationKey) operation_key,
+    OptionalPtr(ReturnCode) return_code
 )
 {
     critical_section(self->lock,
@@ -463,7 +489,7 @@ bool Process__mark_parked_operation_ready(
                         continue;
                     }
 
-                    match_optional(OperationKey, operation_key,
+                    match_optional(OperationKey, *operation_key,
                         some(key)
                         {
                             match_optional(OperationKey, parked_operation->operation_key,
@@ -471,7 +497,7 @@ bool Process__mark_parked_operation_ready(
                                 {
                                     if (parked_key == key)
                                     {
-                                        parked_operation->return_code = return_code;
+                                        parked_operation->return_code = *return_code;
                                         ParkedOperation__mark_ready(parked_operation);
                                         cs_return true;
                                     }
@@ -481,7 +507,7 @@ bool Process__mark_parked_operation_ready(
                         },
                         none()
                         {
-                            parked_operation->return_code = return_code;
+                            parked_operation->return_code = *return_code;
                             ParkedOperation__mark_ready(parked_operation);
                             cs_return true;
                         }
@@ -626,6 +652,11 @@ Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr se
     return Success(ProcessSetupStatus, PROCESS_SETUP);
 }
 
+Result(KAllocCode) Process__dispose_page_table(ProcessPtr self)
+{
+    return ProcessPageTable__dispose(&self->page_table);
+}
+
 Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self)
 {
     match_optional(ProcessChildEvent, ProcessChildEvents__pop_front(&self->child_events),
@@ -636,25 +667,35 @@ Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self)
     return Error(ProcessChildEvent, bstring("Child event queue empty"), PROCESS_CHILD_EVENT_QUEUE_EMPTY);
 }
 
-Result(CollectionCode) Process__push_child_event(ProcessPtr self, ProcessChildEvent event)
+Result(CollectionCode) Process__push_child_event(ProcessPtr self, ConstProcessChildEventPtr event)
 {
-    return ProcessChildEvents__push(&self->child_events, event);
+    return ProcessChildEvents__push(&self->child_events, *event);
 }
 
-Result(ProcessPtr) Process__setup(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent)
+Result(ProcessPtr) Process__setup(KernelPtr kernel, const Elf * binary, OptionalPtr(ProcessPtr) parent)
 {
-    return Process__setup_with_args(kernel, binary, parent, ProcessArguments__new());
+    ProcessArguments arguments = ProcessArguments__new();
+    return Process__setup_with_args(kernel, binary, parent, &arguments);
 }
 
-Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments)
+Result(ProcessPtr) Process__setup_with_args(
+    KernelPtr kernel,
+    const Elf * binary,
+    OptionalPtr(ProcessPtr) parent,
+    ConstProcessArgumentsPtr arguments
+)
 {
     __d_println(PROCESS, "Process__spawn_from_elf");
     ExpandedSegmentArray expanded_elf = Elf__map(binary);
-    __d_printf(PROCESS, "ELF: %s %x %x\n", cstr(binary.name), binary.start, binary.end);
+    __d_printf(PROCESS, "ELF: %s %x %x\n", cstr(binary->name), binary->start, binary->end);
     __d_printf(PROCESS, "ELF mapped %i\n", ExpandedSegmentArray__len(&expanded_elf));
 
     __d_println(PROCESS, "Creating page table");
-    KernelAddress page_table = PageTable__new(kernel);
+    ProcessPageTable page_table;
+    match_result(ProcessPageTable, ProcessPageTable__new(kernel),
+        success(created_page_table) { page_table = created_page_table; },
+        error(code, message) { return Error(ProcessPtr, message, code); }
+    );
 
     __d_println(PROCESS, "Page table created");
 
@@ -662,23 +703,23 @@ Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Option
     {
         UserAddress addr = segment.address;
         __d_printf(MMU, "Mapping segment %i phys=%p, virt=%p\n", i, addr.kernel_addr.phys_addr, addr.virtual_addr);
-        PageTable__map(v_ptr(page_table, PageTable), kernel, segment.address, segment.size);
+        PageTable__map(&page_table, kernel, segment.address, segment.size);
     });
     __d_println(PROCESS, "Code mapped");
 
-    __d_printf(PROCESS, "Creating stack for %s\n", cstr(binary.name));
+    __d_printf(PROCESS, "Creating stack for %s\n", cstr(binary->name));
     Stack stack = Stack__new();
     __d_printf(
         PROCESS,
         "Stack created for %s base=%p top=%p kbase=%p phys=%p\n",
-        cstr(binary.name),
+        cstr(binary->name),
         stack.base.virtual_addr,
         stack.top.virtual_addr,
         stack.base.kernel_addr.virtual_addr,
         stack.base.kernel_addr.phys_addr
     );
-    __d_printf(PROCESS, "Mapping stack for %s page_table=%p\n", cstr(binary.name), page_table.phys_addr);
-    Stack__map(kernel, &stack, v_ptr(page_table, PageTable));
+    __d_printf(PROCESS, "Mapping stack for %s page_table=%p\n", cstr(binary->name), ProcessPageTable__root(&page_table).phys_addr);
+    Stack__map(kernel, &stack, &page_table);
     __d_println(PROCESS, "Stack mapped");
 
     match_optional(ExpandedSegment, Elf__entry_segment(binary, &expanded_elf),
@@ -687,16 +728,25 @@ Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Option
             Offset entry_offset = Elf__read_header(binary)->entry - entry_point.address.virtual_addr;
             UserAddress entry_address = UserAddress__relative(&entry_point.address, entry_offset);
             ProcessArguments process_arguments = ProcessArguments__new();
-            match_result(CollectionCode, ProcessArguments__push(&process_arguments, binary.name),
+            ProcessArguments requested_arguments = *arguments;
+            match_result(CollectionCode, ProcessArguments__push(&process_arguments, binary->name),
                 success_do_nothing(),
                 error(code, message) { return Error(ProcessPtr, message, SPAWN_ARG_TOO_LONG); }
             );
-            match_result(CollectionCode, ProcessArguments__push_all(&process_arguments, &arguments),
+            match_result(CollectionCode, ProcessArguments__push_all(&process_arguments, &requested_arguments),
                 success_do_nothing(),
                 error(code, message) { return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG); }
             );
 
-            match_result(ProcessPtr, Process__new(kernel, binary.name, page_table, entry_address, stack, parent, process_arguments),
+            match_result(ProcessPtr, Process__new(
+                kernel,
+                &binary->name,
+                &page_table,
+                &entry_address,
+                &stack,
+                parent,
+                &process_arguments
+            ),
                 success(proc)
                 {
                     for_each_fa(ExpandedSegmentArray, expanded_elf, segment_index, segment,
@@ -719,6 +769,42 @@ Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Option
     return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
 }
 
+Result(ProcessSetupStatus) Process__dispose(ProcessPtr self)
+{
+    while (ParkedOperations__len(&self->parked_operations) > 0)
+    {
+        match_optional(ParkedOperationPtr, ParkedOperations__remove_at(&self->parked_operations, 0),
+            some(operation)
+            {
+                ParkedOperation__dispose(operation);
+            },
+            none_do_nothing()
+        );
+    }
+    match_result(CollectionCode, ParkedOperations__dispose(&self->parked_operations),
+        success_do_nothing(),
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    );
+
+    match_result(CollectionCode, ProcessFileDescriptors__dispose(&self->file_descriptors),
+        success_do_nothing(),
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    );
+
+    match_result(CollectionCode, UserAllocations__dispose(&self->user_allocations),
+        success_do_nothing(),
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    );
+
+    ProcessContext__dispose(self->context);
+    match_result(KAllocCode, Kernel__free(addr(self)),
+        success_do_nothing(),
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    );
+
+    return Success(ProcessSetupStatus, PROCESS_SETUP);
+}
+
 Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 )
@@ -728,12 +814,35 @@ Result(ProcessMemoryCode) Process__record_user_allocation(
     match_result(CollectionCode, UserAllocations__push(&self->user_allocations, allocation),
         success(_)
         {
-        return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
-    },
+            __d_printf(
+                MEMORY,
+                "process alloc pid=%i name=%s type=%s user=%p kernel=%p phys=%p size=%i tracked=%i\n",
+                self->pid,
+                cstr(self->name),
+                UserAllocationType__name(type),
+                address.virtual_addr,
+                address.kernel_addr.virtual_addr,
+                address.kernel_addr.phys_addr,
+                allocation.size,
+                UserAllocations__len(&self->user_allocations)
+            );
+            return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+        },
         error(code, message)
         {
-        return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
-    }
+            __d_printf(
+                MEMORY,
+                "process alloc tracking failed pid=%i name=%s type=%s user=%p kernel=%p size=%i code=%i\n",
+                self->pid,
+                cstr(self->name),
+                UserAllocationType__name(type),
+                address.virtual_addr,
+                address.kernel_addr.virtual_addr,
+                allocation.size,
+                code
+            );
+            return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
+        }
     );
 
     return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
@@ -777,32 +886,42 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     size_t allocation_size = Process__page_aligned_size(size);
     Address virtual_address = self->allocation_next;
 
-    UserAddress allocation = Kernel__alloc_user(virtual_address, allocation_size, true, true, false);
-    PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, allocation_size);
-
-    match_result(ProcessMemoryCode, Process__record_user_allocation(
-        self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC
-    ),
-        success(_)
+    match_result(UserAddress, Kernel__try_alloc_user(virtual_address, allocation_size, true, true, false),
+        success(allocation)
         {
-            self->allocation_next += allocation_size;
-            return Success(UserAddress, allocation);
+            PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
+
+            match_result(ProcessMemoryCode, Process__record_user_allocation(
+                self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC
+            ),
+                success(_)
+                {
+                    self->allocation_next += allocation_size;
+                    return Success(UserAddress, allocation);
+                },
+                error(code, message)
+                {
+                    PageTable__unmap(&self->page_table, self->kernel, allocation.virtual_addr, allocation_size);
+                    Kernel__free(allocation.kernel_addr.virtual_addr);
+                    return Error(UserAddress, message, code);
+                });
         },
         error(code, message)
         {
-            return Error(UserAddress, message, code);
-        });
+            return Error(UserAddress, message, PROCESS_MEMORY_FULL);
+        }
+    );
 
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
 }
 
-Result(UserAddress) Process__map_shared_user_pages(
+Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(
     ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size
 )
 {
     if (self == NULL || source == NULL || source_virtual_address == 0 || size == 0) // hundelint: ignore-no-null
     {
-        return Error(UserAddress, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+        return Error(SharedUserPages, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
     }
 
     Address source_base = Process__page_base(source_virtual_address);
@@ -810,18 +929,18 @@ Result(UserAddress) Process__map_shared_user_pages(
     size_t allocation_size = Process__page_aligned_size(source_offset + size);
     UserAllocationRangeMatch range = UserAllocationRangeMatch__new(source_base, allocation_size);
 
-    match_optional(UserAllocations__FindResult, UserAllocations__find(
+    match_find_result_ptr(UserAllocations, UserAllocations__find(
         &source->user_allocations, allocation_contains_range, &range
     ),
-        some(found)
+        some(allocation_match)
         {
-            Offset backing_offset = source_base - found.value->address.virtual_addr;
+            Offset backing_offset = source_base - allocation_match->address.virtual_addr;
             Address target_base = self->allocation_next;
             KernelAddress mapping_kernel_address = KERNEL_ADDR(
-                found.value->address.kernel_addr.virtual_addr + backing_offset + source_offset,
-                found.value->address.kernel_addr.phys_addr + backing_offset + source_offset
+                allocation_match->address.kernel_addr.virtual_addr + backing_offset + source_offset,
+                allocation_match->address.kernel_addr.phys_addr + backing_offset + source_offset
             );
-            mapping_kernel_address.valid = found.value->address.kernel_addr.valid;
+            mapping_kernel_address.valid = allocation_match->address.kernel_addr.valid;
             UserAddress mapping = UserAddress__new(
                 target_base + source_offset,
                 mapping_kernel_address,
@@ -832,10 +951,10 @@ Result(UserAddress) Process__map_shared_user_pages(
             );
 
             KernelAddress allocation_kernel_address = KERNEL_ADDR(
-                found.value->address.kernel_addr.virtual_addr + backing_offset,
-                found.value->address.kernel_addr.phys_addr + backing_offset
+                allocation_match->address.kernel_addr.virtual_addr + backing_offset,
+                allocation_match->address.kernel_addr.phys_addr + backing_offset
             );
-            allocation_kernel_address.valid = found.value->address.kernel_addr.valid;
+            allocation_kernel_address.valid = allocation_match->address.kernel_addr.valid;
             UserAddress allocation = UserAddress__new(
                 target_base,
                 allocation_kernel_address,
@@ -845,19 +964,33 @@ Result(UserAddress) Process__map_shared_user_pages(
                 true
             );
 
-            PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, allocation_size);
+            PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
             match_result(ProcessMemoryCode, Process__record_user_allocation(
                 self, allocation, allocation_size, USER_ALLOCATION_SHARED
             ),
                 success(_)
                 {
                     self->allocation_next += allocation_size;
-                    return Success(UserAddress, mapping);
+                    return Success(SharedUserPages, SharedUserPages__new(allocation, mapping));
                 },
-                error(code, message) { return Error(UserAddress, message, code); }
+                error(code, message) { return Error(SharedUserPages, message, code); }
             );
         },
         none_do_nothing()
+    );
+
+    return Error(SharedUserPages, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+}
+
+Result(UserAddress) Process__map_shared_user_pages(
+    ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size
+)
+{
+    match_result(SharedUserPages, Process__map_shared_user_pages_with_allocation(
+        self, source, source_virtual_address, size
+    ),
+        success(shared) { return Success(UserAddress, shared.mapping); },
+        error(code, message) { return Error(UserAddress, message, code); }
     );
 
     return Error(UserAddress, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
@@ -865,18 +998,19 @@ Result(UserAddress) Process__map_shared_user_pages(
 
 Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self)
 {
+    size_t allocation_size = self->kernel->heap.coarse_block_size;
     UserAddress allocation = Kernel__alloc_user(
-        IDLE_DEBUG_PAGE_VADDR, PAGE_SIZE, true, true, false
+        IDLE_DEBUG_PAGE_VADDR, allocation_size, true, true, false
     );
     IdleDebugStatePtr state = k_v_ptr(allocation, IdleDebugState);
     state->magic = IDLE_DEBUG_MAGIC;
     state->before_wfi_count = 0;
     state->after_wfi_count = 0;
 
-    PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, PAGE_SIZE);
+    PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
 
     match_result(ProcessMemoryCode, Process__record_user_allocation(
-        self, allocation, PAGE_SIZE, USER_ALLOCATION_DYNAMIC
+        self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC
     ),
         success_do_nothing(),
         error(code, message) { return Error(UserAddress, message, code); }
@@ -911,7 +1045,7 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
         true
     );
 
-    PageTable__map_mmio(v_ptr(self->page_table, PageTable), self->kernel, mapping, size);
+    PageTable__map_mmio(&self->page_table, self->kernel, mapping, size);
     match_result(ProcessMemoryCode, Process__record_user_allocation(
         self, allocation, allocation_size, USER_ALLOCATION_MMIO
     ),
@@ -956,22 +1090,31 @@ Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
     {
         Address mapped_end = Process__page_aligned_size(new_break);
         size_t allocation_size = mapped_end - self->heap_mapped_end;
-        UserAddress allocation = Kernel__alloc_user(
+        match_result(UserAddress, Kernel__try_alloc_user(
             self->heap_mapped_end, allocation_size, true, true, false
-        );
-
-        PageTable__map(v_ptr(self->page_table, PageTable), self->kernel, allocation, allocation_size);
-        match_result(ProcessMemoryCode, Process__record_user_allocation(
-            self, allocation, allocation_size, USER_ALLOCATION_HEAP
         ),
-            success(_)
+            success(allocation)
             {
-                self->heap_mapped_end = mapped_end;
+                PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
+                match_result(ProcessMemoryCode, Process__record_user_allocation(
+                    self, allocation, allocation_size, USER_ALLOCATION_HEAP
+                ),
+                    success(_)
+                    {
+                        self->heap_mapped_end = mapped_end;
+                    },
+                    error(code, message)
+                    {
+                        PageTable__unmap(&self->page_table, self->kernel, allocation.virtual_addr, allocation_size);
+                        Kernel__free(allocation.kernel_addr.virtual_addr);
+                        return Error(Address, message, code);
+                    });
             },
             error(code, message)
             {
-                return Error(Address, message, code);
-            });
+                return Error(Address, message, PROCESS_MEMORY_FULL);
+            }
+        );
     }
 
     self->heap_break = new_break;
@@ -983,7 +1126,19 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
     match_optional(UserAllocation, UserAllocations__at(&self->user_allocations, index),
         some(allocation)
         {
-            PageTable__unmap(v_ptr(self->page_table, PageTable), self->kernel, allocation.address.virtual_addr, allocation.size);
+            __d_printf(
+                MEMORY,
+                "process free pid=%i name=%s type=%s user=%p kernel=%p phys=%p size=%i tracked=%i\n",
+                self->pid,
+                cstr(self->name),
+                UserAllocationType__name(allocation.type),
+                allocation.address.virtual_addr,
+                allocation.address.kernel_addr.virtual_addr,
+                allocation.address.kernel_addr.phys_addr,
+                allocation.size,
+                UserAllocations__len(&self->user_allocations)
+            );
+            PageTable__unmap(&self->page_table, self->kernel, allocation.address.virtual_addr, allocation.size);
             Address kernel_virtual = allocation.address.kernel_addr.virtual_addr;
 
             UserAllocations__remove_at(&self->user_allocations, index);
@@ -1008,7 +1163,7 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
 
 Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virtual_address)
 {
-    match_optional(UserAllocations__FindResult, UserAllocations__find(
+    match_optional(UserAllocations__FindResult, UserAllocations__find( // hundelint: ignore-find-result-matcher
         &self->user_allocations, allocation_matches_virtual, &virtual_address
     ),
         some(found)
@@ -1054,12 +1209,12 @@ static Result(FileDescriptor) Process__set_file_descriptor_unlocked(
     ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle
 )
 {
-    match_optional(ProcessFileDescriptors__FindResult, ProcessFileDescriptors__find(
+    match_find_result_ptr(ProcessFileDescriptors, ProcessFileDescriptors__find(
         &self->file_descriptors, file_descriptor_matches_fd, &fd
     ),
-        some(found)
+        some(descriptor)
         {
-            found.value->handle = handle;
+            descriptor->handle = handle;
             if (fd >= self->next_file_descriptor)
             {
                 self->next_file_descriptor = fd + 1;
@@ -1101,7 +1256,7 @@ static Result(FileDescriptor) Process__allocate_file_descriptor_unlocked(Process
     FileDescriptor fd = self->next_file_descriptor;
     while (fd < MAX_HANDLES_PER_PROCESS)
     {
-        match_optional(ProcessFileDescriptors__FindResult, ProcessFileDescriptors__find(
+        match_find_result(ProcessFileDescriptors, ProcessFileDescriptors__find(
             &self->file_descriptors, file_descriptor_matches_fd, &fd
         ),
             some_do_nothing(),
@@ -1125,10 +1280,10 @@ Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor f
 
 static Result(ProcessIOHandle) Process__get_io_handle_unlocked(ProcessPtr self, FileDescriptor fd)
 {
-    match_optional(ProcessFileDescriptors__FindResult, ProcessFileDescriptors__find(
+    match_find_result_ptr(ProcessFileDescriptors, ProcessFileDescriptors__find(
         &self->file_descriptors, file_descriptor_matches_fd, &fd
     ),
-        some(found) { return Success(ProcessIOHandle, found.value->handle); },
+        some(descriptor) { return Success(ProcessIOHandle, descriptor->handle); },
         none() { return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN); }
     );
 
@@ -1161,7 +1316,7 @@ static Result(ProcessIOHandle) Process__remove_file_descriptor_unlocked(ProcessP
     match_result(ProcessIOHandle, Process__get_io_handle_unlocked(self, fd),
         success(handle)
         {
-            match_optional(ProcessFileDescriptors__FindResult, ProcessFileDescriptors__find(
+            match_optional(ProcessFileDescriptors__FindResult, ProcessFileDescriptors__find( // hundelint: ignore-find-result-matcher
                 &self->file_descriptors, file_descriptor_matches_fd, &fd
             ),
                 some(found) { ProcessFileDescriptors__remove_at(&self->file_descriptors, found.index); },

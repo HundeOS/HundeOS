@@ -1,5 +1,5 @@
 #include "../../user.h"
-#include "../../sys/io.h"
+#include "sys/io.h"
 
 int main(int argc, char ** argv)
 {

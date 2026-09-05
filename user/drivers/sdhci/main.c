@@ -4,11 +4,11 @@
 #include <stdint.h>
 
 #include "../../../common/types/bstring.h"
-#include "../../sys/debug.h"
-#include "../../sys/pci_config.h"
-#include "../../sys/sd_host_config.h"
-#include "../../sys/service.h"
-#include "../../sys/sync.h"
+#include "sys/debug.h"
+#include "sys/pci_config.h"
+#include "sys/sd_host_config.h"
+#include "sys/service.h"
+#include "sys/sync.h"
 
 #ifndef SDHCI_ENTRYPOINT
 #define SDHCI_ENTRYPOINT main
@@ -140,6 +140,7 @@ typedef struct SdhciCommand
     bool data_present;
 }
 SdhciCommand;
+typedef const SdhciCommand * ConstSdhciCommandPtr;
 
 typedef struct SdhciCommandResult
 {
@@ -147,6 +148,7 @@ typedef struct SdhciCommandResult
     uint32_t response[4];
 }
 SdhciCommandResult;
+typedef const SdhciCommandResult * ConstSdhciCommandResultPtr;
 
 typedef struct SdhciDevice
 {
@@ -172,6 +174,7 @@ typedef struct SdhciPciFunction
 SdhciPciFunction;
 
 typedef SdhciPciFunction * SdhciPciFunctionPtr;
+typedef const SdhciPciFunction * ConstSdhciPciFunctionPtr;
 
 OptionalDef(SdhciPciFunction);
 
@@ -201,19 +204,19 @@ static SdhciCommandResult SdhciCommandResult__new(
     };
 }
 
-static SdhciDevice SdhciDevice__new(ServiceMappedMemoryPtr mapping, SdhciMmioPtr mmio, uint64_t irq, BString path)
+static SdhciDevice SdhciDevice__new(ServiceMappedMemoryPtr mapping, SdhciMmioPtr mmio, uint64_t irq, ConstBStringPtr path)
 {
     return (SdhciDevice) {
         .mapping = mapping,
         .mmio = mmio,
         .irq = irq,
-        .path = path,
+        .path = *path,
     };
 }
 
 static SdhciDevice SdhciDevice__new_empty(void)
 {
-    return SdhciDevice__new(0, 0, 0, bstr(""));
+    return SdhciDevice__new(0, 0, 0, &bstr(""));
 }
 
 static SdhciPciFunction SdhciPciFunction__new(uint64_t bus, uint64_t device, uint64_t function)
@@ -301,14 +304,14 @@ static SdhciPciConfig32Ptr Sdhci__pci_reg32(void * base, uint64_t offset)
 #define SDHCI_PCI_WRITE16(base, offset, value) (*Sdhci__pci_reg16((base), (offset)) = (uint16_t) (value))
 #endif
 
-static uint64_t Sdhci__pci_config_offset(PciConfigPtr config, SdhciPciFunction function)
+static uint64_t Sdhci__pci_config_offset(PciConfigPtr config, ConstSdhciPciFunctionPtr function)
 {
-    return ((function.bus - config->bus_start) * SDHCI_PCI_ECAM_BUS_SIZE)
-        + (function.device * SDHCI_PCI_ECAM_DEVICE_SIZE)
-        + (function.function * SDHCI_PCI_ECAM_FUNCTION_SIZE);
+    return ((function->bus - config->bus_start) * SDHCI_PCI_ECAM_BUS_SIZE)
+        + (function->device * SDHCI_PCI_ECAM_DEVICE_SIZE)
+        + (function->function * SDHCI_PCI_ECAM_FUNCTION_SIZE);
 }
 
-static void * Sdhci__pci_function_base(ServiceMappedMemoryPtr ecam, PciConfigPtr config, SdhciPciFunction function)
+static void * Sdhci__pci_function_base(ServiceMappedMemoryPtr ecam, PciConfigPtr config, ConstSdhciPciFunctionPtr function)
 {
     return driver_ptr_offset(ecam, Sdhci__pci_config_offset(config, function));
 }
@@ -331,7 +334,7 @@ static Optional(SdhciPciFunction) Sdhci__find_pci_function_on_device(
     uint64_t device)
 {
     SdhciPciFunction first_function = SdhciPciFunction__new(bus, device, 0);
-    void * first_base = Sdhci__pci_function_base(ecam, config, first_function);
+    void * first_base = Sdhci__pci_function_base(ecam, config, &first_function);
     if (!Sdhci__pci_function_present(first_base))
     {
         return None(SdhciPciFunction);
@@ -350,7 +353,7 @@ static Optional(SdhciPciFunction) Sdhci__find_pci_function_on_device(
     for (uint64_t function = 1; function < SDHCI_PCI_FUNCTION_COUNT; function++)
     {
         SdhciPciFunction candidate = SdhciPciFunction__new(bus, device, function);
-        void * candidate_base = Sdhci__pci_function_base(ecam, config, candidate);
+        void * candidate_base = Sdhci__pci_function_base(ecam, config, &candidate);
         if (Sdhci__pci_function_present(candidate_base) && Sdhci__pci_function_is_sdhci(candidate_base))
         {
             return Some(SdhciPciFunction, candidate);
@@ -394,7 +397,7 @@ static Optional(SdHostConfig) Sdhci__load_pci_host_config(void)
     match_optional(SdhciPciFunction, Sdhci__find_pci_function(ecam, &pci_config),
         some(function)
         {
-            void * function_base = Sdhci__pci_function_base(ecam, &pci_config, function);
+            void * function_base = Sdhci__pci_function_base(ecam, &pci_config, &function);
             uint32_t bar0 = SDHCI_PCI_READ32(function_base, SDHCI_PCI_CONFIG_BAR0);
             if ((bar0 & SDHCI_PCI_BAR_IO_SPACE) != 0)
             {
@@ -574,14 +577,14 @@ static bool Sdhci__setup_host(SdhciMmioPtr mmio)
     return Sdhci__set_clock(mmio, 400000);
 }
 
-static uint16_t SdhciCommand__value(SdhciCommand command)
+static uint16_t SdhciCommand__value(ConstSdhciCommandPtr command)
 {
-    uint16_t value = (uint16_t) ((command.index << 8) | command.response_type);
-    if (command.response_type != SDHCI_CMD_RESP_NONE)
+    uint16_t value = (uint16_t) ((command->index << 8) | command->response_type);
+    if (command->response_type != SDHCI_CMD_RESP_NONE)
     {
         value |= SDHCI_CMD_CRC_CHECK | SDHCI_CMD_INDEX_CHECK;
     }
-    if (command.data_present)
+    if (command->data_present)
     {
         value |= SDHCI_CMD_DATA_PRESENT;
     }
@@ -589,35 +592,35 @@ static uint16_t SdhciCommand__value(SdhciCommand command)
     return value;
 }
 
-static SdhciCommandResult Sdhci__send_command(SdhciDevicePtr self, SdhciCommand command)
+static SdhciCommandResult Sdhci__send_command(SdhciDevicePtr self, ConstSdhciCommandPtr command)
 {
     SdhciCommandResult result = SdhciCommandResult__new(false, 0, 0, 0, 0);
     uint32_t inhibit = SDHCI_PRESENT_CMD_INHIBIT;
-    if (command.data_present)
+    if (command->data_present)
     {
         inhibit |= SDHCI_PRESENT_DAT_INHIBIT;
     }
 
     if (!Sdhci__wait32_clear(self->mmio, SDHCI_PRESENT_STATE, inhibit))
     {
-        DRIVER_DEBUG("sdhci: command inhibit stuck cmd=%i\n", (int) command.index);
+        DRIVER_DEBUG("sdhci: command inhibit stuck cmd=%i\n", (int) command->index);
         return result;
     }
 
     SDHCI_WRITE32(self->mmio, SDHCI_INT_STATUS, SDHCI_INT_ALL);
-    SDHCI_WRITE16(self->mmio, SDHCI_TRANSFER_MODE, command.transfer_mode);
-    SDHCI_WRITE32(self->mmio, SDHCI_ARGUMENT, command.argument);
+    SDHCI_WRITE16(self->mmio, SDHCI_TRANSFER_MODE, command->transfer_mode);
+    SDHCI_WRITE32(self->mmio, SDHCI_ARGUMENT, command->argument);
     __sync_boundary();
     SDHCI_WRITE16(self->mmio, SDHCI_COMMAND, SdhciCommand__value(command));
 
     if (!Sdhci__wait_interrupt(self->mmio, SDHCI_INT_COMMAND_COMPLETE))
     {
-        DRIVER_DEBUG("sdhci: command failed cmd=%i\n", (int) command.index);
+        DRIVER_DEBUG("sdhci: command failed cmd=%i\n", (int) command->index);
         return result;
     }
 
     result.ok = true;
-    if (command.response_type != SDHCI_CMD_RESP_NONE)
+    if (command->response_type != SDHCI_CMD_RESP_NONE)
     {
         result.response[0] = SDHCI_READ32(self->mmio, SDHCI_RESPONSE);
         result.response[1] = SDHCI_READ32(self->mmio, SDHCI_RESPONSE + 4);
@@ -630,28 +633,26 @@ static SdhciCommandResult Sdhci__send_command(SdhciDevicePtr self, SdhciCommand 
 
 static bool Sdhci__send_app_command(SdhciDevicePtr self, uint32_t argument)
 {
-    SdhciCommandResult result = Sdhci__send_command(
-        self,
-        SdhciCommand__new(SD_CMD_APP_CMD, argument, SDHCI_CMD_RESP_48, 0, false)
-    );
+    SdhciCommand command = SdhciCommand__new(SD_CMD_APP_CMD, argument, SDHCI_CMD_RESP_48, 0, false);
+    SdhciCommandResult result = Sdhci__send_command(self, &command);
 
     return result.ok;
 }
 
-static uint64_t Sdhci__card_block_count_from_csd(SdhciCommandResult csd)
+static uint64_t Sdhci__card_block_count_from_csd(ConstSdhciCommandResultPtr csd)
 {
-    uint32_t csd_structure = (csd.response[3] >> 30) & 0x3U;
+    uint32_t csd_structure = (csd->response[3] >> 30) & 0x3U;
     if (csd_structure == 1)
     {
-        uint64_t c_size = ((uint64_t) (csd.response[2] & 0x3fU) << 16)
-            | ((uint64_t) csd.response[1] >> 16);
+        uint64_t c_size = ((uint64_t) (csd->response[2] & 0x3fU) << 16)
+            | ((uint64_t) csd->response[1] >> 16);
         return (c_size + 1ULL) * 1024ULL;
     }
 
-    uint64_t read_bl_len = (csd.response[2] >> 16) & 0x0fU;
-    uint64_t c_size = ((uint64_t) (csd.response[2] & 0x03ffU) << 2)
-        | ((uint64_t) (csd.response[1] >> 30) & 0x03U);
-    uint64_t c_size_mult = (csd.response[1] >> 15) & 0x07U;
+    uint64_t read_bl_len = (csd->response[2] >> 16) & 0x0fU;
+    uint64_t c_size = ((uint64_t) (csd->response[2] & 0x03ffU) << 2)
+        | ((uint64_t) (csd->response[1] >> 30) & 0x03U);
+    uint64_t c_size_mult = (csd->response[1] >> 15) & 0x07U;
     uint64_t block_len = 1ULL << read_bl_len;
     uint64_t mult = 1ULL << (c_size_mult + 2ULL);
     uint64_t bytes = (c_size + 1ULL) * mult * block_len;
@@ -661,9 +662,11 @@ static uint64_t Sdhci__card_block_count_from_csd(SdhciCommandResult csd)
 
 static bool Sdhci__init_card(SdhciDevicePtr self)
 {
-    Sdhci__send_command(self, SdhciCommand__new(SD_CMD_GO_IDLE_STATE, 0, SDHCI_CMD_RESP_NONE, 0, false));
+    SdhciCommand idle = SdhciCommand__new(SD_CMD_GO_IDLE_STATE, 0, SDHCI_CMD_RESP_NONE, 0, false);
+    Sdhci__send_command(self, &idle);
 
-    Sdhci__send_command(self, SdhciCommand__new(SD_CMD_SEND_IF_COND, 0x1aa, SDHCI_CMD_RESP_48, 0, false));
+    SdhciCommand interface_condition = SdhciCommand__new(SD_CMD_SEND_IF_COND, 0x1aa, SDHCI_CMD_RESP_48, 0, false);
+    Sdhci__send_command(self, &interface_condition);
 
     SdhciCommandResult op_cond = SdhciCommandResult__new(false, 0, 0, 0, 0);
     for (uint64_t retry = 0; retry < SDHCI_APP_CMD_RETRIES; retry++)
@@ -672,10 +675,10 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
         {
             return false;
         }
-        op_cond = Sdhci__send_command(
-            self,
-            SdhciCommand__new(SD_ACMD_SD_SEND_OP_COND, SD_ACMD41_ARGUMENT, SDHCI_CMD_RESP_48, 0, false)
+        SdhciCommand send_op_cond = SdhciCommand__new(
+            SD_ACMD_SD_SEND_OP_COND, SD_ACMD41_ARGUMENT, SDHCI_CMD_RESP_48, 0, false
         );
+        op_cond = Sdhci__send_command(self, &send_op_cond);
         if (op_cond.ok && (op_cond.response[0] & SD_OCR_READY) != 0)
         {
             self->high_capacity = (op_cond.response[0] & SD_OCR_HIGH_CAPACITY) != 0;
@@ -689,44 +692,40 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
         return false;
     }
 
-    SdhciCommandResult cid = Sdhci__send_command(
-        self,
-        SdhciCommand__new(SD_CMD_ALL_SEND_CID, 0, SDHCI_CMD_RESP_136, 0, false)
-    );
+    SdhciCommand send_cid = SdhciCommand__new(SD_CMD_ALL_SEND_CID, 0, SDHCI_CMD_RESP_136, 0, false);
+    SdhciCommandResult cid = Sdhci__send_command(self, &send_cid);
     if (!cid.ok)
     {
         return false;
     }
 
-    SdhciCommandResult rca = Sdhci__send_command(
-        self,
-        SdhciCommand__new(SD_CMD_SEND_RELATIVE_ADDR, 0, SDHCI_CMD_RESP_48, 0, false)
-    );
+    SdhciCommand send_rca = SdhciCommand__new(SD_CMD_SEND_RELATIVE_ADDR, 0, SDHCI_CMD_RESP_48, 0, false);
+    SdhciCommandResult rca = Sdhci__send_command(self, &send_rca);
     if (!rca.ok)
     {
         return false;
     }
     self->rca = (uint16_t) (rca.response[0] >> 16);
 
-    SdhciCommandResult csd = Sdhci__send_command(
-        self,
-        SdhciCommand__new(SD_CMD_SEND_CSD, ((uint32_t) self->rca) << 16, SDHCI_CMD_RESP_136, 0, false)
+    SdhciCommand send_csd = SdhciCommand__new(
+        SD_CMD_SEND_CSD, ((uint32_t) self->rca) << 16, SDHCI_CMD_RESP_136, 0, false
     );
+    SdhciCommandResult csd = Sdhci__send_command(self, &send_csd);
     if (!csd.ok)
     {
         return false;
     }
-    self->block_count = Sdhci__card_block_count_from_csd(csd);
+    self->block_count = Sdhci__card_block_count_from_csd(&csd);
     if (self->block_count == 0)
     {
         DRIVER_DEBUG("sdhci: invalid card capacity\n");
         return false;
     }
 
-    SdhciCommandResult select = Sdhci__send_command(
-        self,
-        SdhciCommand__new(SD_CMD_SELECT_CARD, ((uint32_t) self->rca) << 16, SDHCI_CMD_RESP_48_BUSY, 0, false)
+    SdhciCommand select_card = SdhciCommand__new(
+        SD_CMD_SELECT_CARD, ((uint32_t) self->rca) << 16, SDHCI_CMD_RESP_48_BUSY, 0, false
     );
+    SdhciCommandResult select = Sdhci__send_command(self, &select_card);
     if (!select.ok)
     {
         return false;
@@ -737,10 +736,8 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
         return false;
     }
 
-    SdhciCommandResult block_len = Sdhci__send_command(
-        self,
-        SdhciCommand__new(SD_CMD_SET_BLOCKLEN, SDHCI_BLOCK_SIZE, SDHCI_CMD_RESP_48, 0, false)
-    );
+    SdhciCommand set_block_len = SdhciCommand__new(SD_CMD_SET_BLOCKLEN, SDHCI_BLOCK_SIZE, SDHCI_CMD_RESP_48, 0, false);
+    SdhciCommandResult block_len = Sdhci__send_command(self, &set_block_len);
 
     return block_len.ok;
 }
@@ -754,7 +751,8 @@ static bool Sdhci__bind(SdhciDevicePtr self, SdHostConfig config)
         return false;
     }
 
-    *self = SdhciDevice__new(mapping, driver_ptr(mapping), config.irq, bstr(SDHCI_DEVICE_PATH));
+    BString device_path = bstr(SDHCI_DEVICE_PATH);
+    *self = SdhciDevice__new(mapping, driver_ptr(mapping), config.irq, &device_path);
 
     uint32_t host_version = SDHCI_READ32(self->mmio, SDHCI_HOST_VERSION);
     DRIVER_DEBUG(
@@ -793,17 +791,15 @@ static ServiceCode Sdhci__read_blocks(SdhciDevicePtr self, ServiceBlockRequestPt
     SDHCI_WRITE16(self->mmio, SDHCI_BLOCK_COUNT_REG, (uint16_t) request->block_count);
 
     bool multi_block = request->block_count > 1;
-    SdhciCommandResult read = Sdhci__send_command(
-        self,
-        SdhciCommand__new(
-            multi_block ? SD_CMD_READ_MULTIPLE_BLOCK : SD_CMD_READ_SINGLE_BLOCK,
-            Sdhci__block_argument(self, request->block),
-            SDHCI_CMD_RESP_48,
-            SDHCI_TRANSFER_READ
-                | (multi_block ? SDHCI_TRANSFER_MULTI_BLOCK | SDHCI_TRANSFER_BLOCK_COUNT_ENABLE : 0),
-            true
-        )
+    SdhciCommand read_command = SdhciCommand__new(
+        multi_block ? SD_CMD_READ_MULTIPLE_BLOCK : SD_CMD_READ_SINGLE_BLOCK,
+        Sdhci__block_argument(self, request->block),
+        SDHCI_CMD_RESP_48,
+        SDHCI_TRANSFER_READ
+            | (multi_block ? SDHCI_TRANSFER_MULTI_BLOCK | SDHCI_TRANSFER_BLOCK_COUNT_ENABLE : 0),
+        true
     );
+    SdhciCommandResult read = Sdhci__send_command(self, &read_command);
     if (!read.ok)
     {
         return SERVICE_BLOCK_REQUEST_FAILED;

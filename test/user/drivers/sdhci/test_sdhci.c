@@ -5,8 +5,8 @@
 #include "unity.h"
 
 #include "../../../../common_includes/syscalls/service.h"
-#include "../../../../user/sys/pci_config.h"
-#include "../../../../user/sys/sd_host_config.h"
+#include "../../../../user/lib/sys/pci_config.h"
+#include "../../../../user/lib/sys/sd_host_config.h"
 
 void __sync_boundary()
 {
@@ -585,5 +585,5 @@ void test_sdhci_card_block_count_from_v2_csd(void)
         .response = { 0, 0x00030000U, 0, 0x40000000U },
     };
 
-    TEST_ASSERT_EQUAL_UINT64(4096, Sdhci__card_block_count_from_csd(csd));
+    TEST_ASSERT_EQUAL_UINT64(4096, Sdhci__card_block_count_from_csd(&csd));
 }

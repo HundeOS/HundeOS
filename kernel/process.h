@@ -101,6 +101,8 @@ OptionalDef(FileDescriptor);
 OptionalDef(ProcessIOHandle);
 
 FixedArrayDefine(BString, SPAWN_MAX_ARGS + 1, ProcessArguments, bstring_equals);
+typedef ProcessArguments * ProcessArgumentsPtr;
+typedef const ProcessArguments * ConstProcessArgumentsPtr;
 bool ProcessChildEvent__equals(ProcessChildEventPtr self, ProcessChildEventPtr other);
 #define MAX_PROCESS_CHILD_EVENTS 64
 FixedArrayDefine(ProcessChildEvent, MAX_PROCESS_CHILD_EVENTS, ProcessChildEvents, (EqualFunction) ProcessChildEvent__equals);
@@ -174,6 +176,23 @@ typedef UserAllocation * UserAllocationPtr;
 OptionalDef(UserAllocation);
 bool UserAllocation__equals(UserAllocationPtr self, UserAllocationPtr other);
 
+typedef struct SharedUserPages
+{
+    UserAddress allocation;
+    UserAddress mapping;
+}
+SharedUserPages;
+
+ResultDef(SharedUserPages);
+
+static inline SharedUserPages SharedUserPages__new(UserAddress allocation, UserAddress mapping)
+{
+    return (SharedUserPages) {
+        .allocation = allocation,
+        .mapping = mapping,
+    };
+}
+
 LinkedListDefine(UserAllocation, UserAllocations, (EqualFunction) UserAllocation__equals);
 typedef struct ProcessFileDescriptor
 {
@@ -201,7 +220,7 @@ ResultDef(ProcessPtr);
 typedef struct Process {
     mutex_t lock;
     KernelPtr kernel;
-    KernelAddress page_table;
+    ProcessPageTable page_table;
 
     ProcessContextPtr context;
     Stack stack;
@@ -232,28 +251,37 @@ typedef struct Process {
 
 Result(ProcessPtr) Process__new(
     KernelPtr kernel,
-    BString name,
-    KernelAddress page_table,
-    UserAddress entry,
-    Stack stack,
-    Optional(ProcessPtr) parent,
-    ProcessArguments arguments
+    ConstBStringPtr name,
+    const ProcessPageTable * page_table,
+    const UserAddress * entry,
+    const Stack * stack,
+    OptionalPtr(ProcessPtr) parent,
+    ConstProcessArgumentsPtr arguments
 );
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 
 OptionalType(ProcessTable *, ProcessTablePtr);
 
-Result(ProcessPtr) Process__setup(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent);
-Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, Elf binary, Optional(ProcessPtr) parent, ProcessArguments arguments);
+Result(ProcessPtr) Process__setup(KernelPtr kernel, const Elf * binary, OptionalPtr(ProcessPtr) parent);
+Result(ProcessPtr) Process__setup_with_args(
+    KernelPtr kernel,
+    const Elf * binary,
+    OptionalPtr(ProcessPtr) parent,
+    ConstProcessArgumentsPtr arguments
+);
+Result(ProcessSetupStatus) Process__dispose(ProcessPtr self);
 Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation);
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self);
 Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self);
 Optional(ParkReason) Process__top_park_reason(ProcessPtr self);
 Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self);
-bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key);
+bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key);
 bool Process__mark_parked_operation_ready(
-    ProcessPtr self, ParkReason reason, Optional(OperationKey) operation_key, Optional(ReturnCode) return_code
+    ProcessPtr self,
+    ParkReason reason,
+    OptionalPtr(OperationKey) operation_key,
+    OptionalPtr(ReturnCode) return_code
 );
 bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick);
 bool Process__is_parked(ProcessPtr self);
@@ -270,14 +298,18 @@ bool Process__has_pending_signal(ProcessPtr self);
 Optional(ProcessSignal) Process__take_pending_signal(ProcessPtr self);
 ReturnCode ProcessSignal__exit_code(ProcessSignal signal);
 Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self);
-Result(CollectionCode) Process__push_child_event(ProcessPtr self, ProcessChildEvent event);
+Result(CollectionCode) Process__push_child_event(ProcessPtr self, ConstProcessChildEventPtr event);
 Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr self);
+Result(KAllocCode) Process__dispose_page_table(ProcessPtr self);
 Result(ProcessMemoryCode) Process__record_user_allocation(
     ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
 );
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
 Result(UserAddress) Process__map_shared_user_pages(
+    ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size
+);
+Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(
     ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size
 );
 Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self);

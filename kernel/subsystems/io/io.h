@@ -53,6 +53,8 @@ typedef struct ExternalBuffer
     DataPtr data;
     size_t len;
 } ExternalBuffer;
+typedef ExternalBuffer * ExternalBufferPtr;
+typedef const ExternalBuffer * ConstExternalBufferPtr;
 
 ResultDef(ExternalBuffer);
 OptionalDef(ExternalBuffer);
@@ -77,12 +79,13 @@ ResultDef(IOContext);
 OptionalDef(IOContextPtr);
 ResultDef(IOContextPtr);
 
-typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr self, BString path, Flags flags);
+typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr self, ConstBStringPtr path, Flags flags);
 typedef Result(IOInternalHandle) (* IO_close)(IOStatePtr self, IOInternalHandle handle);
 typedef Result(IOBufferPtr) (* IO_read)(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target
+    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target
 );
 typedef Result(ByteCount) (* IO_write)(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size);
+typedef Result(IOInternalHandle) (* IO_accept)(IOStatePtr self, IOInternalHandle handle);
 typedef Result(ParkStatus)(* IO_park)(IOStatePtr self, IOContextPtr parked_context);
 typedef Result(ParkStatus)(* IO_unpark)(IOStatePtr self);
 typedef Result(IOServerBuffer) (* IO_server_buffer)(IOStatePtr self);
@@ -96,6 +99,7 @@ typedef struct IO
     IO_open open;
     IO_read read;
     IO_write write;
+    IO_accept accept;
     IO_close close;
     IO_park park;
     IO_unpark unpark;
@@ -129,6 +133,7 @@ IO IO__new(
     IO_open open,
     IO_read read,
     IO_write write,
+    IO_accept accept,
     IO_close close,
     IO_park park,
     IO_unpark unpark,
@@ -138,25 +143,39 @@ IO IO__new(
     IO_data_consumed data_consumed,
     IO_eof eof
 );
-DeviceRegistration DeviceRegistration__new(IOPtr device, BString path, IOStatePtr state);
+Result(IOInternalHandle) IO__unsupported_open(IOStatePtr self, ConstBStringPtr path, Flags flags);
+Result(IOBufferPtr) IO__unsupported_read(
+    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target
+);
+Result(ByteCount) IO__unsupported_write(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size);
+Result(IOInternalHandle) IO__unsupported_accept(IOStatePtr self, IOInternalHandle handle);
+Result(IOInternalHandle) IO__unsupported_close(IOStatePtr self, IOInternalHandle handle);
+Result(ParkStatus) IO__unsupported_park(IOStatePtr self, IOContextPtr parked_context);
+Result(ParkStatus) IO__unsupported_unpark(IOStatePtr self);
+Result(IOServerBuffer) IO__unsupported_server_buffer(IOStatePtr self);
+Result(IOServerBuffer) IO__unsupported_server_write_buffer(IOStatePtr self);
+Optional(IOContextPtr) IO__unsupported_data_available(IOStatePtr self, size_t byte_count);
+Result(IOStatus) IO__unsupported_data_consumed(IOStatePtr self, size_t byte_count);
+Optional(IOContextPtr) IO__unsupported_eof(IOStatePtr self);
+DeviceRegistration DeviceRegistration__new(IOPtr device, ConstBStringPtr path, IOStatePtr state);
 
 IOContext IOContext__new(
-    KernelContext kernel_context, Optional(IOSubsystemPtr) io_subsystem,
-    Optional(IOHandle) handle, Optional(ExternalBuffer) buffer
+    KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
+    OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer
 );
 
 IOContextPtr IOContext__heap_new(
-    KernelContext kernel_context, Optional(IOSubsystemPtr) io_subsystem,
-    Optional(IOHandle) handle, Optional(ExternalBuffer) buffer
+    KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
+    OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer
 );
 
 IOContextPtr IOContext__from_originating_context(
-    OriginatingContext originating_context, Optional(IOHandle) handle,
-    Optional(ExternalBuffer) buffer
+    ConstOriginatingContextPtr originating_context, OptionalPtr(IOHandle) handle,
+    OptionalPtr(ExternalBuffer) buffer
 );
 
 IOContextPtr IOContext__from_message_listener(KernelListenerPtr listener, ProcessID pid);
-IOContextPtr IOContext__from_io_context(IOContextPtr base, Optional(IOHandle) handle);
+IOContextPtr IOContext__from_io_context(IOContextPtr base, OptionalPtr(IOHandle) handle);
 
 void IOContext__dispose(IOContextPtr self);
 

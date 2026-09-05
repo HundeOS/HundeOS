@@ -1,7 +1,7 @@
-#include "../../sys/io.h"
-#include "../../sys/process_sleep.h"
-#include "../../sys/spawn.h"
-#include "../../sys/syslog.h"
+#include "sys/io.h"
+#include "sys/process_sleep.h"
+#include "sys/spawn.h"
+#include "sys/syslog.h"
 #include "../../user.h"
 
 #ifndef HUMPEN_WACHHUND_ENTRYPOINT
@@ -35,9 +35,9 @@ static Result(SpawnResult) HumpenWachhund__mount_ext2(ConstBStringPtr device_pat
     return OS__spawn(
         P_WAIT,
         &humpen_wachhund_ext2fs_path,
-        Some(BString, *device_path),
-        Some(BString, *mountpoint),
-        SPAWN_NO_ARG
+        &Some(BString, *device_path),
+        &Some(BString, *mountpoint),
+        &SPAWN_NO_ARG
     );
 }
 
@@ -46,9 +46,9 @@ static Result(SpawnResult) HumpenWachhund__mount_fat32(ConstBStringPtr device_pa
     return OS__spawn(
         P_WAIT,
         &humpen_wachhund_fat32fs_path,
-        Some(BString, *device_path),
-        Some(BString, *mountpoint),
-        SPAWN_NO_ARG
+        &Some(BString, *device_path),
+        &Some(BString, *mountpoint),
+        &SPAWN_NO_ARG
     );
 }
 

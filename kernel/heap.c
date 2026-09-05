@@ -26,13 +26,28 @@ static MemoryBlock MemoryBlock__new(KernelAddress start, uint64_t pages_allocate
     };
 }
 
-static Heap Heap__new(MemoryRegionPtr kernel_heap)
+static size_t Heap__coarse_block_size(SystemInfoPtr system_info)
 {
+    if (system_info->heap_coarse_block_size == 0)
+    {
+        return SystemInfo__default_heap_coarse_block_size();
+    }
+
+    return system_info->heap_coarse_block_size;
+}
+
+static Heap Heap__new(SystemInfoPtr system_info)
+{
+    MemoryRegionPtr kernel_heap = &system_info->kernel_heap;
+    size_t coarse_block_size = Heap__coarse_block_size(system_info);
+
     return (Heap) {
         .lock = MUTEX_INIT,
         .start = kernel_heap->virtual_start,
         .end = kernel_heap->virtual_start + (kernel_heap->physical_end - kernel_heap->physical_start),
         .phys_start = kernel_heap->physical_start,
+        .coarse_block_size = coarse_block_size,
+        .pages_per_block = coarse_block_size / PAGE_SIZE,
         .current_block = MemoryBlock__new(KERNEL_ADDR(kernel_heap->virtual_start, kernel_heap->physical_start), 0),
         .allocated_blocks = AllocatedBlocks__new(),
         .free_blocks = AllocatedBlocks__new(),
@@ -41,9 +56,7 @@ static Heap Heap__new(MemoryRegionPtr kernel_heap)
 
 Result(HeapCode) Heap__init(HeapPtr self, SystemInfoPtr system_info)
 {
-    MemoryRegionPtr kernel_heap = &system_info->kernel_heap;
-
-    *self = Heap__new(kernel_heap);
+    *self = Heap__new(system_info);
     return Success(HeapCode, 0);
 }
 
@@ -52,11 +65,11 @@ inline MemoryPagePtr align_up(MemoryPagePtr page, Address a){
     return (MemoryPagePtr)((x + (a - 1)) & ~(a - 1));
 }
 
-static void MemoryBlock__advance(MemoryBlockPtr self, Address heap_end) {
+static void MemoryBlock__advance(MemoryBlockPtr self, Address heap_end, size_t coarse_block_size) {
     KernelAddress start = self->start;
 
-    Address next_phys_addr = start.phys_addr + COARSE_BLOCK_SIZE;
-    Address next_virtual_addr = start.virtual_addr + COARSE_BLOCK_SIZE;
+    Address next_phys_addr = start.phys_addr + coarse_block_size;
+    Address next_virtual_addr = start.virtual_addr + coarse_block_size;
 
     __d_printf(DEBUG, "advancing block to %p\n", next_virtual_addr);
 
@@ -68,15 +81,20 @@ static void MemoryBlock__advance(MemoryBlockPtr self, Address heap_end) {
     *self = MemoryBlock__new(KERNEL_ADDR(next_virtual_addr, next_phys_addr), 0);
 }
 
-static KernelAddress MemoryBlock__next_page(MemoryBlockPtr self, Address heap_end)
+static KernelAddress MemoryBlock__next_page(
+    MemoryBlockPtr self,
+    Address heap_end,
+    size_t coarse_block_size,
+    uint64_t pages_per_block
+)
 {
     mutex_lock(&self->block_lock);
 
     uint64_t page_index = self->pages_allocated;
 
-    if (page_index >= PAGES_PER_BLOCK)
+    if (page_index >= pages_per_block)
     {
-        MemoryBlock__advance(self, heap_end);
+        MemoryBlock__advance(self, heap_end, coarse_block_size);
         page_index = self->pages_allocated;
     }
     self->pages_allocated++;
@@ -90,7 +108,13 @@ static KernelAddress MemoryBlock__next_page(MemoryBlockPtr self, Address heap_en
     return KERNEL_ADDR(virtual_addr, physical_addr);
 }
 
-static KernelAddress MemoryBlock__next_pages(MemoryBlockPtr self, Address heap_end, size_t num_pages)
+static KernelAddress MemoryBlock__next_pages(
+    MemoryBlockPtr self,
+    Address heap_end,
+    size_t num_pages,
+    size_t coarse_block_size,
+    uint64_t pages_per_block
+)
 {
     mutex_lock(&self->block_lock);
 
@@ -99,9 +123,9 @@ static KernelAddress MemoryBlock__next_pages(MemoryBlockPtr self, Address heap_e
     // assumption is the blocks and pages are sequential
     for (uint64_t i = 0; i < num_pages; i++)
     {
-        if (self->pages_allocated >= PAGES_PER_BLOCK)
+        if (self->pages_allocated >= pages_per_block)
         {
-            MemoryBlock__advance(self, heap_end);
+            MemoryBlock__advance(self, heap_end, coarse_block_size);
         }
         KernelAddress start = self->start;
         uint64_t pages_allocated = self->pages_allocated;
@@ -121,12 +145,37 @@ static KernelAddress MemoryBlock__next_pages(MemoryBlockPtr self, Address heap_e
 
 static KernelAddress Heap__next(HeapPtr self)
 {
-    return MemoryBlock__next_page(&self->current_block, self->end);
+    return MemoryBlock__next_page(
+        &self->current_block,
+        self->end,
+        self->coarse_block_size,
+        self->pages_per_block
+    );
 }
 
 static KernelAddress Heap__next_pages(HeapPtr self, size_t num_pages)
 {
-    return MemoryBlock__next_pages(&self->current_block, self->end, num_pages);
+    return MemoryBlock__next_pages(
+        &self->current_block,
+        self->end,
+        num_pages,
+        self->coarse_block_size,
+        self->pages_per_block
+    );
+}
+
+static bool Heap__has_fresh_capacity(HeapPtr self, uint64_t pages)
+{
+    Address next_virtual_addr =
+        self->current_block.start.virtual_addr + (self->current_block.pages_allocated * PAGE_SIZE);
+    size_t allocation_size = pages * PAGE_SIZE;
+
+    if (next_virtual_addr > self->end)
+    {
+        return false;
+    }
+
+    return allocation_size <= self->end - next_virtual_addr;
 }
 
 static uint64_t Heap__pages_for_size(size_t size)
@@ -297,6 +346,7 @@ KernelAddress Heap__alloc_fresh(HeapPtr self) {
             return INVALID_KERNEL_ADDR;
         }
     );
+    __d_printf(MEMORY, "heap alloc fresh addr=%p phys=%p pages=1 size=%i\n", page.virtual_addr, page.phys_addr, PAGE_SIZE);
     return page;
 }
 
@@ -312,6 +362,14 @@ KernelAddress Heap__alloc_fresh_size(HeapPtr self, size_t size) {
             __d_printf(SYSLOG, "heap fresh allocation untracked addr=%p message=%s\n", page.virtual_addr, BString__cstr(&message));
             return INVALID_KERNEL_ADDR;
         }
+    );
+    __d_printf(
+        MEMORY,
+        "heap alloc fresh addr=%p phys=%p pages=%i size=%i\n",
+        page.virtual_addr,
+        page.phys_addr,
+        pages,
+        size
     );
     return page;
 }
@@ -332,7 +390,18 @@ KernelAddress Heap__alloc_size(HeapPtr self, size_t size)
             {
                 Heap__zero_pages(block.start, block.pages_allocated);
                 match_result(HeapCode, Heap__record_allocated(self, block.start, block.pages_allocated),
-                    success(_) { cs_return block.start; },
+                    success(_)
+                    {
+                        __d_printf(
+                            MEMORY,
+                            "heap alloc reuse addr=%p phys=%p pages=%i size=%i\n",
+                            block.start.virtual_addr,
+                            block.start.phys_addr,
+                            block.pages_allocated,
+                            size
+                        );
+                        cs_return block.start;
+                    },
                     error(code, message)
                     {
                         __d_printf(
@@ -354,6 +423,63 @@ KernelAddress Heap__alloc_size(HeapPtr self, size_t size)
     return INVALID_KERNEL_ADDR;
 }
 
+KernelAddress Heap__try_alloc_size(HeapPtr self, size_t size)
+{
+    critical_section(self->lock,
+    {
+        uint64_t pages = Heap__pages_for_size(size);
+
+        match_optional(MemoryBlock, Heap__take_free_block(self, pages),
+            some(block)
+            {
+                Heap__zero_pages(block.start, block.pages_allocated);
+                match_result(HeapCode, Heap__record_allocated(self, block.start, block.pages_allocated),
+                    success(_)
+                    {
+                        __d_printf(
+                            MEMORY,
+                            "heap alloc reuse addr=%p phys=%p pages=%i size=%i\n",
+                            block.start.virtual_addr,
+                            block.start.phys_addr,
+                            block.pages_allocated,
+                            size
+                        );
+                        cs_return block.start;
+                    },
+                    error(code, message)
+                    {
+                        __d_printf(
+                            SYSLOG,
+                            "heap reused allocation untracked addr=%p message=%s\n",
+                            block.start.virtual_addr,
+                            BString__cstr(&message)
+                        );
+                        cs_return INVALID_KERNEL_ADDR;
+                    }
+                );
+            },
+            none_do_nothing()
+        );
+
+        if (!Heap__has_fresh_capacity(self, pages))
+        {
+            __d_printf(
+                MEMORY,
+                "heap alloc failed size=%i pages=%i current=%p end=%p\n",
+                size,
+                pages,
+                self->current_block.start.virtual_addr + (self->current_block.pages_allocated * PAGE_SIZE),
+                self->end
+            );
+            cs_return INVALID_KERNEL_ADDR;
+        }
+
+        cs_return Heap__alloc_fresh_size(self, size);
+    });
+
+    return INVALID_KERNEL_ADDR;
+}
+
 Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr)
 {
     critical_section(self->lock,
@@ -366,6 +492,15 @@ Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr)
                 AllocatedBlocks__remove_key(&self->allocated_blocks, addr.virtual_addr);
                 MemoryBlock free_block = Heap__coalesce_free_block(self, allocated);
                 AllocatedBlocks__set(&self->free_blocks, free_block.start.virtual_addr, free_block);
+                __d_printf(
+                    MEMORY,
+                    "heap free addr=%p phys=%p pages=%i coalesced_addr=%p coalesced_pages=%i\n",
+                    allocated.start.virtual_addr,
+                    allocated.start.phys_addr,
+                    allocated.pages_allocated,
+                    free_block.start.virtual_addr,
+                    free_block.pages_allocated
+                );
                 cs_return Success(HeapCode, HEAP_OK);
             },
             none_do_nothing()

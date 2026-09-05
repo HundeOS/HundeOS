@@ -25,6 +25,11 @@ typedef enum ServiceOperation
     SERVICE_REGISTER_FILESYSTEM,
     SERVICE_FILESYSTEM_GET_REQUEST,
     SERVICE_FILESYSTEM_COMPLETE,
+    SERVICE_BLOCK_READ_DEVICE_ASYNC,
+    SERVICE_BLOCK_WRITE_DEVICE_ASYNC,
+    SERVICE_REGISTER_SOCKET_ROUTER,
+    SERVICE_SOCKET_GET_REQUEST,
+    SERVICE_SOCKET_COMPLETE,
 } ServiceOperation;
 
 typedef enum ServiceEventType
@@ -35,7 +40,17 @@ typedef enum ServiceEventType
     SERVICE_EVENT_BLOCK_IO = 4,
     SERVICE_EVENT_READY = 5,
     SERVICE_EVENT_FILESYSTEM_IO = 6,
+    SERVICE_EVENT_SOCKET_IO = 7,
 } ServiceEventType;
+
+typedef enum ServiceEventKind
+{
+    SERVICE_EVENT_REQUEST = 1,
+    SERVICE_EVENT_RESPONSE = 2,
+} ServiceEventKind;
+
+#define SERVICE_EVENT_RESPONSE_SOURCE_FLAG (1ULL << 63)
+#define SERVICE_EVENT_SOURCE_MASK (~SERVICE_EVENT_RESPONSE_SOURCE_FLAG)
 
 typedef enum ServiceIOEvent
 {
@@ -51,6 +66,7 @@ typedef struct ServiceEvent
 } ServiceEvent;
 
 typedef ServiceEvent * ServiceEventPtr;
+typedef const ServiceEvent * ConstServiceEventPtr;
 
 static inline ServiceEvent ServiceEvent__new(ServiceEventType type, uint64_t source, uint64_t data)
 {
@@ -59,6 +75,39 @@ static inline ServiceEvent ServiceEvent__new(ServiceEventType type, uint64_t sou
         .source = source,
         .data = data,
     };
+}
+
+static inline ServiceEvent ServiceEvent__request(ServiceEventType type, uint64_t request_id, uint64_t data)
+{
+    return (ServiceEvent) {
+        .type = type,
+        .source = request_id & SERVICE_EVENT_SOURCE_MASK,
+        .data = data,
+    };
+}
+
+static inline ServiceEvent ServiceEvent__response(ServiceEventType type, uint64_t request_id, uint64_t data)
+{
+    return (ServiceEvent) {
+        .type = type,
+        .source = (request_id & SERVICE_EVENT_SOURCE_MASK) | SERVICE_EVENT_RESPONSE_SOURCE_FLAG,
+        .data = data,
+    };
+}
+
+static inline ServiceEventKind ServiceEvent__kind(ServiceEventPtr self)
+{
+    if ((self->source & SERVICE_EVENT_RESPONSE_SOURCE_FLAG) != 0)
+    {
+        return SERVICE_EVENT_RESPONSE;
+    }
+
+    return SERVICE_EVENT_REQUEST;
+}
+
+static inline uint64_t ServiceEvent__request_id(ServiceEventPtr self)
+{
+    return self->source & SERVICE_EVENT_SOURCE_MASK;
 }
 
 typedef enum ServiceCode
@@ -83,6 +132,8 @@ typedef enum ServiceCode
     SERVICE_PERMISSION_DENIED = -15,
     SERVICE_FILESYSTEM_REQUEST_NOT_FOUND = -16,
     SERVICE_FILESYSTEM_REQUEST_FAILED = -17,
+    SERVICE_SOCKET_REQUEST_NOT_FOUND = -18,
+    SERVICE_SOCKET_REQUEST_FAILED = -19,
 } ServiceCode;
 
 typedef enum ServiceFilesystemOperation
@@ -168,6 +219,7 @@ typedef ServiceBlockReadRequest * ServiceBlockReadRequestPtr;
 
 typedef struct ServiceMappedMemory ServiceMappedMemory;
 typedef ServiceMappedMemory * ServiceMappedMemoryPtr;
+OptionalDef(ServiceMappedMemoryPtr);
 
 typedef struct ServiceDeviceAddressRequest
 {
@@ -277,7 +329,7 @@ static inline ServiceDeviceAddressRequest ServiceDeviceAddressRequest__new(Addre
 {
     return (ServiceDeviceAddressRequest) {
         .driver_address = driver_address,
-        .device_address = 0,
+        .device_address = driver_address,
     };
 }
 

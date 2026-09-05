@@ -79,23 +79,23 @@ IOStatus close(IOHandle handle)
 SpawnResult spawn(
     SpawnMode mode,
     ConstBStringPtr path,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     TEST_ASSERT_EQUAL(P_NOWAIT, mode);
     TEST_ASSERT_LESS_THAN_UINT64(4, spawn_count);
     snprintf(spawned_paths[spawn_count], sizeof(spawned_paths[spawn_count]), "%s", BString__cstr(path));
-    match_optional(BString, arg0,
+    match_optional(BString, *arg0,
         some(value) { snprintf(spawned_arg0[spawn_count], sizeof(spawned_arg0[spawn_count]), "%s", BString__cstr(&value)); },
         none_do_nothing()
     );
-    match_optional(BString, arg1,
+    match_optional(BString, *arg1,
         some(value) { snprintf(spawned_arg1[spawn_count], sizeof(spawned_arg1[spawn_count]), "%s", BString__cstr(&value)); },
         none_do_nothing()
     );
-    match_optional(BString, arg2,
+    match_optional(BString, *arg2,
         some(value) { snprintf(spawned_arg2[spawn_count], sizeof(spawned_arg2[spawn_count]), "%s", BString__cstr(&value)); },
         none_do_nothing()
     );
@@ -106,9 +106,9 @@ SpawnResult spawn(
 Result(SpawnResult) OS__spawn(
     SpawnMode mode,
     ConstBStringPtr path,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     SpawnResult result = spawn(mode, path, arg0, arg1, arg2);
@@ -204,7 +204,7 @@ void test_humpen_parse_mount_command_returns_error_for_missing_device_path(void)
 {
     BString line = bstr("device");
 
-    match_result(HumpenMountCommand, Humpen__parse_mount_command(line),
+    match_result(HumpenMountCommand, Humpen__parse_mount_command(&bstr("device")),
         success(command)
         {
             TEST_FAIL();
@@ -219,9 +219,8 @@ void test_humpen_parse_mount_command_returns_error_for_missing_device_path(void)
 
 void test_humpen_parse_mount_command_builds_watchdog_spawn_command_for_ext2(void)
 {
-    BString line = bstr("device /dev/virtio1 ext2 /");
 
-    match_result(HumpenMountCommand, Humpen__parse_mount_command(line),
+    match_result(HumpenMountCommand, Humpen__parse_mount_command(&bstr("device /dev/virtio1 ext2 /")),
         success(command)
         {
             TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, BString__cstr(command.driver_path));

@@ -7,6 +7,15 @@
 
 #include "../../../kernel/debug.h"
 
+LinkedListBodyDefine(ProcessPageTablePages);
+
+bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other)
+{
+    return self->valid == other->valid &&
+        self->virtual_addr == other->virtual_addr &&
+        self->phys_addr == other->phys_addr;
+}
+
 typedef struct MapRequest {
     UserAddress address;
     size_t size;
@@ -17,6 +26,14 @@ typedef MapRequest * MapRequestPtr;
 bool MapRequest__equals(MapRequestPtr self, MapRequestPtr other)
 {
     return self->address.virtual_addr == other->address.virtual_addr && self->size == other->size;
+}
+
+static MapRequest MapRequest__new(UserAddress address, size_t size)
+{
+    return (MapRequest) {
+        .address = address,
+        .size = size,
+    };
 }
 
 static bool MapRequest__is_covered_by_unmap(MapRequestPtr mapped_address, Address virtual_address, size_t size)
@@ -38,34 +55,86 @@ typedef struct PageTable
     MapRequestArray mapped_addresses;
 } PageTable;
 
-KernelAddress PageTable__new(KernelPtr kernel)
+static Result(KAllocCode) ProcessPageTable__record_page(ProcessPageTablePtr self, KernelAddress page)
 {
-    PageTablePtr table = (PageTablePtr) malloc(sizeof(PageTable));
+    match_result(CollectionCode, ProcessPageTablePages__push(&self->pages, page),
+        success(_) { return Success(KAllocCode, KALLOC_OK); },
+        error(code, message) { return Error(KAllocCode, message, code); }
+    );
+
+    return Error(KAllocCode, bstr("Unable to record page table page"), KALLOC_ALLOCATION_FAILED);
+}
+
+Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel)
+{
+    PageTablePtr table = v_ptr(Kernel__alloc(sizeof(PageTable)), PageTable);
     table->mapped_addresses = EmptyArray(MapRequestArray);
-    return (KernelAddress) {
-        .virtual_addr = addr(table),
-        .phys_addr = 0,
-        .valid = true
+
+    ProcessPageTable process_page_table = (ProcessPageTable) {
+        .root = KERNEL_ADDR(addr(table), addr(table)),
+        .pages = ProcessPageTablePages__new(),
     };
+
+    match_result(KAllocCode, ProcessPageTable__record_page(&process_page_table, process_page_table.root),
+        success_do_nothing(),
+        error(code, message) { return Error(ProcessPageTable, message, code); }
+    );
+
+    return Success(ProcessPageTable, process_page_table);
 }
 
-void PageTable__map(PageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+KernelAddress ProcessPageTable__root(ProcessPageTablePtr self)
 {
-    MapRequestArray__push(&self->mapped_addresses, (MapRequest){.address = address, .size = size});
+    return self->root;
 }
 
-void PageTable__map_mmio(PageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+PageTablePtr ProcessPageTable__root_table(ProcessPageTablePtr self)
+{
+    return v_ptr(ProcessPageTable__root(self), PageTable);
+}
+
+size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
+{
+    return ProcessPageTablePages__len(&self->pages);
+}
+
+Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self)
+{
+    for_each_ll(ProcessPageTablePages, self->pages, page,
+    {
+        match_result(KAllocCode, Kernel__free(page.virtual_addr),
+            success_do_nothing(),
+            error(code, message) { return Error(KAllocCode, message, code); }
+        );
+    });
+
+    match_result(CollectionCode, ProcessPageTablePages__dispose(&self->pages),
+        success_do_nothing(),
+        error(code, message) { return Error(KAllocCode, message, code); }
+    );
+
+    self->root = NULL_KERNEL_ADDRESS;
+    return Success(KAllocCode, KALLOC_OK);
+}
+
+void PageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    MapRequestArray__push(&ProcessPageTable__root_table(self)->mapped_addresses, MapRequest__new(address, size));
+}
+
+void PageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     PageTable__map(self, kernel, address, size);
 }
 
-void PageTable__unmap(PageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
+void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
 {
-    for_each_fa(MapRequestArray, self->mapped_addresses, i, mapped_address,
+    PageTablePtr root = ProcessPageTable__root_table(self);
+    for_each_fa(MapRequestArray, root->mapped_addresses, i, mapped_address,
     {
         if (MapRequest__is_covered_by_unmap(&mapped_address, virtual_address, size))
         {
-            MapRequestArray__remove(&self->mapped_addresses, mapped_address);
+            MapRequestArray__remove(&root->mapped_addresses, mapped_address);
             return;
         }
     });

@@ -4,6 +4,7 @@ manifest:
   source_files:
     - kernel/types/*.c
     - kernel/system_info.c
+    - kernel/subsystems/io/io.c
     - kernel/subsystems/io/types.c
     - kernel/subsystems/io/block/*.c
     - kernel/subsystems/io/file/filesystem.c

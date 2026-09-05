@@ -96,14 +96,14 @@ void irq_handler(ProcessContextPtr context, bool current_el)
 
 static uint64_t abort_user_process(
     KernelPtr kernel,
-    Optional(ProcessPtr) current_process,
+    OptionalPtr(ProcessPtr) current_process,
     ProcessContextPtr context,
     ProcessAbortReason reason,
     uint64_t esr,
     uint64_t ec
 )
 {
-    match_optional(ProcessPtr, current_process,
+    match_optional(ProcessPtr, *current_process,
         some(process)
         {
             ProcessAbort abort;
@@ -122,7 +122,7 @@ static uint64_t abort_user_process(
             abort.syndrome = esr;
             abort.cpu = CPU__id();
 
-            match_result(ProcessPtr, Scheduler__abort_process(kernel->scheduler, kernel->io_subsystem, process, abort),
+            match_result(ProcessID, Scheduler__abort_process(kernel->scheduler, kernel->io_subsystem, process, abort),
                 success_do_nothing(),
                 error(code, message) { Kernel__panic(cstr(message), context); }
             );
@@ -133,9 +133,9 @@ static uint64_t abort_user_process(
     return 0;
 }
 
-static bool yield_if_process_parked(KernelPtr kernel, Optional(ProcessPtr) current_process)
+static bool yield_if_process_parked(KernelPtr kernel, OptionalPtr(ProcessPtr) current_process)
 {
-    match_optional(ProcessPtr, current_process,
+    match_optional(ProcessPtr, *current_process,
         some(process)
         {
             if (Process__is_parked(process))
@@ -220,7 +220,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                 SyscallDispatcher__dispatch(
                     &kernel->syscall_dispatcher,
                     kernel,
-                    current_process,
+                    &current_process,
                     context->x[8],
                     context->x[0],
                     context->x[1],
@@ -245,7 +245,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                         none() { __d_printf(SYSCALL, "syscall exit no-current-process id=%p result=%p\n", context->x[8], call_result);; }
                     );
                     __d_printf(SYSCALL, "syscall result: res=%p\n", call_result);
-                    if (yield_if_process_parked(kernel, current_process))
+                    if (yield_if_process_parked(kernel, &current_process))
                     {
                         return 0;
                     }
@@ -253,7 +253,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                 },
                 error(code, message)
                 {
-                    if (yield_if_process_parked(kernel, current_process))
+                    if (yield_if_process_parked(kernel, &current_process))
                     {
                         return 0;
                     }
@@ -291,7 +291,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                 Kernel__panic("Instruction abort from current EL", context);
             }
             return abort_user_process(
-                kernel, current_process, context, PROCESS_ABORT_INSTRUCTION_ABORT, esr, ec
+                kernel, &current_process, context, PROCESS_ABORT_INSTRUCTION_ABORT, esr, ec
             );
             break;
         case 0x21: // Instruction abort from current EL
@@ -304,7 +304,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el) {
                 Kernel__panic("Data abort from current EL", context);
             }
             return abort_user_process(
-                kernel, current_process, context, PROCESS_ABORT_DATA_ABORT, esr, ec
+                kernel, &current_process, context, PROCESS_ABORT_DATA_ABORT, esr, ec
             );
             break;
         case 0x25: // Data abort from current EL

@@ -5,7 +5,7 @@
 #include "../context/originating_call_context.h"
 #include "../scheduler/types.h"
 
-typedef Result(Anything) (* KernelResultMapper)(Result(Anything) result, Anything context);
+typedef Result(Anything) (* KernelResultMapper)(ResultPtr(Anything) result, Anything context);
 OptionalDef(KernelResultMapper);
 
 typedef struct KernelContext KernelContext;
@@ -22,25 +22,25 @@ struct KernelContext
 };
 
 KernelContext KernelContext__new(
-    Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler
+    OptionalPtr(ProcessID) pid, OptionalPtr(SchedulerPtr) scheduler
 );
 
 KernelContextPtr KernelContext__heap_new(
-    Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler
+    OptionalPtr(ProcessID) pid, OptionalPtr(SchedulerPtr) scheduler
 );
 KernelContextPtr KernelContext__heap_new_with_mapper(
-    Optional(ProcessID) pid, Optional(SchedulerPtr) scheduler,
+    OptionalPtr(ProcessID) pid, OptionalPtr(SchedulerPtr) scheduler,
     KernelResultMapper mapper, Anything mapper_context
 );
 void KernelContext__set_result_mapper(
     KernelContextPtr self, KernelResultMapper mapper, Anything mapper_context
 );
-Result(Anything) KernelContext__map_result(KernelContextPtr self, Result(Anything) result);
+Result(Anything) KernelContext__map_result(KernelContextPtr self, ResultPtr(Anything) result);
 bool KernelContext__has_any_state(KernelContextPtr self);
 void KernelContext__dispose_heap(KernelContextPtr self);
 
-KernelContext KernelContext__from_originating_context(OriginatingContext originating_context);
-KernelContextPtr KernelContext__from_originating_context_heap(OriginatingContext originating_context);
+KernelContext KernelContext__from_originating_context(ConstOriginatingContextPtr originating_context);
+KernelContextPtr KernelContext__from_originating_context_heap(ConstOriginatingContextPtr originating_context);
 
 #define NEW_KERNEL_CONTEXT(sched, proc_id) \
     (KernelContext) { \

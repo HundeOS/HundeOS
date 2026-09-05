@@ -1,0 +1,12 @@
+#ifndef __COMMON_INCLUDES_HARDWARE_ETHERNET_H
+#define __COMMON_INCLUDES_HARDWARE_ETHERNET_H
+
+typedef enum EthernetMacKind
+{
+    ETHERNET_MAC_KIND_NONE = 0,
+    ETHERNET_MAC_KIND_BCM2711_GENET = 1,
+    ETHERNET_MAC_KIND_RP1_GEM = 2,
+}
+EthernetMacKind;
+
+#endif

@@ -12,6 +12,12 @@ typedef int64_t Code;
 #define Result(T) \
     Result_##T \
 
+#define ResultPtr(T) \
+    Result_##T * \
+
+#define ConstResultPtr(T) \
+    const Result_##T * \
+
 #define ResultDef(T) \
     typedef struct Success_##T { \
         T val; \
@@ -51,9 +57,6 @@ typedef int64_t Code;
         } \
     } \
 
-
-#define End \
-} \
 
 #define success(val_name) \
     { \

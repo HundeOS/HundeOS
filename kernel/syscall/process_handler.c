@@ -9,7 +9,7 @@ static BString invalid_child_event_request = bstr("Invalid child event request")
 static BString invalid_sleep_request = bstr("Invalid sleep request");
 static BString sleep_pending = bstr("Sleep pending");
 
-static Result(Anything) ProcessChildEvent__copy_to_target(Result(Anything) result, Anything context)
+static Result(Anything) ProcessChildEvent__copy_to_target(ResultPtr(Anything) result, Anything context)
 {
     ProcessChildEventPtr target = (ProcessChildEventPtr) context;
     if (target == 0)
@@ -17,7 +17,7 @@ static Result(Anything) ProcessChildEvent__copy_to_target(Result(Anything) resul
         return Error(Anything, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
     }
 
-    match_result(Anything, result,
+    match_result(Anything, *result,
         success(value)
         {
             ProcessChildEventPtr event = (ProcessChildEventPtr) value;
@@ -44,9 +44,10 @@ static Result(Anything) Process__complete_wait_child_event_syscall(ParkedOperati
                             match_result(ProcessChildEvent, Scheduler__child_take_next_event(scheduler, process),
                                 success(event)
                                 {
+                                    Result(Anything) mapped_result = Success(Anything, (Anything) &event);
                                     return KernelContext__map_result(
                                         parked_operation->kernel_context,
-                                        Success(Anything, (Anything) &event)
+                                        &mapped_result
                                     );
                                 },
                                 error(code, message) { return Error(Anything, message, code); }
@@ -66,7 +67,7 @@ static Result(Anything) Process__complete_wait_child_event_syscall(ParkedOperati
 
 Result(SystemCallResult) ProcessList__handler(
     KernelPtr kernel,
-    Optional(ProcessPtr) proc,
+    OptionalPtr(ProcessPtr) proc,
     Anything arg1,
     Anything arg2,
     Anything arg3,
@@ -92,7 +93,7 @@ Result(SystemCallResult) ProcessList__handler(
 
 Result(SystemCallResult) ProcessWaitChildEvent__handler(
     KernelPtr kernel,
-    Optional(ProcessPtr) proc,
+    OptionalPtr(ProcessPtr) proc,
     Anything arg1,
     Anything arg2,
     Anything arg3,
@@ -105,13 +106,13 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
         return Error(SystemCallResult, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
     }
 
-    match_optional(ProcessPtr, proc,
+    match_optional(ProcessPtr, *proc,
         some(process)
         {
             ProcessChildEventPtr target = (ProcessChildEventPtr) arg1;
             KernelContextPtr kernel_context = KernelContext__heap_new_with_mapper(
-                Some(ProcessID, process->pid),
-                Some(SchedulerPtr, kernel->scheduler),
+                &Some(ProcessID, process->pid),
+                &Some(SchedulerPtr, kernel->scheduler),
                 ProcessChildEvent__copy_to_target,
                 (Anything) target
             );
@@ -120,15 +121,12 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
                 kernel->scheduler,
                 process,
                 kernel_context,
-                Some(Continuation, Process__complete_wait_child_event_syscall),
+                &Some(Continuation, Process__complete_wait_child_event_syscall),
                 true
             ),
                 success(event)
                 {
-                    Result(Anything) mapped = KernelContext__map_result(
-                        kernel_context,
-                        Success(Anything, (Anything) &event)
-                    );
+                    Result(Anything) mapped = KernelContext__map_result(kernel_context, &Success(Anything, (Anything) &event));
                     KernelContext__dispose_heap(kernel_context);
                     match_result(Anything, mapped,
                         success(mapped_code) { return Success(SystemCallResult, mapped_code); },
@@ -152,7 +150,7 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(
 
 Result(SystemCallResult) ProcessSleep__handler(
     KernelPtr kernel,
-    Optional(ProcessPtr) proc,
+    OptionalPtr(ProcessPtr) proc,
     Anything arg1,
     Anything arg2,
     Anything arg3,
@@ -160,7 +158,7 @@ Result(SystemCallResult) ProcessSleep__handler(
     Anything arg5
 )
 {
-    match_optional(ProcessPtr, proc,
+    match_optional(ProcessPtr, *proc,
         some(process)
         {
             match_result(ProcessPtr, Scheduler__sleep_usec(kernel->scheduler, process, (uint64_t) arg1),

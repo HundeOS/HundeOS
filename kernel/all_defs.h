@@ -35,9 +35,4 @@
 
 #define _4GB (4ULL * _1GB)
 
-#define COARSE_BLOCK_SIZE _4MB
-#define PAGES_PER_BLOCK (COARSE_BLOCK_SIZE / PAGE_SIZE)
-
-#define MAX_BLOCKS (_4GB / COARSE_BLOCK_SIZE)
-
 #endif

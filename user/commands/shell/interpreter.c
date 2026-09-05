@@ -1,7 +1,7 @@
 #include "interpreter.h"
 
 #include "../../user.h"
-#include "../../sys/spawn.h"
+#include "sys/spawn.h"
 
 #define SPAWN_ARG_LIMIT 3
 
@@ -45,14 +45,13 @@ static bool Interpreter__matches(ConstBStringPtr str, ConstBStringPtr cmd)
 
 static BString Interpreter__command_path(ConstBStringPtr cmd)
 {
-    BString root_prefix = bstr("/");
 
-    if (BString__starts_with(cmd, &root_prefix))
+    if (BString__starts_with(cmd, &bstr("/")))
     {
         return *cmd;
     }
 
-    BString prefix = BString__append(&COMMAND_SEARCH_PATH, &root_prefix);
+    BString prefix = BString__append(&COMMAND_SEARCH_PATH, &bstr("/"));
     return BString__append(&prefix, cmd);
 }
 
@@ -149,9 +148,14 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
         none_do_nothing()
     );
     SpawnMode mode = command->background ? P_NOWAIT : P_WAIT;
-    SpawnResult result = spawn(mode, &path, arg0, arg1, arg2);
+    SpawnResult result = spawn(mode, &path, &arg0, &arg1, &arg2);
 
-    if (result != SPAWN_SUCCESS)
+    if (result >= SPAWN_SUCCESS)
+    {
+        return COMMAND_SUCCESS;
+    }
+
+    if (result < SPAWN_SUCCESS)
     {
         IO__printf(&bstr("result = %i\n"), (int) result);
     }

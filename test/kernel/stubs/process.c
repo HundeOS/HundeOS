@@ -46,7 +46,12 @@ ProcessPtr active_address_space_process()
 
 void Process__save_context(ProcessPtr self, ProcessContextPtr context)
 {
-    self->context = context;
+    if (context == NULL) // hundelint: ignore-no-null
+    {
+        return;
+    }
+
+    *self->context = *context;
 }
 
 void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)

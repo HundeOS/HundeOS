@@ -8,7 +8,6 @@ static BString sysinfo_path = bstr("sysinfo");
 static BString invalid_path = bstr("Invalid procfs path");
 static BString invalid_handle = bstr("Invalid procfs handle");
 static BString missing_system_info = bstr("Missing system info");
-static BString not_supported = bstr("Procfs operation not supported");
 static BString sysinfo_buffer_full = bstr("Sysinfo read buffer full");
 static BString equals = bstr("=");
 static BString newline = bstr("\n");
@@ -53,6 +52,11 @@ static BString sd_host_present_key = bstr("sd_host.present");
 static BString sd_host_physical_base_key = bstr("sd_host.physical_base");
 static BString sd_host_mmio_size_key = bstr("sd_host.mmio_size");
 static BString sd_host_irq_key = bstr("sd_host.irq");
+static BString ethernet_present_key = bstr("ethernet.present");
+static BString ethernet_mac_kind_key = bstr("ethernet.mac_kind");
+static BString ethernet_physical_base_key = bstr("ethernet.physical_base");
+static BString ethernet_mmio_size_key = bstr("ethernet.mmio_size");
+static BString ethernet_irq_key = bstr("ethernet.irq");
 static BString memory_physical_start_key = bstr("memory.physical_start");
 static BString memory_physical_end_key = bstr("memory.physical_end");
 static BString memory_physical_size_key = bstr("memory.physical_size");
@@ -269,9 +273,11 @@ static void ProcSysinfoWriter__append_physical_memory_regions(ProcSysinfoWriterP
     }
 }
 
-static void ProcSysinfoWriter__append_framebuffer(ProcSysinfoWriterPtr self, Optional(FramebufferInfo) framebuffer)
+static void ProcSysinfoWriter__append_framebuffer(
+    ProcSysinfoWriterPtr self, OptionalPtr(FramebufferInfo) framebuffer
+)
 {
-    match_optional(FramebufferInfo, framebuffer,
+    match_optional(FramebufferInfo, *framebuffer,
         some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 1);
@@ -295,9 +301,9 @@ static void ProcSysinfoWriter__append_framebuffer(ProcSysinfoWriterPtr self, Opt
     );
 }
 
-static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, Optional(PciInfo) pci)
+static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, OptionalPtr(PciInfo) pci)
 {
-    match_optional(PciInfo, pci,
+    match_optional(PciInfo, *pci,
         some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 1);
@@ -311,9 +317,9 @@ static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, Optional(Pc
     );
 }
 
-static void ProcSysinfoWriter__append_sd_host(ProcSysinfoWriterPtr self, Optional(SdHostInfo) sd_host)
+static void ProcSysinfoWriter__append_sd_host(ProcSysinfoWriterPtr self, OptionalPtr(SdHostInfo) sd_host)
 {
-    match_optional(SdHostInfo, sd_host,
+    match_optional(SdHostInfo, *sd_host,
         some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 1);
@@ -322,6 +328,23 @@ static void ProcSysinfoWriter__append_sd_host(ProcSysinfoWriterPtr self, Optiona
             ProcSysinfoWriter__append_dec_line(self, &sd_host_irq_key, info.irq);
         },
         none() { ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 0);; }
+    );
+}
+
+static void ProcSysinfoWriter__append_ethernet(
+    ProcSysinfoWriterPtr self, OptionalPtr(EthernetMacInfo) ethernet_mac
+)
+{
+    match_optional(EthernetMacInfo, *ethernet_mac,
+        some(info)
+        {
+            ProcSysinfoWriter__append_dec_line(self, &ethernet_present_key, 1);
+            ProcSysinfoWriter__append_dec_line(self, &ethernet_mac_kind_key, info.kind);
+            ProcSysinfoWriter__append_hex_line(self, &ethernet_physical_base_key, info.physical_base);
+            ProcSysinfoWriter__append_hex_line(self, &ethernet_mmio_size_key, info.mmio_size);
+            ProcSysinfoWriter__append_dec_line(self, &ethernet_irq_key, info.irq);
+        },
+        none() { ProcSysinfoWriter__append_dec_line(self, &ethernet_present_key, 0);; }
     );
 }
 
@@ -339,9 +362,10 @@ static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
     ProcSysinfoWriter__append_hex_line(&writer, &uart_virtual_base_key, info->uart.virtual_base);
     ProcSysinfoWriter__append_dec_line(&writer, &uart_irq_key, info->uart.irq);
     ProcSysinfoWriter__append_hex_line(&writer, &uart_mmio_size_key, 0x1000);
-    ProcSysinfoWriter__append_framebuffer(&writer, info->framebuffer);
-    ProcSysinfoWriter__append_pci(&writer, info->pci);
-    ProcSysinfoWriter__append_sd_host(&writer, info->sd_host);
+    ProcSysinfoWriter__append_framebuffer(&writer, &info->framebuffer);
+    ProcSysinfoWriter__append_pci(&writer, &info->pci);
+    ProcSysinfoWriter__append_sd_host(&writer, &info->sd_host);
+    ProcSysinfoWriter__append_ethernet(&writer, &info->ethernet_mac);
     ProcSysinfoWriter__append_hex_line(&writer, &memory_physical_start_key, info->physical_memory.physical_start);
     ProcSysinfoWriter__append_hex_line(&writer, &memory_physical_end_key, info->physical_memory.physical_end);
     uint64_t physical_size = info->physical_memory.physical_end - info->physical_memory.physical_start;
@@ -369,7 +393,7 @@ static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
     return writer;
 }
 
-static Result(IOInternalHandle) ProcFilesystemIOState__add_handle(ProcFilesystemIOStatePtr self, BString path)
+static Result(IOInternalHandle) ProcFilesystemIOState__add_handle(ProcFilesystemIOStatePtr self, ConstBStringPtr path)
 {
     critical_section(self->state.lock,
     {
@@ -415,9 +439,9 @@ static Result(IOInternalHandle) ProcFilesystemIOState__delete_handle(
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-static Result(IOInternalHandle) ProcFilesystemIO__open(IOStatePtr self, BString path, Flags flags)
+static Result(IOInternalHandle) ProcFilesystemIO__open(IOStatePtr self, ConstBStringPtr path, Flags flags)
 {
-    if (BString__equals(&path, &sysinfo_path))
+    if (BString__equals(path, &sysinfo_path))
     {
         return ProcFilesystemIOState__add_handle((ProcFilesystemIOStatePtr) self, path);
     }
@@ -431,7 +455,7 @@ static Result(IOInternalHandle) ProcFilesystemIO__close(IOStatePtr self, IOInter
 }
 
 static Result(IOBufferPtr) ProcFilesystemIO__read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer
 )
 {
     ProcFilesystemIOStatePtr fs_state = (ProcFilesystemIOStatePtr) self;
@@ -472,24 +496,9 @@ static Result(IOBufferPtr) ProcFilesystemIO__read(
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-static Result(ByteCount) ProcFilesystemIO__write(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size)
+static Result(FilesystemNodes) ProcFilesystemIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, ConstBStringPtr path)
 {
-    return Error(ByteCount, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(ParkStatus) ProcFilesystemIO__park(IOStatePtr self, IOContextPtr parked_context)
-{
-    return Error(ParkStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(ParkStatus) ProcFilesystemIO__unpark(IOStatePtr self)
-{
-    return Error(ParkStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(FilesystemNodes) ProcFilesystemIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, BString path)
-{
-    BStringArray path_segments = BString__split(&path, '/');
+    BStringArray path_segments = BString__split(path, '/');
     if (BStringArray__len(&path_segments) != 0)
     {
         return Error(FilesystemNodes, invalid_path, IO_INVALID_PATH);
@@ -499,42 +508,34 @@ static Result(FilesystemNodes) ProcFilesystemIO__list_nodes(IOStatePtr self, Fil
     FilesystemNodes result = EmptyArray(FilesystemNodes);
     FilesystemNodes__push(
         &result,
-        FilesystemNode__heap_new(fs_state->state.filesystem, sysinfo_path, 0)
+        FilesystemNode__heap_new(fs_state->state.filesystem, &sysinfo_path, 0)
     );
 
     return Success(FilesystemNodes, result);
 }
 
-static Result(IOStatus) ProcFilesystemIO__mkdir(IOStatePtr self, BString path)
-{
-    return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOStatus) ProcFilesystemIO__remove(IOStatePtr self, BString path, Flags flags)
-{
-    return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOStatus) ProcFilesystemIO__link(IOStatePtr self, BString source_path, BString target_path)
-{
-    return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
 FileIO ProcFilesystemIO__new()
 {
     return (FileIO) {
-        .base_io = (IO) {
-            .open = ProcFilesystemIO__open,
-            .close = ProcFilesystemIO__close,
-            .read = ProcFilesystemIO__read,
-            .write = ProcFilesystemIO__write,
-            .park = ProcFilesystemIO__park,
-            .unpark = ProcFilesystemIO__unpark,
-        },
+        .base_io = IO__new(
+            ProcFilesystemIO__open,
+            ProcFilesystemIO__read,
+            IO__unsupported_write,
+            IO__unsupported_accept,
+            ProcFilesystemIO__close,
+            IO__unsupported_park,
+            IO__unsupported_unpark,
+            IO__unsupported_server_buffer,
+            IO__unsupported_server_write_buffer,
+            IO__unsupported_data_available,
+            IO__unsupported_data_consumed,
+            IO__unsupported_eof
+        ),
         .list_nodes = ProcFilesystemIO__list_nodes,
-        .mkdir = ProcFilesystemIO__mkdir,
-        .remove = ProcFilesystemIO__remove,
-        .link = ProcFilesystemIO__link,
+        .list_dir = FileIO__unsupported_list_dir,
+        .mkdir = FileIO__unsupported_mkdir,
+        .remove = FileIO__unsupported_remove,
+        .link = FileIO__unsupported_link,
     };
 }
 

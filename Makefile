@@ -18,7 +18,7 @@ CFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wex
 
 USER_CFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
            -nostdlib -nostartfiles -mcmodel=small \
-           -march=armv8-a -mno-outline-atomics -I./common -I./common_includes -I./user/lib/newlib/include
+           -march=armv8-a -mno-outline-atomics -I./user/lib -I./common -I./common_includes -I./user/lib/newlib/include
 
 # Assembler flags
 ASFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
@@ -110,23 +110,11 @@ ARCH_ASM_OBJECTS := $(patsubst %.s,$(KERNEL_BUILD_DIR)/%.o,$(ARCH_ASM_SOURCES))
 USER_SOURCES := $(shell find ./user -name "*.c" -print)
 USER_ASM_SOURCES := $(shell find ./user -name "*.s" -print)
 
-USER_ARCH_SOURCES := $(shell find ./user/arch -name "*.c" -print)
-USER_ARCH_ASM_SOURCES := $(shell find ./user/arch -name "*.s" -print)
-
-USER_SYS_SOURCES := $(shell find ./user/sys -name "*.c" -print)
-USER_SYS_ASM_SOURCES := $(shell find ./user/sys -name "*.s" -print)
-
-USER_LIB_SOURCES := $(shell find ./user/lib -name "*.c" ! -name "nano-mallocr.c" -print)
+USER_LIB_SOURCES := $(shell find ./user/lib -name "*.c" ! -name "nano-mallocr.c" ! -path "./user/lib/fiber/arch/hosted/*" -print)
 USER_LIB_ASM_SOURCES := $(shell find ./user/lib -name "*.s" -print)
 
 USER_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_SOURCES))
 USER_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_ASM_SOURCES))
-
-USER_ARCH_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_ARCH_SOURCES))
-USER_ARCH_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_ARCH_ASM_SOURCES))
-
-USER_SYS_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_SYS_SOURCES))
-USER_SYS_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_SYS_ASM_SOURCES))
 
 USER_LIB_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_LIB_SOURCES))
 USER_LIB_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_LIB_ASM_SOURCES))
@@ -151,7 +139,7 @@ EMBEDDED_FS_INPUTS := \
 	$(foreach dir,$(USER_SERVICE_DIRS),services/$(notdir $(dir))=build/user/$(notdir $(dir)).bin)
 EMBEDDED_FS := build/kernel/embedded.fs
 
-.PRECIOUS: build/user/arch/%.o
+.PRECIOUS: build/user/lib/arch/%.o
 
 all: $(BIN)
 
@@ -328,7 +316,7 @@ $(notdir $(1))_ASM_SRCS := $$(wildcard $(1)/*.s)
 $(notdir $(1))_OBJS := $$(patsubst user/%.c,build/user/%.o,$$($(notdir $(1))_SRCS))
 $(notdir $(1))_ASM_OBJS := $$(patsubst user/%.s,build/user/%.o,$$($(notdir $(1))_ASM_SRCS))
 
-build/user/$(notdir $(1)).bin: $$($(notdir $(1))_OBJS) $$($(notdir $(1))_ASM_OBJS) $$($(notdir $(1))_EXTRA_OBJS) $$(COMMON_USER_OBJECTS) $$(USER_ARCH_ASM_OBJECTS) $$(USER_ARCH_OBJECTS) $$(USER_SYS_OBJECTS) $$(USER_SYS_ASM_OBJECTS) $$(USER_LIB_OBJECTS) $$(USER_LIB_ASM_OBJECTS)
+build/user/$(notdir $(1)).bin: $$($(notdir $(1))_OBJS) $$($(notdir $(1))_ASM_OBJS) $$($(notdir $(1))_EXTRA_OBJS) $$(COMMON_USER_OBJECTS) $$(USER_LIB_OBJECTS) $$(USER_LIB_ASM_OBJECTS)
 	$$(LD) $$(USER_LDFLAGS) $$^ -o $$@
 endef
 
@@ -477,6 +465,55 @@ qemu-virt: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 		-nographic \
 		-monitor telnet::4444,server,nowait
 
+qemu-virt-hvf: BOOT_CONFIG = qemu_virt_hvf
+qemu-virt-hvf: $(ELF) $(EXT2_IMG) build/boot_config/qemu_virt_hvf.img $(DISK_IMG) $(SD_CARD_FAT32_IMG)
+	qemu-system-aarch64 \
+		-M virt,gic-version=3,accel=hvf \
+		-smp cpus=4 \
+		-cpu host \
+		-m 4G  \
+		-serial $(SERIAL) \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
+		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
+		-device virtio-blk-device,drive=sd0 \
+		-kernel $(ELF) \
+		-nographic \
+		-monitor telnet::4444,server,nowait
+
+qemu-virt-hvf-trace: BOOT_CONFIG = qemu_virt_hvf
+qemu-virt-hvf-trace:
+	$(MAKE) $(DISK_IMG)
+	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
+	$(MAKE) build/boot_config/qemu_virt_hvf.img
+	$(MAKE) $(SD_CARD_FAT32_IMG)
+	rm -rf $(KERNEL_BUILD_DIR) $(ELF)
+	$(MAKE) CFLAGS="$(CFLAGS) -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE" $(ELF)
+	mkdir -p build
+	: > build/kernel-trace.log
+	qemu-system-aarch64 \
+		-M virt,gic-version=3,accel=hvf \
+		-smp cpus=4 \
+		-cpu host \
+		-m 4G  \
+		-serial $(SERIAL) \
+		-serial file:build/kernel-trace.log \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
+		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=build/boot_config/qemu_virt_hvf.img,format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
+		-device virtio-blk-device,drive=sd0 \
+		-kernel $(ELF) \
+		-nographic \
+		-monitor telnet::4444,server,nowait
+
 qemu-virt-1cpu: BOOT_CONFIG = qemu_virt
 qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 	qemu-system-aarch64 \
@@ -578,4 +615,4 @@ qemu-virt-gdb: clean $(ELF)
 		-S \
 		-gdb tcp::1234
 
-.PHONY: all clean setup python-venv disk sd-fat32-disk ext2-disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace test hundelint hundelint-strict hundelint-test test_clean
+.PHONY: all clean setup python-venv disk sd-fat32-disk ext2-disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-hvf qemu-virt-hvf-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace test hundelint hundelint-strict hundelint-test test_clean

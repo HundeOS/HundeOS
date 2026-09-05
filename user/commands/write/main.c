@@ -1,5 +1,5 @@
 #include "../../user.h"
-#include "../../sys/io.h"
+#include "sys/io.h"
 
 static Optional(BString) Write__split_path_value(ConstBStringPtr arg, BStringPtr path)
 {
@@ -8,8 +8,7 @@ static Optional(BString) Write__split_path_value(ConstBStringPtr arg, BStringPtr
         return None(BString);
     }
 
-    BString delimiter = bstr("=");
-    BStringSplit split = BString__split_first_any(arg, &delimiter);
+    BStringSplit split = BString__split_first_any(arg, &bstr("="));
     match_optional(BString, split.match,
         some(raw_path) { *path = IO__path_from_arg(&raw_path); },
         none_do_nothing()
@@ -20,12 +19,11 @@ static Optional(BString) Write__split_path_value(ConstBStringPtr arg, BStringPtr
 static BString Write__value_from_args(int argc, char ** argv)
 {
     BString value = empty_bstr();
-    BString space = bstr(" ");
     for (int i = 2; i < argc; i++)
     {
         if (i > 2)
         {
-            value = BString__append(&value, &space);
+            value = BString__append(&value, &bstr(" "));
         }
 
         BString arg = BString__new(argv[i]);

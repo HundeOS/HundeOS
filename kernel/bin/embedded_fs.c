@@ -21,12 +21,12 @@ EmbeddedFs EmbeddedFs__new(Address start, Address end)
     };
 }
 
-EmbeddedFsFile EmbeddedFsFile__new(Address start, Address end, BString name)
+EmbeddedFsFile EmbeddedFsFile__new(Address start, Address end, ConstBStringPtr name)
 {
     return (EmbeddedFsFile) {
         .start = start,
         .end = end,
-        .name = name,
+        .name = *name,
     };
 }
 
@@ -94,7 +94,7 @@ static bool EmbeddedFs__entry_is_valid(EmbeddedFsPtr self, EmbeddedFsEntryPtr en
     return true;
 }
 
-Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, BString name)
+Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, ConstBStringPtr name)
 {
     if (!EmbeddedFs__is_valid(self))
     {
@@ -113,14 +113,14 @@ Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, BString name)
         }
 
         BString entry_name = EmbeddedFs__entry_name(self, entry);
-        if (BString__equals(&entry_name, &name))
+        if (BString__equals(&entry_name, name))
         {
             return Some(
                 EmbeddedFsFile,
                 EmbeddedFsFile__new(
                     self->start + entry->data_offset,
                     self->start + entry->data_offset + entry->data_len,
-                    entry_name
+                    &entry_name
                 )
             );
         }

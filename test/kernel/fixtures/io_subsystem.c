@@ -10,25 +10,29 @@ FilesystemPtr init_root_filesystem_with_embedded_binaries(KernelPtr kernel)
     FilesystemPtr filesystem = RootFilesystem__heap_new();
     FilesystemIOStatePtr filesystem_state = FilesystemIOState__heap_new(filesystem);
 
-    FilesystemPtr embedded_binaries = Filesystem__heap_new(bstring("embed"), EmbeddedFilesystemIO__new());
+    FileIO embedded_io = EmbeddedFilesystemIO__new();
+    FilesystemPtr embedded_binaries = Filesystem__heap_new(&bstr("embed"), &embedded_io);
     EmbeddedFilesystemIOStatePtr embedded_binaries_state = EmbeddedFilesystemIOState__heap_new(embedded_binaries);
 
-    Filesystem__mount(filesystem, bstring("sbin"), embedded_binaries);
+    Filesystem__mount(filesystem, &bstr("sbin"), embedded_binaries);
 
-    FilesystemPtr devfs = Filesystem__heap_new(bstring("dev"), DevFilesystemIO__new());
+    FileIO dev_io = DevFilesystemIO__new();
+    FilesystemPtr devfs = Filesystem__heap_new(&bstr("dev"), &dev_io);
     DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(devfs, kernel->io_subsystem);
 
-    Filesystem__mount(filesystem, bstring("dev"), devfs);
+    Filesystem__mount(filesystem, &bstr("dev"), devfs);
 
-    FilesystemPtr procfs = Filesystem__heap_new(bstring("proc"), ProcFilesystemIO__new());
+    FileIO proc_io = ProcFilesystemIO__new();
+    FilesystemPtr procfs = Filesystem__heap_new(&bstr("proc"), &proc_io);
     ProcFilesystemIOStatePtr procfs_state = ProcFilesystemIOState__heap_new(procfs, kernel);
 
-    Filesystem__mount(filesystem, bstring("proc"), procfs);
+    Filesystem__mount(filesystem, &bstr("proc"), procfs);
 
-    FilesystemPtr memfs = Filesystem__heap_new(bstring("tmp/memfs"), MemFilesystemIO__new());
+    FileIO memfs_io = MemFilesystemIO__new();
+    FilesystemPtr memfs = Filesystem__heap_new(&bstr("tmp/memfs"), &memfs_io);
     MemFilesystemIOStatePtr memfs_state = MemFilesystemIOState__heap_new(memfs);
 
-    Filesystem__mount(filesystem, bstring("tmp/memfs"), memfs);
+    Filesystem__mount(filesystem, &bstr("tmp/memfs"), memfs);
 
     return filesystem;
 }

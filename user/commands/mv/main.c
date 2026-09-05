@@ -1,5 +1,5 @@
 #include "../../user.h"
-#include "../../sys/io.h"
+#include "sys/io.h"
 
 #define DIR_ENTRY_BUFFER_SIZE 32
 

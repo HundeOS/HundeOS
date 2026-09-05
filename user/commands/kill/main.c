@@ -1,5 +1,5 @@
 #include "../../user.h"
-#include "../../sys/process.h"
+#include "sys/process.h"
 
 static const BString KILL__SIGNAL_PREFIX = bstr("SIG");
 static const BString KILL__TERM_SIGNAL = bstr("TERM");

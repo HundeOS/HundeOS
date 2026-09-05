@@ -209,9 +209,9 @@ Optional(BString) DynString__bstring(ConstDynStringPtr self)
     return Some(BString, text);
 }
 
-static bool DynString__push_line(DynStringLines * lines, DynString line)
+static bool DynString__push_line(DynStringLines * lines, ConstDynStringPtr line)
 {
-    match_result(CollectionCode, DynStringLines__push(lines, line),
+    match_result(CollectionCode, DynStringLines__push(lines, *line),
         success(index) { return true; },
         error(code, message) { return false; }
     );
@@ -233,7 +233,7 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
         char ch = DynString__char_at_or(self, i, '\0');
         if (ch == '\n')
         {
-            if (!DynString__push_line(&lines, line))
+            if (!DynString__push_line(&lines, &line))
             {
                 DynString__dispose(&line);
                 DynStringLines__dispose_all(&lines);
@@ -264,7 +264,7 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
 
     if (DynString__length(&line) > 0)
     {
-        if (!DynString__push_line(&lines, line))
+        if (!DynString__push_line(&lines, &line))
         {
             DynString__dispose(&line);
             DynStringLines__dispose_all(&lines);

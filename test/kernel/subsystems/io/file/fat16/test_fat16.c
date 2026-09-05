@@ -62,12 +62,11 @@ void test_fat16_creates_lists_and_reads_root_file(void)
     format_volume();
     mount_volume();
 
-    match_result(Fat16Code, Fat16Volume__create_root_file(&volume, bstring("hello.txt"), content, sizeof(content)), success(code) { TEST_ASSERT_EQUAL(FAT16_OK, code); }, error_test_fail());
+    match_result(Fat16Code, Fat16Volume__create_root_file(&volume, &bstr("hello.txt"), content, sizeof(content)), success(code) { TEST_ASSERT_EQUAL(FAT16_OK, code); }, error_test_fail());
 
     match_result(Fat16DirectoryEntries, Fat16Volume__list_root(&volume), success(entries) {
-            BString expected = bstr("HELLO.TXT");
             TEST_ASSERT_EQUAL(1, entries.len);
-            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
+            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &bstr("HELLO.TXT")));
             TEST_ASSERT_EQUAL(FAT16_ATTR_ARCHIVE, entries.data[0].attributes);
             TEST_ASSERT_EQUAL(sizeof(content), entries.data[0].size);
             TEST_ASSERT_TRUE(entries.data[0].first_cluster >= 2);
@@ -75,7 +74,7 @@ void test_fat16_creates_lists_and_reads_root_file(void)
 
     match_result(Fat16Code, Fat16Volume__read_root_file(
         &volume,
-        bstring("HELLO.TXT"),
+        &bstr("HELLO.TXT"),
         target,
         sizeof(target),
         &bytes_read
@@ -90,12 +89,11 @@ void test_fat16_creates_and_lists_root_directory(void)
     format_volume();
     mount_volume();
 
-    match_result(Fat16Code, Fat16Volume__create_root_directory(&volume, bstring("docs")), success(code) { TEST_ASSERT_EQUAL(FAT16_OK, code); }, error_test_fail());
+    match_result(Fat16Code, Fat16Volume__create_root_directory(&volume, &bstr("docs")), success(code) { TEST_ASSERT_EQUAL(FAT16_OK, code); }, error_test_fail());
 
     match_result(Fat16DirectoryEntries, Fat16Volume__list_root(&volume), success(entries) {
-            BString expected = bstr("DOCS");
             TEST_ASSERT_EQUAL(1, entries.len);
-            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &expected));
+            TEST_ASSERT_TRUE(BString__equals(&entries.data[0].name, &bstr("DOCS")));
             TEST_ASSERT_EQUAL(FAT16_ATTR_DIRECTORY, entries.data[0].attributes);
             TEST_ASSERT_EQUAL(0, entries.data[0].size);
             TEST_ASSERT_TRUE(entries.data[0].first_cluster >= 2);
@@ -109,9 +107,9 @@ void test_fat16_rejects_duplicate_root_file(void)
     format_volume();
     mount_volume();
 
-    match_result(Fat16Code, Fat16Volume__create_root_file(&volume, bstring("a.bin"), content, sizeof(content)), success_do_nothing(), error_test_fail());
+    match_result(Fat16Code, Fat16Volume__create_root_file(&volume, &bstr("a.bin"), content, sizeof(content)), success_do_nothing(), error_test_fail());
 
-    match_result(Fat16Code, Fat16Volume__create_root_file(&volume, bstring("A.BIN"), content, sizeof(content)), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(FAT16_ALREADY_EXISTS, code); });
+    match_result(Fat16Code, Fat16Volume__create_root_file(&volume, &bstr("A.BIN"), content, sizeof(content)), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(FAT16_ALREADY_EXISTS, code); });
 }
 
 void test_fat16_rejects_names_outside_8_3_format(void)
@@ -123,14 +121,14 @@ void test_fat16_rejects_names_outside_8_3_format(void)
 
     match_result(Fat16Code, Fat16Volume__create_root_file(
         &volume,
-        bstring("too-long-name.txt"),
+        &bstr("too-long-name.txt"),
         content,
         sizeof(content)
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(FAT16_UNSUPPORTED_NAME, code); });
 
     match_result(Fat16Code, Fat16Volume__create_root_file(
         &volume,
-        bstring("name!.txt"),
+        &bstr("name!.txt"),
         content,
         sizeof(content)
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(FAT16_UNSUPPORTED_NAME, code); });
@@ -145,7 +143,7 @@ void test_fat16_rejects_file_larger_than_one_cluster_for_now(void)
 
     match_result(Fat16Code, Fat16Volume__create_root_file(
         &volume,
-        bstring("large.bin"),
+        &bstr("large.bin"),
         content,
         sizeof(content)
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(FAT16_FILE_TOO_LARGE, code); });

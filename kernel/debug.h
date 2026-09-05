@@ -32,6 +32,7 @@ typedef enum {
     PANIC,
     FOCUS,
     FAT32,
+    MEMORY,
     LEVEL_COUNT
 } Level;
 
@@ -65,6 +66,8 @@ inline const char * level_to_string(Level level)
             return "FOCUS";
         case FAT32:
             return "FAT32";
+        case MEMORY:
+            return "MEMORY";
         case PANIC:
             return "PANIC";
         case UNHANDLED:
@@ -106,7 +109,8 @@ inline const char * level_to_string(Level level)
     LOG_LEVEL_MASK(IODEV) | \
     LOG_LEVEL_MASK(FAULT) | \
     LOG_LEVEL_MASK(PANIC) | \
-    LOG_LEVEL_MASK(SYSCALL) \
+    LOG_LEVEL_MASK(SYSCALL) | \
+    LOG_LEVEL_MASK(MEMORY) \
 )
 
 inline bool __d_should_log(Level level)

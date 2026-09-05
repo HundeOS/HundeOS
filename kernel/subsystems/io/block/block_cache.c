@@ -59,10 +59,10 @@ Result(BlockDeviceCode) BlockCache__read(BlockCachePtr self, BlockNumber block, 
 
     critical_section(self->lock,
     {
-        match_optional(BlockCacheEntries__FindResult, BlockCacheEntries__find(&self->entries, BlockCache__block_matches, &block),
+        match_find_result_ptr(BlockCacheEntries, BlockCacheEntries__find(&self->entries, BlockCache__block_matches, &block),
             some(found)
             {
-                BlockCache__copy(target, found.value->data);
+                BlockCache__copy(target, found->data);
                 cs_return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
             },
             none_do_nothing()

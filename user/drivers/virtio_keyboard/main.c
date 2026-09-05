@@ -3,10 +3,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "../../sys/debug.h"
-#include "../../sys/io_server.h"
-#include "../../sys/service.h"
-#include "../../sys/sync.h"
+#include "sys/debug.h"
+#include "sys/io_server.h"
+#include "sys/service.h"
+#include "sys/sync.h"
 
 #ifndef VIRTIO_KEYBOARD_ENTRYPOINT
 #define VIRTIO_KEYBOARD_ENTRYPOINT main
@@ -103,7 +103,6 @@ VirtioInputEvent;
 
 typedef struct VirtioKeyboard
 {
-    ServiceMappedMemoryPtr mapping;
     void * mmio;
     uint64_t slot;
     uint64_t irq_id;
@@ -132,8 +131,7 @@ static VirtqDesc VirtqDesc__new(uint64_t addr, uint32_t len, uint16_t flags, uin
 static VirtioKeyboard VirtioKeyboard__new(void)
 {
     return (VirtioKeyboard) {
-        .mapping = 0,
-        .mmio = 0,
+        .mmio = (void *) VIRTIO_MMIO_FIRST_PHYS_BASE,
         .slot = 0,
         .irq_id = 0,
         .queue_size = 0,
@@ -385,7 +383,6 @@ static bool VirtioKeyboard__find_device(VirtioKeyboardPtr self)
         void * mmio = driver_ptr_offset(mapping, slot * VIRTIO_MMIO_SLOT_SIZE);
         if (VirtioKeyboard__probe(mmio))
         {
-            self->mapping = mapping;
             self->mmio = mmio;
             self->slot = slot;
             self->irq_id = VIRTIO_MMIO_FIRST_IRQ_ID + slot;
@@ -555,8 +552,7 @@ static bool VirtioKeyboard__init(VirtioKeyboardPtr self)
         return false;
     }
 
-    BString keyboard_path = bstr(VIRTIO_KEYBOARD_PATH);
-    self->keyboard = io_server_register(&keyboard_path, IO_SERVER_READ);
+    self->keyboard = io_server_register(&bstr(VIRTIO_KEYBOARD_PATH), IO_SERVER_READ);
     if (self->keyboard < 0)
     {
         DRIVER_DEBUG("virtio_keyboard: register failed %i\n", (int) self->keyboard);

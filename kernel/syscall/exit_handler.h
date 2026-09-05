@@ -4,7 +4,7 @@
 #include "syscall_dispatcher.h"
 
 Result(SystemCallResult) Exit__handler(
-    KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 );
 

@@ -48,9 +48,9 @@ void __kernel_panic(KernelPtr self, BStringPtr message)
     Kernel__panic(cstr_p(message), NULL); // hundelint: ignore-no-null
 }
 
-void PanicOnError(Result(SubsystemInitStatus) res, KernelPtr kernel, BStringPtr progress_message)
+void PanicOnError(ResultPtr(SubsystemInitStatus) res, KernelPtr kernel, BStringPtr progress_message)
 {
-    match_result(SubsystemInitStatus, res,
+    match_result(SubsystemInitStatus, *res,
         success(_)
         {
             __d_println(PROGRESS, BString__cstr(progress_message));
@@ -61,6 +61,9 @@ void PanicOnError(Result(SubsystemInitStatus) res, KernelPtr kernel, BStringPtr 
         }
     );
 }
+
+#define PanicOnError(res, kernel, progress_message) \
+    ({ Result(SubsystemInitStatus) __res = (res); PanicOnError(&__res, (kernel), (progress_message)); })
 
 KernelPtr Kernel__instance()
 {
@@ -122,7 +125,7 @@ Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
     self->scheduler->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
     self->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
 
-    Optional(Elf) idle_opt = EmbeddedElf__load(bstring("services/idle"));
+    Optional(Elf) idle_opt = EmbeddedElf__load(&bstr("services/idle"));
     match_optional(Elf, idle_opt,
         some(idle)
         {

@@ -22,7 +22,7 @@ ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
     return (ByteCount) size;
 }
 
-#include "../../../../user/sys/print.c"
+#include "../../../../user/lib/sys/print.c"
 
 void setUp(void)
 {
@@ -38,7 +38,7 @@ void test_sprintf_formats_hex_without_global_digit_pointer(void)
 {
     BString format = bstr("magic=0x%x");
 
-    int count = IO__printf(&format, 0x74726976U);
+    int count = IO__printf(&bstr("magic=0x%x"), 0x74726976U);
 
     TEST_ASSERT_EQUAL_STRING("magic=0x74726976", output);
     TEST_ASSERT_EQUAL_INT(16, count);
@@ -46,9 +46,8 @@ void test_sprintf_formats_hex_without_global_digit_pointer(void)
 
 void test_sprintf_formats_pointer_hex_prefix(void)
 {
-    BString format = bstr("ptr=%p");
 
-    int count = IO__printf(&format, (uintptr_t) 0xFEU);
+    int count = IO__printf(&bstr("ptr=%p"), (uintptr_t) 0xFEU);
 
     TEST_ASSERT_EQUAL_STRING("ptr=0xfe", output);
     TEST_ASSERT_EQUAL_INT(8, count);

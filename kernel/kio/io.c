@@ -1,5 +1,11 @@
 #include "io.h"
 
+#undef open
+#undef read
+#undef read_into
+#undef write
+#undef close
+
 FixedArrayBodyDefine(DataBuffer);
 
 static BString unreachable_code = bstr("unreachable code");
@@ -26,20 +32,30 @@ DataPtr DataBuffer__data(DataBufferPtr self)
     return self->data;
 }
 
-Result(IOHandle) open(OriginatingContext context, BString path, Flags flags)
+void DataBuffer__dispose(DataBufferPtr self)
 {
-    IOContextPtr io_context = IOContext__from_originating_context(context, None(IOHandle), None(ExternalBuffer));
-    __d_printf(IOSUB, "Opening %s %p\n", cstr(path), context.kernel);
-
-    CallIOReturn(IOHandle, io_context, IOSubsystem__open(context.kernel->io_subsystem, io_context, path, flags));
+    Kernel__free(addr(self));
 }
 
-Result(ByteCount) read(OriginatingContext context, IOHandle handle, DataBufferPtr buffer)
+Result(IOHandle) open(ConstOriginatingContextPtr context, ConstBStringPtr path, Flags flags)
 {
-    Optional(ExternalBuffer) external_buffer = Some(ExternalBuffer, DataBuffer__convert_to_external_buffer_for_read(buffer));
-    IOContextPtr io_context = IOContext__from_originating_context(context, Some(IOHandle, handle), external_buffer);
+    Optional(IOHandle) handle = None(IOHandle);
+    Optional(ExternalBuffer) buffer = None(ExternalBuffer);
+    IOContextPtr io_context = IOContext__from_originating_context(context, &handle, &None(ExternalBuffer));
+    __d_printf(IOSUB, "Opening %s %p\n", cstr_p(path), context->kernel);
 
-    Result(ByteCount) res = IOSubsystem__read(context.kernel->io_subsystem, io_context);
+    CallIOReturn(IOHandle, io_context, IOSubsystem__open(context->kernel->io_subsystem, io_context, path, flags));
+}
+
+Result(ByteCount) read(ConstOriginatingContextPtr context, IOHandle handle, DataBufferPtr buffer)
+{
+    IOContextPtr io_context = IOContext__from_originating_context(
+        context,
+        &Some(IOHandle, handle),
+        &Some(ExternalBuffer, DataBuffer__convert_to_external_buffer_for_read(buffer))
+    );
+
+    Result(ByteCount) res = IOSubsystem__read(context->kernel->io_subsystem, io_context);
     IOContext__dispose(io_context);
     match_result(ByteCount, res,
         success(bytes_read)
@@ -54,12 +70,15 @@ Result(ByteCount) read(OriginatingContext context, IOHandle handle, DataBufferPt
     return Error(ByteCount, unreachable_code, IO_PANIC);
 }
 
-Result(ByteCount) read_into(OriginatingContext context, IOHandle handle, DataPtr target, size_t size)
+Result(ByteCount) read_into(ConstOriginatingContextPtr context, IOHandle handle, DataPtr target, size_t size)
 {
-    Optional(ExternalBuffer) external_buffer = Some(ExternalBuffer, ExternalBuffer__new(target, size));
-    IOContextPtr io_context = IOContext__from_originating_context(context, Some(IOHandle, handle), external_buffer);
+    IOContextPtr io_context = IOContext__from_originating_context(
+        context,
+        &Some(IOHandle, handle),
+        &Some(ExternalBuffer, ExternalBuffer__new(target, size))
+    );
 
-    Result(ByteCount) res = IOSubsystem__read(context.kernel->io_subsystem, io_context);
+    Result(ByteCount) res = IOSubsystem__read(context->kernel->io_subsystem, io_context);
     IOContext__dispose(io_context);
     match_result(ByteCount, res,
         success(bytes_read)
@@ -73,17 +92,16 @@ Result(ByteCount) read_into(OriginatingContext context, IOHandle handle, DataPtr
     return Error(ByteCount, unreachable_code, IO_PANIC);
 }
 
-Result(ByteCount) write(OriginatingContext context, IOHandle handle, DataBufferPtr buffer)
+Result(ByteCount) write(ConstOriginatingContextPtr context, IOHandle handle, DataBufferPtr buffer)
 {
-    Optional(ExternalBuffer) external_buffer = Some(ExternalBuffer, DataBuffer__convert_to_external_buffer_for_write(buffer));
-    IOContextPtr io_context = IOContext__from_originating_context(context, Some(IOHandle, handle), external_buffer);
+    IOContextPtr io_context = IOContext__from_originating_context(context, &Some(IOHandle, handle), &Some(ExternalBuffer, DataBuffer__convert_to_external_buffer_for_write(buffer)));
 
-    CallIOReturn(ByteCount, io_context, IOSubsystem__write(context.kernel->io_subsystem, io_context));
+    CallIOReturn(ByteCount, io_context, IOSubsystem__write(context->kernel->io_subsystem, io_context));
 }
 
-Result(IOHandle) close(OriginatingContext context, IOHandle handle)
+Result(IOHandle) close(ConstOriginatingContextPtr context, IOHandle handle)
 {
-    IOContextPtr io_context = IOContext__from_originating_context(context, Some(IOHandle, handle), None(ExternalBuffer));
+    IOContextPtr io_context = IOContext__from_originating_context(context, &Some(IOHandle, handle), &None(ExternalBuffer));
 
-    CallIOReturn(IOHandle, io_context, IOSubsystem__close(context.kernel->io_subsystem, io_context));
+    CallIOReturn(IOHandle, io_context, IOSubsystem__close(context->kernel->io_subsystem, io_context));
 }

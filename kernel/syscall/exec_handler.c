@@ -5,16 +5,16 @@
 #include "../types/bstring_additional_types.h"
 #include "auth.h"
 
-static void ExecRequest__push_arg(ProcessArguments * arguments, Optional(BString) arg)
+static void ExecRequest__push_arg(ProcessArgumentsPtr arguments, OptionalPtr(BString) arg)
 {
-    match_optional(BString, arg,
+    match_optional(BString, *arg,
         some(value) { ProcessArguments__push(arguments, value); },
         none_do_nothing()
     );
 }
 
 Result(SystemCallResult) Exec__handler(
-    KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 )
 {
@@ -23,7 +23,7 @@ Result(SystemCallResult) Exec__handler(
 
 
 Result(SystemCallResult) ExecRequest__handler(
-    KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 )
 {
@@ -44,19 +44,19 @@ Result(SystemCallResult) ExecRequest__handler(
     );
 
     ProcessArguments arguments = ProcessArguments__new();
-    ExecRequest__push_arg(&arguments, request->arg0);
-    ExecRequest__push_arg(&arguments, request->arg1);
-    ExecRequest__push_arg(&arguments, request->arg2);
+    ExecRequest__push_arg(&arguments, &request->arg0);
+    ExecRequest__push_arg(&arguments, &request->arg1);
+    ExecRequest__push_arg(&arguments, &request->arg2);
 
     CallContext call_context = CallContext__new(proc, EXEC, arg1, arg2, arg3, arg4, arg5);
-    OriginatingContext originating_context = OriginatingContext__syscall(kernel, call_context);
+    OriginatingContext originating_context = OriginatingContext__syscall(kernel, &call_context);
 
     SpawnMode mode = request->mode;
     bool wait = mode == P_WAIT;
     Optional(UserID) requested_user_id = None(UserID);
     if (request->auth_ticket_id != SPAWN_INHERIT_AUTH_TICKET)
     {
-        match_optional(ProcessPtr, proc,
+        match_optional(ProcessPtr, *proc,
             some(process)
             {
                 match_result(UserID, Auth__consume_ticket(&kernel->auth, process, request->auth_ticket_id),
@@ -69,7 +69,7 @@ Result(SystemCallResult) ExecRequest__handler(
     }
 
     Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(
-        originating_context, request->path, wait, requested_user_id, arguments, request->stdio
+        &originating_context, &request->path, wait, &requested_user_id, &arguments, &request->stdio
     );
     match_result(ProcessPtr, exec_res,
         success(spawned_proc)

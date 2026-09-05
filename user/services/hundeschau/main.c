@@ -1,8 +1,8 @@
-#include "../../sys/spawn.h"
-#include "../../sys/framebuffer_config.h"
-#include "../../sys/io.h"
-#include "../../sys/process.h"
-#include "../../types/fixed_array.h"
+#include "sys/spawn.h"
+#include "sys/framebuffer_config.h"
+#include "sys/io.h"
+#include "sys/process.h"
+#include "types/fixed_array.h"
 #include "../../user.h"
 
 #ifndef HUNDESCHAU_ENTRYPOINT
@@ -46,6 +46,7 @@ typedef struct HundeschauRequiredProcess
 } HundeschauRequiredProcess;
 
 typedef HundeschauRequiredProcess * HundeschauRequiredProcessPtr;
+typedef const HundeschauRequiredProcess * ConstHundeschauRequiredProcessPtr;
 
 OptionalDef(HundeschauRequiredProcess);
 OptionalDef(HundeschauRequiredProcessPtr);
@@ -53,17 +54,17 @@ OptionalDef(HundeschauRequiredProcessPtr);
 static HundeschauRequiredProcess HundeschauRequiredProcess__new(
     uint64_t pid,
     bool respawn,
-    BString path,
-    BString arg0,
-    BString arg1)
+    ConstBStringPtr path,
+    ConstBStringPtr arg0,
+    ConstBStringPtr arg1)
 {
     return (HundeschauRequiredProcess) {
         .pid = pid,
         .respawn = respawn,
         .has_stdio = false,
-        .path = path,
-        .arg0 = arg0,
-        .arg1 = arg1,
+        .path = *path,
+        .arg0 = *arg0,
+        .arg1 = *arg1,
     };
 }
 
@@ -73,7 +74,7 @@ static HundeschauRequiredProcess HundeschauRequiredProcess__new_with_stdio(
     SpawnFileDescriptor stdin_fd,
     SpawnFileDescriptor stdout_fd,
     SpawnFileDescriptor stderr_fd,
-    BString path)
+    ConstBStringPtr path)
 {
     return (HundeschauRequiredProcess) {
         .pid = pid,
@@ -82,7 +83,7 @@ static HundeschauRequiredProcess HundeschauRequiredProcess__new_with_stdio(
         .stdin_fd = stdin_fd,
         .stdout_fd = stdout_fd,
         .stderr_fd = stderr_fd,
-        .path = path,
+        .path = *path,
         .arg0 = empty_bstr(),
         .arg1 = empty_bstr(),
     };
@@ -115,12 +116,14 @@ static int Hundeschau__spawn_required_process(
     HundeschauRequiredProcessesPtr processes, ConstBStringPtr path, ConstBStringPtr arg0, ConstBStringPtr arg1, bool respawn
 )
 {
+    Optional(BString) process_arg0 = SpawnArg__from_bstring(arg0);
+    Optional(BString) process_arg1 = SpawnArg__from_bstring(arg1);
     SpawnResult result = spawn(
         P_NOWAIT,
         path,
-        SpawnArg__from_bstring(arg0),
-        SpawnArg__from_bstring(arg1),
-        SPAWN_NO_ARG
+        &process_arg0,
+        &process_arg1,
+        &SPAWN_NO_ARG
     );
     if (result < 0)
     {
@@ -131,9 +134,9 @@ static int Hundeschau__spawn_required_process(
     HundeschauRequiredProcess process = HundeschauRequiredProcess__new(
         (uint64_t) result,
         respawn,
-        BString__slice(path, 0, BString__length(path)),
-        BString__slice(arg0, 0, BString__length(arg0)),
-        BString__slice(arg1, 0, BString__length(arg1))
+        path,
+        arg0,
+        arg1
     );
     match_result(CollectionCode, HundeschauRequiredProcesses__push(processes, process),
         success_do_nothing(),
@@ -162,9 +165,9 @@ static int Hundeschau__spawn_required_process_with_stdio(
         stdin_fd,
         stdout_fd,
         stderr_fd,
-        SPAWN_NO_ARG,
-        SPAWN_NO_ARG,
-        SPAWN_NO_ARG
+        &SPAWN_NO_ARG,
+        &SPAWN_NO_ARG,
+        &SPAWN_NO_ARG
     );
     if (result < 0)
     {
@@ -178,7 +181,7 @@ static int Hundeschau__spawn_required_process_with_stdio(
         stdin_fd,
         stdout_fd,
         stderr_fd,
-        BString__slice(path, 0, BString__length(path))
+        path
     );
     match_result(CollectionCode, HundeschauRequiredProcesses__push(processes, process),
         success_do_nothing(),
@@ -286,8 +289,7 @@ static BString Hundeschau__line_without_comment(ConstBStringPtr line)
 
 static Optional(DynString) Hundeschau__load_config(void)
 {
-    BString config_path = bstr(HUNDESCHAU_CONFIG_PATH);
-    IOHandle handle = open(&config_path, IO_OPEN_READ);
+    IOHandle handle = open(&bstr(HUNDESCHAU_CONFIG_PATH), IO_OPEN_READ);
     if (handle < 0)
     {
         return None(DynString);
@@ -314,10 +316,10 @@ static Optional(DynString) Hundeschau__load_config(void)
 }
 
 static int Hundeschau__spawn_configured_driver_line(
-    HundeschauRequiredProcessesPtr processes, BString line, bool framebuffer_present
+    HundeschauRequiredProcessesPtr processes, ConstBStringPtr line, bool framebuffer_present
 )
 {
-    BString command_line = Hundeschau__line_without_comment(&line);
+    BString command_line = Hundeschau__line_without_comment(line);
     BString remaining = BString__strip(&command_line);
     if (BString__is_empty(&remaining))
     {
@@ -426,10 +428,11 @@ static int Hundeschau__spawn_configured_drivers(
                     some(bstring_line)
                     {
                         failures += Hundeschau__spawn_configured_driver_line(
-                        processes,
-                        bstring_line,
-                        framebuffer_present
-                    ); },
+                            processes,
+                            &bstring_line,
+                            framebuffer_present
+                        );
+                    },
                     none() { failures++; }
                 );
             });
@@ -523,6 +526,8 @@ int HUNDESCHAU_ENTRYPOINT(void)
                     continue;
                 }
 
+                Optional(BString) process_arg0 = SpawnArg__from_bstring(&process->arg0);
+                Optional(BString) process_arg1 = SpawnArg__from_bstring(&process->arg1);
                 SpawnResult respawn_result = process->has_stdio
                     ? spawn_with_stdio(
                         P_NOWAIT,
@@ -530,16 +535,16 @@ int HUNDESCHAU_ENTRYPOINT(void)
                         process->stdin_fd,
                         process->stdout_fd,
                         process->stderr_fd,
-                        SPAWN_NO_ARG,
-                        SPAWN_NO_ARG,
-                        SPAWN_NO_ARG
+                        &SPAWN_NO_ARG,
+                        &SPAWN_NO_ARG,
+                        &SPAWN_NO_ARG
                     )
                     : spawn(
                         P_NOWAIT,
                         &process->path,
-                        SpawnArg__from_bstring(&process->arg0),
-                        SpawnArg__from_bstring(&process->arg1),
-                        SPAWN_NO_ARG
+                        &process_arg0,
+                        &process_arg1,
+                        &SPAWN_NO_ARG
                     );
                 if (respawn_result < 0)
                 {

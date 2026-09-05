@@ -8,7 +8,7 @@ typedef Kernel * KernelPtr;
 
 FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel);
 Result(IOStatus) Filesystem__mount_block_device(
-    FilesystemPtr root_fs, BString device_path, BString filesystem_type, BString mountpoint
+    FilesystemPtr root_fs, ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
 );
 void FilesystemTable__mount_available_entries(FilesystemPtr root_fs);
 

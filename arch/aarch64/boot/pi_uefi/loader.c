@@ -272,6 +272,9 @@ typedef struct Elf64Header
 }
 Elf64Header;
 
+typedef Elf64Header * Elf64HeaderPtr;
+typedef const Elf64Header * ConstElf64HeaderPtr;
+
 typedef struct Elf64ProgramHeader
 {
     uint32_t type;
@@ -586,7 +589,7 @@ static void fill_free_physical_regions_from_map(
     }
 }
 
-static int is_valid_kernel_elf(Elf64Header * header, uint64_t file_size)
+static int is_valid_kernel_elf(ConstElf64HeaderPtr header, uint64_t file_size)
 {
     uint32_t magic =
         ((uint32_t) header->ident[0]) |

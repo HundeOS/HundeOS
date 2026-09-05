@@ -9,6 +9,7 @@
 #include "../subsystems/io/block/block_device.h"
 #include "../subsystems/io/file/register.h"
 #include "../subsystems/io/file/userspace_filesystem.h"
+#include "../subsystems/io/socket/socket.h"
 
 static BString no_process = bstr("No process for service syscall");
 static BString unsupported_operation = bstr("Unsupported service operation");
@@ -61,11 +62,11 @@ static Result(SystemCallResult) Service__require_capability(ProcessPtr process, 
     return Error(SystemCallResult, permission_denied, SERVICE_PERMISSION_DENIED);
 }
 
-static Result(Anything) ServiceEvent__copy_to_target(Result(Anything) result, Anything context)
+static Result(Anything) ServiceEvent__copy_to_target(ResultPtr(Anything) result, Anything context)
 {
     ServiceEventPtr target = ptr(context, ServiceEvent);
 
-    match_result(Anything, result,
+    match_result(Anything, *result,
         success(event_ptr)
         {
             ServiceEventPtr event = ptr(event_ptr, ServiceEvent);
@@ -83,33 +84,36 @@ static Result(Anything) Service__complete_wait_syscall(ParkedOperationPtr parked
     match_result(ServiceEvent, Service__complete_wait(parked_operation),
         success(event)
         {
+            Result(Anything) mapped_result = Success(Anything, (Anything) &event);
             return KernelContext__map_result(
                 parked_operation->kernel_context,
-                Success(Anything, (Anything) &event)
+                &mapped_result
             );
         },
         error(code, message)
         {
+            Result(Anything) mapped_result = Error(Anything, message, code);
             return KernelContext__map_result(
                 parked_operation->kernel_context,
-                Error(Anything, message, code)
+                &mapped_result
             );
         }
     );
 
+    Result(Anything) mapped_result = Error(Anything, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
     return KernelContext__map_result(
         parked_operation->kernel_context,
-        Error(Anything, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED)
+        &mapped_result
     );
 }
 
 Result(SystemCallResult) Service__handler(
-    KernelPtr kernel, Optional(ProcessPtr) process_opt, Anything service_operation,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) process_opt, Anything service_operation,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 )
 {
 
-    match_optional(ProcessPtr, process_opt,
+    match_optional(ProcessPtr, *process_opt,
         some(process)
         {
             if (service_operation == SERVICE_BECOME_SERVICE)
@@ -140,8 +144,8 @@ Result(SystemCallResult) Service__handler(
                 );
 
                 KernelContextPtr kernel_context = KernelContext__heap_new_with_mapper(
-                    Some(ProcessID, process->pid),
-                    Some(SchedulerPtr, kernel->scheduler),
+                    &Some(ProcessID, process->pid),
+                    &Some(SchedulerPtr, kernel->scheduler),
                     ServiceEvent__copy_to_target,
                     (Anything) target
                 );
@@ -150,15 +154,12 @@ Result(SystemCallResult) Service__handler(
                     kernel->scheduler,
                     process,
                     kernel_context,
-                    Some(Continuation, Service__complete_wait_syscall),
+                    &Some(Continuation, Service__complete_wait_syscall),
                     true
                 ),
                     success(event)
                     {
-                        Result(Anything) mapped = KernelContext__map_result(
-                            kernel_context,
-                            Success(Anything, (Anything) &event)
-                        );
+                        Result(Anything) mapped = KernelContext__map_result(kernel_context, &Success(Anything, (Anything) &event));
                         KernelContext__dispose_heap(kernel_context);
                         __d_printf(IODEV, "service wait return pid=%i code=%i\n", process->pid, SERVICE_OK);
                         match_result(Anything, mapped,
@@ -252,7 +253,7 @@ Result(SystemCallResult) Service__handler(
                 }
 
                 match_result(BlockDeviceCode, BlockDeviceRegistry__register(
-                    request->path, process, request->block_count, kernel->message_broker
+                    &request->path, process, request->block_count, kernel->message_broker
                 ),
                     success(_)
                     {
@@ -301,13 +302,13 @@ Result(SystemCallResult) Service__handler(
                 }
 
                 KernelContext kernel_context = KernelContext__new(
-                    Some(ProcessID, process->pid),
-                    Some(SchedulerPtr, kernel->scheduler)
+                    &Some(ProcessID, process->pid),
+                    &Some(SchedulerPtr, kernel->scheduler)
                 );
                 BlockDevice__set_current_context(&kernel_context);
                 Result(BlockCount) read_result = BlockDeviceRegistry__read_from_process(
                     process,
-                    request->device_path,
+                    &request->device_path,
                     request->block,
                     request->block_count,
                     ptr(request->buffer, Data),
@@ -336,13 +337,13 @@ Result(SystemCallResult) Service__handler(
                 }
 
                 KernelContext kernel_context = KernelContext__new(
-                    Some(ProcessID, process->pid),
-                    Some(SchedulerPtr, kernel->scheduler)
+                    &Some(ProcessID, process->pid),
+                    &Some(SchedulerPtr, kernel->scheduler)
                 );
                 BlockDevice__set_current_context(&kernel_context);
                 Result(BlockCount) write_result = BlockDeviceRegistry__write_from_process(
                     process,
-                    request->device_path,
+                    &request->device_path,
                     request->block,
                     request->block_count,
                     ptr(request->buffer, Data),
@@ -353,6 +354,60 @@ Result(SystemCallResult) Service__handler(
 
                 match_result(BlockCount, write_result,
                     success(blocks) { return Success(SystemCallResult, blocks); },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                );
+            }
+
+            if (service_operation == SERVICE_BLOCK_READ_DEVICE_ASYNC)
+            {
+                match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_USE_BLOCK_DEVICES),
+                    success_do_nothing(),
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                );
+
+                ServiceBlockReadRequestPtr request = (ServiceBlockReadRequestPtr) arg2;
+                if (request == NULL || request->buffer == 0) // hundelint: ignore-no-null
+                {
+                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
+                }
+
+                match_result(BlockRequestID, BlockDeviceRegistry__read_from_process_async(
+                    process,
+                    &request->device_path,
+                    request->block,
+                    request->block_count,
+                    ptr(request->buffer, Data),
+                    request->buffer_size,
+                    kernel->message_broker
+                ),
+                    success(request_id) { return Success(SystemCallResult, request_id); },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                );
+            }
+
+            if (service_operation == SERVICE_BLOCK_WRITE_DEVICE_ASYNC)
+            {
+                match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_USE_BLOCK_DEVICES),
+                    success_do_nothing(),
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                );
+
+                ServiceBlockReadRequestPtr request = (ServiceBlockReadRequestPtr) arg2;
+                if (request == NULL || request->buffer == 0) // hundelint: ignore-no-null
+                {
+                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
+                }
+
+                match_result(BlockRequestID, BlockDeviceRegistry__write_from_process_async(
+                    process,
+                    &request->device_path,
+                    request->block,
+                    request->block_count,
+                    ptr(request->buffer, Data),
+                    request->buffer_size,
+                    kernel->message_broker
+                ),
+                    success(request_id) { return Success(SystemCallResult, request_id); },
                     error(code, message) { return Error(SystemCallResult, message, code); }
                 );
             }
@@ -445,6 +500,74 @@ Result(SystemCallResult) Service__handler(
                 );
             }
 
+            if (service_operation == SERVICE_REGISTER_SOCKET_ROUTER)
+            {
+                match_result(SystemCallResult, Service__require_capability(process, PROCESS_CAP_BECOME_SERVICE),
+                    success_do_nothing(),
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                );
+
+                match_result(SocketRegistryPtr, SocketIO__registered_registry(kernel->io_subsystem),
+                    success(registry)
+                    {
+                        match_result(ServiceCode, SocketRegistry__register_router(
+                            registry, process, kernel->message_broker
+                        ),
+                            success(code) { return Success(SystemCallResult, code); },
+                            error(code, message) { return Error(SystemCallResult, message, code); }
+                        );
+                    },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                );
+            }
+
+            if (service_operation == SERVICE_SOCKET_GET_REQUEST)
+            {
+                uint64_t request_id = (uint64_t) arg2;
+                IOSocketRouterRequestPtr target = (IOSocketRouterRequestPtr) arg3;
+                if (target == NULL)
+                {
+                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
+                }
+
+                match_result(SocketRegistryPtr, SocketIO__registered_registry(kernel->io_subsystem),
+                    success(registry)
+                    {
+                        match_result(IOSocketRouterRequest, SocketRegistry__get_request(
+                            registry, process, request_id
+                        ),
+                            success(request)
+                            {
+                                *target = request;
+                                return Success(SystemCallResult, SERVICE_OK);
+                            },
+                            error(code, message) { return Error(SystemCallResult, message, code); }
+                        );
+                    },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                );
+            }
+
+            if (service_operation == SERVICE_SOCKET_COMPLETE)
+            {
+                IOSocketRouterCompletionPtr completion = (IOSocketRouterCompletionPtr) arg2;
+                if (completion == NULL)
+                {
+                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
+                }
+
+                match_result(SocketRegistryPtr, SocketIO__registered_registry(kernel->io_subsystem),
+                    success(registry)
+                    {
+                        match_result(ServiceCode, SocketRegistry__complete(registry, process, completion),
+                            success(code) { return Success(SystemCallResult, code); },
+                            error(code, message) { return Error(SystemCallResult, message, code); }
+                        );
+                    },
+                    error(code, message) { return Error(SystemCallResult, message, code); }
+                );
+            }
+
             if (service_operation == SERVICE_PUBLISH_READY)
             {
                 if (!ProcessClass__is_service(process->process_class))
@@ -473,8 +596,8 @@ Result(SystemCallResult) Service__handler(
                 }
 
                 KernelContextPtr kernel_context = KernelContext__heap_new(
-                    Some(ProcessID, process->pid),
-                    Some(SchedulerPtr, kernel->scheduler)
+                    &Some(ProcessID, process->pid),
+                    &Some(SchedulerPtr, kernel->scheduler)
                 );
 
                 match_result(ServiceCode, Scheduler__service_wait_ready_with_context_ownership(
@@ -482,7 +605,7 @@ Result(SystemCallResult) Service__handler(
                     process,
                     &request->name,
                     kernel_context,
-                    Some(Continuation, SystemCall__Complete),
+                    &Some(Continuation, SystemCall__Complete),
                     true
                 ),
                     success(code)

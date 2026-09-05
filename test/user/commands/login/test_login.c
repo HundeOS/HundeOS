@@ -113,17 +113,17 @@ SpawnResult spawn_with_auth(
     SpawnMode mode,
     AuthTicketID auth_ticket_id,
     ConstBStringPtr path,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     last_mode = mode;
     last_auth_ticket_id = auth_ticket_id;
     copy_text(last_path, sizeof(last_path), BString__cstr(path));
-    match_optional(BString, arg0, some_test_fail(), none_do_nothing());
-    match_optional(BString, arg1, some_test_fail(), none_do_nothing());
-    match_optional(BString, arg2, some_test_fail(), none_do_nothing());
+    match_optional(BString, *arg0, some_test_fail(), none_do_nothing());
+    match_optional(BString, *arg1, some_test_fail(), none_do_nothing());
+    match_optional(BString, *arg2, some_test_fail(), none_do_nothing());
     return next_spawn_result;
 }
 

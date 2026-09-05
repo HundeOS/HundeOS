@@ -108,7 +108,7 @@ void tearDown(void)
 {
 }
 
-ServiceBlockReadResult service_block_read_device(
+Result(ServiceBlockReadResult) IO__block_read(
     ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
 )
 {
@@ -117,10 +117,28 @@ ServiceBlockReadResult service_block_read_device(
     TEST_ASSERT_EQUAL_UINT64(FAT32FS_BYTES_PER_SECTOR, buffer_size);
     TEST_ASSERT_LESS_THAN_UINT64(TEST_FAT32FS_SECTOR_COUNT, block);
     memcpy((void *) buffer, disk[block], FAT32FS_BYTES_PER_SECTOR);
-    return block_count;
+    return Success(ServiceBlockReadResult, block_count);
 }
 
-ServiceBlockReadResult service_block_write_device(
+ServiceBlockReadResult service_block_read_device(
+    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
+)
+{
+    match_result(ServiceBlockReadResult, IO__block_read(path, block, block_count, buffer, buffer_size),
+        success(result)
+        {
+            return result;
+        },
+        error(code, message)
+        {
+            return (ServiceBlockReadResult) code;
+        }
+    );
+
+    return SERVICE_BLOCK_REQUEST_FAILED;
+}
+
+Result(ServiceBlockReadResult) IO__block_write(
     ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
 )
 {
@@ -129,7 +147,78 @@ ServiceBlockReadResult service_block_write_device(
     TEST_ASSERT_EQUAL_UINT64(FAT32FS_BYTES_PER_SECTOR, buffer_size);
     TEST_ASSERT_LESS_THAN_UINT64(TEST_FAT32FS_SECTOR_COUNT, block);
     memcpy(disk[block], (void *) buffer, FAT32FS_BYTES_PER_SECTOR);
-    return block_count;
+    return Success(ServiceBlockReadResult, block_count);
+}
+
+ServiceBlockReadResult service_block_write_device(
+    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
+)
+{
+    match_result(ServiceBlockReadResult, IO__block_write(path, block, block_count, buffer, buffer_size),
+        success(result)
+        {
+            return result;
+        },
+        error(code, message)
+        {
+            return (ServiceBlockReadResult) code;
+        }
+    );
+
+    return SERVICE_BLOCK_REQUEST_FAILED;
+}
+
+AsyncIO AsyncIO__new(Anything service_context, AsyncIORequestService request_service)
+{
+    return (AsyncIO) {
+        .service_context = service_context,
+        .request_service = request_service,
+    };
+}
+
+Result(AsyncIOCode) AsyncIO__start(
+    AsyncIOPtr self,
+    AsyncIORegisterService register_service,
+    Anything service_context,
+    AsyncIORequestService request_service
+)
+{
+    match_result(AsyncIOCode, register_service(service_context),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(AsyncIOCode, message, code);
+        }
+    );
+
+    return Success(AsyncIOCode, ASYNC_IO_WAIT_COMPLETE);
+}
+
+Result(AsyncIOCode) AsyncIO__start_with_init(
+    AsyncIOPtr self,
+    AsyncIORegisterService register_service,
+    Anything service_context,
+    AsyncIOInitService init_service,
+    AsyncIORequestService request_service
+)
+{
+    match_result(AsyncIOCode, register_service(service_context),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(AsyncIOCode, message, code);
+        }
+    );
+
+    match_result(FiberCode, init_service((FiberPtr) self, service_context),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(AsyncIOCode, message, code);
+        }
+    );
+
+    return Success(AsyncIOCode, ASYNC_IO_WAIT_COMPLETE);
 }
 
 ServiceCode service_become_service(void)
@@ -192,6 +281,16 @@ ServiceCode service_filesystem_complete_open(
     return status;
 }
 
+ServiceCode service_filesystem_complete_open_without_blocks(
+    uint64_t request_id, ServiceCode status, int64_t result, FileMode mode, uint64_t size
+)
+{
+    last_filesystem_completion = ServiceFilesystemCompletion__new(request_id, status, result);
+    last_filesystem_completion.mode = mode;
+    last_filesystem_completion.size = size;
+    return status;
+}
+
 SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
 {
     return SYSLOG_OK;
@@ -200,7 +299,11 @@ SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
 static void assert_fat32fs_mounts(Fat32fsVolumePtr volume)
 {
     match_result(Fat32fsCode, Fat32fsVolume__mount(volume),
-        success(code) { TEST_ASSERT_EQUAL(FAT32FS_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(FAT32FS_OK, code);
+            volume->use_async_io = true;
+        },
         error(code, message) { TEST_FAIL_MESSAGE(BString__cstr(&message)); }
     );
 }

@@ -72,41 +72,45 @@ SchedulerPtr Scheduler__heap_new(MessageBrokerPtr message_broker);
 Result(SchedulerInitStatus) Scheduler__init(KernelPtr kernel, SchedulerPtr self, Elf idle_process);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID cpu);
-Result(ProcessPtr) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc, ReturnCode return_code);
-Result(ProcessPtr) Scheduler__abort_process(
+Result(ProcessID) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc, ReturnCode return_code);
+Result(ProcessID) Scheduler__abort_process(
     SchedulerPtr scheduler, IOSubsystemPtr io_subsystem, ProcessPtr proc, ProcessAbort abort
 );
 
 Result(ProcessPtr) Scheduler__park(
     SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
-    Optional(Continuation) kernel_continuation, ParkReason reason
+    OptionalPtr(Continuation) kernel_continuation, ParkReason reason
 );
 Result(ProcessPtr) Scheduler__park_with_context_ownership(
     SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
-    Optional(Continuation) kernel_continuation, ParkReason reason, bool owns_kernel_context
+    OptionalPtr(Continuation) kernel_continuation, ParkReason reason, bool owns_kernel_context
 );
 
 Result(ProcessID) Scheduler__park_by_pid(
     SchedulerPtr self, ProcessID pid, KernelContextPtr kernel_context,
-    Optional(Continuation) kernel_continuation, ParkReason reason
+    OptionalPtr(Continuation) kernel_continuation, ParkReason reason
 );
 Result(ProcessID) Scheduler__park_by_pid_with_context_ownership(
     SchedulerPtr self, ProcessID pid, KernelContextPtr kernel_context,
-    Optional(Continuation) kernel_continuation, ParkReason reason, bool owns_kernel_context
+    OptionalPtr(Continuation) kernel_continuation, ParkReason reason, bool owns_kernel_context
 );
 Result(ProcessID) Scheduler__park_by_pid_with_context_ownership_and_operation_key(
     SchedulerPtr self, ProcessID pid, KernelContextPtr kernel_context,
-    Optional(Continuation) kernel_continuation, ParkReason reason,
-    bool owns_kernel_context, Optional(OperationKey) operation_key
+    OptionalPtr(Continuation) kernel_continuation, ParkReason reason,
+    bool owns_kernel_context, OptionalPtr(OperationKey) operation_key
 );
 
-Result(ProcessPtr) Scheduler__unpark(SchedulerPtr self, ProcessPtr proc, ParkReason reason, Optional(ReturnCode) return_code);
+Result(ProcessPtr) Scheduler__unpark(
+    SchedulerPtr self, ProcessPtr proc, ParkReason reason, OptionalPtr(ReturnCode) return_code
+);
 Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, uint64_t usec);
 
-Result(ProcessID) Scheduler__unpark_by_pid(SchedulerPtr self, ProcessID pid, ParkReason reason, Optional(ReturnCode) return_code);
+Result(ProcessID) Scheduler__unpark_by_pid(
+    SchedulerPtr self, ProcessID pid, ParkReason reason, OptionalPtr(ReturnCode) return_code
+);
 Result(ProcessID) Scheduler__unpark_by_pid_with_operation_key(
     SchedulerPtr self, ProcessID pid, ParkReason reason,
-    Optional(ReturnCode) return_code, Optional(OperationKey) operation_key
+    OptionalPtr(ReturnCode) return_code, OptionalPtr(OperationKey) operation_key
 );
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
@@ -133,22 +137,22 @@ Result(ServiceCode) Scheduler__subscribe_irq(SchedulerPtr self, ProcessPtr proce
 Result(ServiceCode) Scheduler__send_irq_event(SchedulerPtr self, IRQNumber irq);
 Result(ServiceEvent) Scheduler__service_take_next_event(SchedulerPtr self, ProcessPtr process);
 Result(ServiceEvent) Scheduler__service_wait(
-    SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context, Optional(Continuation) continuation
+    SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation
 );
 Result(ServiceEvent) Scheduler__service_wait_with_context_ownership(
     SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context,
-    Optional(Continuation) continuation, bool owns_kernel_context
+    OptionalPtr(Continuation) continuation, bool owns_kernel_context
 );
 Result(ProcessChildEvent) Scheduler__child_wait_with_context_ownership(
     SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context,
-    Optional(Continuation) continuation, bool owns_kernel_context
+    OptionalPtr(Continuation) continuation, bool owns_kernel_context
 );
 Result(ProcessChildEvent) Scheduler__child_take_next_event(SchedulerPtr self, ProcessPtr process);
-Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr process, ServiceEvent event);
+Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr process, ConstServiceEventPtr event);
 Result(ServiceCode) Scheduler__service_publish_ready(SchedulerPtr self, ConstBStringPtr name);
 Result(ServiceCode) Scheduler__service_wait_ready_with_context_ownership(
     SchedulerPtr self, ProcessPtr process, ConstBStringPtr name,
-    KernelContextPtr kernel_context, Optional(Continuation) continuation, bool owns_kernel_context
+    KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation, bool owns_kernel_context
 );
 Result(CollectionCode) Scheduler__add_blocked_operation(
     SchedulerPtr self, ParkedOperationPtr operation, ParkedOperationPtr blocked_operation

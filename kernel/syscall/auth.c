@@ -33,15 +33,15 @@ bool AuthTicket__equals(void * a, void * b)
     return left->id == right->id;
 }
 
-static Result(UserID) Auth__credential_user_id(BString username, BString password)
+static Result(UserID) Auth__credential_user_id(ConstBStringPtr username, ConstBStringPtr password)
 {
     uint64_t count = sizeof(credentials) / sizeof(credentials[0]);
     for (uint64_t index = 0; index < count; index++)
     {
         AuthCredential credential = credentials[index];
         if (
-            BString__equals(&username, &credential.username)
-            && BString__equals(&password, &credential.password)
+            BString__equals(username, &credential.username)
+            && BString__equals(password, &credential.password)
         )
         {
             return Success(UserID, credential.user_id);
@@ -68,7 +68,7 @@ static AuthTicket AuthTicket__new(AuthTicketID ticket_id, ProcessID issued_to_pi
     return ticket;
 }
 
-Result(AuthTicketID) Auth__authenticate(AuthPtr self, ProcessPtr process, BString username, BString password)
+Result(AuthTicketID) Auth__authenticate(AuthPtr self, ProcessPtr process, ConstBStringPtr username, ConstBStringPtr password)
 {
     match_result(UserID, Auth__credential_user_id(username, password),
         success(user_id)
@@ -99,10 +99,9 @@ Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicket
     Result(UserID) auth_result = Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET);
     critical_section(self->lock,
     {
-        match_optional(AuthTickets__FindResult, AuthTickets__find(&self->tickets, Auth__ticket_id_matches, &ticket_id),
-            some(result)
+        match_find_result_ptr(AuthTickets, AuthTickets__find(&self->tickets, Auth__ticket_id_matches, &ticket_id),
+            some(ticket)
             {
-                AuthTicketPtr ticket = result.value;
                 if (ticket->issued_to_pid != process->pid)
                 {
                     auth_result = Error(UserID, ticket_process_mismatch_message, AUTH_TICKET_FOR_DIFFERENT_PROCESS);
@@ -125,7 +124,7 @@ Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicket
 }
 
 Result(SystemCallResult) Auth__handler(
-    KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 )
 {
@@ -136,14 +135,14 @@ Result(SystemCallResult) Auth__handler(
 
     AuthRequestPtr request = (AuthRequestPtr) arg1;
 
-    match_optional(ProcessPtr, proc,
+    match_optional(ProcessPtr, *proc,
         some(process)
         {
             match_result(AuthTicketID, Auth__authenticate(
                 &kernel->auth,
                 process,
-                request->username,
-                request->password
+                &request->username,
+                &request->password
             ),
                 success(ticket_id) { return Success(SystemCallResult, ticket_id); },
                 error(code, message) { return Error(SystemCallResult, message, code); }

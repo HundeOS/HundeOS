@@ -41,11 +41,13 @@ ResultDef(UserID);
         .tickets = EmptyArray(AuthTickets), \
     } \
 
-Result(AuthTicketID) Auth__authenticate(AuthPtr self, ProcessPtr process, BString username, BString password);
+Result(AuthTicketID) Auth__authenticate(
+    AuthPtr self, ProcessPtr process, ConstBStringPtr username, ConstBStringPtr password
+);
 Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicketID ticket_id);
 
 Result(SystemCallResult) Auth__handler(
-    KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 );
 

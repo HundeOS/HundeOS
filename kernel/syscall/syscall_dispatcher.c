@@ -19,10 +19,10 @@ static BString unhandled_syscall = bstr("Unhandled syscall");
 static BString unhandled_syscall_format = bstr("Unhandled syscall %i");
 
 static Result(SystemCallResult) SyscallDispatcher__deliver_pending_signal(
-    KernelPtr kernel, Optional(ProcessPtr) process_opt, Result(SystemCallResult) syscall_result
+    KernelPtr kernel, OptionalPtr(ProcessPtr) process_opt, ConstResultPtr(SystemCallResult) syscall_result
 )
 {
-    match_optional(ProcessPtr, process_opt,
+    match_optional(ProcessPtr, *process_opt,
         some(process)
         {
             match_optional(ProcessSignal, Process__take_pending_signal(process),
@@ -37,7 +37,7 @@ static Result(SystemCallResult) SyscallDispatcher__deliver_pending_signal(
         none_do_nothing()
     );
 
-    return syscall_result;
+    return *syscall_result;
 }
 
 
@@ -56,14 +56,14 @@ Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, Sy
 }
 
 Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
-                                                     KernelPtr kernel,
-                                                     Optional(ProcessPtr) process_opt,
-                                                     SystemCall syscall_id,
-                                                     Anything arg1,
-                                                     Anything arg2,
-                                                     Anything arg3,
-                                                     Anything arg4,
-                                                     Anything arg5)
+                                                              KernelPtr kernel,
+                                                              OptionalPtr(ProcessPtr) process_opt,
+                                                              SystemCall syscall_id,
+                                                              Anything arg1,
+                                                              Anything arg2,
+                                                              Anything arg3,
+                                                              Anything arg4,
+                                                              Anything arg5)
 {
     __d_printf(DEBUG, "SyscallHandler__handle(syscall_id=%i, arg1=%i, arg2=%i, arg3=%i, arg4=%i, arg5=%i)",
                syscall_id, arg1, arg2, arg3, arg4, arg5);
@@ -71,8 +71,9 @@ Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
     match_optional(Handler, Handlers__at(&self->handlers, syscall_id),
         some(handler)
         {
+            Result(SystemCallResult) handler_result = handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5);
             return SyscallDispatcher__deliver_pending_signal(
-                kernel, process_opt, handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5)
+                kernel, process_opt, &handler_result
             );
         },
         none()

@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 #include "../../../common/types/bstring.h"
-#include "../../types/linked_list.h"
+#include "types/linked_list.h"
 #include "interpreter.h"
 
 LinkedListDefine(BString, ShellHistory, bstring_equals);

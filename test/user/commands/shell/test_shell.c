@@ -90,17 +90,17 @@ static void set_console_input(const char * value)
 SpawnResult spawn(
     SpawnMode mode,
     ConstBStringPtr path,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     spawn_call_count++;
     last_spawn_call.mode = mode;
     last_spawn_call.path = *path;
-    match_optional(BString, arg0, some(value) { last_spawn_call.arg0 = value; }, none_do_nothing());
-    match_optional(BString, arg1, some(value) { last_spawn_call.arg1 = value; }, none_do_nothing());
-    match_optional(BString, arg2, some(value) { last_spawn_call.arg2 = value; }, none_do_nothing());
+    match_optional(BString, *arg0, some(value) { last_spawn_call.arg0 = value; }, none_do_nothing());
+    match_optional(BString, *arg1, some(value) { last_spawn_call.arg1 = value; }, none_do_nothing());
+    match_optional(BString, *arg2, some(value) { last_spawn_call.arg2 = value; }, none_do_nothing());
     return next_spawn_result;
 }
 
@@ -246,6 +246,23 @@ void test_interpreter_execute_spawns_background_command_with_same_args(void)
     TEST_ASSERT_EQUAL_STRING("/sbin/cat", BString__cstr(&last_spawn_call.path));
     TEST_ASSERT_EQUAL_STRING("test.txt", BString__cstr(&last_spawn_call.arg0));
     TEST_ASSERT_EQUAL_STRING("", BString__cstr(&last_spawn_call.arg1));
+}
+
+void test_interpreter_execute_accepts_background_spawn_pid_as_success(void)
+{
+    Interpreter interpreter = Interpreter__new();
+    BString input = bstring("socket_test listen socket://proc/demo &");
+    Command command = Interpreter__parse(&interpreter, &input);
+    next_spawn_result = 25;
+
+    TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__execute(&interpreter, &command));
+
+    TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
+    TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
+    TEST_ASSERT_EQUAL_STRING("/sbin/socket_test", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_STRING("listen", BString__cstr(&last_spawn_call.arg0));
+    TEST_ASSERT_EQUAL_STRING("socket://proc/demo", BString__cstr(&last_spawn_call.arg1));
+    TEST_ASSERT_EQUAL_STRING("", BString__cstr(&printed_output));
 }
 
 void test_interpreter_parse_does_not_pass_background_operator_as_argument(void)

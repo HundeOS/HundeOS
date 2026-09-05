@@ -12,7 +12,89 @@ void BasicIO__put_int(int num) {
     put_int(num);
 }
 
-#ifdef KERNEL_SEMIHOSTING_TRACE
+#ifdef KERNEL_SERIAL_TRACE
+#ifdef BSP_VIRT
+#define QEMU_VIRT_TRACE_UART_OFFSET 0x40000ULL
+#else
+#error "KERNEL_SERIAL_TRACE only has a trace UART configured for BSP_VIRT"
+#endif
+
+extern const uint64_t __mmio_start[];
+static bool trace_uart_initialized = false;
+static volatile uint32_t trace_write_lock = 0;
+
+static volatile uint32_t * TraceUart__reg(uint64_t offset)
+{
+    return (volatile uint32_t *)((uint64_t)&__mmio_start[0] + QEMU_VIRT_TRACE_UART_OFFSET + offset);
+}
+
+static bool TraceUart__tx_ready(void)
+{
+    return (*TraceUart__reg(UART0_FR_OFFSET) & FR_TXFF) == 0;
+}
+
+static void TraceUart__init(void)
+{
+    if (trace_uart_initialized)
+    {
+        return;
+    }
+
+    *TraceUart__reg(UART0_CR_OFFSET) = 0;
+    *TraceUart__reg(UART0_ICR_OFFSET) = 0x7FF;
+    *TraceUart__reg(UART0_IBRD_OFFSET) = 2;
+    *TraceUart__reg(UART0_FBRD_OFFSET) = 0xB;
+    *TraceUart__reg(UART0_LCRH_OFFSET) = 0b11 << 5;
+    *TraceUart__reg(UART0_CR_OFFSET) = UARTCR_UARTEN | UARTCR_TXE;
+    trace_uart_initialized = true;
+}
+
+static bool TraceUart__try_lock(void)
+{
+    return __atomic_exchange_n(&trace_write_lock, 1u, __ATOMIC_ACQUIRE) == 0u;
+}
+
+static void TraceUart__unlock(void)
+{
+    __atomic_store_n(&trace_write_lock, 0u, __ATOMIC_RELEASE);
+}
+
+static void TraceUart__put_char(char c)
+{
+    const uint64_t max_wait = 100000;
+    __asm__ volatile("dsb sy");
+    for (uint64_t count = 0; !TraceUart__tx_ready() && count < max_wait; count++)
+    {
+        CPU__wait();
+    }
+
+    if (TraceUart__tx_ready())
+    {
+        *TraceUart__reg(UART0_DR_OFFSET) = (uint32_t) c;
+    }
+    __asm__ volatile("dsb sy");
+}
+
+void DebugTrace__puts(const char* str)
+{
+    if (!TraceUart__try_lock())
+    {
+        return;
+    }
+
+    TraceUart__init();
+    while (*str)
+    {
+        TraceUart__put_char(*str);
+        if (*str == '\n')
+        {
+            TraceUart__put_char('\r');
+        }
+        str++;
+    }
+    TraceUart__unlock();
+}
+#elif defined(KERNEL_SEMIHOSTING_TRACE)
 #define SEMIHOST_SYS_OPEN 0x01
 #define SEMIHOST_SYS_WRITE 0x05
 #define SEMIHOST_SYS_WRITE0 0x04

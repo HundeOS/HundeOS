@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 #include "../../../common/types/bstring.h"
-#include "../../types/fixed_array.h"
+#include "types/fixed_array.h"
 
 #define COMMAND_MAX_ARGS 16
 

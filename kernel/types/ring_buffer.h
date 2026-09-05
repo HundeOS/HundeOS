@@ -7,7 +7,15 @@
 #include "../address.h"
 #include "../debug.h"
 
+#ifdef Kernel__alloc
+#define KERNEL_TYPES_RING_BUFFER_RESTORE_KERNEL_ALLOC
+#undef Kernel__alloc
+#endif
 KernelAddress Kernel__alloc(size_t size);
+#ifdef KERNEL_TYPES_RING_BUFFER_RESTORE_KERNEL_ALLOC
+#define Kernel__alloc(size) Kernel__alloc_debug((size), KALLOC_SOURCE)
+#undef KERNEL_TYPES_RING_BUFFER_RESTORE_KERNEL_ALLOC
+#endif
 
 typedef size_t Pos;
 typedef size_t ItemCount;

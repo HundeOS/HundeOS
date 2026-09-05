@@ -22,6 +22,7 @@ typedef enum IOOperation
     IO_SERVER_DATA_AVAILABLE,
     IO_SERVER_DATA_CONSUMED,
     IO_SERVER_EOF,
+    IO_ACCEPT,
 }
 IOOperation;
 
@@ -51,6 +52,8 @@ typedef enum IOFlags
     IO_OPEN_WRITE = 0x2,
     IO_REMOVE_RECURSIVE = 0x4,
     IO_OPEN_EXECUTE = 0x8,
+    IO_OPEN_BIND = 0x10,
+    IO_OPEN_LISTEN = 0x20,
 }
 IOFlags;
 
@@ -64,7 +67,7 @@ typedef uint64_t DirectoryEntryAttributes;
 typedef struct DirectoryEntry DirectoryEntry;
 typedef DirectoryEntry * DirectoryEntryPtr;
 
-typedef char * IOServerBufferDataPtr;
+typedef char * IOServerBufferDataPtr; // hundelint: ignore-no-raw-char-buffer
 
 typedef struct IOServerBuffer
 {
@@ -163,7 +166,7 @@ struct DirectoryEntry
     GroupID group_id;
     FileMode mode;
     uint64_t name_len;
-    char name[IO_DIRENT_NAME_MAX];
+    char name[IO_DIRENT_NAME_MAX]; // hundelint: ignore-no-raw-char-buffer
 };
 
 static inline IOPathRequest IOPathRequest__new(ConstBStringPtr path, Flags flags)

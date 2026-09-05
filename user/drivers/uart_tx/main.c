@@ -1,9 +1,9 @@
 #define DRIVER_LOG_TAG "UART-TX"
 
-#include "../../sys/io_server.h"
-#include "../../sys/debug.h"
-#include "../../sys/service.h"
-#include "../../sys/uart_config.h"
+#include "sys/io_server.h"
+#include "sys/debug.h"
+#include "sys/service.h"
+#include "sys/uart_config.h"
 
 #define UART_DR   0x000
 #define UART_FR   0x018
@@ -59,8 +59,7 @@ int UART_TX_ENTRYPOINT(void)
     }
     void * uart = driver_ptr(uart_mapping);
 
-    BString tty_path = bstr(":tty:");
-    IOHandle tty = io_server_register(&tty_path, IO_SERVER_WRITE);
+    IOHandle tty = io_server_register(&bstr(":tty:"), IO_SERVER_WRITE);
     if (tty < 0)
     {
         DRIVER_DEBUG("uart_tx: register error %i\n", (int) tty);

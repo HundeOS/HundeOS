@@ -7,12 +7,13 @@
 
 #include "console/console.h"
 #include "file/filesystem.h"
+#include "socket/socket.h"
 #include "stream/stream.h"
 
 #define IO_REGISTER(io_subsystem, path, io_ptr, io_state) \
     { \
         \
-        Result(DeviceHandle) register_res = IOSubsystem__register_device(io_subsystem, path, (IOPtr) io_ptr, io_state); \
+        Result(DeviceHandle) register_res = IOSubsystem__register_device(io_subsystem, &path, (IOPtr) io_ptr, io_state); \
         \
         match_result(DeviceHandle, register_res, /* hundelint: ignore-match-branch-macros */ \
             success_do_nothing(), \
@@ -29,6 +30,7 @@ static BString TTY = bstr(":tty:");
 static BString KEYBOARD = bstr(":keyboard:");
 static BString HELLO_STREAM = bstr("/dev/hello");
 static BString BUSINFO_STREAM = bstr("/dev/businfo");
+static BString SOCKET_SCHEME = bstr(IO_SOCKET_SCHEME);
 static BString ROOT = bstr("/");
 
 Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
@@ -42,6 +44,13 @@ Result(RegisterCode) IOSubsystem__register(KernelPtr kernel)
     IO_REGISTER(io_subsystem, KEYBOARD, Stream__heap_new(), (IOStatePtr) StreamState__heap_new());
     IO_REGISTER(io_subsystem, HELLO_STREAM, Stream__heap_new(), (IOStatePtr) StreamState__heap_new());
     IO_REGISTER(io_subsystem, BUSINFO_STREAM, Stream__heap_new(), (IOStatePtr) StreamState__heap_new());
+    SocketIOPtr socket_io = SocketIO__heap_new();
+    IO_REGISTER(
+        io_subsystem,
+        SOCKET_SCHEME,
+        &socket_io->base_io,
+        (IOStatePtr) SocketIOState__heap_new(kernel->message_broker, socket_io)
+    );
     IO_REGISTER(io_subsystem, ROOT, &root_fs->file_io.base_io, (IOStatePtr) root_fs->state);
 
     match_result(ListenerRegisterResult, IOSubsystem__register_listeners(kernel),

@@ -29,7 +29,7 @@ void test_map_len_key_set_get_and_delete(void)
     match_result(CollectionCode, TestMap__set(&map, world, 13), success_do_nothing(), error_test_fail());
 
     TEST_ASSERT_EQUAL(2, TestMap__len(&map));
-    TEST_ASSERT_TRUE(BString__equals(&hello, Unwrap(BStringPtr, TestMap__key(&map, 0), (BStringPtr){})));
+    TEST_ASSERT_TRUE(BString__equals(&hello, unwrap(BStringPtr, TestMap__key(&map, 0), (BStringPtr){})));
 
     match_optional(TestInt, TestMap__get(&map, hello), some(value) { TEST_ASSERT_EQUAL(12, value); }, none_test_fail());
 

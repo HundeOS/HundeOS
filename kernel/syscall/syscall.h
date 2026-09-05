@@ -23,9 +23,8 @@ typedef struct CallContext
 CallContext;
 
 CallContext CallContext__new(
-    Optional(ProcessPtr) process, SystemCall syscall_id, Anything arg1, Anything arg2,
+    OptionalPtr(ProcessPtr) process, SystemCall syscall_id, Anything arg1, Anything arg2,
     Anything arg3, Anything arg4, Anything arg5
 );
-
 
 #endif

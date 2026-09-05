@@ -1,5 +1,5 @@
 #include "../../user.h"
-#include "../../sys/process.h"
+#include "sys/process.h"
 
 #define PS_MAX_PROCESSES 32
 #define PS_PID_WIDTH 5

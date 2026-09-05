@@ -10,7 +10,7 @@ UNITY = ../vendor/Unity
 UV ?= uv
 PYTHON = $(UV) run python
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -ffreestanding -mno-outline-atomics -include hundetest.h -I../ -I$(UNITY)/src -I$(PLATFORM_INCLUDE)
+CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -ffreestanding -mno-outline-atomics -include hundetest.h -I../user/lib -I../ -I$(UNITY)/src -I$(PLATFORM_INCLUDE)
 
 # Assembler flags
 ASFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -nostdlib -latomic

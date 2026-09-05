@@ -6,6 +6,7 @@
 #include "../../../../common_includes/syscalls/process.h"
 #include "../../../../common_includes/syscalls/service.h"
 #include "../../../../common_includes/syscalls/spawn.h"
+#include "../../../../common_includes/syscalls/syslog.h"
 
 #define TEST_SERVICE_READY_NAME_MAX 256ULL
 
@@ -41,6 +42,11 @@ static bool fake_config_opened;
 static bool fake_config_closed;
 static uint64_t fake_wait_ready_count;
 static char fake_wait_ready_paths[8][TEST_SERVICE_READY_NAME_MAX];
+
+SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+{
+    return SYSLOG_OK;
+}
 
 #define HUNDESCHULE_ENTRYPOINT hundeschule_main_under_test
 #define IO__printf test_printf
@@ -133,16 +139,16 @@ static void copy_string(char * target, uint64_t size, const char * source)
 SpawnResult spawn(
     SpawnMode mode,
     ConstBStringPtr path,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     TEST_ASSERT_LESS_THAN_UINT64(16, spawn_call_count);
     spawn_calls[spawn_call_count].mode = mode;
     copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), BString__cstr(path));
-    match_optional(BString, arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
-    match_optional(BString, arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(BString, *arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(BString, *arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
     spawn_call_count++;
 
     if (failing_path != NULL && strings_equal(BString__cstr(path), failing_path))
@@ -159,9 +165,9 @@ SpawnResult spawn_with_stdio(
     SpawnFileDescriptor stdin_fd,
     SpawnFileDescriptor stdout_fd,
     SpawnFileDescriptor stderr_fd,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     TEST_FAIL();
@@ -172,9 +178,9 @@ SpawnResult spawn_as(
     SpawnMode mode,
     UserID requested_user_id,
     ConstBStringPtr path,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     TEST_FAIL();
@@ -193,6 +199,7 @@ IOHandle open(ConstBStringPtr path, Flags flags)
     if (strings_equal(BString__cstr(path), "/boot/config/hundeschule.conf"))
     {
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
+        TEST_ASSERT_EQUAL_UINT64(2, fake_wait_ready_count);
         if (fake_config == NULL)
         {
             return IO_INVALID_PATH;
@@ -307,17 +314,18 @@ void test_hundeschule_starts_bootstrap_drivers_then_hundeschau(void)
     HundeschuleRequiredProcesses required_processes = HundeschuleRequiredProcesses__new();
     TEST_ASSERT_EQUAL_INT(0, Hundeschule__initialise_required_processes(&required_processes));
 
-    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
+    TEST_ASSERT_EQUAL_UINT64(7, spawn_call_count);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[0].path);
-    TEST_ASSERT_EQUAL_STRING("0", spawn_calls[0].arg0);
+    TEST_ASSERT_EQUAL_STRING("2", spawn_calls[0].arg0);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", spawn_calls[0].arg1);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[1].path);
-    TEST_ASSERT_EQUAL_STRING("2", spawn_calls[1].arg0);
+    TEST_ASSERT_EQUAL_STRING("0", spawn_calls[1].arg0);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio2", spawn_calls[1].arg1);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[2].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[3].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[4].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/socket_router", spawn_calls[2].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[6].path);
     TEST_ASSERT_EQUAL_UINT64(2, fake_wait_ready_count);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_wait_ready_paths[0]);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio2", fake_wait_ready_paths[1]);
@@ -345,13 +353,14 @@ void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
     HundeschuleRequiredProcesses required_processes = HundeschuleRequiredProcesses__new();
     TEST_ASSERT_EQUAL_INT(0, Hundeschule__initialise_required_processes(&required_processes));
 
-    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
+    TEST_ASSERT_EQUAL_UINT64(7, spawn_call_count);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[0].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[1].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[2].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sdhci", spawn_calls[3].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_keyboard", spawn_calls[4].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/socket_router", spawn_calls[2].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sdhci", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_keyboard", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[6].path);
     TEST_ASSERT_EQUAL_UINT64(2, fake_wait_ready_count);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_wait_ready_paths[0]);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio2", fake_wait_ready_paths[1]);
@@ -370,10 +379,10 @@ void test_hundeschule_respawns_bootstrap_driver_with_same_args(void)
 
     TEST_ASSERT_EQUAL_INT(1, hundeschule_main_under_test());
 
-    TEST_ASSERT_EQUAL_UINT64(7, spawn_call_count);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[6].path);
-    TEST_ASSERT_EQUAL_STRING("2", spawn_calls[6].arg0);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio2", spawn_calls[6].arg1);
+    TEST_ASSERT_EQUAL_UINT64(8, spawn_call_count);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[7].path);
+    TEST_ASSERT_EQUAL_STRING("0", spawn_calls[7].arg0);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio2", spawn_calls[7].arg1);
 }
 
 void test_hundeschule_does_not_respawn_once_driver(void)
@@ -387,5 +396,5 @@ void test_hundeschule_does_not_respawn_once_driver(void)
 
     TEST_ASSERT_EQUAL_INT(1, hundeschule_main_under_test());
 
-    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
+    TEST_ASSERT_EQUAL_UINT64(7, spawn_call_count);
 }

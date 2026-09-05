@@ -5,24 +5,24 @@
 
 static BString invalid_syslog_message = bstr("Invalid syslog message");
 
-static void Syslog__write(BString tag, Optional(ProcessPtr) proc, BString message)
+static void Syslog__write(ConstBStringPtr tag, OptionalPtr(ProcessPtr) proc, ConstBStringPtr message)
 {
     if (!__d_should_log(SYSLOG))
     {
         return;
     }
 
-    match_optional(ProcessPtr, proc,
+    match_optional(ProcessPtr, *proc,
         some(process)
         {
-            k_printf("cpu=%i - %s - ", CPU__id(), cstr(tag));
-            k_printf("pid=%i name=%s: %s", process->pid, cstr(process->name), cstr(message));
+            k_printf("cpu=%i - %s - ", CPU__id(), cstr(*tag));
+            k_printf("pid=%i name=%s: %s", process->pid, cstr(process->name), cstr(*message));
             return;
         },
         none()
         {
-            k_printf("cpu=%i - %s - ", CPU__id(), cstr(tag));
-            k_printf("pid=none: %s", cstr(message));
+            k_printf("cpu=%i - %s - ", CPU__id(), cstr(*tag));
+            k_printf("pid=none: %s", cstr(*message));
             return;
         }
     );
@@ -30,7 +30,7 @@ static void Syslog__write(BString tag, Optional(ProcessPtr) proc, BString messag
 
 Result(SystemCallResult) Syslog__handler(
     KernelPtr kernel,
-    Optional(ProcessPtr) proc,
+    OptionalPtr(ProcessPtr) proc,
     Anything arg1,
     Anything arg2,
     Anything arg3,
@@ -50,6 +50,6 @@ Result(SystemCallResult) Syslog__handler(
         none_do_nothing()
     );
 
-    Syslog__write(tag, proc, request->message);
+    Syslog__write(&tag, proc, &request->message);
     return Success(SystemCallResult, SYSLOG_OK);
 }

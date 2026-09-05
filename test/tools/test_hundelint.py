@@ -37,6 +37,52 @@ class HundelintTest(unittest.TestCase):
         source = 'const char *text = "NULL";\n// NULL\n/* NULL */\n'
         self.assertNotIn("no-null", self.rules_for(source))
 
+    def test_reports_pointer_comparison_to_zero(self):
+        source = (
+            "typedef struct Fiber * FiberPtr;\n"
+            "void example(FiberPtr fiber, void * raw) {\n"
+            "    if (fiber == 0) { }\n"
+            "    if (0 != raw) { }\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertEqual(2, rules.count("no-null"))
+
+    def test_reports_pointer_array_item_comparison_to_zero(self):
+        source = (
+            "typedef struct Fiber * FiberPtr;\n"
+            "static FiberPtr fibers[16] = { 0 };\n"
+            "void example(int index) {\n"
+            "    if (fibers[index] == 0) { }\n"
+            "}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertEqual(1, rules.count("no-null"))
+
+    def test_reports_pointer_field_zero_initializer(self):
+        source = (
+            "typedef struct Fiber * FiberPtr;\n"
+            "typedef struct Fiber Fiber;\n"
+            "struct Fiber { FiberPtr next; int count; };\n"
+            "Fiber example(void) { return (Fiber) { .next = 0, .count = 0 }; }\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertEqual(1, rules.count("no-null"))
+
+    def test_reports_address_field_zero_initializer(self):
+        source = (
+            "typedef unsigned long Address;\n"
+            "typedef struct Fiber Fiber;\n"
+            "struct Fiber { Address stack_base; size_t stack_size; };\n"
+            "Fiber example(void) { return (Fiber) { .stack_base = 0, .stack_size = 0 }; }\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertEqual(1, rules.count("no-null"))
+
+    def test_does_not_report_integer_comparison_to_zero(self):
+        source = "void example(int status) { if (status == 0) { } }\n"
+        self.assertNotIn("no-null", self.ast_rules_for(source))
+
     def test_reports_goto(self):
         self.assertIn("no-goto", self.rules_for("goto done;\n"))
 
@@ -78,6 +124,86 @@ class HundelintTest(unittest.TestCase):
         source = "void example(FindResultOptional(ProcessTable) result) { result.present; result.some.val; }\n"
         rules = self.ast_rules_for(source)
         self.assertEqual(3, rules.count("no-optional-result-internals"))
+
+    def test_allows_match_find_result_branches(self):
+        source = (
+            "void example(ProcessTable processes) {\n"
+            "    match_find_result(ProcessTable, ProcessTable__find(&processes, pid_matches, &pid),\n"
+            "        some(process)\n"
+            "        {\n"
+            "            use(process);\n"
+            "        },\n"
+            "        none()\n"
+            "        {\n"
+            "            return;\n"
+            "        }\n"
+            "    );\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertNotIn("match-branch-macros", rules)
+        self.assertNotIn("block-macro-semicolon", rules)
+
+    def test_allows_match_find_result_ptr_branches(self):
+        source = (
+            "void example(ProcessTable processes) {\n"
+            "    match_find_result_ptr(ProcessTable, ProcessTable__find(&processes, pid_matches, &pid),\n"
+            "        some(process)\n"
+            "        {\n"
+            "            use(process);\n"
+            "        },\n"
+            "        none()\n"
+            "        {\n"
+            "            return;\n"
+            "        }\n"
+            "    );\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertNotIn("match-branch-macros", rules)
+        self.assertNotIn("block-macro-semicolon", rules)
+
+    def test_reports_match_find_result_without_branch_macros(self):
+        source = (
+            "void example(ProcessTable processes) {\n"
+            "    match_find_result(ProcessTable, ProcessTable__find(&processes, pid_matches, &pid),\n"
+            "        { use(process); },\n"
+            "        none()\n"
+            "        {\n"
+            "            return;\n"
+            "        }\n"
+            "    );\n"
+            "}\n"
+        )
+        self.assertIn("match-branch-macros", self.rules_for(source))
+
+    def test_reports_direct_find_result_matching(self):
+        source = (
+            "void example(ProcessTable processes) {\n"
+            "    match_optional(ProcessTable__FindResult, ProcessTable__find(&processes, pid_matches, &pid),\n"
+            "        some(process)\n"
+            "        {\n"
+            "            use(process.value);\n"
+            "        },\n"
+            "        none_do_nothing()\n"
+            "    );\n"
+            "}\n"
+        )
+        self.assertIn("find-result-matcher", self.rules_for(source))
+
+    def test_allows_direct_find_result_matching_with_ignore(self):
+        source = (
+            "void example(ProcessTable processes) {\n"
+            "    match_optional(ProcessTable__FindResult, ProcessTable__find(&processes, pid_matches, &pid), // hundelint: ignore-find-result-matcher\n"
+            "        some(process)\n"
+            "        {\n"
+            "            use(process.index);\n"
+            "        },\n"
+            "        none_do_nothing()\n"
+            "    );\n"
+            "}\n"
+        )
+        self.assertNotIn("find-result-matcher", self.rules_for(source))
 
     def test_reports_collection_internals(self):
         source = "void example(void) { BString text; ExampleLinkedList list; text.len; list.head->value; }\n"
@@ -274,21 +400,92 @@ class HundelintTest(unittest.TestCase):
         rules = self.ast_rules_for(source)
         self.assertNotIn("member-first-arg-self", rules)
 
-    def test_reports_legacy_match_macros(self):
-        source = (
-            "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    Match(BString, value)\n"
-            "        IsSome(text, use(text))\n"
-            "        IsNone(return)\n"
-            "    ResultMatch(ByteCount, result)\n"
-            "        IsSuccess(count, use(count))\n"
-            "        IsError(code, message, return)\n"
-            "}\n"
-        )
-        rules = self.rules_for(source)
-        self.assertEqual(6, rules.count("legacy-match-macros"))
+    def test_reports_bstring_parameter_by_value(self):
+        source = "void example(BString value) {}\n"
+        rules = self.ast_rules_for(source)
+        self.assertIn("no-struct-param-by-value", rules)
 
-    def test_allows_new_match_macros(self):
+    def test_reports_collection_parameter_by_value(self):
+        source = (
+            "FixedArrayDefine(BString, 4, CommandArguments, bstring_equals);\n"
+            "void example(CommandArguments args) {}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertIn("no-struct-param-by-value", rules)
+
+    def test_reports_struct_parameter_by_value(self):
+        source = (
+            "typedef struct Message Message;\n"
+            "void example(Message message) {}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertIn("no-struct-param-by-value", rules)
+
+    def test_reports_explicit_struct_parameter_by_value(self):
+        source = "void example(struct Message message) {}\n"
+        rules = self.ast_rules_for(source)
+        self.assertIn("no-struct-param-by-value", rules)
+
+    def test_reports_optional_result_parameter_by_value(self):
+        source = "void example(Optional(BString) value, Result(ByteCount) count) {}\n"
+        rules = self.ast_rules_for(source)
+        self.assertEqual(2, rules.count("no-struct-param-by-value"))
+
+    def test_allows_struct_return_by_value(self):
+        source = "BString example(void) { return bstr(\"ok\"); }\n"
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("no-struct-param-by-value", rules)
+
+    def test_allows_struct_parameters_by_pointer_typedef(self):
+        source = "void example(ConstBStringPtr text, BStringPtr target, ConstMessagePtr message) {}\n"
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("no-struct-param-by-value", rules)
+        self.assertNotIn("raw-struct-pointer", rules)
+
+    def test_reports_raw_struct_pointer_parameter(self):
+        source = (
+            "typedef struct Message { int value; } Message;\n"
+            "void example(const Message * message) {}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertIn("raw-struct-pointer", rules)
+
+    def test_reports_raw_typedef_struct_pointer_parameter(self):
+        source = (
+            "typedef struct ServiceEvent { int type; } ServiceEvent;\n"
+            "void example(const ServiceEvent * event) {}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertIn("raw-struct-pointer", rules)
+
+    def test_reports_raw_struct_pointer_local(self):
+        source = (
+            "typedef struct Elf64Header { int entry; } Elf64Header;\n"
+            "void example(void) { Elf64Header * header = get_header(); }\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertIn("raw-struct-pointer", rules)
+
+    def test_reports_raw_optional_result_pointer_parameters(self):
+        source = (
+            "void example(const Optional(BString) * value, Result(ByteCount) * count) {}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertEqual(2, rules.count("optional-result-pointer-param-macro"))
+
+    def test_allows_optional_result_pointer_parameter_macros(self):
+        source = (
+            "void example(OptionalPtr(BString) value, ResultPtr(ByteCount) count) {}\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("optional-result-pointer-param-macro", rules)
+
+    def test_allows_struct_param_by_value_ignore_comment(self):
+        source = "void example(BString value) { // hundelint: ignore-no-struct-param-by-value\n}\n"
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("no-struct-param-by-value", rules)
+
+    def test_allows_match_macros(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
             "    match_optional(BString, value,\n"
@@ -309,7 +506,6 @@ class HundelintTest(unittest.TestCase):
             "}\n"
         )
         rules = self.rules_for(source)
-        self.assertNotIn("legacy-match-macros", rules)
         self.assertNotIn("match-branch-macros", rules)
         self.assertNotIn("match-branch-format", rules)
         self.assertNotIn("match-branch-block-format", rules)
@@ -438,21 +634,6 @@ class HundelintTest(unittest.TestCase):
         rules = self.rules_for(source)
         self.assertEqual(4, rules.count("match-branch-macros"))
 
-    def test_allows_legacy_unwrap_macros_in_macro_headers(self):
-        source = "#define Unwrap(T, opt, alternate_val) ((opt).present ? (opt).some.val : (alternate_val))\n"
-        rules = self.rules_for(source, "common/types/optional.h")
-        self.assertNotIn("legacy-match-macros", rules)
-
-    def test_does_not_report_legacy_match_macros_in_string_or_comment(self):
-        source = 'const char *text = "Match(BString, value)";\n// ResultMatch(ByteCount, result)\n'
-        rules = self.rules_for(source)
-        self.assertNotIn("legacy-match-macros", rules)
-
-    def test_allows_legacy_match_macro_ignore_comment(self):
-        source = "Match(BString, value) // hundelint: ignore-legacy-match-macros\n"
-        rules = self.rules_for(source)
-        self.assertNotIn("legacy-match-macros", rules)
-
     def test_reports_legacy_critical_section_macros(self):
         source = (
             "void example(mutex_t lock) {\n"
@@ -475,12 +656,12 @@ class HundelintTest(unittest.TestCase):
 
     def test_rejects_legacy_user_print_bridge(self):
         source = "void print(const char * text) { IO__print(&btext); }\n"
-        rules = self.rules_for(source, "user/sys/print.c")
+        rules = self.rules_for(source, "user/lib/sys/print.c")
         self.assertIn("legacy-user-print", rules)
 
     def test_rejects_legacy_user_printf_bridge(self):
         source = "int printf(const char * format, ...) { return IO__printf(&bformat); }\n"
-        rules = self.rules_for(source, "user/sys/print.c")
+        rules = self.rules_for(source, "user/lib/sys/print.c")
         self.assertIn("legacy-user-print", rules)
 
     def test_allows_non_user_print_calls(self):
@@ -549,20 +730,15 @@ class HundelintTest(unittest.TestCase):
         rules = self.rules_for(source)
         self.assertNotIn("block-macro-semicolon", rules)
 
-    def test_reports_unwrap_macros(self):
+    def test_allows_unwrap_macros(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    BString text = Unwrap(BString, value, empty_bstr());\n"
-            "    ByteCount count = ResultUnwrap(ByteCount, result, 0);\n"
+            "    BString text = unwrap(BString, value, empty_bstr());\n"
+            "    ByteCount count = result_unwrap(ByteCount, result, 0);\n"
             "}\n"
         )
         rules = self.rules_for(source)
-        self.assertEqual(2, rules.count("legacy-match-macros"))
-
-    def test_allows_result_unwrap_macro(self):
-        source = "ByteCount count = result_unwrap(ByteCount, result, 0);\n"
-        rules = self.rules_for(source)
-        self.assertNotIn("legacy-match-macros", rules)
+        self.assertNotIn("match-branch-macros", rules)
 
     def test_allows_collection_internals_in_type_implementations(self):
         source = "void example(void) { BString text; ExampleLinkedList list; text.len; list.head->value; }\n"

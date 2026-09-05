@@ -16,7 +16,7 @@ static uint64_t output_position;
 
 #define LS_ENTRYPOINT ls_main_under_test
 #include "../../../../user/commands/ls/main.c"
-#include "../../../../user/sys/io.c"
+#include "../../../../user/lib/sys/io.c"
 
 void setUp(void)
 {
@@ -103,9 +103,8 @@ void test_ls_prints_entries_for_directory(void)
 {
     fake_count = 2;
     BString one = bstr("one");
-    BString two = bstr("two");
     fake_entries[0] = DirectoryEntry__new(0, 0, 0, 0, &one);
-    fake_entries[1] = DirectoryEntry__new(0, 0, 0, 0, &two);
+    fake_entries[1] = DirectoryEntry__new(0, 0, 0, 0, &bstr("two"));
 
     char * argv[] = { "ls", "/mnt" };
 

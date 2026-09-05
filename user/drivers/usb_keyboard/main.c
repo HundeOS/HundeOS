@@ -5,9 +5,9 @@
 
 #define RING_BUFFER_DEBUG_PRINTF(level, format, ...)
 #include "../../../kernel/types/ring_buffer.h"
-#include "../../sys/debug.h"
-#include "../../sys/io_server.h"
-#include "../../sys/service.h"
+#include "sys/debug.h"
+#include "sys/io_server.h"
+#include "sys/service.h"
 
 #ifndef USB_KEYBOARD_ENTRYPOINT
 #define USB_KEYBOARD_ENTRYPOINT main
@@ -75,8 +75,7 @@ static bool UsbKeyboard__init(UsbKeyboardPtr self)
         return false;
     }
 
-    BString keyboard_path = bstr(USB_KEYBOARD_PATH);
-    self->keyboard = io_server_register(&keyboard_path, IO_SERVER_READ);
+    self->keyboard = io_server_register(&bstr(USB_KEYBOARD_PATH), IO_SERVER_READ);
     if (self->keyboard < 0)
     {
         DRIVER_DEBUG("usb_keyboard: register failed %i\n", (int) self->keyboard);

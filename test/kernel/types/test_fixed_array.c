@@ -22,5 +22,5 @@ void test_kernel_fixed_array_heap_new_uses_kernel_allocator(void)
     match_result(CollectionCode, TestArray__push(array, 10), success(index) { TEST_ASSERT_EQUAL(0, index); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(1, TestArray__len(array));
-    TEST_ASSERT_EQUAL(10, Unwrap(TestType, TestArray__at(array, 0), (TestType){}));
+    TEST_ASSERT_EQUAL(10, unwrap(TestType, TestArray__at(array, 0), (TestType){}));
 }

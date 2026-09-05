@@ -17,6 +17,7 @@ typedef struct BootPlatformInfo {
     Optional(FramebufferInfo) framebuffer;
     Optional(PciInfo) pci;
     Optional(SdHostInfo) sd_host;
+    Optional(EthernetMacInfo) ethernet_mac;
     InterruptControllerKind interrupt_controller_kind;
     uint64_t gic_distributor_physical_base;
     uint64_t gic_distributor_virtual_base;

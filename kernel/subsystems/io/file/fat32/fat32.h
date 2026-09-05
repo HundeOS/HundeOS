@@ -91,7 +91,7 @@ OptionalDef(Fat32DirectoryEntry);
 ResultDef(Fat32DirectoryEntry);
 bool Fat32DirectoryEntry__equals(Fat32DirectoryEntryPtr self, Fat32DirectoryEntryPtr other);
 Fat32DirectoryEntry Fat32DirectoryEntry__new(
-    BString name,
+    ConstBStringPtr name,
     uint8_t attributes,
     uint32_t first_cluster,
     uint32_t size
@@ -132,16 +132,16 @@ Fat32FilesystemIOState;
 
 typedef Fat32FilesystemIOState * Fat32FilesystemIOStatePtr;
 
-Fat32Volume Fat32Volume__new(Optional(BlockDevicePtr) device, BlockCount total_sectors);
+Fat32Volume Fat32Volume__new(OptionalPtr(BlockDevicePtr) device, BlockCount total_sectors);
 Result(Fat32Code) Fat32Volume__format(Fat32VolumePtr self);
 Result(Fat32Code) Fat32Volume__mount(Fat32VolumePtr self);
 Result(Fat32DirectoryEntries) Fat32Volume__list_root(Fat32VolumePtr self);
 Result(Fat32Code) Fat32Volume__create_root_file(
-    Fat32VolumePtr self, BString name, DataPtr data, uint32_t size
+    Fat32VolumePtr self, ConstBStringPtr name, DataPtr data, uint32_t size
 );
-Result(Fat32Code) Fat32Volume__create_root_directory(Fat32VolumePtr self, BString name);
+Result(Fat32Code) Fat32Volume__create_root_directory(Fat32VolumePtr self, ConstBStringPtr name);
 Result(Fat32Code) Fat32Volume__read_root_file(
-    Fat32VolumePtr self, BString name, DataPtr target, uint32_t target_size, Fat32ClusterPtr bytes_read
+    Fat32VolumePtr self, ConstBStringPtr name, DataPtr target, uint32_t target_size, Fat32ClusterPtr bytes_read
 );
 
 FileIO Fat32FilesystemIO__new();

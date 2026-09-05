@@ -301,7 +301,7 @@ void test_hundebus_scan_enumerates_single_and_multifunction_devices(void)
             .bus_start = 0,
             .bus_end = 1,
         },
-        .ecam = &fake_ecam_mapping,
+        .ecam = Some(ServiceMappedMemoryPtr, &fake_ecam_mapping),
         .pci_devices = HundebusPciDevices__new(),
     };
     TestHundebus__seed_device(0, 1, 0, 0x1234, 0x5678, 0x0c, 0x03, 0x30, PCI_HEADER_TYPE_MULTIFUNCTION);
@@ -323,7 +323,7 @@ void test_hundebus_scan_stops_at_mapped_ecam_size(void)
             .bus_start = 0,
             .bus_end = 1,
         },
-        .ecam = &fake_ecam_mapping,
+        .ecam = Some(ServiceMappedMemoryPtr, &fake_ecam_mapping),
         .pci_devices = HundebusPciDevices__new(),
     };
     fake_ecam_mapping.size = 0xffff;
@@ -344,7 +344,7 @@ void test_hundebus_builds_businfo_from_scan(void)
             .bus_start = 0,
             .bus_end = 1,
         },
-        .ecam = &fake_ecam_mapping,
+        .ecam = Some(ServiceMappedMemoryPtr, &fake_ecam_mapping),
         .pci_devices = HundebusPciDevices__new(),
     };
     match_result(DynStringCode, DynString__init(&hundebus.businfo, HUNDEBUS_BUSINFO_INITIAL_CAPACITY), success_do_nothing(), error_test_fail());

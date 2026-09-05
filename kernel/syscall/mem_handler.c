@@ -26,12 +26,20 @@ static MemStatus Mem__status_from_process_code(ProcessMemoryCode code)
     return MEM_OPERATION_NOT_SUPPORTED;
 }
 
+static void Mem__terminate_on_allocation_failure(ProcessPtr process, ProcessMemoryCode code)
+{
+    if (code == PROCESS_MEMORY_FULL)
+    {
+        Process__queue_signal(process, PROCESS_SIGNAL_TERMINATE);
+    }
+}
+
 Result(SystemCallResult) Mem__handler(
-    KernelPtr kernel, Optional(ProcessPtr) proc, Anything mem_operation,
+    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything mem_operation,
     Anything arg2, Anything arg3, Anything arg4, Anything arg5
 )
 {
-    match_optional(ProcessPtr, proc,
+    match_optional(ProcessPtr, *proc,
         some(process)
         {
             if (mem_operation == MEM_ALLOC_PAGES)
@@ -45,12 +53,13 @@ Result(SystemCallResult) Mem__handler(
                 match_result(UserAddress, Process__alloc_user_pages(process, size),
                     success(address)
                     {
-                    return Success(SystemCallResult, address.virtual_addr);
-                },
+                        return Success(SystemCallResult, address.virtual_addr);
+                    },
                     error(code, message)
                     {
-                    return Error(SystemCallResult, message, Mem__status_from_process_code(code));
-                }
+                        Mem__terminate_on_allocation_failure(process, code);
+                        return Error(SystemCallResult, message, Mem__status_from_process_code(code));
+                    }
                 );
             }
 
@@ -59,12 +68,12 @@ Result(SystemCallResult) Mem__handler(
                 match_result(ProcessMemoryCode, Process__free_user_pages(process, (Address) arg2),
                     success(_)
                     {
-                    return Success(SystemCallResult, MEM_OK);
-                },
+                        return Success(SystemCallResult, MEM_OK);
+                    },
                     error(code, message)
                     {
-                    return Error(SystemCallResult, message, Mem__status_from_process_code(code));
-                }
+                        return Error(SystemCallResult, message, Mem__status_from_process_code(code));
+                    }
                 );
             }
 
@@ -73,12 +82,13 @@ Result(SystemCallResult) Mem__handler(
                 match_result(Address, Process__sbrk(process, (int64_t) arg2),
                     success(old_break)
                     {
-                    return Success(SystemCallResult, old_break);
-                },
+                        return Success(SystemCallResult, old_break);
+                    },
                     error(code, message)
                     {
-                    return Error(SystemCallResult, message, Mem__status_from_process_code(code));
-                }
+                        Mem__terminate_on_allocation_failure(process, code);
+                        return Error(SystemCallResult, message, Mem__status_from_process_code(code));
+                    }
                 );
             }
 

@@ -70,7 +70,12 @@ typedef Fat16DirectoryEntry * Fat16DirectoryEntryPtr;
 
 OptionalDef(Fat16DirectoryEntry);
 bool Fat16DirectoryEntry__equals(Fat16DirectoryEntryPtr self, Fat16DirectoryEntryPtr other);
-Fat16DirectoryEntry Fat16DirectoryEntry__new(BString name, uint8_t attributes, uint16_t first_cluster, uint32_t size);
+Fat16DirectoryEntry Fat16DirectoryEntry__new(
+    ConstBStringPtr name,
+    uint8_t attributes,
+    uint16_t first_cluster,
+    uint32_t size
+);
 FixedArrayDefine(
     Fat16DirectoryEntry,
     FAT16_MAX_ROOT_ENTRIES,
@@ -111,11 +116,11 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self);
 Result(Fat16Code) Fat16Volume__mount(Fat16VolumePtr self);
 Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self);
 Result(Fat16Code) Fat16Volume__create_root_file(
-    Fat16VolumePtr self, BString name, DataPtr data, uint32_t size
+    Fat16VolumePtr self, ConstBStringPtr name, DataPtr data, uint32_t size
 );
-Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, BString name);
+Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, ConstBStringPtr name);
 Result(Fat16Code) Fat16Volume__read_root_file(
-    Fat16VolumePtr self, BString name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
+    Fat16VolumePtr self, ConstBStringPtr name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
 );
 
 FileIO Fat16FilesystemIO__new();

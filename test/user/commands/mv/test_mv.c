@@ -28,7 +28,7 @@ static int dir_child_read_count;
 
 #define main mv_main_under_test
 #include "../../../../user/commands/mv/main.c"
-#include "../../../../user/sys/io.c"
+#include "../../../../user/lib/sys/io.c"
 
 enum
 {
@@ -133,8 +133,7 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
             DirectoryEntryPtr entries = request->entries;
             if (strcmp(path, "/srcdir") == 0)
             {
-                BString file_name = bstr("file.txt");
-                entries[0] = DirectoryEntry__new(0, 0, 0, 0, &file_name);
+                entries[0] = DirectoryEntry__new(0, 0, 0, 0, &bstr("file.txt"));
                 return 1;
             }
             if (strcmp(path, "/srcdir/file.txt") == 0)

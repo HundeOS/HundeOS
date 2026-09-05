@@ -54,7 +54,7 @@ The matching macros to match results types should be used
 
 Do not access Optional or Result internals directly, including fields like
 `.present`, `.some.val`, success payload fields, or error payload fields. Use
-`Match`, `ResultMatch`, `Unwrap`, or `ResultUnwrap` instead. The only exception
+`match_optional`, `match_result`, `unwrap`, `result_unwrap` or `result_unwrap` instead. The only exception
 is inside the implementation of the Optional/Result macros themselves.
 
 ## Strings in code
@@ -127,6 +127,12 @@ Do not use `goto` in new or changed code. When modifying code near an existing
 `goto`, refactor that control flow to use structured returns or helper
 functions instead.
 
+## Test code
+Do not add special test-only branches to production code. Tests should use
+stubs, fixtures, dependency injection, or alternate build-linked
+implementations instead of `#ifdef TEST` style conditionals in the code being
+tested.
+
 # Fixing issues
 ## propose a theory and evidence
 - Tell the user what you plan to do before making changes. If there is no
@@ -136,6 +142,12 @@ evidence, the user will be asked to provide evidence.
 # Changing code
 ## propose a change
 Tell the user what you plan to do before making changes.
+
+## No speculative code
+Do not add features, code branches, fields, parameters, flags, hooks, or
+abstractions that are not needed for the current requirement. Avoid preserving
+unused future flexibility. If a branch or field has no current caller or state
+where it is required, leave it out until that requirement exists.
 
 ## Write tests
 Add unit tests for any new code in kernel. Some architecture specific code

@@ -38,12 +38,11 @@ void test_dyn_string_grows_when_appending_past_capacity(void)
 void test_dyn_string_appends_bstring(void)
 {
     DynString text;
-    BString suffix = bstring(" world");
 
     match_result(DynStringCode, DynString__init(&text, 8), success(code) {
             match_result(DynStringCode, DynString__append_cstr(&text, "hello"), success_do_nothing(), error_test_fail());
 
-            match_result(DynStringCode, DynString__append_bstring(&text, &suffix), success_do_nothing(), error_test_fail());
+            match_result(DynStringCode, DynString__append_bstring(&text, &bstr(" world")), success_do_nothing(), error_test_fail());
 
             TEST_ASSERT_EQUAL_STRING("hello world", DynString__cstr(&text));
             DynString__dispose(&text);

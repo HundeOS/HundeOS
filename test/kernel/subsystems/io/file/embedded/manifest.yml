@@ -26,6 +26,7 @@ manifest:
     - kernel/subsystems/io/file/procfs/*.c
     - kernel/subsystems/io/console/*.c
     - kernel/subsystems/io/stream/*.c
+    - kernel/subsystems/io/socket/*.c
     - kernel/syscall_handler.c
     - kernel/mutex.c
     - kernel/exec/exec.c

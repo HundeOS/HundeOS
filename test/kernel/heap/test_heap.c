@@ -5,7 +5,7 @@
 
 Heap heap = NEW_HEAP;
 
-#define TEST_HEAP_PAGES 1200
+#define TEST_HEAP_PAGES 3000
 #define MANY_LIVE_ALLOCATIONS 1100
 
 static uint8_t test_heap_memory[PAGE_SIZE * TEST_HEAP_PAGES];
@@ -14,24 +14,39 @@ static const Address test_heap_physical_base = 0x70000000ULL;
 
 static void assert_free_success(KernelAddress addr)
 {
-    match_result(HeapCode, Heap__free(&heap, addr), success_do_nothing(), error_test_fail());
+    match_result(HeapCode, Heap__free(&heap, addr),
+        success_do_nothing(),
+        error_test_fail());
 }
 
 static void assert_free_fails(KernelAddress addr)
 {
-    match_result(HeapCode, Heap__free(&heap, addr), success_test_fail(), error_test_ok());
+    match_result(HeapCode, Heap__free(&heap, addr),
+        success_test_fail(),
+        error_test_ok());
 }
 
 void setUp(void)
 {
-    SystemInfo system_info = {
-        .kernel_heap = {
-            .virtual_start = (Address)&test_heap_memory[0],
-            .physical_start = test_heap_physical_base,
-            .physical_end = test_heap_physical_base + sizeof(test_heap_memory),
-        },
-    };
-    match_result(HeapCode, Heap__init(&heap, &system_info), success_do_nothing(), error_test_fail());
+    SystemInfo system_info = SystemInfo__new();
+    system_info.kernel_heap.virtual_start = (Address)&test_heap_memory[0];
+    system_info.kernel_heap.physical_start = test_heap_physical_base;
+    system_info.kernel_heap.physical_end = test_heap_physical_base + sizeof(test_heap_memory);
+    match_result(HeapCode, Heap__init(&heap, &system_info),
+        success_do_nothing(),
+        error_test_fail());
+}
+
+static void init_heap_with_coarse_block_size(size_t coarse_block_size)
+{
+    SystemInfo system_info = SystemInfo__new();
+    system_info.heap_coarse_block_size = coarse_block_size;
+    system_info.kernel_heap.virtual_start = (Address)&test_heap_memory[0];
+    system_info.kernel_heap.physical_start = test_heap_physical_base;
+    system_info.kernel_heap.physical_end = test_heap_physical_base + sizeof(test_heap_memory);
+    match_result(HeapCode, Heap__init(&heap, &system_info),
+        success_do_nothing(),
+        error_test_fail());
 }
 
 void tearDown(void)
@@ -134,6 +149,41 @@ void test_reused_multi_page_alloc_is_zeroed(void)
     TEST_ASSERT_EQUAL(vaddr(addr), vaddr(reused));
     TEST_ASSERT_EQUAL(0, reused_bytes[0]);
     TEST_ASSERT_EQUAL(0, reused_bytes[PAGE_SIZE]);
+}
+
+void test_cross_coarse_block_allocation_free_reuses_whole_range(void)
+{
+    init_heap_with_coarse_block_size(PAGE_SIZE * 3);
+    size_t cross_block_size = PAGE_SIZE * 5;
+
+    KernelAddress addr = Heap__alloc_size(&heap, cross_block_size);
+    Address physical = paddr(addr);
+
+    assert_free_success(addr);
+
+    KernelAddress reused = Heap__alloc_size(&heap, cross_block_size);
+
+    TEST_ASSERT_EQUAL(vaddr(addr), vaddr(reused));
+    TEST_ASSERT_EQUAL(physical, paddr(reused));
+}
+
+void test_stack_sized_allocation_crossing_five_coarse_blocks_frees_whole_range(void)
+{
+    init_heap_with_coarse_block_size(_2MB);
+
+    KernelAddress addr = Heap__alloc_size(&heap, STACK_SIZE);
+    Address physical = paddr(addr);
+
+    assert_free_success(addr);
+
+    KernelAddress smaller = Heap__alloc_size(&heap, _2MB);
+    TEST_ASSERT_EQUAL(vaddr(addr), vaddr(smaller));
+    TEST_ASSERT_EQUAL(physical, paddr(smaller));
+
+    KernelAddress reused = Heap__alloc_size(&heap, STACK_SIZE - _2MB);
+
+    TEST_ASSERT_EQUAL(vaddr(addr) + _2MB, vaddr(reused));
+    TEST_ASSERT_EQUAL(physical + _2MB, paddr(reused));
 }
 
 void test_heap_tracks_more_than_one_old_bucket_of_live_allocations(void)

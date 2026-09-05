@@ -140,7 +140,7 @@ Listener KernelListener__new(KernelPtr kernel, Source source, KernelCallback cal
 MessageBroker MessageBroker__new();
 MessageBrokerPtr MessageBroker__heap_new();
 
-Result(ListenerRegisterResult) MessageBroker__register_listener(MessageBrokerPtr self, Listener listener);
+Result(ListenerRegisterResult) MessageBroker__register_listener(MessageBrokerPtr self, ListenerPtr listener);
 Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message);
 void Message__dispose(MessagePtr self);
 
@@ -170,7 +170,7 @@ MessagePtr Message__heap_new_deferred_with_context_ownership(
 MessagePtr Message__heap_new_deferred_with_context_ownership_and_operation_key(
     Source source, SourceCode source_code, Anything anything,
     KernelContextPtr context, Continuation continuation,
-    bool owns_context, Optional(OperationKey) operation_key
+    bool owns_context, OptionalPtr(OperationKey) operation_key
 );
 
 #define NEW_BROKER \

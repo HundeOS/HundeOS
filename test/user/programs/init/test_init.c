@@ -134,16 +134,16 @@ static void copy_string(char * target, uint64_t size, const char * source)
 SpawnResult spawn(
     SpawnMode mode,
     ConstBStringPtr path,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     TEST_ASSERT_LESS_THAN_UINT64(10, spawn_call_count);
     spawn_calls[spawn_call_count].mode = mode;
     copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), BString__cstr(path));
-    match_optional(BString, arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
-    match_optional(BString, arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(BString, *arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(BString, *arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
     spawn_call_count++;
 
     if (failing_path != NULL && strings_equal(BString__cstr(path), failing_path))
@@ -160,9 +160,9 @@ SpawnResult spawn_with_stdio(
     SpawnFileDescriptor stdin_fd,
     SpawnFileDescriptor stdout_fd,
     SpawnFileDescriptor stderr_fd,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     TEST_ASSERT_LESS_THAN_UINT64(10, spawn_call_count);
@@ -172,8 +172,8 @@ SpawnResult spawn_with_stdio(
     spawn_calls[spawn_call_count].stdout_fd = stdout_fd;
     spawn_calls[spawn_call_count].stderr_fd = stderr_fd;
     copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), BString__cstr(path));
-    match_optional(BString, arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
-    match_optional(BString, arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(BString, *arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(BString, *arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
     spawn_call_count++;
 
     if (failing_path != NULL && strings_equal(BString__cstr(path), failing_path))
@@ -188,9 +188,9 @@ SpawnResult spawn_as(
     SpawnMode mode,
     UserID requested_user_id,
     ConstBStringPtr path,
-    Optional(BString) arg0,
-    Optional(BString) arg1,
-    Optional(BString) arg2
+    OptionalPtr(BString) arg0,
+    OptionalPtr(BString) arg1,
+    OptionalPtr(BString) arg2
 )
 {
     TEST_FAIL();

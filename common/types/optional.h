@@ -18,6 +18,9 @@
 #define Optional(T) \
     _Optional(T) \
 
+#define OptionalPtr(T) \
+    _Optional(T) * \
+
 #define AliasOptional(T, alias) \
     typedef _Optional(T) _Optional(alias); \
     typedef _Some(T) _Some(alias); \
@@ -98,7 +101,7 @@
     } \
 } \
 
-#define Unwrap(T, opt, alternate_val) \
+#define unwrap(T, opt, alternate_val) \
     ((opt).present ? (opt).some.val : (alternate_val))\
 
 #endif

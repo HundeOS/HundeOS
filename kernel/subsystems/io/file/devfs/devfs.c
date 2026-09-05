@@ -5,7 +5,6 @@
 #include "../../block/block_device.h"
 
 static BString invalid_path = bstr("Invalid devfs path");
-static BString not_supported = bstr("Devfs operation not supported");
 static BString invalid_handle = bstr("Invalid devfs handle");
 static BString metadata_format = bstr("path=%B\nblock_size=%i\nblock_count=%i\nuserspace_service=%i\n");
 
@@ -21,18 +20,18 @@ BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
     return EmptyArray(BlockDeviceMetadataEntries);
 }
 
-Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias) __attribute__((weak));
-Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(BString alias)
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(ConstBStringPtr alias) __attribute__((weak));
+Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(ConstBStringPtr alias)
 {
     return None(BlockDeviceMetadata);
 }
 
-static BString DevFilesystemIO__name_from_path(BString path)
+static BString DevFilesystemIO__name_from_path(ConstBStringPtr path)
 {
-    BStringArray segments = BString__split(&path, '/');
+    BStringArray segments = BString__split(path, '/');
     if (BStringArray__len(&segments) == 0)
     {
-        return path;
+        return *path;
     }
 
     match_optional(BString, BStringArray__at(&segments, BStringArray__len(&segments) - 1),
@@ -40,11 +39,11 @@ static BString DevFilesystemIO__name_from_path(BString path)
         {
             return name;
         },
-        none() { return path; }
+        none() { return *path; }
     );
 }
 
-static Result(IOInternalHandle) DevFilesystemIOState__add_handle(DevFilesystemIOStatePtr self, BString path)
+static Result(IOInternalHandle) DevFilesystemIOState__add_handle(DevFilesystemIOStatePtr self, ConstBStringPtr path)
 {
     critical_section(self->state.lock,
     {
@@ -86,7 +85,7 @@ static Result(IOInternalHandle) DevFilesystemIOState__delete_handle(DevFilesyste
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-static Result(IOInternalHandle) DevFilesystemIO__open(IOStatePtr self, BString path, Flags flags)
+static Result(IOInternalHandle) DevFilesystemIO__open(IOStatePtr self, ConstBStringPtr path, Flags flags)
 {
     DevFilesystemIOStatePtr fs_state = (DevFilesystemIOStatePtr) self;
 
@@ -104,7 +103,7 @@ static Result(IOInternalHandle) DevFilesystemIO__close(IOStatePtr self, IOIntern
 }
 
 static Result(IOBufferPtr) DevFilesystemIO__read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ExternalBuffer target_buffer
+    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer
 )
 {
     DevFilesystemIOStatePtr fs_state = (DevFilesystemIOStatePtr) self;
@@ -112,7 +111,7 @@ static Result(IOBufferPtr) DevFilesystemIO__read(
     match_result(FileHandleTargetPtr, DevFilesystemIOState__get_handle(fs_state, handle),
         success(target)
         {
-            match_optional(BlockDeviceMetadata, BlockDeviceRegistry__metadata(target->path),
+            match_optional(BlockDeviceMetadata, BlockDeviceRegistry__metadata(&target->path),
                 some(metadata)
                 {
                     BString text = BString__sprintf(
@@ -146,24 +145,9 @@ static Result(IOBufferPtr) DevFilesystemIO__read(
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-static Result(ByteCount) DevFilesystemIO__write(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size)
+static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, ConstBStringPtr path)
 {
-    return Error(ByteCount, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(ParkStatus) DevFilesystemIO__park(IOStatePtr self, IOContextPtr parked_context)
-{
-    return Error(ParkStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(ParkStatus) DevFilesystemIO__unpark(IOStatePtr self)
-{
-    return Error(ParkStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, BString path)
-{
-    BStringArray path_segments = BString__split(&path, '/');
+    BStringArray path_segments = BString__split(path, '/');
     if (BStringArray__len(&path_segments) != 0)
     {
         return Error(FilesystemNodes, invalid_path, IO_INVALID_PATH);
@@ -183,9 +167,10 @@ static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, File
 
     for_each_fa(BlockDevicePaths, paths, index, device_path,
     {
+        BString name = DevFilesystemIO__name_from_path(&device_path);
         FilesystemNodes__push(
             &result,
-            FilesystemNode__heap_new(fs_state->state.filesystem, DevFilesystemIO__name_from_path(device_path), 0)
+            FilesystemNode__heap_new(fs_state->state.filesystem, &name, 0)
         );
 
     });
@@ -193,43 +178,35 @@ static Result(FilesystemNodes) DevFilesystemIO__list_nodes(IOStatePtr self, File
     {
         FilesystemNodes__push(
             &result,
-            FilesystemNode__heap_new(fs_state->state.filesystem, metadata.alias, 0)
+            FilesystemNode__heap_new(fs_state->state.filesystem, &metadata.alias, 0)
         );
 
     });
     return Success(FilesystemNodes, result);
 }
 
-static Result(IOStatus) DevFilesystemIO__mkdir(IOStatePtr self, BString path)
-{
-    return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOStatus) DevFilesystemIO__remove(IOStatePtr self, BString path, Flags flags)
-{
-    return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(IOStatus) DevFilesystemIO__link(IOStatePtr self, BString source_path, BString target_path)
-{
-    return Error(IOStatus, not_supported, IO_OPERATION_NOT_SUPPORTED);
-}
-
 FileIO DevFilesystemIO__new()
 {
     return (FileIO) {
-        .base_io = (IO) {
-            .open = DevFilesystemIO__open,
-            .close = DevFilesystemIO__close,
-            .read = DevFilesystemIO__read,
-            .write = DevFilesystemIO__write,
-            .park = DevFilesystemIO__park,
-            .unpark = DevFilesystemIO__unpark,
-        },
+        .base_io = IO__new(
+            DevFilesystemIO__open,
+            DevFilesystemIO__read,
+            IO__unsupported_write,
+            IO__unsupported_accept,
+            DevFilesystemIO__close,
+            IO__unsupported_park,
+            IO__unsupported_unpark,
+            IO__unsupported_server_buffer,
+            IO__unsupported_server_write_buffer,
+            IO__unsupported_data_available,
+            IO__unsupported_data_consumed,
+            IO__unsupported_eof
+        ),
         .list_nodes = DevFilesystemIO__list_nodes,
-        .mkdir = DevFilesystemIO__mkdir,
-        .remove = DevFilesystemIO__remove,
-        .link = DevFilesystemIO__link,
+        .list_dir = FileIO__unsupported_list_dir,
+        .mkdir = FileIO__unsupported_mkdir,
+        .remove = FileIO__unsupported_remove,
+        .link = FileIO__unsupported_link,
     };
 }
 

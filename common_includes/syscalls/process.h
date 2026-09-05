@@ -80,6 +80,7 @@ typedef struct ProcessChildEvent
 } ProcessChildEvent;
 
 typedef ProcessChildEvent * ProcessChildEventPtr;
+typedef const ProcessChildEvent * ConstProcessChildEventPtr;
 
 static inline ProcessChildEvent ProcessChildEvent__new(void)
 {

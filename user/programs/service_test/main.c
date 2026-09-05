@@ -1,4 +1,4 @@
-#include "../../sys/service.h"
+#include "sys/service.h"
 #include "../../user.h"
 
 int main(void)

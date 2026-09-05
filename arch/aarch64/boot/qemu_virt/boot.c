@@ -71,6 +71,7 @@ __BOOT_STRING__(igrp_) = "IGRPEN1=";
 __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
 {
     qemu_virt_system_info.cpu_count = qemu_virt_platform_info.cpu_count;
+    qemu_virt_system_info.heap_coarse_block_size = SystemInfo__default_heap_coarse_block_size();
 
     qemu_virt_system_info.physical_memory.physical_start = qemu_virt_platform_info.memory_physical_start;
     qemu_virt_system_info.physical_memory.physical_end = qemu_virt_platform_info.memory_physical_end;
@@ -107,6 +108,7 @@ __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
     qemu_virt_system_info.framebuffer = None(FramebufferInfo);
     qemu_virt_system_info.pci = qemu_virt_platform_info.pci;
     qemu_virt_system_info.sd_host = qemu_virt_platform_info.sd_host;
+    qemu_virt_system_info.ethernet_mac = qemu_virt_platform_info.ethernet_mac;
 
     qemu_virt_system_info.gic.distributor_physical_base = qemu_virt_platform_info.gic_distributor_physical_base;
     qemu_virt_system_info.gic.distributor_virtual_base = qemu_virt_platform_info.gic_distributor_virtual_base;

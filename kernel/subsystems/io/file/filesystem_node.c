@@ -4,7 +4,7 @@
 
 FixedArrayBodyDefine(FilesystemNodes);
 
-FilesystemNodePtr FilesystemNode__heap_new(FilesystemPtr filesystem, BString name, FilesystemAttributes attribs)
+FilesystemNodePtr FilesystemNode__heap_new(FilesystemPtr filesystem, ConstBStringPtr name, FilesystemAttributes attribs)
 {
     return FilesystemNode__heap_new_with_metadata(
         filesystem,
@@ -20,7 +20,7 @@ FilesystemNodePtr FilesystemNode__heap_new(FilesystemPtr filesystem, BString nam
 
 FilesystemNodePtr FilesystemNode__heap_new_with_metadata(
     FilesystemPtr filesystem,
-    BString name,
+    ConstBStringPtr name,
     FilesystemAttributes attribs,
     UserID user_id,
     GroupID group_id,
@@ -33,7 +33,7 @@ FilesystemNodePtr FilesystemNode__heap_new_with_metadata(
         .user_id = user_id,
         .group_id = group_id,
         .mode = mode,
-        .name = name,
+        .name = *name,
         .filesystem = filesystem,
         .parent = None(FilesystemNodePtr)
     };

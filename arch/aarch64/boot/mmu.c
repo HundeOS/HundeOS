@@ -363,6 +363,7 @@ __BOOT__(void) enable_mmu()
     // turn on MMU + caches
     sctlr |= (SCTLR_M | SCTLR_C | SCTLR_I);
     sctlr |= (SCTLR_NTWI | SCTLR_NTWE);
+    sctlr |= (SCTLR_UCT | SCTLR_UCI);
 
     // early bring-up: keep alignment checks off unless you really want them
     sctlr &= ~(SCTLR_A | SCTLR_SA | SCTLR_SA0);

@@ -2,7 +2,7 @@
 
 #include "unity.h"
 
-#include "../../../user/types/map.h"
+#include "../../../user/lib/types/map.h"
 
 typedef uint64_t TestType;
 typedef uint64_t TestKey;

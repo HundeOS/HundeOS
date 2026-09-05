@@ -32,7 +32,7 @@ void test_hash_table_insert_and_lookup(void)
     TestHashTable table = TestHashTable__new();
     TestHashTable__set(&table, 123, 456);
     Optional(TestValue) value_opt = TestHashTable__get(&table, 123);
-    TestValue value = Unwrap(TestValue, value_opt, (TestValue){});
+    TestValue value = unwrap(TestValue, value_opt, (TestValue){});
     TEST_ASSERT_EQUAL_INT(456, value);
 }
 
@@ -42,6 +42,6 @@ void test_hash_table_insert_and_update(void)
     TestHashTable__set(&table, 123, 456);
     TestHashTable__set(&table, 123, 789);
     Optional(TestValue) value_opt = TestHashTable__get(&table, 123);
-    TestValue value = Unwrap(TestValue, value_opt, (TestValue){});
+    TestValue value = unwrap(TestValue, value_opt, (TestValue){});
     TEST_ASSERT_EQUAL_INT(789, value);
 }

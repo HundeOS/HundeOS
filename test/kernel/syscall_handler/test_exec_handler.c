@@ -7,6 +7,9 @@
 #include "../fixtures/process.h"
 #include "../stubs/process.h"
 
+#define Exec__handler(kernel, proc, ...) Exec__handler((kernel), &(proc), __VA_ARGS__)
+#define ExecRequest__handler(kernel, proc, ...) ExecRequest__handler((kernel), &(proc), __VA_ARGS__)
+
 static KernelPtr kernel = NULL;
 static ProcessPtr parent = NULL;
 static BString exec_path = bstr("/sbin/hello_world");
@@ -82,7 +85,9 @@ void test_exec_handler_nowait_spawns_without_parking_parent()
 void test_exec_request_handler_can_spawn_as_user(void)
 {
     Process__set_hund_identity(parent);
-    Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user"));
+    BString username = bstring("user");
+    BString password = bstring("user");
+    Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, &bstr("user"), &bstr("user"));
     AuthTicketID ticket_id = result_unwrap(AuthTicketID, auth_result, AUTH_NO_TICKET);
 
     SpawnRequest request = test_spawn_request(
@@ -105,7 +110,9 @@ void test_exec_request_handler_can_spawn_as_user(void)
 
 void test_exec_request_handler_rejects_reused_auth_ticket(void)
 {
-    Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, bstring("user"), bstring("user"));
+    BString username = bstring("user");
+    BString password = bstring("user");
+    Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, &bstr("user"), &bstr("user"));
     AuthTicketID ticket_id = result_unwrap(AuthTicketID, auth_result, AUTH_NO_TICKET);
 
     SpawnRequest request = test_spawn_request(
@@ -139,7 +146,7 @@ void test_exec_request_handler_rejects_reused_auth_ticket(void)
 void test_exec_request_handler_can_spawn_root_shell_with_auth_ticket(void)
 {
     Process__set_hund_identity(parent);
-    Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, bstring("root"), bstring("root"));
+    Result(AuthTicketID) auth_result = Auth__authenticate(&kernel->auth, parent, &bstr("root"), &bstr("root"));
     AuthTicketID ticket_id = result_unwrap(AuthTicketID, auth_result, AUTH_NO_TICKET);
 
     SpawnRequest request = test_spawn_request(

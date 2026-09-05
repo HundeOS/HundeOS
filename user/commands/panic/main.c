@@ -1,5 +1,5 @@
 #include "../../user.h"
-#include "../../sys/system.h"
+#include "sys/system.h"
 
 #ifndef PANIC_ENTRYPOINT
 #define PANIC_ENTRYPOINT main

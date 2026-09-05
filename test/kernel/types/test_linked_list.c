@@ -21,7 +21,7 @@ void test_kernel_linked_list_heap_new_uses_kernel_allocator(void)
     match_result(CollectionCode, TestList__push(list, 10), success(index) { TEST_ASSERT_EQUAL(0, index); }, error_test_fail());
 
     TEST_ASSERT_EQUAL(1, TestList__len(list));
-    TEST_ASSERT_EQUAL(10, Unwrap(TestListType, TestList__at(list, 0), (TestListType){}));
+    TEST_ASSERT_EQUAL(10, unwrap(TestListType, TestList__at(list, 0), (TestListType){}));
     match_result(CollectionCode, TestList__dispose(list), success_do_nothing(), error_test_fail());
 
     TEST_ASSERT_EQUAL(0, TestList__len(list));

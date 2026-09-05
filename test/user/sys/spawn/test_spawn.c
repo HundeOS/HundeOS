@@ -22,7 +22,7 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
     return next_result;
 }
 
-#include "../../../../user/sys/spawn.c"
+#include "../../../../user/lib/sys/spawn.c"
 
 void setUp(void)
 {
@@ -38,10 +38,9 @@ void tearDown(void)
 
 void test_os_spawn_returns_success_result_for_spawned_pid(void)
 {
-    BString path = bstr("/sbin/test");
     next_result = 17;
 
-    match_result(SpawnResult, OS__spawn(P_NOWAIT, &path, SPAWN_NO_ARG, SPAWN_NO_ARG, SPAWN_NO_ARG),
+    match_result(SpawnResult, OS__spawn(P_NOWAIT, &bstr("/sbin/test"), &SPAWN_NO_ARG, &SPAWN_NO_ARG, &SPAWN_NO_ARG),
         success(pid)
         {
             TEST_ASSERT_EQUAL_INT64(17, pid);
@@ -55,10 +54,9 @@ void test_os_spawn_returns_success_result_for_spawned_pid(void)
 
 void test_os_spawn_returns_error_result_for_spawn_failure(void)
 {
-    BString path = bstr("/sbin/missing");
     next_result = SPAWN_NO_FILE;
 
-    match_result(SpawnResult, OS__spawn(P_NOWAIT, &path, SPAWN_NO_ARG, SPAWN_NO_ARG, SPAWN_NO_ARG),
+    match_result(SpawnResult, OS__spawn(P_NOWAIT, &bstr("/sbin/missing"), &SPAWN_NO_ARG, &SPAWN_NO_ARG, &SPAWN_NO_ARG),
         success(pid)
         {
             TEST_FAIL();
@@ -73,18 +71,17 @@ void test_os_spawn_returns_error_result_for_spawn_failure(void)
 
 void test_os_spawn_with_stdio_uses_exec_request_syscall(void)
 {
-    BString path = bstr("/sbin/shell");
     next_result = 42;
 
     match_result(SpawnResult, OS__spawn_with_stdio(
             P_NOWAIT,
-            &path,
+            &bstr("/sbin/shell"),
             3,
             4,
             5,
-            SPAWN_NO_ARG,
-            SPAWN_NO_ARG,
-            SPAWN_NO_ARG
+            &SPAWN_NO_ARG,
+            &SPAWN_NO_ARG,
+            &SPAWN_NO_ARG
         ),
         success(pid)
         {

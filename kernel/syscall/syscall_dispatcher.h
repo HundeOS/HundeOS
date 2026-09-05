@@ -18,7 +18,13 @@ typedef enum RegisterResult
 ResultDef(RegisterResult);
 
 typedef Result(SystemCallResult)(* Handler)(
-        KernelPtr kernel, Optional(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5
+        KernelPtr kernel,
+        OptionalPtr(ProcessPtr) proc,
+        Anything arg1,
+        Anything arg2,
+        Anything arg3,
+        Anything arg4,
+        Anything arg5
     );
 
 OptionalDef(Handler);
@@ -36,14 +42,14 @@ SyscallDispatcher;
 typedef SyscallDispatcher * SyscallDispatcherPtr;
 
 Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
-                                                     KernelPtr kernel,
-                                                     Optional(ProcessPtr) process_opt,
-                                                     SystemCall syscall_id,
-                                                     Anything arg1,
-                                                     Anything arg2,
-                                                     Anything arg3,
-                                                     Anything arg4,
-                                                     Anything arg5);
+                                                              KernelPtr kernel,
+                                                              OptionalPtr(ProcessPtr) process_opt,
+                                                              SystemCall syscall_id,
+                                                              Anything arg1,
+                                                              Anything arg2,
+                                                              Anything arg3,
+                                                              Anything arg4,
+                                                              Anything arg5);
 
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler);
 

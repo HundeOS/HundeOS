@@ -8,6 +8,8 @@ const char * AArch64Exception__class_name(uint64_t ec)
             return "unknown reason";
         case 0x15:
             return "SVC from AArch64";
+        case 0x18:
+            return "trapped MSR, MRS or system instruction";
         case 0x20:
             return "instruction abort from lower EL";
         case 0x21:

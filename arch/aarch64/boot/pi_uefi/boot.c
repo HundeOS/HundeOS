@@ -40,6 +40,9 @@ extern const uint64_t __gicd_start[];
 #define PI4_EMMC2_PHYS_BASE 0xFE340000ULL
 #define PI4_EMMC2_MMIO_SIZE 0x100ULL
 #define PI4_EMMC2_IRQ_ID 126ULL
+#define PI4_GENET_PHYS_BASE 0xFD580000ULL
+#define PI4_GENET_MMIO_SIZE 0x10000ULL
+#define PI4_GENET_IRQ_ID 157ULL
 #define PI_UEFI_GICD_BASE ((uint64_t)&__gicd_start[0])
 #define PI_UEFI_GICR_BASE (PI_UEFI_GICD_BASE + GICR_OFFSET)
 __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = { // hundelint: ignore-constructor-required
@@ -67,6 +70,16 @@ __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = { // hundelint: i
 __BOOT_DATA__(static SystemInfo) pi_uefi_system_info;
 __BOOT_DATA__(static uint64_t) pi_uefi_image_handle = 0;
 __BOOT_DATA__(static uint64_t) pi_uefi_system_table = 0;
+
+static __BOOT__(void) PiUefiPlatformInfo__set_fixed_devices(BootPlatformInfoPtr self)
+{
+    self->ethernet_mac = Some(EthernetMacInfo, EthernetMacInfo__new(
+        ETHERNET_MAC_KIND_BCM2711_GENET,
+        PI4_GENET_PHYS_BASE,
+        PI4_GENET_MMIO_SIZE,
+        PI4_GENET_IRQ_ID
+    ));
+}
 
 __BOOT__(void) pi_uefi_set_entry_args(
     uint64_t image_handle,
@@ -116,9 +129,11 @@ __BOOT__(void) pi_uefi_set_entry_args(
 
 __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
 {
+    PiUefiPlatformInfo__set_fixed_devices(&pi_uefi_platform_info);
     UefiAcpi__apply_system_table(&pi_uefi_platform_info, pi_uefi_system_table);
 
     pi_uefi_system_info.cpu_count = pi_uefi_platform_info.cpu_count;
+    pi_uefi_system_info.heap_coarse_block_size = SystemInfo__default_heap_coarse_block_size();
 
     pi_uefi_system_info.physical_memory.physical_start = pi_uefi_platform_info.memory_physical_start;
     pi_uefi_system_info.physical_memory.physical_end = pi_uefi_platform_info.memory_physical_end;
@@ -151,6 +166,7 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     pi_uefi_system_info.framebuffer = pi_uefi_platform_info.framebuffer;
     pi_uefi_system_info.pci = pi_uefi_platform_info.pci;
     pi_uefi_system_info.sd_host = pi_uefi_platform_info.sd_host;
+    pi_uefi_system_info.ethernet_mac = pi_uefi_platform_info.ethernet_mac;
 
     pi_uefi_system_info.gic.distributor_physical_base = pi_uefi_platform_info.gic_distributor_physical_base;
     pi_uefi_system_info.gic.distributor_virtual_base = (uint64_t)&__gicd_start[0];

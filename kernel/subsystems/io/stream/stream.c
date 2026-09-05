@@ -11,18 +11,20 @@ FixedArrayBodyDefine(StreamParkedContexts);
 static StreamState stream_state;
 static bool stream_state_initialized = false;
 
-static StreamState StreamState__new()
+static void StreamState__init(StreamStatePtr self)
 {
-    return (StreamState) {
-        .state = IOState__new(),
-        .write_buffer = EmptyRingBuffer(IOBuffer),
-        .read_buffer = EmptyRingBuffer(IOBuffer),
-        .data_available = false,
-        .eof = false,
-        .parked_contexts = EmptyArray(StreamParkedContexts),
-        .lock = MUTEX_INIT,
-        .handle_counter = 0,
-    };
+    self->state = IOState__new();
+    self->write_buffer.read_pos = 0;
+    self->write_buffer.write_pos = 0;
+    self->write_buffer.buffer_size = RingBuffer__IOBuffer__size;
+    self->read_buffer.read_pos = 0;
+    self->read_buffer.write_pos = 0;
+    self->read_buffer.buffer_size = RingBuffer__IOBuffer__size;
+    self->data_available = false;
+    self->eof = false;
+    ArrayInit(StreamParkedContexts, self->parked_contexts);
+    self->lock = MUTEX_INIT;
+    self->handle_counter = 0;
 }
 
 static bool Stream__handle_match(IOContextPtr * context_p, void * handle_p)
@@ -39,7 +41,7 @@ static bool Stream__handle_match(IOContextPtr * context_p, void * handle_p)
     );
 }
 
-static Result(IOInternalHandle) Stream__open(IOStatePtr state, BString path, Flags flags)
+static Result(IOInternalHandle) Stream__open(IOStatePtr state, ConstBStringPtr path, Flags flags)
 {
     StreamStatePtr self = (StreamStatePtr) state;
     IOInternalHandle handle = -1;
@@ -61,10 +63,10 @@ static Result(IOInternalHandle) Stream__close(IOStatePtr state, IOInternalHandle
         self->data_available = false;
         self->eof = false;
 
-        match_optional(StreamParkedContexts__FindResult, StreamParkedContexts__find(&self->parked_contexts, Stream__handle_match, &handle),
-            some(found)
+        match_find_result(StreamParkedContexts, StreamParkedContexts__find(&self->parked_contexts, Stream__handle_match, &handle),
+            some(context)
             {
-                match_result(CollectionCode, StreamParkedContexts__remove(&self->parked_contexts, *found.value),
+                match_result(CollectionCode, StreamParkedContexts__remove(&self->parked_contexts, context),
                     success_do_nothing(),
                     error(code, message) { __d_println(IODEV, "no parked context found for handle"); }
                 );
@@ -77,7 +79,7 @@ static Result(IOInternalHandle) Stream__close(IOStatePtr state, IOInternalHandle
 }
 
 static Result(IOBufferPtr) Stream__read(
-    IOStatePtr state, IOInternalHandle handle, size_t size, ExternalBuffer target
+    IOStatePtr state, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target
 )
 {
     StreamStatePtr self = (StreamStatePtr) state;
@@ -272,6 +274,7 @@ IOPtr Stream__heap_new()
         Stream__open,
         Stream__read,
         Stream__write,
+        IO__unsupported_accept,
         Stream__close,
         Stream__park,
         Stream__unpark,
@@ -289,7 +292,7 @@ StreamStatePtr StreamState__instance()
 {
     if (!stream_state_initialized)
     {
-        stream_state = StreamState__new();
+        StreamState__init(&stream_state);
         stream_state_initialized = true;
     }
     return &stream_state;
@@ -298,6 +301,6 @@ StreamStatePtr StreamState__instance()
 StreamStatePtr StreamState__heap_new()
 {
     StreamStatePtr result = ptr(Kernel__alloc_kernel(sizeof(StreamState)), StreamState);
-    *result = StreamState__new();
+    StreamState__init(result);
     return result;
 }

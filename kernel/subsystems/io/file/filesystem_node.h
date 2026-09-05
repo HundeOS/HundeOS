@@ -37,10 +37,12 @@ FilesystemNode;
 OptionalDef(FilesystemNode);
 ResultDef(FilesystemNode);
 
-FilesystemNodePtr FilesystemNode__heap_new(FilesystemPtr filesystem, BString name, FilesystemAttributes attribs);
+FilesystemNodePtr FilesystemNode__heap_new(
+    FilesystemPtr filesystem, ConstBStringPtr name, FilesystemAttributes attribs
+);
 FilesystemNodePtr FilesystemNode__heap_new_with_metadata(
     FilesystemPtr filesystem,
-    BString name,
+    ConstBStringPtr name,
     FilesystemAttributes attribs,
     UserID user_id,
     GroupID group_id,
@@ -48,6 +50,8 @@ FilesystemNodePtr FilesystemNode__heap_new_with_metadata(
 );
 
 FixedArrayDefine(FilesystemNodePtr, MAX_CHILD_NODES, FilesystemNodes, Ptr__equals);
+typedef FilesystemNodes * FilesystemNodesPtr;
+typedef const FilesystemNodes * ConstFilesystemNodesPtr;
 ResultDef(FilesystemNodes);
 
 // Result(FilesystemNodes) FilesystemNode__list(FilesystemNodePtr self, BString path);

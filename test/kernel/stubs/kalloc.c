@@ -11,7 +11,55 @@ static Address virtual_translation_end = 0;
 static Address virtual_translation_physical_start = 0;
 static bool alloc_fill_enabled = false;
 static uint8_t alloc_fill_value = 0;
+static bool user_alloc_failure_enabled = false;
 static bool memcopy_overflow_occurred = false;
+static size_t alloc_count = 0;
+static size_t free_count = 0;
+
+#define KALLOC_STUB_MAX_TRACKED_ALLOCATIONS 16384
+
+typedef struct KAllocStubAllocation {
+    Address address;
+    size_t size;
+    bool active;
+    bool freed;
+} KAllocStubAllocation;
+
+static KAllocStubAllocation tracked_allocations[KALLOC_STUB_MAX_TRACKED_ALLOCATIONS];
+static size_t tracked_allocation_count = 0;
+
+static KAllocStubAllocation KAllocStubAllocation__new(Address address, size_t size)
+{
+    return (KAllocStubAllocation) {
+        .address = address,
+        .size = size,
+        .active = true,
+        .freed = false,
+    };
+}
+
+static void KAllocStub__track_allocation(Address address, size_t size)
+{
+    if (tracked_allocation_count < KALLOC_STUB_MAX_TRACKED_ALLOCATIONS)
+    {
+        tracked_allocations[tracked_allocation_count] = KAllocStubAllocation__new(address, size);
+        tracked_allocation_count++;
+    }
+}
+
+static void KAllocStub__track_free(Address address)
+{
+    for (size_t index = tracked_allocation_count; index > 0; index--)
+    {
+        KAllocStubAllocation * allocation = &tracked_allocations[index - 1];
+        if (allocation->active && allocation->address == address)
+        {
+            allocation->active = false;
+            allocation->freed = true;
+            return;
+        }
+    }
+}
 
 void KAllocStub__reset_virtual_translation(void)
 {
@@ -35,9 +83,41 @@ void KAllocStub__set_alloc_fill(bool enabled, uint8_t value)
     alloc_fill_value = value;
 }
 
+void KAllocStub__set_user_alloc_failure(bool enabled)
+{
+    user_alloc_failure_enabled = enabled;
+}
+
 void KAllocStub__reset_allocation_tracking(void)
 {
     memcopy_overflow_occurred = false;
+    user_alloc_failure_enabled = false;
+    alloc_count = 0;
+    free_count = 0;
+    tracked_allocation_count = 0;
+}
+
+size_t KAllocStub__alloc_count(void)
+{
+    return alloc_count;
+}
+
+size_t KAllocStub__free_count(void)
+{
+    return free_count;
+}
+
+size_t KAllocStub__freed_allocation_count_for_size(size_t size)
+{
+    size_t count = 0;
+    for (size_t index = 0; index < tracked_allocation_count; index++)
+    {
+        if (tracked_allocations[index].freed && tracked_allocations[index].size == size)
+        {
+            count++;
+        }
+    }
+    return count;
 }
 
 bool KAllocStub__memcopy_overflow_occurred(void)
@@ -47,7 +127,9 @@ bool KAllocStub__memcopy_overflow_occurred(void)
 
 KernelAddress Kernel__alloc(size_t size)
 {
+    alloc_count++;
     Address addr = (Address) malloc(size);
+    KAllocStub__track_allocation(addr, size);
     if (alloc_fill_enabled)
     {
         uint8_t * data = ptr(addr, uint8_t);
@@ -60,7 +142,17 @@ KernelAddress Kernel__alloc(size_t size)
     return KERNEL_ADDR(addr, addr);
 }
 
-KernelAddress Kernel__from_virtual_address(KernelPtr kernel, Address virtual_addr)
+KernelAddress Kernel__alloc_page(void)
+{
+    return Kernel__alloc(PAGE_SIZE);
+}
+
+KernelAddress Kernel__alloc_block(void)
+{
+    return Kernel__alloc(SystemInfo__default_heap_coarse_block_size());
+}
+
+KernelAddress Kernel__from_virtual_address(KernelPtr self, Address virtual_addr)
 {
     if (virtual_translation_enabled && virtual_addr >= virtual_translation_start && virtual_addr < virtual_translation_end)
     {
@@ -70,12 +162,12 @@ KernelAddress Kernel__from_virtual_address(KernelPtr kernel, Address virtual_add
     return KERNEL_ADDR(virtual_addr, virtual_addr);
 }
 
-KernelAddress Kernel__try_from_virtual_address(KernelPtr kernel, Address virtual_addr)
+KernelAddress Kernel__try_from_virtual_address(KernelPtr self, Address virtual_addr)
 {
-    return Kernel__from_virtual_address(kernel, virtual_addr);
+    return Kernel__from_virtual_address(self, virtual_addr);
 }
 
-KernelAddress Kernel__from_physical_address(KernelPtr kernel, Address physical)
+KernelAddress Kernel__from_physical_address(KernelPtr self, Address physical)
 {
     return KERNEL_ADDR(physical, physical);
 }
@@ -93,18 +185,27 @@ UserAddress Kernel__alloc_user(Address virtual_address,
 {
     KernelAddress address = Kernel__alloc(size);
 
-    return (UserAddress) {
-        .virtual_addr = virtual_address,
-        .kernel_addr = address,
-        .read = read,
-        .write = write,
-        .execute = execute,
-        .valid = true,
-    };
+    return UserAddress__new(virtual_address, address, read, write, execute, true);
+}
+
+Result(UserAddress) Kernel__try_alloc_user(Address virtual_address,
+                                           size_t size,
+                                           bool read,
+                                           bool write,
+                                           bool execute)
+{
+    if (user_alloc_failure_enabled)
+    {
+        return Error(UserAddress, bstr("Allocation failed"), KALLOC_ALLOCATION_FAILED);
+    }
+
+    return Success(UserAddress, Kernel__alloc_user(virtual_address, size, read, write, execute));
 }
 
 Result(KAllocCode) Kernel__free(Address virtual_address)
 {
+    free_count++;
+    KAllocStub__track_free(virtual_address);
     free(void_ptr(virtual_address));
     return Success(KAllocCode, KALLOC_OK);
 }

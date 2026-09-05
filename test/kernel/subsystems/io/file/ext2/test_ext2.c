@@ -16,6 +16,8 @@ static MemoryBlockDevice memory_device;
 static BlockDevice block_device;
 static Ext2Volume volume;
 static Data async_page[BLOCK_DEVICE_BLOCK_SIZE];
+static BString ext2_type = bstr("ext2");
+static BString tmp_memfs_type = bstr("tmp/memfs");
 
 typedef struct FakeUserspaceBlockDevice
 {
@@ -26,6 +28,59 @@ typedef struct FakeUserspaceBlockDevice
     BlockDevice block_device;
 }
 FakeUserspaceBlockDevice;
+
+static Result(IOInternalHandle) test_file_open(FilesystemPtr fs, IOStatePtr state, BString path, Flags flags)
+{
+    return fs->file_io.base_io.open(state, &path, flags);
+}
+
+static Result(IOBufferPtr) test_file_read(
+    FilesystemPtr fs, IOStatePtr state, IOInternalHandle handle, size_t size, ExternalBuffer target
+)
+{
+    return fs->file_io.base_io.read(state, handle, size, &target);
+}
+
+static Result(ByteCount) test_file_write(
+    FilesystemPtr fs, IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size
+)
+{
+    return fs->file_io.base_io.write(state, handle, data, size);
+}
+
+static Result(DirectoryEntryCount) test_list_dir(
+    FilesystemPtr fs, IOStatePtr state, BString path, DirectoryEntryPtr entries, size_t max_entries
+)
+{
+    return fs->file_io.list_dir(state, &path, entries, max_entries);
+}
+
+static Result(IOStatus) test_mkdir(FilesystemPtr fs, IOStatePtr state, BString path)
+{
+    return fs->file_io.mkdir(state, &path);
+}
+
+static Result(IOStatus) test_remove(FilesystemPtr fs, IOStatePtr state, BString path, Flags flags)
+{
+    return fs->file_io.remove(state, &path, flags);
+}
+
+static Result(IOStatus) test_link(FilesystemPtr fs, IOStatePtr state, BString source_path, BString target_path)
+{
+    return fs->file_io.link(state, &source_path, &target_path);
+}
+
+static FilesystemPtr test_ext2_filesystem(void)
+{
+    FileIO file_io = Ext2FilesystemIO__new();
+    return Filesystem__heap_new(&ext2_type, &file_io);
+}
+
+static FilesystemPtr test_mem_filesystem(void)
+{
+    FileIO file_io = MemFilesystemIO__new();
+    return Filesystem__heap_new(&tmp_memfs_type, &file_io);
+}
 
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
 {
@@ -365,7 +420,8 @@ void setUp(void)
     clear_panic_state();
     memory_device = MemoryBlockDevice__new();
     block_device = MemoryBlockDevice__as_block_device(&memory_device);
-    volume = Ext2Volume__new(Some(BlockDevicePtr, &block_device), TEST_EXT2_SECTORS);
+    Optional(BlockDevicePtr) device = Some(BlockDevicePtr, &block_device);
+    volume = Ext2Volume__new(&device, TEST_EXT2_SECTORS);
     build_test_volume();
 }
 
@@ -393,11 +449,11 @@ void test_ext2_reads_root_file_contents(void)
         .len = sizeof(output),
     };
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(handle) {
-            match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, handle, 5, target), success(buffer) {
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(handle) {
+            match_result(IOBufferPtr, test_file_read(fs, &state->state.state, handle, 5, target), success(buffer) {
                     TEST_ASSERT_EQUAL(5, IOBuffer__item_count(buffer));
 
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 5), success(bytes_read) {
@@ -416,11 +472,11 @@ void test_ext2_reads_root_file_contents_in_chunks(void)
         .len = sizeof(output),
     };
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(handle) {
-            match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, handle, 2, target), success(buffer) {
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(handle) {
+            match_result(IOBufferPtr, test_file_read(fs, &state->state.state, handle, 2, target), success(buffer) {
                     TEST_ASSERT_EQUAL(2, IOBuffer__item_count(buffer));
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 2), success(bytes_read) {
                             TEST_ASSERT_EQUAL(2, bytes_read);
@@ -428,7 +484,7 @@ void test_ext2_reads_root_file_contents_in_chunks(void)
                         }, error_test_fail());
                 }, error_test_fail());
 
-            match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, handle, 3, target), success(buffer) {
+            match_result(IOBufferPtr, test_file_read(fs, &state->state.state, handle, 3, target), success(buffer) {
                     TEST_ASSERT_EQUAL(3, IOBuffer__item_count(buffer));
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 3), success(bytes_read) {
                             TEST_ASSERT_EQUAL(3, bytes_read);
@@ -448,14 +504,15 @@ void test_ext2_reads_file_contents_from_later_inode_group(void)
 
     memory_device = MemoryBlockDevice__new();
     block_device = MemoryBlockDevice__as_block_device(&memory_device);
-    volume = Ext2Volume__new(Some(BlockDevicePtr, &block_device), TEST_EXT2_SECTORS);
+    Optional(BlockDevicePtr) device = Some(BlockDevicePtr, &block_device);
+    volume = Ext2Volume__new(&device, TEST_EXT2_SECTORS);
     build_multi_group_inode_test_volume();
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(handle) {
-            match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, handle, 5, target), success(buffer) {
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(handle) {
+            match_result(IOBufferPtr, test_file_read(fs, &state->state.state, handle, 5, target), success(buffer) {
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 5), success(bytes_read) {
                             TEST_ASSERT_EQUAL(5, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("hello", output, 5);
@@ -468,10 +525,10 @@ void test_ext2_list_dir_uses_async_mount_then_root_read_when_unmounted(void)
 {
     DirectoryEntry entries[4] = { 0 };
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) {
+    match_result(DirectoryEntryCount, test_list_dir(fs, &state->state.state, bstring("/"), entries, 4), success(count) {
             TEST_ASSERT_EQUAL(1, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries[0].name);
             TEST_ASSERT_EQUAL_UINT64(IO_DIRENT_ATTR_NONE, entries[0].attributes);
@@ -495,13 +552,13 @@ void test_ext2_userspace_open_starts_async_inode_lookup(void)
     userspace_device.userspace_service = true;
     userspace.block_device = userspace_device;
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(
+    match_result(IOInternalHandle, test_file_open(fs, 
         &state->state.state, bstring("hello.txt"), IO_OPEN_READ
     ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
@@ -510,25 +567,25 @@ void test_root_filesystem_can_mount_ext2_at_root_and_list_mount_overlays(void)
 {
     FilesystemPtr root_fs = RootFilesystem__heap_new();
     FilesystemIOStatePtr root_state = FilesystemIOState__heap_new(root_fs);
-    FilesystemPtr ext2_fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
-    FilesystemPtr memfs = Filesystem__heap_new(bstring("tmp/memfs"), MemFilesystemIO__new());
+    FilesystemPtr ext2_fs = test_ext2_filesystem();
+    FilesystemPtr memfs = test_mem_filesystem();
     DirectoryEntry root_entries[4] = { 0 };
     DirectoryEntry tmp_entries[2] = { 0 };
 
     Ext2FilesystemIOState__heap_new(ext2_fs, &block_device, 0);
     MemFilesystemIOState__heap_new(memfs);
 
-    match_result(MountResult, Filesystem__mount(root_fs, bstring("/"), ext2_fs), success(code) { TEST_ASSERT_EQUAL(MOUNT_OK, code); }, error_test_fail());
+    match_result(MountResult, Filesystem__mount(root_fs, &bstr("/"), ext2_fs), success(code) { TEST_ASSERT_EQUAL(MOUNT_OK, code); }, error_test_fail());
 
-    match_result(MountResult, Filesystem__mount(root_fs, bstring("/tmp/memfs"), memfs), success(code) { TEST_ASSERT_EQUAL(MOUNT_OK, code); }, error_test_fail());
+    match_result(MountResult, Filesystem__mount(root_fs, &bstr("/tmp/memfs"), memfs), success(code) { TEST_ASSERT_EQUAL(MOUNT_OK, code); }, error_test_fail());
 
-    match_result(DirectoryEntryCount, root_fs->file_io.list_dir(&root_state->state, bstring("/"), root_entries, 4), success(count) {
+    match_result(DirectoryEntryCount, test_list_dir(root_fs, &root_state->state, bstring("/"), root_entries, 4), success(count) {
             TEST_ASSERT_EQUAL(2, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", root_entries[0].name);
             TEST_ASSERT_EQUAL_STRING("tmp", root_entries[1].name);
         }, error_test_fail());
 
-    match_result(DirectoryEntryCount, root_fs->file_io.list_dir(&root_state->state, bstring("/tmp"), tmp_entries, 2), success(count) {
+    match_result(DirectoryEntryCount, test_list_dir(root_fs, &root_state->state, bstring("/tmp"), tmp_entries, 2), success(count) {
             TEST_ASSERT_EQUAL(1, count);
             TEST_ASSERT_EQUAL_STRING("memfs", tmp_entries[0].name);
         }, error_test_fail());
@@ -546,50 +603,50 @@ void test_ext2_userspace_list_dir_starts_async_when_mounted(void)
     userspace_device.userspace_service = true;
     userspace.block_device = userspace_device;
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
     DirectoryEntry entries[4] = { 0 };
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+    match_result(DirectoryEntryCount, test_list_dir(fs, &state->state.state, bstring("/"), entries, 4), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_remove_deletes_regular_file_and_frees_root_entry(void)
 {
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, test_remove(fs, &state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error_test_fail());
+    match_result(DirectoryEntryCount, test_list_dir(fs, &state->state.state, bstring("/"), entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error_test_fail());
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("hello.txt"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("hello.txt"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_ext2_remove_deletes_empty_directory(void)
 {
     add_empty_docs_directory();
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("docs"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, test_remove(fs, &state->state.state, bstring("docs"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) {
+    match_result(DirectoryEntryCount, test_list_dir(fs, &state->state.state, bstring("/"), entries, 4), success(count) {
             TEST_ASSERT_EQUAL(1, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries[0].name);
         }, error_test_fail());
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("docs"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("docs"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_ext2_write_open_creates_new_file_and_reads_back(void)
 {
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
     Data output[16] = { 0 };
     ExternalBuffer target = (ExternalBuffer) {
@@ -597,9 +654,9 @@ void test_ext2_write_open_creates_new_file_and_reads_back(void)
         .len = sizeof(output),
     };
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("notes.txt"), IO_OPEN_WRITE), success(write_handle) {
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("notes.txt"), IO_OPEN_WRITE), success(write_handle) {
             Data input[] = "woof";
-            match_result(ByteCount, fs->file_io.base_io.write(
+            match_result(ByteCount, test_file_write(fs, 
                 &state->state.state,
                 write_handle,
                 input,
@@ -607,8 +664,8 @@ void test_ext2_write_open_creates_new_file_and_reads_back(void)
             ), success(bytes) { TEST_ASSERT_EQUAL(4, bytes); }, error_test_fail());
         }, error_test_fail());
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("notes.txt"), IO_OPEN_READ), success(read_handle) {
-            match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, read_handle, 4, target), success(buffer) {
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("notes.txt"), IO_OPEN_READ), success(read_handle) {
+            match_result(IOBufferPtr, test_file_read(fs, &state->state.state, read_handle, 4, target), success(buffer) {
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 4), success(bytes_read) {
                             TEST_ASSERT_EQUAL(4, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("woof", output, 4);
@@ -619,7 +676,7 @@ void test_ext2_write_open_creates_new_file_and_reads_back(void)
 
 void test_ext2_write_open_truncates_existing_file(void)
 {
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
     Data output[16] = { 0 };
     ExternalBuffer target = (ExternalBuffer) {
@@ -627,9 +684,9 @@ void test_ext2_write_open_truncates_existing_file(void)
         .len = sizeof(output),
     };
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("hello.txt"), IO_OPEN_WRITE), success(write_handle) {
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("hello.txt"), IO_OPEN_WRITE), success(write_handle) {
             Data input[] = "yo";
-            match_result(ByteCount, fs->file_io.base_io.write(
+            match_result(ByteCount, test_file_write(fs, 
                 &state->state.state,
                 write_handle,
                 input,
@@ -637,8 +694,8 @@ void test_ext2_write_open_truncates_existing_file(void)
             ), success(bytes) { TEST_ASSERT_EQUAL(2, bytes); }, error_test_fail());
         }, error_test_fail());
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(read_handle) {
-            match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, read_handle, 16, target), success(buffer) {
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("hello.txt"), IO_OPEN_READ), success(read_handle) {
+            match_result(IOBufferPtr, test_file_read(fs, &state->state.state, read_handle, 16, target), success(buffer) {
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 2), success(bytes_read) {
                             TEST_ASSERT_EQUAL(2, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("yo", output, 2);
@@ -649,14 +706,14 @@ void test_ext2_write_open_truncates_existing_file(void)
 
 void test_ext2_mkdir_creates_empty_directory(void)
 {
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
     DirectoryEntry root_entries[4] = { 0 };
     DirectoryEntry docs_entries[4] = { 0 };
 
-    match_result(IOStatus, fs->file_io.mkdir(&state->state.state, bstring("docs")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, test_mkdir(fs, &state->state.state, bstring("docs")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), root_entries, 4), success(count) {
+    match_result(DirectoryEntryCount, test_list_dir(fs, &state->state.state, bstring("/"), root_entries, 4), success(count) {
             TEST_ASSERT_EQUAL(2, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", root_entries[0].name);
             TEST_ASSERT_EQUAL_STRING("docs", root_entries[1].name);
@@ -666,25 +723,25 @@ void test_ext2_mkdir_creates_empty_directory(void)
             TEST_ASSERT_EQUAL_UINT16(IO_MODE_TYPE_DIR | 0755, root_entries[1].mode);
         }, error_test_fail());
 
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("docs"), docs_entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error_test_fail());
+    match_result(DirectoryEntryCount, test_list_dir(fs, &state->state.state, bstring("docs"), docs_entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error_test_fail());
 }
 
 void test_ext2_remove_recursive_deletes_directory_tree(void)
 {
     add_docs_directory_with_readme();
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("docs"), IO_REMOVE_RECURSIVE), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, test_remove(fs, &state->state.state, bstring("docs"), IO_REMOVE_RECURSIVE), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) {
+    match_result(DirectoryEntryCount, test_list_dir(fs, &state->state.state, bstring("/"), entries, 4), success(count) {
             TEST_ASSERT_EQUAL(1, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries[0].name);
         }, error_test_fail());
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("docs/readme.txt"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("docs/readme.txt"), IO_OPEN_READ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); });
 }
 
 void test_ext2_userspace_remove_starts_async_inode_lookup(void)
@@ -699,13 +756,13 @@ void test_ext2_userspace_remove_starts_async_inode_lookup(void)
     userspace_device.userspace_service = true;
     userspace.block_device = userspace_device;
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+    match_result(IOStatus, test_remove(fs, &state->state.state, bstring("hello.txt"), 0), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_userspace_recursive_remove_starts_async_inode_lookup(void)
@@ -720,13 +777,13 @@ void test_ext2_userspace_recursive_remove_starts_async_inode_lookup(void)
     userspace_device.userspace_service = true;
     userspace.block_device = userspace_device;
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("docs"), IO_REMOVE_RECURSIVE), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+    match_result(IOStatus, test_remove(fs, &state->state.state, bstring("docs"), IO_REMOVE_RECURSIVE), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_userspace_write_starts_async_for_new_file(void)
@@ -741,17 +798,17 @@ void test_ext2_userspace_write_starts_async_for_new_file(void)
     userspace_device.userspace_service = true;
     userspace.block_device = userspace_device;
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(
+    match_result(IOInternalHandle, test_file_open(fs, 
         &state->state.state, bstring("new.txt"), IO_OPEN_WRITE
     ), success(handle) {
             Data input[] = "hi";
-            match_result(ByteCount, fs->file_io.base_io.write(
+            match_result(ByteCount, test_file_write(fs, 
                 &state->state.state,
                 handle,
                 input,
@@ -772,17 +829,17 @@ void test_ext2_userspace_write_starts_async_for_existing_file(void)
     userspace_device.userspace_service = true;
     userspace.block_device = userspace_device;
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(
+    match_result(IOInternalHandle, test_file_open(fs, 
         &state->state.state, bstring("hello.txt"), IO_OPEN_WRITE
     ), success(handle) {
             Data input[] = "yo";
-            match_result(ByteCount, fs->file_io.base_io.write(
+            match_result(ByteCount, test_file_write(fs, 
                 &state->state.state,
                 handle,
                 input,
@@ -803,18 +860,18 @@ void test_ext2_userspace_mkdir_starts_async(void)
     userspace_device.userspace_service = true;
     userspace.block_device = userspace_device;
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOStatus, fs->file_io.mkdir(&state->state.state, bstring("docs")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+    match_result(IOStatus, test_mkdir(fs, &state->state.state, bstring("docs")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_link_creates_hard_link_and_preserves_file_after_single_remove(void)
 {
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
     Data output[16] = { 0 };
     ExternalBuffer target = (ExternalBuffer) {
@@ -822,19 +879,19 @@ void test_ext2_link_creates_hard_link_and_preserves_file_after_single_remove(voi
         .len = sizeof(output),
     };
 
-    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, test_link(fs, &state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) {
+    match_result(DirectoryEntryCount, test_list_dir(fs, &state->state.state, bstring("/"), entries, 4), success(count) {
             TEST_ASSERT_EQUAL(2, count);
             TEST_ASSERT_EQUAL_STRING("hello.txt", entries[0].name);
             TEST_ASSERT_EQUAL_STRING("copy.txt", entries[1].name);
         }, error_test_fail());
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, test_remove(fs, &state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
-    match_result(IOInternalHandle, fs->file_io.base_io.open(&state->state.state, bstring("copy.txt"), IO_OPEN_READ), success(read_handle) {
-            match_result(IOBufferPtr, fs->file_io.base_io.read(&state->state.state, read_handle, 5, target), success(buffer) {
+    match_result(IOInternalHandle, test_file_open(fs, &state->state.state, bstring("copy.txt"), IO_OPEN_READ), success(read_handle) {
+            match_result(IOBufferPtr, test_file_read(fs, &state->state.state, read_handle, 5, target), success(buffer) {
                     match_result(ItemCount, IOBuffer__drain(buffer, output, 5), success(bytes_read) {
                             TEST_ASSERT_EQUAL(5, bytes_read);
                             TEST_ASSERT_EQUAL_MEMORY("hello", output, 5);
@@ -845,16 +902,16 @@ void test_ext2_link_creates_hard_link_and_preserves_file_after_single_remove(voi
 
 void test_ext2_link_remove_last_link_deletes_file(void)
 {
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &block_device, 0);
 
-    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, test_link(fs, &state->state.state, bstring("hello.txt"), bstring("copy.txt")), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
-    match_result(IOStatus, fs->file_io.remove(&state->state.state, bstring("copy.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, test_remove(fs, &state->state.state, bstring("hello.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
+    match_result(IOStatus, test_remove(fs, &state->state.state, bstring("copy.txt"), 0), success(status) { TEST_ASSERT_EQUAL(IO_OK, status); }, error_test_fail());
 
     DirectoryEntry entries[4] = { 0 };
-    match_result(DirectoryEntryCount, fs->file_io.list_dir(&state->state.state, bstring("/"), entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error_test_fail());
+    match_result(DirectoryEntryCount, test_list_dir(fs, &state->state.state, bstring("/"), entries, 4), success(count) { TEST_ASSERT_EQUAL(0, count); }, error_test_fail());
 }
 
 void test_ext2_userspace_link_starts_async(void)
@@ -869,13 +926,13 @@ void test_ext2_userspace_link_starts_async(void)
     userspace_device.userspace_service = true;
     userspace.block_device = userspace_device;
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+    match_result(IOStatus, test_link(fs, &state->state.state, bstring("hello.txt"), bstring("copy.txt")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
 }
 
 void test_ext2_userspace_link_preserves_live_kernel_context_on_first_request(void)
@@ -890,15 +947,15 @@ void test_ext2_userspace_link_preserves_live_kernel_context_on_first_request(voi
     userspace_device.userspace_service = true;
     userspace.block_device = userspace_device;
 
-    FilesystemPtr fs = Filesystem__heap_new(bstring("ext2"), Ext2FilesystemIO__new());
+    FilesystemPtr fs = test_ext2_filesystem();
     Ext2FilesystemIOStatePtr state = Ext2FilesystemIOState__heap_new(fs, &userspace_device, 0);
     state->volume = volume;
     state->volume.device = Some(BlockDevicePtr, &userspace_device);
     state->volume.mounted = true;
 
-    KernelContext kernel_context = KernelContext__new(Some(ProcessID, 77), Some(SchedulerPtr, userspace.scheduler));
+    KernelContext kernel_context = KernelContext__new(&Some(ProcessID, 77), &Some(SchedulerPtr, userspace.scheduler));
     BlockDevice__set_current_context(&kernel_context);
-    match_result(IOStatus, fs->file_io.link(&state->state.state, bstring("hello.txt"), bstring("copy.txt")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
+    match_result(IOStatus, test_link(fs, &state->state.state, bstring("hello.txt"), bstring("copy.txt")), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); });
     BlockDevice__clear_current_context();
 
     Optional(KernelContextPtr) current_context = BlockDevice__current_context();

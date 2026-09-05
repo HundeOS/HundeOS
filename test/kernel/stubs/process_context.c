@@ -33,3 +33,8 @@ ProcessContextPtr ProcessContext__init(KernelPtr kernel,
     context->x[1] = argv;
     return context;
 }
+
+void ProcessContext__dispose(ProcessContextPtr self)
+{
+    Kernel__free(addr(self));
+}
