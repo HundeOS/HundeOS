@@ -1,0 +1,21 @@
+BasedOnStyle: LLVM
+Language: Cpp
+IndentWidth: 4
+ContinuationIndentWidth: 4
+UseTab: Never
+ColumnLimit: 120
+BreakBeforeBraces: Allman
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
+DerivePointerAlignment: false
+PointerAlignment: Middle
+SortIncludes: Never
+IncludeBlocks: Preserve
+ReflowComments: Never
+BreakStringLiterals: false
+CommentPragmas: 'hundelint:'
+# Existing annotations apply to a physical line, so wrapping changes their scope.
+OneLineFormatOffRegex: 'hundelint:'

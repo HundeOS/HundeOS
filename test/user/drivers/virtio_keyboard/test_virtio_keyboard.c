@@ -87,7 +87,7 @@ IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
 IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)
 {
     TEST_ASSERT_EQUAL_INT64(5, handle);
-    *buffer = (IOServerBuffer) {
+    *buffer = (IOServerBuffer){
         .data = fake_io_buffer,
         .capacity = sizeof(fake_io_buffer),
     };
@@ -117,7 +117,7 @@ void test_virtio_keyboard_translates_key_events_to_terminal_bytes(void)
     VirtioKeyboard keyboard = {
         .keyboard = 5,
         .shift = false,
-        .pending = { 0 },
+        .pending = {0},
         .pending_read = 0,
         .pending_write = 0,
     };
@@ -143,7 +143,7 @@ void test_virtio_keyboard_ignores_key_release_for_normal_keys(void)
     VirtioKeyboard keyboard = {
         .keyboard = 5,
         .shift = false,
-        .pending = { 0 },
+        .pending = {0},
         .pending_read = 0,
         .pending_write = 0,
     };

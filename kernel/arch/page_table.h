@@ -12,9 +12,10 @@ typedef Kernel * KernelPtr;
 
 bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other);
 OptionalDef(KernelAddress);
-LinkedListDefine(KernelAddress, ProcessPageTablePages, (EqualFunction) ProcessPageTablePage__equals);
+LinkedListDefine(KernelAddress, ProcessPageTablePages, (EqualFunction)ProcessPageTablePage__equals);
 
-typedef struct ProcessPageTable {
+typedef struct ProcessPageTable
+{
     KernelAddress root;
     ProcessPageTablePages pages;
 } ProcessPageTable;

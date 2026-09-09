@@ -8,20 +8,22 @@
 
 #define MAX_PHYSICAL_MEMORY_REGIONS 64
 
-typedef struct MemoryRegion {
+typedef struct MemoryRegion
+{
     Address virtual_start;
     Address physical_start;
     Address physical_end;
 } MemoryRegion;
 
-typedef struct PhysicalMemoryRegion {
+typedef struct PhysicalMemoryRegion
+{
     Address physical_start;
     Address physical_end;
 } PhysicalMemoryRegion;
 
 static inline PhysicalMemoryRegion PhysicalMemoryRegion__new(Address physical_start, Address physical_end)
 {
-    return (PhysicalMemoryRegion) {
+    return (PhysicalMemoryRegion){
         .physical_start = physical_start,
         .physical_end = physical_end,
     };
@@ -31,19 +33,18 @@ OptionalDef(PhysicalMemoryRegion);
 
 bool PhysicalMemoryRegion__equals(void * a, void * b);
 
-FixedArrayDefine(
-    PhysicalMemoryRegion,
-    MAX_PHYSICAL_MEMORY_REGIONS,
-    PhysicalMemoryRegions,
-    PhysicalMemoryRegion__equals);
+FixedArrayDefine(PhysicalMemoryRegion, MAX_PHYSICAL_MEMORY_REGIONS, PhysicalMemoryRegions,
+                 PhysicalMemoryRegion__equals);
 
-typedef struct UartInfo {
+typedef struct UartInfo
+{
     Address physical_base;
     Address virtual_base;
     uint64_t irq;
 } UartInfo;
 
-typedef enum FramebufferPixelFormat {
+typedef enum FramebufferPixelFormat
+{
     FRAMEBUFFER_PIXEL_FORMAT_RGB_RESERVED_8BIT_PER_COLOR = 0,
     FRAMEBUFFER_PIXEL_FORMAT_BGR_RESERVED_8BIT_PER_COLOR = 1,
     FRAMEBUFFER_PIXEL_FORMAT_BIT_MASK = 2,
@@ -51,7 +52,8 @@ typedef enum FramebufferPixelFormat {
     FRAMEBUFFER_PIXEL_FORMAT_UNKNOWN = 0xff,
 } FramebufferPixelFormat;
 
-typedef struct FramebufferInfo {
+typedef struct FramebufferInfo
+{
     Address physical_base;
     uint64_t size;
     uint32_t width;
@@ -64,19 +66,12 @@ typedef struct FramebufferInfo {
     uint32_t reserved_mask;
 } FramebufferInfo;
 
-static inline FramebufferInfo FramebufferInfo__new(
-    Address physical_base,
-    uint64_t size,
-    uint32_t width,
-    uint32_t height,
-    uint32_t pixels_per_scanline,
-    FramebufferPixelFormat pixel_format,
-    uint32_t red_mask,
-    uint32_t green_mask,
-    uint32_t blue_mask,
-    uint32_t reserved_mask)
+static inline FramebufferInfo FramebufferInfo__new(Address physical_base, uint64_t size, uint32_t width,
+                                                   uint32_t height, uint32_t pixels_per_scanline,
+                                                   FramebufferPixelFormat pixel_format, uint32_t red_mask,
+                                                   uint32_t green_mask, uint32_t blue_mask, uint32_t reserved_mask)
 {
-    return (FramebufferInfo) {
+    return (FramebufferInfo){
         .physical_base = physical_base,
         .size = size,
         .width = width,
@@ -92,20 +87,17 @@ static inline FramebufferInfo FramebufferInfo__new(
 
 OptionalDef(FramebufferInfo);
 
-typedef struct PciInfo {
+typedef struct PciInfo
+{
     Address ecam_physical_base;
     uint64_t ecam_size;
     uint64_t bus_start;
     uint64_t bus_end;
 } PciInfo;
 
-static inline PciInfo PciInfo__new(
-    Address ecam_physical_base,
-    uint64_t ecam_size,
-    uint64_t bus_start,
-    uint64_t bus_end)
+static inline PciInfo PciInfo__new(Address ecam_physical_base, uint64_t ecam_size, uint64_t bus_start, uint64_t bus_end)
 {
-    return (PciInfo) {
+    return (PciInfo){
         .ecam_physical_base = ecam_physical_base,
         .ecam_size = ecam_size,
         .bus_start = bus_start,
@@ -115,7 +107,8 @@ static inline PciInfo PciInfo__new(
 
 OptionalDef(PciInfo);
 
-typedef struct SdHostInfo {
+typedef struct SdHostInfo
+{
     Address physical_base;
     uint64_t mmio_size;
     uint64_t irq;
@@ -123,7 +116,7 @@ typedef struct SdHostInfo {
 
 static inline SdHostInfo SdHostInfo__new(Address physical_base, uint64_t mmio_size, uint64_t irq)
 {
-    return (SdHostInfo) {
+    return (SdHostInfo){
         .physical_base = physical_base,
         .mmio_size = mmio_size,
         .irq = irq,
@@ -132,20 +125,18 @@ static inline SdHostInfo SdHostInfo__new(Address physical_base, uint64_t mmio_si
 
 OptionalDef(SdHostInfo);
 
-typedef struct EthernetMacInfo {
+typedef struct EthernetMacInfo
+{
     EthernetMacKind kind;
     Address physical_base;
     uint64_t mmio_size;
     uint64_t irq;
 } EthernetMacInfo;
 
-static inline EthernetMacInfo EthernetMacInfo__new(
-    EthernetMacKind kind,
-    Address physical_base,
-    uint64_t mmio_size,
-    uint64_t irq)
+static inline EthernetMacInfo EthernetMacInfo__new(EthernetMacKind kind, Address physical_base, uint64_t mmio_size,
+                                                   uint64_t irq)
 {
-    return (EthernetMacInfo) {
+    return (EthernetMacInfo){
         .kind = kind,
         .physical_base = physical_base,
         .mmio_size = mmio_size,
@@ -155,26 +146,30 @@ static inline EthernetMacInfo EthernetMacInfo__new(
 
 OptionalDef(EthernetMacInfo);
 
-typedef struct GicInfo {
+typedef struct GicInfo
+{
     Address distributor_physical_base;
     Address distributor_virtual_base;
     Address redistributor_physical_base;
     Address redistributor_virtual_base;
 } GicInfo;
 
-typedef struct PhysicalMemoryInfo {
+typedef struct PhysicalMemoryInfo
+{
     Address physical_start;
     Address physical_end;
     PhysicalMemoryRegions free_regions;
 } PhysicalMemoryInfo;
 
-typedef enum InterruptControllerKind {
+typedef enum InterruptControllerKind
+{
     INTERRUPT_CONTROLLER_NONE = 0,
     INTERRUPT_CONTROLLER_GIC_V2 = 1,
     INTERRUPT_CONTROLLER_GIC_V3 = 2,
 } InterruptControllerKind;
 
-typedef struct InterruptControllerInfo {
+typedef struct InterruptControllerInfo
+{
     InterruptControllerKind kind;
     Address distributor_physical_base;
     Address distributor_virtual_base;
@@ -186,7 +181,8 @@ typedef struct InterruptControllerInfo {
 
 OptionalDef(InterruptControllerInfo);
 
-typedef struct SystemInfo {
+typedef struct SystemInfo
+{
     uint64_t cpu_count;
     size_t heap_coarse_block_size;
     PhysicalMemoryInfo physical_memory;

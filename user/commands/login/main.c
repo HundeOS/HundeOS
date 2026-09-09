@@ -25,17 +25,11 @@ int LOGIN_ENTRYPOINT(void)
             continue;
         }
 
-        SpawnResult result = spawn_with_auth(
-            P_WAIT,
-            (AuthTicketID) ticket,
-            &bstr("/sbin/shell"),
-            &SPAWN_NO_ARG,
-            &SPAWN_NO_ARG,
-            &SPAWN_NO_ARG
-        );
+        SpawnResult result = spawn_with_auth(P_WAIT, (AuthTicketID)ticket, &bstr("/sbin/shell"), &SPAWN_NO_ARG,
+                                             &SPAWN_NO_ARG, &SPAWN_NO_ARG);
         if (result < 0)
         {
-            IO__printf(&bstr("login: failed to start shell: %i\n"), (int) result);
+            IO__printf(&bstr("login: failed to start shell: %i\n"), (int)result);
             return 1;
         }
     }

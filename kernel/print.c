@@ -16,8 +16,7 @@ typedef struct KPrintfAArch64VaList
     void * vr_top;
     int gr_offs;
     int vr_offs;
-}
-KPrintfAArch64VaList;
+} KPrintfAArch64VaList;
 
 typedef KPrintfAArch64VaList * KPrintfAArch64VaListPtr;
 #endif
@@ -30,7 +29,7 @@ static void trace_puts(const char * str)
 static bool k_printf__has_general_arg(va_list args)
 {
 #if defined(__aarch64__) && defined(__ELF__)
-    KPrintfAArch64VaListPtr state = (KPrintfAArch64VaListPtr) &args;
+    KPrintfAArch64VaListPtr state = (KPrintfAArch64VaListPtr)&args;
     if (state->gr_offs < 0)
     {
         if (state->gr_top == NULL) // hundelint: ignore-no-null
@@ -38,15 +37,14 @@ static bool k_printf__has_general_arg(va_list args)
             return false;
         }
 
-        uintptr_t gr_top = (uintptr_t) state->gr_top;
-        uintptr_t cursor = gr_top + (uintptr_t) state->gr_offs;
-        return cursor >= (gr_top - K_PRINTF_AARCH64_GR_SAVE_BYTES)
-            && (cursor + sizeof(uint64_t)) <= gr_top
-            && (cursor & (sizeof(uint64_t) - 1U)) == 0;
+        uintptr_t gr_top = (uintptr_t)state->gr_top;
+        uintptr_t cursor = gr_top + (uintptr_t)state->gr_offs;
+        return cursor >= (gr_top - K_PRINTF_AARCH64_GR_SAVE_BYTES) && (cursor + sizeof(uint64_t)) <= gr_top &&
+               (cursor & (sizeof(uint64_t) - 1U)) == 0;
     }
 
     return state->stack != NULL // hundelint: ignore-no-null
-        && (((uintptr_t) state->stack) & (sizeof(uint64_t) - 1U)) == 0;
+          && (((uintptr_t)state->stack) & (sizeof(uint64_t) - 1U)) == 0;
 #else
     return true;
 #endif
@@ -65,20 +63,24 @@ static bool k_printf__require_general_arg(va_list args, const char * conversion)
     return false;
 }
 
-void k_println(const char * str) {
+void k_println(const char * str)
+{
     trace_puts(str);
     trace_puts("\n");
 }
 
 // Helper function to output a single character using puts
-static void putchar(char c) {
+static void putchar(char c)
+{
     char str[2] = {c, '\0'};
     trace_puts(str);
 }
 
 // Helper function to output a string character by character
-static void print_string(const char* str) {
-    if (!str) {
+static void print_string(const char * str)
+{
+    if (!str)
+    {
         trace_puts("(null)");
         return;
     }
@@ -86,43 +88,51 @@ static void print_string(const char* str) {
 }
 
 // Helper function to convert and print unsigned integer
-static void print_unsigned(unsigned int value, int base, bool uppercase) {
-    char buffer[33];  // Enough for binary representation + null
-    char* digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+static void print_unsigned(unsigned int value, int base, bool uppercase)
+{
+    char buffer[33]; // Enough for binary representation + null
+    char * digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
     int i = 32;
-    
+
     buffer[i] = '\0';
-    
-    if (value == 0) {
+
+    if (value == 0)
+    {
         buffer[--i] = '0';
-    } else {
-        while (value > 0 && i > 0) {
+    }
+    else
+    {
+        while (value > 0 && i > 0)
+        {
             buffer[--i] = digits[value % base];
             value /= base;
         }
     }
-    
+
     trace_puts(&buffer[i]);
 }
 
 // Helper function to print pointer
-static void print_pointer(void* ptr) {
+static void print_pointer(void * ptr)
+{
     trace_puts("0x");
     uintptr_t value = (uintptr_t)ptr;
-    
-    char buffer[17];  // 64-bit pointer = 16 hex chars + null
+
+    char buffer[17]; // 64-bit pointer = 16 hex chars + null
     int i = 16;
     buffer[i] = '\0';
-    
-    for (int j = 0; j < 16; j++) {
+
+    for (int j = 0; j < 16; j++)
+    {
         buffer[--i] = "0123456789abcdef"[value & 0xF];
         value >>= 4;
     }
-    
+
     // Skip leading zeros but keep at least one
     i = 0;
-    while (i < 15 && buffer[i] == '0') i++;
-    
+    while (i < 15 && buffer[i] == '0')
+        i++;
+
     trace_puts(&buffer[i]);
 }
 
@@ -134,20 +144,25 @@ static void print_signed(int value)
         value = -value;
     }
 
-    print_unsigned((unsigned int) value, 10, false);
+    print_unsigned((unsigned int)value, 10, false);
 }
 
-static StringPos strlen(const char* str) {
+static StringPos strlen(const char * str)
+{
     StringPos len = 0;
-    if (!str) return 0;
-    while (str[len]) len++;
+    if (!str)
+        return 0;
+    while (str[len])
+        len++;
     return len;
 }
 
 // Helper to copy n characters from src to dest, returns number copied
-static int strncpy_len(char* dest, const char* src, int n) {
+static int strncpy_len(char * dest, const char * src, int n)
+{
     int i = 0;
-    while (i < n && src[i]) {
+    while (i < n && src[i])
+    {
         dest[i] = src[i];
         i++;
     }
@@ -156,7 +171,8 @@ static int strncpy_len(char* dest, const char* src, int n) {
 }
 
 // Simple printf implementation
-int k_printf(const char* format, ...) {
+int k_printf(const char * format, ...)
+{
     if (format == NULL) // hundelint: ignore-no-null
     {
         return 0;
@@ -164,246 +180,287 @@ int k_printf(const char* format, ...) {
 
     va_list args;
     va_start(args, format);
-    
+
     int count = 0;
-    char buffer[256];  // Buffer for building output strings
+    char buffer[256]; // Buffer for building output strings
     int buf_idx = 0;
-    for (int i = 0; format[i] != '\0'; i++) {
-        if (format[i] != '%') {
+    for (int i = 0; format[i] != '\0'; i++)
+    {
+        if (format[i] != '%')
+        {
             // Regular character - add to buffer
             buffer[buf_idx++] = format[i];
-            
+
             // Flush buffer if it's getting full or we hit a newline
-            if (buf_idx >= 255 || format[i] == '\n') {
+            if (buf_idx >= 255 || format[i] == '\n')
+            {
                 buffer[buf_idx] = '\0';
                 trace_puts(buffer);
                 count += buf_idx;
                 buf_idx = 0;
             }
-        } else {
+        }
+        else
+        {
             // Flush any pending regular text
-            if (buf_idx > 0) {
+            if (buf_idx > 0)
+            {
                 buffer[buf_idx] = '\0';
                 trace_puts(buffer);
                 count += buf_idx;
                 buf_idx = 0;
             }
-            
+
             // Handle format specifier
             i++;
-            
+
             // Handle flags (simplified - just padding)
             int width = 0;
             bool zero_pad = false;
             bool left_align = false;
-            
+
             // Check for flags
-            while (format[i] == '-' || format[i] == '0') {
-                if (format[i] == '0') zero_pad = true;
-                if (format[i] == '-') left_align = true;
+            while (format[i] == '-' || format[i] == '0')
+            {
+                if (format[i] == '0')
+                    zero_pad = true;
+                if (format[i] == '-')
+                    left_align = true;
                 i++;
             }
-            
+
             // Parse width
-            while (format[i] >= '0' && format[i] <= '9') {
+            while (format[i] >= '0' && format[i] <= '9')
+            {
                 width = width * 10 + (format[i] - '0');
                 i++;
             }
-            
+
             // Handle the conversion specifier
-            switch (format[i]) {
-                case 'd':
-                case 'i': {
-                    if (!k_printf__require_general_arg(args, "i"))
-                    {
-                        va_end(args);
-                        return count;
-                    }
-
-                    int value = va_arg(args, int);
-                    print_signed(value);
-                    
-                    // Estimate digits for count (simplified)
-                    if (value < 0) count++;  // minus sign
-                    if (value == 0) count++;
-                    else {
-                        int temp = value < 0 ? -value : value;
-                        while (temp > 0) {
-                            count++;
-                            temp /= 10;
-                        }
-                    }
-                    break;
+            switch (format[i])
+            {
+            case 'd':
+            case 'i':
+            {
+                if (!k_printf__require_general_arg(args, "i"))
+                {
+                    va_end(args);
+                    return count;
                 }
-                
-                case 'u': {
-                    if (!k_printf__require_general_arg(args, "u"))
-                    {
-                        va_end(args);
-                        return count;
-                    }
 
-                    unsigned int value = va_arg(args, unsigned int);
-                    print_unsigned(value, 10, false);
-                    
-                    // Count digits
-                    if (value == 0) count++;
-                    else {
-                        unsigned int temp = value;
-                        while (temp > 0) {
-                            count++;
-                            temp /= 10;
-                        }
-                    }
-                    break;
-                }
-                
-                case 'x': {
-                    if (!k_printf__require_general_arg(args, "x"))
-                    {
-                        va_end(args);
-                        return count;
-                    }
+                int value = va_arg(args, int);
+                print_signed(value);
 
-                    unsigned int value = va_arg(args, unsigned int);
-                    print_unsigned(value, 16, false);
-                    
-                    // Count hex digits
-                    if (value == 0) count++;
-                    else {
-                        unsigned int temp = value;
-                        while (temp > 0) {
-                            count++;
-                            temp /= 16;
-                        }
-                    }
-                    break;
-                }
-                
-                case 'X': {
-                    if (!k_printf__require_general_arg(args, "X"))
-                    {
-                        va_end(args);
-                        return count;
-                    }
-
-                    unsigned int value = va_arg(args, unsigned int);
-                    print_unsigned(value, 16, true);
-                    
-                    // Count hex digits
-                    if (value == 0) count++;
-                    else {
-                        unsigned int temp = value;
-                        while (temp > 0) {
-                            count++;
-                            temp /= 16;
-                        }
-                    }
-                    break;
-                }
-                
-                case 'o': {
-                    if (!k_printf__require_general_arg(args, "o"))
-                    {
-                        va_end(args);
-                        return count;
-                    }
-
-                    unsigned int value = va_arg(args, unsigned int);
-                    print_unsigned(value, 8, false);
-                    
-                    // Count octal digits
-                    if (value == 0) count++;
-                    else {
-                        unsigned int temp = value;
-                        while (temp > 0) {
-                            count++;
-                            temp /= 8;
-                        }
-                    }
-                    break;
-                }
-                
-                case 'p': {
-                    if (!k_printf__require_general_arg(args, "p"))
-                    {
-                        va_end(args);
-                        return count;
-                    }
-
-                    void* ptr = va_arg(args, void*);
-                    print_pointer(ptr);
-                    count += 2;  // "0x"
-                    
-                    // Count hex digits in pointer
-                    uintptr_t value = (uintptr_t)ptr;
-                    if (value == 0) count++;
-                    else {
-                        while (value > 0) {
-                            count++;
-                            value /= 16;
-                        }
-                    }
-                    break;
-                }
-                
-                case 'c': {
-                    if (!k_printf__require_general_arg(args, "c"))
-                    {
-                        va_end(args);
-                        return count;
-                    }
-
-                    int c = va_arg(args, int);
-                    putchar((char)c);
+                // Estimate digits for count (simplified)
+                if (value < 0)
+                    count++; // minus sign
+                if (value == 0)
                     count++;
-                    break;
-                }
-                
-                case 's': {
-                    if (!k_printf__require_general_arg(args, "s"))
+                else
+                {
+                    int temp = value < 0 ? -value : value;
+                    while (temp > 0)
                     {
-                        va_end(args);
-                        return count;
+                        count++;
+                        temp /= 10;
                     }
+                }
+                break;
+            }
 
-                    char* str = va_arg(args, char*);
-                    print_string(str);
-                    if (str == NULL) // hundelint: ignore-no-null
-                    {
-                        count += 6;
-                    }
-                    else
-                    {
-                        count += (int) strlen(str);
-                    }
-                    break;
+            case 'u':
+            {
+                if (!k_printf__require_general_arg(args, "u"))
+                {
+                    va_end(args);
+                    return count;
                 }
-                
-                case '%': {
-                    putchar('%');
+
+                unsigned int value = va_arg(args, unsigned int);
+                print_unsigned(value, 10, false);
+
+                // Count digits
+                if (value == 0)
                     count++;
-                    break;
+                else
+                {
+                    unsigned int temp = value;
+                    while (temp > 0)
+                    {
+                        count++;
+                        temp /= 10;
+                    }
                 }
-                
-                default: {
-                    // Unknown format specifier, just print it
-                    putchar('%');
-                    putchar(format[i]);
-                    count += 2;
-                    break;
+                break;
+            }
+
+            case 'x':
+            {
+                if (!k_printf__require_general_arg(args, "x"))
+                {
+                    va_end(args);
+                    return count;
                 }
+
+                unsigned int value = va_arg(args, unsigned int);
+                print_unsigned(value, 16, false);
+
+                // Count hex digits
+                if (value == 0)
+                    count++;
+                else
+                {
+                    unsigned int temp = value;
+                    while (temp > 0)
+                    {
+                        count++;
+                        temp /= 16;
+                    }
+                }
+                break;
+            }
+
+            case 'X':
+            {
+                if (!k_printf__require_general_arg(args, "X"))
+                {
+                    va_end(args);
+                    return count;
+                }
+
+                unsigned int value = va_arg(args, unsigned int);
+                print_unsigned(value, 16, true);
+
+                // Count hex digits
+                if (value == 0)
+                    count++;
+                else
+                {
+                    unsigned int temp = value;
+                    while (temp > 0)
+                    {
+                        count++;
+                        temp /= 16;
+                    }
+                }
+                break;
+            }
+
+            case 'o':
+            {
+                if (!k_printf__require_general_arg(args, "o"))
+                {
+                    va_end(args);
+                    return count;
+                }
+
+                unsigned int value = va_arg(args, unsigned int);
+                print_unsigned(value, 8, false);
+
+                // Count octal digits
+                if (value == 0)
+                    count++;
+                else
+                {
+                    unsigned int temp = value;
+                    while (temp > 0)
+                    {
+                        count++;
+                        temp /= 8;
+                    }
+                }
+                break;
+            }
+
+            case 'p':
+            {
+                if (!k_printf__require_general_arg(args, "p"))
+                {
+                    va_end(args);
+                    return count;
+                }
+
+                void * ptr = va_arg(args, void *);
+                print_pointer(ptr);
+                count += 2; // "0x"
+
+                // Count hex digits in pointer
+                uintptr_t value = (uintptr_t)ptr;
+                if (value == 0)
+                    count++;
+                else
+                {
+                    while (value > 0)
+                    {
+                        count++;
+                        value /= 16;
+                    }
+                }
+                break;
+            }
+
+            case 'c':
+            {
+                if (!k_printf__require_general_arg(args, "c"))
+                {
+                    va_end(args);
+                    return count;
+                }
+
+                int c = va_arg(args, int);
+                putchar((char)c);
+                count++;
+                break;
+            }
+
+            case 's':
+            {
+                if (!k_printf__require_general_arg(args, "s"))
+                {
+                    va_end(args);
+                    return count;
+                }
+
+                char * str = va_arg(args, char *);
+                print_string(str);
+                if (str == NULL) // hundelint: ignore-no-null
+                {
+                    count += 6;
+                }
+                else
+                {
+                    count += (int)strlen(str);
+                }
+                break;
+            }
+
+            case '%':
+            {
+                putchar('%');
+                count++;
+                break;
+            }
+
+            default:
+            {
+                // Unknown format specifier, just print it
+                putchar('%');
+                putchar(format[i]);
+                count += 2;
+                break;
+            }
             }
         }
     }
-    
+
     // Flush any remaining buffer content
-    if (buf_idx > 0) {
+    if (buf_idx > 0)
+    {
         buffer[buf_idx] = '\0';
         trace_puts(buffer);
         count += buf_idx;
     }
-    
+
     va_end(args);
     return count;
 }
@@ -412,13 +469,13 @@ static char hex_digit(unsigned int value)
 {
     if (value < 10)
     {
-        return (char) ('0' + value);
+        return (char)('0' + value);
     }
 
-    return (char) ('A' + value - 10);
+    return (char)('A' + value - 10);
 }
 
-int k_sprintf_impl(char* str, const char* format, va_list args)
+int k_sprintf_impl(char * str, const char * format, va_list args)
 {
     if (str == NULL) // hundelint: ignore-no-null
     {
@@ -434,119 +491,146 @@ int k_sprintf_impl(char* str, const char* format, va_list args)
     int count = 0;
     int str_idx = 0;
 
-    for (int i = 0; format[i] != '\0'; i++) {
-        if (format[i] != '%') {
+    for (int i = 0; format[i] != '\0'; i++)
+    {
+        if (format[i] != '%')
+        {
             str[str_idx++] = format[i];
             count++;
-        } else {
+        }
+        else
+        {
             i++;
 
             // Skip width parsing for simplicity in sprintf
-            while (format[i] >= '0' && format[i] <= '9') {
+            while (format[i] >= '0' && format[i] <= '9')
+            {
                 i++;
             }
 
-            switch (format[i]) {
-                case 'd':
-                case 'i': {
-                    int value = va_arg(args, int);
+            switch (format[i])
+            {
+            case 'd':
+            case 'i':
+            {
+                int value = va_arg(args, int);
 
-                    // Convert integer to string
-                    char temp[20];
-                    int temp_idx = 0;
-                    int is_negative = 0;
+                // Convert integer to string
+                char temp[20];
+                int temp_idx = 0;
+                int is_negative = 0;
 
-                    if (value < 0) {
-                        is_negative = 1;
-                        value = -value;
-                    }
-
-                    if (value == 0) {
-                        temp[temp_idx++] = '0';
-                    } else {
-                        int start = temp_idx;
-                        while (value > 0) {
-                            temp[temp_idx++] = '0' + (value % 10);
-                            value /= 10;
-                        }
-                        // Reverse the digits
-                        for (int j = 0; j < (temp_idx - start) / 2; j++) {
-                            char t = temp[start + j];
-                            temp[start + j] = temp[temp_idx - 1 - j];
-                            temp[temp_idx - 1 - j] = t;
-                        }
-                    }
-
-                    if (is_negative) {
-                        str[str_idx++] = '-';
-                        count++;
-                    }
-
-                    for (int j = 0; j < temp_idx; j++) {
-                        str[str_idx++] = temp[j];
-                        count++;
-                    }
-                    break;
+                if (value < 0)
+                {
+                    is_negative = 1;
+                    value = -value;
                 }
 
-                case 's': {
-                    char* s = va_arg(args, char*);
-                    if (!s) s = "(null)";
-                    while (*s) {
-                        str[str_idx++] = *s++;
-                        count++;
-                    }
-                    break;
+                if (value == 0)
+                {
+                    temp[temp_idx++] = '0';
                 }
-
-                case 'c': {
-                    int c = va_arg(args, int);
-                    str[str_idx++] = (char)c;
-                    count++;
-                    break;
-                }
-                case 'p':
-                case 'x': {
-                    unsigned int value = va_arg(args, unsigned int);
-                    char temp[20];
-                    int temp_idx = 0;
-
-                    if (value == 0) {
-                        temp[temp_idx++] = '0';
-                    } else {
-                        int start = temp_idx;
-                        while (value > 0) {
-                            temp[temp_idx++] = hex_digit(value % 16);
-                            value /= 16;
-                        }
-                        // Reverse
-                        for (int j = 0; j < (temp_idx - start) / 2; j++) {
-                            char t = temp[start + j];
-                            temp[start + j] = temp[temp_idx - 1 - j];
-                            temp[temp_idx - 1 - j] = t;
-                        }
-                    }
-                    if (format[i] == 'p')
+                else
+                {
+                    int start = temp_idx;
+                    while (value > 0)
                     {
-                        str[str_idx++] = '0';
-                        str[str_idx++] = 'x';
-                        count += 2;
+                        temp[temp_idx++] = '0' + (value % 10);
+                        value /= 10;
                     }
-                    for (int j = 0; j < temp_idx; j++) {
-                        str[str_idx++] = temp[j];
-                        count++;
+                    // Reverse the digits
+                    for (int j = 0; j < (temp_idx - start) / 2; j++)
+                    {
+                        char t = temp[start + j];
+                        temp[start + j] = temp[temp_idx - 1 - j];
+                        temp[temp_idx - 1 - j] = t;
                     }
-                    break;
                 }
 
-                case '%': {
-                    str[str_idx++] = '%';
+                if (is_negative)
+                {
+                    str[str_idx++] = '-';
                     count++;
-                    break;
                 }
 
-                default:
-                    break;
+                for (int j = 0; j < temp_idx; j++)
+                {
+                    str[str_idx++] = temp[j];
+                    count++;
+                }
+                break;
+            }
+
+            case 's':
+            {
+                char * s = va_arg(args, char *);
+                if (!s)
+                    s = "(null)";
+                while (*s)
+                {
+                    str[str_idx++] = *s++;
+                    count++;
+                }
+                break;
+            }
+
+            case 'c':
+            {
+                int c = va_arg(args, int);
+                str[str_idx++] = (char)c;
+                count++;
+                break;
+            }
+            case 'p':
+            case 'x':
+            {
+                unsigned int value = va_arg(args, unsigned int);
+                char temp[20];
+                int temp_idx = 0;
+
+                if (value == 0)
+                {
+                    temp[temp_idx++] = '0';
+                }
+                else
+                {
+                    int start = temp_idx;
+                    while (value > 0)
+                    {
+                        temp[temp_idx++] = hex_digit(value % 16);
+                        value /= 16;
+                    }
+                    // Reverse
+                    for (int j = 0; j < (temp_idx - start) / 2; j++)
+                    {
+                        char t = temp[start + j];
+                        temp[start + j] = temp[temp_idx - 1 - j];
+                        temp[temp_idx - 1 - j] = t;
+                    }
+                }
+                if (format[i] == 'p')
+                {
+                    str[str_idx++] = '0';
+                    str[str_idx++] = 'x';
+                    count += 2;
+                }
+                for (int j = 0; j < temp_idx; j++)
+                {
+                    str[str_idx++] = temp[j];
+                    count++;
+                }
+                break;
+            }
+
+            case '%':
+            {
+                str[str_idx++] = '%';
+                count++;
+                break;
+            }
+
+            default:
+                break;
             }
         }
     }
@@ -555,8 +639,8 @@ int k_sprintf_impl(char* str, const char* format, va_list args)
     return count;
 }
 
-
-int k_sprintf(char* str, const char* format, ...) {
+int k_sprintf(char * str, const char * format, ...)
+{
     va_list args;
     va_start(args, format);
     int count = k_sprintf_impl(str, format, args);

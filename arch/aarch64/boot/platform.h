@@ -6,7 +6,8 @@
 
 #define BOOT_FRAMEBUFFER_MAP_SIZE (32ULL * 1024ULL * 1024ULL)
 
-typedef struct BootPlatformInfo {
+typedef struct BootPlatformInfo
+{
     uint64_t cpu_count;
     uint64_t memory_physical_start;
     uint64_t memory_physical_end;

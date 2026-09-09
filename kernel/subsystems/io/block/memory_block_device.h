@@ -10,8 +10,7 @@ typedef struct MemoryDeviceBlock
 {
     BlockNumber block;
     KernelAddress address;
-}
-MemoryDeviceBlock;
+} MemoryDeviceBlock;
 
 typedef MemoryDeviceBlock * MemoryDeviceBlockPtr;
 
@@ -20,24 +19,21 @@ OptionalDef(MemoryDeviceBlockPtr);
 ResultDef(MemoryDeviceBlockPtr);
 
 bool MemoryDeviceBlock__equals(MemoryDeviceBlockPtr self, MemoryDeviceBlockPtr other);
-LinkedListDefine(MemoryDeviceBlock, MemoryDeviceBlocks, (EqualFunction) MemoryDeviceBlock__equals);
+LinkedListDefine(MemoryDeviceBlock, MemoryDeviceBlocks, (EqualFunction)MemoryDeviceBlock__equals);
 
 typedef struct MemoryBlockDevice
 {
     MemoryDeviceBlocks blocks;
     mutex_t lock;
-}
-MemoryBlockDevice;
+} MemoryBlockDevice;
 
 typedef MemoryBlockDevice * MemoryBlockDevicePtr;
 
 MemoryBlockDevice MemoryBlockDevice__new();
 BlockDevice MemoryBlockDevice__as_block_device(MemoryBlockDevicePtr self);
-Result(BlockCount) MemoryBlockDevice__read(
-    BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr target
-);
-Result(BlockCount) MemoryBlockDevice__write(
-    BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr source
-);
+Result(BlockCount)
+    MemoryBlockDevice__read(BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr target);
+Result(BlockCount)
+    MemoryBlockDevice__write(BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr source);
 
 #endif

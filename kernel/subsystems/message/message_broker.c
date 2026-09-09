@@ -6,13 +6,9 @@ FixedArrayBodyDefine(Listeners);
 
 static BString too_many_listeners = bstr("too many listeners already registered");
 
-
 MessageBroker MessageBroker__new()
 {
-    return (MessageBroker) {
-        .listeners = EmptyArray(Listeners),
-        .lock = MUTEX_INIT
-    };
+    return (MessageBroker){.listeners = EmptyArray(Listeners), .lock = MUTEX_INIT};
 }
 
 MessageBrokerPtr MessageBroker__heap_new()
@@ -24,92 +20,73 @@ MessageBrokerPtr MessageBroker__heap_new()
 
 Message Message__new_anything(Source source, SourceCode source_code, Anything anything)
 {
-    Payload payload = (Payload) {
-        .type = PAYLOAD_TYPE_ANYTHING,
-        .anything = anything
-    };
+    Payload payload = (Payload){.type = PAYLOAD_TYPE_ANYTHING, .anything = anything};
 
-    return (Message) {
+    return (Message){
         .source = source,
         .source_code = source_code,
         .payload = Some(Payload, payload),
     };
-
 }
 
 Message Message__new_process_id(Source source, SourceCode source_code, ProcessID process_id)
 {
-    Payload payload = (Payload) {
-        .type = PAYLOAD_TYPE_PROCESS_ID,
-        .process_id = process_id
-    };
+    Payload payload = (Payload){.type = PAYLOAD_TYPE_PROCESS_ID, .process_id = process_id};
 
-    return (Message) {
+    return (Message){
         .source = source,
         .source_code = source_code,
         .payload = Some(Payload, payload),
     };
 }
 
-Message Message__new_io_operation(
-    Source source, SourceCode source_code, ProcessID pid, OperationKey operation_key
-)
+Message Message__new_io_operation(Source source, SourceCode source_code, ProcessID pid, OperationKey operation_key)
 {
-    Payload payload = (Payload) {
-        .type = PAYLOAD_TYPE_IO_OPERATION,
-        .io_operation = IOOperationMessage__new(pid, operation_key)
-    };
+    Payload payload =
+        (Payload){.type = PAYLOAD_TYPE_IO_OPERATION, .io_operation = IOOperationMessage__new(pid, operation_key)};
 
-    return (Message) {
+    return (Message){
         .source = source,
         .source_code = source_code,
         .payload = Some(Payload, payload),
     };
 }
 
-Message Message__new_service_event_delivery(
-    Source source, SourceCode source_code, ProcessPtr process, ServiceEvent event
-)
+Message Message__new_service_event_delivery(Source source, SourceCode source_code, ProcessPtr process,
+                                            ServiceEvent event)
 {
-    Payload payload = (Payload) {
-        .type = PAYLOAD_TYPE_SERVICE_EVENT_DELIVERY,
-        .service_event_delivery = (ServiceEventDelivery) {
-            .process = process,
-            .event = event,
-        }
-    };
+    Payload payload = (Payload){.type = PAYLOAD_TYPE_SERVICE_EVENT_DELIVERY,
+                                .service_event_delivery = (ServiceEventDelivery){
+                                    .process = process,
+                                    .event = event,
+                                }};
 
-    return (Message) {
+    return (Message){
         .source = source,
         .source_code = source_code,
         .payload = Some(Payload, payload),
     };
 }
 
-static Message Message__new_deferred(
-    Source source, SourceCode source_code, Anything anything,
-    KernelContextPtr context, Continuation continuation, bool owns_context,
-    OptionalPtr(OperationKey) operation_key
-)
+static Message Message__new_deferred(Source source, SourceCode source_code, Anything anything, KernelContextPtr context,
+                                     Continuation continuation, bool owns_context,
+                                     OptionalPtr(OperationKey) operation_key)
 {
-    Payload payload = (Payload) {
-        .type = PAYLOAD_TYPE_DEFERRED,
-        .deferred = (Deferred) {
-                        .anything = anything,
-                        .continuation = continuation,
-                        .context = context,
-                        .owns_context = owns_context,
-                        .operation_key = *operation_key,
-                    }
-    };
+    Payload payload = (Payload){.type = PAYLOAD_TYPE_DEFERRED,
+                                .deferred = (Deferred){
+                                    .anything = anything,
+                                    .continuation = continuation,
+                                    .context = context,
+                                    .owns_context = owns_context,
+                                    .operation_key = *operation_key,
+                                }};
 
-    return (Message) {
+    return (Message){
         .source = source,
         .source_code = source_code,
         .payload = Some(Payload, payload),
     };
 }
-
 
 MessagePtr Message__heap_new_anything(Source source, SourceCode source_code, Anything anything)
 {
@@ -126,54 +103,44 @@ MessagePtr Message__heap_new_process_id(Source source, SourceCode source_code, P
     return message;
 }
 
-MessagePtr Message__heap_new_io_operation(
-    Source source, SourceCode source_code, ProcessID pid, OperationKey operation_key
-)
+MessagePtr Message__heap_new_io_operation(Source source, SourceCode source_code, ProcessID pid,
+                                          OperationKey operation_key)
 {
     MessagePtr message = ptr(Kernel__alloc_kernel(sizeof(Message)), Message);
     *message = Message__new_io_operation(source, source_code, pid, operation_key);
     return message;
 }
 
-MessagePtr Message__heap_new_service_event_delivery(
-    Source source, SourceCode source_code, ProcessPtr process, ServiceEvent event
-)
+MessagePtr Message__heap_new_service_event_delivery(Source source, SourceCode source_code, ProcessPtr process,
+                                                    ServiceEvent event)
 {
     MessagePtr message = ptr(Kernel__alloc_kernel(sizeof(Message)), Message);
     *message = Message__new_service_event_delivery(source, source_code, process, event);
     return message;
 }
 
-MessagePtr Message__heap_new_deferred(
-    Source source, SourceCode source_code, Anything anything, KernelContextPtr context, Continuation continuation
-)
+MessagePtr Message__heap_new_deferred(Source source, SourceCode source_code, Anything anything,
+                                      KernelContextPtr context, Continuation continuation)
 {
-    return Message__heap_new_deferred_with_context_ownership(
-        source, source_code, anything, context, continuation, false
-    );
+    return Message__heap_new_deferred_with_context_ownership(source, source_code, anything, context, continuation,
+                                                             false);
 }
 
-MessagePtr Message__heap_new_deferred_with_context_ownership(
-    Source source, SourceCode source_code, Anything anything,
-    KernelContextPtr context, Continuation continuation, bool owns_context
-)
+MessagePtr Message__heap_new_deferred_with_context_ownership(Source source, SourceCode source_code, Anything anything,
+                                                             KernelContextPtr context, Continuation continuation,
+                                                             bool owns_context)
 {
     Optional(OperationKey) operation_key = None(OperationKey);
     return Message__heap_new_deferred_with_context_ownership_and_operation_key(
-        source, source_code, anything, context, continuation, owns_context, &operation_key
-    );
+        source, source_code, anything, context, continuation, owns_context, &operation_key);
 }
 
 MessagePtr Message__heap_new_deferred_with_context_ownership_and_operation_key(
-    Source source, SourceCode source_code, Anything anything,
-    KernelContextPtr context, Continuation continuation,
-    bool owns_context, OptionalPtr(OperationKey) operation_key
-)
+    Source source, SourceCode source_code, Anything anything, KernelContextPtr context, Continuation continuation,
+    bool owns_context, OptionalPtr(OperationKey) operation_key)
 {
     MessagePtr message = ptr(Kernel__alloc_kernel(sizeof(Message)), Message);
-    *message = Message__new_deferred(
-        source, source_code, anything, context, continuation, owns_context, operation_key
-    );
+    *message = Message__new_deferred(source, source_code, anything, context, continuation, owns_context, operation_key);
 
     return message;
 }
@@ -190,19 +157,14 @@ void Message__dispose(MessagePtr self)
     Kernel__free(addr(self));
 }
 
-
 Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message)
 {
     __d_printf(BROKER, "delivering message %i %i\n", message->source, message->source_code);
     Listeners clone = Listeners__new();
 
-    critical_section(self->lock,
-    {
-        Listeners__push_all(&clone, &self->listeners);
-    });
+    critical_section(self->lock, { Listeners__push_all(&clone, &self->listeners); });
 
-    for_each_fa(Listeners, clone, index, listener,
-    {
+    for_each_fa(Listeners, clone, index, listener, {
         if (listener.source == message->source)
         {
             listener.dispatch(&listener, message);
@@ -214,9 +176,9 @@ Result(AckCode) MessageBroker__deliver(MessageBrokerPtr self, MessagePtr message
 
 Result(ListenerRegisterResult) MessageBroker__register_listener(MessageBrokerPtr self, ListenerPtr listener)
 {
-    critical_section(self->lock,
-    {
-        match_result(CollectionCode, Listeners__push(&self->listeners, *listener),
+    critical_section(self->lock, {
+        match_result(
+            Listeners__push(&self->listeners, *listener),
             success_do_nothing(),
             error(code, message)
             {
@@ -237,13 +199,8 @@ void Listener__kernel_dispatch(ListenerPtr self, MessagePtr message)
 
 Listener KernelListener__new(KernelPtr kernel, Source source, KernelCallback callback)
 {
-    return (Listener) {
-        .type = LISTENER_TYPE_KERNEL,
-        .dispatch = Listener__kernel_dispatch,
-        .source = source,
-        .kernel_listener = (KernelListener) {
-            .kernel = kernel,
-            .callback = callback
-        }
-    };
+    return (Listener){.type = LISTENER_TYPE_KERNEL,
+                      .dispatch = Listener__kernel_dispatch,
+                      .source = source,
+                      .kernel_listener = (KernelListener){.kernel = kernel, .callback = callback}};
 }

@@ -14,16 +14,18 @@ static const Address test_heap_physical_base = 0x70000000ULL;
 
 static void assert_free_success(KernelAddress addr)
 {
-    match_result(HeapCode, Heap__free(&heap, addr),
+    match_result(Heap__free(&heap, addr),
         success_do_nothing(),
-        error_test_fail());
+        error_test_fail()
+    );
 }
 
 static void assert_free_fails(KernelAddress addr)
 {
-    match_result(HeapCode, Heap__free(&heap, addr),
+    match_result(Heap__free(&heap, addr),
         success_test_fail(),
-        error_test_ok());
+        error_test_ok()
+    );
 }
 
 void setUp(void)
@@ -32,9 +34,10 @@ void setUp(void)
     system_info.kernel_heap.virtual_start = (Address)&test_heap_memory[0];
     system_info.kernel_heap.physical_start = test_heap_physical_base;
     system_info.kernel_heap.physical_end = test_heap_physical_base + sizeof(test_heap_memory);
-    match_result(HeapCode, Heap__init(&heap, &system_info),
+    match_result(Heap__init(&heap, &system_info),
         success_do_nothing(),
-        error_test_fail());
+        error_test_fail()
+    );
 }
 
 static void init_heap_with_coarse_block_size(size_t coarse_block_size)
@@ -44,14 +47,14 @@ static void init_heap_with_coarse_block_size(size_t coarse_block_size)
     system_info.kernel_heap.virtual_start = (Address)&test_heap_memory[0];
     system_info.kernel_heap.physical_start = test_heap_physical_base;
     system_info.kernel_heap.physical_end = test_heap_physical_base + sizeof(test_heap_memory);
-    match_result(HeapCode, Heap__init(&heap, &system_info),
+    match_result(Heap__init(&heap, &system_info),
         success_do_nothing(),
-        error_test_fail());
+        error_test_fail()
+    );
 }
 
 void tearDown(void)
 {
-
 }
 
 void test_simple_heap_alloc_and_free(void)
@@ -136,7 +139,7 @@ void test_freeing_inside_allocated_block_returns_error(void)
 void test_reused_multi_page_alloc_is_zeroed(void)
 {
     KernelAddress addr = Heap__alloc_size(&heap, PAGE_SIZE * 2);
-    uint8_t * bytes = (uint8_t *) vaddr(addr);
+    uint8_t * bytes = (uint8_t *)vaddr(addr);
 
     bytes[0] = 0xAA;
     bytes[PAGE_SIZE] = 0xBB;
@@ -144,7 +147,7 @@ void test_reused_multi_page_alloc_is_zeroed(void)
     assert_free_success(addr);
 
     KernelAddress reused = Heap__alloc_size(&heap, PAGE_SIZE * 2);
-    uint8_t * reused_bytes = (uint8_t *) vaddr(reused);
+    uint8_t * reused_bytes = (uint8_t *)vaddr(reused);
 
     TEST_ASSERT_EQUAL(vaddr(addr), vaddr(reused));
     TEST_ASSERT_EQUAL(0, reused_bytes[0]);

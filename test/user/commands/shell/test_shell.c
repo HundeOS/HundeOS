@@ -14,8 +14,7 @@ typedef struct SpawnCall
     SpawnMode mode;
     BString path;
     SpawnArguments arguments;
-}
-SpawnCall;
+} SpawnCall;
 
 static SpawnCall last_spawn_call;
 static uint64_t spawn_call_count;
@@ -48,14 +47,13 @@ typedef struct TestInputStream
 {
     InputStream input;
     BString line;
-}
-TestInputStream;
+} TestInputStream;
 
 void setUp(void)
 {
     spawn_call_count = 0;
     next_spawn_result = SPAWN_SUCCESS;
-    last_spawn_call = (SpawnCall) {
+    last_spawn_call = (SpawnCall){
         .path = empty_bstr(),
         .arguments = SpawnArguments__new(),
     };
@@ -82,17 +80,25 @@ static BString TestString__from_nullable(const char * value)
 
 static void assert_command_argument(CommandPtr command, StringPos index, const char * expected)
 {
-    match_optional(BString, CommandArguments__at(&command->args, index), some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); }, none_test_fail());
+    match_optional(
+        CommandArguments__at(&command->args, index),
+        some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); },
+        none_test_fail()
+    );
 }
 
 static void assert_spawn_argument(StringPos index, const char * expected)
 {
-    match_optional(BString, SpawnArguments__at(&last_spawn_call.arguments, index), some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); }, none_test_fail());
+    match_optional(
+        SpawnArguments__at(&last_spawn_call.arguments, index),
+        some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); },
+        none_test_fail()
+    );
 }
 
 static BString TestInputStream__read_line(InputStreamPtr self, bool echo)
 {
-    TestInputStream * input = (TestInputStream *) self;
+    TestInputStream * input = (TestInputStream *)self;
     return input->line;
 }
 
@@ -102,29 +108,29 @@ static void set_console_input(const char * value)
     console_input_pos = 0;
 }
 
-SpawnResult spawn(
-    SpawnMode mode,
-    ConstBStringPtr path,
-    OptionalPtr(BString) arg0,
-    OptionalPtr(BString) arg1,
-    OptionalPtr(BString) arg2
-)
+SpawnResult spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0, OptionalPtr(BString) arg1,
+                  OptionalPtr(BString) arg2)
 {
     spawn_call_count++;
     last_spawn_call.mode = mode;
     last_spawn_call.path = *path;
     last_spawn_call.arguments = SpawnArguments__new();
-    match_optional(BString, *arg0, some(value) { SpawnArguments__push(&last_spawn_call.arguments, value); }, none_do_nothing());
-    match_optional(BString, *arg1, some(value) { SpawnArguments__push(&last_spawn_call.arguments, value); }, none_do_nothing());
-    match_optional(BString, *arg2, some(value) { SpawnArguments__push(&last_spawn_call.arguments, value); }, none_do_nothing());
+    match_optional(*arg0,
+        some(value) { SpawnArguments__push(&last_spawn_call.arguments, value); },
+        none_do_nothing()
+    );
+    match_optional(*arg1,
+        some(value) { SpawnArguments__push(&last_spawn_call.arguments, value); },
+        none_do_nothing()
+    );
+    match_optional(*arg2,
+        some(value) { SpawnArguments__push(&last_spawn_call.arguments, value); },
+        none_do_nothing()
+    );
     return next_spawn_result;
 }
 
-SpawnResult spawn_argv(
-    SpawnMode mode,
-    ConstBStringPtr path,
-    ConstSpawnArgumentsPtr arguments
-)
+SpawnResult spawn_argv(SpawnMode mode, ConstBStringPtr path, ConstSpawnArgumentsPtr arguments)
 {
     spawn_call_count++;
     last_spawn_call.mode = mode;
@@ -140,7 +146,7 @@ int IO__printf(ConstBStringPtr format, ...)
     BString text = BString__vsprintf(format, args);
     va_end(args);
     IO__print(&text);
-    return (int) BString__length(&text);
+    return (int)BString__length(&text);
 }
 
 void IO__print(ConstBStringPtr message)
@@ -153,7 +159,7 @@ void IO__print(ConstBStringPtr message)
 
 ByteCount console_read(char * buffer, uint64_t size)
 {
-    if (size == 0 || console_input_pos >= (uint64_t) console_input.len)
+    if (size == 0 || console_input_pos >= (uint64_t)console_input.len)
     {
         return 0;
     }
@@ -336,12 +342,7 @@ void test_interpreter_execute_fails_cleanly_when_too_many_args_are_supplied(void
 
 void test_shell_run_once_returns_exit_for_exit_command(void)
 {
-    TestInputStream input = {
-        .input = {
-            .read_line = TestInputStream__read_line
-        },
-        .line = bstring("exit")
-    };
+    TestInputStream input = {.input = {.read_line = TestInputStream__read_line}, .line = bstring("exit")};
     Shell shell = Shell__new(&input.input);
 
     TEST_ASSERT_EQUAL(EXIT, Shell__run_once(&shell));
@@ -352,12 +353,7 @@ void test_shell_run_once_returns_exit_for_exit_command(void)
 
 void test_shell_run_once_reports_command_failed(void)
 {
-    TestInputStream input = {
-        .input = {
-            .read_line = TestInputStream__read_line
-        },
-        .line = bstring("cat missing")
-    };
+    TestInputStream input = {.input = {.read_line = TestInputStream__read_line}, .line = bstring("cat missing")};
     Shell shell = Shell__new(&input.input);
     next_spawn_result = SPAWN_FAILED;
 
@@ -367,18 +363,17 @@ void test_shell_run_once_reports_command_failed(void)
 
 void test_shell_run_once_stores_non_empty_history_entries(void)
 {
-    TestInputStream input = {
-        .input = {
-            .read_line = TestInputStream__read_line
-        },
-        .line = bstring("cat test.txt")
-    };
+    TestInputStream input = {.input = {.read_line = TestInputStream__read_line}, .line = bstring("cat test.txt")};
     Shell shell = Shell__new(&input.input);
 
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Shell__run_once(&shell));
     TEST_ASSERT_EQUAL_UINT64(1, ShellHistory__len(&shell.history));
 
-    match_optional(BString, ShellHistory__at(&shell.history, 0), some(entry) { TEST_ASSERT_EQUAL_STRING("cat test.txt", BString__cstr(&entry)); }, none_test_fail());
+    match_optional(
+        ShellHistory__at(&shell.history, 0),
+        some(entry) { TEST_ASSERT_EQUAL_STRING("cat test.txt", BString__cstr(&entry)); },
+        none_test_fail()
+    );
 }
 
 void test_interpreter_interpret_groups_double_quoted_argument(void)
@@ -459,10 +454,7 @@ void test_console_input_stream_restores_current_draft_with_down_arrow(void)
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
     TEST_ASSERT_EQUAL_STRING("par", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING(
-        "par\r\033[2K> second\r\033[2K> par",
-        BString__cstr(&printed_output)
-    );
+    TEST_ASSERT_EQUAL_STRING("par\r\033[2K> second\r\033[2K> par", BString__cstr(&printed_output));
 }
 
 void test_console_input_stream_inserts_at_cursor_after_left_arrow(void)
@@ -473,10 +465,7 @@ void test_console_input_stream_inserts_at_cursor_after_left_arrow(void)
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
     TEST_ASSERT_EQUAL_STRING("aXc", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING(
-        "ac\r\033[2K> ac\033[1D\r\033[2K> aXc\033[1D",
-        BString__cstr(&printed_output)
-    );
+    TEST_ASSERT_EQUAL_STRING("ac\r\033[2K> ac\033[1D\r\033[2K> aXc\033[1D", BString__cstr(&printed_output));
 }
 
 void test_console_input_stream_backspace_removes_before_cursor(void)
@@ -487,10 +476,8 @@ void test_console_input_stream_backspace_removes_before_cursor(void)
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
     TEST_ASSERT_EQUAL_STRING("bc", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING(
-        "abc\r\033[2K> abc\033[1D\r\033[2K> abc\033[2D\r\033[2K> bc\033[2D",
-        BString__cstr(&printed_output)
-    );
+    TEST_ASSERT_EQUAL_STRING("abc\r\033[2K> abc\033[1D\r\033[2K> abc\033[2D\r\033[2K> bc\033[2D",
+                             BString__cstr(&printed_output));
 }
 
 void test_console_input_stream_recalled_history_line_can_move_and_insert(void)
@@ -504,10 +491,8 @@ void test_console_input_stream_recalled_history_line_can_move_and_insert(void)
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
     TEST_ASSERT_EQUAL_STRING("hellXo", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING(
-        "\r\033[2K> hello\r\033[2K> hello\033[1D\r\033[2K> hellXo\033[1D",
-        BString__cstr(&printed_output)
-    );
+    TEST_ASSERT_EQUAL_STRING("\r\033[2K> hello\r\033[2K> hello\033[1D\r\033[2K> hellXo\033[1D",
+                             BString__cstr(&printed_output));
 }
 
 void test_console_input_stream_appends_without_full_redraw(void)

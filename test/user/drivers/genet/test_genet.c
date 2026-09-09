@@ -33,7 +33,7 @@ static const char * fake_sysinfo;
 
 static ServiceMappedMemory ServiceMappedMemory__new(void * driver_address, uint64_t device_address, size_t size)
 {
-    return (ServiceMappedMemory) {
+    return (ServiceMappedMemory){
         .driver_address = driver_address,
         .device_address = device_address,
         .size = size,
@@ -50,12 +50,11 @@ void setUp(void)
     fake_sysinfo_opened = false;
     fake_sysinfo_closed = false;
     fake_ready_path = bstr("");
-    fake_sysinfo =
-        "ethernet.present=1\n"
-        "ethernet.mac_kind=1\n"
-        "ethernet.physical_base=0xfd580000\n"
-        "ethernet.mmio_size=0x10000\n"
-        "ethernet.irq=157\n";
+    fake_sysinfo = "ethernet.present=1\n"
+                   "ethernet.mac_kind=1\n"
+                   "ethernet.physical_base=0xfd580000\n"
+                   "ethernet.mmio_size=0x10000\n"
+                   "ethernet.irq=157\n";
 }
 
 void tearDown(void)
@@ -122,7 +121,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size) // hundelint: ignore-no
         buf[index] = fake_sysinfo[index];
         index++;
     }
-    return (ByteCount) index;
+    return (ByteCount)index;
 }
 
 IOStatus close(IOHandle handle)
@@ -137,14 +136,16 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     TEST_ASSERT_EQUAL_INT(3, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     DynString sysinfo;
-    match_result(DynStringCode, DynString__init(&sysinfo, 128),
+    match_result(
+        DynString__init(&sysinfo, 128),
         success_do_nothing(),
         error(code, message) { return None(DynString); }
     );
 
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
-        match_result(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]),
+        match_result(
+            DynString__push_char(&sysinfo, fake_sysinfo[index]),
             success_do_nothing(),
             error(code, message)
             {
@@ -164,19 +165,20 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
 void test_ethernet_config_parses_genet_sysinfo(void)
 {
     DynString sysinfo;
-    match_result(DynStringCode, DynString__init(&sysinfo, 128),
+    match_result(DynString__init(&sysinfo, 128),
         success_do_nothing(),
         error_test_fail()
     );
     for (uint64_t index = 0; fake_sysinfo[index] != '\0'; index++)
     {
-        match_result(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]),
+        match_result(DynString__push_char(&sysinfo, fake_sysinfo[index]),
             success_do_nothing(),
             error_test_fail()
         );
     }
 
-    match_optional(EthernetConfig, EthernetConfig__parse(&sysinfo),
+    match_optional(
+        EthernetConfig__parse(&sysinfo),
         some(config)
         {
             TEST_ASSERT_EQUAL_INT(ETHERNET_MAC_KIND_BCM2711_GENET, config.mac_kind);
@@ -205,12 +207,11 @@ void test_genet_main_maps_supported_pi4_mac_and_publishes_ready(void)
 
 void test_genet_main_rejects_non_genet_config(void)
 {
-    fake_sysinfo =
-        "ethernet.present=1\n"
-        "ethernet.mac_kind=2\n"
-        "ethernet.physical_base=0xfd580000\n"
-        "ethernet.mmio_size=0x10000\n"
-        "ethernet.irq=157\n";
+    fake_sysinfo = "ethernet.present=1\n"
+                   "ethernet.mac_kind=2\n"
+                   "ethernet.physical_base=0xfd580000\n"
+                   "ethernet.mmio_size=0x10000\n"
+                   "ethernet.irq=157\n";
 
     int result = genet_main_under_test();
 

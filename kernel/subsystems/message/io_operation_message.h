@@ -9,14 +9,13 @@ typedef struct IOOperationMessage
 {
     ProcessID pid;
     OperationKey operation_key;
-}
-IOOperationMessage;
+} IOOperationMessage;
 
 typedef IOOperationMessage * IOOperationMessagePtr;
 
 static inline IOOperationMessage IOOperationMessage__new(ProcessID pid, OperationKey operation_key)
 {
-    return (IOOperationMessage) {
+    return (IOOperationMessage){
         .pid = pid,
         .operation_key = operation_key,
     };
@@ -24,8 +23,7 @@ static inline IOOperationMessage IOOperationMessage__new(ProcessID pid, Operatio
 
 static inline IOOperationMessagePtr IOOperationMessage__heap_new(ProcessID pid, OperationKey operation_key)
 {
-    IOOperationMessagePtr self =
-        ptr(Kernel__alloc_kernel(sizeof(IOOperationMessage)), IOOperationMessage);
+    IOOperationMessagePtr self = ptr(Kernel__alloc_kernel(sizeof(IOOperationMessage)), IOOperationMessage);
     *self = IOOperationMessage__new(pid, operation_key);
     return self;
 }

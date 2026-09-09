@@ -16,8 +16,7 @@ typedef struct SpawnCall
     char path[64];
     char arg0[64];
     char arg1[64];
-}
-SpawnCall;
+} SpawnCall;
 
 struct ServiceMappedMemory
 {
@@ -59,11 +58,11 @@ void setUp(void)
     failing_path = NULL;
     for (uint64_t i = 0; i < 16; i++)
     {
-        spawn_calls[i] = (SpawnCall) { 0 };
+        spawn_calls[i] = (SpawnCall){0};
     }
 
-    fake_mapping = (ServiceMappedMemory) {
-        .driver_address = (uint64_t) fake_virtio_region,
+    fake_mapping = (ServiceMappedMemory){
+        .driver_address = (uint64_t)fake_virtio_region,
         .device_address = 0x0a000000ULL,
         .size = sizeof(fake_virtio_region),
     };
@@ -73,9 +72,9 @@ void setUp(void)
         fake_virtio_region[i] = 0;
     }
 
-    volatile uint32_t * slot0 = (volatile uint32_t *) &fake_virtio_region[0];
-    volatile uint32_t * slot1 = (volatile uint32_t *) &fake_virtio_region[0x200];
-    volatile uint32_t * slot2 = (volatile uint32_t *) &fake_virtio_region[0x400];
+    volatile uint32_t * slot0 = (volatile uint32_t *)&fake_virtio_region[0];
+    volatile uint32_t * slot1 = (volatile uint32_t *)&fake_virtio_region[0x200];
+    volatile uint32_t * slot2 = (volatile uint32_t *)&fake_virtio_region[0x400];
 
     slot0[0x000 / 4] = 0x74726976U;
     slot0[0x004 / 4] = 1;
@@ -136,19 +135,30 @@ static void copy_string(char * target, uint64_t size, const char * source)
     target[i] = '\0';
 }
 
-SpawnResult spawn(
-    SpawnMode mode,
-    ConstBStringPtr path,
-    OptionalPtr(BString) arg0,
-    OptionalPtr(BString) arg1,
-    OptionalPtr(BString) arg2
-)
+SpawnResult spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0, OptionalPtr(BString) arg1,
+                  OptionalPtr(BString) arg2)
 {
     TEST_ASSERT_LESS_THAN_UINT64(16, spawn_call_count);
     spawn_calls[spawn_call_count].mode = mode;
     copy_string(spawn_calls[spawn_call_count].path, sizeof(spawn_calls[spawn_call_count].path), BString__cstr(path));
-    match_optional(BString, *arg0, some(value) { copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0), BString__cstr(&value)); }, none_do_nothing());
-    match_optional(BString, *arg1, some(value) { copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1), BString__cstr(&value)); }, none_do_nothing());
+    match_optional(
+        *arg0,
+        some(value)
+        {
+            copy_string(spawn_calls[spawn_call_count].arg0, sizeof(spawn_calls[spawn_call_count].arg0),
+                        BString__cstr(&value));
+        },
+        none_do_nothing()
+    );
+    match_optional(
+        *arg1,
+        some(value)
+        {
+            copy_string(spawn_calls[spawn_call_count].arg1, sizeof(spawn_calls[spawn_call_count].arg1),
+                        BString__cstr(&value));
+        },
+        none_do_nothing()
+    );
     spawn_call_count++;
 
     if (failing_path != NULL && strings_equal(BString__cstr(path), failing_path))
@@ -156,32 +166,19 @@ SpawnResult spawn(
         return SPAWN_NO_FILE;
     }
 
-    return (SpawnResult) spawn_call_count;
+    return (SpawnResult)spawn_call_count;
 }
 
-SpawnResult spawn_with_stdio(
-    SpawnMode mode,
-    ConstBStringPtr path,
-    SpawnFileDescriptor stdin_fd,
-    SpawnFileDescriptor stdout_fd,
-    SpawnFileDescriptor stderr_fd,
-    OptionalPtr(BString) arg0,
-    OptionalPtr(BString) arg1,
-    OptionalPtr(BString) arg2
-)
+SpawnResult spawn_with_stdio(SpawnMode mode, ConstBStringPtr path, SpawnFileDescriptor stdin_fd,
+                             SpawnFileDescriptor stdout_fd, SpawnFileDescriptor stderr_fd, OptionalPtr(BString) arg0,
+                             OptionalPtr(BString) arg1, OptionalPtr(BString) arg2)
 {
     TEST_FAIL();
     return SPAWN_FAILED;
 }
 
-SpawnResult spawn_as(
-    SpawnMode mode,
-    UserID requested_user_id,
-    ConstBStringPtr path,
-    OptionalPtr(BString) arg0,
-    OptionalPtr(BString) arg1,
-    OptionalPtr(BString) arg2
-)
+SpawnResult spawn_as(SpawnMode mode, UserID requested_user_id, ConstBStringPtr path, OptionalPtr(BString) arg0,
+                     OptionalPtr(BString) arg1, OptionalPtr(BString) arg2)
 {
     TEST_FAIL();
     return SPAWN_FAILED;
@@ -231,14 +228,23 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     }
 
     DynString config;
-    match_result(DynStringCode, DynString__init(&config, max_bytes), success_do_nothing(), error(code, message) { return None(DynString); });
+    match_result(
+        DynString__init(&config, max_bytes),
+        success_do_nothing(),
+        error(code, message) { return None(DynString); }
+    );
 
     for (StringPos index = 0; source[index] != '\0' && index < max_bytes; index++)
     {
-        match_result(DynStringCode, DynString__push_char(&config, source[index]), success_do_nothing(), error(code, message) {
+        match_result(
+            DynString__push_char(&config, source[index]),
+            success_do_nothing(),
+            error(code, message)
+            {
                 DynString__dispose(&config);
                 return None(DynString);
-            });
+            }
+        );
     }
 
     return Some(DynString, config);
@@ -290,7 +296,7 @@ ServiceCode service_wait_ready(ConstBStringPtr name)
 
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
-    return (void *) (memory->driver_address + offset);
+    return (void *)(memory->driver_address + offset);
 }
 
 int test_printf(ConstBStringPtr format, ...)
@@ -335,32 +341,32 @@ void test_hundeschule_starts_bootstrap_drivers_then_hundeschau(void)
 
 void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
 {
-    fake_sysinfo =
-        "framebuffer.present=1\n"
-        "framebuffer.physical_base=0x3e000000\n"
-        "framebuffer.physical_size=0x20000\n"
-        "framebuffer.width=512\n"
-        "framebuffer.height=64\n"
-        "framebuffer.pixels_per_scanline=512\n"
-        "framebuffer.pixel_format=0\n";
-    fake_config =
-        "# hundeschule driver config\n"
-        "driver /sbin/drivers/hundebus once\n"
-        "driver /sbin/drivers/sdhci once\n"
-        "driver /sbin/drivers/virtio_keyboard respawn framebuffer\n"
-        "driver /sbin/drivers/uart_rx respawn no-framebuffer\n";
+    fake_sysinfo = "framebuffer.present=1\n"
+                   "framebuffer.physical_base=0x3e000000\n"
+                   "framebuffer.physical_size=0x20000\n"
+                   "framebuffer.width=512\n"
+                   "framebuffer.height=64\n"
+                   "framebuffer.pixels_per_scanline=512\n"
+                   "framebuffer.pixel_format=0\n";
+    fake_config = "# hundeschule driver config\n"
+                  "driver /sbin/drivers/hundebus once\n"
+                  "driver /sbin/services/hundekanal-test-echo once\n"
+                  "driver /sbin/drivers/sdhci once\n"
+                  "driver /sbin/drivers/virtio_keyboard respawn framebuffer\n"
+                  "driver /sbin/drivers/uart_rx respawn no-framebuffer\n";
 
     HundeschuleRequiredProcesses required_processes = HundeschuleRequiredProcesses__new();
     TEST_ASSERT_EQUAL_INT(0, Hundeschule__initialise_required_processes(&required_processes));
 
-    TEST_ASSERT_EQUAL_UINT64(7, spawn_call_count);
+    TEST_ASSERT_EQUAL_UINT64(8, spawn_call_count);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[0].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk", spawn_calls[1].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/socket_router", spawn_calls[2].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[3].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sdhci", spawn_calls[4].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_keyboard", spawn_calls[5].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[6].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundekanal-test-echo", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sdhci", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_keyboard", spawn_calls[6].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[7].path);
     TEST_ASSERT_EQUAL_UINT64(2, fake_wait_ready_count);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_wait_ready_paths[0]);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio2", fake_wait_ready_paths[1]);
@@ -371,7 +377,7 @@ void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
 void test_hundeschule_respawns_bootstrap_driver_with_same_args(void)
 {
     fake_child_event_count = 1;
-    fake_child_events[0] = (ProcessChildEvent) {
+    fake_child_events[0] = (ProcessChildEvent){
         .pid = 2,
         .status = 0,
         .type = PROCESS_CHILD_EVENT_EXITED,
@@ -388,7 +394,7 @@ void test_hundeschule_respawns_bootstrap_driver_with_same_args(void)
 void test_hundeschule_does_not_respawn_once_driver(void)
 {
     fake_child_event_count = 1;
-    fake_child_events[0] = (ProcessChildEvent) {
+    fake_child_events[0] = (ProcessChildEvent){
         .pid = 3,
         .status = 0,
         .type = PROCESS_CHILD_EVENT_EXITED,
@@ -397,4 +403,83 @@ void test_hundeschule_does_not_respawn_once_driver(void)
     TEST_ASSERT_EQUAL_INT(1, hundeschule_main_under_test());
 
     TEST_ASSERT_EQUAL_UINT64(7, spawn_call_count);
+}
+
+void test_hundeschule_lookup_handles_missing_pid_and_updates_stored_record(void)
+{
+    HundeschuleRequiredProcesses processes = HundeschuleRequiredProcesses__new();
+    match_optional(Hundeschule__find_required_process(&processes, 42),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    HundeschuleRequiredProcess first =
+        HundeschuleRequiredProcess__new(11, true, &bstr("/first"), &empty_bstr(), &empty_bstr());
+    HundeschuleRequiredProcess last =
+        HundeschuleRequiredProcess__new(42, true, &bstr("/last"), &empty_bstr(), &empty_bstr());
+    match_result(HundeschuleRequiredProcesses__push(&processes, first),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(HundeschuleRequiredProcesses__push(&processes, last),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_optional(Hundeschule__find_required_process(&processes, 99),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_optional(
+        Hundeschule__find_required_process(&processes, 42),
+        some(process)
+        {
+            TEST_ASSERT_TRUE(BString__equals(&process->path, &bstr("/last")));
+            process->pid = 84;
+        },
+        none_test_fail()
+    );
+    match_optional(Hundeschule__find_required_process(&processes, 42),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_optional(
+        Hundeschule__find_required_process(&processes, 84),
+        some(process) { TEST_ASSERT_TRUE(BString__equals(&process->path, &bstr("/last"))); },
+        none_test_fail()
+    );
+    match_optional(
+        Hundeschule__find_required_process(&processes, 11),
+        some(process) { TEST_ASSERT_TRUE(BString__equals(&process->path, &bstr("/first"))); },
+        none_test_fail()
+    );
+}
+
+void test_hundeschule_next_token_handles_whitespace_and_exhaustion(void)
+{
+    BString remaining = bstr(" \tdriver \t /sbin/demo  once \r ");
+    match_optional(
+        Hundeschule__next_token(&remaining),
+        some(token) { TEST_ASSERT_TRUE(BString__equals(&token, &bstr("driver"))); },
+        none_test_fail()
+    );
+    match_optional(
+        Hundeschule__next_token(&remaining),
+        some(token) { TEST_ASSERT_TRUE(BString__equals(&token, &bstr("/sbin/demo"))); },
+        none_test_fail()
+    );
+    match_optional(
+        Hundeschule__next_token(&remaining),
+        some(token) { TEST_ASSERT_TRUE(BString__equals(&token, &bstr("once"))); },
+        none_test_fail()
+    );
+    match_optional(Hundeschule__next_token(&remaining),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    TEST_ASSERT_TRUE(BString__is_empty(&remaining));
+    remaining = bstr(" \t\r ");
+    match_optional(Hundeschule__next_token(&remaining),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    TEST_ASSERT_TRUE(BString__is_empty(&remaining));
 }

@@ -51,33 +51,27 @@ static void VideoTermTest__set_input(char * input)
 
 static void build_fake_sysinfo(void)
 {
-    snprintf(
-        fake_sysinfo,
-        sizeof(fake_sysinfo),
-    "framebuffer.present=1\n"
-    "framebuffer.physical_base=0x3e000000\n"
-    "framebuffer.physical_size=0x20000\n"
-    "framebuffer.physical_size_human=128 KiB\n"
-    "framebuffer.width=512\n"
-    "framebuffer.height=64\n"
-    "framebuffer.pixels_per_scanline=512\n"
-    "framebuffer.pixel_format=%u\n"
-    "framebuffer.red_mask=0x%llx\n"
-    "framebuffer.green_mask=0x%llx\n"
-    "framebuffer.blue_mask=0x%llx\n"
-    "framebuffer.reserved_mask=0x%llx\n",
-        (unsigned int) fake_pixel_format,
-        (unsigned long long) fake_red_mask,
-        (unsigned long long) fake_green_mask,
-        (unsigned long long) fake_blue_mask,
-        (unsigned long long) fake_reserved_mask);
+    snprintf(fake_sysinfo, sizeof(fake_sysinfo),
+             "framebuffer.present=1\n"
+             "framebuffer.physical_base=0x3e000000\n"
+             "framebuffer.physical_size=0x20000\n"
+             "framebuffer.physical_size_human=128 KiB\n"
+             "framebuffer.width=512\n"
+             "framebuffer.height=64\n"
+             "framebuffer.pixels_per_scanline=512\n"
+             "framebuffer.pixel_format=%u\n"
+             "framebuffer.red_mask=0x%llx\n"
+             "framebuffer.green_mask=0x%llx\n"
+             "framebuffer.blue_mask=0x%llx\n"
+             "framebuffer.reserved_mask=0x%llx\n",
+             (unsigned int)fake_pixel_format, (unsigned long long)fake_red_mask, (unsigned long long)fake_green_mask,
+             (unsigned long long)fake_blue_mask, (unsigned long long)fake_reserved_mask);
 }
 
-static const uint8_t fake_font_data[] =
-    "0020:00000000000000000000000000000000\n"
-    "0061:0000000000003C42023E4242463A0000\n"
-    "01F600:000003E00C181004200226324631400140014FF92AAA26B213E40C1803E00000\n"
-    "0FFFD:000000007E42425A5A4242427E000000\n";
+static const uint8_t fake_font_data[] = "0020:00000000000000000000000000000000\n"
+                                        "0061:0000000000003C42023E4242463A0000\n"
+                                        "01F600:000003E00C181004200226324631400140014FF92AAA26B213E40C1803E00000\n"
+                                        "0FFFD:000000007E42425A5A4242427E000000\n";
 
 static uint8_t fake_emoji_atlas[16 * 1024 * 1024];
 
@@ -88,22 +82,22 @@ static uint8_t fake_emoji_atlas[16 * 1024 * 1024];
 #define VIDEO_TERM_EMOJI_ATLAS_END (fake_emoji_atlas + sizeof(fake_emoji_atlas))
 #include "../../../../user/drivers/video_term/main.c"
 
-static void VideoTermTest__seed_emoji_pixel(
-    uint32_t codepoint,
-    uint64_t x,
-    uint64_t y,
-    uint8_t red,
-    uint8_t green,
-    uint8_t blue)
+static void VideoTermTest__seed_emoji_pixel(uint32_t codepoint, uint64_t x, uint64_t y, uint8_t red, uint8_t green,
+                                            uint8_t blue)
 {
-    uint32_t codepoints[1] = { codepoint };
-    match_optional(VideoTermEmojiEntryPtr, VideoTerm__find_emoji(codepoints, 1), some(emoji) {
+    uint32_t codepoints[1] = {codepoint};
+    match_optional(
+        VideoTerm__find_emoji(codepoints, 1),
+        some(emoji)
+        {
             uint64_t emoji_pixel = emoji->atlas_offset + (((y * VIDEO_TERM_EMOJI_SIZE) + x) * 4);
             fake_emoji_atlas[emoji_pixel] = red;
             fake_emoji_atlas[emoji_pixel + 1] = green;
             fake_emoji_atlas[emoji_pixel + 2] = blue;
             fake_emoji_atlas[emoji_pixel + 3] = 0xff;
-        }, none() { TEST_FAIL_MESSAGE("generated emoji index should include expected codepoint"); });
+        },
+        none() { TEST_FAIL_MESSAGE("generated emoji index should include expected codepoint"); }
+    );
 }
 
 void setUp(void)
@@ -130,8 +124,7 @@ void setUp(void)
         fake_framebuffer[i] = 0xffffffffU;
     }
     for (uint64_t i = FRAMEBUFFER_SIZE / sizeof(uint32_t);
-         i < (FRAMEBUFFER_SIZE / sizeof(uint32_t)) + FRAMEBUFFER_GUARD_WORDS;
-         i++)
+         i < (FRAMEBUFFER_SIZE / sizeof(uint32_t)) + FRAMEBUFFER_GUARD_WORDS; i++)
     {
         fake_framebuffer[i] = 0xfeedfaceU;
     }
@@ -190,7 +183,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size)
         buf[index] = fake_sysinfo[index];
         index++;
     }
-    return (ByteCount) index;
+    return (ByteCount)index;
 }
 
 IOStatus close(IOHandle handle)
@@ -205,13 +198,22 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     TEST_ASSERT_EQUAL_INT64(7, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     DynString sysinfo;
-    match_result(DynStringCode, DynString__init(&sysinfo, 128), success_do_nothing(), error(code, message) { return None(DynString); });
+    match_result(
+        DynString__init(&sysinfo, 128),
+        success_do_nothing(),
+        error(code, message) { return None(DynString); }
+    );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
-        match_result(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]), success_do_nothing(), error(code, message) {
+        match_result(
+            DynString__push_char(&sysinfo, fake_sysinfo[index]),
+            success_do_nothing(),
+            error(code, message)
+            {
                 DynString__dispose(&sysinfo);
                 return None(DynString);
-            });
+            }
+        );
     }
     return Some(DynString, sysinfo);
 }
@@ -228,7 +230,7 @@ uint64_t device_ptr(ServiceMappedMemoryPtr memory)
 
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
-    return (void *) ((uint64_t) memory->driver_address + offset);
+    return (void *)((uint64_t)memory->driver_address + offset);
 }
 
 uint64_t device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
@@ -415,7 +417,8 @@ void test_video_term_main_draws_hundeschau_banner_dog_emojis(void)
     TEST_ASSERT_TRUE(fake_data_consumed);
     TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);
     TEST_ASSERT_EQUAL_UINT32(0x00214365U, fake_framebuffer[(1 * FRAMEBUFFER_STRIDE) + 6]);
-    TEST_ASSERT_EQUAL_UINT32(0x00876543U, fake_framebuffer[(1 * FRAMEBUFFER_STRIDE) + (32 * VIDEO_TERM_COLUMN_WIDTH) + 6]);
+    TEST_ASSERT_EQUAL_UINT32(0x00876543U,
+                             fake_framebuffer[(1 * FRAMEBUFFER_STRIDE) + (32 * VIDEO_TERM_COLUMN_WIDTH) + 6]);
 }
 
 void test_video_term_main_draws_plain_digits_with_text_font(void)
@@ -496,34 +499,29 @@ void test_video_term_main_handles_shell_cursor_left_sequence(void)
 void test_video_term_main_bounds_writes_to_mapped_framebuffer_size(void)
 {
     fake_io_buffer = "a\n"
-        "a\n"
-        "a\n"
-        "a";
+                     "a\n"
+                     "a\n"
+                     "a";
     fake_io_buffer_size = 7;
     fake_framebuffer_mapping.size = FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT * sizeof(uint32_t);
     fake_sysinfo[0] = '\0';
-    snprintf(
-        fake_sysinfo,
-        sizeof(fake_sysinfo),
-        "framebuffer.present=1\n"
-        "framebuffer.physical_base=0x3e000000\n"
-        "framebuffer.physical_size=0x%llx\n"
-        "framebuffer.physical_size_human=128 KiB\n"
-        "framebuffer.width=%llu\n"
-        "framebuffer.height=%llu\n"
-        "framebuffer.pixels_per_scanline=%llu\n"
-        "framebuffer.pixel_format=%u\n",
-        (unsigned long long) fake_framebuffer_mapping.size,
-        (unsigned long long) FRAMEBUFFER_WIDTH,
-        (unsigned long long) FRAMEBUFFER_HEIGHT,
-        (unsigned long long) (FRAMEBUFFER_WIDTH + 64ULL),
-        (unsigned int) FRAMEBUFFER_CONFIG_PIXEL_FORMAT_RGB_RESERVED_8BIT_PER_COLOR);
+    snprintf(fake_sysinfo, sizeof(fake_sysinfo),
+             "framebuffer.present=1\n"
+             "framebuffer.physical_base=0x3e000000\n"
+             "framebuffer.physical_size=0x%llx\n"
+             "framebuffer.physical_size_human=128 KiB\n"
+             "framebuffer.width=%llu\n"
+             "framebuffer.height=%llu\n"
+             "framebuffer.pixels_per_scanline=%llu\n"
+             "framebuffer.pixel_format=%u\n",
+             (unsigned long long)fake_framebuffer_mapping.size, (unsigned long long)FRAMEBUFFER_WIDTH,
+             (unsigned long long)FRAMEBUFFER_HEIGHT, (unsigned long long)(FRAMEBUFFER_WIDTH + 64ULL),
+             (unsigned int)FRAMEBUFFER_CONFIG_PIXEL_FORMAT_RGB_RESERVED_8BIT_PER_COLOR);
 
     TEST_ASSERT_EQUAL_INT(0, video_term_main_under_test());
 
     for (uint64_t i = FRAMEBUFFER_SIZE / sizeof(uint32_t);
-         i < (FRAMEBUFFER_SIZE / sizeof(uint32_t)) + FRAMEBUFFER_GUARD_WORDS;
-         i++)
+         i < (FRAMEBUFFER_SIZE / sizeof(uint32_t)) + FRAMEBUFFER_GUARD_WORDS; i++)
     {
         TEST_ASSERT_EQUAL_UINT32(0xfeedfaceU, fake_framebuffer[i]);
     }
@@ -539,8 +537,7 @@ void test_video_term_main_handles_repeated_shell_redraws(void)
     TEST_ASSERT_TRUE(VideoTermTest__cell_has_pixel(0, 0x00d8d8d8U));
     TEST_ASSERT_TRUE(VideoTermTest__cell_has_pixel(59, 0x00d8d8d8U));
     for (uint64_t i = FRAMEBUFFER_SIZE / sizeof(uint32_t);
-         i < (FRAMEBUFFER_SIZE / sizeof(uint32_t)) + FRAMEBUFFER_GUARD_WORDS;
-         i++)
+         i < (FRAMEBUFFER_SIZE / sizeof(uint32_t)) + FRAMEBUFFER_GUARD_WORDS; i++)
     {
         TEST_ASSERT_EQUAL_UINT32(0xfeedfaceU, fake_framebuffer[i]);
     }

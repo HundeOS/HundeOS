@@ -22,7 +22,6 @@ typedef Scheduler * SchedulerPtr;
 
 typedef IOContext * IOContextPtr;
 
-
 FixedArrayDefine(IOHandle, MAX_HANDLES, PIDHandles, SimpleEquals(uint64_t));
 typedef PIDHandles * PIDHandlesPtr;
 OptionalDef(PIDHandles);
@@ -50,8 +49,7 @@ typedef struct IOSubsystem
     Optional(FilesystemPtr) root_filesystem;
 
     mutex_t lock;
-}
-IOSubsystem;
+} IOSubsystem;
 
 typedef IOSubsystem * IOSubsystemPtr;
 
@@ -66,44 +64,33 @@ ResultDef(DirectoryEntryCount);
 ResultDef(IOStatus);
 #endif
 
-Result(DeviceHandle) IOSubsystem__register_device(
-    IOSubsystemPtr self, ConstBStringPtr path, IOPtr device, IOStatePtr device_state
-);
+Result(DeviceHandle)
+    IOSubsystem__register_device(IOSubsystemPtr self, ConstBStringPtr path, IOPtr device, IOStatePtr device_state);
 Optional(DeviceRegistrationPtr) IOSubsystem__find_registered_device(IOSubsystemPtr self, ConstBStringPtr path);
 
-Result(IOHandle) IOSubsystem__record_open_handle(
-    IOSubsystemPtr self, IOContextPtr context, ConstBStringPtr path, IOInternalHandle handle
-);
+Result(IOHandle) IOSubsystem__record_open_handle(IOSubsystemPtr self, IOContextPtr context, ConstBStringPtr path,
+                                                 IOInternalHandle handle);
 Result(IOHandle) IOSubsystem__open(IOSubsystemPtr self, IOContextPtr context, ConstBStringPtr path, Flags flags);
 Result(IOHandle) IOSubsystem__accept(IOSubsystemPtr self, IOContextPtr context);
 Result(IOHandle) IOSubsystem__close(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__read(IOSubsystemPtr self, IOContextPtr context);
 Result(ByteCount) IOSubsystem__write(IOSubsystemPtr self, IOContextPtr context);
-Result(IOHandle) IOSubsystem__server_register(
-    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, ConstBStringPtr path, IOServerRole role
-);
-Result(IOStatus) IOSubsystem__server_get_buffer(
-    IOSubsystemPtr self, IOContextPtr context, ProcessPtr process, IOServerBufferPtr target
-);
-Result(IOStatus) IOSubsystem__server_data_available(
-    IOSubsystemPtr self, IOContextPtr context, size_t byte_count
-);
-Result(IOStatus) IOSubsystem__server_data_consumed(
-    IOSubsystemPtr self, IOContextPtr context, size_t byte_count
-);
+Result(IOHandle) IOSubsystem__server_register(IOSubsystemPtr self, IOContextPtr context, ProcessPtr process,
+                                              ConstBStringPtr path, IOServerRole role);
+Result(IOStatus) IOSubsystem__server_get_buffer(IOSubsystemPtr self, IOContextPtr context, ProcessPtr process,
+                                                IOServerBufferPtr target);
+Result(IOStatus) IOSubsystem__server_data_available(IOSubsystemPtr self, IOContextPtr context, size_t byte_count);
+Result(IOStatus) IOSubsystem__server_data_consumed(IOSubsystemPtr self, IOContextPtr context, size_t byte_count);
 Result(IOStatus) IOSubsystem__server_eof(IOSubsystemPtr self, IOContextPtr context);
-Result(DirectoryEntryCount) IOSubsystem__list_dir(
-    IOSubsystemPtr self, ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries
-);
-Result(CollectionCode) IOSubsystem__append_dev_filesystem_nodes(
-    IOSubsystemPtr self, FilesystemPtr filesystem, FilesystemNodes * target
-);
+Result(DirectoryEntryCount)
+    IOSubsystem__list_dir(IOSubsystemPtr self, ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries);
+Result(CollectionCode)
+    IOSubsystem__append_dev_filesystem_nodes(IOSubsystemPtr self, FilesystemPtr filesystem, FilesystemNodes * target);
 Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, ConstBStringPtr path);
 Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, ConstBStringPtr path, Flags flags);
 Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, ConstBStringPtr source_path, ConstBStringPtr target_path);
-Result(IOStatus) IOSubsystem__mount(
-    IOSubsystemPtr self, ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
-);
+Result(IOStatus) IOSubsystem__mount(IOSubsystemPtr self, ConstBStringPtr device_path, ConstBStringPtr filesystem_type,
+                                    ConstBStringPtr mountpoint);
 
 Result(IOStatus) IOSubsystem__data_arrived(IOSubsystemPtr self, IOContextPtr parked_context);
 void IOSubsystem__message_received(KernelListenerPtr listener, MessagePtr message);
@@ -117,30 +104,24 @@ IOSubsystemPtr IOSubsystem__heap_new(SchedulerPtr scheduler, MessageBrokerPtr me
 
 IOInternalHandle device_internal_handle(IOHandle handle);
 
-#define NEW_IO_SUBSYSTEM(sched, broker) \
-    (IOSubsystem) { \
-        .devices = EmptyArray(IODevicesArray), \
-        .handles = EmptyMap(IOHandlesMap), \
-        .scheduler = sched, \
-        .process_handles = EmptyMap(ProcessHandleMap),\
-        .read_server_processes = EmptyMap(IOServerProcessMap),\
-        .write_server_processes = EmptyMap(IOServerProcessMap),\
-        .server_roles = EmptyMap(IOServerRoleMap),\
-        .root_filesystem = None(FilesystemPtr),\
-        .lock = MUTEX_INIT,\
-        .message_broker = broker,\
-        \
+#define NEW_IO_SUBSYSTEM(sched, broker)                                                                                \
+    (IOSubsystem)                                                                                                      \
+    {                                                                                                                  \
+        .devices = EmptyArray(IODevicesArray), .handles = EmptyMap(IOHandlesMap), .scheduler = sched,                  \
+        .process_handles = EmptyMap(ProcessHandleMap), .read_server_processes = EmptyMap(IOServerProcessMap),          \
+        .write_server_processes = EmptyMap(IOServerProcessMap), .server_roles = EmptyMap(IOServerRoleMap),             \
+        .root_filesystem = None(FilesystemPtr), .lock = MUTEX_INIT, .message_broker = broker,                          \
     }
 
-#define IO_SUBSYSTEM_INIT(subsystem, sched) \
-        ArrayInit(IODevicesArray, subsystem.devices); \
-        MapInit(IOHandlesMap, subsystem.handles); \
-        subsystem.scheduler = sched; \
-        subsystem.lock = MUTEX_INIT;\
-        MapInit(ProcessHandleMap, subsystem.process_handles);\
-        MapInit(IOServerProcessMap, subsystem.read_server_processes);\
-        MapInit(IOServerProcessMap, subsystem.write_server_processes);\
-        MapInit(IOServerRoleMap, subsystem.server_roles);\
-        subsystem.root_filesystem = None(FilesystemPtr);\
+#define IO_SUBSYSTEM_INIT(subsystem, sched)                                                                            \
+    ArrayInit(IODevicesArray, subsystem.devices);                                                                      \
+    MapInit(IOHandlesMap, subsystem.handles);                                                                          \
+    subsystem.scheduler = sched;                                                                                       \
+    subsystem.lock = MUTEX_INIT;                                                                                       \
+    MapInit(ProcessHandleMap, subsystem.process_handles);                                                              \
+    MapInit(IOServerProcessMap, subsystem.read_server_processes);                                                      \
+    MapInit(IOServerProcessMap, subsystem.write_server_processes);                                                     \
+    MapInit(IOServerRoleMap, subsystem.server_roles);                                                                  \
+    subsystem.root_filesystem = None(FilesystemPtr);
 
 #endif

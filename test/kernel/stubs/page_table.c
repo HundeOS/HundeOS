@@ -11,12 +11,12 @@ LinkedListBodyDefine(ProcessPageTablePages);
 
 bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other)
 {
-    return self->valid == other->valid &&
-        self->virtual_addr == other->virtual_addr &&
-        self->phys_addr == other->phys_addr;
+    return self->valid == other->valid && self->virtual_addr == other->virtual_addr &&
+           self->phys_addr == other->phys_addr;
 }
 
-typedef struct MapRequest {
+typedef struct MapRequest
+{
     UserAddress address;
     size_t size;
 } MapRequest;
@@ -30,7 +30,7 @@ bool MapRequest__equals(MapRequestPtr self, MapRequestPtr other)
 
 static MapRequest MapRequest__new(UserAddress address, size_t size)
 {
-    return (MapRequest) {
+    return (MapRequest){
         .address = address,
         .size = size,
     };
@@ -47,7 +47,7 @@ static bool MapRequest__is_covered_by_unmap(MapRequestPtr mapped_address, Addres
 }
 
 OptionalDef(MapRequest);
-FixedArrayDefine(MapRequest, 1024, MapRequestArray, (EqualFunction) MapRequest__equals);
+FixedArrayDefine(MapRequest, 1024, MapRequestArray, (EqualFunction)MapRequest__equals);
 FixedArrayBodyDefine(MapRequestArray);
 
 typedef struct PageTable
@@ -57,7 +57,8 @@ typedef struct PageTable
 
 static Result(KAllocCode) ProcessPageTable__record_page(ProcessPageTablePtr self, KernelAddress page)
 {
-    match_result(CollectionCode, ProcessPageTablePages__push(&self->pages, page),
+    match_result(
+        ProcessPageTablePages__push(&self->pages, page),
         success(_) { return Success(KAllocCode, KALLOC_OK); },
         error(code, message) { return Error(KAllocCode, message, code); }
     );
@@ -70,12 +71,13 @@ Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel)
     PageTablePtr table = v_ptr(Kernel__alloc(sizeof(PageTable)), PageTable);
     table->mapped_addresses = EmptyArray(MapRequestArray);
 
-    ProcessPageTable process_page_table = (ProcessPageTable) {
+    ProcessPageTable process_page_table = (ProcessPageTable){
         .root = KERNEL_ADDR(addr(table), addr(table)),
         .pages = ProcessPageTablePages__new(),
     };
 
-    match_result(KAllocCode, ProcessPageTable__record_page(&process_page_table, process_page_table.root),
+    match_result(
+        ProcessPageTable__record_page(&process_page_table, process_page_table.root),
         success_do_nothing(),
         error(code, message) { return Error(ProcessPageTable, message, code); }
     );
@@ -100,15 +102,16 @@ size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
 
 Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self)
 {
-    for_each_ll(ProcessPageTablePages, self->pages, page,
-    {
-        match_result(KAllocCode, Kernel__free(page.virtual_addr),
+    for_each_ll(ProcessPageTablePages, self->pages, page, {
+        match_result(
+            Kernel__free(page.virtual_addr),
             success_do_nothing(),
             error(code, message) { return Error(KAllocCode, message, code); }
         );
     });
 
-    match_result(CollectionCode, ProcessPageTablePages__dispose(&self->pages),
+    match_result(
+        ProcessPageTablePages__dispose(&self->pages),
         success_do_nothing(),
         error(code, message) { return Error(KAllocCode, message, code); }
     );
@@ -130,8 +133,7 @@ void PageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress
 void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
 {
     PageTablePtr root = ProcessPageTable__root_table(self);
-    for_each_fa(MapRequestArray, root->mapped_addresses, i, mapped_address,
-    {
+    for_each_fa(MapRequestArray, root->mapped_addresses, i, mapped_address, {
         if (MapRequest__is_covered_by_unmap(&mapped_address, virtual_address, size))
         {
             MapRequestArray__remove(&root->mapped_addresses, mapped_address);
@@ -140,22 +142,23 @@ void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtua
     });
 }
 
-bool check_address_mapped(PageTable *page_table, Address virtual_address, bool read, bool write, bool execute, size_t size)
+bool check_address_mapped(PageTable * page_table, Address virtual_address, bool read, bool write, bool execute,
+                          size_t size)
 {
-    for_each_fa(MapRequestArray, page_table->mapped_addresses, i, mapped_address,
-    {
+    for_each_fa(MapRequestArray, page_table->mapped_addresses, i, mapped_address, {
         UserAddress mapped = mapped_address.address;
-        __d_printf(PROGRESS,
+        __d_printf(
+            PROGRESS,
             "Checking %i mapped address calls vaddr=%p mapped=%p size=%i expected_size=%i rwx=%i%i%i expected rwx=%i%i%i\n",
-            i, virtual_address, mapped.virtual_addr, mapped_address.size, size,
-            mapped_address.address.read, mapped_address.address.write, mapped_address.address.execute,
-            read, write, execute);
+            i, virtual_address, mapped.virtual_addr, mapped_address.size, size, mapped_address.address.read,
+            mapped_address.address.write, mapped_address.address.execute, read, write, execute);
         bool match = mapped.virtual_addr == virtual_address;
         match &= mapped.read == read;
         match &= mapped.write == write;
         match &= mapped.execute == execute;
         match &= mapped_address.size == size;
-        if (match) {
+        if (match)
+        {
             return true;
         }
     });

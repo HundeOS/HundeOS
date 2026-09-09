@@ -27,7 +27,7 @@ void setUp(void)
     requested_path[0] = '\0';
     for (uint64_t i = 0; i < 4; i++)
     {
-        fake_entries[i] = (DirectoryEntry) { 0 };
+        fake_entries[i] = (DirectoryEntry){0};
     }
 }
 
@@ -50,7 +50,7 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 {
     TEST_ASSERT_EQUAL(IO_CALL, call);
     TEST_ASSERT_EQUAL(IO_LIST_DIR, arg1);
-    IOListDirRequestPtr request = (IOListDirRequestPtr) arg2;
+    IOListDirRequestPtr request = (IOListDirRequestPtr)arg2;
     copy_text(requested_path, BString__cstr(&request->path), sizeof(requested_path));
 
     if (fake_result < 0)
@@ -71,7 +71,7 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
         entries[i] = fake_entries[i];
     }
 
-    return (Anything) count;
+    return (Anything)count;
 }
 
 void IO__print(ConstBStringPtr message)
@@ -94,9 +94,9 @@ int IO__printf(ConstBStringPtr format, ...)
     StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
-        output_position += (uint64_t) written;
+        output_position += (uint64_t)written;
     }
-    return (int) written;
+    return (int)written;
 }
 
 void test_ls_prints_entries_for_directory(void)
@@ -106,7 +106,7 @@ void test_ls_prints_entries_for_directory(void)
     fake_entries[0] = DirectoryEntry__new(0, 0, 0, 0, &one);
     fake_entries[1] = DirectoryEntry__new(0, 0, 0, 0, &bstr("two"));
 
-    char * argv[] = { "ls", "/mnt" };
+    char * argv[] = {"ls", "/mnt"};
 
     TEST_ASSERT_EQUAL_INT(0, ls_main_under_test(2, argv));
     TEST_ASSERT_EQUAL_STRING("/mnt", requested_path);
@@ -116,7 +116,7 @@ void test_ls_prints_entries_for_directory(void)
 void test_ls_prints_named_io_error(void)
 {
     fake_result = IO_INVALID_PATH;
-    char * argv[] = { "ls", "/mnt/fs1" };
+    char * argv[] = {"ls", "/mnt/fs1"};
 
     TEST_ASSERT_EQUAL_INT(1, ls_main_under_test(2, argv));
     TEST_ASSERT_EQUAL_STRING("/mnt/fs1", requested_path);
@@ -128,14 +128,10 @@ void test_ls_long_format_prints_mode_owner_group_and_name(void)
     fake_count = 1;
     BString drivers = bstr("drivers");
     fake_entries[0] = DirectoryEntry__new(
-        0,
-        PROCESS_USER_HUND,
-        PROCESS_GROUP_HUND,
-        IO_MODE_TYPE_DIR | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC,
-        &drivers
-    );
+        0, PROCESS_USER_HUND, PROCESS_GROUP_HUND,
+        IO_MODE_TYPE_DIR | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC, &drivers);
 
-    char * argv[] = { "ls", "-l", "/sbin" };
+    char * argv[] = {"ls", "-l", "/sbin"};
 
     TEST_ASSERT_EQUAL_INT(0, ls_main_under_test(3, argv));
     TEST_ASSERT_EQUAL_STRING("/sbin", requested_path);
@@ -150,14 +146,14 @@ void test_ls_a_hides_dot_entries_unless_requested(void)
     fake_entries[0] = DirectoryEntry__new(0, 0, 0, 0, &hidden);
     fake_entries[1] = DirectoryEntry__new(0, 0, 0, 0, &shown);
 
-    char * argv[] = { "ls", "/" };
+    char * argv[] = {"ls", "/"};
     TEST_ASSERT_EQUAL_INT(0, ls_main_under_test(2, argv));
     TEST_ASSERT_EQUAL_STRING("shown\n", output);
 
     output_position = 0;
     output[0] = '\0';
 
-    char * all_argv[] = { "ls", "-a", "/" };
+    char * all_argv[] = {"ls", "-a", "/"};
     TEST_ASSERT_EQUAL_INT(0, ls_main_under_test(3, all_argv));
     TEST_ASSERT_EQUAL_STRING(".hidden\nshown\n", output);
 }

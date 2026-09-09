@@ -20,10 +20,11 @@ static bool Kill__matches_signal_name(ConstBStringPtr value, ConstBStringPtr exp
 
 static bool Kill__parse_signal_spec(ConstBStringPtr value, ProcessSignal * signal)
 {
-    match_optional(uint64_t, BString__parse_uint64(value),
+    match_optional(
+        BString__parse_uint64(value),
         some(numeric_signal)
         {
-            *signal = (ProcessSignal) numeric_signal;
+            *signal = (ProcessSignal)numeric_signal;
             return true;
         },
         none_do_nothing()
@@ -54,16 +55,16 @@ static const char * Kill__signal_result_string(ProcessSignalResult result)
 {
     switch (result)
     {
-        case PROCESS_SIGNAL_OK:
-            return "PROCESS_SIGNAL_OK";
-        case PROCESS_SIGNAL_INVALID_ARGUMENT:
-            return "PROCESS_SIGNAL_INVALID_ARGUMENT";
-        case PROCESS_SIGNAL_PROCESS_NOT_FOUND:
-            return "PROCESS_SIGNAL_PROCESS_NOT_FOUND";
-        case PROCESS_SIGNAL_UNSUPPORTED:
-            return "PROCESS_SIGNAL_UNSUPPORTED";
-        default:
-            return "PROCESS_SIGNAL_UNKNOWN";
+    case PROCESS_SIGNAL_OK:
+        return "PROCESS_SIGNAL_OK";
+    case PROCESS_SIGNAL_INVALID_ARGUMENT:
+        return "PROCESS_SIGNAL_INVALID_ARGUMENT";
+    case PROCESS_SIGNAL_PROCESS_NOT_FOUND:
+        return "PROCESS_SIGNAL_PROCESS_NOT_FOUND";
+    case PROCESS_SIGNAL_UNSUPPORTED:
+        return "PROCESS_SIGNAL_UNSUPPORTED";
+    default:
+        return "PROCESS_SIGNAL_UNKNOWN";
     }
 }
 
@@ -95,13 +96,14 @@ int main(int argc, char ** argv)
         return 1;
     }
 
-    match_optional(uint64_t, BString__parse_uint64(pid_arg),
+    match_optional(
+        BString__parse_uint64(pid_arg),
         some(pid)
         {
             ProcessSignalResult result = kill_process(pid, signal);
             if (result != PROCESS_SIGNAL_OK)
             {
-                IO__printf(&bstr("kill: error %s (%i)\n"), Kill__signal_result_string(result), (int) result);
+                IO__printf(&bstr("kill: error %s (%i)\n"), Kill__signal_result_string(result), (int)result);
                 return 1;
             }
 

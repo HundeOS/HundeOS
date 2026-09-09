@@ -19,8 +19,7 @@
 typedef struct SocketRouterConnection
 {
     IOHandle client;
-}
-SocketRouterConnection;
+} SocketRouterConnection;
 
 typedef SocketRouterConnection * SocketRouterConnectionPtr;
 
@@ -28,7 +27,7 @@ OptionalDef(SocketRouterConnection);
 
 static SocketRouterConnection SocketRouterConnection__new(IOHandle client)
 {
-    return (SocketRouterConnection) {
+    return (SocketRouterConnection){
         .client = client,
     };
 }
@@ -38,12 +37,8 @@ static bool SocketRouterConnection__equals(SocketRouterConnectionPtr self, Socke
     return self->client == other->client;
 }
 
-FixedArrayDefine(
-    SocketRouterConnection,
-    SOCKET_ROUTER_MAX_PENDING_CONNECTIONS,
-    SocketRouterConnections,
-    (EqualFunction) SocketRouterConnection__equals
-);
+FixedArrayDefine(SocketRouterConnection, SOCKET_ROUTER_MAX_PENDING_CONNECTIONS, SocketRouterConnections,
+                 (EqualFunction)SocketRouterConnection__equals);
 FixedArrayBodyDefine(SocketRouterConnections);
 
 typedef struct SocketRouterEndpoint
@@ -52,8 +47,7 @@ typedef struct SocketRouterEndpoint
     IOHandle listener;
     uint64_t backlog;
     SocketRouterConnections pending;
-}
-SocketRouterEndpoint;
+} SocketRouterEndpoint;
 
 typedef SocketRouterEndpoint * SocketRouterEndpointPtr;
 
@@ -61,7 +55,7 @@ OptionalDef(SocketRouterEndpoint);
 
 static SocketRouterEndpoint SocketRouterEndpoint__new(ConstBStringPtr uri, IOHandle listener, uint64_t backlog)
 {
-    return (SocketRouterEndpoint) {
+    return (SocketRouterEndpoint){
         .uri = *uri,
         .listener = listener,
         .backlog = backlog,
@@ -74,19 +68,14 @@ static bool SocketRouterEndpoint__equals(SocketRouterEndpointPtr self, SocketRou
     return BString__equals(&self->uri, &other->uri);
 }
 
-FixedArrayDefine(
-    SocketRouterEndpoint,
-    SOCKET_ROUTER_MAX_ENDPOINTS,
-    SocketRouterEndpoints,
-    (EqualFunction) SocketRouterEndpoint__equals
-);
+FixedArrayDefine(SocketRouterEndpoint, SOCKET_ROUTER_MAX_ENDPOINTS, SocketRouterEndpoints,
+                 (EqualFunction)SocketRouterEndpoint__equals);
 FixedArrayBodyDefine(SocketRouterEndpoints);
 
 typedef struct SocketRouter
 {
     SocketRouterEndpoints endpoints;
-}
-SocketRouter;
+} SocketRouter;
 
 typedef SocketRouter * SocketRouterPtr;
 
@@ -104,49 +93,46 @@ static BString socket_router_ready_publish_failed = bstr("socket router ready pu
 
 static SocketRouter SocketRouter__new(void)
 {
-    return (SocketRouter) {
+    return (SocketRouter){
         .endpoints = SocketRouterEndpoints__new(),
     };
 }
 
 static bool SocketRouter__uri_valid(ConstBStringPtr uri)
 {
-    return BString__starts_with(uri, &bstr(IO_SOCKET_SCHEME)) && BString__length(uri) > BString__length(&bstr(IO_SOCKET_SCHEME));
+    return BString__starts_with(uri, &bstr(IO_SOCKET_SCHEME)) &&
+           BString__length(uri) > BString__length(&bstr(IO_SOCKET_SCHEME));
 }
 
 static bool SocketRouterEndpoint__uri_matches(SocketRouterEndpointPtr endpoint, void * raw_uri)
 {
-    ConstBStringPtr uri = (ConstBStringPtr) raw_uri;
+    ConstBStringPtr uri = (ConstBStringPtr)raw_uri;
     return BString__equals(&endpoint->uri, uri);
 }
 
 static bool SocketRouterEndpoint__listener_matches(SocketRouterEndpointPtr endpoint, void * raw_listener)
 {
-    IOHandle * listener = (IOHandle *) raw_listener;
+    IOHandle * listener = (IOHandle *)raw_listener;
     return endpoint->listener == *listener;
 }
 
-static Result(IOSocketStatus) SocketRouter__listen(
-    SocketRouterPtr self,
-    ConstBStringPtr uri,
-    IOHandle listener,
-    uint64_t backlog
-)
+static Result(IOSocketStatus)
+    SocketRouter__listen(SocketRouterPtr self, ConstBStringPtr uri, IOHandle listener, uint64_t backlog)
 {
     if (!SocketRouter__uri_valid(uri))
     {
         return Error(IOSocketStatus, socket_router_invalid_uri, IO_SOCKET_INVALID_URI);
     }
 
-    match_find_result_ptr(SocketRouterEndpoints, SocketRouterEndpoints__find(
-        &self->endpoints, SocketRouterEndpoint__uri_matches, (void *) uri
-    ),
+    match_find_result_ptr(
+        SocketRouterEndpoints__find(&self->endpoints, SocketRouterEndpoint__uri_matches, (void *)uri),
         some(endpoint) { return Error(IOSocketStatus, socket_router_endpoint_exists, IO_SOCKET_ENDPOINT_EXISTS); },
         none_do_nothing()
     );
 
     SocketRouterEndpoint endpoint = SocketRouterEndpoint__new(uri, listener, backlog);
-    match_result(CollectionCode, SocketRouterEndpoints__push(&self->endpoints, endpoint),
+    match_result(
+        SocketRouterEndpoints__push(&self->endpoints, endpoint),
         success(_) { return Success(IOSocketStatus, IO_SOCKET_OK); },
         error(code, message) { return Error(IOSocketStatus, socket_router_endpoints_full, IO_SOCKET_ENDPOINTS_FULL); }
     );
@@ -154,15 +140,10 @@ static Result(IOSocketStatus) SocketRouter__listen(
     return Error(IOSocketStatus, socket_router_endpoints_full, IO_SOCKET_ENDPOINTS_FULL);
 }
 
-static Result(IOHandle) SocketRouter__connect(
-    SocketRouterPtr self,
-    ConstBStringPtr uri,
-    IOHandle client
-)
+static Result(IOHandle) SocketRouter__connect(SocketRouterPtr self, ConstBStringPtr uri, IOHandle client)
 {
-    match_find_result_ptr(SocketRouterEndpoints, SocketRouterEndpoints__find(
-        &self->endpoints, SocketRouterEndpoint__uri_matches, (void *) uri
-    ),
+    match_find_result_ptr(
+        SocketRouterEndpoints__find(&self->endpoints, SocketRouterEndpoint__uri_matches, (void *)uri),
         some(endpoint)
         {
             if (SocketRouterConnections__len(&endpoint->pending) >= endpoint->backlog)
@@ -170,9 +151,8 @@ static Result(IOHandle) SocketRouter__connect(
                 return Error(IOHandle, socket_router_backlog_full, IO_SOCKET_BACKLOG_FULL);
             }
 
-            match_result(CollectionCode, SocketRouterConnections__push(
-                &endpoint->pending, SocketRouterConnection__new(client)
-            ),
+            match_result(
+                SocketRouterConnections__push(&endpoint->pending, SocketRouterConnection__new(client)),
                 success(_) { return Success(IOHandle, endpoint->listener); },
                 error(code, message) { return Error(IOHandle, socket_router_backlog_full, IO_SOCKET_BACKLOG_FULL); }
             );
@@ -185,14 +165,17 @@ static Result(IOHandle) SocketRouter__connect(
 
 static Result(IOHandle) SocketRouter__accept(SocketRouterPtr self, IOHandle listener)
 {
-    match_find_result_ptr(SocketRouterEndpoints, SocketRouterEndpoints__find(
-        &self->endpoints, SocketRouterEndpoint__listener_matches, &listener
-    ),
+    match_find_result_ptr(
+        SocketRouterEndpoints__find(&self->endpoints, SocketRouterEndpoint__listener_matches, &listener),
         some(endpoint)
         {
-            match_optional(SocketRouterConnection, SocketRouterConnections__pop(&endpoint->pending),
+            match_optional(
+                SocketRouterConnections__pop(&endpoint->pending),
                 some(connection) { return Success(IOHandle, connection.client); },
-                none() { return Error(IOHandle, socket_router_no_pending_connection, IO_SOCKET_NO_PENDING_CONNECTION); }
+                none()
+                {
+                    return Error(IOHandle, socket_router_no_pending_connection, IO_SOCKET_NO_PENDING_CONNECTION);
+                }
             );
         },
         none() { return Error(IOHandle, socket_router_endpoint_not_found, IO_SOCKET_NOT_LISTENER); }
@@ -201,27 +184,26 @@ static Result(IOHandle) SocketRouter__accept(SocketRouterPtr self, IOHandle list
     return Error(IOHandle, socket_router_endpoint_not_found, IO_SOCKET_NOT_LISTENER);
 }
 
-static Result(IOHandle) SocketRouter__handle_request(
-    SocketRouterPtr self,
-    IOSocketRouterRequestPtr request
-)
+static Result(IOHandle) SocketRouter__handle_request(SocketRouterPtr self, IOSocketRouterRequestPtr request)
 {
     switch (request->operation)
     {
-        case IO_SOCKET_ROUTER_LISTEN:
-            match_result(IOSocketStatus, SocketRouter__listen(self, &request->uri, request->handle, request->backlog),
-                success(status) { return Success(IOHandle, request->handle); },
-                error(code, message) { return Error(IOHandle, message, code); }
-            );
+    case IO_SOCKET_ROUTER_LISTEN:
+        match_result(
+            SocketRouter__listen(self, &request->uri, request->handle, request->backlog),
+            success(status) { return Success(IOHandle, request->handle); },
+            error(code, message) { return Error(IOHandle, message, code); }
+        );
 
-        case IO_SOCKET_ROUTER_CONNECT:
-            match_result(IOHandle, SocketRouter__connect(self, &request->uri, request->handle),
-                success(listener) { return Success(IOHandle, listener); },
-                error(code, message) { return Error(IOHandle, message, code); }
-            );
+    case IO_SOCKET_ROUTER_CONNECT:
+        match_result(
+            SocketRouter__connect(self, &request->uri, request->handle),
+            success(listener) { return Success(IOHandle, listener); },
+            error(code, message) { return Error(IOHandle, message, code); }
+        );
 
-        case IO_SOCKET_ROUTER_ACCEPT:
-            return SocketRouter__accept(self, request->handle);
+    case IO_SOCKET_ROUTER_ACCEPT:
+        return SocketRouter__accept(self, request->handle);
     }
 
     return Error(IOHandle, socket_router_invalid_uri, IO_SOCKET_INVALID_URI);
@@ -249,7 +231,7 @@ static Result(AsyncIOCode) SocketRouter__register_service(Anything service_conte
 
 static Result(FiberCode) SocketRouter__request_service(FiberPtr fiber, Anything service_context, ServiceEvent request)
 {
-    SocketRouterPtr router = (SocketRouterPtr) service_context;
+    SocketRouterPtr router = (SocketRouterPtr)service_context;
     uint64_t request_id = ServiceEvent__request_id(&request);
     IOSocketRouterRequest router_request;
     ServiceCode get_status = service_socket_get_request(request_id, &router_request);
@@ -258,7 +240,8 @@ static Result(FiberCode) SocketRouter__request_service(FiberPtr fiber, Anything 
         return Error(FiberCode, socket_router_endpoint_not_found, get_status);
     }
 
-    match_result(IOHandle, SocketRouter__handle_request(router, &router_request),
+    match_result(
+        SocketRouter__handle_request(router, &router_request),
         success(handle)
         {
             ServiceCode complete_status = service_socket_complete(request_id, IO_SOCKET_OK, handle);
@@ -270,7 +253,7 @@ static Result(FiberCode) SocketRouter__request_service(FiberPtr fiber, Anything 
         },
         error(code, message)
         {
-            ServiceCode complete_status = service_socket_complete(request_id, (IOSocketStatus) code, -1);
+            ServiceCode complete_status = service_socket_complete(request_id, (IOSocketStatus)code, -1);
             if (!service_ok(complete_status))
             {
                 return Error(FiberCode, message, complete_status);
@@ -286,12 +269,8 @@ int main(void)
 {
     SocketRouter router = SocketRouter__new();
     AsyncIO async_io;
-    match_result(AsyncIOCode, AsyncIO__start(
-        &async_io,
-        SocketRouter__register_service,
-        (Anything) &router,
-        SocketRouter__request_service
-    ),
+    match_result(
+        AsyncIO__start(&async_io, SocketRouter__register_service, (Anything)&router, SocketRouter__request_service),
         success(_) { return 0; },
         error(code, message)
         {

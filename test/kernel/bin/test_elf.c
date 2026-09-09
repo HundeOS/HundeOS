@@ -25,34 +25,30 @@ void tearDown(void)
 
 static Elf load_test_elf()
 {
-    return unwrap(Elf, EmbeddedElf__load(&bstr("hello_world")), (Elf){});
+    return unwrap_optional(EmbeddedElf__load(&bstr("hello_world")), (Elf){});
 }
 
-static void check_section(
-    Optional(SectionHeaderPtr) opt_section,
-    const char * name,
-    SectionType type,
-    Address virtual_address,
-    Offset offset,
-    Size size,
-    EntrySize entry_size,
-    SectionFlags flags,
-    SectionInfo info,
-    SectionIndex link,
-    Alignment alignment)
+static void check_section(Optional(SectionHeaderPtr) opt_section, const char * name, SectionType type,
+                          Address virtual_address, Offset offset, Size size, EntrySize entry_size, SectionFlags flags,
+                          SectionInfo info, SectionIndex link, Alignment alignment)
 {
-    match_optional(SectionHeaderPtr, opt_section, some(section) {
-                TEST_ASSERT_NOT_NULL(section);
-                TEST_ASSERT_EQUAL_UINT(offset, section->offset);
-                TEST_ASSERT_EQUAL_UINT(flags, section->flags);
-                TEST_ASSERT_EQUAL_UINT(info, section->info);
-                TEST_ASSERT_EQUAL_UINT(link, section->link);
-                TEST_ASSERT_EQUAL_UINT(virtual_address, section->virtual_address);
-                TEST_ASSERT_EQUAL_UINT(size, section->size);
-                TEST_ASSERT_EQUAL_UINT(entry_size, section->entry_size);
-                TEST_ASSERT_EQUAL_UINT(alignment, section->alignment);
-                TEST_ASSERT_EQUAL_UINT(type, section->type);
-            }, none_test_fail());
+    match_optional(
+        opt_section,
+        some(section)
+        {
+            TEST_ASSERT_NOT_NULL(section);
+            TEST_ASSERT_EQUAL_UINT(offset, section->offset);
+            TEST_ASSERT_EQUAL_UINT(flags, section->flags);
+            TEST_ASSERT_EQUAL_UINT(info, section->info);
+            TEST_ASSERT_EQUAL_UINT(link, section->link);
+            TEST_ASSERT_EQUAL_UINT(virtual_address, section->virtual_address);
+            TEST_ASSERT_EQUAL_UINT(size, section->size);
+            TEST_ASSERT_EQUAL_UINT(entry_size, section->entry_size);
+            TEST_ASSERT_EQUAL_UINT(alignment, section->alignment);
+            TEST_ASSERT_EQUAL_UINT(type, section->type);
+        },
+        none_test_fail()
+    );
 }
 
 void __test__sections(void)
@@ -66,23 +62,9 @@ void __test__sections(void)
     Optional(SectionHeaderPtr) section_1 = SectionHeaderArray__at(&sections, 1);
     Optional(SectionHeaderPtr) section_6 = SectionHeaderArray__at(&sections, 6);
 
-    check_section(
-        section_0, "", 0x0,
-        0x00, 0x00,
-        0x00, 0x00, 0,
-        0, 0, 0x0);
-    check_section(
-        section_1, ".text", ProgramData,
-        0x400000, 0x10000,
-        0x58, 0x00, 0,
-        0, 0, 0x0);
-    check_section(
-        section_6, ".shstrtab", StringTable,
-        0x400000, 0x10323,
-        0x32, 0x00, 0,
-        0, 0, 0x01);
-
-
+    check_section(section_0, "", 0x0, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0x0);
+    check_section(section_1, ".text", ProgramData, 0x400000, 0x10000, 0x58, 0x00, 0, 0, 0, 0x0);
+    check_section(section_6, ".shstrtab", StringTable, 0x400000, 0x10323, 0x32, 0x00, 0, 0, 0, 0x01);
 }
 
 void test_map_binary_runnable(void)
@@ -92,13 +74,18 @@ void test_map_binary_runnable(void)
 
     TEST_ASSERT_EQUAL_UINT(1, addresses.len);
     Optional(ExpandedSegment) segment_opt = ExpandedSegmentArray__at(&addresses, 0);
-    match_optional(ExpandedSegment, segment_opt, some(segment) {
-                TEST_ASSERT(segment.address.execute);
-                TEST_ASSERT(segment.address.read);
-                TEST_ASSERT_FALSE(segment.address.write);
-                TEST_ASSERT_EQUAL_UINT(0x400000, segment.address.virtual_addr);
-                TEST_ASSERT_EQUAL_UINT(4096, segment.size);
-            }, none_test_fail());
+    match_optional(
+        segment_opt,
+        some(segment)
+        {
+            TEST_ASSERT(segment.address.execute);
+            TEST_ASSERT(segment.address.read);
+            TEST_ASSERT_FALSE(segment.address.write);
+            TEST_ASSERT_EQUAL_UINT(0x400000, segment.address.virtual_addr);
+            TEST_ASSERT_EQUAL_UINT(4096, segment.size);
+        },
+        none_test_fail()
+    );
 }
 
 void test_map_zeroes_load_segment_memory_beyond_file_size(void)
@@ -117,7 +104,7 @@ void test_map_zeroes_load_segment_memory_beyond_file_size(void)
     header->program_header_entry_size = sizeof(ProgramHeader);
     header->program_header_entries = 1;
 
-    *program_header = (ProgramHeader) {
+    *program_header = (ProgramHeader){
         .type = Load,
         .flags = Read | Write,
         .segment_offset = 128,
@@ -129,12 +116,15 @@ void test_map_zeroes_load_segment_memory_beyond_file_size(void)
     };
 
     KAllocStub__set_alloc_fill(true, 0xaa);
-    Elf elf = Elf__new((Address) image, (Address) &image[sizeof(image)], &bstr("bss_test"));
+    Elf elf = Elf__new((Address)image, (Address)&image[sizeof(image)], &bstr("bss_test"));
     ExpandedSegmentArray segments = Elf__map(&elf);
     KAllocStub__set_alloc_fill(false, 0);
 
     TEST_ASSERT_EQUAL_UINT(1, ExpandedSegmentArray__len(&segments));
-    match_optional(ExpandedSegment, ExpandedSegmentArray__at(&segments, 0), some(segment) {
+    match_optional(
+        ExpandedSegmentArray__at(&segments, 0),
+        some(segment)
+        {
             uint8_t * mapped = ptr(segment.address.kernel_addr.virtual_addr, uint8_t);
             TEST_ASSERT_EQUAL_UINT8(0x11, mapped[0]);
             TEST_ASSERT_EQUAL_UINT8(0x22, mapped[1]);
@@ -144,7 +134,9 @@ void test_map_zeroes_load_segment_memory_beyond_file_size(void)
             {
                 TEST_ASSERT_EQUAL_UINT8(0, mapped[index]);
             }
-        }, none_test_fail());
+        },
+        none_test_fail()
+    );
 }
 
 void test_map_handles_unaligned_load_segment_memory(void)
@@ -163,7 +155,7 @@ void test_map_handles_unaligned_load_segment_memory(void)
     header->program_header_entry_size = sizeof(ProgramHeader);
     header->program_header_entries = 1;
 
-    *program_header = (ProgramHeader) {
+    *program_header = (ProgramHeader){
         .type = Load,
         .flags = Read | Write,
         .segment_offset = 128,
@@ -175,12 +167,15 @@ void test_map_handles_unaligned_load_segment_memory(void)
     };
 
     KAllocStub__set_alloc_fill(true, 0xaa);
-    Elf elf = Elf__new((Address) image, (Address) &image[sizeof(image)], &bstr("unaligned_bss_test"));
+    Elf elf = Elf__new((Address)image, (Address)&image[sizeof(image)], &bstr("unaligned_bss_test"));
     ExpandedSegmentArray segments = Elf__map(&elf);
     KAllocStub__set_alloc_fill(false, 0);
 
     TEST_ASSERT_EQUAL_UINT(1, ExpandedSegmentArray__len(&segments));
-    match_optional(ExpandedSegment, ExpandedSegmentArray__at(&segments, 0), some(segment) {
+    match_optional(
+        ExpandedSegmentArray__at(&segments, 0),
+        some(segment)
+        {
             TEST_ASSERT_EQUAL_UINT(0x500000, segment.address.virtual_addr);
             TEST_ASSERT_EQUAL_UINT(4096, segment.size);
 
@@ -197,7 +192,9 @@ void test_map_handles_unaligned_load_segment_memory(void)
             {
                 TEST_ASSERT_EQUAL_UINT8(0, mapped[index]);
             }
-        }, none_test_fail());
+        },
+        none_test_fail()
+    );
 }
 
 void test_program_header(void)
@@ -210,18 +207,23 @@ void test_program_header(void)
 
     Optional(ProgramHeaderPtr) opt_header = ProgramHeaderArray__at(&headers, 0);
 
-    match_optional(ProgramHeaderPtr, opt_header, some(header) {
-                TEST_ASSERT_NOT_NULL(header);
-                TEST_ASSERT_EQUAL_UINT(Load, header->type);
-                TEST_ASSERT(header->flags & Read);
-                TEST_ASSERT(header->flags & Execute);
-                TEST_ASSERT_EQUAL_UINT(0x10000, header->segment_offset);
-                TEST_ASSERT_EQUAL_UINT(0x400000, header->virtual_address);
-                TEST_ASSERT_EQUAL_UINT(0x400000, header->physical_address);
-                TEST_ASSERT_EQUAL_UINT(0x65, header->file_size);
-                TEST_ASSERT_EQUAL_UINT(0x65, header->memory_size);
-                TEST_ASSERT_EQUAL_UINT(0x10000, header->alignment);
-            }, none_test_fail());
+    match_optional(
+        opt_header,
+        some(header)
+        {
+            TEST_ASSERT_NOT_NULL(header);
+            TEST_ASSERT_EQUAL_UINT(Load, header->type);
+            TEST_ASSERT(header->flags & Read);
+            TEST_ASSERT(header->flags & Execute);
+            TEST_ASSERT_EQUAL_UINT(0x10000, header->segment_offset);
+            TEST_ASSERT_EQUAL_UINT(0x400000, header->virtual_address);
+            TEST_ASSERT_EQUAL_UINT(0x400000, header->physical_address);
+            TEST_ASSERT_EQUAL_UINT(0x65, header->file_size);
+            TEST_ASSERT_EQUAL_UINT(0x65, header->memory_size);
+            TEST_ASSERT_EQUAL_UINT(0x10000, header->alignment);
+        },
+        none_test_fail()
+    );
 }
 
 void test_parse_elf_header(void)

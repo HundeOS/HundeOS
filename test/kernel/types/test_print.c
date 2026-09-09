@@ -37,7 +37,7 @@ void test_k_sprintf_impl_returns_zero_for_null_format(void)
 
 void test_k_sprintf_prints_null_string_argument(void)
 {
-    char output[16] = { 0 };
+    char output[16] = {0};
 
     TEST_ASSERT_EQUAL_INT(6, k_sprintf(output, "%s", NULL));
     TEST_ASSERT_EQUAL_STRING("(null)", output);

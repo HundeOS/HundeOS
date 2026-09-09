@@ -49,11 +49,14 @@ static void _putchar(char c)
 }
 
 // Simple string output
-void puts(const char* str) {
-    while (*str) {
+void puts(const char * str)
+{
+    while (*str)
+    {
         _putchar(*str);
-        if (*str == '\n') {
-            _putchar('\r');  // Add carriage return
+        if (*str == '\n')
+        {
+            _putchar('\r'); // Add carriage return
         }
         str++;
     }
@@ -61,7 +64,7 @@ void puts(const char* str) {
 
 static volatile bool _check_read_ready()
 {
-    return (bool) (*uart_reg(UART0_FR_OFFSET) & FR_RXFE);
+    return (bool)(*uart_reg(UART0_FR_OFFSET) & FR_RXFE);
 }
 
 Optional(Char) _readchar()
@@ -71,7 +74,7 @@ Optional(Char) _readchar()
     WaitResult wait_res = Spin__wait(&_check_read_ready);
     if (wait_res == WAIT_OK)
     {
-        res = Some(Char, (Char) (*uart_reg(UART0_DR_OFFSET) & 0xFF));
+        res = Some(Char, (Char)(*uart_reg(UART0_DR_OFFSET) & 0xFF));
     }
 
     __asm__ volatile("dsb sy");
@@ -83,30 +86,30 @@ void echo(Char c)
     _send(c);
 }
 
-
 // Convert integer to string and print
-void put_int(int num) {
+void put_int(int num)
+{
     if (num == 0)
     {
         _putchar('0');
         return;
     }
-    
+
     if (num < 0)
     {
         _putchar('-');
         num = -num;
     }
-    
+
     char digits[10];
     int count = 0;
-    
+
     while (num > 0 && count < 10)
     {
         digits[count++] = '0' + (num % 10);
         num /= 10;
     }
-    
+
     // Print in reverse order
     while (count > 0)
     {
@@ -119,10 +122,10 @@ Result(InitCode) uart_init(UartInfoPtr info)
     uart_use_info(info);
 
     // initialize UART
-    *uart_reg(UART0_CR_OFFSET) = 0;           // turn off UART0
+    *uart_reg(UART0_CR_OFFSET) = 0; // turn off UART0
 
-    *uart_reg(UART0_ICR_OFFSET) = 0x7FF;      // clear interrupts
-    *uart_reg(UART0_IBRD_OFFSET) = 2;         // 115200 baud
+    *uart_reg(UART0_ICR_OFFSET) = 0x7FF; // clear interrupts
+    *uart_reg(UART0_IBRD_OFFSET) = 2;    // 115200 baud
     *uart_reg(UART0_FBRD_OFFSET) = 0xB;
     *uart_reg(UART0_LCRH_OFFSET) = 0b11 << 5; // 8n1
     *uart_reg(UART0_CR_OFFSET) = 0x301;       // enable Tx, Rx, FIFO
@@ -134,22 +137,19 @@ Result(InitCode) uart_enable_irqs(UartInfoPtr info)
 {
     uart_use_info(info);
 
-    *uart_reg(UART0_CR_OFFSET) = 0;            // disable UART
-    *uart_reg(UART0_ICR_OFFSET) = 0x7FF;       // clear all interrupts
-    *uart_reg(UART0_IMSC_OFFSET) = I_RX | I_RT; // enable RX and receive-timeout interrupts
+    *uart_reg(UART0_CR_OFFSET) = 0;                              // disable UART
+    *uart_reg(UART0_ICR_OFFSET) = 0x7FF;                         // clear all interrupts
+    *uart_reg(UART0_IMSC_OFFSET) = I_RX | I_RT;                  // enable RX and receive-timeout interrupts
     *uart_reg(UART0_CR_OFFSET) = (1 << 9) | (1 << 8) | (1 << 0); // enable UART, TX, RX
 
     __d_println(IRQ2, "Vals");
-    __d_printf(IRQ2,
-        "IMSC=%x MIS=%x CR=%x\n",
-        *uart_reg(UART0_IMSC_OFFSET),
-        *uart_reg(UART0_MIS_OFFSET),
-        *uart_reg(UART0_CR_OFFSET));
+    __d_printf(IRQ2, "IMSC=%x MIS=%x CR=%x\n", *uart_reg(UART0_IMSC_OFFSET), *uart_reg(UART0_MIS_OFFSET),
+               *uart_reg(UART0_CR_OFFSET));
 
     return Success(InitCode, ARCH_INIT_OK);
 }
 
-ConsoleState console_state = (ConsoleState) { // hundelint: ignore-constructor-required
+ConsoleState console_state = (ConsoleState){ // hundelint: ignore-constructor-required
     .state = NEW_IO_STATE,
     .write_buffer = EmptyRingBuffer(IOBuffer),
     .read_buffer = EmptyRingBuffer(IOBuffer),
@@ -168,7 +168,7 @@ void uart_irq_handler(IOSubsystemPtr io_subsystem)
         // Drain RX FIFO
         while (!(*uart_reg(UART0_FR_OFFSET) & FR_RXFE))
         {
-            Char ch = (Char) *uart_reg(UART0_DR_OFFSET) & 0xFF;
+            Char ch = (Char)*uart_reg(UART0_DR_OFFSET) & 0xFF;
             __d_printf(IRQ, "Read char: %i\n", ch);
             __d_printf(IRQ, "Read char: %c\n", ch);
             IOBuffer__push(&console_state.read_buffer, ch);
@@ -182,18 +182,15 @@ void uart_irq_handler(IOSubsystemPtr io_subsystem)
         // Fill TX FIFO until full or nothing left to send
         while (!(*uart_reg(UART0_FR_OFFSET) & FR_TXFF))
         {
-            match_result(Char, IOBuffer__pop(&console_state.write_buffer),
-                success(val)
-                {
-                    *uart_reg(UART0_DR_OFFSET) = val;
-                },
+            match_result(
+                IOBuffer__pop(&console_state.write_buffer),
+                success(val) { *uart_reg(UART0_DR_OFFSET) = val; },
                 error(code, message)
                 {
-                    __d_printf(IRQ, "UART TX pop failed: %s (%i)\n", BString__cstr(&message), (int) code);
+                    __d_printf(IRQ, "UART TX pop failed: %s (%i)\n", BString__cstr(&message), (int)code);
                     break;
                 }
             );
-
         }
         // Clear TX
         *uart_reg(UART0_ICR_OFFSET) = I_TX;
@@ -208,13 +205,18 @@ void uart_irq_handler(IOSubsystemPtr io_subsystem)
     if (received_data)
     {
         // only message io subsystem if there is a parked context
-        match_optional(IOContextPtr, ParkedContexts__at(&console_state.parked_contexts, -1),
+        match_optional(
+            ParkedContexts__at(&console_state.parked_contexts, -1),
             some(parked_context)
             {
                 __d_println(IOSUB, "Parked context found");
                 IOSubsystem__data_arrived(io_subsystem, parked_context);
             },
-            none() { __d_println(IOSUB, "NO parked context found");; }
+            none()
+            {
+                __d_println(IOSUB, "NO parked context found");
+                ;
+            }
         );
     }
 }

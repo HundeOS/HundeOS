@@ -13,12 +13,12 @@ static uint64_t Sync__cache_line_size(void)
 
 static uintptr_t Sync__cache_line_start(void * address, uint64_t line_size)
 {
-    return ((uintptr_t) address) & ~((uintptr_t) line_size - 1);
+    return ((uintptr_t)address) & ~((uintptr_t)line_size - 1);
 }
 
 static uintptr_t Sync__cache_line_end(void * address, size_t size, uint64_t line_size)
 {
-    return ((uintptr_t) address + size + line_size - 1) & ~((uintptr_t) line_size - 1);
+    return ((uintptr_t)address + size + line_size - 1) & ~((uintptr_t)line_size - 1);
 }
 
 void __sync_boundary()
@@ -37,7 +37,7 @@ void __sync_cache_clean(void * address, size_t size)
 
     for (uintptr_t cursor = start; cursor < end; cursor += line_size)
     {
-        __asm__ __volatile__("dc cvac, %0" :: "r"(cursor) : "memory");
+        __asm__ __volatile__("dc cvac, %0" ::"r"(cursor) : "memory");
     }
 
     barrier_dsb_sy();
@@ -51,7 +51,7 @@ void __sync_cache_invalidate(void * address, size_t size)
 
     for (uintptr_t cursor = start; cursor < end; cursor += line_size)
     {
-        __asm__ __volatile__("dc civac, %0" :: "r"(cursor) : "memory");
+        __asm__ __volatile__("dc civac, %0" ::"r"(cursor) : "memory");
     }
 
     barrier_dsb_sy();
@@ -66,7 +66,7 @@ void __sync_cache_clean_invalidate(void * address, size_t size)
 
     for (uintptr_t cursor = start; cursor < end; cursor += line_size)
     {
-        __asm__ __volatile__("dc civac, %0" :: "r"(cursor) : "memory");
+        __asm__ __volatile__("dc civac, %0" ::"r"(cursor) : "memory");
     }
 
     barrier_dsb_sy();

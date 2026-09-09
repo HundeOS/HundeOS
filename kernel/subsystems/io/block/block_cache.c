@@ -11,7 +11,7 @@ bool BlockCacheEntry__equals(BlockCacheEntryPtr self, BlockCacheEntryPtr other)
 
 BlockCache BlockCache__new(BlockDevicePtr device)
 {
-    return (BlockCache) {
+    return (BlockCache){
         .device = device,
         .entries = BlockCacheEntries__new(),
         .lock = MUTEX_INIT,
@@ -20,7 +20,7 @@ BlockCache BlockCache__new(BlockDevicePtr device)
 
 static bool BlockCache__block_matches(BlockCacheEntryPtr entry, void * context)
 {
-    BlockNumber block = *(BlockNumber *) context;
+    BlockNumber block = *(BlockNumber *)context;
     return entry->block == block;
 }
 
@@ -39,7 +39,8 @@ static Result(BlockDeviceCode) BlockCache__cache_entry(BlockCachePtr self, Block
         BlockCacheEntries__pop_front(&self->entries);
     }
 
-    match_result(CollectionCode, BlockCacheEntries__push(&self->entries, entry),
+    match_result(
+        BlockCacheEntries__push(&self->entries, entry),
         success(_) { return Success(BlockDeviceCode, BLOCK_DEVICE_OK); },
         error(code, message) { return Error(BlockDeviceCode, message, BLOCK_DEVICE_IO_ERROR); }
     );
@@ -57,9 +58,9 @@ Result(BlockDeviceCode) BlockCache__read(BlockCachePtr self, BlockNumber block, 
     BlockCacheEntry entry;
     entry.block = block;
 
-    critical_section(self->lock,
-    {
-        match_find_result_ptr(BlockCacheEntries, BlockCacheEntries__find(&self->entries, BlockCache__block_matches, &block),
+    critical_section(self->lock, {
+        match_find_result_ptr(
+            BlockCacheEntries__find(&self->entries, BlockCache__block_matches, &block),
             some(found)
             {
                 BlockCache__copy(target, found->data);
@@ -68,7 +69,8 @@ Result(BlockDeviceCode) BlockCache__read(BlockCachePtr self, BlockNumber block, 
             none_do_nothing()
         );
 
-        match_result(BlockCount, BlockDevice__read(self->device, block, 1, entry.data),
+        match_result(
+            BlockDevice__read(self->device, block, 1, entry.data),
             success(count)
             {
                 if (count != 1)
@@ -79,7 +81,8 @@ Result(BlockDeviceCode) BlockCache__read(BlockCachePtr self, BlockNumber block, 
             error(code, message) { cs_return Error(BlockDeviceCode, message, code); }
         );
 
-        match_result(BlockDeviceCode, BlockCache__cache_entry(self, entry),
+        match_result(
+            BlockCache__cache_entry(self, entry),
             success_do_nothing(),
             error(code, message) { cs_return Error(BlockDeviceCode, message, code); }
         );

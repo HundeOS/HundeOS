@@ -17,15 +17,8 @@ typedef enum RegisterResult
 
 ResultDef(RegisterResult);
 
-typedef Result(SystemCallResult)(* Handler)(
-        KernelPtr kernel,
-        OptionalPtr(ProcessPtr) proc,
-        Anything arg1,
-        Anything arg2,
-        Anything arg3,
-        Anything arg4,
-        Anything arg5
-    );
+typedef Result(SystemCallResult) (*Handler)(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                            Anything arg2, Anything arg3, Anything arg4, Anything arg5);
 
 OptionalDef(Handler);
 ResultDef(Handler);
@@ -36,28 +29,21 @@ typedef struct SyscallDispatcher
     Handlers handlers;
     mutex_t init_lock;
     bool init_done;
-}
-SyscallDispatcher;
+} SyscallDispatcher;
 
 typedef SyscallDispatcher * SyscallDispatcherPtr;
 
-Result(SystemCallResult) SyscallDispatcher__dispatch(SyscallDispatcherPtr self,
-                                                              KernelPtr kernel,
-                                                              OptionalPtr(ProcessPtr) process_opt,
-                                                              SystemCall syscall_id,
-                                                              Anything arg1,
-                                                              Anything arg2,
-                                                              Anything arg3,
-                                                              Anything arg4,
-                                                              Anything arg5);
+Result(SystemCallResult)
+    SyscallDispatcher__dispatch(SyscallDispatcherPtr self, KernelPtr kernel, OptionalPtr(ProcessPtr) process_opt,
+                                SystemCall syscall_id, Anything arg1, Anything arg2, Anything arg3, Anything arg4,
+                                Anything arg5);
 
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler);
 
-#define NEW_SYSCALL_DISPATCHER \
-    (SyscallDispatcher) { \
-        .handlers = EmptyArray(Handlers), \
-        .init_lock = MUTEX_INIT, \
-        .init_done = false \
-    } \
+#define NEW_SYSCALL_DISPATCHER                                                                                         \
+    (SyscallDispatcher)                                                                                                \
+    {                                                                                                                  \
+        .handlers = EmptyArray(Handlers), .init_lock = MUTEX_INIT, .init_done = false                                  \
+    }
 
 #endif

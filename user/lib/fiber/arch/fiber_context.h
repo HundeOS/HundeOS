@@ -9,7 +9,7 @@
 typedef struct Fiber Fiber;
 typedef Fiber * FiberPtr;
 
-typedef void (* FiberContextStart)(FiberPtr fiber);
+typedef void (*FiberContextStart)(FiberPtr fiber);
 
 #if __STDC_HOSTED__
 #include "hosted/fiber_context.h"
@@ -17,9 +17,8 @@ typedef void (* FiberContextStart)(FiberPtr fiber);
 #include "aarch64/fiber_context.h"
 #endif
 
-Result(FiberCode) FiberContext__init(
-    FiberContextPtr self, Address stack_base, size_t stack_size, FiberContextStart start, FiberPtr fiber
-);
+Result(FiberCode) FiberContext__init(FiberContextPtr self, Address stack_base, size_t stack_size,
+                                     FiberContextStart start, FiberPtr fiber);
 void FiberContext__switch(FiberContextPtr self, FiberContextPtr next);
 
 #endif

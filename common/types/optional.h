@@ -3,105 +3,104 @@
 
 #include <stdbool.h>
 
-#define _Optional(T) \
-    Optional__##T \
+#define _Optional(T) Optional__##T
 
-#define _Some(T) \
-    Some__##T \
+#define _Some(T) Some__##T
 
-#define _None(T) \
-    None__##T \
+#define _None(T) None__##T
 
-#define _Type(T) \
-    opt__##T##__type \
+#define _Type(T) opt__##T##__type
 
-#define Optional(T) \
-    _Optional(T) \
+#define Optional(T) _Optional(T)
 
-#define OptionalPtr(T) \
-    _Optional(T) * \
+#define OptionalPtr(T) _Optional(T) *
 
-#define AliasOptional(T, alias) \
-    typedef _Optional(T) _Optional(alias); \
-    typedef _Some(T) _Some(alias); \
-    typedef _None(T) _None(alias); \
-    typedef T _Type(alias); \
+#define AliasOptional(T, alias)                                                                                        \
+    typedef _Optional(T) _Optional(alias);                                                                             \
+    typedef _Some(T) _Some(alias);                                                                                     \
+    typedef _None(T) _None(alias);                                                                                     \
+    typedef T _Type(alias);
 
-#define OptionalPreDefine(T) \
-    typedef struct _None(T) _None(T); \
-    typedef struct _Some(T) _Some(T); \
-    typedef union _Optional(T) _Optional(T); \
+#define OptionalPreDefine(T)                                                                                           \
+    typedef struct _None(T) _None(T);                                                                                  \
+    typedef struct _Some(T) _Some(T);                                                                                  \
+    typedef union _Optional(T) _Optional(T);                                                                           \
     typedef T _Type(T);
 
-#define OptionalDef(T) \
-    typedef struct _None(T) { \
-    } _None(T); \
-    \
-    typedef struct _Some(T) { \
-        T val; \
-    } _Some(T); \
-    \
-    typedef struct _Optional(T) { \
-        bool present; \
-        union { \
-          _Some(T) some; \
-          _None(T) none;\
-        }; \
-    } _Optional(T); \
-    typedef T _Type(T); \
+#define OptionalDef(T)                                                                                                 \
+    typedef struct _None(T)                                                                                            \
+    {                                                                                                                  \
+    } _None(T);                                                                                                        \
+                                                                                                                       \
+    typedef struct _Some(T)                                                                                            \
+    {                                                                                                                  \
+        T val;                                                                                                         \
+    } _Some(T);                                                                                                        \
+                                                                                                                       \
+    typedef struct _Optional(T)                                                                                        \
+    {                                                                                                                  \
+        bool present;                                                                                                  \
+        union                                                                                                          \
+        {                                                                                                              \
+            _Some(T) some;                                                                                             \
+            _None(T) none;                                                                                             \
+        };                                                                                                             \
+    } _Optional(T);                                                                                                    \
+    typedef T _Type(T);
 
-#define OptionalType(T, alias) \
-    typedef T alias; \
-    OptionalDef(alias); \
+#define OptionalType(T, alias)                                                                                         \
+    typedef T alias;                                                                                                   \
+    OptionalDef(alias);
 
+#define Some(T, value)                                                                                                 \
+    (_Optional(T))                                                                                                     \
+    {                                                                                                                  \
+        .present = true, .some = (_Some(T))                                                                            \
+        {                                                                                                              \
+            .val = value,                                                                                              \
+        }                                                                                                              \
+    }
 
-#define Some(T, value) \
-    (_Optional(T)) { \
-        .present = true,\
-        .some = (_Some(T)) { \
-            .val = value, \
-        } \
-    } \
+#define None(T)                                                                                                        \
+    (_Optional(T))                                                                                                     \
+    {                                                                                                                  \
+        .present = false, .none = (_None(T))                                                                           \
+        {                                                                                                              \
+        }                                                                                                              \
+    }
 
-#define None(T) \
-    (_Optional(T)) { \
-        .present = false, \
-        .none = (_None(T)) { \
-        } \
-    } \
+#define End }
 
-#define End \
-} \
+#define is_something(optional) optional.present
 
-#define is_something(optional) \
-    optional.present
+#define is_nothing(optional) !optional.present
 
-#define is_nothing(optional) \
-    !optional.present
-
-#define some(val_name) \
-    { \
+#define some(val_name)                                                                                                 \
+    {                                                                                                                  \
         value_type val_name = __optional.some.val;
 
-#define none() \
-    {
+#define none() {
 
-#define some_do_nothing() some(_) {}
-#define none_do_nothing() none() {}
+#define some_do_nothing()                                                                                              \
+    some(_)                                                                                                            \
+    {                                                                                                                  \
+    }
+#define none_do_nothing()                                                                                              \
+    none()                                                                                                             \
+    {                                                                                                                  \
+    }
 
-#define match_optional(T, opt, some_branch, none_branch) \
-{ \
-    typedef opt__##T##__type value_type; \
-    _Optional(T) __optional = opt; \
-    if (__optional.present) \
-        some_branch \
-    } \
-    else \
-        none_branch \
-    } \
-} \
+#define match_optional(opt, some_branch, none_branch)                                                                  \
+    {                                                                                                                  \
+        __auto_type __optional = (opt);                                                                                \
+        typedef __typeof__(__optional.some.val) value_type;                                                            \
+        if (__optional.present)                                                                                        \
+            some_branch                                                                                                \
+    }                                                                                                                  \
+    else none_branch                                                                                                   \
+    }                                                                                                                  \
+    }
 
-#define unwrap(T, opt, alternate_val) \
-    ((opt).present ? (opt).some.val : (alternate_val))\
+#define unwrap_optional(opt, alternate_val) ((opt).present ? (opt).some.val : (alternate_val))
 
 #endif

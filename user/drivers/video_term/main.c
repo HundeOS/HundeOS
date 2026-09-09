@@ -49,8 +49,7 @@ typedef struct VideoTermGlyph
 {
     uint64_t width;
     uint16_t rows[VIDEO_TERM_FONT_HEIGHT];
-}
-VideoTermGlyph;
+} VideoTermGlyph;
 
 typedef VideoTermGlyph * VideoTermGlyphPtr;
 OptionalDef(VideoTermEmojiEntryPtr);
@@ -60,8 +59,7 @@ typedef enum VideoTermEscapeState
     VIDEO_TERM_ESCAPE_STATE_NONE,
     VIDEO_TERM_ESCAPE_STATE_ESC,
     VIDEO_TERM_ESCAPE_STATE_CSI,
-}
-VideoTermEscapeState;
+} VideoTermEscapeState;
 
 typedef struct VideoTerm
 {
@@ -82,8 +80,7 @@ typedef struct VideoTerm
     bool csi_has_value;
     uint32_t emoji_codepoints[VIDEO_TERM_EMOJI_CLUSTER_CAPACITY];
     uint8_t emoji_codepoint_count;
-}
-VideoTerm;
+} VideoTerm;
 
 typedef VideoTerm * VideoTermPtr;
 
@@ -91,22 +88,20 @@ static void VideoTerm__newline(VideoTermPtr self);
 
 static bool VideoTerm__is_hex_digit(uint8_t ch)
 {
-    return (ch >= '0' && ch <= '9')
-        || (ch >= 'A' && ch <= 'F')
-        || (ch >= 'a' && ch <= 'f');
+    return (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F') || (ch >= 'a' && ch <= 'f');
 }
 
 static uint8_t VideoTerm__hex_value(uint8_t ch)
 {
     if (ch >= '0' && ch <= '9')
     {
-        return (uint8_t) (ch - '0');
+        return (uint8_t)(ch - '0');
     }
     if (ch >= 'A' && ch <= 'F')
     {
-        return (uint8_t) (10U + (ch - 'A'));
+        return (uint8_t)(10U + (ch - 'A'));
     }
-    return (uint8_t) (10U + (ch - 'a'));
+    return (uint8_t)(10U + (ch - 'a'));
 }
 
 static const uint8_t * VideoTerm__next_line(const uint8_t * cursor, const uint8_t * end)
@@ -122,10 +117,7 @@ static const uint8_t * VideoTerm__next_line(const uint8_t * cursor, const uint8_
     return cursor;
 }
 
-static bool VideoTerm__parse_codepoint(
-    const uint8_t ** cursor,
-    const uint8_t * end,
-    uint32_t * codepoint)
+static bool VideoTerm__parse_codepoint(const uint8_t ** cursor, const uint8_t * end, uint32_t * codepoint)
 {
     uint32_t value = 0;
     const uint8_t * current = *cursor;
@@ -153,10 +145,7 @@ static bool VideoTerm__parse_codepoint(
     return true;
 }
 
-static bool VideoTerm__parse_glyph_rows(
-    const uint8_t * cursor,
-    const uint8_t * end,
-    VideoTermGlyphPtr glyph)
+static bool VideoTerm__parse_glyph_rows(const uint8_t * cursor, const uint8_t * end, VideoTermGlyphPtr glyph)
 {
     uint64_t hex_digits = 0;
     const uint8_t * current = cursor;
@@ -184,11 +173,11 @@ static bool VideoTerm__parse_glyph_rows(
         uint16_t row_bits = 0;
         for (uint64_t digit = 0; digit < digits_per_row; digit++)
         {
-            row_bits = (uint16_t) ((row_bits << 4U) | VideoTerm__hex_value(cursor[(row * digits_per_row) + digit]));
+            row_bits = (uint16_t)((row_bits << 4U) | VideoTerm__hex_value(cursor[(row * digits_per_row) + digit]));
         }
         if (glyph->width == 8)
         {
-            row_bits = (uint16_t) (row_bits << 8U);
+            row_bits = (uint16_t)(row_bits << 8U);
         }
         glyph->rows[row] = row_bits;
     }
@@ -238,7 +227,7 @@ static bool VideoTerm__load_primary_glyph(uint32_t codepoint, VideoTermGlyphPtr 
     glyph->width = 8;
     for (uint64_t row = 0; row < VIDEO_TERM_FONT_HEIGHT; row++)
     {
-        glyph->rows[row] = (uint16_t) (VIDEO_TERM_SPLEEN_GLYPHS[glyph_index][row] << 8U);
+        glyph->rows[row] = (uint16_t)(VIDEO_TERM_SPLEEN_GLYPHS[glyph_index][row] << 8U);
     }
 
     return true;
@@ -254,10 +243,8 @@ static bool VideoTerm__load_any_glyph(uint32_t codepoint, VideoTermGlyphPtr glyp
     return VideoTerm__load_glyph(codepoint, glyph);
 }
 
-static bool VideoTerm__emoji_entry_matches(
-    VideoTermEmojiEntryPtr entry,
-    const uint32_t * codepoints,
-    uint8_t codepoint_count)
+static bool VideoTerm__emoji_entry_matches(VideoTermEmojiEntryPtr entry, const uint32_t * codepoints,
+                                           uint8_t codepoint_count)
 {
     if (entry->codepoint_count != codepoint_count)
     {
@@ -275,10 +262,8 @@ static bool VideoTerm__emoji_entry_matches(
     return true;
 }
 
-static bool VideoTerm__emoji_entry_has_prefix(
-    VideoTermEmojiEntryPtr entry,
-    const uint32_t * codepoints,
-    uint8_t codepoint_count)
+static bool VideoTerm__emoji_entry_has_prefix(VideoTermEmojiEntryPtr entry, const uint32_t * codepoints,
+                                              uint8_t codepoint_count)
 {
     if (entry->codepoint_count < codepoint_count)
     {
@@ -296,9 +281,7 @@ static bool VideoTerm__emoji_entry_has_prefix(
     return true;
 }
 
-static Optional(VideoTermEmojiEntryPtr) VideoTerm__find_emoji(
-    const uint32_t * codepoints,
-    uint8_t codepoint_count)
+static Optional(VideoTermEmojiEntryPtr) VideoTerm__find_emoji(const uint32_t * codepoints, uint8_t codepoint_count)
 {
     for (uint64_t index = 0; index < VIDEO_TERM_EMOJI_ENTRY_COUNT; index++)
     {
@@ -380,19 +363,19 @@ static uint32_t VideoTerm__pack_channel(uint8_t value, uint64_t mask)
     }
 
     uint32_t max_value = width == 32 ? 0xffffffffU : ((1U << width) - 1U);
-    uint32_t scaled = ((uint32_t) value * max_value + 127U) / 255U;
-    return (scaled << shift) & (uint32_t) mask;
+    uint32_t scaled = ((uint32_t)value * max_value + 127U) / 255U;
+    return (scaled << shift) & (uint32_t)mask;
 }
 
 static uint32_t VideoTerm__convert_bitmask_color(VideoTermPtr self, uint32_t rgb)
 {
-    uint8_t red = (uint8_t) ((rgb >> 16U) & 0xffU);
-    uint8_t green = (uint8_t) ((rgb >> 8U) & 0xffU);
-    uint8_t blue = (uint8_t) (rgb & 0xffU);
+    uint8_t red = (uint8_t)((rgb >> 16U) & 0xffU);
+    uint8_t green = (uint8_t)((rgb >> 8U) & 0xffU);
+    uint8_t blue = (uint8_t)(rgb & 0xffU);
 
-    return VideoTerm__pack_channel(red, self->config.red_mask)
-        | VideoTerm__pack_channel(green, self->config.green_mask)
-        | VideoTerm__pack_channel(blue, self->config.blue_mask);
+    return VideoTerm__pack_channel(red, self->config.red_mask) |
+           VideoTerm__pack_channel(green, self->config.green_mask) |
+           VideoTerm__pack_channel(blue, self->config.blue_mask);
 }
 
 static uint32_t VideoTerm__convert_color(VideoTermPtr self, uint32_t rgb)
@@ -428,13 +411,8 @@ static void VideoTerm__put_pixel(VideoTermPtr self, uint64_t x, uint64_t y, uint
     self->pixels[pixel_index] = VideoTerm__convert_color(self, color);
 }
 
-static void VideoTerm__fill_rect(
-    VideoTermPtr self,
-    uint64_t x,
-    uint64_t y,
-    uint64_t width,
-    uint64_t height,
-    uint32_t color)
+static void VideoTerm__fill_rect(VideoTermPtr self, uint64_t x, uint64_t y, uint64_t width, uint64_t height,
+                                 uint32_t color)
 {
     uint32_t converted_color = VideoTerm__convert_color(self, color);
     for (uint64_t row = 0; row < height; row++)
@@ -537,8 +515,8 @@ static void VideoTerm__draw_emoji(VideoTermPtr self, VideoTermEmojiEntryPtr emoj
     uint64_t origin_y = self->cursor_y * VIDEO_TERM_CELL_HEIGHT;
     uint64_t cell_width = VIDEO_TERM_EMOJI_ADVANCE_COLUMNS * VIDEO_TERM_COLUMN_WIDTH;
     const uint8_t * atlas = VIDEO_TERM_EMOJI_ATLAS_START;
-    uint32_t atlas_size = (uint32_t) (VIDEO_TERM_EMOJI_ATLAS_END - VIDEO_TERM_EMOJI_ATLAS_START);
-    uint32_t image_size = (uint32_t) (VIDEO_TERM_EMOJI_SIZE * VIDEO_TERM_EMOJI_SIZE * 4ULL);
+    uint32_t atlas_size = (uint32_t)(VIDEO_TERM_EMOJI_ATLAS_END - VIDEO_TERM_EMOJI_ATLAS_START);
+    uint32_t image_size = (uint32_t)(VIDEO_TERM_EMOJI_SIZE * VIDEO_TERM_EMOJI_SIZE * 4ULL);
 
     if (emoji->atlas_offset + image_size > atlas_size)
     {
@@ -553,8 +531,8 @@ static void VideoTerm__draw_emoji(VideoTermPtr self, VideoTermEmojiEntryPtr emoj
         for (uint64_t col = 0; col < VIDEO_TERM_CELL_HEIGHT; col++)
         {
             uint64_t source_col = (col * VIDEO_TERM_EMOJI_SIZE) / VIDEO_TERM_CELL_HEIGHT;
-            uint32_t offset = emoji->atlas_offset
-                + (uint32_t) (((source_row * VIDEO_TERM_EMOJI_SIZE) + source_col) * 4ULL);
+            uint32_t offset =
+                emoji->atlas_offset + (uint32_t)(((source_row * VIDEO_TERM_EMOJI_SIZE) + source_col) * 4ULL);
             uint8_t red = atlas[offset];
             uint8_t green = atlas[offset + 1];
             uint8_t blue = atlas[offset + 2];
@@ -593,13 +571,9 @@ static void VideoTerm__clear_line_cells(VideoTermPtr self, uint64_t start_column
         end_column = self->columns;
     }
 
-    VideoTerm__fill_rect(
-        self,
-        start_column * VIDEO_TERM_COLUMN_WIDTH,
-        self->cursor_y * VIDEO_TERM_CELL_HEIGHT,
-        (end_column - start_column) * VIDEO_TERM_COLUMN_WIDTH,
-        VIDEO_TERM_CELL_HEIGHT,
-        VIDEO_TERM_COLOR_BG);
+    VideoTerm__fill_rect(self, start_column * VIDEO_TERM_COLUMN_WIDTH, self->cursor_y * VIDEO_TERM_CELL_HEIGHT,
+                         (end_column - start_column) * VIDEO_TERM_COLUMN_WIDTH, VIDEO_TERM_CELL_HEIGHT,
+                         VIDEO_TERM_COLOR_BG);
 }
 
 static void VideoTerm__clear_line(VideoTermPtr self, uint64_t mode)
@@ -689,16 +663,12 @@ static void VideoTerm__draw_codepoint(VideoTermPtr self, uint32_t codepoint)
     {
         for (uint64_t col = 0; col < VIDEO_TERM_FONT_WIDTH; col++)
         {
-            uint16_t mask = (uint16_t) (1U << (VIDEO_TERM_FONT_WIDTH - 1U - col));
+            uint16_t mask = (uint16_t)(1U << (VIDEO_TERM_FONT_WIDTH - 1U - col));
             if ((glyph.rows[row] & mask) != 0)
             {
-                VideoTerm__fill_rect(
-                    self,
-                    origin_x + (col * VIDEO_TERM_SCALE),
-                    origin_y + VIDEO_TERM_TEXT_Y_OFFSET + (row * VIDEO_TERM_SCALE),
-                    VIDEO_TERM_SCALE,
-                    VIDEO_TERM_SCALE,
-                    VIDEO_TERM_COLOR_FG);
+                VideoTerm__fill_rect(self, origin_x + (col * VIDEO_TERM_SCALE),
+                                     origin_y + VIDEO_TERM_TEXT_Y_OFFSET + (row * VIDEO_TERM_SCALE), VIDEO_TERM_SCALE,
+                                     VIDEO_TERM_SCALE, VIDEO_TERM_COLOR_FG);
             }
         }
     }
@@ -729,7 +699,7 @@ static bool VideoTerm__emoji_cluster_can_append(VideoTermPtr self, uint32_t code
 
 static bool VideoTerm__codepoint_can_start_emoji(uint32_t codepoint)
 {
-    uint32_t codepoints[1] = { codepoint };
+    uint32_t codepoints[1] = {codepoint};
     return VideoTerm__has_emoji_prefix(codepoints, 1);
 }
 
@@ -759,8 +729,7 @@ static void VideoTerm__flush_emoji_cluster(VideoTermPtr self)
         return;
     }
 
-    if (self->emoji_codepoint_count == 1
-        && VideoTerm__codepoint_prefers_text_presentation(self->emoji_codepoints[0]))
+    if (self->emoji_codepoint_count == 1 && VideoTerm__codepoint_prefers_text_presentation(self->emoji_codepoints[0]))
     {
         uint32_t codepoint = self->emoji_codepoints[0];
         VideoTerm__clear_emoji_cluster(self);
@@ -768,7 +737,8 @@ static void VideoTerm__flush_emoji_cluster(VideoTermPtr self)
         return;
     }
 
-    match_optional(VideoTermEmojiEntryPtr, VideoTerm__find_emoji(self->emoji_codepoints, self->emoji_codepoint_count),
+    match_optional(
+        VideoTerm__find_emoji(self->emoji_codepoints, self->emoji_codepoint_count),
         some(emoji)
         {
             VideoTerm__draw_emoji(self, emoji);
@@ -911,7 +881,7 @@ static bool VideoTerm__consume_escape_byte(VideoTermPtr self, uint8_t byte)
 
     if (byte >= '0' && byte <= '9')
     {
-        self->csi_value = (self->csi_value * 10ULL) + (uint64_t) (byte - '0');
+        self->csi_value = (self->csi_value * 10ULL) + (uint64_t)(byte - '0');
         self->csi_has_value = true;
         return true;
     }
@@ -985,7 +955,7 @@ static void VideoTerm__write_byte(VideoTermPtr self, uint8_t byte)
 static VideoTerm VideoTerm__new(FramebufferConfig config, void * pixels, uint64_t mapped_size)
 {
     VideoTerm self = {
-        .pixels = (uint32_t *) pixels,
+        .pixels = (uint32_t *)pixels,
         .mapped_pixels = mapped_size / sizeof(uint32_t),
         .config = config,
         .columns = config.width / VIDEO_TERM_COLUMN_WIDTH,
@@ -1000,7 +970,7 @@ static VideoTerm VideoTerm__new(FramebufferConfig config, void * pixels, uint64_
         .escape_state = VIDEO_TERM_ESCAPE_STATE_NONE,
         .csi_value = 0,
         .csi_has_value = false,
-        .emoji_codepoints = { 0 },
+        .emoji_codepoints = {0},
         .emoji_codepoint_count = 0,
     };
 
@@ -1050,7 +1020,7 @@ int VIDEO_TERM_ENTRYPOINT(void)
     IOHandle video = io_server_register(&bstr(VIDEO_TERM_PATH), IO_SERVER_WRITE);
     if (video < 0)
     {
-        DRIVER_DEBUG("video_term: register error %i\n", (int) video);
+        DRIVER_DEBUG("video_term: register error %i\n", (int)video);
         return 1;
     }
 
@@ -1058,9 +1028,7 @@ int VIDEO_TERM_ENTRYPOINT(void)
 
     ServiceEvent event;
     ServiceCode wait_status;
-    for (wait_status = service_wait(&event);
-         service_alive(wait_status);
-         wait_status = service_wait(&event))
+    for (wait_status = service_wait(&event); service_alive(wait_status); wait_status = service_wait(&event))
     {
         if (service_ok(wait_status))
         {
@@ -1073,7 +1041,7 @@ int VIDEO_TERM_ENTRYPOINT(void)
                     VideoTerm__hide_cursor(&terminal);
                     for (uint64_t i = 0; i < buffer.capacity; i++)
                     {
-                        VideoTerm__write_byte(&terminal, (uint8_t) buffer.data[i]);
+                        VideoTerm__write_byte(&terminal, (uint8_t)buffer.data[i]);
                     }
                     VideoTerm__flush_emoji_cluster(&terminal);
                     VideoTerm__show_cursor(&terminal);

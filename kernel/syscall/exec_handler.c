@@ -5,41 +5,30 @@
 #include "../types/bstring_additional_types.h"
 #include "auth.h"
 
-Result(SystemCallResult) Exec__handler(
-    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-    Anything arg2, Anything arg3, Anything arg4, Anything arg5
-)
+Result(SystemCallResult) Exec__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                       Anything arg3, Anything arg4, Anything arg5)
 {
     return ExecRequest__handler(kernel, proc, arg1, arg2, arg3, arg4, arg5);
 }
 
-
-Result(SystemCallResult) ExecRequest__handler(
-    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-    Anything arg2, Anything arg3, Anything arg4, Anything arg5
-)
+Result(SystemCallResult) ExecRequest__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                              Anything arg2, Anything arg3, Anything arg4, Anything arg5)
 {
     if (arg1 == 0)
     {
         return Error(SystemCallResult, bstring("Invalid exec request"), SPAWN_FAILED);
     }
 
-    SpawnRequestPtr request = (SpawnRequestPtr) arg1;
+    SpawnRequestPtr request = (SpawnRequestPtr)arg1;
 
-    __d_printf(
-        EXEC,
-        "exec request handler path=%s mode=%i requested_user=%i auth_ticket=%i\n",
-        cstr(request->path),
-        request->mode,
-        (int) request->requested_user_id,
-        (int) request->auth_ticket_id
-    );
+    __d_printf(EXEC, "exec request handler path=%s mode=%i requested_user=%i auth_ticket=%i\n", cstr(request->path),
+               request->mode, (int)request->requested_user_id, (int)request->auth_ticket_id);
 
     ProcessArguments arguments = ProcessArguments__new();
     SpawnArguments requested_arguments = request->arguments;
-    for_each_fa(SpawnArguments, requested_arguments, argument_index, argument,
-    {
-        match_result(CollectionCode, ProcessArguments__push(&arguments, argument),
+    for_each_fa(SpawnArguments, requested_arguments, argument_index, argument, {
+        match_result(
+            ProcessArguments__push(&arguments, argument),
             success_do_nothing(),
             error(code, message) { return Error(SystemCallResult, message, SPAWN_ARG_TOO_LONG); }
         );
@@ -53,11 +42,17 @@ Result(SystemCallResult) ExecRequest__handler(
     Optional(UserID) requested_user_id = None(UserID);
     if (request->auth_ticket_id != SPAWN_INHERIT_AUTH_TICKET)
     {
-        match_optional(ProcessPtr, *proc,
+        match_optional(
+            *proc,
             some(process)
             {
-                match_result(UserID, Auth__consume_ticket(&kernel->auth, process, request->auth_ticket_id),
-                    success(user_id) { requested_user_id = Some(UserID, user_id);; },
+                match_result(
+                    Auth__consume_ticket(&kernel->auth, process, request->auth_ticket_id),
+                    success(user_id)
+                    {
+                        requested_user_id = Some(UserID, user_id);
+                        ;
+                    },
                     error(code, message) { return Error(SystemCallResult, message, code); }
                 );
             },
@@ -65,10 +60,10 @@ Result(SystemCallResult) ExecRequest__handler(
         );
     }
 
-    Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(
-        &originating_context, &request->path, wait, &requested_user_id, &arguments, &request->stdio
-    );
-    match_result(ProcessPtr, exec_res,
+    Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(&originating_context, &request->path, wait,
+                                                                      &requested_user_id, &arguments, &request->stdio);
+    match_result(
+        exec_res,
         success(spawned_proc)
         {
             __d_printf(EXEC, "exec request handler success path=%s pid=%i\n", cstr(request->path), spawned_proc->pid);
@@ -76,7 +71,8 @@ Result(SystemCallResult) ExecRequest__handler(
         },
         error(code, message)
         {
-            __d_printf(EXEC, "exec request handler error path=%s code=%i message=%s\n", cstr(request->path), code, cstr(message));
+            __d_printf(EXEC, "exec request handler error path=%s code=%i message=%s\n", cstr(request->path), code,
+                       cstr(message));
             return Error(SystemCallResult, message, code);
         }
     );

@@ -15,35 +15,35 @@
 #define VIRTIO_KEYBOARD_PATH ":keyboard:"
 
 #define VIRTIO_MMIO_FIRST_PHYS_BASE 0x0a000000ULL
-#define VIRTIO_MMIO_SLOT_SIZE       0x200ULL
-#define VIRTIO_MMIO_SLOT_COUNT      32ULL
-#define VIRTIO_MMIO_REGION_SIZE     (VIRTIO_MMIO_SLOT_SIZE * VIRTIO_MMIO_SLOT_COUNT)
-#define VIRTIO_MMIO_FIRST_IRQ_ID    48ULL
+#define VIRTIO_MMIO_SLOT_SIZE 0x200ULL
+#define VIRTIO_MMIO_SLOT_COUNT 32ULL
+#define VIRTIO_MMIO_REGION_SIZE (VIRTIO_MMIO_SLOT_SIZE * VIRTIO_MMIO_SLOT_COUNT)
+#define VIRTIO_MMIO_FIRST_IRQ_ID 48ULL
 
-#define VIRTIO_MMIO_MAGIC           0x000
-#define VIRTIO_MMIO_VERSION         0x004
-#define VIRTIO_MMIO_DEVICE_ID       0x008
+#define VIRTIO_MMIO_MAGIC 0x000
+#define VIRTIO_MMIO_VERSION 0x004
+#define VIRTIO_MMIO_DEVICE_ID 0x008
 #define VIRTIO_MMIO_GUEST_PAGE_SIZE 0x028
-#define VIRTIO_MMIO_QUEUE_SEL       0x030
-#define VIRTIO_MMIO_QUEUE_NUM_MAX   0x034
-#define VIRTIO_MMIO_QUEUE_NUM       0x038
-#define VIRTIO_MMIO_QUEUE_ALIGN     0x03c
-#define VIRTIO_MMIO_QUEUE_PFN       0x040
-#define VIRTIO_MMIO_QUEUE_NOTIFY    0x050
-#define VIRTIO_MMIO_INTERRUPT_STAT  0x060
-#define VIRTIO_MMIO_INTERRUPT_ACK   0x064
-#define VIRTIO_MMIO_STATUS          0x070
+#define VIRTIO_MMIO_QUEUE_SEL 0x030
+#define VIRTIO_MMIO_QUEUE_NUM_MAX 0x034
+#define VIRTIO_MMIO_QUEUE_NUM 0x038
+#define VIRTIO_MMIO_QUEUE_ALIGN 0x03c
+#define VIRTIO_MMIO_QUEUE_PFN 0x040
+#define VIRTIO_MMIO_QUEUE_NOTIFY 0x050
+#define VIRTIO_MMIO_INTERRUPT_STAT 0x060
+#define VIRTIO_MMIO_INTERRUPT_ACK 0x064
+#define VIRTIO_MMIO_STATUS 0x070
 
 #define VIRTIO_MMIO_MAGIC_VALUE 0x74726976U
-#define VIRTIO_DEVICE_ID_INPUT  18U
+#define VIRTIO_DEVICE_ID_INPUT 18U
 #define VIRTIO_STATUS_ACKNOWLEDGE 1U
-#define VIRTIO_STATUS_DRIVER      2U
-#define VIRTIO_STATUS_DRIVER_OK   4U
+#define VIRTIO_STATUS_DRIVER 2U
+#define VIRTIO_STATUS_DRIVER_OK 4U
 
 #define VIRTIO_INPUT_EVENT_QUEUE_INDEX 0U
-#define VIRTIO_INPUT_QUEUE_SIZE        32U
-#define VIRTIO_INPUT_QUEUE_ALIGN       4096U
-#define VIRTIO_INPUT_QUEUE_BYTES       8192U
+#define VIRTIO_INPUT_QUEUE_SIZE 32U
+#define VIRTIO_INPUT_QUEUE_ALIGN 4096U
+#define VIRTIO_INPUT_QUEUE_BYTES 8192U
 
 #define VIRTQ_DESC_F_WRITE 2U
 
@@ -67,39 +67,40 @@ typedef struct VirtqDesc
     uint32_t len;
     uint16_t flags;
     uint16_t next;
-}
-VirtqDesc;
+} VirtqDesc;
+
+typedef VirtqDesc * VirtqDescPtr;
 
 typedef struct VirtqAvail
 {
     uint16_t flags;
     uint16_t idx;
     uint16_t ring[VIRTIO_INPUT_QUEUE_SIZE];
-}
-VirtqAvail;
+} VirtqAvail;
+
+typedef VirtqAvail * VirtqAvailPtr;
 
 typedef struct VirtqUsedElem
 {
     uint32_t id;
     uint32_t len;
-}
-VirtqUsedElem;
+} VirtqUsedElem;
 
 typedef struct VirtqUsed
 {
     uint16_t flags;
     uint16_t idx;
     VirtqUsedElem ring[VIRTIO_INPUT_QUEUE_SIZE];
-}
-VirtqUsed;
+} VirtqUsed;
+
+typedef VirtqUsed * VirtqUsedPtr;
 
 typedef struct VirtioInputEvent
 {
     uint16_t type;
     uint16_t code;
     int32_t value;
-}
-VirtioInputEvent;
+} VirtioInputEvent;
 
 typedef struct VirtioKeyboard
 {
@@ -113,14 +114,13 @@ typedef struct VirtioKeyboard
     char pending[VIRTIO_KEYBOARD_PENDING_BYTES];
     uint64_t pending_read;
     uint64_t pending_write;
-}
-VirtioKeyboard;
+} VirtioKeyboard;
 
 typedef VirtioKeyboard * VirtioKeyboardPtr;
 
 static VirtqDesc VirtqDesc__new(uint64_t addr, uint32_t len, uint16_t flags, uint16_t next)
 {
-    return (VirtqDesc) {
+    return (VirtqDesc){
         .addr = addr,
         .len = len,
         .flags = flags,
@@ -130,15 +130,15 @@ static VirtqDesc VirtqDesc__new(uint64_t addr, uint32_t len, uint16_t flags, uin
 
 static VirtioKeyboard VirtioKeyboard__new(void)
 {
-    return (VirtioKeyboard) {
-        .mmio = (void *) VIRTIO_MMIO_FIRST_PHYS_BASE,
+    return (VirtioKeyboard){
+        .mmio = (void *)VIRTIO_MMIO_FIRST_PHYS_BASE,
         .slot = 0,
         .irq_id = 0,
         .queue_size = 0,
         .last_used_idx = 0,
         .keyboard = -1,
         .shift = false,
-        .pending = { 0 },
+        .pending = {0},
         .pending_read = 0,
         .pending_write = 0,
     };
@@ -154,36 +154,34 @@ static uint64_t VirtioKeyboard__align_up(uint64_t value, uint64_t alignment)
 
 static void VirtioKeyboard__zero_bytes(void * target, uint64_t size)
 {
-    uint8_t * bytes = (uint8_t *) target;
+    uint8_t * bytes = (uint8_t *)target;
     for (uint64_t index = 0; index < size; index++)
     {
         bytes[index] = 0;
     }
 }
 
-static VirtqDesc * VirtioKeyboard__descs(VirtioKeyboardPtr self)
+static VirtqDescPtr VirtioKeyboard__descs(VirtioKeyboardPtr self)
 {
-    return (VirtqDesc *) virtio_keyboard_queue_area;
+    return (VirtqDescPtr)virtio_keyboard_queue_area;
 }
 
-static VirtqAvail * VirtioKeyboard__avail(VirtioKeyboardPtr self)
+static VirtqAvailPtr VirtioKeyboard__avail(VirtioKeyboardPtr self)
 {
-    return (VirtqAvail *) (virtio_keyboard_queue_area + sizeof(VirtqDesc) * VIRTIO_INPUT_QUEUE_SIZE);
+    return (VirtqAvailPtr)(virtio_keyboard_queue_area + sizeof(VirtqDesc) * VIRTIO_INPUT_QUEUE_SIZE);
 }
 
-static VirtqUsed * VirtioKeyboard__used(VirtioKeyboardPtr self)
+static VirtqUsedPtr VirtioKeyboard__used(VirtioKeyboardPtr self)
 {
-    uint64_t used_offset = VirtioKeyboard__align_up(
-        sizeof(VirtqDesc) * VIRTIO_INPUT_QUEUE_SIZE + sizeof(VirtqAvail),
-        VIRTIO_INPUT_QUEUE_ALIGN
-    );
-    return (VirtqUsed *) (virtio_keyboard_queue_area + used_offset);
+    uint64_t used_offset = VirtioKeyboard__align_up(sizeof(VirtqDesc) * VIRTIO_INPUT_QUEUE_SIZE + sizeof(VirtqAvail),
+                                                    VIRTIO_INPUT_QUEUE_ALIGN);
+    return (VirtqUsedPtr)(virtio_keyboard_queue_area + used_offset);
 }
 
 #if !defined(VIRTIO_KEYBOARD_READ32) || !defined(VIRTIO_KEYBOARD_WRITE32)
 static volatile uint32_t * VirtioKeyboard__reg32(void * base, uint64_t offset)
 {
-    return (volatile uint32_t *) ((uint64_t) base + offset);
+    return (volatile uint32_t *)((uint64_t)base + offset);
 }
 #endif
 
@@ -192,7 +190,7 @@ static volatile uint32_t * VirtioKeyboard__reg32(void * base, uint64_t offset)
 #endif
 
 #ifndef VIRTIO_KEYBOARD_WRITE32
-#define VIRTIO_KEYBOARD_WRITE32(base, offset, value) (*VirtioKeyboard__reg32((base), (offset)) = (uint32_t) (value))
+#define VIRTIO_KEYBOARD_WRITE32(base, offset, value) (*VirtioKeyboard__reg32((base), (offset)) = (uint32_t)(value))
 #endif
 
 static uint64_t VirtioKeyboard__pending_count(VirtioKeyboardPtr self)
@@ -229,36 +227,89 @@ static char VirtioKeyboard__letter(uint16_t code, bool shift)
     char letter = '\0';
     switch (code)
     {
-        case 16: letter = 'q'; break;
-        case 17: letter = 'w'; break;
-        case 18: letter = 'e'; break;
-        case 19: letter = 'r'; break;
-        case 20: letter = 't'; break;
-        case 21: letter = 'y'; break;
-        case 22: letter = 'u'; break;
-        case 23: letter = 'i'; break;
-        case 24: letter = 'o'; break;
-        case 25: letter = 'p'; break;
-        case 30: letter = 'a'; break;
-        case 31: letter = 's'; break;
-        case 32: letter = 'd'; break;
-        case 33: letter = 'f'; break;
-        case 34: letter = 'g'; break;
-        case 35: letter = 'h'; break;
-        case 36: letter = 'j'; break;
-        case 37: letter = 'k'; break;
-        case 38: letter = 'l'; break;
-        case 44: letter = 'z'; break;
-        case 45: letter = 'x'; break;
-        case 46: letter = 'c'; break;
-        case 47: letter = 'v'; break;
-        case 48: letter = 'b'; break;
-        case 49: letter = 'n'; break;
-        case 50: letter = 'm'; break;
-        default: return '\0';
+    case 16:
+        letter = 'q';
+        break;
+    case 17:
+        letter = 'w';
+        break;
+    case 18:
+        letter = 'e';
+        break;
+    case 19:
+        letter = 'r';
+        break;
+    case 20:
+        letter = 't';
+        break;
+    case 21:
+        letter = 'y';
+        break;
+    case 22:
+        letter = 'u';
+        break;
+    case 23:
+        letter = 'i';
+        break;
+    case 24:
+        letter = 'o';
+        break;
+    case 25:
+        letter = 'p';
+        break;
+    case 30:
+        letter = 'a';
+        break;
+    case 31:
+        letter = 's';
+        break;
+    case 32:
+        letter = 'd';
+        break;
+    case 33:
+        letter = 'f';
+        break;
+    case 34:
+        letter = 'g';
+        break;
+    case 35:
+        letter = 'h';
+        break;
+    case 36:
+        letter = 'j';
+        break;
+    case 37:
+        letter = 'k';
+        break;
+    case 38:
+        letter = 'l';
+        break;
+    case 44:
+        letter = 'z';
+        break;
+    case 45:
+        letter = 'x';
+        break;
+    case 46:
+        letter = 'c';
+        break;
+    case 47:
+        letter = 'v';
+        break;
+    case 48:
+        letter = 'b';
+        break;
+    case 49:
+        letter = 'n';
+        break;
+    case 50:
+        letter = 'm';
+        break;
+    default:
+        return '\0';
     }
 
-    return shift ? (char) (letter - ('a' - 'A')) : letter;
+    return shift ? (char)(letter - ('a' - 'A')) : letter;
 }
 
 static char VirtioKeyboard__number_or_symbol(uint16_t code, bool shift)
@@ -278,18 +329,30 @@ static char VirtioKeyboard__punctuation(uint16_t code, bool shift)
 {
     switch (code)
     {
-        case 12: return shift ? '_' : '-';
-        case 13: return shift ? '+' : '=';
-        case 26: return shift ? '{' : '[';
-        case 27: return shift ? '}' : ']';
-        case 39: return shift ? ':' : ';';
-        case 40: return shift ? '"' : '\'';
-        case 41: return shift ? '~' : '`';
-        case 43: return shift ? '|' : '\\';
-        case 51: return shift ? '<' : ',';
-        case 52: return shift ? '>' : '.';
-        case 53: return shift ? '?' : '/';
-        default: return '\0';
+    case 12:
+        return shift ? '_' : '-';
+    case 13:
+        return shift ? '+' : '=';
+    case 26:
+        return shift ? '{' : '[';
+    case 27:
+        return shift ? '}' : ']';
+    case 39:
+        return shift ? ':' : ';';
+    case 40:
+        return shift ? '"' : '\'';
+    case 41:
+        return shift ? '~' : '`';
+    case 43:
+        return shift ? '|' : '\\';
+    case 51:
+        return shift ? '<' : ',';
+    case 52:
+        return shift ? '>' : '.';
+    case 53:
+        return shift ? '?' : '/';
+    default:
+        return '\0';
     }
 }
 
@@ -364,9 +427,9 @@ static void VirtioKeyboard__handle_key_event(VirtioKeyboardPtr self, uint16_t co
 
 static bool VirtioKeyboard__probe(void * mmio)
 {
-    return VIRTIO_KEYBOARD_READ32(mmio, VIRTIO_MMIO_MAGIC) == VIRTIO_MMIO_MAGIC_VALUE
-        && VIRTIO_KEYBOARD_READ32(mmio, VIRTIO_MMIO_VERSION) >= 1
-        && VIRTIO_KEYBOARD_READ32(mmio, VIRTIO_MMIO_DEVICE_ID) == VIRTIO_DEVICE_ID_INPUT;
+    return VIRTIO_KEYBOARD_READ32(mmio, VIRTIO_MMIO_MAGIC) == VIRTIO_MMIO_MAGIC_VALUE &&
+           VIRTIO_KEYBOARD_READ32(mmio, VIRTIO_MMIO_VERSION) >= 1 &&
+           VIRTIO_KEYBOARD_READ32(mmio, VIRTIO_MMIO_DEVICE_ID) == VIRTIO_DEVICE_ID_INPUT;
 }
 
 static bool VirtioKeyboard__find_device(VirtioKeyboardPtr self)
@@ -386,7 +449,7 @@ static bool VirtioKeyboard__find_device(VirtioKeyboardPtr self)
             self->mmio = mmio;
             self->slot = slot;
             self->irq_id = VIRTIO_MMIO_FIRST_IRQ_ID + slot;
-            DRIVER_DEBUG("virtio_keyboard: found slot=%i irq=%i\n", (int) slot, (int) self->irq_id);
+            DRIVER_DEBUG("virtio_keyboard: found slot=%i irq=%i\n", (int)slot, (int)self->irq_id);
             return true;
         }
     }
@@ -412,7 +475,7 @@ static bool VirtioKeyboard__setup_event_queue(VirtioKeyboardPtr self)
     }
     if ((queue_device_address & (VIRTIO_INPUT_QUEUE_ALIGN - 1)) != 0)
     {
-        DRIVER_DEBUG("virtio_keyboard: queue address not aligned 0x%x\n", (unsigned int) queue_device_address);
+        DRIVER_DEBUG("virtio_keyboard: queue address not aligned 0x%x\n", (unsigned int)queue_device_address);
         return false;
     }
 
@@ -428,13 +491,13 @@ static bool VirtioKeyboard__setup_event_queue(VirtioKeyboardPtr self)
         return false;
     }
 
-    self->queue_size = queue_num_max < VIRTIO_INPUT_QUEUE_SIZE ? (uint16_t) queue_num_max : VIRTIO_INPUT_QUEUE_SIZE;
+    self->queue_size = queue_num_max < VIRTIO_INPUT_QUEUE_SIZE ? (uint16_t)queue_num_max : VIRTIO_INPUT_QUEUE_SIZE;
     VIRTIO_KEYBOARD_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_NUM, self->queue_size);
     VIRTIO_KEYBOARD_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_ALIGN, VIRTIO_INPUT_QUEUE_ALIGN);
     VIRTIO_KEYBOARD_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_PFN, queue_device_address / VIRTIO_INPUT_QUEUE_ALIGN);
 
-    VirtqDesc * descs = VirtioKeyboard__descs(self);
-    VirtqAvail * avail = VirtioKeyboard__avail(self);
+    VirtqDescPtr descs = VirtioKeyboard__descs(self);
+    VirtqAvailPtr avail = VirtioKeyboard__avail(self);
     for (uint16_t index = 0; index < self->queue_size; index++)
     {
         uint64_t event_device_address = 0;
@@ -452,11 +515,8 @@ static bool VirtioKeyboard__setup_event_queue(VirtioKeyboardPtr self)
     self->last_used_idx = VirtioKeyboard__used(self)->idx;
     __sync_boundary();
     VIRTIO_KEYBOARD_WRITE32(self->mmio, VIRTIO_MMIO_QUEUE_NOTIFY, VIRTIO_INPUT_EVENT_QUEUE_INDEX);
-    VIRTIO_KEYBOARD_WRITE32(
-        self->mmio,
-        VIRTIO_MMIO_STATUS,
-        VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_DRIVER_OK
-    );
+    VIRTIO_KEYBOARD_WRITE32(self->mmio, VIRTIO_MMIO_STATUS,
+                            VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_DRIVER_OK);
     return true;
 }
 
@@ -473,7 +533,7 @@ static void VirtioKeyboard__ack_interrupt(VirtioKeyboardPtr self)
 
 static void VirtioKeyboard__requeue_event(VirtioKeyboardPtr self, uint16_t descriptor_id)
 {
-    VirtqAvail * avail = VirtioKeyboard__avail(self);
+    VirtqAvailPtr avail = VirtioKeyboard__avail(self);
     avail->ring[avail->idx % self->queue_size] = descriptor_id;
     __sync_boundary();
     avail->idx++;
@@ -483,7 +543,7 @@ static void VirtioKeyboard__requeue_event(VirtioKeyboardPtr self, uint16_t descr
 
 static void VirtioKeyboard__drain_used_events(VirtioKeyboardPtr self)
 {
-    VirtqUsed * used = VirtioKeyboard__used(self);
+    VirtqUsedPtr used = VirtioKeyboard__used(self);
     while (self->last_used_idx != used->idx)
     {
         VirtqUsedElem used_event = used->ring[self->last_used_idx % self->queue_size];
@@ -494,7 +554,7 @@ static void VirtioKeyboard__drain_used_events(VirtioKeyboardPtr self)
             {
                 VirtioKeyboard__handle_key_event(self, event.code, event.value);
             }
-            VirtioKeyboard__requeue_event(self, (uint16_t) used_event.id);
+            VirtioKeyboard__requeue_event(self, (uint16_t)used_event.id);
         }
         self->last_used_idx++;
     }
@@ -555,7 +615,7 @@ static bool VirtioKeyboard__init(VirtioKeyboardPtr self)
     self->keyboard = io_server_register(&bstr(VIRTIO_KEYBOARD_PATH), IO_SERVER_READ);
     if (self->keyboard < 0)
     {
-        DRIVER_DEBUG("virtio_keyboard: register failed %i\n", (int) self->keyboard);
+        DRIVER_DEBUG("virtio_keyboard: register failed %i\n", (int)self->keyboard);
         return false;
     }
 

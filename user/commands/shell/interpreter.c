@@ -17,7 +17,7 @@ static Command Command__new(void)
 {
     Command command = {
         .name = empty_bstr(),
-        .args = { 0 },
+        .args = {0},
         .background = false,
     };
     command.args = CommandArguments__new();
@@ -57,9 +57,7 @@ static BString Interpreter__command_path(ConstBStringPtr cmd)
 
 Interpreter Interpreter__new(void)
 {
-    Interpreter interpreter = {
-        .command = { 0 }
-    };
+    Interpreter interpreter = {.command = {0}};
     interpreter.command = Command__new();
     return interpreter;
 }
@@ -71,7 +69,8 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
     BString remaining = *input;
 
     BStringSplit command_split = Interpreter__parse_token(&remaining);
-    match_optional(BString, command_split.match,
+    match_optional(
+        command_split.match,
         some(parsed_command) { self->command.name = parsed_command; },
         none() { return self->command; }
     );
@@ -81,10 +80,12 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
     while (CommandArguments__len(&self->command.args) < COMMAND_MAX_ARGS)
     {
         BStringSplit arg_split = Interpreter__parse_token(&remaining);
-        match_optional(BString, arg_split.match,
+        match_optional(
+            arg_split.match,
             some(argument)
             {
-                match_result(CollectionCode, CommandArguments__push(&self->command.args, argument),
+                match_result(
+                    CommandArguments__push(&self->command.args, argument),
                     success_do_nothing(),
                     error(code, message) { return self->command; }
                 );
@@ -94,7 +95,8 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
         remaining = arg_split.rest;
     }
 
-    match_optional(BString, CommandArguments__pop(&self->command.args),
+    match_optional(
+        CommandArguments__pop(&self->command.args),
         some(last_argument)
         {
             if (BString__equals(&last_argument, &BACKGROUND_OPERATOR))
@@ -133,9 +135,9 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
     BString path = Interpreter__command_path(&command->name);
     SpawnArguments arguments = SpawnArguments__new();
     CommandArguments command_arguments = command->args;
-    for_each_fa(CommandArguments, command_arguments, argument_index, argument,
-    {
-        match_result(CollectionCode, SpawnArguments__push(&arguments, argument),
+    for_each_fa(CommandArguments, command_arguments, argument_index, argument, {
+        match_result(
+            SpawnArguments__push(&arguments, argument),
             success_do_nothing(),
             error(code, message) { return COMMAND_FAILED; }
         );
@@ -150,19 +152,19 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
 
     if (result < SPAWN_SUCCESS)
     {
-        IO__printf(&bstr("result = %i\n"), (int) result);
+        IO__printf(&bstr("result = %i\n"), (int)result);
     }
 
     switch (result)
     {
-        case SPAWN_SUCCESS:
-            return COMMAND_SUCCESS;
-        case SPAWN_NO_MEM:
-        case SPAWN_NO_FILE:
-        case SPAWN_NO_PATH:
-        case SPAWN_ARG_TOO_LONG:
-        case SPAWN_FAILED:
-            return COMMAND_FAILED;
+    case SPAWN_SUCCESS:
+        return COMMAND_SUCCESS;
+    case SPAWN_NO_MEM:
+    case SPAWN_NO_FILE:
+    case SPAWN_NO_PATH:
+    case SPAWN_ARG_TOO_LONG:
+    case SPAWN_FAILED:
+        return COMMAND_FAILED;
     }
 
     return COMMAND_FAILED;

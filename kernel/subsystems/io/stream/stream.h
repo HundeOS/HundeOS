@@ -20,8 +20,7 @@ typedef struct StreamState
     StreamParkedContexts parked_contexts;
 
     mutex_t lock;
-}
-StreamState;
+} StreamState;
 
 typedef StreamState * StreamStatePtr;
 

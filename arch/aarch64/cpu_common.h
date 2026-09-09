@@ -3,7 +3,8 @@
 #include "asm_helpers.h"
 #include "../../kernel/cpu.h"
 
-inline uint64_t cpu_id() {
+inline uint64_t cpu_id()
+{
     return read_tpidr_el1();
 }
 
@@ -19,7 +20,8 @@ inline uint64_t mpidr_for_cpu(unsigned cpu_index)
     return mpidr_pack(0, 0, 0, cpu_index & 0xFFu);
 }
 
-inline void cpu_set_this_id(CPUID id){
+inline void cpu_set_this_id(CPUID id)
+{
     write_tpidr_el1(id);
 }
 

@@ -5,15 +5,17 @@
 #include "../../kernel/process.h"
 #include "../../kernel/arch/cpu.h"
 
-typedef enum {
+typedef enum
+{
     CPU_OFFLINE = 0,
     CPU_BOOTING,
     CPU_ONLINE,
     CPU_IDLE
 } cpu_state;
 
-typedef struct CPU {
-    Process* current_process;
+typedef struct CPU
+{
+    Process * current_process;
     uint64_t cpu_id;
     Address kernel_stack;
     cpu_state state;
@@ -24,9 +26,10 @@ void smp_init();
 uint64_t start_secondary_cpus();
 void start_primary_cpu();
 
-inline uint64_t get_current_el(void) {
+inline uint64_t get_current_el(void)
+{
     uint64_t el;
-    __asm__ __volatile__("mrs %0, CurrentEL" : "=r" (el));
+    __asm__ __volatile__("mrs %0, CurrentEL" : "=r"(el));
     return (el >> 2) & 3;
 }
 

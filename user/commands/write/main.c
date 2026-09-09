@@ -9,7 +9,7 @@ static Optional(BString) Write__split_path_value(ConstBStringPtr arg, BStringPtr
     }
 
     BStringSplit split = BString__split_first_any(arg, &bstr("="));
-    match_optional(BString, split.match,
+    match_optional(split.match,
         some(raw_path) { *path = IO__path_from_arg(&raw_path); },
         none_do_nothing()
     );
@@ -55,20 +55,21 @@ int main(int argc, char ** argv)
         value = Write__split_path_value(&arg, &path);
     }
 
-    match_optional(BString, value,
+    match_optional(
+        value,
         some(text)
         {
             IOHandle handle = IO__open(&path, IO_OPEN_WRITE);
             if (handle < 0)
             {
-                IO__printf(&bstr("write: open error %i\n"), (int) handle);
+                IO__printf(&bstr("write: open error %i\n"), (int)handle);
                 return 1;
             }
 
             ByteCount bytes = IO__write(handle, &text);
             if (bytes < 0)
             {
-                IO__printf(&bstr("write: write error %i\n"), (int) bytes);
+                IO__printf(&bstr("write: write error %i\n"), (int)bytes);
                 close(handle);
                 return 1;
             }

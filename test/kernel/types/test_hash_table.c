@@ -11,20 +11,18 @@ OptionalDef(TestValue);
 
 HashCode hash_uint64(uint64_t * key)
 {
-    return (HashCode) *key;
+    return (HashCode)*key;
 }
 
-HashtableDefine(TestKey, TestValue, 128, 1024, TestHashTable, hash_uint64, SimpleEquals(uint64_t), SimpleEquals(uint64_t))
-HashtableBodyDefine(TestHashTable)
+HashtableDefine(TestKey, TestValue, 128, 1024, TestHashTable, hash_uint64, SimpleEquals(uint64_t),
+                SimpleEquals(uint64_t)) HashtableBodyDefine(TestHashTable)
 
-void setUp(void)
+    void setUp(void)
 {
-
 }
 
 void tearDown(void)
 {
-
 }
 
 void test_hash_table_insert_and_lookup(void)
@@ -32,7 +30,7 @@ void test_hash_table_insert_and_lookup(void)
     TestHashTable table = TestHashTable__new();
     TestHashTable__set(&table, 123, 456);
     Optional(TestValue) value_opt = TestHashTable__get(&table, 123);
-    TestValue value = unwrap(TestValue, value_opt, (TestValue){});
+    TestValue value = unwrap_optional(value_opt, (TestValue){});
     TEST_ASSERT_EQUAL_INT(456, value);
 }
 
@@ -42,6 +40,6 @@ void test_hash_table_insert_and_update(void)
     TestHashTable__set(&table, 123, 456);
     TestHashTable__set(&table, 123, 789);
     Optional(TestValue) value_opt = TestHashTable__get(&table, 123);
-    TestValue value = unwrap(TestValue, value_opt, (TestValue){});
+    TestValue value = unwrap_optional(value_opt, (TestValue){});
     TEST_ASSERT_EQUAL_INT(789, value);
 }

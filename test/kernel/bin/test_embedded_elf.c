@@ -8,14 +8,16 @@ extern const unsigned char _bin_hello_world_end[];
 
 void setUp(void)
 {
-
 }
 
 void test_elf_lookup(void)
 {
     Optional(Elf) elf = EmbeddedElf__load(&bstr("hello_world"));
 
-    match_optional(Elf, elf, some_do_nothing(), none_test_fail());
+    match_optional(elf,
+        some_do_nothing(),
+        none_test_fail()
+    );
 }
 
 void test_elf_list_uses_embedded_index(void)
@@ -36,5 +38,8 @@ void test_elf_lookup_missing_file(void)
 {
     Optional(Elf) elf = EmbeddedElf__load(&bstr("missing"));
 
-    match_optional(Elf, elf, some_test_fail(), none_do_nothing());
+    match_optional(elf,
+        some_test_fail(),
+        none_do_nothing()
+    );
 }

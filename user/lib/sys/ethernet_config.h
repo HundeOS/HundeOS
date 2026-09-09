@@ -18,8 +18,7 @@ typedef struct EthernetConfig
     uint64_t physical_base;
     uint64_t mmio_size;
     uint64_t irq;
-}
-EthernetConfig;
+} EthernetConfig;
 
 typedef EthernetConfig * EthernetConfigPtr;
 
@@ -33,19 +32,15 @@ typedef struct EthernetConfigParseState
     bool found_physical_base;
     bool found_mmio_size;
     bool found_irq;
-}
-EthernetConfigParseState;
+} EthernetConfigParseState;
 
 typedef EthernetConfigParseState * EthernetConfigParseStatePtr;
 typedef const EthernetConfigParseState * ConstEthernetConfigParseStatePtr;
 
-static EthernetConfig EthernetConfig__new(
-    EthernetMacKind mac_kind,
-    uint64_t physical_base,
-    uint64_t mmio_size,
-    uint64_t irq)
+static EthernetConfig EthernetConfig__new(EthernetMacKind mac_kind, uint64_t physical_base, uint64_t mmio_size,
+                                          uint64_t irq)
 {
-    return (EthernetConfig) {
+    return (EthernetConfig){
         .mac_kind = mac_kind,
         .physical_base = physical_base,
         .mmio_size = mmio_size,
@@ -55,7 +50,7 @@ static EthernetConfig EthernetConfig__new(
 
 static EthernetConfigParseState EthernetConfigParseState__new(void)
 {
-    return (EthernetConfigParseState) {
+    return (EthernetConfigParseState){
         .config = EthernetConfig__new(ETHERNET_MAC_KIND_NONE, 0, 0, 0),
         .found_present = false,
         .found_mac_kind = false,
@@ -77,7 +72,8 @@ static Optional(uint64_t) EthernetConfig__read_line_value(ConstBStringPtr line, 
     BStringSplit split = BString__split_first_any(line, &ethernet_config_delimiter);
     bool matched = false;
 
-    match_optional(BString, split.match,
+    match_optional(
+        split.match,
         some(raw_key)
         {
             BString line_key = BString__strip(&raw_key);
@@ -94,13 +90,12 @@ static Optional(uint64_t) EthernetConfig__read_line_value(ConstBStringPtr line, 
     return BString__parse_uint64_base(&split.rest, 0);
 }
 
-static void EthernetConfigParseState__read_config_line(
-    EthernetConfigParseStatePtr self,
-    ConstBStringPtr line)
+static void EthernetConfigParseState__read_config_line(EthernetConfigParseStatePtr self, ConstBStringPtr line)
 {
     if (!self->found_present)
     {
-        match_optional(uint64_t, EthernetConfig__read_line_value(line, &ethernet_config_present_key),
+        match_optional(
+            EthernetConfig__read_line_value(line, &ethernet_config_present_key),
             some(parsed) { self->found_present = parsed == 1; },
             none_do_nothing()
         );
@@ -108,10 +103,11 @@ static void EthernetConfigParseState__read_config_line(
 
     if (!self->found_mac_kind)
     {
-        match_optional(uint64_t, EthernetConfig__read_line_value(line, &ethernet_config_mac_kind_key),
+        match_optional(
+            EthernetConfig__read_line_value(line, &ethernet_config_mac_kind_key),
             some(parsed)
             {
-                self->config.mac_kind = (EthernetMacKind) parsed;
+                self->config.mac_kind = (EthernetMacKind)parsed;
                 self->found_mac_kind = true;
             },
             none_do_nothing()
@@ -120,7 +116,8 @@ static void EthernetConfigParseState__read_config_line(
 
     if (!self->found_physical_base)
     {
-        match_optional(uint64_t, EthernetConfig__read_line_value(line, &ethernet_config_physical_base_key),
+        match_optional(
+            EthernetConfig__read_line_value(line, &ethernet_config_physical_base_key),
             some(parsed)
             {
                 self->config.physical_base = parsed;
@@ -132,7 +129,8 @@ static void EthernetConfigParseState__read_config_line(
 
     if (!self->found_mmio_size)
     {
-        match_optional(uint64_t, EthernetConfig__read_line_value(line, &ethernet_config_mmio_size_key),
+        match_optional(
+            EthernetConfig__read_line_value(line, &ethernet_config_mmio_size_key),
             some(parsed)
             {
                 self->config.mmio_size = parsed;
@@ -144,7 +142,8 @@ static void EthernetConfigParseState__read_config_line(
 
     if (!self->found_irq)
     {
-        match_optional(uint64_t, EthernetConfig__read_line_value(line, &ethernet_config_irq_key),
+        match_optional(
+            EthernetConfig__read_line_value(line, &ethernet_config_irq_key),
             some(parsed)
             {
                 self->config.irq = parsed;
@@ -157,23 +156,21 @@ static void EthernetConfigParseState__read_config_line(
 
 static bool EthernetConfigParseState__has_required_fields(ConstEthernetConfigParseStatePtr self)
 {
-    return self->found_present
-        && self->found_mac_kind
-        && self->found_physical_base
-        && self->found_mmio_size
-        && self->found_irq;
+    return self->found_present && self->found_mac_kind && self->found_physical_base && self->found_mmio_size &&
+           self->found_irq;
 }
 
 static Optional(EthernetConfig) EthernetConfig__parse(ConstDynStringPtr sysinfo)
 {
     EthernetConfigParseState state = EthernetConfigParseState__new();
 
-    match_optional(DynStringLines, DynString__lines(sysinfo),
+    match_optional(
+        DynString__lines(sysinfo),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line,
-            {
-                match_optional(BString, DynString__bstring(&line),
+            for_each_ll(DynStringLines, lines, line, {
+                match_optional(
+                    DynString__bstring(&line),
                     some(bstring_line) { EthernetConfigParseState__read_config_line(&state, &bstring_line); },
                     none_do_nothing()
                 );
@@ -202,7 +199,8 @@ static Optional(EthernetConfig) EthernetConfig__load(void)
     Optional(DynString) sysinfo = IO__read_dyn_string(handle, ETHERNET_CONFIG_MAX);
     close(handle);
 
-    match_optional(DynString, sysinfo,
+    match_optional(
+        sysinfo,
         some(data)
         {
             Optional(EthernetConfig) config = EthernetConfig__parse(&data);

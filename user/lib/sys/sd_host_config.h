@@ -16,8 +16,7 @@ typedef struct SdHostConfig
     uint64_t physical_base;
     uint64_t mmio_size;
     uint64_t irq;
-}
-SdHostConfig;
+} SdHostConfig;
 
 typedef SdHostConfig * SdHostConfigPtr;
 typedef bool * BoolPtr;
@@ -27,7 +26,7 @@ OptionalDef(SdHostConfig);
 
 static SdHostConfig SdHostConfig__new(uint64_t physical_base, uint64_t mmio_size, uint64_t irq)
 {
-    return (SdHostConfig) {
+    return (SdHostConfig){
         .physical_base = physical_base,
         .mmio_size = mmio_size,
         .irq = irq,
@@ -45,7 +44,8 @@ static bool SdHostConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr 
     BStringSplit split = BString__split_first_any(line, &sd_host_config_delimiter);
     bool matched = false;
 
-    match_optional(BString, split.match,
+    match_optional(
+        split.match,
         some(raw_key)
         {
             BString line_key = BString__strip(&raw_key);
@@ -59,7 +59,8 @@ static bool SdHostConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr 
         return false;
     }
 
-    match_optional(uint64_t, BString__parse_uint64_base(&split.rest, 0),
+    match_optional(
+        BString__parse_uint64_base(&split.rest, 0),
         some(parsed)
         {
             *value = parsed;
@@ -71,13 +72,8 @@ static bool SdHostConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr 
     return false;
 }
 
-static void SdHostConfig__read_config_line(
-    ConstBStringPtr line,
-    SdHostConfigPtr self,
-    BoolPtr found_present,
-    BoolPtr found_physical_base,
-    BoolPtr found_mmio_size,
-    BoolPtr found_irq)
+static void SdHostConfig__read_config_line(ConstBStringPtr line, SdHostConfigPtr self, BoolPtr found_present,
+                                           BoolPtr found_physical_base, BoolPtr found_mmio_size, BoolPtr found_irq)
 {
     uint64_t parsed = 0;
 
@@ -85,7 +81,8 @@ static void SdHostConfig__read_config_line(
     {
         *found_present = parsed == 1;
     }
-    if (!*found_physical_base && SdHostConfig__read_line_value(line, &sd_host_config_physical_base_key, &self->physical_base))
+    if (!*found_physical_base &&
+        SdHostConfig__read_line_value(line, &sd_host_config_physical_base_key, &self->physical_base))
     {
         *found_physical_base = true;
     }
@@ -107,22 +104,18 @@ static Optional(SdHostConfig) SdHostConfig__parse(ConstDynStringPtr sysinfo)
     bool found_mmio_size = false;
     bool found_irq = false;
 
-    match_optional(DynStringLines, DynString__lines(sysinfo),
+    match_optional(
+        DynString__lines(sysinfo),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line,
-            {
-                match_optional(BString, DynString__bstring(&line),
+            for_each_ll(DynStringLines, lines, line, {
+                match_optional(
+                    DynString__bstring(&line),
                     some(bstring_line)
                     {
-                        SdHostConfig__read_config_line(
-                        &bstring_line,
-                        &config,
-                        &found_present,
-                        &found_physical_base,
-                        &found_mmio_size,
-                        &found_irq
-                    ); },
+                        SdHostConfig__read_config_line(&bstring_line, &config, &found_present, &found_physical_base,
+                                                       &found_mmio_size, &found_irq);
+                    },
                     none_do_nothing()
                 );
             });
@@ -150,7 +143,8 @@ static Optional(SdHostConfig) SdHostConfig__load(void)
     Optional(DynString) sysinfo = IO__read_dyn_string(handle, SD_HOST_CONFIG_MAX);
     close(handle);
 
-    match_optional(DynString, sysinfo,
+    match_optional(
+        sysinfo,
         some(data)
         {
             Optional(SdHostConfig) config = SdHostConfig__parse(&data);

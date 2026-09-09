@@ -5,9 +5,9 @@
 #include "sys/service.h"
 #include "sys/uart_config.h"
 
-#define UART_DR   0x000
-#define UART_FR   0x018
-#define FR_TXFF   (1u << 5)
+#define UART_DR 0x000
+#define UART_FR 0x018
+#define FR_TXFF (1u << 5)
 
 #ifndef UART_TX_ENTRYPOINT
 #define UART_TX_ENTRYPOINT main
@@ -16,7 +16,7 @@
 #if !defined(UART_READ32) || !defined(UART_WRITE32)
 static volatile uint32_t * reg32(void * base, uint64_t offset)
 {
-    return (volatile uint32_t *) ((uint64_t) base + offset);
+    return (volatile uint32_t *)((uint64_t)base + offset);
 }
 #endif
 
@@ -25,7 +25,7 @@ static volatile uint32_t * reg32(void * base, uint64_t offset)
 #endif
 
 #ifndef UART_WRITE32
-#define UART_WRITE32(base, offset, value) (*reg32((base), (offset)) = (uint32_t) (value))
+#define UART_WRITE32(base, offset, value) (*reg32((base), (offset)) = (uint32_t)(value))
 #endif
 
 static void write_uart(void * uart, char value)
@@ -62,15 +62,13 @@ int UART_TX_ENTRYPOINT(void)
     IOHandle tty = io_server_register(&bstr(":tty:"), IO_SERVER_WRITE);
     if (tty < 0)
     {
-        DRIVER_DEBUG("uart_tx: register error %i\n", (int) tty);
+        DRIVER_DEBUG("uart_tx: register error %i\n", (int)tty);
         return 1;
     }
 
     ServiceEvent event;
     ServiceCode wait_status;
-    for (wait_status = service_wait(&event);
-         service_alive(wait_status);
-         wait_status = service_wait(&event))
+    for (wait_status = service_wait(&event); service_alive(wait_status); wait_status = service_wait(&event))
     {
         if (service_ok(wait_status))
         {

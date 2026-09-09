@@ -10,15 +10,13 @@ typedef enum Sources
     SOURCE_SCHEDULER = 5,
     SOURCE_PROCESS = 6,
     SOURCE_SERVICE = 7,
-}
-Sources;
+} Sources;
 
 typedef enum AckCodes
 {
     ACK_OK = 0,
     ACK_ERROR = 1,
-}
-AckCodes;
+} AckCodes;
 
 typedef enum PayloadTypes
 {
@@ -28,37 +26,31 @@ typedef enum PayloadTypes
     PAYLOAD_TYPE_PROCESS_ID = 3,
     PAYLOAD_TYPE_IO_OPERATION = 4,
     PAYLOAD_TYPE_SERVICE_EVENT_DELIVERY = 5,
-}
-PayloadTypes;
+} PayloadTypes;
 
 typedef enum ListenerRegisterResults
 {
     LISTENER_REGISTER_OK = 0,
     LISTENER_REGISTER_ERROR = 1,
-}
-ListenerRegisterResults;
-
+} ListenerRegisterResults;
 
 typedef enum IOSystemCodes
 {
     SUBSYS_IO_PARK = 4001,
     SUBSYS_IO_AVAILABLE = 4002,
     SUBSYS_IO_OPERATION_AVAILABLE = 4003,
-}
-IOSystemCodes;
+} IOSystemCodes;
 
 typedef enum ServiceSystemCodes
 {
     SUBSYS_SERVICE_EVENT_AVAILABLE = 5001,
-}
-ServiceSystemCodes;
+} ServiceSystemCodes;
 
 typedef enum ProcessCodes
 {
     SUBSYS_PROCESS_TERMINATED = 6000,
     SUBSYS_PROCESS_WAIT = 6001,
     SUBSYS_PROCESS_RUNNING = 6002,
-}
-ProcessCodes;
+} ProcessCodes;
 
 #endif

@@ -15,8 +15,7 @@ typedef struct Command
     BString name;
     CommandArguments args;
     bool background;
-}
-Command;
+} Command;
 
 typedef Command * CommandPtr;
 typedef const Command * ConstCommandPtr;
@@ -24,8 +23,7 @@ typedef const Command * ConstCommandPtr;
 typedef struct Interpreter
 {
     Command command;
-}
-Interpreter;
+} Interpreter;
 
 typedef Interpreter * InterpreterPtr;
 typedef const Interpreter * ConstInterpreterPtr;

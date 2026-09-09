@@ -11,14 +11,11 @@ int main(void)
         ServiceCode result = service_wait(&event);
         if (!service_ok(result))
         {
-            IO__printf(&bstr("service_test: wait error %i\n"), (int) result);
+            IO__printf(&bstr("service_test: wait error %i\n"), (int)result);
             continue;
         }
 
-        IO__printf(&bstr("service_test: event type=%i source=%i data=%i\n"),
-            (int) event.type,
-            (int) event.source,
-            (int) event.data
-        );
+        IO__printf(&bstr("service_test: event type=%i source=%i data=%i\n"), (int)event.type, (int)event.source,
+                   (int)event.data);
     }
 }

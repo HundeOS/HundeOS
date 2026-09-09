@@ -6,12 +6,14 @@
 #define PI_UEFI_HANDOFF_MAGIC 0x504955454649484fULL
 #define PI_UEFI_MAX_PHYSICAL_MEMORY_REGIONS 64
 
-typedef struct PiUefiPhysicalMemoryRegion {
+typedef struct PiUefiPhysicalMemoryRegion
+{
     uint64_t physical_start;
     uint64_t physical_end;
 } PiUefiPhysicalMemoryRegion;
 
-typedef struct PiUefiFramebuffer {
+typedef struct PiUefiFramebuffer
+{
     uint64_t physical_base;
     uint64_t size;
     uint32_t width;
@@ -24,7 +26,8 @@ typedef struct PiUefiFramebuffer {
     uint32_t reserved_mask;
 } PiUefiFramebuffer;
 
-typedef struct PiUefiHandoff {
+typedef struct PiUefiHandoff
+{
     uint64_t physical_memory_region_count;
     PiUefiPhysicalMemoryRegion physical_memory_regions[PI_UEFI_MAX_PHYSICAL_MEMORY_REGIONS];
     uint64_t framebuffer_present;

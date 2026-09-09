@@ -34,8 +34,7 @@ OptionalDef(IOSubsystemPtr);
 typedef struct IOState
 {
     IOHandleArray handles;
-}
-IOState;
+} IOState;
 
 typedef IOState * IOStatePtr;
 
@@ -43,8 +42,7 @@ typedef enum ParkStatus
 {
     IO_PARK_OK = 0,
     IO_UNPARK_OK = 1,
-}
-ParkStatus;
+} ParkStatus;
 
 ResultDef(ParkStatus);
 
@@ -79,20 +77,19 @@ ResultDef(IOContext);
 OptionalDef(IOContextPtr);
 ResultDef(IOContextPtr);
 
-typedef Result(IOInternalHandle) (* IO_open)(IOStatePtr self, ConstBStringPtr path, Flags flags);
-typedef Result(IOInternalHandle) (* IO_close)(IOStatePtr self, IOInternalHandle handle);
-typedef Result(IOBufferPtr) (* IO_read)(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target
-);
-typedef Result(ByteCount) (* IO_write)(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size);
-typedef Result(IOInternalHandle) (* IO_accept)(IOStatePtr self, IOInternalHandle handle);
-typedef Result(ParkStatus)(* IO_park)(IOStatePtr self, IOContextPtr parked_context);
-typedef Result(ParkStatus)(* IO_unpark)(IOStatePtr self);
-typedef Result(IOServerBuffer) (* IO_server_buffer)(IOStatePtr self);
-typedef Result(IOServerBuffer) (* IO_server_write_buffer)(IOStatePtr self);
-typedef Optional(IOContextPtr) (* IO_data_available)(IOStatePtr self, size_t byte_count);
-typedef Result(IOStatus) (* IO_data_consumed)(IOStatePtr self, size_t byte_count);
-typedef Optional(IOContextPtr) (* IO_eof)(IOStatePtr self);
+typedef Result(IOInternalHandle) (*IO_open)(IOStatePtr self, ConstBStringPtr path, Flags flags);
+typedef Result(IOInternalHandle) (*IO_close)(IOStatePtr self, IOInternalHandle handle);
+typedef Result(IOBufferPtr) (*IO_read)(IOStatePtr self, IOInternalHandle handle, size_t size,
+                                       ConstExternalBufferPtr target);
+typedef Result(ByteCount) (*IO_write)(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size);
+typedef Result(IOInternalHandle) (*IO_accept)(IOStatePtr self, IOInternalHandle handle);
+typedef Result(ParkStatus) (*IO_park)(IOStatePtr self, IOContextPtr parked_context);
+typedef Result(ParkStatus) (*IO_unpark)(IOStatePtr self);
+typedef Result(IOServerBuffer) (*IO_server_buffer)(IOStatePtr self);
+typedef Result(IOServerBuffer) (*IO_server_write_buffer)(IOStatePtr self);
+typedef Optional(IOContextPtr) (*IO_data_available)(IOStatePtr self, size_t byte_count);
+typedef Result(IOStatus) (*IO_data_consumed)(IOStatePtr self, size_t byte_count);
+typedef Optional(IOContextPtr) (*IO_eof)(IOStatePtr self);
 
 typedef struct IO
 {
@@ -129,24 +126,12 @@ MapDefine(IOHandle, DeviceRegistrationPtr, 1024, IOHandlesMap, SimpleEquals(uint
 FixedArrayDefine(DeviceRegistration, IO_MAX_DEVICES, IODevicesArray, SimpleEquals(uint64_t));
 
 IOState IOState__new();
-IO IO__new(
-    IO_open open,
-    IO_read read,
-    IO_write write,
-    IO_accept accept,
-    IO_close close,
-    IO_park park,
-    IO_unpark unpark,
-    IO_server_buffer server_buffer,
-    IO_server_write_buffer server_write_buffer,
-    IO_data_available data_available,
-    IO_data_consumed data_consumed,
-    IO_eof eof
-);
+IO IO__new(IO_open open, IO_read read, IO_write write, IO_accept accept, IO_close close, IO_park park, IO_unpark unpark,
+           IO_server_buffer server_buffer, IO_server_write_buffer server_write_buffer, IO_data_available data_available,
+           IO_data_consumed data_consumed, IO_eof eof);
 Result(IOInternalHandle) IO__unsupported_open(IOStatePtr self, ConstBStringPtr path, Flags flags);
-Result(IOBufferPtr) IO__unsupported_read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target
-);
+Result(IOBufferPtr)
+    IO__unsupported_read(IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target);
 Result(ByteCount) IO__unsupported_write(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size);
 Result(IOInternalHandle) IO__unsupported_accept(IOStatePtr self, IOInternalHandle handle);
 Result(IOInternalHandle) IO__unsupported_close(IOStatePtr self, IOInternalHandle handle);
@@ -159,20 +144,14 @@ Result(IOStatus) IO__unsupported_data_consumed(IOStatePtr self, size_t byte_coun
 Optional(IOContextPtr) IO__unsupported_eof(IOStatePtr self);
 DeviceRegistration DeviceRegistration__new(IOPtr device, ConstBStringPtr path, IOStatePtr state);
 
-IOContext IOContext__new(
-    KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
-    OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer
-);
+IOContext IOContext__new(KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
+                         OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer);
 
-IOContextPtr IOContext__heap_new(
-    KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
-    OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer
-);
+IOContextPtr IOContext__heap_new(KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
+                                 OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer);
 
-IOContextPtr IOContext__from_originating_context(
-    ConstOriginatingContextPtr originating_context, OptionalPtr(IOHandle) handle,
-    OptionalPtr(ExternalBuffer) buffer
-);
+IOContextPtr IOContext__from_originating_context(ConstOriginatingContextPtr originating_context,
+                                                 OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer);
 
 IOContextPtr IOContext__from_message_listener(KernelListenerPtr listener, ProcessID pid);
 IOContextPtr IOContext__from_io_context(IOContextPtr base, OptionalPtr(IOHandle) handle);
@@ -181,15 +160,16 @@ void IOContext__dispose(IOContextPtr self);
 
 ExternalBuffer ExternalBuffer__new(DataPtr data, size_t len);
 
-#define NEW_BUFFER \
-    (Buffer) { \
-        .len = 0, \
-        .max = _4_MEGS, \
-    } \
+#define NEW_BUFFER                                                                                                     \
+    (Buffer)                                                                                                           \
+    {                                                                                                                  \
+        .len = 0, .max = _4_MEGS,                                                                                      \
+    }
 
-#define NEW_IO_STATE \
-    (IOState) {\
-        .handles = EmptyArray(IOHandleArray),\
-    } \
+#define NEW_IO_STATE                                                                                                   \
+    (IOState)                                                                                                          \
+    {                                                                                                                  \
+        .handles = EmptyArray(IOHandleArray),                                                                          \
+    }
 
 #endif

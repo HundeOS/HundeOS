@@ -9,13 +9,13 @@
 SyslogResult kernel_syslog(ConstBStringPtr message)
 {
     SyslogRequest request = SyslogRequest__new(message, None(BString));
-    return (SyslogResult) syscall(SYSCALL_SYSLOG, (Anything) &request, 0, 0, 0, 0);
+    return (SyslogResult)syscall(SYSCALL_SYSLOG, (Anything)&request, 0, 0, 0, 0);
 }
 
 SyslogResult kernel_syslog_tag(ConstBStringPtr tag, ConstBStringPtr message)
 {
     SyslogRequest request = SyslogRequest__new(message, Some(BString, *tag));
-    return (SyslogResult) syscall(SYSCALL_SYSLOG, (Anything) &request, 0, 0, 0, 0);
+    return (SyslogResult)syscall(SYSCALL_SYSLOG, (Anything)&request, 0, 0, 0, 0);
 }
 
 SyslogResult kernel_syslogf(const char * format, ...)

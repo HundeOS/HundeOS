@@ -20,14 +20,13 @@ typedef struct SyslogRequest
 {
     BString message;
     Optional(BString) tag;
-}
-SyslogRequest;
+} SyslogRequest;
 
 typedef SyslogRequest * SyslogRequestPtr;
 
 static inline SyslogRequest SyslogRequest__new(ConstBStringPtr message, Optional(BString) tag)
 {
-    return (SyslogRequest) {
+    return (SyslogRequest){
         .message = *message,
         .tag = tag,
     };

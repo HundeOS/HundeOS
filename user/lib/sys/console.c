@@ -16,7 +16,7 @@ ByteCount console_read(char * buf, uint64_t size)
     ByteCount res = 0;
     res = read(STDIN_FILENO, buf, size);
 
-    if (res > 0 && res < (ByteCount) size)
+    if (res > 0 && res < (ByteCount)size)
     {
         buf[res] = '\0';
     }

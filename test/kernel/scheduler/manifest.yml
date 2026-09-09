@@ -3,6 +3,7 @@ manifest:
     - kernel/syscall/*.c
     - kernel/process.c
     - kernel/process_class.c
+    - kernel/cpu_timer.c
     - kernel/bin/*.c
     - kernel/stack.c
     - kernel/kernel_init.c

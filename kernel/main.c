@@ -23,30 +23,24 @@ static BString tty_path = bstr(":tty:");
 
 static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, ConstBStringPtr path, Flags flags)
 {
-    __d_printf(
-        IOSUB, "open_stdio_handle pid=%i name=%s path=%s flags=%i\n",
-        process->pid, cstr(process->name), cstr_p(path), flags
-    );
-    KernelContext kernel_context = KernelContext__new(
-        &Some(ProcessID, process->pid),
-        &Some(SchedulerPtr, kernel->scheduler)
-    );
-    IOContextPtr context = IOContext__heap_new(
-        &kernel_context,
-        &Some(IOSubsystemPtr, kernel->io_subsystem),
-        &None(IOHandle),
-        &None(ExternalBuffer)
-    );
+    __d_printf(IOSUB, "open_stdio_handle pid=%i name=%s path=%s flags=%i\n", process->pid, cstr(process->name),
+               cstr_p(path), flags);
+    KernelContext kernel_context =
+        KernelContext__new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
+    IOContextPtr context = IOContext__heap_new(&kernel_context, &Some(IOSubsystemPtr, kernel->io_subsystem),
+                                               &None(IOHandle), &None(ExternalBuffer));
     Result(IOHandle) open_result = IOSubsystem__open(kernel->io_subsystem, context, path, flags);
     IOContext__dispose(context);
-    match_result(IOHandle, open_result,
+    match_result(
+        open_result,
         success(handle)
         {
             __d_printf(IOSUB, "open_stdio_handle success pid=%i flags=%i handle=%p\n", process->pid, flags, handle);
         },
         error(code, message)
         {
-            __d_printf(IOSUB, "open_stdio_handle error pid=%i flags=%i code=%i message=%s\n", process->pid, flags, code, cstr(message));
+            __d_printf(IOSUB, "open_stdio_handle error pid=%i flags=%i code=%i message=%s\n", process->pid, flags, code,
+                       cstr(message));
         }
     );
     return open_result;
@@ -55,7 +49,8 @@ static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, 
 static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, ProcessPtr process)
 {
     __d_printf(IOSUB, "install_default_stdio start pid=%i name=%s\n", process->pid, cstr(process->name));
-    match_result(IOHandle, open_stdio_handle(kernel, process, &tty_path, IO_OPEN_READ),
+    match_result(
+        open_stdio_handle(kernel, process, &tty_path, IO_OPEN_READ),
         success(handle)
         {
             __d_printf(IOSUB, "install_default_stdio fd=0 pid=%i handle=%p\n", process->pid, handle);
@@ -64,7 +59,8 @@ static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, Proces
         error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
     );
 
-    match_result(IOHandle, open_stdio_handle(kernel, process, &console_path, IO_OPEN_WRITE),
+    match_result(
+        open_stdio_handle(kernel, process, &console_path, IO_OPEN_WRITE),
         success(handle)
         {
             __d_printf(IOSUB, "install_default_stdio fd=1 pid=%i handle=%p\n", process->pid, handle);
@@ -73,7 +69,8 @@ static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, Proces
         error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
     );
 
-    match_result(IOHandle, open_stdio_handle(kernel, process, &console_path, IO_OPEN_WRITE),
+    match_result(
+        open_stdio_handle(kernel, process, &console_path, IO_OPEN_WRITE),
         success(handle)
         {
             __d_printf(IOSUB, "install_default_stdio fd=2 pid=%i handle=%p\n", process->pid, handle);
@@ -90,19 +87,24 @@ void schedule_as(KernelPtr kernel, ConstBStringPtr name, ProcessClass process_cl
 {
     __d_printf(PROGRESS, "Queuing to scheduler: %s\n", cstr_p(name));
     Optional(Elf) program = EmbeddedElf__load(name);
-    match_optional(Elf, program,
+    match_optional(
+        program,
         some(elf)
         {
-            match_result(ProcessPtr, Process__setup(kernel, &elf, &None(ProcessPtr)),
+            match_result(
+                Process__setup(kernel, &elf, &None(ProcessPtr)),
                 success(process)
                 {
-                    __d_printf(PROCESS, "schedule_as setup success pid=%i name=%s process=%p\n", process->pid, cstr(process->name), process);
+                    __d_printf(PROCESS, "schedule_as setup success pid=%i name=%s process=%p\n", process->pid,
+                               cstr(process->name), process);
                     process->process_class = process_class;
                     Exec__apply_builtin_identity_policy(process);
-                    match_result(ProcessSetupStatus, install_default_stdio(kernel, process),
+                    match_result(
+                        install_default_stdio(kernel, process),
                         success(_)
                         {
-                            __d_printf(SCHEDULER, "schedule_as scheduling pid=%i name=%s\n", process->pid, cstr(process->name));
+                            __d_printf(SCHEDULER, "schedule_as scheduling pid=%i name=%s\n", process->pid,
+                                       cstr(process->name));
                             Scheduler__schedule(kernel->scheduler, process);
                         },
                         error(code, message)
@@ -133,8 +135,8 @@ void schedule(KernelPtr kernel, ConstBStringPtr name)
     schedule_as(kernel, name, PROCESS_CLASS_NORMAL);
 }
 
-
-void Kernel_main(CPUID cpu_id) {
+void Kernel_main(CPUID cpu_id)
+{
     KernelPtr kernel = Kernel__instance();
     __d_printf(PROGRESS, "Kernel starting init: %i\n", cpu_id);
     if (cpu_id == 1)
@@ -155,8 +157,13 @@ void Kernel_main(CPUID cpu_id) {
     }
 
     SystemInfo system_info = SystemInfo__new();
-    match_optional(SystemInfo, kernel->system_info,
-        some(value) { system_info = value;; },
+    match_optional(
+        kernel->system_info,
+        some(value)
+        {
+            system_info = value;
+            ;
+        },
         none()
         {
             Kernel__panic("Kernel missing system info", NULL); // hundelint: ignore-no-null
@@ -164,7 +171,8 @@ void Kernel_main(CPUID cpu_id) {
         }
     );
 
-    match_result(InitCode, CPU__init(&system_info),
+    match_result(
+        CPU__init(&system_info),
         success_do_nothing(),
         error(code, message)
         {
@@ -182,7 +190,8 @@ void Kernel_main(CPUID cpu_id) {
     }
     else
     {
-        match_result(SchedulerInitStatus, Scheduler__wait_until_ready(kernel->scheduler),
+        match_result(
+            Scheduler__wait_until_ready(kernel->scheduler),
             success_do_nothing(),
             error(code, message)
             {

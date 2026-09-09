@@ -17,7 +17,7 @@ int main(int argc, char ** argv)
     IOStatus status = IO__link_file(&source_path, &target_path);
     if (status != IO_OK)
     {
-        IO__printf(&bstr("ln: error %s (%i)\n"), io_status_string(status), (int) status);
+        IO__printf(&bstr("ln: error %s (%i)\n"), io_status_string(status), (int)status);
         return 1;
     }
 

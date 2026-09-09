@@ -27,16 +27,8 @@ ResultDef(MemoryBlock);
 
 HashCode Heap__hash_address(Address * self);
 
-HashtableDefine(
-    Address,
-    MemoryBlock,
-    BLOCK_TABLE_SIZE,
-    BLOCK_BUCKET_SIZE,
-    AllocatedBlocks,
-    Heap__hash_address,
-    SimpleEquals(uint64_t),
-    never__equals
-);
+HashtableDefine(Address, MemoryBlock, BLOCK_TABLE_SIZE, BLOCK_BUCKET_SIZE, AllocatedBlocks, Heap__hash_address,
+                SimpleEquals(uint64_t), never__equals);
 
 typedef struct Heap
 {
@@ -49,16 +41,14 @@ typedef struct Heap
     MemoryBlock current_block;
     AllocatedBlocks allocated_blocks;
     AllocatedBlocks free_blocks;
-}
-Heap;
+} Heap;
 
 typedef enum HeapCodes
 {
     HEAP_NOT_IMPLEMENTED = -1,
     HEAP_OUT_OF_MEMORY = -2,
     HEAP_OK = 0,
-}
-HeapCodes;
+} HeapCodes;
 
 typedef Heap * HeapPtr;
 typedef uint64_t HeapCode;
@@ -76,25 +66,19 @@ KernelAddress Heap__from_physical_address(HeapPtr self, Address physical);
 KernelAddress Heap__from_virtual_address(HeapPtr self, Address virtual);
 KernelAddress Heap__try_from_virtual_address(HeapPtr self, Address virtual);
 
-#define NEW_BLOCK \
-    { \
-        .start = INVALID_KERNEL_ADDR, \
-        .block_lock = MUTEX_INIT, \
-        .pages_allocated = 0,\
-    } \
+#define NEW_BLOCK                                                                                                      \
+    {                                                                                                                  \
+        .start = INVALID_KERNEL_ADDR,                                                                                  \
+        .block_lock = MUTEX_INIT,                                                                                      \
+        .pages_allocated = 0,                                                                                          \
+    }
 
-
-#define NEW_HEAP \
-    (Heap) { \
-        .lock = MUTEX_INIT, \
-        .start = 0, \
-        .end = 0, \
-        .phys_start = 0,\
-        .coarse_block_size = 0,\
-        .pages_per_block = 0,\
-        .current_block = NEW_BLOCK, \
-        .allocated_blocks = EmptyHashtable(AllocatedBlocks),\
-        .free_blocks = EmptyHashtable(AllocatedBlocks),\
-    } \
+#define NEW_HEAP                                                                                                       \
+    (Heap)                                                                                                             \
+    {                                                                                                                  \
+        .lock = MUTEX_INIT, .start = 0, .end = 0, .phys_start = 0, .coarse_block_size = 0, .pages_per_block = 0,       \
+        .current_block = NEW_BLOCK, .allocated_blocks = EmptyHashtable(AllocatedBlocks),                               \
+        .free_blocks = EmptyHashtable(AllocatedBlocks),                                                                \
+    }
 
 #endif

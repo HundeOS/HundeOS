@@ -44,32 +44,25 @@ static BString EmbeddedFileIO__relative_path(ConstBStringPtr path)
 
 static bool EmbeddedFileIO__contains_node(FilesystemNodesPtr nodes, ConstBStringPtr name)
 {
-    for_each_fa_ptr(FilesystemNodes, nodes, index, node,
-    {
+    for_each_fa_ptr(FilesystemNodes, nodes, index, node, {
         if (BString__equals(&node->name, name))
         {
             return true;
         }
-
     });
     return false;
 }
 
-static void EmbeddedFileIO__metadata_for_child(
-    ConstBStringPtr parent_path,
-    ConstBStringPtr child_name,
-    bool is_directory,
-    UserID * user_id,
-    GroupID * group_id,
-    FilesystemPermissions * mode
-)
+static void EmbeddedFileIO__metadata_for_child(ConstBStringPtr parent_path, ConstBStringPtr child_name,
+                                               bool is_directory, UserID * user_id, GroupID * group_id,
+                                               FilesystemPermissions * mode)
 {
     bool is_hund_path = false;
 
     if (BString__length(parent_path) == 0)
     {
-        is_hund_path = is_directory
-            && (BString__equals(child_name, &drivers_name) || BString__equals(child_name, &services_name));
+        is_hund_path =
+            is_directory && (BString__equals(child_name, &drivers_name) || BString__equals(child_name, &services_name));
     }
     else if (BString__equals(parent_path, &drivers_name) || BString__starts_with(parent_path, &drivers_prefix))
     {
@@ -84,30 +77,24 @@ static void EmbeddedFileIO__metadata_for_child(
     {
         *user_id = PROCESS_USER_HUND;
         *group_id = PROCESS_GROUP_HUND;
-        *mode = is_directory
-            ? (IO_MODE_TYPE_DIR | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC)
-            : (IO_MODE_TYPE_FILE | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC);
+        *mode =
+            is_directory
+                ? (IO_MODE_TYPE_DIR | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC)
+                : (IO_MODE_TYPE_FILE | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ |
+                   IO_MODE_GROUP_EXEC);
         return;
     }
 
     *user_id = PROCESS_USER_ROOT;
     *group_id = PROCESS_GROUP_ROOT;
-    *mode = is_directory
-        ? (IO_MODE_TYPE_DIR
-            | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC
-            | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC
-            | IO_MODE_OTHER_READ | IO_MODE_OTHER_EXEC)
-        : (IO_MODE_TYPE_FILE
-            | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC
-            | IO_MODE_GROUP_READ | IO_MODE_GROUP_EXEC
-            | IO_MODE_OTHER_READ | IO_MODE_OTHER_EXEC);
+    *mode = is_directory ? (IO_MODE_TYPE_DIR | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ |
+                            IO_MODE_GROUP_EXEC | IO_MODE_OTHER_READ | IO_MODE_OTHER_EXEC)
+                         : (IO_MODE_TYPE_FILE | IO_MODE_OWNER_READ | IO_MODE_OWNER_EXEC | IO_MODE_GROUP_READ |
+                            IO_MODE_GROUP_EXEC | IO_MODE_OTHER_READ | IO_MODE_OTHER_EXEC);
 }
 
-static Optional(FilesystemNodePtr) EmbeddedFileIO__node_for_entry(
-    FilesystemPtr filesystem,
-    ConstBStringPtr parent_path,
-    ConstBStringPtr entry_name
-)
+static Optional(FilesystemNodePtr)
+    EmbeddedFileIO__node_for_entry(FilesystemPtr filesystem, ConstBStringPtr parent_path, ConstBStringPtr entry_name)
 {
     BString relative_parent = EmbeddedFileIO__relative_path(parent_path);
     BString relative_entry = EmbeddedFileIO__relative_path(entry_name);
@@ -136,11 +123,8 @@ static Optional(FilesystemNodePtr) EmbeddedFileIO__node_for_entry(
             return None(FilesystemNodePtr);
         }
 
-        remaining = BString__slice(
-            &relative_entry,
-            BString__length(&relative_parent) + 1,
-            BString__length(&relative_entry)
-        );
+        remaining =
+            BString__slice(&relative_entry, BString__length(&relative_parent) + 1, BString__length(&relative_entry));
     }
 
     BStringArray segments = BString__split(&remaining, '/');
@@ -150,7 +134,8 @@ static Optional(FilesystemNodePtr) EmbeddedFileIO__node_for_entry(
     }
 
     BString child_name = empty_bstr();
-    match_optional(BString, BStringArray__at(&segments, 0),
+    match_optional(
+        BStringArray__at(&segments, 0),
         some(segment) { child_name = segment; },
         none() { return None(FilesystemNodePtr); }
     );
@@ -160,22 +145,13 @@ static Optional(FilesystemNodePtr) EmbeddedFileIO__node_for_entry(
     FilesystemPermissions mode = 0;
     EmbeddedFileIO__metadata_for_child(&relative_parent, &child_name, is_directory, &user_id, &group_id, &mode);
 
-    return Some(
-        FilesystemNodePtr,
-        FilesystemNode__heap_new_with_metadata(
-            filesystem,
-            &child_name,
-            IO_DIRENT_ATTR_NONE,
-            user_id,
-            group_id,
-            mode
-        )
-    );
+    return Some(FilesystemNodePtr, FilesystemNode__heap_new_with_metadata(filesystem, &child_name, IO_DIRENT_ATTR_NONE,
+                                                                          user_id, group_id, mode));
 }
 
 Result(IOInternalHandle) EmbeddedFileIO__open(IOStatePtr self, ConstBStringPtr path, Flags flags)
 {
-    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
+    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr)self;
     BString relative_path = EmbeddedFileIO__relative_path(path);
 
     if (BString__length(&relative_path) == 0)
@@ -183,12 +159,13 @@ Result(IOInternalHandle) EmbeddedFileIO__open(IOStatePtr self, ConstBStringPtr p
         return Error(IOInternalHandle, BString__sprintf(&invalid_path_format, path), IO_INVALID_PATH);
     }
 
-    match_optional(Elf, EmbeddedElf__load(&relative_path),
+    match_optional(
+        EmbeddedElf__load(&relative_path),
         some(elf)
         {
-            critical_section(fs_state->state.lock,
-            {
-                IOInternalHandle handle = (IOInternalHandle) fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
+            critical_section(fs_state->state.lock, {
+                IOInternalHandle handle =
+                    (IOInternalHandle)fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
                 FileHandleTargetMap__set(&fs_state->state.handles, handle, FileHandleTarget__heap_new(&relative_path));
                 cs_return Success(IOInternalHandle, handle);
             });
@@ -201,11 +178,11 @@ Result(IOInternalHandle) EmbeddedFileIO__open(IOStatePtr self, ConstBStringPtr p
 
 Result(IOInternalHandle) EmbeddedFileIO__close(IOStatePtr self, IOInternalHandle handle)
 {
-    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
+    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr)self;
 
-    critical_section(fs_state->state.lock,
-    {
-        match_optional(FileHandleTargetPtr, FileHandleTargetMap__get(&fs_state->state.handles, handle),
+    critical_section(fs_state->state.lock, {
+        match_optional(
+            FileHandleTargetMap__get(&fs_state->state.handles, handle),
             some(target)
             {
                 FileHandleTarget__dispose(target);
@@ -219,29 +196,27 @@ Result(IOInternalHandle) EmbeddedFileIO__close(IOStatePtr self, IOInternalHandle
     return Error(IOInternalHandle, invalid_file_handle, IO_UNKNOWN_HANDLE);
 }
 
-Result(IOBufferPtr) EmbeddedFileIO__read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer
-)
+Result(IOBufferPtr)
+    EmbeddedFileIO__read(IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer)
 {
-    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
+    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr)self;
 
     Optional(FileHandleTargetPtr) target;
 
-    critical_section(fs_state->state.lock,
-    {
-        target = FileHandleTargetMap__get(&fs_state->state.handles, handle);
-    });
-    match_optional(FileHandleTargetPtr, target,
+    critical_section(fs_state->state.lock, { target = FileHandleTargetMap__get(&fs_state->state.handles, handle); });
+    match_optional(
+        target,
         some(target_ptr)
         {
             if (IOBuffer__item_count(&target_ptr->buffer) < size)
             {
                 size_t free_space = IOBuffer__free_space(&target_ptr->buffer);
 
-                match_optional(Elf, EmbeddedElf__load(&target_ptr->path),
+                match_optional(
+                    EmbeddedElf__load(&target_ptr->path),
                     some(elf)
                     {
-                        CharPtr bytes = (CharPtr) elf.start;
+                        CharPtr bytes = (CharPtr)elf.start;
                         size_t elf_size = elf.end - elf.start;
 
                         if (target_ptr->offset >= elf_size)
@@ -257,22 +232,16 @@ Result(IOBufferPtr) EmbeddedFileIO__read(
                     },
                     none()
                     {
-                        return Error(IOBufferPtr,
-                                     BString__sprintf(&invalid_path_format, &target_ptr->path),
+                        return Error(IOBufferPtr, BString__sprintf(&invalid_path_format, &target_ptr->path),
                                      IO_INVALID_PATH);
                     }
                 );
-
             }
 
             return Success(IOBufferPtr, &target_ptr->buffer);
         },
-        none()
-        {
-            return Error(IOBufferPtr, invalid_file_handle, IO_UNKNOWN_HANDLE);
-        }
+        none() { return Error(IOBufferPtr, invalid_file_handle, IO_UNKNOWN_HANDLE); }
     );
-
 }
 
 Result(ByteCount) EmbeddedFileIO__write(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size)
@@ -292,12 +261,12 @@ Result(ParkStatus) EmbeddedFileIO__unpark(IOStatePtr self)
 
 Result(FilesystemNodes) EmbeddedFileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, ConstBStringPtr path)
 {
-    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr) self;
+    EmbeddedFilesystemIOStatePtr fs_state = (EmbeddedFilesystemIOStatePtr)self;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
     BString relative_path = EmbeddedFileIO__relative_path(path);
-    for_each_fa(BStringArray, EmbeddedElf__list(), index, entry,
-    {
-        match_optional(FilesystemNodePtr, EmbeddedFileIO__node_for_entry(fs_state->state.filesystem, &relative_path, &entry),
+    for_each_fa(BStringArray, EmbeddedElf__list(), index, entry, {
+        match_optional(
+            EmbeddedFileIO__node_for_entry(fs_state->state.filesystem, &relative_path, &entry),
             some(node)
             {
                 if (!EmbeddedFileIO__contains_node(&result, &node->name))
@@ -307,28 +276,17 @@ Result(FilesystemNodes) EmbeddedFileIO__list_nodes(IOStatePtr self, FilesystemNo
             },
             none_do_nothing()
         );
-
     });
     return Success(FilesystemNodes, result);
 }
 
 FileIO EmbeddedFilesystemIO__new()
 {
-    FileIO embedded_file_io = (FileIO) {
-        .base_io = IO__new(
-            EmbeddedFileIO__open,
-            EmbeddedFileIO__read,
-            EmbeddedFileIO__write,
-            IO__unsupported_accept,
-            EmbeddedFileIO__close,
-            EmbeddedFileIO__park,
-            EmbeddedFileIO__unpark,
-            IO__unsupported_server_buffer,
-            IO__unsupported_server_write_buffer,
-            IO__unsupported_data_available,
-            IO__unsupported_data_consumed,
-            IO__unsupported_eof
-        ),
+    FileIO embedded_file_io = (FileIO){
+        .base_io = IO__new(EmbeddedFileIO__open, EmbeddedFileIO__read, EmbeddedFileIO__write, IO__unsupported_accept,
+                           EmbeddedFileIO__close, EmbeddedFileIO__park, EmbeddedFileIO__unpark,
+                           IO__unsupported_server_buffer, IO__unsupported_server_write_buffer,
+                           IO__unsupported_data_available, IO__unsupported_data_consumed, IO__unsupported_eof),
         .list_nodes = EmbeddedFileIO__list_nodes,
         .list_dir = FileIO__unsupported_list_dir,
         .mkdir = FileIO__unsupported_mkdir,
@@ -340,11 +298,10 @@ FileIO EmbeddedFilesystemIO__new()
 
 EmbeddedFilesystemIOStatePtr EmbeddedFilesystemIOState__heap_new(FilesystemPtr fs)
 {
-    EmbeddedFilesystemIOStatePtr io_state = ptr(
-            Kernel__alloc_kernel(sizeof(EmbeddedFilesystemIOState)), EmbeddedFilesystemIOState
-        );
+    EmbeddedFilesystemIOStatePtr io_state =
+        ptr(Kernel__alloc_kernel(sizeof(EmbeddedFilesystemIOState)), EmbeddedFilesystemIOState);
 
-    *io_state = (EmbeddedFilesystemIOState) {
+    *io_state = (EmbeddedFilesystemIOState){
         .state = FilesystemIOState__new(fs),
         .handle_count = 0,
     };

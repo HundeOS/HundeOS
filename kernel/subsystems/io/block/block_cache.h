@@ -14,22 +14,20 @@ typedef struct BlockCacheEntry
 {
     BlockNumber block;
     Data data[BLOCK_DEVICE_BLOCK_SIZE];
-}
-BlockCacheEntry;
+} BlockCacheEntry;
 
 typedef BlockCacheEntry * BlockCacheEntryPtr;
 
 OptionalDef(BlockCacheEntry);
 bool BlockCacheEntry__equals(BlockCacheEntryPtr self, BlockCacheEntryPtr other);
-FixedArrayDefine(BlockCacheEntry, BLOCK_CACHE_MAX_ENTRIES, BlockCacheEntries, (EqualFunction) BlockCacheEntry__equals);
+FixedArrayDefine(BlockCacheEntry, BLOCK_CACHE_MAX_ENTRIES, BlockCacheEntries, (EqualFunction)BlockCacheEntry__equals);
 
 typedef struct BlockCache
 {
     BlockDevicePtr device;
     BlockCacheEntries entries;
     mutex_t lock;
-}
-BlockCache;
+} BlockCache;
 
 typedef BlockCache * BlockCachePtr;
 

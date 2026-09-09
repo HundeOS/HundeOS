@@ -7,14 +7,14 @@
 #ifdef DYN_STRING_USE_KERNEL_ALLOC
 #include "../../kernel/kalloc.h"
 #include "../../kernel/panic.h"
-#define DYN_STRING_ALLOC(size) ((void *) Kernel__alloc(size).virtual_addr)
-#define DYN_STRING_FREE(ptr) \
-    { \
-        Result(KAllocCode) free_result = Kernel__free(addr(ptr)); \
-        match_result(KAllocCode, free_result, \
-            success_do_nothing(), \
+#define DYN_STRING_ALLOC(size) ((void *)Kernel__alloc(size).virtual_addr)
+#define DYN_STRING_FREE(ptr)                                                                                              \
+    {                                                                                                                     \
+        Result(KAllocCode) free_result = Kernel__free(addr(ptr));                                                         \
+        match_result(                                                                                                     \
+            free_result, success_do_nothing(),                                                                          \
             error(code, message) { Kernel__panic(BString__cstr(&message), NULL); } /* hundelint: ignore-no-null */ \
-        ); \
+        );                                                                                                                \
     }
 #else
 void * malloc(size_t size);
@@ -50,8 +50,7 @@ typedef struct DynString
     StringPos len;
     StringPos capacity;
     char * data;
-}
-DynString;
+} DynString;
 
 typedef DynString * DynStringPtr;
 typedef const DynString * ConstDynStringPtr;
@@ -61,8 +60,9 @@ OptionalDef(DynStringPtr);
 
 bool dyn_string_equals(void * a, void * b);
 LinkedListDefine(DynString, DynStringLines, &dyn_string_equals);
+typedef DynStringLines * DynStringLinesPtr;
 OptionalDef(DynStringLines);
-void DynStringLines__dispose_all(DynStringLines * self);
+void DynStringLines__dispose_all(DynStringLinesPtr self);
 
 Result(DynStringCode) DynString__init(DynStringPtr self, StringPos capacity);
 Result(DynStringCode) DynString__reserve(DynStringPtr self, StringPos capacity);

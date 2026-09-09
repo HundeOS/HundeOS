@@ -18,8 +18,7 @@ typedef struct PciConfig
     uint64_t ecam_size;
     uint64_t bus_start;
     uint64_t bus_end;
-}
-PciConfig;
+} PciConfig;
 
 typedef PciConfig * PciConfigPtr;
 
@@ -31,15 +30,14 @@ typedef struct PciConfigParseState
     bool found_ecam_size;
     bool found_bus_start;
     bool found_bus_end;
-}
-PciConfigParseState;
+} PciConfigParseState;
 
 typedef PciConfigParseState * PciConfigParseStatePtr;
 typedef const PciConfigParseState * ConstPciConfigParseStatePtr;
 
 static PciConfig PciConfig__new(uint64_t ecam_physical_base, uint64_t ecam_size, uint64_t bus_start, uint64_t bus_end)
 {
-    return (PciConfig) {
+    return (PciConfig){
         .ecam_physical_base = ecam_physical_base,
         .ecam_size = ecam_size,
         .bus_start = bus_start,
@@ -59,7 +57,8 @@ static Optional(uint64_t) PciConfig__read_line_value(ConstBStringPtr line, Const
     BStringSplit split = BString__split_first_any(line, &pci_config_delimiter);
     bool matched = false;
 
-    match_optional(BString, split.match,
+    match_optional(
+        split.match,
         some(raw_key)
         {
             BString line_key = BString__strip(&raw_key);
@@ -78,7 +77,7 @@ static Optional(uint64_t) PciConfig__read_line_value(ConstBStringPtr line, Const
 
 static PciConfigParseState PciConfigParseState__new(void)
 {
-    PciConfigParseState self = { 0 };
+    PciConfigParseState self = {0};
 
     return self;
 }
@@ -87,14 +86,16 @@ static void PciConfigParseState__read_config_line(PciConfigParseStatePtr self, C
 {
     if (!self->found_present)
     {
-        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_present_key),
+        match_optional(
+            PciConfig__read_line_value(line, &pci_config_present_key),
             some(parsed) { self->found_present = parsed == 1; },
             none_do_nothing()
         );
     }
     if (!self->found_ecam_physical_base)
     {
-        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_ecam_physical_base_key),
+        match_optional(
+            PciConfig__read_line_value(line, &pci_config_ecam_physical_base_key),
             some(parsed)
             {
                 self->config.ecam_physical_base = parsed;
@@ -105,7 +106,8 @@ static void PciConfigParseState__read_config_line(PciConfigParseStatePtr self, C
     }
     if (!self->found_ecam_size)
     {
-        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_ecam_size_key),
+        match_optional(
+            PciConfig__read_line_value(line, &pci_config_ecam_size_key),
             some(parsed)
             {
                 self->config.ecam_size = parsed;
@@ -116,7 +118,8 @@ static void PciConfigParseState__read_config_line(PciConfigParseStatePtr self, C
     }
     if (!self->found_bus_start)
     {
-        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_bus_start_key),
+        match_optional(
+            PciConfig__read_line_value(line, &pci_config_bus_start_key),
             some(parsed)
             {
                 self->config.bus_start = parsed;
@@ -127,7 +130,8 @@ static void PciConfigParseState__read_config_line(PciConfigParseStatePtr self, C
     }
     if (!self->found_bus_end)
     {
-        match_optional(uint64_t, PciConfig__read_line_value(line, &pci_config_bus_end_key),
+        match_optional(
+            PciConfig__read_line_value(line, &pci_config_bus_end_key),
             some(parsed)
             {
                 self->config.bus_end = parsed;
@@ -140,23 +144,21 @@ static void PciConfigParseState__read_config_line(PciConfigParseStatePtr self, C
 
 static bool PciConfigParseState__has_required_fields(ConstPciConfigParseStatePtr self)
 {
-    return self->found_present
-        && self->found_ecam_physical_base
-        && self->found_ecam_size
-        && self->found_bus_start
-        && self->found_bus_end;
+    return self->found_present && self->found_ecam_physical_base && self->found_ecam_size && self->found_bus_start &&
+           self->found_bus_end;
 }
 
 static bool PciConfig__read_config(ConstDynStringPtr sysinfo, PciConfigPtr self)
 {
     PciConfigParseState state = PciConfigParseState__new();
 
-    match_optional(DynStringLines, DynString__lines(sysinfo),
+    match_optional(
+        DynString__lines(sysinfo),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line,
-            {
-                match_optional(BString, DynString__bstring(&line),
+            for_each_ll(DynStringLines, lines, line, {
+                match_optional(
+                    DynString__bstring(&line),
                     some(bstring_line) { PciConfigParseState__read_config_line(&state, &bstring_line); },
                     none_do_nothing()
                 );
@@ -187,7 +189,8 @@ static bool PciConfig__load(PciConfigPtr self)
     Optional(DynString) sysinfo = IO__read_dyn_string(handle, PCI_CONFIG_MAX);
     close(handle);
 
-    match_optional(DynString, sysinfo,
+    match_optional(
+        sysinfo,
         some(data)
         {
             bool loaded = PciConfig__read_config(&data, self);

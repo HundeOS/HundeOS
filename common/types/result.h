@@ -9,79 +9,79 @@
 
 typedef int64_t Code;
 
-#define Result(T) \
-    Result_##T \
+#define Result(T) Result_##T
 
-#define ResultPtr(T) \
-    Result_##T * \
+#define ResultPtr(T) Result_##T *
 
-#define ConstResultPtr(T) \
-    const Result_##T * \
+#define ConstResultPtr(T) const Result_##T *
 
-#define ResultDef(T) \
-    typedef struct Success_##T { \
-        T val; \
-    } Success_##T; \
-    \
-    typedef struct Error_##T { \
-        Code code; \
-        BString error; \
-    } Error_##T; \
-    \
-    typedef struct Result_##T { \
-        bool ok; \
-        union { \
-          Success_##T success;\
-          Error_##T error;\
-        };\
-    } Result_##T;\
-    \
-    typedef T Result_##T##_type; \
+#define ResultDef(T)                                                                                                   \
+    typedef struct Success_##T                                                                                         \
+    {                                                                                                                  \
+        T val;                                                                                                         \
+    } Success_##T;                                                                                                     \
+                                                                                                                       \
+    typedef struct Error_##T                                                                                           \
+    {                                                                                                                  \
+        Code code;                                                                                                     \
+        BString error;                                                                                                 \
+    } Error_##T;                                                                                                       \
+                                                                                                                       \
+    typedef struct Result_##T                                                                                          \
+    {                                                                                                                  \
+        bool ok;                                                                                                       \
+        union                                                                                                          \
+        {                                                                                                              \
+            Success_##T success;                                                                                       \
+            Error_##T error;                                                                                           \
+        };                                                                                                             \
+    } Result_##T;                                                                                                      \
+                                                                                                                       \
+    typedef T Result_##T##_type;
 
+#define Success(T, value)                                                                                              \
+    (Result_##T)                                                                                                       \
+    {                                                                                                                  \
+        .ok = true, .success = (Success_##T)                                                                           \
+        {                                                                                                              \
+            .val = value,                                                                                              \
+        }                                                                                                              \
+    }
 
+#define Error(T, error_message, error_code)                                                                            \
+    (Result_##T)                                                                                                       \
+    {                                                                                                                  \
+        .ok = false, .error = (Error_##T)                                                                              \
+        {                                                                                                              \
+            .code = error_code, .error = error_message,                                                                \
+        }                                                                                                              \
+    }
 
-#define Success(T, value) \
-    ( Result_##T ) { \
-        .ok = true, \
-        .success = (Success_##T) { \
-            .val = value, \
-        } \
-    } \
-
-#define Error(T, error_message, error_code) \
-    ( Result_##T ) { \
-        .ok = false, \
-        .error = (Error_##T) { \
-            .code = error_code, \
-            .error = error_message, \
-        } \
-    } \
-
-
-#define success(val_name) \
-    { \
+#define success(val_name)                                                                                              \
+    {                                                                                                                  \
         __ResultValueType val_name = __result.success.val;
 
-#define error(code_name, message_name) \
-    { \
-        BString message_name = __result.error.error; \
+#define error(code_name, message_name)                                                                                 \
+    {                                                                                                                  \
+        BString message_name = __result.error.error;                                                                   \
         Code code_name = __result.error.code;
 
-#define success_do_nothing() success(_) {}
+#define success_do_nothing()                                                                                           \
+    success(_)                                                                                                         \
+    {                                                                                                                  \
+    }
 
-#define match_result(T, res, success_branch, error_branch) \
-{ \
-    typedef Result_##T##_type __ResultValueType __attribute__((unused)); \
-    Result_##T __result = res; \
-    if (__result.ok) \
-        success_branch \
-    } \
-    else \
-        error_branch \
-    } \
-} \
+#define match_result(res, success_branch, error_branch)                                                                \
+    {                                                                                                                  \
+        __auto_type __result = (res);                                                                                  \
+        typedef __typeof__(__result.success.val) __ResultValueType __attribute__((unused));                            \
+        if (__result.ok)                                                                                               \
+            success_branch                                                                                             \
+    }                                                                                                                  \
+    else error_branch                                                                                                  \
+    }                                                                                                                  \
+    }
 
-#define result_unwrap(T, res, alternate_val) \
-    ((res).ok ? (res).success.val : (alternate_val))\
+#define unwrap_result(res, alternate_val) ((res).ok ? (res).success.val : (alternate_val))
 
 #endif

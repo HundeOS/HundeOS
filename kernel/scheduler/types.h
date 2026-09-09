@@ -30,7 +30,7 @@ OptionalDef(ReturnCode);
 OptionalDef(OperationKey);
 OptionalDef(ParkReason);
 
-typedef Result(Anything) (* Continuation)(ParkedOperationPtr parked_operation);
+typedef Result(Anything) (*Continuation)(ParkedOperationPtr parked_operation);
 
 OptionalDef(Continuation);
 

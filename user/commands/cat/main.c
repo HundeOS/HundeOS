@@ -15,7 +15,7 @@ int main(int argc, char ** argv)
     IOHandle handle = IO__open(&path, IO_OPEN_READ);
     if (handle < 0)
     {
-        IO__printf(&bstr("cat: open error %i\n"), (int) handle);
+        IO__printf(&bstr("cat: open error %i\n"), (int)handle);
         return 1;
     }
 
@@ -30,7 +30,7 @@ int main(int argc, char ** argv)
 
         if (bytes < 0)
         {
-            IO__printf(&bstr("cat: read error %i\n"), (int) bytes);
+            IO__printf(&bstr("cat: read error %i\n"), (int)bytes);
             close(handle);
             return 1;
         }

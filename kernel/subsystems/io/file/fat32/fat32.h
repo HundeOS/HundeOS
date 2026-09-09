@@ -57,8 +57,7 @@ typedef enum Fat32Code
     FAT32_ALREADY_EXISTS = -6,
     FAT32_UNSUPPORTED_NAME = -7,
     FAT32_FILE_TOO_LARGE = -8,
-}
-Fat32Code;
+} Fat32Code;
 
 ResultDef(Fat32Code);
 
@@ -71,8 +70,7 @@ typedef struct Fat32Volume
     BlockNumber data_start_sector;
     uint32_t root_cluster;
     uint32_t cluster_count;
-}
-Fat32Volume;
+} Fat32Volume;
 
 typedef Fat32Volume * Fat32VolumePtr;
 
@@ -82,26 +80,17 @@ typedef struct Fat32DirectoryEntry
     uint8_t attributes;
     uint32_t first_cluster;
     uint32_t size;
-}
-Fat32DirectoryEntry;
+} Fat32DirectoryEntry;
 
 typedef Fat32DirectoryEntry * Fat32DirectoryEntryPtr;
 
 OptionalDef(Fat32DirectoryEntry);
 ResultDef(Fat32DirectoryEntry);
 bool Fat32DirectoryEntry__equals(Fat32DirectoryEntryPtr self, Fat32DirectoryEntryPtr other);
-Fat32DirectoryEntry Fat32DirectoryEntry__new(
-    ConstBStringPtr name,
-    uint8_t attributes,
-    uint32_t first_cluster,
-    uint32_t size
-);
-FixedArrayDefine(
-    Fat32DirectoryEntry,
-    FAT32_MAX_ROOT_ENTRIES,
-    Fat32DirectoryEntries,
-    (EqualFunction) Fat32DirectoryEntry__equals
-);
+Fat32DirectoryEntry Fat32DirectoryEntry__new(ConstBStringPtr name, uint8_t attributes, uint32_t first_cluster,
+                                             uint32_t size);
+FixedArrayDefine(Fat32DirectoryEntry, FAT32_MAX_ROOT_ENTRIES, Fat32DirectoryEntries,
+                 (EqualFunction)Fat32DirectoryEntry__equals);
 ResultDef(Fat32DirectoryEntries);
 
 typedef struct Fat32FileHandle
@@ -110,8 +99,7 @@ typedef struct Fat32FileHandle
     FilePointer offset;
     IOBuffer buffer;
     Flags flags;
-}
-Fat32FileHandle;
+} Fat32FileHandle;
 
 typedef Fat32FileHandle * Fat32FileHandlePtr;
 
@@ -127,8 +115,7 @@ typedef struct Fat32FilesystemIOState
     Fat32FileHandleMap handles;
     uint32_t handle_count;
     bool mounted;
-}
-Fat32FilesystemIOState;
+} Fat32FilesystemIOState;
 
 typedef Fat32FilesystemIOState * Fat32FilesystemIOStatePtr;
 
@@ -136,18 +123,14 @@ Fat32Volume Fat32Volume__new(OptionalPtr(BlockDevicePtr) device, BlockCount tota
 Result(Fat32Code) Fat32Volume__format(Fat32VolumePtr self);
 Result(Fat32Code) Fat32Volume__mount(Fat32VolumePtr self);
 Result(Fat32DirectoryEntries) Fat32Volume__list_root(Fat32VolumePtr self);
-Result(Fat32Code) Fat32Volume__create_root_file(
-    Fat32VolumePtr self, ConstBStringPtr name, DataPtr data, uint32_t size
-);
+Result(Fat32Code) Fat32Volume__create_root_file(Fat32VolumePtr self, ConstBStringPtr name, DataPtr data, uint32_t size);
 Result(Fat32Code) Fat32Volume__create_root_directory(Fat32VolumePtr self, ConstBStringPtr name);
-Result(Fat32Code) Fat32Volume__read_root_file(
-    Fat32VolumePtr self, ConstBStringPtr name, DataPtr target, uint32_t target_size, Fat32ClusterPtr bytes_read
-);
+Result(Fat32Code) Fat32Volume__read_root_file(Fat32VolumePtr self, ConstBStringPtr name, DataPtr target,
+                                              uint32_t target_size, Fat32ClusterPtr bytes_read);
 
 FileIO Fat32FilesystemIO__new();
 bool Fat32FilesystemIO__available();
-Fat32FilesystemIOStatePtr Fat32FilesystemIOState__heap_new(
-    FilesystemPtr fs, BlockDevicePtr device, BlockCount total_sectors
-);
+Fat32FilesystemIOStatePtr Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device,
+                                                           BlockCount total_sectors);
 
 #endif

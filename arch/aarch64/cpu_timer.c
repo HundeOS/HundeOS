@@ -26,22 +26,20 @@ void CPUTimer__gicv3_dist_enable_grp1ns(InterruptControllerInfoPtr interrupt_con
 {
     // Enable ARE_NS (bit 4) and EnableGrp1NS (bit 1). Leave grp0 off.
     uint32_t ctlr = r32(interrupt_controller->distributor_virtual_base + GICD_CTLR_OFFSET);
-    ctlr |= (1u<<4) /*ARE_NS*/ | (1u<<1) /*EnableGrp1NS*/;
+    ctlr |= (1u << 4) /*ARE_NS*/ | (1u << 1) /*EnableGrp1NS*/;
     w32(interrupt_controller->distributor_virtual_base + GICD_CTLR_OFFSET, ctlr);
     dsb_ish();
     isb();
 }
 
 // Map: redistributor base for this CPU (QEMU virt packs by Aff0)
-inline volatile uint8_t* CPUTimer__gicr_base_this_cpu(InterruptControllerInfoPtr interrupt_controller)
+inline volatile uint8_t * CPUTimer__gicr_base_this_cpu(InterruptControllerInfoPtr interrupt_controller)
 {
-    return (volatile uint8_t*)(
-        interrupt_controller->redistributor_virtual_base + (uint64_t)cpu_aff0() * GICR_STRIDE
-    );
+    return (volatile uint8_t *)(interrupt_controller->redistributor_virtual_base + (uint64_t)cpu_aff0() * GICR_STRIDE);
 }
 
 /* Configure GICv3 CPU interface + enable PPI for CNTV (27) */
-__attribute__((noinline))  // keeps return addresses clean for debugging
+__attribute__((noinline)) // keeps return addresses clean for debugging
 static void CPUTimer__enable(SystemInfoPtr system_info, bool use_virtual_timer, uint64_t hz)
 {
     timer_hz = hz ? hz : 1000u;
@@ -59,19 +57,19 @@ static void CPUTimer__enable(SystemInfoPtr system_info, bool use_virtual_timer, 
     uint32_t waker = mmio_read32(gicr + GICR_WAKER_OFFSET);
 
     if (waker & (1u << 1))
-    {                // ProcessorSleep
+    { // ProcessorSleep
         mmio_write32(waker & ~(1u << 1), gicr + GICR_WAKER_OFFSET);
         do
         {
             waker = mmio_read32(gicr + GICR_WAKER_OFFSET);
-        } while (waker & (1u << 2));        // wait ChildrenAsleep==0
+        } while (waker & (1u << 2)); // wait ChildrenAsleep==0
     }
 
     // All non-secure interrupts to Group1
     mmio_write32(0xFFFFFFFFu, gicr + GICR_IGROUPR0_OFFSET);
 
     // --- Configure timer PPI as edge-triggered ---
-    unsigned ppi  = use_virtual_timer ? PPI_CNTV : PPI_CNTP;
+    unsigned ppi = use_virtual_timer ? PPI_CNTV : PPI_CNTP;
     unsigned bit1 = ((ppi - 16u) * 2u) + 1u; // ICFGR1: bit[1]=1 => edge
 
     uint32_t icfgr1 = mmio_read32(gicr + GICR_ICFGR1_OFFSET);
@@ -91,20 +89,20 @@ static void CPUTimer__enable(SystemInfoPtr system_info, bool use_virtual_timer, 
     isb();
 
     // --- CPU interface: enable system registers & Group1Ns, unmask priority ---
-    wr_icc_sre(1);   // enable ICC_* system register interface
+    wr_icc_sre(1); // enable ICC_* system register interface
     isb();
     wr_icc_pmr(0xFF);
     wr_icc_igrpen1(1);
 
     // --- Arm the generic timer (per-CPU) ---
-    uint64_t frq  = rd_cntfrq();
+    uint64_t frq = rd_cntfrq();
     uint64_t tick = frq / timer_hz;
 
     if (use_virtual_timer)
     {
-        wr_cntv_ctl(0);               // disable while programming
+        wr_cntv_ctl(0); // disable while programming
         wr_cntv_tval(tick);
-        wr_cntv_ctl(1);               // enable
+        wr_cntv_ctl(1); // enable
     }
     else
     {
@@ -128,14 +126,14 @@ void CPUTimer__start(SystemInfoPtr system_info, uint64_t hz)
 static void CPUTimer__rearm(IRQNumber irq)
 {
     uint64_t frq;
-    __asm__ volatile("mrs %0, cntfrq_el0":"=r"(frq));
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frq));
     if (irq == PPI_CNTV)
     {
-        __asm__ volatile("msr cntv_tval_el0, %0" :: "r"(frq / timer_hz));
+        __asm__ volatile("msr cntv_tval_el0, %0" ::"r"(frq / timer_hz));
     }
     if (irq == PPI_CNTP)
     {
-        __asm__ volatile("msr cntp_tval_el0, %0" :: "r"(frq / timer_hz));
+        __asm__ volatile("msr cntp_tval_el0, %0" ::"r"(frq / timer_hz));
     }
 
     // Force system register synchronization right here!

@@ -77,7 +77,7 @@ IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
 IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)
 {
     TEST_ASSERT_EQUAL_INT64(5, handle);
-    *buffer = (IOServerBuffer) {
+    *buffer = (IOServerBuffer){
         .data = fake_io_buffer,
         .capacity = sizeof(fake_io_buffer),
     };
@@ -128,9 +128,18 @@ void test_usb_keyboard_publishes_pending_bytes(void)
         .pending = UsbKeyboardPendingBuffer__new(),
     };
 
-    match_result(Pos, UsbKeyboardPendingBuffer__push(&keyboard.pending, 'u'), success_do_nothing(), error_test_fail());
-    match_result(Pos, UsbKeyboardPendingBuffer__push(&keyboard.pending, 's'), success_do_nothing(), error_test_fail());
-    match_result(Pos, UsbKeyboardPendingBuffer__push(&keyboard.pending, 'b'), success_do_nothing(), error_test_fail());
+    match_result(UsbKeyboardPendingBuffer__push(&keyboard.pending, 'u'),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(UsbKeyboardPendingBuffer__push(&keyboard.pending, 's'),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(UsbKeyboardPendingBuffer__push(&keyboard.pending, 'b'),
+        success_do_nothing(),
+        error_test_fail()
+    );
 
     UsbKeyboard__publish_pending(&keyboard);
 

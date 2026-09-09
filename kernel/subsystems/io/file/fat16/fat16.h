@@ -37,8 +37,7 @@ typedef enum Fat16Code
     FAT16_ALREADY_EXISTS = -6,
     FAT16_UNSUPPORTED_NAME = -7,
     FAT16_FILE_TOO_LARGE = -8,
-}
-Fat16Code;
+} Fat16Code;
 
 ResultDef(Fat16Code);
 
@@ -52,8 +51,7 @@ typedef struct Fat16Volume
     BlockNumber root_dir_start_sector;
     BlockNumber data_start_sector;
     uint16_t cluster_count;
-}
-Fat16Volume;
+} Fat16Volume;
 
 typedef Fat16Volume * Fat16VolumePtr;
 
@@ -63,25 +61,16 @@ typedef struct Fat16DirectoryEntry
     uint8_t attributes;
     uint16_t first_cluster;
     uint32_t size;
-}
-Fat16DirectoryEntry;
+} Fat16DirectoryEntry;
 
 typedef Fat16DirectoryEntry * Fat16DirectoryEntryPtr;
 
 OptionalDef(Fat16DirectoryEntry);
 bool Fat16DirectoryEntry__equals(Fat16DirectoryEntryPtr self, Fat16DirectoryEntryPtr other);
-Fat16DirectoryEntry Fat16DirectoryEntry__new(
-    ConstBStringPtr name,
-    uint8_t attributes,
-    uint16_t first_cluster,
-    uint32_t size
-);
-FixedArrayDefine(
-    Fat16DirectoryEntry,
-    FAT16_MAX_ROOT_ENTRIES,
-    Fat16DirectoryEntries,
-    (EqualFunction) Fat16DirectoryEntry__equals
-);
+Fat16DirectoryEntry Fat16DirectoryEntry__new(ConstBStringPtr name, uint8_t attributes, uint16_t first_cluster,
+                                             uint32_t size);
+FixedArrayDefine(Fat16DirectoryEntry, FAT16_MAX_ROOT_ENTRIES, Fat16DirectoryEntries,
+                 (EqualFunction)Fat16DirectoryEntry__equals);
 ResultDef(Fat16DirectoryEntries);
 
 typedef struct Fat16FileHandle
@@ -90,8 +79,7 @@ typedef struct Fat16FileHandle
     FilePointer offset;
     IOBuffer buffer;
     Flags flags;
-}
-Fat16FileHandle;
+} Fat16FileHandle;
 
 typedef Fat16FileHandle * Fat16FileHandlePtr;
 
@@ -106,8 +94,7 @@ typedef struct Fat16FilesystemIOState
     Fat16FileHandleMap handles;
     uint32_t handle_count;
     bool mounted;
-}
-Fat16FilesystemIOState;
+} Fat16FilesystemIOState;
 
 typedef Fat16FilesystemIOState * Fat16FilesystemIOStatePtr;
 
@@ -115,18 +102,14 @@ Fat16Volume Fat16Volume__new(BlockDevicePtr device, BlockCount total_sectors);
 Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self);
 Result(Fat16Code) Fat16Volume__mount(Fat16VolumePtr self);
 Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self);
-Result(Fat16Code) Fat16Volume__create_root_file(
-    Fat16VolumePtr self, ConstBStringPtr name, DataPtr data, uint32_t size
-);
+Result(Fat16Code) Fat16Volume__create_root_file(Fat16VolumePtr self, ConstBStringPtr name, DataPtr data, uint32_t size);
 Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, ConstBStringPtr name);
-Result(Fat16Code) Fat16Volume__read_root_file(
-    Fat16VolumePtr self, ConstBStringPtr name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
-);
+Result(Fat16Code) Fat16Volume__read_root_file(Fat16VolumePtr self, ConstBStringPtr name, DataPtr target,
+                                              uint32_t target_size, uint32_t * bytes_read);
 
 FileIO Fat16FilesystemIO__new();
 bool Fat16FilesystemIO__available();
-Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(
-    FilesystemPtr fs, BlockDevicePtr device, BlockCount total_sectors
-);
+Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device,
+                                                           BlockCount total_sectors);
 
 #endif

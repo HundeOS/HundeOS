@@ -23,8 +23,7 @@ typedef enum SubsystemInitStatuses
 {
     SUBSYSTEM_INIT_OK,
     SUBSYSTEM_INIT_FAILED,
-}
-SubsystemInitStatuses;
+} SubsystemInitStatuses;
 
 typedef uint64_t SubsystemInitStatus;
 

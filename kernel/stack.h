@@ -13,11 +13,12 @@ typedef struct Stack
 typedef Stack * StackPtr;
 
 Stack Stack__new();
-void Stack__map(KernelPtr kernel, Stack * self, ProcessPageTablePtr page_table);
+void Stack__map(KernelPtr kernel, StackPtr self, ProcessPageTablePtr page_table);
 
-#define NULL_STACK (Stack) { \
-    .base = NULL_USER_ADDRESS, \
-    .top = NULL_USER_ADDRESS, \
-} \
+#define NULL_STACK                                                                                                     \
+    (Stack)                                                                                                            \
+    {                                                                                                                  \
+        .base = NULL_USER_ADDRESS, .top = NULL_USER_ADDRESS,                                                           \
+    }
 
 #endif

@@ -4,4 +4,3 @@
 const char __heap_start[_4MB];
 const void * __heap_end = __heap_start + _4MB;
 const void * __heap_start_phys = __heap_start + OFFSET; // just fake it to the virtual addr
-

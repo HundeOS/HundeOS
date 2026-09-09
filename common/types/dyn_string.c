@@ -7,8 +7,8 @@ LinkedListBodyDefine(DynStringLines);
 
 bool dyn_string_equals(void * a, void * b)
 {
-    DynStringPtr left = (DynStringPtr) a;
-    DynStringPtr right = (DynStringPtr) b;
+    DynStringPtr left = (DynStringPtr)a;
+    DynStringPtr right = (DynStringPtr)b;
     if (DynString__length(left) != DynString__length(right))
     {
         return false;
@@ -29,17 +29,11 @@ bool dyn_string_equals(void * a, void * b)
 
 void DynStringLines__dispose_all(DynStringLines * self)
 {
-    for_each_ll(DynStringLines, *self, line,
-    {
-        DynString__dispose(&line);
-    });
+    for_each_ll(DynStringLines, *self, line, { DynString__dispose(&line); });
 
-    match_result(CollectionCode, DynStringLines__dispose(self), // hundelint: ignore-trivial-error-branch
+    match_result(DynStringLines__dispose(self), // hundelint: ignore-trivial-error-branch
         success_do_nothing(),
-        error(code, message)
-        {
-            return;
-        }
+        error(code, message) { return; }
     );
 }
 
@@ -68,7 +62,7 @@ Result(DynStringCode) DynString__init(DynStringPtr self, StringPos capacity)
         return Error(DynStringCode, invalid_capacity, DYN_STRING_INVALID_CAPACITY);
     }
 
-    char * data = DYN_STRING_ALLOC((size_t) capacity);
+    char * data = DYN_STRING_ALLOC((size_t)capacity);
     if (data == NULL)
     {
         return Error(DynStringCode, allocation_failed, DYN_STRING_ALLOCATION_FAILED);
@@ -88,7 +82,7 @@ Result(DynStringCode) DynString__reserve(DynStringPtr self, StringPos capacity)
         return Success(DynStringCode, DYN_STRING_OK);
     }
 
-    char * data = DYN_STRING_ALLOC((size_t) capacity);
+    char * data = DYN_STRING_ALLOC((size_t)capacity);
     if (data == NULL)
     {
         return Error(DynStringCode, allocation_failed, DYN_STRING_ALLOCATION_FAILED);
@@ -107,7 +101,8 @@ Result(DynStringCode) DynString__push_char(DynStringPtr self, char ch)
     StringPos required = self->len + 2;
     if (required > self->capacity)
     {
-        match_result(DynStringCode, DynString__reserve(self, DynString__next_capacity(self->capacity, required)),
+        match_result(
+            DynString__reserve(self, DynString__next_capacity(self->capacity, required)),
             success_do_nothing(),
             error(code, message) { return Error(DynStringCode, message, code); }
         );
@@ -123,7 +118,8 @@ Result(DynStringCode) DynString__append_cstr(DynStringPtr self, const char * tex
 {
     for (StringPos i = 0; text[i] != '\0'; i++)
     {
-        match_result(DynStringCode, DynString__push_char(self, text[i]),
+        match_result(
+            DynString__push_char(self, text[i]),
             success_do_nothing(),
             error(code, message) { return Error(DynStringCode, message, code); }
         );
@@ -134,9 +130,9 @@ Result(DynStringCode) DynString__append_cstr(DynStringPtr self, const char * tex
 
 Result(DynStringCode) DynString__append_bstring(DynStringPtr self, ConstBStringPtr text)
 {
-    for_each_bstring(text, i, ch,
-    {
-        match_result(DynStringCode, DynString__push_char(self, ch),
+    for_each_bstring(text, i, ch, {
+        match_result(
+            DynString__push_char(self, ch),
             success_do_nothing(),
             error(code, message) { return Error(DynStringCode, message, code); }
         );
@@ -188,7 +184,7 @@ Optional(char) DynString__char_at(ConstDynStringPtr self, StringPos index)
 
 char DynString__char_at_or(ConstDynStringPtr self, StringPos index, char alternate)
 {
-    match_optional(char, DynString__char_at(self, index),
+    match_optional(DynString__char_at(self, index),
         some(ch) { return ch; },
         none() { return alternate; }
     );
@@ -211,7 +207,8 @@ Optional(BString) DynString__bstring(ConstDynStringPtr self)
 
 static bool DynString__push_line(DynStringLines * lines, ConstDynStringPtr line)
 {
-    match_result(CollectionCode, DynStringLines__push(lines, *line),
+    match_result(
+        DynStringLines__push(lines, *line),
         success(index) { return true; },
         error(code, message) { return false; }
     );
@@ -223,7 +220,8 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
 {
     DynStringLines lines = DynStringLines__new();
     DynString line;
-    match_result(DynStringCode, DynString__init(&line, 16),
+    match_result(
+        DynString__init(&line, 16),
         success_do_nothing(),
         error(code, message) { return None(DynStringLines); }
     );
@@ -240,7 +238,8 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
                 return None(DynStringLines);
             }
 
-            match_result(DynStringCode, DynString__init(&line, 16),
+            match_result(
+                DynString__init(&line, 16),
                 success_do_nothing(),
                 error(code, message)
                 {
@@ -251,7 +250,8 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
             continue;
         }
 
-        match_result(DynStringCode, DynString__push_char(&line, ch),
+        match_result(
+            DynString__push_char(&line, ch),
             success_do_nothing(),
             error(code, message)
             {

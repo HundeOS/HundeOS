@@ -125,10 +125,43 @@ class HundelintTest(unittest.TestCase):
         rules = self.ast_rules_for(source)
         self.assertEqual(3, rules.count("no-optional-result-internals"))
 
+    def test_reports_generated_collection_typedefs(self):
+        source = (
+            "void example(void) {\n"
+            "    Values__type value;\n"
+            "    Values__type_ptr pointer;\n"
+            "    Values__type_ptr__optional optional;\n"
+            "    ValueMap__value_type_ptr mapped;\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertEqual(4, rules.count("no-generated-collection-types"))
+
+    def test_allows_generated_collection_typedefs_inside_implementation(self):
+        source = "typedef type alias__type;\n"
+        rules = self.rules_for(source, "common/types/fixed_array.h")
+        self.assertNotIn("no-generated-collection-types", rules)
+
+    def test_allows_inferred_optional_matcher(self):
+        source = (
+            "void example(void) {\n"
+            "    match_optional(values_at(),\n"
+            "        some(value)\n"
+            "        {\n"
+            "            use(value);\n"
+            "        },\n"
+            "        none_do_nothing()\n"
+            "    );\n"
+            "}\n"
+        )
+        rules = self.rules_for(source)
+        self.assertNotIn("match-branch-macros", rules)
+        self.assertNotIn("block-macro-semicolon", rules)
+
     def test_allows_match_find_result_branches(self):
         source = (
             "void example(ProcessTable processes) {\n"
-            "    match_find_result(ProcessTable, ProcessTable__find(&processes, pid_matches, &pid),\n"
+            "    match_find_result(ProcessTable__find(&processes, pid_matches, &pid),\n"
             "        some(process)\n"
             "        {\n"
             "            use(process);\n"
@@ -147,7 +180,7 @@ class HundelintTest(unittest.TestCase):
     def test_allows_match_find_result_ptr_branches(self):
         source = (
             "void example(ProcessTable processes) {\n"
-            "    match_find_result_ptr(ProcessTable, ProcessTable__find(&processes, pid_matches, &pid),\n"
+            "    match_find_result_ptr(ProcessTable__find(&processes, pid_matches, &pid),\n"
             "        some(process)\n"
             "        {\n"
             "            use(process);\n"
@@ -166,7 +199,7 @@ class HundelintTest(unittest.TestCase):
     def test_reports_match_find_result_without_branch_macros(self):
         source = (
             "void example(ProcessTable processes) {\n"
-            "    match_find_result(ProcessTable, ProcessTable__find(&processes, pid_matches, &pid),\n"
+            "    match_find_result(ProcessTable__find(&processes, pid_matches, &pid),\n"
             "        { use(process); },\n"
             "        none()\n"
             "        {\n"
@@ -177,10 +210,10 @@ class HundelintTest(unittest.TestCase):
         )
         self.assertIn("match-branch-macros", self.rules_for(source))
 
-    def test_reports_direct_find_result_matching(self):
+    def test_allows_direct_find_result_matching_when_the_entry_is_needed(self):
         source = (
             "void example(ProcessTable processes) {\n"
-            "    match_optional(ProcessTable__FindResult, ProcessTable__find(&processes, pid_matches, &pid),\n"
+            "    match_optional(ProcessTable__find(&processes, pid_matches, &pid),\n"
             "        some(process)\n"
             "        {\n"
             "            use(process.value);\n"
@@ -189,21 +222,23 @@ class HundelintTest(unittest.TestCase):
             "    );\n"
             "}\n"
         )
-        self.assertIn("find-result-matcher", self.rules_for(source))
+        self.assertNotIn("match-branch-macros", self.rules_for(source))
 
-    def test_allows_direct_find_result_matching_with_ignore(self):
+    def test_reports_explicit_type_arguments_to_matchers(self):
         source = (
-            "void example(ProcessTable processes) {\n"
-            "    match_optional(ProcessTable__FindResult, ProcessTable__find(&processes, pid_matches, &pid), // hundelint: ignore-find-result-matcher\n"
-            "        some(process)\n"
-            "        {\n"
-            "            use(process.index);\n"
-            "        },\n"
-            "        none_do_nothing()\n"
-            "    );\n"
+            "void example(void) {\n"
+            "    match_optional(Value, optional(), some(value) {}, none_do_nothing());\n"
+            "    match_result(Value, result(), success(value) {}, error(code, message) { return; });\n"
+            "    match_find_result(Values, find(), some(value) {}, none_do_nothing());\n"
+            "    match_find_result_ptr(Values, find(), some(value) {}, none_do_nothing());\n"
             "}\n"
         )
-        self.assertNotIn("find-result-matcher", self.rules_for(source))
+        rules = self.rules_for(source)
+        self.assertEqual(4, rules.count("typed-match-argument"))
+
+    def test_reports_legacy_collection_optional_matcher(self):
+        source = "match_collection_optional(optional(), some(value) {}, none_do_nothing());\n"
+        self.assertIn("legacy-collection-optional-matcher", self.rules_for(source))
 
     def test_reports_collection_internals(self):
         source = "void example(void) { BString text; ExampleLinkedList list; text.len; list.head->value; }\n"
@@ -228,6 +263,14 @@ class HundelintTest(unittest.TestCase):
         source = "void example(Wrapper wrapper) { wrapper.text.len; }\n"
         rules = self.ast_rules_for(source)
         self.assertNotIn("no-collection-internals", rules)
+
+    def test_reports_atomic_fixed_array_storage_access(self):
+        source = (
+            "AtomicFixedArrayDefine(uint64_t, 4, Slots);\n"
+            "void example(SlotsPtr slots) { slots->data[0] = 7; }\n"
+            "uint64_t read_slot(ConstSlotsPtr slots) { return slots->data[0]; }\n"
+        )
+        self.assertEqual(2, self.ast_rules_for(source).count("no-collection-internals"))
 
     def test_does_not_record_initializer_arguments_as_collection_symbols(self):
         source = (
@@ -466,6 +509,15 @@ class HundelintTest(unittest.TestCase):
         rules = self.ast_rules_for(source)
         self.assertIn("raw-struct-pointer", rules)
 
+    def test_allows_struct_value_initialized_from_pointer_cast(self):
+        source = (
+            "typedef struct BString { int len; } BString;\n"
+            "BString from_chars(const char * chars);\n"
+            "void example(void) { BString text = from_chars((const char *) data); }\n"
+        )
+        rules = self.ast_rules_for(source)
+        self.assertNotIn("raw-struct-pointer", rules)
+
     def test_reports_raw_optional_result_pointer_parameters(self):
         source = (
             "void example(const Optional(BString) * value, Result(ByteCount) * count) {}\n"
@@ -488,11 +540,11 @@ class HundelintTest(unittest.TestCase):
     def test_allows_match_macros(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    match_optional(BString, value,\n"
+            "    match_optional(value,\n"
             "        some(text) { use(text); },\n"
             "        none() { return; }\n"
             "    );\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_result(result,\n"
             "        success(count)\n"
             "        {\n"
             "            use(count);\n"
@@ -513,11 +565,11 @@ class HundelintTest(unittest.TestCase):
     def test_allows_explicit_do_nothing_and_test_branch_macros_in_tests(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    match_optional(BString, value,\n"
+            "    match_optional(value,\n"
             "        some_do_nothing(),\n"
             "        none_test_fail()\n"
             "    );\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_result(result,\n"
             "        success_do_nothing(),\n"
             "        error_test_ok()\n"
             "    );\n"
@@ -532,11 +584,11 @@ class HundelintTest(unittest.TestCase):
     def test_rejects_test_fail_branch_macros_outside_tests(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    match_optional(BString, value,\n"
+            "    match_optional(value,\n"
             "        some_test_fail(),\n"
             "        none_do_nothing()\n"
             "    );\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_result(result,\n"
             "        success_do_nothing(),\n"
             "        error_test_fail()\n"
             "    );\n"
@@ -549,11 +601,11 @@ class HundelintTest(unittest.TestCase):
     def test_rejects_error_do_nothing_and_empty_error_blocks(self):
         source = (
             "void example(Result(ByteCount) result) {\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_result(result,\n"
             "        success_do_nothing(),\n"
             "        error_do_nothing()\n"
             "    );\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_result(result,\n"
             "        success_do_nothing(),\n"
             "        error(code, message) {}\n"
             "    );\n"
@@ -566,15 +618,15 @@ class HundelintTest(unittest.TestCase):
     def test_rejects_trivial_error_return_break_and_continue_blocks(self):
         source = (
             "void example(Result(ByteCount) result) {\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_result(result,\n"
             "        success_do_nothing(),\n"
             "        error(code, message) { return; }\n"
             "    );\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_result(result,\n"
             "        success_do_nothing(),\n"
             "        error(code, message) { break; }\n"
             "    );\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_result(result,\n"
             "        success_do_nothing(),\n"
             "        error(code, message) { continue; }\n"
             "    );\n"
@@ -586,7 +638,7 @@ class HundelintTest(unittest.TestCase):
     def test_allows_trivial_error_branch_with_explicit_ignore(self):
         source = (
             "void example(Result(ByteCount) result) {\n"
-            "    match_result(ByteCount, result, // hundelint: ignore-trivial-error-branch\n"
+            "    match_result(result, // hundelint: ignore-trivial-error-branch\n"
             "        success_do_nothing(),\n"
             "        error(code, message) { return; }\n"
             "    );\n"
@@ -599,8 +651,8 @@ class HundelintTest(unittest.TestCase):
     def test_reports_inline_match_branch_macros(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    match_optional(BString, value, some(text) { use(text); }, none() { return; });\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_optional(value, some(text) { use(text); }, none() { return; });\n"
+            "    match_result(result,\n"
             "        success(count) { use(count); }, error(code, message) { report(code); return; }\n"
             "    );\n"
             "}\n"
@@ -611,7 +663,7 @@ class HundelintTest(unittest.TestCase):
     def test_reports_multiline_match_branch_brace_on_same_line(self):
         source = (
             "void example(Result(ByteCount) result) {\n"
-            "    match_result(ByteCount, result,\n"
+            "    match_result(result,\n"
             "        success(count) {\n"
             "            use(count);\n"
             "        },\n"
@@ -625,10 +677,10 @@ class HundelintTest(unittest.TestCase):
     def test_reports_match_without_branch_macros(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    match_optional(BString, value, text, { use(text); }, { return; });\n"
-            "    match_result(ByteCount, result, count, { use(count); }, code, message, { return; });\n"
-            "    match_optional(BString, value, some(text), { use(text); }, none(), { return; });\n"
-            "    match_result(ByteCount, result, success(count), { use(count); }, error(code, message), { return; });\n"
+            "    match_optional(value, text, { return; });\n"
+            "    match_result(result, count, { use(count); }, code, message, { return; });\n"
+            "    match_optional(value, some(text), { use(text); }, none(), { return; });\n"
+            "    match_result(result, success(count), { use(count); }, error(code, message), { return; });\n"
             "}\n"
         )
         rules = self.rules_for(source)
@@ -701,7 +753,7 @@ class HundelintTest(unittest.TestCase):
     def test_reports_block_macro_without_semicolon(self):
         source = (
             "void example(Optional(BString) value, TestList list) {\n"
-            "    match_optional(BString, value,\n"
+            "    match_optional(value,\n"
             "        some(text) { use(text); },\n"
             "        none() {}\n"
             "    )\n"
@@ -717,7 +769,7 @@ class HundelintTest(unittest.TestCase):
     def test_allows_block_macro_with_semicolon(self):
         source = (
             "void example(Optional(BString) value, TestList list) {\n"
-            "    match_optional(BString, value,\n"
+            "    match_optional(value,\n"
             "        some(text) { use(text); },\n"
             "        none() {}\n"
             "    );\n"
@@ -733,12 +785,31 @@ class HundelintTest(unittest.TestCase):
     def test_allows_unwrap_macros(self):
         source = (
             "void example(Optional(BString) value, Result(ByteCount) result) {\n"
-            "    BString text = unwrap(BString, value, empty_bstr());\n"
-            "    ByteCount count = result_unwrap(ByteCount, result, 0);\n"
+            "    BString text = unwrap_optional(value, empty_bstr());\n"
+            "    ByteCount count = unwrap_result(result, 0);\n"
             "}\n"
         )
         rules = self.rules_for(source)
         self.assertNotIn("match-branch-macros", rules)
+        self.assertNotIn("typed-unwrap-argument", rules)
+
+    def test_reports_legacy_unwrap_macros(self):
+        source = (
+            "void example(Optional(BString) value, Result(ByteCount) result) {\n"
+            "    BString text = unwrap(BString, value, empty_bstr());\n"
+            "    ByteCount count = result_unwrap(ByteCount, result, 0);\n"
+            "}\n"
+        )
+        self.assertEqual(2, self.rules_for(source).count("legacy-unwrap-macro"))
+
+    def test_reports_explicit_unwrap_type_arguments(self):
+        source = (
+            "void example(Optional(BString) value, Result(ByteCount) result) {\n"
+            "    BString text = unwrap_optional(BString, value, empty_bstr());\n"
+            "    ByteCount count = unwrap_result(ByteCount, result, 0);\n"
+            "}\n"
+        )
+        self.assertEqual(2, self.rules_for(source).count("typed-unwrap-argument"))
 
     def test_allows_collection_internals_in_type_implementations(self):
         source = "void example(void) { BString text; ExampleLinkedList list; text.len; list.head->value; }\n"

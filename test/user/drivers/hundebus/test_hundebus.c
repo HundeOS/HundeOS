@@ -35,12 +35,11 @@ static uint64_t fake_wait_event_count;
 static uint64_t fake_wait_event_index;
 static char printed_output[1024];
 static uint64_t printed_output_len;
-static const char * fake_sysinfo =
-    "pci.present=1\n"
-    "pci.ecam.physical_base=0x4010000000\n"
-    "pci.ecam.size=0x200000\n"
-    "pci.bus.start=0\n"
-    "pci.bus.end=1\n";
+static const char * fake_sysinfo = "pci.present=1\n"
+                                   "pci.ecam.physical_base=0x4010000000\n"
+                                   "pci.ecam.size=0x200000\n"
+                                   "pci.bus.start=0\n"
+                                   "pci.bus.end=1\n";
 
 #define HUNDEBUS_ENTRYPOINT hundebus_main_under_test
 #define IO__printf test_printf
@@ -67,20 +66,13 @@ static void TestHundebus__write8(uint64_t offset, uint8_t value)
 static void TestHundebus__write16(uint64_t offset, uint16_t value)
 {
     TEST_ASSERT_LESS_THAN_UINT64(sizeof(fake_ecam) - 1, offset);
-    fake_ecam[offset] = (uint8_t) (value & 0xffU);
-    fake_ecam[offset + 1] = (uint8_t) (value >> 8);
+    fake_ecam[offset] = (uint8_t)(value & 0xffU);
+    fake_ecam[offset + 1] = (uint8_t)(value >> 8);
 }
 
-static void TestHundebus__seed_device(
-    uint64_t bus,
-    uint64_t device,
-    uint64_t function,
-    uint16_t vendor_id,
-    uint16_t device_id,
-    uint8_t class_code,
-    uint8_t subclass,
-    uint8_t prog_if,
-    uint8_t header_type)
+static void TestHundebus__seed_device(uint64_t bus, uint64_t device, uint64_t function, uint16_t vendor_id,
+                                      uint16_t device_id, uint8_t class_code, uint8_t subclass, uint8_t prog_if,
+                                      uint8_t header_type)
 {
     uint64_t offset = TestHundebus__function_offset(bus, device, function);
     TestHundebus__write16(offset + PCI_CONFIG_VENDOR_ID, vendor_id);
@@ -98,7 +90,7 @@ void setUp(void)
         fake_ecam[index] = 0xff;
     }
 
-    fake_ecam_mapping = (ServiceMappedMemory) {
+    fake_ecam_mapping = (ServiceMappedMemory){
         .driver_address = fake_ecam,
         .device_address = 0x4010000000,
         .size = TEST_PCI_ECAM_SIZE,
@@ -165,7 +157,7 @@ ServiceCode service_wait(ServiceEventPtr event)
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
     TEST_ASSERT_LESS_THAN_UINT64(memory->size, offset);
-    return (void *) ((uint64_t) memory->driver_address + offset);
+    return (void *)((uint64_t)memory->driver_address + offset);
 }
 
 size_t mapped_size(ServiceMappedMemoryPtr memory)
@@ -190,7 +182,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size)
         buf[index] = fake_sysinfo[index];
         index++;
     }
-    return (ByteCount) index;
+    return (ByteCount)index;
 }
 
 IOStatus close(IOHandle handle)
@@ -205,13 +197,22 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     TEST_ASSERT_EQUAL_INT(1, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     DynString sysinfo;
-    match_result(DynStringCode, DynString__init(&sysinfo, 128), success_do_nothing(), error(code, message) { return None(DynString); });
+    match_result(
+        DynString__init(&sysinfo, 128),
+        success_do_nothing(),
+        error(code, message) { return None(DynString); }
+    );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
-        match_result(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]), success_do_nothing(), error(code, message) {
+        match_result(
+            DynString__push_char(&sysinfo, fake_sysinfo[index]),
+            success_do_nothing(),
+            error(code, message)
+            {
                 DynString__dispose(&sysinfo);
                 return None(DynString);
-            });
+            }
+        );
     }
     return Some(DynString, sysinfo);
 }
@@ -228,7 +229,7 @@ IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)
 {
     TEST_ASSERT_EQUAL_INT(7, handle);
     fake_businfo_buffer_requested = true;
-    *buffer = (IOServerBuffer) {
+    *buffer = (IOServerBuffer){
         .data = fake_businfo_buffer,
         .capacity = sizeof(fake_businfo_buffer),
     };
@@ -260,16 +261,12 @@ int test_printf(ConstBStringPtr format, ...)
 {
     va_list args;
     va_start(args, format);
-    int count = vsnprintf(
-        &printed_output[printed_output_len],
-        sizeof(printed_output) - printed_output_len,
-        BString__cstr(format),
-        args
-    );
+    int count = vsnprintf(&printed_output[printed_output_len], sizeof(printed_output) - printed_output_len,
+                          BString__cstr(format), args);
     va_end(args);
     if (count > 0)
     {
-        printed_output_len += (uint64_t) count;
+        printed_output_len += (uint64_t)count;
         if (printed_output_len >= sizeof(printed_output))
         {
             printed_output_len = sizeof(printed_output) - 1;
@@ -280,7 +277,7 @@ int test_printf(ConstBStringPtr format, ...)
 
 void test_hundebus_config_loads_ecam_from_sysinfo(void)
 {
-    PciConfig config = { 0 };
+    PciConfig config = {0};
 
     TEST_ASSERT_TRUE(PciConfig__load(&config));
 
@@ -295,12 +292,13 @@ void test_hundebus_config_loads_ecam_from_sysinfo(void)
 void test_hundebus_scan_enumerates_single_and_multifunction_devices(void)
 {
     Hundebus hundebus = {
-        .pci_config = {
-            .ecam_physical_base = 0x4010000000,
-            .ecam_size = TEST_PCI_ECAM_SIZE,
-            .bus_start = 0,
-            .bus_end = 1,
-        },
+        .pci_config =
+            {
+                .ecam_physical_base = 0x4010000000,
+                .ecam_size = TEST_PCI_ECAM_SIZE,
+                .bus_start = 0,
+                .bus_end = 1,
+            },
         .ecam = Some(ServiceMappedMemoryPtr, &fake_ecam_mapping),
         .pci_devices = HundebusPciDevices__new(),
     };
@@ -317,12 +315,13 @@ void test_hundebus_scan_enumerates_single_and_multifunction_devices(void)
 void test_hundebus_scan_stops_at_mapped_ecam_size(void)
 {
     Hundebus hundebus = {
-        .pci_config = {
-            .ecam_physical_base = 0x4010000000,
-            .ecam_size = 0xffff,
-            .bus_start = 0,
-            .bus_end = 1,
-        },
+        .pci_config =
+            {
+                .ecam_physical_base = 0x4010000000,
+                .ecam_size = 0xffff,
+                .bus_start = 0,
+                .bus_end = 1,
+            },
         .ecam = Some(ServiceMappedMemoryPtr, &fake_ecam_mapping),
         .pci_devices = HundebusPciDevices__new(),
     };
@@ -338,16 +337,20 @@ void test_hundebus_scan_stops_at_mapped_ecam_size(void)
 void test_hundebus_builds_businfo_from_scan(void)
 {
     Hundebus hundebus = {
-        .pci_config = {
-            .ecam_physical_base = 0x4010000000,
-            .ecam_size = TEST_PCI_ECAM_SIZE,
-            .bus_start = 0,
-            .bus_end = 1,
-        },
+        .pci_config =
+            {
+                .ecam_physical_base = 0x4010000000,
+                .ecam_size = TEST_PCI_ECAM_SIZE,
+                .bus_start = 0,
+                .bus_end = 1,
+            },
         .ecam = Some(ServiceMappedMemoryPtr, &fake_ecam_mapping),
         .pci_devices = HundebusPciDevices__new(),
     };
-    match_result(DynStringCode, DynString__init(&hundebus.businfo, HUNDEBUS_BUSINFO_INITIAL_CAPACITY), success_do_nothing(), error_test_fail());
+    match_result(DynString__init(&hundebus.businfo, HUNDEBUS_BUSINFO_INITIAL_CAPACITY),
+        success_do_nothing(),
+                 error_test_fail()
+    );
     TestHundebus__seed_device(0, 1, 0, 0x1234, 0x5678, 0x0c, 0x03, 0x30, 0x00);
 
     TEST_ASSERT_EQUAL_UINT64(1, Hundebus__scan_pci(&hundebus));
@@ -366,7 +369,7 @@ void test_hundebus_main_registers_businfo_and_serves_read_request(void)
 {
     TestHundebus__seed_device(0, 0, 0, 0x1b36, 0x0008, 0x06, 0x00, 0x00, 0x00);
     fake_wait_event_count = 1;
-    fake_wait_events[0] = (ServiceEvent) {
+    fake_wait_events[0] = (ServiceEvent){
         .type = SERVICE_EVENT_IO,
         .source = SERVICE_IO_READ_REQUEST,
         .data = 7,

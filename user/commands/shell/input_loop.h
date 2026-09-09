@@ -13,21 +13,19 @@ typedef const ShellHistory * ConstShellHistoryPtr;
 typedef struct InputStream InputStream;
 typedef InputStream * InputStreamPtr;
 typedef const InputStream * ConstInputStreamPtr;
-typedef BString (* InputStreamReadLine)(InputStreamPtr self, bool echo);
+typedef BString (*InputStreamReadLine)(InputStreamPtr self, bool echo);
 
 typedef struct InputStream
 {
     InputStreamReadLine read_line;
-}
-InputStream;
+} InputStream;
 
 typedef struct Shell
 {
     Interpreter interpreter;
     InputStreamPtr input;
     ShellHistory history;
-}
-Shell;
+} Shell;
 
 typedef Shell * ShellPtr;
 typedef const Shell * ConstShellPtr;

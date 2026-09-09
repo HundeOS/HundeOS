@@ -12,7 +12,8 @@ static PageTable null_table;
 
 mutex_t init_mutex = MUTEX_INIT;
 
-PageTable * MMU__init_null() {
+PageTable * MMU__init_null()
+{
     mutex_lock(&init_mutex);
 
     PageTable__zero(&null_table);
@@ -20,12 +21,14 @@ PageTable * MMU__init_null() {
     return &null_table;
 }
 
-#define GUARD_ASID  0xFFu  // reserved, never used by real processes
+#define GUARD_ASID 0xFFu // reserved, never used by real processes
 
-void MMU__park_ttbr0(uint64_t guard_L0_pa, uint16_t guard_asid, bool disable_walks) {
-    if (disable_walks) {
+void MMU__park_ttbr0(uint64_t guard_L0_pa, uint16_t guard_asid, bool disable_walks)
+{
+    if (disable_walks)
+    {
         uint64_t tcr = read_tcr_el1();
-        tcr |= (1ULL << 7);              // EPD0 = 1
+        tcr |= (1ULL << 7); // EPD0 = 1
         write_tcr_el1(tcr);
         dsb_ish();
         isb();
@@ -37,13 +40,11 @@ void MMU__park_ttbr0(uint64_t guard_L0_pa, uint16_t guard_asid, bool disable_wal
     // No TLBI needed if guard_asid != old_asid
 }
 
-
 void MMU__install_null_low_mem_table(KernelPtr kernel)
 {
     PageTable * table = MMU__init_null();
     KernelAddress address = PageTable__from_virtual_address(kernel, addr(table));
 
     MMU__park_ttbr0(address.phys_addr, (GUARD_ASID << 48), false);
-    __asm__ volatile("tlbi vmalle1");  // invalidate all EL1 stage-1 TLBs
-
+    __asm__ volatile("tlbi vmalle1"); // invalidate all EL1 stage-1 TLBs
 }

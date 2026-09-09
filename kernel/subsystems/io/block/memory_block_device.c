@@ -7,7 +7,7 @@ static BString allocation_failed = bstr("Memory block device allocation failed")
 
 static MemoryDeviceBlock MemoryDeviceBlock__new(BlockNumber block, KernelAddress address)
 {
-    return (MemoryDeviceBlock) {
+    return (MemoryDeviceBlock){
         .block = block,
         .address = address,
     };
@@ -20,7 +20,7 @@ bool MemoryDeviceBlock__equals(MemoryDeviceBlockPtr self, MemoryDeviceBlockPtr o
 
 MemoryBlockDevice MemoryBlockDevice__new()
 {
-    return (MemoryBlockDevice) {
+    return (MemoryBlockDevice){
         .blocks = MemoryDeviceBlocks__new(),
         .lock = MUTEX_INIT,
     };
@@ -33,7 +33,7 @@ BlockDevice MemoryBlockDevice__as_block_device(MemoryBlockDevicePtr self)
 
 static bool MemoryDeviceBlock__matches_number(MemoryDeviceBlockPtr block, void * context)
 {
-    BlockNumber number = *(BlockNumber *) context;
+    BlockNumber number = *(BlockNumber *)context;
     return block->block == number;
 }
 
@@ -53,11 +53,11 @@ static void MemoryBlockDevice__copy(DataPtr target, DataPtr source)
     }
 }
 
-static Result(MemoryDeviceBlockPtr) MemoryBlockDevice__find_or_create_block(
-    MemoryBlockDevicePtr self, BlockNumber block
-)
+static Result(MemoryDeviceBlockPtr)
+    MemoryBlockDevice__find_or_create_block(MemoryBlockDevicePtr self, BlockNumber block)
 {
-    match_find_result_ptr(MemoryDeviceBlocks, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
+    match_find_result_ptr(
+        MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
         some(found) { return Success(MemoryDeviceBlockPtr, found); },
         none_do_nothing()
     );
@@ -70,36 +70,39 @@ static Result(MemoryDeviceBlockPtr) MemoryBlockDevice__find_or_create_block(
 
     MemoryBlockDevice__zero(v_ptr(address, Data));
 
-    match_result(CollectionCode, MemoryDeviceBlocks__push(&self->blocks, MemoryDeviceBlock__new(block, address)),
-    success(_)
-    {
-            match_find_result_ptr(MemoryDeviceBlocks, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
+    match_result(
+        MemoryDeviceBlocks__push(&self->blocks, MemoryDeviceBlock__new(block, address)),
+        success(_)
+        {
+            match_find_result_ptr(
+                MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &block),
                 some(found) { return Success(MemoryDeviceBlockPtr, found); },
                 none_do_nothing()
             );
-        }, error(code, message) { return Error(MemoryDeviceBlockPtr, message, BLOCK_DEVICE_IO_ERROR); });
+        },
+        error(code, message) { return Error(MemoryDeviceBlockPtr, message, BLOCK_DEVICE_IO_ERROR); }
+    );
 
     return Error(MemoryDeviceBlockPtr, allocation_failed, BLOCK_DEVICE_IO_ERROR);
 }
 
-Result(BlockCount) MemoryBlockDevice__read(
-    BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr target
-)
+Result(BlockCount)
+    MemoryBlockDevice__read(BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr target)
 {
-    MemoryBlockDevicePtr self = (MemoryBlockDevicePtr) context;
+    MemoryBlockDevicePtr self = (MemoryBlockDevicePtr)context;
     if (self == NULL || target == NULL || count == 0) // hundelint: ignore-no-null
     {
         return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
-    critical_section(self->lock,
-    {
+    critical_section(self->lock, {
         for (BlockCount i = 0; i < count; i++)
         {
             DataPtr block_target = target + (i * BLOCK_DEVICE_BLOCK_SIZE);
             BlockNumber current_block = block + i;
 
-            match_find_result_ptr(MemoryDeviceBlocks, MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &current_block),
+            match_find_result_ptr(
+                MemoryDeviceBlocks__find(&self->blocks, MemoryDeviceBlock__matches_number, &current_block),
                 some(found) { MemoryBlockDevice__copy(block_target, v_ptr(found->address, Data)); },
                 none() { MemoryBlockDevice__zero(block_target); }
             );
@@ -109,21 +112,20 @@ Result(BlockCount) MemoryBlockDevice__read(
     });
 }
 
-Result(BlockCount) MemoryBlockDevice__write(
-    BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr source
-)
+Result(BlockCount)
+    MemoryBlockDevice__write(BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr source)
 {
-    MemoryBlockDevicePtr self = (MemoryBlockDevicePtr) context;
+    MemoryBlockDevicePtr self = (MemoryBlockDevicePtr)context;
     if (self == NULL || source == NULL || count == 0) // hundelint: ignore-no-null
     {
         return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
-    critical_section(self->lock,
-    {
+    critical_section(self->lock, {
         for (BlockCount i = 0; i < count; i++)
         {
-            match_result(MemoryDeviceBlockPtr, MemoryBlockDevice__find_or_create_block(self, block + i),
+            match_result(
+                MemoryBlockDevice__find_or_create_block(self, block + i),
                 success(memory_block)
                 {
                     DataPtr block_source = source + (i * BLOCK_DEVICE_BLOCK_SIZE);

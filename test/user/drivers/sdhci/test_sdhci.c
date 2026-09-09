@@ -41,8 +41,7 @@ typedef struct FakeSdhciHost
     uint64_t read_words_remaining;
     uint64_t read_word_index;
     bool read_active;
-}
-FakeSdhciHost;
+} FakeSdhciHost;
 
 static uint32_t fake_sdhci_read32(void * base, uint64_t offset);
 static void fake_sdhci_write32(void * base, uint64_t offset, uint32_t value);
@@ -107,16 +106,16 @@ static void fake_write_pci8(uint64_t offset, uint8_t value)
 
 static void fake_write_pci16(uint64_t offset, uint16_t value)
 {
-    fake_pci_ecam[offset] = (uint8_t) value;
-    fake_pci_ecam[offset + 1] = (uint8_t) (value >> 8);
+    fake_pci_ecam[offset] = (uint8_t)value;
+    fake_pci_ecam[offset + 1] = (uint8_t)(value >> 8);
 }
 
 static void fake_write_pci32(uint64_t offset, uint32_t value)
 {
-    fake_pci_ecam[offset] = (uint8_t) value;
-    fake_pci_ecam[offset + 1] = (uint8_t) (value >> 8);
-    fake_pci_ecam[offset + 2] = (uint8_t) (value >> 16);
-    fake_pci_ecam[offset + 3] = (uint8_t) (value >> 24);
+    fake_pci_ecam[offset] = (uint8_t)value;
+    fake_pci_ecam[offset + 1] = (uint8_t)(value >> 8);
+    fake_pci_ecam[offset + 2] = (uint8_t)(value >> 16);
+    fake_pci_ecam[offset + 3] = (uint8_t)(value >> 24);
 }
 
 static void fake_add_pci_sdhci_function(uint64_t device)
@@ -126,11 +125,9 @@ static void fake_add_pci_sdhci_function(uint64_t device)
     fake_write_pci8(offset + SDHCI_PCI_CONFIG_CLASS_CODE, SDHCI_PCI_CLASS_SYSTEM_PERIPHERAL);
     fake_write_pci8(offset + SDHCI_PCI_CONFIG_SUBCLASS, SDHCI_PCI_SUBCLASS_SD_HOST);
     fake_write_pci8(offset + SDHCI_PCI_CONFIG_HEADER_TYPE, 0);
-    fake_write_pci32(
-        offset + SDHCI_PCI_CONFIG_BAR0,
-        ((uint32_t) FAKE_PCI_SD_HOST_PHYSICAL_BASE) | SDHCI_PCI_BAR_MEMORY_64
-    );
-    fake_write_pci32(offset + SDHCI_PCI_CONFIG_BAR0 + 4, (uint32_t) (FAKE_PCI_SD_HOST_PHYSICAL_BASE >> 32));
+    fake_write_pci32(offset + SDHCI_PCI_CONFIG_BAR0,
+                     ((uint32_t)FAKE_PCI_SD_HOST_PHYSICAL_BASE) | SDHCI_PCI_BAR_MEMORY_64);
+    fake_write_pci32(offset + SDHCI_PCI_CONFIG_BAR0 + 4, (uint32_t)(FAKE_PCI_SD_HOST_PHYSICAL_BASE >> 32));
     fake_write_pci8(offset + SDHCI_PCI_CONFIG_INTERRUPT_LINE, FAKE_PCI_SD_HOST_IRQ);
 }
 
@@ -164,7 +161,7 @@ static void fake_start_read_command(void)
 {
     fake_host.read_active = true;
     fake_host.read_word_index = 0;
-    fake_host.read_words_remaining = ((uint64_t) fake_host.block_count) * (SDHCI_BLOCK_SIZE / sizeof(uint32_t));
+    fake_host.read_words_remaining = ((uint64_t)fake_host.block_count) * (SDHCI_BLOCK_SIZE / sizeof(uint32_t));
 }
 
 static uint32_t fake_sdhci_read32(void * base, uint64_t offset)
@@ -194,7 +191,7 @@ static uint32_t fake_sdhci_read32(void * base, uint64_t offset)
     {
         TEST_ASSERT_TRUE(fake_host.read_active);
         TEST_ASSERT_GREATER_THAN_UINT64(0, fake_host.read_words_remaining);
-        uint32_t value = 0x03020100U + (uint32_t) (fake_host.read_word_index * 0x04040404U);
+        uint32_t value = 0x03020100U + (uint32_t)(fake_host.read_word_index * 0x04040404U);
         fake_host.read_word_index++;
         fake_host.read_words_remaining--;
         if (fake_host.read_words_remaining == 0)
@@ -332,11 +329,11 @@ static void fake_sdhci_write8(void * base, uint64_t offset, uint8_t value)
 
 static Optional(SdHostConfig) fake_sdhci_load_config(void)
 {
-    return Some(SdHostConfig, ((SdHostConfig) {
-        .physical_base = FAKE_SD_HOST_PHYSICAL_BASE,
-        .mmio_size = FAKE_SD_HOST_MMIO_SIZE,
-        .irq = FAKE_SD_HOST_IRQ,
-    }));
+    return Some(SdHostConfig, ((SdHostConfig){
+                                  .physical_base = FAKE_SD_HOST_PHYSICAL_BASE,
+                                  .mmio_size = FAKE_SD_HOST_MMIO_SIZE,
+                                  .irq = FAKE_SD_HOST_IRQ,
+                              }));
 }
 
 static bool fake_sdhci_load_pci_config(PciConfigPtr config)
@@ -346,7 +343,7 @@ static bool fake_sdhci_load_pci_config(PciConfigPtr config)
         return false;
     }
 
-    *config = (PciConfig) {
+    *config = (PciConfig){
         .ecam_physical_base = FAKE_PCI_ECAM_PHYSICAL_BASE,
         .ecam_size = FAKE_PCI_ECAM_SIZE,
         .bus_start = 0,
@@ -358,17 +355,17 @@ static bool fake_sdhci_load_pci_config(PciConfigPtr config)
 
 void setUp(void)
 {
-    fake_host = (FakeSdhciHost) {
+    fake_host = (FakeSdhciHost){
         .present_state = SDHCI_PRESENT_CARD_INSERTED,
         .capabilities = 100U << 8,
         .host_version = 0x00001002U,
     };
-    fake_mapping = (ServiceMappedMemory) {
+    fake_mapping = (ServiceMappedMemory){
         .driver_address = &fake_host,
         .device_address = FAKE_SD_HOST_PHYSICAL_BASE,
         .size = FAKE_SD_HOST_MMIO_SIZE,
     };
-    fake_ecam_mapping = (ServiceMappedMemory) {
+    fake_ecam_mapping = (ServiceMappedMemory){
         .driver_address = fake_pci_ecam,
         .device_address = FAKE_PCI_ECAM_PHYSICAL_BASE,
         .size = FAKE_PCI_ECAM_SIZE,
@@ -400,13 +397,13 @@ void setUp(void)
     {
         fake_request_buffer[index] = 0;
     }
-    fake_block_request = (ServiceBlockRequest) {
+    fake_block_request = (ServiceBlockRequest){
         .request_id = 77,
         .operation = SERVICE_BLOCK_READ,
         .block = 3,
         .block_count = 1,
         .block_size = SDHCI_BLOCK_SIZE,
-        .buffer = (Address) fake_request_buffer,
+        .buffer = (Address)fake_request_buffer,
         .buffer_size = sizeof(fake_request_buffer),
         .device_path = bstr(SDHCI_DEVICE_PATH),
     };
@@ -463,7 +460,7 @@ uint64_t device_ptr(ServiceMappedMemoryPtr memory)
 
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
-    return (void *) ((uint64_t) memory->driver_address + offset);
+    return (void *)((uint64_t)memory->driver_address + offset);
 }
 
 uint64_t device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
@@ -518,7 +515,7 @@ ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint
 
 ServiceCode service_device_address(void * driver_address, Address * device_address)
 {
-    *device_address = (uint64_t) driver_address;
+    *device_address = (uint64_t)driver_address;
     return SERVICE_OK;
 }
 
@@ -582,7 +579,7 @@ void test_sdhci_card_block_count_from_v2_csd(void)
 {
     SdhciCommandResult csd = {
         .ok = true,
-        .response = { 0, 0x00030000U, 0, 0x40000000U },
+        .response = {0, 0x00030000U, 0, 0x40000000U},
     };
 
     TEST_ASSERT_EQUAL_UINT64(4096, Sdhci__card_block_count_from_csd(&csd));

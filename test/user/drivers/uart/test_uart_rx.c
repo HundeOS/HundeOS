@@ -7,12 +7,12 @@
 #include "../../../../common_includes/syscalls/io.h"
 #include "../../../../common_includes/syscalls/service.h"
 
-#define UART_DR   0x000
-#define UART_FR   0x018
-#define UART_CR   0x030
+#define UART_DR 0x000
+#define UART_FR 0x018
+#define UART_CR 0x030
 #define UART_IMSC 0x038
-#define UART_ICR  0x044
-#define FR_RXFE   (1u << 4)
+#define UART_ICR 0x044
+#define FR_RXFE (1u << 4)
 #define UART_PHYS_BASE 0x12345000ULL
 #define UART_IRQ_ID 99ULL
 
@@ -35,12 +35,10 @@ static bool fake_sysinfo_closed;
 #define SYSINFO_PADDING_16 SYSINFO_PADDING_4 SYSINFO_PADDING_4 SYSINFO_PADDING_4 SYSINFO_PADDING_4
 #define SYSINFO_PADDING_32 SYSINFO_PADDING_16 SYSINFO_PADDING_16
 
-static const char fake_sysinfo[] =
-    SYSINFO_PADDING_32
-    "uart.physical_base=0x12345000\n"
-    "uart.virtual_base=0xffff000000000000\n"
-    "uart.irq=99\n"
-    "uart.mmio_size=0x1000\n";
+static const char fake_sysinfo[] = SYSINFO_PADDING_32 "uart.physical_base=0x12345000\n"
+                                                      "uart.virtual_base=0xffff000000000000\n"
+                                                      "uart.irq=99\n"
+                                                      "uart.mmio_size=0x1000\n";
 
 struct ServiceMappedMemory
 {
@@ -170,7 +168,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size)
         buf[index] = fake_sysinfo[index];
         index++;
     }
-    return (ByteCount) index;
+    return (ByteCount)index;
 }
 
 IOStatus close(IOHandle handle)
@@ -185,13 +183,22 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     TEST_ASSERT_EQUAL_INT64(7, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     DynString sysinfo;
-    match_result(DynStringCode, DynString__init(&sysinfo, 128), success_do_nothing(), error(code, message) { return None(DynString); });
+    match_result(
+        DynString__init(&sysinfo, 128),
+        success_do_nothing(),
+        error(code, message) { return None(DynString); }
+    );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
-        match_result(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]), success_do_nothing(), error(code, message) {
+        match_result(
+            DynString__push_char(&sysinfo, fake_sysinfo[index]),
+            success_do_nothing(),
+            error(code, message)
+            {
                 DynString__dispose(&sysinfo);
                 return None(DynString);
-            });
+            }
+        );
     }
     return Some(DynString, sysinfo);
 }
@@ -208,7 +215,7 @@ uint64_t device_ptr(ServiceMappedMemoryPtr memory)
 
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
-    return (void *) ((uint64_t) memory->driver_address + offset);
+    return (void *)((uint64_t)memory->driver_address + offset);
 }
 
 uint64_t device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
@@ -291,8 +298,10 @@ void test_uart_rx_main_maps_registers_subscribes_irq_and_publishes_read_data(voi
     TEST_ASSERT_EQUAL_CHAR('b', fake_io_buffer[1]);
     TEST_ASSERT_EQUAL_CHAR('c', fake_io_buffer[2]);
     TEST_ASSERT_EQUAL_UINT64(2, fake_uart_icr_write_count);
-    TEST_ASSERT_EQUAL_UINT32((1u << 4) | (1u << 6) | (1u << 7) | (1u << 8) | (1u << 9) | (1u << 10), fake_uart_icr_writes[0]);
+    TEST_ASSERT_EQUAL_UINT32((1u << 4) | (1u << 6) | (1u << 7) | (1u << 8) | (1u << 9) | (1u << 10),
+                             fake_uart_icr_writes[0]);
     TEST_ASSERT_EQUAL_UINT32((1u << 4) | (1u << 6), fake_uart_imsc);
     TEST_ASSERT_EQUAL_UINT32((1u << 0) | (1u << 8) | (1u << 9), fake_uart_cr);
-    TEST_ASSERT_EQUAL_UINT32((1u << 4) | (1u << 6) | (1u << 7) | (1u << 8) | (1u << 9) | (1u << 10), fake_uart_icr_writes[1]);
+    TEST_ASSERT_EQUAL_UINT32((1u << 4) | (1u << 6) | (1u << 7) | (1u << 8) | (1u << 9) | (1u << 10),
+                             fake_uart_icr_writes[1]);
 }

@@ -2,15 +2,18 @@
 #include "print.h"
 #include "boot_strings.h"
 
-__BOOT__(void) boot_panic(const char * msg) {
+__BOOT__(void) boot_panic(const char * msg)
+{
     _print(msg);
-    while (true) {
+    while (true)
+    {
         __asm__ volatile("wfe");
     }
 }
 
-__BOOT__(void) boot_vectors_init(void) {
-    extern void *boot_vector_table;
+__BOOT__(void) boot_vectors_init(void)
+{
+    extern void * boot_vector_table;
 
     write_vbar_el1((uint64_t)&boot_vector_table);
 }
@@ -44,9 +47,8 @@ __BOOT__(void) boot_handler(boot_trapframe_t * trap)
     _print_unsigned(fsc);
     _print(TCR);
     _print_unsigned(tcr);
-    while (1) {
+    while (1)
+    {
         __asm__ volatile("wfe");
     }
 }
-
-

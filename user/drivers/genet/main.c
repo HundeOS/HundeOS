@@ -25,8 +25,7 @@ typedef struct GenetDevice
     GenetMmioPtr mmio;
     uint64_t irq;
     BString path;
-}
-GenetDevice;
+} GenetDevice;
 
 typedef GenetDevice * GenetDevicePtr;
 
@@ -38,13 +37,10 @@ static BString genet_error_unsupported_config = bstr("genet unsupported ethernet
 static BString genet_error_mmio_map_failed = bstr("genet mmio map failed");
 static BString genet_error_unsupported_version = bstr("genet unsupported version");
 
-static GenetDevice GenetDevice__new(
-    ServiceMappedMemoryPtr mapping,
-    GenetMmioPtr mmio,
-    uint64_t irq,
-    ConstBStringPtr path)
+static GenetDevice GenetDevice__new(ServiceMappedMemoryPtr mapping, GenetMmioPtr mmio, uint64_t irq,
+                                    ConstBStringPtr path)
 {
-    return (GenetDevice) {
+    return (GenetDevice){
         .mapping = mapping,
         .mmio = mmio,
         .irq = irq,
@@ -54,7 +50,7 @@ static GenetDevice GenetDevice__new(
 
 static GenetRegister32Ptr Genet__reg32(GenetMmioPtr base, uint64_t offset)
 {
-    return (GenetRegister32Ptr) ((uint64_t) base + offset);
+    return (GenetRegister32Ptr)((uint64_t)base + offset);
 }
 
 static uint32_t Genet__read32(GenetMmioPtr base, uint64_t offset)
@@ -74,9 +70,8 @@ static bool Genet__version_supported(uint32_t sys_rev_ctrl)
 
 static bool Genet__config_supported(EthernetConfigPtr config)
 {
-    return config->mac_kind == ETHERNET_MAC_KIND_BCM2711_GENET
-        && config->physical_base != 0
-        && config->mmio_size >= 0x10000;
+    return config->mac_kind == ETHERNET_MAC_KIND_BCM2711_GENET && config->physical_base != 0 &&
+           config->mmio_size >= 0x10000;
 }
 
 static Result(GenetDevice) Genet__init(void)
@@ -87,7 +82,8 @@ static Result(GenetDevice) Genet__init(void)
         return Error(GenetDevice, genet_error_service_registration_failed, SERVICE_NOT_SERVICE_PROCESS);
     }
 
-    match_optional(EthernetConfig, EthernetConfig__load(),
+    match_optional(
+        EthernetConfig__load(),
         some(config)
         {
             if (!Genet__config_supported(&config))
@@ -126,7 +122,7 @@ static Result(GenetDevice) Genet__init(void)
 int main(void)
 {
     GenetDevice device;
-    match_result(GenetDevice, Genet__init(),
+    match_result(Genet__init(),
         success(value) { device = value; },
         error(code, message) { return 1; }
     );

@@ -15,7 +15,7 @@ int IO__vprintf(ConstBStringPtr format, va_list args)
 {
     BString text = BString__vsprintf(format, args);
     IO__print(&text);
-    return (int) BString__length(&text);
+    return (int)BString__length(&text);
 }
 
 int IO__printf(ConstBStringPtr format, ...)

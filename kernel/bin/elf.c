@@ -25,7 +25,7 @@ static size_t Elf__page_allocation_size(Address address, size_t size)
 
 Elf Elf__new(const Address start, const Address end, ConstBStringPtr name)
 {
-    return (Elf) {
+    return (Elf){
         .start = start,
         .end = end,
         .name = *name,
@@ -34,7 +34,7 @@ Elf Elf__new(const Address start, const Address end, ConstBStringPtr name)
 
 ExpandedSegment ExpandedSegment__new(UserAddress address, size_t size)
 {
-    return (ExpandedSegment) {
+    return (ExpandedSegment){
         .address = address,
         .size = size,
     };
@@ -56,16 +56,21 @@ SectionHeaderArray Elf__read_section_headers(ConstElfPtr self)
     Offset section_names = header->section_name_index;
 
     SectionHeaderPtr start = offset_ptr(self->start, section_header_offset, SectionHeader);
-    __d_printf(PROCESS, "header offset=%p size=%i names=%p\n", section_header_offset, section_header_size, section_names);
+    __d_printf(PROCESS, "header offset=%p size=%i names=%p\n", section_header_offset, section_header_size,
+               section_names);
     for (int i = 0; i < section_header_entries; i++)
     {
         SectionHeaderPtr header = offset_ptr(start, i * section_header_size, SectionHeader);
 
-        match_result(CollectionCode, SectionHeaderArray__push(&headers, header),
+        match_result(
+            SectionHeaderArray__push(&headers, header),
             success_do_nothing(),
-            error(code, message) { __d_println(PANIC, cstr(message));; }
+            error(code, message)
+            {
+                __d_println(PANIC, cstr(message));
+                ;
+            }
         );
-
     }
     return headers;
 }
@@ -83,9 +88,14 @@ ProgramHeaderArray Elf__read_program_headers(ConstElfPtr self)
     {
         ProgramHeaderPtr header = offset_ptr(start, i * program_header_size, ProgramHeader);
 
-        match_result(CollectionCode, ProgramHeaderArray__push(&headers, header),
+        match_result(
+            ProgramHeaderArray__push(&headers, header),
             success_do_nothing(),
-            error(code, message) { __d_println(PANIC, cstr(message));; }
+            error(code, message)
+            {
+                __d_println(PANIC, cstr(message));
+                ;
+            }
         );
     }
     return headers;
@@ -98,18 +108,13 @@ static UserAddress Elf__explode(ConstElfPtr self, ProgramHeaderPtr header)
     Offset page_offset = segment_start - page_start;
     size_t allocation_size = Elf__page_allocation_size(segment_start, header->memory_size);
 
-    UserAddress page_address = Kernel__alloc_user(
-        page_start,
-        allocation_size,
-        header->flags & Read,
-        header->flags & Write,
-        header->flags & Execute);
+    UserAddress page_address = Kernel__alloc_user(page_start, allocation_size, header->flags & Read,
+                                                  header->flags & Write, header->flags & Execute);
     UserAddress address = UserAddress__relative(&page_address, page_offset);
 
     Kernel__memset(page_address.kernel_addr.virtual_addr, 0, allocation_size);
-    Kernel__memcopy(offset_addr(self->start, header->segment_offset),
-        address.kernel_addr.virtual_addr,
-        header->file_size);
+    Kernel__memcopy(offset_addr(self->start, header->segment_offset), address.kernel_addr.virtual_addr,
+                    header->file_size);
     if (header->flags & Execute)
     {
         Arch__sync_instruction_memory(address.kernel_addr.virtual_addr, header->file_size);
@@ -117,33 +122,38 @@ static UserAddress Elf__explode(ConstElfPtr self, ProgramHeaderPtr header)
     return page_address;
 }
 
-static void Elf__expand_segment(
-    ConstElfPtr self, ProgramHeaderPtr header, ExpandedSegmentArrayPtr expanded_segments
-)
+static void Elf__expand_segment(ConstElfPtr self, ProgramHeaderPtr header, ExpandedSegmentArrayPtr expanded_segments)
 {
     __d_printf(PROCESS, "Expanding segment header=%p name=%s\n", header, cstr(self->name));
     if (header->type == Load)
     {
         UserAddress address = Elf__explode(self, header);
-        ExpandedSegment segment = ExpandedSegment__new(
-            address,
-            Elf__page_allocation_size(header->virtual_address, header->memory_size)
-        );
+        ExpandedSegment segment =
+            ExpandedSegment__new(address, Elf__page_allocation_size(header->virtual_address, header->memory_size));
         ExpandedSegmentArray__push(expanded_segments, segment);
     }
-
 }
 
-ExpandedSegmentArray Elf__map(ConstElfPtr self) {
+ExpandedSegmentArray Elf__map(ConstElfPtr self)
+{
     ProgramHeaderArray headers = Elf__read_program_headers(self);
     ExpandedSegmentArray expanded_segments = ExpandedSegmentArray__new();
     __d_printf(DEBUG, "Mapping segments %i\n", ProgramHeaderArray__len(&headers));
 
-    for (int i = 0; i < (int) ProgramHeaderArray__len(&headers); i++)
+    for (int i = 0; i < (int)ProgramHeaderArray__len(&headers); i++)
     {
-        match_optional(ProgramHeaderPtr, ProgramHeaderArray__at(&headers, i),
-            some(header) { Elf__expand_segment(self, header, &expanded_segments);; },
-            none() { __d_println(PANIC, "No header");; }
+        match_optional(
+            ProgramHeaderArray__at(&headers, i),
+            some(header)
+            {
+                Elf__expand_segment(self, header, &expanded_segments);
+                ;
+            },
+            none()
+            {
+                __d_println(PANIC, "No header");
+                ;
+            }
         );
     }
     return expanded_segments;
@@ -154,15 +164,13 @@ Optional(ExpandedSegment) Elf__entry_segment(ConstElfPtr self, ExpandedSegmentAr
     Address entry = Elf__read_header(self)->entry;
     ExpandedSegmentArray segments = *expanded_segments;
 
-    for_each_fa(ExpandedSegmentArray, segments, i, segment,
-    {
+    for_each_fa(ExpandedSegmentArray, segments, i, segment, {
         Address start = segment.address.virtual_addr;
         Address end = start + segment.size;
         if (entry >= start && entry < end)
         {
             return Some(ExpandedSegment, segment);
         }
-
     });
     return None(ExpandedSegment);
 }

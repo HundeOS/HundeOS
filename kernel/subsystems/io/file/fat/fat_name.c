@@ -2,10 +2,7 @@
 
 bool FatName__is_valid_83_char(char ch)
 {
-    return (ch >= 'A' && ch <= 'Z')
-        || (ch >= '0' && ch <= '9')
-        || ch == '_'
-        || ch == '-';
+    return (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
 }
 
 bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
@@ -28,7 +25,7 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
     }
 
     BString base = empty_bstr();
-    match_optional(BString, BStringArray__at(&parts, 0),
+    match_optional(BStringArray__at(&parts, 0),
         some(segment) { base = segment; },
         none() { return false; }
     );
@@ -49,14 +46,14 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
             return false;
         }
 
-        target[target_index] = (uint8_t) ch;
+        target[target_index] = (uint8_t)ch;
         target_index++;
     }
 
     if (part_count == 2)
     {
         BString extension = empty_bstr();
-        match_optional(BString, BStringArray__at(&parts, 1),
+        match_optional(BStringArray__at(&parts, 1),
             some(segment) { extension = segment; },
             none() { return false; }
         );
@@ -77,7 +74,7 @@ bool FatName__encode_83(ConstBStringPtr name, uint8_t target[FAT_NAME_83_SIZE])
                 return false;
             }
 
-            target[target_index] = (uint8_t) ch;
+            target[target_index] = (uint8_t)ch;
             target_index++;
         }
     }

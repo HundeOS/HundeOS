@@ -13,13 +13,14 @@ static BString no_context_slot = bstr("No hosted fiber context slot");
 
 ResultDef(int);
 
-static Optional(FiberContextPtr) fiber_contexts[FIBER_CONTEXT_HOSTED_MAX_CONTEXTS] = { 0 };
+static Optional(FiberContextPtr) fiber_contexts[FIBER_CONTEXT_HOSTED_MAX_CONTEXTS] = {0};
 
 static Result(int) FiberContext__allocate_slot(FiberContextPtr self)
 {
     for (int index = 0; index < FIBER_CONTEXT_HOSTED_MAX_CONTEXTS; index++)
     {
-        match_optional(FiberContextPtr, fiber_contexts[index],
+        match_optional(
+            fiber_contexts[index],
             some_do_nothing(),
             none()
             {
@@ -34,18 +35,14 @@ static Result(int) FiberContext__allocate_slot(FiberContextPtr self)
 
 static void FiberContext__start(int slot)
 {
-    match_optional(FiberContextPtr, fiber_contexts[slot],
-        some(self)
-        {
-            self->start(self->fiber);
-        },
+    match_optional(fiber_contexts[slot],
+        some(self) { self->start(self->fiber); },
         none_do_nothing()
     );
 }
 
-Result(FiberCode) FiberContext__init(
-    FiberContextPtr self, Address stack_base, size_t stack_size, FiberContextStart start, FiberPtr fiber
-)
+Result(FiberCode) FiberContext__init(FiberContextPtr self, Address stack_base, size_t stack_size,
+                                     FiberContextStart start, FiberPtr fiber)
 {
     if (stack_size < FIBER_STACK_ALIGNMENT)
     {
@@ -53,15 +50,10 @@ Result(FiberCode) FiberContext__init(
     }
 
     memset(self, 0, sizeof(FiberContext));
-    match_result(int, FiberContext__allocate_slot(self),
-        success(slot)
-        {
-            self->slot = slot;
-        },
-        error(code, message)
-        {
-            return Error(FiberCode, message, code);
-        }
+    match_result(
+        FiberContext__allocate_slot(self),
+        success(slot) { self->slot = slot; },
+        error(code, message) { return Error(FiberCode, message, code); }
     );
 
     if (getcontext(&self->context) != 0)
@@ -69,18 +61,13 @@ Result(FiberCode) FiberContext__init(
         return Error(FiberCode, invalid_context_stack, FIBER_INVALID_STACK_SIZE);
     }
 
-    self->context.uc_stack.ss_sp = (void *) stack_base;
+    self->context.uc_stack.ss_sp = (void *)stack_base;
     self->context.uc_stack.ss_size = stack_size;
     self->context.uc_link = 0;
     self->start = start;
     self->fiber = fiber;
 
-    makecontext(
-        &self->context,
-        (void (*)(void)) FiberContext__start,
-        1,
-        self->slot
-    );
+    makecontext(&self->context, (void (*)(void))FiberContext__start, 1, self->slot);
 
     return Success(FiberCode, FIBER_OK);
 }

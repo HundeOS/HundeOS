@@ -27,7 +27,7 @@ ResultDef(ServiceEvent);
 ResultDef(ServiceCode);
 
 bool ServiceEvent__equals(ServiceEventPtr self, ServiceEventPtr other);
-FixedArrayDefine(ServiceEvent, MAX_SERVICE_EVENTS, ServiceEvents, (EqualFunction) ServiceEvent__equals);
+FixedArrayDefine(ServiceEvent, MAX_SERVICE_EVENTS, ServiceEvents, (EqualFunction)ServiceEvent__equals);
 
 typedef struct ServiceState
 {
@@ -39,8 +39,7 @@ typedef struct ServiceEventDelivery
 {
     ProcessPtr process;
     ServiceEvent event;
-}
-ServiceEventDelivery;
+} ServiceEventDelivery;
 
 typedef ServiceEventDelivery * ServiceEventDeliveryPtr;
 

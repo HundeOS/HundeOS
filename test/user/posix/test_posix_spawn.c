@@ -15,7 +15,7 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
     last_call = num;
     if (num == SYSCALL_EXEC || num == SYSCALL_EXEC_REQUEST)
     {
-        last_request = *((SpawnRequestPtr) arg1);
+        last_request = *((SpawnRequestPtr)arg1);
     }
 
     return next_result;
@@ -27,7 +27,7 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
 void setUp(void)
 {
     last_call = 0;
-    last_request = (SpawnRequest) { 0 };
+    last_request = (SpawnRequest){0};
     next_result = 0;
 }
 
@@ -37,7 +37,8 @@ void tearDown(void)
 
 static void assert_last_request_argument(StringPos index, const char * expected)
 {
-    match_optional(BString, SpawnArguments__at(&last_request.arguments, index),
+    match_optional(
+        SpawnArguments__at(&last_request.arguments, index),
         some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); },
         none_test_fail()
     );
@@ -45,10 +46,11 @@ static void assert_last_request_argument(StringPos index, const char * expected)
 
 void test_posix_spawnv_converts_argv_after_argv0_to_hundos_spawn_arguments(void)
 {
-    char * argv[] = { "tool", "one", "two", "three", "four", NULL };
+    char * argv[] = {"tool", "one", "two", "three", "four", NULL};
     next_result = 42;
 
-    match_result(SpawnResult, POSIX__spawnv(P_NOWAIT, "/sbin/tool", argv),
+    match_result(
+        POSIX__spawnv(P_NOWAIT, "/sbin/tool", argv),
         success(pid)
         {
             TEST_ASSERT_EQUAL_INT64(42, pid);
@@ -64,9 +66,10 @@ void test_posix_spawnv_converts_argv_after_argv0_to_hundos_spawn_arguments(void)
 
 void test_posix_spawnv_rejects_missing_path(void)
 {
-    char * argv[] = { "tool", NULL };
+    char * argv[] = {"tool", NULL};
 
-    match_result(SpawnResult, POSIX__spawnv(P_NOWAIT, NULL, argv),
+    match_result(
+        POSIX__spawnv(P_NOWAIT, NULL, argv),
         success_test_fail(),
         error(code, message) { TEST_ASSERT_EQUAL_INT64(SPAWN_NO_PATH, code); }
     );

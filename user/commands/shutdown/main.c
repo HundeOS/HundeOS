@@ -12,7 +12,7 @@ int main(int argc, char ** argv)
     SystemCallResult result = shutdown_system();
     if (result != SYSCALL_OK)
     {
-        IO__printf(&bstr("shutdown: error %i\n"), (int) result);
+        IO__printf(&bstr("shutdown: error %i\n"), (int)result);
         return 1;
     }
 

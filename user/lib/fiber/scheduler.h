@@ -28,7 +28,9 @@ Result(FiberPtr) FiberScheduler__spawn(FiberSchedulerPtr self, FiberEntry entry,
 Result(FiberCode) FiberScheduler__run_ready(FiberSchedulerPtr self);
 Result(FiberCode) FiberScheduler__run_ready_until_blocked(FiberSchedulerPtr self);
 Result(FiberCode) FiberScheduler__await_current(FiberSchedulerPtr self, FiberWaitKey key);
+Result(FiberCode) FiberScheduler__await_channel(FiberSchedulerPtr self, ChannelPtr channel);
 Result(FiberCode) FiberScheduler__wake(FiberSchedulerPtr self, FiberWaitKey key, FiberWakeValue value);
+Result(FiberCode) FiberScheduler__wake_channel(FiberSchedulerPtr self, ChannelPtr channel);
 Optional(FiberPtr) FiberScheduler__current(FiberSchedulerPtr self);
 size_t FiberScheduler__live_count(FiberSchedulerPtr self);
 size_t FiberScheduler__max_fibers(FiberSchedulerPtr self);

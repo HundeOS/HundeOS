@@ -13,13 +13,13 @@ static size_t output_position;
 ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
 {
     const char * buf = BString__cstr(text);
-    size_t size = (size_t) BString__length(text);
+    size_t size = (size_t)BString__length(text);
     for (size_t i = 0; i < size && output_position + 1 < sizeof(output); i++)
     {
         output[output_position++] = buf[i];
     }
     output[output_position] = '\0';
-    return (ByteCount) size;
+    return (ByteCount)size;
 }
 
 #include "../../../../user/lib/sys/print.c"
@@ -47,7 +47,7 @@ void test_sprintf_formats_hex_without_global_digit_pointer(void)
 void test_sprintf_formats_pointer_hex_prefix(void)
 {
 
-    int count = IO__printf(&bstr("ptr=%p"), (uintptr_t) 0xFEU);
+    int count = IO__printf(&bstr("ptr=%p"), (uintptr_t)0xFEU);
 
     TEST_ASSERT_EQUAL_STRING("ptr=0xfe", output);
     TEST_ASSERT_EQUAL_INT(8, count);

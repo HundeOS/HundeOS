@@ -7,8 +7,7 @@ typedef struct ConsoleInputStream
 {
     InputStream input;
     ShellHistoryPtr history;
-}
-ConsoleInputStream;
+} ConsoleInputStream;
 
 typedef ConsoleInputStream * ConsoleInputStreamPtr;
 
@@ -26,9 +25,7 @@ static void Shell__store_history(ShellPtr self, ConstBStringPtr line);
 static ConsoleInputStream ConsoleInputStream__new(void)
 {
     ConsoleInputStream input = {
-        .input = {
-            .read_line = ConsoleInputStream__read_line
-        },
+        .input = {.read_line = ConsoleInputStream__read_line},
         .history = NULL, // hundelint: ignore-no-null
     };
     return input;
@@ -41,7 +38,7 @@ static void ConsoleInputStream__bind_history(ConsoleInputStreamPtr self, ShellHi
 
 static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
 {
-    ConsoleInputStreamPtr input = (ConsoleInputStreamPtr) self;
+    ConsoleInputStreamPtr input = (ConsoleInputStreamPtr)self;
     BString line = empty_bstr();
     BString draft = empty_bstr();
     ShellHistory__NodePtr history_cursor = NULL; // hundelint: ignore-no-null
@@ -51,9 +48,14 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
     while (true)
     {
         char ch = '\0';
-        match_optional(char, ConsoleInputStream__read_char(),
+        match_optional(
+            ConsoleInputStream__read_char(),
             some(read_ch) { ch = read_ch; },
-            none() { return line;; }
+            none()
+            {
+                return line;
+                ;
+            }
         );
 
         if (ch == '\r' || ch == '\n')
@@ -82,9 +84,14 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
         if (ch == '\x1b')
         {
             BString escape_sequence = empty_bstr();
-            match_optional(BString, ConsoleInputStream__read_escape_sequence(),
+            match_optional(
+                ConsoleInputStream__read_escape_sequence(),
                 some(sequence) { escape_sequence = sequence; },
-                none() { continue;; }
+                none()
+                {
+                    continue;
+                    ;
+                }
             );
 
             char first = BString__char_at_or(&escape_sequence, 0, '\0');
@@ -218,14 +225,32 @@ static Optional(char) ConsoleInputStream__read_char(void)
 static Optional(BString) ConsoleInputStream__read_escape_sequence(void)
 {
     BString sequence = empty_bstr();
-    match_optional(char, ConsoleInputStream__read_char(),
-        some(first) { BString__push_char(&sequence, first);; },
-        none() { return None(BString);; }
+    match_optional(
+        ConsoleInputStream__read_char(),
+        some(first)
+        {
+            BString__push_char(&sequence, first);
+            ;
+        },
+        none()
+        {
+            return None(BString);
+            ;
+        }
     );
 
-    match_optional(char, ConsoleInputStream__read_char(),
-        some(second) { BString__push_char(&sequence, second);; },
-        none() { return None(BString);; }
+    match_optional(
+        ConsoleInputStream__read_char(),
+        some(second)
+        {
+            BString__push_char(&sequence, second);
+            ;
+        },
+        none()
+        {
+            return None(BString);
+            ;
+        }
     );
 
     return Some(BString, sequence);
@@ -244,7 +269,7 @@ static void ConsoleInputStream__redraw_line(ConstBStringPtr line, StringPos curs
     StringPos move_left = BString__length(line) - cursor;
     if (move_left > 0)
     {
-        IO__printf(&bstr("\033[%iD"), (int) move_left);
+        IO__printf(&bstr("\033[%iD"), (int)move_left);
     }
 }
 
@@ -261,11 +286,12 @@ static void Shell__store_history(ShellPtr self, ConstBStringPtr line)
         return;
     }
 
-    match_result(CollectionCode, ShellHistory__push(&self->history, *line),
+    match_result(
+        ShellHistory__push(&self->history, *line),
         success_do_nothing(),
         error(code, message)
         {
-            IO__printf(&bstr("shell: failed to store history: %B (%i)\n"), &message, (int) code);
+            IO__printf(&bstr("shell: failed to store history: %B (%i)\n"), &message, (int)code);
             return;
         }
     );
@@ -275,18 +301,18 @@ static void Shell__handle_result(ConstShellPtr self, ShellResult result)
 {
     switch (result)
     {
-        case EXIT:
-            IO__print(&bstr("Shell exiting\n"));
-            break;
-        case COMMAND_NOT_FOUND:
-            IO__print(&bstr("Command not found\n"));
-            break;
-        case COMMAND_FAILED:
-            IO__print(&bstr("Command failed\n"));
-            break;
-        case COMMAND_EXECUTED:
-        case COMMAND_SUCCESS:
-            break;
+    case EXIT:
+        IO__print(&bstr("Shell exiting\n"));
+        break;
+    case COMMAND_NOT_FOUND:
+        IO__print(&bstr("Command not found\n"));
+        break;
+    case COMMAND_FAILED:
+        IO__print(&bstr("Command failed\n"));
+        break;
+    case COMMAND_EXECUTED:
+    case COMMAND_SUCCESS:
+        break;
     }
 }
 

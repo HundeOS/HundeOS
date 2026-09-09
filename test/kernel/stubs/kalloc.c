@@ -12,13 +12,15 @@ static Address virtual_translation_physical_start = 0;
 static bool alloc_fill_enabled = false;
 static uint8_t alloc_fill_value = 0;
 static bool user_alloc_failure_enabled = false;
+static bool free_failure_enabled = false;
 static bool memcopy_overflow_occurred = false;
 static size_t alloc_count = 0;
 static size_t free_count = 0;
 
 #define KALLOC_STUB_MAX_TRACKED_ALLOCATIONS 16384
 
-typedef struct KAllocStubAllocation {
+typedef struct KAllocStubAllocation
+{
     Address address;
     size_t size;
     bool active;
@@ -30,7 +32,7 @@ static size_t tracked_allocation_count = 0;
 
 static KAllocStubAllocation KAllocStubAllocation__new(Address address, size_t size)
 {
-    return (KAllocStubAllocation) {
+    return (KAllocStubAllocation){
         .address = address,
         .size = size,
         .active = true,
@@ -128,7 +130,7 @@ bool KAllocStub__memcopy_overflow_occurred(void)
 KernelAddress Kernel__alloc(size_t size)
 {
     alloc_count++;
-    Address addr = (Address) malloc(size);
+    Address addr = (Address)malloc(size);
     KAllocStub__track_allocation(addr, size);
     if (alloc_fill_enabled)
     {
@@ -154,9 +156,11 @@ KernelAddress Kernel__alloc_block(void)
 
 KernelAddress Kernel__from_virtual_address(KernelPtr self, Address virtual_addr)
 {
-    if (virtual_translation_enabled && virtual_addr >= virtual_translation_start && virtual_addr < virtual_translation_end)
+    if (virtual_translation_enabled && virtual_addr >= virtual_translation_start &&
+        virtual_addr < virtual_translation_end)
     {
-        return KERNEL_ADDR(virtual_addr, virtual_translation_physical_start + (virtual_addr - virtual_translation_start));
+        return KERNEL_ADDR(virtual_addr,
+                           virtual_translation_physical_start + (virtual_addr - virtual_translation_start));
     }
 
     return KERNEL_ADDR(virtual_addr, virtual_addr);
@@ -177,22 +181,14 @@ Address Kernel__alloc_kernel(size_t size)
     return vaddr(Kernel__alloc(size));
 }
 
-UserAddress Kernel__alloc_user(Address virtual_address,
-                               size_t size,
-                               bool read,
-                               bool write,
-                               bool execute)
+UserAddress Kernel__alloc_user(Address virtual_address, size_t size, bool read, bool write, bool execute)
 {
     KernelAddress address = Kernel__alloc(size);
 
     return UserAddress__new(virtual_address, address, read, write, execute, true);
 }
 
-Result(UserAddress) Kernel__try_alloc_user(Address virtual_address,
-                                           size_t size,
-                                           bool read,
-                                           bool write,
-                                           bool execute)
+Result(UserAddress) Kernel__try_alloc_user(Address virtual_address, size_t size, bool read, bool write, bool execute)
 {
     if (user_alloc_failure_enabled)
     {
@@ -204,10 +200,19 @@ Result(UserAddress) Kernel__try_alloc_user(Address virtual_address,
 
 Result(KAllocCode) Kernel__free(Address virtual_address)
 {
+    if (free_failure_enabled)
+    {
+        return Error(KAllocCode, bstr("Free failed"), KALLOC_INVALID_ADDRESS);
+    }
     free_count++;
     KAllocStub__track_free(virtual_address);
     free(void_ptr(virtual_address));
     return Success(KAllocCode, KALLOC_OK);
+}
+
+void KAllocStub__set_free_failure(bool enabled)
+{
+    free_failure_enabled = enabled;
 }
 
 void Kernel__memcopy(Address src, Address target, size_t size)
@@ -215,15 +220,20 @@ void Kernel__memcopy(Address src, Address target, size_t size)
     void * v_src = (void *)src;
     void * v_target = (void *)target;
 
-    for (int i = 0; i < size; i++) {
+    for (int i = 0; i < size; i++)
+    {
         ((char *)v_target)[i] = ((char *)v_src)[i];
     }
 }
 
-void * memset(void *dst, int c, size_t n) {
-    uint8_t *d = (uint8_t *)dst;
+void * memset(void * dst, int c, size_t n)
+{
+    uint8_t * d = (uint8_t *)dst;
     uint8_t v = (uint8_t)c;
-    while (n--) { *d++ = v; }
+    while (n--)
+    {
+        *d++ = v;
+    }
     return dst;
 }
 

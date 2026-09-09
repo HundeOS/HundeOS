@@ -31,23 +31,16 @@ typedef struct FilesystemNode
 
     Optional(FilesystemNodePtr) parent;
     FilesystemPtr filesystem;
-}
-FilesystemNode;
+} FilesystemNode;
 
 OptionalDef(FilesystemNode);
 ResultDef(FilesystemNode);
 
-FilesystemNodePtr FilesystemNode__heap_new(
-    FilesystemPtr filesystem, ConstBStringPtr name, FilesystemAttributes attribs
-);
-FilesystemNodePtr FilesystemNode__heap_new_with_metadata(
-    FilesystemPtr filesystem,
-    ConstBStringPtr name,
-    FilesystemAttributes attribs,
-    UserID user_id,
-    GroupID group_id,
-    FilesystemPermissions mode
-);
+FilesystemNodePtr FilesystemNode__heap_new(FilesystemPtr filesystem, ConstBStringPtr name,
+                                           FilesystemAttributes attribs);
+FilesystemNodePtr FilesystemNode__heap_new_with_metadata(FilesystemPtr filesystem, ConstBStringPtr name,
+                                                         FilesystemAttributes attribs, UserID user_id, GroupID group_id,
+                                                         FilesystemPermissions mode);
 
 FixedArrayDefine(FilesystemNodePtr, MAX_CHILD_NODES, FilesystemNodes, Ptr__equals);
 typedef FilesystemNodes * FilesystemNodesPtr;

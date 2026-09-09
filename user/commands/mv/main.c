@@ -11,7 +11,7 @@ static IOStatus Mv__move_file(IOHandle source_handle, ConstBStringPtr source_pat
     if (target_handle < 0)
     {
         close(source_handle);
-        return (IOStatus) target_handle;
+        return (IOStatus)target_handle;
     }
 
     while (true)
@@ -26,7 +26,7 @@ static IOStatus Mv__move_file(IOHandle source_handle, ConstBStringPtr source_pat
         {
             close(target_handle);
             close(source_handle);
-            return (IOStatus) read_bytes;
+            return (IOStatus)read_bytes;
         }
 
         ByteCount written = IO__write(target_handle, &buffer);
@@ -34,7 +34,7 @@ static IOStatus Mv__move_file(IOHandle source_handle, ConstBStringPtr source_pat
         {
             close(target_handle);
             close(source_handle);
-            return (IOStatus) written;
+            return (IOStatus)written;
         }
     }
 
@@ -43,12 +43,8 @@ static IOStatus Mv__move_file(IOHandle source_handle, ConstBStringPtr source_pat
     return IO__remove_file(source_path);
 }
 
-static IOStatus Mv__move_directory_entries(
-    ConstBStringPtr source_path,
-    ConstBStringPtr target_path,
-    DirectoryEntryPtr entries,
-    DirectoryEntryCount count
-)
+static IOStatus Mv__move_directory_entries(ConstBStringPtr source_path, ConstBStringPtr target_path,
+                                           DirectoryEntryPtr entries, DirectoryEntryCount count)
 {
     IOStatus mkdir_status = IO__make_dir(target_path);
     if (mkdir_status != IO_OK)
@@ -87,7 +83,7 @@ static IOStatus Mv__move_path(ConstBStringPtr source_path, ConstBStringPtr targe
         return Mv__move_directory_entries(source_path, target_path, entries, count);
     }
 
-    return (IOStatus) source_handle;
+    return (IOStatus)source_handle;
 }
 
 int main(int argc, char ** argv)
@@ -106,7 +102,7 @@ int main(int argc, char ** argv)
     IOStatus status = Mv__move_path(&source_path, &target_path);
     if (status != IO_OK)
     {
-        IO__printf(&bstr("mv: error %s (%i)\n"), io_status_string(status), (int) status);
+        IO__printf(&bstr("mv: error %s (%i)\n"), io_status_string(status), (int)status);
         return 1;
     }
 

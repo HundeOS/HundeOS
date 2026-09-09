@@ -4,15 +4,13 @@
 
 #include "unity.h"
 #include "../../../kernel/subsystems/message/message_broker.h"
+#include "../../../kernel/service/service_directory.h"
 #include "../../../kernel/irq/irq_dispatcher.h"
 #include "../../../kernel/kalloc.h"
 #include "../../../kernel/all_defs.h"
 
-static KernelPtr TestKernel__heap_new(
-    SchedulerPtr scheduler,
-    MessageBrokerPtr message_broker,
-    IOSubsystemPtr io_subsystem
-)
+static KernelPtr TestKernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr message_broker,
+                                      IOSubsystemPtr io_subsystem)
 {
     KernelPtr kernel = ptr(Kernel__alloc_kernel(sizeof(Kernel)), Kernel);
 
@@ -32,11 +30,22 @@ static KernelPtr TestKernel__heap_new(
     kernel->message_broker = message_broker;
     kernel->irq_dispatcher = ptr(Kernel__alloc_kernel(sizeof(IRQDispatcher)), IRQDispatcher);
     *kernel->irq_dispatcher = NEW_IRQ_DISPATCHER(scheduler);
+    kernel->service_directory = KERNEL_SERVICE_DIRECTORY_INIT;
+    match_result(
+        KernelServiceDirectory__init(&kernel->service_directory),
+        success_do_nothing(),
+        error(code, message) { TEST_FAIL(); }
+    );
     kernel->auth = NEW_AUTH;
-    match_optional(SystemInfo, kernel->system_info, some(value) {
+    match_optional(
+        kernel->system_info,
+        some(value)
+        {
             kernel->scheduler->interrupt_controller = Some(InterruptControllerInfo, value.interrupt_controller);
             kernel->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, value.interrupt_controller);
-        }, none_do_nothing());
+        },
+        none_do_nothing()
+    );
 
     return kernel;
 }
@@ -50,7 +59,7 @@ KernelPtr init_test_kernel_without_filesystem()
     KernelPtr kernel = TestKernel__heap_new(scheduler, message_broker, io_subsystem);
     ProcessFixture__set_kernel(kernel);
 
-    Elf idle = unwrap(Elf, EmbeddedElf__load(&bstr("hello_world")), (Elf){});
+    Elf idle = unwrap_optional(EmbeddedElf__load(&bstr("hello_world")), (Elf){});
 
     Scheduler__init(kernel, scheduler, idle);
     Scheduler__start(scheduler, 0);
@@ -63,13 +72,14 @@ KernelPtr init_test_kernel_with_filesystem(FilesystemPtr filesystem)
     KernelPtr kernel = init_test_kernel_without_filesystem();
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, filesystem);
     Result(DeviceHandle) register_res = IOSubsystem__register_device(
-        kernel->io_subsystem, &bstr("/"), &filesystem->file_io.base_io, &filesystem->state->state
+        kernel->io_subsystem, &bstr("/"), &filesystem->file_io.base_io, &filesystem->state->state);
+    match_result(register_res,
+        success_do_nothing(),
+        error_test_fail()
     );
-    match_result(DeviceHandle, register_res, success_do_nothing(), error_test_fail());
 
     return kernel;
 }
-
 
 KernelPtr init_test_kernel()
 {
@@ -77,9 +87,11 @@ KernelPtr init_test_kernel()
     FilesystemPtr filesystem = init_root_filesystem_with_embedded_binaries(kernel);
     kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, filesystem);
     Result(DeviceHandle) register_res = IOSubsystem__register_device(
-        kernel->io_subsystem, &bstr("/"), &filesystem->file_io.base_io, &filesystem->state->state
+        kernel->io_subsystem, &bstr("/"), &filesystem->file_io.base_io, &filesystem->state->state);
+    match_result(register_res,
+        success_do_nothing(),
+        error_test_fail()
     );
-    match_result(DeviceHandle, register_res, success_do_nothing(), error_test_fail());
 
     return kernel;
 }

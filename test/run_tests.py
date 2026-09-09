@@ -182,9 +182,13 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                           for file
                           in source_expanded
                           if file.endswith(".c")]
+        common_sources = glob.glob(os.path.join(project_root, "common/**/*.c"), recursive=True)
+        common_arch_dir = os.path.join(project_root, "common", "arch")
+        hosted_arch_dir = os.path.join(common_arch_dir, "hosted")
         common_c_files = [
-            os.path.relpath(expand, test_dir)
-            for expand in glob.glob(os.path.join(project_root, "common/**/*.c"), recursive=True)
+            os.path.relpath(source, test_dir)
+            for source in common_sources
+            if not source.startswith(common_arch_dir + os.sep) or source.startswith(hosted_arch_dir + os.sep)
         ]
 
         def object_path_for_source(file):

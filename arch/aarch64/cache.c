@@ -19,14 +19,14 @@ void Arch__sync_instruction_memory(Address address, size_t size)
 
     for (Address cursor = start; cursor < end; cursor += line_size)
     {
-        __asm__ __volatile__("dc cvau, %0" :: "r"(cursor) : "memory");
+        __asm__ __volatile__("dc cvau, %0" ::"r"(cursor) : "memory");
     }
 
     __asm__ __volatile__("dsb ish" ::: "memory");
 
     for (Address cursor = start; cursor < end; cursor += line_size)
     {
-        __asm__ __volatile__("ic ivau, %0" :: "r"(cursor) : "memory");
+        __asm__ __volatile__("ic ivau, %0" ::"r"(cursor) : "memory");
     }
 
     __asm__ __volatile__("dsb ish" ::: "memory");

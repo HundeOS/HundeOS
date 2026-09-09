@@ -11,8 +11,7 @@ typedef struct DevFilesystemIOState
     FilesystemIOState state;
     IOSubsystemPtr io_subsystem;
     IOInternalHandle next_handle;
-}
-DevFilesystemIOState;
+} DevFilesystemIOState;
 
 typedef DevFilesystemIOState * DevFilesystemIOStatePtr;
 

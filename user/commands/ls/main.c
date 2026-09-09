@@ -18,7 +18,7 @@ typedef LSOptions * LSOptionsPtr;
 
 static LSOptions LSOptions__new(void)
 {
-    return (LSOptions) {
+    return (LSOptions){
         .show_all = false,
         .long_format = false,
         .path_arg = None(BString),
@@ -29,14 +29,14 @@ static const char * LS__user_name(UserID user_id)
 {
     switch (user_id)
     {
-        case PROCESS_USER_ROOT:
-            return "root";
-        case PROCESS_USER_HUND:
-            return "hund";
-        case PROCESS_USER_USER:
-            return "user";
-        default:
-            return "unknown";
+    case PROCESS_USER_ROOT:
+        return "root";
+    case PROCESS_USER_HUND:
+        return "hund";
+    case PROCESS_USER_USER:
+        return "user";
+    default:
+        return "unknown";
     }
 }
 
@@ -44,14 +44,14 @@ static const char * LS__group_name(GroupID group_id)
 {
     switch (group_id)
     {
-        case PROCESS_GROUP_ROOT:
-            return "root";
-        case PROCESS_GROUP_HUND:
-            return "hund";
-        case PROCESS_GROUP_USER:
-            return "user";
-        default:
-            return "unknown";
+    case PROCESS_GROUP_ROOT:
+        return "root";
+    case PROCESS_GROUP_HUND:
+        return "hund";
+    case PROCESS_GROUP_USER:
+        return "user";
+    default:
+        return "unknown";
     }
 }
 
@@ -92,7 +92,8 @@ static void LS__print_entry(DirectoryEntryPtr entry, LSOptionsPtr options)
     }
 
     BString mode = LS__mode_string(entry->mode);
-    IO__printf(&bstr("%B %s %s %s\n"), &mode, LS__user_name(entry->user_id), LS__group_name(entry->group_id), entry->name);
+    IO__printf(&bstr("%B %s %s %s\n"), &mode, LS__user_name(entry->user_id), LS__group_name(entry->group_id),
+               entry->name);
 }
 
 static bool LS__matches_option(const char * arg, const char * option)
@@ -110,7 +111,7 @@ static bool LS__matches_option(const char * arg, const char * option)
     return arg[i] == '\0' && option[i] == '\0';
 }
 
-static bool LS__parse_options(int argc, char ** argv, LSOptions * options)
+static bool LS__parse_options(int argc, char ** argv, LSOptionsPtr options)
 {
     *options = LSOptions__new();
 
@@ -142,7 +143,8 @@ static bool LS__parse_options(int argc, char ** argv, LSOptions * options)
             return false;
         }
 
-        match_optional(BString, options->path_arg,
+        match_optional(
+            options->path_arg,
             some(path_arg)
             {
                 IO__printf(&bstr("ls: too many paths\n"));
@@ -159,7 +161,7 @@ static bool LS__parse_options(int argc, char ** argv, LSOptions * options)
 
 static BString LS__path_from_options(LSOptionsPtr options)
 {
-    match_optional(BString, options->path_arg,
+    match_optional(options->path_arg,
         some(path_arg) { return IO__path_from_arg(&path_arg); },
         none_do_nothing()
     );
@@ -182,7 +184,7 @@ int LS_ENTRYPOINT(int argc, char ** argv)
 
     if (count < 0)
     {
-        IO__printf(&bstr("ls: error %s (%i)\n"), io_status_string((IOStatus) count), (int) count);
+        IO__printf(&bstr("ls: error %s (%i)\n"), io_status_string((IOStatus)count), (int)count);
         return 1;
     }
 

@@ -14,6 +14,6 @@ int PANIC_ENTRYPOINT(int argc, char ** argv)
     }
 
     SystemCallResult result = panic_system();
-    IO__printf(&bstr("panic: syscall returned %i\n"), (int) result);
+    IO__printf(&bstr("panic: syscall returned %i\n"), (int)result);
     return 1;
 }

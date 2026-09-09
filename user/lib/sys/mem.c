@@ -16,12 +16,12 @@ void * mem_alloc_pages(size_t size)
     }
 
     MemAddress result = syscall(MEM_CALL, MEM_ALLOC_PAGES, size, 0, 0, 0);
-    if ((int64_t) result <= 0)
+    if ((int64_t)result <= 0)
     {
         return NULL; // hundelint: ignore-no-null
     }
 
-    return (void *) result;
+    return (void *)result;
 }
 
 Result(Anything) mem_alloc_bytes(size_t size)
@@ -37,7 +37,7 @@ Result(Anything) mem_alloc_bytes(size_t size)
         return Error(Anything, mem_allocation_failed, MEM_ALLOCATION_FAILED);
     }
 
-    return Success(Anything, (Anything) allocation);
+    return Success(Anything, (Anything)allocation);
 }
 
 Result(Anything) mem_alloc_pages_result(size_t size)
@@ -53,23 +53,38 @@ Result(Anything) mem_alloc_pages_result(size_t size)
         return Error(Anything, mem_allocation_failed, MEM_ALLOCATION_FAILED);
     }
 
-    return Success(Anything, (Anything) allocation);
+    return Success(Anything, (Anything)allocation);
 }
 
 MemStatus mem_free_pages(void * address)
 {
-    return (MemStatus) syscall(MEM_CALL, MEM_FREE_PAGES, (MemAddress) address, 0, 0, 0);
+    return (MemStatus)syscall(MEM_CALL, MEM_FREE_PAGES, (MemAddress)address, 0, 0, 0);
+}
+
+Result(Anything) mem_alloc_shared_page(uint64_t first_peer, uint64_t second_peer)
+{
+    int64_t result = (int64_t)syscall(MEM_CALL, MEM_ALLOC_SHARED_PAGE, first_peer, second_peer, 0, 0);
+    if (result < 0)
+    {
+        return Error(Anything, mem_allocation_failed, result);
+    }
+    return Success(Anything, (Anything)result);
+}
+
+MemStatus mem_release_shared_page(uint64_t address)
+{
+    return (MemStatus)syscall(MEM_CALL, MEM_RELEASE_SHARED_PAGE, address, 0, 0, 0);
 }
 
 void * _sbrk(ptrdiff_t increment)
 {
-    MemAddress result = syscall(MEM_CALL, MEM_SBRK, (MemIncrement) increment, 0, 0, 0);
-    if ((int64_t) result < 0)
+    MemAddress result = syscall(MEM_CALL, MEM_SBRK, (MemIncrement)increment, 0, 0, 0);
+    if ((int64_t)result < 0)
     {
-        return (void *) -1;
+        return (void *)-1;
     }
 
-    return (void *) result;
+    return (void *)result;
 }
 
 void * _sbrk_r(ptrdiff_t increment)

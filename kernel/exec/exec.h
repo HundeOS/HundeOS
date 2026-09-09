@@ -14,34 +14,17 @@ typedef uint64_t ExecResult;
 
 FixedArrayDefine(Char, _16MB, ElfReadBuffer, SimpleEquals(Char));
 
-Result(ProcessPtr) Exec__exec(
-    ConstOriginatingContextPtr originating_context,
-    ConstBStringPtr path,
-    bool wait,
-    ConstProcessArgumentsPtr arguments
-);
-Result(ProcessPtr) Exec__exec_as(
-    ConstOriginatingContextPtr originating_context,
-    ConstBStringPtr path,
-    bool wait,
-    OptionalPtr(UserID) requested_user_id,
-    ConstProcessArgumentsPtr arguments
-);
-Result(ProcessPtr) Exec__exec_authorized_as(
-    ConstOriginatingContextPtr originating_context,
-    ConstBStringPtr path,
-    bool wait,
-    OptionalPtr(UserID) requested_user_id,
-    ConstProcessArgumentsPtr arguments
-);
-Result(ProcessPtr) Exec__exec_authorized_as_with_stdio(
-    ConstOriginatingContextPtr originating_context,
-    ConstBStringPtr path,
-    bool wait,
-    OptionalPtr(UserID) requested_user_id,
-    ConstProcessArgumentsPtr arguments,
-    ConstSpawnStdioPtr stdio
-);
+Result(ProcessPtr) Exec__exec(ConstOriginatingContextPtr originating_context, ConstBStringPtr path, bool wait,
+                              ConstProcessArgumentsPtr arguments);
+Result(ProcessPtr) Exec__exec_as(ConstOriginatingContextPtr originating_context, ConstBStringPtr path, bool wait,
+                                 OptionalPtr(UserID) requested_user_id, ConstProcessArgumentsPtr arguments);
+Result(ProcessPtr)
+    Exec__exec_authorized_as(ConstOriginatingContextPtr originating_context, ConstBStringPtr path, bool wait,
+                             OptionalPtr(UserID) requested_user_id, ConstProcessArgumentsPtr arguments);
+Result(ProcessPtr)
+    Exec__exec_authorized_as_with_stdio(ConstOriginatingContextPtr originating_context, ConstBStringPtr path, bool wait,
+                                        OptionalPtr(UserID) requested_user_id, ConstProcessArgumentsPtr arguments,
+                                        ConstSpawnStdioPtr stdio);
 
 void Exec__apply_builtin_identity_policy(ProcessPtr self);
 

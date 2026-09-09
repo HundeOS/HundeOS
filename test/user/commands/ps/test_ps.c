@@ -24,7 +24,7 @@ void setUp(void)
     output[0] = '\0';
     for (uint64_t i = 0; i < 4; i++)
     {
-        fake_processes[i] = (ProcessInfo) { 0 };
+        fake_processes[i] = (ProcessInfo){0};
     }
 }
 
@@ -60,7 +60,7 @@ ProcessListResult process_list(ProcessInfoPtr entries, size_t max_entries)
     {
         entries[i] = fake_processes[i];
     }
-    return (ProcessListResult) count;
+    return (ProcessListResult)count;
 }
 
 int IO__printf(ConstBStringPtr format, ...)
@@ -72,9 +72,9 @@ int IO__printf(ConstBStringPtr format, ...)
     StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
-        output_position += (uint64_t) written;
+        output_position += (uint64_t)written;
     }
-    return (int) written;
+    return (int)written;
 }
 
 void test_ps_prints_process_snapshot(void)
@@ -105,8 +105,7 @@ void test_ps_prints_process_snapshot(void)
         "1     PROC_STATE_READY             -                        normal   root     init\n"
         "2     PROC_STATE_WAITING           PARK_WAIT_SERVICE_EVENT  service  hund     virtio_blk\n"
         "3     PROC_STATE_WAITING           PARK_WAIT_SERVICE_READY  service  hund     hundeschule\n",
-        output
-    );
+        output);
 }
 
 void test_ps_reports_process_list_error(void)

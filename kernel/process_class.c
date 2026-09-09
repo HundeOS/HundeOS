@@ -9,13 +9,12 @@ uint64_t ProcessClass__priority(ProcessClass self)
 {
     switch (self)
     {
-        case PROCESS_CLASS_REALTIME_SERVICE:
-            return 2;
-        case PROCESS_CLASS_SERVICE:
-            return 1;
-        case PROCESS_CLASS_NORMAL:
-        default:
-            return 0;
+    case PROCESS_CLASS_REALTIME_SERVICE:
+        return 2;
+    case PROCESS_CLASS_SERVICE:
+    case PROCESS_CLASS_NORMAL:
+    default:
+        return 1;
     }
 }
 
@@ -23,13 +22,13 @@ const char * ProcessClass__to_string(ProcessClass self)
 {
     switch (self)
     {
-        case PROCESS_CLASS_REALTIME_SERVICE:
-            return "realtime_service";
-        case PROCESS_CLASS_SERVICE:
-            return "service";
-        case PROCESS_CLASS_NORMAL:
-            return "normal";
-        default:
-            return "unknown";
+    case PROCESS_CLASS_REALTIME_SERVICE:
+        return "realtime_service";
+    case PROCESS_CLASS_SERVICE:
+        return "service";
+    case PROCESS_CLASS_NORMAL:
+        return "normal";
+    default:
+        return "unknown";
     }
 }

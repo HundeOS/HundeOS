@@ -222,7 +222,8 @@ void test_bstring_split_first_token_strips_before_splitting(void)
 
     BStringSplit split = BString__split_first_token(&bstr("  alpha   beta"), &bstr(" \t"));
 
-    match_optional(BString, split.match,
+    match_optional(
+        split.match,
         some(token)
         {
             TEST_ASSERT_EQUAL_STRING("alpha", BString__cstr(&token));
@@ -236,21 +237,33 @@ void test_bstring_parse_uint64_returns_value_for_valid_decimal(void)
 {
     BString input = bstring("12345");
 
-    match_optional(uint64_t, BString__parse_uint64(&bstr("12345")), some(value) { TEST_ASSERT_EQUAL_UINT64(12345, value); }, none_test_fail());
+    match_optional(
+        BString__parse_uint64(&bstr("12345")),
+        some(value) { TEST_ASSERT_EQUAL_UINT64(12345, value); },
+        none_test_fail()
+    );
 }
 
 void test_bstring_parse_uint64_base_zero_accepts_hex_prefix(void)
 {
     BString input = bstring("0xfe340000");
 
-    match_optional(uint64_t, BString__parse_uint64_base(&bstr("0xfe340000"), 0), some(value) { TEST_ASSERT_EQUAL_HEX64(0xfe340000, value); }, none_test_fail());
+    match_optional(
+        BString__parse_uint64_base(&bstr("0xfe340000"), 0),
+        some(value) { TEST_ASSERT_EQUAL_HEX64(0xfe340000, value); },
+        none_test_fail()
+    );
 }
 
 void test_bstring_parse_uint64_base_strips_whitespace(void)
 {
     BString input = bstring(" 126\n");
 
-    match_optional(uint64_t, BString__parse_uint64_base(&bstr(" 126\n"), 0), some(value) { TEST_ASSERT_EQUAL_UINT64(126, value); }, none_test_fail());
+    match_optional(
+        BString__parse_uint64_base(&bstr(" 126\n"), 0),
+        some(value) { TEST_ASSERT_EQUAL_UINT64(126, value); },
+        none_test_fail()
+    );
 }
 
 void test_bstring_parse_uint64_rejects_empty_input(void)
@@ -271,7 +284,10 @@ void test_bstring_parse_uint64_base_rejects_trailing_text(void)
 {
     BString input = bstring("0xfe340000tail");
 
-    match_optional(uint64_t, BString__parse_uint64_base(&bstr("0xfe340000tail"), 0), some_test_fail(), none_do_nothing());
+    match_optional(BString__parse_uint64_base(&bstr("0xfe340000tail"), 0),
+        some_test_fail(),
+        none_do_nothing()
+    );
 }
 
 void test_bstring_uppercase_converts_ascii_lowercase(void)
@@ -294,7 +310,11 @@ void test_bstring_char_at_returns_character_when_in_bounds(void)
 {
     BString input = bstring("hello");
 
-    match_optional(char, BString__char_at(&bstr("hello"), 1), some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); }, none_test_fail());
+    match_optional(
+        BString__char_at(&bstr("hello"), 1),
+        some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); },
+        none_test_fail()
+    );
 }
 
 void test_bstring_char_at_returns_none_when_out_of_bounds(void)
@@ -314,7 +334,7 @@ void test_bstring_contains_char_reports_presence(void)
 
 void test_bstring_from_chars_copies_requested_length(void)
 {
-    char input[] = { 'h', 'u', 'n', 'd', 'e', 'x' };
+    char input[] = {'h', 'u', 'n', 'd', 'e', 'x'};
 
     BString result = BString__from_chars(input, 5);
 
@@ -326,10 +346,7 @@ void test_bstring_iterate_visits_each_character(void)
 {
     BString output = empty_bstr();
 
-    for_each_bstring(&bstr("abc"), index, ch,
-    {
-        BString__push_char(&output, ch);
-    });
+    for_each_bstring(&bstr("abc"), index, ch, { BString__push_char(&output, ch); });
 
     TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&output));
 }
@@ -374,7 +391,7 @@ void test_bstring_sprintf_formats_pointer_width_hex(void)
 {
     BString format = bstring("addr=%p");
 
-    BString formatted = BString__sprintf(&bstr("addr=%p"), (uintptr_t) 0xffff000000600000ULL);
+    BString formatted = BString__sprintf(&bstr("addr=%p"), (uintptr_t)0xffff000000600000ULL);
 
     TEST_ASSERT_EQUAL_STRING("addr=0xffff000000600000", BString__cstr(&formatted));
 }

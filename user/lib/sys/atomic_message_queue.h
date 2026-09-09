@@ -1,0 +1,18 @@
+#ifndef USER_SYS_ATOMIC_MESSAGE_QUEUE_H
+#define USER_SYS_ATOMIC_MESSAGE_QUEUE_H
+
+#include "services/atomic_message_queue.h"
+
+ResultDef(AtomicMessageQueueArrivalsPtr);
+
+Result(AtomicMessageQueueArrivalsPtr) atomic_message_queue_listen(ConstBStringPtr name);
+Result(AtomicMessageQueue) atomic_message_queue_connect(AtomicMessageQueueEndpointID endpoint);
+Result(AtomicMessageQueue) atomic_message_queue_accept(AtomicMessageQueueConnectionID connection);
+AtomicMessageQueueCode atomic_message_queue_close(AtomicMessageQueueConnectionID connection);
+
+// These waits recheck all predicates after every architectural event wakeup.
+void atomic_message_queue_wait_readable(AtomicMessageQueuePtr queue);
+void atomic_message_queue_wait_writable(AtomicMessageQueuePtr queue);
+void atomic_message_queue_wait_arrivals(AtomicMessageQueueArrivalsPtr arrivals, AtomicMessageQueueEpoch observed_epoch);
+
+#endif

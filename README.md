@@ -56,6 +56,31 @@ make qemu-virt-1cpu-trace
 make qemu-virt-2cpus-trace
 ```
 
+## Code Formatting
+
+Format all project C sources and headers:
+
+```sh
+make format
+```
+
+Check formatting without modifying files:
+
+```sh
+make format-check
+```
+
+Both targets use clang-format 22.1.0, downloaded automatically through `uv`.
+The base style is defined in `.clang-format`: four spaces, Allman braces, a
+120-column target, and preserved include order. `tools/hundeformat.py` keeps
+match branches on separate lines and preserves the placement of existing
+line-scoped lint annotations. Those annotations can exceed the column target.
+Use the make targets for the final formatting pass; plain editor clang-format
+does not apply these additional conventions.
+
+Vendored code, build output, generated Unity test runners, and the generated
+emoji atlas header are excluded. Run `make format-test` to test the formatter.
+
 ## FAT32 Disk Image
 
 QEMU attaches `build/disk.img` as a raw virtio block device. The Makefile creates

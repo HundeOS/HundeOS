@@ -12,7 +12,7 @@ ResultDef(CollectionCode);
 
 #ifndef __COMMON_TYPES_EQUAL_FUNCTION_DEFINED
 #define __COMMON_TYPES_EQUAL_FUNCTION_DEFINED
-typedef bool(* EqualFunction)(void * a, void * b);
+typedef bool (*EqualFunction)(void * a, void * b);
 #endif
 
 #define FIXED_ARRAY_ALLOC(size) malloc(size)

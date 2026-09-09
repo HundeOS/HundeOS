@@ -46,8 +46,7 @@ typedef enum Ext2DirectoryEntryTypes
     EXT2_DIRENT_TYPE_FIFO = 5,
     EXT2_DIRENT_TYPE_SOCKET = 6,
     EXT2_DIRENT_TYPE_SYMLINK = 7,
-}
-Ext2DirectoryEntryTypes;
+} Ext2DirectoryEntryTypes;
 
 typedef enum Ext2Code
 {
@@ -58,8 +57,7 @@ typedef enum Ext2Code
     EXT2_NOT_FOUND = -4,
     EXT2_NOT_SUPPORTED = -5,
     EXT2_FILE_TOO_LARGE = -6,
-}
-Ext2Code;
+} Ext2Code;
 
 ResultDef(Ext2Code);
 
@@ -80,8 +78,7 @@ typedef struct Ext2Volume
     Ext2Block group_inode_table_block[EXT2_MAX_GROUPS];
     Ext2Block first_data_block;
     bool mounted;
-}
-Ext2Volume;
+} Ext2Volume;
 
 typedef Ext2Volume * Ext2VolumePtr;
 
@@ -92,26 +89,16 @@ typedef struct Ext2DirectoryEntry
     Ext2InodeNumber inode;
     Ext2InodeMode mode;
     Ext2FileSize size;
-}
-Ext2DirectoryEntry;
+} Ext2DirectoryEntry;
 
 typedef Ext2DirectoryEntry * Ext2DirectoryEntryPtr;
 
 OptionalDef(Ext2DirectoryEntry);
 bool Ext2DirectoryEntry__equals(Ext2DirectoryEntryPtr self, Ext2DirectoryEntryPtr other);
-Ext2DirectoryEntry Ext2DirectoryEntry__new(
-    ConstBStringPtr name,
-    Ext2DirectoryEntryType file_type,
-    Ext2InodeNumber inode,
-    Ext2InodeMode mode,
-    Ext2FileSize size
-);
-FixedArrayDefine(
-    Ext2DirectoryEntry,
-    EXT2_MAX_ROOT_ENTRIES,
-    Ext2DirectoryEntries,
-    (EqualFunction) Ext2DirectoryEntry__equals
-);
+Ext2DirectoryEntry Ext2DirectoryEntry__new(ConstBStringPtr name, Ext2DirectoryEntryType file_type,
+                                           Ext2InodeNumber inode, Ext2InodeMode mode, Ext2FileSize size);
+FixedArrayDefine(Ext2DirectoryEntry, EXT2_MAX_ROOT_ENTRIES, Ext2DirectoryEntries,
+                 (EqualFunction)Ext2DirectoryEntry__equals);
 ResultDef(Ext2DirectoryEntries);
 
 typedef struct Ext2FileHandle
@@ -124,8 +111,7 @@ typedef struct Ext2FileHandle
     Ext2Block block[EXT2_NDIR_BLOCKS];
     IOBuffer buffer;
     Flags flags;
-}
-Ext2FileHandle;
+} Ext2FileHandle;
 
 typedef Ext2FileHandle * Ext2FileHandlePtr;
 
@@ -139,8 +125,7 @@ typedef struct Ext2FilesystemIOState
     Ext2Volume volume;
     Ext2FileHandleMap handles;
     Ext2HandleCount handle_count;
-}
-Ext2FilesystemIOState;
+} Ext2FilesystemIOState;
 
 typedef Ext2FilesystemIOState * Ext2FilesystemIOStatePtr;
 
@@ -150,8 +135,7 @@ Result(Ext2DirectoryEntries) Ext2Volume__list_root(Ext2VolumePtr self);
 
 FileIO Ext2FilesystemIO__new();
 bool Ext2FilesystemIO__available();
-Ext2FilesystemIOStatePtr Ext2FilesystemIOState__heap_new(
-    FilesystemPtr fs, BlockDevicePtr device, BlockCount total_sectors
-);
+Ext2FilesystemIOStatePtr Ext2FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device,
+                                                         BlockCount total_sectors);
 
 #endif

@@ -22,20 +22,14 @@ static BString not_implemented = bstr("FAT16 operation not implemented");
 
 bool Fat16DirectoryEntry__equals(Fat16DirectoryEntryPtr self, Fat16DirectoryEntryPtr other)
 {
-    return BString__equals(&self->name, &other->name)
-        && self->attributes == other->attributes
-        && self->first_cluster == other->first_cluster
-        && self->size == other->size;
+    return BString__equals(&self->name, &other->name) && self->attributes == other->attributes &&
+           self->first_cluster == other->first_cluster && self->size == other->size;
 }
 
-Fat16DirectoryEntry Fat16DirectoryEntry__new(
-    ConstBStringPtr name,
-    uint8_t attributes,
-    uint16_t first_cluster,
-    uint32_t size
-)
+Fat16DirectoryEntry Fat16DirectoryEntry__new(ConstBStringPtr name, uint8_t attributes, uint16_t first_cluster,
+                                             uint32_t size)
 {
-    return (Fat16DirectoryEntry) {
+    return (Fat16DirectoryEntry){
         .name = *name,
         .attributes = attributes,
         .first_cluster = first_cluster,
@@ -77,11 +71,11 @@ Fat16Volume Fat16Volume__new(BlockDevicePtr device, BlockCount total_sectors)
                 volume.sectors_per_fat = sectors_per_fat;
                 volume.root_dir_start_sector = FAT16_RESERVED_SECTORS + (FAT16_FAT_COUNT * sectors_per_fat);
                 volume.data_start_sector = volume.root_dir_start_sector + root_dir_sectors;
-                volume.cluster_count = (uint16_t) clusters;
+                volume.cluster_count = (uint16_t)clusters;
                 break;
             }
 
-            sectors_per_fat = (uint16_t) required_fat_sectors;
+            sectors_per_fat = (uint16_t)required_fat_sectors;
         }
     }
 
@@ -90,9 +84,7 @@ Fat16Volume Fat16Volume__new(BlockDevicePtr device, BlockCount total_sectors)
 
 static bool Fat16Volume__has_valid_geometry(Fat16VolumePtr self)
 {
-    return self->total_sectors > self->data_start_sector
-        && self->sectors_per_fat > 0
-        && self->cluster_count > 0;
+    return self->total_sectors > self->data_start_sector && self->sectors_per_fat > 0 && self->cluster_count > 0;
 }
 
 static void Fat16__zero(DataPtr data, size_t len)
@@ -123,34 +115,33 @@ static size_t Fat16__min_size(size_t left, size_t right)
 
 static uint16_t Fat16__read_u16(DataPtr data, size_t offset)
 {
-    return (uint16_t) data[offset] | ((uint16_t) data[offset + 1] << 8);
+    return (uint16_t)data[offset] | ((uint16_t)data[offset + 1] << 8);
 }
 
 static uint32_t Fat16__read_u32(DataPtr data, size_t offset)
 {
-    return (uint32_t) data[offset]
-        | ((uint32_t) data[offset + 1] << 8)
-        | ((uint32_t) data[offset + 2] << 16)
-        | ((uint32_t) data[offset + 3] << 24);
+    return (uint32_t)data[offset] | ((uint32_t)data[offset + 1] << 8) | ((uint32_t)data[offset + 2] << 16) |
+           ((uint32_t)data[offset + 3] << 24);
 }
 
 static void Fat16__write_u16(DataPtr data, size_t offset, uint16_t value)
 {
-    data[offset] = (Data) (value & 0xff);
-    data[offset + 1] = (Data) ((value >> 8) & 0xff);
+    data[offset] = (Data)(value & 0xff);
+    data[offset + 1] = (Data)((value >> 8) & 0xff);
 }
 
 static void Fat16__write_u32(DataPtr data, size_t offset, uint32_t value)
 {
-    data[offset] = (Data) (value & 0xff);
-    data[offset + 1] = (Data) ((value >> 8) & 0xff);
-    data[offset + 2] = (Data) ((value >> 16) & 0xff);
-    data[offset + 3] = (Data) ((value >> 24) & 0xff);
+    data[offset] = (Data)(value & 0xff);
+    data[offset + 1] = (Data)((value >> 8) & 0xff);
+    data[offset + 2] = (Data)((value >> 16) & 0xff);
+    data[offset + 3] = (Data)((value >> 24) & 0xff);
 }
 
 static Result(Fat16Code) Fat16Volume__read_sector(Fat16VolumePtr self, BlockNumber sector, DataPtr target)
 {
-    match_result(BlockCount, BlockDevice__read(self->device, sector, 1, target),
+    match_result(
+        BlockDevice__read(self->device, sector, 1, target),
         success(count)
         {
             if (count == 1)
@@ -166,7 +157,8 @@ static Result(Fat16Code) Fat16Volume__read_sector(Fat16VolumePtr self, BlockNumb
 
 static Result(Fat16Code) Fat16Volume__write_sector(Fat16VolumePtr self, BlockNumber sector, DataPtr source)
 {
-    match_result(BlockCount, BlockDevice__write(self->device, sector, 1, source),
+    match_result(
+        BlockDevice__write(self->device, sector, 1, source),
         success(count)
         {
             if (count == 1)
@@ -196,7 +188,7 @@ static BString Fat16__decode_83_name(DataPtr source)
 
     for (size_t i = 0; i < 8 && source[i] != ' '; i++)
     {
-        BString__push_char(&result, (char) source[i]);
+        BString__push_char(&result, (char)source[i]);
     }
 
     if (source[8] != ' ')
@@ -205,7 +197,7 @@ static BString Fat16__decode_83_name(DataPtr source)
 
         for (size_t i = 8; i < 11 && source[i] != ' '; i++)
         {
-            BString__push_char(&result, (char) source[i]);
+            BString__push_char(&result, (char)source[i]);
         }
     }
 
@@ -214,7 +206,7 @@ static BString Fat16__decode_83_name(DataPtr source)
 
 static Result(Fat16Code) Fat16Volume__write_fat_entry(Fat16VolumePtr self, uint16_t cluster, uint16_t value)
 {
-    Data sector[FAT16_BYTES_PER_SECTOR] = { 0 };
+    Data sector[FAT16_BYTES_PER_SECTOR] = {0};
     size_t fat_offset = cluster * sizeof(uint16_t);
     BlockNumber relative_sector = fat_offset / FAT16_BYTES_PER_SECTOR;
     size_t sector_offset = fat_offset % FAT16_BYTES_PER_SECTOR;
@@ -223,14 +215,16 @@ static Result(Fat16Code) Fat16Volume__write_fat_entry(Fat16VolumePtr self, uint1
     {
         BlockNumber fat_sector = self->fat_start_sector + (fat * self->sectors_per_fat) + relative_sector;
 
-        match_result(Fat16Code, Fat16Volume__read_sector(self, fat_sector, sector),
+        match_result(
+            Fat16Volume__read_sector(self, fat_sector, sector),
             success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
         );
 
         Fat16__write_u16(sector, sector_offset, value);
 
-        match_result(Fat16Code, Fat16Volume__write_sector(self, fat_sector, sector),
+        match_result(
+            Fat16Volume__write_sector(self, fat_sector, sector),
             success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
         );
@@ -241,12 +235,13 @@ static Result(Fat16Code) Fat16Volume__write_fat_entry(Fat16VolumePtr self, uint1
 
 static Result(Fat16Code) Fat16Volume__read_fat_entry(Fat16VolumePtr self, uint16_t cluster, uint16_t * value)
 {
-    Data sector[FAT16_BYTES_PER_SECTOR] = { 0 };
+    Data sector[FAT16_BYTES_PER_SECTOR] = {0};
     size_t fat_offset = cluster * sizeof(uint16_t);
     BlockNumber relative_sector = fat_offset / FAT16_BYTES_PER_SECTOR;
     size_t sector_offset = fat_offset % FAT16_BYTES_PER_SECTOR;
 
-    match_result(Fat16Code, Fat16Volume__read_sector(self, self->fat_start_sector + relative_sector, sector),
+    match_result(
+        Fat16Volume__read_sector(self, self->fat_start_sector + relative_sector, sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -260,7 +255,8 @@ static Result(Fat16Code) Fat16Volume__find_free_cluster(Fat16VolumePtr self, uin
     for (uint16_t current = 2; current < self->cluster_count + 2; current++)
     {
         uint16_t value = FAT16_END_OF_CHAIN;
-        match_result(Fat16Code, Fat16Volume__read_fat_entry(self, current, &value),
+        match_result(
+            Fat16Volume__read_fat_entry(self, current, &value),
             success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
         );
@@ -280,25 +276,22 @@ static BlockNumber Fat16Volume__cluster_sector(Fat16VolumePtr self, uint16_t clu
     return self->data_start_sector + ((cluster - 2) * FAT16_SECTORS_PER_CLUSTER);
 }
 
-static Result(Fat16Code) Fat16Volume__find_root_entry(
-    Fat16VolumePtr self, ConstBStringPtr name, BlockNumber * sector, size_t * offset
-)
+static Result(Fat16Code)
+    Fat16Volume__find_root_entry(Fat16VolumePtr self, ConstBStringPtr name, BlockNumber * sector, size_t * offset)
 {
-    Data encoded_name[11] = { 0 };
-    match_result(Fat16Code, Fat16__encode_83_name(name, encoded_name),
+    Data encoded_name[11] = {0};
+    match_result(
+        Fat16__encode_83_name(name, encoded_name),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
-    Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
+    Data directory_sector[FAT16_BYTES_PER_SECTOR] = {0};
 
     for (uint16_t relative_sector = 0; relative_sector < self->root_dir_sectors; relative_sector++)
     {
-        match_result(Fat16Code, Fat16Volume__read_sector(
-            self,
-            self->root_dir_start_sector + relative_sector,
-            directory_sector
-        ),
+        match_result(
+            Fat16Volume__read_sector(self, self->root_dir_start_sector + relative_sector, directory_sector),
             success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
         );
@@ -337,19 +330,14 @@ static Result(Fat16Code) Fat16Volume__find_root_entry(
     return Error(Fat16Code, not_found, FAT16_NOT_FOUND);
 }
 
-static Result(Fat16Code) Fat16Volume__find_free_root_entry(
-    Fat16VolumePtr self, BlockNumber * sector, size_t * offset
-)
+static Result(Fat16Code) Fat16Volume__find_free_root_entry(Fat16VolumePtr self, BlockNumber * sector, size_t * offset)
 {
-    Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
+    Data directory_sector[FAT16_BYTES_PER_SECTOR] = {0};
 
     for (uint16_t relative_sector = 0; relative_sector < self->root_dir_sectors; relative_sector++)
     {
-        match_result(Fat16Code, Fat16Volume__read_sector(
-            self,
-            self->root_dir_start_sector + relative_sector,
-            directory_sector
-        ),
+        match_result(
+            Fat16Volume__read_sector(self, self->root_dir_start_sector + relative_sector, directory_sector),
             success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
         );
@@ -375,7 +363,7 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
         return Error(Fat16Code, invalid_argument, FAT16_INVALID_ARGUMENT);
     }
 
-    Data sector[FAT16_BYTES_PER_SECTOR] = { 0 };
+    Data sector[FAT16_BYTES_PER_SECTOR] = {0};
 
     sector[0] = 0xeb;
     sector[1] = 0x3c;
@@ -395,11 +383,11 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
     Fat16__write_u16(sector, 17, FAT16_ROOT_ENTRY_COUNT);
     if (self->total_sectors <= 0xffff)
     {
-        Fat16__write_u16(sector, 19, (uint16_t) self->total_sectors);
+        Fat16__write_u16(sector, 19, (uint16_t)self->total_sectors);
     }
     else
     {
-        Fat16__write_u32(sector, 32, (uint32_t) self->total_sectors);
+        Fat16__write_u32(sector, 32, (uint32_t)self->total_sectors);
     }
     sector[21] = FAT16_MEDIA_FIXED_DISK;
     Fat16__write_u16(sector, 22, self->sectors_per_fat);
@@ -430,7 +418,8 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
     sector[510] = 0x55;
     sector[511] = 0xaa;
 
-    match_result(Fat16Code, Fat16Volume__write_sector(self, 0, sector),
+    match_result(
+        Fat16Volume__write_sector(self, 0, sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -446,11 +435,8 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
                 Fat16__write_u16(sector, 2, FAT16_END_OF_CHAIN);
             }
 
-            match_result(Fat16Code, Fat16Volume__write_sector(
-                self,
-                self->fat_start_sector + (fat * self->sectors_per_fat) + i,
-                sector
-            ),
+            match_result(
+                Fat16Volume__write_sector(self, self->fat_start_sector + (fat * self->sectors_per_fat) + i, sector),
                 success_do_nothing(),
                 error(code, message) { return Error(Fat16Code, message, code); }
             );
@@ -460,7 +446,8 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
     Fat16__zero(sector, FAT16_BYTES_PER_SECTOR);
     for (uint16_t i = 0; i < self->root_dir_sectors; i++)
     {
-        match_result(Fat16Code, Fat16Volume__write_sector(self, self->root_dir_start_sector + i, sector),
+        match_result(
+            Fat16Volume__write_sector(self, self->root_dir_start_sector + i, sector),
             success_do_nothing(),
             error(code, message) { return Error(Fat16Code, message, code); }
         );
@@ -471,19 +458,16 @@ Result(Fat16Code) Fat16Volume__format(Fat16VolumePtr self)
 
 Result(Fat16Code) Fat16Volume__mount(Fat16VolumePtr self)
 {
-    Data sector[FAT16_BYTES_PER_SECTOR] = { 0 };
-    match_result(Fat16Code, Fat16Volume__read_sector(self, 0, sector),
+    Data sector[FAT16_BYTES_PER_SECTOR] = {0};
+    match_result(
+        Fat16Volume__read_sector(self, 0, sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
-    if (sector[510] != 0x55
-        || sector[511] != 0xaa
-        || Fat16__read_u16(sector, 11) != FAT16_BYTES_PER_SECTOR
-        || sector[13] != FAT16_SECTORS_PER_CLUSTER
-        || sector[16] != FAT16_FAT_COUNT
-        || Fat16__read_u16(sector, 17) != FAT16_ROOT_ENTRY_COUNT
-        || Fat16__read_u16(sector, 22) == 0)
+    if (sector[510] != 0x55 || sector[511] != 0xaa || Fat16__read_u16(sector, 11) != FAT16_BYTES_PER_SECTOR ||
+        sector[13] != FAT16_SECTORS_PER_CLUSTER || sector[16] != FAT16_FAT_COUNT ||
+        Fat16__read_u16(sector, 17) != FAT16_ROOT_ENTRY_COUNT || Fat16__read_u16(sector, 22) == 0)
     {
         return Error(Fat16Code, invalid_volume, FAT16_INVALID_VOLUME);
     }
@@ -501,7 +485,7 @@ Result(Fat16Code) Fat16Volume__mount(Fat16VolumePtr self)
     self->fat_start_sector = Fat16__read_u16(sector, 14);
     self->root_dir_start_sector = self->fat_start_sector + (FAT16_FAT_COUNT * self->sectors_per_fat);
     self->data_start_sector = self->root_dir_start_sector + self->root_dir_sectors;
-    self->cluster_count = (uint16_t) ((self->total_sectors - self->data_start_sector) / FAT16_SECTORS_PER_CLUSTER);
+    self->cluster_count = (uint16_t)((self->total_sectors - self->data_start_sector) / FAT16_SECTORS_PER_CLUSTER);
 
     if (!Fat16Volume__has_valid_geometry(self))
     {
@@ -519,11 +503,12 @@ Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self)
     }
 
     Fat16DirectoryEntries entries = Fat16DirectoryEntries__new();
-    Data sector[FAT16_BYTES_PER_SECTOR] = { 0 };
+    Data sector[FAT16_BYTES_PER_SECTOR] = {0};
 
     for (uint16_t relative_sector = 0; relative_sector < self->root_dir_sectors; relative_sector++)
     {
-        match_result(Fat16Code, Fat16Volume__read_sector(self, self->root_dir_start_sector + relative_sector, sector),
+        match_result(
+            Fat16Volume__read_sector(self, self->root_dir_start_sector + relative_sector, sector),
             success_do_nothing(),
             error(code, message) { return Error(Fat16DirectoryEntries, message, code); }
         );
@@ -541,14 +526,12 @@ Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self)
             }
 
             BString entry_name = Fat16__decode_83_name(&sector[offset]);
-            Fat16DirectoryEntry entry = Fat16DirectoryEntry__new(
-                &entry_name,
-                sector[offset + 11],
-                Fat16__read_u16(sector, offset + 26),
-                Fat16__read_u32(sector, offset + 28)
-            );
+            Fat16DirectoryEntry entry =
+                Fat16DirectoryEntry__new(&entry_name, sector[offset + 11], Fat16__read_u16(sector, offset + 26),
+                                         Fat16__read_u32(sector, offset + 28));
 
-            match_result(CollectionCode, Fat16DirectoryEntries__push(&entries, entry),
+            match_result(
+                Fat16DirectoryEntries__push(&entries, entry),
                 success_do_nothing(),
                 error(code, message) { return Error(Fat16DirectoryEntries, message, code); }
             );
@@ -558,9 +541,7 @@ Result(Fat16DirectoryEntries) Fat16Volume__list_root(Fat16VolumePtr self)
     return Success(Fat16DirectoryEntries, entries);
 }
 
-Result(Fat16Code) Fat16Volume__create_root_file(
-    Fat16VolumePtr self, ConstBStringPtr name, DataPtr data, uint32_t size
-)
+Result(Fat16Code) Fat16Volume__create_root_file(Fat16VolumePtr self, ConstBStringPtr name, DataPtr data, uint32_t size)
 {
     if (!Fat16Volume__has_valid_geometry(self))
     {
@@ -572,15 +553,17 @@ Result(Fat16Code) Fat16Volume__create_root_file(
         return Error(Fat16Code, file_too_large, FAT16_FILE_TOO_LARGE);
     }
 
-    Data encoded_name[11] = { 0 };
-    match_result(Fat16Code, Fat16__encode_83_name(name, encoded_name),
+    Data encoded_name[11] = {0};
+    match_result(
+        Fat16__encode_83_name(name, encoded_name),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
     BlockNumber existing_sector = 0;
     size_t existing_offset = 0;
-    match_result(Fat16Code, Fat16Volume__find_root_entry(self, name, &existing_sector, &existing_offset),
+    match_result(
+        Fat16Volume__find_root_entry(self, name, &existing_sector, &existing_offset),
         success(_) { return Error(Fat16Code, already_exists, FAT16_ALREADY_EXISTS); },
         error(code, message)
         {
@@ -592,36 +575,41 @@ Result(Fat16Code) Fat16Volume__create_root_file(
     );
 
     uint16_t cluster = 0;
-    match_result(Fat16Code, Fat16Volume__find_free_cluster(self, &cluster),
+    match_result(
+        Fat16Volume__find_free_cluster(self, &cluster),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
-    match_result(Fat16Code, Fat16Volume__write_fat_entry(self, cluster, FAT16_END_OF_CHAIN),
+    match_result(
+        Fat16Volume__write_fat_entry(self, cluster, FAT16_END_OF_CHAIN),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
-    Data file_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
+    Data file_sector[FAT16_BYTES_PER_SECTOR] = {0};
     if (size > 0)
     {
         Fat16__copy(file_sector, data, size);
     }
 
-    match_result(Fat16Code, Fat16Volume__write_sector(self, Fat16Volume__cluster_sector(self, cluster), file_sector),
+    match_result(
+        Fat16Volume__write_sector(self, Fat16Volume__cluster_sector(self, cluster), file_sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
-    match_result(Fat16Code, Fat16Volume__find_free_root_entry(self, &entry_sector, &entry_offset),
+    match_result(
+        Fat16Volume__find_free_root_entry(self, &entry_sector, &entry_offset),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
-    Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
-    match_result(Fat16Code, Fat16Volume__read_sector(self, entry_sector, directory_sector),
+    Data directory_sector[FAT16_BYTES_PER_SECTOR] = {0};
+    match_result(
+        Fat16Volume__read_sector(self, entry_sector, directory_sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -631,7 +619,8 @@ Result(Fat16Code) Fat16Volume__create_root_file(
     Fat16__write_u16(directory_sector, entry_offset + 26, cluster);
     Fat16__write_u32(directory_sector, entry_offset + 28, size);
 
-    match_result(Fat16Code, Fat16Volume__write_sector(self, entry_sector, directory_sector),
+    match_result(
+        Fat16Volume__write_sector(self, entry_sector, directory_sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -646,15 +635,17 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, ConstB
         return Error(Fat16Code, invalid_argument, FAT16_INVALID_ARGUMENT);
     }
 
-    Data encoded_name[11] = { 0 };
-    match_result(Fat16Code, Fat16__encode_83_name(name, encoded_name),
+    Data encoded_name[11] = {0};
+    match_result(
+        Fat16__encode_83_name(name, encoded_name),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
     BlockNumber existing_sector = 0;
     size_t existing_offset = 0;
-    match_result(Fat16Code, Fat16Volume__find_root_entry(self, name, &existing_sector, &existing_offset),
+    match_result(
+        Fat16Volume__find_root_entry(self, name, &existing_sector, &existing_offset),
         success(_) { return Error(Fat16Code, already_exists, FAT16_ALREADY_EXISTS); },
         error(code, message)
         {
@@ -666,31 +657,36 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, ConstB
     );
 
     uint16_t cluster = 0;
-    match_result(Fat16Code, Fat16Volume__find_free_cluster(self, &cluster),
+    match_result(
+        Fat16Volume__find_free_cluster(self, &cluster),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
-    match_result(Fat16Code, Fat16Volume__write_fat_entry(self, cluster, FAT16_END_OF_CHAIN),
+    match_result(
+        Fat16Volume__write_fat_entry(self, cluster, FAT16_END_OF_CHAIN),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
-    Data directory_data[FAT16_BYTES_PER_SECTOR] = { 0 };
-    match_result(Fat16Code, Fat16Volume__write_sector(self, Fat16Volume__cluster_sector(self, cluster), directory_data),
+    Data directory_data[FAT16_BYTES_PER_SECTOR] = {0};
+    match_result(
+        Fat16Volume__write_sector(self, Fat16Volume__cluster_sector(self, cluster), directory_data),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
-    match_result(Fat16Code, Fat16Volume__find_free_root_entry(self, &entry_sector, &entry_offset),
+    match_result(
+        Fat16Volume__find_free_root_entry(self, &entry_sector, &entry_offset),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
-    Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
-    match_result(Fat16Code, Fat16Volume__read_sector(self, entry_sector, directory_sector),
+    Data directory_sector[FAT16_BYTES_PER_SECTOR] = {0};
+    match_result(
+        Fat16Volume__read_sector(self, entry_sector, directory_sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -700,7 +696,8 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, ConstB
     Fat16__write_u16(directory_sector, entry_offset + 26, cluster);
     Fat16__write_u32(directory_sector, entry_offset + 28, 0);
 
-    match_result(Fat16Code, Fat16Volume__write_sector(self, entry_sector, directory_sector),
+    match_result(
+        Fat16Volume__write_sector(self, entry_sector, directory_sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -708,9 +705,8 @@ Result(Fat16Code) Fat16Volume__create_root_directory(Fat16VolumePtr self, ConstB
     return Success(Fat16Code, FAT16_OK);
 }
 
-Result(Fat16Code) Fat16Volume__read_root_file(
-    Fat16VolumePtr self, ConstBStringPtr name, DataPtr target, uint32_t target_size, uint32_t * bytes_read
-)
+Result(Fat16Code) Fat16Volume__read_root_file(Fat16VolumePtr self, ConstBStringPtr name, DataPtr target,
+                                              uint32_t target_size, uint32_t * bytes_read)
 {
     if (!Fat16Volume__has_valid_geometry(self))
     {
@@ -719,13 +715,15 @@ Result(Fat16Code) Fat16Volume__read_root_file(
 
     BlockNumber entry_sector = 0;
     size_t entry_offset = 0;
-    match_result(Fat16Code, Fat16Volume__find_root_entry(self, name, &entry_sector, &entry_offset),
+    match_result(
+        Fat16Volume__find_root_entry(self, name, &entry_sector, &entry_offset),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
 
-    Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
-    match_result(Fat16Code, Fat16Volume__read_sector(self, entry_sector, directory_sector),
+    Data directory_sector[FAT16_BYTES_PER_SECTOR] = {0};
+    match_result(
+        Fat16Volume__read_sector(self, entry_sector, directory_sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -737,8 +735,9 @@ Result(Fat16Code) Fat16Volume__read_root_file(
         return Error(Fat16Code, invalid_argument, FAT16_INVALID_ARGUMENT);
     }
 
-    Data file_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
-    match_result(Fat16Code, Fat16Volume__read_sector(self, Fat16Volume__cluster_sector(self, cluster), file_sector),
+    Data file_sector[FAT16_BYTES_PER_SECTOR] = {0};
+    match_result(
+        Fat16Volume__read_sector(self, Fat16Volume__cluster_sector(self, cluster), file_sector),
         success_do_nothing(),
         error(code, message) { return Error(Fat16Code, message, code); }
     );
@@ -770,8 +769,7 @@ static IOStatus Fat16FilesystemIO__status_from_fat16(Fat16Code code)
 
 static bool Fat16FilesystemIO__is_root_path(ConstBStringPtr path)
 {
-    return BString__is_empty(path)
-        || (BString__length(path) == 1 && BString__char_at_or(path, 0, '\0') == '/');
+    return BString__is_empty(path) || (BString__length(path) == 1 && BString__char_at_or(path, 0, '\0') == '/');
 }
 
 static bool Fat16FilesystemIO__is_root_file_path(ConstBStringPtr path)
@@ -795,7 +793,7 @@ static bool Fat16FilesystemIO__is_root_file_path(ConstBStringPtr path)
 static Fat16FileHandlePtr Fat16FileHandle__heap_new(ConstBStringPtr path, Flags flags)
 {
     Fat16FileHandlePtr handle = ptr(Kernel__alloc_kernel(sizeof(Fat16FileHandle)), Fat16FileHandle);
-    *handle = (Fat16FileHandle) {
+    *handle = (Fat16FileHandle){
         .path = *path,
         .offset = 0,
         .buffer = EmptyRingBuffer(IOBuffer),
@@ -807,7 +805,7 @@ static Fat16FileHandlePtr Fat16FileHandle__heap_new(ConstBStringPtr path, Flags 
 
 static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, ConstBStringPtr path, Flags flags)
 {
-    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
+    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr)self;
     BString open_path = *path;
 
     if (!fs_state->mounted || !Fat16FilesystemIO__is_root_file_path(&open_path))
@@ -817,23 +815,20 @@ static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, ConstBStringP
 
     if ((flags & IO_OPEN_READ) != 0)
     {
-        Data data[FAT16_MAX_FILE_SIZE] = { 0 };
+        Data data[FAT16_MAX_FILE_SIZE] = {0};
         uint32_t bytes_read = 0;
-        match_result(Fat16Code, Fat16Volume__read_root_file(&fs_state->volume, &open_path, data, sizeof(data), &bytes_read),
+        match_result(
+            Fat16Volume__read_root_file(&fs_state->volume, &open_path, data, sizeof(data), &bytes_read),
             success_do_nothing(),
             error(code, message)
             {
-                return Error(
-                IOInternalHandle,
-                message,
-                Fat16FilesystemIO__status_from_fat16(code)
-            ); }
+                return Error(IOInternalHandle, message, Fat16FilesystemIO__status_from_fat16(code));
+            }
         );
     }
 
-    critical_section(fs_state->state.lock,
-    {
-        IOInternalHandle handle = (IOInternalHandle) fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
+    critical_section(fs_state->state.lock, {
+        IOInternalHandle handle = (IOInternalHandle)fs_state->handle_count++ | fs_state->state.filesystem->fs_code;
         Fat16FileHandleMap__set(&fs_state->handles, handle, Fat16FileHandle__heap_new(&open_path, flags));
         cs_return Success(IOInternalHandle, handle);
     });
@@ -841,11 +836,11 @@ static Result(IOInternalHandle) Fat16FileIO__open(IOStatePtr self, ConstBStringP
 
 static Result(IOInternalHandle) Fat16FileIO__close(IOStatePtr self, IOInternalHandle handle)
 {
-    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
+    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr)self;
 
-    critical_section(fs_state->state.lock,
-    {
-        match_optional(Fat16FileHandlePtr, Fat16FileHandleMap__get(&fs_state->handles, handle),
+    critical_section(fs_state->state.lock, {
+        match_optional(
+            Fat16FileHandleMap__get(&fs_state->handles, handle),
             some(_)
             {
                 Fat16FileHandleMap__delete(&fs_state->handles, handle);
@@ -858,15 +853,14 @@ static Result(IOInternalHandle) Fat16FileIO__close(IOStatePtr self, IOInternalHa
     return Error(IOInternalHandle, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-static Result(IOBufferPtr) Fat16FileIO__read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer
-)
+static Result(IOBufferPtr)
+    Fat16FileIO__read(IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer)
 {
-    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
+    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr)self;
 
-    critical_section(fs_state->state.lock,
-    {
-        match_optional(Fat16FileHandlePtr, Fat16FileHandleMap__get(&fs_state->handles, handle),
+    critical_section(fs_state->state.lock, {
+        match_optional(
+            Fat16FileHandleMap__get(&fs_state->handles, handle),
             some(target)
             {
                 if ((target->flags & IO_OPEN_READ) == 0)
@@ -874,19 +868,15 @@ static Result(IOBufferPtr) Fat16FileIO__read(
                     cs_return Error(IOBufferPtr, invalid_handle, IO_OPERATION_NOT_SUPPORTED);
                 }
 
-                Data data[FAT16_MAX_FILE_SIZE] = { 0 };
+                Data data[FAT16_MAX_FILE_SIZE] = {0};
                 uint32_t bytes_read = 0;
-                match_result(Fat16Code, Fat16Volume__read_root_file(
-                    &fs_state->volume, &target->path, data, sizeof(data), &bytes_read
-                ),
+                match_result(
+                    Fat16Volume__read_root_file(&fs_state->volume, &target->path, data, sizeof(data), &bytes_read),
                     success_do_nothing(),
                     error(code, message)
                     {
-                        cs_return Error(
-                        IOBufferPtr,
-                        message,
-                        Fat16FilesystemIO__status_from_fat16(code)
-                    ); }
+                        cs_return Error(IOBufferPtr, message, Fat16FilesystemIO__status_from_fat16(code));
+                    }
                 );
 
                 if (target->offset >= bytes_read)
@@ -911,11 +901,11 @@ static Result(IOBufferPtr) Fat16FileIO__read(
 
 static Result(ByteCount) Fat16FileIO__write(IOStatePtr self, IOInternalHandle handle, DataPtr data, size_t size)
 {
-    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
+    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr)self;
 
-    critical_section(fs_state->state.lock,
-    {
-        match_optional(Fat16FileHandlePtr, Fat16FileHandleMap__get(&fs_state->handles, handle),
+    critical_section(fs_state->state.lock, {
+        match_optional(
+            Fat16FileHandleMap__get(&fs_state->handles, handle),
             some(target)
             {
                 if ((target->flags & IO_OPEN_WRITE) == 0 || target->offset != 0)
@@ -923,7 +913,8 @@ static Result(ByteCount) Fat16FileIO__write(IOStatePtr self, IOInternalHandle ha
                     cs_return Error(ByteCount, invalid_handle, IO_OPERATION_NOT_SUPPORTED);
                 }
 
-                match_result(Fat16Code, Fat16Volume__create_root_file(&fs_state->volume, &target->path, data, size),
+                match_result(
+                    Fat16Volume__create_root_file(&fs_state->volume, &target->path, data, size),
                     success(_)
                     {
                         target->offset = size;
@@ -931,11 +922,8 @@ static Result(ByteCount) Fat16FileIO__write(IOStatePtr self, IOInternalHandle ha
                     },
                     error(code, message)
                     {
-                        cs_return Error(
-                        ByteCount,
-                        message,
-                        Fat16FilesystemIO__status_from_fat16(code)
-                    ); }
+                        cs_return Error(ByteCount, message, Fat16FilesystemIO__status_from_fat16(code));
+                    }
                 );
             },
             none() { cs_return Error(ByteCount, invalid_handle, IO_UNKNOWN_HANDLE); }
@@ -957,7 +945,7 @@ static Result(ParkStatus) Fat16FileIO__unpark(IOStatePtr self)
 
 static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, ConstBStringPtr path)
 {
-    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
+    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr)self;
     BString list_path = *path;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
 
@@ -975,27 +963,23 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
 
         BlockNumber entry_sector = 0;
         size_t entry_offset = 0;
-        match_result(Fat16Code, Fat16Volume__find_root_entry(&fs_state->volume, &list_path, &entry_sector, &entry_offset),
+        match_result(
+            Fat16Volume__find_root_entry(&fs_state->volume, &list_path, &entry_sector, &entry_offset),
             success_do_nothing(),
             error(code, message)
             {
-                return Error(
-                FilesystemNodes,
-                message,
-                Fat16FilesystemIO__status_from_fat16(code)
-            ); }
+                return Error(FilesystemNodes, message, Fat16FilesystemIO__status_from_fat16(code));
+            }
         );
 
-        Data directory_sector[FAT16_BYTES_PER_SECTOR] = { 0 };
-        match_result(Fat16Code, Fat16Volume__read_sector(&fs_state->volume, entry_sector, directory_sector),
+        Data directory_sector[FAT16_BYTES_PER_SECTOR] = {0};
+        match_result(
+            Fat16Volume__read_sector(&fs_state->volume, entry_sector, directory_sector),
             success_do_nothing(),
             error(code, message)
             {
-                return Error(
-                FilesystemNodes,
-                message,
-                Fat16FilesystemIO__status_from_fat16(code)
-            ); }
+                return Error(FilesystemNodes, message, Fat16FilesystemIO__status_from_fat16(code));
+            }
         );
 
         if ((directory_sector[entry_offset + 11] & FAT16_ATTR_DIRECTORY) == 0)
@@ -1006,25 +990,17 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
         return Success(FilesystemNodes, result);
     }
 
-    match_result(Fat16DirectoryEntries, Fat16Volume__list_root(&fs_state->volume),
+    match_result(
+        Fat16Volume__list_root(&fs_state->volume),
         success(entries)
         {
-            for_each_fa(Fat16DirectoryEntries, entries, index, entry,
-            {
+            for_each_fa(Fat16DirectoryEntries, entries, index, entry, {
                 FilesystemNodes__push(
-                    &result,
-                    FilesystemNode__heap_new(fs_state->state.filesystem, &entry.name, entry.attributes)
-                );
+                    &result, FilesystemNode__heap_new(fs_state->state.filesystem, &entry.name, entry.attributes));
             });
             return Success(FilesystemNodes, result);
         },
-        error(code, message)
-        {
-            return Error(
-            FilesystemNodes,
-            message,
-            Fat16FilesystemIO__status_from_fat16(code)
-        ); }
+        error(code, message) { return Error(FilesystemNodes, message, Fat16FilesystemIO__status_from_fat16(code)); }
     );
 
     return Success(FilesystemNodes, result);
@@ -1032,14 +1008,15 @@ static Result(FilesystemNodes) Fat16FileIO__list_nodes(IOStatePtr self, Filesyst
 
 static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, ConstBStringPtr path)
 {
-    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr) self;
+    Fat16FilesystemIOStatePtr fs_state = (Fat16FilesystemIOStatePtr)self;
     BString mkdir_path = *path;
     if (!fs_state->mounted || !Fat16FilesystemIO__is_root_file_path(&mkdir_path))
     {
         return Error(IOStatus, invalid_path, IO_INVALID_PATH);
     }
 
-    match_result(Fat16Code, Fat16Volume__create_root_directory(&fs_state->volume, &mkdir_path),
+    match_result(
+        Fat16Volume__create_root_directory(&fs_state->volume, &mkdir_path),
         success(_) { return Success(IOStatus, IO_OK); },
         error(code, message) { return Error(IOStatus, message, Fat16FilesystemIO__status_from_fat16(code)); }
     );
@@ -1049,21 +1026,11 @@ static Result(IOStatus) Fat16FileIO__mkdir(IOStatePtr self, ConstBStringPtr path
 
 FileIO Fat16FilesystemIO__new()
 {
-    return (FileIO) {
-        .base_io = IO__new(
-            Fat16FileIO__open,
-            Fat16FileIO__read,
-            Fat16FileIO__write,
-            IO__unsupported_accept,
-            Fat16FileIO__close,
-            Fat16FileIO__park,
-            Fat16FileIO__unpark,
-            IO__unsupported_server_buffer,
-            IO__unsupported_server_write_buffer,
-            IO__unsupported_data_available,
-            IO__unsupported_data_consumed,
-            IO__unsupported_eof
-        ),
+    return (FileIO){
+        .base_io = IO__new(Fat16FileIO__open, Fat16FileIO__read, Fat16FileIO__write, IO__unsupported_accept,
+                           Fat16FileIO__close, Fat16FileIO__park, Fat16FileIO__unpark, IO__unsupported_server_buffer,
+                           IO__unsupported_server_write_buffer, IO__unsupported_data_available,
+                           IO__unsupported_data_consumed, IO__unsupported_eof),
         .list_nodes = Fat16FileIO__list_nodes,
         .list_dir = FileIO__unsupported_list_dir,
         .mkdir = Fat16FileIO__mkdir,
@@ -1077,20 +1044,18 @@ bool Fat16FilesystemIO__available()
     return true;
 }
 
-Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(
-    FilesystemPtr fs, BlockDevicePtr device, BlockCount total_sectors
-)
+Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device,
+                                                           BlockCount total_sectors)
 {
-    Fat16FilesystemIOStatePtr io_state = ptr(
-        Kernel__alloc_kernel(sizeof(Fat16FilesystemIOState)), Fat16FilesystemIOState
-    );
+    Fat16FilesystemIOStatePtr io_state =
+        ptr(Kernel__alloc_kernel(sizeof(Fat16FilesystemIOState)), Fat16FilesystemIOState);
 
     if (total_sectors == 0)
     {
         total_sectors = FAT16_DEFAULT_MEMORY_SECTORS;
     }
 
-    *io_state = (Fat16FilesystemIOState) {
+    *io_state = (Fat16FilesystemIOState){
         .state = FilesystemIOState__new(fs),
         .handles = Fat16FileHandleMap__new(),
         .handle_count = 0,
@@ -1099,10 +1064,12 @@ Fat16FilesystemIOStatePtr Fat16FilesystemIOState__heap_new(
 
     io_state->volume = Fat16Volume__new(device, total_sectors);
 
-    match_result(Fat16Code, Fat16Volume__format(&io_state->volume),
+    match_result(
+        Fat16Volume__format(&io_state->volume),
         success(_)
         {
-            match_result(Fat16Code, Fat16Volume__mount(&io_state->volume),
+            match_result(
+                Fat16Volume__mount(&io_state->volume),
                 success(_) { io_state->mounted = true; },
                 error(code, message)
                 {

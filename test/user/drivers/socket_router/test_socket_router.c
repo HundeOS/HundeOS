@@ -96,12 +96,8 @@ ServiceCode service_publish_ready(ConstBStringPtr name)
     return SERVICE_OK;
 }
 
-Result(AsyncIOCode) AsyncIO__start(
-    AsyncIOPtr self,
-    AsyncIORegisterService register_service,
-    Anything service_context,
-    AsyncIORequestService request_service
-)
+Result(AsyncIOCode) AsyncIO__start(AsyncIOPtr self, AsyncIORegisterService register_service, Anything service_context,
+                                   AsyncIORequestService request_service)
 {
     fake_async_started = true;
     fake_register_service = register_service;
@@ -115,7 +111,8 @@ void test_socket_router_rejects_non_socket_uri(void)
     SocketRouter router = SocketRouter__new();
     BString uri = bstr("/tmp/sock1");
 
-    match_result(IOSocketStatus, SocketRouter__listen(&router, &bstr("/tmp/sock1"), 10, 4),
+    match_result(
+        SocketRouter__listen(&router, &bstr("/tmp/sock1"), 10, 4),
         success_test_fail(),
         error(code, message) { TEST_ASSERT_EQUAL(IO_SOCKET_INVALID_URI, code); }
     );
@@ -126,17 +123,20 @@ void test_socket_router_listens_and_accepts_pending_connection(void)
     SocketRouter router = SocketRouter__new();
     BString uri = bstr("socket://proc/sock1");
 
-    match_result(IOSocketStatus, SocketRouter__listen(&router, &bstr("socket://proc/sock1"), 10, 4),
+    match_result(
+        SocketRouter__listen(&router, &bstr("socket://proc/sock1"), 10, 4),
         success(status) { TEST_ASSERT_EQUAL(IO_SOCKET_OK, status); },
         error_test_fail()
     );
 
-    match_result(IOHandle, SocketRouter__connect(&router, &bstr("socket://proc/sock1"), 20),
+    match_result(
+        SocketRouter__connect(&router, &bstr("socket://proc/sock1"), 20),
         success(listener) { TEST_ASSERT_EQUAL_INT64(10, listener); },
         error_test_fail()
     );
 
-    match_result(IOHandle, SocketRouter__accept(&router, 10),
+    match_result(
+        SocketRouter__accept(&router, 10),
         success(handle) { TEST_ASSERT_EQUAL_INT64(20, handle); },
         error_test_fail()
     );
@@ -147,17 +147,20 @@ void test_socket_router_enforces_listener_backlog(void)
     SocketRouter router = SocketRouter__new();
     BString uri = bstr("socket://proc/sock1");
 
-    match_result(IOSocketStatus, SocketRouter__listen(&router, &bstr("socket://proc/sock1"), 10, 1),
+    match_result(
+        SocketRouter__listen(&router, &bstr("socket://proc/sock1"), 10, 1),
         success(status) { TEST_ASSERT_EQUAL(IO_SOCKET_OK, status); },
         error_test_fail()
     );
 
-    match_result(IOHandle, SocketRouter__connect(&router, &bstr("socket://proc/sock1"), 20),
+    match_result(
+        SocketRouter__connect(&router, &bstr("socket://proc/sock1"), 20),
         success(listener) { TEST_ASSERT_EQUAL_INT64(10, listener); },
         error_test_fail()
     );
 
-    match_result(IOHandle, SocketRouter__connect(&router, &bstr("socket://proc/sock1"), 21),
+    match_result(
+        SocketRouter__connect(&router, &bstr("socket://proc/sock1"), 21),
         success_test_fail(),
         error(code, message) { TEST_ASSERT_EQUAL(IO_SOCKET_BACKLOG_FULL, code); }
     );
@@ -176,13 +179,16 @@ void test_socket_router_main_starts_async_io_and_registers_service(void)
 void test_socket_router_async_request_service_handles_socket_request(void)
 {
     SocketRouter router = SocketRouter__new();
-    IOSocketRouterRequest listen_request = IOSocketRouterRequest__new(1, IO_SOCKET_ROUTER_LISTEN, &bstr("socket://proc/sock1"), 10, 4);
-    IOSocketRouterRequest connect_request = IOSocketRouterRequest__new(2, IO_SOCKET_ROUTER_CONNECT, &bstr("socket://proc/sock1"), 20, 0);
+    IOSocketRouterRequest listen_request =
+        IOSocketRouterRequest__new(1, IO_SOCKET_ROUTER_LISTEN, &bstr("socket://proc/sock1"), 10, 4);
+    IOSocketRouterRequest connect_request =
+        IOSocketRouterRequest__new(2, IO_SOCKET_ROUTER_CONNECT, &bstr("socket://proc/sock1"), 20, 0);
     ServiceEvent listen_event = ServiceEvent__request(SERVICE_EVENT_SOCKET_IO, 1, 0);
     ServiceEvent connect_event = ServiceEvent__request(SERVICE_EVENT_SOCKET_IO, 2, 0);
 
     fake_socket_request = listen_request;
-    match_result(FiberCode, SocketRouter__request_service((FiberPtr) 1, (Anything) &router, listen_event),
+    match_result(
+        SocketRouter__request_service((FiberPtr)1, (Anything)&router, listen_event),
         success(code) { TEST_ASSERT_EQUAL(FIBER_OK, code); },
         error_test_fail()
     );
@@ -190,14 +196,16 @@ void test_socket_router_async_request_service_handles_socket_request(void)
     TEST_ASSERT_EQUAL_INT64(10, fake_socket_completion.result);
 
     fake_socket_request = connect_request;
-    match_result(FiberCode, SocketRouter__request_service((FiberPtr) 1, (Anything) &router, connect_event),
+    match_result(
+        SocketRouter__request_service((FiberPtr)1, (Anything)&router, connect_event),
         success(code) { TEST_ASSERT_EQUAL(FIBER_OK, code); },
         error_test_fail()
     );
     TEST_ASSERT_EQUAL(IO_SOCKET_OK, fake_socket_completion.status);
     TEST_ASSERT_EQUAL_INT64(10, fake_socket_completion.result);
 
-    match_result(IOHandle, SocketRouter__accept(&router, 10),
+    match_result(
+        SocketRouter__accept(&router, 10),
         success(handle) { TEST_ASSERT_EQUAL_INT64(20, handle); },
         error_test_fail()
     );

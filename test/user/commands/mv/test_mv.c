@@ -15,8 +15,7 @@ typedef struct FakeCall
     Flags flags;
     IOHandle handle;
     size_t size;
-}
-FakeCall;
+} FakeCall;
 
 static FakeCall calls[64];
 static size_t call_count;
@@ -62,7 +61,8 @@ static void copy_text(char * target, const char * source, size_t target_size)
     target[position] = '\0';
 }
 
-static void record_call(IOOperation op, const char * path_a, const char * path_b, Flags flags, IOHandle handle, size_t size)
+static void record_call(IOOperation op, const char * path_a, const char * path_b, Flags flags, IOHandle handle,
+                        size_t size)
 {
     calls[call_count].op = op;
     calls[call_count].flags = flags;
@@ -82,11 +82,11 @@ static void record_call(IOOperation op, const char * path_a, const char * path_b
 Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
 {
     TEST_ASSERT_EQUAL(IO_CALL, call);
-    IOOperation op = (IOOperation) arg1;
+    IOOperation op = (IOOperation)arg1;
 
     if (op == IO_OPEN)
     {
-        IOPathRequestPtr request = (IOPathRequestPtr) arg2;
+        IOPathRequestPtr request = (IOPathRequestPtr)arg2;
         const char * path = BString__cstr(&request->path);
         Flags flags = request->flags;
         record_call(op, path, NULL, flags, 0, 0);
@@ -124,7 +124,7 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 
     if (op == IO_LIST_DIR)
     {
-        IOListDirRequestPtr request = (IOListDirRequestPtr) arg2;
+        IOListDirRequestPtr request = (IOListDirRequestPtr)arg2;
         const char * path = BString__cstr(&request->path);
         record_call(op, path, NULL, 0, 0, request->max_entries);
 
@@ -148,9 +148,9 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 
     if (op == IO_READ)
     {
-        IOHandle handle = (IOHandle) arg2;
-        char * buffer = (char *) arg3;
-        record_call(op, NULL, NULL, 0, handle, (size_t) arg4);
+        IOHandle handle = (IOHandle)arg2;
+        char * buffer = (char *)arg3;
+        record_call(op, NULL, NULL, 0, handle, (size_t)arg4);
 
         if (scenario == MV_SCENARIO_FILE && handle == 11)
         {
@@ -179,23 +179,23 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 
     if (op == IO_WRITE)
     {
-        IOHandle handle = (IOHandle) arg2;
-        const char * buffer = (const char *) arg3;
-        size_t size = (size_t) arg4;
+        IOHandle handle = (IOHandle)arg2;
+        const char * buffer = (const char *)arg3;
+        size_t size = (size_t)arg4;
         record_call(op, buffer, NULL, 0, handle, size);
-        return (Anything) size;
+        return (Anything)size;
     }
 
     if (op == IO_CLOSE)
     {
-        IOHandle handle = (IOHandle) arg2;
+        IOHandle handle = (IOHandle)arg2;
         record_call(op, NULL, NULL, 0, handle, 0);
         return IO_OK;
     }
 
     if (op == IO_MKDIR)
     {
-        IOPathRequestPtr request = (IOPathRequestPtr) arg2;
+        IOPathRequestPtr request = (IOPathRequestPtr)arg2;
         const char * path = BString__cstr(&request->path);
         record_call(op, path, NULL, 0, 0, 0);
         return IO_OK;
@@ -203,7 +203,7 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
 
     if (op == IO_REMOVE)
     {
-        IOPathRequestPtr request = (IOPathRequestPtr) arg2;
+        IOPathRequestPtr request = (IOPathRequestPtr)arg2;
         const char * path = BString__cstr(&request->path);
         Flags flags = request->flags;
         record_call(op, path, NULL, flags, 0, 0);
@@ -232,15 +232,15 @@ int IO__printf(ConstBStringPtr format, ...)
     StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
-        output_position += (uint64_t) written;
+        output_position += (uint64_t)written;
     }
-    return (int) written;
+    return (int)written;
 }
 
 void test_mv_moves_a_file_via_copy_then_remove(void)
 {
     scenario = MV_SCENARIO_FILE;
-    char * argv[] = { "mv", "src.txt", "dst.txt" };
+    char * argv[] = {"mv", "src.txt", "dst.txt"};
 
     TEST_ASSERT_EQUAL_INT(0, mv_main_under_test(3, argv));
     TEST_ASSERT_EQUAL_INT(8, call_count);
@@ -257,7 +257,7 @@ void test_mv_moves_a_file_via_copy_then_remove(void)
 void test_mv_moves_directory_tree_recursively(void)
 {
     scenario = MV_SCENARIO_DIR;
-    char * argv[] = { "mv", "/srcdir", "/destdir" };
+    char * argv[] = {"mv", "/srcdir", "/destdir"};
 
     TEST_ASSERT_EQUAL_INT(0, mv_main_under_test(3, argv));
     TEST_ASSERT_EQUAL(IO_LIST_DIR, calls[1].op);

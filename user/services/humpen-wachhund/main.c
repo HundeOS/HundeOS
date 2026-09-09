@@ -32,29 +32,19 @@ static uint64_t HumpenWachhund__next_backoff(uint64_t current)
 
 static Result(SpawnResult) HumpenWachhund__mount_ext2(ConstBStringPtr device_path, ConstBStringPtr mountpoint)
 {
-    return OS__spawn(
-        P_WAIT,
-        &humpen_wachhund_ext2fs_path,
-        &Some(BString, *device_path),
-        &Some(BString, *mountpoint),
-        &SPAWN_NO_ARG
-    );
+    return OS__spawn(P_WAIT, &humpen_wachhund_ext2fs_path, &Some(BString, *device_path), &Some(BString, *mountpoint),
+                     &SPAWN_NO_ARG);
 }
 
 static Result(SpawnResult) HumpenWachhund__mount_fat32(ConstBStringPtr device_path, ConstBStringPtr mountpoint)
 {
-    return OS__spawn(
-        P_WAIT,
-        &humpen_wachhund_fat32fs_path,
-        &Some(BString, *device_path),
-        &Some(BString, *mountpoint),
-        &SPAWN_NO_ARG
-    );
+    return OS__spawn(P_WAIT, &humpen_wachhund_fat32fs_path, &Some(BString, *device_path), &Some(BString, *mountpoint),
+                     &SPAWN_NO_ARG);
 }
 
-static Result(SpawnResult) HumpenWachhund__mount_userspace_filesystem(
-    ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
-)
+static Result(SpawnResult)
+    HumpenWachhund__mount_userspace_filesystem(ConstBStringPtr device_path, ConstBStringPtr filesystem_type,
+                                               ConstBStringPtr mountpoint)
 {
     if (BString__equals(filesystem_type, &humpen_wachhund_ext2_filesystem))
     {
@@ -84,46 +74,26 @@ int HUMPEN_WACHHUND_ENTRYPOINT(int argc, char ** argv)
 
     while (true)
     {
-        if (BString__equals(&filesystem_type, &humpen_wachhund_ext2_filesystem)
-            || BString__equals(&filesystem_type, &humpen_wachhund_fat32_filesystem))
+        if (BString__equals(&filesystem_type, &humpen_wachhund_ext2_filesystem) ||
+            BString__equals(&filesystem_type, &humpen_wachhund_fat32_filesystem))
         {
-            match_result(SpawnResult, HumpenWachhund__mount_userspace_filesystem(
-                &device_path,
-                &filesystem_type,
-                &mountpoint
-            ),
+            match_result(
+                HumpenWachhund__mount_userspace_filesystem(&device_path, &filesystem_type, &mountpoint),
                 success(spawn_result)
                 {
                     if (spawn_result == 0)
                     {
-                        kernel_syslog_tagf(
-                            HUMPEN_WACHHUND_LOG_TAG,
-                            "mounted %B on %B",
-                            &device_path,
-                            &mountpoint
-                        );
+                        kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "mounted %B on %B", &device_path, &mountpoint);
                         return 0;
                     }
 
-                    kernel_syslog_tagf(
-                        HUMPEN_WACHHUND_LOG_TAG,
-                        "failed to mount %B on %B: %i",
-                        &device_path,
-                        &mountpoint,
-                        (int) spawn_result
-                    );
+                    kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "failed to mount %B on %B: %i", &device_path,
+                                       &mountpoint, (int)spawn_result);
                 },
                 error(code, message)
                 {
-                    kernel_syslog_tagf(
-                        HUMPEN_WACHHUND_LOG_TAG,
-                        "failed to start %B fs for %B on %B: %B (%i)",
-                        &filesystem_type,
-                        &device_path,
-                        &mountpoint,
-                        &message,
-                        (int) code
-                    );
+                    kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "failed to start %B fs for %B on %B: %B (%i)",
+                                       &filesystem_type, &device_path, &mountpoint, &message, (int)code);
                 }
             );
         }
@@ -132,28 +102,18 @@ int HUMPEN_WACHHUND_ENTRYPOINT(int argc, char ** argv)
             IOStatus status = IO__mount_device(&device_path, &filesystem_type, &mountpoint);
             if (status == IO_OK)
             {
-                kernel_syslog_tagf(
-                    HUMPEN_WACHHUND_LOG_TAG,
-                    "mounted %B on %B",
-                    &device_path,
-                    &mountpoint
-                );
+                kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "mounted %B on %B", &device_path, &mountpoint);
                 return 0;
             }
 
-            kernel_syslog_tagf(
-                HUMPEN_WACHHUND_LOG_TAG,
-                "failed to mount %B on %B: %i",
-                &device_path,
-                &mountpoint,
-                (int) status
-            );
+            kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "failed to mount %B on %B: %i", &device_path, &mountpoint,
+                               (int)status);
         }
 
         ProcessSleepResult sleep_result = sleep_usec(backoff_usec);
         if (sleep_result != PROCESS_SLEEP_OK)
         {
-            kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "sleep failed: %i", (int) sleep_result);
+            kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "sleep failed: %i", (int)sleep_result);
             return 1;
         }
 

@@ -8,7 +8,7 @@
 #include "types/bstring.h"
 
 #ifndef FIXED_ARRAY_ALLOC
-#define FIXED_ARRAY_ALLOC(size) ((void *) 0)
+#define FIXED_ARRAY_ALLOC(size) ((void *)0)
 #define __SPAWN_FIXED_ARRAY_ALLOC_DEFINED
 #endif
 
@@ -22,7 +22,7 @@
 #define SPAWN_MAX_ARGS 16
 #define SPAWN_INHERIT_USER_ID UINT64_MAX
 #define SPAWN_INHERIT_AUTH_TICKET AUTH_NO_TICKET
-#define SPAWN_STDIO_DEFAULT ((SpawnStdio) { 0 })
+#define SPAWN_STDIO_DEFAULT ((SpawnStdio){0})
 #define SPAWN_NO_ARG None(BString)
 
 FixedArrayDefine(BString, SPAWN_MAX_ARGS, SpawnArguments, bstring_equals);
@@ -31,13 +31,14 @@ typedef const SpawnArguments * ConstSpawnArgumentsPtr;
 
 typedef enum SpawnModes
 {
-    P_OVERLAY = 1,	// Overlays parent process with child, which destroys the parent. This has the same effect as the exec* functions.
-    P_WAIT = 2,	    // Suspends parent process until the child process has finished executing (synchronous spawn).
-    P_NOWAIT = 3,   //
-    P_NOWAITO = 4,	// Continues to execute calling process concurrently with new process (asynchronous spawn).
-    P_DETACH = 5,	// The child is run in background without access to the console or keyboard. Calls to _cwait upon the new process will fail (asynchronous spawn)
-}
-SpawnModes;
+    P_OVERLAY =
+        1, // Overlays parent process with child, which destroys the parent. This has the same effect as the exec* functions.
+    P_WAIT = 2,    // Suspends parent process until the child process has finished executing (synchronous spawn).
+    P_NOWAIT = 3,  //
+    P_NOWAITO = 4, // Continues to execute calling process concurrently with new process (asynchronous spawn).
+    P_DETACH =
+        5, // The child is run in background without access to the console or keyboard. Calls to _cwait upon the new process will fail (asynchronous spawn)
+} SpawnModes;
 
 typedef enum SpawnErrors
 {
@@ -47,8 +48,7 @@ typedef enum SpawnErrors
     SPAWN_NO_PATH = -3,
     SPAWN_ARG_TOO_LONG = -4,
     SPAWN_FAILED = -128,
-}
-SpawnErrors;
+} SpawnErrors;
 
 typedef int64_t SpawnResult;
 typedef int SpawnMode;
@@ -63,13 +63,10 @@ typedef struct SpawnStdio
 } SpawnStdio;
 typedef const SpawnStdio * ConstSpawnStdioPtr;
 
-static inline SpawnStdio SpawnStdio__new(
-    SpawnFileDescriptor stdin_fd,
-    SpawnFileDescriptor stdout_fd,
-    SpawnFileDescriptor stderr_fd
-)
+static inline SpawnStdio SpawnStdio__new(SpawnFileDescriptor stdin_fd, SpawnFileDescriptor stdout_fd,
+                                         SpawnFileDescriptor stderr_fd)
 {
-    return (SpawnStdio) {
+    return (SpawnStdio){
         .present = 1,
         .stdin_fd = stdin_fd,
         .stdout_fd = stdout_fd,
@@ -119,16 +116,11 @@ static inline Optional(BString) SpawnArg__from_bstring(ConstBStringPtr value)
     return Some(BString, *value);
 }
 
-static inline SpawnRequest SpawnRequest__new(
-    SpawnMode mode,
-    ConstBStringPtr path,
-    UserID requested_user_id,
-    AuthTicketID auth_ticket_id,
-    SpawnStdio stdio,
-    ConstSpawnArgumentsPtr arguments
-)
+static inline SpawnRequest SpawnRequest__new(SpawnMode mode, ConstBStringPtr path, UserID requested_user_id,
+                                             AuthTicketID auth_ticket_id, SpawnStdio stdio,
+                                             ConstSpawnArgumentsPtr arguments)
 {
-    return (SpawnRequest) {
+    return (SpawnRequest){
         .path = *path,
         .mode = mode,
         .requested_user_id = requested_user_id,

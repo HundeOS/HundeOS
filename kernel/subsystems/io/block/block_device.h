@@ -55,31 +55,21 @@ typedef struct BlockDeviceMetadata
     size_t block_size;
     BlockCount block_count;
     bool userspace_service;
-}
-BlockDeviceMetadata;
+} BlockDeviceMetadata;
 
 typedef BlockDeviceMetadata * BlockDeviceMetadataPtr;
 
 OptionalDef(BlockDeviceMetadata);
 bool BlockDeviceMetadata__equals(BlockDeviceMetadataPtr self, BlockDeviceMetadataPtr other);
-BlockDeviceMetadata BlockDeviceMetadata__new(
-    ConstBStringPtr alias,
-    ConstBStringPtr path,
-    size_t block_size,
-    BlockCount block_count,
-    bool userspace_service
-);
-FixedArrayDefine(
-    BlockDeviceMetadata,
-    IO_MAX_DEVICES,
-    BlockDeviceMetadataEntries,
-    (EqualFunction) BlockDeviceMetadata__equals
-);
+BlockDeviceMetadata BlockDeviceMetadata__new(ConstBStringPtr alias, ConstBStringPtr path, size_t block_size,
+                                             BlockCount block_count, bool userspace_service);
+FixedArrayDefine(BlockDeviceMetadata, IO_MAX_DEVICES, BlockDeviceMetadataEntries,
+                 (EqualFunction)BlockDeviceMetadata__equals);
 ResultDef(BlockDeviceMetadataEntries);
 
 typedef struct BlockIOContext BlockIOContext;
 typedef BlockIOContext * BlockIOContextPtr;
-typedef Result(Anything) (* BlockIOContinuation)(BlockIOContextPtr context);
+typedef Result(Anything) (*BlockIOContinuation)(BlockIOContextPtr context);
 
 OptionalDef(BlockIOContinuation);
 
@@ -94,24 +84,21 @@ typedef struct BlockIOContext
     BlockDeviceCode status;
     Anything owner_context;
     Optional(BlockRequestID) request_id;
-}
-BlockIOContext;
+} BlockIOContext;
 
 static inline BlockIOContext BlockIOContext__new(const KernelContext * kernel_context, Anything owner_context)
 {
-    return (BlockIOContext) {
+    return (BlockIOContext){
         .kernel_context = *kernel_context,
         .owner_context = owner_context,
         .request_id = None(BlockRequestID),
     };
 }
 
-typedef Result(BlockCount) (* BlockDeviceRead)(
-    BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr target
-);
-typedef Result(BlockCount) (* BlockDeviceWrite)(
-    BlockDriverContextPtr context, BlockNumber block, BlockCount count, DataPtr source
-);
+typedef Result(BlockCount) (*BlockDeviceRead)(BlockDriverContextPtr context, BlockNumber block, BlockCount count,
+                                              DataPtr target);
+typedef Result(BlockCount) (*BlockDeviceWrite)(BlockDriverContextPtr context, BlockNumber block, BlockCount count,
+                                               DataPtr source);
 
 typedef struct BlockDevice
 {
@@ -120,71 +107,46 @@ typedef struct BlockDevice
     BlockDeviceWrite write;
     size_t block_size;
     bool userspace_service;
-}
-BlockDevice;
+} BlockDevice;
 
 BlockDevice BlockDevice__new(BlockDriverContextPtr context, BlockDeviceRead read, BlockDeviceWrite write);
 Result(BlockCount) BlockDevice__read(BlockDevicePtr self, BlockNumber block, BlockCount count, DataPtr target);
 Result(BlockCount) BlockDevice__write(BlockDevicePtr self, BlockNumber block, BlockCount count, DataPtr source);
-Result(Anything) BlockDevice__read_async(
-    BlockDevicePtr self, BlockNumber block, BlockCount count,
-    BlockIOContextPtr context, BlockIOContinuation continuation
-);
-Result(Anything) BlockDevice__write_async(
-    BlockDevicePtr self, BlockNumber block, BlockCount count,
-    DataPtr source, BlockIOContextPtr context, BlockIOContinuation continuation
-);
+Result(Anything) BlockDevice__read_async(BlockDevicePtr self, BlockNumber block, BlockCount count,
+                                         BlockIOContextPtr context, BlockIOContinuation continuation);
+Result(Anything) BlockDevice__write_async(BlockDevicePtr self, BlockNumber block, BlockCount count, DataPtr source,
+                                          BlockIOContextPtr context, BlockIOContinuation continuation);
 void BlockDevice__set_current_context(KernelContextPtr context);
 void BlockDevice__clear_current_context();
 Optional(KernelContextPtr) BlockDevice__current_context();
 void BlockDeviceRegistry__reset(void);
-Result(BlockDeviceCode) BlockDeviceRegistry__register(
-    ConstBStringPtr path, ProcessPtr service_process, BlockCount block_count, MessageBrokerPtr message_broker
-);
-Result(BlockCount) BlockDeviceRegistry__read_from_process(
-    ProcessPtr requester,
-    ConstBStringPtr path,
-    BlockNumber block,
-    BlockCount count,
-    DataPtr requester_buffer,
-    size_t buffer_size,
-    MessageBrokerPtr message_broker
-);
-Result(BlockCount) BlockDeviceRegistry__write_from_process(
-    ProcessPtr requester,
-    ConstBStringPtr path,
-    BlockNumber block,
-    BlockCount count,
-    DataPtr requester_buffer,
-    size_t buffer_size,
-    MessageBrokerPtr message_broker
-);
-Result(BlockRequestID) BlockDeviceRegistry__read_from_process_async(
-    ProcessPtr requester,
-    ConstBStringPtr path,
-    BlockNumber block,
-    BlockCount count,
-    DataPtr requester_buffer,
-    size_t buffer_size,
-    MessageBrokerPtr message_broker
-);
-Result(BlockRequestID) BlockDeviceRegistry__write_from_process_async(
-    ProcessPtr requester,
-    ConstBStringPtr path,
-    BlockNumber block,
-    BlockCount count,
-    DataPtr requester_buffer,
-    size_t buffer_size,
-    MessageBrokerPtr message_broker
-);
+Result(BlockDeviceCode) BlockDeviceRegistry__register(ConstBStringPtr path, ProcessPtr service_process,
+                                                      BlockCount block_count, MessageBrokerPtr message_broker);
+Result(BlockCount) BlockDeviceRegistry__read_from_process(ProcessPtr requester, ConstBStringPtr path, BlockNumber block,
+                                                          BlockCount count, DataPtr requester_buffer,
+                                                          size_t buffer_size, MessageBrokerPtr message_broker);
+Result(BlockCount)
+    BlockDeviceRegistry__write_from_process(ProcessPtr requester, ConstBStringPtr path, BlockNumber block,
+                                            BlockCount count, DataPtr requester_buffer, size_t buffer_size,
+                                            MessageBrokerPtr message_broker);
+Result(BlockRequestID)
+    BlockDeviceRegistry__read_from_process_async(ProcessPtr requester, ConstBStringPtr path, BlockNumber block,
+                                                 BlockCount count, DataPtr requester_buffer, size_t buffer_size,
+                                                 MessageBrokerPtr message_broker);
+Result(BlockRequestID)
+    BlockDeviceRegistry__write_from_process_async(ProcessPtr requester, ConstBStringPtr path, BlockNumber block,
+                                                  BlockCount count, DataPtr requester_buffer, size_t buffer_size,
+                                                  MessageBrokerPtr message_broker);
+Result(ServiceCode) BlockDeviceRegistry__open_channel(ProcessPtr requester, ServiceBlockChannelOpenRequestPtr request,
+                                                      MessageBrokerPtr message_broker);
+Result(ServiceCode)
+    BlockDeviceRegistry__close_channel(ProcessPtr requester, ServiceBlockChannelCloseRequestPtr request);
 Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPtr process);
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(ConstBStringPtr path);
 BlockDevicePaths BlockDeviceRegistry__paths();
 BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries();
 Optional(BlockDeviceMetadata) BlockDeviceRegistry__metadata(ConstBStringPtr alias);
 Result(ServiceBlockRequest) BlockDeviceRegistry__get_request(ProcessPtr service_process, uint64_t request_id);
-Result(ServiceCode) BlockDeviceService__complete(
-    ProcessPtr service_process, ServiceBlockCompletionPtr completion
-);
+Result(ServiceCode) BlockDeviceService__complete(ProcessPtr service_process, ServiceBlockCompletionPtr completion);
 
 #endif

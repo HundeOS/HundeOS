@@ -1,10 +1,8 @@
 #include "originating_call_context.h"
 
-static OriginatingContext OriginatingContext__new(
-    KernelPtr kernel, CallType type, OptionalPtr(ProcessPtr) process
-)
+static OriginatingContext OriginatingContext__new(KernelPtr kernel, CallType type, OptionalPtr(ProcessPtr) process)
 {
-    return (OriginatingContext) {
+    return (OriginatingContext){
         .type = type,
         .kernel = kernel,
         .process = *process,
@@ -13,12 +11,12 @@ static OriginatingContext OriginatingContext__new(
 
 static IRQCallContext IRQCallContext__new()
 {
-    return (IRQCallContext) {};
+    return (IRQCallContext){};
 }
 
 static FaultCallContext FaultCallContext__new()
 {
-    return (FaultCallContext) {};
+    return (FaultCallContext){};
 }
 
 OriginatingContext OriginatingContext__syscall(KernelPtr kernel, const CallContext * syscall)

@@ -16,21 +16,11 @@ bool Fat16FilesystemIO__available()
 
 static FileIO FileIO__new_all_unsupported()
 {
-    return (FileIO) {
-        .base_io = IO__new(
-            IO__unsupported_open,
-            IO__unsupported_read,
-            IO__unsupported_write,
-            IO__unsupported_accept,
-            IO__unsupported_close,
-            IO__unsupported_park,
-            IO__unsupported_unpark,
-            IO__unsupported_server_buffer,
-            IO__unsupported_server_write_buffer,
-            IO__unsupported_data_available,
-            IO__unsupported_data_consumed,
-            IO__unsupported_eof
-        ),
+    return (FileIO){
+        .base_io = IO__new(IO__unsupported_open, IO__unsupported_read, IO__unsupported_write, IO__unsupported_accept,
+                           IO__unsupported_close, IO__unsupported_park, IO__unsupported_unpark,
+                           IO__unsupported_server_buffer, IO__unsupported_server_write_buffer,
+                           IO__unsupported_data_available, IO__unsupported_data_consumed, IO__unsupported_eof),
         .list_nodes = FileIO__unsupported_list_nodes,
         .list_dir = FileIO__unsupported_list_dir,
         .mkdir = FileIO__unsupported_mkdir,
@@ -45,9 +35,8 @@ FileIO Fat16FilesystemIO__new()
     return FileIO__new_all_unsupported();
 }
 
-void * Fat16FilesystemIOState__heap_new(
-    FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors
-) __attribute__((weak));
+void * Fat16FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
+    __attribute__((weak));
 void * Fat16FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
 {
     return 0;
@@ -65,9 +54,8 @@ FileIO Fat32FilesystemIO__new()
     return FileIO__new_all_unsupported();
 }
 
-void * Fat32FilesystemIOState__heap_new(
-    FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors
-) __attribute__((weak));
+void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
+    __attribute__((weak));
 void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
 {
     return 0;
@@ -85,9 +73,8 @@ FileIO Ext2FilesystemIO__new()
     return FileIO__new_all_unsupported();
 }
 
-void * Ext2FilesystemIOState__heap_new(
-    FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors
-) __attribute__((weak));
+void * Ext2FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
+    __attribute__((weak));
 void * Ext2FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
 {
     return 0;
@@ -107,7 +94,7 @@ BString ext2 = bstr("ext2");
 BString memfs = bstr("tmp/memfs");
 BString proc = bstr("proc");
 
-#define BOOT_CONFIG_BLOCK_COUNT ((uint64_t) 8 * 1024 * 1024 / BLOCK_DEVICE_BLOCK_SIZE)
+#define BOOT_CONFIG_BLOCK_COUNT ((uint64_t)8 * 1024 * 1024 / BLOCK_DEVICE_BLOCK_SIZE)
 
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(ConstBStringPtr path) __attribute__((weak));
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(ConstBStringPtr path)
@@ -115,9 +102,9 @@ Optional(BlockDevicePtr) BlockDeviceRegistry__find(ConstBStringPtr path)
     return None(BlockDevicePtr);
 }
 
-static Result(IOStatus) Filesystem__mount_resolved_block_device(
-    FilesystemPtr root_fs, BlockDevicePtr device, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
-)
+static Result(IOStatus)
+    Filesystem__mount_resolved_block_device(FilesystemPtr root_fs, BlockDevicePtr device,
+                                            ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
 {
     Optional(FilesystemPtr) filesystem = None(FilesystemPtr);
 
@@ -143,10 +130,12 @@ static Result(IOStatus) Filesystem__mount_resolved_block_device(
         filesystem = Some(FilesystemPtr, ext2_filesystem);
     }
 
-    match_optional(FilesystemPtr, filesystem,
+    match_optional(
+        filesystem,
         some(mounted_filesystem)
         {
-            match_result(MountResult, Filesystem__mount(root_fs, mountpoint, mounted_filesystem),
+            match_result(
+                Filesystem__mount(root_fs, mountpoint, mounted_filesystem),
                 success(_) { return Success(IOStatus, IO_OK); },
                 error(code, message) { return Error(IOStatus, message, code); }
             );
@@ -157,16 +146,17 @@ static Result(IOStatus) Filesystem__mount_resolved_block_device(
     return Error(IOStatus, bstring("Filesystem type not supported"), IO_OPERATION_NOT_SUPPORTED);
 }
 
-Result(IOStatus) Filesystem__mount_block_device(
-    FilesystemPtr self, ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
-)
+Result(IOStatus) Filesystem__mount_block_device(FilesystemPtr self, ConstBStringPtr device_path,
+                                                ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
 {
-    match_optional(FilesystemPtr, Mounts__get(&self->mounts, *mountpoint),
+    match_optional(
+        Mounts__get(&self->mounts, *mountpoint),
         some(existing) { return Success(IOStatus, IO_OK); },
         none_do_nothing()
     );
 
-    match_optional(BlockDevicePtr, BlockDeviceRegistry__find(device_path),
+    match_optional(
+        BlockDeviceRegistry__find(device_path),
         some(device) { return Filesystem__mount_resolved_block_device(self, device, filesystem_type, mountpoint); },
         none_do_nothing()
     );
@@ -176,7 +166,7 @@ Result(IOStatus) Filesystem__mount_block_device(
 
 static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableEntryPtr entry)
 {
-    match_optional(FilesystemPtr, Mounts__get(&root_fs->mounts, entry->mountpoint),
+    match_optional(Mounts__get(&root_fs->mounts, entry->mountpoint),
         some(existing) { return; },
         none_do_nothing()
     );
@@ -185,8 +175,7 @@ static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableE
     if (entry->match_block_count)
     {
         BlockDeviceMetadataEntries metadata_entries = BlockDeviceRegistry__metadata_entries();
-        for_each_fa(BlockDeviceMetadataEntries, metadata_entries, index, metadata,
-        {
+        for_each_fa(BlockDeviceMetadataEntries, metadata_entries, index, metadata, {
             if (metadata.block_count == entry->block_count)
             {
                 device_match = BlockDeviceRegistry__find(&metadata.path);
@@ -198,30 +187,26 @@ static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableE
         device_match = BlockDeviceRegistry__find(&entry->device_path);
     }
 
-    match_optional(BlockDevicePtr, device_match,
-        some(device) { Filesystem__mount_resolved_block_device(root_fs, device, &entry->filesystem_type, &entry->mountpoint); },
+    match_optional(
+        device_match,
+        some(device)
+        {
+            Filesystem__mount_resolved_block_device(root_fs, device, &entry->filesystem_type, &entry->mountpoint);
+        },
         none_do_nothing()
     );
 }
 
 static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemTablePtr self)
 {
-    match_result(CollectionCode, FilesystemTable__add(
-        self,
-        &bstr("/dev/virtio1"),
-        &bstr("ext2"),
-        &bstr("/")
-    ),
+    match_result(
+        FilesystemTable__add(self, &bstr("/dev/virtio1"), &bstr("ext2"), &bstr("/")),
         success_do_nothing(),
         error(code, message) { return Error(CollectionCode, message, code); }
     );
 
-    match_result(CollectionCode, FilesystemTable__add_by_block_count(
-        self,
-        BOOT_CONFIG_BLOCK_COUNT,
-        &bstr("ext2"),
-        &bstr("/boot/config")
-    ),
+    match_result(
+        FilesystemTable__add_by_block_count(self, BOOT_CONFIG_BLOCK_COUNT, &bstr("ext2"), &bstr("/boot/config")),
         success_do_nothing(),
         error(code, message) { return Error(CollectionCode, message, code); }
     );
@@ -232,9 +217,7 @@ static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemT
 void FilesystemTable__mount_available_entries(FilesystemPtr root_fs)
 {
     for_each_ll(FilesystemTableEntries, root_fs->filesystem_table.entries, entry,
-    {
-        FilesystemTable__mount_entry(root_fs, &entry);
-    });
+                { FilesystemTable__mount_entry(root_fs, &entry); });
 }
 
 FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel)
@@ -263,7 +246,8 @@ FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel)
     MemFilesystemIOStatePtr memfs_state = MemFilesystemIOState__heap_new(mem_filesystem);
     Filesystem__mount(root_fs, &memfs, mem_filesystem);
 
-    match_result(CollectionCode, FilesystemTable__add_hardcoded_entries(&root_fs->filesystem_table),
+    match_result(
+        FilesystemTable__add_hardcoded_entries(&root_fs->filesystem_table),
         success(_) { FilesystemTable__mount_available_entries(root_fs); },
         error(code, message) { __d_printf(FILESYSTEM, "Filesystem table setup failed %i %s\n", code, cstr(message)); }
     );

@@ -20,6 +20,10 @@ run the tests and generate the runners.
 ## Check first
 Plan and then tell the user what you plan to do before making changes.
 
+## Compilation database
+Run `make compile-commands` whenever source files are added or removed so IDEs
+and other tooling receive the current build targets and compiler flags.
+
 ## Unit tests
 ### Kernel
 Add unit tests for any new code in kernel. Some architecture specific code
@@ -42,6 +46,23 @@ fixing. Ensure the user is informed of the theory and agrees to
 the evidence.
 
 # Code standards
+## Reuse built-in types and operations
+Read [Generic types, collections, and strings](docs/generic-types.md) before
+implementing or changing collection, string, Optional, or Result operations.
+
+Before writing a local helper or loop for searching, membership, filtering,
+sorting, copying, parsing, or collection mutation, inspect the relevant shared
+type's public API, macro-generated functions, and existing callers. Use the
+built-in operation when it fits. Using an iteration macro does not justify
+reimplementing an operation the collection already provides.
+
+If an operation is missing, consider adding a small reusable function to the
+owning generic type instead of duplicating it in a caller. Explain the gap and
+why the function belongs there in the proposed change. Add tests alongside the
+type's existing tests and update the guide when its public API changes. Keep
+domain-specific logic in the caller, and do not add speculative APIs without a
+current need.
+
 ## Result types (Some, None, Success, Error, etc)
 These should be used in the kernel code in most cases. Raw pointers or NULLs
 should not be used in the kernel or driver. Optional types should be used.
@@ -54,8 +75,10 @@ The matching macros to match results types should be used
 
 Do not access Optional or Result internals directly, including fields like
 `.present`, `.some.val`, success payload fields, or error payload fields. Use
-`match_optional`, `match_result`, `unwrap`, `result_unwrap` or `result_unwrap` instead. The only exception
-is inside the implementation of the Optional/Result macros themselves.
+`match_optional`, `match_result`, `unwrap_optional`, or `unwrap_result` instead.
+The match and unwrap macros derive their types from their expressions; never
+pass an explicit type argument. The only exception is inside the implementation
+of the Optional/Result macros themselves.
 
 ## Strings in code
 BStrings should be used. These are bounded with length stored independently to the buffer.
@@ -71,6 +94,11 @@ There are Macros for iterating over fixedarrays etc. These should be used.
 Do not access fields data structure structs directly,
 use the provided functions or add functions if they make sense and are needed.
 
+Generated collection typedefs such as names ending in `__type`, `__type_ptr`,
+`__optional`, or `__value_type` are private implementation details. Do not use
+them in callers. Match and unwrap macros derive their value types from their
+expressions; never pass an explicit type argument.
+
 ## Pointers in kernel code
 Pointers should be typedefed to a name following the convention
 TypeNamePtr
@@ -81,6 +109,13 @@ Do not add `(void) name;` statements to suppress unused parameter or unused vari
 
 ## GOTO no go
 Dont use goto statements, ever.
+
+## Lint
+Always run `make hundelint` after changing code. Treat any hundelint finding as
+work that must be fixed, even though the command may exit 0. Do not describe
+existing findings as acceptable baseline findings. Do not add ignores,
+suppressions, or exclusions to hide lint findings unless the user explicitly
+approves that exact suppression.
 
 ## critical_section
 When using mutexes in the kernel, use the critical_section macros along
@@ -154,6 +189,18 @@ Add unit tests for any new code in kernel. Some architecture specific code
 may not have unit tests as it is difficult to test..
 
 # Kernel architecture
+Read [Channels and event queues](docs/channels-and-event-queues.md) before changing
+service discovery, shared queues, channel lifecycle, or managed shared-page memory.
+
+Read [Atomic message queues](docs/atomic-message-queues.md) before changing
+queue access permissions, connection establishment, or transport authentication.
+It records the initial atomic message queue API and the remaining migration away
+from globally writable service queues.
+
+Read [Userspace interrupt service](docs/interrupt-service.md) before changing
+device IRQ delegation, interrupt registration/authentication, or acknowledgement
+and rearm handling. This document describes the proposed `hund-unterbrict` design.
+
 ## We will be working towards a "millikernel" architecture
 This means that the kernel is neither monolithic or split up in to micro concerns.
 

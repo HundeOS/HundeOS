@@ -7,8 +7,7 @@
 typedef struct MemFilePage
 {
     KernelAddress address;
-}
-MemFilePage;
+} MemFilePage;
 
 typedef MemFilePage * MemFilePagePtr;
 
@@ -16,7 +15,7 @@ OptionalDef(MemFilePage);
 OptionalDef(MemFilePagePtr);
 
 bool MemFilePage__equals(MemFilePagePtr self, MemFilePagePtr other);
-LinkedListDefine(MemFilePage, MemFilePages, (EqualFunction) MemFilePage__equals);
+LinkedListDefine(MemFilePage, MemFilePages, (EqualFunction)MemFilePage__equals);
 
 typedef struct MemFile
 {
@@ -24,8 +23,7 @@ typedef struct MemFile
     size_t size;
     size_t capacity;
     MemFilePages pages;
-}
-MemFile;
+} MemFile;
 
 typedef MemFile * MemFilePtr;
 
@@ -34,13 +32,12 @@ OptionalDef(MemFilePtr);
 ResultDef(MemFilePtr);
 
 bool MemFile__equals(MemFilePtr self, MemFilePtr other);
-LinkedListDefine(MemFile, MemFiles, (EqualFunction) MemFile__equals);
+LinkedListDefine(MemFile, MemFiles, (EqualFunction)MemFile__equals);
 
 typedef struct MemDirectory
 {
     BString path;
-}
-MemDirectory;
+} MemDirectory;
 
 typedef MemDirectory * MemDirectoryPtr;
 
@@ -48,7 +45,7 @@ OptionalDef(MemDirectory);
 OptionalDef(MemDirectoryPtr);
 
 bool MemDirectory__equals(MemDirectoryPtr self, MemDirectoryPtr other);
-LinkedListDefine(MemDirectory, MemDirectories, (EqualFunction) MemDirectory__equals);
+LinkedListDefine(MemDirectory, MemDirectories, (EqualFunction)MemDirectory__equals);
 
 typedef struct MemFileHandle
 {
@@ -56,8 +53,7 @@ typedef struct MemFileHandle
     FilePointer offset;
     IOBuffer buffer;
     Flags flags;
-}
-MemFileHandle;
+} MemFileHandle;
 
 typedef MemFileHandle * MemFileHandlePtr;
 
@@ -73,8 +69,7 @@ typedef struct MemFilesystemIOState
     MemDirectories directories;
     MemFileHandleMap handles;
     uint32_t handle_count;
-}
-MemFilesystemIOState;
+} MemFilesystemIOState;
 
 typedef MemFilesystemIOState * MemFilesystemIOStatePtr;
 

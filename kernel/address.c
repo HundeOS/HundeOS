@@ -16,7 +16,6 @@ bool KernelAddress__equals(KernelAddressPtr self, KernelAddressPtr other)
     return false;
 }
 
-
 bool UserAddress__equals(UserAddressPtr self, UserAddressPtr other)
 {
     if (self == other)

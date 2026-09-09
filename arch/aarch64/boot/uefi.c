@@ -32,8 +32,7 @@ typedef struct EfiTableHeader
     uint32_t header_size;
     uint32_t crc32;
     uint32_t reserved;
-}
-EfiTableHeader;
+} EfiTableHeader;
 
 typedef struct EfiGuid
 {
@@ -41,15 +40,15 @@ typedef struct EfiGuid
     uint16_t data2;
     uint16_t data3;
     uint8_t data4[8];
-}
-EfiGuid;
+} EfiGuid;
+
+typedef const EfiGuid * ConstEfiGuidPtr;
 
 typedef struct EfiConfigurationTable
 {
     EfiGuid vendor_guid;
     uint64_t vendor_table;
-}
-EfiConfigurationTable;
+} EfiConfigurationTable;
 
 typedef struct EfiSystemTable
 {
@@ -67,33 +66,29 @@ typedef struct EfiSystemTable
     uint64_t boot_services;
     uint64_t number_of_table_entries;
     EfiConfigurationTable * configuration_table;
-}
-EfiSystemTable;
+} EfiSystemTable;
 
 typedef EfiSystemTable * EfiSystemTablePtr;
 typedef EfiConfigurationTable * EfiConfigurationTablePtr;
 
 static __BOOT__(uint8_t) UefiAcpi__read8(uint64_t address)
 {
-    return *(volatile uint8_t *) address;
+    return *(volatile uint8_t *)address;
 }
 
 static __BOOT__(uint16_t) UefiAcpi__read16(uint64_t address)
 {
-    return ((uint16_t) UefiAcpi__read8(address))
-        | ((uint16_t) UefiAcpi__read8(address + 1) << 8);
+    return ((uint16_t)UefiAcpi__read8(address)) | ((uint16_t)UefiAcpi__read8(address + 1) << 8);
 }
 
 static __BOOT__(uint32_t) UefiAcpi__read32(uint64_t address)
 {
-    return ((uint32_t) UefiAcpi__read16(address))
-        | ((uint32_t) UefiAcpi__read16(address + 2) << 16);
+    return ((uint32_t)UefiAcpi__read16(address)) | ((uint32_t)UefiAcpi__read16(address + 2) << 16);
 }
 
 static __BOOT__(uint64_t) UefiAcpi__read64(uint64_t address)
 {
-    return ((uint64_t) UefiAcpi__read32(address))
-        | ((uint64_t) UefiAcpi__read32(address + 4) << 32);
+    return ((uint64_t)UefiAcpi__read32(address)) | ((uint64_t)UefiAcpi__read32(address + 4) << 32);
 }
 
 static __BOOT__(bool) UefiAcpi__checksum_ok(uint64_t address, uint32_t len)
@@ -107,34 +102,20 @@ static __BOOT__(bool) UefiAcpi__checksum_ok(uint64_t address, uint32_t len)
     return sum == 0;
 }
 
-static __BOOT__(bool) UefiAcpi__guid_is_acpi20(EfiGuid * guid)
+static __BOOT__(bool) UefiAcpi__guid_is_acpi20(ConstEfiGuidPtr guid)
 {
-    return guid->data1 == ACPI_20_TABLE_GUID_DATA1
-        && guid->data2 == ACPI_20_TABLE_GUID_DATA2
-        && guid->data3 == ACPI_20_TABLE_GUID_DATA3
-        && guid->data4[0] == 0xbc
-        && guid->data4[1] == 0x22
-        && guid->data4[2] == 0x00
-        && guid->data4[3] == 0x80
-        && guid->data4[4] == 0xc7
-        && guid->data4[5] == 0x3c
-        && guid->data4[6] == 0x88
-        && guid->data4[7] == 0x81;
+    return guid->data1 == ACPI_20_TABLE_GUID_DATA1 && guid->data2 == ACPI_20_TABLE_GUID_DATA2 &&
+           guid->data3 == ACPI_20_TABLE_GUID_DATA3 && guid->data4[0] == 0xbc && guid->data4[1] == 0x22 &&
+           guid->data4[2] == 0x00 && guid->data4[3] == 0x80 && guid->data4[4] == 0xc7 && guid->data4[5] == 0x3c &&
+           guid->data4[6] == 0x88 && guid->data4[7] == 0x81;
 }
 
-static __BOOT__(bool) UefiAcpi__guid_is_acpi10(EfiGuid * guid)
+static __BOOT__(bool) UefiAcpi__guid_is_acpi10(ConstEfiGuidPtr guid)
 {
-    return guid->data1 == ACPI_10_TABLE_GUID_DATA1
-        && guid->data2 == ACPI_10_TABLE_GUID_DATA2
-        && guid->data3 == ACPI_10_TABLE_GUID_DATA3
-        && guid->data4[0] == 0x9a
-        && guid->data4[1] == 0x16
-        && guid->data4[2] == 0x00
-        && guid->data4[3] == 0x90
-        && guid->data4[4] == 0x27
-        && guid->data4[5] == 0x3f
-        && guid->data4[6] == 0xc1
-        && guid->data4[7] == 0x4d;
+    return guid->data1 == ACPI_10_TABLE_GUID_DATA1 && guid->data2 == ACPI_10_TABLE_GUID_DATA2 &&
+           guid->data3 == ACPI_10_TABLE_GUID_DATA3 && guid->data4[0] == 0x9a && guid->data4[1] == 0x16 &&
+           guid->data4[2] == 0x00 && guid->data4[3] == 0x90 && guid->data4[4] == 0x27 && guid->data4[5] == 0x3f &&
+           guid->data4[6] == 0xc1 && guid->data4[7] == 0x4d;
 }
 
 static __BOOT__(uint64_t) UefiAcpi__find_rsdp(uint64_t system_table)
@@ -144,7 +125,7 @@ static __BOOT__(uint64_t) UefiAcpi__find_rsdp(uint64_t system_table)
         return 0;
     }
 
-    EfiSystemTablePtr table = (EfiSystemTablePtr) system_table;
+    EfiSystemTablePtr table = (EfiSystemTablePtr)system_table;
     if (table->header.signature != EFI_SYSTEM_TABLE_SIGNATURE || table->configuration_table == 0)
     {
         return 0;
@@ -297,12 +278,9 @@ static __BOOT__(void) UefiAcpi__apply_mcfg(BootPlatformInfoPtr platform, uint64_
 
         if (ecam_base != 0 && bus_end >= bus_start)
         {
-            platform->pci = Some(PciInfo, PciInfo__new(
-                ecam_base,
-                ((bus_end - bus_start) + 1ULL) * ACPI_PCI_ECAM_BUS_SIZE,
-                bus_start,
-                bus_end
-            ));
+            platform->pci =
+                Some(PciInfo, PciInfo__new(ecam_base, ((bus_end - bus_start) + 1ULL) * ACPI_PCI_ECAM_BUS_SIZE,
+                                           bus_start, bus_end));
             return;
         }
 

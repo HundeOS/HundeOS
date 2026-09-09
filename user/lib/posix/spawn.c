@@ -15,7 +15,8 @@ SpawnArguments POSIX__spawn_arguments_after_argv0(char * const argv[]) // hundel
     // Hudos spawn arguments exclude argv0; Process__setup_with_args supplies it from the executable path.
     for (size_t index = POSIX_FIRST_HUNDOS_ARGUMENT_INDEX; argv[index] != NULL; index++) // hundelint: ignore-no-null
     {
-        match_result(CollectionCode, SpawnArguments__push(&arguments, bstring(argv[index])),
+        match_result(
+            SpawnArguments__push(&arguments, bstring(argv[index])),
             success_do_nothing(),
             error(code, message) { return arguments; }
         );
@@ -24,7 +25,8 @@ SpawnArguments POSIX__spawn_arguments_after_argv0(char * const argv[]) // hundel
     return arguments;
 }
 
-Result(SpawnResult) POSIX__spawnv(SpawnMode mode, const char * path, char * const argv[]) // hundelint: ignore-no-raw-char-buffer
+Result(SpawnResult)
+    POSIX__spawnv(SpawnMode mode, const char * path, char * const argv[]) // hundelint: ignore-no-raw-char-buffer
 {
     if (path == NULL) // hundelint: ignore-no-null
     {

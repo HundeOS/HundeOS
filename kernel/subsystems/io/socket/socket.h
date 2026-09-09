@@ -34,45 +34,27 @@ struct SocketRegistry
     uint64_t next_request_id;
 };
 
-#define SOCKET_REGISTRY_INIT \
-    (SocketRegistry) { \
-        .lock = MUTEX_INIT, \
-        .router_process = None(ProcessPtr), \
-        .message_broker = None(MessageBrokerPtr), \
-        .requests = EmptyMap(SocketRequestMap), \
-        .next_request_id = 1, \
+#define SOCKET_REGISTRY_INIT                                                                                           \
+    (SocketRegistry)                                                                                                   \
+    {                                                                                                                  \
+        .lock = MUTEX_INIT, .router_process = None(ProcessPtr), .message_broker = None(MessageBrokerPtr),              \
+        .requests = EmptyMap(SocketRequestMap), .next_request_id = 1,                                                  \
     }
 
 ResultDef(IOSocketRouterRequest);
 
-typedef Result(Anything) (* SocketRequestComplete)(
-    IOSocketRouterRequestPtr request,
-    IOSocketRouterCompletionPtr completion,
-    Anything context
-);
+typedef Result(Anything) (*SocketRequestComplete)(IOSocketRouterRequestPtr request,
+                                                  IOSocketRouterCompletionPtr completion, Anything context);
 
-Result(ServiceCode) SocketRegistry__register_router(
-    SocketRegistryPtr self,
-    ProcessPtr service_process,
-    MessageBrokerPtr message_broker
-);
-Result(ServiceCode) SocketRegistry__start_request(
-    SocketRegistryPtr self,
-    IOSocketRouterRequest request,
-    KernelContext kernel_context,
-    SocketRequestComplete complete,
-    Anything complete_context
-);
-Result(IOSocketRouterRequest) SocketRegistry__get_request(
-    SocketRegistryPtr self,
-    ProcessPtr service_process,
-    uint64_t request_id
-);
-Result(ServiceCode) SocketRegistry__complete(
-    SocketRegistryPtr self,
-    ProcessPtr service_process,
-    IOSocketRouterCompletionPtr completion
-);
+Result(ServiceCode) SocketRegistry__register_router(SocketRegistryPtr self, ProcessPtr service_process,
+                                                    MessageBrokerPtr message_broker);
+Result(ServiceCode)
+    SocketRegistry__start_request(SocketRegistryPtr self, IOSocketRouterRequest request, KernelContext kernel_context,
+                                  SocketRequestComplete complete, Anything complete_context);
+Result(IOSocketRouterRequest)
+    SocketRegistry__get_request(SocketRegistryPtr self, ProcessPtr service_process, uint64_t request_id);
+Result(ServiceCode) SocketRegistry__complete(SocketRegistryPtr self, ProcessPtr service_process,
+                                             IOSocketRouterCompletionPtr completion);
 void SocketRegistry__reset(SocketRegistryPtr self);
 
 typedef struct SocketIOState SocketIOState;

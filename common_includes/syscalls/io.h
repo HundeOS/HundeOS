@@ -23,8 +23,7 @@ typedef enum IOOperation
     IO_SERVER_DATA_CONSUMED,
     IO_SERVER_EOF,
     IO_ACCEPT,
-}
-IOOperation;
+} IOOperation;
 
 typedef enum IOStatus
 {
@@ -43,8 +42,7 @@ typedef enum IOStatus
     IO_UNKNOWN_PID = -12,
     IO_PERMISSION_DENIED = -13,
     IO_PANIC = -255,
-}
-IOStatus;
+} IOStatus;
 
 typedef enum IOFlags
 {
@@ -54,8 +52,7 @@ typedef enum IOFlags
     IO_OPEN_EXECUTE = 0x8,
     IO_OPEN_BIND = 0x10,
     IO_OPEN_LISTEN = 0x20,
-}
-IOFlags;
+} IOFlags;
 
 typedef int64_t IOHandle;
 typedef int64_t ByteCount;
@@ -73,14 +70,13 @@ typedef struct IOServerBuffer
 {
     IOServerBufferDataPtr data;
     uint64_t capacity;
-}
-IOServerBuffer;
+} IOServerBuffer;
 
 typedef IOServerBuffer * IOServerBufferPtr;
 
 static inline IOServerBuffer IOServerBuffer__new(IOServerBufferDataPtr data, uint64_t capacity)
 {
-    return (IOServerBuffer) {
+    return (IOServerBuffer){
         .data = data,
         .capacity = capacity,
     };
@@ -90,15 +86,13 @@ typedef enum IOServerRole
 {
     IO_SERVER_READ = 1,
     IO_SERVER_WRITE = 2,
-}
-IOServerRole;
+} IOServerRole;
 
 typedef struct IOPathRequest
 {
     BString path;
     Flags flags;
-}
-IOPathRequest;
+} IOPathRequest;
 
 typedef IOPathRequest * IOPathRequestPtr;
 
@@ -107,8 +101,7 @@ typedef struct IOListDirRequest
     BString path;
     DirectoryEntryPtr entries;
     size_t max_entries;
-}
-IOListDirRequest;
+} IOListDirRequest;
 
 typedef IOListDirRequest * IOListDirRequestPtr;
 
@@ -116,8 +109,7 @@ typedef struct IOLinkRequest
 {
     BString source_path;
     BString target_path;
-}
-IOLinkRequest;
+} IOLinkRequest;
 
 typedef IOLinkRequest * IOLinkRequestPtr;
 
@@ -126,8 +118,7 @@ typedef struct IOMountRequest
     BString device_path;
     BString filesystem_type;
     BString mountpoint;
-}
-IOMountRequest;
+} IOMountRequest;
 
 typedef IOMountRequest * IOMountRequestPtr;
 
@@ -135,8 +126,7 @@ typedef struct IOServerRegisterRequest
 {
     BString path;
     IOServerRole role;
-}
-IOServerRegisterRequest;
+} IOServerRegisterRequest;
 
 typedef IOServerRegisterRequest * IOServerRegisterRequestPtr;
 
@@ -146,15 +136,15 @@ typedef IOServerRegisterRequest * IOServerRegisterRequestPtr;
 #define IO_MODE_TYPE_FILE 0x8000U
 #define IO_MODE_TYPE_DIR 0x4000U
 
-#define IO_MODE_OWNER_READ  0x0100U
+#define IO_MODE_OWNER_READ 0x0100U
 #define IO_MODE_OWNER_WRITE 0x0080U
-#define IO_MODE_OWNER_EXEC  0x0040U
-#define IO_MODE_GROUP_READ  0x0020U
+#define IO_MODE_OWNER_EXEC 0x0040U
+#define IO_MODE_GROUP_READ 0x0020U
 #define IO_MODE_GROUP_WRITE 0x0010U
-#define IO_MODE_GROUP_EXEC  0x0008U
-#define IO_MODE_OTHER_READ  0x0004U
+#define IO_MODE_GROUP_EXEC 0x0008U
+#define IO_MODE_OTHER_READ 0x0004U
 #define IO_MODE_OTHER_WRITE 0x0002U
-#define IO_MODE_OTHER_EXEC  0x0001U
+#define IO_MODE_OTHER_EXEC 0x0001U
 
 #define IO_DIRENT_ATTR_NONE 0ULL
 #define IO_DIRENT_ATTR_HIDDEN (1ULL << 0)
@@ -171,17 +161,16 @@ struct DirectoryEntry
 
 static inline IOPathRequest IOPathRequest__new(ConstBStringPtr path, Flags flags)
 {
-    return (IOPathRequest) {
+    return (IOPathRequest){
         .path = *path,
         .flags = flags,
     };
 }
 
-static inline IOListDirRequest IOListDirRequest__new(
-    ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries
-)
+static inline IOListDirRequest IOListDirRequest__new(ConstBStringPtr path, DirectoryEntryPtr entries,
+                                                     size_t max_entries)
 {
-    return (IOListDirRequest) {
+    return (IOListDirRequest){
         .path = *path,
         .entries = entries,
         .max_entries = max_entries,
@@ -190,17 +179,16 @@ static inline IOListDirRequest IOListDirRequest__new(
 
 static inline IOLinkRequest IOLinkRequest__new(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
-    return (IOLinkRequest) {
+    return (IOLinkRequest){
         .source_path = *source_path,
         .target_path = *target_path,
     };
 }
 
-static inline IOMountRequest IOMountRequest__new(
-    ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
-)
+static inline IOMountRequest IOMountRequest__new(ConstBStringPtr device_path, ConstBStringPtr filesystem_type,
+                                                 ConstBStringPtr mountpoint)
 {
-    return (IOMountRequest) {
+    return (IOMountRequest){
         .device_path = *device_path,
         .filesystem_type = *filesystem_type,
         .mountpoint = *mountpoint,
@@ -209,21 +197,16 @@ static inline IOMountRequest IOMountRequest__new(
 
 static inline IOServerRegisterRequest IOServerRegisterRequest__new(ConstBStringPtr path, IOServerRole role)
 {
-    return (IOServerRegisterRequest) {
+    return (IOServerRegisterRequest){
         .path = *path,
         .role = role,
     };
 }
 
-static inline DirectoryEntry DirectoryEntry__new(
-    DirectoryEntryAttributes attributes,
-    UserID user_id,
-    GroupID group_id,
-    FileMode mode,
-    ConstBStringPtr name
-)
+static inline DirectoryEntry DirectoryEntry__new(DirectoryEntryAttributes attributes, UserID user_id, GroupID group_id,
+                                                 FileMode mode, ConstBStringPtr name)
 {
-    DirectoryEntry entry = (DirectoryEntry) {
+    DirectoryEntry entry = (DirectoryEntry){
         .attributes = attributes,
         .user_id = user_id,
         .group_id = group_id,
@@ -231,7 +214,7 @@ static inline DirectoryEntry DirectoryEntry__new(
         .name_len = 0,
     };
 
-    entry.name_len = (uint64_t) BString__copy_to(name, entry.name, IO_DIRENT_NAME_MAX);
+    entry.name_len = (uint64_t)BString__copy_to(name, entry.name, IO_DIRENT_NAME_MAX);
     return entry;
 }
 

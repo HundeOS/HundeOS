@@ -17,20 +17,19 @@
 #define USB_KEYBOARD_PENDING_BYTES 256U
 
 RingBufferDefine(USB_KEYBOARD_PENDING_BYTES, UsbKeyboardPendingBuffer)
-RingBufferStackBodyDefine(UsbKeyboardPendingBuffer)
+    RingBufferStackBodyDefine(UsbKeyboardPendingBuffer)
 
-typedef struct UsbKeyboard
+        typedef struct UsbKeyboard
 {
     IOHandle keyboard;
     UsbKeyboardPendingBuffer pending;
-}
-UsbKeyboard;
+} UsbKeyboard;
 
 typedef UsbKeyboard * UsbKeyboardPtr;
 
 static UsbKeyboard UsbKeyboard__new(void)
 {
-    return (UsbKeyboard) {
+    return (UsbKeyboard){
         .keyboard = -1,
         .pending = UsbKeyboardPendingBuffer__new(),
     };
@@ -49,7 +48,8 @@ static void UsbKeyboard__publish_pending(UsbKeyboardPtr self)
         return;
     }
 
-    match_result(ItemCount, UsbKeyboardPendingBuffer__drain(&self->pending, (CharPtr) buffer.data, buffer.capacity),
+    match_result(
+        UsbKeyboardPendingBuffer__drain(&self->pending, (CharPtr)buffer.data, buffer.capacity),
         success(byte_count)
         {
             if (byte_count > 0)
@@ -59,7 +59,7 @@ static void UsbKeyboard__publish_pending(UsbKeyboardPtr self)
         },
         error(code, message)
         {
-            DRIVER_DEBUG("usb_keyboard: pending drain failed: %s (%i)\n", BString__cstr(&message), (int) code);
+            DRIVER_DEBUG("usb_keyboard: pending drain failed: %s (%i)\n", BString__cstr(&message), (int)code);
             return;
         }
     );
@@ -78,7 +78,7 @@ static bool UsbKeyboard__init(UsbKeyboardPtr self)
     self->keyboard = io_server_register(&bstr(USB_KEYBOARD_PATH), IO_SERVER_READ);
     if (self->keyboard < 0)
     {
-        DRIVER_DEBUG("usb_keyboard: register failed %i\n", (int) self->keyboard);
+        DRIVER_DEBUG("usb_keyboard: register failed %i\n", (int)self->keyboard);
         return false;
     }
 

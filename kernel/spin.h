@@ -3,7 +3,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef enum {
+typedef enum
+{
     WAIT_ABORT = -1,
     WAIT_OK = 0,
 } WaitResult;
@@ -12,7 +13,6 @@ typedef void * SpinContext;
 
 typedef volatile bool (*SpinCheck)();
 typedef volatile bool (*SpinContextCheck)(SpinContext ctx);
-
 
 void Spin__spin(uint64_t count);
 WaitResult Spin__wait(SpinCheck check);

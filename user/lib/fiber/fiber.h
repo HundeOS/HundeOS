@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "../../user.h"
+#include "../channel/channel.h"
 #include "../../../common/types/address.h"
 #include "../../../common/types/result.h"
 #include "../../../common/types/optional.h"
@@ -25,8 +26,7 @@ typedef enum FiberCode
     FIBER_ALLOCATION_FAILED = -6,
     FIBER_INVALID_STACK_SIZE = -7,
     FIBER_LIMIT_REACHED = -8,
-}
-FiberCode;
+} FiberCode;
 
 typedef enum FiberState
 {
@@ -35,8 +35,7 @@ typedef enum FiberState
     FIBER_RUNNING = 3,
     FIBER_WAITING = 4,
     FIBER_DONE = 5,
-}
-FiberState;
+} FiberState;
 
 ResultDef(FiberCode);
 
@@ -51,15 +50,14 @@ typedef enum FiberWaitKind
     FIBER_WAIT_BLOCK_REQUEST = 1,
     FIBER_WAIT_SERVICE_EVENT = 2,
     FIBER_WAIT_USER = 3,
-}
-FiberWaitKind;
+    FIBER_WAIT_CHANNEL = 4,
+} FiberWaitKind;
 
 typedef struct FiberWaitKey
 {
     FiberWaitKind kind;
     uint64_t id;
-}
-FiberWaitKey;
+} FiberWaitKey;
 
 typedef FiberWaitKey * FiberWaitKeyPtr;
 typedef const FiberWaitKey * ConstFiberWaitKeyPtr;
@@ -69,11 +67,10 @@ typedef struct FiberWakeValue
     FiberWaitKey key;
     FiberCode status;
     uint64_t value;
-}
-FiberWakeValue;
+} FiberWakeValue;
 typedef const FiberWakeValue * ConstFiberWakeValuePtr;
 
-typedef Result(FiberCode) (* FiberEntry)(FiberPtr self, Anything argument);
+typedef Result(FiberCode) (*FiberEntry)(FiberPtr self, Anything argument);
 
 OptionalDef(FiberWaitKey);
 OptionalDef(FiberWakeValue);
@@ -88,6 +85,7 @@ FiberWaitKey FiberWaitKey__new(FiberWaitKind kind, uint64_t id);
 FiberWaitKey FiberWaitKey__none(void);
 FiberWaitKey FiberWaitKey__request(uint64_t request_id);
 FiberWaitKey FiberWaitKey__block_request(uint64_t request_id);
+FiberWaitKey FiberWaitKey__channel(ChannelPtr channel);
 bool FiberWaitKey__equals(FiberWaitKeyPtr self, FiberWaitKeyPtr other);
 
 FiberWakeValue FiberWakeValue__new(ConstFiberWaitKeyPtr key, FiberCode status, uint64_t value);

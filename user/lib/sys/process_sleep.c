@@ -4,5 +4,5 @@
 
 ProcessSleepResult sleep_usec(uint64_t usec)
 {
-    return (ProcessSleepResult) syscall(SYSCALL_SLEEP, (Anything) usec, 0, 0, 0, 0);
+    return (ProcessSleepResult)syscall(SYSCALL_SLEEP, (Anything)usec, 0, 0, 0, 0);
 }

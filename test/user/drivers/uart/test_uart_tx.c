@@ -7,9 +7,9 @@
 #include "../../../../common_includes/syscalls/io.h"
 #include "../../../../common_includes/syscalls/service.h"
 
-#define UART_DR   0x000
-#define UART_FR   0x018
-#define FR_TXFF   (1u << 5)
+#define UART_DR 0x000
+#define UART_FR 0x018
+#define FR_TXFF (1u << 5)
 #define UART_PHYS_BASE 0x12345000ULL
 
 static char fake_io_buffer[2];
@@ -30,11 +30,10 @@ static uint64_t fake_service_wait_count;
 static bool fake_sysinfo_opened;
 static bool fake_sysinfo_closed;
 
-static const char fake_sysinfo[] =
-    "uart.physical_base=0x12345000\n"
-    "uart.virtual_base=0xffff000000000000\n"
-    "uart.irq=99\n"
-    "uart.mmio_size=0x1000\n";
+static const char fake_sysinfo[] = "uart.physical_base=0x12345000\n"
+                                   "uart.virtual_base=0xffff000000000000\n"
+                                   "uart.irq=99\n"
+                                   "uart.mmio_size=0x1000\n";
 
 static uint32_t fake_uart_read32(void * base, uint64_t offset);
 static void fake_uart_write32(void * base, uint64_t offset, uint32_t value);
@@ -126,7 +125,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size)
         buf[index] = fake_sysinfo[index];
         index++;
     }
-    return (ByteCount) index;
+    return (ByteCount)index;
 }
 
 IOStatus close(IOHandle handle)
@@ -141,13 +140,22 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     TEST_ASSERT_EQUAL_INT64(7, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     DynString sysinfo;
-    match_result(DynStringCode, DynString__init(&sysinfo, 128), success_do_nothing(), error(code, message) { return None(DynString); });
+    match_result(
+        DynString__init(&sysinfo, 128),
+        success_do_nothing(),
+        error(code, message) { return None(DynString); }
+    );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
-        match_result(DynStringCode, DynString__push_char(&sysinfo, fake_sysinfo[index]), success_do_nothing(), error(code, message) {
+        match_result(
+            DynString__push_char(&sysinfo, fake_sysinfo[index]),
+            success_do_nothing(),
+            error(code, message)
+            {
                 DynString__dispose(&sysinfo);
                 return None(DynString);
-            });
+            }
+        );
     }
     return Some(DynString, sysinfo);
 }
@@ -164,7 +172,7 @@ uint64_t device_ptr(ServiceMappedMemoryPtr memory)
 
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
-    return (void *) ((uint64_t) memory->driver_address + offset);
+    return (void *)((uint64_t)memory->driver_address + offset);
 }
 
 uint64_t device_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)

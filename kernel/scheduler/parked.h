@@ -29,21 +29,17 @@ struct ParkedOperation
 
 OptionalDef(ParkedOperation);
 
-ParkedOperationPtr ParkedOperation__heap_new(
-    KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation, ParkReason park_reason
-);
-ParkedOperationPtr ParkedOperation__heap_new_with_context_ownership(
-    KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation,
-    ParkReason park_reason, bool owns_kernel_context
-);
+ParkedOperationPtr ParkedOperation__heap_new(KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation,
+                                             ParkReason park_reason);
+ParkedOperationPtr ParkedOperation__heap_new_with_context_ownership(KernelContextPtr kernel_context,
+                                                                    OptionalPtr(Continuation) continuation,
+                                                                    ParkReason park_reason, bool owns_kernel_context);
 bool ParkedOperation__is_ready(ParkedOperationPtr self);
 void ParkedOperation__mark_ready(ParkedOperationPtr self);
-Result(CollectionCode) ParkedOperation__add_blocked_operation(
-    ParkedOperationPtr self, ParkedOperationPtr blocked_operation
-);
-Result(CollectionCode) ParkedOperation__resolve_blocked_operation(
-    ParkedOperationPtr self, ParkedOperationPtr blocked_operation
-);
+Result(CollectionCode)
+    ParkedOperation__add_blocked_operation(ParkedOperationPtr self, ParkedOperationPtr blocked_operation);
+Result(CollectionCode)
+    ParkedOperation__resolve_blocked_operation(ParkedOperationPtr self, ParkedOperationPtr blocked_operation);
 
 BString ParkReason__to_string(ParkReason reason);
 

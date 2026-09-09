@@ -9,27 +9,16 @@ static BString io_operation_not_supported = bstr("IO operation not supported");
 
 IOState IOState__new()
 {
-    return (IOState) {
+    return (IOState){
         .handles = EmptyArray(IOHandleArray),
     };
 }
 
-IO IO__new(
-    IO_open open,
-    IO_read read,
-    IO_write write,
-    IO_accept accept,
-    IO_close close,
-    IO_park park,
-    IO_unpark unpark,
-    IO_server_buffer server_buffer,
-    IO_server_write_buffer server_write_buffer,
-    IO_data_available data_available,
-    IO_data_consumed data_consumed,
-    IO_eof eof
-)
+IO IO__new(IO_open open, IO_read read, IO_write write, IO_accept accept, IO_close close, IO_park park, IO_unpark unpark,
+           IO_server_buffer server_buffer, IO_server_write_buffer server_write_buffer, IO_data_available data_available,
+           IO_data_consumed data_consumed, IO_eof eof)
 {
-    return (IO) {
+    return (IO){
         .open = open,
         .read = read,
         .write = write,
@@ -50,9 +39,8 @@ Result(IOInternalHandle) IO__unsupported_open(IOStatePtr self, ConstBStringPtr p
     return Error(IOInternalHandle, io_operation_not_supported, IO_OPERATION_NOT_SUPPORTED);
 }
 
-Result(IOBufferPtr) IO__unsupported_read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target
-)
+Result(IOBufferPtr)
+    IO__unsupported_read(IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target)
 {
     return Error(IOBufferPtr, io_operation_not_supported, IO_OPERATION_NOT_SUPPORTED);
 }
@@ -109,19 +97,17 @@ Optional(IOContextPtr) IO__unsupported_eof(IOStatePtr self)
 
 DeviceRegistration DeviceRegistration__new(IOPtr device, ConstBStringPtr path, IOStatePtr state)
 {
-    return (DeviceRegistration) {
+    return (DeviceRegistration){
         .device = device,
         .path = *path,
         .state = state,
     };
 }
 
-IOContext IOContext__new(
-    KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
-    OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer
-)
+IOContext IOContext__new(KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
+                         OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer)
 {
-    return (IOContext) {
+    return (IOContext){
         .kernel_context = *kernel_context,
         .io_subsystem = *io_subsystem,
         .handle = *handle,
@@ -129,10 +115,8 @@ IOContext IOContext__new(
     };
 }
 
-IOContextPtr IOContext__heap_new(
-    KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
-    OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer
-)
+IOContextPtr IOContext__heap_new(KernelContextPtr kernel_context, OptionalPtr(IOSubsystemPtr) io_subsystem,
+                                 OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer)
 {
     IOContextPtr context = ptr(Kernel__alloc_kernel(sizeof(IOContext)), IOContext);
     *context = IOContext__new(kernel_context, io_subsystem, handle, buffer);
@@ -140,10 +124,8 @@ IOContextPtr IOContext__heap_new(
     return context;
 }
 
-IOContextPtr IOContext__from_originating_context(
-    ConstOriginatingContextPtr originating_context,
-    OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer
-)
+IOContextPtr IOContext__from_originating_context(ConstOriginatingContextPtr originating_context,
+                                                 OptionalPtr(IOHandle) handle, OptionalPtr(ExternalBuffer) buffer)
 {
     KernelPtr kernel = originating_context->kernel;
     KernelContext kernel_context = KernelContext__from_originating_context(originating_context);
@@ -156,12 +138,8 @@ IOContextPtr IOContext__from_message_listener(KernelListenerPtr listener, Proces
 
     KernelContext kernel_context = KernelContext__new(&Some(ProcessID, pid), &Some(SchedulerPtr, kernel->scheduler));
 
-    return IOContext__heap_new(
-        &kernel_context,
-        &Some(IOSubsystemPtr, kernel->io_subsystem),
-        &None(IOHandle),
-        &None(ExternalBuffer)
-    );
+    return IOContext__heap_new(&kernel_context, &Some(IOSubsystemPtr, kernel->io_subsystem), &None(IOHandle),
+                               &None(ExternalBuffer));
 }
 
 IOContextPtr IOContext__from_io_context(IOContextPtr self, OptionalPtr(IOHandle) handle)
@@ -176,7 +154,7 @@ void IOContext__dispose(IOContextPtr self)
 
 ExternalBuffer ExternalBuffer__new(DataPtr data, size_t len)
 {
-    return (ExternalBuffer) {
+    return (ExternalBuffer){
         .data = data,
         .len = len,
     };

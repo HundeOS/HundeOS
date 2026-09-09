@@ -28,9 +28,11 @@ void test_syslog_handler_writes_process_message_to_kernel_logger(void)
     SyslogRequest request = SyslogRequest__new(&message, None(BString));
     Optional(ProcessPtr) proc = Some(ProcessPtr, process);
 
-    match_result(SystemCallResult, Syslog__handler(
-        NULL, &Some(ProcessPtr, process), (Anything) &request, 0, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); }, error_test_fail());
+    match_result(
+        Syslog__handler(NULL, &Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0),
+        success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); },
+        error_test_fail()
+    );
 
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "SYSLOG"));
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "virtio_blk: probe failed"));
@@ -45,9 +47,11 @@ void test_syslog_handler_writes_tagged_process_message_to_kernel_logger(void)
     SyslogRequest request = SyslogRequest__new(&message, Some(BString, tag));
     Optional(ProcessPtr) proc = Some(ProcessPtr, process);
 
-    match_result(SystemCallResult, Syslog__handler(
-        NULL, &Some(ProcessPtr, process), (Anything) &request, 0, 0, 0, 0
-    ), success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); }, error_test_fail());
+    match_result(
+        Syslog__handler(NULL, &Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0),
+        success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); },
+        error_test_fail()
+    );
 
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "VIRTIO-BLK"));
     TEST_ASSERT_NULL(strstr(BasicIO__output(), "SYSLOG"));
@@ -59,7 +63,9 @@ void test_syslog_handler_rejects_missing_message(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
 
-    match_result(SystemCallResult, Syslog__handler(
-        NULL, &Some(ProcessPtr, process), 0, 0, 0, 0, 0
-    ), success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(SYSLOG_INVALID_ARGUMENT, code); });
+    match_result(
+        Syslog__handler(NULL, &Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(SYSLOG_INVALID_ARGUMENT, code); }
+    );
 }

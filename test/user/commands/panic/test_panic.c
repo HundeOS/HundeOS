@@ -51,14 +51,14 @@ int IO__printf(ConstBStringPtr format, ...)
     StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
-        output_position += (uint64_t) written;
+        output_position += (uint64_t)written;
     }
-    return (int) written;
+    return (int)written;
 }
 
 void test_panic_invokes_panic_system(void)
 {
-    char * argv[] = { "panic" };
+    char * argv[] = {"panic"};
 
     TEST_ASSERT_EQUAL_INT(1, panic_main_under_test(1, argv));
     TEST_ASSERT_EQUAL_UINT64(1, panic_call_count);
@@ -67,7 +67,7 @@ void test_panic_invokes_panic_system(void)
 
 void test_panic_rejects_arguments(void)
 {
-    char * argv[] = { "panic", "now" };
+    char * argv[] = {"panic", "now"};
 
     TEST_ASSERT_EQUAL_INT(1, panic_main_under_test(2, argv));
     TEST_ASSERT_EQUAL_UINT64(0, panic_call_count);

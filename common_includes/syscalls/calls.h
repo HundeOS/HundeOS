@@ -28,7 +28,6 @@ typedef enum SystemCallResults
     SYSCALL_OK = 0,
     SYSCALL_FAILURE = -1,
     SYSCALL_IO_BLOCK = -2
-}
-SystemCallResults;
+} SystemCallResults;
 
 #endif

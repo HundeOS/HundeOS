@@ -14,8 +14,7 @@ typedef struct EmbeddedFilesystemIOState
     // inheritance, leave as first item
     FilesystemIOState state;
     HandleCount handle_count;
-}
-EmbeddedFilesystemIOState;
+} EmbeddedFilesystemIOState;
 
 typedef EmbeddedFilesystemIOState * EmbeddedFilesystemIOStatePtr;
 

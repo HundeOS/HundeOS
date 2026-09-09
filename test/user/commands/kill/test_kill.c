@@ -54,14 +54,14 @@ int IO__printf(ConstBStringPtr format, ...)
     StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
-        output_position += (uint64_t) written;
+        output_position += (uint64_t)written;
     }
-    return (int) written;
+    return (int)written;
 }
 
 void test_kill_defaults_to_terminate_signal(void)
 {
-    char * argv[] = { "kill", "42" };
+    char * argv[] = {"kill", "42"};
 
     TEST_ASSERT_EQUAL_INT(0, kill_main_under_test(2, argv));
     TEST_ASSERT_EQUAL_UINT64(42, last_pid);
@@ -70,7 +70,7 @@ void test_kill_defaults_to_terminate_signal(void)
 
 void test_kill_accepts_named_signal(void)
 {
-    char * argv[] = { "kill", "-KILL", "77" };
+    char * argv[] = {"kill", "-KILL", "77"};
 
     TEST_ASSERT_EQUAL_INT(0, kill_main_under_test(3, argv));
     TEST_ASSERT_EQUAL_UINT64(77, last_pid);
@@ -79,7 +79,7 @@ void test_kill_accepts_named_signal(void)
 
 void test_kill_accepts_numeric_signal(void)
 {
-    char * argv[] = { "kill", "-2", "9" };
+    char * argv[] = {"kill", "-2", "9"};
 
     TEST_ASSERT_EQUAL_INT(0, kill_main_under_test(3, argv));
     TEST_ASSERT_EQUAL_UINT64(9, last_pid);
@@ -89,7 +89,7 @@ void test_kill_accepts_numeric_signal(void)
 void test_kill_prints_named_error(void)
 {
     fake_result = PROCESS_SIGNAL_PROCESS_NOT_FOUND;
-    char * argv[] = { "kill", "-TERM", "123" };
+    char * argv[] = {"kill", "-TERM", "123"};
 
     TEST_ASSERT_EQUAL_INT(1, kill_main_under_test(3, argv));
     TEST_ASSERT_EQUAL_STRING("kill: error PROCESS_SIGNAL_PROCESS_NOT_FOUND (-2)\n", output);

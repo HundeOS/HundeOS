@@ -14,36 +14,41 @@ void tearDown(void)
 
 static SystemInfo test_system_info(void)
 {
-    return (SystemInfo) {
-        .kernel_image = {
-            .virtual_start = 0xffff000000100000ULL,
-            .physical_start = 0x80200000ULL,
-            .physical_end = 0x80400000ULL,
-        },
-        .kernel_heap = {
-            .virtual_start = 0xfffff00000000000ULL,
-            .physical_start = 0x90000000ULL,
-            .physical_end = 0x90400000ULL,
-        },
-        .kernel_stack = {
-            .virtual_start = 0xffff800000000000ULL,
-            .physical_start = 0xc0000000ULL,
-            .physical_end = 0xc0400000ULL,
-        },
-        .embedded_binaries = {
-            .virtual_start = 0xffffa00000000000ULL,
-            .physical_start = 0x88000000ULL,
-            .physical_end = 0x88200000ULL,
-        },
-        .interrupt_controller = {
-            .kind = INTERRUPT_CONTROLLER_GIC_V3,
-            .distributor_physical_base = 0x08000000ULL,
-            .distributor_virtual_base = 0xffff000000400000ULL,
-            .redistributor_physical_base = 0x080a0000ULL,
-            .redistributor_virtual_base = 0xffff0000004a0000ULL,
-            .cpu_interface_physical_base = 0,
-            .cpu_interface_virtual_base = 0,
-        },
+    return (SystemInfo){
+        .kernel_image =
+            {
+                .virtual_start = 0xffff000000100000ULL,
+                .physical_start = 0x80200000ULL,
+                .physical_end = 0x80400000ULL,
+            },
+        .kernel_heap =
+            {
+                .virtual_start = 0xfffff00000000000ULL,
+                .physical_start = 0x90000000ULL,
+                .physical_end = 0x90400000ULL,
+            },
+        .kernel_stack =
+            {
+                .virtual_start = 0xffff800000000000ULL,
+                .physical_start = 0xc0000000ULL,
+                .physical_end = 0xc0400000ULL,
+            },
+        .embedded_binaries =
+            {
+                .virtual_start = 0xffffa00000000000ULL,
+                .physical_start = 0x88000000ULL,
+                .physical_end = 0x88200000ULL,
+            },
+        .interrupt_controller =
+            {
+                .kind = INTERRUPT_CONTROLLER_GIC_V3,
+                .distributor_physical_base = 0x08000000ULL,
+                .distributor_virtual_base = 0xffff000000400000ULL,
+                .redistributor_physical_base = 0x080a0000ULL,
+                .redistributor_virtual_base = 0xffff0000004a0000ULL,
+                .cpu_interface_physical_base = 0,
+                .cpu_interface_virtual_base = 0,
+            },
     };
 }
 
@@ -85,8 +90,7 @@ typedef struct TestEfiTableHeader
     uint32_t header_size;
     uint32_t crc32;
     uint32_t reserved;
-}
-TestEfiTableHeader;
+} TestEfiTableHeader;
 
 typedef struct TestEfiGuid
 {
@@ -94,15 +98,13 @@ typedef struct TestEfiGuid
     uint16_t data2;
     uint16_t data3;
     uint8_t data4[8];
-}
-TestEfiGuid;
+} TestEfiGuid;
 
 typedef struct TestEfiConfigurationTable
 {
     TestEfiGuid vendor_guid;
     uint64_t vendor_table;
-}
-TestEfiConfigurationTable;
+} TestEfiConfigurationTable;
 
 typedef struct TestEfiSystemTable
 {
@@ -120,12 +122,11 @@ typedef struct TestEfiSystemTable
     uint64_t boot_services;
     uint64_t number_of_table_entries;
     TestEfiConfigurationTable * configuration_table;
-}
-TestEfiSystemTable;
+} TestEfiSystemTable;
 
 static void write_le32(uint8_t * buffer, size_t offset, uint32_t value)
 {
-    buffer[offset] = (uint8_t) value;
+    buffer[offset] = (uint8_t)value;
     buffer[offset + 1] = (uint8_t)(value >> 8);
     buffer[offset + 2] = (uint8_t)(value >> 16);
     buffer[offset + 3] = (uint8_t)(value >> 24);
@@ -133,16 +134,16 @@ static void write_le32(uint8_t * buffer, size_t offset, uint32_t value)
 
 static void write_le64(uint8_t * buffer, size_t offset, uint64_t value)
 {
-    write_le32(buffer, offset, (uint32_t) value);
+    write_le32(buffer, offset, (uint32_t)value);
     write_le32(buffer, offset + 4, (uint32_t)(value >> 32));
 }
 
 static void write_sig(uint8_t * buffer, const char * signature)
 {
-    buffer[0] = (uint8_t) signature[0];
-    buffer[1] = (uint8_t) signature[1];
-    buffer[2] = (uint8_t) signature[2];
-    buffer[3] = (uint8_t) signature[3];
+    buffer[0] = (uint8_t)signature[0];
+    buffer[1] = (uint8_t)signature[1];
+    buffer[2] = (uint8_t)signature[2];
+    buffer[3] = (uint8_t)signature[3];
 }
 
 static void set_checksum(uint8_t * buffer, size_t checksum_offset, size_t len)
@@ -158,24 +159,24 @@ static void set_checksum(uint8_t * buffer, size_t checksum_offset, size_t len)
 
 void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
 {
-    uint8_t rsdp[36] = { 0 };
-    uint8_t xsdt[36 + 24] = { 0 };
-    uint8_t spcr[64] = { 0 };
-    uint8_t madt[44 + 24 + 80 + 16] = { 0 };
-    uint8_t mcfg[44 + 16] = { 0 };
+    uint8_t rsdp[36] = {0};
+    uint8_t xsdt[36 + 24] = {0};
+    uint8_t spcr[64] = {0};
+    uint8_t madt[44 + 24 + 80 + 16] = {0};
+    uint8_t mcfg[44 + 16] = {0};
 
     memcpy(rsdp, "RSD PTR ", 8);
     rsdp[15] = 2;
     write_le32(rsdp, 20, sizeof(rsdp));
-    write_le64(rsdp, 24, (uint64_t)(uintptr_t) xsdt);
+    write_le64(rsdp, 24, (uint64_t)(uintptr_t)xsdt);
     set_checksum(rsdp, 8, 20);
     set_checksum(rsdp, 32, sizeof(rsdp));
 
     write_sig(xsdt, "XSDT");
     write_le32(xsdt, 4, sizeof(xsdt));
-    write_le64(xsdt, 36, (uint64_t)(uintptr_t) spcr);
-    write_le64(xsdt, 44, (uint64_t)(uintptr_t) madt);
-    write_le64(xsdt, 52, (uint64_t)(uintptr_t) mcfg);
+    write_le64(xsdt, 36, (uint64_t)(uintptr_t)spcr);
+    write_le64(xsdt, 44, (uint64_t)(uintptr_t)madt);
+    write_le64(xsdt, 52, (uint64_t)(uintptr_t)mcfg);
     set_checksum(xsdt, 9, sizeof(xsdt));
 
     write_sig(spcr, "SPCR");
@@ -210,18 +211,20 @@ void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
     set_checksum(mcfg, 9, sizeof(mcfg));
 
     TestEfiConfigurationTable config = {
-        .vendor_guid = {
-            .data1 = 0x8868e871,
-            .data2 = 0xe4f1,
-            .data3 = 0x11d3,
-            .data4 = { 0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81 },
-        },
-        .vendor_table = (uint64_t)(uintptr_t) rsdp,
+        .vendor_guid =
+            {
+                .data1 = 0x8868e871,
+                .data2 = 0xe4f1,
+                .data3 = 0x11d3,
+                .data4 = {0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81},
+            },
+        .vendor_table = (uint64_t)(uintptr_t)rsdp,
     };
     TestEfiSystemTable system_table = {
-        .header = {
-            .signature = 0x5453595320494249ULL,
-        },
+        .header =
+            {
+                .signature = 0x5453595320494249ULL,
+            },
         .number_of_table_entries = 1,
         .configuration_table = &config,
     };
@@ -234,7 +237,7 @@ void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
         .gic_distributor_virtual_base = 0xffff000000400000ULL,
     };
 
-    UefiAcpi__apply_system_table(&platform, (uint64_t)(uintptr_t) &system_table);
+    UefiAcpi__apply_system_table(&platform, (uint64_t)(uintptr_t)&system_table);
 
     TEST_ASSERT_EQUAL_UINT64(0xfe201000ULL, platform.uart_physical_base);
     TEST_ASSERT_EQUAL_UINT64(153, platform.uart_irq);
@@ -242,10 +245,15 @@ void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
     TEST_ASSERT_EQUAL_UINT64(0xff841000ULL, platform.gic_distributor_physical_base);
     TEST_ASSERT_EQUAL_UINT64(0xff848000ULL, platform.gic_redistributor_physical_base);
     TEST_ASSERT_EQUAL_UINT64(0xff842000ULL, platform.gic_cpu_interface_physical_base);
-    match_optional(PciInfo, platform.pci, some(info) {
+    match_optional(
+        platform.pci,
+        some(info)
+        {
             TEST_ASSERT_EQUAL_UINT64(0x4010000000ULL, info.ecam_physical_base);
             TEST_ASSERT_EQUAL_UINT64(0x10000000ULL, info.ecam_size);
             TEST_ASSERT_EQUAL_UINT64(0, info.bus_start);
             TEST_ASSERT_EQUAL_UINT64(255, info.bus_end);
-        }, none() { TEST_FAIL_MESSAGE("UEFI ACPI MCFG should populate PCI info"); });
+        },
+        none() { TEST_FAIL_MESSAGE("UEFI ACPI MCFG should populate PCI info"); }
+    );
 }

@@ -21,8 +21,7 @@ typedef struct EmbeddedFsHeader
     uint32_t blob_size;
     uint32_t reserved0;
     uint32_t reserved1;
-}
-EmbeddedFsHeader;
+} EmbeddedFsHeader;
 
 typedef EmbeddedFsHeader * EmbeddedFsHeaderPtr;
 
@@ -34,8 +33,7 @@ typedef struct EmbeddedFsEntry
     uint32_t name_len;
     uint32_t flags;
     uint32_t reserved0;
-}
-EmbeddedFsEntry;
+} EmbeddedFsEntry;
 
 typedef EmbeddedFsEntry * EmbeddedFsEntryPtr;
 
@@ -43,8 +41,7 @@ typedef struct EmbeddedFs
 {
     Address start;
     Address end;
-}
-EmbeddedFs;
+} EmbeddedFs;
 
 typedef EmbeddedFs * EmbeddedFsPtr;
 
@@ -53,8 +50,7 @@ typedef struct EmbeddedFsFile
     Address start;
     Address end;
     BString name;
-}
-EmbeddedFsFile;
+} EmbeddedFsFile;
 
 typedef EmbeddedFsFile * EmbeddedFsFilePtr;
 

@@ -34,25 +34,25 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
     {
         if (arg1 == IO_OPEN || arg1 == IO_MKDIR || arg1 == IO_REMOVE)
         {
-            last_path_request = *((IOPathRequestPtr) arg2);
+            last_path_request = *((IOPathRequestPtr)arg2);
         }
         if (arg1 == IO_LIST_DIR)
         {
-            last_list_dir_request = *((IOListDirRequestPtr) arg2);
+            last_list_dir_request = *((IOListDirRequestPtr)arg2);
         }
         if (arg1 == IO_LINK)
         {
-            last_link_request = *((IOLinkRequestPtr) arg2);
+            last_link_request = *((IOLinkRequestPtr)arg2);
         }
         if (arg1 == IO_MOUNT)
         {
-            last_mount_request = *((IOMountRequestPtr) arg2);
+            last_mount_request = *((IOMountRequestPtr)arg2);
         }
     }
 
     if (num == IO_CALL && arg1 == IO_READ && next_read_result > 0)
     {
-        memcpy((void *) arg3, next_read_data, (size_t) next_read_result);
+        memcpy((void *)arg3, next_read_data, (size_t)next_read_result);
         return next_read_result;
     }
 
@@ -65,9 +65,15 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
 static DynString dyn_string_from_cstr(const char * text)
 {
     DynString string;
-    match_result(DynStringCode, DynString__init(&string, 128), success_do_nothing(), error_test_fail());
+    match_result(DynString__init(&string, 128),
+        success_do_nothing(),
+        error_test_fail()
+    );
 
-    match_result(DynStringCode, DynString__append_cstr(&string, text), success_do_nothing(), error_test_fail());
+    match_result(DynString__append_cstr(&string, text),
+        success_do_nothing(),
+        error_test_fail()
+    );
 
     return string;
 }
@@ -80,10 +86,10 @@ void setUp(void)
     last_arg3 = 0;
     last_arg4 = 0;
     last_arg5 = 0;
-    last_path_request = (IOPathRequest) { 0 };
-    last_list_dir_request = (IOListDirRequest) { 0 };
-    last_link_request = (IOLinkRequest) { 0 };
-    last_mount_request = (IOMountRequest) { 0 };
+    last_path_request = (IOPathRequest){0};
+    last_list_dir_request = (IOListDirRequest){0};
+    last_link_request = (IOLinkRequest){0};
+    last_mount_request = (IOMountRequest){0};
     next_read_data = NULL;
     next_read_result = 0;
     next_result = 0;
@@ -128,14 +134,19 @@ void test_io_read_dyn_string_returns_file_contents(void)
     next_read_data = "abc";
     next_read_result = 3;
 
-    match_optional(DynString, IO__read_dyn_string(9, 16), some(text) {
+    match_optional(
+        IO__read_dyn_string(9, 16),
+        some(text)
+        {
             TEST_ASSERT_EQUAL(IO_CALL, last_call);
             TEST_ASSERT_EQUAL(IO_READ, last_arg1);
             TEST_ASSERT_EQUAL_INT64(9, last_arg2);
             TEST_ASSERT_EQUAL_STRING("abc", DynString__cstr(&text));
             TEST_ASSERT_EQUAL_INT64(3, DynString__length(&text));
             DynString__dispose(&text);
-        }, none_test_fail());
+        },
+        none_test_fail()
+    );
 }
 
 void test_io_write_uses_bstring_length(void)
@@ -148,7 +159,7 @@ void test_io_write_uses_bstring_length(void)
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_WRITE, last_arg1);
     TEST_ASSERT_EQUAL_INT64(7, last_arg2);
-    TEST_ASSERT_EQUAL_STRING("hello", (const char *) last_arg3);
+    TEST_ASSERT_EQUAL_STRING("hello", (const char *)last_arg3);
     TEST_ASSERT_EQUAL_INT64(5, last_arg4);
 }
 
@@ -199,47 +210,52 @@ void test_io_mount_uses_bstring_paths(void)
 
 void test_sd_host_config_parse_reads_present_host(void)
 {
-    DynString sysinfo = dyn_string_from_cstr(
-        "machine=qemu_virt\n"
-        "sd_host.present=1\n"
-        "sd_host.physical_base=0xfe340000\n"
-        "sd_host.mmio_size=0x100\n"
-        "sd_host.irq=126\n"
-    );
+    DynString sysinfo = dyn_string_from_cstr("machine=qemu_virt\n"
+                                             "sd_host.present=1\n"
+                                             "sd_host.physical_base=0xfe340000\n"
+                                             "sd_host.mmio_size=0x100\n"
+                                             "sd_host.irq=126\n");
 
-    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some(config) {
+    match_optional(
+        SdHostConfig__parse(&sysinfo),
+        some(config)
+        {
             TEST_ASSERT_EQUAL_HEX64(0xfe340000, config.physical_base);
             TEST_ASSERT_EQUAL_HEX64(0x100, config.mmio_size);
             TEST_ASSERT_EQUAL_UINT64(126, config.irq);
-        }, none_test_fail());
+        },
+        none_test_fail()
+    );
 
     DynString__dispose(&sysinfo);
 }
 
 void test_sd_host_config_parse_returns_none_when_host_absent(void)
 {
-    DynString sysinfo = dyn_string_from_cstr(
-        "sd_host.present=0\n"
-        "sd_host.physical_base=0xfe340000\n"
-        "sd_host.mmio_size=0x100\n"
-        "sd_host.irq=126\n"
-    );
+    DynString sysinfo = dyn_string_from_cstr("sd_host.present=0\n"
+                                             "sd_host.physical_base=0xfe340000\n"
+                                             "sd_host.mmio_size=0x100\n"
+                                             "sd_host.irq=126\n");
 
-    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some_test_fail(), none_do_nothing());
+    match_optional(SdHostConfig__parse(&sysinfo),
+        some_test_fail(),
+        none_do_nothing()
+    );
 
     DynString__dispose(&sysinfo);
 }
 
 void test_sd_host_config_parse_rejects_partial_numeric_values(void)
 {
-    DynString sysinfo = dyn_string_from_cstr(
-        "sd_host.present=1\n"
-        "sd_host.physical_base=0xfe340000tail\n"
-        "sd_host.mmio_size=0x100\n"
-        "sd_host.irq=126\n"
-    );
+    DynString sysinfo = dyn_string_from_cstr("sd_host.present=1\n"
+                                             "sd_host.physical_base=0xfe340000tail\n"
+                                             "sd_host.mmio_size=0x100\n"
+                                             "sd_host.irq=126\n");
 
-    match_optional(SdHostConfig, SdHostConfig__parse(&sysinfo), some_test_fail(), none_do_nothing());
+    match_optional(SdHostConfig__parse(&sysinfo),
+        some_test_fail(),
+        none_do_nothing()
+    );
 
     DynString__dispose(&sysinfo);
 }

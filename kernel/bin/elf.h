@@ -30,82 +30,86 @@ typedef uint16_t NameIndex;
 typedef uint32_t SectionInfo;
 typedef uint32_t NameOffset;
 
-typedef enum ElfTypeVals {
-    Unknown=0x00,
-    Relocatable=0x01,
-    Executable=0x02,
-    Shared=0x03,
-    Core=0x04,
-    ReservedOSLow=0xFE00,
-    ReservedOSHigh=0xFEFF,
-    ReservedProcessorLow=0xFF00,
-    ReservedProcessorHigh=0xFFFF,
+typedef enum ElfTypeVals
+{
+    Unknown = 0x00,
+    Relocatable = 0x01,
+    Executable = 0x02,
+    Shared = 0x03,
+    Core = 0x04,
+    ReservedOSLow = 0xFE00,
+    ReservedOSHigh = 0xFEFF,
+    ReservedProcessorLow = 0xFF00,
+    ReservedProcessorHigh = 0xFFFF,
 } ElfTypeVals;
 
-typedef enum ElfMachineVals {
-    Aarch64=0xB7
+typedef enum ElfMachineVals
+{
+    Aarch64 = 0xB7
 } ElfMachineVals;
 
-typedef enum ElfSectionTypeVals {
-    Null=0x00,
-    ProgramData=0x01,
-    SymbolTable=0x02,
-    StringTable=0x03,
-    RelocationEntriesAddends=0x04,
-    SymbolHashTable=0x05,
-    DynamicLinkInfo=0x06,
-    Note=0x07,
-    NoDataProgramSpace=0x08,
-    RelocationEntries=0x09,
-    Shlib=0x0A,
-    DynamicSymbolTable=0x0B,
-    ConstructorArray=0x0E,
-    DestructorArray=0x0F,
-    PreInitArray=0x10,
-    Group=0x11,
-    ExtendedTableIndexes=0x12,
-    Num=0x13,
-    LoOS=0x60000000,
+typedef enum ElfSectionTypeVals
+{
+    Null = 0x00,
+    ProgramData = 0x01,
+    SymbolTable = 0x02,
+    StringTable = 0x03,
+    RelocationEntriesAddends = 0x04,
+    SymbolHashTable = 0x05,
+    DynamicLinkInfo = 0x06,
+    Note = 0x07,
+    NoDataProgramSpace = 0x08,
+    RelocationEntries = 0x09,
+    Shlib = 0x0A,
+    DynamicSymbolTable = 0x0B,
+    ConstructorArray = 0x0E,
+    DestructorArray = 0x0F,
+    PreInitArray = 0x10,
+    Group = 0x11,
+    ExtendedTableIndexes = 0x12,
+    Num = 0x13,
+    LoOS = 0x60000000,
 } ElfSectionTypeVals;
 
 typedef enum ProgramHeaderFlagsVals
 {
-    Execute=0x1,
-    Write=0x2,
-    Read=0x4,
+    Execute = 0x1,
+    Write = 0x2,
+    Read = 0x4,
 } ProgramHeaderFlagsVals;
 
 typedef enum ElfProgramHeaderTypeVals
 {
-    TypeNull=0x00000000,
-    Load=0x00000001,
-    Dynamic=0x00000002,
-    Interpreter=0x00000003,
-    AuxiliaryInfo=0x00000004,
-    ShLib=0x00000005,
-    ProgramHeaderSegment=0x00000006,
-    ThreadlocalTemplate=0x00000007,
-    OSReservedLow=0x60000000,
-    OSReservedHigh=0x6FFFFFFF,
-    ProcessorReservedLow=0x70000000,
-    ProcessorReservedHigh=0x7FFFFFFF,
+    TypeNull = 0x00000000,
+    Load = 0x00000001,
+    Dynamic = 0x00000002,
+    Interpreter = 0x00000003,
+    AuxiliaryInfo = 0x00000004,
+    ShLib = 0x00000005,
+    ProgramHeaderSegment = 0x00000006,
+    ThreadlocalTemplate = 0x00000007,
+    OSReservedLow = 0x60000000,
+    OSReservedHigh = 0x6FFFFFFF,
+    ProcessorReservedLow = 0x70000000,
+    ProcessorReservedHigh = 0x7FFFFFFF,
 } ProgramHeaderTypeVals;
 
-typedef enum SectionFlagsVals {
-    Writable=0x1,
-    OccupiesMemoryDuringExecution=0x2,
-    SectionExecutable=0x4,
-    MightBeMerged=0x10,
-    NullTerminatedStrings=0x20,
-    SHTIndex=0x40,
-    PreserveOrder=0x80,
-    OsNonConforming=0x100,
-    MemberOfGroup=0x200,
-    ThreadLocalData=0x400,
-    OSSpecificMask=0x0FF00000,
-    ProcessorSpecific=0xF0000000,
-    SolarisSpecialOrdering=0x4000000,
-    SolarisSectionExcluded=0x8000000,
+typedef enum SectionFlagsVals
+{
+    Writable = 0x1,
+    OccupiesMemoryDuringExecution = 0x2,
+    SectionExecutable = 0x4,
+    MightBeMerged = 0x10,
+    NullTerminatedStrings = 0x20,
+    SHTIndex = 0x40,
+    PreserveOrder = 0x80,
+    OsNonConforming = 0x100,
+    MemberOfGroup = 0x200,
+    ThreadLocalData = 0x400,
+    OSSpecificMask = 0x0FF00000,
+    ProcessorSpecific = 0xF0000000,
+    SolarisSpecialOrdering = 0x4000000,
+    SolarisSectionExcluded = 0x8000000,
 } SectionFlagsVals;
 
 typedef enum Endianess
@@ -141,7 +145,8 @@ typedef struct Elf64Header
 typedef Elf64Header * Elf64HeaderPtr;
 typedef const Elf64Header * ConstElf64HeaderPtr;
 
-typedef struct ProgramHeader {
+typedef struct ProgramHeader
+{
     ProgramHeaderType type;
     ProgramHeaderFlags flags;
     Offset segment_offset;
@@ -152,7 +157,8 @@ typedef struct ProgramHeader {
     Alignment alignment;
 } ProgramHeader;
 
-typedef struct SectionHeader {
+typedef struct SectionHeader
+{
     NameOffset name_offset;
     SectionType type;
     SectionFlags flags;
@@ -165,16 +171,18 @@ typedef struct SectionHeader {
     Size entry_size;
 } SectionHeader;
 
-typedef struct {
-    Address vaddr;      // target VA
-    Offset off;         // file offset
-    Size filesz;        // bytes to read from file
-    Size memsz;         // total size in memory (≥ filesz)
-    ElfFlags flags;     // PF_R/W/X
-    Alignment align;    // usually 0x1000
+typedef struct
+{
+    Address vaddr;   // target VA
+    Offset off;      // file offset
+    Size filesz;     // bytes to read from file
+    Size memsz;      // total size in memory (≥ filesz)
+    ElfFlags flags;  // PF_R/W/X
+    Alignment align; // usually 0x1000
 } LoadSeg;
 
-typedef struct Elf {
+typedef struct Elf
+{
     const Address start;
     const Address end;
     BString name;

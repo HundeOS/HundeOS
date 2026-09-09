@@ -17,7 +17,7 @@ bool ServiceEvent__equals(ServiceEventPtr self, ServiceEventPtr other)
 
 ServiceState ServiceState__new()
 {
-    return (ServiceState) {
+    return (ServiceState){
         .events = ServiceEvents__new(),
         .active_irq_event = None(ServiceEvent),
     };
@@ -30,7 +30,8 @@ Result(ServiceEvent) Service__pop_next_event(ProcessPtr process)
         return Error(ServiceEvent, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
     }
 
-    match_optional(ServiceEvent, ServiceEvents__pop_front(&process->service.events),
+    match_optional(
+        ServiceEvents__pop_front(&process->service.events),
         some(event) { return Success(ServiceEvent, event); },
         none_do_nothing()
     );
@@ -45,7 +46,8 @@ Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent ev
         return Error(ServiceCode, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
     }
 
-    match_result(CollectionCode, ServiceEvents__push(&process->service.events, event),
+    match_result(
+        ServiceEvents__push(&process->service.events, event),
         success_do_nothing(),
         error(code, message) { return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL); }
     );
@@ -55,17 +57,17 @@ Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent ev
 
 Result(ServiceEvent) Service__complete_wait(ParkedOperationPtr parked_operation)
 {
-    match_optional(SchedulerPtr, parked_operation->kernel_context->scheduler,
+    match_optional(
+        parked_operation->kernel_context->scheduler,
         some(scheduler)
         {
-            match_optional(ProcessID, parked_operation->kernel_context->pid,
+            match_optional(
+                parked_operation->kernel_context->pid,
                 some(pid)
                 {
-                    match_optional(ProcessPtr, Scheduler__find_process_by_pid(scheduler, pid),
-                        some(process)
-                        {
-                            return Scheduler__service_take_next_event(scheduler, process);
-                        },
+                    match_optional(
+                        Scheduler__find_process_by_pid(scheduler, pid),
+                        some(process) { return Scheduler__service_take_next_event(scheduler, process); },
                         none_do_nothing()
                     );
                 },

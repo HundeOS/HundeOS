@@ -18,16 +18,14 @@ typedef enum IOSocketStatus
     IO_SOCKET_BACKLOG_FULL = -5,
     IO_SOCKET_NO_PENDING_CONNECTION = -6,
     IO_SOCKET_ENDPOINTS_FULL = -7,
-}
-IOSocketStatus;
+} IOSocketStatus;
 
 typedef enum IOSocketRouterOperation
 {
     IO_SOCKET_ROUTER_LISTEN = 1,
     IO_SOCKET_ROUTER_CONNECT = 2,
     IO_SOCKET_ROUTER_ACCEPT = 3,
-}
-IOSocketRouterOperation;
+} IOSocketRouterOperation;
 
 typedef struct IOSocketRouterRequest
 {
@@ -36,20 +34,14 @@ typedef struct IOSocketRouterRequest
     BString uri;
     IOHandle handle;
     uint64_t backlog;
-}
-IOSocketRouterRequest;
+} IOSocketRouterRequest;
 
 typedef IOSocketRouterRequest * IOSocketRouterRequestPtr;
 
-static inline IOSocketRouterRequest IOSocketRouterRequest__new(
-    uint64_t request_id,
-    IOSocketRouterOperation operation,
-    ConstBStringPtr uri,
-    IOHandle handle,
-    uint64_t backlog
-)
+static inline IOSocketRouterRequest IOSocketRouterRequest__new(uint64_t request_id, IOSocketRouterOperation operation,
+                                                               ConstBStringPtr uri, IOHandle handle, uint64_t backlog)
 {
-    return (IOSocketRouterRequest) {
+    return (IOSocketRouterRequest){
         .request_id = request_id,
         .operation = operation,
         .uri = *uri,
@@ -63,18 +55,14 @@ typedef struct IOSocketRouterCompletion
     uint64_t request_id;
     IOSocketStatus status;
     IOHandle result;
-}
-IOSocketRouterCompletion;
+} IOSocketRouterCompletion;
 
 typedef IOSocketRouterCompletion * IOSocketRouterCompletionPtr;
 
-static inline IOSocketRouterCompletion IOSocketRouterCompletion__new(
-    uint64_t request_id,
-    IOSocketStatus status,
-    IOHandle result
-)
+static inline IOSocketRouterCompletion IOSocketRouterCompletion__new(uint64_t request_id, IOSocketStatus status,
+                                                                     IOHandle result)
 {
-    return (IOSocketRouterCompletion) {
+    return (IOSocketRouterCompletion){
         .request_id = request_id,
         .status = status,
         .result = result,

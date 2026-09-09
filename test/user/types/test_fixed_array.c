@@ -10,7 +10,7 @@ OptionalDef(TestType);
 
 static bool test_type_equals(void * a, void * b)
 {
-    return *(TestType *) a == *(TestType *) b;
+    return *(TestType *)a == *(TestType *)b;
 }
 
 FixedArrayDefine(TestType, 4, TestArray, &test_type_equals);
@@ -23,8 +23,11 @@ void test_user_fixed_array_heap_new_uses_user_allocator(void)
     TEST_ASSERT_NOT_NULL(array);
     TEST_ASSERT_EQUAL(0, TestArray__len(array));
 
-    match_result(CollectionCode, TestArray__push(array, 10), success_do_nothing(), error_test_fail());
+    match_result(TestArray__push(array, 10),
+        success_do_nothing(),
+        error_test_fail()
+    );
 
-    TEST_ASSERT_EQUAL(10, unwrap(TestType, TestArray__at(array, 0), (TestType){}));
+    TEST_ASSERT_EQUAL(10, unwrap_optional(TestArray__at(array, 0), (TestType){}));
     free(array);
 }

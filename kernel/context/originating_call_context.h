@@ -13,18 +13,15 @@ typedef enum CallTypes
     CALL_TYPE_SYSCALL = 0,
     CALL_TYPE_IRQ = 1,
     CALL_TYPE_FAULT = 2
-}
-CallTypes;
+} CallTypes;
 
 typedef struct IRQCallContext
 {
-}
-IRQCallContext;
+} IRQCallContext;
 
 typedef struct FaultCallContext
 {
-}
-FaultCallContext;
+} FaultCallContext;
 
 typedef struct OriginatingContext
 {
@@ -38,8 +35,7 @@ typedef struct OriginatingContext
         IRQCallContext irq;
         FaultCallContext fault;
     } call;
-}
-OriginatingContext;
+} OriginatingContext;
 typedef OriginatingContext * OriginatingContextPtr;
 typedef const OriginatingContext * ConstOriginatingContextPtr;
 

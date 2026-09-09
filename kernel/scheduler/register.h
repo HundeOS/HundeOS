@@ -10,5 +10,4 @@ ResultDef(SchedulerRegisterCode);
 
 Result(SchedulerRegisterCode) Scheduler__register(KernelPtr kernel);
 
-
 #endif

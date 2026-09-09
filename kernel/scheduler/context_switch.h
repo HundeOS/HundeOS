@@ -9,10 +9,11 @@ typedef struct ContextSwitch
     Optional(ProcessPtr) old_proc;
 } ContextSwitch;
 
+typedef const ContextSwitch * ConstContextSwitchPtr;
+
 OptionalDef(ContextSwitch);
 
-
-void ContextSwitch__switch(const ContextSwitch * self);
+void ContextSwitch__switch(ConstContextSwitchPtr self);
 ContextSwitch ContextSwitch__new(ProcessPtr new_proc, OptionalPtr(ProcessPtr) old_proc);
 
 #endif

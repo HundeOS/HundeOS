@@ -20,12 +20,12 @@ void * mem_alloc_pages(size_t size)
 
 Result(Anything) mem_alloc_bytes(size_t size)
 {
-    return Success(Anything, (Anything) malloc(size));
+    return Success(Anything, (Anything)malloc(size));
 }
 
 Result(Anything) mem_alloc_pages_result(size_t size)
 {
-    return Success(Anything, (Anything) mem_alloc_pages(size));
+    return Success(Anything, (Anything)mem_alloc_pages(size));
 }
 
 MemStatus mem_free_pages(void * address)
@@ -40,6 +40,7 @@ MemStatus mem_free_pages(void * address)
     return MEM_OK;
 }
 
+#include "../../../user/lib/channel/channel.c"
 #include "../../../user/lib/fiber/fiber.c"
 #include "../../../user/lib/fiber/scheduler.c"
 #include "../../../user/lib/async_io/async_io.c"
@@ -48,8 +49,7 @@ typedef struct TestAsyncIOContext
 {
     uint64_t request_count;
     uint64_t last_request_id;
-}
-TestAsyncIOContext;
+} TestAsyncIOContext;
 
 typedef TestAsyncIOContext * TestAsyncIOContextPtr;
 
@@ -60,7 +60,7 @@ static ServiceBlockReadResult next_async_block_request_id;
 
 static TestAsyncIOContext TestAsyncIOContext__new(void)
 {
-    return (TestAsyncIOContext) {
+    return (TestAsyncIOContext){
         .request_count = 0,
         .last_request_id = 0,
     };
@@ -73,7 +73,7 @@ static Result(AsyncIOCode) register_success(Anything service_context)
 
 static Result(FiberCode) record_request(FiberPtr fiber, Anything service_context, ServiceEvent request)
 {
-    TestAsyncIOContextPtr context = (TestAsyncIOContextPtr) service_context;
+    TestAsyncIOContextPtr context = (TestAsyncIOContextPtr)service_context;
     context->request_count++;
     context->last_request_id = ServiceEvent__request_id(&request);
     return Success(FiberCode, FIBER_OK);
@@ -81,36 +81,30 @@ static Result(FiberCode) record_request(FiberPtr fiber, Anything service_context
 
 static Result(FiberCode) wait_for_response(FiberPtr fiber, Anything service_context, ServiceEvent request)
 {
-    TestAsyncIOContextPtr context = (TestAsyncIOContextPtr) service_context;
+    TestAsyncIOContextPtr context = (TestAsyncIOContextPtr)service_context;
     context->request_count++;
 
-    match_result(AsyncIOPtr, AsyncIO__current(),
+    match_result(
+        AsyncIO__current(),
         success(async_io)
         {
-            match_result(FiberCode, FiberScheduler__await_current(&async_io->scheduler, FiberWaitKey__request(42)),
+            match_result(
+                FiberScheduler__await_current(&async_io->scheduler, FiberWaitKey__request(42)),
                 success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(FiberCode, message, code);
-                }
+                error(code, message) { return Error(FiberCode, message, code); }
             );
         },
-        error(code, message)
-        {
-            return Error(FiberCode, message, code);
-        }
+        error(code, message) { return Error(FiberCode, message, code); }
     );
 
-    match_result(FiberWakeValue, Fiber__take_wake_value(fiber),
+    match_result(
+        Fiber__take_wake_value(fiber),
         success(value)
         {
             context->last_request_id = value.value;
             return Success(FiberCode, FIBER_OK);
         },
-        error(code, message)
-        {
-            return Error(FiberCode, message, code);
-        }
+        error(code, message) { return Error(FiberCode, message, code); }
     );
 
     return Success(FiberCode, FIBER_OK);
@@ -143,16 +137,14 @@ ServiceCode service_wait(ServiceEventPtr event)
     return SERVICE_OK;
 }
 
-ServiceBlockReadResult service_block_read_device_async(
-    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
-)
+ServiceBlockReadResult service_block_read_device_async(ConstBStringPtr path, uint64_t block, uint64_t block_count,
+                                                       Address buffer, size_t buffer_size)
 {
     return next_async_block_request_id;
 }
 
-ServiceBlockReadResult service_block_write_device_async(
-    ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size
-)
+ServiceBlockReadResult service_block_write_device_async(ConstBStringPtr path, uint64_t block, uint64_t block_count,
+                                                        Address buffer, size_t buffer_size)
 {
     return next_async_block_request_id;
 }
@@ -165,11 +157,9 @@ void test_async_io_start_registers_and_spawns_fiber_for_request(void)
     wait_event_count = 1;
     wait_event_index = 0;
 
-    match_result(AsyncIOCode, AsyncIO__start(&async_io, register_success, (Anything) &context, record_request),
-        success(code)
-        {
-            TEST_ASSERT_EQUAL(ASYNC_IO_WAIT_COMPLETE, code);
-        },
+    match_result(
+        AsyncIO__start(&async_io, register_success, (Anything)&context, record_request),
+        success(code) { TEST_ASSERT_EQUAL(ASYNC_IO_WAIT_COMPLETE, code); },
         error_test_fail()
     );
 
@@ -198,14 +188,15 @@ void test_async_io_response_without_waiter_is_queued(void)
     AsyncIO async_io = AsyncIO__new(0, record_request);
     ServiceEvent response = ServiceEvent__response(SERVICE_EVENT_BLOCK_IO, 9, 123);
 
-    match_result(AsyncIOCode, AsyncIO__deliver_response(&async_io, &response),
+    match_result(AsyncIO__deliver_response(&async_io, &response),
         success_do_nothing(),
         error_test_fail()
     );
 
     TEST_ASSERT_EQUAL(1, AsyncIO__pending_response_count(&async_io));
 
-    match_result(ServiceEvent, AsyncIO__take_response(&async_io, 9),
+    match_result(
+        AsyncIO__take_response(&async_io, 9),
         success(queued)
         {
             TEST_ASSERT_EQUAL(SERVICE_EVENT_RESPONSE, ServiceEvent__kind(&queued));
@@ -222,15 +213,15 @@ void test_async_io_response_without_waiter_is_queued(void)
 void test_async_io_response_wakes_waiting_fiber(void)
 {
     TestAsyncIOContext context = TestAsyncIOContext__new();
-    AsyncIO async_io = AsyncIO__new((Anything) &context, wait_for_response);
+    AsyncIO async_io = AsyncIO__new((Anything)&context, wait_for_response);
     ServiceEvent request = ServiceEvent__request(SERVICE_EVENT_FILESYSTEM_IO, 1, 0);
     ServiceEvent response = ServiceEvent__response(SERVICE_EVENT_BLOCK_IO, 42, 0);
 
-    match_result(AsyncIOCode, AsyncIO__spawn_request(&async_io, &request),
+    match_result(AsyncIO__spawn_request(&async_io, &request),
         success_do_nothing(),
         error_test_fail()
     );
-    match_result(FiberCode, FiberScheduler__run_ready_until_blocked(&async_io.scheduler),
+    match_result(FiberScheduler__run_ready_until_blocked(&async_io.scheduler),
         success_do_nothing(),
         error_test_fail()
     );
@@ -238,7 +229,7 @@ void test_async_io_response_wakes_waiting_fiber(void)
     TEST_ASSERT_EQUAL(1, context.request_count);
     TEST_ASSERT_EQUAL(1, FiberScheduler__waiting_count(&async_io.scheduler));
 
-    match_result(AsyncIOCode, AsyncIO__deliver_response(&async_io, &response),
+    match_result(AsyncIO__deliver_response(&async_io, &response),
         success_do_nothing(),
         error_test_fail()
     );
@@ -246,7 +237,7 @@ void test_async_io_response_wakes_waiting_fiber(void)
     TEST_ASSERT_EQUAL(1, FiberScheduler__ready_count(&async_io.scheduler));
     TEST_ASSERT_EQUAL(0, FiberScheduler__waiting_count(&async_io.scheduler));
 
-    match_result(FiberCode, FiberScheduler__run_ready_until_blocked(&async_io.scheduler),
+    match_result(FiberScheduler__run_ready_until_blocked(&async_io.scheduler),
         success_do_nothing(),
         error_test_fail()
     );
@@ -260,35 +251,33 @@ void test_async_io_response_wakes_waiting_fiber(void)
 void test_async_io_spawn_request_rejects_when_live_fiber_limit_reached(void)
 {
     TestAsyncIOContext context = TestAsyncIOContext__new();
-    AsyncIO async_io = AsyncIO__new_with_max_fibers((Anything) &context, wait_for_response, 1);
+    AsyncIO async_io = AsyncIO__new_with_max_fibers((Anything)&context, wait_for_response, 1);
     ServiceEvent first = ServiceEvent__request(SERVICE_EVENT_FILESYSTEM_IO, 1, 0);
     ServiceEvent second = ServiceEvent__request(SERVICE_EVENT_FILESYSTEM_IO, 2, 0);
 
-    match_result(AsyncIOCode, AsyncIO__spawn_request(&async_io, &first),
+    match_result(AsyncIO__spawn_request(&async_io, &first),
         success_do_nothing(),
         error_test_fail()
     );
-    match_result(FiberCode, FiberScheduler__run_ready_until_blocked(&async_io.scheduler),
+    match_result(FiberScheduler__run_ready_until_blocked(&async_io.scheduler),
         success_do_nothing(),
         error_test_fail()
     );
 
     TEST_ASSERT_EQUAL(1, AsyncIO__live_fiber_count(&async_io));
 
-    match_result(AsyncIOCode, AsyncIO__spawn_request(&async_io, &second),
+    match_result(
+        AsyncIO__spawn_request(&async_io, &second),
         success_test_fail(),
-        error(code, message)
-        {
-            TEST_ASSERT_EQUAL(ASYNC_IO_FIBER_FAILED, code);
-        }
+        error(code, message) { TEST_ASSERT_EQUAL(ASYNC_IO_FIBER_FAILED, code); }
     );
 
     ServiceEvent response = ServiceEvent__response(SERVICE_EVENT_BLOCK_IO, 42, 0);
-    match_result(AsyncIOCode, AsyncIO__deliver_response(&async_io, &response),
+    match_result(AsyncIO__deliver_response(&async_io, &response),
         success_do_nothing(),
         error_test_fail()
     );
-    match_result(FiberCode, FiberScheduler__run_ready_until_blocked(&async_io.scheduler),
+    match_result(FiberScheduler__run_ready_until_blocked(&async_io.scheduler),
         success_do_nothing(),
         error_test_fail()
     );
@@ -300,22 +289,20 @@ void test_async_io_spawn_request_rejects_when_live_fiber_limit_reached(void)
 void test_io_block_read_takes_queued_async_response(void)
 {
     TestAsyncIOContext context = TestAsyncIOContext__new();
-    AsyncIO async_io = AsyncIO__new((Anything) &context, record_request);
+    AsyncIO async_io = AsyncIO__new((Anything)&context, record_request);
     current_async_io = Some(AsyncIOPtr, &async_io);
     next_async_block_request_id = 77;
 
     ServiceEvent response = ServiceEvent__response(SERVICE_EVENT_BLOCK_IO, 77, 1);
-    match_result(AsyncIOCode, AsyncIO__deliver_response(&async_io, &response),
+    match_result(AsyncIO__deliver_response(&async_io, &response),
         success_do_nothing(),
         error_test_fail()
     );
 
-    uint8_t buffer[512] = { 0 };
-    match_result(ServiceBlockReadResult, IO__block_read(&bstr("/dev/test"), 4, 1, (Address) buffer, sizeof(buffer)),
-        success(blocks)
-        {
-            TEST_ASSERT_EQUAL(1, blocks);
-        },
+    uint8_t buffer[512] = {0};
+    match_result(
+        IO__block_read(&bstr("/dev/test"), 4, 1, (Address)buffer, sizeof(buffer)),
+        success(blocks) { TEST_ASSERT_EQUAL(1, blocks); },
         error_test_fail()
     );
 

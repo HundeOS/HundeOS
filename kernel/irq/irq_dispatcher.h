@@ -17,8 +17,7 @@ typedef enum IRQDispatchStatus
     IRQ_DISPATCH_UNHANDLED = 1,
     IRQ_DISPATCH_RESCHEDULE = 2,
     IRQ_DISPATCH_ERROR = -1,
-}
-IRQDispatchStatus;
+} IRQDispatchStatus;
 
 ResultDef(IRQDispatchStatus);
 
@@ -28,8 +27,7 @@ typedef enum IRQRegistrationStatus
     IRQ_ALREADY_REGISTERED = -1,
     IRQ_INVALID_CONSUMER = -2,
     IRQ_REGISTRATION_ERROR = -3,
-}
-IRQRegistrationStatus;
+} IRQRegistrationStatus;
 
 ResultDef(IRQRegistrationStatus);
 
@@ -39,18 +37,14 @@ typedef struct IRQDispatchContext
     CPUID cpu;
     bool current_el;
     ProcessContextPtr process_context;
-}
-IRQDispatchContext;
+} IRQDispatchContext;
 
 typedef IRQDispatchContext * IRQDispatchContextPtr;
 
-static inline IRQDispatchContext IRQDispatchContext__new(
-    IRQNumber irq,
-    CPUID cpu,
-    bool current_el,
-    ProcessContextPtr process_context)
+static inline IRQDispatchContext IRQDispatchContext__new(IRQNumber irq, CPUID cpu, bool current_el,
+                                                         ProcessContextPtr process_context)
 {
-    return (IRQDispatchContext) {
+    return (IRQDispatchContext){
         .irq = irq,
         .cpu = cpu,
         .current_el = current_el,
@@ -64,8 +58,7 @@ typedef enum IRQConsumerType
 {
     IRQ_CONSUMER_KERNEL = 1,
     IRQ_CONSUMER_SERVICE = 2,
-}
-IRQConsumerType;
+} IRQConsumerType;
 
 typedef struct IRQConsumer
 {
@@ -73,8 +66,7 @@ typedef struct IRQConsumer
     IRQKernelConsumer kernel_consumer;
     void * kernel_data;
     ProcessPtr service_process;
-}
-IRQConsumer;
+} IRQConsumer;
 
 typedef IRQConsumer * IRQConsumerPtr;
 
@@ -87,32 +79,23 @@ typedef struct IRQDispatcher
     Optional(InterruptControllerInfo) interrupt_controller;
     IRQConsumerMap consumers;
     mutex_t lock;
-}
-IRQDispatcher;
+} IRQDispatcher;
 
 typedef IRQDispatcher * IRQDispatcherPtr;
 
-#define NEW_IRQ_DISPATCHER(scheduler_ptr) \
-    (IRQDispatcher) { \
-        .scheduler = scheduler_ptr, \
-        .interrupt_controller = None(InterruptControllerInfo), \
-        .consumers = EmptyMap(IRQConsumerMap), \
-        .lock = MUTEX_INIT, \
+#define NEW_IRQ_DISPATCHER(scheduler_ptr)                                                                              \
+    (IRQDispatcher)                                                                                                    \
+    {                                                                                                                  \
+        .scheduler = scheduler_ptr, .interrupt_controller = None(InterruptControllerInfo),                             \
+        .consumers = EmptyMap(IRQConsumerMap), .lock = MUTEX_INIT,                                                     \
     }
 
-Result(IRQRegistrationStatus) IRQDispatcher__register_kernel(
-    IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, void * data
-);
+Result(IRQRegistrationStatus)
+    IRQDispatcher__register_kernel(IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, void * data);
 
-Result(IRQRegistrationStatus) IRQDispatcher__register_service(
-    IRQDispatcherPtr self, IRQNumber irq, ProcessPtr process
-);
-Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(
-    IRQDispatcherPtr self, ProcessPtr process
-);
+Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr self, IRQNumber irq, ProcessPtr process);
+Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispatcherPtr self, ProcessPtr process);
 
-Result(IRQDispatchStatus) IRQDispatcher__dispatch(
-    IRQDispatcherPtr self, IRQNumber irq, IRQDispatchContextPtr context
-);
+Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumber irq, IRQDispatchContextPtr context);
 
 #endif

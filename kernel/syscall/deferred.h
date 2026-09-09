@@ -7,5 +7,4 @@
 
 Result(Anything) SystemCall__Complete(ParkedOperationPtr parked_operation);
 
-
 #endif

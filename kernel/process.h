@@ -46,15 +46,16 @@ OptionalDef(GroupID);
 // 6    5      4     3    2         1     0
 // dead stop active sleep wait interrupt ready
 //
-typedef enum ProcessStates{
-    PROC_STATE_NEW               = 0b0000000, // Being created
-    PROC_STATE_READY             = 0b0000001, // Ready to run
-    PROC_STATE_RUNNING           = 0b0010000, // Currently executing
-    PROC_STATE_INTERRUPTED       = 0b0000010, // Interrupted by signal
-    PROC_STATE_WAITING           = 0b0000100, // Waiting for I/O or event
-    PROC_STATE_SLEEPING          = 0b0001000, // Sleeping (timed wait)
-    PROC_STATE_STOPPED           = 0b0100000, // Stopped (e.g., by signal)
-    PROC_STATE_DEAD              = 0b1000000, // Being destroyed
+typedef enum ProcessStates
+{
+    PROC_STATE_NEW = 0b0000000,               // Being created
+    PROC_STATE_READY = 0b0000001,             // Ready to run
+    PROC_STATE_RUNNING = 0b0010000,           // Currently executing
+    PROC_STATE_INTERRUPTED = 0b0000010,       // Interrupted by signal
+    PROC_STATE_WAITING = 0b0000100,           // Waiting for I/O or event
+    PROC_STATE_SLEEPING = 0b0001000,          // Sleeping (timed wait)
+    PROC_STATE_STOPPED = 0b0100000,           // Stopped (e.g., by signal)
+    PROC_STATE_DEAD = 0b1000000,              // Being destroyed
     PROC_STATE_SWITCHING_CONTEXT = 0b0100100, // Switching context
 } ProcessStates;
 
@@ -105,32 +106,33 @@ typedef ProcessArguments * ProcessArgumentsPtr;
 typedef const ProcessArguments * ConstProcessArgumentsPtr;
 bool ProcessChildEvent__equals(ProcessChildEventPtr self, ProcessChildEventPtr other);
 #define MAX_PROCESS_CHILD_EVENTS 64
-FixedArrayDefine(ProcessChildEvent, MAX_PROCESS_CHILD_EVENTS, ProcessChildEvents, (EqualFunction) ProcessChildEvent__equals);
+FixedArrayDefine(ProcessChildEvent, MAX_PROCESS_CHILD_EVENTS, ProcessChildEvents,
+                 (EqualFunction)ProcessChildEvent__equals);
 
 inline const char * ProcessState__to_string(ProcessState state)
 {
     switch (state)
     {
-        case PROC_STATE_NEW:
-            return "PROC_STATE_NEW";
-        case PROC_STATE_READY:
-            return "PROC_STATE_READY";
-        case PROC_STATE_RUNNING:
-            return "PROC_STATE_RUNNING";
-        case PROC_STATE_INTERRUPTED:
-            return "PROC_STATE_INTERRUPTED";
-        case PROC_STATE_WAITING:
-            return "PROC_STATE_WAITING";
-        case PROC_STATE_SLEEPING:
-            return "PROC_STATE_SLEEPING";
-        case PROC_STATE_STOPPED:
-            return "PROC_STATE_STOPPED";
-        case PROC_STATE_DEAD:
-            return "PROC_STATE_DEAD";
-        case PROC_STATE_SWITCHING_CONTEXT:
-            return "PROC_STATE_SWITCHING_CONTEXT";
-        default:
-            return "UNKNOWN";
+    case PROC_STATE_NEW:
+        return "PROC_STATE_NEW";
+    case PROC_STATE_READY:
+        return "PROC_STATE_READY";
+    case PROC_STATE_RUNNING:
+        return "PROC_STATE_RUNNING";
+    case PROC_STATE_INTERRUPTED:
+        return "PROC_STATE_INTERRUPTED";
+    case PROC_STATE_WAITING:
+        return "PROC_STATE_WAITING";
+    case PROC_STATE_SLEEPING:
+        return "PROC_STATE_SLEEPING";
+    case PROC_STATE_STOPPED:
+        return "PROC_STATE_STOPPED";
+    case PROC_STATE_DEAD:
+        return "PROC_STATE_DEAD";
+    case PROC_STATE_SWITCHING_CONTEXT:
+        return "PROC_STATE_SWITCHING_CONTEXT";
+    default:
+        return "UNKNOWN";
     }
 }
 
@@ -180,20 +182,19 @@ typedef struct SharedUserPages
 {
     UserAddress allocation;
     UserAddress mapping;
-}
-SharedUserPages;
+} SharedUserPages;
 
 ResultDef(SharedUserPages);
 
 static inline SharedUserPages SharedUserPages__new(UserAddress allocation, UserAddress mapping)
 {
-    return (SharedUserPages) {
+    return (SharedUserPages){
         .allocation = allocation,
         .mapping = mapping,
     };
 }
 
-LinkedListDefine(UserAllocation, UserAllocations, (EqualFunction) UserAllocation__equals);
+LinkedListDefine(UserAllocation, UserAllocations, (EqualFunction)UserAllocation__equals);
 typedef struct ProcessFileDescriptor
 {
     FileDescriptor fd;
@@ -205,9 +206,7 @@ typedef ProcessFileDescriptor * ProcessFileDescriptorPtr;
 OptionalDef(ProcessFileDescriptor);
 bool ProcessFileDescriptor__equals(ProcessFileDescriptorPtr self, ProcessFileDescriptorPtr other);
 
-LinkedListDefine(
-    ProcessFileDescriptor, ProcessFileDescriptors, (EqualFunction) ProcessFileDescriptor__equals
-);
+LinkedListDefine(ProcessFileDescriptor, ProcessFileDescriptors, (EqualFunction)ProcessFileDescriptor__equals);
 
 typedef struct Process Process;
 typedef Process * ProcessPtr;
@@ -217,7 +216,8 @@ typedef Kernel * KernelPtr;
 OptionalDef(ProcessPtr);
 ResultDef(ProcessPtr);
 
-typedef struct Process {
+typedef struct Process
+{
     mutex_t lock;
     KernelPtr kernel;
     ProcessPageTable page_table;
@@ -249,27 +249,17 @@ typedef struct Process {
     ParkedOperations parked_operations;
 } Process;
 
-Result(ProcessPtr) Process__new(
-    KernelPtr kernel,
-    ConstBStringPtr name,
-    const ProcessPageTable * page_table,
-    const UserAddress * entry,
-    const Stack * stack,
-    OptionalPtr(ProcessPtr) parent,
-    ConstProcessArgumentsPtr arguments
-);
+Result(ProcessPtr)
+    Process__new(KernelPtr kernel, ConstBStringPtr name, const ProcessPageTable * page_table, const UserAddress * entry,
+                 const Stack * stack, OptionalPtr(ProcessPtr) parent, ConstProcessArgumentsPtr arguments);
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 
 OptionalType(ProcessTable *, ProcessTablePtr);
 
 Result(ProcessPtr) Process__setup(KernelPtr kernel, const Elf * binary, OptionalPtr(ProcessPtr) parent);
-Result(ProcessPtr) Process__setup_with_args(
-    KernelPtr kernel,
-    const Elf * binary,
-    OptionalPtr(ProcessPtr) parent,
-    ConstProcessArgumentsPtr arguments
-);
+Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, const Elf * binary, OptionalPtr(ProcessPtr) parent,
+                                            ConstProcessArgumentsPtr arguments);
 Result(ProcessSetupStatus) Process__dispose(ProcessPtr self);
 Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation);
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self);
@@ -277,12 +267,8 @@ Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self
 Optional(ParkReason) Process__top_park_reason(ProcessPtr self);
 Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self);
 bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key);
-bool Process__mark_parked_operation_ready(
-    ProcessPtr self,
-    ParkReason reason,
-    OptionalPtr(OperationKey) operation_key,
-    OptionalPtr(ReturnCode) return_code
-);
+bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key,
+                                          OptionalPtr(ReturnCode) return_code);
 bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick);
 bool Process__is_parked(ProcessPtr self);
 bool Process__is_handling_service_irq(ProcessPtr self);
@@ -301,17 +287,14 @@ Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self);
 Result(CollectionCode) Process__push_child_event(ProcessPtr self, ConstProcessChildEventPtr event);
 Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr self);
 Result(KAllocCode) Process__dispose_page_table(ProcessPtr self);
-Result(ProcessMemoryCode) Process__record_user_allocation(
-    ProcessPtr self, UserAddress address, size_t size, UserAllocationType type
-);
+Result(ProcessMemoryCode)
+    Process__record_user_allocation(ProcessPtr self, UserAddress address, size_t size, UserAllocationType type);
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
-Result(UserAddress) Process__map_shared_user_pages(
-    ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size
-);
-Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(
-    ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size
-);
+Result(UserAddress)
+    Process__map_shared_user_pages(ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size);
+Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPtr self, ProcessPtr source,
+                                                                       Address source_virtual_address, size_t size);
 Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self);
 Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size);
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment);
@@ -320,9 +303,8 @@ Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self);
 Result(FileDescriptor) Process__allocate_file_descriptor(ProcessPtr self, ProcessIOHandle handle);
 Result(FileDescriptor) Process__set_file_descriptor(ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle);
 Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor fd);
-Result(FileDescriptor) Process__copy_file_descriptor(
-    ProcessPtr self, ProcessPtr source, FileDescriptor target_fd, FileDescriptor source_fd
-);
+Result(FileDescriptor) Process__copy_file_descriptor(ProcessPtr self, ProcessPtr source, FileDescriptor target_fd,
+                                                     FileDescriptor source_fd);
 Result(ProcessIOHandle) Process__remove_file_descriptor(ProcessPtr self, FileDescriptor fd);
 
 #endif

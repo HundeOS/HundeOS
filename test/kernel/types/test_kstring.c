@@ -6,13 +6,13 @@
 BString hello = bstr("hello");
 BString world = bstr("world");
 
-#define TEST_KSTRING_EQUALS(expected, actual) \
-    bool equal = BString__equals(&expected, &actual); \
-    if (!equal) \
-    { \
-        k_printf("expected=\"%s\" actual=\"%s\"\n", BString__cstr(&expected), BString__cstr(&actual));\
-    } \
-    TEST_ASSERT_TRUE(equal); \
+#define TEST_KSTRING_EQUALS(expected, actual)                                                                          \
+    bool equal = BString__equals(&expected, &actual);                                                                  \
+    if (!equal)                                                                                                        \
+    {                                                                                                                  \
+        k_printf("expected=\"%s\" actual=\"%s\"\n", BString__cstr(&expected), BString__cstr(&actual));                 \
+    }                                                                                                                  \
+    TEST_ASSERT_TRUE(equal);
 
 void setUp(void)
 {
@@ -20,9 +20,7 @@ void setUp(void)
 
 void tearDown(void)
 {
-
 }
-
 
 void test_kstring_split(void)
 {
@@ -30,8 +28,8 @@ void test_kstring_split(void)
     BStringArray strs = BString__split(&bstr("hello/world"), '/');
 
     TEST_ASSERT_EQUAL_INT(2, BStringArray__len(&strs));
-    BStringPtr str1 = unwrap(BStringPtr, BStringArray__ptr_at(&strs, 0), (BStringPtr){});
-    BStringPtr str2 = unwrap(BStringPtr, BStringArray__ptr_at(&strs, 1), (BStringPtr){});
+    BStringPtr str1 = unwrap_optional(BStringArray__ptr_at(&strs, 0), (BStringPtr){});
+    BStringPtr str2 = unwrap_optional(BStringArray__ptr_at(&strs, 1), (BStringPtr){});
 
     TEST_ASSERT_TRUE(BString__equals(str1, &hello));
     TEST_ASSERT_TRUE(BString__equals(str2, &world));
@@ -43,8 +41,8 @@ void test_kstring_split_preceeding_delimiter(void)
     BStringArray strs = BString__split(&bstr("/hello/world"), '/');
 
     TEST_ASSERT_EQUAL_INT(2, BStringArray__len(&strs));
-    BStringPtr str1 = unwrap(BStringPtr, BStringArray__ptr_at(&strs, 0), (BStringPtr){});
-    BStringPtr str2 = unwrap(BStringPtr, BStringArray__ptr_at(&strs, 1), (BStringPtr){});
+    BStringPtr str1 = unwrap_optional(BStringArray__ptr_at(&strs, 0), (BStringPtr){});
+    BStringPtr str2 = unwrap_optional(BStringArray__ptr_at(&strs, 1), (BStringPtr){});
 
     TEST_ASSERT_TRUE(BString__equals(str1, &hello));
     TEST_ASSERT_TRUE(BString__equals(str2, &world));
@@ -56,8 +54,8 @@ void test_kstring_split_trailing_delimiters(void)
     BStringArray strs = BString__split(&bstr("/hello/world//"), '/');
 
     TEST_ASSERT_EQUAL_INT(2, BStringArray__len(&strs));
-    BStringPtr str1 = unwrap(BStringPtr, BStringArray__ptr_at(&strs, 0), (BStringPtr){});
-    BStringPtr str2 = unwrap(BStringPtr, BStringArray__ptr_at(&strs, 1), (BStringPtr){});
+    BStringPtr str1 = unwrap_optional(BStringArray__ptr_at(&strs, 0), (BStringPtr){});
+    BStringPtr str2 = unwrap_optional(BStringArray__ptr_at(&strs, 1), (BStringPtr){});
 
     TEST_ASSERT_TRUE(BString__equals(str1, &hello));
     TEST_ASSERT_TRUE(BString__equals(str2, &world));
@@ -69,8 +67,8 @@ void test_kstring_split_double_delimiter(void)
     BStringArray strs = BString__split(&bstr("/hello//world"), '/');
 
     TEST_ASSERT_EQUAL_INT(2, BStringArray__len(&strs));
-    BStringPtr str1 = unwrap(BStringPtr, BStringArray__ptr_at(&strs, 0), (BStringPtr){});
-    BStringPtr str2 = unwrap(BStringPtr, BStringArray__ptr_at(&strs, 1), (BStringPtr){});
+    BStringPtr str1 = unwrap_optional(BStringArray__ptr_at(&strs, 0), (BStringPtr){});
+    BStringPtr str2 = unwrap_optional(BStringArray__ptr_at(&strs, 1), (BStringPtr){});
 
     TEST_ASSERT_TRUE(BString__equals(str1, &hello));
     TEST_ASSERT_TRUE(BString__equals(str2, &world));
@@ -129,14 +127,21 @@ void test_kstring_char_at_returns_character_when_in_bounds(void)
 {
     BString str = bstring("hello");
 
-    match_optional(char, BString__char_at(&bstr("hello"), 1), some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); }, none_test_fail());
+    match_optional(
+        BString__char_at(&bstr("hello"), 1),
+        some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); },
+        none_test_fail()
+    );
 }
 
 void test_kstring_char_at_returns_none_when_out_of_bounds(void)
 {
     BString str = bstring("hello");
 
-    match_optional(char, BString__char_at(&bstr("hello"), 5), some_test_fail(), none() { TEST_ASSERT_TRUE(true); });
+    match_optional(BString__char_at(&bstr("hello"), 5),
+        some_test_fail(),
+        none() { TEST_ASSERT_TRUE(true); }
+    );
 }
 
 void test_kstring_uppercase(void)

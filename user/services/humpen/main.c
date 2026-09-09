@@ -23,13 +23,11 @@ static BString humpen_invalid_filesystem_type = bstr("invalid filesystem type");
 static BString humpen_invalid_mountpoint = bstr("invalid mountpoint");
 static BString humpen_unexpected_fstab_token = bstr("unexpected fstab token");
 
-
 typedef uint64_t MountResult;
 ResultDef(MountResult);
 
 const MountResult HUMPEN_PARSE_ERROR = 1;
 const MountResult HUMPEN_FSTAB_ERROR = 2;
-
 
 typedef struct HumpenMountCommand
 {
@@ -40,16 +38,12 @@ typedef struct HumpenMountCommand
     Optional(BString) arg0;
     Optional(BString) arg1;
     Optional(BString) arg2;
-}
-HumpenMountCommand;
+} HumpenMountCommand;
 
 ResultDef(HumpenMountCommand);
 
-static HumpenMountCommand HumpenMountCommand__new(
-    ConstBStringPtr device_path,
-    ConstBStringPtr filesystem_type,
-    ConstBStringPtr mountpoint
-)
+static HumpenMountCommand HumpenMountCommand__new(ConstBStringPtr device_path, ConstBStringPtr filesystem_type,
+                                                  ConstBStringPtr mountpoint)
 {
     HumpenMountCommand command = {
         .driver_path = &humpen_wachhund_path,
@@ -75,7 +69,8 @@ static Optional(DynString) Humpen__load_fstab(void)
     Optional(DynString) read_result = IO__read_dyn_string(handle, HUMPEN_FSTAB_MAX);
 
     close(handle);
-    match_optional(DynString, read_result,
+    match_optional(
+        read_result,
         some(fstab)
         {
             if (DynString__length(&fstab) <= 0)
@@ -95,7 +90,7 @@ static Optional(DynString) Humpen__load_fstab(void)
 static BString Humpen__line_without_comment(ConstBStringPtr line)
 {
     BStringSplit split = BString__split_first_any(line, &humpen_comment_delimiter);
-    match_optional(BString, split.match,
+    match_optional(split.match,
         some(before_comment) { return before_comment; },
         none_do_nothing()
     );
@@ -111,7 +106,8 @@ static Result(HumpenMountCommand) Humpen__parse_mount_command(ConstBStringPtr in
     BString mountpoint = empty_bstr();
 
     BStringSplit command_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(BString, command_split.match,
+    match_optional(
+        command_split.match,
         some(token)
         {
             if (!BString__equals(&token, &humpen_device_command))
@@ -121,57 +117,46 @@ static Result(HumpenMountCommand) Humpen__parse_mount_command(ConstBStringPtr in
 
             remaining = command_split.rest;
         },
-        none()
-        {
-            return Error(HumpenMountCommand, humpen_invalid_fstab_line, HUMPEN_PARSE_ERROR);
-        }
+        none() { return Error(HumpenMountCommand, humpen_invalid_fstab_line, HUMPEN_PARSE_ERROR); }
     );
 
     BStringSplit device_path_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(BString, device_path_split.match,
+    match_optional(
+        device_path_split.match,
         some(token)
         {
             device_path = token;
             remaining = device_path_split.rest;
         },
-        none()
-        {
-            return Error(HumpenMountCommand, humpen_invalid_device_path, HUMPEN_PARSE_ERROR);
-        }
+        none() { return Error(HumpenMountCommand, humpen_invalid_device_path, HUMPEN_PARSE_ERROR); }
     );
 
     BStringSplit filesystem_type_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(BString, filesystem_type_split.match,
+    match_optional(
+        filesystem_type_split.match,
         some(token)
         {
             filesystem_type = token;
             remaining = filesystem_type_split.rest;
         },
-        none()
-        {
-            return Error(HumpenMountCommand, humpen_invalid_filesystem_type, HUMPEN_PARSE_ERROR);
-        }
+        none() { return Error(HumpenMountCommand, humpen_invalid_filesystem_type, HUMPEN_PARSE_ERROR); }
     );
 
     BStringSplit mountpoint_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(BString, mountpoint_split.match,
+    match_optional(
+        mountpoint_split.match,
         some(token)
         {
             mountpoint = token;
             remaining = mountpoint_split.rest;
         },
-        none()
-        {
-            return Error(HumpenMountCommand, humpen_invalid_mountpoint, HUMPEN_PARSE_ERROR);
-        }
+        none() { return Error(HumpenMountCommand, humpen_invalid_mountpoint, HUMPEN_PARSE_ERROR); }
     );
 
     BStringSplit extra_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(BString, extra_split.match,
-        some(extra)
-        {
-            return Error(HumpenMountCommand, humpen_unexpected_fstab_token, HUMPEN_PARSE_ERROR);
-        },
+    match_optional(
+        extra_split.match,
+        some(extra) { return Error(HumpenMountCommand, humpen_unexpected_fstab_token, HUMPEN_PARSE_ERROR); },
         none_do_nothing()
     );
 
@@ -187,27 +172,15 @@ static Result(SpawnResult) Humpen__spawn_watchdog_line(ConstBStringPtr line)
         return Success(SpawnResult, 0);
     }
 
-    match_result(HumpenMountCommand, Humpen__parse_mount_command(&remaining),
+    match_result(
+        Humpen__parse_mount_command(&remaining),
         success(command)
         {
-            IO__printf(
-                &bstr("humpen: mounting %B as %B on %B\n"),
-                &command.device_path,
-                &command.filesystem_type,
-                &command.mountpoint
-            );
-            return OS__spawn(
-                P_NOWAIT,
-                command.driver_path,
-                &command.arg0,
-                &command.arg1,
-                &command.arg2
-            );
+            IO__printf(&bstr("humpen: mounting %B as %B on %B\n"), &command.device_path, &command.filesystem_type,
+                       &command.mountpoint);
+            return OS__spawn(P_NOWAIT, command.driver_path, &command.arg0, &command.arg1, &command.arg2);
         },
-        error(code, message)
-        {
-            return Error(SpawnResult, message, code);
-        }
+        error(code, message) { return Error(SpawnResult, message, code); }
     );
 
     return Error(SpawnResult, humpen_invalid_fstab_line, HUMPEN_PARSE_ERROR);
@@ -215,15 +188,17 @@ static Result(SpawnResult) Humpen__spawn_watchdog_line(ConstBStringPtr line)
 
 static Result(MountResult) Humpen__mount_fstab(ConstDynStringPtr fstab)
 {
-    match_optional(DynStringLines, DynString__lines(fstab),
+    match_optional(
+        DynString__lines(fstab),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line,
-            {
-                match_optional(BString, DynString__bstring(&line),
+            for_each_ll(DynStringLines, lines, line, {
+                match_optional(
+                    DynString__bstring(&line),
                     some(bstring_line)
                     {
-                        match_result(SpawnResult, Humpen__spawn_watchdog_line(&bstring_line),
+                        match_result(
+                            Humpen__spawn_watchdog_line(&bstring_line),
                             success_do_nothing(),
                             error(code, message)
                             {
@@ -242,10 +217,7 @@ static Result(MountResult) Humpen__mount_fstab(ConstDynStringPtr fstab)
             DynStringLines__dispose_all(&lines);
             return Success(MountResult, 0);
         },
-        none()
-        {
-            return Error(MountResult, bstr("failed to split fstab lines"), HUMPEN_FSTAB_ERROR);
-        }
+        none() { return Error(MountResult, bstr("failed to split fstab lines"), HUMPEN_FSTAB_ERROR); }
     );
 
     return Error(MountResult, bstr("failed to mount fstab"), HUMPEN_FSTAB_ERROR);
@@ -255,17 +227,16 @@ int HUMPEN_ENTRYPOINT(void)
 {
     int result = 1;
 
-    match_optional(DynString, Humpen__load_fstab(),
+    match_optional(
+        Humpen__load_fstab(),
         some(fstab)
         {
-            match_result(MountResult, Humpen__mount_fstab(&fstab),
-                success(spawn_result)
-                {
-                    result = (int) spawn_result;
-                },
+            match_result(
+                Humpen__mount_fstab(&fstab),
+                success(spawn_result) { result = (int)spawn_result; },
                 error(code, message)
                 {
-                    IO__printf(&bstr("humpen: %B (%i)\n"), &message, (int) code);
+                    IO__printf(&bstr("humpen: %B (%i)\n"), &message, (int)code);
                     result = 1;
                 }
             );

@@ -4,12 +4,10 @@
 
 LinkedListBodyDefine(BlockedParkedOperations);
 
-static ParkedOperation ParkedOperation__new(
-    KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation,
-    ParkReason park_reason, bool owns_kernel_context
-)
+static ParkedOperation ParkedOperation__new(KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation,
+                                            ParkReason park_reason, bool owns_kernel_context)
 {
-    return (ParkedOperation) {
+    return (ParkedOperation){
         .kernel_context = kernel_context,
         .owns_kernel_context = owns_kernel_context,
         .ready = false,
@@ -22,19 +20,15 @@ static ParkedOperation ParkedOperation__new(
     };
 }
 
-ParkedOperationPtr ParkedOperation__heap_new(
-    KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation, ParkReason park_reason
-)
+ParkedOperationPtr ParkedOperation__heap_new(KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation,
+                                             ParkReason park_reason)
 {
-    return ParkedOperation__heap_new_with_context_ownership(
-        kernel_context, continuation, park_reason, false
-    );
+    return ParkedOperation__heap_new_with_context_ownership(kernel_context, continuation, park_reason, false);
 }
 
-ParkedOperationPtr ParkedOperation__heap_new_with_context_ownership(
-    KernelContextPtr kernel_context, OptionalPtr(Continuation) continuation,
-    ParkReason park_reason, bool owns_kernel_context
-)
+ParkedOperationPtr ParkedOperation__heap_new_with_context_ownership(KernelContextPtr kernel_context,
+                                                                    OptionalPtr(Continuation) continuation,
+                                                                    ParkReason park_reason, bool owns_kernel_context)
 {
     ParkedOperationPtr context = ptr(Kernel__alloc_kernel(sizeof(ParkedOperation)), ParkedOperation);
     *context = ParkedOperation__new(kernel_context, continuation, park_reason, owns_kernel_context);
@@ -52,11 +46,11 @@ void ParkedOperation__mark_ready(ParkedOperationPtr self)
     self->ready = true;
 }
 
-Result(CollectionCode) ParkedOperation__add_blocked_operation(
-    ParkedOperationPtr self, ParkedOperationPtr blocked_operation
-)
+Result(CollectionCode)
+    ParkedOperation__add_blocked_operation(ParkedOperationPtr self, ParkedOperationPtr blocked_operation)
 {
-    match_result(CollectionCode, BlockedParkedOperations__push(&self->blocked_operations, blocked_operation),
+    match_result(
+        BlockedParkedOperations__push(&self->blocked_operations, blocked_operation),
         success(index)
         {
             self->pending_operations++;
@@ -68,11 +62,11 @@ Result(CollectionCode) ParkedOperation__add_blocked_operation(
     return Error(CollectionCode, bstring("Unable to add blocked operation"), LINKED_LIST_ALLOCATION_FAILED);
 }
 
-Result(CollectionCode) ParkedOperation__resolve_blocked_operation(
-    ParkedOperationPtr self, ParkedOperationPtr blocked_operation
-)
+Result(CollectionCode)
+    ParkedOperation__resolve_blocked_operation(ParkedOperationPtr self, ParkedOperationPtr blocked_operation)
 {
-    match_result(CollectionCode, BlockedParkedOperations__remove(&self->blocked_operations, blocked_operation),
+    match_result(
+        BlockedParkedOperations__remove(&self->blocked_operations, blocked_operation),
         success(index)
         {
             if (self->pending_operations > 0)
@@ -91,20 +85,20 @@ BString ParkReason__to_string(ParkReason reason)
 {
     switch (reason)
     {
-        case PARK_WAIT_CHILD:
-            return bstr("PARK_WAIT_CHILD");
-        case PARK_WAIT_IO:
-            return bstr("PARK_WAIT_IO");
-        case PARK_WAIT_SERVICE_EVENT:
-            return bstr("PARK_WAIT_SERVICE_EVENT");
-        case PARK_WAIT_CHILD_EVENT:
-            return bstr("PARK_WAIT_CHILD_EVENT");
-        case PARK_WAIT_SERVICE_READY:
-            return bstr("PARK_WAIT_SERVICE_READY");
-        case PARK_SLEEP:
-            return bstr("PARK_SLEEP");
-        default:
-            return bstr("PARK_WAIT_UNKNOWN");
+    case PARK_WAIT_CHILD:
+        return bstr("PARK_WAIT_CHILD");
+    case PARK_WAIT_IO:
+        return bstr("PARK_WAIT_IO");
+    case PARK_WAIT_SERVICE_EVENT:
+        return bstr("PARK_WAIT_SERVICE_EVENT");
+    case PARK_WAIT_CHILD_EVENT:
+        return bstr("PARK_WAIT_CHILD_EVENT");
+    case PARK_WAIT_SERVICE_READY:
+        return bstr("PARK_WAIT_SERVICE_READY");
+    case PARK_SLEEP:
+        return bstr("PARK_SLEEP");
+    default:
+        return bstr("PARK_WAIT_UNKNOWN");
     }
 }
 
@@ -112,7 +106,8 @@ void ParkedOperation__dispose(ParkedOperationPtr self)
 {
     while (BlockedParkedOperations__len(&self->blocked_operations) > 0)
     {
-        match_optional(ParkedOperationPtr, BlockedParkedOperations__remove_at(&self->blocked_operations, 0),
+        match_optional(
+            BlockedParkedOperations__remove_at(&self->blocked_operations, 0),
             some(blocked_operation) { ParkedOperation__dispose(blocked_operation); },
             none_do_nothing()
         );

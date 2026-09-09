@@ -14,13 +14,8 @@ typedef ProcessContext * ProcessContextPtr;
 typedef struct Kernel Kernel;
 typedef Kernel * KernelPtr;
 
-ProcessContextPtr ProcessContext__init(KernelPtr kernel,
-                                       ProcessID pid,
-                                       StackPtr stack,
-                                       UserAddress entry_point,
-                                       KernelAddress page_table,
-                                       uint64_t argc,
-                                       Address argv);
+ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr stack, UserAddress entry_point,
+                                       KernelAddress page_table, uint64_t argc, Address argv);
 void ProcessContext__dispose(ProcessContextPtr self);
 void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self);
 

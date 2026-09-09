@@ -99,7 +99,6 @@ __BOOT_STRING__(mapping_memset) = "memset";
 __BOOT_STRING__(mapping_vectors) = "vector_table";
 __BOOT_STRING__(mapping_stack) = "kernel_stack";
 
-
 __BOOT_STRING__(mmu_enable) = "Switching on MMU\n";
 __BOOT_STRING__(entering_hi_mem) = "Entering high memory kernel\n";
 __BOOT_STRING__(MAIN) = "primary_main\n";

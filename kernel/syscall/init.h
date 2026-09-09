@@ -5,5 +5,4 @@
 
 Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self);
 
-
 #endif

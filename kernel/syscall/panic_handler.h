@@ -3,14 +3,7 @@
 
 #include "syscall.h"
 
-Result(SystemCallResult) Panic__handler(
-    KernelPtr kernel,
-    OptionalPtr(ProcessPtr) proc,
-    Anything arg1,
-    Anything arg2,
-    Anything arg3,
-    Anything arg4,
-    Anything arg5
-);
+Result(SystemCallResult) Panic__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                        Anything arg3, Anything arg4, Anything arg5);
 
 #endif

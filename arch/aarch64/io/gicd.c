@@ -6,8 +6,8 @@
 #include "../asm_helpers.h"
 
 #define GICD_CTLR_ENABLE_GRP1NS (1u << 1)
-#define GICD_CTLR_ARE_NS        (1u << 4)
-#define GIC_SPI_START           32u
+#define GICD_CTLR_ARE_NS (1u << 4)
+#define GIC_SPI_START 32u
 
 static Address gicd_base(InterruptControllerInfoPtr info)
 {
@@ -39,28 +39,20 @@ Result(InitCode) gic_enable_interrupt(InterruptControllerInfoPtr info, uint32_t 
     unsigned int bit = irq % 32;
     Address base = gicd_base(info);
 
-    volatile unsigned int *GICD_ISENABLER = (unsigned int *)(base + 0x100 + (reg * 4));
-    volatile uint8_t *GICD_IPRIORITYR = (uint8_t *)(base + 0x400 + irq);
-    volatile uint8_t *GICD_ITARGETSR = (uint8_t *)(base + 0x800 + irq);
-    volatile uint32_t *GICD_IGROUPR = (uint32_t *)(base + 0x080 + (reg * 4));
+    volatile unsigned int * GICD_ISENABLER = (unsigned int *)(base + 0x100 + (reg * 4));
+    volatile uint8_t * GICD_IPRIORITYR = (uint8_t *)(base + 0x400 + irq);
+    volatile uint8_t * GICD_ITARGETSR = (uint8_t *)(base + 0x800 + irq);
+    volatile uint32_t * GICD_IGROUPR = (uint32_t *)(base + 0x080 + (reg * 4));
 
     gicd_enable_group1ns(info);
-    *GICD_IPRIORITYR = 0xA0;  // medium priority
-    *GICD_ITARGETSR = 1;      // legacy route to CPU0
+    *GICD_IPRIORITYR = 0xA0; // medium priority
+    *GICD_ITARGETSR = 1;     // legacy route to CPU0
     gicd_route_spi_to_cpu0(info, irq);
     *GICD_ISENABLER = (1 << bit);
     *GICD_IGROUPR |= (1 << bit);
 
-    __d_printf(
-        IODEV,
-        "gic enable irq=%i reg=%i bit=%i isenabler=0x%x igroupr=0x%x ctlr=0x%x\n",
-        irq,
-        reg,
-        bit,
-        *GICD_ISENABLER,
-        *GICD_IGROUPR,
-        *(volatile uint32_t *)(base + 0x000)
-    );
+    __d_printf(IODEV, "gic enable irq=%i reg=%i bit=%i isenabler=0x%x igroupr=0x%x ctlr=0x%x\n", irq, reg, bit,
+               *GICD_ISENABLER, *GICD_IGROUPR, *(volatile uint32_t *)(base + 0x000));
 
     __d_printf(IRQ2, "ISENABLER1=%x\n", *(volatile uint32_t *)(base + 0x104));
     __d_printf(IRQ2, "GICD_CTLR=%x\n", *(volatile uint32_t *)(base + 0x000));
@@ -102,9 +94,9 @@ Result(InitCode) gic_init(InterruptControllerInfoPtr info)
     }
 
     // Enable CPU interface via system registers (GICv3)
-    asm volatile("msr ICC_PMR_EL1, %0" :: "r"(0xFF));   // accept all priorities
-    asm volatile("msr ICC_IGRPEN1_EL1, %0" :: "r"(1));  // enable group1
-    asm volatile("msr DAIFClr, #2" :::"memory" );  // enable group1
+    asm volatile("msr ICC_PMR_EL1, %0" ::"r"(0xFF));  // accept all priorities
+    asm volatile("msr ICC_IGRPEN1_EL1, %0" ::"r"(1)); // enable group1
+    asm volatile("msr DAIFClr, #2" ::: "memory");     // enable group1
     asm volatile("isb; dsb sy");
     __d_printf(IRQ2, "daif=%x\n", read_daifclr());
     __d_printf(IRQ2, "current_el=%x\n", (read_current_el() >> 2));

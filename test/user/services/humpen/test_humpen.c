@@ -55,14 +55,23 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     TEST_ASSERT_EQUAL(3, handle);
 
     DynString text;
-    match_result(DynStringCode, DynString__init(&text, max_bytes), success_do_nothing(), error(code, message) { return None(DynString); });
+    match_result(
+        DynString__init(&text, max_bytes),
+        success_do_nothing(),
+        error(code, message) { return None(DynString); }
+    );
 
     while (next_fstab[next_fstab_position] != '\0' && next_fstab_position < max_bytes)
     {
-        match_result(DynStringCode, DynString__push_char(&text, next_fstab[next_fstab_position]), success_do_nothing(), error(code, message) {
+        match_result(
+            DynString__push_char(&text, next_fstab[next_fstab_position]),
+            success_do_nothing(),
+            error(code, message)
+            {
                 DynString__dispose(&text);
                 return None(DynString);
-            });
+            }
+        );
 
         next_fstab_position++;
     }
@@ -76,40 +85,42 @@ IOStatus close(IOHandle handle)
     return IO_OK;
 }
 
-SpawnResult spawn(
-    SpawnMode mode,
-    ConstBStringPtr path,
-    OptionalPtr(BString) arg0,
-    OptionalPtr(BString) arg1,
-    OptionalPtr(BString) arg2
-)
+SpawnResult spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0, OptionalPtr(BString) arg1,
+                  OptionalPtr(BString) arg2)
 {
     TEST_ASSERT_EQUAL(P_NOWAIT, mode);
     TEST_ASSERT_LESS_THAN_UINT64(4, spawn_count);
     snprintf(spawned_paths[spawn_count], sizeof(spawned_paths[spawn_count]), "%s", BString__cstr(path));
-    match_optional(BString, *arg0,
-        some(value) { snprintf(spawned_arg0[spawn_count], sizeof(spawned_arg0[spawn_count]), "%s", BString__cstr(&value)); },
+    match_optional(
+        *arg0,
+        some(value)
+        {
+            snprintf(spawned_arg0[spawn_count], sizeof(spawned_arg0[spawn_count]), "%s", BString__cstr(&value));
+        },
         none_do_nothing()
     );
-    match_optional(BString, *arg1,
-        some(value) { snprintf(spawned_arg1[spawn_count], sizeof(spawned_arg1[spawn_count]), "%s", BString__cstr(&value)); },
+    match_optional(
+        *arg1,
+        some(value)
+        {
+            snprintf(spawned_arg1[spawn_count], sizeof(spawned_arg1[spawn_count]), "%s", BString__cstr(&value));
+        },
         none_do_nothing()
     );
-    match_optional(BString, *arg2,
-        some(value) { snprintf(spawned_arg2[spawn_count], sizeof(spawned_arg2[spawn_count]), "%s", BString__cstr(&value)); },
+    match_optional(
+        *arg2,
+        some(value)
+        {
+            snprintf(spawned_arg2[spawn_count], sizeof(spawned_arg2[spawn_count]), "%s", BString__cstr(&value));
+        },
         none_do_nothing()
     );
     spawn_count++;
     return next_spawn_result;
 }
 
-Result(SpawnResult) OS__spawn(
-    SpawnMode mode,
-    ConstBStringPtr path,
-    OptionalPtr(BString) arg0,
-    OptionalPtr(BString) arg1,
-    OptionalPtr(BString) arg2
-)
+Result(SpawnResult) OS__spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0,
+                              OptionalPtr(BString) arg1, OptionalPtr(BString) arg2)
 {
     SpawnResult result = spawn(mode, path, arg0, arg1, arg2);
     if (result >= 0)
@@ -139,18 +150,17 @@ int IO__printf(ConstBStringPtr format, ...)
     StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
-        output_position += (uint64_t) written;
+        output_position += (uint64_t)written;
     }
-    return (int) written;
+    return (int)written;
 }
 
 void test_humpen_starts_mount_handlers_for_device_entries_from_fstab(void)
 {
-    next_fstab =
-        "# device <path> <filesystem> <mountpoint>\n"
-        "device /dev/virtio1 ext2 /\n"
-        "\n"
-        "device /dev/virtio3 fat32 /mnt/fs1 # data\n";
+    next_fstab = "# device <path> <filesystem> <mountpoint>\n"
+                 "device /dev/virtio1 ext2 /\n"
+                 "\n"
+                 "device /dev/virtio3 fat32 /mnt/fs1 # data\n";
 
     TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
 
@@ -177,10 +187,9 @@ void test_humpen_returns_failure_when_watchdog_spawn_fails(void)
 
 void test_humpen_handles_comments_blank_lines_and_missing_final_newline(void)
 {
-    next_fstab =
-        "# device <path> <filesystem> <mountpoint>\n"
-        "   \r\n"
-        "device /dev/virtio1 ext2 / # root";
+    next_fstab = "# device <path> <filesystem> <mountpoint>\n"
+                 "   \r\n"
+                 "device /dev/virtio1 ext2 / # root";
 
     TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
 
@@ -204,11 +213,9 @@ void test_humpen_parse_mount_command_returns_error_for_missing_device_path(void)
 {
     BString line = bstr("device");
 
-    match_result(HumpenMountCommand, Humpen__parse_mount_command(&bstr("device")),
-        success(command)
-        {
-            TEST_FAIL();
-        },
+    match_result(
+        Humpen__parse_mount_command(&bstr("device")),
+        success(command) { TEST_FAIL(); },
         error(code, message)
         {
             TEST_ASSERT_EQUAL_INT(HUMPEN_PARSE_ERROR, code);
@@ -220,22 +227,26 @@ void test_humpen_parse_mount_command_returns_error_for_missing_device_path(void)
 void test_humpen_parse_mount_command_builds_watchdog_spawn_command_for_ext2(void)
 {
 
-    match_result(HumpenMountCommand, Humpen__parse_mount_command(&bstr("device /dev/virtio1 ext2 /")),
+    match_result(
+        Humpen__parse_mount_command(&bstr("device /dev/virtio1 ext2 /")),
         success(command)
         {
             TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, BString__cstr(command.driver_path));
             TEST_ASSERT_EQUAL_STRING("/dev/virtio1", BString__cstr(&command.device_path));
             TEST_ASSERT_EQUAL_STRING("ext2", BString__cstr(&command.filesystem_type));
             TEST_ASSERT_EQUAL_STRING("/", BString__cstr(&command.mountpoint));
-            match_optional(BString, command.arg0,
+            match_optional(
+                command.arg0,
                 some(arg) { TEST_ASSERT_EQUAL_STRING("/dev/virtio1", BString__cstr(&arg)); },
                 none_test_fail()
             );
-            match_optional(BString, command.arg1,
+            match_optional(
+                command.arg1,
                 some(arg) { TEST_ASSERT_EQUAL_STRING("ext2", BString__cstr(&arg)); },
                 none_test_fail()
             );
-            match_optional(BString, command.arg2,
+            match_optional(
+                command.arg2,
                 some(arg) { TEST_ASSERT_EQUAL_STRING("/", BString__cstr(&arg)); },
                 none_test_fail()
             );

@@ -4,9 +4,7 @@
 #include "../kernel_core.h"
 #include "syscall.h"
 
-Result(SystemCallResult) Signal__handler(
-    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-    Anything arg2, Anything arg3, Anything arg4, Anything arg5
-);
+Result(SystemCallResult) Signal__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                         Anything arg3, Anything arg4, Anything arg5);
 
 #endif

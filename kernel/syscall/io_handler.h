@@ -8,8 +8,7 @@
 #include "../kernel_init.h"
 #include "syscalls/io.h"
 
-Result(SystemCallResult) IO__handler(
-    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5
-);
+Result(SystemCallResult) IO__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                     Anything arg3, Anything arg4, Anything arg5);
 
 #endif

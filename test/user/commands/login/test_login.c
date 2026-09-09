@@ -65,11 +65,8 @@ static bool contains_text(const char * haystack, const char * needle)
     while (haystack[haystack_index] != '\0')
     {
         uint64_t needle_index = 0;
-        while (
-            needle[needle_index] != '\0'
-            && haystack[haystack_index + needle_index] != '\0'
-            && haystack[haystack_index + needle_index] == needle[needle_index]
-        )
+        while (needle[needle_index] != '\0' && haystack[haystack_index + needle_index] != '\0' &&
+               haystack[haystack_index + needle_index] == needle[needle_index])
         {
             needle_index++;
         }
@@ -109,21 +106,24 @@ AuthResult auth(ConstBStringPtr username, ConstBStringPtr password)
     return AUTH_INVALID_CREDENTIALS;
 }
 
-SpawnResult spawn_with_auth(
-    SpawnMode mode,
-    AuthTicketID auth_ticket_id,
-    ConstBStringPtr path,
-    OptionalPtr(BString) arg0,
-    OptionalPtr(BString) arg1,
-    OptionalPtr(BString) arg2
-)
+SpawnResult spawn_with_auth(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBStringPtr path,
+                            OptionalPtr(BString) arg0, OptionalPtr(BString) arg1, OptionalPtr(BString) arg2)
 {
     last_mode = mode;
     last_auth_ticket_id = auth_ticket_id;
     copy_text(last_path, sizeof(last_path), BString__cstr(path));
-    match_optional(BString, *arg0, some_test_fail(), none_do_nothing());
-    match_optional(BString, *arg1, some_test_fail(), none_do_nothing());
-    match_optional(BString, *arg2, some_test_fail(), none_do_nothing());
+    match_optional(*arg0,
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_optional(*arg1,
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_optional(*arg2,
+        some_test_fail(),
+        none_do_nothing()
+    );
     return next_spawn_result;
 }
 
@@ -146,9 +146,9 @@ int IO__printf(ConstBStringPtr format, ...)
     StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
-        output_position += (uint64_t) written;
+        output_position += (uint64_t)written;
     }
-    return (int) written;
+    return (int)written;
 }
 
 BString Console__read_line(bool echo)

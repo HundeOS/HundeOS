@@ -9,6 +9,7 @@ UNITY_PATH=vendor/Unity
 BOOT_PLATFORM ?= qemu_virt
 BSP_DEFINES ?= -DBSP_VIRT
 UV ?= uv
+CLANG_FORMAT = clang-format
 PYTHON = $(UV) run python
 PYTHON_ENV_STAMP = .venv/.uv-sync
 # Compiler flags
@@ -90,7 +91,8 @@ QEMU_EFI_VARS = build/$(BOOT_PLATFORM)/efi-vars.fd
 SOURCES := $(shell find ./kernel -name "*.c" -print)
 ASM_SOURCES := $(shell find ./kernel -name "*.s" -print)
 
-COMMON_SOURCES := $(shell find ./common -name "*.c" -print)
+COMMON_SOURCES := $(shell find ./common -path "./common/arch" -prune -o -name "*.c" -print)
+COMMON_ARCH_SOURCES := $(shell find ./common/arch/aarch64 -name "*.c" -print)
 
 ARCH_COMMON_SOURCES := $(shell find ./arch/aarch64 -path "./arch/aarch64/boot/*/*" -prune -o -name "*.c" -print)
 ARCH_PLATFORM_SOURCES := $(shell find ./arch/aarch64/boot/$(BOOT_PLATFORM) -name "*.c" ! -name "loader.c" -print 2>/dev/null)
@@ -102,7 +104,7 @@ ARCH_ASM_SOURCES := $(ARCH_COMMON_ASM_SOURCES) $(ARCH_PLATFORM_ASM_SOURCES)
 # Define object files based on source files, potentially in a build directory
 OBJECTS := $(patsubst %.c,$(KERNEL_BUILD_DIR)/%.o,$(SOURCES))
 ASM_OBJECTS := $(patsubst %.s,$(KERNEL_BUILD_DIR)/%.o,$(ASM_SOURCES))
-COMMON_KERNEL_OBJECTS := $(patsubst %.c,$(KERNEL_BUILD_DIR)/%.o,$(COMMON_SOURCES))
+COMMON_KERNEL_OBJECTS := $(patsubst %.c,$(KERNEL_BUILD_DIR)/%.o,$(COMMON_SOURCES) $(COMMON_ARCH_SOURCES))
 
 ARCH_OBJECTS := $(patsubst %.c,$(KERNEL_BUILD_DIR)/%.o,$(ARCH_SOURCES))
 ARCH_ASM_OBJECTS := $(patsubst %.s,$(KERNEL_BUILD_DIR)/%.o,$(ARCH_ASM_SOURCES))
@@ -118,7 +120,7 @@ USER_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_ASM_SOURCES))
 
 USER_LIB_OBJECTS := $(patsubst ./%.c,build/%.o,$(USER_LIB_SOURCES))
 USER_LIB_ASM_OBJECTS := $(patsubst ./%.s,build/%.o,$(USER_LIB_ASM_SOURCES))
-COMMON_USER_OBJECTS := $(patsubst ./common/%.c,build/user/common/%.o,$(COMMON_SOURCES))
+COMMON_USER_OBJECTS := $(patsubst ./common/%.c,build/user/common/%.o,$(COMMON_SOURCES) $(COMMON_ARCH_SOURCES))
 
 USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
 USER_BINARY_DIRS := $(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null))
@@ -146,6 +148,11 @@ all: $(BIN)
 # Semihosting version (better for QEMU debugging)
 elf: $(ELF)
 kernel: hundelint user_binaries $(BIN)
+
+# Capture real kernel and userspace flags without compiling or launching QEMU.
+.PHONY: compile-commands
+compile-commands:
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --overwrite --full-path make -B elf
 
 setup: python-venv
 	mkdir -p build
@@ -297,6 +304,16 @@ clean:
 
 test: $(PYTHON_ENV_STAMP)
 	make test -C test
+
+.PHONY: format format-check format-test
+format: $(PYTHON_ENV_STAMP)
+	$(PYTHON) tools/hundeformat.py -- $(CLANG_FORMAT)
+
+format-check: $(PYTHON_ENV_STAMP)
+	$(PYTHON) tools/hundeformat.py --check -- $(CLANG_FORMAT)
+
+format-test: $(PYTHON_ENV_STAMP)
+	$(PYTHON) test/tools/test_hundeformat.py -- $(CLANG_FORMAT)
 
 hundelint: $(PYTHON_ENV_STAMP)
 	$(PYTHON) tools/hundelint.py --require-tree-sitter

@@ -39,12 +39,14 @@ CPUID CPU__id()
 
 void CPU__noop()
 {
-
 }
 
 void CPU__wait()
 {
+}
 
+void CPU__signal_event()
+{
 }
 
 uint64_t CPU__count()
@@ -54,17 +56,14 @@ uint64_t CPU__count()
 
 void CPU__wait_for_interrupts()
 {
-
 }
 
 void CPU__check_halt()
 {
-
 }
 
 void CPU__halt_all()
 {
-
 }
 
 void CPU__assign_id(CPUID id)

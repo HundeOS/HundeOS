@@ -3,11 +3,17 @@
 
 #include <stdint.h>
 
+#define MEM_SHARED_PAGE_BASE 0x71000000ULL
+#define MEM_SHARED_PAGE_COUNT 64U
+#define MEM_SHARED_PAGE_SIZE 4096ULL
+
 typedef enum MemOperation
 {
     MEM_ALLOC_PAGES,
     MEM_FREE_PAGES,
     MEM_SBRK,
+    MEM_ALLOC_SHARED_PAGE,
+    MEM_RELEASE_SHARED_PAGE,
 } MemOperation;
 
 typedef enum MemStatus
@@ -19,6 +25,8 @@ typedef enum MemStatus
     MEM_ALLOCATION_FAILED = -4,
     MEM_FREE_FAILED = -5,
     MEM_OPERATION_NOT_SUPPORTED = -6,
+    MEM_PERMISSION_DENIED = -7,
+    MEM_PEER_NOT_FOUND = -8,
 } MemStatus;
 
 typedef uint64_t MemSize;

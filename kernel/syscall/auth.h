@@ -34,21 +34,17 @@ typedef Auth * AuthPtr;
 ResultDef(AuthTicketID);
 ResultDef(UserID);
 
-#define NEW_AUTH \
-    (Auth) { \
-        .lock = MUTEX_INIT, \
-        .next_ticket_id = 1, \
-        .tickets = EmptyArray(AuthTickets), \
-    } \
+#define NEW_AUTH                                                                                                       \
+    (Auth)                                                                                                             \
+    {                                                                                                                  \
+        .lock = MUTEX_INIT, .next_ticket_id = 1, .tickets = EmptyArray(AuthTickets),                                   \
+    }
 
-Result(AuthTicketID) Auth__authenticate(
-    AuthPtr self, ProcessPtr process, ConstBStringPtr username, ConstBStringPtr password
-);
+Result(AuthTicketID)
+    Auth__authenticate(AuthPtr self, ProcessPtr process, ConstBStringPtr username, ConstBStringPtr password);
 Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicketID ticket_id);
 
-Result(SystemCallResult) Auth__handler(
-    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-    Anything arg2, Anything arg3, Anything arg4, Anything arg5
-);
+Result(SystemCallResult) Auth__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                       Anything arg3, Anything arg4, Anything arg5);
 
 #endif

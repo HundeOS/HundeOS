@@ -51,14 +51,14 @@ int IO__printf(ConstBStringPtr format, ...)
     StringPos written = BString__copy_to(&formatted, output + output_position, sizeof(output) - output_position);
     if (written > 0)
     {
-        output_position += (uint64_t) written;
+        output_position += (uint64_t)written;
     }
-    return (int) written;
+    return (int)written;
 }
 
 void test_shutdown_invokes_shutdown_system(void)
 {
-    char * argv[] = { "shutdown" };
+    char * argv[] = {"shutdown"};
 
     TEST_ASSERT_EQUAL_INT(0, shutdown_main_under_test(1, argv));
     TEST_ASSERT_EQUAL_UINT64(1, shutdown_call_count);
@@ -66,7 +66,7 @@ void test_shutdown_invokes_shutdown_system(void)
 
 void test_shutdown_prints_error_when_shutdown_fails(void)
 {
-    char * argv[] = { "shutdown" };
+    char * argv[] = {"shutdown"};
     fake_result = SYSCALL_IO_BLOCK;
 
     TEST_ASSERT_EQUAL_INT(1, shutdown_main_under_test(1, argv));

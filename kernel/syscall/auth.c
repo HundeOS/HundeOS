@@ -21,9 +21,9 @@ typedef struct AuthCredential
 } AuthCredential;
 
 static AuthCredential credentials[] = {
-    { bstr("root"), bstr("root"), PROCESS_USER_ROOT },
-    { bstr("hund"), bstr("hund"), PROCESS_USER_HUND },
-    { bstr("user"), bstr("user"), PROCESS_USER_USER },
+    {bstr("root"), bstr("root"), PROCESS_USER_ROOT},
+    {bstr("hund"), bstr("hund"), PROCESS_USER_HUND},
+    {bstr("user"), bstr("user"), PROCESS_USER_USER},
 };
 
 bool AuthTicket__equals(void * a, void * b)
@@ -39,10 +39,7 @@ static Result(UserID) Auth__credential_user_id(ConstBStringPtr username, ConstBS
     for (uint64_t index = 0; index < count; index++)
     {
         AuthCredential credential = credentials[index];
-        if (
-            BString__equals(username, &credential.username)
-            && BString__equals(password, &credential.password)
-        )
+        if (BString__equals(username, &credential.username) && BString__equals(password, &credential.password))
         {
             return Success(UserID, credential.user_id);
         }
@@ -53,7 +50,7 @@ static Result(UserID) Auth__credential_user_id(ConstBStringPtr username, ConstBS
 
 static bool Auth__ticket_id_matches(AuthTicketPtr ticket, void * context)
 {
-    AuthTicketID ticket_id = *((AuthTicketID *) context);
+    AuthTicketID ticket_id = *((AuthTicketID *)context);
     return ticket->id == ticket_id;
 }
 
@@ -68,22 +65,27 @@ static AuthTicket AuthTicket__new(AuthTicketID ticket_id, ProcessID issued_to_pi
     return ticket;
 }
 
-Result(AuthTicketID) Auth__authenticate(AuthPtr self, ProcessPtr process, ConstBStringPtr username, ConstBStringPtr password)
+Result(AuthTicketID)
+    Auth__authenticate(AuthPtr self, ProcessPtr process, ConstBStringPtr username, ConstBStringPtr password)
 {
-    match_result(UserID, Auth__credential_user_id(username, password),
+    match_result(
+        Auth__credential_user_id(username, password),
         success(user_id)
         {
             Result(AuthTicketID) result = Error(AuthTicketID, ticket_store_full_message, AUTH_TICKET_STORE_FULL);
-            critical_section(self->lock,
-            {
+            critical_section(self->lock, {
                 AuthTicketID ticket_id = self->next_ticket_id;
                 self->next_ticket_id++;
 
                 AuthTicket ticket = AuthTicket__new(ticket_id, process->pid, user_id);
 
-                match_result(CollectionCode, AuthTickets__push(&self->tickets, ticket),
+                match_result(
+                    AuthTickets__push(&self->tickets, ticket),
                     success(_) { result = Success(AuthTicketID, ticket_id); },
-                    error(code, message) { result = Error(AuthTicketID, ticket_store_full_message, AUTH_TICKET_STORE_FULL); }
+                    error(code, message)
+                    {
+                        result = Error(AuthTicketID, ticket_store_full_message, AUTH_TICKET_STORE_FULL);
+                    }
                 );
             });
             return result;
@@ -97,9 +99,9 @@ Result(AuthTicketID) Auth__authenticate(AuthPtr self, ProcessPtr process, ConstB
 Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicketID ticket_id)
 {
     Result(UserID) auth_result = Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET);
-    critical_section(self->lock,
-    {
-        match_find_result_ptr(AuthTickets, AuthTickets__find(&self->tickets, Auth__ticket_id_matches, &ticket_id),
+    critical_section(self->lock, {
+        match_find_result_ptr(
+            AuthTickets__find(&self->tickets, Auth__ticket_id_matches, &ticket_id),
             some(ticket)
             {
                 if (ticket->issued_to_pid != process->pid)
@@ -123,27 +125,22 @@ Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicket
     return auth_result;
 }
 
-Result(SystemCallResult) Auth__handler(
-    KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-    Anything arg2, Anything arg3, Anything arg4, Anything arg5
-)
+Result(SystemCallResult) Auth__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                       Anything arg3, Anything arg4, Anything arg5)
 {
     if (arg1 == 0)
     {
         return Error(SystemCallResult, invalid_credentials_message, AUTH_INVALID_CREDENTIALS);
     }
 
-    AuthRequestPtr request = (AuthRequestPtr) arg1;
+    AuthRequestPtr request = (AuthRequestPtr)arg1;
 
-    match_optional(ProcessPtr, *proc,
+    match_optional(
+        *proc,
         some(process)
         {
-            match_result(AuthTicketID, Auth__authenticate(
-                &kernel->auth,
-                process,
-                &request->username,
-                &request->password
-            ),
+            match_result(
+                Auth__authenticate(&kernel->auth, process, &request->username, &request->password),
                 success(ticket_id) { return Success(SystemCallResult, ticket_id); },
                 error(code, message) { return Error(SystemCallResult, message, code); }
             );

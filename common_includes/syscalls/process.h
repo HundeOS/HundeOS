@@ -44,6 +44,7 @@ typedef enum ProcessCapabilityBits
     PROCESS_CAP_HANDLE_BLOCK_REQUESTS = 1ULL << 4,
     PROCESS_CAP_MOUNT_FILESYSTEM = 1ULL << 5,
     PROCESS_CAP_USE_BLOCK_DEVICES = 1ULL << 6,
+    PROCESS_CAP_MANAGE_SHARED_PAGES = 1ULL << 7,
     PROCESS_CAP_ALL = UINT64_MAX,
 } ProcessCapabilityBits;
 
@@ -84,7 +85,7 @@ typedef const ProcessChildEvent * ConstProcessChildEventPtr;
 
 static inline ProcessChildEvent ProcessChildEvent__new(void)
 {
-    return (ProcessChildEvent) {
+    return (ProcessChildEvent){
         .pid = 0,
         .status = 0,
         .type = 0,
@@ -113,14 +114,13 @@ typedef struct ProcessInfo
     char wait_reason[PROCESS_INFO_WAIT_SIZE];
     char class_name[PROCESS_INFO_CLASS_SIZE];
     char user_name[PROCESS_INFO_USER_SIZE];
-}
-ProcessInfo;
+} ProcessInfo;
 
 typedef ProcessInfo * ProcessInfoPtr;
 
 static inline ProcessInfo ProcessInfo__new(uint64_t pid)
 {
-    return (ProcessInfo) {
+    return (ProcessInfo){
         .pid = pid,
     };
 }
@@ -129,14 +129,13 @@ typedef struct ProcessListRequest
 {
     ProcessInfoPtr entries;
     uint64_t max_entries;
-}
-ProcessListRequest;
+} ProcessListRequest;
 
 typedef ProcessListRequest * ProcessListRequestPtr;
 
 static inline ProcessListRequest ProcessListRequest__new(ProcessInfoPtr entries, uint64_t max_entries)
 {
-    return (ProcessListRequest) {
+    return (ProcessListRequest){
         .entries = entries,
         .max_entries = max_entries,
     };

@@ -1,0 +1,5 @@
+build/**
+vendor/**
+user/lib/newlib/**
+test/**/*_Runner.c
+user/drivers/video_term/emoji_atlas.h

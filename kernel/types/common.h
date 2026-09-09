@@ -16,5 +16,4 @@ typedef uint8_t CollectionCode;
 ResultDef(CollectionCode);
 #endif
 
-
 #endif

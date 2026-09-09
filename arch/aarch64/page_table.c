@@ -8,7 +8,7 @@
 #include "../../kernel/kalloc.h"
 #include "../../kernel/kernel_core.h"
 
-#define PAGE_MASK   (~(PAGE_SIZE - 1ULL))
+#define PAGE_MASK (~(PAGE_SIZE - 1ULL))
 #define PAGE_OFF(x) ((uint64_t)(x) & (PAGE_SIZE - 1ULL))
 
 LinkedListBodyDefine(ProcessPageTablePages);
@@ -17,9 +17,8 @@ static BString page_table_allocation_failed = bstr("Page table allocation failed
 
 bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other)
 {
-    return self->valid == other->valid &&
-        self->virtual_addr == other->virtual_addr &&
-        self->phys_addr == other->phys_addr;
+    return self->valid == other->valid && self->virtual_addr == other->virtual_addr &&
+           self->phys_addr == other->phys_addr;
 }
 
 // VA[47:39] = L0 index (9) - points to next table or a block (if block, rest of output addr is used as offset)
@@ -58,37 +57,37 @@ bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other)
 //  PXN (bit 53)       : Privileged eXecute-Never (blocks EL1 execute)
 //  UXN (bit 54)       : Unprivileged eXecute-Never (blocks EL0 execute)
 
-
 static Result(KAllocCode) ProcessPageTable__record_page(ProcessPageTablePtr self, KernelAddress page)
 {
-    match_result(CollectionCode, ProcessPageTablePages__push(&self->pages, page),
+    match_result(
+        ProcessPageTablePages__push(&self->pages, page),
         success(_) { return Success(KAllocCode, KALLOC_OK); },
-        error(code, message)
-        {
-            return Error(KAllocCode, message, KALLOC_ALLOCATION_FAILED);
-        }
+        error(code, message) { return Error(KAllocCode, message, KALLOC_ALLOCATION_FAILED); }
     );
 
     return Error(KAllocCode, page_table_allocation_failed, KALLOC_ALLOCATION_FAILED);
 }
 
-Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel) {
+Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel)
+{
     KernelAddress table = Kernel__alloc_page();
     if (!table.valid)
     {
         return Error(ProcessPageTable, page_table_allocation_failed, KALLOC_ALLOCATION_FAILED);
     }
 
-    ProcessPageTable process_page_table = (ProcessPageTable) {
+    ProcessPageTable process_page_table = (ProcessPageTable){
         .root = table,
         .pages = ProcessPageTablePages__new(),
     };
 
-    match_result(KAllocCode, ProcessPageTable__record_page(&process_page_table, table),
+    match_result(
+        ProcessPageTable__record_page(&process_page_table, table),
         success_do_nothing(),
         error(code, message)
         {
-            match_result(KAllocCode, Kernel__free(table.virtual_addr),
+            match_result(
+                Kernel__free(table.virtual_addr),
                 success_do_nothing(),
                 error(free_code, free_message) { return Error(ProcessPageTable, free_message, free_code); }
             );
@@ -97,14 +96,8 @@ Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel) {
     );
 
     __d_printf(DEBUG, "new table 0x%x", table);
-    __d_printf(
-        MEMORY,
-        "pagetable alloc level=root addr=%p phys=%p size=%i valid=%i\n",
-        table.virtual_addr,
-        table.phys_addr,
-        PAGE_SIZE,
-        (int) table.valid
-    );
+    __d_printf(MEMORY, "pagetable alloc level=root addr=%p phys=%p size=%i valid=%i\n", table.virtual_addr,
+               table.phys_addr, PAGE_SIZE, (int)table.valid);
     return Success(ProcessPageTable, process_page_table);
 }
 
@@ -125,15 +118,16 @@ size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
 
 Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self)
 {
-    for_each_ll(ProcessPageTablePages, self->pages, page,
-    {
-        match_result(KAllocCode, Kernel__free(page.virtual_addr),
+    for_each_ll(ProcessPageTablePages, self->pages, page, {
+        match_result(
+            Kernel__free(page.virtual_addr),
             success_do_nothing(),
             error(code, message) { return Error(KAllocCode, message, code); }
         );
     });
 
-    match_result(CollectionCode, ProcessPageTablePages__dispose(&self->pages),
+    match_result(
+        ProcessPageTablePages__dispose(&self->pages),
         success_do_nothing(),
         error(code, message) { return Error(KAllocCode, message, code); }
     );
@@ -158,7 +152,8 @@ void PageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress addr
     Address user_end = align_up_4k(vaddr(address) + size);
     Address kernel_start = align_down_4k(u_kvaddr(address) - (vaddr(address) - user_start));
 
-    __d_printf(MMU, "Pagetable map uvirt=%p size=%p table=%p\n", vaddr(address), size, ProcessPageTable__root_table(self));
+    __d_printf(MMU, "Pagetable map uvirt=%p size=%p table=%p\n", vaddr(address), size,
+               ProcessPageTable__root_table(self));
     __d_printf(MMU, "Pagetable map start=%p kernel=%p end=%p\n", user_start, kernel_start, user_end);
 
     size_t adjusted_range = user_end - user_start;
@@ -173,13 +168,7 @@ void PageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress addr
         access = ACCESS_EL1_RW_EL0_RW;
     }
 
-    MappingPermissions perms = MappingPermissions__new(
-        ATTR_INDEX_NORMAL,
-        SHARE_INNER,
-        access,
-        !address.execute,
-        0
-    );
+    MappingPermissions perms = MappingPermissions__new(ATTR_INDEX_NORMAL, SHARE_INNER, access, !address.execute, 0);
     __d_printf(MMU, "Mapping pages = %i\n", pages);
     for (uint64_t page = 0; page < pages; page++)
     {
@@ -207,13 +196,7 @@ void PageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress
     uint64_t pages = adjusted_range / PAGE_SIZE;
     pages += adjusted_range % PAGE_SIZE ? 1 : 0;
 
-    MappingPermissions perms = MappingPermissions__new(
-        ATTR_INDEX_DEVICE,
-        SHARE_OUTER,
-        ACCESS_EL1_RW_EL0_RW,
-        1,
-        1
-    );
+    MappingPermissions perms = MappingPermissions__new(ATTR_INDEX_DEVICE, SHARE_OUTER, ACCESS_EL1_RW_EL0_RW, 1, 1);
 
     for (uint64_t page = 0; page < pages; page++)
     {
@@ -224,8 +207,7 @@ void PageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress
     __asm__ __volatile__("dsb ishst; isb" ::: "memory");
 }
 
-static KernelAddress PageTable__next_level_table_if_present(KernelAddress parent_level_table,
-                                                            KernelPtr kernel,
+static KernelAddress PageTable__next_level_table_if_present(KernelAddress parent_level_table, KernelPtr kernel,
                                                             uint64_t child_index)
 {
     PageTablePtr parent_level_table_ptr = v_ptr(parent_level_table, PageTable);
@@ -242,15 +224,13 @@ static KernelAddress PageTable__next_level_table_if_present(KernelAddress parent
 static void PageTable__invalidate_page(Address virtual_address)
 {
     uint64_t page = virtual_address >> 12;
-    __asm__ __volatile__(
-        "dsb ishst\n"
-        "tlbi vaae1is, %0\n"
-        "dsb ish\n"
-        "isb\n"
-        :
-        : "r"(page)
-        : "memory"
-    );
+    __asm__ __volatile__("dsb ishst\n"
+                         "tlbi vaae1is, %0\n"
+                         "dsb ish\n"
+                         "isb\n"
+                         :
+                         : "r"(page)
+                         : "memory");
 }
 
 void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
@@ -304,10 +284,8 @@ void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtua
  *     should ensure appropriate barriers/TLB maintenance before relying on HW walks
  *     (e.g., dsb ishst; isb; and invalidate if replacing something).
  */
-KernelAddress PageTable__ensure_next_level_table(ProcessPageTablePtr page_table,
-                                                 KernelAddress parent_level_table,
-                                                 KernelPtr kernel,
-                                                 uint64_t child_index)
+KernelAddress PageTable__ensure_next_level_table(ProcessPageTablePtr page_table, KernelAddress parent_level_table,
+                                                 KernelPtr kernel, uint64_t child_index)
 {
     // Defensive: table has 512 entries at 4 KiB granule.
     // (Optional) if you have an assertion macro, enable it:
@@ -317,40 +295,40 @@ KernelAddress PageTable__ensure_next_level_table(ProcessPageTablePtr page_table,
     uint64_t descriptor = parent_level_table_ptr->entries[child_index];
 
     // Case 1: already a valid TABLE descriptor → return its next-level base.
-    if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE)) {
+    if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE))
+    {
         return PageTable__from_physical_address(kernel, descriptor & MASK_PTE_NEXTADDR);
     }
 
     // Case 2: slot holds a valid LEAF (block/page) → caller must split it.
     // We do not overwrite it here to avoid silent semantic changes.
-    if ((descriptor & FLAG_PTE_VALID) && !(descriptor & FLAG_PTE_TABLE)) {
+    if ((descriptor & FLAG_PTE_VALID) && !(descriptor & FLAG_PTE_TABLE))
+    {
         __d_println(PANIC, "null table");
-        return NULL_KERNEL_ADDRESS;  // leaf present; cannot "ensure" a table without a split
+        return NULL_KERNEL_ADDRESS; // leaf present; cannot "ensure" a table without a split
     }
 
     // Case 3: slot is invalid → allocate a fresh zeroed table page.
     KernelAddress next_level_table = Kernel__alloc_page();
 
-    if (!next_level_table.valid) {
+    if (!next_level_table.valid)
+    {
         __d_println(PANIC, "failed to allocate");
-        return NULL_KERNEL_ADDRESS;  // we should probably cause a fault
+        return NULL_KERNEL_ADDRESS; // we should probably cause a fault
     }
 
-    match_result(KAllocCode, ProcessPageTable__record_page(page_table, next_level_table),
+    match_result(
+        ProcessPageTable__record_page(page_table, next_level_table),
         success_do_nothing(),
         error(code, message)
         {
-            match_result(KAllocCode, Kernel__free(next_level_table.virtual_addr),
+            match_result(
+                Kernel__free(next_level_table.virtual_addr),
                 success_do_nothing(),
                 error(free_code, free_message)
                 {
-                    __d_printf(
-                        MEMORY,
-                        "pagetable record cleanup free failed addr=%p code=%i message=%s\n",
-                        next_level_table.virtual_addr,
-                        free_code,
-                        BString__cstr(&free_message)
-                    );
+                    __d_printf(MEMORY, "pagetable record cleanup free failed addr=%p code=%i message=%s\n",
+                               next_level_table.virtual_addr, free_code, BString__cstr(&free_message));
                 }
             );
             __d_println(PANIC, "failed to record page table allocation");
@@ -358,15 +336,9 @@ KernelAddress PageTable__ensure_next_level_table(ProcessPageTablePtr page_table,
         }
     );
 
-    __d_printf(
-        MEMORY,
-        "pagetable alloc level=child parent=%p child_index=%i addr=%p phys=%p size=%i\n",
-        parent_level_table.virtual_addr,
-        child_index,
-        next_level_table.virtual_addr,
-        next_level_table.phys_addr,
-        PAGE_SIZE
-    );
+    __d_printf(MEMORY, "pagetable alloc level=child parent=%p child_index=%i addr=%p phys=%p size=%i\n",
+               parent_level_table.virtual_addr, child_index, next_level_table.virtual_addr, next_level_table.phys_addr,
+               PAGE_SIZE);
 
     // Install a TABLE descriptor that points to the new page.
     parent_level_table_ptr->entries[child_index] = PageTable__make_table_desc(p_ptr(next_level_table, PageTable));
@@ -378,15 +350,13 @@ KernelAddress PageTable__ensure_next_level_table(ProcessPageTablePtr page_table,
     return next_level_table;
 }
 
-int PageTable__map_2M_block(ProcessPageTablePtr self,
-                                     KernelPtr kernel,
-                                     uint64_t virtual_address,
-                                     uint64_t phys_addr,
-                                     ConstMappingPermissionsPtr perms)
+int PageTable__map_2M_block(ProcessPageTablePtr self, KernelPtr kernel, uint64_t virtual_address, uint64_t phys_addr,
+                            ConstMappingPermissionsPtr perms)
 {
     KernelAddress table = ProcessPageTable__root(self);
     __d_printf(DEBUG, "Mapping 2M 0x%x\n", table.virtual_addr);
-    if (!table.valid) {
+    if (!table.valid)
+    {
         return -1;
     }
     __d_println(DEBUG, "Mapping 2M");
@@ -402,20 +372,18 @@ int PageTable__map_2M_block(ProcessPageTablePtr self,
     }
 
     __d_printf(DEBUG, "Mapping 2M 0x%x\n", l2_tbl);
-    v_ptr(l2_tbl, PageTable)->entries[L2_IDX(virtual_address)] =
-        PageTable__l2_block_desc(phys_addr, perms->memory_type, perms->shareability, perms->access, perms->uxn, perms->pxn);
+    v_ptr(l2_tbl, PageTable)->entries[L2_IDX(virtual_address)] = PageTable__l2_block_desc(
+        phys_addr, perms->memory_type, perms->shareability, perms->access, perms->uxn, perms->pxn);
 
     return 0;
 }
 
-int PageTable__map_4k_page(ProcessPageTablePtr self,
-                                    KernelPtr kernel,
-                                    Address virtual_address,
-                                    Address phys_addr,
-                                    ConstMappingPermissionsPtr perms)
+int PageTable__map_4k_page(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, Address phys_addr,
+                           ConstMappingPermissionsPtr perms)
 {
     KernelAddress table = ProcessPageTable__root(self);
-    if (!table.valid) {
+    if (!table.valid)
+    {
         return -1;
     }
 
@@ -435,9 +403,7 @@ int PageTable__map_4k_page(ProcessPageTablePtr self,
         return -1;
     }
 
-    v_ptr(l3_tbl, PageTable)->entries[L3_IDX(virtual_address)] =
-        PageTable__make_page_desc_4k_l3(
-            phys_addr, perms->memory_type, perms->shareability, perms->access, perms->uxn, perms->pxn
-        );
+    v_ptr(l3_tbl, PageTable)->entries[L3_IDX(virtual_address)] = PageTable__make_page_desc_4k_l3(
+        phys_addr, perms->memory_type, perms->shareability, perms->access, perms->uxn, perms->pxn);
     return 0;
 }

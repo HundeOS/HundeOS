@@ -14,7 +14,7 @@ Result(InitCode) uart_init(UartInfoPtr info);
 Result(InitCode) uart_enable_irqs(UartInfoPtr info);
 
 void put_int(int c);
-void puts(const char *s);
+void puts(const char * s);
 
 void uart_irq_handler(IOSubsystemPtr io_subsystem);
 

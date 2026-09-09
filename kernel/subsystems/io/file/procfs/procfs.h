@@ -11,8 +11,7 @@ typedef struct ProcFilesystemIOState
     FilesystemIOState state;
     KernelPtr kernel;
     IOInternalHandle next_handle;
-}
-ProcFilesystemIOState;
+} ProcFilesystemIOState;
 
 typedef ProcFilesystemIOState * ProcFilesystemIOStatePtr;
 

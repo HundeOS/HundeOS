@@ -11,13 +11,8 @@ struct ProcessContext
     uint64_t fpsr;
 };
 
-ProcessContextPtr ProcessContext__init(KernelPtr kernel,
-                                       ProcessID pid,
-                                       StackPtr stack,
-                                       UserAddress entry_point,
-                                       KernelAddress page_table,
-                                       uint64_t argc,
-                                       Address argv)
+ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr stack, UserAddress entry_point,
+                                       KernelAddress page_table, uint64_t argc, Address argv)
 {
     ProcessContextPtr context = v_ptr(Kernel__alloc(sizeof(ProcessContext)), ProcessContext);
     for (int i = 0; i < 31; i++)

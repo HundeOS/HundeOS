@@ -53,41 +53,32 @@ static __BOOT_DATA__(MappingPermissions) stack_heap_perms = { // hundelint: igno
     .shareability = SHARE_INNER,
     .memory_type = ATTR_INDEX_NORMAL,
     .uxn = 1,
-    .pxn = 1
-};
+    .pxn = 1};
 
 static __BOOT_DATA__(MappingPermissions) kernel_perms = { // hundelint: ignore-constructor-required
     .access = ACCESS_EL1_RW_EL0_NO,
     .shareability = SHARE_INNER,
     .memory_type = ATTR_INDEX_NORMAL,
     .uxn = 1,
-    .pxn = 0
-};
+    .pxn = 0};
 
 static __BOOT_DATA__(MappingPermissions) kernel_rw_perms = { // hundelint: ignore-constructor-required
     .access = ACCESS_EL1_RW_EL0_NO,
     .shareability = SHARE_INNER,
     .memory_type = ATTR_INDEX_NORMAL,
     .uxn = 1,
-    .pxn = 1
-};
+    .pxn = 1};
 
 static __BOOT_DATA__(MappingPermissions) device_perms = { // hundelint: ignore-constructor-required
     .memory_type = ATTR_INDEX_DEVICE,
     .access = ACCESS_EL1_RW_EL0_NO,
     .shareability = SHARE_OUTER,
     .uxn = 1,
-    .pxn = 1
-};
+    .pxn = 1};
 
 static __BOOT_DATA__(MappingPermissions) embedded_binaries_perms = { // hundelint: ignore-constructor-required
-    .memory_type = ATTR_INDEX_NORMAL,
-    .access = ACCESS_EL1_RO_EL0_NO,
-    .shareability = SHARE_INNER,
-    .uxn = 1,
-    .pxn = 1,
+    .memory_type = ATTR_INDEX_NORMAL, .access = ACCESS_EL1_RO_EL0_NO, .shareability = SHARE_INNER, .uxn = 1, .pxn = 1,
 };
-
 
 __BOOT__(PageTable *) ensure_next_level_table(PageTable * parent_level_table, uint64_t child_index)
 {
@@ -102,7 +93,7 @@ __BOOT__(PageTable *) ensure_next_level_table(PageTable * parent_level_table, ui
     // We do not overwrite it here to avoid silent semantic changes.
     if ((descriptor & FLAG_PTE_VALID) && !(descriptor & FLAG_PTE_TABLE))
     {
-        return NULL;  // leaf present; cannot "ensure" a table without a split
+        return NULL; // leaf present; cannot "ensure" a table without a split
     }
 
     PageTable * next_level_table = &table_pool[table_cursor++];
@@ -133,21 +124,16 @@ __BOOT__(void) map_2M_block(PageTable * table, uint64_t virtual_address, uint64_
     {
         boot_panic(block_mapped);
     }
-    else {
-        l2_tbl->entries[L2_IDX(virtual_address)] = PageTable__l2_block_desc(phys_addr,
-                                                                            perms->memory_type,
-                                                                            perms->shareability,
-                                                                            perms->access,
-                                                                            perms->uxn,
-                                                                            perms->pxn);
+    else
+    {
+        l2_tbl->entries[L2_IDX(virtual_address)] = PageTable__l2_block_desc(
+            phys_addr, perms->memory_type, perms->shareability, perms->access, perms->uxn, perms->pxn);
     }
 }
 
-__BOOT__(void) map_range_2M(PageTable * table,
-    uint64_t phys_start,
-    uint64_t phys_end,
-    uint64_t target,
-    MappingPermissions * perms) {
+__BOOT__(void)
+map_range_2M(PageTable * table, uint64_t phys_start, uint64_t phys_end, uint64_t target, MappingPermissions * perms)
+{
 
     uint64_t from = align_down_2m(phys_start);
     uint64_t to = align_up_2m(phys_end);
@@ -159,7 +145,6 @@ __BOOT__(void) map_range_2M(PageTable * table,
         map_2M_block(table, va, pa, perms);
     }
 }
-
 
 __BOOT__(void) map_kernel_heap_rw(SystemInfoPtr system_info)
 {
@@ -194,10 +179,7 @@ __BOOT__(void) map_embedded_binaries_ro()
     map_range_2M(&high_mem_l0_table, phys_start, phys_end, target, &embedded_binaries_perms);
 }
 
-__BOOT__(void) map_kernel_all_normal_rwx(uint64_t phys_start,
-                                         uint64_t phys_end,
-                                         uint64_t target,
-                                         PageTable * table)
+__BOOT__(void) map_kernel_all_normal_rwx(uint64_t phys_start, uint64_t phys_end, uint64_t target, PageTable * table)
 {
     map_range_2M(table, phys_start, phys_end, target, &kernel_perms);
 }
@@ -209,15 +191,13 @@ __BOOT__(void) map_uart(PageTable * table, uint64_t virt_addr, uint64_t phys_add
 
 __BOOT__(void) map_gicd_gicr(PageTable * table, BootPlatformInfoPtr platform)
 {
-    map_2M_block(table,
-        platform->gic_distributor_virtual_base,
-        platform->gic_distributor_physical_base,
-        &device_perms);
+    map_2M_block(table, platform->gic_distributor_virtual_base, platform->gic_distributor_physical_base, &device_perms);
 }
 
 __BOOT__(void) map_framebuffer(PageTable * table, BootPlatformInfoPtr platform)
 {
-    match_optional(FramebufferInfo, platform->framebuffer,
+    match_optional(
+        platform->framebuffer,
         some(framebuffer)
         {
             uint64_t map_size = framebuffer.size;
@@ -225,13 +205,8 @@ __BOOT__(void) map_framebuffer(PageTable * table, BootPlatformInfoPtr platform)
             {
                 map_size = BOOT_FRAMEBUFFER_MAP_SIZE;
             }
-            map_range_2M(
-                table,
-                framebuffer.physical_base,
-                framebuffer.physical_base + map_size,
-                (uint64_t)&__framebuffer_start[0],
-                &device_perms
-            );
+            map_range_2M(table, framebuffer.physical_base, framebuffer.physical_base + map_size,
+                         (uint64_t)&__framebuffer_start[0], &device_perms);
         },
         none_do_nothing()
     );
@@ -243,32 +218,22 @@ __BOOT__(void) map_kernel(SystemInfoPtr system_info)
     uint64_t k_low_phys_max = (uintptr_t)&__boot_end[0];
     uint64_t k_low_virt_base = KERNEL_LOW_VIRT_BASE;
 
-    map_kernel_all_normal_rwx(
-        k_low_phys,
-        k_low_phys_max,
-        k_low_virt_base,
-        &low_mem_l0_table); // unity map
+    map_kernel_all_normal_rwx(k_low_phys, k_low_phys_max, k_low_virt_base,
+                              &low_mem_l0_table); // unity map
 
     uint64_t k_high_phys = (uintptr_t)&__text_phys;
     uint64_t k_high_phys_max = (uintptr_t)&__lma_end;
     uint64_t k_high_virt_base = (uintptr_t)&__text_virt;
 
-    map_kernel_all_normal_rwx(
-        k_high_phys,
-        k_high_phys_max,
-        k_high_virt_base,
-        &high_mem_l0_table);
+    map_kernel_all_normal_rwx(k_high_phys, k_high_phys_max, k_high_virt_base, &high_mem_l0_table);
 
     map_kernel_heap_rw(system_info);
 }
 
 __BOOT__(void) map_tables_high()
 {
-    map_range_2M(&high_mem_l0_table,
-        (uint64_t)&__table_phys_start,
-        (uint64_t)&__table_phys_end,
-        (uint64_t)&__table_virt_start,
-        &kernel_rw_perms);
+    map_range_2M(&high_mem_l0_table, (uint64_t)&__table_phys_start, (uint64_t)&__table_phys_end,
+                 (uint64_t)&__table_virt_start, &kernel_rw_perms);
 }
 
 #ifdef __BOOT_DEBUG
@@ -277,7 +242,8 @@ static __BOOT__(void) debug_boot_mapping(const char * label, uint64_t va)
     uint64_t pa = 0;
     uint64_t desc = 0;
     int level = 0;
-    const uint64_t * root = pick_l0_for_va(va, (const uint64_t *)&low_mem_l0_table, (const uint64_t *)&high_mem_l0_table);
+    const uint64_t * root =
+        pick_l0_for_va(va, (const uint64_t *)&low_mem_l0_table, (const uint64_t *)&high_mem_l0_table);
     int ok = va_to_pa_from_l0(root, va, &pa, &level, &desc);
 
     boot_debug_print(mapping_check);
@@ -344,9 +310,11 @@ __BOOT__(void) enable_mmu()
     write_tcr_el1(boot_tcr_el1());
     isb();
     write_ttbr1_el1((uint64_t)&high_mem_l0_table);
-    dsb_ish(); isb();
-    tlbi_vmalle1();           // flush stale translations
-    dsb_ish(); isb();
+    dsb_ish();
+    isb();
+    tlbi_vmalle1(); // flush stale translations
+    dsb_ish();
+    isb();
     write_ttbr0_el1((uint64_t)&low_mem_l0_table);
     dsb_ish();
     isb();
@@ -374,9 +342,11 @@ __BOOT__(void) enable_mmu()
     write_sctlr_el1(sctlr);
 
     write_ttbr1_el1((uint64_t)&high_mem_l0_table);
-    dsb_ish(); isb();
-    tlbi_vmalle1();           // flush stale translations
-    dsb_ish(); isb();
+    dsb_ish();
+    isb();
+    tlbi_vmalle1(); // flush stale translations
+    dsb_ish();
+    isb();
     write_ttbr0_el1((uint64_t)&low_mem_l0_table);
     dsb_ish();
     isb();

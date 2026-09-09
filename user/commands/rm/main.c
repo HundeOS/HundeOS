@@ -22,7 +22,7 @@ int main(int argc, char ** argv)
     IOStatus status = IO__remove_file_with_flags(&path, flags);
     if (status < 0)
     {
-        IO__printf(&bstr("rm: error %i\n"), (int) status);
+        IO__printf(&bstr("rm: error %i\n"), (int)status);
         return 1;
     }
 

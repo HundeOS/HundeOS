@@ -32,12 +32,12 @@ extern const uint64_t __gicd_start[];
 
 #define QEMU_VIRT_GICD_PHYS_BASE 0x08000000UL
 #define QEMU_VIRT_GICR_PHYS_BASE (QEMU_VIRT_GICD_PHYS_BASE + GICR_OFFSET)
-#define QEMU_VIRT_GICD_BASE      ((uint64_t)&__gicd_start[0])
-#define QEMU_VIRT_GICR_BASE      (QEMU_VIRT_GICD_BASE + GICR_OFFSET)
+#define QEMU_VIRT_GICD_BASE ((uint64_t)&__gicd_start[0])
+#define QEMU_VIRT_GICR_BASE (QEMU_VIRT_GICD_BASE + GICR_OFFSET)
 #define QEMU_VIRT_PCI_ECAM_PHYS_BASE 0x4010000000ULL
-#define QEMU_VIRT_PCI_ECAM_SIZE      0x10000000ULL
-#define QEMU_VIRT_PCI_BUS_START      0ULL
-#define QEMU_VIRT_PCI_BUS_END        255ULL
+#define QEMU_VIRT_PCI_ECAM_SIZE 0x10000000ULL
+#define QEMU_VIRT_PCI_BUS_START 0ULL
+#define QEMU_VIRT_PCI_BUS_END 255ULL
 
 __BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = { // hundelint: ignore-constructor-required
     .cpu_count = 4,
@@ -46,12 +46,12 @@ __BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = { // hundelint:
     .uart_physical_base = BOOT_UART0_PHYS_BASE,
     .uart_virtual_base = BOOT_MMIO_VIRT_BASE,
     .uart_irq = BOOT_UART_IRQ_ID,
-    .pci = Some(PciInfo, ((PciInfo) { // hundelint: ignore-constructor-required
-        .ecam_physical_base = QEMU_VIRT_PCI_ECAM_PHYS_BASE,
-        .ecam_size = QEMU_VIRT_PCI_ECAM_SIZE,
-        .bus_start = QEMU_VIRT_PCI_BUS_START,
-        .bus_end = QEMU_VIRT_PCI_BUS_END,
-    })),
+    .pci = Some(PciInfo, ((PciInfo){ // hundelint: ignore-constructor-required
+                          .ecam_physical_base = QEMU_VIRT_PCI_ECAM_PHYS_BASE,
+                          .ecam_size = QEMU_VIRT_PCI_ECAM_SIZE,
+                          .bus_start = QEMU_VIRT_PCI_BUS_START,
+                          .bus_end = QEMU_VIRT_PCI_BUS_END,
+                      })),
     .sd_host = None(SdHostInfo),
     .interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V3,
     .gic_distributor_physical_base = QEMU_VIRT_GICD_PHYS_BASE,
@@ -99,8 +99,7 @@ __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
     qemu_virt_system_info.mmio.virtual_start = (uint64_t)&__mmio_start[0];
     qemu_virt_system_info.mmio.physical_start = qemu_virt_platform_info.uart_physical_base;
     qemu_virt_system_info.mmio.physical_end =
-        qemu_virt_platform_info.uart_physical_base +
-        ((uint64_t)&__mmio_end[0] - (uint64_t)&__mmio_start[0]);
+        qemu_virt_platform_info.uart_physical_base + ((uint64_t)&__mmio_end[0] - (uint64_t)&__mmio_start[0]);
 
     qemu_virt_system_info.uart.physical_base = qemu_virt_platform_info.uart_physical_base;
     qemu_virt_system_info.uart.virtual_base = qemu_virt_platform_info.uart_virtual_base;

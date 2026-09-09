@@ -11,6 +11,7 @@
 #include "irq/irq_dispatcher.h"
 #include "system_info.h"
 #include "syscall/auth.h"
+#include "service/service_directory.h"
 
 typedef uint64_t KernelInitStatus;
 
@@ -26,6 +27,7 @@ typedef struct Kernel
     SchedulerPtr scheduler;
     MessageBrokerPtr message_broker;
     IRQDispatcherPtr irq_dispatcher;
+    KernelServiceDirectory service_directory;
     Auth auth;
 } Kernel;
 

@@ -15,7 +15,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size)
 {
     ByteCount copied = 0;
 
-    for (; copied < next_input_size && copied < (ByteCount) size; copied++)
+    for (; copied < next_input_size && copied < (ByteCount)size; copied++)
     {
         buf[copied] = next_input[copied];
     }
@@ -79,7 +79,7 @@ void test_console_read_does_not_write_past_one_byte_buffer(void)
     next_input = "x";
     next_input_size = 1;
 
-    char buffer[2] = { '?', '!' };
+    char buffer[2] = {'?', '!'};
     ByteCount read_count = console_read(buffer, 1);
 
     TEST_ASSERT_EQUAL_INT64(1, read_count);

@@ -30,7 +30,7 @@ typedef AuthRequest * AuthRequestPtr;
 
 static inline AuthRequest AuthRequest__new(ConstBStringPtr username, ConstBStringPtr password)
 {
-    return (AuthRequest) {
+    return (AuthRequest){
         .username = *username,
         .password = *password,
     };

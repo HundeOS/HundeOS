@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "../types/bstring.h"
 
-inline StringPos strlen(const char *str)
+inline StringPos strlen(const char * str)
 {
     StringPos len = 0;
     while (*str++)
@@ -13,12 +13,14 @@ inline StringPos strlen(const char *str)
     return len;
 }
 
-inline bool compare(const char *a, const char *b)
+inline bool compare(const char * a, const char * b)
 {
-    if (strlen(a) != strlen(b)) return false;
+    if (strlen(a) != strlen(b))
+        return false;
     while (*a && *b)
     {
-        if (*a++ != *b++) return false;
+        if (*a++ != *b++)
+            return false;
     }
     return true;
 }

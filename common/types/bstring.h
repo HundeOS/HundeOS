@@ -15,8 +15,7 @@ typedef struct BString
     StringPos len;
     StringPos max;
     char data[BSTRING_MAX_SIZE];
-}
-BString;
+} BString;
 
 typedef BString * BStringPtr;
 typedef const BString * ConstBStringPtr;
@@ -29,8 +28,7 @@ typedef struct BStringSplit
 {
     Optional(BString) match;
     BString rest;
-}
-BStringSplit;
+} BStringSplit;
 
 typedef struct BStringArray BStringArray;
 typedef struct BStringArray * BStringArrayPtr;
@@ -67,38 +65,28 @@ Optional(uint64_t) BString__parse_uint64_base(ConstBStringPtr self, uint64_t bas
 BString BString__vsprintf(ConstBStringPtr self, va_list args);
 BString BString__sprintf(ConstBStringPtr self, ...);
 
-#define EMPTY_BSTRING \
-    (BString) { \
-        .len = 0, \
-        .max = BSTRING_MAX_SIZE, \
-        .data[0] = 0 \
-    } \
+#define EMPTY_BSTRING (BString){.len = 0, .max = BSTRING_MAX_SIZE, .data[0] = 0}
 
-#define BString__STRLEN(s) ( (sizeof(s)/sizeof(s[0])) - sizeof(s[0]) )
-#define BSTRING_NEW(chars) \
-    (BString) { \
-        .max = BSTRING_MAX_SIZE, \
-        .len = BString__STRLEN(chars), \
-        .data = chars, \
-    } \
+#define BString__STRLEN(s) ((sizeof(s) / sizeof(s[0])) - sizeof(s[0]))
+#define BSTRING_NEW(chars)                                                                                             \
+    (BString)                                                                                                          \
+    {                                                                                                                  \
+        .max = BSTRING_MAX_SIZE, .len = BString__STRLEN(chars), .data = chars,                                         \
+    }
 
-#define bstr(chars) \
-    BSTRING_NEW(chars)
+#define bstr(chars) BSTRING_NEW(chars)
 
-#define empty_bstr() \
-    EMPTY_BSTRING
+#define empty_bstr() EMPTY_BSTRING
 
-#define cstr(bstr) \
-    BString__cstr(&(bstr))
+#define cstr(bstr) BString__cstr(&(bstr))
 
-#define cstr_p(bstrptr) \
-    BString__cstr(bstrptr)
+#define cstr_p(bstrptr) BString__cstr(bstrptr)
 
-#define for_each_bstring(self, index, ch, ...) \
-    for (StringPos index = 0; index < BString__length(self); index++) \
-    { \
-        char ch = BString__char_at_or(self, index, '\0'); \
-        __VA_ARGS__ \
+#define for_each_bstring(self, index, ch, ...)                                                                         \
+    for (StringPos index = 0; index < BString__length(self); index++)                                                  \
+    {                                                                                                                  \
+        char ch = BString__char_at_or(self, index, '\0');                                                              \
+        __VA_ARGS__                                                                                                    \
     }
 
 #endif

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Python tooling for the HundeOS kernel experiment."
 requires-python = ">=3.12"
 dependencies = [
+    "clang-format==22.1.0",
     "pyyaml",
     "tree-sitter",
     "tree-sitter-c",

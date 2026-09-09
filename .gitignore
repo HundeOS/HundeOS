@@ -13,3 +13,4 @@ __pycache__
 *.bak
 
 build
+/compile_commands.json

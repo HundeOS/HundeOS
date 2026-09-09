@@ -35,5 +35,4 @@ typedef IOBuffer * IOBufferPtr;
 
 ResultDef(IOBufferPtr);
 
-
 #endif

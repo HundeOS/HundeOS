@@ -19,12 +19,9 @@ typedef struct CallContext
     Anything arg3;
     Anything arg4;
     Anything arg5;
-}
-CallContext;
+} CallContext;
 
-CallContext CallContext__new(
-    OptionalPtr(ProcessPtr) process, SystemCall syscall_id, Anything arg1, Anything arg2,
-    Anything arg3, Anything arg4, Anything arg5
-);
+CallContext CallContext__new(OptionalPtr(ProcessPtr) process, SystemCall syscall_id, Anything arg1, Anything arg2,
+                             Anything arg3, Anything arg4, Anything arg5);
 
 #endif

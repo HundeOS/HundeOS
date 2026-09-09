@@ -4,18 +4,18 @@
 
 static EmbeddedFsHeaderPtr EmbeddedFs__header(EmbeddedFsPtr self)
 {
-    return (EmbeddedFsHeaderPtr) self->start;
+    return (EmbeddedFsHeaderPtr)self->start;
 }
 
 static EmbeddedFsEntryPtr EmbeddedFs__entries(EmbeddedFsPtr self)
 {
     EmbeddedFsHeaderPtr header = EmbeddedFs__header(self);
-    return (EmbeddedFsEntryPtr) (self->start + header->index_offset);
+    return (EmbeddedFsEntryPtr)(self->start + header->index_offset);
 }
 
 EmbeddedFs EmbeddedFs__new(Address start, Address end)
 {
-    return (EmbeddedFs) {
+    return (EmbeddedFs){
         .start = start,
         .end = end,
     };
@@ -23,7 +23,7 @@ EmbeddedFs EmbeddedFs__new(Address start, Address end)
 
 EmbeddedFsFile EmbeddedFsFile__new(Address start, Address end, ConstBStringPtr name)
 {
-    return (EmbeddedFsFile) {
+    return (EmbeddedFsFile){
         .start = start,
         .end = end,
         .name = *name,
@@ -75,7 +75,7 @@ bool EmbeddedFs__is_valid(EmbeddedFsPtr self)
 
 static BString EmbeddedFs__entry_name(EmbeddedFsPtr self, EmbeddedFsEntryPtr entry)
 {
-    return BString__new((const char *) (self->start + entry->name_offset));
+    return BString__new((const char *)(self->start + entry->name_offset));
 }
 
 static bool EmbeddedFs__entry_is_valid(EmbeddedFsPtr self, EmbeddedFsEntryPtr entry)
@@ -115,14 +115,9 @@ Optional(EmbeddedFsFile) EmbeddedFs__find(EmbeddedFsPtr self, ConstBStringPtr na
         BString entry_name = EmbeddedFs__entry_name(self, entry);
         if (BString__equals(&entry_name, name))
         {
-            return Some(
-                EmbeddedFsFile,
-                EmbeddedFsFile__new(
-                    self->start + entry->data_offset,
-                    self->start + entry->data_offset + entry->data_len,
-                    &entry_name
-                )
-            );
+            return Some(EmbeddedFsFile,
+                        EmbeddedFsFile__new(self->start + entry->data_offset,
+                                            self->start + entry->data_offset + entry->data_len, &entry_name));
         }
     }
 

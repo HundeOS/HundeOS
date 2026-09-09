@@ -6,8 +6,7 @@
 typedef struct MemoryPage
 {
     char page[PAGE_SIZE];
-}
-MemoryPage;
+} MemoryPage;
 
 typedef MemoryPage * MemoryPagePtr;
 

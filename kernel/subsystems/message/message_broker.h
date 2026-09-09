@@ -12,7 +12,6 @@
 #include "../../service/service.h"
 #include "io_operation_message.h"
 
-
 typedef struct Kernel Kernel;
 typedef Kernel * KernelPtr;
 
@@ -35,8 +34,7 @@ typedef enum ListenerTypes
 {
     LISTENER_TYPE_KERNEL = 0,
     LISTENER_TYPE_PROCESS = 1,
-}
-ListenerTypes;
+} ListenerTypes;
 
 typedef struct Message Message;
 typedef Message * MessagePtr;
@@ -49,14 +47,12 @@ typedef struct KernelListener
 {
     KernelPtr kernel;
     KernelCallback callback;
-}
-KernelListener;
+} KernelListener;
 
 typedef struct ProcessListener
 {
     ProcessID process_id;
-}
-ProcessListener;
+} ProcessListener;
 
 typedef struct Listener Listener;
 typedef Listener * ListenerPtr;
@@ -74,8 +70,7 @@ typedef struct Listener
         KernelListener kernel_listener;
         ProcessListener process_listener;
     };
-}
-Listener;
+} Listener;
 
 typedef Listener * ListenerPtr;
 OptionalDef(ListenerPtr);
@@ -95,7 +90,6 @@ typedef struct Deferred
     Optional(OperationKey) operation_key;
 } Deferred;
 
-
 typedef struct Payload
 {
     PayloadType type;
@@ -108,8 +102,7 @@ typedef struct Payload
         ServiceEventDelivery service_event_delivery;
         PayloadData data[MAX_PAYLOAD_SIZE];
     };
-}
-Payload;
+} Payload;
 
 OptionalDef(Payload);
 
@@ -119,8 +112,7 @@ typedef struct Message
     SourceCode source_code;
 
     Optional(Payload) payload;
-}
-Message;
+} Message;
 
 OptionalDef(Message);
 
@@ -130,8 +122,7 @@ typedef struct MessageBroker
 {
     Listeners listeners;
     mutex_t lock;
-}
-MessageBroker;
+} MessageBroker;
 
 typedef MessageBroker * MessageBrokerPtr;
 
@@ -148,35 +139,26 @@ Message Message__new_anything(Source source, SourceCode source_code, Anything an
 MessagePtr Message__heap_new_anything(Source source, SourceCode source_code, Anything anything);
 Message Message__new_process_id(Source source, SourceCode source_code, ProcessID process_id);
 MessagePtr Message__heap_new_process_id(Source source, SourceCode source_code, ProcessID process_id);
-Message Message__new_io_operation(
-    Source source, SourceCode source_code, ProcessID pid, OperationKey operation_key
-);
-MessagePtr Message__heap_new_io_operation(
-    Source source, SourceCode source_code, ProcessID pid, OperationKey operation_key
-);
-Message Message__new_service_event_delivery(
-    Source source, SourceCode source_code, ProcessPtr process, ServiceEvent event
-);
-MessagePtr Message__heap_new_service_event_delivery(
-    Source source, SourceCode source_code, ProcessPtr process, ServiceEvent event
-);
-MessagePtr Message__heap_new_deferred(
-    Source source, SourceCode source_code, Anything anything, KernelContextPtr context, Continuation continuation
-);
-MessagePtr Message__heap_new_deferred_with_context_ownership(
-    Source source, SourceCode source_code, Anything anything,
-    KernelContextPtr context, Continuation continuation, bool owns_context
-);
+Message Message__new_io_operation(Source source, SourceCode source_code, ProcessID pid, OperationKey operation_key);
+MessagePtr Message__heap_new_io_operation(Source source, SourceCode source_code, ProcessID pid,
+                                          OperationKey operation_key);
+Message Message__new_service_event_delivery(Source source, SourceCode source_code, ProcessPtr process,
+                                            ServiceEvent event);
+MessagePtr Message__heap_new_service_event_delivery(Source source, SourceCode source_code, ProcessPtr process,
+                                                    ServiceEvent event);
+MessagePtr Message__heap_new_deferred(Source source, SourceCode source_code, Anything anything,
+                                      KernelContextPtr context, Continuation continuation);
+MessagePtr Message__heap_new_deferred_with_context_ownership(Source source, SourceCode source_code, Anything anything,
+                                                             KernelContextPtr context, Continuation continuation,
+                                                             bool owns_context);
 MessagePtr Message__heap_new_deferred_with_context_ownership_and_operation_key(
-    Source source, SourceCode source_code, Anything anything,
-    KernelContextPtr context, Continuation continuation,
-    bool owns_context, OptionalPtr(OperationKey) operation_key
-);
+    Source source, SourceCode source_code, Anything anything, KernelContextPtr context, Continuation continuation,
+    bool owns_context, OptionalPtr(OperationKey) operation_key);
 
-#define NEW_BROKER \
-    (MessageBroker) { \
-        .listeners = EmptyArray(Listeners), \
+#define NEW_BROKER                                                                                                     \
+    (MessageBroker)                                                                                                    \
+    {                                                                                                                  \
+        .listeners = EmptyArray(Listeners),                                                                            \
     }
-
 
 #endif

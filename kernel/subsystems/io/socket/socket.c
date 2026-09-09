@@ -25,8 +25,7 @@ typedef struct SocketRequestState
     bool completed;
     IOSocketStatus status;
     IOHandle result;
-}
-SocketRequestState;
+} SocketRequestState;
 
 MapBodyDefine(SocketRequestMap);
 
@@ -40,15 +39,11 @@ static BString socket_scheduler_failed = bstr("Socket scheduler operation failed
 static BString socket_kernel_not_found = bstr("Socket kernel not found");
 static BString socket_device_not_registered = bstr("Socket IO is not registered");
 
-static SocketRequestState SocketRequestState__new(
-    IOSocketRouterRequest request,
-    KernelContext kernel_context,
-    ProcessID waiting_pid,
-    SocketRequestComplete complete,
-    Anything complete_context
-)
+static SocketRequestState SocketRequestState__new(IOSocketRouterRequest request, KernelContext kernel_context,
+                                                  ProcessID waiting_pid, SocketRequestComplete complete,
+                                                  Anything complete_context)
 {
-    return (SocketRequestState) {
+    return (SocketRequestState){
         .request = request,
         .kernel_context = ptr(Kernel__alloc_kernel(sizeof(KernelContext)), KernelContext),
         .waiting_pid = Some(ProcessID, waiting_pid),
@@ -61,13 +56,9 @@ static SocketRequestState SocketRequestState__new(
     };
 }
 
-static Result(SocketRequestStatePtr) SocketRequestState__heap_new(
-    IOSocketRouterRequest request,
-    KernelContext kernel_context,
-    ProcessID waiting_pid,
-    SocketRequestComplete complete,
-    Anything complete_context
-)
+static Result(SocketRequestStatePtr)
+    SocketRequestState__heap_new(IOSocketRouterRequest request, KernelContext kernel_context, ProcessID waiting_pid,
+                                 SocketRequestComplete complete, Anything complete_context)
 {
     KernelAddress address = Kernel__alloc(sizeof(SocketRequestState));
     if (!address.valid)
@@ -90,20 +81,18 @@ static void SocketRequestState__dispose(SocketRequestStatePtr self)
     Kernel__free(addr(self));
 }
 
-static Result(ServiceCode) SocketRegistry__deliver_service_event(
-    SocketRegistryPtr self,
-    ProcessPtr router_process,
-    ServiceEvent event
-)
+static Result(ServiceCode)
+    SocketRegistry__deliver_service_event(SocketRegistryPtr self, ProcessPtr router_process, ServiceEvent event)
 {
-    match_optional(MessageBrokerPtr, self->message_broker,
+    match_optional(
+        self->message_broker,
         some(message_broker)
         {
             MessagePtr message = Message__heap_new_service_event_delivery(
-                SOURCE_SERVICE, SUBSYS_SERVICE_EVENT_AVAILABLE, router_process, event
-            );
+                SOURCE_SERVICE, SUBSYS_SERVICE_EVENT_AVAILABLE, router_process, event);
 
-            match_result(AckCode, MessageBroker__deliver(message_broker, message),
+            match_result(
+                MessageBroker__deliver(message_broker, message),
                 success(_) { return Success(ServiceCode, SERVICE_OK); },
                 error(code, message) { return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR); }
             );
@@ -121,13 +110,16 @@ static Result(Anything) SocketRegistry__complete_wait(ParkedOperationPtr parked_
     uint64_t request_id = 0;
     Result(Anything) wait_result = Error(Anything, socket_request_not_found, IO_INVALID_PATH);
 
-    match_optional(SchedulerPtr, parked_operation->kernel_context->scheduler,
+    match_optional(
+        parked_operation->kernel_context->scheduler,
         some(scheduler)
         {
-            match_optional(KernelPtr, scheduler->kernel,
+            match_optional(
+                scheduler->kernel,
                 some(kernel)
                 {
-                    match_result(SocketRegistryPtr, SocketIO__registered_registry(kernel->io_subsystem),
+                    match_result(
+                        SocketIO__registered_registry(kernel->io_subsystem),
                         success(registry) { registry_opt = Some(SocketRegistryPtr, registry); },
                         error(code, message) { registry_opt = None(SocketRegistryPtr); }
                     );
@@ -139,18 +131,22 @@ static Result(Anything) SocketRegistry__complete_wait(ParkedOperationPtr parked_
     );
 
     SocketRegistryPtr registry;
-    match_optional(SocketRegistryPtr, registry_opt,
+    match_optional(
+        registry_opt,
         some(found) { registry = found; },
         none() { return Error(Anything, socket_kernel_not_found, IO_INVALID_PATH); }
     );
 
-    match_optional(OperationKey, parked_operation->operation_key,
+    match_optional(
+        parked_operation->operation_key,
         some(key) { request_id = key; },
         none() { return Error(Anything, socket_request_not_found, IO_INVALID_PATH); }
     );
 
-    critical_section(registry->lock,
-        match_optional(SocketRequestStatePtr, SocketRequestMap__get(&registry->requests, request_id),
+    critical_section(
+        registry->lock,
+        match_optional(
+            SocketRequestMap__get(&registry->requests, request_id),
             some(request)
             {
                 if (!request->completed)
@@ -159,48 +155,42 @@ static Result(Anything) SocketRegistry__complete_wait(ParkedOperationPtr parked_
                 }
                 else
                 {
-                    match_result(CollectionCode, SocketRequestMap__delete(&registry->requests, request_id),
+                    match_result(
+                        SocketRequestMap__delete(&registry->requests, request_id),
                         success_do_nothing(),
                         error(code, message)
                         {
-                            __d_printf(IODEV, "socket request delete failed id=%i code=%i\n", (int) request_id, (int) code);
+                            __d_printf(IODEV, "socket request delete failed id=%i code=%i\n", (int)request_id,
+                                       (int)code);
                         }
                     );
                     completed_request = Some(SocketRequestStatePtr, request);
                     IOSocketRouterCompletion completion =
                         IOSocketRouterCompletion__new(request->request.request_id, request->status, request->result);
-                    match_result(Anything, request->complete(
-                        &request->request, &completion, request->complete_context
-                    ),
+                    match_result(
+                        request->complete(&request->request, &completion, request->complete_context),
                         success(value)
                         {
                             Result(Anything) mapped_result = Success(Anything, value);
-                            wait_result = KernelContext__map_result(
-                                request->kernel_context,
-                                &mapped_result
-                            );
+                            wait_result = KernelContext__map_result(request->kernel_context, &mapped_result);
                         },
                         error(code, message)
                         {
-                            wait_result = KernelContext__map_result(
-                                request->kernel_context,
-                                &Error(Anything, message, code)
-                            );
+                            wait_result =
+                                KernelContext__map_result(request->kernel_context, &Error(Anything, message, code));
                         }
                     );
                 }
             },
-            none()
-            {
-                wait_result = Error(Anything, socket_request_not_found, IO_INVALID_PATH);
-            }
-        );
-    );
+            none() { wait_result = Error(Anything, socket_request_not_found, IO_INVALID_PATH); }
+        ););
 
-    match_result(Anything, wait_result,
+    match_result(
+        wait_result,
         success(value)
         {
-            match_optional(SocketRequestStatePtr, completed_request,
+            match_optional(
+                completed_request,
                 some(request) { SocketRequestState__dispose(request); },
                 none_do_nothing()
             );
@@ -210,7 +200,8 @@ static Result(Anything) SocketRegistry__complete_wait(ParkedOperationPtr parked_
         {
             if (code != IO_WAIT_FOR_DATA && code != IO_INVALID_PATH)
             {
-                match_optional(SocketRequestStatePtr, completed_request,
+                match_optional(
+                    completed_request,
                     some(request) { SocketRequestState__dispose(request); },
                     none_do_nothing()
                 );
@@ -220,48 +211,40 @@ static Result(Anything) SocketRegistry__complete_wait(ParkedOperationPtr parked_
     );
 }
 
-Result(ServiceCode) SocketRegistry__register_router(
-    SocketRegistryPtr self,
-    ProcessPtr service_process,
-    MessageBrokerPtr message_broker
-)
+Result(ServiceCode)
+    SocketRegistry__register_router(SocketRegistryPtr self, ProcessPtr service_process, MessageBrokerPtr message_broker)
 {
-    critical_section(self->lock,
-        self->router_process = Some(ProcessPtr, service_process);
-        self->message_broker = Some(MessageBrokerPtr, message_broker);
-    );
+    critical_section(self->lock, self->router_process = Some(ProcessPtr, service_process);
+                     self->message_broker = Some(MessageBrokerPtr, message_broker););
 
     return Success(ServiceCode, SERVICE_OK);
 }
 
-Result(ServiceCode) SocketRegistry__start_request(
-    SocketRegistryPtr self,
-    IOSocketRouterRequest request,
-    KernelContext kernel_context,
-    SocketRequestComplete complete,
-    Anything complete_context
-)
+Result(ServiceCode)
+    SocketRegistry__start_request(SocketRegistryPtr self, IOSocketRouterRequest request, KernelContext kernel_context,
+                                  SocketRequestComplete complete, Anything complete_context)
 {
     Optional(ProcessPtr) router_process = None(ProcessPtr);
     Optional(MessageBrokerPtr) message_broker = None(MessageBrokerPtr);
     Result(SocketRequestStatePtr) request_state_result =
         Error(SocketRequestStatePtr, socket_router_not_registered, SERVICE_SOCKET_REQUEST_FAILED);
 
-    match_optional(ProcessID, kernel_context.pid,
+    match_optional(
+        kernel_context.pid,
         some(pid)
         {
-            critical_section(self->lock,
-                match_optional(ProcessPtr, self->router_process,
-                    some(router)
-                    {
-                        request.request_id = self->next_request_id++;
-                        router_process = Some(ProcessPtr, router);
-                        message_broker = self->message_broker;
-                    },
-                    none_do_nothing()
-                );
-            );
-            match_optional(ProcessPtr, router_process,
+            critical_section(self->lock, match_optional(
+                                             self->router_process,
+                                             some(router)
+                {
+                                                 request.request_id = self->next_request_id++;
+                                                 router_process = Some(ProcessPtr, router);
+                                                 message_broker = self->message_broker;
+                                             },
+                                             none_do_nothing()
+            ););
+            match_optional(
+                router_process,
                 some(router)
                 {
                     request_state_result =
@@ -274,17 +257,18 @@ Result(ServiceCode) SocketRegistry__start_request(
     );
 
     SocketRequestStatePtr request_state;
-    match_result(SocketRequestStatePtr, request_state_result,
+    match_result(
+        request_state_result,
         success(created_request) { request_state = created_request; },
         error(code, message) { return Error(ServiceCode, message, code); }
     );
 
     Result(CollectionCode) set_result = Error(CollectionCode, socket_request_queue_full, MAP_FULL);
-    critical_section(self->lock,
-        set_result = SocketRequestMap__set(&self->requests, request_state->request.request_id, request_state);
-    );
+    critical_section(self->lock, set_result = SocketRequestMap__set(&self->requests, request_state->request.request_id,
+                                                                    request_state););
 
-    match_result(CollectionCode, set_result,
+    match_result(
+        set_result,
         success_do_nothing(),
         error(code, message)
         {
@@ -293,15 +277,13 @@ Result(ServiceCode) SocketRegistry__start_request(
         }
     );
 
-    match_optional(ProcessPtr, router_process,
+    match_optional(
+        router_process,
         some(router)
         {
-            ServiceEvent event = ServiceEvent__request(
-                SERVICE_EVENT_SOCKET_IO,
-                request_state->request.request_id,
-                0
-            );
-            match_result(ServiceCode, SocketRegistry__deliver_service_event(self, router, event),
+            ServiceEvent event = ServiceEvent__request(SERVICE_EVENT_SOCKET_IO, request_state->request.request_id, 0);
+            match_result(
+                SocketRegistry__deliver_service_event(self, router, event),
                 success_do_nothing(),
                 error(code, message)
                 {
@@ -314,23 +296,20 @@ Result(ServiceCode) SocketRegistry__start_request(
         none_do_nothing()
     );
 
-    match_optional(ProcessID, request_state->waiting_pid,
+    match_optional(
+        request_state->waiting_pid,
         some(pid)
         {
-            match_optional(MessageBrokerPtr, message_broker,
+            match_optional(
+                message_broker,
                 some(broker)
                 {
                     MessagePtr message = Message__heap_new_deferred_with_context_ownership_and_operation_key(
-                        SOURCE_IO,
-                        SUBSYS_IO_PARK,
-                        pid,
-                        request_state->kernel_context,
-                        SocketRegistry__complete_wait,
-                        true,
-                        &Some(OperationKey, request_state->request.request_id)
-                    );
+                        SOURCE_IO, SUBSYS_IO_PARK, pid, request_state->kernel_context, SocketRegistry__complete_wait,
+                        true, &Some(OperationKey, request_state->request.request_id));
 
-                    match_result(AckCode, MessageBroker__deliver(broker, message),
+                    match_result(
+                        MessageBroker__deliver(broker, message),
                         success(_)
                         {
                             request_state->parked_operation_owns_context = true;
@@ -353,86 +332,82 @@ Result(ServiceCode) SocketRegistry__start_request(
     return Error(ServiceCode, socket_scheduler_failed, SERVICE_SCHEDULER_ERROR);
 }
 
-Result(IOSocketRouterRequest) SocketRegistry__get_request(
-    SocketRegistryPtr self,
-    ProcessPtr service_process,
-    uint64_t request_id
-)
+Result(IOSocketRouterRequest)
+    SocketRegistry__get_request(SocketRegistryPtr self, ProcessPtr service_process, uint64_t request_id)
 {
     Result(IOSocketRouterRequest) result =
         Error(IOSocketRouterRequest, socket_request_not_found, SERVICE_SOCKET_REQUEST_NOT_FOUND);
 
-    critical_section(self->lock,
-        match_optional(SocketRequestStatePtr, SocketRequestMap__get(&self->requests, request_id),
-            some(request)
-            {
-                match_optional(ProcessPtr, self->router_process,
-                    some(router)
-                    {
-                        if (router == service_process)
-                        {
-                            result = Success(IOSocketRouterRequest, request->request);
-                        }
-                    },
-                    none_do_nothing()
-                );
-            },
-            none_do_nothing()
-        );
-    );
+    critical_section(self->lock, match_optional(
+                                     SocketRequestMap__get(&self->requests, request_id),
+                                     some(request)
+        {
+                                         match_optional(
+                                             self->router_process,
+                                             some(router)
+                                             {
+                                                 if (router == service_process)
+                                                 {
+                                                     result = Success(IOSocketRouterRequest, request->request);
+                                                 }
+                                             },
+                                             none_do_nothing()
+                                         );
+                                     },
+                                     none_do_nothing()
+    ););
 
     return result;
 }
 
-Result(ServiceCode) SocketRegistry__complete(
-    SocketRegistryPtr self,
-    ProcessPtr service_process,
-    IOSocketRouterCompletionPtr completion
-)
+Result(ServiceCode)
+    SocketRegistry__complete(SocketRegistryPtr self, ProcessPtr service_process, IOSocketRouterCompletionPtr completion)
 {
     Optional(ProcessID) waiting_pid = None(ProcessID);
     Optional(MessageBrokerPtr) message_broker = None(MessageBrokerPtr);
     Result(ServiceCode) result = Error(ServiceCode, socket_request_not_found, SERVICE_SOCKET_REQUEST_NOT_FOUND);
 
-    critical_section(self->lock,
-        match_optional(SocketRequestStatePtr, SocketRequestMap__get(&self->requests, completion->request_id),
-            some(request)
-            {
-                match_optional(ProcessPtr, self->router_process,
-                    some(router)
-                    {
-                        if (router == service_process)
-                        {
-                            request->completed = true;
-                            request->status = completion->status;
-                            request->result = completion->result;
-                            waiting_pid = request->waiting_pid;
-                            message_broker = self->message_broker;
-                            result = Success(ServiceCode, SERVICE_OK);
-                        }
-                    },
-                    none_do_nothing()
-                );
-            },
-            none_do_nothing()
-        );
-    );
+    critical_section(self->lock, match_optional(
+                                     SocketRequestMap__get(&self->requests, completion->request_id),
+                                     some(request)
+        {
+                                         match_optional(
+                                             self->router_process,
+                                             some(router)
+                                             {
+                                                 if (router == service_process)
+                                                 {
+                                                     request->completed = true;
+                                                     request->status = completion->status;
+                                                     request->result = completion->result;
+                                                     waiting_pid = request->waiting_pid;
+                                                     message_broker = self->message_broker;
+                                                     result = Success(ServiceCode, SERVICE_OK);
+                                                 }
+                                             },
+                                             none_do_nothing()
+                                         );
+                                     },
+                                     none_do_nothing()
+    ););
 
-    match_result(ServiceCode, result,
+    match_result(result,
         success_do_nothing(),
         error(code, message) { return Error(ServiceCode, message, code); }
     );
 
-    match_optional(ProcessID, waiting_pid,
+    match_optional(
+        waiting_pid,
         some(pid)
         {
-            match_optional(MessageBrokerPtr, message_broker,
+            match_optional(
+                message_broker,
                 some(broker)
                 {
-                    MessagePtr message = Message__heap_new_io_operation(
-                        SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid, completion->request_id
-                    );
-                    match_result(AckCode, MessageBroker__deliver(broker, message),
+                    MessagePtr message = Message__heap_new_io_operation(SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid,
+                                                                        completion->request_id);
+                    match_result(
+                        MessageBroker__deliver(broker, message),
                         success(_) { return Success(ServiceCode, SERVICE_OK); },
                         error(code, message) { return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR); }
                     );
@@ -448,24 +423,17 @@ Result(ServiceCode) SocketRegistry__complete(
 
 void SocketRegistry__reset(SocketRegistryPtr self)
 {
-    critical_section(self->lock,
-        for_each_map(SocketRequestMap, self->requests, index, request_id, request,
-        {
-            SocketRequestState__dispose(request);
-        });
-        self->router_process = None(ProcessPtr);
-        self->message_broker = None(MessageBrokerPtr);
-        self->requests = SocketRequestMap__new();
-        self->next_request_id = 1;
-    );
+    critical_section(self->lock, for_each_map(SocketRequestMap, self->requests, index, request_id, request,
+                                              { SocketRequestState__dispose(request); });
+                     self->router_process = None(ProcessPtr); self->message_broker = None(MessageBrokerPtr);
+                     self->requests = SocketRequestMap__new(); self->next_request_id = 1;);
 }
 
 typedef enum SocketHandleKind
 {
     SOCKET_HANDLE_LISTENER = 1,
     SOCKET_HANDLE_CONNECTION = 2,
-}
-SocketHandleKind;
+} SocketHandleKind;
 
 FixedArrayDefine(IOInternalHandle, 64, SocketPendingConnections, SimpleEquals(uint32_t));
 FixedArrayBodyDefine(SocketPendingConnections);
@@ -478,8 +446,7 @@ typedef struct SocketHandle
     IOBufferPtr buffer;
     Optional(IOContextPtr) parked_reader;
     SocketPendingConnections pending_connections;
-}
-SocketHandle;
+} SocketHandle;
 
 typedef SocketHandle * SocketHandlePtr;
 
@@ -506,7 +473,7 @@ static BString socket_accept_queue_empty = bstr("Socket accept queue empty");
 
 static SocketHandle SocketHandle__new(IOInternalHandle handle, SocketHandleKind kind)
 {
-    return (SocketHandle) {
+    return (SocketHandle){
         .handle = handle,
         .kind = kind,
         .peer = None(IOInternalHandle),
@@ -537,7 +504,7 @@ static void SocketHandle__dispose(SocketHandlePtr self)
 
 static SocketIOState SocketIOState__new(MessageBrokerPtr message_broker, SocketIOPtr socket_io)
 {
-    return (SocketIOState) {
+    return (SocketIOState){
         .state = IOState__new(),
         .handles = SocketHandleMap__new(),
         .next_handle = 1,
@@ -557,26 +524,24 @@ SocketIOStatePtr SocketIOState__heap_new(MessageBrokerPtr message_broker, Socket
 static Result(SocketHandlePtr) SocketIOState__add_handle(SocketIOStatePtr self, SocketHandleKind kind)
 {
     IOInternalHandle handle = 0;
-    critical_section(self->lock,
-        handle = self->next_handle++;
-    );
+    critical_section(self->lock, handle = self->next_handle++;);
 
     SocketHandlePtr socket_handle;
-    match_result(SocketHandlePtr, SocketHandle__heap_new(handle, kind),
+    match_result(
+        SocketHandle__heap_new(handle, kind),
         success(created) { socket_handle = created; },
         error(code, message) { return Error(SocketHandlePtr, message, code); }
     );
 
-    critical_section(self->lock,
-        match_result(CollectionCode, SocketHandleMap__set(&self->handles, handle, socket_handle),
-            success_do_nothing(),
-            error(code, message)
-            {
-                SocketHandle__dispose(socket_handle);
-                cs_return Error(SocketHandlePtr, message, IO_REGISTER_FAILED);
-            }
-        );
-    );
+    critical_section(self->lock, match_result(
+                                     SocketHandleMap__set(&self->handles, handle, socket_handle),
+        success_do_nothing(),
+                                     error(code, message)
+        {
+                                         SocketHandle__dispose(socket_handle);
+                                         cs_return Error(SocketHandlePtr, message, IO_REGISTER_FAILED);
+                                     }
+    ););
 
     return Success(SocketHandlePtr, socket_handle);
 }
@@ -584,21 +549,17 @@ static Result(SocketHandlePtr) SocketIOState__add_handle(SocketIOStatePtr self, 
 static Result(SocketHandlePtr) SocketIOState__get_handle(SocketIOStatePtr self, IOInternalHandle handle)
 {
     Optional(SocketHandlePtr) found = None(SocketHandlePtr);
-    critical_section(self->lock,
-        found = SocketHandleMap__get(&self->handles, handle);
-    );
+    critical_section(self->lock, found = SocketHandleMap__get(&self->handles, handle););
 
-    match_optional(SocketHandlePtr, found,
+    match_optional(
+        found,
         some(socket_handle) { return Success(SocketHandlePtr, socket_handle); },
         none() { return Error(SocketHandlePtr, socket_invalid_handle, IO_UNKNOWN_HANDLE); }
     );
 }
 
-static Result(Anything) SocketIO__complete_listen(
-    IOSocketRouterRequestPtr request,
-    IOSocketRouterCompletionPtr completion,
-    Anything context
-)
+static Result(Anything) SocketIO__complete_listen(IOSocketRouterRequestPtr request,
+                                                  IOSocketRouterCompletionPtr completion, Anything context)
 {
     if (completion->status != IO_SOCKET_OK)
     {
@@ -608,64 +569,62 @@ static Result(Anything) SocketIO__complete_listen(
     return Success(Anything, request->handle);
 }
 
-static Result(Anything) SocketIO__complete_connect(
-    IOSocketRouterRequestPtr request,
-    IOSocketRouterCompletionPtr completion,
-    Anything context
-)
+static Result(Anything) SocketIO__complete_connect(IOSocketRouterRequestPtr request,
+                                                   IOSocketRouterCompletionPtr completion, Anything context)
 {
-    SocketIOStatePtr self = (SocketIOStatePtr) context;
+    SocketIOStatePtr self = (SocketIOStatePtr)context;
     if (completion->status != IO_SOCKET_OK)
     {
         return Error(Anything, socket_request_failed, completion->status);
     }
 
-    IOInternalHandle client_handle = (IOInternalHandle) request->handle;
-    IOInternalHandle listener_handle = (IOInternalHandle) completion->result;
+    IOInternalHandle client_handle = (IOInternalHandle)request->handle;
+    IOInternalHandle listener_handle = (IOInternalHandle)completion->result;
 
     SocketHandlePtr listener;
     SocketHandlePtr client;
     SocketHandlePtr server;
-    match_result(SocketHandlePtr, SocketIOState__get_handle(self, listener_handle),
+    match_result(
+        SocketIOState__get_handle(self, listener_handle),
         success(found) { listener = found; },
         error(code, message) { return Error(Anything, message, code); }
     );
-    match_result(SocketHandlePtr, SocketIOState__get_handle(self, client_handle),
+    match_result(
+        SocketIOState__get_handle(self, client_handle),
         success(found) { client = found; },
         error(code, message) { return Error(Anything, message, code); }
     );
-    match_result(SocketHandlePtr, SocketIOState__add_handle(self, SOCKET_HANDLE_CONNECTION),
+    match_result(
+        SocketIOState__add_handle(self, SOCKET_HANDLE_CONNECTION),
         success(created) { server = created; },
         error(code, message) { return Error(Anything, message, code); }
     );
 
     Optional(IOContextPtr) parked_accept = None(IOContextPtr);
-    critical_section(self->lock,
-        client->peer = Some(IOInternalHandle, server->handle);
-        server->peer = Some(IOInternalHandle, client->handle);
-        match_result(CollectionCode, SocketPendingConnections__push(
-            &listener->pending_connections, server->handle
-        ),
-            success_do_nothing(),
-            error(code, message) { cs_return Error(Anything, message, IO_REGISTER_FAILED); }
-        );
-        parked_accept = listener->parked_reader;
-        listener->parked_reader = None(IOContextPtr);
-    );
+    critical_section(self->lock, client->peer = Some(IOInternalHandle, server->handle);
+                     server->peer = Some(IOInternalHandle, client->handle); match_result(
+                         SocketPendingConnections__push(&listener->pending_connections, server->handle),
+                         success_do_nothing(),
+                         error(code, message) { cs_return Error(Anything, message, IO_REGISTER_FAILED); }
+                     );
+                     parked_accept = listener->parked_reader; listener->parked_reader = None(IOContextPtr););
 
-    match_optional(IOContextPtr, parked_accept,
+    match_optional(
+        parked_accept,
         some(parked_context)
         {
-            match_optional(ProcessID, parked_context->kernel_context.pid,
+            match_optional(
+                parked_context->kernel_context.pid,
                 some(pid)
                 {
-                    match_optional(IOHandle, parked_context->handle,
+                    match_optional(
+                        parked_context->handle,
                         some(context_handle)
                         {
                             MessagePtr message = Message__heap_new_io_operation(
-                                SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid, context_handle
-                            );
-                            match_result(AckCode, MessageBroker__deliver(self->message_broker, message),
+                                SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid, context_handle);
+                            match_result(
+                                MessageBroker__deliver(self->message_broker, message),
                                 success_do_nothing(),
                                 error(code, message) { return Error(Anything, message, code); }
                             );
@@ -682,15 +641,11 @@ static Result(Anything) SocketIO__complete_connect(
     return Success(Anything, client_handle);
 }
 
-static Result(ServiceCode) SocketIO__start_router_request(
-    SocketIOStatePtr self,
-    IOSocketRouterOperation operation,
-    ConstBStringPtr path,
-    IOInternalHandle handle,
-    Flags flags
-)
+static Result(ServiceCode) SocketIO__start_router_request(SocketIOStatePtr self, IOSocketRouterOperation operation,
+                                                          ConstBStringPtr path, IOInternalHandle handle, Flags flags)
 {
-    match_optional(KernelContextPtr, BlockDevice__current_context(),
+    match_optional(
+        BlockDevice__current_context(),
         some(kernel_context)
         {
             uint64_t backlog = 0;
@@ -705,9 +660,8 @@ static Result(ServiceCode) SocketIO__start_router_request(
             }
 
             IOSocketRouterRequest request = IOSocketRouterRequest__new(0, operation, path, handle, backlog);
-            return SocketRegistry__start_request(
-                &self->socket_io->registry, request, *kernel_context, complete, (Anything) self
-            );
+            return SocketRegistry__start_request(&self->socket_io->registry, request, *kernel_context, complete,
+                                                 (Anything)self);
         },
         none_do_nothing()
     );
@@ -717,7 +671,7 @@ static Result(ServiceCode) SocketIO__start_router_request(
 
 static Result(IOInternalHandle) SocketIO__open(IOStatePtr state, ConstBStringPtr path, Flags flags)
 {
-    SocketIOStatePtr self = (SocketIOStatePtr) state;
+    SocketIOStatePtr self = (SocketIOStatePtr)state;
     IOSocketRouterOperation operation = IO_SOCKET_ROUTER_CONNECT;
     SocketHandleKind handle_kind = SOCKET_HANDLE_CONNECTION;
     if ((flags & IO_OPEN_BIND) != 0 || (flags & IO_OPEN_LISTEN) != 0)
@@ -726,12 +680,12 @@ static Result(IOInternalHandle) SocketIO__open(IOStatePtr state, ConstBStringPtr
         handle_kind = SOCKET_HANDLE_LISTENER;
     }
 
-    match_result(SocketHandlePtr, SocketIOState__add_handle(self, handle_kind),
+    match_result(
+        SocketIOState__add_handle(self, handle_kind),
         success(socket_handle)
         {
-            match_result(ServiceCode, SocketIO__start_router_request(
-                self, operation, path, socket_handle->handle, flags
-            ),
+            match_result(
+                SocketIO__start_router_request(self, operation, path, socket_handle->handle, flags),
                 success(_) { return Error(IOInternalHandle, socket_request_pending, IO_WAIT_FOR_DATA); },
                 error(code, message)
                 {
@@ -749,8 +703,9 @@ static Result(IOInternalHandle) SocketIO__open(IOStatePtr state, ConstBStringPtr
 
 static Result(IOInternalHandle) SocketIO__accept(IOStatePtr state, IOInternalHandle handle)
 {
-    SocketIOStatePtr self = (SocketIOStatePtr) state;
-    match_result(SocketHandlePtr, SocketIOState__get_handle(self, handle),
+    SocketIOStatePtr self = (SocketIOStatePtr)state;
+    match_result(
+        SocketIOState__get_handle(self, handle),
         success(listener)
         {
             if (listener->kind != SOCKET_HANDLE_LISTENER)
@@ -758,12 +713,13 @@ static Result(IOInternalHandle) SocketIO__accept(IOStatePtr state, IOInternalHan
                 return Error(IOInternalHandle, socket_invalid_operation, IO_OPERATION_NOT_SUPPORTED);
             }
 
-            critical_section(self->lock,
-                match_optional(IOInternalHandle, SocketPendingConnections__pop_front(&listener->pending_connections),
+            critical_section(
+                self->lock,
+                match_optional(
+                    SocketPendingConnections__pop_front(&listener->pending_connections),
                     some(connection_handle) { cs_return Success(IOInternalHandle, connection_handle); },
                     none() { cs_return Error(IOInternalHandle, socket_accept_queue_empty, IO_WAIT_FOR_DATA); }
-                );
-            );
+                ););
         },
         error(code, message) { return Error(IOInternalHandle, message, code); }
     );
@@ -773,40 +729,37 @@ static Result(IOInternalHandle) SocketIO__accept(IOStatePtr state, IOInternalHan
 
 static Result(IOInternalHandle) SocketIO__close(IOStatePtr state, IOInternalHandle handle)
 {
-    SocketIOStatePtr self = (SocketIOStatePtr) state;
+    SocketIOStatePtr self = (SocketIOStatePtr)state;
     SocketHandlePtr closed;
-    match_result(SocketHandlePtr, SocketIOState__get_handle(self, handle),
+    match_result(
+        SocketIOState__get_handle(self, handle),
         success(found) { closed = found; },
         error(code, message) { return Error(IOInternalHandle, message, code); }
     );
 
-    critical_section(self->lock,
-        SocketHandleMap__delete(&self->handles, handle);
-        match_optional(IOInternalHandle, closed->peer,
-            some(peer_handle)
-            {
-                match_optional(SocketHandlePtr, SocketHandleMap__get(&self->handles, peer_handle),
-                    some(peer) { peer->peer = None(IOInternalHandle); },
-                    none_do_nothing()
-                );
-            },
-            none_do_nothing()
-        );
-    );
+    critical_section(self->lock, SocketHandleMap__delete(&self->handles, handle); match_optional(
+                         closed->peer,
+                         some(peer_handle)
+        {
+                             match_optional(
+                                 SocketHandleMap__get(&self->handles, peer_handle),
+                                 some(peer) { peer->peer = None(IOInternalHandle); },
+                                 none_do_nothing()
+                             );
+                         },
+                         none_do_nothing()
+    ););
 
     SocketHandle__dispose(closed);
     return Success(IOInternalHandle, handle);
 }
 
-static Result(IOBufferPtr) SocketIO__read(
-    IOStatePtr state,
-    IOInternalHandle handle,
-    size_t size,
-    ConstExternalBufferPtr target
-)
+static Result(IOBufferPtr)
+    SocketIO__read(IOStatePtr state, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target)
 {
-    SocketIOStatePtr self = (SocketIOStatePtr) state;
-    match_result(SocketHandlePtr, SocketIOState__get_handle(self, handle),
+    SocketIOStatePtr self = (SocketIOStatePtr)state;
+    match_result(
+        SocketIOState__get_handle(self, handle),
         success(socket_handle)
         {
             if (IOBuffer__item_count(socket_handle->buffer) == 0)
@@ -823,19 +776,22 @@ static Result(IOBufferPtr) SocketIO__read(
 
 static Result(ByteCount) SocketIO__write(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size)
 {
-    SocketIOStatePtr self = (SocketIOStatePtr) state;
+    SocketIOStatePtr self = (SocketIOStatePtr)state;
     SocketHandlePtr socket_handle;
     SocketHandlePtr peer;
 
-    match_result(SocketHandlePtr, SocketIOState__get_handle(self, handle),
+    match_result(
+        SocketIOState__get_handle(self, handle),
         success(found) { socket_handle = found; },
         error(code, message) { return Error(ByteCount, message, code); }
     );
 
-    match_optional(IOInternalHandle, socket_handle->peer,
+    match_optional(
+        socket_handle->peer,
         some(peer_handle)
         {
-            match_result(SocketHandlePtr, SocketIOState__get_handle(self, peer_handle),
+            match_result(
+                SocketIOState__get_handle(self, peer_handle),
                 success(found) { peer = found; },
                 error(code, message) { return Error(ByteCount, message, code); }
             );
@@ -844,28 +800,29 @@ static Result(ByteCount) SocketIO__write(IOStatePtr state, IOInternalHandle hand
     );
 
     Optional(IOContextPtr) parked_reader = None(IOContextPtr);
-    critical_section(self->lock,
-        match_result(Pos, IOBuffer__push_all(peer->buffer, (CharPtr) data, size),
-            success_do_nothing(),
-            error(code, message) { cs_return Error(ByteCount, message, code); }
-        );
-        parked_reader = peer->parked_reader;
-        peer->parked_reader = None(IOContextPtr);
+    critical_section(self->lock, match_result(
+                                     IOBuffer__push_all(peer->buffer, (CharPtr)data, size),
+        success_do_nothing(),
+                                     error(code, message) { cs_return Error(ByteCount, message, code); }
     );
+                     parked_reader = peer->parked_reader; peer->parked_reader = None(IOContextPtr););
 
-    match_optional(IOContextPtr, parked_reader,
+    match_optional(
+        parked_reader,
         some(context)
         {
-            match_optional(ProcessID, context->kernel_context.pid,
+            match_optional(
+                context->kernel_context.pid,
                 some(pid)
                 {
-                    match_optional(IOHandle, context->handle,
+                    match_optional(
+                        context->handle,
                         some(context_handle)
                         {
                             MessagePtr message = Message__heap_new_io_operation(
-                                SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid, context_handle
-                            );
-                            match_result(AckCode, MessageBroker__deliver(self->message_broker, message),
+                                SOURCE_IO, SUBSYS_IO_OPERATION_AVAILABLE, pid, context_handle);
+                            match_result(
+                                MessageBroker__deliver(self->message_broker, message),
                                 success_do_nothing(),
                                 error(code, message) { return Error(ByteCount, message, code); }
                             );
@@ -884,16 +841,16 @@ static Result(ByteCount) SocketIO__write(IOStatePtr state, IOInternalHandle hand
 
 static Result(ParkStatus) SocketIO__park(IOStatePtr state, IOContextPtr parked_context)
 {
-    SocketIOStatePtr self = (SocketIOStatePtr) state;
-    match_optional(IOHandle, parked_context->handle,
+    SocketIOStatePtr self = (SocketIOStatePtr)state;
+    match_optional(
+        parked_context->handle,
         some(handle)
         {
-            match_result(SocketHandlePtr, SocketIOState__get_handle(self, device_internal_handle(handle)),
+            match_result(
+                SocketIOState__get_handle(self, device_internal_handle(handle)),
                 success(socket_handle)
                 {
-                    critical_section(self->lock,
-                        socket_handle->parked_reader = Some(IOContextPtr, parked_context);
-                    );
+                    critical_section(self->lock, socket_handle->parked_reader = Some(IOContextPtr, parked_context););
                     return Success(ParkStatus, IO_PARK_OK);
                 },
                 error(code, message) { return Error(ParkStatus, message, code); }
@@ -913,30 +870,21 @@ static Result(ParkStatus) SocketIO__unpark(IOStatePtr state)
 SocketIOPtr SocketIO__heap_new(void)
 {
     SocketIOPtr result = v_ptr(Kernel__alloc(sizeof(SocketIO)), SocketIO);
-    result->base_io = IO__new(
-        SocketIO__open,
-        SocketIO__read,
-        SocketIO__write,
-        SocketIO__accept,
-        SocketIO__close,
-        SocketIO__park,
-        SocketIO__unpark,
-        IO__unsupported_server_buffer,
-        IO__unsupported_server_write_buffer,
-        IO__unsupported_data_available,
-        IO__unsupported_data_consumed,
-        IO__unsupported_eof
-    );
+    result->base_io =
+        IO__new(SocketIO__open, SocketIO__read, SocketIO__write, SocketIO__accept, SocketIO__close, SocketIO__park,
+                SocketIO__unpark, IO__unsupported_server_buffer, IO__unsupported_server_write_buffer,
+                IO__unsupported_data_available, IO__unsupported_data_consumed, IO__unsupported_eof);
     result->registry = SOCKET_REGISTRY_INIT;
     return result;
 }
 
 Result(SocketRegistryPtr) SocketIO__registered_registry(IOSubsystemPtr io_subsystem)
 {
-    match_optional(DeviceRegistrationPtr, IOSubsystem__find_registered_device(io_subsystem, &bstr(IO_SOCKET_SCHEME)),
+    match_optional(
+        IOSubsystem__find_registered_device(io_subsystem, &bstr(IO_SOCKET_SCHEME)),
         some(registration)
         {
-            SocketIOPtr socket_io = (SocketIOPtr) registration->device;
+            SocketIOPtr socket_io = (SocketIOPtr)registration->device;
             return Success(SocketRegistryPtr, &socket_io->registry);
         },
         none_do_nothing()

@@ -9,13 +9,14 @@
 #include "syscall/syscall_dispatcher.h"
 #include "kernel_core.h"
 #include "irq/irq_dispatcher.h"
+#include "service/service_directory.h"
 #include "bin/embedded_binaries.h"
 #include "scheduler/register.h"
 #include "scheduler/scheduler.h"
 
-
 static BString failed_to_find_idle_process = bstr("failed to find idle process");
 static BString heap_init_progress = bstr("heap initialised");
+static BString service_directory_init_progress = bstr("service directory initialised");
 static BString syscall_init_progress = bstr("syscall handlers initialised");
 static BString io_init_progress = bstr("io subsystem initialised");
 static BString scheduler_init_progress = bstr("scheduler initialised");
@@ -38,6 +39,7 @@ static Kernel instance = { // hundelint: ignore-constructor-required
     .scheduler = &scheduler,
     .message_broker = &message_broker,
     .irq_dispatcher = &irq_dispatcher,
+    .service_directory = KERNEL_SERVICE_DIRECTORY_INIT,
     .auth = NEW_AUTH,
 };
 
@@ -50,20 +52,18 @@ void __kernel_panic(KernelPtr self, BStringPtr message)
 
 void PanicOnError(ResultPtr(SubsystemInitStatus) res, KernelPtr kernel, BStringPtr progress_message)
 {
-    match_result(SubsystemInitStatus, *res,
-        success(_)
-        {
-            __d_println(PROGRESS, BString__cstr(progress_message));
-        },
-        error(code, message)
-        {
-            __kernel_panic(kernel, &message);
-        }
+    match_result(
+        *res,
+        success(_) { __d_println(PROGRESS, BString__cstr(progress_message)); },
+        error(code, message) { __kernel_panic(kernel, &message); }
     );
 }
 
-#define PanicOnError(res, kernel, progress_message) \
-    ({ Result(SubsystemInitStatus) __res = (res); PanicOnError(&__res, (kernel), (progress_message)); })
+#define PanicOnError(res, kernel, progress_message)                                                                    \
+    ({                                                                                                                 \
+        Result(SubsystemInitStatus) __res = (res);                                                                     \
+        PanicOnError(&__res, (kernel), (progress_message));                                                            \
+    })
 
 KernelPtr Kernel__instance()
 {
@@ -73,24 +73,20 @@ KernelPtr Kernel__instance()
 Result(SubsystemInitStatus) Kernel__io_subsystem_init(KernelPtr self)
 {
     __d_println(DEBUG, "Kernel__io_subsystem_init");
-    match_result(RegisterCode, IOSubsystem__register(self),
+    match_result(
+        IOSubsystem__register(self),
         success_do_nothing(),
-        error(code, message)
-        {
-            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-        }
+        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
     );
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
 Result(SubsystemInitStatus) Kernel__init_syscall_handlers(KernelPtr self)
 {
-    match_result(RegisterResult, Init__syscalls(&self->syscall_dispatcher);,
+    match_result(
+        Init__syscalls(&self->syscall_dispatcher),
         success_do_nothing(),
-        error(code, message)
-        {
-            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-        }
+        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
     );
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
@@ -103,12 +99,21 @@ Result(SubsystemInitStatus) Kernel__init_heap(KernelPtr self)
     }
 
     SystemInfoPtr system_info = &self->system_info.some.val;
-    match_result(HeapCode, Heap__init(&self->heap, system_info);,
+    match_result(
+        Heap__init(&self->heap, system_info),
         success_do_nothing(),
-        error(code, message)
-        {
-            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-        }
+        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+    );
+
+    return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
+}
+
+Result(SubsystemInitStatus) Kernel__init_service_directory(KernelPtr self)
+{
+    match_result(
+        KernelServiceDirectory__init(&self->service_directory),
+        success_do_nothing(),
+        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
     );
 
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
@@ -126,24 +131,21 @@ Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
     self->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
 
     Optional(Elf) idle_opt = EmbeddedElf__load(&bstr("services/idle"));
-    match_optional(Elf, idle_opt,
+    match_optional(
+        idle_opt,
         some(idle)
         {
-            match_result(SchedulerInitStatus, Scheduler__init(self, self->scheduler, idle);,
+            match_result(
+                Scheduler__init(self, self->scheduler, idle),
                 success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-                }
+                error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
             );
         },
-        none()
-        {
-            return Error(SubsystemInitStatus, failed_to_find_idle_process, SUBSYSTEM_INIT_FAILED);
-        }
+        none() { return Error(SubsystemInitStatus, failed_to_find_idle_process, SUBSYSTEM_INIT_FAILED); }
     );
 
-    match_result(SchedulerRegisterCode, Scheduler__register(self),
+    match_result(
+        Scheduler__register(self),
         success_do_nothing(),
         error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
     );
@@ -157,6 +159,7 @@ void Kernel__init(KernelPtr self)
     __atomic_store_n(&self->status, INIT_IN_PROGRESS, __ATOMIC_RELEASE);
 
     PanicOnError(Kernel__init_heap(self), self, &heap_init_progress);
+    PanicOnError(Kernel__init_service_directory(self), self, &service_directory_init_progress);
     PanicOnError(Kernel__init_syscall_handlers(self), self, &syscall_init_progress);
     PanicOnError(Kernel__io_subsystem_init(self), self, &io_init_progress);
     PanicOnError(Kernel__init_scheduler(self), self, &scheduler_init_progress);

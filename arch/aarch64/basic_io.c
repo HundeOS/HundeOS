@@ -4,11 +4,13 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-void BasicIO__puts(const char* str) {
+void BasicIO__puts(const char * str)
+{
     puts(str);
 }
 
-void BasicIO__put_int(int num) {
+void BasicIO__put_int(int num)
+{
     put_int(num);
 }
 
@@ -70,12 +72,12 @@ static void TraceUart__put_char(char c)
 
     if (TraceUart__tx_ready())
     {
-        *TraceUart__reg(UART0_DR_OFFSET) = (uint32_t) c;
+        *TraceUart__reg(UART0_DR_OFFSET) = (uint32_t)c;
     }
     __asm__ volatile("dsb sy");
 }
 
-void DebugTrace__puts(const char* str)
+void DebugTrace__puts(const char * str)
 {
     if (!TraceUart__try_lock())
     {
@@ -101,7 +103,7 @@ void DebugTrace__puts(const char* str)
 #define SEMIHOST_OPEN_WRITE 4
 
 static const char trace_path[] = "build/kernel-trace.log";
-static uintptr_t trace_handle = (uintptr_t) -1;
+static uintptr_t trace_handle = (uintptr_t)-1;
 static bool trace_open_attempted = false;
 static volatile uint32_t trace_write_lock = 0;
 
@@ -129,11 +131,11 @@ static uintptr_t DebugTrace__open_handle()
     {
         trace_open_attempted = true;
         uintptr_t args[3] = {
-            (uintptr_t) trace_path,
+            (uintptr_t)trace_path,
             SEMIHOST_OPEN_WRITE,
             sizeof(trace_path) - 1,
         };
-        trace_handle = Semihosting__call(SEMIHOST_SYS_OPEN, (uintptr_t) args);
+        trace_handle = Semihosting__call(SEMIHOST_SYS_OPEN, (uintptr_t)args);
     }
 
     return trace_handle;
@@ -149,7 +151,7 @@ static void DebugTrace__unlock()
     __atomic_store_n(&trace_write_lock, 0u, __ATOMIC_RELEASE);
 }
 
-void DebugTrace__puts(const char* str)
+void DebugTrace__puts(const char * str)
 {
     if (!DebugTrace__try_lock())
     {
@@ -157,7 +159,7 @@ void DebugTrace__puts(const char* str)
     }
 
     uintptr_t handle = DebugTrace__open_handle();
-    if (handle == (uintptr_t) -1)
+    if (handle == (uintptr_t)-1)
     {
         DebugTrace__unlock();
         return;
@@ -165,14 +167,14 @@ void DebugTrace__puts(const char* str)
 
     uintptr_t args[3] = {
         handle,
-        (uintptr_t) str,
+        (uintptr_t)str,
         DebugTrace__strlen(str),
     };
-    Semihosting__call(SEMIHOST_SYS_WRITE, (uintptr_t) args);
+    Semihosting__call(SEMIHOST_SYS_WRITE, (uintptr_t)args);
     DebugTrace__unlock();
 }
 #else
-void DebugTrace__puts(const char* str)
+void DebugTrace__puts(const char * str)
 {
 }
 #endif

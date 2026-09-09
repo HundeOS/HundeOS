@@ -64,12 +64,9 @@ static BString memory_physical_size_human_key = bstr("memory.physical_size_human
 static BString memory_free_region_count_key = bstr("memory.free_region.count");
 static BString memory_kernel_heap_prefix = bstr("memory.kernel_heap");
 static BString interrupt_controller_kind_key = bstr("interrupt_controller.kind");
-static BString interrupt_controller_distributor_key =
-    bstr("interrupt_controller.distributor_physical_base");
-static BString interrupt_controller_redistributor_key =
-    bstr("interrupt_controller.redistributor_physical_base");
-static BString interrupt_controller_cpu_interface_key =
-    bstr("interrupt_controller.cpu_interface_physical_base");
+static BString interrupt_controller_distributor_key = bstr("interrupt_controller.distributor_physical_base");
+static BString interrupt_controller_redistributor_key = bstr("interrupt_controller.redistributor_physical_base");
+static BString interrupt_controller_cpu_interface_key = bstr("interrupt_controller.cpu_interface_physical_base");
 
 typedef struct ProcSysinfoWriter
 {
@@ -79,14 +76,13 @@ typedef struct ProcSysinfoWriter
     FilePointer cursor;
     size_t written;
     bool failed;
-}
-ProcSysinfoWriter;
+} ProcSysinfoWriter;
 
 typedef ProcSysinfoWriter * ProcSysinfoWriterPtr;
 
 static ProcSysinfoWriter ProcSysinfoWriter__new(IOBufferPtr buffer, FilePointer offset, size_t size)
 {
-    return (ProcSysinfoWriter) {
+    return (ProcSysinfoWriter){
         .buffer = buffer,
         .target_offset = offset,
         .requested_size = size,
@@ -100,9 +96,18 @@ static void ProcSysinfoWriter__append_char(ProcSysinfoWriterPtr self, char ch)
 {
     if (self->cursor >= self->target_offset && self->written < self->requested_size && !self->failed)
     {
-        match_result(Pos, IOBuffer__push(self->buffer, ch),
-            success(pos) { self->written++;; },
-            error(code, message) { self->failed = true;; }
+        match_result(
+            IOBuffer__push(self->buffer, ch),
+            success(pos)
+            {
+                self->written++;
+                ;
+            },
+            error(code, message)
+            {
+                self->failed = true;
+                ;
+            }
         );
     }
 
@@ -111,10 +116,7 @@ static void ProcSysinfoWriter__append_char(ProcSysinfoWriterPtr self, char ch)
 
 static void ProcSysinfoWriter__append_bstring(ProcSysinfoWriterPtr self, ConstBStringPtr text)
 {
-    for_each_bstring(text, index, ch,
-    {
-        ProcSysinfoWriter__append_char(self, ch);
-    });
+    for_each_bstring(text, index, ch, { ProcSysinfoWriter__append_char(self, ch); });
 }
 
 static void ProcSysinfoWriter__append_key_value_prefix(ProcSysinfoWriterPtr self, ConstBStringPtr key)
@@ -185,16 +187,15 @@ static void ProcSysinfoWriter__append_human_size_line(ProcSysinfoWriterPtr self,
     ProcSysinfoWriter__append_bstring(self, &newline);
 }
 
-static void ProcSysinfoWriter__append_region_key(
-    ProcSysinfoWriterPtr self,
-    ConstBStringPtr prefix,
-    ConstBStringPtr suffix)
+static void ProcSysinfoWriter__append_region_key(ProcSysinfoWriterPtr self, ConstBStringPtr prefix,
+                                                 ConstBStringPtr suffix)
 {
     ProcSysinfoWriter__append_bstring(self, prefix);
     ProcSysinfoWriter__append_bstring(self, suffix);
 }
 
-static void ProcSysinfoWriter__append_memory_region(ProcSysinfoWriterPtr self, ConstBStringPtr prefix, MemoryRegionPtr region)
+static void ProcSysinfoWriter__append_memory_region(ProcSysinfoWriterPtr self, ConstBStringPtr prefix,
+                                                    MemoryRegionPtr region)
 {
     ProcSysinfoWriter__append_region_key(self, prefix, &physical_start_suffix);
     ProcSysinfoWriter__append_bstring(self, &equals);
@@ -218,10 +219,8 @@ static void ProcSysinfoWriter__append_memory_region(ProcSysinfoWriterPtr self, C
     ProcSysinfoWriter__append_bstring(self, &newline);
 }
 
-static void ProcSysinfoWriter__append_physical_memory_region_key(
-    ProcSysinfoWriterPtr self,
-    uint64_t index,
-    ConstBStringPtr suffix)
+static void ProcSysinfoWriter__append_physical_memory_region_key(ProcSysinfoWriterPtr self, uint64_t index,
+                                                                 ConstBStringPtr suffix)
 {
     ProcSysinfoWriter__append_bstring(self, &memory_free_region_prefix);
     if (index < 10)
@@ -233,10 +232,8 @@ static void ProcSysinfoWriter__append_physical_memory_region_key(
     ProcSysinfoWriter__append_bstring(self, suffix);
 }
 
-static void ProcSysinfoWriter__append_physical_memory_region(
-    ProcSysinfoWriterPtr self,
-    uint64_t index,
-    PhysicalMemoryRegionPtr region)
+static void ProcSysinfoWriter__append_physical_memory_region(ProcSysinfoWriterPtr self, uint64_t index,
+                                                             PhysicalMemoryRegionPtr region)
 {
     ProcSysinfoWriter__append_physical_memory_region_key(self, index, &physical_start_suffix);
     ProcSysinfoWriter__append_bstring(self, &equals);
@@ -260,24 +257,29 @@ static void ProcSysinfoWriter__append_physical_memory_region(
     ProcSysinfoWriter__append_bstring(self, &newline);
 }
 
-static void ProcSysinfoWriter__append_physical_memory_regions(ProcSysinfoWriterPtr self, PhysicalMemoryRegions * regions)
+static void ProcSysinfoWriter__append_physical_memory_regions(ProcSysinfoWriterPtr self,
+                                                              PhysicalMemoryRegions * regions)
 {
     size_t region_count = PhysicalMemoryRegions__len(regions);
     ProcSysinfoWriter__append_dec_line(self, &memory_free_region_count_key, region_count);
     for (uint64_t index = 0; index < region_count; index++)
     {
-        match_optional(PhysicalMemoryRegions__type_ptr__optional, PhysicalMemoryRegions__ptr_at(regions, index),
-            some(region) { ProcSysinfoWriter__append_physical_memory_region(self, index, region);; },
+        match_optional(
+            PhysicalMemoryRegions__ptr_at(regions, index),
+            some(region)
+            {
+                ProcSysinfoWriter__append_physical_memory_region(self, index, region);
+                ;
+            },
             none_do_nothing()
         );
     }
 }
 
-static void ProcSysinfoWriter__append_framebuffer(
-    ProcSysinfoWriterPtr self, OptionalPtr(FramebufferInfo) framebuffer
-)
+static void ProcSysinfoWriter__append_framebuffer(ProcSysinfoWriterPtr self, OptionalPtr(FramebufferInfo) framebuffer)
 {
-    match_optional(FramebufferInfo, *framebuffer,
+    match_optional(
+        *framebuffer,
         some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 1);
@@ -286,24 +288,25 @@ static void ProcSysinfoWriter__append_framebuffer(
             ProcSysinfoWriter__append_human_size_line(self, &framebuffer_physical_size_human_key, info.size);
             ProcSysinfoWriter__append_dec_line(self, &framebuffer_width_key, info.width);
             ProcSysinfoWriter__append_dec_line(self, &framebuffer_height_key, info.height);
-            ProcSysinfoWriter__append_dec_line(
-                self,
-                &framebuffer_pixels_per_scanline_key,
-                info.pixels_per_scanline
-            );
+            ProcSysinfoWriter__append_dec_line(self, &framebuffer_pixels_per_scanline_key, info.pixels_per_scanline);
             ProcSysinfoWriter__append_dec_line(self, &framebuffer_pixel_format_key, info.pixel_format);
             ProcSysinfoWriter__append_hex_line(self, &framebuffer_red_mask_key, info.red_mask);
             ProcSysinfoWriter__append_hex_line(self, &framebuffer_green_mask_key, info.green_mask);
             ProcSysinfoWriter__append_hex_line(self, &framebuffer_blue_mask_key, info.blue_mask);
             ProcSysinfoWriter__append_hex_line(self, &framebuffer_reserved_mask_key, info.reserved_mask);
         },
-        none() { ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 0);; }
+        none()
+        {
+            ProcSysinfoWriter__append_dec_line(self, &framebuffer_present_key, 0);
+            ;
+        }
     );
 }
 
 static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, OptionalPtr(PciInfo) pci)
 {
-    match_optional(PciInfo, *pci,
+    match_optional(
+        *pci,
         some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 1);
@@ -313,13 +316,18 @@ static void ProcSysinfoWriter__append_pci(ProcSysinfoWriterPtr self, OptionalPtr
             ProcSysinfoWriter__append_dec_line(self, &pci_bus_start_key, info.bus_start);
             ProcSysinfoWriter__append_dec_line(self, &pci_bus_end_key, info.bus_end);
         },
-        none() { ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 0);; }
+        none()
+        {
+            ProcSysinfoWriter__append_dec_line(self, &pci_present_key, 0);
+            ;
+        }
     );
 }
 
 static void ProcSysinfoWriter__append_sd_host(ProcSysinfoWriterPtr self, OptionalPtr(SdHostInfo) sd_host)
 {
-    match_optional(SdHostInfo, *sd_host,
+    match_optional(
+        *sd_host,
         some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 1);
@@ -327,15 +335,18 @@ static void ProcSysinfoWriter__append_sd_host(ProcSysinfoWriterPtr self, Optiona
             ProcSysinfoWriter__append_hex_line(self, &sd_host_mmio_size_key, info.mmio_size);
             ProcSysinfoWriter__append_dec_line(self, &sd_host_irq_key, info.irq);
         },
-        none() { ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 0);; }
+        none()
+        {
+            ProcSysinfoWriter__append_dec_line(self, &sd_host_present_key, 0);
+            ;
+        }
     );
 }
 
-static void ProcSysinfoWriter__append_ethernet(
-    ProcSysinfoWriterPtr self, OptionalPtr(EthernetMacInfo) ethernet_mac
-)
+static void ProcSysinfoWriter__append_ethernet(ProcSysinfoWriterPtr self, OptionalPtr(EthernetMacInfo) ethernet_mac)
 {
-    match_optional(EthernetMacInfo, *ethernet_mac,
+    match_optional(
+        *ethernet_mac,
         some(info)
         {
             ProcSysinfoWriter__append_dec_line(self, &ethernet_present_key, 1);
@@ -344,15 +355,16 @@ static void ProcSysinfoWriter__append_ethernet(
             ProcSysinfoWriter__append_hex_line(self, &ethernet_mmio_size_key, info.mmio_size);
             ProcSysinfoWriter__append_dec_line(self, &ethernet_irq_key, info.irq);
         },
-        none() { ProcSysinfoWriter__append_dec_line(self, &ethernet_present_key, 0);; }
+        none()
+        {
+            ProcSysinfoWriter__append_dec_line(self, &ethernet_present_key, 0);
+            ;
+        }
     );
 }
 
-static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
-    SystemInfoPtr info,
-    IOBufferPtr buffer,
-    FilePointer offset,
-    size_t size)
+static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(SystemInfoPtr info, IOBufferPtr buffer,
+                                                              FilePointer offset, size_t size)
 {
     ProcSysinfoWriter writer = ProcSysinfoWriter__new(buffer, offset, size);
 
@@ -374,29 +386,19 @@ static ProcSysinfoWriter ProcSysinfoWriter__write_system_info(
     ProcSysinfoWriter__append_physical_memory_regions(&writer, &info->physical_memory.free_regions);
     ProcSysinfoWriter__append_memory_region(&writer, &memory_kernel_heap_prefix, &info->kernel_heap);
     ProcSysinfoWriter__append_dec_line(&writer, &interrupt_controller_kind_key, info->interrupt_controller.kind);
-    ProcSysinfoWriter__append_hex_line(
-        &writer,
-        &interrupt_controller_distributor_key,
-        info->interrupt_controller.distributor_physical_base
-    );
-    ProcSysinfoWriter__append_hex_line(
-        &writer,
-        &interrupt_controller_redistributor_key,
-        info->interrupt_controller.redistributor_physical_base
-    );
-    ProcSysinfoWriter__append_hex_line(
-        &writer,
-        &interrupt_controller_cpu_interface_key,
-        info->interrupt_controller.cpu_interface_physical_base
-    );
+    ProcSysinfoWriter__append_hex_line(&writer, &interrupt_controller_distributor_key,
+                                       info->interrupt_controller.distributor_physical_base);
+    ProcSysinfoWriter__append_hex_line(&writer, &interrupt_controller_redistributor_key,
+                                       info->interrupt_controller.redistributor_physical_base);
+    ProcSysinfoWriter__append_hex_line(&writer, &interrupt_controller_cpu_interface_key,
+                                       info->interrupt_controller.cpu_interface_physical_base);
 
     return writer;
 }
 
 static Result(IOInternalHandle) ProcFilesystemIOState__add_handle(ProcFilesystemIOStatePtr self, ConstBStringPtr path)
 {
-    critical_section(self->state.lock,
-    {
+    critical_section(self->state.lock, {
         IOInternalHandle handle = self->next_handle++ | self->state.filesystem->fs_code;
         FileHandleTargetPtr target = FileHandleTarget__heap_new(path);
         FileHandleTargetMap__set(&self->state.handles, handle, target);
@@ -404,13 +406,12 @@ static Result(IOInternalHandle) ProcFilesystemIOState__add_handle(ProcFilesystem
     });
 }
 
-static Result(FileHandleTargetPtr) ProcFilesystemIOState__get_handle(
-    ProcFilesystemIOStatePtr self, IOInternalHandle handle
-)
+static Result(FileHandleTargetPtr)
+    ProcFilesystemIOState__get_handle(ProcFilesystemIOStatePtr self, IOInternalHandle handle)
 {
-    critical_section(self->state.lock,
-    {
-        match_optional(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle),
+    critical_section(self->state.lock, {
+        match_optional(
+            FileHandleTargetMap__get(&self->state.handles, handle),
             some(target) { cs_return Success(FileHandleTargetPtr, target); },
             none() { cs_return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE); }
         );
@@ -419,13 +420,12 @@ static Result(FileHandleTargetPtr) ProcFilesystemIOState__get_handle(
     return Error(FileHandleTargetPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-static Result(IOInternalHandle) ProcFilesystemIOState__delete_handle(
-    ProcFilesystemIOStatePtr self, IOInternalHandle handle
-)
+static Result(IOInternalHandle)
+    ProcFilesystemIOState__delete_handle(ProcFilesystemIOStatePtr self, IOInternalHandle handle)
 {
-    critical_section(self->state.lock,
-    {
-        match_optional(FileHandleTargetPtr, FileHandleTargetMap__get(&self->state.handles, handle),
+    critical_section(self->state.lock, {
+        match_optional(
+            FileHandleTargetMap__get(&self->state.handles, handle),
             some(target)
             {
                 FileHandleTarget__dispose(target);
@@ -443,7 +443,7 @@ static Result(IOInternalHandle) ProcFilesystemIO__open(IOStatePtr self, ConstBSt
 {
     if (BString__equals(path, &sysinfo_path))
     {
-        return ProcFilesystemIOState__add_handle((ProcFilesystemIOStatePtr) self, path);
+        return ProcFilesystemIOState__add_handle((ProcFilesystemIOStatePtr)self, path);
     }
 
     return Error(IOInternalHandle, invalid_path, IO_INVALID_PATH);
@@ -451,16 +451,16 @@ static Result(IOInternalHandle) ProcFilesystemIO__open(IOStatePtr self, ConstBSt
 
 static Result(IOInternalHandle) ProcFilesystemIO__close(IOStatePtr self, IOInternalHandle handle)
 {
-    return ProcFilesystemIOState__delete_handle((ProcFilesystemIOStatePtr) self, handle);
+    return ProcFilesystemIOState__delete_handle((ProcFilesystemIOStatePtr)self, handle);
 }
 
-static Result(IOBufferPtr) ProcFilesystemIO__read(
-    IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer
-)
+static Result(IOBufferPtr)
+    ProcFilesystemIO__read(IOStatePtr self, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer)
 {
-    ProcFilesystemIOStatePtr fs_state = (ProcFilesystemIOStatePtr) self;
+    ProcFilesystemIOStatePtr fs_state = (ProcFilesystemIOStatePtr)self;
 
-    match_result(FileHandleTargetPtr, ProcFilesystemIOState__get_handle(fs_state, handle),
+    match_result(
+        ProcFilesystemIOState__get_handle(fs_state, handle),
         success(target)
         {
             if (!BString__equals(&target->path, &sysinfo_path))
@@ -468,7 +468,8 @@ static Result(IOBufferPtr) ProcFilesystemIO__read(
                 return Error(IOBufferPtr, invalid_path, IO_INVALID_PATH);
             }
 
-            match_optional(SystemInfo, fs_state->kernel->system_info,
+            match_optional(
+                fs_state->kernel->system_info,
                 some(system_info)
                 {
                     IOBuffer__reset(&target->buffer);
@@ -487,7 +488,11 @@ static Result(IOBufferPtr) ProcFilesystemIO__read(
                     target->offset += writer.written;
                     return Success(IOBufferPtr, &target->buffer);
                 },
-                none() { return Error(IOBufferPtr, missing_system_info, IO_OPERATION_NOT_SUPPORTED);; }
+                none()
+                {
+                    return Error(IOBufferPtr, missing_system_info, IO_OPERATION_NOT_SUPPORTED);
+                    ;
+                }
             );
         },
         error(code, message) { return Error(IOBufferPtr, message, code); }
@@ -496,7 +501,8 @@ static Result(IOBufferPtr) ProcFilesystemIO__read(
     return Error(IOBufferPtr, invalid_handle, IO_UNKNOWN_HANDLE);
 }
 
-static Result(FilesystemNodes) ProcFilesystemIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, ConstBStringPtr path)
+static Result(FilesystemNodes)
+    ProcFilesystemIO__list_nodes(IOStatePtr self, FilesystemNodePtr parent, ConstBStringPtr path)
 {
     BStringArray path_segments = BString__split(path, '/');
     if (BStringArray__len(&path_segments) != 0)
@@ -504,33 +510,20 @@ static Result(FilesystemNodes) ProcFilesystemIO__list_nodes(IOStatePtr self, Fil
         return Error(FilesystemNodes, invalid_path, IO_INVALID_PATH);
     }
 
-    ProcFilesystemIOStatePtr fs_state = (ProcFilesystemIOStatePtr) self;
+    ProcFilesystemIOStatePtr fs_state = (ProcFilesystemIOStatePtr)self;
     FilesystemNodes result = EmptyArray(FilesystemNodes);
-    FilesystemNodes__push(
-        &result,
-        FilesystemNode__heap_new(fs_state->state.filesystem, &sysinfo_path, 0)
-    );
+    FilesystemNodes__push(&result, FilesystemNode__heap_new(fs_state->state.filesystem, &sysinfo_path, 0));
 
     return Success(FilesystemNodes, result);
 }
 
 FileIO ProcFilesystemIO__new()
 {
-    return (FileIO) {
-        .base_io = IO__new(
-            ProcFilesystemIO__open,
-            ProcFilesystemIO__read,
-            IO__unsupported_write,
-            IO__unsupported_accept,
-            ProcFilesystemIO__close,
-            IO__unsupported_park,
-            IO__unsupported_unpark,
-            IO__unsupported_server_buffer,
-            IO__unsupported_server_write_buffer,
-            IO__unsupported_data_available,
-            IO__unsupported_data_consumed,
-            IO__unsupported_eof
-        ),
+    return (FileIO){
+        .base_io = IO__new(ProcFilesystemIO__open, ProcFilesystemIO__read, IO__unsupported_write,
+                           IO__unsupported_accept, ProcFilesystemIO__close, IO__unsupported_park,
+                           IO__unsupported_unpark, IO__unsupported_server_buffer, IO__unsupported_server_write_buffer,
+                           IO__unsupported_data_available, IO__unsupported_data_consumed, IO__unsupported_eof),
         .list_nodes = ProcFilesystemIO__list_nodes,
         .list_dir = FileIO__unsupported_list_dir,
         .mkdir = FileIO__unsupported_mkdir,
@@ -542,7 +535,7 @@ FileIO ProcFilesystemIO__new()
 ProcFilesystemIOStatePtr ProcFilesystemIOState__heap_new(FilesystemPtr fs, KernelPtr kernel)
 {
     ProcFilesystemIOStatePtr state = ptr(Kernel__alloc_kernel(sizeof(ProcFilesystemIOState)), ProcFilesystemIOState);
-    *state = (ProcFilesystemIOState) {
+    *state = (ProcFilesystemIOState){
         .state = FilesystemIOState__new(fs),
         .kernel = kernel,
         .next_handle = 1,

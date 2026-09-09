@@ -12,7 +12,8 @@ static void Syslog__write(ConstBStringPtr tag, OptionalPtr(ProcessPtr) proc, Con
         return;
     }
 
-    match_optional(ProcessPtr, *proc,
+    match_optional(
+        *proc,
         some(process)
         {
             k_printf("cpu=%i - %s - ", CPU__id(), cstr(*tag));
@@ -28,24 +29,17 @@ static void Syslog__write(ConstBStringPtr tag, OptionalPtr(ProcessPtr) proc, Con
     );
 }
 
-Result(SystemCallResult) Syslog__handler(
-    KernelPtr kernel,
-    OptionalPtr(ProcessPtr) proc,
-    Anything arg1,
-    Anything arg2,
-    Anything arg3,
-    Anything arg4,
-    Anything arg5
-)
+Result(SystemCallResult) Syslog__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                         Anything arg3, Anything arg4, Anything arg5)
 {
     if (arg1 == 0)
     {
         return Error(SystemCallResult, invalid_syslog_message, SYSLOG_INVALID_ARGUMENT);
     }
 
-    SyslogRequestPtr request = (SyslogRequestPtr) arg1;
+    SyslogRequestPtr request = (SyslogRequestPtr)arg1;
     BString tag = bstr("SYSLOG");
-    match_optional(BString, request->tag,
+    match_optional(request->tag,
         some(copied_tag) { tag = copied_tag; },
         none_do_nothing()
     );

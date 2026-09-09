@@ -16,8 +16,7 @@ typedef enum MountResults
 {
     MOUNT_OK = 0,
     MOUNT_ERROR = -1,
-}
-MountResults;
+} MountResults;
 
 ResultDef(MountResult);
 
@@ -32,37 +31,29 @@ typedef struct FilesystemTableEntry
     BString mountpoint;
     bool match_block_count;
     uint64_t block_count;
-}
-FilesystemTableEntry;
+} FilesystemTableEntry;
 
 typedef FilesystemTableEntry * FilesystemTableEntryPtr;
 
 OptionalDef(FilesystemTableEntry);
 bool FilesystemTableEntry__equals(FilesystemTableEntryPtr self, FilesystemTableEntryPtr other);
-FilesystemTableEntry FilesystemTableEntry__new(
-    ConstBStringPtr device_path,
-    ConstBStringPtr filesystem_type,
-    ConstBStringPtr mountpoint,
-    bool match_block_count,
-    uint64_t block_count
-);
-LinkedListDefine(FilesystemTableEntry, FilesystemTableEntries, (EqualFunction) FilesystemTableEntry__equals);
+FilesystemTableEntry FilesystemTableEntry__new(ConstBStringPtr device_path, ConstBStringPtr filesystem_type,
+                                               ConstBStringPtr mountpoint, bool match_block_count,
+                                               uint64_t block_count);
+LinkedListDefine(FilesystemTableEntry, FilesystemTableEntries, (EqualFunction)FilesystemTableEntry__equals);
 
 typedef struct FilesystemTable
 {
     FilesystemTableEntries entries;
-}
-FilesystemTable;
+} FilesystemTable;
 
 typedef FilesystemTable * FilesystemTablePtr;
 
 FilesystemTable FilesystemTable__new();
-Result(CollectionCode) FilesystemTable__add(
-    FilesystemTablePtr self, ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
-);
-Result(CollectionCode) FilesystemTable__add_by_block_count(
-    FilesystemTablePtr self, uint64_t block_count, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint
-);
+Result(CollectionCode) FilesystemTable__add(FilesystemTablePtr self, ConstBStringPtr device_path,
+                                            ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint);
+Result(CollectionCode) FilesystemTable__add_by_block_count(FilesystemTablePtr self, uint64_t block_count,
+                                                           ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint);
 
 OptionalDef(FilesystemPtr);
 ResultDef(FilesystemPtr);
@@ -83,16 +74,14 @@ typedef struct Filesystem
     FileIO file_io;
     FilesystemIOStatePtr state;
     FilesystemCode fs_code;
-}
-Filesystem;
+} Filesystem;
 
 typedef struct FileHandleTarget
 {
     BString path;
     FilePointer offset;
     IOBuffer buffer;
-}
-FileHandleTarget;
+} FileHandleTarget;
 
 typedef FileHandleTarget * FileHandleTargetPtr;
 
@@ -102,7 +91,6 @@ ResultDef(FileHandleTargetPtr);
 
 MapDefine(IOInternalHandle, FileHandleTargetPtr, MAX_HANDLES_PER_DEVICE, FileHandleTargetMap, SimpleEquals(uint32_t));
 
-
 typedef struct FilesystemIOState
 {
     // inheritance
@@ -111,8 +99,7 @@ typedef struct FilesystemIOState
     FileHandleTargetMap handles;
 
     mutex_t lock;
-}
-FilesystemIOState;
+} FilesystemIOState;
 
 typedef FilesystemIOState * FilesystemIOStatePtr;
 

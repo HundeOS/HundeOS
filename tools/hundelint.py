@@ -33,7 +33,7 @@ class Rule:
 PROTECTED_COLLECTION_FIELDS = ("buffer", "len", "head", "tail", "items", "data", "capacity", "count")
 PROTECTED_OPTIONAL_RESULT_FIELDS = ("present", "some", "none", "ok", "success", "error", "val", "code")
 PROTECTED_COLLECTION_DECLARATION_MACRO = re.compile(
-    r"\b(?P<macro>FixedArrayDefine|LinkedListDefine|MapDefine|RingBufferDefine)\s*\((?P<args>[^;]+)\)"
+    r"\b(?P<macro>FixedArrayDefine|AtomicFixedArrayDefine|LinkedListDefine|MapDefine|RingBufferDefine)\s*\((?P<args>[^;]+)\)"
 )
 BLOCK_STATEMENT_MACROS = (
     "match_optional",
@@ -46,6 +46,7 @@ BLOCK_STATEMENT_MACROS = (
     "for_each_ll_ptr",
     "for_each_fa",
     "for_each_fa_ptr",
+    "for_each_atomic_fa_ptr",
     "for_each_map",
     "for_each_map_ptr",
     "for_each_bstring",
@@ -133,6 +134,29 @@ RULES = (
         ),
     ),
     Rule(
+        name="no-generated-collection-types",
+        message="use public collection APIs and inferred match macros instead of generated collection typedefs",
+        pattern=re.compile(
+            r"\b[A-Za-z_][A-Za-z0-9_]*__(?:type(?:_ptr)?(?:__optional)?|optional|value_type(?:_ptr)?|FindResult)\b"
+        ),
+        allow_paths=(
+            "common/types/atomic_fixed_array.h",
+            "common/types/fixed_array.h",
+            "common/types/linked_list.h",
+            "common/types/map.h",
+        ),
+    ),
+    Rule(
+        name="legacy-collection-optional-matcher",
+        message="use the inferred match_optional macro",
+        pattern=re.compile(r"\bmatch_collection_optional\s*\("),
+    ),
+    Rule(
+        name="legacy-unwrap-macro",
+        message="use unwrap_optional or unwrap_result",
+        pattern=re.compile(r"\b(?:unwrap|result_unwrap)\s*\("),
+    ),
+    Rule(
         name="constructor-required",
         message="use a Type__new method instead of direct struct literals or zero-initializer plus field assignments",
         pattern=re.compile(r"$^"),
@@ -180,7 +204,7 @@ RULES = (
     ),
     Rule(
         name="match-branch-macros",
-        message="use success/error or some/none branch macros in match_result/match_optional/match_find_result/match_find_result_ptr",
+        message="use inferred match macros with success/error or some/none branches",
         pattern=re.compile(r"(?!)"),
         allow_paths=(
             "common/types/dyn_string.h",
@@ -192,6 +216,21 @@ RULES = (
             "kernel/types/linked_list.h",
             "kernel/types/ring_buffer.h",
         ),
+    ),
+    Rule(
+        name="typed-match-argument",
+        message="match macros infer their payload type; remove the explicit type argument",
+        pattern=re.compile(r"(?!)"),
+        allow_paths=(
+            "common/types/find_result.h",
+            "common/types/optional.h",
+            "common/types/result.h",
+        ),
+    ),
+    Rule(
+        name="typed-unwrap-argument",
+        message="unwrap macros derive their value type; remove the explicit type argument",
+        pattern=re.compile(r"(?!)"),
     ),
     Rule(
         name="match-branch-format",
@@ -232,17 +271,6 @@ RULES = (
         message="put a semicolon after block-style macro calls",
         pattern=re.compile(r"(?!)"),
     ),
-    Rule(
-        name="find-result-matcher",
-        message="use match_find_result/match_find_result_ptr instead of matching FindResult internals directly",
-        pattern=re.compile(r"(?!)"),
-        allow_paths=(
-            "common/types/find_result.h",
-            "common/types/fixed_array.h",
-            "common/types/linked_list.h",
-            "kernel/types/hashtable.h",
-        ),
-    ),
 )
 
 AST_RULE_NAMES = {
@@ -266,10 +294,11 @@ RAW_STRUCT_POINTER_RULE = next(rule for rule in RULES if rule.name == "raw-struc
 MATCH_BRANCH_RULE = next(rule for rule in RULES if rule.name == "match-branch-macros")
 MATCH_BRANCH_FORMAT_RULE = next(rule for rule in RULES if rule.name == "match-branch-format")
 MATCH_BRANCH_BLOCK_FORMAT_RULE = next(rule for rule in RULES if rule.name == "match-branch-block-format")
+TYPED_MATCH_ARGUMENT_RULE = next(rule for rule in RULES if rule.name == "typed-match-argument")
+TYPED_UNWRAP_ARGUMENT_RULE = next(rule for rule in RULES if rule.name == "typed-unwrap-argument")
 TRIVIAL_ERROR_BRANCH_RULE = next(rule for rule in RULES if rule.name == "trivial-error-branch")
 CRITICAL_SECTION_CONTROL_FLOW_RULE = next(rule for rule in RULES if rule.name == "critical-section-control-flow")
 BLOCK_MACRO_SEMICOLON_RULE = next(rule for rule in RULES if rule.name == "block-macro-semicolon")
-FIND_RESULT_MATCHER_RULE = next(rule for rule in RULES if rule.name == "find-result-matcher")
 
 
 def _load_tree_sitter():
@@ -385,6 +414,7 @@ def _protected_collection_types(source: str) -> set[str]:
         args = [arg.strip() for arg in match.group("args").split(",")]
         alias_index = {
             "FixedArrayDefine": 2,
+            "AtomicFixedArrayDefine": 2,
             "LinkedListDefine": 1,
             "MapDefine": 3,
             "RingBufferDefine": 1,
@@ -393,6 +423,8 @@ def _protected_collection_types(source: str) -> set[str]:
             alias = args[alias_index]
             names.add(alias)
             names.add(f"{alias}Ptr")
+            if match.group("macro") == "AtomicFixedArrayDefine":
+                names.add(f"Const{alias}Ptr")
     return names
 
 
@@ -858,10 +890,18 @@ def _declaration_uses_raw_struct_pointer(source: bytes, node, struct_like_types:
     if node.type == "declaration" and declarator.type == "function_declarator":
         return False
 
-    return any(
-        descendant.type in {"pointer_declarator", "abstract_pointer_declarator"}
-        for descendant in _walk(declarator)
-    )
+    return _declarator_uses_pointer(declarator)
+
+
+def _declarator_uses_pointer(node) -> bool:
+    if node is None:
+        return False
+    if node.type in {"pointer_declarator", "abstract_pointer_declarator"}:
+        return True
+    if node.type == "init_declarator":
+        return _declarator_uses_pointer(node.child_by_field_name("declarator"))
+
+    return any(_declarator_uses_pointer(child) for child in node.children)
 
 
 def _lint_optional_result_pointer_params(path: Path, source_text: str, tree) -> list[Finding]:
@@ -1754,13 +1794,29 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
         for offset, args_text in _iter_macro_calls(clean_source, macro_name):
             args_with_offsets = _split_macro_args_with_offsets(args_text)
             args = [arg for arg, _start in args_with_offsets]
-            valid = (
-                len(args) == 4
-                and args[2].lstrip().startswith(success_branches)
-                and args[3].lstrip().startswith(error_branches)
-            )
+            branch_index = 1
             line_number, column = _line_column_for_offset(line_starts, offset)
             raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+            if (
+                len(args) == 4
+                and not _is_allowed(TYPED_MATCH_ARGUMENT_RULE, path)
+                and TYPED_MATCH_ARGUMENT_RULE.name not in _line_ignores(raw_line)
+            ):
+                findings.append(
+                    Finding(
+                        path=path,
+                        line=line_number,
+                        column=column,
+                        rule=TYPED_MATCH_ARGUMENT_RULE.name,
+                        message=TYPED_MATCH_ARGUMENT_RULE.message,
+                    )
+                )
+                continue
+            valid = (
+                len(args) == branch_index + 2
+                and args[branch_index].lstrip().startswith(success_branches)
+                and args[branch_index + 1].lstrip().startswith(error_branches)
+            )
 
             if not valid and not branch_allowed and MATCH_BRANCH_RULE.name not in _line_ignores(raw_line):
                 findings.append(
@@ -1778,7 +1834,7 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
                 open_line, _open_column = _line_column_for_offset(line_starts, open_paren_offset)
                 branch_lines = [
                     _line_column_for_offset(line_starts, open_paren_offset + 1 + args_with_offsets[index][1])[0]
-                    for index in (2, 3)
+                    for index in (branch_index, branch_index + 1)
                 ]
                 if branch_lines[0] <= open_line or branch_lines[1] <= open_line or branch_lines[0] == branch_lines[1]:
                     findings.append(
@@ -1792,7 +1848,7 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
                     )
 
             if valid and not block_format_allowed and MATCH_BRANCH_BLOCK_FORMAT_RULE.name not in _line_ignores(raw_line):
-                for index in (2, 3):
+                for index in (branch_index, branch_index + 1):
                     branch = args[index]
                     first_line = branch.split("\n", 1)[0]
                     if "\n" in branch and "{" in first_line:
@@ -1812,7 +1868,7 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
                 and not trivial_error_allowed
                 and TRIVIAL_ERROR_BRANCH_RULE.name not in _line_ignores(raw_line)
             ):
-                error_arg = args[3].strip()
+                error_arg = args[branch_index + 1].strip()
                 if error_arg.startswith("error(") and re.search(r"\)\s*\{\s*(?:(?:return|break|continue)\s*;)?\s*\}\s*$", error_arg):
                     findings.append(
                         Finding(
@@ -1823,6 +1879,34 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
                             message=TRIVIAL_ERROR_BRANCH_RULE.message,
                         )
                     )
+
+    return findings
+
+
+def _lint_unwrap_macros(path: Path, source: str) -> list[Finding]:
+    clean_source = "\n".join(_sanitise_source(source))
+    raw_lines = source.splitlines()
+    line_starts = _line_starts(clean_source)
+    findings = []
+
+    for macro_name in ("unwrap_optional", "unwrap_result"):
+        for offset, args_text in _iter_macro_calls(clean_source, macro_name):
+            if len(_split_macro_args(args_text)) != 3:
+                continue
+
+            line_number, column = _line_column_for_offset(line_starts, offset)
+            raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+            if TYPED_UNWRAP_ARGUMENT_RULE.name in _line_ignores(raw_line):
+                continue
+            findings.append(
+                Finding(
+                    path=path,
+                    line=line_number,
+                    column=column,
+                    rule=TYPED_UNWRAP_ARGUMENT_RULE.name,
+                    message=TYPED_UNWRAP_ARGUMENT_RULE.message,
+                )
+            )
 
     return findings
 
@@ -1864,40 +1948,6 @@ def _lint_block_macro_semicolons(path: Path, source: str) -> list[Finding]:
     return findings
 
 
-def _lint_find_result_matching(path: Path, source: str) -> list[Finding]:
-    if _is_allowed(FIND_RESULT_MATCHER_RULE, path):
-        return []
-
-    clean_source = "\n".join(_sanitise_source(source))
-    raw_lines = source.splitlines()
-    line_starts = _line_starts(clean_source)
-    findings = []
-
-    for offset, args_text in _iter_macro_calls(clean_source, "match_optional"):
-        args = _split_macro_args(args_text)
-        if len(args) != 4:
-            continue
-        if not re.search(r"\b[A-Za-z_][A-Za-z0-9_]*__FindResult\b", args[0]):
-            continue
-
-        line_number, column = _line_column_for_offset(line_starts, offset)
-        raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
-        if FIND_RESULT_MATCHER_RULE.name in _line_ignores(raw_line):
-            continue
-
-        findings.append(
-            Finding(
-                path=path,
-                line=line_number,
-                column=column,
-                rule=FIND_RESULT_MATCHER_RULE.name,
-                message=FIND_RESULT_MATCHER_RULE.message,
-            )
-        )
-
-    return findings
-
-
 def lint_source(path: Path, source: str, tree=None) -> list[Finding]:
     raw_lines = source.splitlines()
     clean_lines = _sanitise_source(source)
@@ -1929,9 +1979,9 @@ def lint_source(path: Path, source: str, tree=None) -> list[Finding]:
                 )
 
     findings.extend(_lint_match_branch_macros(path, source))
+    findings.extend(_lint_unwrap_macros(path, source))
     findings.extend(_lint_critical_section_control_flow(path, source))
     findings.extend(_lint_block_macro_semicolons(path, source))
-    findings.extend(_lint_find_result_matching(path, source))
 
     if tree is not None:
         findings.extend(_lint_constructor_required(path, source, tree))

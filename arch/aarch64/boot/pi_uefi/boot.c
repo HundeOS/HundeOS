@@ -53,11 +53,11 @@ __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = { // hundelint: i
     .uart_virtual_base = BOOT_MMIO_VIRT_BASE,
     .uart_irq = PI4_UART_IRQ_ID,
     .framebuffer = None(FramebufferInfo),
-    .sd_host = Some(SdHostInfo, ((SdHostInfo) { // hundelint: ignore-constructor-required
-        .physical_base = PI4_EMMC2_PHYS_BASE,
-        .mmio_size = PI4_EMMC2_MMIO_SIZE,
-        .irq = PI4_EMMC2_IRQ_ID,
-    })),
+    .sd_host = Some(SdHostInfo, ((SdHostInfo){ // hundelint: ignore-constructor-required
+                                 .physical_base = PI4_EMMC2_PHYS_BASE,
+                                 .mmio_size = PI4_EMMC2_MMIO_SIZE,
+                                 .irq = PI4_EMMC2_IRQ_ID,
+                             })),
     .interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V2,
     .gic_distributor_physical_base = PI4_GICD_PHYS_BASE,
     .gic_distributor_virtual_base = PI_UEFI_GICD_BASE,
@@ -73,27 +73,21 @@ __BOOT_DATA__(static uint64_t) pi_uefi_system_table = 0;
 
 static __BOOT__(void) PiUefiPlatformInfo__set_fixed_devices(BootPlatformInfoPtr self)
 {
-    self->ethernet_mac = Some(EthernetMacInfo, EthernetMacInfo__new(
-        ETHERNET_MAC_KIND_BCM2711_GENET,
-        PI4_GENET_PHYS_BASE,
-        PI4_GENET_MMIO_SIZE,
-        PI4_GENET_IRQ_ID
-    ));
+    self->ethernet_mac =
+        Some(EthernetMacInfo, EthernetMacInfo__new(ETHERNET_MAC_KIND_BCM2711_GENET, PI4_GENET_PHYS_BASE,
+                                                   PI4_GENET_MMIO_SIZE, PI4_GENET_IRQ_ID));
 }
 
-__BOOT__(void) pi_uefi_set_entry_args(
-    uint64_t image_handle,
-    uint64_t system_table,
-    uint64_t physical_memory_end,
-    uint64_t handoff_magic,
-    uint64_t handoff_address)
+__BOOT__(void)
+pi_uefi_set_entry_args(uint64_t image_handle, uint64_t system_table, uint64_t physical_memory_end,
+                       uint64_t handoff_magic, uint64_t handoff_address)
 {
     pi_uefi_image_handle = image_handle;
     pi_uefi_system_table = system_table;
     if (handoff_magic == PI_UEFI_HANDOFF_MAGIC && physical_memory_end != 0 && handoff_address != 0)
     {
         pi_uefi_platform_info.memory_physical_end = physical_memory_end;
-        PiUefiHandoffPtr handoff = (PiUefiHandoffPtr) handoff_address;
+        PiUefiHandoffPtr handoff = (PiUefiHandoffPtr)handoff_address;
         uint64_t region_count = handoff->physical_memory_region_count;
         if (region_count > PhysicalMemoryRegions__max_size)
         {
@@ -103,26 +97,21 @@ __BOOT__(void) pi_uefi_set_entry_args(
         pi_uefi_platform_info.physical_memory_regions.len = region_count;
         for (uint64_t index = 0; index < region_count; index++)
         {
-            pi_uefi_platform_info.physical_memory_regions.data[index] = PhysicalMemoryRegion__new(
-                handoff->physical_memory_regions[index].physical_start,
-                handoff->physical_memory_regions[index].physical_end
-            );
+            pi_uefi_platform_info.physical_memory_regions.data[index] =
+                PhysicalMemoryRegion__new(handoff->physical_memory_regions[index].physical_start,
+                                          handoff->physical_memory_regions[index].physical_end);
         }
 
         if (handoff->framebuffer_present != 0)
         {
-            pi_uefi_platform_info.framebuffer = Some(FramebufferInfo, FramebufferInfo__new(
-                handoff->framebuffer.physical_base,
-                handoff->framebuffer.size,
-                handoff->framebuffer.width,
-                handoff->framebuffer.height,
-                handoff->framebuffer.pixels_per_scanline,
-                (FramebufferPixelFormat) handoff->framebuffer.pixel_format,
-                handoff->framebuffer.red_mask,
-                handoff->framebuffer.green_mask,
-                handoff->framebuffer.blue_mask,
-                handoff->framebuffer.reserved_mask
-            ));
+            pi_uefi_platform_info.framebuffer =
+                Some(FramebufferInfo,
+                     FramebufferInfo__new(handoff->framebuffer.physical_base, handoff->framebuffer.size,
+                                          handoff->framebuffer.width, handoff->framebuffer.height,
+                                          handoff->framebuffer.pixels_per_scanline,
+                                          (FramebufferPixelFormat)handoff->framebuffer.pixel_format,
+                                          handoff->framebuffer.red_mask, handoff->framebuffer.green_mask,
+                                          handoff->framebuffer.blue_mask, handoff->framebuffer.reserved_mask));
         }
     }
 }
@@ -157,8 +146,8 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
 
     pi_uefi_system_info.mmio.virtual_start = (uint64_t)&__mmio_start[0];
     pi_uefi_system_info.mmio.physical_start = pi_uefi_platform_info.uart_physical_base;
-    pi_uefi_system_info.mmio.physical_end = pi_uefi_platform_info.uart_physical_base +
-        ((uint64_t)&__mmio_end[0] - (uint64_t)&__mmio_start[0]);
+    pi_uefi_system_info.mmio.physical_end =
+        pi_uefi_platform_info.uart_physical_base + ((uint64_t)&__mmio_end[0] - (uint64_t)&__mmio_start[0]);
 
     pi_uefi_system_info.uart.physical_base = pi_uefi_platform_info.uart_physical_base;
     pi_uefi_system_info.uart.virtual_base = pi_uefi_platform_info.uart_virtual_base;
@@ -176,8 +165,8 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     pi_uefi_system_info.interrupt_controller.kind = pi_uefi_platform_info.interrupt_controller_kind;
     pi_uefi_system_info.interrupt_controller.distributor_physical_base =
         pi_uefi_platform_info.gic_distributor_physical_base;
-    pi_uefi_system_info.interrupt_controller.distributor_virtual_base = PI_UEFI_GICD_BASE +
-        (pi_uefi_platform_info.gic_distributor_physical_base & ((2ULL * 1024ULL * 1024ULL) - 1ULL));
+    pi_uefi_system_info.interrupt_controller.distributor_virtual_base =
+        PI_UEFI_GICD_BASE + (pi_uefi_platform_info.gic_distributor_physical_base & ((2ULL * 1024ULL * 1024ULL) - 1ULL));
     pi_uefi_system_info.interrupt_controller.redistributor_physical_base =
         pi_uefi_platform_info.gic_redistributor_physical_base;
     pi_uefi_system_info.interrupt_controller.redistributor_virtual_base =
@@ -187,8 +176,7 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     pi_uefi_system_info.interrupt_controller.cpu_interface_virtual_base =
         pi_uefi_platform_info.gic_cpu_interface_virtual_base;
 
-    pi_uefi_system_info.physical_memory.free_regions.len =
-        pi_uefi_platform_info.physical_memory_regions.len;
+    pi_uefi_system_info.physical_memory.free_regions.len = pi_uefi_platform_info.physical_memory_regions.len;
     for (uint64_t index = 0; index < pi_uefi_platform_info.physical_memory_regions.len; index++)
     {
         pi_uefi_system_info.physical_memory.free_regions.data[index] =

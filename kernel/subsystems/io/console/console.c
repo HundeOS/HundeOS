@@ -10,42 +10,38 @@ FixedArrayBodyDefine(ParkedContexts);
 
 static Result(IOInternalHandle) Console__open(IOStatePtr state, ConstBStringPtr path, Flags flags)
 {
-    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    ConsoleStatePtr self = (ConsoleStatePtr)state;
     IOInternalHandle handle = -1;
-    critical_section(self->lock,
-    {
-        handle = ++self->handle_counter;
-    });
+    critical_section(self->lock, { handle = ++self->handle_counter; });
     return Success(IOInternalHandle, handle);
 }
 
 bool handle_match(IOContextPtr * context_p, void * handle_p)
 {
     IOContextPtr context = *context_p;
-    IOInternalHandle handle = *(IOInternalHandle *) handle_p;
+    IOInternalHandle handle = *(IOInternalHandle *)handle_p;
 
-    match_optional(IOHandle, context->handle,
-        some(context_handle)
-        {
-            return handle == device_internal_handle(context_handle);
-        },
+    match_optional(
+        context->handle,
+        some(context_handle) { return handle == device_internal_handle(context_handle); },
         none() { return false; }
     );
 }
 
 static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandle handle)
 {
-    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    ConsoleStatePtr self = (ConsoleStatePtr)state;
 
-    critical_section(self->lock,
-    {
+    critical_section(self->lock, {
         IOBuffer__reset(&self->read_buffer);
         IOBuffer__reset(&self->write_buffer);
 
-        match_find_result(ParkedContexts, ParkedContexts__find(&self->parked_contexts, handle_match, &handle),
+        match_find_result(
+            ParkedContexts__find(&self->parked_contexts, handle_match, &handle),
             some(context)
             {
-                match_result(CollectionCode, ParkedContexts__remove(&self->parked_contexts, context),
+                match_result(
+                    ParkedContexts__remove(&self->parked_contexts, context),
                     success_do_nothing(),
                     error(code, message) { __d_println(IODEV, "no parked context found for handle"); }
                 );
@@ -57,11 +53,10 @@ static Result(IOInternalHandle) Console__close(IOStatePtr state, IOInternalHandl
     return Success(IOInternalHandle, handle);
 }
 
-static Result(IOBufferPtr) Console__read(
-    IOStatePtr state, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target
-)
+static Result(IOBufferPtr)
+    Console__read(IOStatePtr state, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target)
 {
-    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    ConsoleStatePtr self = (ConsoleStatePtr)state;
     if (IOBuffer__item_count(&self->read_buffer) == 0)
     {
         return Error(IOBufferPtr, bstring("wait for IO"), IO_WAIT_FOR_DATA);
@@ -71,17 +66,17 @@ static Result(IOBufferPtr) Console__read(
 
 static Result(ByteCount) Console__write(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size)
 {
-    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    ConsoleStatePtr self = (ConsoleStatePtr)state;
     DataPtr cursor = data;
 
-    critical_section(self->lock,
-    {
+    critical_section(self->lock, {
         for (size_t i = 0; i < size; i++)
         {
             char out[2];
             out[0] = cursor[i];
             out[1] = '\0';
-            match_result(Pos, IOBuffer__push(&self->write_buffer, cursor[i]),
+            match_result(
+                IOBuffer__push(&self->write_buffer, cursor[i]),
                 success_do_nothing(),
                 error(code, message) { cs_return Error(ByteCount, message, code); }
             );
@@ -94,18 +89,15 @@ static Result(ByteCount) Console__write(IOStatePtr state, IOInternalHandle handl
 
 static Result(IOServerBuffer) Console__server_write_buffer(IOStatePtr state)
 {
-    ConsoleStatePtr self = (ConsoleStatePtr) state;
-    IOServerBuffer buffer = IOServerBuffer__new(
-        NULL, // hundelint: ignore-no-null
-        0
-    );
+    ConsoleStatePtr self = (ConsoleStatePtr)state;
+    IOServerBuffer buffer = IOServerBuffer__new(NULL, // hundelint: ignore-no-null
+                                             0);
 
-    critical_section(self->lock,
-    {
+    critical_section(self->lock, {
         size_t read_pos = self->write_buffer.read_pos % self->write_buffer.buffer_size;
         size_t item_count = IOBuffer__item_count(&self->write_buffer);
         size_t contiguous = self->write_buffer.buffer_size - read_pos;
-        buffer.data = (IOServerBufferDataPtr) &self->write_buffer.buffer[read_pos];
+        buffer.data = (IOServerBufferDataPtr)&self->write_buffer.buffer[read_pos];
         buffer.capacity = item_count < contiguous ? item_count : contiguous;
     });
 
@@ -114,9 +106,8 @@ static Result(IOServerBuffer) Console__server_write_buffer(IOStatePtr state)
 
 static Result(IOStatus) Console__data_consumed(IOStatePtr state, size_t byte_count)
 {
-    ConsoleStatePtr self = (ConsoleStatePtr) state;
-    critical_section(self->lock,
-    {
+    ConsoleStatePtr self = (ConsoleStatePtr)state;
+    critical_section(self->lock, {
         size_t item_count = IOBuffer__item_count(&self->write_buffer);
         if (byte_count > item_count)
         {
@@ -129,11 +120,11 @@ static Result(IOStatus) Console__data_consumed(IOStatePtr state, size_t byte_cou
 
 static Result(ParkStatus) Console__park(IOStatePtr state, IOContextPtr parked_context)
 {
-    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    ConsoleStatePtr self = (ConsoleStatePtr)state;
 
-    critical_section(self->lock,
-    {
-        match_result(CollectionCode, ParkedContexts__push(&self->parked_contexts, parked_context),
+    critical_section(self->lock, {
+        match_result(
+            ParkedContexts__push(&self->parked_contexts, parked_context),
             success_do_nothing(),
             error(code, message) { cs_return Error(ParkStatus, message, code); }
         );
@@ -145,11 +136,11 @@ static Result(ParkStatus) Console__park(IOStatePtr state, IOContextPtr parked_co
 
 static Result(ParkStatus) Console__unpark(IOStatePtr state)
 {
-    ConsoleStatePtr self = (ConsoleStatePtr) state;
+    ConsoleStatePtr self = (ConsoleStatePtr)state;
 
-    critical_section(self->lock,
-    {
-        match_optional(IOContextPtr, ParkedContexts__pop(&self->parked_contexts),
+    critical_section(self->lock, {
+        match_optional(
+            ParkedContexts__pop(&self->parked_contexts),
             some_do_nothing(),
             none() { cs_return Error(ParkStatus, bstring("No parked console context"), ARRAY_EMPTY); }
         );
@@ -162,20 +153,9 @@ IOPtr Console__heap_new()
 {
     IOPtr result = v_ptr(Kernel__alloc(sizeof(IO)), IO);
 
-    *result = IO__new(
-        Console__open,
-        Console__read,
-        Console__write,
-        IO__unsupported_accept,
-        Console__close,
-        Console__park,
-        Console__unpark,
-        IO__unsupported_server_buffer,
-        Console__server_write_buffer,
-        IO__unsupported_data_available,
-        Console__data_consumed,
-        IO__unsupported_eof
-    );
+    *result = IO__new(Console__open, Console__read, Console__write, IO__unsupported_accept, Console__close,
+                      Console__park, Console__unpark, IO__unsupported_server_buffer, Console__server_write_buffer,
+                      IO__unsupported_data_available, Console__data_consumed, IO__unsupported_eof);
 
     return result;
 }

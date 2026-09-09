@@ -6,7 +6,7 @@
 #include "result.h"
 
 #ifndef FIXED_ARRAY_ALLOC
-#define FIXED_ARRAY_ALLOC(size) ((void *) 0)
+#define FIXED_ARRAY_ALLOC(size) ((void *)0)
 #define __COMMON_TYPES_BSTRING_FIXED_ARRAY_ALLOC_DEFINED
 #endif
 
