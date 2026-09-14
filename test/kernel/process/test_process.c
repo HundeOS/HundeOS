@@ -85,7 +85,7 @@ void test_setup_from_elf(void)
     );
 }
 
-void test_setup_maps_service_directory_and_queue_region(void)
+void test_setup_maps_service_directory(void)
 {
     Elf elf = load_hello_world_elf();
     match_result(
@@ -95,9 +95,6 @@ void test_setup_maps_service_directory_and_queue_region(void)
             TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
                                              HUND_SERVICE_DIRECTORY_VADDR, true, false, false,
                                              HUND_SERVICE_DIRECTORY_SIZE));
-            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
-                                             HUND_SERVICE_QUEUE_REGION_VADDR, true, true, false,
-                                             HUND_SERVICE_SHARED_REGION_SIZE));
         },
         error_test_fail()
     );
@@ -532,15 +529,58 @@ void test_process_dispose_page_table_frees_owned_pages_and_tracking_nodes(void)
         {
             size_t page_count = ProcessPageTable__page_count(&process->page_table);
             size_t free_count_before = KAllocStub__free_count();
+            size_t mappings_before = MemoryMappings__len(&kernel->memory_accounting.mappings);
+            Address space = ProcessPageTable__root(&process->page_table).virtual_addr;
 
             match_result(Process__dispose_page_table(process),
                 success_do_nothing(),
                 error_test_fail()
             );
 
-            TEST_ASSERT_EQUAL(free_count_before + (page_count * 2), KAllocStub__free_count());
+            size_t removed_mappings = mappings_before - MemoryMappings__len(&kernel->memory_accounting.mappings);
+            TEST_ASSERT_EQUAL(free_count_before + (page_count * 2) + removed_mappings, KAllocStub__free_count());
+            match_optional(
+                MemoryAccounting__usage(&kernel->memory_accounting, space),
+                some(usage)
+                {
+                    TEST_ASSERT_EQUAL_UINT64(0, usage.private_bytes);
+                    TEST_ASSERT_EQUAL_UINT64(0, usage.shared_bytes);
+                    TEST_ASSERT_EQUAL_UINT64(0, usage.device_bytes);
+                },
+                none_test_fail()
+            );
             TEST_ASSERT_EQUAL(0, ProcessPageTable__page_count(&process->page_table));
             TEST_ASSERT_FALSE(ProcessPageTable__root(&process->page_table).valid);
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_claimed_device_is_reset_before_memory_disposal(void)
+{
+    extern Address test_reset_device;
+    test_reset_device = 0;
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    match_result(
+        Process__map_mmio(process, 0x0a000000, PAGE_SIZE),
+        success(mmio)
+        {
+            match_result(Process__claim_virtio_device(process, mmio.virtual_addr),
+                success_do_nothing(),
+                         error_test_fail()
+            );
+            match_result(Process__dispose_user_allocations(process),
+                success_do_nothing(),
+                error_test_fail()
+            );
+            TEST_ASSERT_EQUAL_UINT64(mmio.virtual_addr, test_reset_device);
+            match_optional(process->virtio_device,
+                some_test_fail(),
+                none_do_nothing()
+            );
+            test_reset_device = 0;
+            Process__quiesce_device(process);
+            TEST_ASSERT_EQUAL_UINT64(0, test_reset_device);
         },
         error_test_fail()
     );

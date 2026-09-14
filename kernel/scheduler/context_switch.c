@@ -65,6 +65,7 @@ void ContextSwitch__switch(const ContextSwitch * self)
         self->old_proc,
         some(proc)
         {
+            CPUUsage__stop(&proc->cpu_usage);
             if (proc->state != PROC_STATE_DEAD && proc->state != PROC_STATE_WAITING &&
                 proc->state != PROC_STATE_SLEEPING)
             {
@@ -75,6 +76,7 @@ void ContextSwitch__switch(const ContextSwitch * self)
     );
 
     ProcessPtr new_proc = self->new_proc;
+    CPUUsage__start(&new_proc->cpu_usage);
     __d_printf(PROCESS_SWITCH, "ContextSwitch__switch target pid=%i name=%s state=%s context=%p page_table=%p\n",
                new_proc->pid, cstr(new_proc->name), ProcessState__to_string(new_proc->state), new_proc->context,
                paddr(ProcessPageTable__root(&new_proc->page_table)));

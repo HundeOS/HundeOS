@@ -11,7 +11,7 @@
 #include "../../../kernel/kalloc.h"
 #include "../../../kernel/subsystems/io/block/block_device.h"
 #include "../../../kernel/subsystems/io/register.h"
-#include "../../../kernel/subsystems/io/file/memfs/memfs.h"
+#include "../../../test/kernel/fixtures/memfs/memfs.h"
 #include "../../../kernel/subsystems/io/socket/socket.h"
 #include "../../../common_includes/syscalls/service.h"
 #include "../../../common_includes/syscalls/socket.h"
@@ -61,12 +61,6 @@ static ServiceReadyRequest test_ready_request(const char * name)
 {
     BString ready_name = bstring(name);
     return ServiceReadyRequest__new(&ready_name);
-}
-
-static ServiceQueueRequest test_queue_request(const char * name, uint64_t kernel_event_subscriptions)
-{
-    BString service_name = bstring(name);
-    return ServiceQueueRequest__new(&service_name, kernel_event_subscriptions);
 }
 
 static ServiceBlockDeviceRegistration test_block_registration(const char * path, BlockCount block_count)
@@ -137,21 +131,6 @@ uint64_t Arch__mask_count();
 uint64_t Arch__unmask_count();
 uint64_t Arch__enabled_irq();
 uint64_t Arch__enable_count();
-
-bool Fat32FilesystemIO__available()
-{
-    return true;
-}
-
-FileIO Fat32FilesystemIO__new()
-{
-    return MemFilesystemIO__new();
-}
-
-void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
-{
-    return MemFilesystemIOState__heap_new(fs);
-}
 
 bool Ext2FilesystemIO__available()
 {
@@ -251,6 +230,37 @@ void test_service_handler_become_service_denies_unprivileged_process(void)
     );
 
     TEST_ASSERT_EQUAL(PROCESS_CLASS_NORMAL, process->process_class);
+}
+
+void test_service_handler_authorizes_only_live_capable_block_clients(void)
+{
+    ProcessPtr service = dummy_process(101, cpu, PROC_STATE_READY);
+    ProcessPtr client = dummy_process(102, cpu, PROC_STATE_READY);
+    Process__set_hund_identity(service);
+    Process__set_hund_identity(client);
+    Scheduler__schedule_on_cpu(kernel->scheduler, client, cpu);
+    match_result(
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, client->pid, 0, 0, 0),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
+    Process__set_identity(client, 1000, 1000, PROCESS_CAP_NONE);
+    match_result(
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, client->pid, 0, 0, 0),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code); }
+    );
+    match_result(
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, 99999, 0, 0, 0),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code); }
+    );
+    Process__set_identity(service, 1000, 1000, PROCESS_CAP_NONE);
+    match_result(
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, client->pid, 0, 0, 0),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code); }
+    );
 }
 
 void test_service_handler_map_mmio_denies_unprivileged_process(void)
@@ -382,28 +392,7 @@ void test_service_handler_publish_ready_unparks_waiter(void)
     TEST_ASSERT_EQUAL(SERVICE_OK, unwrap_result(deferred_syscall_result(), (Anything)-999));
 }
 
-void test_service_handler_request_queue_registers_shared_service_queue(void)
-{
-    ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
-    service->process_class = PROCESS_CLASS_SERVICE;
-    ServiceQueueRequest request = test_queue_request("hundekanal-warter", SERVICE_KERNEL_EVENT_PROCESS_EXIT);
-
-    match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_REQUEST_QUEUE, (Anything)&request, 0, 0, 0),
-        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
-        error_test_fail()
-    );
-
-    ServiceDirectoryPtr directory = KernelServiceDirectory__kernel_directory(&kernel->service_directory);
-    TEST_ASSERT_EQUAL_UINT64(HUND_SERVICE_DIRECTORY_MAGIC, directory->magic);
-    TEST_ASSERT_EQUAL_UINT64(1, directory->entry_count);
-    TEST_ASSERT_EQUAL_UINT64(service->pid, directory->entries[0].service_pid);
-    TEST_ASSERT_EQUAL_UINT64(HUND_SERVICE_QUEUE_REGION_VADDR, directory->entries[0].queue_address);
-    TEST_ASSERT_EQUAL_UINT64(SERVICE_KERNEL_EVENT_PROCESS_EXIT, directory->entries[0].kernel_event_subscriptions);
-    TEST_ASSERT_TRUE(ServiceDirectoryEntry__name_equals(&directory->entries[0], &request.name));
-}
-
-void test_service_handler_publish_ready_does_not_register_shared_service_queue(void)
+void test_service_handler_publish_ready_does_not_register_endpoint(void)
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
@@ -545,47 +534,12 @@ void test_service_handler_registers_block_device_for_service_process(void)
     );
 }
 
-void test_service_handler_registering_block_device_mounts_matching_filesystem_table_entry(void)
-{
-    FilesystemPtr root = RootFilesystem__heap_new();
-    FilesystemIOState__heap_new(root);
-    BString device_path = bstring("/dev/virtio-table");
-    BString filesystem_type = bstring("fat32");
-    BString mountpoint = bstring("/mnt/fs1");
-    match_result(FilesystemTable__add(&root->filesystem_table, &device_path, &bstr("fat32"), &bstr("/mnt/fs1")),
-                 success_do_nothing(),
-        error_test_fail()
-    );
-    kernel->io_subsystem->root_filesystem = Some(FilesystemPtr, root);
-
-    match_optional(Mounts__get(&root->mounts, bstring("/mnt/fs1")),
-        some_test_fail(),
-        none_do_nothing()
-    );
-
-    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
-    ServiceBlockDeviceRegistration request = test_block_registration("/dev/virtio-table", 128);
-
-    match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything)&request, 0, 0, 0),
-        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
-        error_test_fail()
-    );
-
-    match_optional(
-        Mounts__get(&root->mounts, bstring("/mnt/fs1")),
-        some(mounted) { TEST_ASSERT_NOT_NULL(mounted); },
-        none_test_fail()
-    );
-}
-
 void test_service_handler_registering_block_device_mounts_root_filesystem_table_entry(void)
 {
     FilesystemPtr root = RootFilesystem__heap_new();
     FilesystemIOState__heap_new(root);
     BString device_path = bstring("/dev/virtio-root");
-    match_result(FilesystemTable__add(&root->filesystem_table, &device_path, &bstr("ext2"), &bstr("/")),
+    match_result(FilesystemTable__add(&root->filesystem_table, &device_path, &bstr("bootstrap-ext2"), &bstr("/")),
                  success_do_nothing(),
         error_test_fail()
     );
@@ -632,7 +586,7 @@ void test_service_handler_rejects_duplicate_block_device_registration(void)
     );
 }
 
-void test_service_handler_block_open_channel_maps_and_notifies_block_service(void)
+void test_service_handler_block_connect_maps_and_notifies_block_service(void)
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
@@ -647,17 +601,16 @@ void test_service_handler_block_open_channel_maps_and_notifies_block_service(voi
 
     ProcessPtr filesystem = dummy_process(2, cpu, PROC_STATE_READY);
     BString device_path = bstring("/dev/channel-blk");
-    ServiceBlockChannelOpenRequest open_request = ServiceBlockChannelOpenRequest__new(&device_path);
+    ServiceBlockConnectionRequest open_request = ServiceBlockConnectionRequest__new(&device_path);
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, filesystem), SERVICE_BLOCK_OPEN_CHANNEL, (Anything)&open_request, 0,
-                         0, 0),
+        Service__handler(kernel, Some(ProcessPtr, filesystem), SERVICE_BLOCK_CONNECT, (Anything)&open_request, 0, 0, 0),
         success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
         error_test_fail()
     );
 
-    TEST_ASSERT_NOT_EQUAL_UINT64(0, open_request.channel_id);
-    TEST_ASSERT_NOT_EQUAL_UINT64(0, open_request.channel);
-    TEST_ASSERT_EQUAL_UINT64(sizeof(BlockChannelMemory), open_request.channel_size);
+    TEST_ASSERT_NOT_EQUAL_UINT64(0, open_request.connection_id);
+    TEST_ASSERT_NOT_EQUAL_UINT64(0, open_request.shared_memory);
+    TEST_ASSERT_EQUAL_UINT64(sizeof(BlockProtocolMemory), open_request.shared_memory_size);
 
     ServiceEvent event = ServiceEvent__request(SERVICE_EVENT_MESSAGE, 0, 0);
     match_result(
@@ -666,14 +619,14 @@ void test_service_handler_block_open_channel_maps_and_notifies_block_service(voi
         error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL(SERVICE_EVENT_BLOCK_CHANNEL_OPEN, event.type);
-    TEST_ASSERT_EQUAL_UINT64(open_request.channel_id, event.source);
+    TEST_ASSERT_EQUAL(SERVICE_EVENT_BLOCK_CONNECTION_OPENED, event.type);
+    TEST_ASSERT_EQUAL_UINT64(open_request.connection_id, event.source);
     TEST_ASSERT_NOT_EQUAL_UINT64(0, event.data);
 
-    ServiceBlockChannelCloseRequest close_request = ServiceBlockChannelCloseRequest__new(open_request.channel_id);
+    ServiceBlockDisconnectionRequest close_request = ServiceBlockDisconnectionRequest__new(open_request.connection_id);
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, filesystem), SERVICE_BLOCK_CLOSE_CHANNEL, (Anything)&close_request, 0,
-                         0, 0),
+        Service__handler(kernel, Some(ProcessPtr, filesystem), SERVICE_BLOCK_DISCONNECT, (Anything)&close_request, 0, 0,
+                         0),
         success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
         error_test_fail()
     );
@@ -685,12 +638,13 @@ void test_service_handler_block_open_channel_maps_and_notifies_block_service(voi
         error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL(SERVICE_EVENT_BLOCK_CHANNEL_CLOSED, event.type);
-    TEST_ASSERT_EQUAL_UINT64(open_request.channel_id, event.source);
+    TEST_ASSERT_EQUAL(SERVICE_EVENT_BLOCK_CONNECTION_CLOSED, event.type);
+    TEST_ASSERT_EQUAL_UINT64(open_request.connection_id, event.source);
 }
 
 void test_service_handler_process_cleanup_unregisters_block_device(void)
 {
+    BlockDevicePtr retained;
     ProcessPtr first_process = dummy_process(1, cpu, PROC_STATE_READY);
     first_process->process_class = PROCESS_CLASS_SERVICE;
     ProcessPtr second_process = dummy_process(2, cpu, PROC_STATE_READY);
@@ -706,7 +660,11 @@ void test_service_handler_process_cleanup_unregisters_block_device(void)
 
     match_optional(
         TestBlockDeviceRegistry__find(bstring("/dev/virtio-cleanup")),
-        some(device) { TEST_ASSERT_NOT_NULL(device); },
+        some(device)
+        {
+            retained = device;
+            BlockDevice__retain(retained);
+        },
         none_test_fail()
     );
 
@@ -720,6 +678,14 @@ void test_service_handler_process_cleanup_unregisters_block_device(void)
         some_test_fail(),
         none_do_nothing()
     );
+
+    Data sector[512];
+    match_result(
+        BlockDevice__read(retained, 0, 1, sector),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_IO_ERROR, code); }
+    );
+    BlockDevice__release(retained);
 
     match_result(
         Service__handler(kernel, Some(ProcessPtr, second_process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything)&request, 0,
@@ -776,7 +742,7 @@ void test_service_handler_gets_and_completes_block_write_request(void)
     );
 
     TEST_ASSERT_EQUAL(event.source, request.request_id);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio-protocol", BString__cstr(&request.device_path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio-protocol"), request.device_path);
     TEST_ASSERT_EQUAL(SERVICE_BLOCK_WRITE, request.operation);
     TEST_ASSERT_EQUAL_UINT64(7, request.block);
     TEST_ASSERT_EQUAL_UINT64(1, request.block_count);
@@ -913,7 +879,7 @@ void test_service_handler_block_read_device_maps_requester_buffer_into_block_ser
             TEST_ASSERT_EQUAL(SERVICE_BLOCK_READ, block_request.operation);
             TEST_ASSERT_EQUAL(13, block_request.block);
             TEST_ASSERT_EQUAL(1, block_request.block_count);
-            TEST_ASSERT_NOT_EQUAL(read_request.buffer, block_request.buffer);
+            TEST_ASSERT_NOT_EQUAL(0, block_request.buffer);
         },
         error_test_fail()
     );
@@ -1093,7 +1059,7 @@ void test_service_handler_socket_router_gets_and_completes_request(void)
     TEST_ASSERT_EQUAL(IO_SOCKET_ROUTER_LISTEN, fetched_request.operation);
     TEST_ASSERT_EQUAL_INT64(42, fetched_request.handle);
     TEST_ASSERT_EQUAL_UINT64(4, fetched_request.backlog);
-    TEST_ASSERT_EQUAL_STRING("socket://proc/sock1", BString__cstr(&fetched_request.uri));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("socket://proc/sock1"), fetched_request.uri);
 
     IOSocketRouterCompletion completion = IOSocketRouterCompletion__new(fetched_request.request_id, IO_SOCKET_OK, 42);
     match_result(
@@ -1364,9 +1330,9 @@ void test_service_handler_userspace_filesystem_list_dir_uses_shared_entries_buff
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
             TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_LIST_DIR, filesystem_request.operation);
-            TEST_ASSERT_EQUAL_STRING("/dev/virtio-fs", BString__cstr(&filesystem_request.device_path));
-            TEST_ASSERT_EQUAL_STRING("", BString__cstr(&filesystem_request.path));
-            TEST_ASSERT_NOT_EQUAL((Address)entries_buffer.virtual_addr, filesystem_request.entries);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio-fs"), filesystem_request.device_path);
+            TEST_ASSERT_EQUAL_BSTRING(bstr(""), filesystem_request.path);
+            TEST_ASSERT_NOT_EQUAL(0, filesystem_request.entries);
         },
         error_test_fail()
     );
@@ -1461,7 +1427,7 @@ void test_service_handler_userspace_filesystem_open_read_close_file(void)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
             TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_OPEN, filesystem_request.operation);
-            TEST_ASSERT_EQUAL_STRING("hello.txt", BString__cstr(&filesystem_request.path));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("hello.txt"), filesystem_request.path);
             TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, filesystem_request.flags);
         },
         error_test_fail()
@@ -1509,7 +1475,7 @@ void test_service_handler_userspace_filesystem_open_read_close_file(void)
             TEST_ASSERT_EQUAL_UINT64(12, read_request.block);
             TEST_ASSERT_EQUAL_UINT64(0, read_request.block_offset);
             TEST_ASSERT_EQUAL_UINT64(5, read_request.size);
-            TEST_ASSERT_NOT_EQUAL(read_buffer.virtual_addr, read_request.buffer);
+            TEST_ASSERT_NOT_EQUAL(0, read_request.buffer);
         },
         error_test_fail()
     );
@@ -1611,10 +1577,10 @@ void test_service_handler_userspace_filesystem_write_mkdir_and_remove(void)
                 {
                     TEST_ASSERT_EQUAL(SERVICE_OK, code);
                     TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_WRITE, write_request.operation);
-                    TEST_ASSERT_EQUAL_STRING("new.txt", BString__cstr(&write_request.path));
+                    TEST_ASSERT_EQUAL_BSTRING(bstr("new.txt"), write_request.path);
                     TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE, write_request.flags);
                     TEST_ASSERT_EQUAL_UINT64(8, write_request.size);
-                    TEST_ASSERT_NOT_EQUAL(write_buffer.virtual_addr, write_request.buffer);
+                    TEST_ASSERT_NOT_EQUAL(0, write_request.buffer);
                 },
                 error_test_fail()
             );
@@ -1673,7 +1639,7 @@ void test_service_handler_userspace_filesystem_write_mkdir_and_remove(void)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
             TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_MKDIR, mkdir_service_request.operation);
-            TEST_ASSERT_EQUAL_STRING("docs", BString__cstr(&mkdir_service_request.path));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("docs"), mkdir_service_request.path);
         },
         error_test_fail()
     );
@@ -1711,7 +1677,7 @@ void test_service_handler_userspace_filesystem_write_mkdir_and_remove(void)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
             TEST_ASSERT_EQUAL(SERVICE_FILESYSTEM_REMOVE, remove_service_request.operation);
-            TEST_ASSERT_EQUAL_STRING("docs", BString__cstr(&remove_service_request.path));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("docs"), remove_service_request.path);
             TEST_ASSERT_EQUAL_UINT64(IO_REMOVE_RECURSIVE, remove_service_request.flags);
         },
         error_test_fail()

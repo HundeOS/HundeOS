@@ -31,6 +31,7 @@ static ProcessPtr expected_active_process = NULL;
 static bool continuation_saw_active_address_space = false;
 
 static const CPUID cpu_id = 12;
+extern uint64_t test_cpu_time_usec;
 
 void Arch__reset_irq_tracking();
 uint64_t Arch__masked_irq();
@@ -133,6 +134,7 @@ static IOState abort_stderr_state = NEW_IO_STATE;
 
 void setUp(void)
 {
+    test_cpu_time_usec = 0;
     continuation_context = NULL;
     continuation_kernel_context = NULL;
     received_message = None(Message);
@@ -171,6 +173,79 @@ Result(Anything) continuation(ParkedOperationPtr parked_operation)
     );
 
     return Error(Anything, no_return_code, -1);
+}
+
+void test_context_switch_accounts_outgoing_and_incoming_processes(void)
+{
+    ProcessPtr first = dummy_process(1, cpu_id, PROC_STATE_READY);
+    ProcessPtr second = dummy_process(2, cpu_id, PROC_STATE_READY);
+    ContextSwitch initial = ContextSwitch__new(first, &None(ProcessPtr));
+    ContextSwitch__switch(&initial);
+    test_cpu_time_usec = 25000;
+    ContextSwitch next = ContextSwitch__new(second, &Some(ProcessPtr, first));
+    ContextSwitch__switch(&next);
+    test_cpu_time_usec = 50000;
+    ProcessCPUUsage first_usage = CPUUsage__snapshot(&first->cpu_usage);
+    ProcessCPUUsage second_usage = CPUUsage__snapshot(&second->cpu_usage);
+    TEST_ASSERT_EQUAL_UINT64(25000, first_usage.total_usec);
+    TEST_ASSERT_EQUAL_UINT64(25000, second_usage.total_usec);
+    TEST_ASSERT_EQUAL_UINT64(2500, first_usage.short_basis_points);
+    TEST_ASSERT_EQUAL_UINT64(2500, second_usage.short_basis_points);
+}
+
+void test_parking_stops_cpu_usage_before_outgoing_process_selection(void)
+{
+    ProcessPtr process = dummy_process(1, cpu_id, PROC_STATE_READY);
+    match_result(Scheduler__schedule_on_cpu(scheduler, process, cpu_id),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    ContextSwitch initial = ContextSwitch__new(process, &None(ProcessPtr));
+    ContextSwitch__switch(&initial);
+    test_cpu_time_usec = 25000;
+    KernelContext context = test_scheduler_kernel_context();
+    match_result(Scheduler__park(scheduler, process, &context, &None(Continuation), PARK_WAIT_CHILD),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    test_cpu_time_usec = 2000000;
+    ProcessCPUUsage snapshot = CPUUsage__snapshot(&process->cpu_usage);
+    TEST_ASSERT_EQUAL_UINT64(25000, snapshot.total_usec);
+    TEST_ASSERT_EQUAL_UINT64(0, snapshot.short_basis_points);
+    TEST_ASSERT_EQUAL_UINT64(0, snapshot.long_basis_points);
+}
+
+void test_process_snapshot_reports_assigned_cpu_on_multiple_schedulers(void)
+{
+    ProcessPtr first = dummy_process(1, 0, PROC_STATE_READY);
+    ProcessPtr second = dummy_process(2, cpu_id, PROC_STATE_WAITING);
+    match_result(Scheduler__schedule_on_cpu(scheduler, first, 0),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Scheduler__schedule_on_cpu(scheduler, second, cpu_id),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    ProcessInfo entries[4];
+    ProcessListResult count = Scheduler__process_info_snapshot(scheduler, entries, 4);
+    bool found_first = false;
+    bool found_second = false;
+    for (ProcessListResult index = 0; index < count; index++)
+    {
+        if (entries[index].pid == first->pid)
+        {
+            found_first = true;
+            TEST_ASSERT_EQUAL_UINT64(0, entries[index].cpu);
+        }
+        if (entries[index].pid == second->pid)
+        {
+            found_second = true;
+            TEST_ASSERT_EQUAL_UINT64(cpu_id, entries[index].cpu);
+        }
+    }
+    TEST_ASSERT_TRUE(found_first);
+    TEST_ASSERT_TRUE(found_second);
 }
 
 void test_kernel_context_reports_no_state_when_empty()
@@ -341,6 +416,26 @@ void test_scheduler_init_creates_cpu_slots_independent_of_online_cpu_count(void)
     );
 
     reset_cpu_count();
+}
+
+void test_scheduler_requires_capability_from_live_channel_client(void)
+{
+    ProcessPtr client = dummy_process(1, cpu_id, PROC_STATE_READY);
+    Process__set_identity(client, PROCESS_USER_HUND, PROCESS_GROUP_HUND, PROCESS_CAP_NONE);
+    Scheduler__schedule(scheduler, client);
+
+    match_result(
+        Scheduler__require_process_capability(scheduler, client->pid, PROCESS_CAP_SUBSCRIBE_IRQ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code); }
+    );
+
+    Process__set_identity(client, PROCESS_USER_HUND, PROCESS_GROUP_HUND, PROCESS_CAP_SUBSCRIBE_IRQ);
+    match_result(
+        Scheduler__require_process_capability(scheduler, client->pid, PROCESS_CAP_SUBSCRIBE_IRQ),
+        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        error_test_fail()
+    );
 }
 
 void test_all_processes_when_processes_are_scheduled()
@@ -652,39 +747,6 @@ void test_scheduler_exit_sends_a_message_to_the_broker_saying_the_process_exited
         },
         none_test_fail()
     );
-}
-
-void test_scheduler_exit_queues_process_exit_event_for_subscribed_service(void)
-{
-    ProcessPtr service = dummy_process(99, cpu_id, PROC_STATE_READY);
-    service->process_class = PROCESS_CLASS_SERVICE;
-    BString service_name = bstr("hundekanal-warter");
-
-    match_result(
-        KernelServiceDirectory__request_queue(&kernel->service_directory, service, &service_name,
-                                              SERVICE_KERNEL_EVENT_PROCESS_EXIT),
-        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
-        error_test_fail()
-    );
-
-    ProcessPtr proc = dummy_process(1, cpu_id, PROC_STATE_READY);
-    ProcessID pid = proc->pid;
-    ProcessContextPtr context = test_saved_context();
-    Scheduler__schedule(scheduler, proc);
-    Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
-
-    match_result(Scheduler__exit(scheduler, proc, 10),
-        success_do_nothing(),
-        error_test_fail()
-    );
-
-    ServiceQueueMessage message = ServiceQueueMessage__new(0, 0);
-    ServiceQueuePtr queue = KernelServiceDirectory__kernel_queue(&kernel->service_directory, 0);
-    TEST_ASSERT_EQUAL(SERVICE_QUEUE_OK, ServiceQueue__pop(queue, &message));
-    TEST_ASSERT_EQUAL_UINT64(SERVICE_QUEUE_MESSAGE_KERNEL_PROCESS_EXIT, message.kind);
-    TEST_ASSERT_EQUAL_UINT64(pid, message.arg0);
-    TEST_ASSERT_EQUAL_UINT64(10, message.arg1);
 }
 
 void test_scheduler_exit_unparks_parent_if_waiting(void)

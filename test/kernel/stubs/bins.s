@@ -94,7 +94,7 @@ embedded_name_hundeschau:
 embedded_name_humpen:
     .asciz "services/humpen"
 embedded_name_virtio_blk:
-    .asciz "drivers/virtio_blk"
+    .asciz "drivers/virtio_blk_channelio"
 embedded_name_uart_rx:
     .asciz "drivers/uart_rx"
 embedded_name_uart_tx:

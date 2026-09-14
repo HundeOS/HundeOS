@@ -186,6 +186,7 @@ SECTIONS
     __embedded_binaries_start = .;
 
     KEEP(*(.binaries))
+    . = ALIGN(PAGE_4KB);
   } :kbinaries
   __embedded_binaries_end = .;
   __embedded_binaries_phys_start = LOADADDR(.binaries);

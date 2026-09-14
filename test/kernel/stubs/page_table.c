@@ -4,6 +4,7 @@
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/types/comparison.h"
 #include "../../../kernel/types/fixed_array.h"
+#include "ipc/queue_layout.h"
 
 #include "../../../kernel/debug.h"
 
@@ -47,7 +48,7 @@ static bool MapRequest__is_covered_by_unmap(MapRequestPtr mapped_address, Addres
 }
 
 OptionalDef(MapRequest);
-FixedArrayDefine(MapRequest, 1024, MapRequestArray, (EqualFunction)MapRequest__equals);
+FixedArrayDefine(MapRequest, 3 * QUEUE_LIMIT + 64, MapRequestArray, (EqualFunction)MapRequest__equals);
 FixedArrayBodyDefine(MapRequestArray);
 
 typedef struct PageTable
@@ -100,7 +101,7 @@ size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
     return ProcessPageTablePages__len(&self->pages);
 }
 
-Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self)
+Result(KAllocCode) ArchProcessPageTable__dispose(ProcessPageTablePtr self)
 {
     for_each_ll(ProcessPageTablePages, self->pages, page, {
         match_result(
@@ -120,17 +121,17 @@ Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self)
     return Success(KAllocCode, KALLOC_OK);
 }
 
-void PageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     MapRequestArray__push(&ProcessPageTable__root_table(self)->mapped_addresses, MapRequest__new(address, size));
 }
 
-void PageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
-    PageTable__map(self, kernel, address, size);
+    ArchPageTable__map(self, kernel, address, size);
 }
 
-void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
+void ArchPageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
 {
     PageTablePtr root = ProcessPageTable__root_table(self);
     for_each_fa(MapRequestArray, root->mapped_addresses, i, mapped_address, {

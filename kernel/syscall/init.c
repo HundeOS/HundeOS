@@ -44,6 +44,7 @@ Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
             REGISTER(self, MEM_CALL, &Mem__handler);
             REGISTER(self, SERVICE_CALL, &Service__handler);
             REGISTER(self, SYSCALL_PROCESS_LIST, &ProcessList__handler);
+            REGISTER(self, SYSCALL_PROCESS_CREDENTIALS, &ProcessCredentials__handler);
             REGISTER(self, SYSCALL_PROCESS_WAIT_CHILD_EVENT, &ProcessWaitChildEvent__handler);
             REGISTER(self, SYSCALL_SYSLOG, &Syslog__handler);
             REGISTER(self, SYSCALL_PROCESS_SIGNAL, &Signal__handler);

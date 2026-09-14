@@ -116,7 +116,7 @@ size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
     return ProcessPageTablePages__len(&self->pages);
 }
 
-Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self)
+Result(KAllocCode) ArchProcessPageTable__dispose(ProcessPageTablePtr self)
 {
     for_each_ll(ProcessPageTablePages, self->pages, page, {
         match_result(
@@ -146,7 +146,7 @@ KernelAddress PageTable__from_virtual_address(KernelPtr kernel, Address virtual_
     return Kernel__from_virtual_address(kernel, virtual_addr);
 }
 
-void PageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address user_end = align_up_4k(vaddr(address) + size);
@@ -187,7 +187,7 @@ void PageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress addr
     __d_println(MMU, "Mapped");
 }
 
-void PageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address phys_start = align_down_4k(u_kpaddr(address));
@@ -233,7 +233,7 @@ static void PageTable__invalidate_page(Address virtual_address)
                          : "memory");
 }
 
-void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
+void ArchPageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
 {
     Address user_start = align_down_4k(virtual_address);
     Address user_end = align_up_4k(user_start + size);

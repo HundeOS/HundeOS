@@ -45,7 +45,7 @@ void tearDown(void)
 
 IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    TEST_ASSERT_EQUAL_STRING(HUMPEN_FSTAB_PATH, BString__cstr(path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr(HUMPEN_FSTAB_PATH), *path);
     TEST_ASSERT_EQUAL(IO_OPEN_READ, flags);
     return 3;
 }
@@ -164,15 +164,11 @@ void test_humpen_starts_mount_handlers_for_device_entries_from_fstab(void)
 
     TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
 
-    TEST_ASSERT_EQUAL_UINT64(2, spawn_count);
+    TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
     TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, spawned_paths[0]);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio1", spawned_arg0[0]);
-    TEST_ASSERT_EQUAL_STRING("ext2", spawned_arg1[0]);
-    TEST_ASSERT_EQUAL_STRING("/", spawned_arg2[0]);
-    TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, spawned_paths[1]);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio3", spawned_arg0[1]);
-    TEST_ASSERT_EQUAL_STRING("fat32", spawned_arg1[1]);
-    TEST_ASSERT_EQUAL_STRING("/mnt/fs1", spawned_arg2[1]);
+    TEST_ASSERT_EQUAL_STRING("/dev/virtio3", spawned_arg0[0]);
+    TEST_ASSERT_EQUAL_STRING("fat32", spawned_arg1[0]);
+    TEST_ASSERT_EQUAL_STRING("/mnt/fs1", spawned_arg2[0]);
 }
 
 void test_humpen_returns_failure_when_watchdog_spawn_fails(void)
@@ -193,11 +189,7 @@ void test_humpen_handles_comments_blank_lines_and_missing_final_newline(void)
 
     TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
 
-    TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
-    TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, spawned_paths[0]);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio1", spawned_arg0[0]);
-    TEST_ASSERT_EQUAL_STRING("ext2", spawned_arg1[0]);
-    TEST_ASSERT_EQUAL_STRING("/", spawned_arg2[0]);
+    TEST_ASSERT_EQUAL_UINT64(0, spawn_count);
 }
 
 void test_humpen_rejects_trailing_tokens_before_mounting(void)
@@ -219,7 +211,7 @@ void test_humpen_parse_mount_command_returns_error_for_missing_device_path(void)
         error(code, message)
         {
             TEST_ASSERT_EQUAL_INT(HUMPEN_PARSE_ERROR, code);
-            TEST_ASSERT_TRUE(BString__equals(&message, &humpen_invalid_device_path));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("missing fstab device"), message);
         }
     );
 }
@@ -231,23 +223,21 @@ void test_humpen_parse_mount_command_builds_watchdog_spawn_command_for_ext2(void
         Humpen__parse_mount_command(&bstr("device /dev/virtio1 ext2 /")),
         success(command)
         {
-            TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, BString__cstr(command.driver_path));
-            TEST_ASSERT_EQUAL_STRING("/dev/virtio1", BString__cstr(&command.device_path));
-            TEST_ASSERT_EQUAL_STRING("ext2", BString__cstr(&command.filesystem_type));
-            TEST_ASSERT_EQUAL_STRING("/", BString__cstr(&command.mountpoint));
+            TEST_ASSERT_EQUAL_BSTRING(bstr(HUMPEN_WACHHUND_PATH), *command.driver_path);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio1"), command.device_path);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("ext2"), command.filesystem_type);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/"), command.mountpoint);
             match_optional(
                 command.arg0,
-                some(arg) { TEST_ASSERT_EQUAL_STRING("/dev/virtio1", BString__cstr(&arg)); },
+                some(arg) { TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio1"), arg); },
                 none_test_fail()
             );
-            match_optional(
-                command.arg1,
-                some(arg) { TEST_ASSERT_EQUAL_STRING("ext2", BString__cstr(&arg)); },
+            match_optional(command.arg1,
+                some(arg) { TEST_ASSERT_EQUAL_BSTRING(bstr("ext2"), arg); },
                 none_test_fail()
             );
-            match_optional(
-                command.arg2,
-                some(arg) { TEST_ASSERT_EQUAL_STRING("/", BString__cstr(&arg)); },
+            match_optional(command.arg2,
+                some(arg) { TEST_ASSERT_EQUAL_BSTRING(bstr("/"), arg); },
                 none_test_fail()
             );
         },

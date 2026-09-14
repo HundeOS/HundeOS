@@ -1,3 +1,4 @@
 # device <path> <filesystem> <mountpoint>
+device /dev/virtio1 ext2 /
 device /dev/virtio4 ext2 /mnt/ext2user
 device /dev/mmc0 fat32 /mnt/sd

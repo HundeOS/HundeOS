@@ -9,6 +9,25 @@ static BString invalid_child_event_request = bstr("Invalid child event request")
 static BString invalid_sleep_request = bstr("Invalid sleep request");
 static BString sleep_pending = bstr("Sleep pending");
 
+Result(SystemCallResult) ProcessCredentials__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                                     Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+{
+    if (arg1 == 0 || arg2 == 0)
+    {
+        return Error(SystemCallResult, bstr("Invalid credential request"), PROCESS_CREDENTIALS_INVALID_ARGUMENT);
+    }
+    ProcessCredentialsPtr target = (ProcessCredentialsPtr)arg2;
+    match_result(
+        Scheduler__process_credentials(kernel->scheduler, (ProcessID)arg1),
+        success(credentials)
+        {
+            *target = credentials;
+            return Success(SystemCallResult, PROCESS_CREDENTIALS_OK);
+        },
+        error(code, message) { return Error(SystemCallResult, message, code); }
+    );
+}
+
 static Result(Anything) ProcessChildEvent__copy_to_target(ResultPtr(Anything) result, Anything context)
 {
     ProcessChildEventPtr target = (ProcessChildEventPtr)context;

@@ -133,6 +133,7 @@ __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
 
 __BOOT__(void) qemu_virt_enter_kernel(uint64_t cpu)
 {
+    cpu_set_this_id(cpu);
     boot_debug_print(new_line);
     boot_debug_print(entering_hi_mem);
     boot_debug_print_base(cpu, 10);
@@ -188,11 +189,6 @@ __BOOT__(void) secondary_booted(uint64_t cpu)
     boot_debug_print_base(cpu, 10);
     boot_debug_print(new_line);
     boot_debug_print(new_line);
-
-    boot_vectors_init();
-    enable_fp_simd();
-    enable_tbi_for_kernel();
-    enable_mmu();
 
     qemu_virt_enter_kernel(cpu);
 }

@@ -48,7 +48,7 @@ void test_console_read_returns_bstring(void)
 
     BString input = Console__read();
 
-    TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&input));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), input);
     TEST_ASSERT_EQUAL_INT64(3, input.len);
 }
 
@@ -59,7 +59,7 @@ void test_console_read_line_returns_bstring_until_newline(void)
 
     BString line = Console__read_line(false);
 
-    TEST_ASSERT_EQUAL_STRING("hello", BString__cstr(&line));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("hello"), line);
     TEST_ASSERT_EQUAL_INT64(5, line.len);
 }
 
@@ -70,8 +70,8 @@ void test_console_read_line_handles_backspace_and_echo(void)
 
     BString line = Console__read_line(true);
 
-    TEST_ASSERT_EQUAL_STRING("acd", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING("ab\b \bcd", BString__cstr(&printed_output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("acd"), line);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("ab\b \bcd"), printed_output);
 }
 
 void test_console_read_does_not_write_past_one_byte_buffer(void)

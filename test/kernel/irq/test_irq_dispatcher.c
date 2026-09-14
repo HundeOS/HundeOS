@@ -234,3 +234,47 @@ void test_irq_dispatcher_dispose_process_resources_unregisters_service_consumer(
 
     TEST_ASSERT_EQUAL_UINT64(2, Arch__enable_count());
 }
+
+void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
+{
+    ProcessPtr manager = dummy_process(1, 0, PROC_STATE_READY);
+    manager->process_class = PROCESS_CLASS_SERVICE;
+
+    match_result(
+        IRQDispatcher__register_manager(kernel->irq_dispatcher, manager),
+        success(address) { TEST_ASSERT_EQUAL_UINT64(KERNEL_NOTIFICATION_QUEUE_ADDRESS, address); },
+        error_test_fail()
+    );
+    match_result(
+        IRQDispatcher__register_managed_irq(kernel->irq_dispatcher, 48, manager),
+        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        error_test_fail()
+    );
+
+    IRQDispatchContext context = IRQDispatchContext__new(48, 0, false, NULL);
+    match_result(
+        IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context),
+        success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status); },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(48, Arch__masked_irq());
+    match_optional(
+        kernel->irq_dispatcher->manager_queue_memory,
+        some(memory)
+        {
+            TEST_ASSERT_TRUE(memory.write);
+            KernelNotificationQueuePtr queue = k_v_ptr(memory, KernelNotificationQueue);
+            match_optional(
+                KernelNotificationQueue__pop(queue),
+                some(event)
+                {
+                    TEST_ASSERT_EQUAL_UINT64(48, event.id);
+                    TEST_ASSERT_EQUAL_UINT64(1, event.sequence);
+                },
+                none_test_fail()
+            );
+        },
+        none_test_fail()
+    );
+}

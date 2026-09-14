@@ -46,9 +46,9 @@ FiberWaitKey FiberWaitKey__block_request(uint64_t request_id)
     return FiberWaitKey__request(request_id);
 }
 
-FiberWaitKey FiberWaitKey__channel(ChannelPtr channel)
+FiberWaitKey FiberWaitKey__channel_signal(ChannelSignalPtr channel)
 {
-    return FiberWaitKey__new(FIBER_WAIT_CHANNEL, (uint64_t)Channel__state(channel));
+    return FiberWaitKey__new(FIBER_WAIT_CHANNEL, (uint64_t)ChannelSignal__state(channel));
 }
 
 bool FiberWaitKey__equals(FiberWaitKeyPtr self, FiberWaitKeyPtr other)

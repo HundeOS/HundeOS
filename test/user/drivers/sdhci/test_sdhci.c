@@ -519,6 +519,26 @@ ServiceCode service_device_address(void * driver_address, Address * device_addre
     return SERVICE_OK;
 }
 
+Result(BlockServer) BlockServer__listen(ConstBStringPtr name, BlockProtocolBlockCount block_count,
+                                        BlockServerContext context, BlockServerTransfer transfer)
+{
+    return Success(BlockServer, (BlockServer){0});
+}
+bool BlockServer__poll(BlockServerPtr self)
+{
+    return false;
+}
+void Channel__prepare_wait(void)
+{
+}
+void Channel__wait_event(void)
+{
+}
+ServiceCode service_poll(ServiceEventPtr event)
+{
+    return service_wait(event);
+}
+
 ServiceCode service_wait(ServiceEventPtr event)
 {
     fake_service_wait_count++;
@@ -544,7 +564,7 @@ void test_sdhci_main_registers_mmc0_and_completes_read_request(void)
     TEST_ASSERT_TRUE(fake_block_request_fetched);
     TEST_ASSERT_TRUE(fake_block_completed);
     TEST_ASSERT_EQUAL_STRING(SDHCI_DEVICE_PATH, fake_registered_path);
-    TEST_ASSERT_EQUAL_STRING(SDHCI_DEVICE_PATH, BString__cstr(&fake_ready_name));
+    TEST_ASSERT_EQUAL_BSTRING(bstr(SDHCI_DEVICE_PATH), fake_ready_name);
     TEST_ASSERT_EQUAL_UINT64(SDHCI_BLOCK_SIZE, fake_registered_block_size);
     TEST_ASSERT_EQUAL_UINT64(2048, fake_registered_block_count);
     TEST_ASSERT_EQUAL_UINT64(FAKE_SD_HOST_IRQ, fake_subscribed_irq);
@@ -583,4 +603,17 @@ void test_sdhci_card_block_count_from_v2_csd(void)
     };
 
     TEST_ASSERT_EQUAL_UINT64(4096, Sdhci__card_block_count_from_csd(&csd));
+}
+
+void test_sdhci_executes_block_protocol_read_request(void)
+{
+    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, &bstr(SDHCI_DEVICE_PATH));
+    device.high_capacity = true;
+    device.block_count = 2048;
+    uint8_t first_bytes[SDHCI_BLOCK_SIZE];
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK, Sdhci__transfer_channel(&device, BLOCK_PROTOCOL_READ, 3, first_bytes));
+    TEST_ASSERT_EQUAL_UINT8(0, first_bytes[0]);
+    TEST_ASSERT_EQUAL_UINT8(1, first_bytes[1]);
+    TEST_ASSERT_EQUAL_UINT8(2, first_bytes[2]);
+    TEST_ASSERT_EQUAL_UINT8(3, first_bytes[3]);
 }

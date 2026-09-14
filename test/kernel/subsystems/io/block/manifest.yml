@@ -4,6 +4,7 @@ manifest:
   source_files:
     - kernel/types/*.c
     - kernel/subsystems/io/block/*.c
+    - test/kernel/isolated_stubs/device_registry.c
     - kernel/scheduler/kernel_context.c
     - kernel/mutex.c
     - test/kernel/stubs/cpu.c

@@ -2,5 +2,6 @@ manifest:
   include_default_stubs: false
   include_default_fixtures: false
   source_files:
+    - user/lib/io/mount_config.c
     - common/types/bstring.c
     - common/types/dyn_string.c

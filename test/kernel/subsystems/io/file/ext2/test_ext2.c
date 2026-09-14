@@ -5,7 +5,7 @@
 #include "../../../../../../kernel/scheduler/scheduler.h"
 #include "../../../../../../kernel/subsystems/io/block/memory_block_device.h"
 #include "../../../../../../kernel/subsystems/io/file/ext2/ext2.h"
-#include "../../../../../../kernel/subsystems/io/file/memfs/memfs.h"
+#include "../../../../../../test/kernel/fixtures/memfs/memfs.h"
 #include "../../../../stubs/panic.h"
 
 #define TEST_EXT2_SECTORS 64
@@ -471,9 +471,16 @@ void test_ext2_mounts_and_lists_root_directory(void)
         Ext2Volume__list_root(&volume),
         success(entries)
         {
-            TEST_ASSERT_EQUAL(1, entries.len);
-            TEST_ASSERT_EQUAL_STRING("hello.txt", entries.data[0].name.data);
-            TEST_ASSERT_EQUAL_UINT16(EXT2_INODE_MODE_FILE | 0644, entries.data[0].mode);
+            TEST_ASSERT_EQUAL(1, Ext2DirectoryEntries__len(&entries));
+            match_optional(
+                Ext2DirectoryEntries__at(&entries, 0),
+                some(entry)
+                {
+                    TEST_ASSERT_EQUAL_BSTRING(bstr("hello.txt"), entry.name);
+                    TEST_ASSERT_EQUAL_UINT16(EXT2_INODE_MODE_FILE | 0644, entry.mode);
+                },
+                none_test_fail()
+            );
         },
         error_test_fail()
     );

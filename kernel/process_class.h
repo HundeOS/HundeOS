@@ -4,12 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef enum ProcessClass
-{
-    PROCESS_CLASS_NORMAL = 0,
-    PROCESS_CLASS_SERVICE = 1,
-    PROCESS_CLASS_REALTIME_SERVICE = 2,
-} ProcessClass;
+#include "../common/process/process_types.h"
 
 bool ProcessClass__is_service(ProcessClass self);
 uint64_t ProcessClass__priority(ProcessClass self);

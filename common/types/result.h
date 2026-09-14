@@ -82,6 +82,10 @@ typedef int64_t Code;
     }                                                                                                                  \
     }
 
-#define unwrap_result(res, alternate_val) ((res).ok ? (res).success.val : (alternate_val))
+#define unwrap_result(res, alternate_val)                                                                              \
+    ({                                                                                                                 \
+        __auto_type __result = (res);                                                                                  \
+        __result.ok ? __result.success.val : (alternate_val);                                                          \
+    })
 
 #endif

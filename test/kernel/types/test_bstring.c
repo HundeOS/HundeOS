@@ -1,6 +1,30 @@
 #include "unity.h"
 #include "../../../common/types/bstring.h"
 
+void test_bstring_assertion_compares_embedded_nuls(void)
+{
+    BString expected = bstr("a\0b");
+    BString actual = BString__from_chars("a\0b", 3);
+    TEST_ASSERT_EQUAL_BSTRING(expected, actual);
+}
+
+void test_bstring_assertion_evaluates_arguments_once(void)
+{
+    BString value = bstr("value");
+    unsigned expected_calls = 0;
+    unsigned actual_calls = 0;
+    TEST_ASSERT_EQUAL_BSTRING((expected_calls++, value), (actual_calls++, value));
+    TEST_ASSERT_EQUAL_UINT(1, expected_calls);
+    TEST_ASSERT_EQUAL_UINT(1, actual_calls);
+}
+
+void test_bstring_assertion_accepts_returned_values_and_dereferenced_pointers(void)
+{
+    BString value = bstr("VALUE");
+    ConstBStringPtr pointer = &value;
+    TEST_ASSERT_EQUAL_BSTRING(BString__uppercase(&bstr("value")), *pointer);
+}
+
 void setUp(void)
 {
 }
@@ -16,7 +40,7 @@ void test_bstring_clear_resets_string(void)
     BString__clear(&str);
 
     TEST_ASSERT_TRUE(BString__is_empty(&str));
-    TEST_ASSERT_EQUAL_STRING("", BString__cstr(&str));
+    TEST_ASSERT_EQUAL_BSTRING(bstr(""), str);
 }
 
 void test_bstring_push_char_appends_until_capacity_limit(void)
@@ -25,7 +49,7 @@ void test_bstring_push_char_appends_until_capacity_limit(void)
 
     TEST_ASSERT_TRUE(BString__push_char(&str, 'c'));
     TEST_ASSERT_EQUAL_INT64(3, str.len);
-    TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&str));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), str);
 }
 
 void test_bstring_push_char_rejects_when_full(void)
@@ -47,7 +71,7 @@ void test_bstring_insert_char_inserts_at_requested_position(void)
 
     TEST_ASSERT_TRUE(BString__insert_char(&str, 1, 'b'));
     TEST_ASSERT_EQUAL_INT64(3, str.len);
-    TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&str));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), str);
 }
 
 void test_bstring_insert_char_rejects_out_of_bounds_index(void)
@@ -55,7 +79,7 @@ void test_bstring_insert_char_rejects_out_of_bounds_index(void)
     BString str = bstring("ab");
 
     TEST_ASSERT_FALSE(BString__insert_char(&str, 3, 'c'));
-    TEST_ASSERT_EQUAL_STRING("ab", BString__cstr(&str));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("ab"), str);
 }
 
 void test_bstring_set_char_at_updates_existing_character(void)
@@ -65,7 +89,7 @@ void test_bstring_set_char_at_updates_existing_character(void)
     TEST_ASSERT_TRUE(BString__set_char_at(&str, 1, 'x'));
 
     TEST_ASSERT_EQUAL_INT64(3, BString__length(&str));
-    TEST_ASSERT_EQUAL_STRING("axc", BString__cstr(&str));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("axc"), str);
 }
 
 void test_bstring_set_char_at_extends_length(void)
@@ -75,7 +99,7 @@ void test_bstring_set_char_at_extends_length(void)
     TEST_ASSERT_TRUE(BString__set_char_at(&str, 2, 'c'));
 
     TEST_ASSERT_EQUAL_INT64(3, BString__length(&str));
-    TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&str));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), str);
 }
 
 void test_bstring_set_char_at_rejects_out_of_bounds_index(void)
@@ -84,7 +108,7 @@ void test_bstring_set_char_at_rejects_out_of_bounds_index(void)
 
     TEST_ASSERT_FALSE(BString__set_char_at(&str, BSTRING_MAX_SIZE - 1, 'x'));
     TEST_ASSERT_EQUAL_INT64(2, BString__length(&str));
-    TEST_ASSERT_EQUAL_STRING("ab", BString__cstr(&str));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("ab"), str);
 }
 
 void test_bstring_remove_at_removes_requested_position(void)
@@ -93,7 +117,7 @@ void test_bstring_remove_at_removes_requested_position(void)
 
     TEST_ASSERT_TRUE(BString__remove_at(&str, 1));
     TEST_ASSERT_EQUAL_INT64(2, str.len);
-    TEST_ASSERT_EQUAL_STRING("ac", BString__cstr(&str));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("ac"), str);
 }
 
 void test_bstring_remove_at_rejects_out_of_bounds_index(void)
@@ -102,7 +126,7 @@ void test_bstring_remove_at_rejects_out_of_bounds_index(void)
     BString str = bstring("ab");
 
     TEST_ASSERT_FALSE(BString__remove_at(&str, 2));
-    TEST_ASSERT_EQUAL_STRING("ab", BString__cstr(&str));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("ab"), str);
 }
 
 void test_bstring_is_whitespace_matches_shell_whitespace_set(void)
@@ -121,7 +145,7 @@ void test_bstring_strip_removes_leading_and_trailing_whitespace(void)
 
     BString stripped = BString__strip(&bstr(" \t hello world \n"));
 
-    TEST_ASSERT_EQUAL_STRING("hello world", BString__cstr(&stripped));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("hello world"), stripped);
 }
 
 void test_bstring_strip_returns_empty_for_whitespace_only_input(void)
@@ -139,7 +163,7 @@ void test_bstring_slice_returns_requested_range(void)
 
     BString slice = BString__slice(&bstr("abcdef"), 1, 4);
 
-    TEST_ASSERT_EQUAL_STRING("bcd", BString__cstr(&slice));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("bcd"), slice);
 }
 
 void test_bstring_slice_uses_minus_one_as_end_of_string(void)
@@ -148,7 +172,7 @@ void test_bstring_slice_uses_minus_one_as_end_of_string(void)
 
     BString slice = BString__slice(&bstr("abcdef"), 2, -1);
 
-    TEST_ASSERT_EQUAL_STRING("cdef", BString__cstr(&slice));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("cdef"), slice);
 }
 
 void test_bstring_slice_clamps_out_of_range_positions(void)
@@ -157,7 +181,7 @@ void test_bstring_slice_clamps_out_of_range_positions(void)
 
     BString slice = BString__slice(&bstr("abcdef"), -4, 99);
 
-    TEST_ASSERT_EQUAL_STRING("abcdef", BString__cstr(&slice));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("abcdef"), slice);
 }
 
 void test_bstring_slice_returns_empty_when_start_is_not_before_end(void)
@@ -187,9 +211,11 @@ void test_bstring_split_first_any_splits_at_first_matching_delimiter(void)
 
     BStringSplit split = BString__split_first_any(&bstr("alpha beta"), &bstr(" \t"));
 
-    TEST_ASSERT_TRUE(split.match.present);
-    TEST_ASSERT_EQUAL_STRING("alpha", BString__cstr(&split.match.some.val));
-    TEST_ASSERT_EQUAL_STRING("beta", BString__cstr(&split.rest));
+    match_optional(split.match,
+        some(value) { TEST_ASSERT_EQUAL_BSTRING(bstr("alpha"), value); },
+        none_test_fail()
+    );
+    TEST_ASSERT_EQUAL_BSTRING(bstr("beta"), split.rest);
 }
 
 void test_bstring_split_first_any_returns_empty_match_when_delimiter_is_first(void)
@@ -199,9 +225,11 @@ void test_bstring_split_first_any_returns_empty_match_when_delimiter_is_first(vo
 
     BStringSplit split = BString__split_first_any(&bstr("\"tail"), &bstr("\""));
 
-    TEST_ASSERT_TRUE(split.match.present);
-    TEST_ASSERT_TRUE(BString__is_empty(&split.match.some.val));
-    TEST_ASSERT_EQUAL_STRING("tail", BString__cstr(&split.rest));
+    match_optional(split.match,
+        some(value) { TEST_ASSERT_EQUAL_BSTRING(empty_bstr(), value); },
+        none_test_fail()
+    );
+    TEST_ASSERT_EQUAL_BSTRING(bstr("tail"), split.rest);
 }
 
 void test_bstring_split_first_any_returns_whole_input_when_no_delimiter_found(void)
@@ -211,8 +239,10 @@ void test_bstring_split_first_any_returns_whole_input_when_no_delimiter_found(vo
 
     BStringSplit split = BString__split_first_any(&bstr("token"), &bstr(" \t"));
 
-    TEST_ASSERT_TRUE(split.match.present);
-    TEST_ASSERT_EQUAL_STRING("token", BString__cstr(&split.match.some.val));
+    match_optional(split.match,
+        some(value) { TEST_ASSERT_EQUAL_BSTRING(bstr("token"), value); },
+        none_test_fail()
+    );
     TEST_ASSERT_TRUE(BString__is_empty(&split.rest));
 }
 
@@ -226,8 +256,8 @@ void test_bstring_split_first_token_strips_before_splitting(void)
         split.match,
         some(token)
         {
-            TEST_ASSERT_EQUAL_STRING("alpha", BString__cstr(&token));
-            TEST_ASSERT_EQUAL_STRING("  beta", BString__cstr(&split.rest));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("alpha"), token);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("  beta"), split.rest);
         },
         none_test_fail()
     );
@@ -296,7 +326,7 @@ void test_bstring_uppercase_converts_ascii_lowercase(void)
 
     BString uppercase = BString__uppercase(&bstr("Sigterm-42"));
 
-    TEST_ASSERT_EQUAL_STRING("SIGTERM-42", BString__cstr(&uppercase));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("SIGTERM-42"), uppercase);
 }
 
 void test_bstring_length_returns_stored_length(void)
@@ -339,7 +369,7 @@ void test_bstring_from_chars_copies_requested_length(void)
     BString result = BString__from_chars(input, 5);
 
     TEST_ASSERT_EQUAL_INT64(5, BString__length(&result));
-    TEST_ASSERT_EQUAL_STRING("hunde", BString__cstr(&result));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("hunde"), result);
 }
 
 void test_bstring_iterate_visits_each_character(void)
@@ -348,7 +378,7 @@ void test_bstring_iterate_visits_each_character(void)
 
     for_each_bstring(&bstr("abc"), index, ch, { BString__push_char(&output, ch); });
 
-    TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), output);
 }
 
 void test_bstring_sprintf_formats_unsigned_decimal(void)
@@ -357,7 +387,7 @@ void test_bstring_sprintf_formats_unsigned_decimal(void)
 
     BString formatted = BString__sprintf(&bstr("value=%u"), 4000000000U);
 
-    TEST_ASSERT_EQUAL_STRING("value=4000000000", BString__cstr(&formatted));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("value=4000000000"), formatted);
 }
 
 void test_bstring_sprintf_formats_signed_64_bit_decimal(void)
@@ -366,7 +396,7 @@ void test_bstring_sprintf_formats_signed_64_bit_decimal(void)
 
     BString formatted = BString__sprintf(&bstr("value=%lld"), -4294967296LL);
 
-    TEST_ASSERT_EQUAL_STRING("value=-4294967296", BString__cstr(&formatted));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("value=-4294967296"), formatted);
 }
 
 void test_bstring_sprintf_formats_unsigned_64_bit_decimal(void)
@@ -375,7 +405,7 @@ void test_bstring_sprintf_formats_unsigned_64_bit_decimal(void)
 
     BString formatted = BString__sprintf(&bstr("value=%llu"), 4294967296ULL);
 
-    TEST_ASSERT_EQUAL_STRING("value=4294967296", BString__cstr(&formatted));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("value=4294967296"), formatted);
 }
 
 void test_bstring_sprintf_formats_unsigned_64_bit_hex(void)
@@ -384,7 +414,7 @@ void test_bstring_sprintf_formats_unsigned_64_bit_hex(void)
 
     BString formatted = BString__sprintf(&bstr("addr=0x%llx"), 0xffff000000600000ULL);
 
-    TEST_ASSERT_EQUAL_STRING("addr=0xffff000000600000", BString__cstr(&formatted));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("addr=0xffff000000600000"), formatted);
 }
 
 void test_bstring_sprintf_formats_pointer_width_hex(void)
@@ -393,7 +423,7 @@ void test_bstring_sprintf_formats_pointer_width_hex(void)
 
     BString formatted = BString__sprintf(&bstr("addr=%p"), (uintptr_t)0xffff000000600000ULL);
 
-    TEST_ASSERT_EQUAL_STRING("addr=0xffff000000600000", BString__cstr(&formatted));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("addr=0xffff000000600000"), formatted);
 }
 
 void test_bstring_sprintf_formats_bstring(void)
@@ -403,7 +433,7 @@ void test_bstring_sprintf_formats_bstring(void)
 
     BString formatted = BString__sprintf(&bstr("path=%B"), &path);
 
-    TEST_ASSERT_EQUAL_STRING("path=/dev/virtio1", BString__cstr(&formatted));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("path=/dev/virtio1"), formatted);
 }
 
 void test_bstring_sprintf_formats_bstring_by_length(void)
@@ -413,7 +443,7 @@ void test_bstring_sprintf_formats_bstring_by_length(void)
 
     BString formatted = BString__sprintf(&bstr("value=%B!"), &value);
 
-    TEST_ASSERT_EQUAL_STRING("value=abc!", BString__cstr(&formatted));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("value=abc!"), formatted);
 }
 
 void test_bstring_sprintf_formats_left_aligned_width(void)
@@ -422,7 +452,7 @@ void test_bstring_sprintf_formats_left_aligned_width(void)
 
     BString formatted = BString__sprintf(&bstr("'%-*s'"), 5, "id");
 
-    TEST_ASSERT_EQUAL_STRING("'id   '", BString__cstr(&formatted));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("'id   '"), formatted);
 }
 
 void test_bstring_sprintf_formats_star_precision_for_string(void)
@@ -430,5 +460,5 @@ void test_bstring_sprintf_formats_star_precision_for_string(void)
 
     BString formatted = BString__sprintf(&bstr("%-*.*s!"), 6, 3, "abcdef");
 
-    TEST_ASSERT_EQUAL_STRING("abc   !", BString__cstr(&formatted));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("abc   !"), formatted);
 }

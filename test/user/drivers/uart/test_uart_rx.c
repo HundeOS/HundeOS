@@ -152,7 +152,7 @@ ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappe
 
 IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    TEST_ASSERT_EQUAL_STRING("/proc/sysinfo", BString__cstr(path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), *path);
     TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
     fake_sysinfo_opened = true;
     return 7;
@@ -230,7 +230,7 @@ size_t mapped_size(ServiceMappedMemoryPtr memory)
 
 IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
 {
-    TEST_ASSERT_EQUAL_STRING(":tty:", BString__cstr(path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr(":tty:"), *path);
     TEST_ASSERT_EQUAL_INT(IO_SERVER_READ, role);
     return 42;
 }

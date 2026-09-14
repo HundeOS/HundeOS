@@ -7,8 +7,8 @@
 #include "io.h"
 #include "types/address.h"
 #include "types/bstring.h"
-#include "../../common/ipc/block_channel.h"
-#include "../../common/ipc/echo_channel.h"
+#include "ipc/queue_types.h"
+#include "../../common/ipc/legacy_block_transport.h"
 
 typedef enum ServiceOperation
 {
@@ -32,13 +32,17 @@ typedef enum ServiceOperation
     SERVICE_REGISTER_SOCKET_ROUTER,
     SERVICE_SOCKET_GET_REQUEST,
     SERVICE_SOCKET_COMPLETE,
-    SERVICE_REQUEST_QUEUE,
-    SERVICE_BLOCK_OPEN_CHANNEL,
-    SERVICE_BLOCK_CLOSE_CHANNEL,
-    SERVICE_ATOMIC_MESSAGE_QUEUE_LISTEN,
-    SERVICE_ATOMIC_MESSAGE_QUEUE_CONNECT,
-    SERVICE_ATOMIC_MESSAGE_QUEUE_ACCEPT,
-    SERVICE_ATOMIC_MESSAGE_QUEUE_CLOSE,
+    SERVICE_BLOCK_CONNECT,
+    SERVICE_BLOCK_DISCONNECT,
+    SERVICE_QUEUE_LISTEN,
+    SERVICE_QUEUE_CONNECT,
+    SERVICE_QUEUE_ACCEPT,
+    SERVICE_QUEUE_CLOSE,
+    SERVICE_REGISTER_INTERRUPT_MANAGER,
+    SERVICE_ROUTE_MANAGED_IRQ,
+    SERVICE_POLL,
+    SERVICE_AUTHORIZE_BLOCK_CLIENT,
+    SERVICE_CLAIM_VIRTIO_DEVICE,
 } ServiceOperation;
 
 typedef enum ServiceEventType
@@ -50,8 +54,8 @@ typedef enum ServiceEventType
     SERVICE_EVENT_READY = 5,
     SERVICE_EVENT_FILESYSTEM_IO = 6,
     SERVICE_EVENT_SOCKET_IO = 7,
-    SERVICE_EVENT_BLOCK_CHANNEL_OPEN = 8,
-    SERVICE_EVENT_BLOCK_CHANNEL_CLOSED = 9,
+    SERVICE_EVENT_BLOCK_CONNECTION_OPENED = 8,
+    SERVICE_EVENT_BLOCK_CONNECTION_CLOSED = 9,
 } ServiceEventType;
 
 typedef enum ServiceEventKind
@@ -145,9 +149,30 @@ typedef enum ServiceCode
     SERVICE_FILESYSTEM_REQUEST_FAILED = -17,
     SERVICE_SOCKET_REQUEST_NOT_FOUND = -18,
     SERVICE_SOCKET_REQUEST_FAILED = -19,
-    SERVICE_BLOCK_CHANNEL_NOT_FOUND = -20,
-    SERVICE_BLOCK_CHANNEL_FAILED = -21,
+    SERVICE_BLOCK_CONNECTION_NOT_FOUND = -20,
+    SERVICE_BLOCK_CONNECTION_FAILED = -21,
+    SERVICE_INTERRUPT_MANAGER_EXISTS = -22,
+    SERVICE_INTERRUPT_MANAGER_REQUIRED = -23,
 } ServiceCode;
+
+typedef struct ServiceInterruptManagerRegistration
+{
+    Address event_queue;
+    Address distributor;
+} ServiceInterruptManagerRegistration;
+typedef ServiceInterruptManagerRegistration * ServiceInterruptManagerRegistrationPtr;
+
+typedef struct ServiceManagedIRQRoute
+{
+    uint64_t client_pid;
+    uint64_t irq;
+} ServiceManagedIRQRoute;
+typedef ServiceManagedIRQRoute * ServiceManagedIRQRoutePtr;
+
+static inline ServiceManagedIRQRoute ServiceManagedIRQRoute__new(uint64_t client_pid, uint64_t irq)
+{
+    return (ServiceManagedIRQRoute){.client_pid = client_pid, .irq = irq};
+}
 
 typedef enum ServiceFilesystemOperation
 {
@@ -240,22 +265,22 @@ typedef struct ServiceBlockDeviceRegistration
 
 typedef ServiceBlockDeviceRegistration * ServiceBlockDeviceRegistrationPtr;
 
-typedef struct ServiceBlockChannelOpenRequest
+typedef struct ServiceBlockConnectionRequest
 {
     BString device_path;
-    uint64_t channel_id;
-    Address channel;
-    size_t channel_size;
-} ServiceBlockChannelOpenRequest;
+    BlockConnectionID connection_id;
+    Address shared_memory;
+    size_t shared_memory_size;
+} ServiceBlockConnectionRequest;
 
-typedef ServiceBlockChannelOpenRequest * ServiceBlockChannelOpenRequestPtr;
+typedef ServiceBlockConnectionRequest * ServiceBlockConnectionRequestPtr;
 
-typedef struct ServiceBlockChannelCloseRequest
+typedef struct ServiceBlockDisconnectionRequest
 {
-    uint64_t channel_id;
-} ServiceBlockChannelCloseRequest;
+    BlockConnectionID connection_id;
+} ServiceBlockDisconnectionRequest;
 
-typedef ServiceBlockChannelCloseRequest * ServiceBlockChannelCloseRequestPtr;
+typedef ServiceBlockDisconnectionRequest * ServiceBlockDisconnectionRequestPtr;
 
 typedef struct ServiceReadyRequest
 {
@@ -263,22 +288,6 @@ typedef struct ServiceReadyRequest
 } ServiceReadyRequest;
 
 typedef ServiceReadyRequest * ServiceReadyRequestPtr;
-
-typedef enum ServiceKernelEventSubscription
-{
-    SERVICE_KERNEL_EVENT_NONE = 0,
-    SERVICE_KERNEL_EVENT_PROCESS_EXIT = 1ULL << 0,
-} ServiceKernelEventSubscription;
-
-#define SERVICE_KERNEL_EVENT_SUPPORTED_MASK SERVICE_KERNEL_EVENT_PROCESS_EXIT
-
-typedef struct ServiceQueueRequest
-{
-    BString name;
-    uint64_t kernel_event_subscriptions;
-} ServiceQueueRequest;
-
-typedef ServiceQueueRequest * ServiceQueueRequestPtr;
 
 typedef struct ServiceFilesystemRegistration
 {
@@ -329,20 +338,20 @@ ServiceBlockDeviceRegistration__new(ConstBStringPtr path, uint64_t block_size, u
     };
 }
 
-static inline ServiceBlockChannelOpenRequest ServiceBlockChannelOpenRequest__new(ConstBStringPtr path)
+static inline ServiceBlockConnectionRequest ServiceBlockConnectionRequest__new(ConstBStringPtr path)
 {
-    return (ServiceBlockChannelOpenRequest){
+    return (ServiceBlockConnectionRequest){
         .device_path = *path,
-        .channel_id = 0,
-        .channel = 0,
-        .channel_size = sizeof(BlockChannelMemory),
+        .connection_id = 0,
+        .shared_memory = 0,
+        .shared_memory_size = sizeof(BlockProtocolMemory),
     };
 }
 
-static inline ServiceBlockChannelCloseRequest ServiceBlockChannelCloseRequest__new(uint64_t channel_id)
+static inline ServiceBlockDisconnectionRequest ServiceBlockDisconnectionRequest__new(BlockConnectionID connection_id)
 {
-    return (ServiceBlockChannelCloseRequest){
-        .channel_id = channel_id,
+    return (ServiceBlockDisconnectionRequest){
+        .connection_id = connection_id,
     };
 }
 
@@ -381,14 +390,6 @@ static inline ServiceReadyRequest ServiceReadyRequest__new(ConstBStringPtr name)
 {
     return (ServiceReadyRequest){
         .name = *name,
-    };
-}
-
-static inline ServiceQueueRequest ServiceQueueRequest__new(ConstBStringPtr name, uint64_t kernel_event_subscriptions)
-{
-    return (ServiceQueueRequest){
-        .name = *name,
-        .kernel_event_subscriptions = kernel_event_subscriptions,
     };
 }
 

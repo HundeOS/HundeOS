@@ -14,6 +14,8 @@
 #include "../../../subsystems/message/subsystem_codes.h"
 #include "../../../types/map.h"
 
+_Static_assert(DEVICE_REGISTRY_CAPACITY >= 2 * IO_MAX_DEVICES, "Device registry must hold block and stream devices");
+
 static BString invalid_argument = bstr("Invalid block device argument");
 static BString already_registered = bstr("Block device already registered");
 static BString registry_full = bstr("Block device registry full");
@@ -24,7 +26,7 @@ static BString request_not_complete = bstr("Userspace block IO request is not co
 static BString allocation_failed = bstr("Userspace block IO allocation failed");
 
 #define MAX_BLOCK_REQUESTS IO_MAX_DEVICES
-#define MAX_BLOCK_CHANNELS IO_MAX_DEVICES
+#define MAX_BLOCK_CONNECTIONS IO_MAX_DEVICES
 
 typedef struct UserspaceBlockDevice
 {
@@ -45,24 +47,22 @@ FixedArrayBodyDefine(BlockDeviceMetadataEntries);
 FixedArrayDefine(BlockRequestID, MAX_BLOCK_REQUESTS, BlockRequestIDs, SimpleEquals(uint64_t));
 FixedArrayBodyDefine(BlockRequestIDs);
 
-typedef uint64_t BlockChannelID;
+OptionalDef(BlockConnectionID);
 
-OptionalDef(BlockChannelID);
-
-typedef struct UserspaceBlockChannel
+typedef struct UserspaceBlockConnection
 {
-    BlockChannelID channel_id;
+    BlockConnectionID connection_id;
     UserspaceBlockDevicePtr device;
     ProcessPtr requester;
     UserAddress requester_allocation;
     UserAddress service_allocation;
-} UserspaceBlockChannel;
+} UserspaceBlockConnection;
 
-typedef UserspaceBlockChannel * UserspaceBlockChannelPtr;
+typedef UserspaceBlockConnection * UserspaceBlockConnectionPtr;
 
-OptionalDef(UserspaceBlockChannelPtr);
-FixedArrayDefine(UserspaceBlockChannelPtr, MAX_BLOCK_CHANNELS, BlockChannels, Ptr__equals);
-FixedArrayBodyDefine(BlockChannels);
+OptionalDef(UserspaceBlockConnectionPtr);
+FixedArrayDefine(UserspaceBlockConnectionPtr, MAX_BLOCK_CONNECTIONS, BlockConnections, Ptr__equals);
+FixedArrayBodyDefine(BlockConnections);
 FixedArrayDefine(UserspaceBlockDevicePtr, IO_MAX_DEVICES, UserspaceBlockDevices, Ptr__equals);
 FixedArrayBodyDefine(UserspaceBlockDevices);
 
@@ -99,18 +99,18 @@ OptionalDef(UserspaceBlockRequestPtr);
 OptionalDef(MessageBrokerPtr);
 ResultDef(UserspaceBlockDevicePtr);
 ResultDef(UserspaceBlockRequestPtr);
-ResultDef(UserspaceBlockChannelPtr);
+ResultDef(UserspaceBlockConnectionPtr);
 ResultDef(BlockDeviceParkContextPtr);
-typedef struct BlockChannelOpenMemory
+typedef struct BlockConnectionMemory
 {
-    BlockChannelID channel_id;
+    BlockConnectionID connection_id;
     UserAddress requester_allocation;
     UserAddress service_allocation;
     UserAddress service_mapping;
     size_t size;
-} BlockChannelOpenMemory;
+} BlockConnectionMemory;
 
-ResultDef(BlockChannelOpenMemory);
+ResultDef(BlockConnectionMemory);
 FixedArrayBodyDefine(BlockDevicePaths);
 FixedArrayDefine(UserspaceBlockRequestPtr, MAX_BLOCK_REQUESTS, BlockRequests, Ptr__equals);
 FixedArrayBodyDefine(BlockRequests);
@@ -118,15 +118,16 @@ MapDefine(BString, UserspaceBlockDevicePtr, IO_MAX_DEVICES, BlockDeviceRegistryM
 MapBodyDefine(BlockDeviceRegistryMap);
 MapDefine(BlockRequestID, UserspaceBlockRequestPtr, MAX_BLOCK_REQUESTS, BlockRequestMap, SimpleEquals(uint64_t));
 MapBodyDefine(BlockRequestMap);
-MapDefine(BlockChannelID, UserspaceBlockChannelPtr, MAX_BLOCK_CHANNELS, BlockChannelMap, SimpleEquals(uint64_t));
-MapBodyDefine(BlockChannelMap);
+MapDefine(BlockConnectionID, UserspaceBlockConnectionPtr, MAX_BLOCK_CONNECTIONS, BlockConnectionMap,
+          SimpleEquals(uint64_t));
+MapBodyDefine(BlockConnectionMap);
 
 typedef struct BlockDeviceRegistryState
 {
     mutex_t lock;
     BlockDeviceRegistryMap devices;
     BlockRequestMap requests;
-    BlockChannelMap channels;
+    BlockConnectionMap channels;
     uint64_t next_request_id;
     uint64_t next_device_id;
     uint64_t next_channel_id;
@@ -136,20 +137,20 @@ typedef struct BlockDeviceRegistryState
     (BlockDeviceRegistryState)                                                                                         \
     {                                                                                                                  \
         .lock = MUTEX_INIT, .devices = EmptyMap(BlockDeviceRegistryMap), .requests = EmptyMap(BlockRequestMap),        \
-        .channels = EmptyMap(BlockChannelMap), .next_request_id = 1, .next_device_id = 0, .next_channel_id = 1,        \
+        .channels = EmptyMap(BlockConnectionMap), .next_request_id = 1, .next_device_id = 0, .next_channel_id = 1,     \
     }
 
 static BlockDeviceRegistryState registry = BLOCK_DEVICE_REGISTRY_STATE_INIT;
 static Optional(KernelContextPtr) current_contexts[MAX_CPUS] = {0};
 static BString hd_alias_format = bstr("hd%i");
 
-static BlockChannelOpenMemory BlockChannelOpenMemory__new(BlockChannelID channel_id,
-                                                          UserAddressPtr requester_allocation,
-                                                          UserAddressPtr service_allocation,
-                                                          UserAddressPtr service_mapping, size_t size)
+static BlockConnectionMemory BlockConnectionMemory__new(BlockConnectionID connection_id,
+                                                        UserAddressPtr requester_allocation,
+                                                        UserAddressPtr service_allocation,
+                                                        UserAddressPtr service_mapping, size_t size)
 {
-    return (BlockChannelOpenMemory){
-        .channel_id = channel_id,
+    return (BlockConnectionMemory){
+        .connection_id = connection_id,
         .requester_allocation = *requester_allocation,
         .service_allocation = *service_allocation,
         .service_mapping = *service_mapping,
@@ -202,12 +203,13 @@ static BlockDevice UserspaceBlockDevice__block_device(UserspaceBlockDevicePtr se
     return block_device;
 }
 
-static UserspaceBlockChannel UserspaceBlockChannel__new(BlockChannelID channel_id, UserspaceBlockDevicePtr device,
-                                                        ProcessPtr requester, UserAddressPtr requester_allocation,
-                                                        UserAddressPtr service_allocation)
+static UserspaceBlockConnection UserspaceBlockConnection__new(BlockConnectionID connection_id,
+                                                              UserspaceBlockDevicePtr device, ProcessPtr requester,
+                                                              UserAddressPtr requester_allocation,
+                                                              UserAddressPtr service_allocation)
 {
-    return (UserspaceBlockChannel){
-        .channel_id = channel_id,
+    return (UserspaceBlockConnection){
+        .connection_id = connection_id,
         .device = device,
         .requester = requester,
         .requester_allocation = *requester_allocation,
@@ -231,19 +233,20 @@ static Result(UserspaceBlockDevicePtr)
     return Success(UserspaceBlockDevicePtr, self);
 }
 
-static Result(UserspaceBlockChannelPtr)
-    UserspaceBlockChannel__heap_new(BlockChannelID channel_id, UserspaceBlockDevicePtr device, ProcessPtr requester,
-                                    UserAddressPtr requester_allocation, UserAddressPtr service_allocation)
+static Result(UserspaceBlockConnectionPtr)
+    UserspaceBlockConnection__heap_new(BlockConnectionID connection_id, UserspaceBlockDevicePtr device,
+                                       ProcessPtr requester, UserAddressPtr requester_allocation,
+                                       UserAddressPtr service_allocation)
 {
-    KernelAddress address = Kernel__alloc(sizeof(UserspaceBlockChannel));
+    KernelAddress address = Kernel__alloc(sizeof(UserspaceBlockConnection));
     if (!address.valid)
     {
-        return Error(UserspaceBlockChannelPtr, allocation_failed, BLOCK_DEVICE_IO_ERROR);
+        return Error(UserspaceBlockConnectionPtr, allocation_failed, BLOCK_DEVICE_IO_ERROR);
     }
 
-    UserspaceBlockChannelPtr self = ptr(address.virtual_addr, UserspaceBlockChannel);
-    *self = UserspaceBlockChannel__new(channel_id, device, requester, requester_allocation, service_allocation);
-    return Success(UserspaceBlockChannelPtr, self);
+    UserspaceBlockConnectionPtr self = ptr(address.virtual_addr, UserspaceBlockConnection);
+    *self = UserspaceBlockConnection__new(connection_id, device, requester, requester_allocation, service_allocation);
+    return Success(UserspaceBlockConnectionPtr, self);
 }
 
 static UserspaceBlockRequest
@@ -364,21 +367,22 @@ static void UserspaceBlockRequest__release(UserspaceBlockRequestPtr self)
     Kernel__free(addr(self));
 }
 
-static Result(ServiceCode) UserspaceBlockChannel__notify_closed(UserspaceBlockChannelPtr self)
+static Result(ServiceCode) UserspaceBlockConnection__notify_closed(UserspaceBlockConnectionPtr self)
 {
     return UserspaceBlockDevice__deliver_service_event(
         self->device, self->device->service_process,
-        ServiceEvent__new(SERVICE_EVENT_BLOCK_CHANNEL_CLOSED, self->channel_id, 0));
+        ServiceEvent__new(SERVICE_EVENT_BLOCK_CONNECTION_CLOSED, self->connection_id, 0));
 }
 
-static void UserspaceBlockChannel__free_mappings(UserspaceBlockChannelPtr self)
+static void UserspaceBlockConnection__free_mappings(UserspaceBlockConnectionPtr self)
 {
     match_result(
         Process__free_user_pages(self->device->service_process, self->service_allocation.virtual_addr),
         success_do_nothing(),
         error(code, message)
         {
-            __d_printf(IODEV, "block channel service unmap failed id=%i code=%i\n", (int)self->channel_id, (int)code);
+            __d_printf(IODEV, "block connection service unmap failed id=%i code=%i\n", (int)self->connection_id,
+                       (int)code);
         }
     );
 
@@ -387,27 +391,28 @@ static void UserspaceBlockChannel__free_mappings(UserspaceBlockChannelPtr self)
         success_do_nothing(),
         error(code, message)
         {
-            __d_printf(IODEV, "block channel requester free failed id=%i code=%i\n", (int)self->channel_id, (int)code);
+            __d_printf(IODEV, "block connection requester free failed id=%i code=%i\n", (int)self->connection_id,
+                       (int)code);
         }
     );
 }
 
-static Result(ServiceCode) UserspaceBlockChannel__release(UserspaceBlockChannelPtr self, bool notify_service)
+static Result(ServiceCode) UserspaceBlockConnection__release(UserspaceBlockConnectionPtr self, bool notify_service)
 {
     if (notify_service)
     {
         match_result(
-            UserspaceBlockChannel__notify_closed(self),
+            UserspaceBlockConnection__notify_closed(self),
             success_do_nothing(),
             error(code, message)
             {
-                __d_printf(IODEV, "block channel close notify failed id=%i code=%i\n", (int)self->channel_id,
+                __d_printf(IODEV, "block connection close notify failed id=%i code=%i\n", (int)self->connection_id,
                            (int)code);
             }
         );
     }
 
-    UserspaceBlockChannel__free_mappings(self);
+    UserspaceBlockConnection__free_mappings(self);
     Kernel__free(addr(self));
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -428,7 +433,7 @@ static void BlockDeviceRegistry__remove_request(UserspaceBlockRequestPtr request
 void BlockDeviceRegistry__reset(void)
 {
     BlockRequests stale_requests = BlockRequests__new();
-    BlockChannels stale_channels = BlockChannels__new();
+    BlockConnections stale_channels = BlockConnections__new();
     UserspaceBlockDevices stale_devices = UserspaceBlockDevices__new();
 
     critical_section(
@@ -455,24 +460,24 @@ void BlockDeviceRegistry__reset(void)
                              }
                          );
                      });
-        for_each_map(BlockChannelMap, registry.channels, channel_index, channel_id, channel,
+        for_each_map(BlockConnectionMap, registry.channels, channel_index, connection_id, channel,
                      {
                          match_result(
-                             BlockChannels__push(&stale_channels, channel),
+                             BlockConnections__push(&stale_channels, channel),
                              success_do_nothing(),
                              error(code, message)
                              {
-                                 __d_printf(IODEV, "block channel reset collect failed code=%i\n", (int)code);
+                                 __d_printf(IODEV, "block connection reset collect failed code=%i\n", (int)code);
                              }
                          );
                      });
 
         registry.devices = BlockDeviceRegistryMap__new(); registry.requests = BlockRequestMap__new();
-        registry.channels = BlockChannelMap__new(); registry.next_device_id = 0; registry.next_request_id = 1;
+        registry.channels = BlockConnectionMap__new(); registry.next_device_id = 0; registry.next_request_id = 1;
         registry.next_channel_id = 1;);
 
-    for_each_fa(BlockChannels, stale_channels, channel_index, channel,
-                { UserspaceBlockChannel__release(channel, false); });
+    for_each_fa(BlockConnections, stale_channels, channel_index, channel,
+                { UserspaceBlockConnection__release(channel, false); });
 
     for_each_fa(BlockRequests, stale_requests, request_index, request, { UserspaceBlockRequest__release(request); });
 
@@ -828,7 +833,24 @@ BlockDevice BlockDevice__new(BlockDriverContextPtr context, BlockDeviceRead read
         .write = write,
         .block_size = BLOCK_DEVICE_BLOCK_SIZE,
         .userspace_service = false,
+        .references = 1,
     };
+}
+
+void BlockDevice__retain(BlockDevicePtr self)
+{
+    if (self->userspace_service)
+    {
+        __atomic_add_fetch(&self->references, 1, __ATOMIC_RELAXED);
+    }
+}
+
+void BlockDevice__release(BlockDevicePtr self)
+{
+    if (self->userspace_service && __atomic_sub_fetch(&self->references, 1, __ATOMIC_ACQ_REL) == 0)
+    {
+        Kernel__free(addr(self->context));
+    }
 }
 
 Result(BlockCount) BlockDevice__read(BlockDevicePtr self, BlockNumber block, BlockCount count, DataPtr target)
@@ -836,6 +858,11 @@ Result(BlockCount) BlockDevice__read(BlockDevicePtr self, BlockNumber block, Blo
     if (self == NULL || self->read == NULL || target == NULL || count == 0) // hundelint: ignore-no-null
     {
         return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+    }
+
+    if (__atomic_load_n(&self->unavailable, __ATOMIC_ACQUIRE))
+    {
+        return Error(BlockCount, request_failed, BLOCK_DEVICE_IO_ERROR);
     }
 
     return self->read(self->context, block, count, target);
@@ -848,6 +875,11 @@ Result(BlockCount) BlockDevice__write(BlockDevicePtr self, BlockNumber block, Bl
         return Error(BlockCount, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
+    if (__atomic_load_n(&self->unavailable, __ATOMIC_ACQUIRE))
+    {
+        return Error(BlockCount, request_failed, BLOCK_DEVICE_IO_ERROR);
+    }
+
     return self->write(self->context, block, count, source);
 }
 
@@ -857,6 +889,11 @@ Result(Anything) BlockDevice__read_async(BlockDevicePtr self, BlockNumber block,
     if (self == NULL || context == NULL || continuation == NULL || count == 0) // hundelint: ignore-no-null
     {
         return Error(Anything, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
+    }
+
+    if (__atomic_load_n(&self->unavailable, __ATOMIC_ACQUIRE))
+    {
+        return Error(Anything, request_failed, BLOCK_DEVICE_IO_ERROR);
     }
 
     context->block = block;
@@ -978,6 +1015,11 @@ Result(Anything) BlockDevice__write_async(BlockDevicePtr self, BlockNumber block
         return Error(Anything, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
     }
 
+    if (__atomic_load_n(&self->unavailable, __ATOMIC_ACQUIRE))
+    {
+        return Error(Anything, request_failed, BLOCK_DEVICE_IO_ERROR);
+    }
+
     context->block = block;
     context->block_count = count;
     context->buffer = source;
@@ -1046,28 +1088,41 @@ Result(BlockDeviceCode) BlockDeviceRegistry__register(ConstBStringPtr path, Proc
         success(device)
         {
             Result(BlockDeviceCode) register_result = Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
-            critical_section(registry.lock,
-                             match_optional(
-                                 BlockDeviceRegistryMap__get(&registry.devices, *path),
-                                 some(existing)
-                                 {
-                                     register_result =
-                                         Error(BlockDeviceCode, already_registered, BLOCK_DEVICE_ALREADY_REGISTERED);
-                                 },
-                                 none()
-                                 {
-                                     device->alias = BString__sprintf(&hd_alias_format, (int)registry.next_device_id++);
-                                     match_result(
-                                         BlockDeviceRegistryMap__set(&registry.devices, *path, device),
-                                         success(_) { register_result = Success(BlockDeviceCode, BLOCK_DEVICE_OK); },
-                                         error(code, message)
-                                         {
-                                             register_result =
-                                                 Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
-                                         }
-                                     );
-                                 }
-                             ););
+            critical_section(
+                registry.lock,
+                match_optional(
+                    BlockDeviceRegistryMap__get(&registry.devices, *path),
+                    some(existing)
+                    {
+                        register_result = Error(BlockDeviceCode, already_registered, BLOCK_DEVICE_ALREADY_REGISTERED);
+                    },
+                    none()
+                    {
+                        device->alias = BString__sprintf(&hd_alias_format, (int)registry.next_device_id++);
+                        match_result(
+                            BlockDeviceRegistryMap__set(&registry.devices, *path, device),
+                            success(_)
+                            {
+                                DeviceRecord record =
+                                    DeviceRecord__new(DEVICE_BLOCK, service_process->pid, path, &device->alias,
+                                                      device->block_device.block_size, block_count);
+                                match_result(
+                                    KernelDeviceRegistry__publish(&service_process->kernel->device_registry, &record),
+                                    success(code) { register_result = Success(BlockDeviceCode, BLOCK_DEVICE_OK); },
+                                    error(code, message)
+                                    {
+                                        BlockDeviceRegistryMap__delete(&registry.devices, *path);
+                                        register_result = Error(BlockDeviceCode, message, BLOCK_DEVICE_REGISTRY_FULL);
+                                    }
+                                );
+                            },
+                            error(code, message)
+                            {
+                                register_result = Error(BlockDeviceCode, registry_full, BLOCK_DEVICE_REGISTRY_FULL);
+                            }
+                        );
+                    }
+                ););
 
             match_result(
                 register_result,
@@ -1422,11 +1477,11 @@ Result(BlockRequestID)
     return Error(BlockRequestID, invalid_argument, BLOCK_DEVICE_INVALID_ARGUMENT);
 }
 
-static Result(BlockChannelOpenMemory)
-    BlockDeviceRegistry__open_channel_memory(ProcessPtr requester, ProcessPtr service_process, size_t size)
+static Result(BlockConnectionMemory)
+    BlockDeviceRegistry__connect_memory(ProcessPtr requester, ProcessPtr service_process, size_t size)
 {
-    BlockChannelID channel_id = 0;
-    critical_section(registry.lock, channel_id = registry.next_channel_id++;);
+    BlockConnectionID connection_id = 0;
+    critical_section(registry.lock, connection_id = registry.next_channel_id++;);
 
     match_result(
         Process__alloc_user_pages(requester, size),
@@ -1438,9 +1493,9 @@ static Result(BlockChannelOpenMemory)
                                                                requester_allocation.virtual_addr, size),
                 success(service_pages)
                 {
-                    BlockChannelOpenMemory opened = BlockChannelOpenMemory__new(
-                        channel_id, &requester_allocation, &service_pages.allocation, &service_pages.mapping, size);
-                    return Success(BlockChannelOpenMemory, opened);
+                    BlockConnectionMemory opened = BlockConnectionMemory__new(
+                        connection_id, &requester_allocation, &service_pages.allocation, &service_pages.mapping, size);
+                    return Success(BlockConnectionMemory, opened);
                 },
                 error(code, message)
                 {
@@ -1449,21 +1504,21 @@ static Result(BlockChannelOpenMemory)
                         success_do_nothing(),
                         error(free_code, free_message)
                         {
-                            __d_printf(IODEV, "block channel requester cleanup failed code=%i\n", (int)free_code);
+                            __d_printf(IODEV, "block connection requester cleanup failed code=%i\n", (int)free_code);
                         }
                     );
-                    return Error(BlockChannelOpenMemory, message, SERVICE_BLOCK_CHANNEL_FAILED);
+                    return Error(BlockConnectionMemory, message, SERVICE_BLOCK_CONNECTION_FAILED);
                 }
             );
         },
-        error(code, message) { return Error(BlockChannelOpenMemory, message, SERVICE_BLOCK_CHANNEL_FAILED); }
+        error(code, message) { return Error(BlockConnectionMemory, message, SERVICE_BLOCK_CONNECTION_FAILED); }
     );
 
-    return Error(BlockChannelOpenMemory, allocation_failed, SERVICE_BLOCK_CHANNEL_FAILED);
+    return Error(BlockConnectionMemory, allocation_failed, SERVICE_BLOCK_CONNECTION_FAILED);
 }
 
-Result(ServiceCode) BlockDeviceRegistry__open_channel(ProcessPtr requester, ServiceBlockChannelOpenRequestPtr request,
-                                                      MessageBrokerPtr message_broker)
+Result(ServiceCode) BlockDeviceRegistry__connect(ProcessPtr requester, ServiceBlockConnectionRequestPtr request,
+                                                 MessageBrokerPtr message_broker)
 {
     if (requester == NULL || request == NULL || BString__is_empty(&request->device_path) || message_broker == NULL) // hundelint: ignore-no-null
     {
@@ -1484,51 +1539,50 @@ Result(ServiceCode) BlockDeviceRegistry__open_channel(ProcessPtr requester, Serv
             }
 
             match_result(
-                BlockDeviceRegistry__open_channel_memory(requester, device->service_process,
-                                                         sizeof(BlockChannelMemory)),
+                BlockDeviceRegistry__connect_memory(requester, device->service_process, sizeof(BlockProtocolMemory)),
                 success(opened)
                 {
-                    BlockChannelMemoryPtr channel_memory =
-                        ptr(opened.requester_allocation.kernel_addr.virtual_addr, BlockChannelMemory);
-                    BlockChannelMemory__init(channel_memory);
+                    BlockProtocolMemoryPtr channel_memory =
+                        ptr(opened.requester_allocation.kernel_addr.virtual_addr, BlockProtocolMemory);
+                    BlockProtocolMemory__init(channel_memory);
 
                     Result(CollectionCode) set_result = Error(CollectionCode, registry_full, MAP_FULL);
                     match_result(
-                        UserspaceBlockChannel__heap_new(opened.channel_id, device, requester,
-                                                        &opened.requester_allocation, &opened.service_allocation),
+                        UserspaceBlockConnection__heap_new(opened.connection_id, device, requester,
+                                                           &opened.requester_allocation, &opened.service_allocation),
                         success(channel)
                         {
-                            critical_section(registry.lock, set_result = BlockChannelMap__set(
-                                                                &registry.channels, opened.channel_id, channel););
+                            critical_section(registry.lock, set_result = BlockConnectionMap__set(
+                                                                &registry.channels, opened.connection_id, channel););
 
                             match_result(
                                 set_result,
                                 success_do_nothing(),
                                 error(code, message)
                                 {
-                                    BlockChannelState__ack_consumer_close(&channel_memory->state);
-                                    UserspaceBlockChannel__release(channel, false);
-                                    return Error(ServiceCode, registry_full, SERVICE_BLOCK_CHANNEL_FAILED);
+                                    BlockProtocolSignalState__ack_consumer_close(&channel_memory->state);
+                                    UserspaceBlockConnection__release(channel, false);
+                                    return Error(ServiceCode, registry_full, SERVICE_BLOCK_CONNECTION_FAILED);
                                 }
                             );
 
-                            request->channel_id = opened.channel_id;
-                            request->channel = opened.requester_allocation.virtual_addr;
-                            request->channel_size = opened.size;
+                            request->connection_id = opened.connection_id;
+                            request->shared_memory = opened.requester_allocation.virtual_addr;
+                            request->shared_memory_size = opened.size;
 
                             match_result(
                                 UserspaceBlockDevice__deliver_service_event(
                                     device, device->service_process,
-                                    ServiceEvent__new(SERVICE_EVENT_BLOCK_CHANNEL_OPEN, opened.channel_id,
+                                    ServiceEvent__new(SERVICE_EVENT_BLOCK_CONNECTION_OPENED, opened.connection_id,
                                                       opened.service_mapping.virtual_addr)),
                                 success(code) { return Success(ServiceCode, code); },
                                 error(code, message)
                                 {
-                                    critical_section(registry.lock,
-                                                     BlockChannelMap__delete(&registry.channels, opened.channel_id););
-                                    BlockChannelState__ack_consumer_close(&channel_memory->state);
-                                    UserspaceBlockChannel__release(channel, false);
-                                    return Error(ServiceCode, message, SERVICE_BLOCK_CHANNEL_FAILED);
+                                    critical_section(registry.lock, BlockConnectionMap__delete(&registry.channels,
+                                                                                               opened.connection_id););
+                                    BlockProtocolSignalState__ack_consumer_close(&channel_memory->state);
+                                    UserspaceBlockConnection__release(channel, false);
+                                    return Error(ServiceCode, message, SERVICE_BLOCK_CONNECTION_FAILED);
                                 }
                             );
                         },
@@ -1540,7 +1594,8 @@ Result(ServiceCode) BlockDeviceRegistry__open_channel(ProcessPtr requester, Serv
                                 success_do_nothing(),
                                 error(free_code, free_message)
                                 {
-                                    __d_printf(IODEV, "block channel service cleanup failed code=%i\n", (int)free_code);
+                                    __d_printf(IODEV, "block connection service cleanup failed code=%i\n",
+                                               (int)free_code);
                                 }
                             );
                             match_result(
@@ -1548,39 +1603,39 @@ Result(ServiceCode) BlockDeviceRegistry__open_channel(ProcessPtr requester, Serv
                                 success_do_nothing(),
                                 error(free_code, free_message)
                                 {
-                                    __d_printf(IODEV, "block channel requester cleanup failed code=%i\n",
+                                    __d_printf(IODEV, "block connection requester cleanup failed code=%i\n",
                                                (int)free_code);
                                 }
                             );
-                            return Error(ServiceCode, message, SERVICE_BLOCK_CHANNEL_FAILED);
+                            return Error(ServiceCode, message, SERVICE_BLOCK_CONNECTION_FAILED);
                         }
                     );
                 },
-                error(code, message) { return Error(ServiceCode, message, SERVICE_BLOCK_CHANNEL_FAILED); }
+                error(code, message) { return Error(ServiceCode, message, SERVICE_BLOCK_CONNECTION_FAILED); }
             );
         },
         none_do_nothing()
     );
 
-    return Error(ServiceCode, invalid_argument, SERVICE_BLOCK_CHANNEL_NOT_FOUND);
+    return Error(ServiceCode, invalid_argument, SERVICE_BLOCK_CONNECTION_NOT_FOUND);
 }
 
-Result(ServiceCode) BlockDeviceRegistry__close_channel(ProcessPtr requester, ServiceBlockChannelCloseRequestPtr request)
+Result(ServiceCode) BlockDeviceRegistry__disconnect(ProcessPtr requester, ServiceBlockDisconnectionRequestPtr request)
 {
-    if (requester == NULL || request == NULL || request->channel_id == 0) // hundelint: ignore-no-null
+    if (requester == NULL || request == NULL || request->connection_id == 0) // hundelint: ignore-no-null
     {
         return Error(ServiceCode, invalid_argument, SERVICE_INVALID_BUFFER);
     }
 
-    Optional(UserspaceBlockChannelPtr) channel_result = None(UserspaceBlockChannelPtr);
+    Optional(UserspaceBlockConnectionPtr) channel_result = None(UserspaceBlockConnectionPtr);
     critical_section(registry.lock, match_optional(
-                                        BlockChannelMap__get(&registry.channels, request->channel_id),
+                                        BlockConnectionMap__get(&registry.channels, request->connection_id),
                                         some(channel)
         {
                                             if (channel->requester == requester)
                                             {
-                                                channel_result = Some(UserspaceBlockChannelPtr, channel);
-                                                BlockChannelMap__delete(&registry.channels, request->channel_id);
+                                                channel_result = Some(UserspaceBlockConnectionPtr, channel);
+                                                BlockConnectionMap__delete(&registry.channels, request->connection_id);
                                             }
                                         },
                                         none_do_nothing()
@@ -1588,11 +1643,11 @@ Result(ServiceCode) BlockDeviceRegistry__close_channel(ProcessPtr requester, Ser
 
     match_optional(
         channel_result,
-        some(channel) { return UserspaceBlockChannel__release(channel, true); },
+        some(channel) { return UserspaceBlockConnection__release(channel, true); },
         none_do_nothing()
     );
 
-    return Error(ServiceCode, request_not_found, SERVICE_BLOCK_CHANNEL_NOT_FOUND);
+    return Error(ServiceCode, request_not_found, SERVICE_BLOCK_CONNECTION_NOT_FOUND);
 }
 
 Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPtr process)
@@ -1604,7 +1659,7 @@ Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPt
 
     BlockRequestIDs stale_request_ids = BlockRequestIDs__new();
     BlockRequests stale_requests = BlockRequests__new();
-    BlockChannels stale_channels = BlockChannels__new();
+    BlockConnections stale_channels = BlockConnections__new();
     UserspaceBlockDevices stale_devices = UserspaceBlockDevices__new();
     BlockDevicePaths stale_paths = EmptyArray(BlockDevicePaths);
 
@@ -1624,12 +1679,12 @@ Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPt
                                             );
                                         }
                                     });
-        for_each_map(BlockChannelMap, registry.channels, channel_index, channel_id, channel,
+        for_each_map(BlockConnectionMap, registry.channels, channel_index, connection_id, channel,
                      {
                          if (channel->requester == process || channel->device->service_process == process)
                          {
                              match_result(
-                                 BlockChannels__push(&stale_channels, channel),
+                                 BlockConnections__push(&stale_channels, channel),
                                  success_do_nothing(),
                                  error(code, message)
                                  {
@@ -1638,15 +1693,15 @@ Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPt
                              );
                          }
                      });
-        for_each_fa(BlockChannels, stale_channels, channel_index, stale_channel,
+        for_each_fa(BlockConnections, stale_channels, channel_index, stale_channel,
                     {
                         match_result(
-                            BlockChannelMap__delete(&registry.channels, stale_channel->channel_id),
+                            BlockConnectionMap__delete(&registry.channels, stale_channel->connection_id),
                             success_do_nothing(),
                             error(code, message)
                             {
-                                __d_printf(IODEV, "block channel stale delete failed id=%i code=%i\n",
-                                           (int)stale_channel->channel_id, (int)code);
+                                __d_printf(IODEV, "block connection stale delete failed id=%i code=%i\n",
+                                           (int)stale_channel->connection_id, (int)code);
                             }
                         );
                     });
@@ -1670,6 +1725,7 @@ Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPt
                             BlockDeviceRegistryMap__get(&registry.devices, stale_path),
                             some(device)
                             {
+                                __atomic_store_n(&device->block_device.unavailable, true, __ATOMIC_RELEASE);
                                 BlockDeviceRegistryMap__delete(&registry.devices, stale_path);
                                 match_result(
                                     UserspaceBlockDevices__push(&stale_devices, device),
@@ -1712,10 +1768,11 @@ Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPt
 
     for_each_fa(BlockRequests, stale_requests, request_index, request, { UserspaceBlockRequest__release(request); });
 
-    for_each_fa(BlockChannels, stale_channels, channel_index, channel,
-                { UserspaceBlockChannel__release(channel, channel->device->service_process != process); });
+    for_each_fa(BlockConnections, stale_channels, channel_index, channel,
+                { UserspaceBlockConnection__release(channel, channel->device->service_process != process); });
 
-    for_each_fa(UserspaceBlockDevices, stale_devices, device_index, device, { Kernel__free(addr(device)); });
+    for_each_fa(UserspaceBlockDevices, stale_devices, device_index, device,
+                { BlockDevice__release(&device->block_device); });
 
     return Success(BlockDeviceCode, BLOCK_DEVICE_OK);
 }

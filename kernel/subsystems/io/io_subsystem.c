@@ -102,43 +102,6 @@ Optional(DeviceRegistrationPtr) IOSubsystem__find_registered_device(IOSubsystemP
     return None(DeviceRegistrationPtr);
 }
 
-static bool IOSubsystem__is_dev_path(ConstBStringPtr path)
-{
-    return BString__starts_with(path, &bstr("/dev/"));
-}
-
-static BString IOSubsystem__dev_name_from_path(ConstBStringPtr path)
-{
-    BStringArray segments = BString__split(path, '/');
-    if (BStringArray__len(&segments) == 0)
-    {
-        return *path;
-    }
-
-    match_optional(
-        BStringArray__at(&segments, BStringArray__len(&segments) - 1),
-        some(name) { return name; },
-        none() { return *path; }
-    );
-}
-
-Result(CollectionCode)
-    IOSubsystem__append_dev_filesystem_nodes(IOSubsystemPtr self, FilesystemPtr filesystem, FilesystemNodes * target)
-{
-    for_each_fa(IODevicesArray, self->devices, index, registration, {
-        if (IOSubsystem__is_dev_path(&registration.path))
-        {
-            BString dev_name = IOSubsystem__dev_name_from_path(&registration.path);
-            match_result(
-                FilesystemNodes__push(target, FilesystemNode__heap_new(filesystem, &dev_name, 0)),
-                success_do_nothing(),
-                error(code, message) { return Error(CollectionCode, message, code); }
-            );
-        }
-    });
-    return Success(CollectionCode, 0);
-}
-
 Result(IOHandle) IOSubsystem__record_open_handle(IOSubsystemPtr self, IOContextPtr context, ConstBStringPtr path,
                                                  IOInternalHandle handle)
 {
@@ -937,6 +900,21 @@ Result(IOHandle) IOSubsystem__server_register(IOSubsystemPtr self, IOContextPtr 
                 );
             }
             IOServerRoleMap__set(&self->server_roles, handle, role);
+            if (BString__starts_with(path, &bstr("/dev/")))
+            {
+                DeviceRecord record = DeviceRecord__new(DEVICE_KERNEL_STREAM, process->pid, path, &empty_bstr(), 0, 0);
+                match_result(
+                    KernelDeviceRegistry__publish(&process->kernel->device_registry, &record),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        if (code != SERVICE_DEVICE_ALREADY_REGISTERED)
+                        {
+                            return Error(IOHandle, message, IO_REGISTER_FAILED);
+                        }
+                    }
+                );
+            }
             return Success(IOHandle, handle);
         },
         error(code, message) { return Error(IOHandle, message, code); }
@@ -966,7 +944,7 @@ static Result(IOServerBuffer) IOSubsystem__map_server_buffer(ProcessPtr process,
     UserAddress user_address = UserAddress__new(
         user_page, Kernel__from_virtual_address(Kernel__instance(), kernel_page), true, true, false, true);
 
-    PageTable__map(&process->page_table, Kernel__instance(), user_address, map_size);
+    PageTable__map_shared(&process->page_table, Kernel__instance(), user_address, map_size);
     match_result(
         Process__record_user_allocation(process, user_address, map_size, USER_ALLOCATION_DYNAMIC),
         success(_)

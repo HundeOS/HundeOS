@@ -2,10 +2,11 @@
 
 #include "boot.h"
 #include "cpu.h"
+#include "exceptions.h"
+#include "mmu.h"
 
 #include "boot_strings.h"
 #include "print.h"
-#include "mutex.h"
 #include "../io/psci.h"
 
 #include "boot_debug.h"
@@ -14,12 +15,7 @@ extern void (*secondary_boot_entry)(void);
 
 __BOOT_ALLOCATION__(static uint8_t) __attribute__((aligned(16))) boot_cpu_stacks[MAX_CPUS][STACK_SIZE];
 
-// we count the primary
-__BOOT_DATA__(static uint64_t) cpus_online = 1;
 __BOOT_DATA__(static uint64_t) messaged = 1;
-
-static volatile __BOOT_DATA__(boot_mutex) mutex = { // hundelint: ignore-constructor-required
-    .lock = 0};
 
 __BOOT__(void) boot_secondary_cpus(uint64_t cpu_count)
 {
@@ -61,9 +57,13 @@ __BOOT__(void) boot_secondary_cpus(uint64_t cpu_count)
 
 __BOOT__(void) cpu_booted()
 {
-    lock(&mutex);
-    cpus_online++;
-    uint64_t cpu = cpus_online;
-    unlock(&mutex);
-    secondary_booted(cpu);
+    // Secondary CPUs arrive with translation disabled. Enable Normal-memory
+    // mappings before any exclusive access, including the boot/logging locks.
+    boot_vectors_init();
+    enable_fp_simd();
+    enable_tbi_for_kernel();
+    enable_mmu();
+
+    // Supported platforms number cores by Aff0; kernel IDs are one-based.
+    secondary_booted((rd_mpidr() & 0xff) + 1);
 }

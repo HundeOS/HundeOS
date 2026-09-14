@@ -81,27 +81,6 @@ Result(CollectionCode)
     return Error(CollectionCode, bstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND);
 }
 
-BString ParkReason__to_string(ParkReason reason)
-{
-    switch (reason)
-    {
-    case PARK_WAIT_CHILD:
-        return bstr("PARK_WAIT_CHILD");
-    case PARK_WAIT_IO:
-        return bstr("PARK_WAIT_IO");
-    case PARK_WAIT_SERVICE_EVENT:
-        return bstr("PARK_WAIT_SERVICE_EVENT");
-    case PARK_WAIT_CHILD_EVENT:
-        return bstr("PARK_WAIT_CHILD_EVENT");
-    case PARK_WAIT_SERVICE_READY:
-        return bstr("PARK_WAIT_SERVICE_READY");
-    case PARK_SLEEP:
-        return bstr("PARK_SLEEP");
-    default:
-        return bstr("PARK_WAIT_UNKNOWN");
-    }
-}
-
 void ParkedOperation__dispose(ParkedOperationPtr self)
 {
     while (BlockedParkedOperations__len(&self->blocked_operations) > 0)

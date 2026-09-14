@@ -1,39 +1,17 @@
-#ifndef __USER_LIB_CHANNEL_CHANNEL_H
-#define __USER_LIB_CHANNEL_CHANNEL_H
-
-#include <stdbool.h>
-#include <stdint.h>
+#ifndef HUND_USER_CHANNEL_H
+#define HUND_USER_CHANNEL_H
 
 #include "ipc/channel.h"
+#include "protocol.h"
+#include "services/service_directory.h"
 
-typedef struct Channel Channel;
-typedef Channel * ChannelPtr;
-typedef const Channel * ConstChannelPtr;
-
-struct Channel
-{
-    ChannelStatePtr state;
-};
-
-ChannelState ChannelState__new(void);
-uint64_t ChannelState__data_epoch(ChannelStatePtr self);
-uint64_t ChannelState__space_epoch(ChannelStatePtr self);
-void ChannelState__notify_data(ChannelStatePtr self);
-void ChannelState__notify_space(ChannelStatePtr self);
-bool ChannelState__data_changed(ChannelStatePtr self, uint64_t observed_epoch);
-bool ChannelState__space_changed(ChannelStatePtr self, uint64_t observed_epoch);
-
-Channel Channel__new(ChannelStatePtr state);
-ChannelStatePtr Channel__state(ChannelPtr self);
-uint64_t Channel__data_epoch(ChannelPtr self);
-uint64_t Channel__space_epoch(ChannelPtr self);
-void Channel__notify_data(ChannelPtr self);
-void Channel__notify_space(ChannelPtr self);
-bool Channel__data_changed(ChannelPtr self, uint64_t observed_epoch);
-bool Channel__space_changed(ChannelPtr self, uint64_t observed_epoch);
-
-void Channel__signal(ChannelPtr self);
-void Channel__wait_for_data_change(ChannelPtr self, uint64_t observed_epoch);
-void Channel__wait_for_space_change(ChannelPtr self, uint64_t observed_epoch);
+Result(Channel) Channel__open(ServiceDirectoryPtr directory, ConstBStringPtr target_service);
+Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr request, size_t request_size);
+Result(OptionalChannelReplySize) Channel__poll_reply(ChannelPtr self, ChannelDataPtr reply, size_t reply_capacity);
+Result(ChannelReplySize) Channel__submit(ChannelPtr self, ConstChannelDataPtr request, size_t request_size,
+                                         ChannelDataPtr reply, size_t reply_capacity);
+void Channel__prepare_wait(void);
+void Channel__wait_event(void);
+ChannelCode Channel__close(ChannelPtr self);
 
 #endif

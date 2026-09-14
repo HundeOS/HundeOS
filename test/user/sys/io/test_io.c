@@ -109,7 +109,7 @@ void test_io_open_uses_bstring_path(void)
     TEST_ASSERT_EQUAL_INT64(42, handle);
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_OPEN, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/mnt/fs1/test.txt", BString__cstr(&last_path_request.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1/test.txt"), last_path_request.path);
     TEST_ASSERT_EQUAL(IO_OPEN_READ, last_path_request.flags);
 }
 
@@ -173,7 +173,7 @@ void test_io_make_dir_uses_bstring_path(void)
     TEST_ASSERT_EQUAL(IO_OK, status);
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_MKDIR, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/mnt/fs1/newdir", BString__cstr(&last_path_request.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1/newdir"), last_path_request.path);
 }
 
 void test_io_link_uses_bstring_paths(void)
@@ -187,8 +187,8 @@ void test_io_link_uses_bstring_paths(void)
     TEST_ASSERT_EQUAL(IO_OK, status);
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_LINK, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/mnt/ext2fs/hello.txt", BString__cstr(&last_link_request.source_path));
-    TEST_ASSERT_EQUAL_STRING("/mnt/ext2fs/copy.txt", BString__cstr(&last_link_request.target_path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/hello.txt"), last_link_request.source_path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/copy.txt"), last_link_request.target_path);
 }
 
 void test_io_mount_uses_bstring_paths(void)
@@ -203,9 +203,9 @@ void test_io_mount_uses_bstring_paths(void)
     TEST_ASSERT_EQUAL(IO_OK, status);
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_MOUNT, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/dev/virtio3", BString__cstr(&last_mount_request.device_path));
-    TEST_ASSERT_EQUAL_STRING("fat32", BString__cstr(&last_mount_request.filesystem_type));
-    TEST_ASSERT_EQUAL_STRING("/mnt/fs1", BString__cstr(&last_mount_request.mountpoint));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio3"), last_mount_request.device_path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("fat32"), last_mount_request.filesystem_type);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1"), last_mount_request.mountpoint);
 }
 
 void test_sd_host_config_parse_reads_present_host(void)

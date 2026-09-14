@@ -87,6 +87,8 @@ void reset_state()
     write_data = NULL;
     PROC = STUB_PROCESS(PID);
     SERVER_PROC = STUB_PROCESS(2);
+    PROC.kernel = kernel;
+    SERVER_PROC.kernel = kernel;
     SERVER_PROC.process_class = PROCESS_CLASS_SERVICE;
     SERVER_PROC.service = ServiceState__new();
     SERVER_PROC.user_allocations = UserAllocations__new();

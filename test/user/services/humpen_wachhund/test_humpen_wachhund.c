@@ -59,9 +59,9 @@ void tearDown(void)
 
 IOStatus IO__mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
 {
-    TEST_ASSERT_EQUAL_STRING("/dev/mmc0", BString__cstr(device_path));
-    TEST_ASSERT_EQUAL_STRING("fat32", BString__cstr(filesystem_type));
-    TEST_ASSERT_EQUAL_STRING("/mnt/sd", BString__cstr(mountpoint));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0"), *device_path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("fat32"), *filesystem_type);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/sd"), *mountpoint);
 
     IOStatus result = IO_OK;
     if (mount_count < mount_result_count)

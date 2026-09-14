@@ -28,6 +28,7 @@ FixedArrayBodyDefine(ManagedSharedPages);
 
 BString unreachable_code = bstr("Unreachable code reached\n");
 BString process_not_found = bstr("Process not found\n");
+static BString process_permission_denied = bstr("Process permission denied\n");
 BString reason_mismatch_format = bstr("Process was parked for reason %i, not %i\n");
 BString process_wasnt_parked = bstr("Process wasn't parked\n");
 static BString abort_format =
@@ -43,10 +44,6 @@ static BString service_event_queue_empty = bstr("Service event queue is empty");
 static BString child_event_queue_empty = bstr("Child event queue is empty");
 static BString missing_interrupt_controller = bstr("Missing interrupt controller info");
 static BString no_cpus_available = bstr("No CPUs available");
-static BString process_user_root = bstr("root");
-static BString process_user_hund = bstr("hund");
-static BString process_user_user = bstr("user");
-static BString process_user_unknown = bstr("unknown");
 
 static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
 static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
@@ -205,9 +202,9 @@ static Result(Address)
                     success(address)
                     {
                         Kernel__memset(address.kernel_addr.virtual_addr, 0, MEM_SHARED_PAGE_SIZE);
-                        PageTable__map(&owner->page_table, owner->kernel, address, MEM_SHARED_PAGE_SIZE);
-                        PageTable__map(&first->page_table, first->kernel, address, MEM_SHARED_PAGE_SIZE);
-                        PageTable__map(&second->page_table, second->kernel, address, MEM_SHARED_PAGE_SIZE);
+                        PageTable__map_shared(&owner->page_table, owner->kernel, address, MEM_SHARED_PAGE_SIZE);
+                        PageTable__map_shared(&first->page_table, first->kernel, address, MEM_SHARED_PAGE_SIZE);
+                        PageTable__map_shared(&second->page_table, second->kernel, address, MEM_SHARED_PAGE_SIZE);
                         *page = ManagedSharedPage__new(address, owner->pid, first->pid, second->pid);
                         return Success(Address, virtual_address);
                     },
@@ -285,7 +282,7 @@ Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, A
 {
     if (length == 0 || length >= HUND_SERVICE_NAME_SIZE)
     {
-        return Error(Address, bstr("Invalid endpoint name"), ATOMIC_MESSAGE_QUEUE_INVALID);
+        return Error(Address, bstr("Invalid endpoint name"), QUEUE_INVALID);
     }
     critical_section(self->scheduler_lock, {
         // Copy only from a tracked readable allocation, through its kernel mapping.
@@ -296,43 +293,42 @@ Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, A
             {
                 BString endpoint_name =
                     BString__from_chars(ptr(allocation.address.kernel_addr.virtual_addr + name - start, char), length);
-                cs_return AtomicMessageQueues__listen(&self->atomic_message_queues, process, &endpoint_name);
+                cs_return Queues__listen(&self->queues, process, &endpoint_name);
             }
         });
     });
-    return Error(Address, bstr("Invalid endpoint name mapping"), ATOMIC_MESSAGE_QUEUE_INVALID);
+    return Error(Address, bstr("Invalid endpoint name mapping"), QUEUE_INVALID);
 }
 
-Result(Address)
-    Scheduler__atomic_message_queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id)
+Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id)
 {
     critical_section(self->scheduler_lock, {
-        if (operation == SERVICE_ATOMIC_MESSAGE_QUEUE_CONNECT)
+        if (operation == SERVICE_QUEUE_CONNECT)
         {
             match_result(
-                AtomicMessageQueues__connect(&self->atomic_message_queues, process, (AtomicMessageQueueEndpointID)id),
+                Queues__connect(&self->queues, process, (QueueEndpointID)id),
                 success(connection) { cs_return Success(Address, connection); },
                 error(code, message) { cs_return Error(Address, message, code); }
             );
         }
-        if (operation == SERVICE_ATOMIC_MESSAGE_QUEUE_ACCEPT)
+        if (operation == SERVICE_QUEUE_ACCEPT)
         {
             match_result(
-                AtomicMessageQueues__accept(&self->atomic_message_queues, process, (AtomicMessageQueueConnectionID)id),
+                Queues__accept(&self->queues, process, (QueueConnectionID)id),
                 success(queue_code) { cs_return Success(Address, queue_code); },
                 error(code, message) { cs_return Error(Address, message, code); }
             );
         }
-        if (operation == SERVICE_ATOMIC_MESSAGE_QUEUE_CLOSE)
+        if (operation == SERVICE_QUEUE_CLOSE)
         {
             match_result(
-                AtomicMessageQueues__close(&self->atomic_message_queues, process, (AtomicMessageQueueConnectionID)id),
+                Queues__close(&self->queues, process, (QueueConnectionID)id),
                 success(queue_code) { cs_return Success(Address, queue_code); },
                 error(code, message) { cs_return Error(Address, message, code); }
             );
         }
     });
-    return Error(Address, bstr("Invalid queue operation"), ATOMIC_MESSAGE_QUEUE_INVALID);
+    return Error(Address, bstr("Invalid queue operation"), QUEUE_INVALID);
 }
 static Tick CPUScheduler__sleep_ticks_from_usec(uint64_t usec)
 {
@@ -397,12 +393,30 @@ static bool CPUScheduler__can_resume(ProcessPtr * process, void * compare_state)
     }
 }
 
+static void CPUScheduler__publish_processes(CPUSchedulerPtr self)
+{
+    KernelProcessRegistryPtr registry = &self->idle_process->kernel->process_registry;
+    uint64_t count = 0;
+    if (self->started)
+    {
+        ProcessRecord idle = ProcessRecord__new(self->idle_process, self->cpu);
+        KernelProcessRegistry__set(registry, self->cpu, count++, &idle);
+    }
+    for_each_fa(ProcessTable, self->processes, index, process, {
+        ProcessRecord record = ProcessRecord__new(process, self->cpu);
+        KernelProcessRegistry__set(registry, self->cpu, count++, &record);
+    });
+    KernelProcessRegistry__set_count(registry, self->cpu, count);
+    self->last_registry_sample_usec = CPU__time_usec();
+}
+
 static Result(CPUID) CPUScheduler__schedule(CPUSchedulerPtr self, ProcessPtr new_proc)
 {
     __d_printf(SCHEDULER, "Queuing %s %s\n", cstr(new_proc->name), ProcessState__to_string(new_proc->state));
     new_proc->state = PROC_STATE_READY;
     __d_printf(SCHEDULER, "%s %s\n", cstr(new_proc->name), ProcessState__to_string(new_proc->state));
     ProcessTable__push(&self->processes, new_proc);
+    CPUScheduler__publish_processes(self);
     return Success(CPUID, self->cpu);
 }
 
@@ -495,7 +509,9 @@ Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
         remove_res,
         success(process_index)
         {
+            CPUUsage__stop(&proc->cpu_usage);
             proc->state = PROC_STATE_DEAD;
+            CPUScheduler__publish_processes(self);
             return Success(ProcessPtr, proc);
         },
         error(code, message) { return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND); }
@@ -509,7 +525,7 @@ static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, C
             CPUScheduler__exit(cpu, process),
             success(exited)
             {
-                AtomicMessageQueues__exit(&self->atomic_message_queues, exited);
+                Queues__exit(&self->queues, exited);
                 match_result(
                     Scheduler__shared_pages_exit_locked(self, exited),
                     success(_) { cs_return Success(ProcessPtr, exited); },
@@ -534,6 +550,7 @@ static Result(ProcessPtr) CPUScheduler__park(CPUSchedulerPtr self, ProcessPtr pr
             ParkedOperationPtr parked = ParkedOperation__heap_new_with_context_ownership(
                 kernel_context, kernel_continuation, reason, owns_kernel_context);
             parked->operation_key = *operation_key;
+            CPUUsage__stop(&proc->cpu_usage);
             proc->state = reason == PARK_SLEEP ? PROC_STATE_SLEEPING : PROC_STATE_WAITING;
             __d_printf(SCHEDULER, "CPUScheduler__park - context %i\n", parked);
             match_result(
@@ -742,60 +759,10 @@ ProcessTable Scheduler__process_snapshot(SchedulerPtr self)
     return ProcessTable__new();
 }
 
-static BString ProcessClass__snapshot_name(ProcessClass process_class)
-{
-    switch (process_class)
-    {
-    case PROCESS_CLASS_REALTIME_SERVICE:
-        return bstr("rt-service");
-    case PROCESS_CLASS_SERVICE:
-        return bstr("service");
-    case PROCESS_CLASS_NORMAL:
-    default:
-        return bstr("normal");
-    }
-}
-
-static BString Process__snapshot_user_name(ProcessPtr process)
-{
-    if (process->user_id == PROCESS_USER_ROOT)
-    {
-        return process_user_root;
-    }
-    if (process->user_id == PROCESS_USER_HUND)
-    {
-        return process_user_hund;
-    }
-    if (process->user_id == PROCESS_USER_USER)
-    {
-        return process_user_user;
-    }
-
-    return process_user_unknown;
-}
-
 static ProcessInfo ProcessInfo__from_process_locked(ProcessPtr process)
 {
-    ProcessInfo info = ProcessInfo__new(process->pid);
-    BString state = bstring(ProcessState__to_string(process->state));
-    BString class_name = ProcessClass__snapshot_name(process->process_class);
-    BString user_name = Process__snapshot_user_name(process);
-
-    BString__copy_to(&process->name, info.name, PROCESS_INFO_NAME_SIZE);
-    BString__copy_to(&state, info.state, PROCESS_INFO_STATE_SIZE);
-    BString__copy_to(&bstr("-"), info.wait_reason, PROCESS_INFO_WAIT_SIZE);
-    match_optional(
-        Process__top_park_reason(process),
-        some(reason)
-        {
-            BString wait_reason = ParkReason__to_string(reason);
-            BString__copy_to(&wait_reason, info.wait_reason, PROCESS_INFO_WAIT_SIZE);
-        },
-        none_do_nothing()
-    );
-    BString__copy_to(&class_name, info.class_name, PROCESS_INFO_CLASS_SIZE);
-    BString__copy_to(&user_name, info.user_name, PROCESS_INFO_USER_SIZE);
-    return info;
+    ProcessRecord record = ProcessRecord__new(process, 0);
+    return ProcessRecord__info(&record);
 }
 
 ProcessListResult Scheduler__process_info_snapshot(SchedulerPtr self, ProcessInfoPtr entries, uint64_t max_entries)
@@ -812,6 +779,7 @@ ProcessListResult Scheduler__process_info_snapshot(SchedulerPtr self, ProcessInf
             if (sched->started)
             {
                 entries[written] = ProcessInfo__from_process_locked(sched->idle_process);
+                entries[written].cpu = sched->cpu;
                 written++;
                 if (written >= max_entries)
                 {
@@ -825,6 +793,7 @@ ProcessListResult Scheduler__process_info_snapshot(SchedulerPtr self, ProcessInf
                     cs_return(ProcessListResult) written;
                 }
                 entries[written] = ProcessInfo__from_process_locked(process);
+                entries[written].cpu = sched->cpu;
                 written++;
             });
         });
@@ -898,6 +867,7 @@ static void Scheduler__write_abort_to_stderr(IOSubsystemPtr io_subsystem, Proces
 
 static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, ProcessPtr proc, ReturnCode return_code)
 {
+    Process__quiesce_device(proc);
     match_optional(
         self->kernel,
         some_do_nothing(),
@@ -910,19 +880,6 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
             res,
             success(exited)
             {
-                match_optional(
-                    self->kernel,
-                    some(kernel)
-                    {
-                        match_result(
-                            KernelServiceDirectory__notify_process_exit(&kernel->service_directory, pid, return_code),
-                            success_do_nothing(),
-                            error(code, message) { return Error(ProcessID, message, SCHEDULER_GENERAL_ERROR); }
-                        );
-                    },
-                    none_do_nothing()
-                );
-
                 match_optional(
                     exited->parent,
                     some(parent)
@@ -1059,6 +1016,41 @@ Optional(ProcessPtr) Scheduler__find_process_by_pid(SchedulerPtr self, ProcessID
     critical_section(self->scheduler_lock, { cs_return Scheduler__find_process_by_pid_locked(self, pid); });
 
     return None(ProcessPtr);
+}
+
+Result(ProcessCredentials) Scheduler__process_credentials(SchedulerPtr self, ProcessID pid)
+{
+    critical_section(self->scheduler_lock, {
+        match_optional(
+            Scheduler__find_process_by_pid_locked(self, pid),
+            some(process)
+            {
+                cs_return Success(ProcessCredentials, ProcessCredentials__new(process->user_id, process->group_id));
+            },
+            none_do_nothing()
+        );
+    });
+    return Error(ProcessCredentials, process_not_found, PROCESS_CREDENTIALS_NOT_FOUND);
+}
+
+Result(ServiceCode)
+    Scheduler__require_process_capability(SchedulerPtr self, ProcessID pid, ProcessCapabilities capability)
+{
+    critical_section(self->scheduler_lock, {
+        match_optional(
+            Scheduler__find_process_by_pid_locked(self, pid),
+            some(process)
+            {
+                if (Process__has_capability(process, capability))
+                {
+                    cs_return Success(ServiceCode, SERVICE_OK);
+                }
+                cs_return Error(ServiceCode, process_permission_denied, SERVICE_PERMISSION_DENIED);
+            },
+            none_do_nothing()
+        );
+    });
+    return Error(ServiceCode, process_not_found, SERVICE_PERMISSION_DENIED);
 }
 
 Result(ProcessID) Scheduler__queue_signal(SchedulerPtr self, ProcessID pid, ProcessSignal signal)
@@ -1405,6 +1397,18 @@ Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu)
 bool Scheduler__should_preempt_on_timer(SchedulerPtr self, CPUID cpu)
 {
     critical_section(self->scheduler_lock, {
+        match_optional(
+            CPUSchedulers__at(&self->schedulers, cpu),
+            some(scheduler)
+            {
+                if (scheduler->started && CPU__time_usec() - scheduler->last_registry_sample_usec >=
+                                              PROCESS_CPU_SHORT_TICKS * PROCESS_CPU_TICK_USEC)
+                {
+                    CPUScheduler__publish_processes(scheduler);
+                }
+            },
+            none_do_nothing()
+        );
         match_optional(
             Scheduler__current_process_locked(self, cpu),
             some(process)

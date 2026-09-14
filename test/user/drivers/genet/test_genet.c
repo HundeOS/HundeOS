@@ -105,7 +105,7 @@ void * driver_ptr(ServiceMappedMemoryPtr memory)
 
 IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    TEST_ASSERT_EQUAL_STRING("/proc/sysinfo", BString__cstr(path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), *path);
     TEST_ASSERT_EQUAL_INT(IO_OPEN_READ, flags);
     fake_sysinfo_opened = true;
     return 3;
@@ -202,7 +202,7 @@ void test_genet_main_maps_supported_pi4_mac_and_publishes_ready(void)
     TEST_ASSERT_TRUE(fake_sysinfo_closed);
     TEST_ASSERT_TRUE(fake_mapped_mmio);
     TEST_ASSERT_TRUE(fake_ready_published);
-    TEST_ASSERT_EQUAL_STRING(GENET_READY_PATH, BString__cstr(&fake_ready_path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr(GENET_READY_PATH), fake_ready_path);
 }
 
 void test_genet_main_rejects_non_genet_config(void)

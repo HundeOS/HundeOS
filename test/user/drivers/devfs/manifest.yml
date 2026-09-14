@@ -1,0 +1,6 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - user/drivers/devfs/devfs.c
+    - user/lib/io/filesystem_driver.c

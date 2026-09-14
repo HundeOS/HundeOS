@@ -14,23 +14,23 @@
 
 typedef struct TestTransport
 {
-    AtomicMessageQueueIdentity identity;
-    AtomicMessageQueuePage client;
-    AtomicMessageQueuePage server;
+    QueueIdentity identity;
+    QueuePage client;
+    QueuePage server;
     bool client_closed;
     bool server_closed;
 } TestTransport;
 
-static TestTransport transports[ATOMIC_MESSAGE_QUEUE_LIMIT];
-static ChannelPayload payloads[ATOMIC_MESSAGE_QUEUE_LIMIT];
-static bool pages_live[ATOMIC_MESSAGE_QUEUE_LIMIT];
-static AtomicMessageQueueArrivals warden_arrivals;
-static AtomicMessageQueueArrivals echo_arrivals;
-static ChannelExchanges exchanges;
+static TestTransport transports[QUEUE_LIMIT];
+static ChannelPayload payloads[QUEUE_LIMIT];
+static bool pages_live[QUEUE_LIMIT];
+static QueueArrivals warden_arrivals;
+static QueueArrivals echo_arrivals;
+static ChannelSessions exchanges;
 static EchoConnections echoes;
 static ServiceDirectory directory;
-static AtomicMessageQueueParticipantID current_pid;
-static AtomicMessageQueueHandleGeneration next_generation;
+static QueueParticipantID current_pid;
+static QueueHandleGeneration next_generation;
 static uint64_t allocated_pages;
 static uint64_t released_pages;
 static uint64_t last_allocated_client;
@@ -38,14 +38,16 @@ static uint64_t waits;
 static bool fail_allocation;
 static bool fail_release;
 static bool run_echo;
+static void (*fixture_server_step)(void);
+static bool fixture_listener_available;
 static char output[4096];
 static size_t output_length;
 
-static void ChannelFixture__push(AtomicMessageQueuePtr queue, ConstServiceQueueMessagePtr message)
+static void ChannelFixture__push(QueuePtr queue, ConstQueueMessagePtr message)
 {
     match_result(
-        AtomicMessageQueue__push(queue, message),
-        success(status) { TEST_ASSERT_EQUAL(ATOMIC_MESSAGE_QUEUE_OK, status); },
+        Queue__push(queue, message),
+        success(status) { TEST_ASSERT_EQUAL(QUEUE_OK, status); },
         error_test_fail()
     );
 }
@@ -55,19 +57,19 @@ static void ChannelFixture__reset(void)
     memset(transports, 0, sizeof(transports));
     memset(payloads, 0, sizeof(payloads));
     memset(pages_live, 0, sizeof(pages_live));
-    warden_arrivals = (AtomicMessageQueueArrivals){.endpoint = 16};
-    echo_arrivals = (AtomicMessageQueueArrivals){.endpoint = 33};
-    exchanges = ChannelExchanges__new();
+    warden_arrivals = (QueueArrivals){.endpoint = 16};
+    echo_arrivals = (QueueArrivals){.endpoint = 33};
+    exchanges = ChannelSessions__new();
     echoes = EchoConnections__new();
     directory = (ServiceDirectory){0};
     directory.entries[0].present = 1;
     directory.entries[0].service_pid = 7;
     directory.entries[0].generation = warden_arrivals.endpoint;
-    ServiceDirectoryName__copy_from_bstring(&directory.entries[0].name, &bstr("hundekanal-warter"));
+    directory.entries[0].name = bstr("hundekanal-warter");
     directory.entries[1].present = 1;
     directory.entries[1].service_pid = 8;
     directory.entries[1].generation = echo_arrivals.endpoint;
-    ServiceDirectoryName__copy_from_bstring(&directory.entries[1].name, &bstr("hundekanal-test-echo"));
+    directory.entries[1].name = bstr("hundekanal-test-echo");
     current_pid = 42;
     next_generation = 4;
     allocated_pages = 0;
@@ -77,6 +79,8 @@ static void ChannelFixture__reset(void)
     fail_allocation = false;
     fail_release = false;
     run_echo = true;
+    fixture_server_step = NULL;
+    fixture_listener_available = false;
     output_length = 0;
     output[0] = '\0';
 }
@@ -85,10 +89,10 @@ uint64_t process_current_pid(void)
 {
     return current_pid;
 }
-void ChannelExchange__prepare_wait(void)
+void Queue__prepare_wait(void)
 {
 }
-void ChannelExchange__wait_event(void)
+void Queue__wait_event(void)
 {
 }
 void IO__print(ConstBStringPtr str)
@@ -113,15 +117,19 @@ ServiceCode service_publish_ready(ConstBStringPtr name)
     return SERVICE_OK;
 }
 
-Result(AtomicMessageQueueArrivalsPtr) atomic_message_queue_listen(ConstBStringPtr name)
+Result(QueueArrivalsPtr) Queue__listen(ConstBStringPtr name)
 {
-    return Error(AtomicMessageQueueArrivalsPtr, bstr("Already listening"), ATOMIC_MESSAGE_QUEUE_OCCUPIED);
+    if (fixture_listener_available && BString__equals(name, &directory.entries[1].name))
+    {
+        return Success(QueueArrivalsPtr, &echo_arrivals);
+    }
+    return Error(QueueArrivalsPtr, bstr("Already listening"), QUEUE_OCCUPIED);
 }
 
-Result(AtomicMessageQueue) atomic_message_queue_connect(AtomicMessageQueueEndpointID endpoint)
+Result(Queue) Queue__connect(QueueEndpointID endpoint)
 {
-    AtomicMessageQueueArrivalsPtr arrivals = &warden_arrivals;
-    AtomicMessageQueueParticipantID server = 7;
+    QueueArrivalsPtr arrivals = &warden_arrivals;
+    QueueParticipantID server = 7;
     if (endpoint == echo_arrivals.endpoint)
     {
         arrivals = &echo_arrivals;
@@ -129,9 +137,9 @@ Result(AtomicMessageQueue) atomic_message_queue_connect(AtomicMessageQueueEndpoi
     }
     else if (endpoint != warden_arrivals.endpoint)
     {
-        return Error(AtomicMessageQueue, bstr("Stale endpoint"), ATOMIC_MESSAGE_QUEUE_INVALID);
+        return Error(Queue, bstr("Stale endpoint"), QUEUE_INVALID);
     }
-    for (uint64_t index = 0; index < ATOMIC_MESSAGE_QUEUE_LIMIT; index++)
+    for (uint64_t index = 0; index < QUEUE_LIMIT; index++)
     {
         TestTransport * transport = &transports[index];
         if (transport->identity.connection != 0 && !(transport->client_closed && transport->server_closed))
@@ -139,41 +147,39 @@ Result(AtomicMessageQueue) atomic_message_queue_connect(AtomicMessageQueueEndpoi
             continue;
         }
         *transport = (TestTransport){0};
-        transport->identity =
-            (AtomicMessageQueueIdentity){.connection = ++next_generation * ATOMIC_MESSAGE_QUEUE_LIMIT + index,
-                                         .endpoint = endpoint,
-                                         .client_pid = current_pid,
-                                         .server_pid = server};
-        match_result(
-            AtomicMessageQueueConnectionSlots__set(&arrivals->connections, index, transport->identity.connection),
-            success_do_nothing(),
+        transport->identity = (QueueIdentity){.connection = ++next_generation * QUEUE_LIMIT + index,
+                                              .endpoint = endpoint,
+                                              .client_pid = current_pid,
+                                              .server_pid = server};
+        match_result(QueueConnectionSlots__set(&arrivals->connections, index, transport->identity.connection),
+                     success_do_nothing(),
             error_test_fail()
         );
         arrivals->epoch++;
-        return AtomicMessageQueue__attach(&transport->identity, &transport->client, &transport->server,
-                                          transport->identity.connection, current_pid);
+        return Queue__attach(&transport->identity, &transport->client, &transport->server,
+                             transport->identity.connection, current_pid);
     }
-    return Error(AtomicMessageQueue, bstr("Full"), ATOMIC_MESSAGE_QUEUE_FULL);
+    return Error(Queue, bstr("Full"), QUEUE_FULL);
 }
 
-Result(AtomicMessageQueue) atomic_message_queue_accept(AtomicMessageQueueConnectionID id)
+Result(Queue) Queue__accept(QueueConnectionID id)
 {
-    TestTransport * transport = &transports[id % ATOMIC_MESSAGE_QUEUE_LIMIT];
+    TestTransport * transport = &transports[id % QUEUE_LIMIT];
     if (transport->identity.connection != id || transport->identity.server_pid != current_pid)
     {
-        return Error(AtomicMessageQueue, bstr("Denied"), ATOMIC_MESSAGE_QUEUE_DENIED);
+        return Error(Queue, bstr("Denied"), QUEUE_DENIED);
     }
     if (transport->identity.closed)
     {
-        return Error(AtomicMessageQueue, bstr("Closed"), ATOMIC_MESSAGE_QUEUE_CLOSED);
+        return Error(Queue, bstr("Closed"), QUEUE_CLOSED);
     }
     transport->identity.accepted = 1;
-    return AtomicMessageQueue__attach(&transport->identity, &transport->client, &transport->server, id, current_pid);
+    return Queue__attach(&transport->identity, &transport->client, &transport->server, id, current_pid);
 }
 
-AtomicMessageQueueCode atomic_message_queue_close(AtomicMessageQueueConnectionID id)
+QueueCode QueueConnection__close(QueueConnectionID id)
 {
-    TestTransport * transport = &transports[id % ATOMIC_MESSAGE_QUEUE_LIMIT];
+    TestTransport * transport = &transports[id % QUEUE_LIMIT];
     TEST_ASSERT_EQUAL_UINT64(id, transport->identity.connection);
     transport->identity.closed = 1;
     if (current_pid == transport->identity.client_pid)
@@ -184,13 +190,13 @@ AtomicMessageQueueCode atomic_message_queue_close(AtomicMessageQueueConnectionID
     {
         TEST_ASSERT_EQUAL_UINT64(current_pid, transport->identity.server_pid);
         transport->server_closed = true;
-        AtomicMessageQueueArrivalsPtr arrivals = current_pid == 7 ? &warden_arrivals : &echo_arrivals;
-        match_result(AtomicMessageQueueConnectionSlots__set(&arrivals->connections, id % ATOMIC_MESSAGE_QUEUE_LIMIT, 0),
-                     success_do_nothing(),
-            error_test_fail()
+        QueueArrivalsPtr arrivals = current_pid == 7 ? &warden_arrivals : &echo_arrivals;
+        match_result(QueueConnectionSlots__set(&arrivals->connections, id % QUEUE_LIMIT, 0),
+            success_do_nothing(),
+                     error_test_fail()
         );
     }
-    return ATOMIC_MESSAGE_QUEUE_OK;
+    return QUEUE_OK;
 }
 
 Result(Anything) mem_alloc_shared_page(uint64_t first_peer, uint64_t second_peer)
@@ -202,7 +208,7 @@ Result(Anything) mem_alloc_shared_page(uint64_t first_peer, uint64_t second_peer
     {
         return Error(Anything, bstr("Allocation failed"), MEM_ALLOCATION_FAILED);
     }
-    for (uint64_t index = 0; index < ATOMIC_MESSAGE_QUEUE_LIMIT; index++)
+    for (uint64_t index = 0; index < QUEUE_LIMIT; index++)
     {
         if (pages_live[index])
         {
@@ -223,7 +229,7 @@ MemStatus mem_release_shared_page(uint64_t address)
     {
         return MEM_FREE_FAILED;
     }
-    for (uint64_t index = 0; index < ATOMIC_MESSAGE_QUEUE_LIMIT; index++)
+    for (uint64_t index = 0; index < QUEUE_LIMIT; index++)
     {
         if (address != (uint64_t)&payloads[index])
         {
@@ -243,54 +249,60 @@ static void ChannelFixture__pump(void)
 {
     uint64_t caller = current_pid;
     current_pid = 7;
-    ChannelExchanges__step(&exchanges, &warden_arrivals);
+    ChannelSessions__step(&exchanges, &warden_arrivals);
     if (run_echo)
     {
         current_pid = 8;
-        EchoConnections__step(&echoes, &echo_arrivals, 7);
+        if (fixture_server_step != NULL)
+        {
+            fixture_server_step();
+        }
+        else
+        {
+            EchoConnections__step(&echoes, &echo_arrivals, 7);
+        }
     }
     current_pid = caller;
 }
 
-void atomic_message_queue_wait_writable(AtomicMessageQueuePtr queue)
+void Queue__wait_writable(QueuePtr queue)
 {
-    while (AtomicMessageQueue__status(queue) == ATOMIC_MESSAGE_QUEUE_PENDING)
+    while (Queue__status(queue) == QUEUE_PENDING)
     {
         TEST_ASSERT_LESS_THAN_UINT64(1000, ++waits);
         ChannelFixture__pump();
     }
 }
-void atomic_message_queue_wait_readable(AtomicMessageQueuePtr queue)
+void Queue__wait_readable(QueuePtr queue)
 {
-    while (AtomicMessageQueue__status(queue) != ATOMIC_MESSAGE_QUEUE_CLOSED && queue->incoming->produced == queue->read)
+    while (Queue__status(queue) != QUEUE_CLOSED && queue->incoming->produced == queue->read)
     {
         TEST_ASSERT_LESS_THAN_UINT64(1000, ++waits);
         ChannelFixture__pump();
     }
 }
 
-static AtomicMessageQueue ChannelFixture__client(void)
+static Queue ChannelFixture__client(void)
 {
-    Result(AtomicMessageQueue) result = atomic_message_queue_connect(warden_arrivals.endpoint);
-    AtomicMessageQueue queue = unwrap_result(result, (AtomicMessageQueue){0});
-    atomic_message_queue_wait_writable(&queue);
+    Result(Queue) result = Queue__connect(warden_arrivals.endpoint);
+    Queue queue = unwrap_result(result, (Queue){0});
+    Queue__wait_writable(&queue);
     return queue;
 }
 
-static ServiceQueueMessage ChannelFixture__receive(AtomicMessageQueuePtr queue)
+static QueueMessage ChannelFixture__receive(QueuePtr queue)
 {
-    atomic_message_queue_wait_readable(queue);
-    match_result(AtomicMessageQueue__pop(queue),
+    Queue__wait_readable(queue);
+    match_result(Queue__pop(queue),
         success(message) { return message; },
         error_test_fail()
     );
-    return (ServiceQueueMessage){0};
+    return (QueueMessage){0};
 }
 
-static ServiceQueueMessage ChannelFixture__open(AtomicMessageQueuePtr queue)
+static QueueMessage ChannelFixture__open(QueuePtr queue)
 {
-    ServiceQueueMessage open =
-        ChannelExchange__message(CHANNEL_REQUEST_OPEN, echo_arrivals.endpoint, 0, queue->connection);
+    QueueMessage open = ChannelControlMessage__new(CHANNEL_REQUEST_OPEN, echo_arrivals.endpoint, 0, queue->connection);
     open.sender_pid = 9999;
     ChannelFixture__push(queue, &open);
     return ChannelFixture__receive(queue);
@@ -304,9 +316,9 @@ static void ChannelFixture__drain(void)
     }
 }
 
-Channel Channel__new(ChannelStatePtr state)
+ChannelSignal ChannelSignal__new(ChannelSignalStatePtr state)
 {
-    return (Channel){.state = state};
+    return (ChannelSignal){.state = state};
 }
 FiberScheduler FiberScheduler__new(void)
 {
@@ -320,13 +332,14 @@ Result(FiberCode) FiberScheduler__run_ready_until_blocked(FiberSchedulerPtr self
 {
     return Success(FiberCode, FIBER_OK);
 }
-Result(FiberCode) FiberScheduler__await_channel(FiberSchedulerPtr self, ChannelPtr channel)
+Result(FiberCode) FiberScheduler__await_channel_signal(FiberSchedulerPtr self, ChannelSignalPtr channel)
 {
     return Success(FiberCode, FIBER_OK);
 }
-Result(FiberCode) FiberScheduler__wake_channel(FiberSchedulerPtr self, ChannelPtr channel)
+Result(FiberCode) FiberScheduler__wake_channel_signal(FiberSchedulerPtr self, ChannelSignalPtr channel)
 {
     return Success(FiberCode, FIBER_OK);
 }
 
 #endif
+#include "services/service_directory.h"

@@ -212,7 +212,7 @@ SpawnResult spawn_as(SpawnMode mode, UserID requested_user_id, ConstBStringPtr p
 
 IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    if (strings_equal(BString__cstr(path), "/proc/sysinfo"))
+    if (strings_equal(BString__cstr(path), "/boot/sysinfo"))
     {
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
         fake_sysinfo_opened = true;
@@ -232,17 +232,17 @@ IOHandle open(ConstBStringPtr path, Flags flags)
 
     if (fake_open_count == 0)
     {
-        TEST_ASSERT_EQUAL_STRING(fake_expect_keyboard_input ? ":keyboard:" : ":tty:", BString__cstr(path));
+        TEST_ASSERT_EQUAL_BSTRING(fake_expect_keyboard_input ? bstr(":keyboard:") : bstr(":tty:"), *path);
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
     }
     else if (fake_open_count == 1)
     {
-        TEST_ASSERT_EQUAL_STRING(":console:", BString__cstr(path));
+        TEST_ASSERT_EQUAL_BSTRING(bstr(":console:"), *path);
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE, flags);
     }
     else
     {
-        TEST_ASSERT_EQUAL_STRING(":console:", BString__cstr(path));
+        TEST_ASSERT_EQUAL_BSTRING(bstr(":console:"), *path);
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE, flags);
     }
 

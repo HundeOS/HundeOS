@@ -17,6 +17,7 @@
 #include "process_class.h"
 #include "service/service.h"
 #include "scheduler/types.h"
+#include "scheduler/cpu_usage.h"
 
 OptionalDef(UserAddress);
 
@@ -31,7 +32,7 @@ ResultDef(ParkedOperationPtr);
 LinkedListDefine(ParkedOperationPtr, ParkedOperations, &Ptr__equals);
 
 typedef uint64_t ProcessID;
-typedef uint64_t ProcessState;
+#include "../common/process/process_types.h"
 typedef uint64_t Tick;
 
 OptionalDef(ProcessID);
@@ -41,23 +42,6 @@ OptionalDef(ProcessChildEvent);
 ResultDef(ProcessChildEvent);
 OptionalDef(UserID);
 OptionalDef(GroupID);
-
-// state bits
-// 6    5      4     3    2         1     0
-// dead stop active sleep wait interrupt ready
-//
-typedef enum ProcessStates
-{
-    PROC_STATE_NEW = 0b0000000,               // Being created
-    PROC_STATE_READY = 0b0000001,             // Ready to run
-    PROC_STATE_RUNNING = 0b0010000,           // Currently executing
-    PROC_STATE_INTERRUPTED = 0b0000010,       // Interrupted by signal
-    PROC_STATE_WAITING = 0b0000100,           // Waiting for I/O or event
-    PROC_STATE_SLEEPING = 0b0001000,          // Sleeping (timed wait)
-    PROC_STATE_STOPPED = 0b0100000,           // Stopped (e.g., by signal)
-    PROC_STATE_DEAD = 0b1000000,              // Being destroyed
-    PROC_STATE_SWITCHING_CONTEXT = 0b0100100, // Switching context
-} ProcessStates;
 
 typedef enum ProcessErrors
 {
@@ -108,33 +92,6 @@ bool ProcessChildEvent__equals(ProcessChildEventPtr self, ProcessChildEventPtr o
 #define MAX_PROCESS_CHILD_EVENTS 64
 FixedArrayDefine(ProcessChildEvent, MAX_PROCESS_CHILD_EVENTS, ProcessChildEvents,
                  (EqualFunction)ProcessChildEvent__equals);
-
-inline const char * ProcessState__to_string(ProcessState state)
-{
-    switch (state)
-    {
-    case PROC_STATE_NEW:
-        return "PROC_STATE_NEW";
-    case PROC_STATE_READY:
-        return "PROC_STATE_READY";
-    case PROC_STATE_RUNNING:
-        return "PROC_STATE_RUNNING";
-    case PROC_STATE_INTERRUPTED:
-        return "PROC_STATE_INTERRUPTED";
-    case PROC_STATE_WAITING:
-        return "PROC_STATE_WAITING";
-    case PROC_STATE_SLEEPING:
-        return "PROC_STATE_SLEEPING";
-    case PROC_STATE_STOPPED:
-        return "PROC_STATE_STOPPED";
-    case PROC_STATE_DEAD:
-        return "PROC_STATE_DEAD";
-    case PROC_STATE_SWITCHING_CONTEXT:
-        return "PROC_STATE_SWITCHING_CONTEXT";
-    default:
-        return "UNKNOWN";
-    }
-}
 
 typedef enum ProcessSetupStatus
 {
@@ -229,11 +186,13 @@ typedef struct Process
     ProcessState state;
     UserAddress entry_point;
     Tick last_tick;
+    CPUUsage cpu_usage;
     BString name;
     Address heap_break;
     Address heap_mapped_end;
     Address allocation_next;
     UserAllocations user_allocations;
+    Optional(UserAddress) virtio_device;
     ProcessFileDescriptors file_descriptors;
     FileDescriptor next_file_descriptor;
     Optional(ProcessAbort) abort;
@@ -290,6 +249,8 @@ Result(KAllocCode) Process__dispose_page_table(ProcessPtr self);
 Result(ProcessMemoryCode)
     Process__record_user_allocation(ProcessPtr self, UserAddress address, size_t size, UserAllocationType type);
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address);
+Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address mapping);
+void Process__quiesce_device(ProcessPtr self);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
 Result(UserAddress)
     Process__map_shared_user_pages(ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size);

@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "../../user.h"
-#include "../channel/channel.h"
+#include "../channel/signal.h"
 #include "../../../common/types/address.h"
 #include "../../../common/types/result.h"
 #include "../../../common/types/optional.h"
@@ -85,7 +85,7 @@ FiberWaitKey FiberWaitKey__new(FiberWaitKind kind, uint64_t id);
 FiberWaitKey FiberWaitKey__none(void);
 FiberWaitKey FiberWaitKey__request(uint64_t request_id);
 FiberWaitKey FiberWaitKey__block_request(uint64_t request_id);
-FiberWaitKey FiberWaitKey__channel(ChannelPtr channel);
+FiberWaitKey FiberWaitKey__channel_signal(ChannelSignalPtr channel);
 bool FiberWaitKey__equals(FiberWaitKeyPtr self, FiberWaitKeyPtr other);
 
 FiberWakeValue FiberWakeValue__new(ConstFiberWaitKeyPtr key, FiberCode status, uint64_t value);

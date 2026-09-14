@@ -12,6 +12,9 @@
 #include "system_info.h"
 #include "syscall/auth.h"
 #include "service/service_directory.h"
+#include "service/device_registry.h"
+#include "memory_accounting.h"
+#include "service/process_registry.h"
 
 typedef uint64_t KernelInitStatus;
 
@@ -28,6 +31,9 @@ typedef struct Kernel
     MessageBrokerPtr message_broker;
     IRQDispatcherPtr irq_dispatcher;
     KernelServiceDirectory service_directory;
+    KernelDeviceRegistry device_registry;
+    KernelProcessRegistry process_registry;
+    MemoryAccounting memory_accounting;
     Auth auth;
 } Kernel;
 

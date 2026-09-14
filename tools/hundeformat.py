@@ -20,10 +20,10 @@ MATCH_MACROS = {
 }
 
 
-def source_paths():
+def source_paths(root):
     for directory in SOURCE_ROOTS:
-        for path in sorted((ROOT / directory).rglob("*")):
-            relative = path.relative_to(ROOT)
+        for path in sorted((root / directory).rglob("*")):
+            relative = path.relative_to(root)
             if path.suffix not in {".c", ".h"} or not path.is_file():
                 continue
             if "build" in relative.parts or relative.is_relative_to("user/lib/newlib"):
@@ -107,7 +107,7 @@ def main():
         parser.error("provide a clang-format command after --")
     changed = 0
     count = 0
-    for path in source_paths():
+    for path in source_paths(ROOT):
         original = path.read_text()
         formatted = format_source(original, path, command)
         count += 1

@@ -112,3 +112,26 @@ void test_atomic_fixed_array_supports_a_different_scalar_width_and_const_reads(v
         none_test_fail()
     );
 }
+
+void test_atomic_fixed_array_take_returns_and_clears_one_slot(void)
+{
+    AtomicTestSlots slots = AtomicTestSlots__new();
+    match_result(AtomicTestSlots__set(&slots, 2, 73),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_optional(
+        AtomicTestSlots__take(&slots, 2),
+        some(value) { TEST_ASSERT_EQUAL_UINT64(73, value); },
+        none_test_fail()
+    );
+    match_optional(
+        AtomicTestSlots__at(&slots, 2),
+        some(value) { TEST_ASSERT_EQUAL_UINT64(0, value); },
+        none_test_fail()
+    );
+    match_optional(AtomicTestSlots__take(&slots, 4),
+        some_test_fail(),
+        none_do_nothing()
+    );
+}

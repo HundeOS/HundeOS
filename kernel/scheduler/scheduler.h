@@ -13,7 +13,7 @@
 #include "../process.h"
 #include "../system_info.h"
 #include "../service/event_dispatcher.h"
-#include "../service/atomic_message_queue.h"
+#include "../ipc/queues.h"
 #include "subsystems/message/message_broker.h"
 #include "syscalls/service.h"
 #include "syscalls/mem.h"
@@ -45,6 +45,7 @@ typedef struct CPUScheduler
     Tick last_tick;
     CPUID cpu;
     bool started;
+    uint64_t last_registry_sample_usec;
 } CPUScheduler;
 
 typedef CPUScheduler * CPUSchedulerPtr;
@@ -77,7 +78,7 @@ typedef struct Scheduler
     CPUSchedulers schedulers;
     ServiceEventDispatcher service_event_dispatcher;
     ManagedSharedPages shared_pages;
-    AtomicMessageQueues atomic_message_queues;
+    Queues queues;
     mutex_t scheduler_lock;
     bool ready;
 } Scheduler;
@@ -125,13 +126,15 @@ Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);
 bool Scheduler__should_preempt_on_timer(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__find_process_by_pid(SchedulerPtr self, ProcessID pid);
+Result(ProcessCredentials) Scheduler__process_credentials(SchedulerPtr self, ProcessID pid);
+Result(ServiceCode)
+    Scheduler__require_process_capability(SchedulerPtr self, ProcessID pid, ProcessCapabilities capability);
 Result(ProcessID) Scheduler__queue_signal(SchedulerPtr self, ProcessID pid, ProcessSignal signal);
 Result(Address)
     Scheduler__alloc_shared_page(SchedulerPtr self, ProcessPtr owner, ProcessID first_peer, ProcessID second_peer);
 Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr owner, Address address);
 Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name, size_t length);
-Result(Address)
-    Scheduler__atomic_message_queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id);
+Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id);
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
 ProcessTable Scheduler__all_processes_for_all_cpus(SchedulerPtr self);
 ProcessTable Scheduler__process_snapshot(SchedulerPtr self);
@@ -180,8 +183,8 @@ bool Scheduler__parked_operation_is_ready(SchedulerPtr self, ParkedOperationPtr 
     {                                                                                                                  \
         .kernel = None(KernelPtr), .message_broker = broker, .interrupt_controller = None(InterruptControllerInfo),    \
         .schedulers = EmptyArray(CPUSchedulers), .service_event_dispatcher = NEW_SERVICE_EVENT_DISPATCHER,             \
-        .shared_pages = EmptyArray(ManagedSharedPages), .atomic_message_queues = ATOMIC_MESSAGE_QUEUES_INIT,           \
-        .scheduler_lock = MUTEX_INIT, .ready = false,                                                                  \
+        .shared_pages = EmptyArray(ManagedSharedPages), .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT,           \
+        .ready = false,                                                                                                \
     }
 
 #endif

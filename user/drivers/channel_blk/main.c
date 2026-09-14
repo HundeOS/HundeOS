@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "channel/channel.h"
+#include "channel/signal.h"
 #include "sys/debug.h"
 #include "sys/service.h"
 #include "types/fixed_array.h"
@@ -16,30 +16,30 @@
 #define CHANNEL_BLK_BLOCK_COUNT 8ULL
 #define CHANNEL_BLK_STORAGE_SIZE (CHANNEL_BLK_BLOCK_SIZE * CHANNEL_BLK_BLOCK_COUNT)
 
-typedef struct ChannelBlkOpenChannel
+typedef struct ChannelBlkConnection
 {
-    uint64_t channel_id;
-    BlockChannelMemoryPtr memory;
-} ChannelBlkOpenChannel;
+    BlockConnectionID connection_id;
+    BlockProtocolMemoryPtr memory;
+} ChannelBlkConnection;
 
-typedef ChannelBlkOpenChannel * ChannelBlkOpenChannelPtr;
+typedef ChannelBlkConnection * ChannelBlkConnectionPtr;
 
-OptionalDef(ChannelBlkOpenChannel);
+OptionalDef(ChannelBlkConnection);
 
-static bool ChannelBlkOpenChannel__equals(ChannelBlkOpenChannelPtr self, ChannelBlkOpenChannelPtr other)
+static bool ChannelBlkConnection__equals(ChannelBlkConnectionPtr self, ChannelBlkConnectionPtr other)
 {
-    return self->channel_id == other->channel_id;
+    return self->connection_id == other->connection_id;
 }
 
-FixedArrayDefine(ChannelBlkOpenChannel, BLOCK_CHANNEL_REQUEST_CAPACITY, ChannelBlkOpenChannels,
-                 (EqualFunction)ChannelBlkOpenChannel__equals);
-FixedArrayBodyDefine(ChannelBlkOpenChannels);
+FixedArrayDefine(ChannelBlkConnection, BLOCK_PROTOCOL_REQUEST_CAPACITY, ChannelBlkConnections,
+                 (EqualFunction)ChannelBlkConnection__equals);
+FixedArrayBodyDefine(ChannelBlkConnections);
 
 typedef struct ChannelBlk
 {
     BString path;
     uint8_t storage[CHANNEL_BLK_STORAGE_SIZE];
-    ChannelBlkOpenChannels channels;
+    ChannelBlkConnections connections;
 } ChannelBlk;
 
 typedef ChannelBlk * ChannelBlkPtr;
@@ -48,127 +48,119 @@ static ChannelBlk ChannelBlk__new(ConstBStringPtr path)
 {
     return (ChannelBlk){
         .path = *path,
-        .channels = ChannelBlkOpenChannels__new(),
+        .connections = ChannelBlkConnections__new(),
     };
 }
 
-static ChannelBlkOpenChannel ChannelBlkOpenChannel__new(uint64_t channel_id, BlockChannelMemoryPtr memory)
+static ChannelBlkConnection ChannelBlkConnection__new(BlockConnectionID connection_id, BlockProtocolMemoryPtr memory)
 {
-    return (ChannelBlkOpenChannel){
-        .channel_id = channel_id,
+    return (ChannelBlkConnection){
+        .connection_id = connection_id,
         .memory = memory,
     };
 }
 
-static void ChannelBlk__copy(uint8_t * target, uint8_t * source, size_t byte_count)
-{
-    for (size_t i = 0; i < byte_count; i++)
-    {
-        target[i] = source[i];
-    }
-}
-
-static BlockChannelResponse ChannelBlk__handle_request(ChannelBlkPtr self, BlockChannelRequestPtr request,
-                                                       uint8_t * channel_data)
+static BlockProtocolResponse ChannelBlk__handle_request(ChannelBlkPtr self, BlockProtocolRequestPtr request,
+                                                        BlockProtocolMemoryPtr memory)
 {
     size_t byte_count = request->block_count * CHANNEL_BLK_BLOCK_SIZE;
     size_t storage_offset = request->block * CHANNEL_BLK_BLOCK_SIZE;
-    BlockChannelStatus status = BLOCK_CHANNEL_OK;
+    BlockProtocolStatus status = BLOCK_PROTOCOL_OK;
     uint64_t completed_blocks = request->block_count;
 
     if (request->block + request->block_count > CHANNEL_BLK_BLOCK_COUNT ||
-        request->data_offset + byte_count > BLOCK_CHANNEL_DATA_SIZE || request->byte_count < byte_count)
+        request->data_offset + byte_count > BLOCK_PROTOCOL_DATA_SIZE || request->byte_count < byte_count)
     {
-        status = BLOCK_CHANNEL_INVALID_ARGUMENT;
+        status = BLOCK_PROTOCOL_INVALID_ARGUMENT;
         completed_blocks = 0;
     }
-    else if (request->operation == BLOCK_CHANNEL_READ)
+    else if (request->operation == BLOCK_PROTOCOL_READ)
     {
-        ChannelBlk__copy(channel_data + request->data_offset, self->storage + storage_offset, byte_count);
+        BlockProtocolMemory__write_data(memory, request->data_offset, self->storage + storage_offset, byte_count);
     }
-    else if (request->operation == BLOCK_CHANNEL_WRITE)
+    else if (request->operation == BLOCK_PROTOCOL_WRITE)
     {
-        ChannelBlk__copy(self->storage + storage_offset, channel_data + request->data_offset, byte_count);
+        BlockProtocolMemory__read_data(memory, request->data_offset, self->storage + storage_offset, byte_count);
     }
     else
     {
-        status = BLOCK_CHANNEL_INVALID_ARGUMENT;
+        status = BLOCK_PROTOCOL_INVALID_ARGUMENT;
         completed_blocks = 0;
     }
 
-    return BlockChannelResponse__new(request->request_id, status, completed_blocks, request->data_offset, byte_count);
+    return BlockProtocolResponse__new(request->request_id, status, completed_blocks, request->data_offset, byte_count);
 }
 
-static void ChannelBlk__process_channel(ChannelBlkPtr self, BlockChannelMemoryPtr memory)
+static void ChannelBlk__process_protocol(ChannelBlkPtr self, BlockProtocolMemoryPtr memory)
 {
-    BlockChannelRequest request;
-    while (BlockChannelRequestRing__pop(&memory->requests, &memory->state, &request) == BLOCK_CHANNEL_OK)
+    BlockProtocolRequest request;
+    while (BlockProtocolMemory__pop_request(memory, &request) == BLOCK_PROTOCOL_OK)
     {
-        BlockChannelResponse response = ChannelBlk__handle_request(self, &request, memory->data);
+        BlockProtocolResponse response = ChannelBlk__handle_request(self, &request, memory);
         response.data_offset = request.data_offset;
-        BlockChannelResponseRing__push(&memory->responses, &memory->state, &response);
-        Channel channel = Channel__new(&memory->state.channel);
-        Channel__notify_data(&channel);
+        BlockProtocolMemory__push_response(memory, &response);
+        ChannelSignal signal = ChannelSignal__new(BlockProtocolMemory__channel_state(memory));
+        ChannelSignal__notify_data(&signal);
     }
 }
 
-static void ChannelBlk__run_channel(ChannelBlkPtr self, BlockChannelMemoryPtr memory)
+static void ChannelBlk__run_connection(ChannelBlkPtr self, BlockProtocolMemoryPtr memory)
 {
-    Channel channel = Channel__new(&memory->state.channel);
-    while (!BlockChannelState__closed(&memory->state))
+    ChannelSignal signal = ChannelSignal__new(BlockProtocolMemory__channel_state(memory));
+    while (!BlockProtocolMemory__closed(memory))
     {
-        uint64_t observed_epoch = Channel__data_epoch(&channel);
-        ChannelBlk__process_channel(self, memory);
-        if (BlockChannelRequestRing__empty(&memory->requests) && !BlockChannelState__closed(&memory->state))
+        uint64_t observed_epoch = ChannelSignal__data_epoch(&signal);
+        ChannelBlk__process_protocol(self, memory);
+        if (BlockProtocolMemory__requests_empty(memory) && !BlockProtocolMemory__closed(memory))
         {
-            Channel__wait_for_data_change(&channel, observed_epoch);
+            ChannelSignal__wait_for_data_change(&signal, observed_epoch);
         }
     }
-    if (BlockChannelState__consumer_closed(&memory->state))
+    if (BlockProtocolMemory__consumer_closed(memory))
     {
-        BlockChannelState__ack_consumer_close(&memory->state);
+        BlockProtocolMemory__ack_consumer_close(memory);
     }
 }
 
-static void ChannelBlk__open_channel(ChannelBlkPtr self, ServiceEventPtr event)
+static void ChannelBlk__open_connection(ChannelBlkPtr self, ServiceEventPtr event)
 {
-    BlockChannelMemoryPtr memory = (BlockChannelMemoryPtr)event->data;
-    ChannelBlkOpenChannel channel = ChannelBlkOpenChannel__new(event->source, memory);
-    ChannelBlkOpenChannels__push(&self->channels, channel);
-    ChannelBlk__run_channel(self, memory);
+    BlockProtocolMemoryPtr memory = (BlockProtocolMemoryPtr)event->data;
+    ChannelBlkConnection connection = ChannelBlkConnection__new(event->source, memory);
+    ChannelBlkConnections__push(&self->connections, connection);
+    ChannelBlk__run_connection(self, memory);
 }
 
-static bool ChannelBlkOpenChannel__id_matches(ChannelBlkOpenChannelPtr self, void * context)
+static bool ChannelBlkConnection__id_matches(ChannelBlkConnectionPtr self, void * context)
 {
-    uint64_t channel_id = *(uint64_t *)context;
-    return self->channel_id == channel_id;
+    BlockConnectionID connection_id = *(BlockConnectionID *)context;
+    return self->connection_id == connection_id;
 }
 
-static void ChannelBlk__close_channel(ChannelBlkPtr self, ServiceEventPtr event)
+static void ChannelBlk__close_connection(ChannelBlkPtr self, ServiceEventPtr event)
 {
-    uint64_t channel_id = event->source;
+    BlockConnectionID connection_id = event->source;
     match_find_result(
-        ChannelBlkOpenChannels__find(&self->channels, ChannelBlkOpenChannel__id_matches, &channel_id),
-        some(channel) { ChannelBlkOpenChannels__remove(&self->channels, channel); },
+        ChannelBlkConnections__find(&self->connections, ChannelBlkConnection__id_matches, &connection_id),
+        some(connection) { ChannelBlkConnections__remove(&self->connections, connection); },
         none_do_nothing()
     );
 }
 
 static void ChannelBlk__handle_event(ChannelBlkPtr self, ServiceEventPtr event)
 {
-    if (event->type == SERVICE_EVENT_BLOCK_CHANNEL_OPEN)
+    if (event->type == SERVICE_EVENT_BLOCK_CONNECTION_OPENED)
     {
-        ChannelBlk__open_channel(self, event);
+        ChannelBlk__open_connection(self, event);
         return;
     }
-    if (event->type == SERVICE_EVENT_BLOCK_CHANNEL_CLOSED)
+    if (event->type == SERVICE_EVENT_BLOCK_CONNECTION_CLOSED)
     {
-        ChannelBlk__close_channel(self, event);
+        ChannelBlk__close_connection(self, event);
         return;
     }
 
-    for_each_fa(ChannelBlkOpenChannels, self->channels, index, channel,
-                { ChannelBlk__process_channel(self, channel.memory); });
+    for_each_fa(ChannelBlkConnections, self->connections, index, connection,
+                { ChannelBlk__process_protocol(self, connection.memory); });
 }
 
 int CHANNEL_BLK_ENTRYPOINT(int argc, char ** argv)

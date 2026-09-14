@@ -304,7 +304,6 @@ __BOOT__(void) zero_table_pool()
 
 __BOOT__(void) enable_mmu()
 {
-    boot_debug_print(enabling_mmu);
     write_mair_el1(MAIR_VALUE);
 
     write_tcr_el1(boot_tcr_el1());

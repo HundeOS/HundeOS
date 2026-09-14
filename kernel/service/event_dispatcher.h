@@ -11,8 +11,9 @@
 #include "../types/optional.h"
 #include "../types/result.h"
 #include "service.h"
+#include "../../common/interrupts/interrupt_types.h"
+#include "../../common/ipc/kernel_notification_queue.h"
 
-typedef uint64_t IRQNumber;
 OptionalDef(IRQNumber);
 
 typedef struct IRQService

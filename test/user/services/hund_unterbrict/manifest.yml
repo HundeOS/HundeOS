@@ -1,0 +1,14 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - common/types/bstring.c
+    - common/types/dyn_string.c
+    - common/arch/hosted/ipc_platform.c
+    - common/arch/hosted/interrupt_controller.c
+    - common/ipc/queue_layout.c
+    - common/services/service_directory.c
+    - common/ipc/queue.c
+    - common/ipc/kernel_notification_queue.c
+    - common/ipc/interrupt_protocol.c
+    - user/lib/channel/server.c

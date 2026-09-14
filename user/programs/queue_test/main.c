@@ -1,23 +1,24 @@
-#include "sys/atomic_message_queue.h"
+#include "sys/queue.h"
 #include "sys/service.h"
 #include "sys/io.h"
 #include "sys/print.h"
 #include "types/fixed_array.h"
+#include "services/service_directory.h"
 
-OptionalDef(AtomicMessageQueue);
+OptionalDef(Queue);
 
 static bool QueueTest__equals(void * first, void * second)
 {
-    AtomicMessageQueuePtr a = first;
-    AtomicMessageQueuePtr b = second;
+    QueuePtr a = first;
+    QueuePtr b = second;
     return a->connection == b->connection;
 }
 
-FixedArrayDefine(AtomicMessageQueue, ATOMIC_MESSAGE_QUEUE_LIMIT, TestQueues, &QueueTest__equals);
+FixedArrayDefine(Queue, QUEUE_LIMIT, TestQueues, &QueueTest__equals);
 FixedArrayBodyDefine(TestQueues);
 typedef TestQueues * TestQueuesPtr;
 
-static bool QueueTest__contains(TestQueuesPtr queues, AtomicMessageQueueConnectionID id)
+static bool QueueTest__contains(TestQueuesPtr queues, QueueConnectionID id)
 {
     for_each_fa_ptr(TestQueues, queues, index, queue, {
         if (queue.connection == id)
@@ -28,18 +29,18 @@ static bool QueueTest__contains(TestQueuesPtr queues, AtomicMessageQueueConnecti
     return false;
 }
 
-static bool QueueTest__serve_once(TestQueuesPtr queues, AtomicMessageQueueArrivalsPtr arrivals)
+static bool QueueTest__serve_once(TestQueuesPtr queues, QueueArrivalsPtr arrivals)
 {
     bool work = false;
-    for_each_atomic_fa_ptr(AtomicMessageQueueConnectionSlots, &arrivals->connections, index, id, {
+    for_each_atomic_fa_ptr(QueueConnectionSlots, &arrivals->connections, index, id, {
         if (id == 0 || QueueTest__contains(queues, id))
         {
             continue;
         }
         match_result(
-            atomic_message_queue_accept(id),
+            Queue__accept(id),
             success(queue) { TestQueues__push(queues, queue); },
-            error(code, message) { atomic_message_queue_close(id); }
+            error(code, message) { QueueConnection__close(id); }
         );
         work = true;
     });
@@ -48,30 +49,29 @@ static bool QueueTest__serve_once(TestQueuesPtr queues, AtomicMessageQueueArriva
             TestQueues__ptr_at(queues, index),
             some(queue)
             {
-                AtomicMessageQueueMessageCount pending =
+                QueueMessageCount pending =
                     queue->written - __atomic_load_n(&queue->incoming->consumed, __ATOMIC_ACQUIRE);
-                if (AtomicMessageQueue__status(queue) == ATOMIC_MESSAGE_QUEUE_CLOSED ||
-                    pending > ATOMIC_MESSAGE_QUEUE_CAPACITY)
+                if (Queue__status(queue) == QUEUE_CLOSED || pending > QUEUE_CAPACITY)
                 {
-                    atomic_message_queue_close(queue->connection);
+                    QueueConnection__close(queue->connection);
                     TestQueues__remove(queues, value);
                     work = true;
                     break;
                 }
-                if (pending == ATOMIC_MESSAGE_QUEUE_CAPACITY)
+                if (pending == QUEUE_CAPACITY)
                 {
                     continue;
                 }
                 match_result(
-                    AtomicMessageQueue__pop(queue),
+                    Queue__pop(queue),
                     success(message)
                     {
                         match_result(
-                            AtomicMessageQueue__push(queue, &message),
+                            Queue__push(queue, &message),
                             success_do_nothing(),
                             error(code, message)
                             {
-                                atomic_message_queue_close(queue->connection);
+                                QueueConnection__close(queue->connection);
                                 TestQueues__remove(queues, value);
                                 return true;
                             }
@@ -80,9 +80,9 @@ static bool QueueTest__serve_once(TestQueuesPtr queues, AtomicMessageQueueArriva
                     },
                     error(code, message)
                     {
-                        if (code != ATOMIC_MESSAGE_QUEUE_EMPTY)
+                        if (code != QUEUE_EMPTY)
                         {
-                            atomic_message_queue_close(queue->connection);
+                            QueueConnection__close(queue->connection);
                             TestQueues__remove(queues, value);
                             return true;
                         }
@@ -102,7 +102,7 @@ static int QueueTest__server(void)
         return 1;
     }
     match_result(
-        atomic_message_queue_listen(&bstr("queue-test")),
+        Queue__listen(&bstr("queue-test")),
         success(arrivals)
         {
             TestQueues queues = TestQueues__new();
@@ -122,15 +122,15 @@ static int QueueTest__server(void)
     return 1;
 }
 
-static int QueueTest__exchange(AtomicMessageQueuePtr queue)
+static int QueueTest__exchange(QueuePtr queue)
 {
     for (uint64_t sequence = 0; sequence < 128; sequence++)
     {
-        atomic_message_queue_wait_writable(queue);
-        ServiceQueueMessage request = ServiceQueueMessage__new(9999, 1);
+        Queue__wait_writable(queue);
+        QueueMessage request = QueueMessage__new(9999, 1);
         request.arg0 = sequence;
         match_result(
-            AtomicMessageQueue__push(queue, &request),
+            Queue__push(queue, &request),
             success_do_nothing(),
             error(code, message)
             {
@@ -138,9 +138,9 @@ static int QueueTest__exchange(AtomicMessageQueuePtr queue)
                 return 1;
             }
         );
-        atomic_message_queue_wait_readable(queue);
+        Queue__wait_readable(queue);
         match_result(
-            AtomicMessageQueue__pop(queue),
+            Queue__pop(queue),
             success(reply)
             {
                 if (reply.arg0 != sequence || reply.sender_pid != queue->peer_pid)
@@ -178,7 +178,7 @@ int main(int argc, char ** argv)
             return 1;
         }
     }
-    AtomicMessageQueueEndpointID endpoint;
+    QueueEndpointID endpoint;
     match_optional(
         ServiceDirectory__find_endpoint(ServiceDirectory__shared(), &bstr("queue-test")),
         some(value) { endpoint = value; },
@@ -189,7 +189,7 @@ int main(int argc, char ** argv)
         }
     );
     match_result(
-        atomic_message_queue_connect(endpoint),
+        Queue__connect(endpoint),
         success(queue)
         {
             if (probe_identity || probe_peer)
@@ -204,12 +204,12 @@ int main(int argc, char ** argv)
                     __atomic_store_n(&queue.incoming->produced, 0, __ATOMIC_RELEASE);
                 }
                 IO__print(&bstr("queue_test: ERROR protected page was writable\n"));
-                atomic_message_queue_close(queue.connection);
+                QueueConnection__close(queue.connection);
                 return 1;
             }
             int result = QueueTest__exchange(&queue);
-            AtomicMessageQueueCode status = atomic_message_queue_close(queue.connection);
-            if (result != 0 || status != ATOMIC_MESSAGE_QUEUE_OK)
+            QueueCode status = QueueConnection__close(queue.connection);
+            if (result != 0 || status != QUEUE_OK)
             {
                 IO__printf(&bstr("queue_test: exchange failed result=%i close=%i\n"), result, (int)status);
                 return 1;

@@ -2,17 +2,23 @@
 
 ## Status and scope
 
-This is the proposed architecture for `hund-unterbrict`, not an implemented
-service. It builds on [Channels and event queues](channels-and-event-queues.md).
-Its transport should follow the
-[atomic message queues](atomic-message-queues.md) design: kernel-mediated
-connection establishment, isolated client queues, and protected kernel events.
-The connection API and migration of the warden-managed echo channels are
-implemented. Protected general kernel-event delivery, overflow recovery, and
-integration of those events with the connection/fibre loop remain prerequisites.
-The initial consumer will be a channel-based MMIO block driver; filesystem
-integration comes later. The existing kernel IRQ subscription and wait APIs
-remain in place until their callers are migrated.
+This architecture now has an initial implementation in `hund-unterbrict` and
+the separate `virtio_blk_channelio` driver. It builds on
+[Channels and event queues](channels-and-event-queues.md) and the
+[queue transport](queues.md) design.
+
+The kernel-to-manager transport is a fixed per-IRQ coalescing queue. The kernel
+masks an IRQ before publishing it, so every routed IRQ has a dedicated pending
+slot and queue capacity cannot discard another IRQ. Driver control and delivery
+messages use persistent bidirectional `Channel` sessions; the interrupt
+protocol does not define another channel or expose its internal queues.
+All VirtIO disks, including the root and boot-configuration disks, now select
+`virtio_blk_channelio`. Hundeschule starts the embedded channel manager and
+interrupt server and waits for both before probing disks. Their startup does
+not depend on disk configuration. The legacy kernel IRQ subscription and wait
+APIs remain for other unmigrated callers; the old `virtio_blk` driver has been
+deleted. `virtio_blk_channelio` owns the hardware implementation and uses only
+its fibre runtime and interrupt-manager channel.
 
 The objective is to keep device IRQ routing and acknowledgement policy in
 userspace. Hardware interrupt entry still runs in the kernel. Registration,
@@ -31,10 +37,10 @@ service's shared event queue.
 `hund-unterbrict` owns device IRQ registrations, delivery to consumers,
 outstanding acknowledgements, and rearming. It receives a kernel-authorized
 mapping of the GIC distributor registers needed to manage delegated IRQs.
-It consumes kernel IRQ and process-exit events together with channel requests
-in one logical event loop using fibre/event waits. Under the atomic-message-queue
-proposal, these arrive through separate protected kernel and per-client queues,
-not one globally writable ring. Wakeup aggregation remains to be designed.
+It consumes kernel IRQ events together with channel requests in one logical
+event loop using event waits. Kernel notifications use a one-way
+`KernelNotificationQueue`; each driver uses a separate `Channel`. The queue
+transport beneath a channel is not part of the interrupt protocol.
 
 Device drivers own their device MMIO registers. They service the device and
 clear its interrupt source before acknowledging completion to the interrupt
@@ -52,24 +58,17 @@ not become responsible for interrupt routing or device acknowledgements.
 ## Registration and authentication
 
 Processes register through a channel to `hund-unterbrict`, not through a direct
-device-driver IRQ subscription syscall. Registration requests identify the IRQ,
-request correlation ID, and reply channel, and include an authentication token.
-Only kernel-validated `hund` processes may subscribe. A claimed PID, process
-name, or service-directory entry is not proof of eligibility.
+device-driver IRQ subscription syscall. Registration requests identify the IRQ
+through the requesting connection. Only kernel-validated `hund` processes may
+subscribe. A claimed PID, process name, or service-directory entry is not proof
+of eligibility.
 
-The interrupt service calls the kernel to validate an unfamiliar token. The
-validation contract must bind the token to a live process incarnation and its
-`hund` authorization, and bind registration to that authenticated process's
-channel. The service caches successful validation results so subsequent
-requests do not each require a syscall. Invalid tokens receive an authorization
-error on the requesting channel and do not change registration state.
-
-Cache entries must be scoped to the token and process incarnation, not merely
-a reusable numeric PID. Process exit invalidates the corresponding entries.
-Any token expiry or authorization revocation supported by the kernel must also
-invalidate cached authorization before it can be reused. The token issuance,
-validation ABI, and invalidation mechanism are implementation requirements,
-not existing APIs; the current login-ticket API is not assumed to satisfy them.
+Connection-bound validation replaces a separate bearer token in the initial
+implementation. The kernel-authenticated warden connection supplies the
+driver's PID as server-side channel metadata; it is not taken from the driver
+payload. The manager passes that PID to the kernel, which resolves the live
+process and checks its IRQ capability. Invalid or dead clients receive an
+authorization error and do not change registration state.
 
 Each device IRQ has at most one registered consumer. After authentication, a
 request for an occupied IRQ receives an explicit already-registered error on
@@ -78,24 +77,11 @@ not replace the consumer or silently steal the registration. Kernel-reserved
 and unsupported IRQs also receive explicit errors. Registration and reply
 delivery must preserve consistent ownership when a queue is full.
 
-Legacy globally writable service queues and channel control descriptors
-are not an authenticated transport. The warden-managed echo path no longer uses
-them; its control records are private and its connections are isolated.
-A token placed in globally readable memory
-cannot safely be treated as a secret bearer credential. Before claiming secure
-authorization, the implementation must provide protected token transport and
-endpoint binding, or a validation protocol that remains safe when request
-contents are observable. Validating a copied token and trusting a supplied PID
-alone is insufficient. The channel demonstration now supplies isolated transport;
-token issuance, validation and authorization binding are still prerequisites.
-
-The preferred solution is kernel-mediated queue establishment with authenticated
-peer descriptors and participant-only mappings, as described in
-[Atomic message queues](atomic-message-queues.md). Requests for a connection
-incur setup syscalls; subsequent IRQ requests and ACKs remain userspace messages.
-Signing requests is an alternative for message authenticity, not a defense
-against another writer destroying a shared queue. Token validation and caching
-remain required for `hund` authorization even with authenticated transport.
+Legacy globally writable service queues and client-claimed identities are not
+an authenticated transport. Registration therefore uses warden-managed
+channels backed by kernel-mediated, participant-only queue mappings. Connection
+setup and initial route authorization incur syscalls; subsequent IRQ deliveries
+and acknowledgements remain channel exchanges in userspace.
 
 ## Interrupt and acknowledgement flow
 
@@ -122,7 +108,7 @@ completion message are separate operations. A device can remain asserted after
 the kernel finishes its CPU-interface handling. Keeping its GIC source masked
 until userspace completion prevents repeated delivery during that interval.
 
-Queue saturation must not lose an IRQ or its outstanding completion state.
+Channel backpressure must not lose an IRQ or its outstanding completion state.
 Retain pending notifications for retry and leave the source masked until its
 delivery can complete. The same reliability requirement applies to process-exit
 events used for cleanup; current bounded-queue exit delivery is not sufficient
@@ -130,7 +116,15 @@ to guarantee this without overflow recovery.
 
 ## Consumer death and cleanup
 
-The service subscribes to kernel process-exit events. If the process whose
+The target protocol must define how clients release IRQ registrations while the
+channel session remains open; the operation belongs to the interrupt protocol
+and need not be named close. Clients separately close the channel
+session when finished with it. Session close and kernel-reported client death
+must also clean up registrations left behind by the client. Cleanup across these
+layers must be idempotent, and orphaned IRQs must remain masked.
+
+The required design includes reliable kernel process-exit events; this cleanup
+path remains implementation work. If the process whose
 acknowledgement it is waiting for dies, it completes that outstanding software
 acknowledgement on the process's behalf rather than waiting forever. It removes
 the process's IRQ registrations and cached authorization and invalidates their
@@ -162,7 +156,7 @@ and recovery policy are deferred; do not add unused timeout machinery now.
 - Duplicate and reserved-IRQ registration errors returned on the channel.
 - IRQ delivery, device-before-service acknowledgement ordering, and exactly
   one rearm for a valid completion; stale and duplicate ACK rejection.
-- Queue-full retry without lost notifications or premature rearming.
+- Channel-reply retry without lost notifications or premature rearming.
 - Consumer death before delivery and while awaiting an ACK, with registration
   removal, cache invalidation, and the orphaned source remaining masked.
 - Block reads on a dedicated QEMU test disk with no per-completion wait or

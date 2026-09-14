@@ -35,7 +35,7 @@ void test_map_len_key_set_get_and_delete(void)
     );
 
     TEST_ASSERT_EQUAL(2, TestMap__len(&map));
-    TEST_ASSERT_TRUE(BString__equals(&hello, unwrap_optional(TestMap__key(&map, 0), (BStringPtr){})));
+    TEST_ASSERT_EQUAL_BSTRING(hello, *(unwrap_optional(TestMap__key(&map, 0), (BStringPtr){})));
 
     match_optional(TestMap__get(&map, hello),
         some(value) { TEST_ASSERT_EQUAL(12, value); },

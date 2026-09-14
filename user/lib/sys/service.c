@@ -59,6 +59,11 @@ ServiceCode service_wait(ServiceEventPtr event)
     return (ServiceCode)syscall(SERVICE_CALL, SERVICE_WAIT, (Anything)event, 0, 0, 0);
 }
 
+ServiceCode service_poll(ServiceEventPtr event)
+{
+    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_POLL, (Anything)event, 0, 0, 0);
+}
+
 ServiceCode service_become_service()
 {
     return (ServiceCode)syscall(SERVICE_CALL, SERVICE_BECOME_SERVICE, 0, 0, 0, 0);
@@ -101,22 +106,43 @@ ServiceCode service_subscribe_irq(uint64_t irq)
     return (ServiceCode)syscall(SERVICE_CALL, SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0);
 }
 
+ServiceCode service_register_interrupt_manager(ServiceInterruptManagerRegistrationPtr registration)
+{
+    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_REGISTER_INTERRUPT_MANAGER, (Anything)registration, 0, 0, 0);
+}
+
+ServiceCode service_route_managed_irq(uint64_t client_pid, uint64_t irq)
+{
+    ServiceManagedIRQRoute request = ServiceManagedIRQRoute__new(client_pid, irq);
+    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_ROUTE_MANAGED_IRQ, (Anything)&request, 0, 0, 0);
+}
+
+ServiceCode service_claim_virtio_device(Address mapping)
+{
+    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_CLAIM_VIRTIO_DEVICE, (Anything)mapping, 0, 0, 0);
+}
+
 ServiceCode service_register_block_device(ConstBStringPtr path, uint64_t block_size, uint64_t block_count)
 {
     ServiceBlockDeviceRegistration request = ServiceBlockDeviceRegistration__new(path, block_size, block_count);
     return (ServiceCode)syscall(SERVICE_CALL, SERVICE_REGISTER_BLOCK_DEVICE, (Anything)&request, 0, 0, 0);
 }
 
-ServiceCode service_block_open_channel(ConstBStringPtr path, ServiceBlockChannelOpenRequestPtr channel)
+ServiceCode service_authorize_block_client(uint64_t client_pid)
 {
-    *channel = ServiceBlockChannelOpenRequest__new(path);
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_BLOCK_OPEN_CHANNEL, (Anything)channel, 0, 0, 0);
+    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_AUTHORIZE_BLOCK_CLIENT, client_pid, 0, 0, 0);
 }
 
-ServiceCode service_block_close_channel(uint64_t channel_id)
+ServiceCode service_block_connect(ConstBStringPtr path, ServiceBlockConnectionRequestPtr channel)
 {
-    ServiceBlockChannelCloseRequest request = ServiceBlockChannelCloseRequest__new(channel_id);
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_BLOCK_CLOSE_CHANNEL, (Anything)&request, 0, 0, 0);
+    *channel = ServiceBlockConnectionRequest__new(path);
+    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_BLOCK_CONNECT, (Anything)channel, 0, 0, 0);
+}
+
+ServiceCode service_block_disconnect(BlockConnectionID connection_id)
+{
+    ServiceBlockDisconnectionRequest request = ServiceBlockDisconnectionRequest__new(connection_id);
+    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_BLOCK_DISCONNECT, (Anything)&request, 0, 0, 0);
 }
 
 ServiceBlockReadResult service_block_read_device(ConstBStringPtr path, uint64_t block, uint64_t block_count,
@@ -232,13 +258,6 @@ ServiceCode service_device_address(void * driver_address, Address * device_addre
 
     *device_address = request.device_address;
     return SERVICE_OK;
-}
-
-ServiceCode service_request_queue(ConstBStringPtr name, uint64_t kernel_event_subscriptions)
-{
-    ServiceQueueRequest request = ServiceQueueRequest__new(name, kernel_event_subscriptions);
-
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_REQUEST_QUEUE, (Anything)&request, 0, 0, 0);
 }
 
 ServiceCode service_publish_ready(ConstBStringPtr name)

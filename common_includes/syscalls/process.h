@@ -2,6 +2,7 @@
 #define _COMMON_INCLUDES_SYSCALLS_PROCESS_H
 
 #include <stdint.h>
+#include "types/result.h"
 
 #define PROCESS_INFO_NAME_SIZE 64
 #define PROCESS_INFO_STATE_SIZE 32
@@ -19,6 +20,27 @@ typedef uint64_t ProcessSignalMask;
 typedef uint64_t UserID;
 typedef uint64_t GroupID;
 typedef uint64_t ProcessCapabilities;
+
+typedef struct ProcessCredentials
+{
+    UserID user_id;
+    GroupID group_id;
+} ProcessCredentials;
+typedef ProcessCredentials * ProcessCredentialsPtr;
+typedef const ProcessCredentials * ConstProcessCredentialsPtr;
+ResultDef(ProcessCredentials);
+
+static inline ProcessCredentials ProcessCredentials__new(UserID user_id, GroupID group_id)
+{
+    return (ProcessCredentials){.user_id = user_id, .group_id = group_id};
+}
+
+typedef enum ProcessCredentialsStatus
+{
+    PROCESS_CREDENTIALS_OK = 0,
+    PROCESS_CREDENTIALS_INVALID_ARGUMENT = -1,
+    PROCESS_CREDENTIALS_NOT_FOUND = -2,
+} ProcessCredentialsStatus;
 
 typedef enum ProcessBuiltinUsers
 {
@@ -106,9 +128,27 @@ typedef enum ProcessSleepResults
     PROCESS_SLEEP_FAILED = -2,
 } ProcessSleepResults;
 
+#define PROCESS_CPU_TICK_USEC 1000ULL
+#define PROCESS_CPU_SHORT_TICKS 100ULL
+#define PROCESS_CPU_LONG_TICKS (10 * PROCESS_CPU_SHORT_TICKS)
+
+typedef struct ProcessCPUUsage
+{
+    uint64_t total_usec;
+    uint64_t short_basis_points;
+    uint64_t long_basis_points;
+} ProcessCPUUsage;
+
+static inline ProcessCPUUsage ProcessCPUUsage__new(void)
+{
+    return (ProcessCPUUsage){.total_usec = 0, .short_basis_points = 0, .long_basis_points = 0};
+}
+
 typedef struct ProcessInfo
 {
     uint64_t pid;
+    uint64_t cpu;
+    ProcessCPUUsage cpu_usage;
     char name[PROCESS_INFO_NAME_SIZE];
     char state[PROCESS_INFO_STATE_SIZE];
     char wait_reason[PROCESS_INFO_WAIT_SIZE];

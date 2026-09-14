@@ -19,6 +19,7 @@
 
 static KernelPtr kernel = NULL;
 static const CPUID cpu = 0;
+extern uint64_t test_cpu_time_usec;
 
 static bool scheduler_contains_process(ProcessID pid)
 {
@@ -33,6 +34,7 @@ static bool scheduler_contains_process(ProcessID pid)
 
 void setUp(void)
 {
+    test_cpu_time_usec = 0;
     clear_panic_state();
     reset_system_state();
     kernel = init_test_kernel_without_filesystem();
@@ -48,6 +50,9 @@ void test_process_list_handler_returns_scheduled_processes(void)
 {
     ProcessPtr init = dummy_process(1, cpu, PROC_STATE_READY);
     ProcessPtr driver = dummy_process(2, cpu, PROC_STATE_READY);
+    CPUUsage__start(&driver->cpu_usage);
+    test_cpu_time_usec = 10000;
+    CPUUsage__stop(&driver->cpu_usage);
     driver->process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(driver);
     ProcessPtr ready_waiter = dummy_process(3, cpu, PROC_STATE_READY);
@@ -75,6 +80,7 @@ void test_process_list_handler_returns_scheduled_processes(void)
         success(count)
         {
             TEST_ASSERT_EQUAL_UINT64(4, count);
+            TEST_ASSERT_EQUAL_UINT64(cpu, entries[0].cpu);
             TEST_ASSERT_EQUAL_STRING("hello_world", entries[0].name);
             TEST_ASSERT_EQUAL_STRING("PROC_STATE_RUNNING", entries[0].state);
             TEST_ASSERT_EQUAL_STRING("-", entries[0].wait_reason);
@@ -87,6 +93,10 @@ void test_process_list_handler_returns_scheduled_processes(void)
             TEST_ASSERT_EQUAL_STRING("normal", entries[1].class_name);
             TEST_ASSERT_EQUAL_STRING("root", entries[1].user_name);
             TEST_ASSERT_EQUAL_UINT64(driver->pid, entries[2].pid);
+            TEST_ASSERT_EQUAL_UINT64(cpu, entries[2].cpu);
+            TEST_ASSERT_EQUAL_UINT64(10000, entries[2].cpu_usage.total_usec);
+            TEST_ASSERT_EQUAL_UINT64(1000, entries[2].cpu_usage.short_basis_points);
+            TEST_ASSERT_EQUAL_UINT64(100, entries[2].cpu_usage.long_basis_points);
             TEST_ASSERT_EQUAL_STRING("PROC_STATE_WAITING", entries[2].state);
             TEST_ASSERT_EQUAL_STRING("PARK_WAIT_SERVICE_EVENT", entries[2].wait_reason);
             TEST_ASSERT_EQUAL_STRING("service", entries[2].class_name);
@@ -135,6 +145,48 @@ void test_process_list_handler_rejects_missing_request(void)
         ProcessList__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
         success_test_fail(),
         error(code, message) { TEST_ASSERT_EQUAL(PROCESS_LIST_INVALID_ARGUMENT, code); }
+    );
+}
+
+void test_process_credentials_returns_target_identity_not_requester_identity(void)
+{
+    ProcessPtr requester = dummy_process(41, cpu, PROC_STATE_READY);
+    ProcessPtr target = dummy_process(42, cpu, PROC_STATE_READY);
+    Process__set_hund_identity(requester);
+    Process__set_identity(target, 123, 456, PROCESS_CAP_NONE);
+    Scheduler__schedule(kernel->scheduler, target);
+    ProcessCredentials credentials = ProcessCredentials__new(0, 0);
+    match_result(
+        ProcessCredentials__handler(kernel, &Some(ProcessPtr, requester), target->pid, (Anything)&credentials, 0, 0, 0),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_OK, status);
+            TEST_ASSERT_EQUAL(123, credentials.user_id);
+            TEST_ASSERT_EQUAL(456, credentials.group_id);
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_credentials_rejects_missing_pid_and_invalid_arguments_without_overwriting_output(void)
+{
+    ProcessCredentials credentials = ProcessCredentials__new(123, 456);
+    match_result(
+        ProcessCredentials__handler(kernel, &None(ProcessPtr), 99999, (Anything)&credentials, 0, 0, 0),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_NOT_FOUND, code); }
+    );
+    TEST_ASSERT_EQUAL(123, credentials.user_id);
+    TEST_ASSERT_EQUAL(456, credentials.group_id);
+    match_result(
+        ProcessCredentials__handler(kernel, &None(ProcessPtr), 0, (Anything)&credentials, 0, 0, 0),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_INVALID_ARGUMENT, code); }
+    );
+    match_result(
+        ProcessCredentials__handler(kernel, &None(ProcessPtr), 1, 0, 0, 0, 0),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_INVALID_ARGUMENT, code); }
     );
 }
 

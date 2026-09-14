@@ -3,6 +3,7 @@
 #include "../../../common/types/dyn_string.h"
 #include "sys/io.h"
 #include "sys/spawn.h"
+#include "io/mount_config.h"
 #include "../../user.h"
 
 #ifndef HUMPEN_ENTRYPOINT
@@ -13,15 +14,8 @@
 #define HUMPEN_FSTAB_MAX 2048U
 #define HUMPEN_WACHHUND_PATH "/sbin/services/humpen-wachhund"
 
-static BString humpen_space_delimiters = bstr(" \t\r\n");
-static BString humpen_comment_delimiter = bstr("#");
-static BString humpen_device_command = bstr("device");
 static BString humpen_wachhund_path = bstr(HUMPEN_WACHHUND_PATH);
 static BString humpen_invalid_fstab_line = bstr("invalid fstab line");
-static BString humpen_invalid_device_path = bstr("invalid device path");
-static BString humpen_invalid_filesystem_type = bstr("invalid filesystem type");
-static BString humpen_invalid_mountpoint = bstr("invalid mountpoint");
-static BString humpen_unexpected_fstab_token = bstr("unexpected fstab token");
 
 typedef uint64_t MountResult;
 ResultDef(MountResult);
@@ -89,78 +83,20 @@ static Optional(DynString) Humpen__load_fstab(void)
 
 static BString Humpen__line_without_comment(ConstBStringPtr line)
 {
-    BStringSplit split = BString__split_first_any(line, &humpen_comment_delimiter);
-    match_optional(split.match,
-        some(before_comment) { return before_comment; },
-        none_do_nothing()
-    );
-
-    return BString__slice(line, 0, BString__length(line));
+    return MountConfig__without_comment(line);
 }
 
 static Result(HumpenMountCommand) Humpen__parse_mount_command(ConstBStringPtr input)
 {
-    BString remaining = *input;
-    BString device_path = empty_bstr();
-    BString filesystem_type = empty_bstr();
-    BString mountpoint = empty_bstr();
-
-    BStringSplit command_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(
-        command_split.match,
-        some(token)
+    match_result(
+        MountConfig__parse(input),
+        success(config)
         {
-            if (!BString__equals(&token, &humpen_device_command))
-            {
-                return Error(HumpenMountCommand, humpen_invalid_fstab_line, HUMPEN_PARSE_ERROR);
-            }
-
-            remaining = command_split.rest;
+            return Success(HumpenMountCommand,
+                           HumpenMountCommand__new(&config.device_path, &config.filesystem_type, &config.mountpoint));
         },
-        none() { return Error(HumpenMountCommand, humpen_invalid_fstab_line, HUMPEN_PARSE_ERROR); }
+        error(code, message) { return Error(HumpenMountCommand, message, code); }
     );
-
-    BStringSplit device_path_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(
-        device_path_split.match,
-        some(token)
-        {
-            device_path = token;
-            remaining = device_path_split.rest;
-        },
-        none() { return Error(HumpenMountCommand, humpen_invalid_device_path, HUMPEN_PARSE_ERROR); }
-    );
-
-    BStringSplit filesystem_type_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(
-        filesystem_type_split.match,
-        some(token)
-        {
-            filesystem_type = token;
-            remaining = filesystem_type_split.rest;
-        },
-        none() { return Error(HumpenMountCommand, humpen_invalid_filesystem_type, HUMPEN_PARSE_ERROR); }
-    );
-
-    BStringSplit mountpoint_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(
-        mountpoint_split.match,
-        some(token)
-        {
-            mountpoint = token;
-            remaining = mountpoint_split.rest;
-        },
-        none() { return Error(HumpenMountCommand, humpen_invalid_mountpoint, HUMPEN_PARSE_ERROR); }
-    );
-
-    BStringSplit extra_split = BString__split_first_token(&remaining, &humpen_space_delimiters);
-    match_optional(
-        extra_split.match,
-        some(extra) { return Error(HumpenMountCommand, humpen_unexpected_fstab_token, HUMPEN_PARSE_ERROR); },
-        none_do_nothing()
-    );
-
-    return Success(HumpenMountCommand, HumpenMountCommand__new(&device_path, &filesystem_type, &mountpoint));
 }
 
 static Result(SpawnResult) Humpen__spawn_watchdog_line(ConstBStringPtr line)
@@ -176,6 +112,11 @@ static Result(SpawnResult) Humpen__spawn_watchdog_line(ConstBStringPtr line)
         Humpen__parse_mount_command(&remaining),
         success(command)
         {
+            // The filesystem service starts root before publishing readiness.
+            if (BString__equals(&command.mountpoint, &bstr("/")))
+            {
+                return Success(SpawnResult, 0);
+            }
             IO__printf(&bstr("humpen: mounting %B as %B on %B\n"), &command.device_path, &command.filesystem_type,
                        &command.mountpoint);
             return OS__spawn(P_NOWAIT, command.driver_path, &command.arg0, &command.arg1, &command.arg2);

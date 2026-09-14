@@ -31,6 +31,9 @@ static KernelPtr TestKernel__heap_new(SchedulerPtr scheduler, MessageBrokerPtr m
     kernel->irq_dispatcher = ptr(Kernel__alloc_kernel(sizeof(IRQDispatcher)), IRQDispatcher);
     *kernel->irq_dispatcher = NEW_IRQ_DISPATCHER(scheduler);
     kernel->service_directory = KERNEL_SERVICE_DIRECTORY_INIT;
+    kernel->device_registry = KernelDeviceRegistry__new();
+    kernel->process_registry = KernelProcessRegistry__new();
+    kernel->memory_accounting = MemoryAccounting__new();
     match_result(
         KernelServiceDirectory__init(&kernel->service_directory),
         success_do_nothing(),

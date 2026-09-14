@@ -63,7 +63,7 @@ static IOServerRegisterRequest test_io_server_register_request(const char * raw_
 static Result(IOInternalHandle) fake_open(IOStatePtr state_ptr, ConstBStringPtr open_path, Flags flags)
 {
     TEST_ASSERT_EQUAL(&state, state_ptr);
-    TEST_ASSERT_TRUE(BString__equals(&path, open_path));
+    TEST_ASSERT_EQUAL_BSTRING(path, *open_path);
     TEST_ASSERT_EQUAL(FLAGS, flags);
     opened = true;
     return Success(IOInternalHandle, INTERNAL_HANDLE);

@@ -25,6 +25,14 @@ Run `make compile-commands` whenever source files are added or removed so IDEs
 and other tooling receive the current build targets and compiler flags.
 
 ## Unit tests
+### Python
+Use pytest for testing Python code. Write module-level test functions, not test
+classes or unittest.TestCase subclasses. Use pytest fixtures for shared setup
+and dependencies, including tmp_path where appropriate. Inject dependencies
+explicitly rather than monkeypatching globals or replacing attributes at runtime.
+When test doubles are needed, use small fake implementations, not mocks or
+mocking libraries. Do not use monkeypatch or unittest.mock.
+
 ### Kernel
 Add unit tests for any new code in kernel. Some architecture specific code
 may not have unit tests as it is difficult to test..
@@ -163,6 +171,12 @@ Do not use `goto` in new or changed code. When modifying code near an existing
 functions instead.
 
 ## Test code
+Use `TEST_ASSERT_EQUAL_BSTRING(expected, actual)` from `test/hundetest.h` for
+BString equality assertions. Both arguments are BString values, for example
+`TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), *path)` when `path` is a pointer.
+The macro evaluates each argument once. Do not convert BStrings
+to C strings for equality assertions; lengths and embedded NUL bytes matter.
+
 Do not add special test-only branches to production code. Tests should use
 stubs, fixtures, dependency injection, or alternate build-linked
 implementations instead of `#ifdef TEST` style conditionals in the code being
@@ -189,10 +203,15 @@ Add unit tests for any new code in kernel. Some architecture specific code
 may not have unit tests as it is difficult to test..
 
 # Kernel architecture
+Read [Userspace I/O system](docs/io-system.md) before changing I/O routing,
+file-handle ownership, filesystem service transport, or socket/stream service
+interfaces. `hund-io-system` is the common application-facing I/O service;
+filesystem, network, and stream protocols use the existing bidirectional Channel.
+
 Read [Channels and event queues](docs/channels-and-event-queues.md) before changing
 service discovery, shared queues, channel lifecycle, or managed shared-page memory.
 
-Read [Atomic message queues](docs/atomic-message-queues.md) before changing
+Read [Queues](docs/queues.md) before changing
 queue access permissions, connection establishment, or transport authentication.
 It records the initial atomic message queue API and the remaining migration away
 from globally writable service queues.

@@ -1,3 +1,4 @@
+#include "channel/block_server.h"
 #define DRIVER_LOG_TAG "SDHCI"
 
 #include <stdbool.h>
@@ -9,6 +10,7 @@
 #include "sys/sd_host_config.h"
 #include "sys/service.h"
 #include "sys/sync.h"
+#include "channel/signal.h"
 
 #ifndef SDHCI_ENTRYPOINT
 #define SDHCI_ENTRYPOINT main
@@ -836,6 +838,19 @@ static void Sdhci__handle_block_request(SdhciDevicePtr self, uint64_t request_id
     service_block_complete(request.request_id, status, service_ok(status) ? request.block_count : 0);
 }
 
+static BlockProtocolStatus Sdhci__transfer_channel(BlockServerContext context, BlockProtocolOperation operation,
+                                                   BlockProtocolBlockNumber block, ChannelDataPtr data)
+{
+    SdhciDevicePtr self = context;
+    if (operation != BLOCK_PROTOCOL_READ)
+    {
+        return BLOCK_PROTOCOL_IO_ERROR;
+    }
+    ServiceBlockRequest request = ServiceBlockRequest__new(0, self->path, SERVICE_BLOCK_READ, block, 1,
+                                                           SDHCI_BLOCK_SIZE, (Address)data, SDHCI_BLOCK_SIZE);
+    return service_ok(Sdhci__read_blocks(self, &request)) ? BLOCK_PROTOCOL_OK : BLOCK_PROTOCOL_IO_ERROR;
+}
+
 static void Sdhci__ack_irq(SdhciDevicePtr self)
 {
     uint32_t status = SDHCI_READ32(self->mmio, SDHCI_INT_STATUS);
@@ -870,6 +885,13 @@ int SDHCI_ENTRYPOINT(void)
                 return 1;
             }
 
+            BlockServer block_server;
+            match_result(
+                BlockServer__listen(&device.path, device.block_count, &device, Sdhci__transfer_channel),
+                success(server) { block_server = server; },
+                error(code, message) { return 1; }
+            );
+
             if (!service_ok(service_publish_ready(&device.path)))
             {
                 DRIVER_DEBUG("sdhci: ready publish failed\n");
@@ -885,8 +907,9 @@ int SDHCI_ENTRYPOINT(void)
             DRIVER_DEBUG("sdhci: registered %s blocks=%i\n", BString__cstr(&device.path), (int)device.block_count);
 
             ServiceEvent event;
-            for (ServiceCode wait_status = service_wait(&event); service_alive(wait_status);
-                 wait_status = service_wait(&event))
+            Channel__prepare_wait();
+            for (ServiceCode wait_status = service_poll(&event); service_alive(wait_status);
+                 wait_status = service_poll(&event))
             {
                 if (service_ok(wait_status))
                 {
@@ -900,6 +923,10 @@ int SDHCI_ENTRYPOINT(void)
                         Sdhci__handle_block_request(&device, event.source);
                     }
                     __sync_boundary();
+                }
+                if (!BlockServer__poll(&block_server) && wait_status == SERVICE_EVENT_QUEUE_EMPTY)
+                {
+                    Channel__wait_event();
                 }
             }
 

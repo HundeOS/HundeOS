@@ -71,7 +71,7 @@ void test_hundeschau_configured_driver_uses_final_token_without_delimiter(void)
     TEST_ASSERT_EQUAL(0, Hundeschau__spawn_configured_driver_line(
                              &processes, &bstr(" \tdriver \t/sbin/example\trespawn always"), false));
     TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
-    TEST_ASSERT_TRUE(BString__equals(&spawned_path, &bstr("/sbin/example")));
+    TEST_ASSERT_EQUAL_BSTRING(spawned_path, bstr("/sbin/example"));
     match_optional(
         Hundeschau__find_required_process(&processes, 1),
         some(process) { TEST_ASSERT_TRUE(process->respawn); },
@@ -109,7 +109,7 @@ void test_hundeschau_lookup_handles_missing_pid_and_updates_stored_record(void)
         Hundeschau__find_required_process(&processes, 42),
         some(process)
         {
-            TEST_ASSERT_TRUE(BString__equals(&process->path, &bstr("/last")));
+            TEST_ASSERT_EQUAL_BSTRING(process->path, bstr("/last"));
             process->pid = 84;
         },
         none_test_fail()
@@ -120,12 +120,12 @@ void test_hundeschau_lookup_handles_missing_pid_and_updates_stored_record(void)
     );
     match_optional(
         Hundeschau__find_required_process(&processes, 84),
-        some(process) { TEST_ASSERT_TRUE(BString__equals(&process->path, &bstr("/last"))); },
+        some(process) { TEST_ASSERT_EQUAL_BSTRING(process->path, bstr("/last")); },
         none_test_fail()
     );
     match_optional(
         Hundeschau__find_required_process(&processes, 11),
-        some(process) { TEST_ASSERT_TRUE(BString__equals(&process->path, &bstr("/first"))); },
+        some(process) { TEST_ASSERT_EQUAL_BSTRING(process->path, bstr("/first")); },
         none_test_fail()
     );
 }
@@ -135,17 +135,17 @@ void test_hundeschau_next_token_handles_whitespace_and_exhaustion(void)
     BString remaining = bstr(" \tdriver \t /sbin/demo  once \r ");
     match_optional(
         Hundeschau__next_token(&remaining),
-        some(token) { TEST_ASSERT_TRUE(BString__equals(&token, &bstr("driver"))); },
+        some(token) { TEST_ASSERT_EQUAL_BSTRING(token, bstr("driver")); },
         none_test_fail()
     );
     match_optional(
         Hundeschau__next_token(&remaining),
-        some(token) { TEST_ASSERT_TRUE(BString__equals(&token, &bstr("/sbin/demo"))); },
+        some(token) { TEST_ASSERT_EQUAL_BSTRING(token, bstr("/sbin/demo")); },
         none_test_fail()
     );
     match_optional(
         Hundeschau__next_token(&remaining),
-        some(token) { TEST_ASSERT_TRUE(BString__equals(&token, &bstr("once"))); },
+        some(token) { TEST_ASSERT_EQUAL_BSTRING(token, bstr("once")); },
         none_test_fail()
     );
     match_optional(Hundeschau__next_token(&remaining),

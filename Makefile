@@ -60,6 +60,12 @@ DISK_LONG_FILE = tools/disk_images/disk_long_filename.txt
 DISK_LONG_NAME = This is a long filename.txt
 DISK_LARGE_FILE = tools/disk_images/disk_large_file.txt
 DISK_LARGE_NAME = BIGFILE.TXT
+CHANNELIO_DISK_IMG = build/channelio-fat32.img
+CHANNELIO_DISK_SIZE_MB = 64
+CHANNELIO_DISK_LABEL = CHANNELIO
+CHANNELIO_DISK_TEST_NAME = CHANNEL.TXT
+CHANNELIO_EXT2_IMG = build/channelio-ext2.img
+CHANNELIO_EXT2_LABEL = CHANNELIO_EXT2
 SD_CARD_FAT32_IMG = build/sdcard-fat32.img
 SD_CARD_FAT32_SIZE_MB = 64
 SD_CARD_FAT32_LABEL = TESTSD
@@ -171,6 +177,23 @@ $(DISK_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(DISK_TEST_FILE)
 	$(PYTHON) tools/populate_fat32_image.py $@ $(DISK_TEST_NAME) $(DISK_TEST_FILE)
 	$(PYTHON) tools/populate_fat32_image.py $@ "$(DISK_LONG_NAME)" $(DISK_LONG_FILE)
 	$(PYTHON) tools/populate_fat32_image.py $@ $(DISK_LARGE_NAME) $(DISK_LARGE_FILE)
+
+$(CHANNELIO_DISK_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(DISK_TEST_FILE)
+	mkdir -p `dirname $@`
+	dd if=/dev/zero of=$@ bs=1048576 count=$(CHANNELIO_DISK_SIZE_MB)
+	$(MKFS_FAT) -F 32 -S 512 -s 1 -R 32 -n $(CHANNELIO_DISK_LABEL) $@
+	$(PYTHON) tools/populate_fat32_image.py $@ $(CHANNELIO_DISK_TEST_NAME) $(DISK_TEST_FILE)
+
+$(CHANNELIO_EXT2_IMG): $(shell find $(EXT2_ROOT_DIR) -type f -print)
+	mkdir -p `dirname $@`
+	rm -f $@.tmp
+	dd if=/dev/zero of=$@.tmp bs=1048576 count=$(EXT2_SIZE_MB)
+	@if [ "$(EXT2_MKFS)" = "genext2fs" ]; then \
+		$(EXT2_MKFS) -b $$(( $(EXT2_SIZE_MB) * 1024 )) -B $(EXT2_IMG_BLOCK_SIZE) -L $(CHANNELIO_EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
+	else \
+		$(EXT2_MKFS) -q -F -t ext2 -b $(EXT2_IMG_BLOCK_SIZE) -I $(EXT2_INODE_SIZE) -L $(CHANNELIO_EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
+	fi
+	mv $@.tmp $@
 
 $(SD_CARD_FAT32_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(SD_CARD_FAT32_README_FILE) $(SD_CARD_FAT32_CONFIG_FILE) $(SD_CARD_FAT32_NOTE_FILE)
 	mkdir -p `dirname $@`
@@ -303,6 +326,7 @@ clean:
 	rm -rf build
 
 test: $(PYTHON_ENV_STAMP)
+	$(PYTHON) -m pytest
 	make test -C test
 
 .PHONY: format format-check format-test
@@ -313,7 +337,7 @@ format-check: $(PYTHON_ENV_STAMP)
 	$(PYTHON) tools/hundeformat.py --check -- $(CLANG_FORMAT)
 
 format-test: $(PYTHON_ENV_STAMP)
-	$(PYTHON) test/tools/test_hundeformat.py -- $(CLANG_FORMAT)
+	$(PYTHON) -m pytest test/tools/test_hundeformat.py --clang-format "$(CLANG_FORMAT)"
 
 hundelint: $(PYTHON_ENV_STAMP)
 	$(PYTHON) tools/hundelint.py --require-tree-sitter
@@ -322,7 +346,7 @@ hundelint-strict: $(PYTHON_ENV_STAMP)
 	$(PYTHON) tools/hundelint.py --require-tree-sitter --strict
 
 hundelint-test: $(PYTHON_ENV_STAMP)
-	$(PYTHON) test/tools/test_hundelint.py
+	$(PYTHON) -m pytest test/tools/test_hundelint.py
 
 test_clean:
 	make clean -C test
@@ -465,7 +489,7 @@ qemu-pi-uefi-firmware-framebuffer-trace:
 		-monitor none
 
 qemu-virt: BOOT_CONFIG = qemu_virt
-qemu-virt: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
+qemu-virt: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
 		-smp cpus=4 -cpu max \
@@ -478,12 +502,16 @@ qemu-virt: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 		-device virtio-blk-device,drive=hd1 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
 		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
+		-device virtio-blk-device,drive=channelio0 \
+		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
+		-device virtio-blk-device,drive=channelio1 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait
 
 qemu-virt-hvf: BOOT_CONFIG = qemu_virt_hvf
-qemu-virt-hvf: $(ELF) $(EXT2_IMG) build/boot_config/qemu_virt_hvf.img $(DISK_IMG) $(SD_CARD_FAT32_IMG)
+qemu-virt-hvf: $(ELF) $(EXT2_IMG) build/boot_config/qemu_virt_hvf.img $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3,accel=hvf \
 		-smp cpus=4 \
@@ -498,6 +526,10 @@ qemu-virt-hvf: $(ELF) $(EXT2_IMG) build/boot_config/qemu_virt_hvf.img $(DISK_IMG
 		-device virtio-blk-device,drive=hd2 \
 		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
 		-device virtio-blk-device,drive=sd0 \
+		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
+		-device virtio-blk-device,drive=channelio0 \
+		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
+		-device virtio-blk-device,drive=channelio1 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait
@@ -508,6 +540,8 @@ qemu-virt-hvf-trace:
 	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
 	$(MAKE) build/boot_config/qemu_virt_hvf.img
 	$(MAKE) $(SD_CARD_FAT32_IMG)
+	$(MAKE) $(CHANNELIO_DISK_IMG)
+	$(MAKE) $(CHANNELIO_EXT2_IMG)
 	rm -rf $(KERNEL_BUILD_DIR) $(ELF)
 	$(MAKE) CFLAGS="$(CFLAGS) -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE" $(ELF)
 	mkdir -p build
@@ -527,12 +561,16 @@ qemu-virt-hvf-trace:
 		-device virtio-blk-device,drive=hd2 \
 		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
 		-device virtio-blk-device,drive=sd0 \
+		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
+		-device virtio-blk-device,drive=channelio0 \
+		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
+		-device virtio-blk-device,drive=channelio1 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait
 
 qemu-virt-1cpu: BOOT_CONFIG = qemu_virt
-qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
+qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3,virtualization=off,secure=off \
 		-smp cpus=1 -cpu max \
@@ -545,6 +583,10 @@ qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 		-device virtio-blk-device,drive=hd1 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
 		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
+		-device virtio-blk-device,drive=channelio0 \
+		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
+		-device virtio-blk-device,drive=channelio1 \
   		-kernel $(ELF) \
   		-nographic \
 		-monitor telnet::4444,server,nowait
@@ -554,6 +596,8 @@ qemu-virt-1cpu-trace:
 	$(MAKE) $(DISK_IMG)
 	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
 	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
+	$(MAKE) $(CHANNELIO_DISK_IMG)
+	$(MAKE) $(CHANNELIO_EXT2_IMG)
 	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p build
 	: > build/kernel-trace.log
@@ -570,6 +614,10 @@ qemu-virt-1cpu-trace:
 		-device virtio-blk-device,drive=hd1 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
 		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
+		-device virtio-blk-device,drive=channelio0 \
+		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
+		-device virtio-blk-device,drive=channelio1 \
 		-kernel $(ELF) \
 		-nographic \
 		-semihosting-config enable=on,target=native \
@@ -581,6 +629,8 @@ qemu-virt-2cpus-trace:
 	$(MAKE) $(DISK_IMG)
 	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
 	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
+	$(MAKE) $(CHANNELIO_DISK_IMG)
+	$(MAKE) $(CHANNELIO_EXT2_IMG)
 	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p build
 	: > build/kernel-trace.log
@@ -597,6 +647,10 @@ qemu-virt-2cpus-trace:
 		-device virtio-blk-device,drive=hd1 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
 		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
+		-device virtio-blk-device,drive=channelio0 \
+		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
+		-device virtio-blk-device,drive=channelio1 \
 		-kernel $(ELF) \
 		-nographic \
 		-semihosting-config enable=on,target=native \
@@ -604,7 +658,7 @@ qemu-virt-2cpus-trace:
 		-D qemu-2cpus.log
 
 qemu-virt-2cpus: BOOT_CONFIG = qemu_virt
-qemu-virt-2cpus: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
+qemu-virt-2cpus: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
 		-smp cpus=2 -cpu max \
@@ -617,6 +671,10 @@ qemu-virt-2cpus: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 		-device virtio-blk-device,drive=hd1 \
 		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
 		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
+		-device virtio-blk-device,drive=channelio0 \
+		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
+		-device virtio-blk-device,drive=channelio1 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait

@@ -4,7 +4,8 @@
 
 #include "sys/debug.h"
 #include "sys/service.h"
-#include "async_io/async_io.h"
+#include "channel/block_client.h"
+#include "io/filesystem_driver.h"
 #include "types/fixed_array.h"
 #include "../../user.h"
 #include "../../../common/types/bstring_additional_types.h"
@@ -68,7 +69,6 @@ typedef struct Ext2fsVolume
     uint32_t inode_table_block[EXT2FS_MAX_GROUPS];
     uint32_t group_block_bitmap_block[EXT2FS_MAX_GROUPS];
     uint32_t group_inode_bitmap_block[EXT2FS_MAX_GROUPS];
-    bool use_async_io;
 } Ext2fsVolume;
 
 typedef Ext2fsVolume * Ext2fsVolumePtr;
@@ -143,18 +143,23 @@ static Ext2fsVolume Ext2fsVolume__new(ConstBStringPtr device_path)
 {
     return (Ext2fsVolume){
         .device_path = *device_path,
-        .use_async_io = false,
     };
 }
 
-typedef struct Ext2fsServiceContext
-{
-    Ext2fsVolume volume;
-    BString filesystem_type;
-    BString mountpoint;
-} Ext2fsServiceContext;
+static BlockClient ext2fs_block_protocol;
 
-typedef Ext2fsServiceContext * Ext2fsServiceContextPtr;
+static ServiceCode Ext2fs__connect_block_protocol(ConstBStringPtr device_path)
+{
+    match_result(
+        BlockClient__open(device_path),
+        success(channel)
+        {
+            ext2fs_block_protocol = channel;
+            return SERVICE_OK;
+        },
+        error(code, message) { return (ServiceCode)code; }
+    );
+}
 
 static BString ext2fs_io_error = bstr("EXT2FS IO error");
 static BString ext2fs_invalid_path = bstr("EXT2FS invalid path");
@@ -164,15 +169,6 @@ static BString ext2fs_not_a_file = bstr("EXT2FS not a file");
 static BString ext2fs_already_exists = bstr("EXT2FS already exists");
 static BString ext2fs_no_space = bstr("EXT2FS no space");
 static BString ext2fs_unsupported = bstr("EXT2FS unsupported filesystem");
-
-static Ext2fsServiceContext Ext2fsServiceContext__new(ConstBStringPtr device_path, ConstBStringPtr mountpoint)
-{
-    return (Ext2fsServiceContext){
-        .volume = Ext2fsVolume__new(device_path),
-        .filesystem_type = bstr("ext2"),
-        .mountpoint = *mountpoint,
-    };
-}
 
 static uint16_t Ext2fs__read_u16(uint8_t * data, size_t offset)
 {
@@ -202,62 +198,36 @@ static void Ext2fs__write_u32(uint8_t * data, size_t offset, uint32_t value)
 static Result(Ext2fsBlockData) Ext2fs__read_block(Ext2fsVolumePtr self, uint32_t block)
 {
     Ext2fsBlockData target;
-    if (self->use_async_io)
-    {
-        match_result(
-            IO__block_read(&self->device_path, (uint64_t)block * EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK,
-                           EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK, (Address)&target.data, EXT2FS_BLOCK_SIZE),
-            success(result)
+    match_result(
+        BlockClient__read(&ext2fs_block_protocol, (uint64_t)block * EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK,
+                          EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK, (Address)&target.data, EXT2FS_BLOCK_SIZE),
+        success(result)
+        {
+            if (result != EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK)
             {
-                if (result != EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK)
-                {
-                    return Error(Ext2fsBlockData, ext2fs_io_error, EXT2FS_IO_ERROR);
-                }
-            },
-            error(code, message) { return Error(Ext2fsBlockData, message, code); }
-        );
-
-        return Success(Ext2fsBlockData, target);
-    }
-
-    ServiceBlockReadResult result =
-        service_block_read_device(&self->device_path, (uint64_t)block * EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK,
-                                  EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK, (Address)&target.data, EXT2FS_BLOCK_SIZE);
-    if (result != EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK)
-    {
-        return Error(Ext2fsBlockData, ext2fs_io_error, EXT2FS_IO_ERROR);
-    }
+                return Error(Ext2fsBlockData, ext2fs_io_error, EXT2FS_IO_ERROR);
+            }
+        },
+        error(code, message) { return Error(Ext2fsBlockData, message, code); }
+    );
 
     return Success(Ext2fsBlockData, target);
 }
 
 static Result(Ext2fsCode) Ext2fs__write_block(Ext2fsVolumePtr self, uint32_t block, Ext2fsBlockPtr source)
 {
-    if (self->use_async_io)
-    {
-        match_result(
-            IO__block_write(&self->device_path, (uint64_t)block * EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK,
-                            EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK, (Address)source, EXT2FS_BLOCK_SIZE),
-            success(result)
+    match_result(
+        BlockClient__write(&ext2fs_block_protocol, (uint64_t)block * EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK,
+                           EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK, (Address)source, EXT2FS_BLOCK_SIZE),
+        success(result)
+        {
+            if (result != EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK)
             {
-                if (result != EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK)
-                {
-                    return Error(Ext2fsCode, ext2fs_io_error, EXT2FS_IO_ERROR);
-                }
-            },
-            error(code, message) { return Error(Ext2fsCode, message, code); }
-        );
-
-        return Success(Ext2fsCode, EXT2FS_OK);
-    }
-
-    ServiceBlockReadResult result =
-        service_block_write_device(&self->device_path, (uint64_t)block * EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK,
-                                   EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK, (Address)source, EXT2FS_BLOCK_SIZE);
-    if (result != EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK)
-    {
-        return Error(Ext2fsCode, ext2fs_io_error, EXT2FS_IO_ERROR);
-    }
+                return Error(Ext2fsCode, ext2fs_io_error, EXT2FS_IO_ERROR);
+            }
+        },
+        error(code, message) { return Error(Ext2fsCode, message, code); }
+    );
 
     return Success(Ext2fsCode, EXT2FS_OK);
 }
@@ -485,8 +455,8 @@ static Result(Ext2fsInode) Ext2fsVolume__inode_for_path(Ext2fsVolumePtr self, Co
     return Success(Ext2fsInode, current);
 }
 
-static DirectoryEntryCount Ext2fsVolume__list_dir(Ext2fsVolumePtr self, ConstBStringPtr path, DirectoryEntryPtr entries,
-                                                  size_t max_entries)
+static DirectoryEntryCount Ext2fsVolume__list_dir_from(Ext2fsVolumePtr self, ConstBStringPtr path,
+                                                       DirectoryEntryPtr entries, size_t max_entries, uint64_t skip)
 {
     Ext2fsInode directory;
     match_result(
@@ -533,6 +503,12 @@ static DirectoryEntryCount Ext2fsVolume__list_dir(Ext2fsVolumePtr self, ConstBSt
                 BString name = BString__from_chars((const char *)&block.data[offset + 8], name_len);
                 if (!BString__equals(&name, &bstr(".")) && !BString__equals(&name, &bstr("..")))
                 {
+                    if (skip > 0)
+                    {
+                        skip--;
+                        offset += rec_len;
+                        continue;
+                    }
                     Ext2fsInode entry_inode;
                     match_result(
                         Ext2fsVolume__read_inode(self, inode_number),
@@ -1484,249 +1460,118 @@ static Result(Ext2fsCode) Ext2fsVolume__remove_at_path(Ext2fsVolumePtr self, Con
                                       &target_inode, flags);
 }
 
-static ServiceCode Ext2fs__handle_open(Ext2fsVolumePtr volume, ServiceFilesystemRequestPtr request)
+static Result(FilesystemFileSize)
+    Ext2fs__load(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data)
 {
+    Ext2fsVolumePtr volume = context;
+    Ext2fsInode inode;
     match_result(
-        Ext2fsVolume__inode_for_path(volume, &request->path),
-        success(inode)
+        Ext2fsVolume__inode_for_path(volume, path),
+        success(value) { inode = value; },
+        error(code, message) { return Error(FilesystemFileSize, message, IO_INVALID_PATH); }
+    );
+    if (!Ext2fsInode__is_file(&inode) || inode.size > FILESYSTEM_FILE_CAPACITY)
+    {
+        return Error(FilesystemFileSize, ext2fs_io_error, IO_OPERATION_NOT_SUPPORTED);
+    }
+    for (uint64_t offset = 0; offset < inode.size; offset += EXT2FS_BLOCK_SIZE)
+    {
+        uint64_t count = inode.size - offset;
+        if (count > EXT2FS_BLOCK_SIZE)
         {
-            if (!Ext2fsInode__is_file(&inode))
-            {
-                return service_filesystem_complete_open_without_blocks(request->request_id,
-                                                                       SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0);
-            }
-
-            return service_filesystem_complete_open(request->request_id, SERVICE_OK, 0, inode.mode, inode.size,
-                                                    inode.block);
-        },
-        error(code, message)
-        {
-            if ((request->flags & IO_OPEN_WRITE) != 0 && (request->flags & IO_OPEN_READ) == 0)
-            {
-                uint32_t blocks[12] = {0};
-                return service_filesystem_complete_open(request->request_id, SERVICE_OK, 0, EXT2FS_MODE_FILE | 0644, 0,
-                                                        blocks);
-            }
-
-            return service_filesystem_complete_open_without_blocks(request->request_id,
-                                                                   SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0);
+            count = EXT2FS_BLOCK_SIZE;
         }
+        uint32_t number = inode.block[offset / EXT2FS_BLOCK_SIZE];
+        if (number == 0)
+        {
+            memset(data + offset, 0, count);
+            continue;
+        }
+        match_result(
+            Ext2fs__read_block(volume, number),
+            success(block) { memcpy(data + offset, block.data, count); },
+            error(code, message) { return Error(FilesystemFileSize, message, IO_INVALID_PATH); }
+        );
+    }
+    return Success(FilesystemFileSize, inode.size);
+}
+
+static IOStatus Ext2fs__store(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data,
+                              FilesystemFileSize size)
+{
+    Ext2fsVolumePtr volume = context;
+    match_result(
+        Ext2fsVolume__write_file_at_path(volume, path, data, size),
+        success(value) { return IO_OK; },
+        error(code, message) { return IO_INVALID_PATH; }
     );
 }
 
-static ServiceCode Ext2fs__handle_read(Ext2fsVolumePtr volume, ServiceFilesystemRequestPtr request)
+static Result(OptionalDirectoryEntry) Ext2fs__list(IOServiceContext context, ConstBStringPtr path, uint64_t index)
 {
-    if (request->block == 0 || request->block_offset >= EXT2FS_BLOCK_SIZE ||
-        request->size > EXT2FS_BLOCK_SIZE - request->block_offset)
-    {
-        return service_filesystem_complete(request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0);
-    }
-
-    Ext2fsBlockData block;
-    match_result(
-        Ext2fs__read_block(volume, (uint32_t)request->block),
-        success(block_data) { block = block_data; },
-        error(code, message)
-        {
-            return service_filesystem_complete(request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0);
-        }
-    );
-
-    memcpy((void *)request->buffer, &block.data[request->block_offset], request->size);
-    return service_filesystem_complete(request->request_id, SERVICE_OK, (int64_t)request->size);
-}
-
-static ServiceCode Ext2fs__handle_write(Ext2fsVolumePtr volume, ServiceFilesystemRequestPtr request)
-{
-    match_result(
-        Ext2fsVolume__write_file_at_path(volume, &request->path, (uint8_t *)request->buffer, request->size),
-        success(result)
-        {
-            return service_filesystem_complete_open(request->request_id, SERVICE_OK, (int64_t)request->size,
-                                                    result.inode.mode, result.inode.size, result.inode.block);
-        },
-        error(code, message)
-        {
-            return service_filesystem_complete_open_without_blocks(request->request_id,
-                                                                   SERVICE_FILESYSTEM_REQUEST_FAILED, 0, 0, 0);
-        }
-    );
-}
-
-static ServiceCode Ext2fs__handle_mkdir(Ext2fsVolumePtr volume, ServiceFilesystemRequestPtr request)
-{
-    match_result(
-        Ext2fsVolume__mkdir_at_path(volume, &request->path),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return service_filesystem_complete(request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0);
-        }
-    );
-
-    return service_filesystem_complete(request->request_id, SERVICE_OK, IO_OK);
-}
-
-static ServiceCode Ext2fs__handle_remove(Ext2fsVolumePtr volume, ServiceFilesystemRequestPtr request)
-{
-    match_result(
-        Ext2fsVolume__remove_at_path(volume, &request->path, request->flags),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return service_filesystem_complete(request->request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0);
-        }
-    );
-
-    return service_filesystem_complete(request->request_id, SERVICE_OK, IO_OK);
-}
-
-static void Ext2fs__handle_request(Ext2fsVolumePtr volume, uint64_t request_id)
-{
-    ServiceFilesystemRequest request;
-    ServiceCode request_status = service_filesystem_get_request(request_id, &request);
-    if (!service_ok(request_status))
-    {
-        DRIVER_DEBUG("ext2fs: request %i fetch failed %i\n", (int)request_id, (int)request_status);
-        service_filesystem_complete(request_id, request_status, 0);
-        return;
-    }
-
-    if (request.operation == SERVICE_FILESYSTEM_OPEN)
-    {
-        Ext2fs__handle_open(volume, &request);
-        return;
-    }
-
-    if (request.operation == SERVICE_FILESYSTEM_READ)
-    {
-        Ext2fs__handle_read(volume, &request);
-        return;
-    }
-
-    if (request.operation == SERVICE_FILESYSTEM_WRITE)
-    {
-        Ext2fs__handle_write(volume, &request);
-        return;
-    }
-
-    if (request.operation == SERVICE_FILESYSTEM_MKDIR)
-    {
-        Ext2fs__handle_mkdir(volume, &request);
-        return;
-    }
-
-    if (request.operation == SERVICE_FILESYSTEM_REMOVE)
-    {
-        Ext2fs__handle_remove(volume, &request);
-        return;
-    }
-
-    if (request.operation == SERVICE_FILESYSTEM_CLOSE)
-    {
-        service_filesystem_complete(request.request_id, SERVICE_OK, 0);
-        return;
-    }
-
-    if (request.operation != SERVICE_FILESYSTEM_LIST_DIR)
-    {
-        service_filesystem_complete(request.request_id, SERVICE_OPERATION_NOT_SUPPORTED, 0);
-        return;
-    }
-
-    DirectoryEntryCount count =
-        Ext2fsVolume__list_dir(volume, &request.path, (DirectoryEntryPtr)request.entries, request.max_entries);
+    DirectoryEntry entry;
+    DirectoryEntryCount count = Ext2fsVolume__list_dir_from(context, path, &entry, 1, index);
     if (count < 0)
     {
-        service_filesystem_complete(request.request_id, SERVICE_FILESYSTEM_REQUEST_FAILED, 0);
-        return;
+        return Error(OptionalDirectoryEntry, bstr("Directory lookup failed"), count);
     }
-
-    service_filesystem_complete(request.request_id, SERVICE_OK, count);
+    return Success(OptionalDirectoryEntry, count == 0 ? None(DirectoryEntry) : Some(DirectoryEntry, entry));
 }
 
-static Result(AsyncIOCode) Ext2fs__register_service(Anything service_context)
+static IOStatus Ext2fs__mkdir(IOServiceContext context, ConstBStringPtr path)
 {
-    Ext2fsServiceContextPtr context = (Ext2fsServiceContextPtr)service_context;
-
-    DRIVER_DEBUG("ext2fs: starting device=%B mountpoint=%B\n", &context->volume.device_path, &context->mountpoint);
-
-    if (!service_ok(service_become_service()))
-    {
-        DRIVER_DEBUG("ext2fs: service registration failed\n");
-        return Error(AsyncIOCode, ext2fs_io_error, ASYNC_IO_REGISTER_FAILED);
-    }
-
+    Ext2fsVolumePtr volume = context;
     match_result(
-        Ext2fsVolume__mount(&context->volume),
-        success_do_nothing(),
-        error(code, message)
-        {
-            DRIVER_DEBUG("ext2fs: mount failed device=%B mountpoint=%B\n", &context->volume.device_path,
-                         &context->mountpoint);
-            return Error(AsyncIOCode, message, ASYNC_IO_REGISTER_FAILED);
-        }
+        Ext2fsVolume__mkdir_at_path(volume, path),
+        success(value) { return IO_OK; },
+        error(code, message) { return IO_INVALID_PATH; }
     );
-
-    context->volume.use_async_io = true;
-
-    DRIVER_DEBUG("ext2fs: mounted device=%B mountpoint=%B\n", &context->volume.device_path, &context->mountpoint);
-
-    ServiceCode register_status =
-        service_register_filesystem(&context->volume.device_path, &context->filesystem_type, &context->mountpoint);
-    if (!service_ok(register_status))
-    {
-        DRIVER_DEBUG("ext2fs: filesystem registration failed device=%B mountpoint=%B status=%i\n",
-                     &context->volume.device_path, &context->mountpoint, (int)register_status);
-        return Error(AsyncIOCode, ext2fs_io_error, ASYNC_IO_REGISTER_FAILED);
-    }
-
-    DRIVER_DEBUG("ext2fs: registered device=%B mountpoint=%B\n", &context->volume.device_path, &context->mountpoint);
-
-    ServiceCode ready_status = service_publish_ready(&context->mountpoint);
-    if (!service_ok(ready_status))
-    {
-        DRIVER_DEBUG("ext2fs: ready publish failed mountpoint=%B status=%i\n", &context->mountpoint, (int)ready_status);
-        return Error(AsyncIOCode, ext2fs_io_error, ASYNC_IO_REGISTER_FAILED);
-    }
-
-    DRIVER_DEBUG("ext2fs: ready mountpoint=%B\n", &context->mountpoint);
-    return Success(AsyncIOCode, ASYNC_IO_OK);
 }
 
-static Result(FiberCode) Ext2fs__request_service(FiberPtr self, Anything service_context, ServiceEvent request)
+static IOStatus Ext2fs__remove(IOServiceContext context, ConstBStringPtr path, Flags flags)
 {
-    Ext2fsServiceContextPtr context = (Ext2fsServiceContextPtr)service_context;
-    if (request.type == SERVICE_EVENT_FILESYSTEM_IO)
-    {
-        Ext2fs__handle_request(&context->volume, request.source);
-    }
+    Ext2fsVolumePtr volume = context;
+    match_result(
+        Ext2fsVolume__remove_at_path(volume, path, flags),
+        success(value) { return IO_OK; },
+        error(code, message) { return IO_INVALID_PATH; }
+    );
+}
 
-    return Success(FiberCode, FIBER_OK);
+static FilesystemOperations Ext2fs__operations(void)
+{
+    return FilesystemOperations__new(Ext2fs__load, Ext2fs__store, Ext2fs__list, Ext2fs__mkdir, Ext2fs__remove,
+                                     EXT2FS_MAX_READ_SIZE);
 }
 
 int EXT2FS_ENTRYPOINT(int argc, char ** argv)
 {
-    if (argc != EXT2FS_ARG_COUNT)
+    if (argc != EXT2FS_ARG_COUNT || !service_ok(service_become_service()))
     {
-        DRIVER_DEBUG("ext2fs: usage <device> <mountpoint>\n");
         return 1;
     }
-
-    BString device_path = BString__new(argv[1]);
+    BString device = BString__new(argv[1]);
     BString mountpoint = BString__new(argv[2]);
-    Ext2fsServiceContext context = Ext2fsServiceContext__new(&device_path, &mountpoint);
-    AsyncIO async_io = AsyncIO__new((Anything)&context, Ext2fs__request_service);
-
+    static Ext2fsVolume volume;
+    volume = Ext2fsVolume__new(&device);
+    if (!service_ok(Ext2fs__connect_block_protocol(&device)))
+    {
+        return 1;
+    }
     match_result(
-        AsyncIO__start(&async_io, Ext2fs__register_service, (Anything)&context, Ext2fs__request_service),
-        success(code) { return code == ASYNC_IO_WAIT_COMPLETE ? 0 : 1; },
+        Ext2fsVolume__mount(&volume),
+        success_do_nothing(),
         error(code, message)
         {
-            DRIVER_DEBUG("ext2fs: async io failed error=%B code=%i\n", &message, (int)code);
+            DRIVER_DEBUG("ext2fs: mount failed: %B (%i)\n", &message, (int)code);
+            BlockClient__close(&ext2fs_block_protocol);
             return 1;
         }
     );
-
-    return 1;
+    static FilesystemDriver driver;
+    FilesystemOperations operations = Ext2fs__operations();
+    driver = FilesystemDriver__new(&volume, &operations);
+    int result = FilesystemDriver__run(&driver, &mountpoint);
+    BlockClient__close(&ext2fs_block_protocol);
+    return result;
 }

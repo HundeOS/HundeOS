@@ -68,6 +68,17 @@ void tearDown(void)
     reset_cpu_count();
 }
 
+void test_embedded_exec_does_not_require_a_kernel_filesystem(void)
+{
+    kernel->io_subsystem->root_filesystem = None(FilesystemPtr);
+    ProcessArguments arguments = ProcessArguments__new();
+    match_result(
+        Exec__exec(&context, &exec_path, false, &arguments),
+        success(process) { TEST_ASSERT_EQUAL_BSTRING(process->name, exec_path); },
+        error_test_fail()
+    );
+}
+
 void test_exec_spawns_process_and_puts_parent_in_wait()
 {
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);

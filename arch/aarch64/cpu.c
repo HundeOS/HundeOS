@@ -20,6 +20,15 @@ uint64_t CPU__id()
     return cpu_id();
 }
 
+uint64_t CPU__time_usec(void)
+{
+    uint64_t counter;
+    uint64_t frequency;
+    __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(counter)::"memory");
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+    return (counter / frequency) * 1000000ULL + (counter % frequency) * 1000000ULL / frequency;
+}
+
 void CPU__noop()
 {
     __asm__ __volatile__("nop");

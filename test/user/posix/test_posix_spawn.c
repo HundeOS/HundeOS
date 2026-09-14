@@ -35,11 +35,11 @@ void tearDown(void)
 {
 }
 
-static void assert_last_request_argument(StringPos index, const char * expected)
+static void assert_last_request_argument(StringPos index, ConstBStringPtr expected)
 {
     match_optional(
         SpawnArguments__at(&last_request.arguments, index),
-        some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); },
+        some(argument) { TEST_ASSERT_EQUAL_BSTRING(*expected, argument); },
         none_test_fail()
     );
 }
@@ -55,10 +55,10 @@ void test_posix_spawnv_converts_argv_after_argv0_to_hundos_spawn_arguments(void)
         {
             TEST_ASSERT_EQUAL_INT64(42, pid);
             TEST_ASSERT_EQUAL(SYSCALL_EXEC, last_call);
-            TEST_ASSERT_EQUAL_STRING("/sbin/tool", BString__cstr(&last_request.path));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/tool"), last_request.path);
             TEST_ASSERT_EQUAL_UINT64(4, SpawnArguments__len(&last_request.arguments));
-            assert_last_request_argument(0, "one");
-            assert_last_request_argument(3, "four");
+            assert_last_request_argument(0, &bstr("one"));
+            assert_last_request_argument(3, &bstr("four"));
         },
         error_test_fail()
     );

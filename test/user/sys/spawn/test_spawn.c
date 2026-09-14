@@ -36,11 +36,11 @@ void tearDown(void)
 {
 }
 
-static void assert_last_request_argument(StringPos index, const char * expected)
+static void assert_last_request_argument(StringPos index, ConstBStringPtr expected)
 {
     match_optional(
         SpawnArguments__at(&last_request.arguments, index),
-        some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); },
+        some(argument) { TEST_ASSERT_EQUAL_BSTRING(*expected, argument); },
         none_test_fail()
     );
 }
@@ -55,7 +55,7 @@ void test_os_spawn_returns_success_result_for_spawned_pid(void)
         {
             TEST_ASSERT_EQUAL_INT64(17, pid);
             TEST_ASSERT_EQUAL(SYSCALL_EXEC, last_call);
-            TEST_ASSERT_EQUAL_STRING("/sbin/test", BString__cstr(&last_request.path));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/test"), last_request.path);
             TEST_ASSERT_EQUAL(P_NOWAIT, last_request.mode);
             TEST_ASSERT_EQUAL_UINT64(0, SpawnArguments__len(&last_request.arguments));
         },
@@ -74,8 +74,8 @@ void test_os_spawn_copies_legacy_optional_args_into_spawn_arguments(void)
         {
             TEST_ASSERT_EQUAL_INT64(18, pid);
             TEST_ASSERT_EQUAL_UINT64(2, SpawnArguments__len(&last_request.arguments));
-            assert_last_request_argument(0, "one");
-            assert_last_request_argument(1, "two");
+            assert_last_request_argument(0, &bstr("one"));
+            assert_last_request_argument(1, &bstr("two"));
         },
         error_test_fail()
     );
@@ -109,8 +109,8 @@ void test_os_spawn_argv_accepts_more_than_three_args(void)
             TEST_ASSERT_EQUAL_INT64(19, pid);
             TEST_ASSERT_EQUAL(SYSCALL_EXEC, last_call);
             TEST_ASSERT_EQUAL_UINT64(4, SpawnArguments__len(&last_request.arguments));
-            assert_last_request_argument(0, "one");
-            assert_last_request_argument(3, "four");
+            assert_last_request_argument(0, &bstr("one"));
+            assert_last_request_argument(3, &bstr("four"));
         },
         error_test_fail()
     );
@@ -126,7 +126,7 @@ void test_os_spawn_returns_error_result_for_spawn_failure(void)
         error(code, message)
         {
             TEST_ASSERT_EQUAL_INT64(SPAWN_NO_FILE, code);
-            TEST_ASSERT_EQUAL_STRING("spawn failed: file not found", BString__cstr(&message));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("spawn failed: file not found"), message);
         }
     );
 }

@@ -25,6 +25,7 @@
 #define VIRTIO_MMIO_MAGIC_VALUE 0x74726976U
 #define VIRTIO_DEVICE_ID_BLOCK 2U
 #define HUNDESCHULE_REQUIRED_PROCESSES_MAX 16U
+#define HUNDESCHULE_VIRTIO_BLOCK_DRIVER_SELECTIONS_MAX 16U
 #define HUNDESCHULE_CONFIG_PATH "/boot/config/hundeschule.conf"
 #define HUNDESCHULE_CONFIG_MAX 2048U
 
@@ -34,11 +35,16 @@ static BString hundeschule_hundebus_path = bstr("/sbin/drivers/hundebus");
 static BString hundeschule_virtio_keyboard_path = bstr("/sbin/drivers/virtio_keyboard");
 static BString hundeschule_uart_rx_path = bstr("/sbin/drivers/uart_rx");
 static BString hundeschule_uart_tx_path = bstr("/sbin/drivers/uart_tx");
-static BString hundeschule_virtio_blk_path = bstr("/sbin/drivers/virtio_blk");
+static BString hundeschule_channel_manager_path = bstr("/sbin/services/hundekanal-warter");
+static BString hundeschule_interrupt_manager_path = bstr("/sbin/services/hund-unterbrict");
+static BString hundeschule_virtio_blk_channelio_path = bstr("/sbin/drivers/virtio_blk_channelio");
 static BString hundeschule_socket_router_path = bstr("/sbin/drivers/socket_router");
+static BString hundeschule_filesystem_path = bstr("/sbin/services/hund-dateisystem");
+static BString hundeschule_io_system_path = bstr("/sbin/services/hund-io-system");
 static BString hundeschule_space_delimiters = bstr(" \t\r");
 static BString hundeschule_comment_delimiter = bstr("#");
 static BString hundeschule_driver_command = bstr("driver");
+static BString hundeschule_virtio_block_driver_command = bstr("virtio-block-driver");
 static BString hundeschule_once_option = bstr("once");
 static BString hundeschule_respawn_option = bstr("respawn");
 static BString hundeschule_framebuffer_condition = bstr("framebuffer");
@@ -82,6 +88,40 @@ FixedArrayBodyDefine(HundeschuleRequiredProcesses);
 
 typedef HundeschuleRequiredProcesses * HundeschuleRequiredProcessesPtr;
 typedef volatile uint32_t * HundeschuleRegisterPtr;
+
+typedef struct HundeschuleVirtioBlockDriverSelection
+{
+    BString device_path;
+    BString driver_path;
+    bool used;
+} HundeschuleVirtioBlockDriverSelection;
+
+typedef HundeschuleVirtioBlockDriverSelection * HundeschuleVirtioBlockDriverSelectionPtr;
+
+OptionalDef(HundeschuleVirtioBlockDriverSelection);
+
+static HundeschuleVirtioBlockDriverSelection HundeschuleVirtioBlockDriverSelection__new(ConstBStringPtr device_path,
+                                                                                        ConstBStringPtr driver_path)
+{
+    return (HundeschuleVirtioBlockDriverSelection){
+        .device_path = *device_path,
+        .driver_path = *driver_path,
+        .used = false,
+    };
+}
+
+static bool HundeschuleVirtioBlockDriverSelection__equals_fixed_array(void * self, void * other)
+{
+    HundeschuleVirtioBlockDriverSelectionPtr left = self;
+    HundeschuleVirtioBlockDriverSelectionPtr right = other;
+    return BString__equals(&left->device_path, &right->device_path);
+}
+
+FixedArrayDefine(HundeschuleVirtioBlockDriverSelection, HUNDESCHULE_VIRTIO_BLOCK_DRIVER_SELECTIONS_MAX,
+                 HundeschuleVirtioBlockDriverSelections, &HundeschuleVirtioBlockDriverSelection__equals_fixed_array);
+FixedArrayBodyDefine(HundeschuleVirtioBlockDriverSelections);
+
+typedef HundeschuleVirtioBlockDriverSelections * HundeschuleVirtioBlockDriverSelectionsPtr;
 
 static HundeschuleRegisterPtr Hundeschule__reg32(void * base, uint64_t offset)
 {
@@ -149,39 +189,66 @@ static Optional(HundeschuleRequiredProcessPtr)
     return None(HundeschuleRequiredProcessPtr);
 }
 
-static Optional(BString) HundeschuleRequiredProcess__ready_path(HundeschuleRequiredProcessPtr self)
+static bool HundeschuleVirtioBlockDriverSelection__matches_device(HundeschuleVirtioBlockDriverSelectionPtr self,
+                                                                  void * context)
 {
-    if (BString__equals(&self->path, &hundeschule_virtio_blk_path))
-    {
-        return Some(BString, self->arg1);
-    }
-
-    return None(BString);
+    return BString__equals(&self->device_path, context);
 }
 
-static int Hundeschule__wait_for_bootstrap_block_devices(HundeschuleRequiredProcessesPtr processes)
+static ConstBStringPtr Hundeschule__virtio_block_driver(HundeschuleVirtioBlockDriverSelectionsPtr selections,
+                                                        ConstBStringPtr device_path)
+{
+    match_find_result_ptr(
+        HundeschuleVirtioBlockDriverSelections__find(selections, HundeschuleVirtioBlockDriverSelection__matches_device,
+                                                     (void *)device_path),
+        some(selection)
+        {
+            selection->used = true;
+            return &selection->driver_path;
+        },
+        none_do_nothing()
+    );
+    return &hundeschule_virtio_blk_channelio_path;
+}
+
+static bool Hundeschule__is_virtio_block_driver(ConstBStringPtr path)
+{
+    return BString__equals(path, &hundeschule_virtio_blk_channelio_path);
+}
+
+static int Hundeschule__wait_for_block_device(ConstBStringPtr device_path)
+{
+    ServiceCode result = service_wait_ready(device_path);
+    if (service_ok(result))
+    {
+        return 0;
+    }
+
+    IO__printf(&bstr("hundeschule: failed waiting for %B: %i\n"), device_path, (int)result);
+    return 1;
+}
+
+static int Hundeschule__unused_virtio_block_driver_selections(HundeschuleVirtioBlockDriverSelectionsPtr selections)
 {
     int failures = 0;
-    for_each_fa_ptr(HundeschuleRequiredProcesses, processes, index, process, {
-        match_optional(
-            HundeschuleRequiredProcess__ready_path(&process),
-            some(ready_path)
-            {
-                ServiceCode result = service_wait_ready(&ready_path);
-                if (!service_ok(result))
-                {
-                    IO__printf(&bstr("hundeschule: failed waiting for %B: %i\n"), &ready_path, (int)result);
-                    failures++;
-                }
-            },
-            none_do_nothing()
-        );
+    for_each_fa_ptr(HundeschuleVirtioBlockDriverSelections, selections, index, selection, {
+        if (!selection.used)
+        {
+            IO__printf(&bstr("hundeschule: virtio block driver selection did not match %B\n"), &selection.device_path);
+            failures++;
+        }
     });
-
     return failures;
 }
 
-static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesPtr processes)
+static Optional(DynString) Hundeschule__load_config(void);
+static int Hundeschule__parse_virtio_block_driver_selections(HundeschuleVirtioBlockDriverSelectionsPtr selections,
+                                                             ConstDynStringPtr config);
+static int Hundeschule__spawn_configured_drivers(HundeschuleRequiredProcessesPtr processes, ConstDynStringPtr config,
+                                                 bool framebuffer_present);
+static int Hundeschule__spawn_default_drivers(HundeschuleRequiredProcessesPtr processes, bool framebuffer_present);
+
+static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesPtr processes, bool framebuffer_present)
 {
     ServiceMappedMemoryPtr mapping;
     if (!service_ok(service_map_mmio(VIRTIO_MMIO_FIRST_PHYS_BASE, VIRTIO_MMIO_REGION_SIZE, &mapping)))
@@ -190,6 +257,9 @@ static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesP
         return 1;
     }
 
+    HundeschuleVirtioBlockDriverSelections selections = HundeschuleVirtioBlockDriverSelections__new();
+    Optional(DynString) config = None(DynString);
+    bool configured_services_started = false;
     int failures = 0;
     uint64_t virtio_ordinal = 1;
     for (uint64_t next_slot = VIRTIO_MMIO_SLOT_COUNT; next_slot > 0; next_slot--)
@@ -204,12 +274,47 @@ static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesP
         {
             BString slot_arg = Hundeschule__u64_bstring(slot);
             BString path_arg = Hundeschule__virtio_path(virtio_ordinal);
-            failures += Hundeschule__spawn_required_process(processes, &hundeschule_virtio_blk_path, &slot_arg,
-                                                            &path_arg, true);
+            ConstBStringPtr driver_path = Hundeschule__virtio_block_driver(&selections, &path_arg);
+            failures += Hundeschule__spawn_required_process(processes, driver_path, &slot_arg, &path_arg, true);
+            if (failures == 0)
+            {
+                failures += Hundeschule__wait_for_block_device(&path_arg);
+            }
             virtio_ordinal++;
+
+            if (failures == 0 && !configured_services_started)
+            {
+                match_optional(
+                    Hundeschule__load_config(),
+                    some(loaded_config)
+                    {
+                        config = Some(DynString, loaded_config);
+                        configured_services_started = true;
+                        failures += Hundeschule__parse_virtio_block_driver_selections(&selections, &loaded_config);
+                        failures +=
+                            Hundeschule__spawn_configured_drivers(processes, &loaded_config, framebuffer_present);
+                    },
+                    none_do_nothing()
+                );
+            }
+
+            if (failures != 0)
+            {
+                break;
+            }
         }
     }
 
+    if (failures == 0 && !configured_services_started)
+    {
+        failures += Hundeschule__spawn_default_drivers(processes, framebuffer_present);
+    }
+
+    failures += Hundeschule__unused_virtio_block_driver_selections(&selections);
+    match_optional(config,
+        some(loaded_config) { DynString__dispose(&loaded_config); },
+        none_do_nothing()
+    );
     return failures;
 }
 
@@ -260,6 +365,90 @@ static Optional(DynString) Hundeschule__load_config(void)
     return None(DynString);
 }
 
+static int Hundeschule__parse_virtio_block_driver_selection_line(HundeschuleVirtioBlockDriverSelectionsPtr selections,
+                                                                 ConstBStringPtr line)
+{
+    BString command_line = Hundeschule__line_without_comment(line);
+    BString remaining = BString__strip(&command_line);
+    if (BString__is_empty(&remaining))
+    {
+        return 0;
+    }
+
+    BString command = empty_bstr();
+    match_optional(Hundeschule__next_token(&remaining),
+        some(token) { command = token; },
+        none() { return 0; }
+    );
+
+    if (!BString__equals(&command, &hundeschule_virtio_block_driver_command))
+    {
+        return 0;
+    }
+
+    BString device_path = empty_bstr();
+    match_optional(Hundeschule__next_token(&remaining),
+        some(token) { device_path = token; },
+        none() { return 1; }
+    );
+
+    BString driver_path = empty_bstr();
+    match_optional(Hundeschule__next_token(&remaining),
+        some(token) { driver_path = token; },
+        none() { return 1; }
+    );
+
+    match_optional(Hundeschule__next_token(&remaining),
+        some(unexpected) { return 1; },
+        none_do_nothing()
+    );
+
+    if (!Hundeschule__is_virtio_block_driver(&driver_path))
+    {
+        DRIVER_DEBUG("hundeschule: invalid virtio block driver=%B line=%B\n", &driver_path, line);
+        return 1;
+    }
+
+    HundeschuleVirtioBlockDriverSelection selection =
+        HundeschuleVirtioBlockDriverSelection__new(&device_path, &driver_path);
+    match_optional(
+        HundeschuleVirtioBlockDriverSelections__find_item(selections, selection),
+        some(index) { return 1; },
+        none_do_nothing()
+    );
+    match_result(
+        HundeschuleVirtioBlockDriverSelections__push(selections, selection),
+        success_do_nothing(),
+        error(code, message) { return 1; }
+    );
+    return 0;
+}
+
+static int Hundeschule__parse_virtio_block_driver_selections(HundeschuleVirtioBlockDriverSelectionsPtr selections,
+                                                             ConstDynStringPtr config)
+{
+    int failures = 0;
+    match_optional(
+        DynString__lines(config),
+        some(lines)
+        {
+            for_each_ll(DynStringLines, lines, line, {
+                match_optional(
+                    DynString__bstring(&line),
+                    some(bstring_line)
+                    {
+                        failures += Hundeschule__parse_virtio_block_driver_selection_line(selections, &bstring_line);
+                    },
+                    none() { failures++; }
+                );
+            });
+            DynStringLines__dispose_all(&lines);
+        },
+        none() { failures++; }
+    );
+    return failures;
+}
+
 static int Hundeschule__spawn_configured_driver_line(HundeschuleRequiredProcessesPtr processes, ConstBStringPtr line,
                                                      bool framebuffer_present)
 {
@@ -275,6 +464,11 @@ static int Hundeschule__spawn_configured_driver_line(HundeschuleRequiredProcesse
         some(token) { command = token; },
         none() { return 0; }
     );
+
+    if (BString__equals(&command, &hundeschule_virtio_block_driver_command))
+    {
+        return 0;
+    }
 
     if (!BString__equals(&command, &hundeschule_driver_command))
     {
@@ -358,6 +552,15 @@ static int Hundeschule__spawn_configured_driver_line(HundeschuleRequiredProcesse
         return 0;
     }
 
+    // These services are already running before disk configuration is available.
+    if (BString__equals(&path, &hundeschule_channel_manager_path) ||
+        BString__equals(&path, &hundeschule_interrupt_manager_path) ||
+        BString__equals(&path, &hundeschule_socket_router_path) ||
+        BString__equals(&path, &hundeschule_io_system_path) || BString__equals(&path, &hundeschule_filesystem_path))
+    {
+        return 0;
+    }
+
     DRIVER_DEBUG("hundeschule: config spawning path=%B respawn=%i\n", &path, (int)respawn);
     return Hundeschule__spawn_required_process(processes, &path, &hundeschule_empty, &hundeschule_empty, respawn);
 }
@@ -423,45 +626,44 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
         return 1;
     }
 
-    failures += Hundeschule__spawn_virtio_block_drivers(processes);
+    if (Hundeschule__spawn_required_process(processes, &hundeschule_channel_manager_path, &hundeschule_empty,
+                                            &hundeschule_empty, false) != 0 ||
+        !service_ok(service_wait_ready(&bstr("hundekanal-warter"))))
+    {
+        return 1;
+    }
+    if (Hundeschule__spawn_required_process(processes, &hundeschule_interrupt_manager_path, &hundeschule_empty,
+                                            &hundeschule_empty, false) != 0 ||
+        !service_ok(service_wait_ready(&bstr("hund-unterbrict"))))
+    {
+        return 1;
+    }
+
+    if (Hundeschule__spawn_required_process(processes, &hundeschule_socket_router_path, &hundeschule_empty,
+                                            &hundeschule_empty, false) != 0 ||
+        !service_ok(service_wait_ready(&bstr("socket_router"))))
+    {
+        return 1;
+    }
+    if (Hundeschule__spawn_required_process(processes, &hundeschule_io_system_path, &hundeschule_empty,
+                                            &hundeschule_empty, false) != 0 ||
+        !service_ok(service_wait_ready(&bstr("hund-io-system"))))
+    {
+        return 1;
+    }
+
+    failures += Hundeschule__spawn_virtio_block_drivers(processes, framebuffer_present);
 
     if (failures != 0)
     {
         return failures;
     }
 
-    failures += Hundeschule__wait_for_bootstrap_block_devices(processes);
-    if (failures != 0)
+    if (Hundeschule__spawn_required_process(processes, &hundeschule_filesystem_path, &hundeschule_empty,
+                                            &hundeschule_empty, false) != 0 ||
+        !service_ok(service_wait_ready(&bstr("hund-dateisystem"))))
     {
-        return failures;
-    }
-
-    failures += Hundeschule__spawn_required_process(processes, &hundeschule_socket_router_path, &hundeschule_empty,
-                                                    &hundeschule_empty, false);
-    if (failures != 0)
-    {
-        return failures;
-    }
-
-    match_optional(
-        Hundeschule__load_config(),
-        some(config)
-        {
-            DRIVER_DEBUG("hundeschule: loaded config %s bytes=%i\n", HUNDESCHULE_CONFIG_PATH,
-                         (int)DynString__length(&config));
-            failures += Hundeschule__spawn_configured_drivers(processes, &config, framebuffer_present);
-            DynString__dispose(&config);
-        },
-        none()
-        {
-            DRIVER_DEBUG("hundeschule: no config loaded, using defaults\n");
-            failures += Hundeschule__spawn_default_drivers(processes, framebuffer_present);
-        }
-    );
-
-    if (failures != 0)
-    {
-        return failures;
+        return 1;
     }
 
     failures += Hundeschule__spawn_required_process(processes, &hundeschule_hundeschau_path, &hundeschule_empty,

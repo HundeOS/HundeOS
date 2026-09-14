@@ -8,7 +8,7 @@
 #include "../../common/types/dyn_string.h"
 #include "io.h"
 
-#define SD_HOST_CONFIG_PATH "/proc/sysinfo"
+#define SD_HOST_CONFIG_PATH "/boot/sysinfo"
 #define SD_HOST_CONFIG_MAX 32768
 
 typedef struct SdHostConfig

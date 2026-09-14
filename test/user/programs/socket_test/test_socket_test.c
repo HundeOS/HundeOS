@@ -3,6 +3,13 @@
 #include <string.h>
 
 #include "unity.h"
+#include "io/client.h"
+
+IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset)
+{
+    TEST_FAIL_MESSAGE("Unexpected filesystem request in socket program");
+    return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+}
 
 #include "../../../../common_includes/syscalls/calls.h"
 #include "../../../../common_includes/syscalls/io.h"
@@ -53,7 +60,8 @@ void tearDown(void)
 {
 }
 
-Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+static Anything record_operation(SystemCall call, Anything arg1, Anything arg2, Anything arg3, Anything arg4,
+                                 Anything arg5)
 {
     calls[call_count] = (RecordedCall){
         .call = call,
@@ -80,7 +88,7 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
     {
         char * buffer = (char *)arg3;
         const char * text = "pong";
-        if (arg2 == 22)
+        if (arg2 == IO_SESSION_HANDLE_BASE + 22)
         {
             text = "ping";
         }
@@ -96,6 +104,34 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
         result_pos++;
     }
     return result;
+}
+
+Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+{
+    TEST_FAIL_MESSAGE("Socket operations must not use IO syscalls");
+    return -1;
+}
+
+IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
+{
+    IOPathRequest request = IOPathRequest__new(path, flags);
+    return record_operation(IO_CALL, IO_OPEN, (Anything)&request, 0, 0, 0);
+}
+IOHandle IOClient__accept(IOHandle handle)
+{
+    return record_operation(IO_CALL, IO_ACCEPT, handle, 0, 0, 0);
+}
+IOStatus IOClient__close(IOHandle handle)
+{
+    return record_operation(IO_CALL, IO_CLOSE, handle, 0, 0, 0);
+}
+ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
+{
+    return record_operation(IO_CALL, IO_READ, handle, (Anything)data, size, 0);
+}
+ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
+{
+    return record_operation(IO_CALL, IO_WRITE, handle, (Anything)data, size, 0);
 }
 
 void IO__print(ConstBStringPtr message)
@@ -124,7 +160,7 @@ int IO__printf(ConstBStringPtr format, ...)
 void test_socket_test_connect_opens_socket_writes_message_and_reads_reply(void)
 {
     char * argv[] = {"socket_test", "connect", "socket://proc/demo", "hello"};
-    SocketTestTest__queue_result(21);
+    SocketTestTest__queue_result(IO_SESSION_HANDLE_BASE + 21);
     SocketTestTest__queue_result(5);
     SocketTestTest__queue_result(IO_OK);
 
@@ -133,10 +169,10 @@ void test_socket_test_connect_opens_socket_writes_message_and_reads_reply(void)
     TEST_ASSERT_EQUAL_UINT64(4, call_count);
     TEST_ASSERT_EQUAL(IO_CALL, calls[0].call);
     TEST_ASSERT_EQUAL(IO_OPEN, calls[0].arg1);
-    TEST_ASSERT_EQUAL_STRING("socket://proc/demo", BString__cstr(&last_open_request.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("socket://proc/demo"), last_open_request.path);
     TEST_ASSERT_EQUAL(IO_OPEN_READ | IO_OPEN_WRITE, last_open_request.flags);
     TEST_ASSERT_EQUAL(IO_WRITE, calls[1].arg1);
-    TEST_ASSERT_EQUAL_INT64(21, calls[1].arg2);
+    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 21, calls[1].arg2);
     TEST_ASSERT_EQUAL_STRING("hello", last_write);
     TEST_ASSERT_EQUAL(IO_READ, calls[2].arg1);
     TEST_ASSERT_EQUAL(IO_CLOSE, calls[3].arg1);
@@ -146,8 +182,8 @@ void test_socket_test_connect_opens_socket_writes_message_and_reads_reply(void)
 void test_socket_test_listen_binds_accepts_reads_and_replies(void)
 {
     char * argv[] = {"socket_test", "listen", "socket://proc/demo"};
-    SocketTestTest__queue_result(11);
-    SocketTestTest__queue_result(22);
+    SocketTestTest__queue_result(IO_SESSION_HANDLE_BASE + 11);
+    SocketTestTest__queue_result(IO_SESSION_HANDLE_BASE + 22);
     SocketTestTest__queue_result(4);
     SocketTestTest__queue_result(IO_OK);
     SocketTestTest__queue_result(IO_OK);
@@ -156,12 +192,12 @@ void test_socket_test_listen_binds_accepts_reads_and_replies(void)
 
     TEST_ASSERT_EQUAL_UINT64(6, call_count);
     TEST_ASSERT_EQUAL(IO_OPEN, calls[0].arg1);
-    TEST_ASSERT_EQUAL_STRING("socket://proc/demo", BString__cstr(&last_open_request.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("socket://proc/demo"), last_open_request.path);
     TEST_ASSERT_EQUAL(IO_OPEN_BIND | IO_OPEN_LISTEN, last_open_request.flags);
     TEST_ASSERT_EQUAL(IO_ACCEPT, calls[1].arg1);
-    TEST_ASSERT_EQUAL_INT64(11, calls[1].arg2);
+    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 11, calls[1].arg2);
     TEST_ASSERT_EQUAL(IO_READ, calls[2].arg1);
-    TEST_ASSERT_EQUAL_INT64(22, calls[2].arg2);
+    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 22, calls[2].arg2);
     TEST_ASSERT_EQUAL(IO_WRITE, calls[3].arg1);
     TEST_ASSERT_EQUAL_STRING("pong", last_write);
     TEST_ASSERT_EQUAL(IO_CLOSE, calls[4].arg1);

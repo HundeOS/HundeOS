@@ -10,13 +10,14 @@ manifest:
     - kernel/subsystems/io/file/filesystem.c
     - kernel/subsystems/io/file/filesystem_node.c
     - kernel/subsystems/io/file/ext2/*.c
-    - kernel/subsystems/io/file/memfs/*.c
-    - kernel/subsystems/io/file/procfs/*.c
+    - test/kernel/fixtures/memfs/*.c
+    - kernel/subsystems/io/file/bootfs/*.c
     - kernel/scheduler/kernel_context.c
     - kernel/mutex.c
     - test/kernel/stubs/cpu.c
     - test/kernel/stubs/kalloc.c
     - test/kernel/stubs/panic.c
     - test/kernel/isolated_stubs/process_shared_pages.c
+    - test/kernel/isolated_stubs/device_registry.c
     - test/kernel/isolated_stubs/scheduler.c
     - test/kernel/isolated_stubs/message_broker.c

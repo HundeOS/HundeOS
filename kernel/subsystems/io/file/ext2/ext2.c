@@ -4904,6 +4904,7 @@ Ext2FilesystemIOStatePtr Ext2FilesystemIOState__heap_new(FilesystemPtr fs, Block
                                                          BlockCount total_sectors)
 {
     Ext2FilesystemIOStatePtr io_state = ptr(Kernel__alloc_kernel(sizeof(Ext2FilesystemIOState)), Ext2FilesystemIOState);
+    BlockDevice__retain(device);
 
     *io_state = (Ext2FilesystemIOState){
         .state =

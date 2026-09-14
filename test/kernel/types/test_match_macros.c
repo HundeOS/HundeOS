@@ -94,7 +94,7 @@ void test_match_result_runs_error_branch(void)
         {
             saw_error = true;
             TEST_ASSERT_EQUAL(MATCH_MACRO_FAILED, code);
-            TEST_ASSERT_TRUE(BString__equals(&expected, &message));
+            TEST_ASSERT_EQUAL_BSTRING(expected, message);
         }
     );
 

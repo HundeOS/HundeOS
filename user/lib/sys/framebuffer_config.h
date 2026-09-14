@@ -9,7 +9,7 @@
 #include "../../common/types/dyn_string.h"
 #include "io.h"
 
-#define FRAMEBUFFER_CONFIG_PATH "/proc/sysinfo"
+#define FRAMEBUFFER_CONFIG_PATH "/boot/sysinfo"
 #define FRAMEBUFFER_CONFIG_MAX 16384
 
 typedef enum FramebufferConfigPixelFormat

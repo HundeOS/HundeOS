@@ -4,6 +4,7 @@
 #include "../../common_includes/syscalls/spawn.h"
 #include "../types/result.h"
 #include "../bin/elf.h"
+#include "../bin/embedded_binaries.h"
 #include "../kio/io.h"
 #include "../kalloc.h"
 #include "../syscall/deferred.h"
@@ -21,7 +22,6 @@ static const BString hundeschau_program = bstr("/sbin/services/hundeschau");
 static const BString hundeschau_boot_program = bstr("services/hundeschau");
 static const BString hundekanal_warter_program = bstr("/sbin/services/hundekanal-warter");
 static const BString hundebus_program = bstr("/sbin/drivers/hundebus");
-static const BString virtio_blk_program = bstr("/sbin/drivers/virtio_blk");
 static const BString sdhci_program = bstr("/sbin/drivers/sdhci");
 static const BString uart_rx_program = bstr("/sbin/drivers/uart_rx");
 static const BString uart_tx_program = bstr("/sbin/drivers/uart_tx");
@@ -31,8 +31,8 @@ static bool Exec__is_hund_owned_program(ConstBStringPtr path)
     return BString__equals(path, &hundeschau_program) || BString__equals(path, &hundeschule_program) ||
            BString__equals(path, &hundeschule_boot_program) || BString__equals(path, &hundeschau_boot_program) ||
            BString__equals(path, &hundekanal_warter_program) || BString__equals(path, &hundebus_program) ||
-           BString__equals(path, &virtio_blk_program) || BString__equals(path, &sdhci_program) ||
-           BString__equals(path, &uart_rx_program) || BString__equals(path, &uart_tx_program);
+           BString__equals(path, &sdhci_program) || BString__equals(path, &uart_rx_program) ||
+           BString__equals(path, &uart_tx_program);
 }
 
 void Exec__apply_builtin_identity_policy(ProcessPtr self)
@@ -352,6 +352,23 @@ static Result(ProcessPtr)
         none_do_nothing()
     );
 
+    // Bootstrap execution reads the immutable archive, not a kernel filesystem.
+    if (BString__starts_with(path, &bstr("/sbin/")))
+    {
+        BString relative = BString__slice(path, 6, BString__length(path));
+        match_optional(
+            EmbeddedElf__load(&relative),
+            some(embedded)
+            {
+                size_t size = embedded.end - embedded.start;
+                Address copy = Kernel__alloc_kernel(size);
+                Kernel__memcopy(embedded.start, copy, size);
+                Elf elf = Elf__new(copy, copy + size, path);
+                return Exec__launch_loaded_elf(context, &elf, wait, requested_user_id, arguments, stdio);
+            },
+            none() { return Error(ProcessPtr, bstr("Embedded executable not found"), SPAWN_NO_FILE); }
+        );
+    }
     match_result(
         open(*context, *path, IO_OPEN_READ),
         success(handle)

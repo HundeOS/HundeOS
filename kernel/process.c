@@ -1,7 +1,9 @@
 #include "process.h"
+#include "bin/embedded_mapping.h"
 #include "scheduler/parked.h"
 #include "bin/elf.h"
 #include "arch/page_table.h"
+#include "arch/device.h"
 #include "arch/process.h"
 #include "arch/process_context.h"
 #include "types/bstring.h"
@@ -257,7 +259,22 @@ static Result(Address) Process__setup_args(ProcessPtr self, ConstProcessArgument
 
 static Result(ProcessSetupStatus) Process__map_service_directory(ProcessPtr self)
 {
-    if (!self->kernel->service_directory.directory.valid || !self->kernel->service_directory.queues.valid)
+    match_result(
+        EmbeddedArchive__map_process(self),
+        success_do_nothing(),
+        error(code, message) { return Error(ProcessSetupStatus, message, code); }
+    );
+    match_result(
+        KernelProcessRegistry__map_process(&self->kernel->process_registry, self),
+        success_do_nothing(),
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    );
+    match_result(
+        KernelDeviceRegistry__map_process(&self->kernel->device_registry, self),
+        success_do_nothing(),
+        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+    );
+    if (!self->kernel->service_directory.directory.valid)
     {
         match_result(
             KernelServiceDirectory__init(&self->kernel->service_directory),
@@ -293,6 +310,7 @@ Result(ProcessPtr)
     proc->pid = pid;
     proc->stack = *stack;
     proc->last_tick = 0;
+    proc->cpu_usage = CPUUsage__new();
     proc->name = *name;
     proc->parked_operations = ParkedOperations__new();
     proc->parent = *parent;
@@ -300,6 +318,7 @@ Result(ProcessPtr)
     proc->heap_mapped_end = USER_HEAP_BASE;
     proc->allocation_next = USER_ALLOC_BASE;
     proc->user_allocations = UserAllocations__new();
+    proc->virtio_device = None(UserAddress);
     proc->file_descriptors = Process__inherit_file_descriptors(parent);
     proc->next_file_descriptor = Process__inherit_next_file_descriptor(parent);
     proc->abort = None(ProcessAbort);
@@ -645,6 +664,9 @@ Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr se
         return Error(ProcessSetupStatus, argument_too_long, PROCESS_FAILED_TO_SETUP);
     }
 
+    Process__quiesce_device(self);
+    KernelDeviceRegistry__remove_process(&self->kernel->device_registry, self->pid);
+
     match_result(
         BlockDeviceRegistry__dispose_process_resources(self),
         success_do_nothing(),
@@ -662,7 +684,7 @@ Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr se
 
 Result(KAllocCode) Process__dispose_page_table(ProcessPtr self)
 {
-    return ProcessPageTable__dispose(&self->page_table);
+    return ProcessPageTable__dispose(&self->page_table, self->kernel);
 }
 
 Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self)
@@ -830,6 +852,40 @@ Result(ProcessMemoryCode)
     return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
 }
 
+Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address mapping)
+{
+    match_optional(
+        self->virtio_device,
+        some(device) { return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL); },
+        none_do_nothing()
+    );
+    for_each_ll(UserAllocations, self->user_allocations, allocation, {
+        Address start = allocation.address.virtual_addr;
+        if (allocation.type == USER_ALLOCATION_MMIO && mapping >= start && allocation.size >= 0x100 &&
+            mapping - start <= allocation.size - 0x100 && (mapping & 3) == 0 && Arch__is_virtio_block_device(mapping))
+        {
+            UserAddress device = allocation.address;
+            device.virtual_addr = mapping;
+            self->virtio_device = Some(UserAddress, device);
+            return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+        }
+    });
+    return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+}
+
+void Process__quiesce_device(ProcessPtr self)
+{
+    match_optional(
+        self->virtio_device,
+        some(device)
+        {
+            Arch__reset_virtio_device(device.virtual_addr, self->page_table.root.phys_addr);
+            self->virtio_device = None(UserAddress);
+        },
+        none_do_nothing()
+    );
+}
+
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address)
 {
     if (self == NULL || virtual_address == 0) // hundelint: ignore-no-null
@@ -936,7 +992,7 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
             allocation_kernel_address.valid = allocation_match->address.kernel_addr.valid;
             UserAddress allocation = UserAddress__new(target_base, allocation_kernel_address, true, true, false, true);
 
-            PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
+            PageTable__map_shared(&self->page_table, self->kernel, allocation, allocation_size);
             match_result(
                 Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_SHARED),
                 success(_)
@@ -1081,6 +1137,19 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
         UserAllocations__at(&self->user_allocations, index),
         some(allocation)
         {
+            match_optional(
+                self->virtio_device,
+                some(device)
+                {
+                    if (allocation.type == USER_ALLOCATION_MMIO &&
+                        device.virtual_addr >= allocation.address.virtual_addr &&
+                        device.virtual_addr - allocation.address.virtual_addr < allocation.size)
+                    {
+                        return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FREE_FAILED);
+                    }
+                },
+                none_do_nothing()
+            );
             __d_printf(MEMORY, "process free pid=%i name=%s type=%s user=%p kernel=%p phys=%p size=%i tracked=%i\n",
                        self->pid, cstr(self->name), UserAllocationType__name(allocation.type),
                        allocation.address.virtual_addr, allocation.address.kernel_addr.virtual_addr,
@@ -1132,6 +1201,7 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
 
 Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self)
 {
+    Process__quiesce_device(self);
     while (self->user_allocations.len > 0)
     {
         match_result(

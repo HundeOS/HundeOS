@@ -98,7 +98,7 @@
 
 
 .macro save_context
-    // Reserve full ProcessContext size (0x520)
+    // Reserve full ProcessContext size (0x320)
     sub sp, sp, #0x320
 
     // --- General-purpose registers (x0–x30) ---
@@ -127,24 +127,24 @@
     mrs x0, spsr_el1
     str x0, [sp, #0x108]
 
-    // --- SIMD/FPU registers (q0–q31) ---
+    // Each pair of 128-bit SIMD registers occupies 32 bytes.
     add x1, sp, #0x110
-    stp q0,  q1,  [x1, #16 * 0]
-    stp q2,  q3,  [x1, #16 * 1]
-    stp q4,  q5,  [x1, #16 * 2]
-    stp q6,  q7,  [x1, #16 * 3]
-    stp q8,  q9,  [x1, #16 * 4]
-    stp q10, q11, [x1, #16 * 5]
-    stp q12, q13, [x1, #16 * 6]
-    stp q14, q15, [x1, #16 * 7]
-    stp q16, q17, [x1, #16 * 8]
-    stp q18, q19, [x1, #16 * 9]
-    stp q20, q21, [x1, #16 * 10]
-    stp q22, q23, [x1, #16 * 11]
-    stp q24, q25, [x1, #16 * 12]
-    stp q26, q27, [x1, #16 * 13]
-    stp q28, q29, [x1, #16 * 14]
-    stp q30, q31, [x1, #16 * 15]
+    stp q0,  q1,  [x1, #32 * 0]
+    stp q2,  q3,  [x1, #32 * 1]
+    stp q4,  q5,  [x1, #32 * 2]
+    stp q6,  q7,  [x1, #32 * 3]
+    stp q8,  q9,  [x1, #32 * 4]
+    stp q10, q11, [x1, #32 * 5]
+    stp q12, q13, [x1, #32 * 6]
+    stp q14, q15, [x1, #32 * 7]
+    stp q16, q17, [x1, #32 * 8]
+    stp q18, q19, [x1, #32 * 9]
+    stp q20, q21, [x1, #32 * 10]
+    stp q22, q23, [x1, #32 * 11]
+    stp q24, q25, [x1, #32 * 12]
+    stp q26, q27, [x1, #32 * 13]
+    stp q28, q29, [x1, #32 * 14]
+    stp q30, q31, [x1, #32 * 15]
 
     // --- Save FPCR/FPSR ---
     mrs x2, fpcr
@@ -159,22 +159,22 @@
     mov x11, sp
     add x12, x11, #0x110 // q[n] offset
 
-    ldp q0,  q1,  [x12, #16 * 0]
-    ldp q2,  q3,  [x12, #16 * 1]
-    ldp q4,  q5,  [x12, #16 * 2]
-    ldp q6,  q7,  [x12, #16 * 3]
-    ldp q8,  q9,  [x12, #16 * 4]
-    ldp q10, q11, [x12, #16 * 5]
-    ldp q12, q13, [x12, #16 * 6]
-    ldp q14, q15, [x12, #16 * 7]
-    ldp q16, q17, [x12, #16 * 8]
-    ldp q18, q19, [x12, #16 * 9]
-    ldp q20, q21, [x12, #16 * 10]
-    ldp q22, q23, [x12, #16 * 11]
-    ldp q24, q25, [x12, #16 * 12]
-    ldp q26, q27, [x12, #16 * 13]
-    ldp q28, q29, [x12, #16 * 14]
-    ldp q30, q31, [x12, #16 * 15]
+    ldp q0,  q1,  [x12, #32 * 0]
+    ldp q2,  q3,  [x12, #32 * 1]
+    ldp q4,  q5,  [x12, #32 * 2]
+    ldp q6,  q7,  [x12, #32 * 3]
+    ldp q8,  q9,  [x12, #32 * 4]
+    ldp q10, q11, [x12, #32 * 5]
+    ldp q12, q13, [x12, #32 * 6]
+    ldp q14, q15, [x12, #32 * 7]
+    ldp q16, q17, [x12, #32 * 8]
+    ldp q18, q19, [x12, #32 * 9]
+    ldp q20, q21, [x12, #32 * 10]
+    ldp q22, q23, [x12, #32 * 11]
+    ldp q24, q25, [x12, #32 * 12]
+    ldp q26, q27, [x12, #32 * 13]
+    ldp q28, q29, [x12, #32 * 14]
+    ldp q30, q31, [x12, #32 * 15]
 
     //--- Restore FPCR/FPSR ---
     ldr x2, [x11, #0x310]  //fpcr offset
@@ -220,22 +220,22 @@
     mov x11, x0
     add x12, x11, #0x110 // q[n] offset
 
-    ldp q0,  q1,  [x12, #16 * 0]
-    ldp q2,  q3,  [x12, #16 * 1]
-    ldp q4,  q5,  [x12, #16 * 2]
-    ldp q6,  q7,  [x12, #16 * 3]
-    ldp q8,  q9,  [x12, #16 * 4]
-    ldp q10, q11, [x12, #16 * 5]
-    ldp q12, q13, [x12, #16 * 6]
-    ldp q14, q15, [x12, #16 * 7]
-    ldp q16, q17, [x12, #16 * 8]
-    ldp q18, q19, [x12, #16 * 9]
-    ldp q20, q21, [x12, #16 * 10]
-    ldp q22, q23, [x12, #16 * 11]
-    ldp q24, q25, [x12, #16 * 12]
-    ldp q26, q27, [x12, #16 * 13]
-    ldp q28, q29, [x12, #16 * 14]
-    ldp q30, q31, [x12, #16 * 15]
+    ldp q0,  q1,  [x12, #32 * 0]
+    ldp q2,  q3,  [x12, #32 * 1]
+    ldp q4,  q5,  [x12, #32 * 2]
+    ldp q6,  q7,  [x12, #32 * 3]
+    ldp q8,  q9,  [x12, #32 * 4]
+    ldp q10, q11, [x12, #32 * 5]
+    ldp q12, q13, [x12, #32 * 6]
+    ldp q14, q15, [x12, #32 * 7]
+    ldp q16, q17, [x12, #32 * 8]
+    ldp q18, q19, [x12, #32 * 9]
+    ldp q20, q21, [x12, #32 * 10]
+    ldp q22, q23, [x12, #32 * 11]
+    ldp q24, q25, [x12, #32 * 12]
+    ldp q26, q27, [x12, #32 * 13]
+    ldp q28, q29, [x12, #32 * 14]
+    ldp q30, q31, [x12, #32 * 15]
 
     //--- Restore FPCR/FPSR ---
     ldr x2, [x11, #0x310]  //fpcr offset
@@ -294,22 +294,22 @@
     mov x11, sp
     add x12, x11, #0x110 // q[n] offset
 
-    ldp q0,  q1,  [x12, #16 * 0]
-    ldp q2,  q3,  [x12, #16 * 1]
-    ldp q4,  q5,  [x12, #16 * 2]
-    ldp q6,  q7,  [x12, #16 * 3]
-    ldp q8,  q9,  [x12, #16 * 4]
-    ldp q10, q11, [x12, #16 * 5]
-    ldp q12, q13, [x12, #16 * 6]
-    ldp q14, q15, [x12, #16 * 7]
-    ldp q16, q17, [x12, #16 * 8]
-    ldp q18, q19, [x12, #16 * 9]
-    ldp q20, q21, [x12, #16 * 10]
-    ldp q22, q23, [x12, #16 * 11]
-    ldp q24, q25, [x12, #16 * 12]
-    ldp q26, q27, [x12, #16 * 13]
-    ldp q28, q29, [x12, #16 * 14]
-    ldp q30, q31, [x12, #16 * 15]
+    ldp q0,  q1,  [x12, #32 * 0]
+    ldp q2,  q3,  [x12, #32 * 1]
+    ldp q4,  q5,  [x12, #32 * 2]
+    ldp q6,  q7,  [x12, #32 * 3]
+    ldp q8,  q9,  [x12, #32 * 4]
+    ldp q10, q11, [x12, #32 * 5]
+    ldp q12, q13, [x12, #32 * 6]
+    ldp q14, q15, [x12, #32 * 7]
+    ldp q16, q17, [x12, #32 * 8]
+    ldp q18, q19, [x12, #32 * 9]
+    ldp q20, q21, [x12, #32 * 10]
+    ldp q22, q23, [x12, #32 * 11]
+    ldp q24, q25, [x12, #32 * 12]
+    ldp q26, q27, [x12, #32 * 13]
+    ldp q28, q29, [x12, #32 * 14]
+    ldp q30, q31, [x12, #32 * 15]
 
     //--- Restore FPCR/FPSR ---
     ldr x2, [x11, #0x310]  //fpcr offset

@@ -78,20 +78,20 @@ static BString TestString__from_nullable(const char * value)
     return BString__new(value);
 }
 
-static void assert_command_argument(CommandPtr command, StringPos index, const char * expected)
+static void assert_command_argument(CommandPtr command, StringPos index, ConstBStringPtr expected)
 {
     match_optional(
         CommandArguments__at(&command->args, index),
-        some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); },
+        some(argument) { TEST_ASSERT_EQUAL_BSTRING(*expected, argument); },
         none_test_fail()
     );
 }
 
-static void assert_spawn_argument(StringPos index, const char * expected)
+static void assert_spawn_argument(StringPos index, ConstBStringPtr expected)
 {
     match_optional(
         SpawnArguments__at(&last_spawn_call.arguments, index),
-        some(argument) { TEST_ASSERT_EQUAL_STRING(expected, BString__cstr(&argument)); },
+        some(argument) { TEST_ASSERT_EQUAL_BSTRING(*expected, argument); },
         none_test_fail()
     );
 }
@@ -198,10 +198,10 @@ void test_interpreter_parse_returns_command_value(void)
 
     Command command = Interpreter__parse(&interpreter, &input);
 
-    TEST_ASSERT_EQUAL_STRING("write", BString__cstr(&command.name));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("write"), command.name);
     TEST_ASSERT_EQUAL_UINT64(2, CommandArguments__len(&command.args));
-    assert_command_argument(&command, 0, "/mnt/fs1/out.txt");
-    assert_command_argument(&command, 1, "hello world");
+    assert_command_argument(&command, 0, &bstr("/mnt/fs1/out.txt"));
+    assert_command_argument(&command, 1, &bstr("hello world"));
 }
 
 void test_interpreter_parse_supports_empty_quoted_argument(void)
@@ -211,10 +211,10 @@ void test_interpreter_parse_supports_empty_quoted_argument(void)
 
     Command command = Interpreter__parse(&interpreter, &input);
 
-    TEST_ASSERT_EQUAL_STRING("write", BString__cstr(&command.name));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("write"), command.name);
     TEST_ASSERT_EQUAL_UINT64(2, CommandArguments__len(&command.args));
-    assert_command_argument(&command, 0, "");
-    assert_command_argument(&command, 1, "tail");
+    assert_command_argument(&command, 0, &bstr(""));
+    assert_command_argument(&command, 1, &bstr("tail"));
 }
 
 void test_interpreter_parse_preserves_root_path_command_name(void)
@@ -224,9 +224,9 @@ void test_interpreter_parse_preserves_root_path_command_name(void)
 
     Command command = Interpreter__parse(&interpreter, &input);
 
-    TEST_ASSERT_EQUAL_STRING("/sbin/cat", BString__cstr(&command.name));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/cat"), command.name);
     TEST_ASSERT_EQUAL_UINT64(1, CommandArguments__len(&command.args));
-    assert_command_argument(&command, 0, "/mnt/fs1/test.txt");
+    assert_command_argument(&command, 0, &bstr("/mnt/fs1/test.txt"));
 }
 
 void test_interpreter_parse_collects_more_than_spawn_limit_args(void)
@@ -236,10 +236,10 @@ void test_interpreter_parse_collects_more_than_spawn_limit_args(void)
 
     Command command = Interpreter__parse(&interpreter, &input);
 
-    TEST_ASSERT_EQUAL_STRING("cmd", BString__cstr(&command.name));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("cmd"), command.name);
     TEST_ASSERT_EQUAL_UINT64(4, CommandArguments__len(&command.args));
-    assert_command_argument(&command, 0, "a");
-    assert_command_argument(&command, 3, "d");
+    assert_command_argument(&command, 0, &bstr("a"));
+    assert_command_argument(&command, 3, &bstr("d"));
 }
 
 void test_interpreter_execute_returns_success_without_spawn_for_empty_command(void)
@@ -261,9 +261,9 @@ void test_interpreter_execute_spawns_command_with_args(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_WAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_STRING("/sbin/cat", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/cat"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(1, SpawnArguments__len(&last_spawn_call.arguments));
-    assert_spawn_argument(0, "This is a long filename.txt");
+    assert_spawn_argument(0, &bstr("This is a long filename.txt"));
 }
 
 void test_interpreter_execute_spawns_background_command_with_same_args(void)
@@ -277,9 +277,9 @@ void test_interpreter_execute_spawns_background_command_with_same_args(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_STRING("/sbin/cat", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/cat"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(1, SpawnArguments__len(&last_spawn_call.arguments));
-    assert_spawn_argument(0, "test.txt");
+    assert_spawn_argument(0, &bstr("test.txt"));
 }
 
 void test_interpreter_execute_spawns_command_with_more_than_three_args(void)
@@ -292,12 +292,12 @@ void test_interpreter_execute_spawns_command_with_more_than_three_args(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_WAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_STRING("/sbin/cmd", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/cmd"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(4, SpawnArguments__len(&last_spawn_call.arguments));
-    assert_spawn_argument(0, "a");
-    assert_spawn_argument(1, "b");
-    assert_spawn_argument(2, "c");
-    assert_spawn_argument(3, "d");
+    assert_spawn_argument(0, &bstr("a"));
+    assert_spawn_argument(1, &bstr("b"));
+    assert_spawn_argument(2, &bstr("c"));
+    assert_spawn_argument(3, &bstr("d"));
 }
 
 void test_interpreter_execute_accepts_background_spawn_pid_as_success(void)
@@ -311,11 +311,11 @@ void test_interpreter_execute_accepts_background_spawn_pid_as_success(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_STRING("/sbin/socket_test", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/socket_test"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(2, SpawnArguments__len(&last_spawn_call.arguments));
-    assert_spawn_argument(0, "listen");
-    assert_spawn_argument(1, "socket://proc/demo");
-    TEST_ASSERT_EQUAL_STRING("", BString__cstr(&printed_output));
+    assert_spawn_argument(0, &bstr("listen"));
+    assert_spawn_argument(1, &bstr("socket://proc/demo"));
+    TEST_ASSERT_EQUAL_BSTRING(bstr(""), printed_output);
 }
 
 void test_interpreter_parse_does_not_pass_background_operator_as_argument(void)
@@ -327,7 +327,7 @@ void test_interpreter_parse_does_not_pass_background_operator_as_argument(void)
 
     TEST_ASSERT_TRUE(command.background);
     TEST_ASSERT_EQUAL_UINT64(1, CommandArguments__len(&command.args));
-    assert_command_argument(&command, 0, "test.txt");
+    assert_command_argument(&command, 0, &bstr("test.txt"));
 }
 
 void test_interpreter_execute_fails_cleanly_when_too_many_args_are_supplied(void)
@@ -348,7 +348,7 @@ void test_shell_run_once_returns_exit_for_exit_command(void)
     TEST_ASSERT_EQUAL(EXIT, Shell__run_once(&shell));
     TEST_ASSERT_TRUE(exit_called);
     TEST_ASSERT_EQUAL_INT(0, exit_code);
-    TEST_ASSERT_EQUAL_STRING("\n> \nShell exiting\n", BString__cstr(&printed_output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("\n> \nShell exiting\n"), printed_output);
 }
 
 void test_shell_run_once_reports_command_failed(void)
@@ -358,7 +358,7 @@ void test_shell_run_once_reports_command_failed(void)
     next_spawn_result = SPAWN_FAILED;
 
     TEST_ASSERT_EQUAL(COMMAND_FAILED, Shell__run_once(&shell));
-    TEST_ASSERT_EQUAL_STRING("\n> \nresult = -128\nCommand failed\n", BString__cstr(&printed_output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("\n> \nresult = -128\nCommand failed\n"), printed_output);
 }
 
 void test_shell_run_once_stores_non_empty_history_entries(void)
@@ -371,7 +371,7 @@ void test_shell_run_once_stores_non_empty_history_entries(void)
 
     match_optional(
         ShellHistory__at(&shell.history, 0),
-        some(entry) { TEST_ASSERT_EQUAL_STRING("cat test.txt", BString__cstr(&entry)); },
+        some(entry) { TEST_ASSERT_EQUAL_BSTRING(bstr("cat test.txt"), entry); },
         none_test_fail()
     );
 }
@@ -385,9 +385,9 @@ void test_interpreter_interpret_groups_double_quoted_argument(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_WAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_STRING("/sbin/cat", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/cat"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(1, SpawnArguments__len(&last_spawn_call.arguments));
-    assert_spawn_argument(0, "This is a long filename.txt");
+    assert_spawn_argument(0, &bstr("This is a long filename.txt"));
 }
 
 void test_interpreter_interpret_mixes_quoted_and_unquoted_arguments(void)
@@ -398,10 +398,10 @@ void test_interpreter_interpret_mixes_quoted_and_unquoted_arguments(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__interpret(&interpreter, &input));
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
-    TEST_ASSERT_EQUAL_STRING("/sbin/write", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/write"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(2, SpawnArguments__len(&last_spawn_call.arguments));
-    assert_spawn_argument(0, "/mnt/fs1/out.txt");
-    assert_spawn_argument(1, "hello world");
+    assert_spawn_argument(0, &bstr("/mnt/fs1/out.txt"));
+    assert_spawn_argument(1, &bstr("hello world"));
 }
 
 void test_interpreter_interpret_supports_empty_quoted_argument(void)
@@ -412,10 +412,10 @@ void test_interpreter_interpret_supports_empty_quoted_argument(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__interpret(&interpreter, &input));
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
-    TEST_ASSERT_EQUAL_STRING("/sbin/write", BString__cstr(&last_spawn_call.path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/write"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(2, SpawnArguments__len(&last_spawn_call.arguments));
-    assert_spawn_argument(0, "");
-    assert_spawn_argument(1, "tail");
+    assert_spawn_argument(0, &bstr(""));
+    assert_spawn_argument(1, &bstr("tail"));
 }
 
 void test_interpreter_interpret_ignores_empty_input(void)
@@ -438,8 +438,8 @@ void test_console_input_stream_recalls_previous_history_entry_with_up_arrow(void
 
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
-    TEST_ASSERT_EQUAL_STRING("second", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING("\r\033[2K> second", BString__cstr(&printed_output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("second"), line);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("\r\033[2K> second"), printed_output);
 }
 
 void test_console_input_stream_restores_current_draft_with_down_arrow(void)
@@ -453,8 +453,8 @@ void test_console_input_stream_restores_current_draft_with_down_arrow(void)
 
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
-    TEST_ASSERT_EQUAL_STRING("par", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING("par\r\033[2K> second\r\033[2K> par", BString__cstr(&printed_output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("par"), line);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("par\r\033[2K> second\r\033[2K> par"), printed_output);
 }
 
 void test_console_input_stream_inserts_at_cursor_after_left_arrow(void)
@@ -464,8 +464,8 @@ void test_console_input_stream_inserts_at_cursor_after_left_arrow(void)
 
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
-    TEST_ASSERT_EQUAL_STRING("aXc", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING("ac\r\033[2K> ac\033[1D\r\033[2K> aXc\033[1D", BString__cstr(&printed_output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("aXc"), line);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("ac\r\033[2K> ac\033[1D\r\033[2K> aXc\033[1D"), printed_output);
 }
 
 void test_console_input_stream_backspace_removes_before_cursor(void)
@@ -475,9 +475,9 @@ void test_console_input_stream_backspace_removes_before_cursor(void)
 
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
-    TEST_ASSERT_EQUAL_STRING("bc", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING("abc\r\033[2K> abc\033[1D\r\033[2K> abc\033[2D\r\033[2K> bc\033[2D",
-                             BString__cstr(&printed_output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("bc"), line);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("abc\r\033[2K> abc\033[1D\r\033[2K> abc\033[2D\r\033[2K> bc\033[2D"),
+                              printed_output);
 }
 
 void test_console_input_stream_recalled_history_line_can_move_and_insert(void)
@@ -490,9 +490,8 @@ void test_console_input_stream_recalled_history_line_can_move_and_insert(void)
 
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
-    TEST_ASSERT_EQUAL_STRING("hellXo", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING("\r\033[2K> hello\r\033[2K> hello\033[1D\r\033[2K> hellXo\033[1D",
-                             BString__cstr(&printed_output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("hellXo"), line);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("\r\033[2K> hello\r\033[2K> hello\033[1D\r\033[2K> hellXo\033[1D"), printed_output);
 }
 
 void test_console_input_stream_appends_without_full_redraw(void)
@@ -502,6 +501,6 @@ void test_console_input_stream_appends_without_full_redraw(void)
 
     BString line = ConsoleInputStream__read_line(&input.input, true);
 
-    TEST_ASSERT_EQUAL_STRING("hello", BString__cstr(&line));
-    TEST_ASSERT_EQUAL_STRING("hello", BString__cstr(&printed_output));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("hello"), line);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("hello"), printed_output);
 }

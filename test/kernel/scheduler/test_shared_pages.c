@@ -82,18 +82,18 @@ void test_shared_page_is_zeroed_and_mapped_only_to_three_participants(void)
 void test_owner_release_unmaps_every_participant_and_frees_backing_once(void)
 {
     Address address = allocate_shared_page();
-    size_t before = KAllocStub__free_count();
+    size_t before = KAllocStub__freed_allocation_count_for_size(MEM_SHARED_PAGE_SIZE);
     release_page(address);
     TEST_ASSERT_FALSE(mapped(owner, address));
     TEST_ASSERT_FALSE(mapped(first_peer, address));
     TEST_ASSERT_FALSE(mapped(second_peer, address));
-    TEST_ASSERT_EQUAL_UINT64(before + 1, KAllocStub__free_count());
+    TEST_ASSERT_EQUAL_UINT64(before + 1, KAllocStub__freed_allocation_count_for_size(MEM_SHARED_PAGE_SIZE));
     match_result(
         Scheduler__release_shared_page(kernel->scheduler, owner, address),
         success_test_fail(),
         error(code, message) { TEST_ASSERT_EQUAL(MEM_INVALID_ADDRESS, code); }
     );
-    TEST_ASSERT_EQUAL_UINT64(before + 1, KAllocStub__free_count());
+    TEST_ASSERT_EQUAL_UINT64(before + 1, KAllocStub__freed_allocation_count_for_size(MEM_SHARED_PAGE_SIZE));
 }
 
 void test_peer_exit_preserves_survivor_mapping_until_owner_releases(void)
@@ -105,10 +105,10 @@ void test_peer_exit_preserves_survivor_mapping_until_owner_releases(void)
     );
     TEST_ASSERT_TRUE(mapped(owner, address));
     TEST_ASSERT_TRUE(mapped(second_peer, address));
-    size_t before = KAllocStub__free_count();
+    size_t before = KAllocStub__freed_allocation_count_for_size(MEM_SHARED_PAGE_SIZE);
     release_page(address);
     TEST_ASSERT_FALSE(mapped(second_peer, address));
-    TEST_ASSERT_EQUAL_UINT64(before + 1, KAllocStub__free_count());
+    TEST_ASSERT_EQUAL_UINT64(before + 1, KAllocStub__freed_allocation_count_for_size(MEM_SHARED_PAGE_SIZE));
 }
 
 void test_both_peer_exits_leave_backing_owned_until_release(void)
@@ -123,9 +123,9 @@ void test_both_peer_exits_leave_backing_owned_until_release(void)
         error_test_fail()
     );
     TEST_ASSERT_TRUE(mapped(owner, address));
-    size_t before = KAllocStub__free_count();
+    size_t before = KAllocStub__freed_allocation_count_for_size(MEM_SHARED_PAGE_SIZE);
     release_page(address);
-    TEST_ASSERT_EQUAL_UINT64(before + 1, KAllocStub__free_count());
+    TEST_ASSERT_EQUAL_UINT64(before + 1, KAllocStub__freed_allocation_count_for_size(MEM_SHARED_PAGE_SIZE));
 }
 
 void test_owner_exit_revokes_remaining_shared_mappings(void)

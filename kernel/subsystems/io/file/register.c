@@ -3,16 +3,7 @@
 #include "../../../kernel_core.h"
 #include "../block/block_device.h"
 #include "filesystem.h"
-#include "devfs/devfs.h"
-#include "embedded/embedded.h"
-#include "memfs/memfs.h"
-#include "procfs/procfs.h"
-
-bool Fat16FilesystemIO__available() __attribute__((weak));
-bool Fat16FilesystemIO__available()
-{
-    return false;
-}
+#include "bootfs/bootfs.h"
 
 static FileIO FileIO__new_all_unsupported()
 {
@@ -27,38 +18,6 @@ static FileIO FileIO__new_all_unsupported()
         .remove = FileIO__unsupported_remove,
         .link = FileIO__unsupported_link,
     };
-}
-
-FileIO Fat16FilesystemIO__new() __attribute__((weak));
-FileIO Fat16FilesystemIO__new()
-{
-    return FileIO__new_all_unsupported();
-}
-
-void * Fat16FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
-    __attribute__((weak));
-void * Fat16FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
-{
-    return 0;
-}
-
-bool Fat32FilesystemIO__available() __attribute__((weak));
-bool Fat32FilesystemIO__available()
-{
-    return false;
-}
-
-FileIO Fat32FilesystemIO__new() __attribute__((weak));
-FileIO Fat32FilesystemIO__new()
-{
-    return FileIO__new_all_unsupported();
-}
-
-void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
-    __attribute__((weak));
-void * Fat32FilesystemIOState__heap_new(FilesystemPtr fs, BlockDevicePtr device, uint64_t total_sectors)
-{
-    return 0;
 }
 
 bool Ext2FilesystemIO__available() __attribute__((weak));
@@ -86,13 +45,8 @@ BlockDeviceMetadataEntries BlockDeviceRegistry__metadata_entries()
     return EmptyArray(BlockDeviceMetadataEntries);
 }
 
-BString embedded = bstr("sbin");
-BString dev = bstr("dev");
-BString fat16 = bstr("fat16");
-BString fat32 = bstr("fat32");
-BString ext2 = bstr("ext2");
-BString memfs = bstr("tmp/memfs");
-BString proc = bstr("proc");
+BString bootstrap_ext2 = bstr("bootstrap-ext2");
+BString boot = bstr("boot");
 
 #define BOOT_CONFIG_BLOCK_COUNT ((uint64_t)8 * 1024 * 1024 / BLOCK_DEVICE_BLOCK_SIZE)
 
@@ -108,21 +62,7 @@ static Result(IOStatus)
 {
     Optional(FilesystemPtr) filesystem = None(FilesystemPtr);
 
-    if (BString__equals(filesystem_type, &fat16) && Fat16FilesystemIO__available())
-    {
-        FileIO fat16_io = Fat16FilesystemIO__new();
-        FilesystemPtr fat_filesystem = Filesystem__heap_new(mountpoint, &fat16_io);
-        Fat16FilesystemIOState__heap_new(fat_filesystem, device, 0);
-        filesystem = Some(FilesystemPtr, fat_filesystem);
-    }
-    else if (BString__equals(filesystem_type, &fat32) && Fat32FilesystemIO__available())
-    {
-        FileIO fat32_io = Fat32FilesystemIO__new();
-        FilesystemPtr fat_filesystem = Filesystem__heap_new(mountpoint, &fat32_io);
-        Fat32FilesystemIOState__heap_new(fat_filesystem, device, 0);
-        filesystem = Some(FilesystemPtr, fat_filesystem);
-    }
-    else if (BString__equals(filesystem_type, &bstr("ext2")) && Ext2FilesystemIO__available())
+    if (BString__equals(filesystem_type, &bootstrap_ext2) && Ext2FilesystemIO__available())
     {
         FileIO ext2_io = Ext2FilesystemIO__new();
         FilesystemPtr ext2_filesystem = Filesystem__heap_new(mountpoint, &ext2_io);
@@ -200,13 +140,7 @@ static void FilesystemTable__mount_entry(FilesystemPtr root_fs, FilesystemTableE
 static Result(CollectionCode) FilesystemTable__add_hardcoded_entries(FilesystemTablePtr self)
 {
     match_result(
-        FilesystemTable__add(self, &bstr("/dev/virtio1"), &bstr("ext2"), &bstr("/")),
-        success_do_nothing(),
-        error(code, message) { return Error(CollectionCode, message, code); }
-    );
-
-    match_result(
-        FilesystemTable__add_by_block_count(self, BOOT_CONFIG_BLOCK_COUNT, &bstr("ext2"), &bstr("/boot/config")),
+        FilesystemTable__add_by_block_count(self, BOOT_CONFIG_BLOCK_COUNT, &bootstrap_ext2, &bstr("/boot/config")),
         success_do_nothing(),
         error(code, message) { return Error(CollectionCode, message, code); }
     );
@@ -225,26 +159,10 @@ FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel)
     FilesystemPtr root_fs = RootFilesystem__heap_new();
     FilesystemIOStatePtr root_fs_state = FilesystemIOState__heap_new(root_fs);
 
-    FileIO embedded_io = EmbeddedFilesystemIO__new();
-    FilesystemPtr embedded_fs = Filesystem__heap_new(&embedded, &embedded_io);
-    EmbeddedFilesystemIOStatePtr embedded_fs_state = EmbeddedFilesystemIOState__heap_new(embedded_fs);
-
-    Filesystem__mount(root_fs, &embedded, embedded_fs);
-
-    FileIO dev_io = DevFilesystemIO__new();
-    FilesystemPtr dev_filesystem = Filesystem__heap_new(&dev, &dev_io);
-    DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(dev_filesystem, kernel->io_subsystem);
-    Filesystem__mount(root_fs, &dev, dev_filesystem);
-
-    FileIO proc_io = ProcFilesystemIO__new();
-    FilesystemPtr proc_filesystem = Filesystem__heap_new(&proc, &proc_io);
-    ProcFilesystemIOStatePtr procfs_state = ProcFilesystemIOState__heap_new(proc_filesystem, kernel);
-    Filesystem__mount(root_fs, &proc, proc_filesystem);
-
-    FileIO mem_io = MemFilesystemIO__new();
-    FilesystemPtr mem_filesystem = Filesystem__heap_new(&memfs, &mem_io);
-    MemFilesystemIOStatePtr memfs_state = MemFilesystemIOState__heap_new(mem_filesystem);
-    Filesystem__mount(root_fs, &memfs, mem_filesystem);
+    FileIO boot_io = BootFilesystemIO__new();
+    FilesystemPtr boot_filesystem = Filesystem__heap_new(&boot, &boot_io);
+    BootFilesystemIOStatePtr bootfs_state = BootFilesystemIOState__heap_new(boot_filesystem, kernel);
+    Filesystem__mount(root_fs, &boot, boot_filesystem);
 
     match_result(
         FilesystemTable__add_hardcoded_entries(&root_fs->filesystem_table),
@@ -253,9 +171,6 @@ FilesystemPtr Filesystem__build_root_and_mounts(KernelPtr kernel)
     );
 
     __d_printf(FILESYSTEM, "Root filesystem %p\n", root_fs);
-    __d_printf(FILESYSTEM, "Embedded filesystem %p\n", embedded_fs);
-    __d_printf(FILESYSTEM, "Device filesystem %p\n", dev_filesystem);
-    __d_printf(FILESYSTEM, "Proc filesystem %p\n", proc_filesystem);
-    __d_printf(FILESYSTEM, "Memory filesystem %p\n", mem_filesystem);
+    __d_printf(FILESYSTEM, "Boot filesystem %p\n", boot_filesystem);
     return root_fs;
 }

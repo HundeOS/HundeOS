@@ -59,11 +59,11 @@ setup:
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
-{test_base}/build/%.o: {project_base}/%.c
+{build_dir}/%.o: {project_base}/%.c
 	mkdir -p `dirname $@`
 	$(CC) $(CFLAGS) -c $< -o $@
 
-{test_base}/build/%.o: {project_base}/%.s
+{build_dir}/%.o: {project_base}/%.s
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
@@ -195,7 +195,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
             source_abs = os.path.abspath(os.path.join(test_dir, file))
             source_rel = os.path.relpath(source_abs, project_root)
             source_no_ext, _ = os.path.splitext(source_rel)
-            return os.path.join(kernel_obj_build_dir, source_no_ext + ".o")
+            return os.path.join(build_dir, source_no_ext + ".o")
 
         asm_objects = [object_path_for_source(file)
                        for file

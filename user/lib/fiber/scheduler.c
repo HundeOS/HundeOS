@@ -114,9 +114,9 @@ Result(FiberCode) FiberScheduler__await_current(FiberSchedulerPtr self, FiberWai
     return Error(FiberCode, no_current_fiber, FIBER_NO_CURRENT_FIBER);
 }
 
-Result(FiberCode) FiberScheduler__await_channel(FiberSchedulerPtr self, ChannelPtr channel)
+Result(FiberCode) FiberScheduler__await_channel_signal(FiberSchedulerPtr self, ChannelSignalPtr channel)
 {
-    return FiberScheduler__await_current(self, FiberWaitKey__channel(channel));
+    return FiberScheduler__await_current(self, FiberWaitKey__channel_signal(channel));
 }
 
 static bool Fiber__is_waiting_for(FiberPtr * fiber, void * context)
@@ -171,10 +171,10 @@ Result(FiberCode) FiberScheduler__wake(FiberSchedulerPtr self, FiberWaitKey key,
     return Error(FiberCode, wait_not_found, FIBER_WAIT_NOT_FOUND);
 }
 
-Result(FiberCode) FiberScheduler__wake_channel(FiberSchedulerPtr self, ChannelPtr channel)
+Result(FiberCode) FiberScheduler__wake_channel_signal(FiberSchedulerPtr self, ChannelSignalPtr channel)
 {
-    FiberWaitKey key = FiberWaitKey__channel(channel);
-    FiberWakeValue value = FiberWakeValue__new(&key, FIBER_OK, Channel__data_epoch(channel));
+    FiberWaitKey key = FiberWaitKey__channel_signal(channel);
+    FiberWakeValue value = FiberWakeValue__new(&key, FIBER_OK, ChannelSignal__data_epoch(channel));
     return FiberScheduler__wake(self, key, value);
 }
 

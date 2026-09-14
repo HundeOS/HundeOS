@@ -14,6 +14,7 @@ ResultDef(CPUID);
 typedef struct CPU CPU;
 
 extern CPUID CPU__id();
+uint64_t CPU__time_usec(void);
 
 extern void CPU__noop();
 extern void CPU__wait();

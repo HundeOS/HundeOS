@@ -10,7 +10,7 @@
 static ProcessInfo fake_processes[4];
 static ProcessListResult fake_process_count;
 static ProcessListResult fake_process_result;
-static char output[512];
+static char output[2048];
 static uint64_t output_position;
 
 #define PS_ENTRYPOINT ps_main_under_test
@@ -81,12 +81,16 @@ void test_ps_prints_process_snapshot(void)
 {
     fake_process_count = 3;
     fake_processes[0].pid = 1;
+    fake_processes[0].cpu_usage.total_usec = 1234567;
+    fake_processes[0].cpu_usage.long_basis_points = 1234;
+    fake_processes[0].cpu_usage.short_basis_points = 10000;
     copy_text(fake_processes[0].state, "PROC_STATE_READY", PROCESS_INFO_STATE_SIZE);
     copy_text(fake_processes[0].wait_reason, "-", PROCESS_INFO_WAIT_SIZE);
     copy_text(fake_processes[0].class_name, "normal", PROCESS_INFO_CLASS_SIZE);
     copy_text(fake_processes[0].user_name, "root", PROCESS_INFO_USER_SIZE);
     copy_text(fake_processes[0].name, "init", PROCESS_INFO_NAME_SIZE);
     fake_processes[1].pid = 2;
+    fake_processes[1].cpu = 3;
     copy_text(fake_processes[1].state, "PROC_STATE_WAITING", PROCESS_INFO_STATE_SIZE);
     copy_text(fake_processes[1].wait_reason, "PARK_WAIT_SERVICE_EVENT", PROCESS_INFO_WAIT_SIZE);
     copy_text(fake_processes[1].class_name, "service", PROCESS_INFO_CLASS_SIZE);
@@ -101,10 +105,10 @@ void test_ps_prints_process_snapshot(void)
 
     TEST_ASSERT_EQUAL_INT(0, ps_main_under_test());
     TEST_ASSERT_EQUAL_STRING(
-        "PID   STATE                        WAIT                     CLASS    USER     NAME\n"
-        "1     PROC_STATE_READY             -                        normal   root     init\n"
-        "2     PROC_STATE_WAITING           PARK_WAIT_SERVICE_EVENT  service  hund     virtio_blk\n"
-        "3     PROC_STATE_WAITING           PARK_WAIT_SERVICE_READY  service  hund     hundeschule\n",
+        "PID   CPU STATE                        WAIT                     CLASS    USER      CPU TIME(s)    CPU% (1s) CPU% (100ms) NAME\n"
+        "1     0   PROC_STATE_READY             -                        normal   root            1.234        12.34       100.00 init\n"
+        "2     3   PROC_STATE_WAITING           PARK_WAIT_SERVICE_EVENT  service  hund            0.000         0.00         0.00 virtio_blk\n"
+        "3     0   PROC_STATE_WAITING           PARK_WAIT_SERVICE_READY  service  hund            0.000         0.00         0.00 hundeschule\n",
         output);
 }
 

@@ -58,6 +58,7 @@ typedef enum IRQConsumerType
 {
     IRQ_CONSUMER_KERNEL = 1,
     IRQ_CONSUMER_SERVICE = 2,
+    IRQ_CONSUMER_MANAGER = 3,
 } IRQConsumerType;
 
 typedef struct IRQConsumer
@@ -66,6 +67,7 @@ typedef struct IRQConsumer
     IRQKernelConsumer kernel_consumer;
     void * kernel_data;
     ProcessPtr service_process;
+    InterruptDeliverySequence delivery_sequence;
 } IRQConsumer;
 
 typedef IRQConsumer * IRQConsumerPtr;
@@ -78,6 +80,8 @@ typedef struct IRQDispatcher
     SchedulerPtr scheduler;
     Optional(InterruptControllerInfo) interrupt_controller;
     IRQConsumerMap consumers;
+    Optional(ProcessPtr) manager;
+    Optional(UserAddress) manager_queue_memory;
     mutex_t lock;
 } IRQDispatcher;
 
@@ -87,13 +91,17 @@ typedef IRQDispatcher * IRQDispatcherPtr;
     (IRQDispatcher)                                                                                                    \
     {                                                                                                                  \
         .scheduler = scheduler_ptr, .interrupt_controller = None(InterruptControllerInfo),                             \
-        .consumers = EmptyMap(IRQConsumerMap), .lock = MUTEX_INIT,                                                     \
+        .consumers = EmptyMap(IRQConsumerMap), .manager = None(ProcessPtr), .manager_queue_memory = None(UserAddress), \
+        .lock = MUTEX_INIT,                                                                                            \
     }
 
 Result(IRQRegistrationStatus)
     IRQDispatcher__register_kernel(IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, void * data);
 
 Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr self, IRQNumber irq, ProcessPtr process);
+Result(Address) IRQDispatcher__register_manager(IRQDispatcherPtr self, ProcessPtr process);
+Result(IRQRegistrationStatus)
+    IRQDispatcher__register_managed_irq(IRQDispatcherPtr self, IRQNumber irq, ProcessPtr manager);
 Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispatcherPtr self, ProcessPtr process);
 
 Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumber irq, IRQDispatchContextPtr context);

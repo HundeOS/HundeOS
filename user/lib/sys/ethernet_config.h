@@ -9,7 +9,7 @@
 #include "hardware/ethernet.h"
 #include "io.h"
 
-#define ETHERNET_CONFIG_PATH "/proc/sysinfo"
+#define ETHERNET_CONFIG_PATH "/boot/sysinfo"
 #define ETHERNET_CONFIG_MAX 32768
 
 typedef struct EthernetConfig

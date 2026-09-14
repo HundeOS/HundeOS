@@ -40,7 +40,7 @@ MemStatus mem_free_pages(void * address)
     return MEM_OK;
 }
 
-#include "../../../user/lib/channel/channel.c"
+#include "../../../user/lib/channel/signal.c"
 #include "../../../user/lib/fiber/fiber.c"
 #include "../../../user/lib/fiber/scheduler.c"
 #include "../../../user/lib/async_io/async_io.c"

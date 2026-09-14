@@ -9,7 +9,7 @@
 #include "../../common/types/dyn_string.h"
 #include "io.h"
 
-#define PCI_CONFIG_PATH "/proc/sysinfo"
+#define PCI_CONFIG_PATH "/boot/sysinfo"
 #define PCI_CONFIG_MAX 32768
 
 typedef struct PciConfig

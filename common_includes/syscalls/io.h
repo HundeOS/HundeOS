@@ -41,6 +41,7 @@ typedef enum IOStatus
     IO_UNKNOWN_BUFFER = -11,
     IO_UNKNOWN_PID = -12,
     IO_PERMISSION_DENIED = -13,
+    IO_PATH_UNMANAGED = -14,
     IO_PANIC = -255,
 } IOStatus;
 

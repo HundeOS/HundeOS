@@ -101,7 +101,6 @@ RULES = (
             "user/lib/sys/service.c",
             "user/lib/sys/service.h",
             "user/user.h",
-            "user/drivers/virtio_blk/main.c",
             "user/drivers/virtio_keyboard/main.c",
         ),
     ),

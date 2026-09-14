@@ -3,10 +3,13 @@
 
 #define PS_MAX_PROCESSES 32
 #define PS_PID_WIDTH 5
+#define PS_CPU_WIDTH 3
 #define PS_STATE_WIDTH 28
 #define PS_WAIT_WIDTH 24
 #define PS_CLASS_WIDTH 8
 #define PS_USER_WIDTH 8
+#define PS_CPU_TIME_WIDTH 12
+#define PS_CPU_PERCENT_WIDTH 12
 
 #ifndef PS_ENTRYPOINT
 #define PS_ENTRYPOINT main
@@ -22,14 +25,27 @@ int PS_ENTRYPOINT(void)
         return 1;
     }
 
-    IO__printf(&bstr("%-*s %-*s %-*s %-*s %-*s %s\n"), PS_PID_WIDTH, "PID", PS_STATE_WIDTH, "STATE", PS_WAIT_WIDTH,
-               "WAIT", PS_CLASS_WIDTH, "CLASS", PS_USER_WIDTH, "USER", "NAME");
+    IO__printf(&bstr("%-*s %-*s %-*s %-*s %-*s %-*s %*s %*s %*s %s\n"), PS_PID_WIDTH, "PID", PS_CPU_WIDTH, "CPU",
+               PS_STATE_WIDTH, "STATE", PS_WAIT_WIDTH, "WAIT", PS_CLASS_WIDTH, "CLASS", PS_USER_WIDTH, "USER",
+               PS_CPU_TIME_WIDTH, "CPU TIME(s)", PS_CPU_PERCENT_WIDTH, "CPU% (1s)", PS_CPU_PERCENT_WIDTH,
+               "CPU% (100ms)", "NAME");
     for (ProcessListResult i = 0; i < count; i++)
     {
-        IO__printf(&bstr("%-*i %-*.*s %-*.*s %-*.*s %-*.*s %s\n"), PS_PID_WIDTH, (int)processes[i].pid, PS_STATE_WIDTH,
-                   PS_STATE_WIDTH, processes[i].state, PS_WAIT_WIDTH, PS_WAIT_WIDTH, processes[i].wait_reason,
-                   PS_CLASS_WIDTH, PS_CLASS_WIDTH, processes[i].class_name, PS_USER_WIDTH, PS_USER_WIDTH,
-                   processes[i].user_name, processes[i].name);
+        uint64_t usec = processes[i].cpu_usage.total_usec;
+        uint64_t long_usage = processes[i].cpu_usage.long_basis_points;
+        uint64_t short_usage = processes[i].cpu_usage.short_basis_points;
+        BString cpu_time = BString__sprintf(&bstr("%llu.%03u"), (unsigned long long)(usec / 1000000),
+                                            (unsigned int)((usec / 1000) % 1000));
+        BString long_percent =
+            BString__sprintf(&bstr("%u.%02u"), (unsigned int)(long_usage / 100), (unsigned int)(long_usage % 100));
+        BString short_percent =
+            BString__sprintf(&bstr("%u.%02u"), (unsigned int)(short_usage / 100), (unsigned int)(short_usage % 100));
+        IO__printf(&bstr("%-*i %-*u %-*.*s %-*.*s %-*.*s %-*.*s %*B %*B %*B %s\n"), PS_PID_WIDTH, (int)processes[i].pid,
+                   PS_CPU_WIDTH, (unsigned int)processes[i].cpu, PS_STATE_WIDTH, PS_STATE_WIDTH, processes[i].state,
+                   PS_WAIT_WIDTH, PS_WAIT_WIDTH, processes[i].wait_reason, PS_CLASS_WIDTH, PS_CLASS_WIDTH,
+                   processes[i].class_name, PS_USER_WIDTH, PS_USER_WIDTH, processes[i].user_name, PS_CPU_TIME_WIDTH,
+                   &cpu_time, PS_CPU_PERCENT_WIDTH, &long_percent, PS_CPU_PERCENT_WIDTH, &short_percent,
+                   processes[i].name);
     }
 
     return 0;

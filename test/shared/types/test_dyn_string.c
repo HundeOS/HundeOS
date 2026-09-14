@@ -142,7 +142,7 @@ void test_dyn_string_bstring_converts_when_it_fits(void)
 
             match_optional(
                 DynString__bstring(&text),
-                some(value) { TEST_ASSERT_EQUAL_STRING("abc", BString__cstr(&value)); },
+                some(value) { TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), value); },
                 none_test_fail()
             );
 

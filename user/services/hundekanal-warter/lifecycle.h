@@ -1,61 +1,63 @@
 #ifndef __HUNDEKANAL_WARTER_LIFECYCLE_H
 #define __HUNDEKANAL_WARTER_LIFECYCLE_H
 
-#include "channel/exchange.h"
+#include "channel/protocol.h"
 #include "types/fixed_array.h"
 
-OptionalDef(AtomicMessageQueue);
-OptionalDef(ServiceQueueMessage);
+OptionalDef(Queue);
+OptionalDef(QueueMessage);
 
-typedef struct ChannelExchange ChannelExchange;
-typedef ChannelExchange * ChannelExchangePtr;
+typedef struct ChannelSession ChannelSession;
+typedef ChannelSession * ChannelSessionPtr;
 
-typedef struct ChannelExchangeState ChannelExchangeState;
-typedef const ChannelExchangeState * ConstChannelExchangeStatePtr;
-ResultDef(ConstChannelExchangeStatePtr);
+typedef struct ChannelSessionState ChannelSessionState;
+typedef const ChannelSessionState * ConstChannelSessionStatePtr;
+ResultDef(ConstChannelSessionStatePtr);
 
-typedef Result(ConstChannelExchangeStatePtr) (*ChannelExchangeStateAction)(ChannelExchangePtr self);
+typedef Result(ConstChannelSessionStatePtr) (*ChannelSessionStateAction)(ChannelSessionPtr self);
 
-struct ChannelExchangeState
+struct ChannelSessionState
 {
-    ChannelExchangeStateAction action;
+    ChannelSessionStateAction action;
 };
 
 // Warden-private ownership and mapping records, never writable by endpoints.
-struct ChannelExchange
+struct ChannelSession
 {
-    AtomicMessageQueue client;
-    Optional(AtomicMessageQueue) server;
-    Optional(ServiceQueueMessage) reply;
-    ConstChannelExchangeStatePtr state;
+    Queue client;
+    Optional(Queue) server;
+    Optional(QueueMessage) reply;
+    ConstChannelSessionStatePtr state;
     uint64_t address;
     uint64_t length;
     bool client_closed;
 };
-OptionalDef(ChannelExchange);
+OptionalDef(ChannelSession);
 
-extern const ChannelExchangeState CHANNEL_EXCHANGE_WAIT_OPEN;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_CONNECTING;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_DELIVERING_OPEN;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_OPEN;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_SUBMITTING;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_WORKING;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_WORKING_CLIENT_CLOSED;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_CLOSING_SERVER;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_DELIVERING_REPLY;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_WAIT_CLIENT_CLOSE;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_RELEASING;
-extern const ChannelExchangeState CHANNEL_EXCHANGE_COMPLETE;
+extern const ChannelSessionState CHANNEL_SESSION_WAIT_OPEN;
+extern const ChannelSessionState CHANNEL_SESSION_CONNECTING;
+extern const ChannelSessionState CHANNEL_SESSION_DELIVERING_OPEN;
+extern const ChannelSessionState CHANNEL_SESSION_OPEN;
+extern const ChannelSessionState CHANNEL_SESSION_SUBMITTING;
+extern const ChannelSessionState CHANNEL_SESSION_WORKING;
+extern const ChannelSessionState CHANNEL_SESSION_CANCELLING;
+extern const ChannelSessionState CHANNEL_SESSION_WORKING_CLIENT_CLOSED;
+extern const ChannelSessionState CHANNEL_SESSION_CLOSING_SERVER;
+extern const ChannelSessionState CHANNEL_SESSION_DELIVERING_REPLY;
+extern const ChannelSessionState CHANNEL_SESSION_WAIT_CLIENT_ACKNOWLEDGEMENT;
+extern const ChannelSessionState CHANNEL_SESSION_WAIT_CLIENT_CLOSE;
+extern const ChannelSessionState CHANNEL_SESSION_RELEASING;
+extern const ChannelSessionState CHANNEL_SESSION_COMPLETE;
 
-ChannelExchange ChannelExchange__new(AtomicMessageQueuePtr client);
-ConstChannelExchangeStatePtr ChannelExchange__state(ChannelExchangePtr self);
-bool ChannelExchange__step(ChannelExchangePtr self);
-bool ChannelExchange__equals(void * first, void * second);
+ChannelSession ChannelSession__new(QueuePtr client);
+ConstChannelSessionStatePtr ChannelSession__state(ChannelSessionPtr self);
+bool ChannelSession__step(ChannelSessionPtr self);
+bool ChannelSession__equals(void * first, void * second);
 
-FixedArrayDefine(ChannelExchange, ATOMIC_MESSAGE_QUEUE_LIMIT, ChannelExchanges, &ChannelExchange__equals);
-typedef ChannelExchanges * ChannelExchangesPtr;
+FixedArrayDefine(ChannelSession, QUEUE_LIMIT, ChannelSessions, &ChannelSession__equals);
+typedef ChannelSessions * ChannelSessionsPtr;
 
-bool ChannelExchanges__contains(ChannelExchangesPtr self, AtomicMessageQueueConnectionID connection);
-bool ChannelExchanges__step(ChannelExchangesPtr self, AtomicMessageQueueArrivalsPtr arrivals);
+bool ChannelSessions__contains(ChannelSessionsPtr self, QueueConnectionID connection);
+bool ChannelSessions__step(ChannelSessionsPtr self, QueueArrivalsPtr arrivals);
 
 #endif

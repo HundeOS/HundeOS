@@ -18,7 +18,6 @@ typedef struct KernelServiceDirectory
 {
     mutex_t lock;
     UserAddress directory;
-    UserAddress queues;
 } KernelServiceDirectory;
 
 typedef KernelServiceDirectory * KernelServiceDirectoryPtr;
@@ -26,20 +25,14 @@ typedef KernelServiceDirectory * KernelServiceDirectoryPtr;
 #define KERNEL_SERVICE_DIRECTORY_INIT                                                                                  \
     (KernelServiceDirectory)                                                                                           \
     {                                                                                                                  \
-        .lock = MUTEX_INIT, .directory = NULL_USER_ADDRESS, .queues = NULL_USER_ADDRESS,                               \
+        .lock = MUTEX_INIT, .directory = NULL_USER_ADDRESS,                                                            \
     }
 
 Result(ServiceCode) KernelServiceDirectory__init(KernelServiceDirectoryPtr self);
 Result(ServiceCode) KernelServiceDirectory__map_process(KernelServiceDirectoryPtr self, ProcessPtr process);
-Result(ServiceCode) KernelServiceDirectory__request_queue(KernelServiceDirectoryPtr self, ProcessPtr process,
-                                                          ConstBStringPtr name, uint64_t kernel_event_subscriptions);
-Result(ServiceCode)
-    KernelServiceDirectory__notify_process_exit(KernelServiceDirectoryPtr self, uint64_t pid, ReturnCode return_code);
-Result(ServiceCode)
-    KernelServiceDirectory__publish_endpoint(KernelServiceDirectoryPtr self, ProcessPtr process, ConstBStringPtr name,
-                                             AtomicMessageQueueEndpointID endpoint);
-void KernelServiceDirectory__remove_endpoint(KernelServiceDirectoryPtr self, AtomicMessageQueueEndpointID endpoint);
+Result(ServiceCode) KernelServiceDirectory__publish_endpoint(KernelServiceDirectoryPtr self, ProcessPtr process,
+                                                             ConstBStringPtr name, QueueEndpointID endpoint);
+void KernelServiceDirectory__remove_endpoint(KernelServiceDirectoryPtr self, QueueEndpointID endpoint);
 ServiceDirectoryPtr KernelServiceDirectory__kernel_directory(KernelServiceDirectoryPtr self);
-ServiceQueuePtr KernelServiceDirectory__kernel_queue(KernelServiceDirectoryPtr self, uint64_t index);
 
 #endif

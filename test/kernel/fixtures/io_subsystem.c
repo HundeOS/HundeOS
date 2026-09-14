@@ -1,8 +1,7 @@
 #include "io_subsystem.h"
-#include "../../../kernel/subsystems/io/file/devfs/devfs.h"
-#include "../../../kernel/subsystems/io/file/embedded/embedded.h"
-#include "../../../kernel/subsystems/io/file/memfs/memfs.h"
-#include "../../../kernel/subsystems/io/file/procfs/procfs.h"
+#include "embedded/embedded.h"
+#include "../../../test/kernel/fixtures/memfs/memfs.h"
+#include "../../../kernel/subsystems/io/file/bootfs/bootfs.h"
 #include "kernel.h"
 
 FilesystemPtr init_root_filesystem_with_embedded_binaries(KernelPtr kernel)
@@ -16,17 +15,11 @@ FilesystemPtr init_root_filesystem_with_embedded_binaries(KernelPtr kernel)
 
     Filesystem__mount(filesystem, &bstr("sbin"), embedded_binaries);
 
-    FileIO dev_io = DevFilesystemIO__new();
-    FilesystemPtr devfs = Filesystem__heap_new(&bstr("dev"), &dev_io);
-    DevFilesystemIOStatePtr devfs_state = DevFilesystemIOState__heap_new(devfs, kernel->io_subsystem);
+    FileIO boot_io = BootFilesystemIO__new();
+    FilesystemPtr bootfs = Filesystem__heap_new(&bstr("boot"), &boot_io);
+    BootFilesystemIOStatePtr bootfs_state = BootFilesystemIOState__heap_new(bootfs, kernel);
 
-    Filesystem__mount(filesystem, &bstr("dev"), devfs);
-
-    FileIO proc_io = ProcFilesystemIO__new();
-    FilesystemPtr procfs = Filesystem__heap_new(&bstr("proc"), &proc_io);
-    ProcFilesystemIOStatePtr procfs_state = ProcFilesystemIOState__heap_new(procfs, kernel);
-
-    Filesystem__mount(filesystem, &bstr("proc"), procfs);
+    Filesystem__mount(filesystem, &bstr("boot"), bootfs);
 
     FileIO memfs_io = MemFilesystemIO__new();
     FilesystemPtr memfs = Filesystem__heap_new(&bstr("tmp/memfs"), &memfs_io);

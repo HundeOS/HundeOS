@@ -42,14 +42,14 @@ MemStatus mem_free_pages(void * address)
     return MEM_OK;
 }
 
-#include "../../../user/lib/channel/channel.c"
+#include "../../../user/lib/channel/signal.c"
 #include "../../../user/lib/fiber/fiber.c"
 #include "../../../user/lib/fiber/scheduler.c"
 
 typedef struct TestFiberContext
 {
     FiberSchedulerPtr scheduler;
-    ChannelPtr channel;
+    ChannelSignalPtr channel;
     uint64_t run_count;
     uint64_t wake_value;
 } TestFiberContext;
@@ -119,7 +119,7 @@ static Result(FiberCode) channel_waiting_entry(FiberPtr self, Anything argument)
     context->run_count++;
 
     match_result(
-        FiberScheduler__await_channel(context->scheduler, context->channel),
+        FiberScheduler__await_channel_signal(context->scheduler, context->channel),
         success_do_nothing(),
         error(code, message) { return Error(FiberCode, message, code); }
     );
@@ -352,11 +352,11 @@ void test_fiber_scheduler_wake_rejects_unknown_wait_key(void)
     );
 }
 
-void test_fiber_scheduler_await_channel_parks_on_channel_state(void)
+void test_fiber_scheduler_await_channel_signal_parks_on_channel_state(void)
 {
     FiberScheduler scheduler = FiberScheduler__new();
-    ChannelState state = ChannelState__new();
-    Channel channel = Channel__new(&state);
+    ChannelSignalState state = ChannelSignalState__new();
+    ChannelSignal channel = ChannelSignal__new(&state);
     TestFiberContext context = TestFiberContext__new(&scheduler);
     context.channel = &channel;
     FiberPtr fiber = 0;
@@ -386,11 +386,11 @@ void test_fiber_scheduler_await_channel_parks_on_channel_state(void)
     Fiber__dispose(fiber);
 }
 
-void test_fiber_scheduler_wake_channel_moves_waiter_to_ready(void)
+void test_fiber_scheduler_wake_channel_signal_moves_waiter_to_ready(void)
 {
     FiberScheduler scheduler = FiberScheduler__new();
-    ChannelState state = ChannelState__new();
-    Channel channel = Channel__new(&state);
+    ChannelSignalState state = ChannelSignalState__new();
+    ChannelSignal channel = ChannelSignal__new(&state);
     TestFiberContext context = TestFiberContext__new(&scheduler);
     context.channel = &channel;
 
@@ -403,8 +403,8 @@ void test_fiber_scheduler_wake_channel_moves_waiter_to_ready(void)
         error_test_fail()
     );
 
-    Channel__notify_data(&channel);
-    match_result(FiberScheduler__wake_channel(&scheduler, &channel),
+    ChannelSignal__notify_data(&channel);
+    match_result(FiberScheduler__wake_channel_signal(&scheduler, &channel),
         success_do_nothing(),
         error_test_fail()
     );
@@ -417,7 +417,7 @@ void test_fiber_scheduler_wake_channel_moves_waiter_to_ready(void)
         error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL_UINT64(Channel__data_epoch(&channel), context.wake_value);
+    TEST_ASSERT_EQUAL_UINT64(ChannelSignal__data_epoch(&channel), context.wake_value);
     TEST_ASSERT_EQUAL(0, FiberScheduler__live_count(&scheduler));
 }
 
@@ -445,7 +445,7 @@ void test_fiber_invalid_state_error_includes_current_state(void)
         error(code, message)
         {
             TEST_ASSERT_EQUAL(FIBER_INVALID_STATE, code);
-            TEST_ASSERT_EQUAL_STRING("Invalid fiber state 5", BString__cstr(&message));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("Invalid fiber state 5"), message);
         }
     );
 

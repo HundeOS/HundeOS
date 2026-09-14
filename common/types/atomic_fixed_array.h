@@ -41,6 +41,14 @@
         }                                                                                                              \
         __atomic_store_n(&self->data[index], value, __ATOMIC_RELEASE);                                                 \
         return Success(CollectionCode, 0);                                                                             \
+    }                                                                                                                  \
+    static inline Optional(alias##__type) alias##__take(alias##Ptr self, uint64_t index)                               \
+    {                                                                                                                  \
+        if (index >= size)                                                                                             \
+        {                                                                                                              \
+            return None(alias##__type);                                                                                \
+        }                                                                                                              \
+        return Some(alias##__type, __atomic_exchange_n(&self->data[index], 0, __ATOMIC_ACQ_REL));                      \
     }
 
 // Each slot is read once on visitation; this is not a snapshot of all slots.

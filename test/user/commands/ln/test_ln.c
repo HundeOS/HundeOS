@@ -71,8 +71,8 @@ void test_ln_calls_link_syscall_for_two_paths(void)
     TEST_ASSERT_EQUAL_INT(0, ln_main_under_test(3, argv));
     TEST_ASSERT_EQUAL(IO_CALL, last_call);
     TEST_ASSERT_EQUAL(IO_LINK, last_arg1);
-    TEST_ASSERT_EQUAL_STRING("/src.txt", BString__cstr(&last_link_request.source_path));
-    TEST_ASSERT_EQUAL_STRING("/dst.txt", BString__cstr(&last_link_request.target_path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/src.txt"), last_link_request.source_path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dst.txt"), last_link_request.target_path);
 }
 
 void test_ln_prints_named_error(void)

@@ -107,7 +107,12 @@ typedef struct BlockDevice
     BlockDeviceWrite write;
     size_t block_size;
     bool userspace_service;
+    bool unavailable;
+    uint64_t references;
 } BlockDevice;
+
+void BlockDevice__retain(BlockDevicePtr self);
+void BlockDevice__release(BlockDevicePtr self);
 
 BlockDevice BlockDevice__new(BlockDriverContextPtr context, BlockDeviceRead read, BlockDeviceWrite write);
 Result(BlockCount) BlockDevice__read(BlockDevicePtr self, BlockNumber block, BlockCount count, DataPtr target);
@@ -137,10 +142,9 @@ Result(BlockRequestID)
     BlockDeviceRegistry__write_from_process_async(ProcessPtr requester, ConstBStringPtr path, BlockNumber block,
                                                   BlockCount count, DataPtr requester_buffer, size_t buffer_size,
                                                   MessageBrokerPtr message_broker);
-Result(ServiceCode) BlockDeviceRegistry__open_channel(ProcessPtr requester, ServiceBlockChannelOpenRequestPtr request,
-                                                      MessageBrokerPtr message_broker);
-Result(ServiceCode)
-    BlockDeviceRegistry__close_channel(ProcessPtr requester, ServiceBlockChannelCloseRequestPtr request);
+Result(ServiceCode) BlockDeviceRegistry__connect(ProcessPtr requester, ServiceBlockConnectionRequestPtr request,
+                                                 MessageBrokerPtr message_broker);
+Result(ServiceCode) BlockDeviceRegistry__disconnect(ProcessPtr requester, ServiceBlockDisconnectionRequestPtr request);
 Result(BlockDeviceCode) BlockDeviceRegistry__dispose_process_resources(ProcessPtr process);
 Optional(BlockDevicePtr) BlockDeviceRegistry__find(ConstBStringPtr path);
 BlockDevicePaths BlockDeviceRegistry__paths();

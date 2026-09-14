@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "channel/channel.h"
+#include "channel/signal.h"
 #include "sys/debug.h"
 #include "sys/service.h"
 
@@ -16,7 +16,7 @@
 
 typedef struct ChannelFs
 {
-    ServiceBlockChannelOpenRequest open_channel;
+    ServiceBlockConnectionRequest connection;
 } ChannelFs;
 
 typedef ChannelFs * ChannelFsPtr;
@@ -24,7 +24,7 @@ typedef ChannelFs * ChannelFsPtr;
 static ChannelFs ChannelFs__new(void)
 {
     return (ChannelFs){
-        .open_channel = ServiceBlockChannelOpenRequest__new(&bstr("")),
+        .connection = ServiceBlockConnectionRequest__new(&bstr("")),
     };
 }
 
@@ -49,64 +49,74 @@ static bool ChannelFs__pattern_matches(uint8_t * data)
     return true;
 }
 
-static BlockChannelStatus ChannelFs__submit(ChannelFsPtr self, BlockChannelMemoryPtr memory,
-                                            BlockChannelOperation operation)
+static BlockProtocolStatus ChannelFs__submit(ChannelFsPtr self, BlockProtocolMemoryPtr memory,
+                                             BlockProtocolOperation operation)
 {
-    uint64_t request_id = BlockChannelState__next_request_id(&memory->state);
-    BlockChannelRequest request = BlockChannelRequest__new(request_id, operation, 0, 1, 0, CHANNEL_FS_BLOCK_SIZE);
-    Channel channel = Channel__new(&memory->state.channel);
-    uint64_t observed_epoch = Channel__data_epoch(&channel);
-    BlockChannelStatus status = BlockChannelRequestRing__push(&memory->requests, &memory->state, &request);
-    if (status != BLOCK_CHANNEL_OK)
+    BlockProtocolRequestID request_id = BlockProtocolMemory__next_request_id(memory);
+    BlockProtocolRequest request = BlockProtocolRequest__new(request_id, operation, 0, 1, 0, CHANNEL_FS_BLOCK_SIZE);
+    ChannelSignal channel = ChannelSignal__new(BlockProtocolMemory__channel_state(memory));
+    uint64_t observed_epoch = ChannelSignal__data_epoch(&channel);
+    BlockProtocolStatus status = BlockProtocolMemory__push_request(memory, &request);
+    if (status != BLOCK_PROTOCOL_OK)
     {
-        if (BlockChannelState__producer_closed(&memory->state))
+        if (BlockProtocolMemory__producer_closed(memory))
         {
-            BlockChannelState__ack_producer_close(&memory->state);
+            BlockProtocolMemory__ack_producer_close(memory);
         }
         return status;
     }
-    Channel__notify_data(&channel);
+    ChannelSignal__notify_data(&channel);
 
-    BlockChannelResponse response;
+    BlockProtocolResponse response;
     while (true)
     {
-        status = BlockChannelResponseRing__pop(&memory->responses, &memory->state, &response);
-        if (status == BLOCK_CHANNEL_OK && response.request_id == request_id)
+        status = BlockProtocolMemory__pop_response(memory, &response);
+        if (status == BLOCK_PROTOCOL_OK && response.request_id == request_id)
         {
             return response.status;
         }
-        if (status == BLOCK_CHANNEL_CLOSED)
+        if (status == BLOCK_PROTOCOL_CLOSED)
         {
-            if (BlockChannelState__producer_closed(&memory->state))
+            if (BlockProtocolMemory__producer_closed(memory))
             {
-                BlockChannelState__ack_producer_close(&memory->state);
+                BlockProtocolMemory__ack_producer_close(memory);
             }
             return status;
         }
-        Channel__wait_for_data_change(&channel, observed_epoch);
-        observed_epoch = Channel__data_epoch(&channel);
+        ChannelSignal__wait_for_data_change(&channel, observed_epoch);
+        observed_epoch = ChannelSignal__data_epoch(&channel);
     }
 }
 
-static bool ChannelFs__exercise_channel(ChannelFsPtr self, BlockChannelMemoryPtr memory)
+static bool ChannelFs__exercise_channel(ChannelFsPtr self, BlockProtocolMemoryPtr memory)
 {
-    ChannelFs__fill_pattern(memory->data);
-    if (ChannelFs__submit(self, memory, BLOCK_CHANNEL_WRITE) != BLOCK_CHANNEL_OK)
+    uint8_t data[CHANNEL_FS_BLOCK_SIZE];
+    ChannelFs__fill_pattern(data);
+    if (BlockProtocolMemory__write_data(memory, 0, data, sizeof(data)) != BLOCK_PROTOCOL_OK)
+    {
+        return false;
+    }
+    if (ChannelFs__submit(self, memory, BLOCK_PROTOCOL_WRITE) != BLOCK_PROTOCOL_OK)
     {
         return false;
     }
 
-    for (size_t i = 0; i < CHANNEL_FS_BLOCK_SIZE; i++)
-    {
-        memory->data[i] = 0;
-    }
-
-    if (ChannelFs__submit(self, memory, BLOCK_CHANNEL_READ) != BLOCK_CHANNEL_OK)
+    __builtin_memset(data, 0, sizeof(data));
+    if (BlockProtocolMemory__write_data(memory, 0, data, sizeof(data)) != BLOCK_PROTOCOL_OK)
     {
         return false;
     }
 
-    return ChannelFs__pattern_matches(memory->data);
+    if (ChannelFs__submit(self, memory, BLOCK_PROTOCOL_READ) != BLOCK_PROTOCOL_OK)
+    {
+        return false;
+    }
+
+    if (BlockProtocolMemory__read_data(memory, 0, data, sizeof(data)) != BLOCK_PROTOCOL_OK)
+    {
+        return false;
+    }
+    return ChannelFs__pattern_matches(data);
 }
 
 int CHANNEL_FS_ENTRYPOINT(int argc, char ** argv)
@@ -123,13 +133,13 @@ int CHANNEL_FS_ENTRYPOINT(int argc, char ** argv)
     {
         return 1;
     }
-    if (!service_ok(service_block_open_channel(&device_path, &fs.open_channel)))
+    if (!service_ok(service_block_connect(&device_path, &fs.connection)))
     {
-        DRIVER_DEBUG("channel_fs: block channel open failed\n");
+        DRIVER_DEBUG("channel_fs: block connection open failed\n");
         return 1;
     }
 
-    BlockChannelMemoryPtr memory = (BlockChannelMemoryPtr)fs.open_channel.channel;
+    BlockProtocolMemoryPtr memory = (BlockProtocolMemoryPtr)fs.connection.shared_memory;
     if (!ChannelFs__exercise_channel(&fs, memory))
     {
         DRIVER_DEBUG("channel_fs: channel transfer failed\n");
@@ -141,6 +151,6 @@ int CHANNEL_FS_ENTRYPOINT(int argc, char ** argv)
         return 1;
     }
 
-    service_block_close_channel(fs.open_channel.channel_id);
+    service_block_disconnect(fs.connection.connection_id);
     return 0;
 }

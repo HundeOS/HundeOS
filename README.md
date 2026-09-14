@@ -5,6 +5,50 @@ userspace drivers. Core kernel code is under `kernel/`, architecture-specific
 code is under `arch/`, userspace code is under `user/`, and unit tests are under
 `test/`.
 
+## I/O Architecture
+
+The common userspace I/O front end is `hund-io-system`. Sockets use its channel
+connection to `socket_router`. Boot-configured FAT32 and EXT2 mounts use
+`hund-io-system` -> `hund-dateisystem` -> filesystem driver -> block driver,
+with a bidirectional Channel at every process boundary. This includes the EXT2
+root disk at `/`: `hund-dateisystem` starts its userspace driver and waits for
+the mount before boot proceeds to login. Nested mounts override root paths.
+Only `/boot/config` retains kernel EXT2; `/boot/sysinfo`, consoles, and streams
+remain kernel-backed. Embedded `/sbin` is served by userspace `embedfs` over
+the same I/O channels. Memfs runs in userspace at `/tmp`,
+started by `hund-dateisystem` before login on every target. It uses the same
+I/O channels as disk filesystems, without a block device.
+Devfs also runs in userspace, mounted at `/dev` before login on every target.
+It reads the kernel-owned device registry through a read-only shared mapping;
+device listings and block metadata use the existing filesystem channels.
+Legacy stream opens explicitly retain their kernel route until stream migration.
+The legacy `virtio_blk` driver is deleted; `virtio_blk_channelio` is the active
+VirtIO block driver. Kernel EXT2 remains necessary for `/boot/config`.
+Memfs records the creator's UID/GID and enforces file and directory permissions;
+new files default to `0644`, directories to `0755`.
+`/boot/sysinfo` provides kernel-generated hardware information and live statistics
+for bootstrap drivers. `/proc` is now a separate read-only userspace filesystem
+backed by the kernel's shared process registry.
+See [Userspace I/O system](docs/io-system.md) for protocol semantics,
+resource lifecycle, limits, and the migration plan.
+
+The [bootstrap filesystem handoff](docs/bootstrap-filesystem-handoff.md) has
+moved `/sbin` file operations to userspace. Embedded executable loading still
+uses a direct kernel archive reader so bootstrap services can start without a
+filesystem dependency. General channel-based executable loading remains pending.
+
+IPC supports 1024 live queue connections system-wide, with 32 messages per
+direction. A Channel currently retains two queue connections through its manager.
+The service directory and listener table each support 1024 entries. Listener
+arrivals occupy three read-only pages per listener.
+
+Try local socket communication in the shell:
+
+```sh
+socket_test listen &
+socket_test connect
+```
+
 ## Developer Setup
 
 Install the cross compiler, QEMU, uv, and FAT filesystem tools.
@@ -55,6 +99,29 @@ make qemu-virt-2cpus
 make qemu-virt-1cpu-trace
 make qemu-virt-2cpus-trace
 ```
+
+## Process CPU Usage
+
+Userspace procfs exposes `/proc/<pid>/status`, `/cpu`, and `/memory` on every
+target. `ps` reads the same shared records directly. Private RAM, shared RAM, and
+MMIO are accounted separately; shared totals are per-process mappings, not unique
+physical memory. See [Process registry and procfs](docs/process-registry-and-procfs.md).
+
+The `CPU` column in `ps` is the zero-based ID of the CPU scheduler the process
+is assigned to. Waiting processes retain their assignment; this column does
+not imply that they are currently executing.
+
+`ps` shows cumulative scheduled CPU time in seconds (`CPU TIME(s)`) and recent
+CPU percentages (`CPU% (1s)` and `CPU% (100ms)`). A value of 100% means one fully
+occupied core, not the whole machine. Time includes userspace execution and
+kernel work while that process is scheduled; waiting and sleeping are excluded.
+
+The recent windows cover the last 1,000 and 100 completed 1 ms clock ticks
+(N = 100), respectively. These use the monotonic architecture clock rather than
+counting scheduler calls. The incomplete current tick is excluded from the
+percentages but included in cumulative time. Windows use their full duration
+even for newly created processes, and sleeping processes' recent usage decays
+to zero. Accounting is retained in the kernel, so no previous `ps` call is needed.
 
 ## Code Formatting
 

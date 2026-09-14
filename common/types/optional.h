@@ -101,6 +101,10 @@
     }                                                                                                                  \
     }
 
-#define unwrap_optional(opt, alternate_val) ((opt).present ? (opt).some.val : (alternate_val))
+#define unwrap_optional(opt, alternate_val)                                                                            \
+    ({                                                                                                                 \
+        __auto_type __optional = (opt);                                                                                \
+        __optional.present ? __optional.some.val : (alternate_val);                                                    \
+    })
 
 #endif

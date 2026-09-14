@@ -84,8 +84,6 @@ Result(IOStatus) IOSubsystem__server_data_consumed(IOSubsystemPtr self, IOContex
 Result(IOStatus) IOSubsystem__server_eof(IOSubsystemPtr self, IOContextPtr context);
 Result(DirectoryEntryCount)
     IOSubsystem__list_dir(IOSubsystemPtr self, ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries);
-Result(CollectionCode)
-    IOSubsystem__append_dev_filesystem_nodes(IOSubsystemPtr self, FilesystemPtr filesystem, FilesystemNodes * target);
 Result(IOStatus) IOSubsystem__mkdir(IOSubsystemPtr self, ConstBStringPtr path);
 Result(IOStatus) IOSubsystem__remove(IOSubsystemPtr self, ConstBStringPtr path, Flags flags);
 Result(IOStatus) IOSubsystem__link(IOSubsystemPtr self, ConstBStringPtr source_path, ConstBStringPtr target_path);

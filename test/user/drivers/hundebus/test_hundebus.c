@@ -167,7 +167,7 @@ size_t mapped_size(ServiceMappedMemoryPtr memory)
 
 IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    TEST_ASSERT_EQUAL_STRING("/proc/sysinfo", BString__cstr(path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), *path);
     TEST_ASSERT_EQUAL_INT(IO_OPEN_READ, flags);
     fake_sysinfo_opened = true;
     return 1;
@@ -219,7 +219,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
 
 IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
 {
-    TEST_ASSERT_EQUAL_STRING("/dev/businfo", BString__cstr(path));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/businfo"), *path);
     TEST_ASSERT_EQUAL_INT(IO_SERVER_READ, role);
     fake_businfo_registered = true;
     return 7;

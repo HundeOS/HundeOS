@@ -31,8 +31,8 @@ void test_kstring_split(void)
     BStringPtr str1 = unwrap_optional(BStringArray__ptr_at(&strs, 0), (BStringPtr){});
     BStringPtr str2 = unwrap_optional(BStringArray__ptr_at(&strs, 1), (BStringPtr){});
 
-    TEST_ASSERT_TRUE(BString__equals(str1, &hello));
-    TEST_ASSERT_TRUE(BString__equals(str2, &world));
+    TEST_ASSERT_EQUAL_BSTRING(hello, *str1);
+    TEST_ASSERT_EQUAL_BSTRING(world, *str2);
 }
 
 void test_kstring_split_preceeding_delimiter(void)
@@ -44,8 +44,8 @@ void test_kstring_split_preceeding_delimiter(void)
     BStringPtr str1 = unwrap_optional(BStringArray__ptr_at(&strs, 0), (BStringPtr){});
     BStringPtr str2 = unwrap_optional(BStringArray__ptr_at(&strs, 1), (BStringPtr){});
 
-    TEST_ASSERT_TRUE(BString__equals(str1, &hello));
-    TEST_ASSERT_TRUE(BString__equals(str2, &world));
+    TEST_ASSERT_EQUAL_BSTRING(hello, *str1);
+    TEST_ASSERT_EQUAL_BSTRING(world, *str2);
 }
 
 void test_kstring_split_trailing_delimiters(void)
@@ -57,8 +57,8 @@ void test_kstring_split_trailing_delimiters(void)
     BStringPtr str1 = unwrap_optional(BStringArray__ptr_at(&strs, 0), (BStringPtr){});
     BStringPtr str2 = unwrap_optional(BStringArray__ptr_at(&strs, 1), (BStringPtr){});
 
-    TEST_ASSERT_TRUE(BString__equals(str1, &hello));
-    TEST_ASSERT_TRUE(BString__equals(str2, &world));
+    TEST_ASSERT_EQUAL_BSTRING(hello, *str1);
+    TEST_ASSERT_EQUAL_BSTRING(world, *str2);
 }
 
 void test_kstring_split_double_delimiter(void)
@@ -70,8 +70,8 @@ void test_kstring_split_double_delimiter(void)
     BStringPtr str1 = unwrap_optional(BStringArray__ptr_at(&strs, 0), (BStringPtr){});
     BStringPtr str2 = unwrap_optional(BStringArray__ptr_at(&strs, 1), (BStringPtr){});
 
-    TEST_ASSERT_TRUE(BString__equals(str1, &hello));
-    TEST_ASSERT_TRUE(BString__equals(str2, &world));
+    TEST_ASSERT_EQUAL_BSTRING(hello, *str1);
+    TEST_ASSERT_EQUAL_BSTRING(world, *str2);
 }
 
 void test_bstring_equals_when_equals(void)

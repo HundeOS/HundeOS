@@ -3,20 +3,39 @@
 #include <stddef.h>
 
 #include "syscall.h"
+#include "io/client.h"
+
+#include "io/path.h"
 
 IOHandle open(ConstBStringPtr path, Flags flags)
 {
+    if (!IOPath__is_bootstrap(path))
+    {
+        IOHandle handle = IOClient__open(path, flags);
+        if (handle != IO_PATH_UNMANAGED)
+        {
+            return handle;
+        }
+    }
     IOPathRequest request = IOPathRequest__new(path, flags);
     return syscall(IO_CALL, IO_OPEN, any(&request), 0, 0, 0);
 }
 
 ByteCount read(IOHandle handle, char * buf, size_t size)
 {
+    if (handle >= IO_SESSION_HANDLE_BASE)
+    {
+        return IOClient__read(handle, (ChannelDataPtr)buf, size);
+    }
     return syscall(IO_CALL, IO_READ, handle, any(buf), size, 0);
 }
 
 ByteCount write(IOHandle handle, char * buf, size_t size)
 {
+    if (handle >= IO_SESSION_HANDLE_BASE)
+    {
+        return IOClient__write(handle, (ConstChannelDataPtr)buf, size);
+    }
     return syscall(IO_CALL, IO_WRITE, handle, any(buf), size, 0);
 }
 
@@ -27,6 +46,10 @@ IOHandle IO__open(ConstBStringPtr path, Flags flags)
 
 IOHandle accept(IOHandle handle)
 {
+    if (handle >= IO_SESSION_HANDLE_BASE)
+    {
+        return IOClient__accept(handle);
+    }
     return syscall(IO_CALL, IO_ACCEPT, handle, 0, 0, 0);
 }
 
@@ -145,6 +168,10 @@ ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
 
 IOStatus close(IOHandle handle)
 {
+    if (handle >= IO_SESSION_HANDLE_BASE)
+    {
+        return IOClient__close(handle);
+    }
     IOStatus result = (IOStatus)syscall(IO_CALL, IO_CLOSE, handle, 0, 0, 0);
     if (result > 0)
     {
@@ -154,8 +181,98 @@ IOStatus close(IOHandle handle)
     return result;
 }
 
+static bool IO__directory_contains(DirectoryEntryPtr entries, size_t count, ConstBStringPtr name)
+{
+    // The public API supplies an untyped output buffer, not a collection.
+    for (size_t index = 0; index < count; index++)
+    {
+        BString existing = BString__from_chars(entries[index].name, entries[index].name_len);
+        if (BString__equals(&existing, name))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
 {
+    if (!IOPath__is_bootstrap(path) && max_entries > 0)
+    {
+        IOReply reply = IOClient__path_request(IO_REQUEST_LIST_DIR, path, 0, 0);
+        if (reply.status == IO_OK)
+        {
+            size_t count = 0;
+            uint64_t offset = 0;
+            while (reply.value == 1 && count < max_entries)
+            {
+                if (reply.entry.name_len >= IO_DIRENT_NAME_MAX)
+                {
+                    return IO_UNKNOWN_BUFFER;
+                }
+                BString name = BString__from_chars(reply.entry.name, reply.entry.name_len);
+                // Namespace overlays arrive first and take precedence over disk entries.
+                if (!IO__directory_contains(entries, count, &name))
+                {
+                    entries[count++] = reply.entry;
+                }
+                if (count == max_entries)
+                {
+                    break;
+                }
+                reply = IOClient__path_request(IO_REQUEST_LIST_DIR, path, 0, ++offset);
+                if (reply.status != IO_OK)
+                {
+                    return reply.status;
+                }
+            }
+            return reply.value == 0 || reply.value == 1 ? (DirectoryEntryCount)count : IO_UNKNOWN_BUFFER;
+        }
+        if (reply.status != IO_PATH_UNMANAGED)
+        {
+            return reply.status;
+        }
+        IOListDirRequest legacy = IOListDirRequest__new(path, entries, max_entries);
+        DirectoryEntryCount count = syscall(IO_CALL, IO_LIST_DIR, any(&legacy), 0, 0, 0);
+        if (count < 0 && reply.value == 0)
+        {
+            return count;
+        }
+        if (count < 0)
+        {
+            count = 0;
+        }
+        for (uint64_t offset = 0; reply.value == 1 && (size_t)count < max_entries; offset++)
+        {
+            if (reply.entry.name_len >= IO_DIRENT_NAME_MAX)
+            {
+                return IO_UNKNOWN_BUFFER;
+            }
+            BString name = BString__from_chars(reply.entry.name, reply.entry.name_len);
+            bool found = false;
+            // Merge the mount overlay into the caller-owned syscall output buffer.
+            for (DirectoryEntryCount index = 0; index < count; index++)
+            {
+                BString existing = BString__from_chars(entries[index].name, entries[index].name_len);
+                if (BString__equals(&existing, &name))
+                {
+                    entries[index] = reply.entry;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+            {
+                entries[count++] = reply.entry;
+            }
+            reply = IOClient__path_request(IO_REQUEST_LIST_DIR, path, 0, offset + 1);
+            if (reply.status != IO_PATH_UNMANAGED)
+            {
+                return reply.status == IO_OK ? IO_UNKNOWN_BUFFER : reply.status;
+            }
+        }
+        return count;
+    }
     IOListDirRequest request = IOListDirRequest__new(path, entries, max_entries);
     return syscall(IO_CALL, IO_LIST_DIR, any(&request), 0, 0, 0);
 }
@@ -197,6 +314,8 @@ const char * io_status_string(IOStatus status)
         return "IO_UNKNOWN_PID";
     case IO_PERMISSION_DENIED:
         return "IO_PERMISSION_DENIED";
+    case IO_PATH_UNMANAGED:
+        return "IO_PATH_UNMANAGED";
     case IO_PANIC:
         return "IO_PANIC";
     }
@@ -206,6 +325,14 @@ const char * io_status_string(IOStatus status)
 
 IOStatus make_dir(ConstBStringPtr path)
 {
+    if (!IOPath__is_bootstrap(path))
+    {
+        IOStatus status = IOClient__path_request(IO_REQUEST_MKDIR, path, 0, 0).status;
+        if (status != IO_PATH_UNMANAGED)
+        {
+            return status;
+        }
+    }
     IOPathRequest request = IOPathRequest__new(path, 0);
     return syscall(IO_CALL, IO_MKDIR, any(&request), 0, 0, 0);
 }
@@ -227,6 +354,14 @@ IOStatus IO__remove_file(ConstBStringPtr path)
 
 IOStatus remove_file_with_flags(ConstBStringPtr path, Flags flags)
 {
+    if (!IOPath__is_bootstrap(path))
+    {
+        IOStatus status = IOClient__path_request(IO_REQUEST_REMOVE, path, flags, 0).status;
+        if (status != IO_PATH_UNMANAGED)
+        {
+            return status;
+        }
+    }
     IOPathRequest request = IOPathRequest__new(path, flags);
     return syscall(IO_CALL, IO_REMOVE, any(&request), 0, 0, 0);
 }

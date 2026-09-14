@@ -9,9 +9,7 @@
 #include "../../../../../../kernel/subsystems/io/block/block_device.h"
 #include "../../../../../../kernel/subsystems/io/block/memory_block_device.h"
 #include "../../../../../../kernel/subsystems/io/file/filesystem.h"
-#include "../../../../../../kernel/subsystems/io/file/fat16/fat16.h"
-#include "../../../../../../kernel/subsystems/io/file/fat32/fat32.h"
-#include "../../../../../../kernel/subsystems/io/file/memfs/memfs.h"
+#include "../../../../../../test/kernel/fixtures/memfs/memfs.h"
 #include "../../../../../../kernel/subsystems/io/file/register.h"
 #include "../../../../../../kernel/subsystems/io/stream/stream.h"
 #include "../../../../../../kernel/system_info.h"
@@ -21,10 +19,6 @@
 
 static FilesystemPtr root;
 static IOStatePtr root_state;
-static MemoryBlockDevice fat16_memory_device;
-static MemoryBlockDevice fat32_memory_device;
-static BlockDevice fat16_block_device;
-static BlockDevice fat32_block_device;
 
 static KernelPtr kernel;
 static ProcessPtr dummy_proc;
@@ -68,8 +62,6 @@ static SystemInfo TestSystemInfo__new(void)
 
 static BString async_list_pending = bstr("Async list pending");
 static BString async_invalid_path = bstr("Invalid path");
-static BString fat16_type = bstr("fat16");
-static BString fat32_type = bstr("fat32");
 static BString root_memfs_type = bstr("root-memfs");
 static BString async_root_type = bstr("async-root");
 static BString mnt_fs1_type = bstr("mnt/fs1");
@@ -99,18 +91,6 @@ static Result(Anything) test_map_result(KernelResultMapper mapper, Result(Anythi
 }
 
 static FileIO AsyncListDirFilesystemIO__new(void);
-
-static FilesystemPtr test_fat16_filesystem(void)
-{
-    FileIO file_io = Fat16FilesystemIO__new();
-    return Filesystem__heap_new(&fat16_type, &file_io);
-}
-
-static FilesystemPtr test_fat32_filesystem(void)
-{
-    FileIO file_io = Fat32FilesystemIO__new();
-    return Filesystem__heap_new(&fat32_type, &file_io);
-}
 
 static FilesystemPtr test_mem_filesystem(ConstBStringPtr name)
 {
@@ -187,19 +167,6 @@ void setUp(void)
     kernel = init_test_kernel();
     root = unwrap_optional(kernel->io_subsystem->root_filesystem, RootFilesystem__heap_new());
 
-    fat16_memory_device = MemoryBlockDevice__new();
-    fat32_memory_device = MemoryBlockDevice__new();
-    fat16_block_device = MemoryBlockDevice__as_block_device(&fat16_memory_device);
-    fat32_block_device = MemoryBlockDevice__as_block_device(&fat32_memory_device);
-
-    FilesystemPtr fat16_filesystem = test_fat16_filesystem();
-    Fat16FilesystemIOStatePtr fat16_state = Fat16FilesystemIOState__heap_new(fat16_filesystem, &fat16_block_device, 0);
-    Filesystem__mount(root, &fat16_type, fat16_filesystem);
-
-    FilesystemPtr fat32_filesystem = test_fat32_filesystem();
-    Fat32FilesystemIOStatePtr fat32_state = Fat32FilesystemIOState__heap_new(fat32_filesystem, &fat32_block_device, 0);
-    Filesystem__mount(root, &fat32_type, fat32_filesystem);
-
     kernel->system_info = Some(SystemInfo, fake_system_info);
     root_state = &root->state->state;
 
@@ -212,11 +179,9 @@ void tearDown(void)
 
 static BString embedded = bstr("sbin");
 static BString dev = bstr("dev");
-static BString proc = bstr("proc");
+static BString boot = bstr("boot");
 static BString tmp = bstr("tmp");
 static BString memfs = bstr("memfs");
-static BString fat16 = bstr("fat16");
-static BString fat32 = bstr("fat32");
 static BString hello_world = bstr("hello_world");
 static BString corrupt = bstr("corrupt");
 
@@ -270,58 +235,50 @@ void test_it_can_list_files_from_root(void)
         nodes,
         success(result)
         {
-            TEST_ASSERT_EQUAL_INT(6, FilesystemNodes__len(&result));
+            TEST_ASSERT_EQUAL_INT(3, FilesystemNodes__len(&result));
             FilesystemNodePtr node = unwrap_optional(FilesystemNodes__at(&result, 0), root->root);
-            TEST_ASSERT_TRUE(BString__equals(&embedded, &node->name));
-            FilesystemNodePtr dev_node = unwrap_optional(FilesystemNodes__at(&result, 1), root->root);
-            TEST_ASSERT_TRUE(BString__equals(&dev, &dev_node->name));
-            FilesystemNodePtr proc_node = unwrap_optional(FilesystemNodes__at(&result, 2), root->root);
-            TEST_ASSERT_TRUE(BString__equals(&proc, &proc_node->name));
-            FilesystemNodePtr tmp_node = unwrap_optional(FilesystemNodes__at(&result, 3), root->root);
-            TEST_ASSERT_TRUE(BString__equals(&tmp, &tmp_node->name));
-            FilesystemNodePtr fat16_node = unwrap_optional(FilesystemNodes__at(&result, 4), root->root);
-            TEST_ASSERT_TRUE(BString__equals(&fat16, &fat16_node->name));
-            FilesystemNodePtr fat32_node = unwrap_optional(FilesystemNodes__at(&result, 5), root->root);
-            TEST_ASSERT_TRUE(BString__equals(&fat32, &fat32_node->name));
+            TEST_ASSERT_EQUAL_BSTRING(embedded, node->name);
+            FilesystemNodePtr boot_node = unwrap_optional(FilesystemNodes__at(&result, 1), root->root);
+            TEST_ASSERT_EQUAL_BSTRING(boot, boot_node->name);
+            FilesystemNodePtr tmp_node = unwrap_optional(FilesystemNodes__at(&result, 2), root->root);
+            TEST_ASSERT_EQUAL_BSTRING(tmp, tmp_node->name);
         },
         error_test_fail()
     );
 }
 
-void test_devfs_lists_registered_block_devices(void)
+void test_block_registration_publishes_device_metadata_and_alias(void)
 {
     ProcessPtr service = dummy_process(200, 11, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
-    BString virtio_path = bstring("/dev/virtio1");
-
-    match_result(IOSubsystem__register_device(kernel->io_subsystem, &bstr("/dev/businfo"), (IOPtr)Stream__heap_new(),
-                                              (IOStatePtr)StreamState__heap_new()),
-                 success_do_nothing(),
-        error_test_fail()
-    );
-
     match_result(
         BlockDeviceRegistry__register(&bstr("/dev/virtio1"), service, 128, kernel->message_broker),
         success(code) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_OK, code); },
         error_test_fail()
     );
 
-    Result(FilesystemNodes) nodes = test_list_nodes(root, root_state, root->root, bstring("/dev"));
-
     match_result(
-        nodes,
-        success(result)
+        DeviceRegistry__find(k_v_ptr(kernel->device_registry.mapping, DeviceRegistry), &bstr("/dev/hd0")),
+        success(found)
         {
-            TEST_ASSERT_EQUAL_INT(3, FilesystemNodes__len(&result));
-            TEST_ASSERT_TRUE(FilesystemNodes__has_name(&result, bstring("businfo")));
-            TEST_ASSERT_TRUE(FilesystemNodes__has_name(&result, bstring("virtio1")));
-            TEST_ASSERT_TRUE(FilesystemNodes__has_name(&result, bstring("hd0")));
+            match_optional(
+                found,
+                some(record)
+                {
+                    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio1"), record.path);
+                    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio1"), record.service);
+                    TEST_ASSERT_EQUAL(512, record.block_size);
+                    TEST_ASSERT_EQUAL(128, record.block_count);
+                    TEST_ASSERT_EQUAL(service->pid, record.owner_pid);
+                },
+                none() { TEST_FAIL(); }
+            );
         },
         error_test_fail()
     );
 }
 
-void test_devfs_can_open_and_read_block_device_metadata(void)
+void test_kernel_no_longer_serves_devfs_metadata(void)
 {
     ProcessPtr service = dummy_process(200, 11, PROC_STATE_READY);
     service->process_class = PROCESS_CLASS_SERVICE;
@@ -337,29 +294,42 @@ void test_devfs_can_open_and_read_block_device_metadata(void)
 
     match_result(
         metadata_handle,
-        success(handle)
-        {
-            Char buffer[128];
-            match_result(
-                IOSubsystem__read(kernel->io_subsystem, rw_context(handle, (DataPtr)buffer, sizeof(buffer))),
-                success(bytes)
-                {
-                    buffer[bytes] = '\0';
-                    TEST_ASSERT_EQUAL_STRING(
-                        "path=/dev/virtio1\nblock_size=512\nblock_count=128\nuserspace_service=1\n", buffer);
-                },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
+        success(handle) { TEST_FAIL_MESSAGE("Kernel still serves device metadata"); },
+        error(code, message) { TEST_ASSERT_NOT_EQUAL(IO_OK, code); }
     );
 }
 
-void test_procfs_can_open_and_read_system_info(void)
+void test_boot_sysinfo_coexists_with_nested_config_mount_and_proc_is_absent(void)
 {
-    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
-    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
-    SystemInfoPtr system_info = &procfs_kernel->system_info.some.val;
+    KernelPtr boot_kernel = init_test_kernel_without_filesystem();
+    boot_kernel->system_info = Some(SystemInfo, fake_system_info);
+    FilesystemPtr built_root = Filesystem__build_root_and_mounts(boot_kernel);
+    FilesystemPtr config = test_mem_filesystem(&bstr("config"));
+    MemFilesystemIOState__heap_new(config);
+    test_mount(built_root, bstring("/boot/config"), config);
+    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(built_root);
+    match_result(
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/boot/sysinfo"), IO_OPEN_READ),
+        success(handle) { TEST_ASSERT_GREATER_OR_EQUAL(0, handle); },
+        error_test_fail()
+    );
+    match_result(
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/boot/config/fstab"), IO_OPEN_WRITE),
+        success(handle) { TEST_ASSERT_GREATER_OR_EQUAL(0, handle); },
+        error_test_fail()
+    );
+    match_result(
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/proc/sysinfo"), IO_OPEN_READ),
+        success_test_fail(),
+        error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); }
+    );
+}
+
+void test_bootfs_can_open_and_read_system_info(void)
+{
+    KernelPtr bootfs_kernel = init_test_kernel_without_filesystem();
+    bootfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    SystemInfoPtr system_info = &bootfs_kernel->system_info.some.val;
     for (uint64_t index = 0; index < 12; index++)
     {
         PhysicalMemoryRegion region =
@@ -367,11 +337,11 @@ void test_procfs_can_open_and_read_system_info(void)
         PhysicalMemoryRegions__push(&system_info->physical_memory.free_regions, region);
     }
 
-    FilesystemPtr procfs_root = Filesystem__build_root_and_mounts(procfs_kernel);
-    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(procfs_root);
+    FilesystemPtr bootfs_root = Filesystem__build_root_and_mounts(bootfs_kernel);
+    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(bootfs_root);
 
     Result(IOHandle) sysinfo_handle =
-        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/proc/sysinfo"), IO_OPEN_READ);
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/boot/sysinfo"), IO_OPEN_READ);
 
     match_result(
         sysinfo_handle,
@@ -436,11 +406,11 @@ void test_procfs_can_open_and_read_system_info(void)
     );
 }
 
-void test_procfs_can_read_system_info_from_non_zero_offset(void)
+void test_bootfs_can_read_system_info_from_non_zero_offset(void)
 {
-    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
-    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
-    SystemInfoPtr system_info = &procfs_kernel->system_info.some.val;
+    KernelPtr bootfs_kernel = init_test_kernel_without_filesystem();
+    bootfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    SystemInfoPtr system_info = &bootfs_kernel->system_info.some.val;
     for (uint64_t index = 0; index < 12; index++)
     {
         PhysicalMemoryRegion region =
@@ -448,11 +418,11 @@ void test_procfs_can_read_system_info_from_non_zero_offset(void)
         PhysicalMemoryRegions__push(&system_info->physical_memory.free_regions, region);
     }
 
-    FilesystemPtr procfs_root = Filesystem__build_root_and_mounts(procfs_kernel);
-    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(procfs_root);
+    FilesystemPtr bootfs_root = Filesystem__build_root_and_mounts(bootfs_kernel);
+    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(bootfs_root);
 
     Result(IOHandle) sysinfo_handle =
-        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/proc/sysinfo"), IO_OPEN_READ);
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/boot/sysinfo"), IO_OPEN_READ);
 
     match_result(
         sysinfo_handle,
@@ -497,21 +467,21 @@ void test_procfs_can_read_system_info_from_non_zero_offset(void)
     );
 }
 
-void test_procfs_can_read_framebuffer_system_info(void)
+void test_bootfs_can_read_framebuffer_system_info(void)
 {
-    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
+    KernelPtr bootfs_kernel = init_test_kernel_without_filesystem();
     SystemInfo framebuffer_system_info = fake_system_info;
     framebuffer_system_info.framebuffer =
         Some(FramebufferInfo, FramebufferInfo__new(0x3e000000, 0x7e9000, 1920, 1080, 2048,
                                                    FRAMEBUFFER_PIXEL_FORMAT_BGR_RESERVED_8BIT_PER_COLOR, 0x00ff0000,
                                                    0x0000ff00, 0x000000ff, 0xff000000));
-    procfs_kernel->system_info = Some(SystemInfo, framebuffer_system_info);
+    bootfs_kernel->system_info = Some(SystemInfo, framebuffer_system_info);
 
-    FilesystemPtr procfs_root = Filesystem__build_root_and_mounts(procfs_kernel);
-    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(procfs_root);
+    FilesystemPtr bootfs_root = Filesystem__build_root_and_mounts(bootfs_kernel);
+    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(bootfs_root);
 
     Result(IOHandle) sysinfo_handle =
-        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/proc/sysinfo"), IO_OPEN_READ);
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/boot/sysinfo"), IO_OPEN_READ);
 
     match_result(
         sysinfo_handle,
@@ -545,15 +515,15 @@ void test_procfs_can_read_framebuffer_system_info(void)
     );
 }
 
-void test_procfs_returns_eof_after_streaming_system_info(void)
+void test_bootfs_returns_eof_after_streaming_system_info(void)
 {
-    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
-    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
-    FilesystemPtr procfs_root = Filesystem__build_root_and_mounts(procfs_kernel);
-    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(procfs_root);
+    KernelPtr bootfs_kernel = init_test_kernel_without_filesystem();
+    bootfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    FilesystemPtr bootfs_root = Filesystem__build_root_and_mounts(bootfs_kernel);
+    KernelPtr mounted_kernel = init_test_kernel_with_filesystem(bootfs_root);
 
     Result(IOHandle) sysinfo_handle =
-        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/proc/sysinfo"), IO_OPEN_READ);
+        IOSubsystem__open(mounted_kernel->io_subsystem, open_context(), &bstr("/boot/sysinfo"), IO_OPEN_READ);
 
     match_result(
         sysinfo_handle,
@@ -586,7 +556,7 @@ void test_it_can_list_files_to_subdir(void)
         {
             TEST_ASSERT_EQUAL_INT(4, FilesystemNodes__len(&result));
             FilesystemNodePtr node = unwrap_optional(FilesystemNodes__at(&result, 0), root->root);
-            TEST_ASSERT_TRUE(BString__equals(&hello_world, &node->name));
+            TEST_ASSERT_EQUAL_BSTRING(hello_world, node->name);
         },
         error_test_fail()
     );
@@ -602,7 +572,7 @@ void test_it_can_list_nested_mount_parent(void)
         {
             TEST_ASSERT_EQUAL_INT(1, FilesystemNodes__len(&result));
             FilesystemNodePtr node = unwrap_optional(FilesystemNodes__at(&result, 0), root->root);
-            TEST_ASSERT_TRUE(BString__equals(&memfs, &node->name));
+            TEST_ASSERT_EQUAL_BSTRING(memfs, node->name);
         },
         error_test_fail()
     );
@@ -612,7 +582,7 @@ void test_filesystem_table_adds_mount_entries(void)
 {
     FilesystemTable table = FilesystemTable__new();
     BString device_path = bstring("/dev/virtio1");
-    BString filesystem_type = bstring("fat32");
+    BString filesystem_type = bstring("userspacefs");
     BString mountpoint = bstring("/mnt/fs1");
 
     match_result(
@@ -626,11 +596,27 @@ void test_filesystem_table_adds_mount_entries(void)
         FilesystemTableEntries__ptr_at(&table.entries, 0),
         some(entry)
         {
-            TEST_ASSERT_TRUE(BString__equals(&entry->device_path, &device_path));
-            TEST_ASSERT_TRUE(BString__equals(&entry->filesystem_type, &filesystem_type));
-            TEST_ASSERT_TRUE(BString__equals(&entry->mountpoint, &mountpoint));
+            TEST_ASSERT_EQUAL_BSTRING(entry->device_path, device_path);
+            TEST_ASSERT_EQUAL_BSTRING(entry->filesystem_type, filesystem_type);
+            TEST_ASSERT_EQUAL_BSTRING(entry->mountpoint, mountpoint);
             TEST_ASSERT_FALSE(entry->match_block_count);
             TEST_ASSERT_EQUAL_UINT64(0, entry->block_count);
+        },
+        none_test_fail()
+    );
+}
+
+void test_boot_mount_table_keeps_config_but_not_root_disk(void)
+{
+    KernelPtr boot_kernel = init_test_kernel();
+    FilesystemPtr filesystem = Filesystem__build_root_and_mounts(boot_kernel);
+    TEST_ASSERT_EQUAL(1, FilesystemTableEntries__len(&filesystem->filesystem_table.entries));
+    match_optional(
+        FilesystemTableEntries__ptr_at(&filesystem->filesystem_table.entries, 0),
+        some(entry)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(entry->mountpoint, bstr("/boot/config"));
+            TEST_ASSERT_TRUE(entry->match_block_count);
         },
         none_test_fail()
     );
@@ -654,9 +640,9 @@ void test_filesystem_table_adds_block_count_mount_entries(void)
         FilesystemTableEntries__ptr_at(&table.entries, 0),
         some(entry)
         {
-            TEST_ASSERT_TRUE(BString__equals(&entry->device_path, &empty_bstr()));
-            TEST_ASSERT_TRUE(BString__equals(&entry->filesystem_type, &filesystem_type));
-            TEST_ASSERT_TRUE(BString__equals(&entry->mountpoint, &mountpoint));
+            TEST_ASSERT_EQUAL_BSTRING(entry->device_path, empty_bstr());
+            TEST_ASSERT_EQUAL_BSTRING(entry->filesystem_type, filesystem_type);
+            TEST_ASSERT_EQUAL_BSTRING(entry->mountpoint, mountpoint);
             TEST_ASSERT_TRUE(entry->match_block_count);
             TEST_ASSERT_EQUAL_UINT64(block_count, entry->block_count);
         },
@@ -687,20 +673,17 @@ void test_it_can_open_files_and_read_from_embedded_via_io_subsystem(void)
 
 void test_io_list_dir_lists_root_mounts(void)
 {
-    DirectoryEntry entries[6];
+    DirectoryEntry entries[4];
 
     match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/", entries, 6), 0, 0,
+        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/", entries, 4), 0, 0,
                     0),
         success(count)
         {
-            TEST_ASSERT_EQUAL_INT(6, count);
+            TEST_ASSERT_EQUAL_INT(3, count);
             TEST_ASSERT_EQUAL_STRING("sbin", entries[0].name);
-            TEST_ASSERT_EQUAL_STRING("dev", entries[1].name);
-            TEST_ASSERT_EQUAL_STRING("proc", entries[2].name);
-            TEST_ASSERT_EQUAL_STRING("tmp", entries[3].name);
-            TEST_ASSERT_EQUAL_STRING("fat16", entries[4].name);
-            TEST_ASSERT_EQUAL_STRING("fat32", entries[5].name);
+            TEST_ASSERT_EQUAL_STRING("boot", entries[1].name);
+            TEST_ASSERT_EQUAL_STRING("tmp", entries[2].name);
         },
         error_test_fail()
     );
@@ -741,9 +724,9 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
         error_test_fail()
     );
 
-    DirectoryEntry entries[8] = {0};
+    DirectoryEntry entries[6] = {0};
     match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/", entries, 8), 0, 0,
+        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/", entries, 6), 0, 0,
                     0),
         success(count)
         {
@@ -751,12 +734,9 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
             bool saw_hello = false;
             bool saw_ebin = false;
             bool saw_dev = false;
-            bool saw_proc = false;
+            bool saw_boot = false;
             bool saw_tmp = false;
-            bool saw_fat16 = false;
-            bool saw_fat32 = false;
-
-            TEST_ASSERT_EQUAL_INT(8, count);
+            TEST_ASSERT_EQUAL_INT(5, count);
             for (DirectoryEntryCount i = 0; i < count; i++)
             {
                 if (strcmp(entries[i].name, "docs") == 0)
@@ -775,32 +755,22 @@ void test_io_list_dir_lists_backing_root_entries_and_mount_overlays(void)
                 {
                     saw_dev = true;
                 }
-                else if (strcmp(entries[i].name, "proc") == 0)
+                else if (strcmp(entries[i].name, "boot") == 0)
                 {
-                    saw_proc = true;
+                    saw_boot = true;
                 }
                 else if (strcmp(entries[i].name, "tmp") == 0)
                 {
                     saw_tmp = true;
-                }
-                else if (strcmp(entries[i].name, "fat16") == 0)
-                {
-                    saw_fat16 = true;
-                }
-                else if (strcmp(entries[i].name, "fat32") == 0)
-                {
-                    saw_fat32 = true;
                 }
             }
 
             TEST_ASSERT_TRUE(saw_docs);
             TEST_ASSERT_TRUE(saw_hello);
             TEST_ASSERT_TRUE(saw_ebin);
-            TEST_ASSERT_TRUE(saw_dev);
-            TEST_ASSERT_TRUE(saw_proc);
+            TEST_ASSERT_FALSE(saw_dev);
+            TEST_ASSERT_TRUE(saw_boot);
             TEST_ASSERT_TRUE(saw_tmp);
-            TEST_ASSERT_TRUE(saw_fat16);
-            TEST_ASSERT_TRUE(saw_fat32);
         },
         error_test_fail()
     );
@@ -812,11 +782,11 @@ void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
     AsyncListDirFilesystemIOStatePtr async_state = AsyncListDirFilesystemIOState__heap_new(async_root);
     test_mount(root, bstring("/"), async_root);
 
-    DirectoryEntry entries[8] = {0};
+    DirectoryEntry entries[6] = {0};
 
     BlockDevice__set_current_context(&kernel_context);
     match_result(
-        test_list_dir(root, root_state, bstring("/"), entries, 8),
+        test_list_dir(root, root_state, bstring("/"), entries, 6),
         success_test_fail(),
         error(code, message) { TEST_ASSERT_EQUAL(BLOCK_DEVICE_REQUEST_PENDING, code); }
     );
@@ -842,12 +812,9 @@ void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
                     bool saw_hello = false;
                     bool saw_ebin = false;
                     bool saw_dev = false;
-                    bool saw_proc = false;
+                    bool saw_boot = false;
                     bool saw_tmp = false;
-                    bool saw_fat16 = false;
-                    bool saw_fat32 = false;
-
-                    TEST_ASSERT_EQUAL_INT(8, count);
+                    TEST_ASSERT_EQUAL_INT(5, count);
                     for (DirectoryEntryCount i = 0; i < count; i++)
                     {
                         if (strcmp(entries[i].name, "docs") == 0)
@@ -866,32 +833,22 @@ void test_root_async_list_dir_merges_mount_overlays_on_completion(void)
                         {
                             saw_dev = true;
                         }
-                        else if (strcmp(entries[i].name, "proc") == 0)
+                        else if (strcmp(entries[i].name, "boot") == 0)
                         {
-                            saw_proc = true;
+                            saw_boot = true;
                         }
                         else if (strcmp(entries[i].name, "tmp") == 0)
                         {
                             saw_tmp = true;
-                        }
-                        else if (strcmp(entries[i].name, "fat16") == 0)
-                        {
-                            saw_fat16 = true;
-                        }
-                        else if (strcmp(entries[i].name, "fat32") == 0)
-                        {
-                            saw_fat32 = true;
                         }
                     }
 
                     TEST_ASSERT_TRUE(saw_docs);
                     TEST_ASSERT_TRUE(saw_hello);
                     TEST_ASSERT_TRUE(saw_ebin);
-                    TEST_ASSERT_TRUE(saw_dev);
-                    TEST_ASSERT_TRUE(saw_proc);
+                    TEST_ASSERT_FALSE(saw_dev);
+                    TEST_ASSERT_TRUE(saw_boot);
                     TEST_ASSERT_TRUE(saw_tmp);
-                    TEST_ASSERT_TRUE(saw_fat16);
-                    TEST_ASSERT_TRUE(saw_fat32);
                 },
                 error_test_fail()
             );
@@ -976,9 +933,9 @@ void test_root_async_list_dir_synthesizes_mount_parent_on_backing_invalid_path(v
 
 void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(void)
 {
-    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
-    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
-    FilesystemPtr built_root = Filesystem__build_root_and_mounts(procfs_kernel);
+    KernelPtr bootfs_kernel = init_test_kernel_without_filesystem();
+    bootfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    FilesystemPtr built_root = Filesystem__build_root_and_mounts(bootfs_kernel);
     FilesystemPtr backing_root = test_mem_filesystem(&root_memfs_type);
     MemFilesystemIOState__heap_new(backing_root);
     test_mount(built_root, bstring("/"), backing_root);
@@ -1035,10 +992,10 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
             bool saw_hello = false;
             bool saw_ebin = false;
             bool saw_dev = false;
-            bool saw_proc = false;
+            bool saw_boot = false;
             bool saw_tmp = false;
 
-            TEST_ASSERT_EQUAL_INT(6, count);
+            TEST_ASSERT_EQUAL_INT(3, count);
             for (DirectoryEntryCount i = 0; i < count; i++)
             {
                 if (strcmp(root_entries[i].name, "docs") == 0)
@@ -1057,9 +1014,9 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
                 {
                     saw_dev = true;
                 }
-                else if (strcmp(root_entries[i].name, "proc") == 0)
+                else if (strcmp(root_entries[i].name, "boot") == 0)
                 {
-                    saw_proc = true;
+                    saw_boot = true;
                 }
                 else if (strcmp(root_entries[i].name, "tmp") == 0)
                 {
@@ -1069,20 +1026,20 @@ void test_build_root_and_mounts_lists_backing_root_entries_and_mount_overlays(vo
 
             TEST_ASSERT_TRUE(saw_docs);
             TEST_ASSERT_TRUE(saw_hello);
-            TEST_ASSERT_TRUE(saw_ebin);
-            TEST_ASSERT_TRUE(saw_dev);
-            TEST_ASSERT_TRUE(saw_proc);
-            TEST_ASSERT_TRUE(saw_tmp);
+            TEST_ASSERT_FALSE(saw_ebin);
+            TEST_ASSERT_FALSE(saw_dev);
+            TEST_ASSERT_TRUE(saw_boot);
+            TEST_ASSERT_FALSE(saw_tmp);
         },
         error_test_fail()
     );
 }
 
-void test_build_root_and_mounts_lists_tmp_mount_parent_when_backing_root_is_mounted(void)
+void test_build_root_and_mounts_does_not_mount_kernel_memfs(void)
 {
-    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
-    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
-    FilesystemPtr built_root = Filesystem__build_root_and_mounts(procfs_kernel);
+    KernelPtr bootfs_kernel = init_test_kernel_without_filesystem();
+    bootfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    FilesystemPtr built_root = Filesystem__build_root_and_mounts(bootfs_kernel);
     FilesystemPtr backing_root = test_mem_filesystem(&root_memfs_type);
     MemFilesystemIOState__heap_new(backing_root);
     test_mount(built_root, bstring("/"), backing_root);
@@ -1093,20 +1050,16 @@ void test_build_root_and_mounts_lists_tmp_mount_parent_when_backing_root_is_moun
     match_result(
         IO__handler(mounted_kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR,
                     TEST_IO_LIST_DIR_REQUEST("/tmp", tmp_entries, 4), 0, 0, 0),
-        success(count)
-        {
-            TEST_ASSERT_EQUAL_INT(1, count);
-            TEST_ASSERT_EQUAL_STRING("memfs", tmp_entries[0].name);
-        },
-        error_test_fail()
+        success(count) { TEST_FAIL_MESSAGE("Kernel must not provide /tmp"); },
+        error(code, message) { TEST_ASSERT_EQUAL(IO_INVALID_PATH, code); }
     );
 }
 
 void test_build_root_and_mounts_lists_mnt_mount_parent_when_backing_root_is_mounted(void)
 {
-    KernelPtr procfs_kernel = init_test_kernel_without_filesystem();
-    procfs_kernel->system_info = Some(SystemInfo, fake_system_info);
-    FilesystemPtr built_root = Filesystem__build_root_and_mounts(procfs_kernel);
+    KernelPtr bootfs_kernel = init_test_kernel_without_filesystem();
+    bootfs_kernel->system_info = Some(SystemInfo, fake_system_info);
+    FilesystemPtr built_root = Filesystem__build_root_and_mounts(bootfs_kernel);
     FilesystemPtr backing_root = test_mem_filesystem(&root_memfs_type);
     FilesystemPtr ext2user = test_mem_filesystem(&ext2user_type);
     MemFilesystemIOState__heap_new(backing_root);
@@ -1199,374 +1152,6 @@ void test_io_list_dir_lists_empty_memfs(void)
         IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR,
                     TEST_IO_LIST_DIR_REQUEST("/tmp/memfs", entries, 4), 0, 0, 0),
         success(count) { TEST_ASSERT_EQUAL_INT(0, count); },
-        error_test_fail()
-    );
-}
-
-void test_io_list_dir_lists_empty_fat16(void)
-{
-    DirectoryEntry entries[4];
-
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat16", entries, 4),
-                    0, 0, 0),
-        success(count) { TEST_ASSERT_EQUAL_INT(0, count); },
-        error_test_fail()
-    );
-}
-
-void test_io_list_dir_lists_empty_fat32(void)
-{
-    DirectoryEntry entries[4];
-
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32", entries, 4),
-                    0, 0, 0),
-        success(count) { TEST_ASSERT_EQUAL_INT(0, count); },
-        error_test_fail()
-    );
-}
-
-void test_fat16_write_read_and_list_root_file(void)
-{
-    Result(IOHandle) write_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat16/NOTE.TXT"), IO_OPEN_WRITE);
-
-    match_result(
-        write_handle,
-        success(write_hand)
-        {
-            Char data[] = "hello fat16";
-            match_result(
-                IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr)data, 11)),
-                success(bytes) { TEST_ASSERT_EQUAL_INT(11, bytes); },
-                error_test_fail()
-            );
-
-            match_result(
-                IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)),
-                success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-
-    DirectoryEntry entries[4];
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat16", entries, 4),
-                    0, 0, 0),
-        success(count)
-        {
-            TEST_ASSERT_EQUAL_INT(1, count);
-            TEST_ASSERT_EQUAL_STRING("NOTE.TXT", entries[0].name);
-        },
-        error_test_fail()
-    );
-
-    Result(IOHandle) read_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat16/NOTE.TXT"), IO_OPEN_READ);
-
-    match_result(
-        read_handle,
-        success(read_hand)
-        {
-            Char buffer[32];
-            match_result(
-                IOSubsystem__read(kernel->io_subsystem, rw_context(read_hand, (DataPtr)buffer, 11)),
-                success(bytes)
-                {
-                    TEST_ASSERT_EQUAL_INT(11, bytes);
-                    buffer[11] = '\0';
-                    TEST_ASSERT_EQUAL_STRING("hello fat16", (char *)buffer);
-                },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-}
-
-void test_fat16_mkdir_lists_root_directory_and_empty_directory(void)
-{
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR,
-                    TEST_IO_LIST_DIR_REQUEST("/", ((DirectoryEntry[5]){0}), 5), 0, 0, 0),
-        success(count) { TEST_ASSERT_EQUAL_INT(5, count); },
-        error_test_fail()
-    );
-
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat16/dir", 0), 0, 0, 0),
-        success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); },
-        error_test_fail()
-    );
-
-    DirectoryEntry root_entries[4];
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR,
-                    TEST_IO_LIST_DIR_REQUEST("/fat16", root_entries, 4), 0, 0, 0),
-        success(count)
-        {
-            TEST_ASSERT_EQUAL_INT(1, count);
-            TEST_ASSERT_EQUAL_STRING("DIR", root_entries[0].name);
-            TEST_ASSERT_EQUAL_INT(FAT16_ATTR_DIRECTORY, root_entries[0].attributes);
-        },
-        error_test_fail()
-    );
-
-    DirectoryEntry dir_entries[4];
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR,
-                    TEST_IO_LIST_DIR_REQUEST("/fat16/dir", dir_entries, 4), 0, 0, 0),
-        success(count) { TEST_ASSERT_EQUAL_INT(0, count); },
-        error_test_fail()
-    );
-}
-
-void test_fat32_write_read_and_list_root_file(void)
-{
-    Result(IOHandle) write_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/NOTE.TXT"), IO_OPEN_WRITE);
-
-    match_result(
-        write_handle,
-        success(write_hand)
-        {
-            Char data[] = "hello fat32";
-            match_result(
-                IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr)data, 11)),
-                success(bytes) { TEST_ASSERT_EQUAL_INT(11, bytes); },
-                error_test_fail()
-            );
-
-            match_result(
-                IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)),
-                success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-
-    DirectoryEntry entries[4];
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32", entries, 4),
-                    0, 0, 0),
-        success(count)
-        {
-            TEST_ASSERT_EQUAL_INT(1, count);
-            TEST_ASSERT_EQUAL_STRING("NOTE.TXT", entries[0].name);
-        },
-        error_test_fail()
-    );
-
-    Result(IOHandle) read_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/NOTE.TXT"), IO_OPEN_READ);
-
-    match_result(
-        read_handle,
-        success(read_hand)
-        {
-            Char buffer[32];
-            match_result(
-                IOSubsystem__read(kernel->io_subsystem, rw_context(read_hand, (DataPtr)buffer, 11)),
-                success(bytes)
-                {
-                    TEST_ASSERT_EQUAL_INT(11, bytes);
-                    buffer[11] = '\0';
-                    TEST_ASSERT_EQUAL_STRING("hello fat32", (char *)buffer);
-                },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-}
-
-void test_fat32_mkdir_lists_root_directory_and_empty_directory(void)
-{
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/dir", 0), 0, 0, 0),
-        success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); },
-        error_test_fail()
-    );
-
-    DirectoryEntry root_entries[4];
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR,
-                    TEST_IO_LIST_DIR_REQUEST("/fat32", root_entries, 4), 0, 0, 0),
-        success(count)
-        {
-            TEST_ASSERT_EQUAL_INT(1, count);
-            TEST_ASSERT_EQUAL_STRING("DIR", root_entries[0].name);
-            TEST_ASSERT_EQUAL_INT(FAT32_ATTR_DIRECTORY, root_entries[0].attributes);
-        },
-        error_test_fail()
-    );
-
-    DirectoryEntry dir_entries[4];
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR,
-                    TEST_IO_LIST_DIR_REQUEST("/fat32/dir", dir_entries, 4), 0, 0, 0),
-        success(count) { TEST_ASSERT_EQUAL_INT(0, count); },
-        error_test_fail()
-    );
-}
-
-void test_fat32_nested_open_missing_parent_fails_cleanly_repeatedly(void)
-{
-    Result(IOHandle) first =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/bin/file.txt"), IO_OPEN_WRITE);
-    match_result(first,
-        success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); }
-    );
-
-    Result(IOHandle) second =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/bin/file.txt"), IO_OPEN_WRITE);
-    match_result(second,
-        success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); }
-    );
-}
-
-void test_fat32_write_read_and_list_nested_file(void)
-{
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/bin", 0), 0, 0, 0),
-        success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); },
-        error_test_fail()
-    );
-
-    Result(IOHandle) write_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/bin/file.txt"), IO_OPEN_WRITE);
-
-    match_result(
-        write_handle,
-        success(write_hand)
-        {
-            Char data[] = "nested fat32";
-            match_result(
-                IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr)data, 12)),
-                success(bytes) { TEST_ASSERT_EQUAL_INT(12, bytes); },
-                error_test_fail()
-            );
-
-            match_result(
-                IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)),
-                success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-
-    DirectoryEntry entries[4];
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR,
-                    TEST_IO_LIST_DIR_REQUEST("/fat32/bin", entries, 4), 0, 0, 0),
-        success(count)
-        {
-            TEST_ASSERT_EQUAL_INT(1, count);
-            TEST_ASSERT_EQUAL_STRING("FILE.TXT", entries[0].name);
-        },
-        error_test_fail()
-    );
-
-    Result(IOHandle) read_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/bin/file.txt"), IO_OPEN_READ);
-
-    match_result(
-        read_handle,
-        success(read_hand)
-        {
-            Char buffer[32];
-            match_result(
-                IOSubsystem__read(kernel->io_subsystem, rw_context(read_hand, (DataPtr)buffer, 12)),
-                success(bytes)
-                {
-                    TEST_ASSERT_EQUAL_INT(12, bytes);
-                    buffer[12] = '\0';
-                    TEST_ASSERT_EQUAL_STRING("nested fat32", (char *)buffer);
-                },
-                error_test_fail()
-            );
-
-            match_result(
-                IOSubsystem__read(kernel->io_subsystem, rw_context(read_hand, (DataPtr)buffer, 12)),
-                success_test_fail(),
-                error(code, message) { TEST_ASSERT_EQUAL_INT(IO_EOF, code); }
-            );
-
-            match_result(
-                IOSubsystem__close(kernel->io_subsystem, close_context(read_hand)),
-                success(handle) { TEST_ASSERT_EQUAL(read_hand, handle); },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-}
-
-void test_fat32_nested_file_read_returns_eof_through_syscall_handler(void)
-{
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/dir", 0), 0, 0, 0),
-        success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); },
-        error_test_fail()
-    );
-
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_OPEN,
-                    TEST_IO_PATH_REQUEST("/fat32/dir/file.txt", IO_OPEN_WRITE), 0, 0, 0),
-        success(fd)
-        {
-            Char data[] = "hello";
-            match_result(
-                IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_WRITE, fd, (Anything)data, 5, 0),
-                success(bytes) { TEST_ASSERT_EQUAL_INT(5, bytes); },
-                error_test_fail()
-            );
-
-            match_result(
-                IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_CLOSE, fd, 0, 0, 0),
-                success(closed_fd) { TEST_ASSERT_EQUAL_INT(fd, closed_fd); },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_OPEN,
-                    TEST_IO_PATH_REQUEST("/fat32/dir/file.txt", IO_OPEN_READ), 0, 0, 0),
-        success(fd)
-        {
-            Char buffer[513];
-            match_result(
-                IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_READ, fd, (Anything)buffer, 512, 0),
-                success(bytes)
-                {
-                    TEST_ASSERT_EQUAL_INT(5, bytes);
-                    buffer[5] = '\0';
-                    TEST_ASSERT_EQUAL_STRING("hello", (char *)buffer);
-                },
-                error_test_fail()
-            );
-
-            match_result(
-                IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_READ, fd, (Anything)buffer, 512, 0),
-                success_test_fail(),
-                error(code, message) { TEST_ASSERT_EQUAL_INT(IO_EOF, code); }
-            );
-
-            match_result(
-                IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_CLOSE, fd, 0, 0, 0),
-                success(closed_fd) { TEST_ASSERT_EQUAL_INT(fd, closed_fd); },
-                error_test_fail()
-            );
-        },
         error_test_fail()
     );
 }
@@ -1679,118 +1264,6 @@ void test_memfs_mkdir_lists_directory_and_allows_file_inside(void)
             TEST_ASSERT_EQUAL_STRING("notes", docs_entries[0].name);
         },
         error_test_fail()
-    );
-}
-
-void test_fat32_rm_removes_nested_file(void)
-{
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/dir", 0), 0, 0, 0),
-        success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); },
-        error_test_fail()
-    );
-
-    Result(IOHandle) write_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/dir/file.txt"), IO_OPEN_WRITE);
-
-    match_result(
-        write_handle,
-        success(write_hand)
-        {
-            Char data[] = "hi";
-            match_result(
-                IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr)data, 2)),
-                success(bytes) { TEST_ASSERT_EQUAL_INT(2, bytes); },
-                error_test_fail()
-            );
-
-            match_result(
-                IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)),
-                success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE, TEST_IO_PATH_REQUEST("/fat32/dir/file.txt", 0), 0,
-                    0, 0),
-        success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); },
-        error_test_fail()
-    );
-
-    DirectoryEntry entries[4];
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR,
-                    TEST_IO_LIST_DIR_REQUEST("/fat32/dir", entries, 4), 0, 0, 0),
-        success(count) { TEST_ASSERT_EQUAL_INT(0, count); },
-        error_test_fail()
-    );
-
-    Result(IOHandle) read_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/dir/file.txt"), IO_OPEN_READ);
-
-    match_result(
-        read_handle,
-        success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); }
-    );
-}
-
-void test_fat32_rm_recursive_removes_directory_tree(void)
-{
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_MKDIR, TEST_IO_PATH_REQUEST("/fat32/dir", 0), 0, 0, 0),
-        success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); },
-        error_test_fail()
-    );
-
-    Result(IOHandle) write_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/dir/file.txt"), IO_OPEN_WRITE);
-
-    match_result(
-        write_handle,
-        success(write_hand)
-        {
-            Char data[] = "hi";
-            match_result(
-                IOSubsystem__write(kernel->io_subsystem, rw_context(write_hand, (DataPtr)data, 2)),
-                success(bytes) { TEST_ASSERT_EQUAL_INT(2, bytes); },
-                error_test_fail()
-            );
-
-            match_result(
-                IOSubsystem__close(kernel->io_subsystem, close_context(write_hand)),
-                success(handle) { TEST_ASSERT_EQUAL(write_hand, handle); },
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_REMOVE,
-                    TEST_IO_PATH_REQUEST("/fat32/dir", IO_REMOVE_RECURSIVE), 0, 0, 0),
-        success(status) { TEST_ASSERT_EQUAL_INT(IO_OK, status); },
-        error_test_fail()
-    );
-
-    DirectoryEntry entries[4];
-    match_result(
-        IO__handler(kernel, Some(ProcessPtr, dummy_proc), IO_LIST_DIR, TEST_IO_LIST_DIR_REQUEST("/fat32", entries, 4),
-                    0, 0, 0),
-        success(count) { TEST_ASSERT_EQUAL_INT(0, count); },
-        error_test_fail()
-    );
-
-    Result(IOHandle) read_handle =
-        IOSubsystem__open(kernel->io_subsystem, open_context(), &bstr("/fat32/dir/file.txt"), IO_OPEN_READ);
-
-    match_result(
-        read_handle,
-        success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL_INT(IO_INVALID_PATH, code); }
     );
 }
 
