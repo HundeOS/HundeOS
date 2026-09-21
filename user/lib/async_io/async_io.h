@@ -25,7 +25,6 @@ typedef enum AsyncIOCode
 } AsyncIOCode;
 
 ResultDef(AsyncIOCode);
-ResultDef(ServiceBlockReadResult);
 ResultDef(ServiceEvent);
 ResultDef(AsyncIOPtr);
 OptionalDef(ServiceEvent);
@@ -62,10 +61,6 @@ Result(AsyncIOCode) AsyncIO__spawn_request(AsyncIOPtr self, ServiceEventPtr even
 Result(AsyncIOCode) AsyncIO__deliver_response(AsyncIOPtr self, ServiceEventPtr event);
 Result(ServiceEvent) AsyncIO__take_response(AsyncIOPtr self, uint64_t request_id);
 Result(ServiceEvent) AsyncIO__yield_for_response(uint64_t request_id);
-Result(ServiceBlockReadResult)
-    IO__block_read(ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size);
-Result(ServiceBlockReadResult)
-    IO__block_write(ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size);
 Result(AsyncIOPtr) AsyncIO__current(void);
 size_t AsyncIO__pending_response_count(AsyncIOPtr self);
 size_t AsyncIO__live_fiber_count(AsyncIOPtr self);

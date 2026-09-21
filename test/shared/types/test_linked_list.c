@@ -36,7 +36,10 @@ void test_linked_list_push_and_at(void)
     TestList list = TestList__new();
 
     match_result(TestList__push(&list, 10),
-        success(index) { TEST_ASSERT_EQUAL(0, index); },
+        success(index)
+        {
+            TEST_ASSERT_EQUAL(0, index);
+        },
         error_test_fail()
     );
 
@@ -66,7 +69,10 @@ void test_linked_list_find(void)
 
     match_find_result_ptr(
         TestList__find(&list, value_matches, &expected),
-        some(found) { TEST_ASSERT_EQUAL(20, *found); },
+        some(found)
+        {
+            TEST_ASSERT_EQUAL(20, *found);
+        },
         none_test_fail()
     );
 }
@@ -82,7 +88,10 @@ void test_linked_list_match_find_result_unwraps_found_value(void)
 
     match_find_result(
         TestList__find(&list, value_matches, &expected),
-        some(value) { TEST_ASSERT_EQUAL(20, value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL(20, value);
+        },
         none_test_fail()
     );
 }
@@ -98,7 +107,10 @@ void test_linked_list_match_find_result_ptr_unwraps_found_pointer(void)
 
     match_find_result_ptr(
         TestList__find(&list, value_matches, &expected),
-        some(value) { *value = 40; },
+        some(value)
+        {
+            *value = 40;
+        },
         none_test_fail()
     );
 
@@ -115,11 +127,16 @@ void test_linked_list_iterate_visits_items_in_order(void)
     TestListType expected = 10;
     uint64_t count = 0;
 
-    for_each_ll(TestList, list, value, {
-        TEST_ASSERT_EQUAL(expected, value);
-        expected += 10;
-        count++;
-    });
+    for_each_ll(
+        TestList,
+        list,
+        value,
+        {
+            TEST_ASSERT_EQUAL(expected, value);
+            expected += 10;
+            count++;
+        }
+    );
 
     TEST_ASSERT_EQUAL(3, count);
 }

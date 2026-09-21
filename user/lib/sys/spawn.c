@@ -25,6 +25,25 @@ static BString spawn_no_path = bstr("spawn failed: path not found");
 static BString spawn_arg_too_long = bstr("spawn failed: argument too long");
 static BString spawn_failed = bstr("spawn failed");
 
+static SpawnResult SpawnRequest__submit(SpawnRequestPtr self, SystemCall operation)
+{
+    return syscall(operation, (Anything)self, 0, 0, 0, 0);
+}
+
+Result(SpawnResult) OS__boot_spawn(ConstBStringPtr path, OptionalPtr(BString) arg0, OptionalPtr(BString) arg1,
+                                   OptionalPtr(BString) arg2)
+{
+    SpawnArguments arguments = SpawnArguments__from_optional_args(arg0, arg1, arg2);
+    SpawnRequest request = SpawnRequest__new(P_NOWAIT, path, SPAWN_INHERIT_USER_ID, SPAWN_INHERIT_AUTH_TICKET,
+                                             SPAWN_STDIO_DEFAULT, &arguments);
+    return SpawnResult__from_raw(syscall(SYSCALL_BOOT_SPAWN, (Anything)&request, 0, 0, 0, 0));
+}
+
+Result(SpawnResult) OS__boot_complete(void)
+{
+    return SpawnResult__from_raw(syscall(SYSCALL_BOOT_COMPLETE, 0, 0, 0, 0, 0));
+}
+
 BString SpawnResult__message(SpawnResult result)
 {
     switch (result)
@@ -57,7 +76,10 @@ Result(SpawnResult) SpawnResult__from_raw(SpawnResult result)
 static Result(CollectionCode) SpawnArguments__push_optional(SpawnArgumentsPtr self, OptionalPtr(BString) arg)
 {
     match_optional(*arg,
-        some(value) { return SpawnArguments__push(self, value); },
+        some(value)
+        {
+            return SpawnArguments__push(self, value);
+        },
         none_do_nothing()
     );
 
@@ -71,17 +93,26 @@ SpawnArguments SpawnArguments__from_optional_args(OptionalPtr(BString) arg0, Opt
     match_result(
         SpawnArguments__push_optional(&arguments, arg0),
         success_do_nothing(),
-        error(code, message) { return arguments; }
+        error(code, message)
+        {
+            return arguments;
+        }
     );
     match_result(
         SpawnArguments__push_optional(&arguments, arg1),
         success_do_nothing(),
-        error(code, message) { return arguments; }
+        error(code, message)
+        {
+            return arguments;
+        }
     );
     match_result(
         SpawnArguments__push_optional(&arguments, arg2),
         success_do_nothing(),
-        error(code, message) { return arguments; }
+        error(code, message)
+        {
+            return arguments;
+        }
     );
 
     return arguments;
@@ -98,7 +129,7 @@ SpawnResult spawn_argv(SpawnMode mode, ConstBStringPtr path, ConstSpawnArguments
 {
     SpawnRequest request =
         SpawnRequest__new(mode, path, SPAWN_INHERIT_USER_ID, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT, arguments);
-    return (SpawnResult)syscall(SYSCALL_EXEC, (Anything)&request, 0, 0, 0, 0);
+    return SpawnRequest__submit(&request, SYSCALL_EXEC);
 }
 
 SpawnResult spawn_as(SpawnMode mode, UserID requested_user_id, ConstBStringPtr path, OptionalPtr(BString) arg0,
@@ -113,7 +144,7 @@ SpawnResult spawn_as_argv(SpawnMode mode, UserID requested_user_id, ConstBString
 {
     SpawnRequest request =
         SpawnRequest__new(mode, path, requested_user_id, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT, arguments);
-    return (SpawnResult)syscall(SYSCALL_EXEC_REQUEST, (Anything)&request, 0, 0, 0, 0);
+    return SpawnRequest__submit(&request, SYSCALL_EXEC_REQUEST);
 }
 
 Result(SpawnResult) OS__spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0,
@@ -178,7 +209,7 @@ SpawnResult spawn_with_auth_argv(SpawnMode mode, AuthTicketID auth_ticket_id, Co
 {
     SpawnRequest request =
         SpawnRequest__new(mode, path, SPAWN_INHERIT_USER_ID, auth_ticket_id, SPAWN_STDIO_DEFAULT, arguments);
-    return (SpawnResult)syscall(SYSCALL_EXEC_REQUEST, (Anything)&request, 0, 0, 0, 0);
+    return SpawnRequest__submit(&request, SYSCALL_EXEC_REQUEST);
 }
 
 SpawnResult spawn_with_stdio(SpawnMode mode, ConstBStringPtr path, SpawnFileDescriptor stdin_fd,
@@ -195,5 +226,5 @@ SpawnResult spawn_with_stdio_argv(SpawnMode mode, ConstBStringPtr path, SpawnFil
 {
     SpawnRequest request = SpawnRequest__new(mode, path, SPAWN_INHERIT_USER_ID, SPAWN_INHERIT_AUTH_TICKET,
                                              SpawnStdio__new(stdin_fd, stdout_fd, stderr_fd), arguments);
-    return (SpawnResult)syscall(SYSCALL_EXEC_REQUEST, (Anything)&request, 0, 0, 0, 0);
+    return SpawnRequest__submit(&request, SYSCALL_EXEC_REQUEST);
 }

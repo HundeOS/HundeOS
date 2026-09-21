@@ -18,6 +18,7 @@
 #include "service/service.h"
 #include "scheduler/types.h"
 #include "scheduler/cpu_usage.h"
+#include "scheduler/queue_wait_usage.h"
 
 OptionalDef(UserAddress);
 
@@ -32,6 +33,7 @@ ResultDef(ParkedOperationPtr);
 LinkedListDefine(ParkedOperationPtr, ParkedOperations, &Ptr__equals);
 
 typedef uint64_t ProcessID;
+typedef ProcessID * ProcessIDPtr;
 #include "../common/process/process_types.h"
 typedef uint64_t Tick;
 
@@ -47,9 +49,6 @@ typedef enum ProcessErrors
 {
     PROC_ERROR_NO_PARKED = -1,
 } ProcessErrors;
-
-typedef uint64_t FileDescriptor;
-typedef uint64_t ProcessIOHandle;
 
 #define PROCESS_ABORT_EXIT_BASE (-1000LL)
 #define PROCESS_SIGNAL_EXIT_BASE (-2000LL)
@@ -80,10 +79,8 @@ typedef struct ProcessAbort
 
 OptionalDef(ProcessAbort);
 
-ResultDef(FileDescriptor);
-ResultDef(ProcessIOHandle);
-OptionalDef(FileDescriptor);
-OptionalDef(ProcessIOHandle);
+ResultDef(SpawnFileDescriptor);
+ResultDef(SpawnStdio);
 
 FixedArrayDefine(BString, SPAWN_MAX_ARGS + 1, ProcessArguments, bstring_equals);
 typedef ProcessArguments * ProcessArgumentsPtr;
@@ -152,20 +149,11 @@ static inline SharedUserPages SharedUserPages__new(UserAddress allocation, UserA
 }
 
 LinkedListDefine(UserAllocation, UserAllocations, (EqualFunction)UserAllocation__equals);
-typedef struct ProcessFileDescriptor
-{
-    FileDescriptor fd;
-    ProcessIOHandle handle;
-} ProcessFileDescriptor;
-
-typedef ProcessFileDescriptor * ProcessFileDescriptorPtr;
-
-OptionalDef(ProcessFileDescriptor);
-bool ProcessFileDescriptor__equals(ProcessFileDescriptorPtr self, ProcessFileDescriptorPtr other);
-
-LinkedListDefine(ProcessFileDescriptor, ProcessFileDescriptors, (EqualFunction)ProcessFileDescriptor__equals);
 
 typedef struct Process Process;
+typedef struct ExecLoad ExecLoad;
+typedef ExecLoad * ExecLoadPtr;
+OptionalDef(ExecLoadPtr);
 typedef Process * ProcessPtr;
 typedef struct Kernel Kernel;
 typedef Kernel * KernelPtr;
@@ -186,17 +174,24 @@ typedef struct Process
     ProcessState state;
     UserAddress entry_point;
     Tick last_tick;
+    uint64_t dispatched_at;
+    bool migration_safe;
+    bool preferred_active;
+    bool preferred_warm;
+    Optional(RequestTicket) preferred_ticket;
     CPUUsage cpu_usage;
+    QueueWaitUsage queue_wait_usage;
+    Optional(UserAddress) queue_wait_control;
     BString name;
     Address heap_break;
     Address heap_mapped_end;
     Address allocation_next;
     UserAllocations user_allocations;
     Optional(UserAddress) virtio_device;
-    ProcessFileDescriptors file_descriptors;
-    FileDescriptor next_file_descriptor;
+    SpawnStdio startup_stdio;
     Optional(ProcessAbort) abort;
     ProcessClass process_class;
+    Optional(ExecLoadPtr) exec_load;
     ServiceState service;
     Optional(UserAddress) idle_debug_address;
     UserID user_id;
@@ -209,15 +204,15 @@ typedef struct Process
 } Process;
 
 Result(ProcessPtr)
-    Process__new(KernelPtr kernel, ConstBStringPtr name, const ProcessPageTable * page_table, const UserAddress * entry,
-                 const Stack * stack, OptionalPtr(ProcessPtr) parent, ConstProcessArgumentsPtr arguments);
+    Process__new(KernelPtr kernel, ConstBStringPtr name, ConstProcessPageTablePtr page_table, ConstUserAddressPtr entry,
+                 ConstStackPtr stack, OptionalPtr(ProcessPtr) parent, ConstProcessArgumentsPtr arguments);
 
 FixedArrayDefine(ProcessPtr, MAX_PROCESSES, ProcessTable, &Ptr__equals);
 
 OptionalType(ProcessTable *, ProcessTablePtr);
 
-Result(ProcessPtr) Process__setup(KernelPtr kernel, const Elf * binary, OptionalPtr(ProcessPtr) parent);
-Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, const Elf * binary, OptionalPtr(ProcessPtr) parent,
+Result(ProcessPtr) Process__setup(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent);
+Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent,
                                             ConstProcessArgumentsPtr arguments);
 Result(ProcessSetupStatus) Process__dispose(ProcessPtr self);
 Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation);
@@ -226,6 +221,7 @@ Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self
 Optional(ParkReason) Process__top_park_reason(ProcessPtr self);
 Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self);
 bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key);
+bool Process__has_ready_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key);
 bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key,
                                           OptionalPtr(ReturnCode) return_code);
 bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick);
@@ -252,6 +248,8 @@ Result(Address) Process__device_address(ProcessPtr self, Address virtual_address
 Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address mapping);
 void Process__quiesce_device(ProcessPtr self);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
+Result(Address) Process__queue_wait_control(ProcessPtr self);
+void Process__wake_shared_wait(ProcessPtr self);
 Result(UserAddress)
     Process__map_shared_user_pages(ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size);
 Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPtr self, ProcessPtr source,
@@ -261,11 +259,7 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment);
 Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virtual_address);
 Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self);
-Result(FileDescriptor) Process__allocate_file_descriptor(ProcessPtr self, ProcessIOHandle handle);
-Result(FileDescriptor) Process__set_file_descriptor(ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle);
-Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor fd);
-Result(FileDescriptor) Process__copy_file_descriptor(ProcessPtr self, ProcessPtr source, FileDescriptor target_fd,
-                                                     FileDescriptor source_fd);
-Result(ProcessIOHandle) Process__remove_file_descriptor(ProcessPtr self, FileDescriptor fd);
+Result(SpawnStdio) Process__stdio_for_spawn(ProcessPtr self, ConstSpawnStdioPtr requested);
+void Process__prepare_startup_stdio(ProcessPtr self);
 
 #endif

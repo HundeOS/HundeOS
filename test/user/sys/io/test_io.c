@@ -7,55 +7,61 @@
 #include "../../../../common_includes/syscalls/calls.h"
 #include "../../../../common_includes/syscalls/io.h"
 
-static SystemCall last_call;
-static Anything last_arg1;
-static Anything last_arg2;
-static Anything last_arg3;
-static Anything last_arg4;
-static Anything last_arg5;
+#include "../../../../user/lib/io/client.h"
+static IORequestOperation last_operation;
+static IOHandle last_handle;
 static IOPathRequest last_path_request;
-static IOListDirRequest last_list_dir_request;
 static IOLinkRequest last_link_request;
-static IOMountRequest last_mount_request;
+static ConstChannelDataPtr last_write_data;
+static size_t last_write_size;
 static const char * next_read_data;
 static ByteCount next_read_result;
-static SystemCallResult next_result;
+static int64_t next_result;
 
-SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
 {
-    last_call = num;
-    last_arg1 = arg1;
-    last_arg2 = arg2;
-    last_arg3 = arg3;
-    last_arg4 = arg4;
-    last_arg5 = arg5;
-
-    if (num == IO_CALL)
+    last_operation = IO_REQUEST_OPEN;
+    last_path_request = (IOPathRequest){.path = *path, .flags = flags};
+    return next_result;
+}
+IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
+{
+    last_operation = IO_REQUEST_LINK;
+    last_link_request = (IOLinkRequest){.source_path = *source_path, .target_path = *target_path};
+    return next_result;
+}
+IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset)
+{
+    last_operation = operation;
+    last_path_request = (IOPathRequest){.path = *path, .flags = flags};
+    return IOReply__new(next_result, 0);
+}
+IOHandle IOClient__accept(IOHandle handle)
+{
+    TEST_FAIL_MESSAGE("Unexpected accept");
+    return IO_UNKNOWN_HANDLE;
+}
+IOStatus IOClient__close(IOHandle handle)
+{
+    return IO_OK;
+}
+ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
+{
+    last_operation = IO_REQUEST_READ;
+    last_handle = handle;
+    TEST_ASSERT_LESS_OR_EQUAL_UINT64(size, next_read_result);
+    if (next_read_result > 0)
     {
-        if (arg1 == IO_OPEN || arg1 == IO_MKDIR || arg1 == IO_REMOVE)
-        {
-            last_path_request = *((IOPathRequestPtr)arg2);
-        }
-        if (arg1 == IO_LIST_DIR)
-        {
-            last_list_dir_request = *((IOListDirRequestPtr)arg2);
-        }
-        if (arg1 == IO_LINK)
-        {
-            last_link_request = *((IOLinkRequestPtr)arg2);
-        }
-        if (arg1 == IO_MOUNT)
-        {
-            last_mount_request = *((IOMountRequestPtr)arg2);
-        }
+        memcpy(data, next_read_data, next_read_result);
     }
-
-    if (num == IO_CALL && arg1 == IO_READ && next_read_result > 0)
-    {
-        memcpy((void *)arg3, next_read_data, (size_t)next_read_result);
-        return next_read_result;
-    }
-
+    return next_read_result;
+}
+ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
+{
+    last_operation = IO_REQUEST_WRITE;
+    last_handle = handle;
+    last_write_data = data;
+    last_write_size = size;
     return next_result;
 }
 
@@ -80,16 +86,10 @@ static DynString dyn_string_from_cstr(const char * text)
 
 void setUp(void)
 {
-    last_call = 0;
-    last_arg1 = 0;
-    last_arg2 = 0;
-    last_arg3 = 0;
-    last_arg4 = 0;
-    last_arg5 = 0;
+    last_operation = 0;
+    last_handle = 0;
     last_path_request = (IOPathRequest){0};
-    last_list_dir_request = (IOListDirRequest){0};
     last_link_request = (IOLinkRequest){0};
-    last_mount_request = (IOMountRequest){0};
     next_read_data = NULL;
     next_read_result = 0;
     next_result = 0;
@@ -107,8 +107,7 @@ void test_io_open_uses_bstring_path(void)
     IOHandle handle = IO__open(&path, IO_OPEN_READ);
 
     TEST_ASSERT_EQUAL_INT64(42, handle);
-    TEST_ASSERT_EQUAL(IO_CALL, last_call);
-    TEST_ASSERT_EQUAL(IO_OPEN, last_arg1);
+    TEST_ASSERT_EQUAL(IO_REQUEST_OPEN, last_operation);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1/test.txt"), last_path_request.path);
     TEST_ASSERT_EQUAL(IO_OPEN_READ, last_path_request.flags);
 }
@@ -119,14 +118,12 @@ void test_io_read_populates_bstring_and_sets_length(void)
     next_read_data = "abc";
     next_read_result = 3;
 
-    ByteCount read_count = IO__read(9, &buffer);
+    ByteCount read_count = IO__read(IO_SESSION_HANDLE_BASE + 9, &buffer);
 
     TEST_ASSERT_EQUAL_INT64(3, read_count);
-    TEST_ASSERT_EQUAL(IO_CALL, last_call);
-    TEST_ASSERT_EQUAL(IO_READ, last_arg1);
-    TEST_ASSERT_EQUAL_INT64(9, last_arg2);
-    TEST_ASSERT_EQUAL_STRING("abc", buffer.data);
-    TEST_ASSERT_EQUAL_INT64(3, buffer.len);
+    TEST_ASSERT_EQUAL(IO_REQUEST_READ, last_operation);
+    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 9, last_handle);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), buffer);
 }
 
 void test_io_read_dyn_string_returns_file_contents(void)
@@ -135,12 +132,11 @@ void test_io_read_dyn_string_returns_file_contents(void)
     next_read_result = 3;
 
     match_optional(
-        IO__read_dyn_string(9, 16),
+        IO__read_dyn_string(IO_SESSION_HANDLE_BASE + 9, 16),
         some(text)
         {
-            TEST_ASSERT_EQUAL(IO_CALL, last_call);
-            TEST_ASSERT_EQUAL(IO_READ, last_arg1);
-            TEST_ASSERT_EQUAL_INT64(9, last_arg2);
+            TEST_ASSERT_EQUAL(IO_REQUEST_READ, last_operation);
+            TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 9, last_handle);
             TEST_ASSERT_EQUAL_STRING("abc", DynString__cstr(&text));
             TEST_ASSERT_EQUAL_INT64(3, DynString__length(&text));
             DynString__dispose(&text);
@@ -153,14 +149,13 @@ void test_io_write_uses_bstring_length(void)
 {
     next_result = 5;
 
-    ByteCount written = IO__write(7, &bstr("hello"));
+    ByteCount written = IO__write(IO_SESSION_HANDLE_BASE + 7, &bstr("hello"));
 
     TEST_ASSERT_EQUAL_INT64(5, written);
-    TEST_ASSERT_EQUAL(IO_CALL, last_call);
-    TEST_ASSERT_EQUAL(IO_WRITE, last_arg1);
-    TEST_ASSERT_EQUAL_INT64(7, last_arg2);
-    TEST_ASSERT_EQUAL_STRING("hello", (const char *)last_arg3);
-    TEST_ASSERT_EQUAL_INT64(5, last_arg4);
+    TEST_ASSERT_EQUAL(IO_REQUEST_WRITE, last_operation);
+    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 7, last_handle);
+    TEST_ASSERT_EQUAL_STRING("hello", (const char *)last_write_data);
+    TEST_ASSERT_EQUAL_INT64(5, last_write_size);
 }
 
 void test_io_make_dir_uses_bstring_path(void)
@@ -171,8 +166,7 @@ void test_io_make_dir_uses_bstring_path(void)
     IOStatus status = IO__make_dir(&path);
 
     TEST_ASSERT_EQUAL(IO_OK, status);
-    TEST_ASSERT_EQUAL(IO_CALL, last_call);
-    TEST_ASSERT_EQUAL(IO_MKDIR, last_arg1);
+    TEST_ASSERT_EQUAL(IO_REQUEST_MKDIR, last_operation);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1/newdir"), last_path_request.path);
 }
 
@@ -185,27 +179,9 @@ void test_io_link_uses_bstring_paths(void)
     IOStatus status = IO__link_file(&source_path, &target_path);
 
     TEST_ASSERT_EQUAL(IO_OK, status);
-    TEST_ASSERT_EQUAL(IO_CALL, last_call);
-    TEST_ASSERT_EQUAL(IO_LINK, last_arg1);
+    TEST_ASSERT_EQUAL(IO_REQUEST_LINK, last_operation);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/hello.txt"), last_link_request.source_path);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/copy.txt"), last_link_request.target_path);
-}
-
-void test_io_mount_uses_bstring_paths(void)
-{
-    BString device_path = bstring("/dev/virtio3");
-    BString filesystem_type = bstring("fat32");
-    BString mountpoint = bstring("/mnt/fs1");
-    next_result = IO_OK;
-
-    IOStatus status = IO__mount_device(&device_path, &filesystem_type, &mountpoint);
-
-    TEST_ASSERT_EQUAL(IO_OK, status);
-    TEST_ASSERT_EQUAL(IO_CALL, last_call);
-    TEST_ASSERT_EQUAL(IO_MOUNT, last_arg1);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio3"), last_mount_request.device_path);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("fat32"), last_mount_request.filesystem_type);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1"), last_mount_request.mountpoint);
 }
 
 void test_sd_host_config_parse_reads_present_host(void)

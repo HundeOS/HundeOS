@@ -21,7 +21,10 @@ Optional(Elf) EmbeddedElf__load(ConstBStringPtr name)
     EmbeddedFs filesystem = EmbeddedElf__filesystem();
     match_optional(
         EmbeddedFs__find(&filesystem, name),
-        some(file) { return Some(Elf, Elf__new(file.start, file.end, &file.name)); },
+        some(file)
+        {
+            return Some(Elf, Elf__new(file.start, file.end, &file.name));
+        },
         none_do_nothing()
     );
 

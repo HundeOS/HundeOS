@@ -8,9 +8,6 @@
 #include "../../../../common_includes/syscalls/process.h"
 #include "../../../../common_includes/syscalls/spawn.h"
 
-static IOStatus mount_results[8];
-static uint64_t mount_result_count;
-static uint64_t mount_count;
 static SpawnResult spawn_results[8];
 static uint64_t spawn_result_count;
 static uint64_t spawn_count;
@@ -31,8 +28,6 @@ static char syslog_message[512];
 
 void setUp(void)
 {
-    mount_result_count = 0;
-    mount_count = 0;
     spawn_result_count = 0;
     spawn_count = 0;
     next_sleep_result = PROCESS_SLEEP_OK;
@@ -42,7 +37,6 @@ void setUp(void)
     syslog_message[0] = '\0';
     for (uint64_t i = 0; i < 8; i++)
     {
-        mount_results[i] = IO_OK;
         spawn_results[i] = 0;
         spawned_modes[i] = 0;
         spawned_paths[i][0] = '\0';
@@ -55,21 +49,6 @@ void setUp(void)
 
 void tearDown(void)
 {
-}
-
-IOStatus IO__mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
-{
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0"), *device_path);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("fat32"), *filesystem_type);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/sd"), *mountpoint);
-
-    IOStatus result = IO_OK;
-    if (mount_count < mount_result_count)
-    {
-        result = mount_results[mount_count];
-    }
-    mount_count++;
-    return result;
 }
 
 Result(SpawnResult) OS__spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0,
@@ -145,7 +124,6 @@ void test_humpen_wachhund_exits_when_mount_succeeds_immediately(void)
     char * argv[] = {"humpen-wachhund", "/dev/mmc0", "fat32", "/mnt/sd"};
 
     TEST_ASSERT_EQUAL_INT(0, humpen_wachhund_main_under_test(4, argv));
-    TEST_ASSERT_EQUAL_UINT64(0, mount_count);
     TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
     TEST_ASSERT_EQUAL(P_WAIT, spawned_modes[0]);
     TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_FAT32FS_PATH, spawned_paths[0]);
@@ -158,6 +136,14 @@ void test_humpen_wachhund_exits_when_mount_succeeds_immediately(void)
     TEST_ASSERT_EQUAL_STRING("mounted /dev/mmc0 on /mnt/sd", syslog_message);
 }
 
+void test_humpen_wachhund_rejects_unsupported_filesystem_without_retry(void)
+{
+    char * argv[] = {"humpen-wachhund", "/dev/mmc0", "bootstrap-ext2", "/mnt/sd"};
+    TEST_ASSERT_EQUAL_INT(1, humpen_wachhund_main_under_test(4, argv));
+    TEST_ASSERT_EQUAL_UINT64(0, spawn_count);
+    TEST_ASSERT_EQUAL_UINT64(0, sleep_count);
+}
+
 void test_humpen_wachhund_retries_with_exponential_backoff(void)
 {
     char * argv[] = {"humpen-wachhund", "/dev/mmc0", "fat32", "/mnt/sd"};
@@ -167,7 +153,6 @@ void test_humpen_wachhund_retries_with_exponential_backoff(void)
     spawn_result_count = 3;
 
     TEST_ASSERT_EQUAL_INT(0, humpen_wachhund_main_under_test(4, argv));
-    TEST_ASSERT_EQUAL_UINT64(0, mount_count);
     TEST_ASSERT_EQUAL_UINT64(3, spawn_count);
     TEST_ASSERT_EQUAL_UINT64(2, sleep_count);
     TEST_ASSERT_EQUAL_UINT64(HUMPEN_WACHHUND_INITIAL_BACKOFF_USEC, sleep_durations[0]);
@@ -195,7 +180,6 @@ void test_humpen_wachhund_runs_ext2fs_driver_in_wait_mode(void)
 
     TEST_ASSERT_EQUAL_INT(0, humpen_wachhund_main_under_test(4, argv));
 
-    TEST_ASSERT_EQUAL_UINT64(0, mount_count);
     TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
     TEST_ASSERT_EQUAL(P_WAIT, spawned_modes[0]);
     TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_EXT2FS_PATH, spawned_paths[0]);
@@ -215,7 +199,6 @@ void test_humpen_wachhund_retries_ext2fs_driver_when_it_exits_with_failure(void)
 
     TEST_ASSERT_EQUAL_INT(0, humpen_wachhund_main_under_test(4, argv));
 
-    TEST_ASSERT_EQUAL_UINT64(0, mount_count);
     TEST_ASSERT_EQUAL_UINT64(2, spawn_count);
     TEST_ASSERT_EQUAL(P_WAIT, spawned_modes[0]);
     TEST_ASSERT_EQUAL(P_WAIT, spawned_modes[1]);

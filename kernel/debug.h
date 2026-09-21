@@ -25,7 +25,6 @@ typedef enum
     IOSUB,
     EXEC,
     FILESYSTEM,
-    BROKER,
     SYSLOG,
     PROGRESS,
     UNHANDLED,
@@ -89,8 +88,6 @@ inline const char * level_to_string(Level level)
         return "EXEC";
     case FILESYSTEM:
         return "FILESYSTEM";
-    case BROKER:
-        return "BROKER";
     case SYSLOG:
         return "SYSLOG";
     case LEVEL_COUNT:
@@ -103,9 +100,15 @@ inline const char * level_to_string(Level level)
 
 #define LOG_LEVEL_MASK(level) (1ULL << (level))
 
+#ifdef KERNEL_LOW_VOLUME_TRACE
+#define ENABLED_LOG_LEVELS                                                                                             \
+    (LOG_LEVEL_MASK(PROGRESS) | LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(EXEC) | LOG_LEVEL_MASK(FAULT) |                \
+     LOG_LEVEL_MASK(PANIC))
+#else
 #define ENABLED_LOG_LEVELS                                                                                             \
     (LOG_LEVEL_MASK(PROGRESS) | LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(IOSUB) | LOG_LEVEL_MASK(IODEV) |               \
      LOG_LEVEL_MASK(FAULT) | LOG_LEVEL_MASK(PANIC) | LOG_LEVEL_MASK(SYSCALL) | LOG_LEVEL_MASK(MEMORY))
+#endif
 
 inline bool __d_should_log(Level level)
 {

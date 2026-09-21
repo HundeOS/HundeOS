@@ -7,6 +7,25 @@ static BString queue_corrupt_cursor = bstr("Corrupt queue cursor");
 static BString queue_full = bstr("Queue full");
 static BString queue_empty = bstr("Queue empty");
 
+static QueuePublication QueuePublication__new(ConstQueueMessagePtr message, QueueCursor cursor)
+{
+    return (QueuePublication){.message = *message, .cursor = cursor};
+}
+
+static QueueProgress QueueProgress__new(QueueCursor incoming_produced, QueueCursor incoming_consumed,
+                                        QueueCursor outgoing_produced, QueueCursor outgoing_consumed,
+                                        QueueStateFlag accepted, QueueStateFlag closed)
+{
+    return (QueueProgress){
+        .incoming_produced = incoming_produced,
+        .incoming_consumed = incoming_consumed,
+        .outgoing_produced = outgoing_produced,
+        .outgoing_consumed = outgoing_consumed,
+        .accepted = accepted,
+        .closed = closed,
+    };
+}
+
 Queue Queue__new(QueueIdentityPtr identity, QueuePagePtr outgoing, QueuePagePtr incoming, QueueConnectionID connection,
                  QueueParticipantID peer_pid)
 {
@@ -53,9 +72,49 @@ QueueConnectionID Queue__connection(QueuePtr self)
     return self->connection;
 }
 
+bool Queue__has_unread_messages(QueuePtr self)
+{
+    if (Queue__status(self) != QUEUE_OK)
+    {
+        return false;
+    }
+    // Each endpoint acknowledges incoming messages on its own outgoing page.
+    QueueCursor consumed = __atomic_load_n(&self->outgoing->consumed, __ATOMIC_ACQUIRE);
+    QueueCursor produced = __atomic_load_n(&self->incoming->produced, __ATOMIC_ACQUIRE);
+    QueueMessageCount pending = produced - consumed;
+    return pending != 0 && pending <= QUEUE_CAPACITY;
+}
+
 QueueParticipantID Queue__peer_pid(QueuePtr self)
 {
     return self->peer_pid;
+}
+
+QueueParticipantID Queue__local_pid(QueuePtr self)
+{
+    return self->peer_pid == self->identity->server_pid ? self->identity->client_pid : self->identity->server_pid;
+}
+
+QueueParticipantID Queue__origin_pid(QueuePtr self)
+{
+    return self->identity->origin_pid;
+}
+
+QueueProgress Queue__progress(QueuePtr self)
+{
+    return QueueProgress__new(__atomic_load_n(&self->incoming->produced, __ATOMIC_ACQUIRE),
+                              __atomic_load_n(&self->incoming->consumed, __ATOMIC_ACQUIRE),
+                              __atomic_load_n(&self->outgoing->produced, __ATOMIC_ACQUIRE),
+                              __atomic_load_n(&self->outgoing->consumed, __ATOMIC_ACQUIRE),
+                              __atomic_load_n(&self->identity->accepted, __ATOMIC_ACQUIRE),
+                              __atomic_load_n(&self->identity->closed, __ATOMIC_ACQUIRE));
+}
+
+bool QueueProgress__equals(ConstQueueProgressPtr self, ConstQueueProgressPtr other)
+{
+    return self->incoming_produced == other->incoming_produced && self->incoming_consumed == other->incoming_consumed &&
+           self->outgoing_produced == other->outgoing_produced && self->outgoing_consumed == other->outgoing_consumed &&
+           self->accepted == other->accepted && self->closed == other->closed;
 }
 
 Result(QueueCode) Queue__push(QueuePtr self, ConstQueueMessagePtr message)
@@ -81,6 +140,15 @@ Result(QueueCode) Queue__push(QueuePtr self, ConstQueueMessagePtr message)
         return Error(QueueCode, queue_full, QUEUE_FULL);
     }
     self->outgoing->messages[self->written % QUEUE_CAPACITY] = *message;
+    QueuePublication publication = QueuePublication__new(message, self->written + 1);
+    match_result(
+        QueuePublications__set(&self->outgoing->publication, 0, &publication),
+        success_do_nothing(),
+        error(code, error_message)
+        {
+            return Error(QueueCode, error_message, QUEUE_INVALID);
+        }
+    );
     self->written++;
     __atomic_store_n(&self->outgoing->produced, self->written, __ATOMIC_RELEASE);
     IpcPlatform__signal_event();

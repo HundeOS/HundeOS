@@ -36,6 +36,7 @@ void test_exchange_advances_through_states_and_preserves_idle_states(void)
 
             run_echo = false;
             QueueMessage submit = ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, 0, client.connection);
+            submit.request = ((RequestMetadata){.generation = 1, .origin_pid = 42});
             ChannelFixture__push(&client, &submit);
             ChannelFixture__pump();
             TEST_ASSERT_EQUAL_PTR(&CHANNEL_SESSION_SUBMITTING, ChannelSession__state(exchange));
@@ -53,13 +54,17 @@ void test_exchange_advances_through_states_and_preserves_idle_states(void)
             ChannelFixture__pump();
             TEST_ASSERT_EQUAL_PTR(&CHANNEL_SESSION_DELIVERING_REPLY, ChannelSession__state(exchange));
             match_optional(exchange->server,
-                some(server){},
+                some(server)
+                {
+                },
                 none_test_fail()
             );
             ChannelFixture__pump();
             TEST_ASSERT_EQUAL_PTR(&CHANNEL_SESSION_WAIT_CLIENT_ACKNOWLEDGEMENT, ChannelSession__state(exchange));
             match_optional(exchange->server,
-                some(server){},
+                some(server)
+                {
+                },
                 none_test_fail()
             );
             TEST_ASSERT_EQUAL(CHANNEL_RESPONSE_REPLIED, ChannelFixture__receive(&client).kind);
@@ -79,6 +84,7 @@ void test_submission_checks_already_queued_completion_in_the_same_step(void)
     ChannelFixture__open(&client);
     run_echo = false;
     QueueMessage submit = ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, 0, client.connection);
+    submit.request = (RequestMetadata){.generation = 1, .origin_pid = 42};
     ChannelFixture__push(&client, &submit);
     ChannelFixture__pump();
     match_optional(
@@ -86,6 +92,7 @@ void test_submission_checks_already_queued_completion_in_the_same_step(void)
         some(echo)
         {
             QueueMessage reply = ChannelControlMessage__new(CHANNEL_RESPONSE_REPLIED, 0, 0, client.connection);
+            reply.request = submit.request;
             ChannelFixture__push(&echo->queue, &reply);
         },
         none_test_fail()
@@ -97,13 +104,17 @@ void test_submission_checks_already_queued_completion_in_the_same_step(void)
         {
             TEST_ASSERT_EQUAL_PTR(&CHANNEL_SESSION_DELIVERING_REPLY, ChannelSession__state(exchange));
             match_optional(exchange->server,
-                some(server){},
+                some(server)
+                {
+                },
                 none_test_fail()
             );
             ChannelFixture__pump();
             TEST_ASSERT_EQUAL_PTR(&CHANNEL_SESSION_WAIT_CLIENT_ACKNOWLEDGEMENT, ChannelSession__state(exchange));
             match_optional(exchange->server,
-                some(server){},
+                some(server)
+                {
+                },
                 none_test_fail()
             );
         },
@@ -114,6 +125,37 @@ void test_submission_checks_already_queued_completion_in_the_same_step(void)
     run_echo = true;
     ChannelFixture__drain();
     TEST_ASSERT_EQUAL_UINT64(1, released_pages);
+}
+
+void test_kernel_client_authenticates_and_forwards_originating_process(void)
+{
+    Queue client = ChannelFixture__kernel_client(42);
+    TEST_ASSERT_EQUAL(CHANNEL_RESPONSE_OPEN, ChannelFixture__open(&client).kind);
+    run_echo = false;
+
+    QueueMessage submit = ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, 0, client.connection);
+    submit.request = (RequestMetadata){.generation = 1, .origin_pid = 42};
+    ChannelFixture__push(&client, &submit);
+    ChannelFixture__pump();
+    ChannelFixture__pump();
+
+    match_optional(
+        EchoConnections__ptr_at(&echoes, 0),
+        some(echo)
+        {
+            match_result(
+                Queue__pop(&echo->queue),
+                success(request)
+                {
+                    TEST_ASSERT_EQUAL(CHANNEL_REQUEST_SERVE, request.kind);
+                    TEST_ASSERT_EQUAL_UINT64(QUEUE_KERNEL_PID, request.arg3);
+                    TEST_ASSERT_EQUAL_UINT64(42, request.request.origin_pid);
+                },
+                error_test_fail()
+            );
+        },
+        none_test_fail()
+    );
 }
 
 void test_full_server_queue_keeps_submission_pending_until_retry(void)
@@ -139,6 +181,7 @@ void test_full_server_queue_keeps_submission_pending_until_retry(void)
                 none_test_fail()
             );
             QueueMessage submit = ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, 0, client.connection);
+            submit.request = ((RequestMetadata){.generation = 1, .origin_pid = 42});
             ChannelFixture__push(&client, &submit);
             ChannelFixture__pump();
             current_pid = 7;
@@ -156,7 +199,10 @@ void test_full_server_queue_keeps_submission_pending_until_retry(void)
             {
                 match_result(
                     Queue__pop(&echo->queue),
-                    success(message) { TEST_ASSERT_EQUAL_UINT64(99, message.kind); },
+                    success(message)
+                    {
+                        TEST_ASSERT_EQUAL_UINT64(99, message.kind);
+                    },
                     error_test_fail()
                 );
             }
@@ -244,15 +290,21 @@ void test_channel_async_request_returns_reply_without_blocking_poll(void)
 
     match_result(
         Channel__request(&client, request, sizeof(request)),
-        success(code) { TEST_ASSERT_EQUAL(CHANNEL_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(CHANNEL_OK, code);
+        },
         error_test_fail()
     );
     match_result(
         Channel__poll_reply(&client, reply, sizeof(reply)),
-        success(optional_size) { match_optional(optional_size,
+        success(optional_size)
+        {
+            match_optional(optional_size,
             some_test_fail(),
             none_do_nothing()
-        ); },
+        );
+        },
         error_test_fail()
     );
 
@@ -356,6 +408,7 @@ void test_client_disconnect_during_server_work_waits_for_completion(void)
     ChannelFixture__open(&client);
     run_echo = false;
     QueueMessage submit = ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, 1, client.connection);
+    submit.request = (RequestMetadata){.generation = 1, .origin_pid = 42};
     ChannelFixture__push(&client, &submit);
     ChannelFixture__pump();
     ChannelFixture__pump();
@@ -372,12 +425,18 @@ void test_server_disconnect_invalidates_client_but_waits_for_its_close(void)
     Queue client = ChannelFixture__client();
     ChannelFixture__open(&client);
     current_pid = 8;
-    for_each_atomic_fa_ptr(QueueConnectionSlots, &echo_arrivals.connections, index, id, {
-        if (id != 0)
+    for_each_atomic_fa_ptr(
+        QueueConnectionSlots,
+        &echo_arrivals.connections,
+        index,
+        id,
         {
-            QueueConnection__close(id);
+            if (id != 0)
+            {
+                QueueConnection__close(id);
+            }
         }
-    });
+    );
     current_pid = 42;
     QueueMessage failed = ChannelFixture__receive(&client);
     TEST_ASSERT_EQUAL(CHANNEL_RESPONSE_FAILED, failed.kind);
@@ -439,7 +498,10 @@ void test_full_reply_queue_retains_open_response_without_blocking_other_clients(
     {
         match_result(
             Queue__pop(&slow),
-            success(message) { TEST_ASSERT_EQUAL_UINT64(99, message.kind); },
+            success(message)
+            {
+                TEST_ASSERT_EQUAL_UINT64(99, message.kind);
+            },
             error_test_fail()
         );
     }

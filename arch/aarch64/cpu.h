@@ -15,7 +15,7 @@ typedef enum
 
 typedef struct CPU
 {
-    Process * current_process;
+    ProcessPtr current_process;
     uint64_t cpu_id;
     Address kernel_stack;
     cpu_state state;

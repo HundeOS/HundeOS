@@ -1,0 +1,7 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - user/services/hundeschule/mounts.c
+    - user/lib/io/mount_client.c
+    - user/lib/io/mount_config.c

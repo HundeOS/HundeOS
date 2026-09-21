@@ -2,6 +2,7 @@
 #define KERNEL_QUEUES_H
 
 #include "../../common/ipc/queue.h"
+#include "../../common/ipc/queue_wait.h"
 #include "../../common/ipc/ipc_platform.h"
 #include "../process.h"
 #include "../service/service_directory.h"
@@ -12,6 +13,7 @@ typedef struct QueueListener
     UserAddress arrivals;
     Optional(ProcessPtr) process;
     QueueEndpointID endpoint;
+    Optional(QueueWaitSnapshot) wait;
 } QueueListener;
 typedef QueueListener * QueueListenerPtr;
 OptionalDef(QueueListener);
@@ -23,8 +25,14 @@ typedef struct QueueConnection
     UserAddress memory;
     Optional(ProcessPtr) client;
     Optional(ProcessPtr) server;
+    Optional(ProcessPtr) kernel_origin;
     QueueConnectionID connection;
     QueueSlotIndex listener_index;
+    bool kernel_client;
+    uint64_t scheduled_generation;
+    bool scheduled_reply;
+    Optional(QueueWaitSnapshot) client_wait;
+    Optional(QueueWaitSnapshot) server_wait;
 } QueueConnection;
 typedef QueueConnection * QueueConnectionPtr;
 OptionalDef(QueueConnection);
@@ -49,5 +57,14 @@ Result(QueueCode) Queues__accept(QueuesPtr self, ProcessPtr process, QueueConnec
 Result(QueueCode) Queues__close(QueuesPtr self, ProcessPtr process, QueueConnectionID connection);
 Result(ProcessPtr) Queues__client_process(QueuesPtr self, ProcessPtr server, QueueConnectionID connection);
 void Queues__exit(QueuesPtr self, ProcessPtr process);
+
+Result(Queue) Queues__connect_kernel(QueuesPtr self, QueueEndpointID endpoint, OptionalPtr(ProcessPtr) origin);
+Result(QueueCode) Queues__close_kernel(QueuesPtr self, QueueConnectionID connection);
+bool Queues__has_kernel_client(QueuesPtr self, ProcessPtr server);
+Result(QueueCode) Queues__watch(QueuesPtr self, ProcessPtr process, ConstQueueWaitSnapshotPtr snapshot);
+bool Queues__wait_changed(QueuesPtr self, ProcessPtr process);
+bool Queues__observation_changed(QueuesPtr self, ProcessPtr process, ConstQueueWaitSnapshotPtr observed);
+bool Queues__has_unread_messages(QueuesPtr self, ProcessPtr process);
+void Queues__clear_wait(QueuesPtr self, ProcessPtr process);
 
 #endif

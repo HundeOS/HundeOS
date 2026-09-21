@@ -163,7 +163,10 @@ void test_interrupt_manager_routes_channel_client_delivers_and_acknowledges(void
     TEST_ASSERT_TRUE(InterruptManager__deliver(&manager));
     match_find_result_ptr(
         InterruptRegistrations__find(&manager.registrations, InterruptRegistration__matches_irq, &routed_irq),
-        some(registration) { TEST_ASSERT_TRUE(InterruptManager__deliver_pending(&manager, registration)); },
+        some(registration)
+        {
+            TEST_ASSERT_TRUE(InterruptManager__deliver_pending(&manager, registration));
+        },
         none_test_fail()
     );
     InterruptProtocolResponse delivery = take_response();

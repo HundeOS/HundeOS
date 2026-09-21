@@ -10,6 +10,7 @@ OptionalDef(KernelResultMapper);
 
 typedef struct KernelContext KernelContext;
 typedef KernelContext * KernelContextPtr;
+typedef const KernelContext * ConstKernelContextPtr;
 OptionalDef(KernelContextPtr);
 
 struct KernelContext

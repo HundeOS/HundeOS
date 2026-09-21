@@ -36,7 +36,10 @@ static Result(int) FiberContext__allocate_slot(FiberContextPtr self)
 static void FiberContext__start(int slot)
 {
     match_optional(fiber_contexts[slot],
-        some(self) { self->start(self->fiber); },
+        some(self)
+        {
+            self->start(self->fiber);
+        },
         none_do_nothing()
     );
 }
@@ -52,8 +55,14 @@ Result(FiberCode) FiberContext__init(FiberContextPtr self, Address stack_base, s
     memset(self, 0, sizeof(FiberContext));
     match_result(
         FiberContext__allocate_slot(self),
-        success(slot) { self->slot = slot; },
-        error(code, message) { return Error(FiberCode, message, code); }
+        success(slot)
+        {
+            self->slot = slot;
+        },
+        error(code, message)
+        {
+            return Error(FiberCode, message, code);
+        }
     );
 
     if (getcontext(&self->context) != 0)

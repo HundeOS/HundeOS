@@ -7,11 +7,13 @@
 
 #include "../../../../common_includes/syscalls/process.h"
 
-static ProcessInfo fake_processes[4];
+static ProcessInfo fake_processes[65];
 static ProcessListResult fake_process_count;
 static ProcessListResult fake_process_result;
-static char output[2048];
+static char output[16384];
 static uint64_t output_position;
+static unsigned allocation_calls;
+static unsigned fail_allocation;
 
 #define PS_ENTRYPOINT ps_main_under_test
 #include "../../../../user/commands/ps/main.c"
@@ -21,8 +23,10 @@ void setUp(void)
     fake_process_count = 0;
     fake_process_result = 0;
     output_position = 0;
+    allocation_calls = 0;
+    fail_allocation = 0;
     output[0] = '\0';
-    for (uint64_t i = 0; i < 4; i++)
+    for (uint64_t i = 0; i < 65; i++)
     {
         fake_processes[i] = (ProcessInfo){0};
     }
@@ -30,6 +34,16 @@ void setUp(void)
 
 void tearDown(void)
 {
+}
+
+Result(Anything) mem_alloc_bytes(size_t size)
+{
+    allocation_calls++;
+    if (allocation_calls == fail_allocation)
+    {
+        return Error(Anything, bstr("Allocation failed"), MEM_ALLOCATION_FAILED);
+    }
+    return Success(Anything, (Anything)malloc(size));
 }
 
 static void copy_text(char * target, const char * source, uint64_t target_size)
@@ -84,6 +98,7 @@ void test_ps_prints_process_snapshot(void)
     fake_processes[0].cpu_usage.total_usec = 1234567;
     fake_processes[0].cpu_usage.long_basis_points = 1234;
     fake_processes[0].cpu_usage.short_basis_points = 10000;
+    fake_processes[0].user_wait_usec = 2345678;
     copy_text(fake_processes[0].state, "PROC_STATE_READY", PROCESS_INFO_STATE_SIZE);
     copy_text(fake_processes[0].wait_reason, "-", PROCESS_INFO_WAIT_SIZE);
     copy_text(fake_processes[0].class_name, "normal", PROCESS_INFO_CLASS_SIZE);
@@ -105,10 +120,10 @@ void test_ps_prints_process_snapshot(void)
 
     TEST_ASSERT_EQUAL_INT(0, ps_main_under_test());
     TEST_ASSERT_EQUAL_STRING(
-        "PID   CPU STATE                        WAIT                     CLASS    USER      CPU TIME(s)    CPU% (1s) CPU% (100ms) NAME\n"
-        "1     0   PROC_STATE_READY             -                        normal   root            1.234        12.34       100.00 init\n"
-        "2     3   PROC_STATE_WAITING           PARK_WAIT_SERVICE_EVENT  service  hund            0.000         0.00         0.00 virtio_blk\n"
-        "3     0   PROC_STATE_WAITING           PARK_WAIT_SERVICE_READY  service  hund            0.000         0.00         0.00 hundeschule\n",
+        "PID   CPU STATE                        WAIT                     CLASS    USER      CPU TIME(s) USER SLEEP(s)    CPU% (1s) CPU% (100ms) NAME\n"
+        "1     0   PROC_STATE_READY             -                        normal   root            1.234         2.345        12.34       100.00 init\n"
+        "2     3   PROC_STATE_WAITING           PARK_WAIT_SERVICE_EVENT  service  hund            0.000         0.000         0.00         0.00 virtio_blk\n"
+        "3     0   PROC_STATE_WAITING           PARK_WAIT_SERVICE_READY  service  hund            0.000         0.000         0.00         0.00 hundeschule\n",
         output);
 }
 
@@ -118,4 +133,53 @@ void test_ps_reports_process_list_error(void)
 
     TEST_ASSERT_EQUAL_INT(1, ps_main_under_test());
     TEST_ASSERT_EQUAL_STRING("ps: error -1\n", output);
+}
+
+void test_ps_prints_processes_beyond_two_buffer_expansions(void)
+{
+    fake_process_count = 65;
+    for (uint64_t i = 0; i < 65; i++)
+    {
+        fake_processes[i].pid = i + 1;
+    }
+    copy_text(fake_processes[64].name, "last-process", PROCESS_INFO_NAME_SIZE);
+    TEST_ASSERT_EQUAL_INT(0, ps_main_under_test());
+    TEST_ASSERT_NOT_NULL(strstr(output, "last-process\n"));
+    uint64_t lines = 0;
+    for (uint64_t i = 0; i < output_position; i++)
+    {
+        if (output[i] == '\n')
+        {
+            lines++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT64(66, lines);
+}
+
+void test_ps_handles_exact_initial_capacity_and_empty_list(void)
+{
+    fake_process_count = 32;
+    copy_text(fake_processes[31].name, "boundary-process", PROCESS_INFO_NAME_SIZE);
+    TEST_ASSERT_EQUAL_INT(0, ps_main_under_test());
+    TEST_ASSERT_NOT_NULL(strstr(output, "boundary-process\n"));
+    fake_process_count = 0;
+    output_position = 0;
+    output[0] = '\0';
+    TEST_ASSERT_EQUAL_INT(0, ps_main_under_test());
+    TEST_ASSERT_NULL(strstr(output, "boundary-process"));
+}
+
+void test_ps_reports_initial_allocation_failure(void)
+{
+    fail_allocation = 1;
+    TEST_ASSERT_EQUAL_INT(1, ps_main_under_test());
+    TEST_ASSERT_EQUAL_STRING("ps: out of memory\n", output);
+}
+
+void test_ps_reports_growth_allocation_failure_without_partial_output(void)
+{
+    fake_process_count = 65;
+    fail_allocation = 2;
+    TEST_ASSERT_EQUAL_INT(1, ps_main_under_test());
+    TEST_ASSERT_EQUAL_STRING("ps: out of memory\n", output);
 }

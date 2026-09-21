@@ -28,6 +28,23 @@ void PageTable__map_shared(ProcessPageTablePtr self, KernelPtr kernel, UserAddre
     PageTable__account(self, kernel, address, size, MEMORY_SHARED);
 }
 
+Result(KAllocCode)
+    PageTable__try_map_shared(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    match_result(
+        ArchPageTable__try_map(self, kernel, address, size),
+        success(code)
+        {
+            PageTable__account(self, kernel, address, size, MEMORY_SHARED);
+            return Success(KAllocCode, code);
+        },
+        error(code, message)
+        {
+            return Error(KAllocCode, message, code);
+        }
+    );
+}
+
 void PageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     ArchPageTable__map_mmio(self, kernel, address, size);
@@ -56,6 +73,9 @@ Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self, KernelPtr
             MemoryAccounting__forget(&kernel->memory_accounting, space);
             return Success(KAllocCode, code);
         },
-        error(code, message) { return Error(KAllocCode, message, code); }
+        error(code, message)
+        {
+            return Error(KAllocCode, message, code);
+        }
     );
 }

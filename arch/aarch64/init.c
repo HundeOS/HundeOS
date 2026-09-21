@@ -28,18 +28,27 @@ Result(SubsystemInitStatus) Arch__init(KernelPtr kernel)
     match_result(
         gic_init(&system_info->interrupt_controller),
         success_do_nothing(),
-        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+        error(code, message)
+        {
+            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+        }
     );
 
     match_result(
         IRQDispatcher__register_kernel(kernel->irq_dispatcher, PPI_CNTV, CPUTimer__handle_irq, NULL),
         success_do_nothing(),
-        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+        error(code, message)
+        {
+            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+        }
     );
     match_result(
         IRQDispatcher__register_kernel(kernel->irq_dispatcher, PPI_CNTP, CPUTimer__handle_irq, NULL),
         success_do_nothing(),
-        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+        error(code, message)
+        {
+            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+        }
     );
 
     enable_irq();
@@ -53,7 +62,10 @@ Result(SubsystemInitStatus) Arch__enable_irq(InterruptControllerInfoPtr interrup
     match_result(
         gic_enable_interrupt(interrupt_controller, (uint32_t)irq),
         success_do_nothing(),
-        error(code, message) { return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED); }
+        error(code, message)
+        {
+            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+        }
     );
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }

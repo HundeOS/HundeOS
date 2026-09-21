@@ -6,7 +6,7 @@
 #define STUB_PROCESS(process_id)                                                                                       \
     (Process)                                                                                                          \
     {                                                                                                                  \
-        .pid = process_id, .file_descriptors = LINKED_LIST_NEW(), .next_file_descriptor = 3,                           \
+        .pid = process_id,                                                                                             \
     }
 
 #endif

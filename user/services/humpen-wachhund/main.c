@@ -99,15 +99,8 @@ int HUMPEN_WACHHUND_ENTRYPOINT(int argc, char ** argv)
         }
         else
         {
-            IOStatus status = IO__mount_device(&device_path, &filesystem_type, &mountpoint);
-            if (status == IO_OK)
-            {
-                kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "mounted %B on %B", &device_path, &mountpoint);
-                return 0;
-            }
-
-            kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "failed to mount %B on %B: %i", &device_path, &mountpoint,
-                               (int)status);
+            kernel_syslog_tagf(HUMPEN_WACHHUND_LOG_TAG, "unsupported filesystem %B", &filesystem_type);
+            return 1;
         }
 
         ProcessSleepResult sleep_result = sleep_usec(backoff_usec);

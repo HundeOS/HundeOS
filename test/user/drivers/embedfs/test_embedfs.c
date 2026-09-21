@@ -191,12 +191,18 @@ void test_only_namespace_can_delegate_and_disconnect_clears_resources(void)
     IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/hello"));
     match_optional(
         Embedfs__serve(&filesystem, 50, 99, &request),
-        some(reply) { TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, reply.status); },
+        some(reply)
+        {
+            TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, reply.status);
+        },
         none_test_fail()
     );
     match_optional(
         Embedfs__serve(&filesystem, 50, 70, &request),
-        some(reply) { TEST_ASSERT_EQUAL(IO_OK, reply.status); },
+        some(reply)
+        {
+            TEST_ASSERT_EQUAL(IO_OK, reply.status);
+        },
         none_test_fail()
     );
     TEST_ASSERT_EQUAL(1, EmbedfsHandles__len(&filesystem.handles));

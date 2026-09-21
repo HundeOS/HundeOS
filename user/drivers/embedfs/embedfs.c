@@ -89,13 +89,19 @@ static IOReply Embedfs__list(EmbedfsPtr self, ConstBStringPtr path, uint64_t req
                 BString child = unwrap_optional(split.match, relative);
                 match_optional(
                     BStringArray__find_item(&self->children, child),
-                    some(found) { continue; },
+                    some(found)
+                    {
+                        continue;
+                    },
                     none_do_nothing()
                 );
                 match_result(
                     BStringArray__push(&self->children, child),
                     success_do_nothing(),
-                    error(code, message) { return IOReply__new(IO_UNKNOWN_BUFFER, 0); }
+                    error(code, message)
+                    {
+                        return IOReply__new(IO_UNKNOWN_BUFFER, 0);
+                    }
                 );
                 if ((uint64_t)BStringArray__len(&self->children) - 1 == requested)
                 {
@@ -110,7 +116,10 @@ static IOReply Embedfs__list(EmbedfsPtr self, ConstBStringPtr path, uint64_t req
                     return reply;
                 }
             },
-            none() { return IOReply__new(IO_INVALID_PATH, 0); }
+            none()
+            {
+                return IOReply__new(IO_INVALID_PATH, 0);
+            }
         );
     }
     return IOReply__new(BString__is_empty(path) || BStringArray__len(&self->children) > 0 ? IO_OK : IO_INVALID_PATH, 0);
@@ -133,11 +142,20 @@ static IOReply Embedfs__open(EmbedfsPtr self, IORequestPtr request, ConstBString
             EmbedfsHandle handle = EmbedfsHandle__new(self->next_handle++, request, &file);
             match_result(
                 EmbedfsHandles__push(&self->handles, handle),
-                success(code) { return IOReply__new(IO_OK, handle.id); },
-                error(code, message) { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+                success(code)
+                {
+                    return IOReply__new(IO_OK, handle.id);
+                },
+                error(code, message)
+                {
+                    return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                }
             );
         },
-        none() { return IOReply__new(IO_INVALID_PATH, 0); }
+        none()
+        {
+            return IOReply__new(IO_INVALID_PATH, 0);
+        }
     );
 }
 
@@ -147,7 +165,7 @@ IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request)
     {
         return IOReply__new(IO_PERMISSION_DENIED, 0);
     }
-    if (request->count > IO_PROTOCOL_DATA_SIZE)
+    if (request->count > IORequest__capacity(request))
     {
         return IOReply__new(IO_UNKNOWN_BUFFER, 0);
     }
@@ -162,10 +180,16 @@ IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request)
                     match_result(
                         EmbedfsHandles__remove(&self->handles, handle),
                         success_do_nothing(),
-                        error(code, message) { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+                        error(code, message)
+                        {
+                            return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                        }
                     );
                 },
-                none() { return IOReply__new(IO_OK, 0); }
+                none()
+                {
+                    return IOReply__new(IO_OK, 0);
+                }
             );
         }
     }
@@ -174,8 +198,14 @@ IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request)
         BString path;
         match_optional(
             Embedfs__relative_path(request),
-            some(value) { path = value; },
-            none() { return IOReply__new(IO_INVALID_PATH, 0); }
+            some(value)
+            {
+                path = value;
+            },
+            none()
+            {
+                return IOReply__new(IO_INVALID_PATH, 0);
+            }
         );
         match_result(
             process_credentials(request->client_pid),
@@ -187,7 +217,10 @@ IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request)
                     return IOReply__new(IO_PERMISSION_DENIED, 0);
                 }
             },
-            error(code, message) { return IOReply__new(IO_UNKNOWN_PID, 0); }
+            error(code, message)
+            {
+                return IOReply__new(IO_UNKNOWN_PID, 0);
+            }
         );
         return request->operation == IO_REQUEST_OPEN ? Embedfs__open(self, request, &path)
                                                      : Embedfs__list(self, &path, request->offset);
@@ -204,18 +237,27 @@ IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request)
             {
                 match_result(
                     EmbedfsHandles__remove(&self->handles, *handle),
-                    success(code) { return IOReply__new(IO_OK, 0); },
-                    error(code, message) { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+                    success(code)
+                    {
+                        return IOReply__new(IO_OK, 0);
+                    },
+                    error(code, message)
+                    {
+                        return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                    }
                 );
             }
             size_t remaining = handle->file.end - handle->file.start - handle->offset;
             size_t size = request->count < remaining ? request->count : remaining;
             IOReply reply = IOReply__new(IO_OK, size);
-            memcpy(reply.data, (const void *)(handle->file.start + handle->offset), size);
+            memcpy(IORequest__read_target(request, &reply), (const void *)(handle->file.start + handle->offset), size);
             handle->offset += size;
             return reply;
         },
-        none() { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+        none()
+        {
+            return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+        }
     );
 }
 

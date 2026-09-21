@@ -27,7 +27,10 @@ Result(ChannelServer) ChannelServer__accept(QueueConnectionID connection, QueueP
             }
             return Success(ChannelServer, ChannelServer__new(&control));
         },
-        error(code, message) { return Error(ChannelServer, channel_server_transport_failed, code); }
+        error(code, message)
+        {
+            return Error(ChannelServer, channel_server_transport_failed, code);
+        }
     );
     return Error(ChannelServer, channel_server_transport_failed, CHANNEL_TRANSPORT_FAILED);
 }
@@ -40,6 +43,11 @@ QueueConnectionID ChannelServer__connection(ChannelServerPtr self)
 QueueParticipantID ChannelServer__client_pid(ChannelServerPtr self)
 {
     return self->client_pid;
+}
+
+QueueParticipantID ChannelServer__transport_pid(ChannelServerPtr self)
+{
+    return self->transport_pid;
 }
 
 QueueCode ChannelServer__status(ChannelServerPtr self)
@@ -55,7 +63,8 @@ Result(OptionalChannelServerRequest) ChannelServer__poll(ChannelServerPtr self)
             Queue__pop(&self->control),
             success(message)
             {
-                if (message.kind == CHANNEL_REQUEST_CANCEL && message.arg2 == self->token)
+                RequestTicket ticket = ChannelControlMessage__ticket(&message);
+                if (message.kind == CHANNEL_REQUEST_CANCEL && RequestTicket__equals(&self->ticket, &ticket))
                 {
                     return Error(OptionalChannelServerRequest, bstr("Channel client disconnected"), QUEUE_CLOSED);
                 }
@@ -75,16 +84,22 @@ Result(OptionalChannelServerRequest) ChannelServer__poll(ChannelServerPtr self)
         Queue__pop(&self->control),
         success(message)
         {
+            RequestTicket ticket = ChannelControlMessage__ticket(&message);
             if (message.kind != CHANNEL_REQUEST_SERVE || message.arg0 == 0 ||
-                message.arg1 >= CHANNEL_PAYLOAD_CAPACITY || message.arg2 == 0 || message.arg3 == 0)
+                message.arg1 >= CHANNEL_PAYLOAD_CAPACITY || message.arg2 == 0 || message.arg3 == 0 ||
+                !RequestTicket__valid(&ticket) ||
+                (self->ticket.connection == ticket.connection &&
+                 self->ticket.metadata.generation >= ticket.metadata.generation))
             {
                 return Error(OptionalChannelServerRequest, channel_server_invalid_request, CHANNEL_INVALID_REPLY);
             }
             self->payload = (ChannelPayloadPtr)message.arg0;
             self->request_size = message.arg1;
             self->token = message.arg2;
-            self->client_pid = message.arg3;
+            self->client_pid = ticket.metadata.origin_pid;
+            self->transport_pid = message.arg3;
             self->handling_request = true;
+            self->ticket = ticket;
             return Success(OptionalChannelServerRequest,
                            Some(ChannelServerRequest, ChannelServerRequest__new(self->request_size, self->client_pid)));
         },
@@ -114,6 +129,7 @@ Result(ChannelCode) ChannelServer__reply(ChannelServerPtr self, ConstChannelData
         return Error(ChannelCode, channel_server_invalid_request, CHANNEL_INVALID_REPLY);
     }
     QueueMessage response = ChannelControlMessage__new(CHANNEL_RESPONSE_REPLIED, 0, size, self->token);
+    response.request = self->ticket.metadata;
     match_result(
         Queue__push(&self->control, &response),
         success(code)

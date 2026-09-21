@@ -41,7 +41,10 @@ Result(OptionalDeviceRecord) DeviceRegistry__find(ConstDeviceRegistryPtr self, C
                     return Success(OptionalDeviceRecord, Some(DeviceRecord, record));
                 }
             },
-            error(code, message) { return Error(OptionalDeviceRecord, message, code); }
+            error(code, message)
+            {
+                return Error(OptionalDeviceRecord, message, code);
+            }
         );
     }
     return Success(OptionalDeviceRecord, None(DeviceRecord));

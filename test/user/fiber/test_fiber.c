@@ -68,9 +68,81 @@ static TestFiberContext TestFiberContext__new(FiberSchedulerPtr scheduler)
 
 void setUp(void)
 {
+    ChannelRequestContext__swap(&None(RequestTicket));
     allocated_stack_size = 0;
     allocated_stack_present = false;
     freed_stack_count = 0;
+}
+
+static Result(FiberCode) ticket_entry(FiberPtr self, Anything argument)
+{
+    RequestTicket ticket = RequestTicket__new(argument, 1, 42, &None(RequestTicket));
+    Optional(RequestTicket) previous = ChannelRequestContext__swap(&Some(RequestTicket, ticket));
+    match_result(
+        Fiber__yield_to_scheduler(self),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(FiberCode, message, code);
+        }
+    );
+    match_optional(
+        ChannelRequestContext__current(),
+        some(current)
+        {
+            TEST_ASSERT_TRUE(RequestTicket__equals(&ticket, &current));
+        },
+        none_test_fail()
+    );
+    ChannelRequestContext__swap(&previous);
+    return Success(FiberCode, FIBER_OK);
+}
+
+void test_request_context_is_isolated_across_fiber_switches(void)
+{
+    FiberContext context;
+    FiberPtr first = unwrap_result(Fiber__heap_new_with_stack_size(ticket_entry, 101, 65536), (FiberPtr){});
+    FiberPtr second = unwrap_result(Fiber__heap_new_with_stack_size(ticket_entry, 202, 65536), (FiberPtr){});
+    match_result(Fiber__resume(first, &context),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_optional(ChannelRequestContext__current(),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_result(Fiber__resume(second, &context),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_optional(ChannelRequestContext__current(),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_result(Fiber__mark_ready(first),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Fiber__resume(first, &context),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Fiber__mark_ready(second),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Fiber__resume(second, &context),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_optional(ChannelRequestContext__current(),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    // The fixture tracks only the most recent stack allocation.
+    free((void *)Fiber__stack_base(first));
+    Fiber__dispose(first);
+    Fiber__dispose(second);
 }
 
 void tearDown(void)
@@ -90,7 +162,10 @@ static Result(FiberCode) waiting_entry(FiberPtr self, Anything argument)
     match_result(
         FiberScheduler__await_current(context->scheduler, FiberWaitKey__block_request(42)),
         success_do_nothing(),
-        error(code, message) { return Error(FiberCode, message, code); }
+        error(code, message)
+        {
+            return Error(FiberCode, message, code);
+        }
     );
 
     match_result(
@@ -100,7 +175,10 @@ static Result(FiberCode) waiting_entry(FiberPtr self, Anything argument)
             context->wake_value = value.value;
             return Success(FiberCode, FIBER_OK);
         },
-        error(code, message) { return Error(FiberCode, message, code); }
+        error(code, message)
+        {
+            return Error(FiberCode, message, code);
+        }
     );
 
     return Success(FiberCode, FIBER_OK);
@@ -121,7 +199,10 @@ static Result(FiberCode) channel_waiting_entry(FiberPtr self, Anything argument)
     match_result(
         FiberScheduler__await_channel_signal(context->scheduler, context->channel),
         success_do_nothing(),
-        error(code, message) { return Error(FiberCode, message, code); }
+        error(code, message)
+        {
+            return Error(FiberCode, message, code);
+        }
     );
 
     match_result(
@@ -131,7 +212,10 @@ static Result(FiberCode) channel_waiting_entry(FiberPtr self, Anything argument)
             context->wake_value = value.value;
             return Success(FiberCode, FIBER_OK);
         },
-        error(code, message) { return Error(FiberCode, message, code); }
+        error(code, message)
+        {
+            return Error(FiberCode, message, code);
+        }
     );
 
     return Success(FiberCode, FIBER_OK);
@@ -212,7 +296,10 @@ void test_fiber_scheduler_run_ready_finishes_immediate_fiber(void)
 
     match_result(
         FiberScheduler__run_ready(&scheduler),
-        success(code) { TEST_ASSERT_EQUAL(FIBER_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(FIBER_OK, code);
+        },
         error_test_fail()
     );
 
@@ -231,13 +318,19 @@ void test_fiber_scheduler_await_parks_current_fiber_on_wait_key(void)
 
     match_result(
         FiberScheduler__spawn(&scheduler, waiting_entry, (Anything)&context),
-        success(spawned) { fiber = spawned; },
+        success(spawned)
+        {
+            fiber = spawned;
+        },
         error_test_fail()
     );
 
     match_result(
         FiberScheduler__run_ready(&scheduler),
-        success(code) { TEST_ASSERT_EQUAL(FIBER_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(FIBER_OK, code);
+        },
         error_test_fail()
     );
 
@@ -269,7 +362,10 @@ void test_fiber_scheduler_wake_moves_waiting_fiber_back_to_ready(void)
 
     match_result(
         FiberScheduler__spawn(&scheduler, waiting_entry, (Anything)&context),
-        success(spawned) { fiber = spawned; },
+        success(spawned)
+        {
+            fiber = spawned;
+        },
         error_test_fail()
     );
     match_result(FiberScheduler__run_ready(&scheduler),
@@ -280,7 +376,10 @@ void test_fiber_scheduler_wake_moves_waiting_fiber_back_to_ready(void)
     FiberWakeValue value = FiberWakeValue__new(&key, FIBER_OK, 99);
     match_result(
         FiberScheduler__wake(&scheduler, key, value),
-        success(code) { TEST_ASSERT_EQUAL(FIBER_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(FIBER_OK, code);
+        },
         error_test_fail()
     );
 
@@ -321,7 +420,10 @@ void test_fiber_scheduler_spawn_rejects_when_live_limit_reached(void)
     match_result(
         FiberScheduler__spawn(&scheduler, immediate_entry, (Anything)&context),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(FIBER_LIMIT_REACHED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(FIBER_LIMIT_REACHED, code);
+        }
     );
 
     FiberWaitKey key = FiberWaitKey__block_request(42);
@@ -348,7 +450,10 @@ void test_fiber_scheduler_wake_rejects_unknown_wait_key(void)
     match_result(
         FiberScheduler__wake(&scheduler, key, value),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(FIBER_WAIT_NOT_FOUND, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(FIBER_WAIT_NOT_FOUND, code);
+        }
     );
 }
 
@@ -363,7 +468,10 @@ void test_fiber_scheduler_await_channel_signal_parks_on_channel_state(void)
 
     match_result(
         FiberScheduler__spawn(&scheduler, channel_waiting_entry, (Anything)&context),
-        success(spawned) { fiber = spawned; },
+        success(spawned)
+        {
+            fiber = spawned;
+        },
         error_test_fail()
     );
 
@@ -429,13 +537,19 @@ void test_fiber_invalid_state_error_includes_current_state(void)
 
     match_result(
         Fiber__heap_new(immediate_entry, (Anything)&context),
-        success(created) { fiber = created; },
+        success(created)
+        {
+            fiber = created;
+        },
         error_test_fail()
     );
 
     match_result(
         Fiber__resume(fiber, &scheduler.context),
-        success(code) { TEST_ASSERT_EQUAL(FIBER_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(FIBER_OK, code);
+        },
         error_test_fail()
     );
 

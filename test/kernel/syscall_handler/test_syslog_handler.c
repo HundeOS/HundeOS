@@ -30,7 +30,10 @@ void test_syslog_handler_writes_process_message_to_kernel_logger(void)
 
     match_result(
         Syslog__handler(NULL, &Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0),
-        success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SYSLOG_OK, code);
+        },
         error_test_fail()
     );
 
@@ -49,7 +52,10 @@ void test_syslog_handler_writes_tagged_process_message_to_kernel_logger(void)
 
     match_result(
         Syslog__handler(NULL, &Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0),
-        success(code) { TEST_ASSERT_EQUAL(SYSLOG_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SYSLOG_OK, code);
+        },
         error_test_fail()
     );
 
@@ -66,6 +72,9 @@ void test_syslog_handler_rejects_missing_message(void)
     match_result(
         Syslog__handler(NULL, &Some(ProcessPtr, process), 0, 0, 0, 0, 0),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(SYSLOG_INVALID_ARGUMENT, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SYSLOG_INVALID_ARGUMENT, code);
+        }
     );
 }

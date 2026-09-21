@@ -508,13 +508,19 @@ BString BString__join(BStringArrayPtr array, char delimiter)
     BString delim = empty_bstr();
     BString__push_char(&delim, delimiter);
 
-    for_each_fa_ptr(BStringArray, array, index, segment, {
-        result = BString__append(&result, &segment);
-        if (index + 1 < BStringArray__len(array))
+    for_each_fa_ptr(
+        BStringArray,
+        array,
+        index,
+        segment,
         {
-            result = BString__append(&result, &delim);
+            result = BString__append(&result, &segment);
+            if (index + 1 < BStringArray__len(array))
+            {
+                result = BString__append(&result, &delim);
+            }
         }
-    });
+    );
     return result;
 }
 
@@ -554,8 +560,14 @@ Optional(char) BString__char_at(ConstBStringPtr self, StringPos index)
 char BString__char_at_or(ConstBStringPtr self, StringPos index, char alternate)
 {
     match_optional(BString__char_at(self, index),
-        some(ch) { return ch; },
-        none() { return alternate; }
+        some(ch)
+        {
+            return ch;
+        },
+        none()
+        {
+            return alternate;
+        }
     );
 }
 

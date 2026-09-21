@@ -8,6 +8,7 @@
 #include "../mutex.h"
 #include "../kernel_init.h"
 #include "syscall.h"
+#include "../types/map.h"
 
 typedef enum RegisterResult
 {
@@ -22,7 +23,8 @@ typedef Result(SystemCallResult) (*Handler)(KernelPtr kernel, OptionalPtr(Proces
 
 OptionalDef(Handler);
 ResultDef(Handler);
-FixedArrayDefine(Handler, 256, Handlers, &Ptr__equals);
+OptionalDef(SystemCall);
+MapDefine(SystemCall, Handler, 256, Handlers, SimpleEquals(uint32_t));
 
 typedef struct SyscallDispatcher
 {
@@ -43,7 +45,7 @@ Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, Sy
 #define NEW_SYSCALL_DISPATCHER                                                                                         \
     (SyscallDispatcher)                                                                                                \
     {                                                                                                                  \
-        .handlers = EmptyArray(Handlers), .init_lock = MUTEX_INIT, .init_done = false                                  \
+        .handlers = EmptyMap(Handlers), .init_lock = MUTEX_INIT, .init_done = false                                    \
     }
 
 #endif

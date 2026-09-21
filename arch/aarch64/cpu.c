@@ -4,6 +4,7 @@
 #include "../../kernel/arch/cpu.h"
 #include "../../kernel/debug.h"
 #include "cpu_common.h"
+#include "ipc/ipc_platform.h"
 
 #define CPU_POKE_SGI 1U
 
@@ -22,11 +23,7 @@ uint64_t CPU__id()
 
 uint64_t CPU__time_usec(void)
 {
-    uint64_t counter;
-    uint64_t frequency;
-    __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(counter)::"memory");
-    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
-    return (counter / frequency) * 1000000ULL + (counter % frequency) * 1000000ULL / frequency;
+    return IpcPlatform__monotonic_usec();
 }
 
 void CPU__noop()
@@ -92,6 +89,11 @@ void CPU__halt_all()
 
 Result(InitCode) CPU__init(SystemInfoPtr system_info)
 {
+    // Permit read-only EL0 access to the virtual counter for bounded IPC polling.
+    uint64_t timer_access;
+    __asm__ volatile("mrs %0, cntkctl_el1" : "=r"(timer_access));
+    timer_access |= 1ULL << 1;
+    __asm__ volatile("msr cntkctl_el1, %0; isb" ::"r"(timer_access) : "memory");
     if (system_info->interrupt_controller.kind != INTERRUPT_CONTROLLER_GIC_V3)
     {
         return Success(InitCode, ARCH_INIT_OK);

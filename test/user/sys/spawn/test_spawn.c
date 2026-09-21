@@ -14,7 +14,7 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
 {
     last_call = num;
     last_arg1 = arg1;
-    if (num == SYSCALL_EXEC || num == SYSCALL_EXEC_REQUEST)
+    if (num == SYSCALL_EXEC || num == SYSCALL_EXEC_REQUEST || num == SYSCALL_BOOT_SPAWN)
     {
         last_request = *((SpawnRequestPtr)arg1);
     }
@@ -36,11 +36,50 @@ void tearDown(void)
 {
 }
 
+void test_spawn_submits_arguments_and_auth_once(void)
+{
+    next_result = 31;
+    match_result(
+        OS__spawn(P_NOWAIT, &bstr("/sbin/test"), &SPAWN_NO_ARG, &SPAWN_NO_ARG, &SPAWN_NO_ARG),
+        success(pid)
+        {
+            TEST_ASSERT_EQUAL(31, pid);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(SYSCALL_EXEC, last_call);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/test"), last_request.path);
+}
+
+void test_boot_wrappers_use_distinct_syscalls(void)
+{
+    next_result = 12;
+    match_result(
+        OS__boot_spawn(&bstr("/sbin/driver"), &SPAWN_NO_ARG, &SPAWN_NO_ARG, &SPAWN_NO_ARG),
+        success(pid)
+        {
+            TEST_ASSERT_EQUAL(12, pid);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(SYSCALL_BOOT_SPAWN, last_call);
+    TEST_ASSERT_EQUAL(P_NOWAIT, last_request.mode);
+    next_result = SPAWN_SUCCESS;
+    match_result(OS__boot_complete(),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(SYSCALL_BOOT_COMPLETE, last_call);
+}
+
 static void assert_last_request_argument(StringPos index, ConstBStringPtr expected)
 {
     match_optional(
         SpawnArguments__at(&last_request.arguments, index),
-        some(argument) { TEST_ASSERT_EQUAL_BSTRING(*expected, argument); },
+        some(argument)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(*expected, argument);
+        },
         none_test_fail()
     );
 }
@@ -122,7 +161,10 @@ void test_os_spawn_returns_error_result_for_spawn_failure(void)
 
     match_result(
         OS__spawn(P_NOWAIT, &bstr("/sbin/missing"), &SPAWN_NO_ARG, &SPAWN_NO_ARG, &SPAWN_NO_ARG),
-        success(pid) { TEST_FAIL(); },
+        success(pid)
+        {
+            TEST_FAIL();
+        },
         error(code, message)
         {
             TEST_ASSERT_EQUAL_INT64(SPAWN_NO_FILE, code);

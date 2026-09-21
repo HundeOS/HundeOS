@@ -11,6 +11,7 @@
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
+void IO__set_startup_stdio(IOHandle input, IOHandle output, IOHandle error);
 
 IOHandle open(ConstBStringPtr path, Flags flags);
 ByteCount read(IOHandle handle, char * buf, size_t size);
@@ -35,7 +36,5 @@ IOStatus remove_file_with_flags(ConstBStringPtr path, Flags flags);
 IOStatus IO__remove_file_with_flags(ConstBStringPtr path, Flags flags);
 IOStatus link_file(ConstBStringPtr source_path, ConstBStringPtr target_path);
 IOStatus IO__link_file(ConstBStringPtr source_path, ConstBStringPtr target_path);
-IOStatus mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint);
-IOStatus IO__mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint);
 
 #endif

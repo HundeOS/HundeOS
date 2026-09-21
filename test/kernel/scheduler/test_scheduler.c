@@ -9,12 +9,8 @@
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/scheduler/scheduler.h"
 #include "../../../kernel/scheduler/parked.h"
-#include "../../../kernel/scheduler/register.h"
 #include "../../../kernel/service/service.h"
 #include "../../../kernel/service/service_directory.h"
-#include "../../../kernel/subsystems/message/message_broker.h"
-#include "../../../kernel/subsystems/message/subsystem_codes.h"
-#include "../../../kernel/subsystems/io/io_subsystem.h"
 #include "../fixtures/kernel.h"
 
 #include <string.h>
@@ -23,15 +19,13 @@ static SchedulerPtr scheduler = NULL;
 static KernelPtr kernel = NULL;
 static ParkedOperationPtr continuation_context;
 static KernelContextPtr continuation_kernel_context;
-static Optional(Message) received_message = None(Message);
-static bool abort_stderr_written = false;
-static char abort_stderr_buffer[512];
-static ByteCount abort_stderr_size = 0;
 static ProcessPtr expected_active_process = NULL;
 static bool continuation_saw_active_address_space = false;
 
 static const CPUID cpu_id = 12;
 extern uint64_t test_cpu_time_usec;
+void BasicIO__reset_output(void);
+const char * BasicIO__output(void);
 
 void Arch__reset_irq_tracking();
 uint64_t Arch__masked_irq();
@@ -40,7 +34,6 @@ uint64_t Arch__mask_count();
 uint64_t Arch__unmask_count();
 
 static BString no_return_code = bstr("no return code");
-static BString abort_stderr_path = bstr(":abort-stderr:");
 static struct ProcessContext saved_context;
 
 static ProcessContextPtr test_saved_context(void)
@@ -75,72 +68,11 @@ static Result(ServiceEvent) test_service_wait(ProcessPtr service_proc, KernelCon
     return Scheduler__service_wait(scheduler, service_proc, kernel_context, &None(Continuation));
 }
 
-static Result(IOInternalHandle) abort_stderr_open(IOStatePtr state, ConstBStringPtr path, Flags flags)
-{
-    return Success(IOInternalHandle, 0x1234);
-}
-
-static Result(IOInternalHandle) abort_stderr_close(IOStatePtr state, IOInternalHandle handle)
-{
-    return Success(IOInternalHandle, handle);
-}
-
-static Result(IOBufferPtr)
-    abort_stderr_read(IOStatePtr state, IOInternalHandle handle, size_t size, ConstExternalBufferPtr target_buffer)
-{
-    return Error(IOBufferPtr, bstring("unsupported"), IO_OPERATION_NOT_SUPPORTED);
-}
-
-static Result(ByteCount) abort_stderr_write(IOStatePtr state, IOInternalHandle handle, DataPtr data, size_t size)
-{
-    abort_stderr_written = true;
-    abort_stderr_size = size;
-
-    size_t copy_size = size;
-    if (copy_size >= sizeof(abort_stderr_buffer))
-    {
-        copy_size = sizeof(abort_stderr_buffer) - 1;
-    }
-
-    for (size_t i = 0; i < copy_size; i++)
-    {
-        abort_stderr_buffer[i] = data[i];
-    }
-    abort_stderr_buffer[copy_size] = '\0';
-
-    return Success(ByteCount, size);
-}
-
-static Result(ParkStatus) abort_stderr_park(IOStatePtr state, IOContextPtr parked_context)
-{
-    return Success(ParkStatus, IO_PARK_OK);
-}
-
-static Result(ParkStatus) abort_stderr_unpark(IOStatePtr state)
-{
-    return Success(ParkStatus, IO_UNPARK_OK);
-}
-
-static IO abort_stderr_io = (IO){
-    .open = abort_stderr_open,
-    .close = abort_stderr_close,
-    .read = abort_stderr_read,
-    .write = abort_stderr_write,
-    .park = abort_stderr_park,
-    .unpark = abort_stderr_unpark,
-};
-
-static IOState abort_stderr_state = NEW_IO_STATE;
-
 void setUp(void)
 {
     test_cpu_time_usec = 0;
     continuation_context = NULL;
     continuation_kernel_context = NULL;
-    received_message = None(Message);
-    abort_stderr_written = false;
-    abort_stderr_size = 0;
-    abort_stderr_buffer[0] = '\0';
     expected_active_process = NULL;
     continuation_saw_active_address_space = false;
     clear_panic_state();
@@ -149,10 +81,8 @@ void setUp(void)
     current_process_reset();
     clear_deferred_syscall_result();
     Arch__reset_irq_tracking();
-    kernel = init_test_kernel_without_filesystem();
+    kernel = init_test_kernel();
     scheduler = kernel->scheduler;
-
-    Scheduler__register(kernel);
 }
 
 void tearDown(void)
@@ -168,7 +98,10 @@ Result(Anything) continuation(ParkedOperationPtr parked_operation)
     continuation_saw_active_address_space = active_address_space_process() == expected_active_process;
 
     match_optional(parked_operation->return_code,
-        some(code) { return Success(Anything, code); },
+        some(code)
+        {
+            return Success(Anything, code);
+        },
         none_do_nothing()
     );
 
@@ -185,12 +118,29 @@ void test_context_switch_accounts_outgoing_and_incoming_processes(void)
     ContextSwitch next = ContextSwitch__new(second, &Some(ProcessPtr, first));
     ContextSwitch__switch(&next);
     test_cpu_time_usec = 50000;
-    ProcessCPUUsage first_usage = CPUUsage__snapshot(&first->cpu_usage);
-    ProcessCPUUsage second_usage = CPUUsage__snapshot(&second->cpu_usage);
+    ProcessCPUUsage first_usage = CPUUsage__snapshot(&first->cpu_usage, test_cpu_time_usec, 0);
+    ProcessCPUUsage second_usage = CPUUsage__snapshot(&second->cpu_usage, test_cpu_time_usec, 0);
     TEST_ASSERT_EQUAL_UINT64(25000, first_usage.total_usec);
     TEST_ASSERT_EQUAL_UINT64(25000, second_usage.total_usec);
     TEST_ASSERT_EQUAL_UINT64(2500, first_usage.short_basis_points);
     TEST_ASSERT_EQUAL_UINT64(2500, second_usage.short_basis_points);
+}
+
+void test_context_switch_records_queue_wake_to_selection_delay_once(void)
+{
+    ProcessPtr process = dummy_process(1, cpu_id, PROC_STATE_READY);
+    QueueWaitUsage__park(&process->queue_wait_usage);
+    test_cpu_time_usec = 20000;
+    QueueWaitUsage__wake(&process->queue_wait_usage, QUEUE_WAIT_TIMEOUT);
+    test_cpu_time_usec = 27000;
+    ContextSwitch next = ContextSwitch__new(process, &None(ProcessPtr));
+    ContextSwitch__switch(&next);
+    test_cpu_time_usec = 40000;
+    ContextSwitch__switch(&next);
+    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&process->queue_wait_usage);
+    TEST_ASSERT_EQUAL_UINT64(1, usage.selections);
+    TEST_ASSERT_EQUAL_UINT64(7000, usage.runnable_usec);
+    TEST_ASSERT_EQUAL_UINT64(7000, usage.max_runnable_usec);
 }
 
 void test_parking_stops_cpu_usage_before_outgoing_process_selection(void)
@@ -209,7 +159,7 @@ void test_parking_stops_cpu_usage_before_outgoing_process_selection(void)
         error_test_fail()
     );
     test_cpu_time_usec = 2000000;
-    ProcessCPUUsage snapshot = CPUUsage__snapshot(&process->cpu_usage);
+    ProcessCPUUsage snapshot = CPUUsage__snapshot(&process->cpu_usage, test_cpu_time_usec, 0);
     TEST_ASSERT_EQUAL_UINT64(25000, snapshot.total_usec);
     TEST_ASSERT_EQUAL_UINT64(0, snapshot.short_basis_points);
     TEST_ASSERT_EQUAL_UINT64(0, snapshot.long_basis_points);
@@ -330,34 +280,6 @@ void test_parked_operation_disposes_unresolved_blocked_operations()
     ParkedOperation__dispose(operation);
 }
 
-static void install_abort_stderr(ProcessPtr proc)
-{
-    match_result(
-        IOSubsystem__register_device(kernel->io_subsystem, &abort_stderr_path, &abort_stderr_io, &abort_stderr_state),
-        success_do_nothing(),
-        error_test_fail()
-    );
-
-    KernelContext kernel_context =
-        KernelContext__new(&Some(ProcessID, proc->pid), &Some(SchedulerPtr, kernel->scheduler));
-    IOContextPtr context = IOContext__heap_new(&kernel_context, &Some(IOSubsystemPtr, kernel->io_subsystem),
-                                               &None(IOHandle), &None(ExternalBuffer));
-
-    match_result(
-        IOSubsystem__open(kernel->io_subsystem, context, &abort_stderr_path, IO_OPEN_WRITE),
-        success(handle)
-        {
-            match_result(Process__set_file_descriptor(proc, 2, handle),
-                success_do_nothing(),
-                error_test_fail()
-            );
-        },
-        error_test_fail()
-    );
-
-    IOContext__dispose(context);
-}
-
 void test_scheduler_interrupt_when_no_processes_are_running_stays_in_idle(void)
 {
     ProcessContextPtr context = test_saved_context();
@@ -391,8 +313,7 @@ void test_scheduler_init_creates_cpu_slots_independent_of_online_cpu_count(void)
 {
     set_cpu_count(MAX_CPUS);
 
-    MessageBrokerPtr message_broker = MessageBroker__heap_new();
-    SchedulerPtr local_scheduler = Scheduler__heap_new(message_broker);
+    SchedulerPtr local_scheduler = Scheduler__heap_new();
     Elf idle = unwrap_optional(EmbeddedElf__load(&bstr("hello_world")), (Elf){});
     SystemInfo system_info = (SystemInfo){
         .cpu_count = 1,
@@ -406,7 +327,10 @@ void test_scheduler_init_creates_cpu_slots_independent_of_online_cpu_count(void)
 
     match_optional(
         Scheduler__idle_process(local_scheduler, 0),
-        some(idle_process) { TEST_ASSERT_NOT_NULL(idle_process); },
+        some(idle_process)
+        {
+            TEST_ASSERT_NOT_NULL(idle_process);
+        },
         none_test_fail()
     );
 
@@ -427,13 +351,19 @@ void test_scheduler_requires_capability_from_live_channel_client(void)
     match_result(
         Scheduler__require_process_capability(scheduler, client->pid, PROCESS_CAP_SUBSCRIBE_IRQ),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code);
+        }
     );
 
     Process__set_identity(client, PROCESS_USER_HUND, PROCESS_GROUP_HUND, PROCESS_CAP_SUBSCRIBE_IRQ);
     match_result(
         Scheduler__require_process_capability(scheduler, client->pid, PROCESS_CAP_SUBSCRIBE_IRQ),
-        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 }
@@ -517,7 +447,10 @@ void test_scheduler_save_context_to_current_process(void)
 
             match_optional(
                 Scheduler__current_process(scheduler, cpu_id),
-                some(current) { TEST_ASSERT_EQUAL(context->elr, current->context->elr); },
+                some(current)
+                {
+                    TEST_ASSERT_EQUAL(context->elr, current->context->elr);
+                },
                 none_test_fail()
             );
         },
@@ -540,7 +473,10 @@ void test_signal_request_does_not_switch_or_remove_remote_process(void)
 
     match_result(
         Scheduler__queue_signal(scheduler, pid, PROCESS_SIGNAL_KILL),
-        success(signalled) { TEST_ASSERT_EQUAL(pid, signalled); },
+        success(signalled)
+        {
+            TEST_ASSERT_EQUAL(pid, signalled);
+        },
         error_test_fail()
     );
     TEST_ASSERT_EQUAL_PTR(caller, current_running_process());
@@ -548,7 +484,10 @@ void test_signal_request_does_not_switch_or_remove_remote_process(void)
     TEST_ASSERT_TRUE(Process__has_pending_signal(target));
     match_optional(
         Scheduler__find_process_by_pid(scheduler, pid),
-        some(found) { TEST_ASSERT_EQUAL_PTR(target, found); },
+        some(found)
+        {
+            TEST_ASSERT_EQUAL_PTR(target, found);
+        },
         none_test_fail()
     );
 
@@ -665,7 +604,10 @@ void test_signal_request_during_selected_context_switch_is_delivered_before_resu
     Scheduler__start(scheduler, cpu_id);
     Optional(ProcessPtr) old = Scheduler__current_process(scheduler, cpu_id);
     match_optional(old,
-        some(process) { process->state = PROC_STATE_SWITCHING_CONTEXT; },
+        some(process)
+        {
+            process->state = PROC_STATE_SWITCHING_CONTEXT;
+        },
         none_test_fail()
     );
     target->state = PROC_STATE_SWITCHING_CONTEXT;
@@ -697,56 +639,25 @@ void test_scheduler_exit_removes_process_when_its_current(void)
 
     match_result(
         Scheduler__exit(scheduler, proc, 10),
-        success(exited_pid) { TEST_ASSERT_EQUAL(pid, exited_pid); },
+        success(exited_pid)
+        {
+            TEST_ASSERT_EQUAL(pid, exited_pid);
+        },
         error_test_fail()
     );
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(idle, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(idle, current);
+        },
         none_test_fail()
     );
 
     ProcessTablePtr processes = Scheduler__all_processes(scheduler, cpu_id);
 
     TEST_ASSERT_EQUAL(0, ProcessTable__len(processes));
-}
-
-void fake_callback(KernelListenerPtr listener, MessagePtr message)
-{
-    received_message = Some(Message, *message);
-}
-
-void test_scheduler_exit_sends_a_message_to_the_broker_saying_the_process_exited(void)
-{
-    Listener listener = KernelListener__new(kernel, SOURCE_PROCESS, fake_callback);
-    MessageBroker__register_listener(kernel->message_broker, &listener);
-
-    ProcessPtr proc = dummy_process(1, cpu_id, PROC_STATE_READY);
-    ProcessID pid = proc->pid;
-    ProcessContextPtr context = test_saved_context();
-    Scheduler__schedule(scheduler, proc);
-    Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
-
-    match_result(Scheduler__exit(scheduler, proc, 10),
-        success_do_nothing(),
-        error_test_fail()
-    );
-
-    match_optional(
-        received_message,
-        some(message)
-        {
-            TEST_ASSERT_EQUAL(SOURCE_PROCESS, message.source);
-            TEST_ASSERT_EQUAL(PROC_STATE_DEAD, message.source_code);
-
-            Payload payload = unwrap_optional(message.payload, (Payload){});
-            TEST_ASSERT_EQUAL(PAYLOAD_TYPE_PROCESS_ID, payload.type);
-            TEST_ASSERT_EQUAL(pid, payload.process_id);
-        },
-        none_test_fail()
-    );
 }
 
 void test_scheduler_exit_unparks_parent_if_waiting(void)
@@ -782,7 +693,10 @@ void test_scheduler_exit_unparks_parent_if_waiting(void)
 
     match_result(
         Scheduler__exit(scheduler, child, 10),
-        success(exited_pid) { TEST_ASSERT_EQUAL(child_pid, exited_pid); },
+        success(exited_pid)
+        {
+            TEST_ASSERT_EQUAL(child_pid, exited_pid);
+        },
         error_test_fail()
     );
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
@@ -801,13 +715,12 @@ void test_scheduler_exit_unparks_parent_if_waiting(void)
     );
 }
 
-void test_scheduler_abort_process_records_fault_writes_stderr_and_unparks_parent(void)
+void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
 {
     ProcessPtr parent = dummy_process(1, cpu_id, PROC_STATE_READY);
     ProcessPtr child = dummy_process(2, cpu_id, PROC_STATE_READY);
     ProcessID child_pid = child->pid;
     child->parent = Some(ProcessPtr, parent);
-    install_abort_stderr(child);
 
     KernelContext kernel_context = test_scheduler_kernel_context();
 
@@ -832,19 +745,20 @@ void test_scheduler_abort_process_records_fault_writes_stderr_and_unparks_parent
         .cpu = cpu_id,
     };
 
+    BasicIO__reset_output();
     match_result(
-        Scheduler__abort_process(scheduler, kernel->io_subsystem, child, abort),
-        success(aborted_pid) { TEST_ASSERT_EQUAL(child_pid, aborted_pid); },
+        Scheduler__abort_process(scheduler, child, abort),
+        success(aborted_pid)
+        {
+            TEST_ASSERT_EQUAL(child_pid, aborted_pid);
+        },
         error_test_fail()
     );
 
-    TEST_ASSERT_TRUE(abort_stderr_written);
-    TEST_ASSERT_TRUE(abort_stderr_size > 0);
-    TEST_ASSERT_NOT_NULL(strstr(abort_stderr_buffer, "process fault: data abort"));
-    TEST_ASSERT_NOT_NULL(strstr(abort_stderr_buffer, "pc=0x400100"));
-
     Anything return_code = unwrap_result(deferred_syscall_result(), (Anything){});
     TEST_ASSERT_EQUAL(PROCESS_ABORT_EXIT_BASE - PROCESS_ABORT_DATA_ABORT, return_code);
+    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "process fault: data abort"));
+    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "pc=0x400100"));
 }
 
 void test_scheduler_exit_removes_process_when_its_not_current(void)
@@ -860,19 +774,28 @@ void test_scheduler_exit_removes_process_when_its_not_current(void)
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(current, other_proc); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(current, other_proc);
+        },
         none_test_fail()
     );
 
     match_result(
         Scheduler__exit(scheduler, proc, 10),
-        success(exited_pid) { TEST_ASSERT_EQUAL(pid, exited_pid); },
+        success(exited_pid)
+        {
+            TEST_ASSERT_EQUAL(pid, exited_pid);
+        },
         error_test_fail()
     );
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(other_proc, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(other_proc, current);
+        },
         none_test_fail()
     );
 
@@ -896,7 +819,10 @@ void test_scheduler_park_switches_process_to_waiting_and_switches_context(void)
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(current, proc); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(current, proc);
+        },
         none_test_fail()
     );
 
@@ -912,7 +838,10 @@ void test_scheduler_park_switches_process_to_waiting_and_switches_context(void)
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(idle, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(idle, current);
+        },
         none_test_fail()
     );
 
@@ -934,7 +863,10 @@ void test_scheduler_unpark_switches_process_back_to_ready(void)
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(current, proc); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(current, proc);
+        },
         none_test_fail()
     );
 
@@ -1035,7 +967,10 @@ void test_scheduler_unpark_gives_error_and_doesnt_unpark_if_reasons_dont_match(v
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(current, proc); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(current, proc);
+        },
         none_test_fail()
     );
 
@@ -1070,7 +1005,10 @@ void test_scheduler_unpark_when_not_idle(void)
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(current, running_proc); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(current, running_proc);
+        },
         none_test_fail()
     );
 
@@ -1097,7 +1035,10 @@ void test_scheduler_unpark_when_not_idle(void)
     // it should cause a context switch as CPU is currently idle
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(running_proc, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(running_proc, current);
+        },
         none_test_fail()
     );
 }
@@ -1119,7 +1060,10 @@ void test_scheduler_park_switches_process_to_waiting_not_switching_context_when_
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(current, running); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(current, running);
+        },
         none_test_fail()
     );
 
@@ -1135,7 +1079,10 @@ void test_scheduler_park_switches_process_to_waiting_not_switching_context_when_
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
-        some(current) { TEST_ASSERT_EQUAL(running, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(running, current);
+        },
         none_test_fail()
     );
 
@@ -1153,7 +1100,10 @@ void test_scheduler_preempt_when_idle_with_a_process_ready(void)
 
     match_result(
         Scheduler__schedule(scheduler, dummy),
-        success(cpu) { TEST_ASSERT_EQUAL(scheduled_cpu, cpu); },
+        success(cpu)
+        {
+            TEST_ASSERT_EQUAL(scheduled_cpu, cpu);
+        },
         error_test_fail()
     );
     ProcessPtr idle = unwrap_optional(Scheduler__idle_process(scheduler, scheduled_cpu), (ProcessPtr){});
@@ -1174,7 +1124,10 @@ void test_scheduler_preempt_when_idle_with_a_process_ready(void)
 
     match_optional(
         Scheduler__current_process(scheduler, scheduled_cpu),
-        some(current) { TEST_ASSERT_EQUAL(dummy, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(dummy, current);
+        },
         none_test_fail()
     );
 }
@@ -1199,7 +1152,10 @@ void test_scheduler_preempt_when_idle_with_multiple_processes_ready_selects_long
 
     match_optional(
         Scheduler__current_process(scheduler, dummy_cpu),
-        some(current) { TEST_ASSERT_EQUAL(proc_least_recently_run, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(proc_least_recently_run, current);
+        },
         none_do_nothing()
     );
 }
@@ -1301,18 +1257,27 @@ void test_pending_signals_preserve_other_bits_and_prioritize_kill(void)
     Process__queue_signal(process, PROCESS_SIGNAL_KILL);
     match_optional(
         Process__take_pending_signal(process),
-        some(signal) { TEST_ASSERT_EQUAL(PROCESS_SIGNAL_KILL, signal); },
+        some(signal)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_KILL, signal);
+        },
         none_test_fail()
     );
     TEST_ASSERT_TRUE(Process__has_pending_signal(process));
     match_optional(
         Process__take_pending_signal(process),
-        some(signal) { TEST_ASSERT_EQUAL(PROCESS_SIGNAL_TERMINATE, signal); },
+        some(signal)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_TERMINATE, signal);
+        },
         none_test_fail()
     );
     match_optional(
         Process__take_pending_signal(process),
-        some(signal) { TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INTERRUPT, signal); },
+        some(signal)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INTERRUPT, signal);
+        },
         none_test_fail()
     );
     TEST_ASSERT_FALSE(Process__has_pending_signal(process));
@@ -1341,13 +1306,19 @@ void test_scheduler_timer_preemption_is_suppressed_for_active_irq_service(void)
 
     match_result(
         Scheduler__subscribe_irq(scheduler, service_proc, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
     match_result(
         Scheduler__send_irq_event(scheduler, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
@@ -1369,7 +1340,10 @@ void test_scheduler_timer_preemption_is_suppressed_for_active_irq_service(void)
     match_result(
         test_service_wait(service_proc, &kernel_context),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code);
+        }
     );
 
     TEST_ASSERT_TRUE(Scheduler__should_preempt_on_timer(scheduler, scheduled_cpu));
@@ -1392,12 +1366,18 @@ void test_timer_handler_does_not_preempt_active_irq_service(void)
 
     match_result(
         Scheduler__subscribe_irq(scheduler, service_proc, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
     match_result(
         Scheduler__send_irq_event(scheduler, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
@@ -1438,13 +1418,19 @@ void test_service_wait_parks_service_process_when_no_event_is_available(void)
     match_result(
         test_service_wait(service_proc, &kernel_context),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code);
+        }
     );
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, service_proc->state);
     match_optional(
         Process__top_park_reason(service_proc),
-        some(reason) { TEST_ASSERT_EQUAL(PARK_WAIT_SERVICE_EVENT, reason); },
+        some(reason)
+        {
+            TEST_ASSERT_EQUAL(PARK_WAIT_SERVICE_EVENT, reason);
+        },
         none_test_fail()
     );
 }
@@ -1461,7 +1447,10 @@ void test_service_enqueue_wakes_parked_service_process_and_wait_returns_event(vo
     match_result(
         test_service_wait(service_proc, &kernel_context),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code);
+        }
     );
 
     ServiceEvent irq_event = (ServiceEvent){
@@ -1472,7 +1461,10 @@ void test_service_enqueue_wakes_parked_service_process_and_wait_returns_event(vo
 
     match_result(
         Scheduler__service_enqueue(scheduler, service_proc, &irq_event),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
@@ -1502,7 +1494,10 @@ void test_service_enqueue_makes_waiting_service_runnable_when_event_is_queued(vo
     match_result(
         test_service_wait(service_proc, &kernel_context),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code);
+        }
     );
 
     service_proc->state = PROC_STATE_WAITING;
@@ -1515,7 +1510,10 @@ void test_service_enqueue_makes_waiting_service_runnable_when_event_is_queued(vo
 
     match_result(
         Scheduler__service_enqueue(scheduler, service_proc, &irq_event),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
@@ -1535,21 +1533,30 @@ void test_scheduler_irq_event_wakes_parked_service_process(void)
 
     match_result(
         Scheduler__subscribe_irq(scheduler, service_proc, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
     match_result(
         test_service_wait(service_proc, &kernel_context),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_EVENT_QUEUE_EMPTY, code);
+        }
     );
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, service_proc->state);
 
     match_result(
         Scheduler__send_irq_event(scheduler, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
@@ -1579,13 +1586,19 @@ void test_scheduler_subscribed_irq_is_sent_to_service_process(void)
 
     match_result(
         Scheduler__subscribe_irq(scheduler, service_proc, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
     match_result(
         Scheduler__send_irq_event(scheduler, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
@@ -1615,19 +1628,28 @@ void test_scheduler_subscribed_irq_coalesces_while_pending_until_process_complet
 
     match_result(
         Scheduler__subscribe_irq(scheduler, service_proc, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
     match_result(
         Scheduler__send_irq_event(scheduler, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
     match_result(
         Scheduler__send_irq_event(scheduler, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
@@ -1652,7 +1674,10 @@ void test_scheduler_subscribed_irq_coalesces_while_pending_until_process_complet
     match_result(
         test_service_wait(service_proc, &kernel_context),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, code);
+        }
     );
 
     TEST_ASSERT_FALSE(Process__is_handling_service_irq(service_proc));
@@ -1661,7 +1686,10 @@ void test_scheduler_subscribed_irq_coalesces_while_pending_until_process_complet
 
     match_result(
         Scheduler__send_irq_event(scheduler, irq),
-        success(code) { TEST_ASSERT_EQUAL_INT(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL_INT(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
@@ -1693,7 +1721,7 @@ void test_scheduler_interrupt_switch_from_one_ready_process_to_another(void)
     TEST_ASSERT_EQUAL(proc_most_recently_run, current_running_process());
 }
 
-void test_io_park_messages_put_process_in_to_wait()
+void test_scheduler_park_by_pid_puts_process_in_wait(void)
 {
     ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
     ProcessContextPtr context = test_saved_context();
@@ -1706,13 +1734,12 @@ void test_io_park_messages_put_process_in_to_wait()
     ProcessPtr running = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_EQUAL(proc, running);
 
-    KernelContext kernel_context = (KernelContext){
-        .scheduler = scheduler,
-    };
-
-    MessagePtr message =
-        Message__heap_new_deferred(SOURCE_IO, SUBSYS_IO_PARK, proc->pid, &kernel_context, continuation);
-    MessageBroker__deliver(kernel->message_broker, message);
+    KernelContext kernel_context = test_scheduler_kernel_context();
+    match_result(
+        Scheduler__park_by_pid(scheduler, proc->pid, &kernel_context, &Some(Continuation, continuation), PARK_WAIT_IO),
+        success_do_nothing(),
+        error_test_fail()
+    );
     Scheduler__preempt(scheduler, cpu_id, context);
 
     running = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
@@ -1721,7 +1748,7 @@ void test_io_park_messages_put_process_in_to_wait()
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, proc->state);
 }
 
-void test_io_data_arrived_pull_process_out_of_park()
+void test_scheduler_unpark_by_pid_resumes_io_continuation(void)
 {
     ProcessPtr proc = dummy_process(100, cpu_id, PROC_STATE_READY);
     ProcessContextPtr context = test_saved_context();
@@ -1734,13 +1761,12 @@ void test_io_data_arrived_pull_process_out_of_park()
     ProcessPtr running = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_EQUAL(proc, running);
 
-    KernelContext kernel_context = (KernelContext){
-        .scheduler = scheduler,
-    };
-
-    MessagePtr message_park =
-        Message__heap_new_deferred(SOURCE_IO, SUBSYS_IO_PARK, proc->pid, &kernel_context, continuation);
-    MessageBroker__deliver(kernel->message_broker, message_park);
+    KernelContext kernel_context = test_scheduler_kernel_context();
+    match_result(
+        Scheduler__park_by_pid(scheduler, proc->pid, &kernel_context, &Some(Continuation, continuation), PARK_WAIT_IO),
+        success_do_nothing(),
+        error_test_fail()
+    );
     Scheduler__preempt(scheduler, cpu_id, context);
 
     running = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
@@ -1748,8 +1774,10 @@ void test_io_data_arrived_pull_process_out_of_park()
 
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, proc->state);
 
-    MessagePtr message_available = Message__heap_new_process_id(SOURCE_IO, SUBSYS_IO_AVAILABLE, proc->pid);
-    MessageBroker__deliver(kernel->message_broker, message_available);
+    match_result(Scheduler__unpark_by_pid(scheduler, proc->pid, PARK_WAIT_IO, &None(ReturnCode)),
+        success_do_nothing(),
+                 error_test_fail()
+    );
     Scheduler__preempt(scheduler, cpu_id, context);
 
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc->state);

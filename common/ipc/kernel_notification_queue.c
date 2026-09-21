@@ -5,6 +5,23 @@ KernelNotificationQueue KernelNotificationQueue__new(void)
     return (KernelNotificationQueue){.pending = KernelNotificationSlots__new()};
 }
 
+bool KernelNotificationQueue__has_pending(KernelNotificationQueuePtr self)
+{
+    for_each_atomic_fa_ptr(
+        KernelNotificationSlots,
+        &self->pending,
+        id,
+        sequence,
+        {
+            if (sequence != 0)
+            {
+                return true;
+            }
+        }
+    );
+    return false;
+}
+
 Result(CollectionCode) KernelNotificationQueue__publish(KernelNotificationQueuePtr self, KernelNotificationID id,
                                                         KernelNotificationSequence sequence)
 {

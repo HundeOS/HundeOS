@@ -1,21 +1,27 @@
 #include "unity.h"
 #include "process/process_registry.h"
-ConstProcessRegistryPtr TestProcessRegistry__shared(void);
-#define ProcessRegistry__shared TestProcessRegistry__shared
 #include "../../../../user/lib/sys/process.c"
-#undef ProcessRegistry__shared
-
-static ProcessRegistry registry;
-ConstProcessRegistryPtr TestProcessRegistry__shared(void)
-{
-    return &registry;
-}
 
 static int64_t credential_status;
 static uint64_t requested_pid;
+static ProcessInfo listed_process;
+static ProcessListResult list_status;
+static uint64_t list_capacity;
+static unsigned list_calls;
 
 SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
 {
+    if (num == SYSCALL_PROCESS_LIST)
+    {
+        ProcessListRequestPtr request = (ProcessListRequestPtr)arg1;
+        list_capacity = request->max_entries;
+        list_calls++;
+        if (list_status > 0)
+        {
+            request->entries[0] = listed_process;
+        }
+        return list_status;
+    }
     TEST_ASSERT_EQUAL(SYSCALL_PROCESS_CREDENTIALS, num);
     requested_pid = arg1;
     if (credential_status == PROCESS_CREDENTIALS_OK)
@@ -30,8 +36,10 @@ void setUp(void)
 {
     credential_status = PROCESS_CREDENTIALS_OK;
     requested_pid = 0;
-    registry.version = PROCESS_REGISTRY_VERSION;
-    ProcessRegistry__set_count(&registry, 0, 0);
+    listed_process = ProcessInfo__new(0);
+    list_status = 1;
+    list_capacity = 0;
+    list_calls = 0;
 }
 void tearDown(void)
 {
@@ -51,7 +59,7 @@ void test_process_credentials_returns_typed_kernel_identity(void)
     );
 }
 
-void test_process_list_reads_shared_registry_without_a_syscall(void)
+void test_process_list_requests_live_snapshot_through_syscall(void)
 {
     ProcessRecord record = {.pid = 77,
                             .cpu = 3,
@@ -60,8 +68,7 @@ void test_process_list_reads_shared_registry_without_a_syscall(void)
                             .wait_reason = None(ParkReason),
                             .credentials = ProcessCredentials__new(2, 2),
                             .cpu_usage = {.total_usec = 104900, .long_basis_points = 1049, .short_basis_points = 2500}};
-    ProcessRegistry__set(&registry, 0, 0, &record);
-    ProcessRegistry__set_count(&registry, 0, 1);
+    listed_process = ProcessRecord__info(&record);
     ProcessInfo entries[2];
     TEST_ASSERT_EQUAL(1, process_list(entries, 2));
     TEST_ASSERT_EQUAL(77, entries[0].pid);
@@ -71,6 +78,16 @@ void test_process_list_reads_shared_registry_without_a_syscall(void)
     TEST_ASSERT_EQUAL_STRING("PROC_STATE_RUNNING", entries[0].state);
     TEST_ASSERT_EQUAL_STRING("user", entries[0].user_name);
     TEST_ASSERT_EQUAL(0, requested_pid);
+    TEST_ASSERT_EQUAL(1, list_calls);
+    TEST_ASSERT_EQUAL(2, list_capacity);
+}
+
+void test_process_list_propagates_syscall_error(void)
+{
+    ProcessInfo entries[1];
+    list_status = PROCESS_LIST_INVALID_ARGUMENT;
+    TEST_ASSERT_EQUAL(PROCESS_LIST_INVALID_ARGUMENT, process_list(entries, 1));
+    TEST_ASSERT_EQUAL(1, list_calls);
 }
 
 void test_process_credentials_does_not_fall_back_to_root_when_lookup_fails(void)
@@ -79,6 +96,9 @@ void test_process_credentials_does_not_fall_back_to_root_when_lookup_fails(void)
     match_result(
         process_credentials(42),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_NOT_FOUND, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_NOT_FOUND, code);
+        }
     );
 }

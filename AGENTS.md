@@ -20,6 +20,15 @@ run the tests and generate the runners.
 ## Check first
 Plan and then tell the user what you plan to do before making changes.
 
+## Deferred features
+Maintain [Features TODO](FEATURES-TODO.md) for features discussed with the user
+but not yet implemented. Read relevant entries before working on those features.
+When a discussed feature is deferred, record or update it using the hierarchy
+System -> Feature -> Supporting features or architecture. Distinguish agreed
+requirements from open design questions; do not add speculative features or
+treat a backlog entry as authorization to implement it. When work is completed,
+update the entry to reflect what remains and link to the implementation docs.
+
 ## Compilation database
 Run `make compile-commands` whenever source files are added or removed so IDEs
 and other tooling receive the current build targets and compiler flags.
@@ -203,6 +212,14 @@ Add unit tests for any new code in kernel. Some architecture specific code
 may not have unit tests as it is difficult to test..
 
 # Kernel architecture
+Read [Shared buffers: hunde-puffer](docs/shared-buffers.md) before changing bulk
+I/O transfer, buffer allocation, mapping permissions, recycling, or cleanup.
+The agreed target uses separately shared directional buffers managed by
+`hunde-puffer`; existing Channels carry descriptors, commands, and completions.
+Do not treat inline Channel payloads as the bulk-transfer design or introduce
+service-specific buffer transports. The document distinguishes requirements
+from unimplemented behavior and open sizing/recovery decisions.
+
 Read [Userspace I/O system](docs/io-system.md) before changing I/O routing,
 file-handle ownership, filesystem service transport, or socket/stream service
 interfaces. `hund-io-system` is the common application-facing I/O service;

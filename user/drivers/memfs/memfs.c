@@ -27,7 +27,10 @@ Memfs Memfs__new(void)
 static void MemfsNode__truncate(MemfsNodePtr self)
 {
     match_optional(self->data,
-        some(data) { free(data); },
+        some(data)
+        {
+            free(data);
+        },
         none_do_nothing()
     );
     self->data = None(MemfsDataPtr);
@@ -40,8 +43,14 @@ void Memfs__dispose(MemfsPtr self)
     {
         match_optional(
             MemfsNodes__remove_at(&self->nodes, 0),
-            some(node) { MemfsNode__truncate(&node); },
-            none() { break; }
+            some(node)
+            {
+                MemfsNode__truncate(&node);
+            },
+            none()
+            {
+                break;
+            }
         );
     }
     self->handles = MemfsHandles__new();
@@ -62,8 +71,14 @@ static Optional(MemfsNodePtr) Memfs__find(MemfsPtr self, ConstBStringPtr path)
 {
     match_find_result_ptr(
         MemfsNodes__find(&self->nodes, MemfsNode__path_matches, (void *)path),
-        some(node) { return Some(MemfsNodePtr, node); },
-        none() { return None(MemfsNodePtr); }
+        some(node)
+        {
+            return Some(MemfsNodePtr, node);
+        },
+        none()
+        {
+            return None(MemfsNodePtr);
+        }
     );
 }
 
@@ -74,8 +89,14 @@ static bool Memfs__directory(MemfsPtr self, ConstBStringPtr path)
         return true;
     }
     match_optional(Memfs__find(self, path),
-        some(node) { return node->directory; },
-        none() { return false; }
+        some(node)
+        {
+            return node->directory;
+        },
+        none()
+        {
+            return false;
+        }
     );
 }
 
@@ -153,7 +174,10 @@ static IOStatus Memfs__directory_access(MemfsPtr self, ConstBStringPtr path, Con
             }
             return MemfsNode__allows(node, credentials, required) ? IO_OK : IO_PERMISSION_DENIED;
         },
-        none() { return IO_INVALID_PATH; }
+        none()
+        {
+            return IO_INVALID_PATH;
+        }
     );
 }
 
@@ -208,8 +232,14 @@ static IOStatus Memfs__create(MemfsPtr self, ConstBStringPtr path, bool director
     MemfsNode node = MemfsNode__new(self->next_node++, path, directory, credentials);
     match_result(
         MemfsNodes__push(&self->nodes, node),
-        success(code) { return IO_OK; },
-        error(code, message) { return IO_REGISTER_FAILED; }
+        success(code)
+        {
+            return IO_OK;
+        },
+        error(code, message)
+        {
+            return IO_REGISTER_FAILED;
+        }
     );
 }
 
@@ -270,10 +300,16 @@ static IOReply Memfs__open(MemfsPtr self, IORequestPtr request, ConstBStringPtr 
                     }
                     return IOReply__new(IO_OK, handle.id);
                 },
-                error(code, message) { return IOReply__new(IO_REGISTER_FAILED, 0); }
+                error(code, message)
+                {
+                    return IOReply__new(IO_REGISTER_FAILED, 0);
+                }
             );
         },
-        none() { return IOReply__new(IO_INVALID_PATH, 0); }
+        none()
+        {
+            return IOReply__new(IO_INVALID_PATH, 0);
+        }
     );
 }
 
@@ -309,7 +345,10 @@ static IOStatus MemfsNode__reserve(MemfsNodePtr self, size_t required)
             self->capacity = capacity;
             return IO_OK;
         },
-        error(code, message) { return IO_REGISTER_FAILED; }
+        error(code, message)
+        {
+            return IO_REGISTER_FAILED;
+        }
     );
 }
 
@@ -356,7 +395,7 @@ static IOReply MemfsNode__transfer(MemfsNodePtr self, MemfsHandlePtr handle, IOR
                 {
                     __builtin_memset(data + self->size, 0, handle->offset - self->size);
                 }
-                __builtin_memcpy(data + handle->offset, request->data, count);
+                __builtin_memcpy(data + handle->offset, IORequest__write_source(request), count);
                 if (self->size < handle->offset + count)
                 {
                     self->size = handle->offset + count;
@@ -364,12 +403,15 @@ static IOReply MemfsNode__transfer(MemfsNodePtr self, MemfsHandlePtr handle, IOR
             }
             else
             {
-                __builtin_memcpy(reply.data, data + handle->offset, count);
+                __builtin_memcpy(IORequest__read_target(request, &reply), data + handle->offset, count);
             }
             handle->offset += count;
             return reply;
         },
-        none() { return IOReply__new(IO_UNKNOWN_BUFFER, 0); }
+        none()
+        {
+            return IOReply__new(IO_UNKNOWN_BUFFER, 0);
+        }
     );
 }
 
@@ -396,10 +438,16 @@ static IOReply Memfs__release(MemfsPtr self, IORequestPtr request)
                 match_result(
                     MemfsHandles__remove(&self->handles, handle),
                     success_do_nothing(),
-                    error(code, message) { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+                    error(code, message)
+                    {
+                        return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                    }
                 );
             },
-            none() { return IOReply__new(IO_OK, 0); }
+            none()
+            {
+                return IOReply__new(IO_OK, 0);
+            }
         );
     }
 }
@@ -411,23 +459,28 @@ static IOReply Memfs__list(MemfsPtr self, ConstBStringPtr path, uint64_t index, 
     {
         return IOReply__new(access, 0);
     }
-    for_each_ll_ptr(MemfsNodes, (&self->nodes), node, {
-        BString parent = Memfs__parent(&node.path);
-        if (!BString__equals(&parent, path))
+    for_each_ll_ptr(
+        MemfsNodes,
+        (&self->nodes),
+        node,
         {
-            continue;
+            BString parent = Memfs__parent(&node.path);
+            if (!BString__equals(&parent, path))
+            {
+                continue;
+            }
+            if (index-- != 0)
+            {
+                continue;
+            }
+            size_t start = BString__equals(path, &bstr("/")) ? 1 : BString__length(path) + 1;
+            BString name = BString__slice(&node.path, start, BString__length(&node.path));
+            IOReply reply = IOReply__new(IO_OK, 1);
+reply.entry = DirectoryEntry__new(IO_DIRENT_ATTR_NONE, node.owner.user_id, node.owner.group_id,
+(node.directory ? IO_MODE_TYPE_DIR : IO_MODE_TYPE_FILE) | node.mode, &name);
+return reply;
         }
-        if (index-- != 0)
-        {
-            continue;
-        }
-        size_t start = BString__equals(path, &bstr("/")) ? 1 : BString__length(path) + 1;
-        BString name = BString__slice(&node.path, start, BString__length(&node.path));
-        IOReply reply = IOReply__new(IO_OK, 1);
-        reply.entry = DirectoryEntry__new(IO_DIRENT_ATTR_NONE, node.owner.user_id, node.owner.group_id,
-                                          (node.directory ? IO_MODE_TYPE_DIR : IO_MODE_TYPE_FILE) | node.mode, &name);
-        return reply;
-    });
+    );
     return IOReply__new(IO_OK, 0);
 }
 
@@ -446,7 +499,10 @@ static IOStatus Memfs__remove_node(MemfsPtr self, MemfsNode node)
             MemfsNode__truncate(&node);
             return IO_OK;
         },
-        error(code, message) { return IO_INVALID_PATH; }
+        error(code, message)
+        {
+            return IO_INVALID_PATH;
+        }
     );
 }
 
@@ -488,16 +544,21 @@ static IOReply Memfs__remove(MemfsPtr self, ConstBStringPtr path, Flags flags, C
                 return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
             }
             // Check the complete tree before freeing anything, so denial cannot partially remove it.
-            for_each_ll_ptr(MemfsNodes, (&self->nodes), child, {
-                if (MemfsNode__descendant(&child, (void *)path))
+            for_each_ll_ptr(
+                MemfsNodes,
+                (&self->nodes),
+                child,
                 {
-                    IOStatus child_access = Memfs__can_remove(self, &child, credentials);
-                    if (child_access != IO_OK)
+                    if (MemfsNode__descendant(&child, (void *)path))
                     {
-                        return IOReply__new(child_access, 0);
+                        IOStatus child_access = Memfs__can_remove(self, &child, credentials);
+                        if (child_access != IO_OK)
+                        {
+                            return IOReply__new(child_access, 0);
+                        }
                     }
                 }
-            });
+            );
             while (true)
             {
                 match_find_result(
@@ -510,12 +571,18 @@ static IOReply Memfs__remove(MemfsPtr self, ConstBStringPtr path, Flags flags, C
                             return IOReply__new(status, 0);
                         }
                     },
-                    none() { break; }
+                    none()
+                    {
+                        break;
+                    }
                 );
             }
             return IOReply__new(Memfs__remove_node(self, removed), 0);
         },
-        none() { return IOReply__new(IO_INVALID_PATH, 0); }
+        none()
+        {
+            return IOReply__new(IO_INVALID_PATH, 0);
+        }
     );
 }
 
@@ -525,7 +592,7 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
     {
         return IOReply__new(IO_PERMISSION_DENIED, 0);
     }
-    if (request->count > IO_PROTOCOL_DATA_SIZE)
+    if (request->count > IORequest__capacity(request))
     {
         return IOReply__new(IO_UNKNOWN_BUFFER, 0);
     }
@@ -548,8 +615,14 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
         ProcessCredentials credentials;
         match_result(
             process_credentials(request->client_pid),
-            success(value) { credentials = value; },
-            error(code, message) { return IOReply__new(IO_UNKNOWN_PID, 0); }
+            success(value)
+            {
+                credentials = value;
+            },
+            error(code, message)
+            {
+                return IOReply__new(IO_UNKNOWN_PID, 0);
+            }
         );
         IOStatus access = Memfs__search_parents(self, &path, &credentials);
         if (access != IO_OK)
@@ -571,7 +644,10 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
             }
             match_optional(
                 Memfs__find(self, &path),
-                some(node) { return IOReply__new(IO_INVALID_PATH, 0); },
+                some(node)
+                {
+                    return IOReply__new(IO_INVALID_PATH, 0);
+                },
                 none_do_nothing()
             );
             return IOReply__new(Memfs__create(self, &path, true, &credentials), 0);
@@ -590,17 +666,32 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
             {
                 match_result(
                     MemfsHandles__remove(&self->handles, *handle),
-                    success(code) { return IOReply__new(IO_OK, 0); },
-                    error(code, message) { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+                    success(code)
+                    {
+                        return IOReply__new(IO_OK, 0);
+                    },
+                    error(code, message)
+                    {
+                        return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                    }
                 );
             }
             match_find_result_ptr(
                 MemfsNodes__find(&self->nodes, MemfsNode__id_matches, handle),
-                some(node) { return MemfsNode__transfer(node, handle, request); },
-                none() { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+                some(node)
+                {
+                    return MemfsNode__transfer(node, handle, request);
+                },
+                none()
+                {
+                    return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                }
             );
         },
-        none() { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+        none()
+        {
+            return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+        }
     );
 }
 

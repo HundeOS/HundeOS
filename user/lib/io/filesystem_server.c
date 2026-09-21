@@ -21,7 +21,15 @@ static bool FilesystemDriver__disconnect(IOServiceContext context, QueueConnecti
     FilesystemDriverPtr self = context;
     if (self->namespace_session == session)
     {
-        for_each_fa_ptr(FilesystemFiles, (&self->files), index, file, { free(file.data); });
+        for_each_fa_ptr(
+            FilesystemFiles,
+            (&self->files),
+            index,
+            file,
+            {
+                free(file.data);
+            }
+        );
         self->files = FilesystemFiles__new();
         self->namespace_session = 0;
     }
@@ -31,11 +39,11 @@ static bool FilesystemDriver__disconnect(IOServiceContext context, QueueConnecti
 int FilesystemDriver__run(FilesystemDriverPtr self, ConstBStringPtr mountpoint)
 {
     static IOService service;
-    match_result(
-        IOService__listen(mountpoint, self, FilesystemDriver__serve, FilesystemDriver__disconnect),
-        success(created) { service = created; },
-        error(code, message) { return 1; }
-    );
+    if (IOService__listen_into(&service, mountpoint, self, FilesystemDriver__serve, FilesystemDriver__disconnect) !=
+        IO_OK)
+    {
+        return 1;
+    }
     if (!service_ok(service_publish_ready(mountpoint)))
     {
         return 1;

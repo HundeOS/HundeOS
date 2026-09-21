@@ -49,17 +49,22 @@ struct ServiceMappedMemory
 
 static ServiceMappedMemory fake_uart_mapping;
 
-static uint32_t fake_uart_read32(void * base, uint64_t offset);
-static void fake_uart_write32(void * base, uint64_t offset, uint32_t value);
+uint32_t Uart__read32(Address base, uint64_t offset);
+void Uart__write32(Address base, uint64_t offset, uint32_t value);
 
-#define UART_RX_ENTRYPOINT uart_rx_main_under_test
-#define UART_READ32 fake_uart_read32
-#define UART_WRITE32 fake_uart_write32
+#include "../stream_runtime.h"
+#define main uart_rx_driver_main
 #include "../../../../user/drivers/uart_rx/main.c"
-
-static uint32_t fake_uart_read32(void * base, uint64_t offset)
+#undef main
+static IODiagnostics diagnostics;
+static int uart_rx_main_under_test(void)
 {
-    TEST_ASSERT_NOT_NULL(base);
+    return StreamDriverTest__run(uart_rx_driver_main);
+}
+
+uint32_t Uart__read32(Address base, uint64_t offset)
+{
+    TEST_ASSERT_NOT_EQUAL(0, base);
     if (offset == UART_FR)
     {
         return fake_uart_read_index < 3 ? 0 : FR_RXFE;
@@ -73,9 +78,9 @@ static uint32_t fake_uart_read32(void * base, uint64_t offset)
     return 0;
 }
 
-static void fake_uart_write32(void * base, uint64_t offset, uint32_t value)
+void Uart__write32(Address base, uint64_t offset, uint32_t value)
 {
-    TEST_ASSERT_NOT_NULL(base);
+    TEST_ASSERT_NOT_EQUAL(0, base);
     if (offset == UART_ICR)
     {
         TEST_ASSERT_LESS_THAN_UINT64(2, fake_uart_icr_write_count);
@@ -97,6 +102,8 @@ static void fake_uart_write32(void * base, uint64_t offset, uint32_t value)
 
 void setUp(void)
 {
+    diagnostics = (IODiagnostics){0};
+    IODiagnostics__attach(&diagnostics);
     fake_uart_values[0] = 'a';
     fake_uart_values[1] = 'b';
     fake_uart_values[2] = 'c';
@@ -126,14 +133,40 @@ void tearDown(void)
 {
 }
 
-SyslogResult kernel_syslogf(const char * format, ...)
+void test_uart_rx_retains_fifo_bytes_when_userspace_buffer_is_full(void)
 {
-    return SYSLOG_OK;
+    UartReceiver receiver = UartReceiver__new(UART_PHYS_BASE);
+    for (uint64_t i = 0; i < UartInput__max_size; i++)
+    {
+        match_result(UartInput__push(&receiver.input, 'x'),
+            success_do_nothing(),
+            error_test_fail()
+        );
+    }
+    TEST_ASSERT_FALSE(UartReceiver__drain(&receiver));
+    TEST_ASSERT_EQUAL_UINT64(0, fake_uart_read_count);
+    IORequest request = {.operation = IO_REQUEST_READ, .count = 2};
+    IOReply reply = UartReceiver__read(&receiver, &request);
+    TEST_ASSERT_EQUAL_INT64(2, reply.value);
+    TEST_ASSERT_TRUE(UartReceiver__drain(&receiver));
+    TEST_ASSERT_EQUAL_UINT64(2, fake_uart_read_count);
+    TEST_ASSERT_EQUAL_UINT64(UartInput__max_size, UartInput__len(&receiver.input));
 }
 
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+void test_uart_rx_empty_read_waits_but_zero_length_read_completes(void)
 {
-    return SYSLOG_OK;
+    UartReceiver receiver = UartReceiver__new(UART_PHYS_BASE);
+    IORequest request = {.operation = IO_REQUEST_READ, .count = 1};
+    IOReply reply = UartReceiver__read(&receiver, &request);
+    TEST_ASSERT_EQUAL_INT(IO_WAIT_FOR_DATA, reply.status);
+    request.count = 0;
+    reply = UartReceiver__read(&receiver, &request);
+    TEST_ASSERT_EQUAL_INT(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL_INT64(0, reply.value);
+    IODiagnostics totals = IODiagnostics__snapshot(&diagnostics);
+    TEST_ASSERT_EQUAL_UINT64(2, totals.uart_reads);
+    TEST_ASSERT_EQUAL_UINT64(1, totals.uart_empty);
+    TEST_ASSERT_EQUAL_UINT64(0, totals.uart_bytes);
 }
 
 ServiceCode service_become_service()
@@ -186,7 +219,10 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     match_result(
         DynString__init(&sysinfo, 128),
         success_do_nothing(),
-        error(code, message) { return None(DynString); }
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
@@ -228,60 +264,48 @@ size_t mapped_size(ServiceMappedMemoryPtr memory)
     return memory->size;
 }
 
-IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
-{
-    TEST_ASSERT_EQUAL_BSTRING(bstr(":tty:"), *path);
-    TEST_ASSERT_EQUAL_INT(IO_SERVER_READ, role);
-    return 42;
-}
-
-ServiceCode service_subscribe_irq(uint64_t irq)
+static bool irq_delivered;
+ServiceCode InterruptClient__subscribe(IRQNumber irq)
 {
     TEST_ASSERT_EQUAL_UINT64(UART_IRQ_ID, irq);
+    irq_delivered = false;
     return SERVICE_OK;
 }
-
-ServiceCode service_wait(ServiceEventPtr event)
+ServiceCode InterruptClient__poll(ServiceEventPtr event)
+{
+    if (irq_delivered)
+    {
+        return SERVICE_EVENT_QUEUE_EMPTY;
+    }
+    irq_delivered = true;
+    *event = ServiceEvent__new(SERVICE_EVENT_IRQ, UART_IRQ_ID, 1);
+    return SERVICE_OK;
+}
+ServiceCode InterruptClient__acknowledge(IRQNumber irq)
+{
+    TEST_ASSERT_EQUAL_UINT64(UART_IRQ_ID, irq);
+    TEST_ASSERT_EQUAL_UINT64(3, fake_uart_read_count);
+    TEST_ASSERT_EQUAL_UINT64(2, fake_uart_icr_write_count);
+    return SERVICE_OK;
+}
+void StreamDriverTest__step(IOStreamDriverPtr driver)
 {
     fake_service_wait_count++;
-    TEST_ASSERT_LESS_THAN_UINT64(3, fake_service_wait_count);
     if (fake_data_available)
     {
-        return SERVICE_COMPLETE;
+        StreamDriverTest__stop();
     }
-
-    event->type = SERVICE_EVENT_IRQ;
-    event->source = UART_IRQ_ID;
-    event->data = 0;
-    return SERVICE_OK;
-}
-
-IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)
-{
-    TEST_ASSERT_EQUAL_INT64(42, handle);
-    buffer->data = fake_io_buffer;
-    buffer->capacity = sizeof(fake_io_buffer);
-    return IO_OK;
-}
-
-IOStatus io_server_data_available(IOHandle handle, uint64_t byte_count)
-{
-    TEST_ASSERT_EQUAL_INT64(42, handle);
-    TEST_ASSERT_EQUAL_UINT64(3, byte_count);
+    IORequest request = IORequest__new(IO_REQUEST_READ, 0);
+    request.count = sizeof(fake_io_buffer);
+    IOReply reply = driver->transfer(driver->context, &request);
+    if (reply.status == IO_WAIT_FOR_DATA)
+    {
+        return;
+    }
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(3, reply.value);
+    __builtin_memcpy(fake_io_buffer, reply.data, reply.value);
     fake_data_available = true;
-    return IO_OK;
-}
-
-IOStatus io_server_data_consumed(IOHandle handle, uint64_t byte_count)
-{
-    TEST_FAIL_MESSAGE("rx driver should not consume write data");
-    return IO_OK;
-}
-
-IOStatus io_server_eof(IOHandle handle)
-{
-    TEST_FAIL_MESSAGE("rx driver should not signal eof");
-    return IO_OK;
 }
 
 void test_uart_rx_main_maps_registers_subscribes_irq_and_publishes_read_data(void)
@@ -292,9 +316,12 @@ void test_uart_rx_main_maps_registers_subscribes_irq_and_publishes_read_data(voi
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     TEST_ASSERT_TRUE(fake_sysinfo_closed);
     TEST_ASSERT_TRUE(fake_data_available);
-    TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);
+    TEST_ASSERT_EQUAL_UINT64(3, fake_service_wait_count);
     TEST_ASSERT_EQUAL_UINT64(3, fake_uart_read_count);
     TEST_ASSERT_EQUAL_CHAR('a', fake_io_buffer[0]);
+    IODiagnostics totals = IODiagnostics__snapshot(&diagnostics);
+    TEST_ASSERT_EQUAL_UINT64(3, totals.uart_bytes);
+    TEST_ASSERT_EQUAL_UINT64(1, totals.uart_irqs);
     TEST_ASSERT_EQUAL_CHAR('b', fake_io_buffer[1]);
     TEST_ASSERT_EQUAL_CHAR('c', fake_io_buffer[2]);
     TEST_ASSERT_EQUAL_UINT64(2, fake_uart_icr_write_count);

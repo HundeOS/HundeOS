@@ -100,14 +100,17 @@ static bool fake_ready_published;
 static BString fake_ready_name;
 static uint8_t fake_request_buffer[512];
 static uint8_t fake_second_request_buffer[512];
-static ServiceBlockRequest fake_block_request;
-static ServiceBlockRequest fake_second_block_request;
 static ServiceCode fake_completion_status;
 static uint64_t fake_completion_blocks;
 static uint32_t fake_submitted_type;
 static uint64_t fake_submitted_sector;
 static bool fake_active_device_ready;
 static VirtioBlkDevicePtr fake_active_device;
+static bool fake_direct_dma;
+static uint8_t fake_shared_buffer[2 * 1024 * 1024];
+static uint64_t fake_dma_limit;
+static unsigned fake_dma_submissions;
+static bool fake_dma_denied;
 
 #include "../../../../user/drivers/virtio_blk_channelio/device.c"
 
@@ -208,6 +211,26 @@ void VirtioBlkMmio__write32(void * base, uint64_t offset, uint32_t value)
     if (offset == VIRTIO_MMIO_QUEUE_NOTIFY)
     {
         slot->queue_notify = value;
+        if (fake_direct_dma)
+        {
+            VirtqDescPtr descriptors = VirtioBlk__descs(fake_active_device);
+            TEST_ASSERT_GREATER_OR_EQUAL_UINT64((Address)fake_shared_buffer, descriptors[1].addr);
+            TEST_ASSERT_LESS_OR_EQUAL_UINT64((Address)fake_shared_buffer + sizeof(fake_shared_buffer),
+                                             descriptors[1].addr + descriptors[1].len);
+            TEST_ASSERT_LESS_OR_EQUAL_UINT64(fake_dma_limit, descriptors[1].len);
+            if (virtio_blk_header.type == VIRTIO_BLK_T_IN)
+            {
+                __builtin_memset((void *)descriptors[1].addr, 0x5a, descriptors[1].len);
+            }
+            else
+            {
+                TEST_ASSERT_EACH_EQUAL_UINT8(0xa5, (void *)descriptors[1].addr, descriptors[1].len);
+                TEST_ASSERT_EQUAL_UINT16(VIRTQ_DESC_F_NEXT, descriptors[1].flags);
+            }
+            virtio_blk_status = VIRTIO_BLK_S_OK;
+            VirtioBlk__used(fake_active_device)->idx++;
+            fake_dma_submissions++;
+        }
         return;
     }
     if (offset == VIRTIO_MMIO_INTERRUPT_ACK)
@@ -243,6 +266,11 @@ void setUp(void)
                                                 .size = TEST_VIRTIO_REGION_SIZE};
 
     fake_map_count = 0;
+    fake_direct_dma = false;
+    fake_dma_denied = false;
+    fake_dma_limit = sizeof(fake_shared_buffer);
+    fake_dma_submissions = 0;
+    __builtin_memset(fake_shared_buffer, 0, sizeof(fake_shared_buffer));
     fake_service_wait_count = 0;
     fake_expected_irqs[0] = VIRTIO_MMIO_FIRST_IRQ_ID;
     fake_expected_irq_count = 1;
@@ -266,26 +294,6 @@ void setUp(void)
     fake_submitted_type = 0xffffffffU;
     fake_submitted_sector = 0xffffffffffffffffULL;
     fake_active_device_ready = false;
-    fake_block_request = (ServiceBlockRequest){
-        .request_id = 40,
-        .device_path = bstr("/dev/virtio1"),
-        .operation = SERVICE_BLOCK_READ,
-        .block = 3,
-        .block_count = 1,
-        .block_size = 512,
-        .buffer = (Address)fake_request_buffer,
-        .buffer_size = sizeof(fake_request_buffer),
-    };
-    fake_second_block_request = (ServiceBlockRequest){
-        .request_id = 41,
-        .device_path = bstr("/dev/virtio1"),
-        .operation = SERVICE_BLOCK_READ,
-        .block = 4,
-        .block_count = 1,
-        .block_size = 512,
-        .buffer = (Address)fake_second_request_buffer,
-        .buffer_size = sizeof(fake_second_request_buffer),
-    };
     for (uint64_t i = 0; i < sizeof(fake_request_buffer); i++)
     {
         fake_request_buffer[i] = 0;
@@ -390,36 +398,7 @@ ServiceCode service_publish_ready(ConstBStringPtr name)
     return SERVICE_OK;
 }
 
-ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPtr request)
-{
-    if (!fake_block_request_mode)
-    {
-        TEST_FAIL_MESSAGE("virtio block request handling is not exercised by this test");
-        return SERVICE_BLOCK_REQUEST_NOT_FOUND;
-    }
-
-    TEST_ASSERT_EQUAL_UINT64(fake_block_request.request_id, request_id);
-    *request = fake_block_request;
-    fake_block_request_fetched = true;
-    return SERVICE_OK;
-}
-
-ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint64_t block_count)
-{
-    if (!fake_block_request_mode)
-    {
-        TEST_FAIL_MESSAGE("virtio block request completion is not exercised by this test");
-        return SERVICE_BLOCK_REQUEST_FAILED;
-    }
-
-    TEST_ASSERT_EQUAL_UINT64(fake_block_request.request_id, request_id);
-    fake_block_completed = true;
-    fake_completion_status = status;
-    fake_completion_blocks = block_count;
-    return SERVICE_OK;
-}
-
-ServiceCode service_device_address(void * driver_address, Address * device_address)
+ServiceCode service_device_address(void * driver_address, AddressPtr device_address)
 {
     TEST_ASSERT_NOT_NULL(driver_address);
     TEST_ASSERT_NOT_NULL(device_address);
@@ -427,11 +406,36 @@ ServiceCode service_device_address(void * driver_address, Address * device_addre
     return SERVICE_OK;
 }
 
+int64_t BufferMemory__operation(MemOperation operation, uint64_t first, uint64_t second, uint64_t third,
+                                uint64_t fourth)
+{
+    TEST_ASSERT_EQUAL(MEM_BUFFER_DEVICE_ADDRESS, operation);
+    TEST_ASSERT_EQUAL_UINT64(BUFFER_LIMIT, first);
+    TEST_ASSERT_TRUE(fourth == BUFFER_READ || fourth == BUFFER_WRITE);
+    if (fake_dma_denied)
+    {
+        return BUFFER_DENIED;
+    }
+    if (third > fake_dma_limit || second > sizeof(fake_shared_buffer) || third > sizeof(fake_shared_buffer) - second)
+    {
+        return BUFFER_INVALID;
+    }
+    return (Address)fake_shared_buffer + second;
+}
+
 Result(BlockServer) BlockServer__listen(ConstBStringPtr name, BlockProtocolBlockCount block_count,
                                         BlockServerContext context, BlockServerTransfer transfer)
 {
     return Success(BlockServer, (BlockServer){0});
 }
+
+ChannelCode BlockServer__listen_into(BlockServerPtr self, ConstBStringPtr name, BlockProtocolBlockCount block_count,
+                                     BlockServerContext context, BlockServerTransfer transfer)
+{
+    *self = (BlockServer){0};
+    return CHANNEL_OK;
+}
+
 bool BlockServer__poll(BlockServerPtr self)
 {
     return false;
@@ -450,35 +454,6 @@ ServiceCode service_poll(ServiceEventPtr event)
 ServiceCode service_wait(ServiceEventPtr event)
 {
     fake_service_wait_count++;
-    if (fake_block_request_mode)
-    {
-        if (fake_service_wait_count == 1)
-        {
-            event->type = SERVICE_EVENT_BLOCK_IO;
-            event->source = fake_block_request.request_id;
-            event->data = 0;
-            return SERVICE_OK;
-        }
-        if (fake_service_wait_count == 2)
-        {
-            TEST_ASSERT_TRUE(fake_active_device_ready);
-            fake_submitted_type = virtio_blk_header.type;
-            fake_submitted_sector = virtio_blk_header.sector;
-            virtio_blk_status = 0;
-            VirtioBlk__used(fake_active_device)
-                ->ring[VirtioBlk__used(fake_active_device)->idx % VIRTIO_BLK_QUEUE_SIZE] = (VirtqUsedElem){
-                .id = 0,
-                .len = 512,
-            };
-            VirtioBlk__used(fake_active_device)->idx++;
-            event->type = SERVICE_EVENT_IRQ;
-            event->source = fake_expected_irqs[0];
-            event->data = 0;
-            return SERVICE_OK;
-        }
-
-        return SERVICE_COMPLETE;
-    }
 
     if (fake_service_wait_count == 1)
     {
@@ -513,10 +488,6 @@ int VirtioBlkRuntime__run(VirtioBlkDevicePtr device, BlockServerPtr server)
         if (event.type == SERVICE_EVENT_IRQ && event.source == device->irq_id)
         {
             VirtioBlk__ack_interrupt(device->mmio);
-        }
-        if (event.type == SERVICE_EVENT_BLOCK_IO)
-        {
-            VirtioBlk__handle_block_request(device, event.source);
         }
         saved_device = *device;
     }
@@ -617,69 +588,71 @@ void test_virtio_blk_main_limits_runtime_to_first_discovered_block_device(void)
     TEST_ASSERT_EQUAL_UINT64(0, fake_slots[1].status_write_count);
 }
 
-void test_virtio_blk_main_completes_block_read_request_through_queue(void)
+static BufferDescriptor prepare_direct_dma(void)
 {
-    fake_block_request_mode = true;
     char * argv[] = {"virtio_blk_channelio", "0", "/dev/virtio1"};
-
     TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test(3, argv));
-
-    TEST_ASSERT_TRUE(fake_block_request_fetched);
-    TEST_ASSERT_TRUE(fake_block_completed);
-    TEST_ASSERT_EQUAL(SERVICE_OK, fake_completion_status);
-    TEST_ASSERT_EQUAL_UINT64(1, fake_completion_blocks);
-    TEST_ASSERT_EQUAL_UINT32(0, fake_slots[0].queue_notify);
-
-    VirtqDesc * descs = VirtioBlk__descs(fake_active_device);
-    TEST_ASSERT_EQUAL_UINT32(sizeof(VirtioBlkOuthdr), descs[0].len);
-    TEST_ASSERT_EQUAL_UINT16(1, descs[0].flags);
-    TEST_ASSERT_EQUAL_UINT16(1, descs[0].next);
-    TEST_ASSERT_EQUAL_UINT32(512, descs[1].len);
-    TEST_ASSERT_EQUAL_UINT16(3, descs[1].flags);
-    TEST_ASSERT_EQUAL_UINT16(2, descs[1].next);
-    TEST_ASSERT_EQUAL_UINT32(1, descs[2].len);
-    TEST_ASSERT_EQUAL_UINT16(2, descs[2].flags);
-
-    TEST_ASSERT_EQUAL_UINT32(0, fake_submitted_type);
-    TEST_ASSERT_EQUAL_UINT64(3, fake_submitted_sector);
-    TEST_ASSERT_EQUAL_UINT16(1, VirtioBlk__avail(fake_active_device)->idx);
-    TEST_ASSERT_EQUAL_UINT16(0, VirtioBlk__avail(fake_active_device)->ring[0]);
+    fake_direct_dma = true;
+    BufferDescriptor buffer = BufferDescriptor__new(BUFFER_LIMIT, BUFFER_READ);
+    buffer.address = (Address)fake_shared_buffer;
+    return buffer;
 }
 
-void test_virtio_blk_main_completes_block_write_request_through_queue(void)
+void test_virtio_reads_full_shared_buffer_in_one_hardware_submission(void)
 {
-    fake_block_request_mode = true;
-    fake_block_request.operation = SERVICE_BLOCK_WRITE;
-    fake_block_request.block = 4;
-    char * argv[] = {"virtio_blk_channelio", "0", "/dev/virtio1"};
-
-    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test(3, argv));
-
-    TEST_ASSERT_TRUE(fake_block_request_fetched);
-    TEST_ASSERT_TRUE(fake_block_completed);
-    TEST_ASSERT_EQUAL(SERVICE_OK, fake_completion_status);
-    TEST_ASSERT_EQUAL_UINT64(1, fake_completion_blocks);
-
-    VirtqDesc * descs = VirtioBlk__descs(fake_active_device);
-    TEST_ASSERT_EQUAL_UINT32(512, descs[1].len);
-    TEST_ASSERT_EQUAL_UINT16(1, descs[1].flags);
-    TEST_ASSERT_EQUAL_UINT16(2, descs[1].next);
-    TEST_ASSERT_EQUAL_UINT32(1, fake_submitted_type);
-    TEST_ASSERT_EQUAL_UINT64(4, fake_submitted_sector);
+    BufferDescriptor buffer = prepare_direct_dma();
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK, VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_READ, 0,
+                                                                     BUFFER_SIZE / BLOCK_CHANNEL_SECTOR_SIZE, &buffer));
+    TEST_ASSERT_EQUAL_UINT(1, fake_dma_submissions);
+    TEST_ASSERT_EACH_EQUAL_UINT8(0x5a, fake_shared_buffer, sizeof(fake_shared_buffer));
 }
 
-void test_virtio_blk_main_delivers_out_of_order_used_entries_in_request_order(void)
+void test_virtio_splits_noncontiguous_shared_ranges_without_staging(void)
 {
-    fake_block_request_mode = true;
-    const char * path = "/dev/virtio2";
-    fake_block_request.device_path = BString__new(path);
-    char * argv[] = {"virtio_blk_channelio", "0", "/dev/virtio1"};
+    BufferDescriptor buffer = prepare_direct_dma();
+    fake_dma_limit = 4096;
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK,
+                      VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_READ, 3, 16, &buffer));
+    TEST_ASSERT_EQUAL_UINT(2, fake_dma_submissions);
+    TEST_ASSERT_EACH_EQUAL_UINT8(0x5a, fake_shared_buffer, 8192);
+    TEST_ASSERT_EQUAL_UINT64(11, virtio_blk_header.sector);
+    TEST_ASSERT_EQUAL_UINT8(0, fake_shared_buffer[8192]);
+}
 
-    TEST_ASSERT_EQUAL_INT(0, virtio_blk_main_under_test(3, argv));
+void test_virtio_writes_from_the_shared_buffer_without_staging(void)
+{
+    BufferDescriptor buffer = prepare_direct_dma();
+    buffer.direction = BUFFER_WRITE;
+    __builtin_memset(fake_shared_buffer, 0xa5, sizeof(fake_shared_buffer));
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK,
+                      VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_WRITE, 0, 16, &buffer));
+    TEST_ASSERT_EQUAL_UINT(1, fake_dma_submissions);
+    TEST_ASSERT_EQUAL_UINT32(VIRTIO_BLK_T_OUT, virtio_blk_header.type);
+}
 
-    TEST_ASSERT_TRUE(fake_block_request_fetched);
-    TEST_ASSERT_TRUE(fake_block_completed);
-    TEST_ASSERT_EQUAL(SERVICE_BLOCK_REQUEST_FAILED, fake_completion_status);
-    TEST_ASSERT_EQUAL_UINT64(0, fake_completion_blocks);
-    TEST_ASSERT_EQUAL_UINT16(0, VirtioBlk__avail(fake_active_device)->idx);
+void test_virtio_rejects_denied_or_oversized_shared_transfers_without_submission(void)
+{
+    BufferDescriptor buffer = prepare_direct_dma();
+    fake_dma_denied = true;
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_IO_ERROR,
+                      VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_READ, 0, 1, &buffer));
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_INVALID_ARGUMENT,
+                      VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_READ, 0,
+                                                  BUFFER_SIZE / BLOCK_CHANNEL_SECTOR_SIZE + 1, &buffer));
+    TEST_ASSERT_EQUAL_UINT(0, fake_dma_submissions);
+}
+
+void test_virtio_does_not_reuse_queue_after_uncertain_completion(void)
+{
+    BufferDescriptor buffer = prepare_direct_dma();
+    fake_direct_dma = false;
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_IO_ERROR,
+                      VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_READ, 0, 1, &buffer));
+    TEST_ASSERT_TRUE(fake_active_device->io_failed);
+    uint16_t submitted = VirtioBlk__avail(fake_active_device)->idx;
+    fake_direct_dma = true;
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_IO_ERROR,
+                      VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_READ, 1, 1, &buffer));
+    TEST_ASSERT_EQUAL_UINT16(submitted, VirtioBlk__avail(fake_active_device)->idx);
+    TEST_ASSERT_EQUAL_UINT(0, fake_dma_submissions);
 }

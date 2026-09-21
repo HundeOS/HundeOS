@@ -28,6 +28,8 @@ asm_switch_context:
     // --- Memory barrier for clean return ---
     dsb     sy
     isb
+    // A different process may have consumed this core's event before resumption.
+    sevl
     eret
 
 .global asm_switch_kernel_context

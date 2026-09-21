@@ -95,7 +95,10 @@ ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappe
                 none_do_nothing()
             );
         },
-        error(code, message) { return SERVICE_INVALID_BUFFER; }
+        error(code, message)
+        {
+            return SERVICE_INVALID_BUFFER;
+        }
     );
 
     return SERVICE_INVALID_BUFFER;
@@ -133,120 +136,12 @@ ServiceCode service_authorize_block_client(uint64_t client_pid)
     return (ServiceCode)syscall(SERVICE_CALL, SERVICE_AUTHORIZE_BLOCK_CLIENT, client_pid, 0, 0, 0);
 }
 
-ServiceCode service_block_connect(ConstBStringPtr path, ServiceBlockConnectionRequestPtr channel)
+ServiceCode service_authorize_mount_client(uint64_t client_pid)
 {
-    *channel = ServiceBlockConnectionRequest__new(path);
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_BLOCK_CONNECT, (Anything)channel, 0, 0, 0);
+    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_AUTHORIZE_MOUNT_CLIENT, client_pid, 0, 0, 0);
 }
 
-ServiceCode service_block_disconnect(BlockConnectionID connection_id)
-{
-    ServiceBlockDisconnectionRequest request = ServiceBlockDisconnectionRequest__new(connection_id);
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_BLOCK_DISCONNECT, (Anything)&request, 0, 0, 0);
-}
-
-ServiceBlockReadResult service_block_read_device(ConstBStringPtr path, uint64_t block, uint64_t block_count,
-                                                 Address buffer, size_t buffer_size)
-{
-    ServiceBlockReadRequest request = ServiceBlockReadRequest__new(path, block, block_count, buffer, buffer_size);
-    return (ServiceBlockReadResult)syscall(SERVICE_CALL, SERVICE_BLOCK_READ_DEVICE, (Anything)&request, 0, 0, 0);
-}
-
-ServiceBlockReadResult service_block_write_device(ConstBStringPtr path, uint64_t block, uint64_t block_count,
-                                                  Address buffer, size_t buffer_size)
-{
-    ServiceBlockReadRequest request = ServiceBlockReadRequest__new(path, block, block_count, buffer, buffer_size);
-    return (ServiceBlockReadResult)syscall(SERVICE_CALL, SERVICE_BLOCK_WRITE_DEVICE, (Anything)&request, 0, 0, 0);
-}
-
-ServiceBlockReadResult service_block_read_device_async(ConstBStringPtr path, uint64_t block, uint64_t block_count,
-                                                       Address buffer, size_t buffer_size)
-{
-    ServiceBlockReadRequest request = ServiceBlockReadRequest__new(path, block, block_count, buffer, buffer_size);
-    return (ServiceBlockReadResult)syscall(SERVICE_CALL, SERVICE_BLOCK_READ_DEVICE_ASYNC, (Anything)&request, 0, 0, 0);
-}
-
-ServiceBlockReadResult service_block_write_device_async(ConstBStringPtr path, uint64_t block, uint64_t block_count,
-                                                        Address buffer, size_t buffer_size)
-{
-    ServiceBlockReadRequest request = ServiceBlockReadRequest__new(path, block, block_count, buffer, buffer_size);
-    return (ServiceBlockReadResult)syscall(SERVICE_CALL, SERVICE_BLOCK_WRITE_DEVICE_ASYNC, (Anything)&request, 0, 0, 0);
-}
-
-ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPtr request)
-{
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_BLOCK_GET_REQUEST, request_id, (Anything)request, 0, 0);
-}
-
-ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint64_t block_count)
-{
-    ServiceBlockCompletion completion = ServiceBlockCompletion__new(request_id, status, block_count);
-
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_BLOCK_COMPLETE, (Anything)&completion, 0, 0, 0);
-}
-
-ServiceCode service_register_filesystem(ConstBStringPtr device_path, ConstBStringPtr filesystem_type,
-                                        ConstBStringPtr mountpoint)
-{
-    ServiceFilesystemRegistration request =
-        ServiceFilesystemRegistration__new(device_path, filesystem_type, mountpoint);
-
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_REGISTER_FILESYSTEM, (Anything)&request, 0, 0, 0);
-}
-
-ServiceCode service_filesystem_get_request(uint64_t request_id, ServiceFilesystemRequestPtr request)
-{
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_FILESYSTEM_GET_REQUEST, request_id, (Anything)request, 0, 0);
-}
-
-ServiceCode service_filesystem_complete(uint64_t request_id, ServiceCode status, int64_t result)
-{
-    ServiceFilesystemCompletion completion = ServiceFilesystemCompletion__new(request_id, status, result);
-
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_FILESYSTEM_COMPLETE, (Anything)&completion, 0, 0, 0);
-}
-
-ServiceCode service_filesystem_complete_open(uint64_t request_id, ServiceCode status, int64_t result, FileMode mode,
-                                             uint64_t size, uint32_t * blocks)
-{
-    ServiceFilesystemCompletion completion = ServiceFilesystemCompletion__new(request_id, status, result);
-    completion.mode = mode;
-    completion.size = size;
-    for (size_t i = 0; i < 12; i++)
-    {
-        completion.block[i] = blocks[i];
-    }
-
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_FILESYSTEM_COMPLETE, (Anything)&completion, 0, 0, 0);
-}
-
-ServiceCode service_filesystem_complete_open_without_blocks(uint64_t request_id, ServiceCode status, int64_t result,
-                                                            FileMode mode, uint64_t size)
-{
-    ServiceFilesystemCompletion completion = ServiceFilesystemCompletion__new(request_id, status, result);
-    completion.mode = mode;
-    completion.size = size;
-
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_FILESYSTEM_COMPLETE, (Anything)&completion, 0, 0, 0);
-}
-
-ServiceCode service_register_socket_router(void)
-{
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_REGISTER_SOCKET_ROUTER, 0, 0, 0, 0);
-}
-
-ServiceCode service_socket_get_request(uint64_t request_id, IOSocketRouterRequestPtr request)
-{
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_SOCKET_GET_REQUEST, request_id, (Anything)request, 0, 0);
-}
-
-ServiceCode service_socket_complete(uint64_t request_id, IOSocketStatus status, IOHandle result)
-{
-    IOSocketRouterCompletion completion = IOSocketRouterCompletion__new(request_id, status, result);
-    return (ServiceCode)syscall(SERVICE_CALL, SERVICE_SOCKET_COMPLETE, (Anything)&completion, 0, 0, 0);
-}
-
-ServiceCode service_device_address(void * driver_address, Address * device_address)
+ServiceCode service_device_address(void * driver_address, AddressPtr device_address)
 {
     ServiceDeviceAddressRequest request = ServiceDeviceAddressRequest__new((Address)driver_address);
 

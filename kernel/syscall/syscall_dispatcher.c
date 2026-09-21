@@ -13,7 +13,7 @@
 #include "../kernel_core.h"
 #include "../scheduler/scheduler.h"
 
-FixedArrayBodyDefine(Handlers);
+MapBodyDefine(Handlers);
 
 static BString unhandled_syscall = bstr("Unhandled syscall");
 static BString unhandled_syscall_format = bstr("Unhandled syscall %i");
@@ -46,8 +46,14 @@ Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, Sy
 {
     match_result(
         Handlers__set(&self->handlers, syscall, handler),
-        success(_) { return Success(RegisterResult, REGISTER_OK); },
-        error(code, message) { return Error(RegisterResult, message, REGISTER_FAILURE); }
+        success(_)
+        {
+            return Success(RegisterResult, REGISTER_OK);
+        },
+        error(code, message)
+        {
+            return Error(RegisterResult, message, REGISTER_FAILURE);
+        }
     );
 }
 
@@ -60,13 +66,16 @@ Result(SystemCallResult)
                arg1, arg2, arg3, arg4, arg5);
 
     match_optional(
-        Handlers__at(&self->handlers, syscall_id),
+        Handlers__get(&self->handlers, syscall_id),
         some(handler)
         {
             Result(SystemCallResult) handler_result = handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5);
             return SyscallDispatcher__deliver_pending_signal(kernel, process_opt, &handler_result);
         },
-        none() { return Error(SystemCallResult, unhandled_syscall, SYSCALL_FAILURE); }
+        none()
+        {
+            return Error(SystemCallResult, unhandled_syscall, SYSCALL_FAILURE);
+        }
     );
 
     return Error(SystemCallResult, BString__sprintf(&unhandled_syscall_format, syscall_id), SYSCALL_FAILURE);

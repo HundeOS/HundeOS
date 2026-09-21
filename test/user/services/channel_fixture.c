@@ -38,6 +38,8 @@ static uint64_t waits;
 static bool fail_allocation;
 static bool fail_release;
 static bool run_echo;
+static bool connect_as_kernel;
+static QueueParticipantID kernel_origin_pid;
 static void (*fixture_server_step)(void);
 static bool fixture_listener_available;
 static char output[4096];
@@ -47,7 +49,10 @@ static void ChannelFixture__push(QueuePtr queue, ConstQueueMessagePtr message)
 {
     match_result(
         Queue__push(queue, message),
-        success(status) { TEST_ASSERT_EQUAL(QUEUE_OK, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_OK, status);
+        },
         error_test_fail()
     );
 }
@@ -79,6 +84,8 @@ static void ChannelFixture__reset(void)
     fail_allocation = false;
     fail_release = false;
     run_echo = true;
+    connect_as_kernel = false;
+    kernel_origin_pid = 0;
     fixture_server_step = NULL;
     fixture_listener_available = false;
     output_length = 0;
@@ -147,17 +154,20 @@ Result(Queue) Queue__connect(QueueEndpointID endpoint)
             continue;
         }
         *transport = (TestTransport){0};
+        QueueParticipantID client = connect_as_kernel ? QUEUE_KERNEL_PID : current_pid;
+        QueueParticipantID origin = connect_as_kernel ? kernel_origin_pid : current_pid;
         transport->identity = (QueueIdentity){.connection = ++next_generation * QUEUE_LIMIT + index,
                                               .endpoint = endpoint,
-                                              .client_pid = current_pid,
-                                              .server_pid = server};
+                                              .client_pid = client,
+                                              .server_pid = server,
+                                              .origin_pid = origin};
         match_result(QueueConnectionSlots__set(&arrivals->connections, index, transport->identity.connection),
                      success_do_nothing(),
             error_test_fail()
         );
         arrivals->epoch++;
         return Queue__attach(&transport->identity, &transport->client, &transport->server,
-                             transport->identity.connection, current_pid);
+                             transport->identity.connection, client);
     }
     return Error(Queue, bstr("Full"), QUEUE_FULL);
 }
@@ -290,11 +300,25 @@ static Queue ChannelFixture__client(void)
     return queue;
 }
 
+static Queue ChannelFixture__kernel_client(QueueParticipantID origin_pid)
+{
+    connect_as_kernel = true;
+    kernel_origin_pid = origin_pid;
+    Result(Queue) result = Queue__connect(warden_arrivals.endpoint);
+    connect_as_kernel = false;
+    Queue queue = unwrap_result(result, (Queue){0});
+    Queue__wait_writable(&queue);
+    return queue;
+}
+
 static QueueMessage ChannelFixture__receive(QueuePtr queue)
 {
     Queue__wait_readable(queue);
     match_result(Queue__pop(queue),
-        success(message) { return message; },
+        success(message)
+        {
+            return message;
+        },
         error_test_fail()
     );
     return (QueueMessage){0};

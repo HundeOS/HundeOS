@@ -1,5 +1,10 @@
 # Channels and event queues
 
+Channel requests carry generation-tagged tickets with origin and parent identity
+through the warden. Kernel-readable control publications support the
+[preferred dependency scheduler](dependency-scheduling.md), separately from
+application I/O payloads and bulk buffers.
+
 The shared Channel payload and nonblocking client request/reply core live in
 `common/ipc/channel*`. Userspace connection setup and waiting remain in
 `user/lib/channel`. `Channel__try_request` returns `CHANNEL_PENDING` when
@@ -8,7 +13,26 @@ the request cannot yet be queued; it has not started a request in that case.
 its acknowledgement complete. It retains a consumed reply under acknowledgement
 backpressure, so retrying does not consume another reply or repeat the request.
 Callers must retain valid queue and payload mappings throughout each call.
-This shared core does not yet provide kernel endpoint establishment.
+`kernel/ipc/kernel_channel` establishes kernel-client sessions through the same
+warden handshake and shared core. It does not introduce another transport.
+
+Kernel clients have the reserved protected identity `QUEUE_KERNEL_PID`, never
+a caller-selected userspace PID. Their control queues use kernel backing
+addresses; only the server receives userspace mappings. Payload addresses are
+resolved against the managed shared-page registry, checking the warden owner,
+kernel peer, target service PID, bounds, and allocation generation on every
+access. A revoked or recycled mapping fails the request. Scheduler locking
+serializes those checks and accesses with release; no lock spans a context switch.
+Kernel control backing survives server exit until the kernel client closes it.
+The read-only queue identity separately records the kernel-authenticated
+originating process. The warden validates root tickets against that origin and
+forwards it to the target service while retaining `QUEUE_KERNEL_PID` as the
+transport participant.
+
+The executable loader delegates the requesting process PID over this authenticated
+kernel session. The I/O service binds that PID for the session and ignores
+payload identity claims from ordinary clients. Closing the session releases its
+protocol resources through the normal warden/server lifecycle.
 
 This describes the generic IPC primitives and the warden-managed channel
 implementation. Read [queues](queues.md) for the underlying
@@ -224,6 +248,13 @@ returned to the requesting client without replacing existing exchanges.
 
 ## Closure and failure
 
+The agreed bulk-buffer manager is [`hunde-puffer`](shared-buffers.md), separate
+from the Channel warden. It allocates directional buffers, establishes common
+virtual addresses through the kernel, and recycles safely detached backing.
+Protocol opens advertise those buffers over existing Channels. Its lifecycle
+must coordinate with the session and process-exit requirements below. Neither
+the general exit-subscription service nor restart recovery is implemented yet.
+
 ### Required lifecycle contract
 
 A well-behaved client explicitly disposes of buffers and other protocol resources
@@ -299,16 +330,24 @@ handles, submissions and completions.
 
 ## Waiting
 
-The warden uses the existing fibre scheduler. Its dispatch fibre yields after a
-bounded scan; the outer loop waits with `WFE` when no progress was made, then
-wakes the fibre to recheck all arrival, message, closure and retry state.
-`SEVL` initializes the event latch once; transport publication and consumption
-issue `SEV`. The echo server uses the same scan-and-event-wait pattern without
-fibres. No shared aggregate wake word is used as an authority or queue cursor.
+The warden and block runtime run ready fibres before waiting. Their idle paths,
+and the non-fibre service loops, use [queue event waits](queues.md#bounded-waits):
+check shared state, publish the observations, then use `WFE` without a syscall.
+Spurious and unrelated event returns repeat `WFE` while leaving that publication
+armed. Queue progress or a kernel wake generation returns to dispatch. Sends
+complete publication before `SEV`; kernel notification producers advance the wake
+generation first. Timer preemption remains enabled and context restoration sets a
+local event so a resumed waiter rechecks state.
 
-`WFE` is not a kernel scheduler park. Timer preemption still schedules ordinary
-services at the same priority as normal processes. Pending termination can be
-delivered on the owning CPU's timer/context-switch path without another syscall.
+Idle waits now also publish authenticated queue observations through a per-process
+shared control area. Scheduler selection skips unchanged waits until a queue or
+kernel notification becomes ready. Ordinary waits have no periodic retry deadline.
+Setup uses one syscall, but arming and clearing waits do not. A validated dependency
+ancestor may remain warm for the scheduler's bounded residency window.
+
+After an observed change the dispatcher rechecks arrival, message, closure and
+retry state. No shared aggregate wake word is used as an authority or queue cursor,
+and a process must not wait while its fibre scheduler has runnable work.
 
 ## Memory API and remaining work
 
@@ -342,17 +381,20 @@ Remaining limitations:
 ### Block-device protocol
 
 The target block protocol uses a `Channel` for connection lifecycle, block
-requests, block responses, and shared-buffer descriptors. Sector bytes may move
-through separately shared buffers, but a client learns the buffer mapping and
+requests, block responses, and shared-buffer descriptors. Sector bytes must move
+through separate bulk buffers managed by `hunde-puffer`. Clients learn mappings and
 valid range from a channel message. Completion and buffer release are also
 channel messages.
 
 `BlockClient` now contains a real `Channel`. Opening it connects to the block
 service's device-path identifier and obtains its sector count with a describe
-request. Reads and writes reuse the session; transfers larger than 512 bytes
-are split into sector requests. Sector bytes currently travel in the shared
-channel payload itself. Separate advertised bulk buffers and their disposal
-operations remain future work; this path creates no separate block mappings.
+request, which advertises its read/write buffer pair. Reads and writes reuse the
+session and transfer up to 2 MiB per request through these buffers. A protocol
+close releases attachments separately from Channel close. Hardware callbacks
+receive the shared buffer and full sector count: VirtIO transfers directly by
+DMA and SDHCI by PIO. Service-to-service backing is retained until reboot,
+never pooled or reassigned after release or exit; coordinated reclamation is
+deferred. See [Shared buffers](shared-buffers.md#current-release-rules).
 
 VirtIO and SDHCI serve these requests through `BlockServer` and `ChannelServer`.
 The server authenticates the warden and checks the forwarded client's block IO
@@ -363,9 +405,10 @@ the operation. SDHCI retains its existing read-only behavior.
 `BlockClient__close` releases the channel session. FAT32 and EXT2 close it when
 their service loop ends, including startup failure. Transport closure handles
 departed clients; the reliable process-exit stream described above remains work
-to implement. The old `service_block_connect` syscall and its remaining legacy
-callers use `legacy_block_transport.h`; FAT32, EXT2, VirtIO, and SDHCI no longer
-exchange block IO through those rings.
+to implement. The old block transport syscalls, kernel broker, and
+`legacy_block_transport.h` have been deleted. FAT32, EXT2, VirtIO,
+`sdhci_channelio`, and the block demo programs use the existing Channels and
+managed bulk buffers exclusively.
 
 The `fat32fs` and `ext2fs` binaries use channel block sessions exclusively. The
 legacy syscall-backed filesystem binaries and transport-specific filesystem

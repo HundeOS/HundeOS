@@ -33,7 +33,10 @@ void test_match_optional_runs_some_branch(void)
             saw_some = true;
             TEST_ASSERT_EQUAL(MATCH_MACRO_OK, value);
         },
-        none() { saw_none = true; }
+        none()
+        {
+            saw_none = true;
+        }
     );
 
     TEST_ASSERT_TRUE(saw_some);
@@ -46,8 +49,14 @@ void test_match_optional_runs_none_branch(void)
     bool saw_none = false;
 
     match_optional(None(MatchMacroCode),
-        some(value) { saw_some = true; },
-        none() { saw_none = true; }
+        some(value)
+        {
+            saw_some = true;
+        },
+        none()
+        {
+            saw_none = true;
+        }
     );
 
     TEST_ASSERT_FALSE(saw_some);
@@ -74,7 +83,10 @@ void test_match_result_runs_ok_branch(void)
             saw_ok = true;
             TEST_ASSERT_EQUAL(MATCH_MACRO_OK, value);
         },
-        error(code, message) { saw_error = true; }
+        error(code, message)
+        {
+            saw_error = true;
+        }
     );
 
     TEST_ASSERT_TRUE(saw_ok);
@@ -89,7 +101,10 @@ void test_match_result_runs_error_branch(void)
 
     match_result(
         Error(MatchMacroCode, expected, MATCH_MACRO_FAILED),
-        success(value) { saw_ok = true; },
+        success(value)
+        {
+            saw_ok = true;
+        },
         error(code, message)
         {
             saw_error = true;
@@ -115,14 +130,24 @@ void test_critical_section_runs_block(void)
     mutex_t lock = MUTEX_INIT;
     int value = 0;
 
-    critical_section(lock, { value = 7; });
+    critical_section(
+        lock,
+        {
+            value = 7;
+        }
+    );
 
     TEST_ASSERT_EQUAL(7, value);
 }
 
 static int returns_from_critical_section(mutex_t * lock)
 {
-    critical_section(*lock, { cs_return 11; });
+    critical_section(
+        *lock,
+        {
+            cs_return 11;
+        }
+    );
 
     return 0;
 }
@@ -138,7 +163,12 @@ void test_cs_return_unlocks_before_returning(void)
 
 static int exits_from_critical_section(mutex_t * lock)
 {
-    critical_section(*lock, { cs_exit_then(return 13); });
+    critical_section(
+        *lock,
+        {
+            cs_exit_then(return 13);
+        }
+    );
 
     return 0;
 }

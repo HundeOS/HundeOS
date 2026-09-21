@@ -40,6 +40,7 @@ typedef struct UserAddress
 
 typedef KernelAddress * KernelAddressPtr;
 typedef UserAddress * UserAddressPtr;
+typedef const UserAddress * ConstUserAddressPtr;
 
 ResultDef(UserAddress);
 

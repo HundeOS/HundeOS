@@ -2,8 +2,136 @@
 
 #include "../../common_includes/syscalls/spawn.h"
 #include "../exec/exec.h"
+#include "../exec/load.h"
+#include "../scheduler/kernel_context.h"
+#include "../scheduler/parked.h"
+#include "../scheduler/scheduler.h"
 #include "../types/bstring_additional_types.h"
 #include "auth.h"
+
+static BString exec_load_pending = bstr("Executable load pending");
+
+static Result(ProcessPtr) ExecLoad__caller(ParkedOperationPtr parked_operation)
+{
+    match_optional(
+        parked_operation->kernel_context->scheduler,
+        some(scheduler)
+        {
+            match_optional(
+                parked_operation->kernel_context->pid,
+                some(pid)
+                {
+                    match_optional(
+                        Scheduler__find_process_by_pid(scheduler, pid),
+                        some(process)
+                        {
+                            return Success(ProcessPtr, process);
+                        },
+                        none_do_nothing()
+                    );
+                },
+                none_do_nothing()
+            );
+        },
+        none_do_nothing()
+    );
+    return Error(ProcessPtr, bstr("Executable load caller unavailable"), SPAWN_FAILED);
+}
+
+static Result(Anything) ExecLoad__complete_syscall(ParkedOperationPtr parked_operation)
+{
+    match_result(
+        ExecLoad__caller(parked_operation),
+        success(process)
+        {
+            match_result(
+                ExecLoad__continue(process),
+                success(child)
+                {
+                    return Success(Anything, child->pid);
+                },
+                error(code, message)
+                {
+                    if (code != SPAWN_PENDING)
+                    {
+                        return Error(Anything, message, code);
+                    }
+                    SchedulerPtr scheduler = process->kernel->scheduler;
+                    match_result(
+                        Scheduler__park_with_context_ownership(scheduler, process, parked_operation->kernel_context,
+                                                               &Some(Continuation, ExecLoad__complete_syscall),
+                                                               PARK_WAIT_EXEC_LOAD, true),
+                        success(parked)
+                        {
+                            parked_operation->owns_kernel_context = false;
+                            return Success(Anything, 0);
+                        },
+                        error(park_code, park_message)
+                        {
+                            return Error(Anything, park_message, park_code);
+                        }
+                    );
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(Anything, message, code);
+        }
+    );
+    return Error(Anything, bstr("Executable load continuation failed"), SPAWN_FAILED);
+}
+
+static Result(SystemCallResult)
+    ExecLoad__start_syscall(ProcessPtr process, ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,
+                            OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments, ConstSpawnStdioPtr stdio)
+{
+    match_result(
+        ExecLoad__begin(context, path, wait, user, arguments, stdio),
+        success(child)
+        {
+            return Success(SystemCallResult, child->pid);
+        },
+        error(code, message)
+        {
+            if (code != SPAWN_PENDING)
+            {
+                return Error(SystemCallResult, message, code);
+            }
+        }
+    );
+    match_result(
+        ExecLoad__continue(process),
+        success(child)
+        {
+            return Success(SystemCallResult, child->pid);
+        },
+        error(code, message)
+        {
+            if (code != SPAWN_PENDING)
+            {
+                return Error(SystemCallResult, message, code);
+            }
+        }
+    );
+    KernelContextPtr kernel_context = KernelContext__from_originating_context_heap(context);
+    match_result(
+        Scheduler__park_with_context_ownership(process->kernel->scheduler, process, kernel_context,
+                                               &Some(Continuation, ExecLoad__complete_syscall), PARK_WAIT_EXEC_LOAD,
+                                               true),
+        success(parked)
+        {
+            return Error(SystemCallResult, exec_load_pending, SYSCALL_IO_BLOCK);
+        },
+        error(code, message)
+        {
+            KernelContext__dispose_heap(kernel_context);
+            ExecLoad__cancel(process);
+            return Error(SystemCallResult, message, code);
+        }
+    );
+    return Error(SystemCallResult, exec_load_pending, SPAWN_FAILED);
+}
 
 Result(SystemCallResult) Exec__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
                                        Anything arg3, Anything arg4, Anything arg5)
@@ -11,13 +139,31 @@ Result(SystemCallResult) Exec__handler(KernelPtr kernel, OptionalPtr(ProcessPtr)
     return ExecRequest__handler(kernel, proc, arg1, arg2, arg3, arg4, arg5);
 }
 
-Result(SystemCallResult) ExecRequest__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                              Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+static Result(SystemCallResult)
+    ExecRequest__execute(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                         Anything arg4, Anything arg5, bool bootstrap)
 {
     if (arg1 == 0)
     {
         return Error(SystemCallResult, bstring("Invalid exec request"), SPAWN_FAILED);
     }
+
+    ProcessPtr process;
+    match_optional(
+        *proc,
+        some(value)
+        {
+            process = value;
+            if (!is_nothing(process->exec_load))
+            {
+                return Error(SystemCallResult, bstr("Executable load already pending"), SPAWN_FAILED);
+            }
+        },
+        none()
+        {
+            return Error(SystemCallResult, bstr("No process"), AUTH_NO_PROCESS);
+        }
+    );
 
     SpawnRequestPtr request = (SpawnRequestPtr)arg1;
 
@@ -26,13 +172,22 @@ Result(SystemCallResult) ExecRequest__handler(KernelPtr kernel, OptionalPtr(Proc
 
     ProcessArguments arguments = ProcessArguments__new();
     SpawnArguments requested_arguments = request->arguments;
-    for_each_fa(SpawnArguments, requested_arguments, argument_index, argument, {
-        match_result(
-            ProcessArguments__push(&arguments, argument),
-            success_do_nothing(),
-            error(code, message) { return Error(SystemCallResult, message, SPAWN_ARG_TOO_LONG); }
-        );
-    });
+    for_each_fa(
+        SpawnArguments,
+        requested_arguments,
+        argument_index,
+        argument,
+        {
+            match_result(
+                ProcessArguments__push(&arguments, argument),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, SPAWN_ARG_TOO_LONG);
+                }
+            );
+        }
+    );
 
     CallContext call_context = CallContext__new(proc, EXEC, arg1, arg2, arg3, arg4, arg5);
     OriginatingContext originating_context = OriginatingContext__syscall(kernel, &call_context);
@@ -53,13 +208,24 @@ Result(SystemCallResult) ExecRequest__handler(KernelPtr kernel, OptionalPtr(Proc
                         requested_user_id = Some(UserID, user_id);
                         ;
                     },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
             },
-            none() { return Error(SystemCallResult, bstring("No process"), AUTH_NO_PROCESS); }
+            none()
+            {
+                return Error(SystemCallResult, bstring("No process"), AUTH_NO_PROCESS);
+            }
         );
     }
 
+    if (!bootstrap)
+    {
+        return ExecLoad__start_syscall(process, &originating_context, &request->path, wait, &requested_user_id,
+                                       &arguments, &request->stdio);
+    }
     Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(&originating_context, &request->path, wait,
                                                                       &requested_user_id, &arguments, &request->stdio);
     match_result(
@@ -78,4 +244,64 @@ Result(SystemCallResult) ExecRequest__handler(KernelPtr kernel, OptionalPtr(Proc
     );
 
     return Error(SystemCallResult, bstring("Exec request handler failed"), SPAWN_FAILED);
+}
+
+Result(SystemCallResult) ExecRequest__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                              Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+{
+    return ExecRequest__execute(kernel, proc, arg1, arg2, arg3, arg4, arg5, false);
+}
+
+static bool Boot__authorized(KernelPtr kernel, OptionalPtr(ProcessPtr) proc)
+{
+    match_optional(
+        *proc,
+        some(process)
+        {
+            return kernel->boot_authority != 0 && kernel->boot_authority == process->pid &&
+                   !__atomic_load_n(&kernel->boot_complete, __ATOMIC_ACQUIRE);
+        },
+        none()
+        {
+            return false;
+        }
+    );
+}
+
+Result(SystemCallResult) BootSpawn__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                            Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+{
+    if (!Boot__authorized(kernel, proc))
+    {
+        return Error(SystemCallResult, bstr("Bootstrap authority unavailable"), SPAWN_FAILED);
+    }
+    return ExecRequest__execute(kernel, proc, arg1, arg2, arg3, arg4, arg5, true);
+}
+
+Result(SystemCallResult) BootComplete__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                               Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+{
+    if (!Boot__authorized(kernel, proc))
+    {
+        return Error(SystemCallResult, bstr("Bootstrap authority unavailable"), SPAWN_FAILED);
+    }
+    SchedulerPtr scheduler = kernel->scheduler;
+    critical_section(
+        scheduler->scheduler_lock,
+        {
+            ServiceDirectoryPtr directory = KernelServiceDirectory__kernel_directory(&kernel->service_directory);
+            if (is_nothing(ServiceDirectory__find_endpoint(directory, &bstr(IO_SYSTEM_SERVICE))) ||
+                is_nothing(ServiceDirectory__find_endpoint(directory, &bstr(IO_FILESYSTEM_SERVICE))) ||
+                is_nothing(ServiceDirectory__find_endpoint(directory, &bstr(CHANNEL_WARDEN_SERVICE_NAME))) ||
+                is_nothing(ServiceDirectory__find_endpoint(directory, &bstr(BUFFER_SERVICE_NAME))) ||
+                is_nothing(ServiceDirectory__find_endpoint(directory, &bstr("/sbin"))) ||
+                is_nothing(ServiceDirectory__find_endpoint(directory, &bstr("/boot"))) ||
+                is_nothing(ServiceDirectory__find_endpoint(directory, &bstr("/boot/config"))))
+            {
+                cs_return Error(SystemCallResult, bstr("Bootstrap services unavailable"), SPAWN_FAILED);
+            }
+            __atomic_store_n(&kernel->boot_complete, true, __ATOMIC_RELEASE);
+        }
+    );
+    return Success(SystemCallResult, SPAWN_SUCCESS);
 }

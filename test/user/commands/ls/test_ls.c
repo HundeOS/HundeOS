@@ -35,43 +35,16 @@ void tearDown(void)
 {
 }
 
-static void copy_text(char * target, const char * source, uint64_t target_size)
+IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset)
 {
-    uint64_t position = 0;
-    while (position + 1 < target_size && source[position] != '\0')
+    TEST_ASSERT_EQUAL(IO_REQUEST_LIST_DIR, operation);
+    BString__copy_to(path, requested_path, sizeof(requested_path));
+    IOReply reply = IOReply__new(fake_result < 0 ? fake_result : IO_OK, offset < fake_count ? 1 : 0);
+    if (offset < fake_count)
     {
-        target[position] = source[position];
-        position++;
+        reply.entry = fake_entries[offset];
     }
-    target[position] = '\0';
-}
-
-Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
-{
-    TEST_ASSERT_EQUAL(IO_CALL, call);
-    TEST_ASSERT_EQUAL(IO_LIST_DIR, arg1);
-    IOListDirRequestPtr request = (IOListDirRequestPtr)arg2;
-    copy_text(requested_path, BString__cstr(&request->path), sizeof(requested_path));
-
-    if (fake_result < 0)
-    {
-        return fake_result;
-    }
-
-    DirectoryEntryPtr entries = request->entries;
-    uint64_t max_entries = request->max_entries;
-    uint64_t count = fake_count;
-    if (count > max_entries)
-    {
-        count = max_entries;
-    }
-
-    for (uint64_t i = 0; i < count; i++)
-    {
-        entries[i] = fake_entries[i];
-    }
-
-    return (Anything)count;
+    return reply;
 }
 
 void IO__print(ConstBStringPtr message)
@@ -156,4 +129,44 @@ void test_ls_a_hides_dot_entries_unless_requested(void)
     char * all_argv[] = {"ls", "-a", "/"};
     TEST_ASSERT_EQUAL_INT(0, ls_main_under_test(3, all_argv));
     TEST_ASSERT_EQUAL_STRING(".hidden\nshown\n", output);
+}
+
+IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
+{
+    if (!BString__starts_with(path, &bstr(IO_SOCKET_SCHEME)))
+    {
+        return IO_PATH_UNMANAGED;
+    }
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return -1;
+}
+
+IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
+{
+    TEST_FAIL_MESSAGE("Unexpected filesystem link");
+    return IO_OPERATION_NOT_SUPPORTED;
+}
+
+IOHandle IOClient__accept(IOHandle handle)
+{
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return -1;
+}
+
+IOStatus IOClient__close(IOHandle handle)
+{
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return IO_UNKNOWN_HANDLE;
+}
+
+ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
+{
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return -1;
+}
+
+ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
+{
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return -1;
 }

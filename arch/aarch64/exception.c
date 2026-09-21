@@ -13,6 +13,7 @@
 #include "../../kernel/irq/irq_dispatcher.h"
 #include "../../kernel/syscall/syscall_dispatcher.h"
 #include "../../kernel/types/optional.h"
+#include "ipc/ipc_platform.h"
 
 #define CPU_POKE_SGI 1U
 
@@ -89,6 +90,10 @@ void irq_handler(ProcessContextPtr context, bool current_el)
         IRQDispatcher__dispatch(kernel->irq_dispatcher, id, &dispatch_context),
         success(status)
         {
+            if (id != PPI_CNTV && id != PPI_CNTP)
+            {
+                IpcPlatform__signal_event();
+            }
             if (id >= 32)
             {
                 __d_printf(IODEV, "irq dispatch id=%i status=%i\n", id, status);
@@ -103,7 +108,10 @@ void irq_handler(ProcessContextPtr context, bool current_el)
                 Scheduler__preempt(kernel->scheduler, cpu, context);
             }
         },
-        error(code, message) { __d_printf(UNHANDLED, "irq dispatch error %i for irq %i\n", code, id); }
+        error(code, message)
+        {
+            __d_printf(UNHANDLED, "irq dispatch error %i for irq %i\n", code, id);
+        }
     );
 }
 
@@ -129,12 +137,18 @@ static uint64_t abort_user_process(KernelPtr kernel, OptionalPtr(ProcessPtr) cur
             abort.cpu = CPU__id();
 
             match_result(
-                Scheduler__abort_process(kernel->scheduler, kernel->io_subsystem, process, abort),
+                Scheduler__abort_process(kernel->scheduler, process, abort),
                 success_do_nothing(),
-                error(code, message) { Kernel__panic(cstr(message), context); }
+                error(code, message)
+                {
+                    Kernel__panic(cstr(message), context);
+                }
             );
         },
-        none() { Kernel__panic("User exception without a current process", context); }
+        none()
+        {
+            Kernel__panic("User exception without a current process", context);
+        }
     );
 
     return 0;

@@ -11,6 +11,12 @@ IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr pat
     return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
 }
 
+IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
+{
+    TEST_FAIL_MESSAGE("Unexpected filesystem link");
+    return IO_OPERATION_NOT_SUPPORTED;
+}
+
 #include "../../../../common_includes/syscalls/calls.h"
 #include "../../../../common_includes/syscalls/io.h"
 

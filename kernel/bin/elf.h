@@ -198,6 +198,7 @@ typedef Elf * ElfPtr;
 typedef const Elf * ConstElfPtr;
 
 ResultDef(Elf);
+Result(Elf) Elf__validate(ConstElfPtr self);
 ResultDef(ElfPtr);
 OptionalDef(Elf);
 OptionalDef(ElfPtr);

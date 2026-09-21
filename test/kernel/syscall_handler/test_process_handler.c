@@ -25,7 +25,10 @@ static bool scheduler_contains_process(ProcessID pid)
 {
     match_optional(
         Scheduler__find_process_by_pid(kernel->scheduler, pid),
-        some(process) { return true; },
+        some(process)
+        {
+            return true;
+        },
         none_do_nothing()
     );
 
@@ -37,7 +40,7 @@ void setUp(void)
     test_cpu_time_usec = 0;
     clear_panic_state();
     reset_system_state();
-    kernel = init_test_kernel_without_filesystem();
+    kernel = init_test_kernel();
     Init__syscalls(&kernel->syscall_dispatcher);
 }
 
@@ -50,9 +53,9 @@ void test_process_list_handler_returns_scheduled_processes(void)
 {
     ProcessPtr init = dummy_process(1, cpu, PROC_STATE_READY);
     ProcessPtr driver = dummy_process(2, cpu, PROC_STATE_READY);
-    CPUUsage__start(&driver->cpu_usage);
+    CPUUsage__start(&driver->cpu_usage, test_cpu_time_usec, 0);
     test_cpu_time_usec = 10000;
-    CPUUsage__stop(&driver->cpu_usage);
+    CPUUsage__stop(&driver->cpu_usage, test_cpu_time_usec, 0);
     driver->process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(driver);
     ProcessPtr ready_waiter = dummy_process(3, cpu, PROC_STATE_READY);
@@ -111,6 +114,38 @@ void test_process_list_handler_returns_scheduled_processes(void)
     );
 }
 
+void test_process_list_observes_child_wait_without_registry_timer_refresh(void)
+{
+    ProcessPtr shell = dummy_process(40, cpu, PROC_STATE_READY);
+    ProcessPtr child = dummy_process(41, cpu, PROC_STATE_READY);
+    Scheduler__schedule_on_cpu(kernel->scheduler, shell, cpu);
+    Scheduler__schedule_on_cpu(kernel->scheduler, child, cpu);
+    shell->state = PROC_STATE_RUNNING;
+    KernelContext context = KernelContext__new(&Some(ProcessID, shell->pid), &Some(SchedulerPtr, kernel->scheduler));
+    match_result(Scheduler__park(kernel->scheduler, shell, &context, &None(Continuation), PARK_WAIT_CHILD),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    child->state = PROC_STATE_RUNNING;
+    ProcessInfo entries[3];
+    ProcessListRequest request = ProcessListRequest__new(entries, 3);
+    match_result(
+        ProcessList__handler(kernel, Some(ProcessPtr, child), (Anything)&request, 0, 0, 0, 0),
+        success(count)
+        {
+            TEST_ASSERT_EQUAL_UINT64(3, count);
+            TEST_ASSERT_EQUAL_UINT64(shell->pid, entries[1].pid);
+            TEST_ASSERT_EQUAL_STRING("PROC_STATE_WAITING", entries[1].state);
+            TEST_ASSERT_EQUAL_STRING("PARK_WAIT_CHILD", entries[1].wait_reason);
+            TEST_ASSERT_EQUAL_UINT64(child->pid, entries[2].pid);
+            TEST_ASSERT_EQUAL_STRING("PROC_STATE_RUNNING", entries[2].state);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(mutex_trylock(&kernel->scheduler->scheduler_lock));
+    mutex_unlock(&kernel->scheduler->scheduler_lock);
+}
+
 void test_process_list_handler_respects_entry_limit(void)
 {
     ProcessPtr first = dummy_process(1, cpu, PROC_STATE_READY);
@@ -144,7 +179,10 @@ void test_process_list_handler_rejects_missing_request(void)
     match_result(
         ProcessList__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_LIST_INVALID_ARGUMENT, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_LIST_INVALID_ARGUMENT, code);
+        }
     );
 }
 
@@ -174,19 +212,28 @@ void test_process_credentials_rejects_missing_pid_and_invalid_arguments_without_
     match_result(
         ProcessCredentials__handler(kernel, &None(ProcessPtr), 99999, (Anything)&credentials, 0, 0, 0),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_NOT_FOUND, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_NOT_FOUND, code);
+        }
     );
     TEST_ASSERT_EQUAL(123, credentials.user_id);
     TEST_ASSERT_EQUAL(456, credentials.group_id);
     match_result(
         ProcessCredentials__handler(kernel, &None(ProcessPtr), 0, (Anything)&credentials, 0, 0, 0),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_INVALID_ARGUMENT, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_INVALID_ARGUMENT, code);
+        }
     );
     match_result(
         ProcessCredentials__handler(kernel, &None(ProcessPtr), 1, 0, 0, 0, 0),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_INVALID_ARGUMENT, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_INVALID_ARGUMENT, code);
+        }
     );
 }
 
@@ -241,7 +288,10 @@ void test_signal_handler_queues_running_process_until_next_syscall_boundary(void
             TEST_ASSERT_FALSE(Process__has_pending_signal(target));
             TEST_ASSERT_FALSE(scheduler_contains_process(target->pid));
         },
-        error(code, message) { TEST_FAIL_MESSAGE(BString__cstr(&message)); }
+        error(code, message)
+        {
+            TEST_FAIL_MESSAGE(BString__cstr(&message));
+        }
     );
 }
 
@@ -256,7 +306,10 @@ void test_signal_handler_rejects_unsupported_signal(void)
     match_result(
         Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)target->pid, (Anything)99, 0, 0, 0),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_SIGNAL_UNSUPPORTED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_UNSUPPORTED, code);
+        }
     );
 }
 
@@ -272,7 +325,10 @@ void test_process_wait_child_event_handler_returns_queued_child_event(void)
     Scheduler__schedule(kernel->scheduler, parent);
     match_result(
         Process__push_child_event(parent, &event),
-        success(result) { TEST_ASSERT_EQUAL_UINT8(0, result); },
+        success(result)
+        {
+            TEST_ASSERT_EQUAL_UINT8(0, result);
+        },
         error_test_fail()
     );
 

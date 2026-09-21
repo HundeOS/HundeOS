@@ -48,4 +48,7 @@ Result(SpawnResult) OS__spawn_with_stdio_argv(SpawnMode mode, ConstBStringPtr pa
                                               SpawnFileDescriptor stdout_fd, SpawnFileDescriptor stderr_fd,
                                               ConstSpawnArgumentsPtr arguments);
 
+Result(SpawnResult) OS__boot_spawn(ConstBStringPtr path, OptionalPtr(BString) arg0, OptionalPtr(BString) arg1,
+                                   OptionalPtr(BString) arg2);
+Result(SpawnResult) OS__boot_complete(void);
 #endif

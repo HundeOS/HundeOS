@@ -42,6 +42,10 @@ USER_LDFLAGS = -nostdlib -Wl,-e,_start
 KERNEL_BUILD_DIR = build/$(BOOT_PLATFORM)/kernel
 ELF = build/$(BOOT_PLATFORM)/kernel.elf
 BIN = build/$(BOOT_PLATFORM)/kernel.img
+HVF_TRACE_KERNEL_BUILD_DIR = build/qemu_virt_trace/kernel
+HVF_TRACE_ELF = build/qemu_virt_trace/kernel.elf
+TCG_ICOUNT_TRACE_KERNEL_BUILD_DIR = build/qemu_virt_tcg_icount_trace/kernel
+TCG_ICOUNT_TRACE_ELF = build/qemu_virt_tcg_icount_trace/kernel.elf
 EFI = build/$(BOOT_PLATFORM)/kernel.efi
 EFI_ESP_IMG = build/$(BOOT_PLATFORM)/esp.img
 PI_UEFI_EFI = build/pi_uefi/BOOTAA64.EFI
@@ -542,8 +546,8 @@ qemu-virt-hvf-trace:
 	$(MAKE) $(SD_CARD_FAT32_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
 	$(MAKE) $(CHANNELIO_EXT2_IMG)
-	rm -rf $(KERNEL_BUILD_DIR) $(ELF)
-	$(MAKE) CFLAGS="$(CFLAGS) -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE" $(ELF)
+	$(MAKE) KERNEL_BUILD_DIR="$(HVF_TRACE_KERNEL_BUILD_DIR)" ELF="$(HVF_TRACE_ELF)" \
+		CFLAGS="$(CFLAGS) -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE -DKERNEL_LOW_VOLUME_TRACE" $(HVF_TRACE_ELF)
 	mkdir -p build
 	: > build/kernel-trace.log
 	qemu-system-aarch64 \
@@ -565,9 +569,47 @@ qemu-virt-hvf-trace:
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
-		-kernel $(ELF) \
+		-kernel $(HVF_TRACE_ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait
+
+qemu-virt-tcg-icount-trace: BOOT_CONFIG = qemu_virt_hvf
+qemu-virt-tcg-icount-trace:
+	$(MAKE) $(DISK_IMG)
+	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
+	$(MAKE) build/boot_config/qemu_virt_hvf.img
+	$(MAKE) $(SD_CARD_FAT32_IMG)
+	$(MAKE) $(CHANNELIO_DISK_IMG)
+	$(MAKE) $(CHANNELIO_EXT2_IMG)
+	$(MAKE) KERNEL_BUILD_DIR="$(TCG_ICOUNT_TRACE_KERNEL_BUILD_DIR)" ELF="$(TCG_ICOUNT_TRACE_ELF)" \
+		CFLAGS="$(CFLAGS) -DBSP_WFE_WAIT -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE -DKERNEL_LOW_VOLUME_TRACE" \
+		$(TCG_ICOUNT_TRACE_ELF)
+	mkdir -p build
+	: > build/kernel-trace.log
+	qemu-system-aarch64 \
+		-M virt,gic-version=3 \
+		-accel tcg,thread=single \
+		-icount shift=auto,sleep=on \
+		-smp cpus=4 \
+		-cpu cortex-a57 \
+		-m 4G \
+		-serial $(SERIAL) \
+		-serial file:build/kernel-trace.log \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
+		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=build/boot_config/qemu_virt_hvf.img,format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
+		-device virtio-blk-device,drive=sd0 \
+		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
+		-device virtio-blk-device,drive=channelio0 \
+		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
+		-device virtio-blk-device,drive=channelio1 \
+		-kernel $(TCG_ICOUNT_TRACE_ELF) \
+		-nographic \
+		-monitor none
 
 qemu-virt-1cpu: BOOT_CONFIG = qemu_virt
 qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
@@ -690,4 +732,4 @@ qemu-virt-gdb: clean $(ELF)
 		-S \
 		-gdb tcp::1234
 
-.PHONY: all clean setup python-venv disk sd-fat32-disk ext2-disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-hvf qemu-virt-hvf-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace test hundelint hundelint-strict hundelint-test test_clean
+.PHONY: all clean setup python-venv disk sd-fat32-disk ext2-disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-hvf qemu-virt-hvf-trace qemu-virt-tcg-icount-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace test hundelint hundelint-strict hundelint-test test_clean

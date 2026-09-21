@@ -11,7 +11,7 @@ static _Alignas(4096) uint8_t archive[4096];
 
 void setUp(void)
 {
-    kernel = init_test_kernel_without_filesystem();
+    kernel = init_test_kernel();
     process = dummy_process(20, 0, PROC_STATE_READY);
     process->name = bstr(EMBEDDED_FS_DRIVER);
     memset(archive, 0, sizeof(archive));
@@ -57,7 +57,10 @@ void test_invalid_archive_does_not_get_mapped(void)
     match_result(
         EmbeddedArchive__map_process(process),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_FAILED_TO_SETUP, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_FAILED_TO_SETUP, code);
+        }
     );
     TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
                                            false, false, sizeof(archive)));
@@ -77,6 +80,9 @@ void test_partial_last_page_is_not_exposed_to_userspace(void)
     match_result(
         EmbeddedArchive__map_process(process),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(PROCESS_FAILED_TO_SETUP, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_FAILED_TO_SETUP, code);
+        }
     );
 }

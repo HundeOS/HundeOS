@@ -12,25 +12,14 @@ manifest:
     - kernel/spin.c
     - kernel/print.c
     - kernel/system_info.c
+    - kernel/boot_info.c
     - kernel/types/*.c
     - kernel/scheduler/*.c
     - kernel/service/*.c
     - kernel/ipc/*.c
-    - kernel/subsystems/message/*.c
-    - kernel/subsystems/io/*.c
-    - kernel/subsystems/io/block/*.c
-    - kernel/subsystems/io/file/*.c
-    - kernel/subsystems/io/file/devfs/*.c
-    - test/kernel/fixtures/embedded/*.c
-    - test/kernel/fixtures/memfs/*.c
-    - kernel/subsystems/io/file/bootfs/*.c
-    - kernel/subsystems/io/console/*.c
-    - kernel/subsystems/io/stream/*.c
-    - kernel/subsystems/io/socket/*.c
     - kernel/syscall_handler.c
     - kernel/mutex.c
-    - kernel/exec/exec.c
+    - kernel/exec/*.c
     - kernel/heap.c
     - kernel/memory_page.c
     - kernel/context/*.c
-    - kernel/kio/*.c

@@ -1,5 +1,14 @@
 # Queues
 
+Kernel executable-loader clients use the same protected connection transport.
+`QUEUE_KERNEL_PID` is reserved for connections created by `Queues__connect_kernel`;
+userspace cannot request that identity. The kernel retains backing addresses while
+the server receives its usual protected mappings. Kernel-held backing is released
+only after both endpoints detach. The warden may allocate a shared payload with
+this reserved peer only while it has a live kernel connection. Allocation
+generations distinguish reused shared-page slots. See
+[kernel Channel clients](channels-and-event-queues.md) for access checks.
+
 `Queue` is an internal transport primitive used to implement `Channel`. It is
 not a service-facing bidirectional IPC abstraction. Application protocols must
 use `Channel` and must not expose queue handles, queue messages, cursors, or
@@ -22,6 +31,180 @@ the warden currently uses a bounded multi-connection scan around fibre/event wai
 This foundation is a prerequisite for authenticated services such as
 [`hund-unterbrict`](interrupt-service.md), not an implementation of IRQ routing
 or token authorization.
+
+## Bounded Waits
+
+Userspace helpers use `WFE` after checking authoritative queue state, without a
+per-wait kernel parking syscall. The first queue registration obtains a private
+shared wait-control allocation through `SERVICE_QUEUE_WAIT_CONTROL`. Idle paths
+publish snapshots there before `WFE`. Spurious and unrelated event returns leave
+the publication armed and repeat `WFE`; queue progress, connection closure, or a
+kernel wake generation returns to the dispatcher and clears it. The scheduler
+excludes an ordinary process with unchanged observations. If no eligible process
+exists, it selects the CPU's idle process rather than retaining the waiter.
+
+The control allocation persists until process exit and cannot be explicitly freed
+or shared with another process. Observations contain handles, not kernel-followed
+user pointers. The kernel authenticates each handle, reads atomic records, and
+rechecks the publication generation. Invalid, incomplete, or changing records
+leave the process runnable. No allocation or deferred syscall occurs on each wait.
+Ordinary shared waits have no periodic retry deadline. Kernel notification
+producers increment the control's wake generation before broadcasting `SEV`, so
+both a resident waiter and the scheduler can distinguish real kernel work from an
+unrelated architectural event.
+
+This gates each transport hop on its actual queue progress. Explicit propagated
+IRQ tokens, hop numbers, stage acknowledgements, and operation-timeout results
+remain to be implemented; this is not a complete implementation of that protocol.
+
+### Receiver Scheduling Priority
+
+The [ticket-aware preferred run queue](dependency-scheduling.md) extends this
+policy with authenticated parent links, cross-CPU FIFO selection, and residency.
+The readiness checks below also support fallback selection.
+
+At process selection, runnable processes with unread incoming messages rank above
+all runnable processes without messages, including realtime-class processes.
+The preferred FIFO is selected first; class and longest-waiting ordering applies
+to fallback selection. Preferred processing can continue after dequeue, up to
+its budget or next shared wait. A ticketed predecessor may retain its CPU through
+a short warm wait. Kernel-blocked processes do not become runnable merely because
+a message exists.
+
+The kernel checks its existing queue backing mappings, comparing the sender's
+published cursor with the receiver's acknowledgement on the opposite page.
+Only live, accepted connections with a pending count within queue capacity count.
+The check applies symmetrically to requests, replies, and warden relay messages,
+without interpreting message kinds. Pending service events and the IRQ/buffer
+manager notification queues also qualify. An unchanged shared-wait publication
+takes precedence over unread transport messages: a process synchronously waiting
+on one Channel may be unable to handle messages on another. Only progress in its
+published observations or pending kernel notifications/signals makes it eligible
+again, except for a validated ticket's bounded warm dispatch. Consuming the last
+message removes unread-message eligibility but does not end an already dispatched
+process's preferred processing budget.
+
+This is strict receiver priority: sustained unread traffic can starve processes
+without messages. Shared cursor values remain untrusted scheduling hints, not
+proof of useful work. Selection observes activity at existing scheduler entry
+points; publication does not introduce a reschedule interrupt. Preferred
+selection now supports cross-CPU migration. Tests cover receiver direction, consumption, cursor bounds/wraparound,
+shared waits, timer retention, yielding, and blocked-process eligibility,
+including an unrelated unread message while waiting on a second Channel.
+The wait-precedence correction passed two four-core traced QEMU boots to login;
+an interactive run also completed login, `ls /boot`, and `ps`. This verifies
+startup progress, not a throughput improvement.
+
+Publication completes with `DSB ISHST` before `SEV`.
+An event arriving between the check and `WFE` remains pending. Event and arrival
+waits return only when an authoritative observation changes or the kernel advances
+the wake generation. Synchronous readable/writable waits use the same rule and
+recheck until ready or closed. Events may be coalesced or spurious: they are never
+a message count and do not by themselves cause another dispatch scan.
+
+Device IRQ dispatch broadcasts an event after the handler publishes state.
+Timer preemption remains enabled, without a global broadcast on every tick.
+Context restoration sets the local event latch with `SEVL`, allowing resumed
+waiters to recheck even if another process consumed an earlier event on that CPU.
+Ready fibres run before idle waits. `WFE` is not a scheduler yield and does not
+make kernel-parked processes runnable. There is no 20-microsecond WFE deadline.
+The kernel wait syscall and diagnostics remain available for explicit callers;
+normal event waits do not increment park counters.
+
+Boot hardware information selects whether the architecture wait primitive uses
+`WFE` or an active `YIELD` recheck. Hardware and the single-threaded TCG icount
+trace target use `WFE`; HVF and ordinary MTTCG use the spin mode because their
+event-wait behavior does not provide the required sleep semantics. The
+`qemu-virt-tcg-icount-trace` target exposes four guest CPUs but serializes them
+on one host TCG thread, so it is suitable for wait behavior and scheduler traces,
+not parallel-throughput measurements.
+
+The stable publication includes a userspace `CNTVCT_EL0` timestamp taken when
+the wait is committed. Process snapshots report `USER_WAIT` and its elapsed
+monotonic duration only while the kernel also validates that the publication is
+stable and its authoritative observations remain unchanged. The timestamp is
+diagnostic-only and does not influence selection or CPU accounting.
+
+The former hybrid design and retained kernel parking syscall are described below.
+
+### Isolated Timeout Probe
+
+Run `queue_wait_probe 1` and `queue_wait_probe 10` to exercise only the calling
+process's kernel wait, leaving all services in userspace event-wait mode. The optional argument
+is a timeout in scheduler ticks (1 through 100; default 10). Each run makes 16
+wait syscalls with an empty observation list and prints one summary afterward.
+Timeout samples are timed from userspace immediately before the syscall to
+userspace immediately after it returns; the minimum, average, and maximum are
+in microseconds. Activity returns and failures are counted separately and do not
+contribute to timeout durations. There is no per-sample console output.
+
+This measures the complete timeout-call path, including entry, parking,
+scheduling, and deferred completion. It does not measure message publication to
+wake detection, nor reproduce every service parking concurrently. Keep the same
+QEMU target and tracing settings when comparing runs.
+
+After the timed calls, the probe waits up to five seconds for a fresh read-only
+process-registry sample and prints its kernel park and runnable totals. This
+sampling wait is userspace polling and excluded from call durations. Verify
+`kernel_parks`, `kernel_timeouts`, and `kernel_selections` equal 16 and activity
+is zero before comparing these totals with the timeout-call total. Subtraction
+gives time outside the recorded parked/runnable intervals, not an attribution to
+one kernel function; it includes entry/completion work and possible preemption
+around the userspace timing boundaries.
+
+#### SDHCI Trace Measurement
+
+On 2026-09-18, `qemu-pi-uefi-firmware-trace` with all services polling and only
+the probe parking produced the following averages over 16 calls. Both probe
+processes were assigned CPU 0; every call timed out, with no activity or errors.
+
+| Requested ticks | Full call (ms) | Parked (ms) | Runnable (ms) | Outside counters (ms) |
+| --- | --- | --- | --- | --- |
+| 1 | 20.376 | 2.063 | 0.324 | 17.988 |
+| 10 | 42.164 | 22.643 | 0.328 | 19.194 |
+
+The one-tick totals were 326010 call, 33010 parked, and 5188 runnable microseconds.
+The ten-tick totals were 674622 call, 362284 parked, and 5240 runnable microseconds.
+The existing trace shows each park allocating 72-, 104-, and 24-byte objects,
+each backed by one page, and freeing them on completion. Allocation, trace output,
+and entry/completion paths warrant separate measurement; these results do not
+prove which dominates. Queue-publication-to-detection latency remains unmeasured.
+This is not an all-services-parking comparison or a claim about untraced hardware.
+
+### Former Hybrid Design
+
+This records the comparison baseline, not the current userspace wait path.
+Only its kernel parking syscall remains implemented.
+
+Channels retain their existing transport. `Queue__prepare_wait` snapshots peer
+publication/consumption cursors, accepted/closed flags, and listener epochs before
+the dispatch scan. `Queue__wait_event` polls those values for up to 20 microseconds,
+then calls `SERVICE_QUEUE_WAIT` with the observed values. It refreshes the snapshot
+before returning, supporting event loops that prepare once before their first scan.
+Opening or closing a local endpoint invalidates the snapshot and forces another
+scan before parking. Synchronous readable/writable waits watch their own connection
+and retry the predicate in userspace after every timed park, preserving the blocking
+contract used by Channel setup. A timeout is not mistaken for an empty/full error.
+
+The syscall authenticates every full-generation handle against the calling process,
+copies observations from tracked readable allocations, and rechecks them under the
+scheduler lock before marking the process `PARK_WAIT_QUEUE`. It never retains a
+userspace pointer, maps arbitrary wait addresses, or switches context with that
+lock held. Peer publication during the handoff remains visible in the authoritative
+cursors; no `SEV` event latch is relied on for correctness.
+
+Initially, the owning CPU's scheduler tick checks parked waits. A changed cursor,
+connection state, or listener epoch makes the process runnable. Pending service
+events, IRQ-manager notifications, and buffer-manager notifications also wake it.
+This keeps publication syscall-free but adds up to one scheduler tick of detection
+latency, plus normal scheduling delay. `SEV` alone does not wake a parked process.
+
+Every wait also expires after N scheduler ticks, even if no observation changed.
+The userspace default is 10 ticks; the syscall accepts 1 through 100. A timeout is
+not an I/O failure: control returns to the userspace loop to recheck other work.
+The former polling budget used the architecture monotonic counter and a nonblocking
+relax instruction. Only the retained syscall tick bounds remain in `common/ipc/queue_wait.h`.
+No performance improvement is assumed without measurement.
 
 ## Initial queue API
 
@@ -52,11 +235,9 @@ or token authorization.
 - `Queue__new` is an infallible constructor for already resolved queue
   pages and peer identity. `Queue__attach` validates a shared identity,
   determines the endpoint direction, and returns a Result.
-- `Queue__wait_readable/writable` recheck queue predicates around AArch64 `WFE`;
-  producers and consumers issue `SEV`. These are process-level waits, not yet
-  multi-connection fibre watches. A server must service its other connections
-  rather than block on one client's queue. `queue_test` scans all connections
-  after event wakes and bounds work per connection.
+- `Queue__wait_readable/writable` recheck state after `WFE`, without kernel parking.
+  Event loops watch locally registered connections and listeners and return to
+  dispatch on any event. Ready fibres run before waiting. See [bounded waits](#bounded-waits).
 - `QueueConnection__close(connection)` is the calling endpoint's final acknowledgement:
   stop all local users of that handle before calling it. The kernel publishes
   closed state and removes only the caller's mappings. The surviving endpoint
@@ -114,7 +295,7 @@ The shared ABI and declarations live in `common/ipc/queue.h` and
 from `common/ipc/queue.c` and `queue_layout.c` into separate kernel and
 userspace objects. Service discovery remains in `common/services/service_directory.c`.
 Event signalling is supplied to both targets by `common/arch/aarch64/ipc_platform.c`; hosted
-tests link the no-op implementation under `common/arch/hosted`.
+tests link a condition-variable event implementation under `common/arch/hosted`.
 
 Queue ABI scalars use the semantic types declared in `queue_types.h`: endpoint
 and connection IDs, participant IDs, epochs, sequences, slot indices, and state

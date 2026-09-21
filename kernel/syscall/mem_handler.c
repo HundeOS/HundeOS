@@ -42,20 +42,53 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
         *proc,
         some(process)
         {
+            if (mem_operation >= MEM_BUFFER_REGISTER && mem_operation <= MEM_BUFFER_DEVICE_ADDRESS)
+            {
+                SchedulerPtr scheduler = kernel->scheduler;
+                critical_section(
+                    scheduler->scheduler_lock,
+                    {
+                        match_result(
+                            Buffers__operation(&scheduler->buffers, scheduler, process, mem_operation,
+                                               arg2, arg3, arg4, arg5),
+                            success(value)
+                            {
+                                cs_return Success(SystemCallResult, value);
+                            },
+                            error(code, message)
+                            {
+                                cs_return Error(SystemCallResult, message, code);
+                            }
+                        );
+                    }
+                );
+            }
             if (mem_operation == MEM_ALLOC_SHARED_PAGE)
             {
                 match_result(
                     Scheduler__alloc_shared_page(kernel->scheduler, process, arg2, arg3),
-                    success(address) { return Success(SystemCallResult, address); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    success(address)
+                    {
+                        return Success(SystemCallResult, address);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
             }
             if (mem_operation == MEM_RELEASE_SHARED_PAGE)
             {
                 match_result(
                     Scheduler__release_shared_page(kernel->scheduler, process, arg2),
-                    success(status) { return Success(SystemCallResult, status); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    success(status)
+                    {
+                        return Success(SystemCallResult, status);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
             }
             if (mem_operation == MEM_ALLOC_PAGES)
@@ -68,7 +101,10 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
 
                 match_result(
                     Process__alloc_user_pages(process, size),
-                    success(address) { return Success(SystemCallResult, address.virtual_addr); },
+                    success(address)
+                    {
+                        return Success(SystemCallResult, address.virtual_addr);
+                    },
                     error(code, message)
                     {
                         Mem__terminate_on_allocation_failure(process, code);
@@ -81,7 +117,10 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
             {
                 match_result(
                     Process__free_user_pages(process, (Address)arg2),
-                    success(_) { return Success(SystemCallResult, MEM_OK); },
+                    success(_)
+                    {
+                        return Success(SystemCallResult, MEM_OK);
+                    },
                     error(code, message)
                     {
                         return Error(SystemCallResult, message, Mem__status_from_process_code(code));
@@ -93,7 +132,10 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
             {
                 match_result(
                     Process__sbrk(process, (int64_t)arg2),
-                    success(old_break) { return Success(SystemCallResult, old_break); },
+                    success(old_break)
+                    {
+                        return Success(SystemCallResult, old_break);
+                    },
                     error(code, message)
                     {
                         Mem__terminate_on_allocation_failure(process, code);
@@ -104,7 +146,10 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
 
             return Error(SystemCallResult, unsupported_operation, MEM_OPERATION_NOT_SUPPORTED);
         },
-        none() { return Error(SystemCallResult, no_process, MEM_NO_PROCESS); }
+        none()
+        {
+            return Error(SystemCallResult, no_process, MEM_NO_PROCESS);
+        }
     );
 
     return Error(SystemCallResult, unsupported_operation, MEM_OPERATION_NOT_SUPPORTED);

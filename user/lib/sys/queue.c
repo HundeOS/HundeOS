@@ -1,4 +1,5 @@
 #include "queue.h"
+#include "queue_wait.h"
 #include "process.h"
 #include "syscall.h"
 #include "syscalls/service.h"
@@ -11,14 +12,45 @@ Result(QueueArrivalsPtr) Queue__listen(ConstBStringPtr name)
     {
         return Error(QueueArrivalsPtr, bstr("Queue listen failed"), value);
     }
-    return Success(QueueArrivalsPtr, (QueueArrivalsPtr)value);
+    QueueArrivalsPtr arrivals = (QueueArrivalsPtr)value;
+    match_result(
+        QueueWait__remember_arrivals(arrivals),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(QueueArrivalsPtr, message, code);
+        }
+    );
+    return Success(QueueArrivalsPtr, arrivals);
 }
 
 static Result(Queue) queue_attach(QueueConnectionID connection)
 {
     Address address = QueueLayout__address(connection);
-    return Queue__attach((QueueIdentityPtr)address, (QueuePagePtr)(address + QUEUE_PAGE_SIZE),
-                         (QueuePagePtr)(address + 2 * QUEUE_PAGE_SIZE), connection, process_current_pid());
+    match_result(
+        Queue__attach((QueueIdentityPtr)address, (QueuePagePtr)(address + QUEUE_PAGE_SIZE),
+                      (QueuePagePtr)(address + 2 * QUEUE_PAGE_SIZE), connection, process_current_pid()),
+        success(queue)
+        {
+            match_result(
+                QueueWait__remember_queue(&queue),
+                success(code)
+                {
+                    return Success(Queue, queue);
+                },
+                error(code, message)
+                {
+                    QueueConnection__close(connection);
+                    return Error(Queue, message, code);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(Queue, message, code);
+        }
+    );
+    return Error(Queue, bstr("Queue attach failed"), QUEUE_INVALID);
 }
 
 Result(Queue) Queue__connect(QueueEndpointID endpoint)
@@ -43,5 +75,16 @@ Result(Queue) Queue__accept(QueueConnectionID connection)
 
 QueueCode QueueConnection__close(QueueConnectionID connection)
 {
-    return (QueueCode)syscall(SERVICE_CALL, SERVICE_QUEUE_CLOSE, connection, 0, 0, 0);
+    QueueCode result = (QueueCode)syscall(SERVICE_CALL, SERVICE_QUEUE_CLOSE, connection, 0, 0, 0);
+    if (result == QUEUE_OK)
+    {
+        match_result(QueueWait__forget(connection),
+            success_do_nothing(),
+            error(code, message)
+            {
+                return code;
+            }
+        );
+    }
+    return result;
 }

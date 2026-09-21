@@ -56,7 +56,10 @@ Result(CollectionCode)
             self->pending_operations++;
             return Success(CollectionCode, index);
         },
-        error(code, message) { return Error(CollectionCode, message, code); }
+        error(code, message)
+        {
+            return Error(CollectionCode, message, code);
+        }
     );
 
     return Error(CollectionCode, bstring("Unable to add blocked operation"), LINKED_LIST_ALLOCATION_FAILED);
@@ -75,7 +78,10 @@ Result(CollectionCode)
             }
             return Success(CollectionCode, index);
         },
-        error(code, message) { return Error(CollectionCode, message, code); }
+        error(code, message)
+        {
+            return Error(CollectionCode, message, code);
+        }
     );
 
     return Error(CollectionCode, bstring("Unable to resolve blocked operation"), LINKED_LIST_ITEM_NOT_FOUND);
@@ -87,7 +93,10 @@ void ParkedOperation__dispose(ParkedOperationPtr self)
     {
         match_optional(
             BlockedParkedOperations__remove_at(&self->blocked_operations, 0),
-            some(blocked_operation) { ParkedOperation__dispose(blocked_operation); },
+            some(blocked_operation)
+            {
+                ParkedOperation__dispose(blocked_operation);
+            },
             none_do_nothing()
         );
     }

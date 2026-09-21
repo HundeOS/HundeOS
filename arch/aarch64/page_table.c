@@ -61,8 +61,14 @@ static Result(KAllocCode) ProcessPageTable__record_page(ProcessPageTablePtr self
 {
     match_result(
         ProcessPageTablePages__push(&self->pages, page),
-        success(_) { return Success(KAllocCode, KALLOC_OK); },
-        error(code, message) { return Error(KAllocCode, message, KALLOC_ALLOCATION_FAILED); }
+        success(_)
+        {
+            return Success(KAllocCode, KALLOC_OK);
+        },
+        error(code, message)
+        {
+            return Error(KAllocCode, message, KALLOC_ALLOCATION_FAILED);
+        }
     );
 
     return Error(KAllocCode, page_table_allocation_failed, KALLOC_ALLOCATION_FAILED);
@@ -89,7 +95,10 @@ Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel)
             match_result(
                 Kernel__free(table.virtual_addr),
                 success_do_nothing(),
-                error(free_code, free_message) { return Error(ProcessPageTable, free_message, free_code); }
+                error(free_code, free_message)
+                {
+                    return Error(ProcessPageTable, free_message, free_code);
+                }
             );
             return Error(ProcessPageTable, message, code);
         }
@@ -118,18 +127,29 @@ size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
 
 Result(KAllocCode) ArchProcessPageTable__dispose(ProcessPageTablePtr self)
 {
-    for_each_ll(ProcessPageTablePages, self->pages, page, {
-        match_result(
-            Kernel__free(page.virtual_addr),
-            success_do_nothing(),
-            error(code, message) { return Error(KAllocCode, message, code); }
-        );
-    });
+    for_each_ll(
+        ProcessPageTablePages,
+        self->pages,
+        page,
+        {
+            match_result(
+                Kernel__free(page.virtual_addr),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(KAllocCode, message, code);
+                }
+            );
+        }
+    );
 
     match_result(
         ProcessPageTablePages__dispose(&self->pages),
         success_do_nothing(),
-        error(code, message) { return Error(KAllocCode, message, code); }
+        error(code, message)
+        {
+            return Error(KAllocCode, message, code);
+        }
     );
 
     self->root = NULL_KERNEL_ADDRESS;
@@ -147,6 +167,11 @@ KernelAddress PageTable__from_virtual_address(KernelPtr kernel, Address virtual_
 }
 
 void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    ArchPageTable__try_map(self, kernel, address, size);
+}
+
+Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address user_end = align_up_4k(vaddr(address) + size);
@@ -181,10 +206,15 @@ void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress 
             phys_addr = align_down_4k(paddr(backing));
         }
 
-        PageTable__map_4k_page(self, kernel, user_addr, phys_addr, &perms);
+        if (PageTable__map_4k_page(self, kernel, user_addr, phys_addr, &perms) != 0)
+        {
+            ArchPageTable__unmap(self, kernel, user_start, page * PAGE_SIZE);
+            return Error(KAllocCode, bstr("Page table allocation failed"), KALLOC_ALLOCATION_FAILED);
+        }
     }
     __asm__ __volatile__("dsb ishst; isb" ::: "memory");
     __d_println(MMU, "Mapped");
+    return Success(KAllocCode, KALLOC_OK);
 }
 
 void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)

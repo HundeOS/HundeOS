@@ -90,8 +90,6 @@ RULES = (
             "kernel/panic.h",
             "kernel/print.c",
             "kernel/print.h",
-            "kernel/subsystems/io/block/block_device.c",
-            "kernel/subsystems/io/console/console.c",
             "kernel/syscall/syslog_handler.c",
             "user/lib/arch/**",
             "user/lib/sys/console.c",

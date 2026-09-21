@@ -18,7 +18,10 @@ SpawnArguments POSIX__spawn_arguments_after_argv0(char * const argv[]) // hundel
         match_result(
             SpawnArguments__push(&arguments, bstring(argv[index])),
             success_do_nothing(),
-            error(code, message) { return arguments; }
+            error(code, message)
+            {
+                return arguments;
+            }
         );
     }
 

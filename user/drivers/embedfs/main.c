@@ -16,11 +16,10 @@ int main(void)
         return 1;
     }
     filesystem = Embedfs__new(&archive);
-    match_result(
-        IOService__listen(&bstr("/sbin"), &filesystem, Embedfs__serve, Embedfs__disconnect),
-        success(created) { service = created; },
-        error(code, message) { return 1; }
-    );
+    if (IOService__listen_into(&service, &bstr("/sbin"), &filesystem, Embedfs__serve, Embedfs__disconnect) != IO_OK)
+    {
+        return 1;
+    }
     if (!service_ok(service_publish_ready(&bstr("/sbin"))))
     {
         return 1;

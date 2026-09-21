@@ -18,7 +18,7 @@ void setUp(void)
 {
     clear_panic_state();
     KAllocStub__reset_allocation_tracking();
-    kernel = init_test_kernel_without_filesystem();
+    kernel = init_test_kernel();
     owner = dummy_process(10, 0, PROC_STATE_READY);
     first_peer = dummy_process(20, 0, PROC_STATE_READY);
     second_peer = dummy_process(30, 0, PROC_STATE_READY);
@@ -40,7 +40,10 @@ static Address allocate_shared_page(void)
 {
     match_result(
         Scheduler__alloc_shared_page(kernel->scheduler, owner, first_peer->pid, second_peer->pid),
-        success(address) { return address; },
+        success(address)
+        {
+            return address;
+        },
         error_test_fail()
     );
     return 0;
@@ -56,7 +59,10 @@ static void release_page(Address address)
 {
     match_result(
         Scheduler__release_shared_page(kernel->scheduler, owner, address),
-        success(status) { TEST_ASSERT_EQUAL(MEM_OK, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(MEM_OK, status);
+        },
         error_test_fail()
     );
 }
@@ -68,15 +74,21 @@ void test_shared_page_is_zeroed_and_mapped_only_to_three_participants(void)
     TEST_ASSERT_TRUE(mapped(first_peer, address));
     TEST_ASSERT_TRUE(mapped(second_peer, address));
     TEST_ASSERT_FALSE(mapped(unrelated, address));
-    for_each_fa(ManagedSharedPages, kernel->scheduler->shared_pages, index, page, {
-        if (page.address.virtual_addr == address)
+    for_each_fa(
+        ManagedSharedPages,
+        kernel->scheduler->shared_pages,
+        index,
+        page,
         {
-            for (size_t offset = 0; offset < MEM_SHARED_PAGE_SIZE; offset++)
+            if (page.address.virtual_addr == address)
             {
-                TEST_ASSERT_EQUAL_UINT8(0, *ptr(page.address.kernel_addr.virtual_addr + offset, uint8_t));
+                for (size_t offset = 0; offset < MEM_SHARED_PAGE_SIZE; offset++)
+                {
+                    TEST_ASSERT_EQUAL_UINT8(0, *ptr(page.address.kernel_addr.virtual_addr + offset, uint8_t));
+                }
             }
         }
-    });
+    );
 }
 
 void test_owner_release_unmaps_every_participant_and_frees_backing_once(void)
@@ -91,7 +103,10 @@ void test_owner_release_unmaps_every_participant_and_frees_backing_once(void)
     match_result(
         Scheduler__release_shared_page(kernel->scheduler, owner, address),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(MEM_INVALID_ADDRESS, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(MEM_INVALID_ADDRESS, code);
+        }
     );
     TEST_ASSERT_EQUAL_UINT64(before + 1, KAllocStub__freed_allocation_count_for_size(MEM_SHARED_PAGE_SIZE));
 }
@@ -137,8 +152,15 @@ void test_owner_exit_revokes_remaining_shared_mappings(void)
     );
     TEST_ASSERT_FALSE(mapped(first_peer, address));
     TEST_ASSERT_FALSE(mapped(second_peer, address));
-    for_each_fa(ManagedSharedPages, kernel->scheduler->shared_pages, index, page,
-                { TEST_ASSERT_FALSE(page.address.valid); });
+    for_each_fa(
+        ManagedSharedPages,
+        kernel->scheduler->shared_pages,
+        index,
+        page,
+        {
+            TEST_ASSERT_FALSE(page.address.valid);
+        }
+    );
 }
 
 void test_shared_page_creation_requires_privileged_service_and_live_distinct_peers(void)
@@ -146,12 +168,18 @@ void test_shared_page_creation_requires_privileged_service_and_live_distinct_pee
     match_result(
         Scheduler__alloc_shared_page(kernel->scheduler, unrelated, first_peer->pid, second_peer->pid),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(MEM_PERMISSION_DENIED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(MEM_PERMISSION_DENIED, code);
+        }
     );
     match_result(
         Scheduler__alloc_shared_page(kernel->scheduler, owner, first_peer->pid, first_peer->pid),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(MEM_PEER_NOT_FOUND, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(MEM_PEER_NOT_FOUND, code);
+        }
     );
     ProcessID dead_pid = first_peer->pid;
     match_result(Scheduler__exit(kernel->scheduler, first_peer, 0),
@@ -161,7 +189,10 @@ void test_shared_page_creation_requires_privileged_service_and_live_distinct_pee
     match_result(
         Scheduler__alloc_shared_page(kernel->scheduler, owner, dead_pid, second_peer->pid),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(MEM_PEER_NOT_FOUND, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(MEM_PEER_NOT_FOUND, code);
+        }
     );
 }
 
@@ -171,7 +202,10 @@ void test_unprivileged_service_cannot_allocate_shared_pages(void)
     match_result(
         Scheduler__alloc_shared_page(kernel->scheduler, owner, first_peer->pid, second_peer->pid),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(MEM_PERMISSION_DENIED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(MEM_PERMISSION_DENIED, code);
+        }
     );
 }
 
@@ -181,7 +215,10 @@ void test_other_process_cannot_release_shared_page(void)
     match_result(
         Scheduler__release_shared_page(kernel->scheduler, first_peer, address),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(MEM_PERMISSION_DENIED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(MEM_PERMISSION_DENIED, code);
+        }
     );
     TEST_ASSERT_TRUE(mapped(first_peer, address));
 }
@@ -192,7 +229,10 @@ void test_shared_page_allocation_failure_does_not_publish_mappings(void)
     match_result(
         Scheduler__alloc_shared_page(kernel->scheduler, owner, first_peer->pid, second_peer->pid),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(MEM_ALLOCATION_FAILED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(MEM_ALLOCATION_FAILED, code);
+        }
     );
     TEST_ASSERT_FALSE(mapped(first_peer, MEM_SHARED_PAGE_BASE));
     TEST_ASSERT_FALSE(mapped(owner, MEM_SHARED_PAGE_BASE));
@@ -208,7 +248,10 @@ void test_shared_page_syscalls_allocate_and_release(void)
             TEST_ASSERT_TRUE(mapped(first_peer, address));
             match_result(
                 Mem__handler(kernel, &caller, MEM_RELEASE_SHARED_PAGE, address, 0, 0, 0),
-                success(status) { TEST_ASSERT_EQUAL(MEM_OK, status); },
+                success(status)
+                {
+                    TEST_ASSERT_EQUAL(MEM_OK, status);
+                },
                 error_test_fail()
             );
             TEST_ASSERT_FALSE(mapped(first_peer, address));

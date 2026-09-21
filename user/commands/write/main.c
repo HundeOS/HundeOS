@@ -10,7 +10,10 @@ static Optional(BString) Write__split_path_value(ConstBStringPtr arg, BStringPtr
 
     BStringSplit split = BString__split_first_any(arg, &bstr("="));
     match_optional(split.match,
-        some(raw_path) { *path = IO__path_from_arg(&raw_path); },
+        some(raw_path)
+        {
+            *path = IO__path_from_arg(&raw_path);
+        },
         none_do_nothing()
     );
     return Some(BString, split.rest);

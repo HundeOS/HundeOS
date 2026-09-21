@@ -8,7 +8,7 @@
 #include "types/address.h"
 #include "types/bstring.h"
 #include "ipc/queue_types.h"
-#include "../../common/ipc/legacy_block_transport.h"
+#include "../../common/ipc/block_protocol.h"
 
 typedef enum ServiceOperation
 {
@@ -16,7 +16,8 @@ typedef enum ServiceOperation
     SERVICE_WAIT,
     SERVICE_MAP_MMIO,
     SERVICE_SUBSCRIBE_IRQ,
-    SERVICE_REGISTER_BLOCK_DEVICE,
+    SERVICE_REGISTER_BLOCK_DEVICE, // Discovery metadata only; I/O uses Channels.
+    /* Retired block transport operations retain their ABI numbers. */
     SERVICE_BLOCK_GET_REQUEST,
     SERVICE_BLOCK_COMPLETE,
     SERVICE_BLOCK_READ_DEVICE,
@@ -24,15 +25,11 @@ typedef enum ServiceOperation
     SERVICE_DEVICE_ADDRESS,
     SERVICE_PUBLISH_READY,
     SERVICE_WAIT_READY,
-    SERVICE_REGISTER_FILESYSTEM,
-    SERVICE_FILESYSTEM_GET_REQUEST,
-    SERVICE_FILESYSTEM_COMPLETE,
-    SERVICE_BLOCK_READ_DEVICE_ASYNC,
+    /* Operations 12-14 were the retired filesystem broker. */
+    SERVICE_BLOCK_READ_DEVICE_ASYNC = 15,
     SERVICE_BLOCK_WRITE_DEVICE_ASYNC,
-    SERVICE_REGISTER_SOCKET_ROUTER,
-    SERVICE_SOCKET_GET_REQUEST,
-    SERVICE_SOCKET_COMPLETE,
-    SERVICE_BLOCK_CONNECT,
+    /* Operations 17-19 were the retired socket broker. */
+    SERVICE_BLOCK_CONNECT = 20,
     SERVICE_BLOCK_DISCONNECT,
     SERVICE_QUEUE_LISTEN,
     SERVICE_QUEUE_CONNECT,
@@ -43,6 +40,10 @@ typedef enum ServiceOperation
     SERVICE_POLL,
     SERVICE_AUTHORIZE_BLOCK_CLIENT,
     SERVICE_CLAIM_VIRTIO_DEVICE,
+    SERVICE_BOOT_HARDWARE_INFO,
+    SERVICE_QUEUE_WAIT,
+    SERVICE_QUEUE_WAIT_CONTROL,
+    SERVICE_AUTHORIZE_MOUNT_CLIENT,
 } ServiceOperation;
 
 typedef enum ServiceEventType
@@ -52,8 +53,6 @@ typedef enum ServiceEventType
     SERVICE_EVENT_IO = 3,
     SERVICE_EVENT_BLOCK_IO = 4,
     SERVICE_EVENT_READY = 5,
-    SERVICE_EVENT_FILESYSTEM_IO = 6,
-    SERVICE_EVENT_SOCKET_IO = 7,
     SERVICE_EVENT_BLOCK_CONNECTION_OPENED = 8,
     SERVICE_EVENT_BLOCK_CONNECTION_CLOSED = 9,
 } ServiceEventType;
@@ -145,10 +144,6 @@ typedef enum ServiceCode
     SERVICE_BLOCK_REQUEST_NOT_FOUND = -13,
     SERVICE_BLOCK_REQUEST_FAILED = -14,
     SERVICE_PERMISSION_DENIED = -15,
-    SERVICE_FILESYSTEM_REQUEST_NOT_FOUND = -16,
-    SERVICE_FILESYSTEM_REQUEST_FAILED = -17,
-    SERVICE_SOCKET_REQUEST_NOT_FOUND = -18,
-    SERVICE_SOCKET_REQUEST_FAILED = -19,
     SERVICE_BLOCK_CONNECTION_NOT_FOUND = -20,
     SERVICE_BLOCK_CONNECTION_FAILED = -21,
     SERVICE_INTERRUPT_MANAGER_EXISTS = -22,
@@ -174,76 +169,6 @@ static inline ServiceManagedIRQRoute ServiceManagedIRQRoute__new(uint64_t client
     return (ServiceManagedIRQRoute){.client_pid = client_pid, .irq = irq};
 }
 
-typedef enum ServiceFilesystemOperation
-{
-    SERVICE_FILESYSTEM_LIST_DIR = 1,
-    SERVICE_FILESYSTEM_OPEN = 2,
-    SERVICE_FILESYSTEM_READ = 3,
-    SERVICE_FILESYSTEM_CLOSE = 4,
-    SERVICE_FILESYSTEM_WRITE = 5,
-    SERVICE_FILESYSTEM_MKDIR = 6,
-    SERVICE_FILESYSTEM_REMOVE = 7,
-} ServiceFilesystemOperation;
-
-typedef enum ServiceBlockOperation
-{
-    SERVICE_BLOCK_READ = 1,
-    SERVICE_BLOCK_WRITE = 2,
-} ServiceBlockOperation;
-
-typedef struct ServiceBlockRequest
-{
-    uint64_t request_id;
-    BString device_path;
-    ServiceBlockOperation operation;
-    uint64_t block;
-    uint64_t block_count;
-    uint64_t block_size;
-    Address buffer;
-    size_t buffer_size;
-} ServiceBlockRequest;
-
-typedef ServiceBlockRequest * ServiceBlockRequestPtr;
-
-static inline ServiceBlockRequest ServiceBlockRequest__new(uint64_t request_id, BString device_path,
-                                                           ServiceBlockOperation operation, uint64_t block,
-                                                           uint64_t block_count, uint64_t block_size, Address buffer,
-                                                           size_t buffer_size)
-{
-    return (ServiceBlockRequest){
-        .request_id = request_id,
-        .device_path = device_path,
-        .operation = operation,
-        .block = block,
-        .block_count = block_count,
-        .block_size = block_size,
-        .buffer = buffer,
-        .buffer_size = buffer_size,
-    };
-}
-
-typedef struct ServiceBlockCompletion
-{
-    uint64_t request_id;
-    ServiceCode status;
-    uint64_t block_count;
-} ServiceBlockCompletion;
-
-typedef ServiceBlockCompletion * ServiceBlockCompletionPtr;
-
-typedef int64_t ServiceBlockReadResult;
-
-typedef struct ServiceBlockReadRequest
-{
-    BString device_path;
-    uint64_t block;
-    uint64_t block_count;
-    Address buffer;
-    size_t buffer_size;
-} ServiceBlockReadRequest;
-
-typedef ServiceBlockReadRequest * ServiceBlockReadRequestPtr;
-
 typedef struct ServiceMappedMemory ServiceMappedMemory;
 typedef ServiceMappedMemory * ServiceMappedMemoryPtr;
 OptionalDef(ServiceMappedMemoryPtr);
@@ -265,68 +190,12 @@ typedef struct ServiceBlockDeviceRegistration
 
 typedef ServiceBlockDeviceRegistration * ServiceBlockDeviceRegistrationPtr;
 
-typedef struct ServiceBlockConnectionRequest
-{
-    BString device_path;
-    BlockConnectionID connection_id;
-    Address shared_memory;
-    size_t shared_memory_size;
-} ServiceBlockConnectionRequest;
-
-typedef ServiceBlockConnectionRequest * ServiceBlockConnectionRequestPtr;
-
-typedef struct ServiceBlockDisconnectionRequest
-{
-    BlockConnectionID connection_id;
-} ServiceBlockDisconnectionRequest;
-
-typedef ServiceBlockDisconnectionRequest * ServiceBlockDisconnectionRequestPtr;
-
 typedef struct ServiceReadyRequest
 {
     BString name;
 } ServiceReadyRequest;
 
 typedef ServiceReadyRequest * ServiceReadyRequestPtr;
-
-typedef struct ServiceFilesystemRegistration
-{
-    BString device_path;
-    BString filesystem_type;
-    BString mountpoint;
-} ServiceFilesystemRegistration;
-
-typedef ServiceFilesystemRegistration * ServiceFilesystemRegistrationPtr;
-
-typedef struct ServiceFilesystemRequest
-{
-    uint64_t request_id;
-    ServiceFilesystemOperation operation;
-    BString device_path;
-    BString path;
-    uint32_t handle;
-    Flags flags;
-    uint64_t block;
-    uint64_t block_offset;
-    Address buffer;
-    size_t size;
-    Address entries;
-    size_t max_entries;
-} ServiceFilesystemRequest;
-
-typedef ServiceFilesystemRequest * ServiceFilesystemRequestPtr;
-
-typedef struct ServiceFilesystemCompletion
-{
-    uint64_t request_id;
-    ServiceCode status;
-    int64_t result;
-    FileMode mode;
-    uint64_t size;
-    uint32_t block[12];
-} ServiceFilesystemCompletion;
-
-typedef ServiceFilesystemCompletion * ServiceFilesystemCompletionPtr;
 
 static inline ServiceBlockDeviceRegistration
 ServiceBlockDeviceRegistration__new(ConstBStringPtr path, uint64_t block_size, uint64_t block_count)
@@ -335,46 +204,6 @@ ServiceBlockDeviceRegistration__new(ConstBStringPtr path, uint64_t block_size, u
         .path = *path,
         .block_size = block_size,
         .block_count = block_count,
-    };
-}
-
-static inline ServiceBlockConnectionRequest ServiceBlockConnectionRequest__new(ConstBStringPtr path)
-{
-    return (ServiceBlockConnectionRequest){
-        .device_path = *path,
-        .connection_id = 0,
-        .shared_memory = 0,
-        .shared_memory_size = sizeof(BlockProtocolMemory),
-    };
-}
-
-static inline ServiceBlockDisconnectionRequest ServiceBlockDisconnectionRequest__new(BlockConnectionID connection_id)
-{
-    return (ServiceBlockDisconnectionRequest){
-        .connection_id = connection_id,
-    };
-}
-
-static inline ServiceBlockCompletion ServiceBlockCompletion__new(uint64_t request_id, ServiceCode status,
-                                                                 uint64_t block_count)
-{
-    return (ServiceBlockCompletion){
-        .request_id = request_id,
-        .status = status,
-        .block_count = block_count,
-    };
-}
-
-static inline ServiceBlockReadRequest ServiceBlockReadRequest__new(ConstBStringPtr path, uint64_t block,
-                                                                   uint64_t block_count, Address buffer,
-                                                                   size_t buffer_size)
-{
-    return (ServiceBlockReadRequest){
-        .device_path = *path,
-        .block = block,
-        .block_count = block_count,
-        .buffer = buffer,
-        .buffer_size = buffer_size,
     };
 }
 
@@ -390,48 +219,6 @@ static inline ServiceReadyRequest ServiceReadyRequest__new(ConstBStringPtr name)
 {
     return (ServiceReadyRequest){
         .name = *name,
-    };
-}
-
-static inline ServiceFilesystemRegistration ServiceFilesystemRegistration__new(ConstBStringPtr device_path,
-                                                                               ConstBStringPtr filesystem_type,
-                                                                               ConstBStringPtr mountpoint)
-{
-    return (ServiceFilesystemRegistration){
-        .device_path = *device_path,
-        .filesystem_type = *filesystem_type,
-        .mountpoint = *mountpoint,
-    };
-}
-
-static inline ServiceFilesystemRequest
-ServiceFilesystemRequest__new(uint64_t request_id, ServiceFilesystemOperation operation, ConstBStringPtr device_path,
-                              ConstBStringPtr path, uint32_t handle, Flags flags, uint64_t block, uint64_t block_offset,
-                              Address buffer, size_t size, Address entries, size_t max_entries)
-{
-    return (ServiceFilesystemRequest){
-        .request_id = request_id,
-        .operation = operation,
-        .device_path = *device_path,
-        .path = *path,
-        .handle = handle,
-        .flags = flags,
-        .block = block,
-        .block_offset = block_offset,
-        .buffer = buffer,
-        .size = size,
-        .entries = entries,
-        .max_entries = max_entries,
-    };
-}
-
-static inline ServiceFilesystemCompletion ServiceFilesystemCompletion__new(uint64_t request_id, ServiceCode status,
-                                                                           int64_t result)
-{
-    return (ServiceFilesystemCompletion){
-        .request_id = request_id,
-        .status = status,
-        .result = result,
     };
 }
 

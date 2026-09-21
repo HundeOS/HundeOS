@@ -123,8 +123,14 @@ int main(void)
 {
     GenetDevice device;
     match_result(Genet__init(),
-        success(value) { device = value; },
-        error(code, message) { return 1; }
+        success(value)
+        {
+            device = value;
+        },
+        error(code, message)
+        {
+            return 1;
+        }
     );
 
     if (!service_ok(service_publish_ready(&device.path)))

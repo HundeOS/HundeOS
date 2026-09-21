@@ -31,7 +31,7 @@ void setUp(void)
     clear_panic_state();
     current_process_reset();
     Arch__reset_irq_tracking();
-    kernel = init_test_kernel_without_filesystem();
+    kernel = init_test_kernel();
     kernel_consumer_called = false;
     observed_context = (IRQDispatchContext){0};
     observed_data = NULL;
@@ -53,7 +53,10 @@ void test_irq_dispatcher_returns_unhandled_when_no_consumer_registered(void)
 
     match_result(
         IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_UNHANDLED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_DISPATCH_UNHANDLED, status);
+        },
         error_test_fail()
     );
 }
@@ -70,13 +73,19 @@ void test_irq_dispatcher_calls_registered_kernel_consumer(void)
 
     match_result(
         IRQDispatcher__register_kernel(kernel->irq_dispatcher, 27, kernel_consumer, &data),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
+        },
         error_test_fail()
     );
 
     match_result(
         IRQDispatcher__dispatch(kernel->irq_dispatcher, 27, &context),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status);
+        },
         error_test_fail()
     );
 
@@ -100,7 +109,10 @@ void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event
 
     match_result(
         IRQDispatcher__register_service(kernel->irq_dispatcher, 48, process),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
+        },
         error_test_fail()
     );
 
@@ -109,7 +121,10 @@ void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event
 
     match_result(
         IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_RESCHEDULE, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_DISPATCH_RESCHEDULE, status);
+        },
         error_test_fail()
     );
 
@@ -121,7 +136,10 @@ void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event
         KernelContext__new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
     match_result(
         Scheduler__service_wait(kernel->scheduler, process, &kernel_context, &None(Continuation)),
-        success(wait_event) { event = wait_event; },
+        success(wait_event)
+        {
+            event = wait_event;
+        },
         error_test_fail()
     );
 
@@ -142,19 +160,28 @@ void test_irq_dispatcher_rejects_duplicate_kernel_registration(void)
 
     match_result(
         IRQDispatcher__register_kernel(kernel->irq_dispatcher, 27, kernel_consumer, &first_data),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
+        },
         error_test_fail()
     );
 
     match_result(
         IRQDispatcher__register_kernel(kernel->irq_dispatcher, 27, kernel_consumer, &second_data),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code);
+        }
     );
 
     match_result(
         IRQDispatcher__dispatch(kernel->irq_dispatcher, 27, &context),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status);
+        },
         error_test_fail()
     );
 
@@ -170,14 +197,20 @@ void test_irq_dispatcher_rejects_duplicate_service_registration(void)
 
     match_result(
         IRQDispatcher__register_service(kernel->irq_dispatcher, 48, first_process),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
+        },
         error_test_fail()
     );
 
     match_result(
         IRQDispatcher__register_service(kernel->irq_dispatcher, 48, second_process),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code);
+        }
     );
 
     TEST_ASSERT_EQUAL_UINT64(1, Arch__enable_count());
@@ -190,14 +223,20 @@ void test_irq_dispatcher_rejects_service_registration_when_kernel_consumer_exist
 
     match_result(
         IRQDispatcher__register_kernel(kernel->irq_dispatcher, 48, kernel_consumer, NULL),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
+        },
         error_test_fail()
     );
 
     match_result(
         IRQDispatcher__register_service(kernel->irq_dispatcher, 48, process),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(IRQ_ALREADY_REGISTERED, code);
+        }
     );
 
     TEST_ASSERT_EQUAL_UINT64(0, Arch__enable_count());
@@ -213,13 +252,19 @@ void test_irq_dispatcher_dispose_process_resources_unregisters_service_consumer(
 
     match_result(
         IRQDispatcher__register_service(kernel->irq_dispatcher, irq, first_process),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
+        },
         error_test_fail()
     );
 
     match_result(
         IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, first_process),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
+        },
         error_test_fail()
     );
 
@@ -228,7 +273,10 @@ void test_irq_dispatcher_dispose_process_resources_unregisters_service_consumer(
 
     match_result(
         IRQDispatcher__register_service(kernel->irq_dispatcher, irq, second_process),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
+        },
         error_test_fail()
     );
 
@@ -239,26 +287,39 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
 {
     ProcessPtr manager = dummy_process(1, 0, PROC_STATE_READY);
     manager->process_class = PROCESS_CLASS_SERVICE;
+    TEST_ASSERT_FALSE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, manager));
 
     match_result(
         IRQDispatcher__register_manager(kernel->irq_dispatcher, manager),
-        success(address) { TEST_ASSERT_EQUAL_UINT64(KERNEL_NOTIFICATION_QUEUE_ADDRESS, address); },
+        success(address)
+        {
+            TEST_ASSERT_EQUAL_UINT64(KERNEL_NOTIFICATION_QUEUE_ADDRESS, address);
+        },
         error_test_fail()
     );
     match_result(
         IRQDispatcher__register_managed_irq(kernel->irq_dispatcher, 48, manager),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_REGISTERED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
+        },
         error_test_fail()
     );
 
     IRQDispatchContext context = IRQDispatchContext__new(48, 0, false, NULL);
     match_result(
         IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context),
-        success(status) { TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status);
+        },
         error_test_fail()
     );
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__masked_irq());
+    TEST_ASSERT_TRUE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, manager));
+    ProcessPtr other = dummy_process(2, 0, PROC_STATE_READY);
+    TEST_ASSERT_FALSE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, other));
     match_optional(
         kernel->irq_dispatcher->manager_queue_memory,
         some(memory)
@@ -274,6 +335,7 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
                 },
                 none_test_fail()
             );
+            TEST_ASSERT_FALSE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, manager));
         },
         none_test_fail()
     );

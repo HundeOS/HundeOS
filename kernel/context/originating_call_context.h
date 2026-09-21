@@ -39,7 +39,7 @@ typedef struct OriginatingContext
 typedef OriginatingContext * OriginatingContextPtr;
 typedef const OriginatingContext * ConstOriginatingContextPtr;
 
-OriginatingContext OriginatingContext__syscall(KernelPtr kernel, const CallContext * syscall);
+OriginatingContext OriginatingContext__syscall(KernelPtr kernel, ConstCallContextPtr syscall);
 OriginatingContext OriginatingContext__irq(KernelPtr kernel, OptionalPtr(ProcessPtr) process);
 OriginatingContext OriginatingContext__fault(KernelPtr kernel, OptionalPtr(ProcessPtr) process);
 

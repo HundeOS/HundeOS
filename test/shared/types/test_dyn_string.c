@@ -112,7 +112,10 @@ void test_dyn_string_char_at_returns_character_by_index(void)
 
             match_optional(
                 DynString__char_at(&text, 1),
-                some(ch) { TEST_ASSERT_EQUAL_CHAR('b', ch); },
+                some(ch)
+                {
+                    TEST_ASSERT_EQUAL_CHAR('b', ch);
+                },
                 none_test_fail()
             );
 
@@ -142,7 +145,10 @@ void test_dyn_string_bstring_converts_when_it_fits(void)
 
             match_optional(
                 DynString__bstring(&text),
-                some(value) { TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), value); },
+                some(value)
+                {
+                    TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), value);
+                },
                 none_test_fail()
             );
 
@@ -173,19 +179,28 @@ void test_dyn_string_lines_splits_into_owned_lines(void)
 
                     match_optional(
                         DynStringLines__at(&lines, 0),
-                        some(line) { TEST_ASSERT_EQUAL_STRING("alpha", DynString__cstr(&line)); },
+                        some(line)
+                        {
+                            TEST_ASSERT_EQUAL_STRING("alpha", DynString__cstr(&line));
+                        },
                         none_test_fail()
                     );
 
                     match_optional(
                         DynStringLines__at(&lines, 1),
-                        some(line) { TEST_ASSERT_EQUAL_STRING("", DynString__cstr(&line)); },
+                        some(line)
+                        {
+                            TEST_ASSERT_EQUAL_STRING("", DynString__cstr(&line));
+                        },
                         none_test_fail()
                     );
 
                     match_optional(
                         DynStringLines__at(&lines, 2),
-                        some(line) { TEST_ASSERT_EQUAL_STRING("beta", DynString__cstr(&line)); },
+                        some(line)
+                        {
+                            TEST_ASSERT_EQUAL_STRING("beta", DynString__cstr(&line));
+                        },
                         none_test_fail()
                     );
 

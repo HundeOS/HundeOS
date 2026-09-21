@@ -138,7 +138,10 @@ Result(KAllocCode) Kernel__free(Address virtual_address)
             __d_printf(MEMORY, "kfree addr=%p phys=%p\n", address.virtual_addr, address.phys_addr);
             return Success(KAllocCode, KALLOC_OK);
         },
-        error(code, message) { return Error(KAllocCode, message, code); }
+        error(code, message)
+        {
+            return Error(KAllocCode, message, code);
+        }
     );
 
     return Error(KAllocCode, not_implemented, KALLOC_NOT_IMPLEMENTED);

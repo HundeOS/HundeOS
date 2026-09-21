@@ -162,7 +162,10 @@ static bool LS__parse_options(int argc, char ** argv, LSOptionsPtr options)
 static BString LS__path_from_options(LSOptionsPtr options)
 {
     match_optional(options->path_arg,
-        some(path_arg) { return IO__path_from_arg(&path_arg); },
+        some(path_arg)
+        {
+            return IO__path_from_arg(&path_arg);
+        },
         none_do_nothing()
     );
 

@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <setjmp.h>
 
 #include "unity.h"
 
@@ -24,17 +25,9 @@ static bool fake_became_service;
 static bool fake_sysinfo_opened;
 static bool fake_sysinfo_closed;
 static bool fake_mapped_ecam;
-static bool fake_businfo_registered;
-static bool fake_businfo_buffer_requested;
-static bool fake_businfo_available;
-static bool fake_businfo_eof;
-static char fake_businfo_buffer[4096];
-static uint64_t fake_businfo_byte_count;
-static ServiceEvent fake_wait_events[4];
-static uint64_t fake_wait_event_count;
-static uint64_t fake_wait_event_index;
-static char printed_output[1024];
-static uint64_t printed_output_len;
+static jmp_buf test_finished;
+static bool fake_listening;
+static bool fake_ready;
 static const char * fake_sysinfo = "pci.present=1\n"
                                    "pci.ecam.physical_base=0x4010000000\n"
                                    "pci.ecam.size=0x200000\n"
@@ -99,19 +92,8 @@ void setUp(void)
     fake_sysinfo_opened = false;
     fake_sysinfo_closed = false;
     fake_mapped_ecam = false;
-    fake_businfo_registered = false;
-    fake_businfo_buffer_requested = false;
-    fake_businfo_available = false;
-    fake_businfo_eof = false;
-    fake_businfo_byte_count = 0;
-    fake_wait_event_count = 0;
-    fake_wait_event_index = 0;
-    printed_output_len = 0;
-    printed_output[0] = '\0';
-    for (uint64_t index = 0; index < sizeof(fake_businfo_buffer); index++)
-    {
-        fake_businfo_buffer[index] = '\0';
-    }
+    fake_listening = false;
+    fake_ready = false;
 }
 
 void tearDown(void)
@@ -140,17 +122,6 @@ ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappe
     TEST_ASSERT_EQUAL_UINT64(TEST_PCI_ECAM_SIZE, size);
     *memory = &fake_ecam_mapping;
     fake_mapped_ecam = true;
-    return SERVICE_OK;
-}
-
-ServiceCode service_wait(ServiceEventPtr event)
-{
-    if (fake_wait_event_index >= fake_wait_event_count)
-    {
-        return SERVICE_ABORT;
-    }
-
-    *event = fake_wait_events[fake_wait_event_index++];
     return SERVICE_OK;
 }
 
@@ -200,7 +171,10 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     match_result(
         DynString__init(&sysinfo, 128),
         success_do_nothing(),
-        error(code, message) { return None(DynString); }
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
@@ -217,62 +191,65 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     return Some(DynString, sysinfo);
 }
 
-IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
+Result(IOService) IOService__listen(ConstBStringPtr name, IOServiceContext context, IOServiceExecute execute,
+                                    IOServiceDisconnect disconnect)
 {
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/businfo"), *path);
-    TEST_ASSERT_EQUAL_INT(IO_SERVER_READ, role);
-    fake_businfo_registered = true;
-    return 7;
+    TEST_ASSERT_EQUAL_BSTRING(bstr(BUS_INFO_SERVICE), *name);
+    TEST_ASSERT_EQUAL_PTR(BusInfo__execute, execute);
+    TEST_ASSERT_EQUAL_PTR(BusInfo__disconnect, disconnect);
+    fake_listening = true;
+    return Success(IOService, ((IOService){.context = context, .execute = execute}));
 }
 
-IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)
+IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServiceContext context,
+                                IOServiceExecute execute, IOServiceDisconnect disconnect)
 {
-    TEST_ASSERT_EQUAL_INT(7, handle);
-    fake_businfo_buffer_requested = true;
-    *buffer = (IOServerBuffer){
-        .data = fake_businfo_buffer,
-        .capacity = sizeof(fake_businfo_buffer),
-    };
+    TEST_ASSERT_EQUAL_BSTRING(bstr(BUS_INFO_SERVICE), *name);
+    TEST_ASSERT_EQUAL_PTR(BusInfo__execute, execute);
+    TEST_ASSERT_EQUAL_PTR(BusInfo__disconnect, disconnect);
+    fake_listening = true;
+    *self = (IOService){.context = context, .execute = execute};
     return IO_OK;
 }
 
-IOStatus io_server_data_available(IOHandle handle, uint64_t byte_count)
+ServiceCode service_publish_ready(ConstBStringPtr name)
 {
-    TEST_ASSERT_EQUAL_INT(7, handle);
-    fake_businfo_available = true;
-    fake_businfo_byte_count = byte_count;
-    return IO_OK;
+    TEST_ASSERT_TRUE(fake_listening);
+    TEST_ASSERT_EQUAL_BSTRING(bstr(BUS_INFO_SERVICE), *name);
+    fake_ready = true;
+    return SERVICE_OK;
 }
-
-IOStatus io_server_data_consumed(IOHandle handle, uint64_t byte_count)
+bool IOService__poll(IOServicePtr self)
 {
-    TEST_FAIL();
-    return IO_OPERATION_NOT_SUPPORTED;
-}
-
-IOStatus io_server_eof(IOHandle handle)
-{
-    TEST_ASSERT_EQUAL_INT(7, handle);
-    fake_businfo_eof = true;
-    return IO_OK;
-}
-
-int test_printf(ConstBStringPtr format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    int count = vsnprintf(&printed_output[printed_output_len], sizeof(printed_output) - printed_output_len,
-                          BString__cstr(format), args);
-    va_end(args);
-    if (count > 0)
-    {
-        printed_output_len += (uint64_t)count;
-        if (printed_output_len >= sizeof(printed_output))
+    TEST_ASSERT_TRUE(fake_ready);
+    IORequest request = BusInfo__request(0);
+    match_optional(
+        self->execute(self->context, 1, 42, &request),
+        some(reply)
         {
-            printed_output_len = sizeof(printed_output) - 1;
+            TEST_ASSERT_EQUAL(IO_OK, reply.status);
+            BusInfoPage page;
+            memcpy(&page, reply.data, sizeof(page));
+            TEST_ASSERT_EQUAL(1, page.total);
+            TEST_ASSERT_EQUAL(0x1b36, page.device.vendor_id);
+        },
+        none()
+        {
+            TEST_FAIL_MESSAGE("Missing bus reply");
         }
-    }
-    return count;
+    );
+    longjmp(test_finished, 1);
+}
+void Channel__prepare_wait(void)
+{
+}
+void Channel__wait_event(void)
+{
+}
+Result(ChannelReplySize) Channel__submit(ChannelPtr self, ConstChannelDataPtr request, size_t request_size,
+                                         ChannelDataPtr reply, size_t reply_capacity)
+{
+    return Error(ChannelReplySize, bstr("Unused in hardware tests"), CHANNEL_UNAVAILABLE);
 }
 
 void test_hundebus_config_loads_ecam_from_sysinfo(void)
@@ -300,7 +277,7 @@ void test_hundebus_scan_enumerates_single_and_multifunction_devices(void)
                 .bus_end = 1,
             },
         .ecam = Some(ServiceMappedMemoryPtr, &fake_ecam_mapping),
-        .pci_devices = HundebusPciDevices__new(),
+        .pci_devices = BusPciDevices__new(),
     };
     TestHundebus__seed_device(0, 1, 0, 0x1234, 0x5678, 0x0c, 0x03, 0x30, PCI_HEADER_TYPE_MULTIFUNCTION);
     TestHundebus__seed_device(0, 1, 1, 0x1234, 0x1111, 0x0c, 0x03, 0x00, 0x00);
@@ -309,7 +286,7 @@ void test_hundebus_scan_enumerates_single_and_multifunction_devices(void)
     uint64_t found = Hundebus__scan_pci(&hundebus);
 
     TEST_ASSERT_EQUAL_UINT64(3, found);
-    TEST_ASSERT_EQUAL_UINT64(3, HundebusPciDevices__len(&hundebus.pci_devices));
+    TEST_ASSERT_EQUAL_UINT64(3, BusPciDevices__len(&hundebus.pci_devices));
 }
 
 void test_hundebus_scan_stops_at_mapped_ecam_size(void)
@@ -323,7 +300,7 @@ void test_hundebus_scan_stops_at_mapped_ecam_size(void)
                 .bus_end = 1,
             },
         .ecam = Some(ServiceMappedMemoryPtr, &fake_ecam_mapping),
-        .pci_devices = HundebusPciDevices__new(),
+        .pci_devices = BusPciDevices__new(),
     };
     fake_ecam_mapping.size = 0xffff;
     TestHundebus__seed_device(0, 1, 0, 0x1234, 0x5678, 0x0c, 0x03, 0x30, 0x00);
@@ -331,60 +308,36 @@ void test_hundebus_scan_stops_at_mapped_ecam_size(void)
     uint64_t found = Hundebus__scan_pci(&hundebus);
 
     TEST_ASSERT_EQUAL_UINT64(1, found);
-    TEST_ASSERT_EQUAL_UINT64(1, HundebusPciDevices__len(&hundebus.pci_devices));
+    TEST_ASSERT_EQUAL_UINT64(1, BusPciDevices__len(&hundebus.pci_devices));
 }
 
-void test_hundebus_builds_businfo_from_scan(void)
-{
-    Hundebus hundebus = {
-        .pci_config =
-            {
-                .ecam_physical_base = 0x4010000000,
-                .ecam_size = TEST_PCI_ECAM_SIZE,
-                .bus_start = 0,
-                .bus_end = 1,
-            },
-        .ecam = Some(ServiceMappedMemoryPtr, &fake_ecam_mapping),
-        .pci_devices = HundebusPciDevices__new(),
-    };
-    match_result(DynString__init(&hundebus.businfo, HUNDEBUS_BUSINFO_INITIAL_CAPACITY),
-        success_do_nothing(),
-                 error_test_fail()
-    );
-    TestHundebus__seed_device(0, 1, 0, 0x1234, 0x5678, 0x0c, 0x03, 0x30, 0x00);
-
-    TEST_ASSERT_EQUAL_UINT64(1, Hundebus__scan_pci(&hundebus));
-    TEST_ASSERT_TRUE(Hundebus__build_businfo(&hundebus));
-
-    TEST_ASSERT_NOT_NULL(strstr(DynString__cstr(&hundebus.businfo), "pci.present=1\n"));
-    TEST_ASSERT_NOT_NULL(strstr(DynString__cstr(&hundebus.businfo), "pci.device.count=1\n"));
-    TEST_ASSERT_NOT_NULL(strstr(DynString__cstr(&hundebus.businfo), "pci.device.0.bdf=0:1.0\n"));
-    TEST_ASSERT_NOT_NULL(strstr(DynString__cstr(&hundebus.businfo), "pci.device.0.vendor_id=0x1234\n"));
-    TEST_ASSERT_NOT_NULL(strstr(DynString__cstr(&hundebus.businfo), "pci.device.0.device_id=0x5678\n"));
-
-    DynString__dispose(&hundebus.businfo);
-}
-
-void test_hundebus_main_registers_businfo_and_serves_read_request(void)
+void test_hundebus_main_listens_and_serves_channel_query(void)
 {
     TestHundebus__seed_device(0, 0, 0, 0x1b36, 0x0008, 0x06, 0x00, 0x00, 0x00);
-    fake_wait_event_count = 1;
-    fake_wait_events[0] = (ServiceEvent){
-        .type = SERVICE_EVENT_IO,
-        .source = SERVICE_IO_READ_REQUEST,
-        .data = 7,
-    };
-
-    TEST_ASSERT_EQUAL_INT(0, hundebus_main_under_test());
-    TEST_ASSERT_EQUAL_STRING("", printed_output);
-
+    if (setjmp(test_finished) == 0)
+    {
+        hundebus_main_under_test();
+        TEST_FAIL_MESSAGE("Bus service terminated");
+    }
     TEST_ASSERT_TRUE(fake_became_service);
     TEST_ASSERT_TRUE(fake_mapped_ecam);
-    TEST_ASSERT_TRUE(fake_businfo_registered);
-    TEST_ASSERT_TRUE(fake_businfo_buffer_requested);
-    TEST_ASSERT_TRUE(fake_businfo_available);
-    TEST_ASSERT_TRUE(fake_businfo_eof);
-    TEST_ASSERT_GREATER_THAN_UINT64(0, fake_businfo_byte_count);
-    TEST_ASSERT_NOT_NULL(strstr(fake_businfo_buffer, "pci.device.count=1\n"));
-    TEST_ASSERT_NOT_NULL(strstr(fake_businfo_buffer, "pci.device.0.vendor_id=0x1b36\n"));
+    TEST_ASSERT_TRUE(fake_listening);
+    TEST_ASSERT_TRUE(fake_ready);
+}
+
+void test_hundebus_does_not_publish_truncated_inventory(void)
+{
+    for (uint64_t bus = 0; bus < 2; bus++)
+    {
+        for (uint64_t device = 0; device < PCI_DEVICE_COUNT; device++)
+        {
+            for (uint64_t function = 0; function < PCI_FUNCTION_COUNT; function++)
+            {
+                TestHundebus__seed_device(bus, device, function, 1, 2, 0, 0, 0, PCI_HEADER_TYPE_MULTIFUNCTION);
+            }
+        }
+    }
+    TEST_ASSERT_EQUAL(1, hundebus_main_under_test());
+    TEST_ASSERT_FALSE(fake_listening);
+    TEST_ASSERT_FALSE(fake_ready);
 }

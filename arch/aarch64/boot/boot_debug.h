@@ -23,12 +23,12 @@
     } while (0)
 #endif
 
-__BOOT__(void) __dump_table(PageTable * table, int entries, const char * level);
+__BOOT__(void) __dump_table(PageTablePtr table, int entries, const char * level);
 
-__BOOT__(PageTable *) table_at(PageTable * table, unsigned index);
+__BOOT__(PageTablePtr) table_at(PageTablePtr table, unsigned index);
 
 __BOOT__(void)
-debug_table_pool(int entries, PageTable * low_mem_l0_table, PageTable * high_mem_l0_table, PageTable table_pool[],
+debug_table_pool(int entries, PageTablePtr low_mem_l0_table, PageTablePtr high_mem_l0_table, PageTable table_pool[],
                  int cursor);
 
 __BOOT__(uint64_t) pa_bits_from_tcr_ips(uint64_t ips);
@@ -49,6 +49,6 @@ __BOOT__(uint64_t) check_symbol_va_to_pa(uint64_t va, const uint64_t * low_l0, c
 
 __BOOT__(uint64_t) va_to_pa_hw(uint64_t va);
 
-__BOOT__(void) __debug_table(PageTable * table, uint64_t addr, const char * message, int entries);
+__BOOT__(void) __debug_table(PageTablePtr table, uint64_t addr, const char * message, int entries);
 
 #endif

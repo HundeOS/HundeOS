@@ -139,7 +139,10 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     match_result(
         DynString__init(&sysinfo, 128),
         success_do_nothing(),
-        error(code, message) { return None(DynString); }
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
 
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)

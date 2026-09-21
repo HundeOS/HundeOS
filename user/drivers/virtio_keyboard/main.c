@@ -4,15 +4,14 @@
 #include <stdint.h>
 
 #include "sys/debug.h"
-#include "sys/io_server.h"
+#include "io/stream_driver.h"
+#include "interrupt/client.h"
 #include "sys/service.h"
 #include "sys/sync.h"
 
 #ifndef VIRTIO_KEYBOARD_ENTRYPOINT
 #define VIRTIO_KEYBOARD_ENTRYPOINT main
 #endif
-
-#define VIRTIO_KEYBOARD_PATH ":keyboard:"
 
 #define VIRTIO_MMIO_FIRST_PHYS_BASE 0x0a000000ULL
 #define VIRTIO_MMIO_SLOT_SIZE 0x200ULL
@@ -60,6 +59,13 @@
 #define KEY_DOWN 108U
 
 #define VIRTIO_KEYBOARD_PENDING_BYTES 256U
+
+static bool KeyboardByte__equals(void * first, void * second)
+{
+    return *(char *)first == *(char *)second;
+}
+FixedArrayDefine(char, VIRTIO_KEYBOARD_PENDING_BYTES, KeyboardInput, KeyboardByte__equals);
+FixedArrayBodyDefine(KeyboardInput);
 
 typedef struct VirtqDesc
 {
@@ -109,11 +115,8 @@ typedef struct VirtioKeyboard
     uint64_t irq_id;
     uint16_t queue_size;
     uint16_t last_used_idx;
-    IOHandle keyboard;
     bool shift;
-    char pending[VIRTIO_KEYBOARD_PENDING_BYTES];
-    uint64_t pending_read;
-    uint64_t pending_write;
+    KeyboardInput pending;
 } VirtioKeyboard;
 
 typedef VirtioKeyboard * VirtioKeyboardPtr;
@@ -136,11 +139,8 @@ static VirtioKeyboard VirtioKeyboard__new(void)
         .irq_id = 0,
         .queue_size = 0,
         .last_used_idx = 0,
-        .keyboard = -1,
         .shift = false,
-        .pending = {0},
-        .pending_read = 0,
-        .pending_write = 0,
+        .pending = KeyboardInput__new(),
     };
 }
 
@@ -195,24 +195,19 @@ static volatile uint32_t * VirtioKeyboard__reg32(void * base, uint64_t offset)
 
 static uint64_t VirtioKeyboard__pending_count(VirtioKeyboardPtr self)
 {
-    return self->pending_write - self->pending_read;
-}
-
-static bool VirtioKeyboard__pending_push(VirtioKeyboardPtr self, char byte)
-{
-    if (VirtioKeyboard__pending_count(self) >= VIRTIO_KEYBOARD_PENDING_BYTES)
-    {
-        return false;
-    }
-
-    self->pending[self->pending_write % VIRTIO_KEYBOARD_PENDING_BYTES] = byte;
-    self->pending_write++;
-    return true;
+    return KeyboardInput__len(&self->pending);
 }
 
 static void VirtioKeyboard__emit_byte(VirtioKeyboardPtr self, char byte)
 {
-    VirtioKeyboard__pending_push(self, byte);
+    match_result(
+        KeyboardInput__push(&self->pending, byte),
+        success_do_nothing(),
+        error(code, message)
+        {
+            DRIVER_DEBUG("keyboard input buffer: %s (%i)\n", BString__cstr(&message), (int)code);
+        }
+    );
 }
 
 static void VirtioKeyboard__emit_escape(VirtioKeyboardPtr self, char final)
@@ -546,6 +541,12 @@ static void VirtioKeyboard__drain_used_events(VirtioKeyboardPtr self)
     VirtqUsedPtr used = VirtioKeyboard__used(self);
     while (self->last_used_idx != used->idx)
     {
+        // Reserve a complete arrow-key escape sequence before consuming an event.
+        if (VirtioKeyboard__pending_count(self) > VIRTIO_KEYBOARD_PENDING_BYTES - 3)
+        {
+            return;
+        }
+        __sync_boundary();
         VirtqUsedElem used_event = used->ring[self->last_used_idx % self->queue_size];
         if (used_event.id < self->queue_size && used_event.len >= sizeof(VirtioInputEvent))
         {
@@ -560,31 +561,29 @@ static void VirtioKeyboard__drain_used_events(VirtioKeyboardPtr self)
     }
 }
 
-static void VirtioKeyboard__publish_pending(VirtioKeyboardPtr self)
+static IOReply VirtioKeyboard__read(IOServiceContext context, IORequestPtr request)
 {
-    if (VirtioKeyboard__pending_count(self) == 0)
+    VirtioKeyboardPtr self = context;
+    IOReply reply = IOReply__new(IO_OK, 0);
+    while ((uint64_t)reply.value < request->count)
     {
-        return;
+        match_optional(
+            KeyboardInput__pop_front(&self->pending),
+            some(value)
+            {
+                IORequest__read_target(request, &reply)[reply.value++] = value;
+            },
+            none()
+            {
+                break;
+            }
+        );
     }
-
-    IOServerBuffer buffer;
-    if (io_server_get_buffer(self->keyboard, &buffer) != IO_OK)
+    if (reply.value == 0 && request->count != 0)
     {
-        return;
+        reply.status = IO_WAIT_FOR_DATA;
     }
-
-    uint64_t byte_count = 0;
-    while (byte_count < buffer.capacity && VirtioKeyboard__pending_count(self) > 0)
-    {
-        buffer.data[byte_count] = self->pending[self->pending_read % VIRTIO_KEYBOARD_PENDING_BYTES];
-        self->pending_read++;
-        byte_count++;
-    }
-
-    if (byte_count > 0)
-    {
-        io_server_data_available(self->keyboard, byte_count);
-    }
+    return reply;
 }
 
 static bool VirtioKeyboard__init(VirtioKeyboardPtr self)
@@ -606,16 +605,9 @@ static bool VirtioKeyboard__init(VirtioKeyboardPtr self)
     {
         return false;
     }
-    if (!service_ok(service_subscribe_irq(self->irq_id)))
+    if (!service_ok(InterruptClient__subscribe(self->irq_id)))
     {
         DRIVER_DEBUG("virtio_keyboard: irq subscribe failed\n");
-        return false;
-    }
-
-    self->keyboard = io_server_register(&bstr(VIRTIO_KEYBOARD_PATH), IO_SERVER_READ);
-    if (self->keyboard < 0)
-    {
-        DRIVER_DEBUG("virtio_keyboard: register failed %i\n", (int)self->keyboard);
         return false;
     }
 
@@ -624,32 +616,57 @@ static bool VirtioKeyboard__init(VirtioKeyboardPtr self)
 
 int VIRTIO_KEYBOARD_ENTRYPOINT(void)
 {
-    VirtioKeyboard keyboard;
+    static VirtioKeyboard keyboard;
     if (!VirtioKeyboard__init(&keyboard))
     {
         return 1;
     }
 
-    ServiceEvent event;
-    for (ServiceCode status = service_wait(&event); service_alive(status); status = service_wait(&event))
+    static IOStreamDriver driver;
+    static IOService service;
+    driver = IOStreamDriver__new(IO_OPEN_READ, &keyboard, VirtioKeyboard__read);
+    if (IOService__listen_into(&service, &bstr(IO_KEYBOARD_SERVICE), &driver, IOStreamDriver__execute,
+                               IOStreamDriver__disconnect) != IO_OK)
     {
-        if (!service_ok(status))
-        {
-            continue;
-        }
-
-        if (event.type == SERVICE_EVENT_IRQ && event.source == keyboard.irq_id)
+        return 1;
+    }
+    if (!service_ok(service_publish_ready(&bstr(IO_KEYBOARD_SERVICE))))
+    {
+        return 1;
+    }
+    bool pending_irq = false;
+    Channel__prepare_wait();
+    while (true)
+    {
+        bool progress = IOService__poll(&service);
+        ServiceEvent event;
+        ServiceCode status = InterruptClient__poll(&event);
+        if (status == SERVICE_OK)
         {
             VirtioKeyboard__ack_interrupt(&keyboard);
-            VirtioKeyboard__drain_used_events(&keyboard);
-            VirtioKeyboard__publish_pending(&keyboard);
+            pending_irq = true;
+            progress = true;
         }
-        if (event.type == SERVICE_EVENT_IO && event.source == SERVICE_IO_READ_REQUEST)
+        else if (status != SERVICE_EVENT_QUEUE_EMPTY)
+        {
+            return 1;
+        }
+        if (pending_irq)
         {
             VirtioKeyboard__drain_used_events(&keyboard);
-            VirtioKeyboard__publish_pending(&keyboard);
+            if (keyboard.last_used_idx == VirtioKeyboard__used(&keyboard)->idx)
+            {
+                if (!service_ok(InterruptClient__acknowledge(keyboard.irq_id)))
+                {
+                    return 1;
+                }
+                pending_irq = false;
+                progress = true;
+            }
+        }
+        if (!progress)
+        {
+            Channel__wait_event();
         }
     }
-
-    return 0;
 }

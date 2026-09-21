@@ -108,7 +108,10 @@ static void FramebufferConfigFields__read_config_line(FramebufferConfigFieldsPtr
     {
         match_optional(
             FramebufferConfig__read_line_value(line, &framebuffer_config_present_key),
-            some(parsed) { self->present = parsed == 1; },
+            some(parsed)
+            {
+                self->present = parsed == 1;
+            },
             none_do_nothing()
         );
     }
@@ -260,13 +263,21 @@ static bool FramebufferConfig__read_config(ConstDynStringPtr sysinfo, Framebuffe
         DynString__lines(sysinfo),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line, {
-                match_optional(
-                    DynString__bstring(&line),
-                    some(bstring_line) { FramebufferConfigFields__read_config_line(&fields, &bstring_line, self); },
-                    none_do_nothing()
-                );
-            });
+            for_each_ll(
+                DynStringLines,
+                lines,
+                line,
+                {
+                    match_optional(
+                        DynString__bstring(&line),
+                        some(bstring_line)
+                        {
+                            FramebufferConfigFields__read_config_line(&fields, &bstring_line, self);
+                        },
+                        none_do_nothing()
+                    );
+                }
+            );
             DynStringLines__dispose_all(&lines);
         },
         none_do_nothing()

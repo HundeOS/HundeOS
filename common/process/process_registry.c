@@ -22,8 +22,14 @@ Result(OptionalProcessRecord) ProcessRegistry__at(ConstProcessRegistryPtr self, 
         {
             match_result(
                 ProcessRecords__at(&self->records, cpu * PROCESS_REGISTRY_CPU_CAPACITY + index),
-                success(record) { return Success(OptionalProcessRecord, Some(ProcessRecord, record)); },
-                error(code, message) { return Error(OptionalProcessRecord, message, code); }
+                success(record)
+                {
+                    return Success(OptionalProcessRecord, Some(ProcessRecord, record));
+                },
+                error(code, message)
+                {
+                    return Error(OptionalProcessRecord, message, code);
+                }
             );
         }
         index -= count;
@@ -48,10 +54,16 @@ Result(OptionalProcessRecord) ProcessRegistry__find(ConstProcessRegistryPtr self
                             return Success(OptionalProcessRecord, found);
                         }
                     },
-                    none() { return Success(OptionalProcessRecord, found); }
+                    none()
+                    {
+                        return Success(OptionalProcessRecord, found);
+                    }
                 );
             },
-            error(code, message) { return Error(OptionalProcessRecord, message, code); }
+            error(code, message)
+            {
+                return Error(OptionalProcessRecord, message, code);
+            }
         );
     }
     return Success(OptionalProcessRecord, None(ProcessRecord));
@@ -82,6 +94,7 @@ ProcessInfo ProcessRecord__info(ConstProcessRecordPtr self)
     ProcessInfo info = ProcessInfo__new(self->pid);
     info.cpu = self->cpu;
     info.cpu_usage = self->cpu_usage;
+    info.user_wait_usec = self->user_wait_usec;
     BString state = bstring(ProcessState__to_string(self->state));
     BString class_name = self->process_class == PROCESS_CLASS_REALTIME_SERVICE ? bstr("rt-service")
                          : self->process_class == PROCESS_CLASS_SERVICE        ? bstr("service")
@@ -91,9 +104,24 @@ ProcessInfo ProcessRecord__info(ConstProcessRecordPtr self)
                         : self->credentials.user_id == PROCESS_USER_USER ? bstr("user")
                                                                          : bstr("unknown");
     BString wait = bstr("-");
-    match_optional(self->wait_reason,
-        some(reason) { wait = ParkReason__to_string(reason); },
-        none_do_nothing()
+    match_optional(
+        self->wait_reason,
+        some(reason)
+        {
+            wait = ParkReason__to_string(reason);
+        },
+        none()
+        {
+            match_optional(
+                self->user_wait,
+                some(user_wait)
+                {
+                    wait = BString__sprintf(&bstr("USER_WAIT %llu.%03us"), user_wait.elapsed_usec / 1000000ULL,
+                                            (unsigned int)((user_wait.elapsed_usec / 1000ULL) % 1000ULL));
+                },
+                none_do_nothing()
+            );
+        }
     );
     BString__copy_to(&self->name, info.name, sizeof(info.name));
     BString__copy_to(&state, info.state, sizeof(info.state));

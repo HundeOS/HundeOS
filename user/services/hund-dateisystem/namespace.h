@@ -15,7 +15,7 @@ OptionalDef(FilesystemMountPtr);
 OptionalDef(FilesystemMount);
 bool FilesystemMount__equals(void * first, void * second);
 bool FilesystemMount__matches_mountpoint(FilesystemMountPtr self, void * context);
-FixedArrayDefine(FilesystemMount, 8, FilesystemMounts, FilesystemMount__equals);
+FixedArrayDefine(FilesystemMount, 16, FilesystemMounts, FilesystemMount__equals);
 typedef struct FilesystemNamespace
 {
     FilesystemMounts mounts;

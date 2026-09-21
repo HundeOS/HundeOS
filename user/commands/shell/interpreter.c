@@ -71,8 +71,14 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
     BStringSplit command_split = Interpreter__parse_token(&remaining);
     match_optional(
         command_split.match,
-        some(parsed_command) { self->command.name = parsed_command; },
-        none() { return self->command; }
+        some(parsed_command)
+        {
+            self->command.name = parsed_command;
+        },
+        none()
+        {
+            return self->command;
+        }
     );
 
     remaining = command_split.rest;
@@ -87,10 +93,16 @@ Command Interpreter__parse(InterpreterPtr self, ConstBStringPtr input)
                 match_result(
                     CommandArguments__push(&self->command.args, argument),
                     success_do_nothing(),
-                    error(code, message) { return self->command; }
+                    error(code, message)
+                    {
+                        return self->command;
+                    }
                 );
             },
-            none() { break; }
+            none()
+            {
+                break;
+            }
         );
         remaining = arg_split.rest;
     }
@@ -135,13 +147,22 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
     BString path = Interpreter__command_path(&command->name);
     SpawnArguments arguments = SpawnArguments__new();
     CommandArguments command_arguments = command->args;
-    for_each_fa(CommandArguments, command_arguments, argument_index, argument, {
-        match_result(
-            SpawnArguments__push(&arguments, argument),
-            success_do_nothing(),
-            error(code, message) { return COMMAND_FAILED; }
-        );
-    });
+    for_each_fa(
+        CommandArguments,
+        command_arguments,
+        argument_index,
+        argument,
+        {
+            match_result(
+                SpawnArguments__push(&arguments, argument),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return COMMAND_FAILED;
+                }
+            );
+        }
+    );
     SpawnMode mode = command->background ? P_NOWAIT : P_WAIT;
     SpawnResult result = spawn_argv(mode, &path, &arguments);
 

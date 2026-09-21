@@ -297,7 +297,10 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     match_result(
         DynString__init(&config, max_bytes),
         success_do_nothing(),
-        error(code, message) { return None(DynString); }
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
 
     for (StringPos index = 0; source[index] != '\0' && index < max_bytes; index++)
@@ -346,6 +349,12 @@ void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
     return (void *)(memory->driver_address + offset);
 }
 
+ServiceCode service_wait_ready(ConstBStringPtr name)
+{
+    TEST_ASSERT_TRUE(BString__equals(name, &bstr("video_term")) || BString__equals(name, &bstr("keyboard")));
+    return SERVICE_OK;
+}
+
 int test_printf(ConstBStringPtr format, ...)
 {
     const char * text = BString__cstr(format);
@@ -379,11 +388,12 @@ void test_init_spawns_required_processes_in_background(void)
     TEST_ASSERT_EQUAL_STRING("/sbin/services/humpen", spawn_calls[0].path);
     TEST_ASSERT_EQUAL(P_NOWAIT, spawn_calls[1].mode);
     TEST_ASSERT_EQUAL_UINT8(1, spawn_calls[1].has_stdio);
-    TEST_ASSERT_EQUAL_UINT64(7, spawn_calls[1].stdin_fd);
-    TEST_ASSERT_EQUAL_UINT64(8, spawn_calls[1].stdout_fd);
-    TEST_ASSERT_EQUAL_UINT64(9, spawn_calls[1].stderr_fd);
+    TEST_ASSERT_EQUAL_UINT64(fake_expect_keyboard_input ? IO_ENDPOINT_KEYBOARD_INPUT : IO_ENDPOINT_TTY_INPUT,
+                             spawn_calls[1].stdin_fd);
+    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[1].stdout_fd);
+    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[1].stderr_fd);
     TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[1].path);
-    TEST_ASSERT_EQUAL_UINT64(3, fake_open_count);
+    TEST_ASSERT_EQUAL_UINT64(0, fake_open_count);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     TEST_ASSERT_TRUE(fake_sysinfo_closed);
 }
@@ -407,10 +417,11 @@ void test_init_spawns_framebuffer_keyboard_console(void)
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/video_term", spawn_calls[1].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[2].path);
     TEST_ASSERT_EQUAL_UINT8(1, spawn_calls[2].has_stdio);
-    TEST_ASSERT_EQUAL_UINT64(7, spawn_calls[2].stdin_fd);
-    TEST_ASSERT_EQUAL_UINT64(8, spawn_calls[2].stdout_fd);
-    TEST_ASSERT_EQUAL_UINT64(9, spawn_calls[2].stderr_fd);
-    TEST_ASSERT_EQUAL_UINT64(3, fake_open_count);
+    TEST_ASSERT_EQUAL_UINT64(fake_expect_keyboard_input ? IO_ENDPOINT_KEYBOARD_INPUT : IO_ENDPOINT_TTY_INPUT,
+                             spawn_calls[2].stdin_fd);
+    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[2].stdout_fd);
+    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[2].stderr_fd);
+    TEST_ASSERT_EQUAL_UINT64(0, fake_open_count);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     TEST_ASSERT_TRUE(fake_sysinfo_closed);
 }
@@ -499,7 +510,8 @@ void test_init_respawns_login_with_same_stdio(void)
     TEST_ASSERT_EQUAL_UINT64(3, spawn_call_count);
     TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[2].path);
     TEST_ASSERT_EQUAL_UINT8(1, spawn_calls[2].has_stdio);
-    TEST_ASSERT_EQUAL_UINT64(7, spawn_calls[2].stdin_fd);
-    TEST_ASSERT_EQUAL_UINT64(8, spawn_calls[2].stdout_fd);
-    TEST_ASSERT_EQUAL_UINT64(9, spawn_calls[2].stderr_fd);
+    TEST_ASSERT_EQUAL_UINT64(fake_expect_keyboard_input ? IO_ENDPOINT_KEYBOARD_INPUT : IO_ENDPOINT_TTY_INPUT,
+                             spawn_calls[2].stdin_fd);
+    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[2].stdout_fd);
+    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[2].stderr_fd);
 }

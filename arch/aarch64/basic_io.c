@@ -1,5 +1,6 @@
 #include "io/uart.h"
 #include "../kernel/arch/basic_io.h"
+#include "../../kernel/arch/cpu.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>

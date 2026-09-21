@@ -19,6 +19,14 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     channel_calls++;
     return opened;
 }
+
+IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
+{
+    channel_calls++;
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/source"), *source_path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/target"), *target_path);
+    return replies[0].status;
+}
 IOHandle IOClient__accept(IOHandle handle)
 {
     TEST_FAIL_MESSAGE("Not a socket test");
@@ -57,6 +65,7 @@ SystemCallResult syscall(SystemCall call, Anything operation, Anything arg2, Any
 
 void setUp(void)
 {
+    IO__set_startup_stdio(0, 0, 0);
     kernel_calls = 0;
     channel_calls = 0;
     opened = IO_FILESYSTEM_HANDLE_BASE;
@@ -92,22 +101,100 @@ void test_backend_failure_never_falls_back_to_kernel(void)
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
-void test_only_explicit_unmanaged_reply_uses_kernel_file_path(void)
+void test_unmanaged_reply_never_uses_kernel_file_path(void)
 {
     opened = IO_PATH_UNMANAGED;
-    TEST_ASSERT_EQUAL(7, open(&bstr("/root-file"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(1, kernel_calls);
+    TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, open(&bstr("/root-file"), IO_OPEN_READ));
+    TEST_ASSERT_EQUAL(0, kernel_calls);
     TEST_ASSERT_EQUAL(1, channel_calls);
 }
 
-void test_bootstrap_files_and_terminal_streams_do_not_require_io_service(void)
+void test_boot_files_use_channels_without_kernel_syscalls(void)
 {
-    TEST_ASSERT_EQUAL(7, open(&bstr("/boot/config/fstab"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(7, open(&bstr("/boot/sysinfo"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(7, open(&bstr(":tty:"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(7, open(&bstr(":console:"), IO_OPEN_WRITE));
+    TEST_ASSERT_EQUAL(opened, open(&bstr("/boot/config/fstab"), IO_OPEN_READ));
+    TEST_ASSERT_EQUAL(opened, open(&bstr("/boot/sysinfo"), IO_OPEN_READ));
+    TEST_ASSERT_EQUAL(2, channel_calls);
+    TEST_ASSERT_EQUAL(0, kernel_calls);
+}
+
+void test_terminal_paths_use_channels_without_kernel_fallback(void)
+{
+    opened = IO_STREAM_HANDLE_BASE;
+    TEST_ASSERT_EQUAL(opened, open(&bstr(":tty:"), IO_OPEN_READ));
+    TEST_ASSERT_EQUAL(opened, open(&bstr(":console:"), IO_OPEN_WRITE));
+    opened = IO_NO_DEVICE_FOUND;
+    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, open(&bstr(":console:"), IO_OPEN_WRITE));
+    TEST_ASSERT_EQUAL(3, channel_calls);
+    TEST_ASSERT_EQUAL(0, kernel_calls);
+}
+
+void test_link_uses_channel_and_preserves_errors(void)
+{
+    replies[0] = IOReply__new(IO_OK, 0);
+    TEST_ASSERT_EQUAL(IO_OK, link_file(&bstr("/source"), &bstr("/target")));
+    replies[0].status = IO_OPERATION_NOT_SUPPORTED;
+    TEST_ASSERT_EQUAL(IO_OPERATION_NOT_SUPPORTED, link_file(&bstr("/source"), &bstr("/target")));
+    TEST_ASSERT_EQUAL(2, channel_calls);
+    TEST_ASSERT_EQUAL(0, kernel_calls);
+}
+
+void test_legacy_handles_never_fall_back_to_syscalls(void)
+{
+    char data[8] = {0};
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, read(7, data, sizeof(data)));
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, write(7, data, sizeof(data)));
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, close(7));
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, accept(7));
     TEST_ASSERT_EQUAL(0, channel_calls);
-    TEST_ASSERT_EQUAL(4, kernel_calls);
+    TEST_ASSERT_EQUAL(0, kernel_calls);
+}
+
+void test_zero_capacity_listing_does_not_send_a_request(void)
+{
+    DirectoryEntry entry;
+    TEST_ASSERT_EQUAL(0, list_dir(&bstr("/"), &entry, 0));
+    TEST_ASSERT_EQUAL(0, channel_calls);
+    TEST_ASSERT_EQUAL(0, kernel_calls);
+}
+
+void test_terminal_stdio_opens_once_and_close_does_not_reopen(void)
+{
+    IO__set_startup_stdio(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+    opened = IO_STREAM_HANDLE_BASE;
+    char data = 'x';
+    TEST_ASSERT_EQUAL(1, write(1, &data, 1));
+    TEST_ASSERT_EQUAL(1, write(1, &data, 1));
+    TEST_ASSERT_EQUAL(3, channel_calls);
+    TEST_ASSERT_EQUAL(IO_OK, close(1));
+    TEST_ASSERT_EQUAL(IO_NOT_OPEN, write(1, &data, 1));
+    TEST_ASSERT_EQUAL(4, channel_calls);
+    TEST_ASSERT_EQUAL(0, kernel_calls);
+}
+
+void test_keyboard_input_uses_channels_without_kernel_fallback(void)
+{
+    opened = IO_STREAM_HANDLE_BASE;
+    TEST_ASSERT_EQUAL(opened, open(&bstr(":keyboard:"), IO_OPEN_READ));
+    IO__set_startup_stdio(IO_ENDPOINT_KEYBOARD_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+    char byte;
+    TEST_ASSERT_EQUAL(0, read(0, &byte, 1));
+    TEST_ASSERT_EQUAL(3, channel_calls);
+    TEST_ASSERT_EQUAL(0, kernel_calls);
+    opened = IO_NO_DEVICE_FOUND;
+    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, open(&bstr(":keyboard:"), IO_OPEN_READ));
+    TEST_ASSERT_EQUAL(0, kernel_calls);
+}
+
+void test_stdio_open_failure_can_retry_without_using_kernel_console(void)
+{
+    IO__set_startup_stdio(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+    opened = IO_NO_DEVICE_FOUND;
+    char data = 'x';
+    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, write(1, &data, 1));
+    opened = IO_STREAM_HANDLE_BASE;
+    TEST_ASSERT_EQUAL(1, write(1, &data, 1));
+    TEST_ASSERT_EQUAL(3, channel_calls);
+    TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
 void test_embedded_files_use_userspace_channels(void)
@@ -134,7 +221,7 @@ void test_tmp_and_former_memfs_paths_use_channels(void)
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
-void test_devfs_uses_channels_and_only_kernel_stream_reply_falls_back(void)
+void test_devfs_uses_channels_without_kernel_stream_fallback(void)
 {
     TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, open(&bstr("/dev/hd0"), IO_OPEN_READ));
     DirectoryEntry entry;
@@ -144,19 +231,18 @@ void test_devfs_uses_channels_and_only_kernel_stream_reply_falls_back(void)
     TEST_ASSERT_EQUAL(IO_INVALID_PATH, open(&bstr("/dev/missing"), IO_OPEN_READ));
     TEST_ASSERT_EQUAL(0, kernel_calls);
     opened = IO_PATH_UNMANAGED;
-    TEST_ASSERT_EQUAL(7, open(&bstr("/dev/businfo"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(1, kernel_calls);
+    TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, open(&bstr("/dev/test-stream"), IO_OPEN_READ));
+    TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
-void test_mount_overlay_replaces_existing_parent_entry_without_duplicate(void)
+void test_unmanaged_directory_reply_is_not_merged_with_kernel_entries(void)
 {
     replies[0] = IOReply__new(IO_PATH_UNMANAGED, 1);
     replies[0].entry = DirectoryEntry__new(0, 0, 0, IO_MODE_TYPE_DIR | 0755, &bstr("mnt"));
     replies[1] = IOReply__new(IO_PATH_UNMANAGED, 0);
     DirectoryEntry entries[3];
-    TEST_ASSERT_EQUAL(1, list_dir(&bstr("/"), entries, 3));
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, entries[0].mode);
-    TEST_ASSERT_EQUAL(1, kernel_calls);
+    TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, list_dir(&bstr("/"), entries, 3));
+    TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
 void test_directory_entries_are_paged_over_channel(void)

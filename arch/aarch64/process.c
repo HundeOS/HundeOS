@@ -82,6 +82,13 @@ void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
     context->x[0] = result;
 }
 
+void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error)
+{
+    self->context->x[3] = input;
+    self->context->x[4] = output;
+    self->context->x[5] = error;
+}
+
 void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
 {
     uint64_t mode = self->spsr & 0xf;
@@ -166,4 +173,8 @@ void Process__save_context(ProcessPtr self, ProcessContextPtr context)
     {
         __d_printf(PROCESS, "Process context ignoring save self=%p context=NULL %i\n", self->context, self->pid);
     }
+}
+uint16_t Arch__elf_machine(void)
+{
+    return 0xB7;
 }

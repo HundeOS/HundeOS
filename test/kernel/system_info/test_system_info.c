@@ -254,6 +254,9 @@ void test_uefi_acpi_populates_uart_and_gic_platform_info(void)
             TEST_ASSERT_EQUAL_UINT64(0, info.bus_start);
             TEST_ASSERT_EQUAL_UINT64(255, info.bus_end);
         },
-        none() { TEST_FAIL_MESSAGE("UEFI ACPI MCFG should populate PCI info"); }
+        none()
+        {
+            TEST_FAIL_MESSAGE("UEFI ACPI MCFG should populate PCI info");
+        }
     );
 }

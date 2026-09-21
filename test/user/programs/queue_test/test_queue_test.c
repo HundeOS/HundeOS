@@ -18,7 +18,10 @@ static void assert_push_success(QueuePtr queue, ConstQueueMessagePtr message)
 {
     match_result(
         Queue__push(queue, message),
-        success(status) { TEST_ASSERT_EQUAL(QUEUE_OK, status); },
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_OK, status);
+        },
         error_test_fail()
     );
 }
@@ -27,7 +30,10 @@ static Queue client_queue(void)
 {
     match_result(
         Queue__attach(&identity, &client_page, &server_page, 16, 1),
-        success(queue) { return queue; },
+        success(queue)
+        {
+            return queue;
+        },
         error_test_fail()
     );
     return (Queue){0};

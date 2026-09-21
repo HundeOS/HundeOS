@@ -27,8 +27,10 @@ ServiceCode service_authorize_block_client(uint64_t client_pid)
 }
 
 static BlockProtocolStatus transfer(BlockServerContext context, BlockProtocolOperation operation,
-                                    BlockProtocolBlockNumber block, ChannelDataPtr data)
+                                    BlockProtocolBlockNumber block, BlockProtocolBlockCount count,
+                                    ConstBufferDescriptorPtr buffer)
 {
+    ChannelDataPtr data = (ChannelDataPtr)buffer->address;
     transfers++;
     TEST_ASSERT_LESS_THAN_UINT64(16, block);
     if (fail_io)
@@ -37,11 +39,11 @@ static BlockProtocolStatus transfer(BlockServerContext context, BlockProtocolOpe
     }
     if (operation == BLOCK_PROTOCOL_READ)
     {
-        memcpy(data, disk[block], BLOCK_CHANNEL_SECTOR_SIZE);
+        memcpy(data, disk[block], count * BLOCK_CHANNEL_SECTOR_SIZE);
     }
     else
     {
-        memcpy(disk[block], data, BLOCK_CHANNEL_SECTOR_SIZE);
+        memcpy(disk[block], data, count * BLOCK_CHANNEL_SECTOR_SIZE);
     }
     return BLOCK_PROTOCOL_OK;
 }
@@ -74,7 +76,10 @@ void tearDown(void)
 static BlockClient open_client(void)
 {
     match_result(BlockClient__open(&bstr("/dev/virtio4")),
-        success(client) { return client; },
+        success(client)
+        {
+            return client;
+        },
         error_test_fail()
     );
     return (BlockClient){0};
@@ -96,7 +101,7 @@ void test_block_client_reuses_channel_for_describe_write_and_multisector_read(vo
     TEST_ASSERT_EQUAL_MEMORY(expected, actual, sizeof(expected));
     TEST_ASSERT_EQUAL_UINT64(1, allocated_pages);
     TEST_ASSERT_EQUAL_UINT(1, authorizations);
-    TEST_ASSERT_EQUAL_UINT(16, transfers);
+    TEST_ASSERT_EQUAL_UINT(2, transfers);
     TEST_ASSERT_EQUAL(CHANNEL_OK, BlockClient__close(&client));
     TEST_ASSERT_EQUAL(CHANNEL_OK, BlockClient__close(&client));
     ChannelFixture__drain();
@@ -118,8 +123,14 @@ void test_block_client_authorization_failure_closes_session(void)
     authorized = false;
     match_result(
         BlockClient__open(&bstr("/dev/virtio4")),
-        success(client) { TEST_FAIL_MESSAGE("Unauthorized client opened block session"); },
-        error(code, message) { TEST_ASSERT_EQUAL(CHANNEL_INVALID_REPLY, code); }
+        success(client)
+        {
+            TEST_FAIL_MESSAGE("Unauthorized client opened block session");
+        },
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(CHANNEL_INVALID_REPLY, code);
+        }
     );
     ChannelFixture__drain();
     TEST_ASSERT_EQUAL_UINT64(allocated_pages, released_pages);
@@ -134,8 +145,14 @@ void test_block_client_io_failure_does_not_copy_reply_data(void)
     fail_io = true;
     match_result(
         BlockClient__read(&client, 0, 1, (Address)data, sizeof(data)),
-        success(count) { TEST_FAIL_MESSAGE("Expected IO error"); },
-        error(code, message) { TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_IO_ERROR, code); }
+        success(count)
+        {
+            TEST_FAIL_MESSAGE("Expected IO error");
+        },
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_IO_ERROR, code);
+        }
     );
     TEST_ASSERT_EACH_EQUAL_UINT8(0xa5, data, sizeof(data));
 }
@@ -147,4 +164,30 @@ void test_block_client_exit_without_close_releases_session(void)
     ChannelFixture__drain();
     TEST_ASSERT_EQUAL_UINT64(allocated_pages, released_pages);
     TEST_ASSERT_EQUAL_UINT64(0, BlockServerConnections__len(&block_server.connections));
+}
+
+void test_block_server_rejects_stale_lease_and_buffer_overflow_before_hardware_access(void)
+{
+    BlockClient client = open_client();
+    TEST_ASSERT_EQUAL_UINT64(8, Channel__server_pid(&client.channel));
+    TEST_ASSERT_NOT_EQUAL(Channel__server_pid(&client.channel), Queue__peer_pid(&client.channel.control));
+    BlockChannelRequest request = BlockChannelRequest__new(BLOCK_PROTOCOL_READ, 0);
+    request.buffer = client.buffers.read.id + BUFFER_LIMIT;
+    request.count = 1;
+    BlockChannelResponse response;
+    match_result(Channel__submit(&client.channel, (ConstChannelDataPtr)&request, sizeof(request),
+                                 (ChannelDataPtr)&response, sizeof(response)),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_INVALID_ARGUMENT, response.status);
+    request.buffer = client.buffers.read.id;
+    request.count = BUFFER_SIZE / BLOCK_CHANNEL_SECTOR_SIZE + 1;
+    match_result(Channel__submit(&client.channel, (ConstChannelDataPtr)&request, sizeof(request),
+                                 (ChannelDataPtr)&response, sizeof(response)),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_INVALID_ARGUMENT, response.status);
+    TEST_ASSERT_EQUAL_UINT(0, transfers);
 }

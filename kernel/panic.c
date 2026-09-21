@@ -275,7 +275,10 @@ static void Kernel__panic_screen(const char * message)
         {
             match_optional(
                 system_info.framebuffer,
-                some(framebuffer) { PanicScreen__render(&framebuffer, message); },
+                some(framebuffer)
+                {
+                    PanicScreen__render(&framebuffer, message);
+                },
                 none_do_nothing()
             );
         },
@@ -283,7 +286,7 @@ static void Kernel__panic_screen(const char * message)
     );
 }
 
-void Kernel__panic(const char * message, ProcessContext * context)
+void Kernel__panic(const char * message, ProcessContextPtr context)
 {
     Kernel__panic_screen(message);
     BasicIO__puts("Kernel panik: ");

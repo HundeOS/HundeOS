@@ -4,10 +4,12 @@
 #include "types/fixed_array.h"
 
 typedef uint8_t SocketByte;
+typedef SocketByte * SocketBytePtr;
 OptionalDef(SocketByte);
 bool SocketByte__equals(void * first, void * second);
 FixedArrayDefine(SocketByte, 1024, SocketBytes, SocketByte__equals);
 typedef uint64_t SocketID;
+typedef SocketID * SocketIDPtr;
 OptionalDef(SocketID);
 bool SocketID__equals(void * first, void * second);
 FixedArrayDefine(SocketID, 16, SocketPending, SocketID__equals);

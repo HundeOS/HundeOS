@@ -5,6 +5,9 @@
 #include "optional.h"
 #include "bstring.h"
 
+typedef uint8_t Data;
+typedef Data * DataPtr;
+
 typedef uint8_t Char;
 typedef Char * CharPtr;
 

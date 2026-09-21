@@ -1,6 +1,7 @@
 #include "process.h"
 #include "bin/embedded_mapping.h"
 #include "scheduler/parked.h"
+#include "exec/load.h"
 #include "bin/elf.h"
 #include "arch/page_table.h"
 #include "arch/device.h"
@@ -12,7 +13,6 @@
 #include "kernel_core.h"
 #include "irq/irq_dispatcher.h"
 #include "service/service_directory.h"
-#include "subsystems/io/block/block_device.h"
 #include "../common_includes/syscalls/spawn.h"
 
 #include "kalloc.h"
@@ -24,7 +24,6 @@ FixedArrayBodyDefine(ProcessArguments);
 FixedArrayBodyDefine(SpawnArguments);
 FixedArrayBodyDefine(ProcessChildEvents);
 LinkedListBodyDefine(UserAllocations);
-LinkedListBodyDefine(ProcessFileDescriptors);
 LinkedListBodyDefine(ParkedOperations);
 
 static ProcessID pid_counter = 0;
@@ -35,8 +34,6 @@ static BString user_allocation_not_found = bstr("User allocation not found");
 static BString static_user_allocation = bstr("Cannot free static user allocation");
 static BString user_allocation_full = bstr("Too many user allocations");
 static BString invalid_heap_break = bstr("Invalid heap break");
-static BString file_descriptor_full = bstr("Too many file descriptors");
-static BString file_descriptor_not_found = bstr("File descriptor not found");
 static BString argument_too_long = bstr("Argument too long");
 static const ProcessCapabilities PROCESS__HUND_CAPABILITIES =
     PROCESS_CAP_BECOME_SERVICE | PROCESS_CAP_MAP_MMIO | PROCESS_CAP_SUBSCRIBE_IRQ | PROCESS_CAP_REGISTER_BLOCK_DEVICE |
@@ -52,12 +49,6 @@ static size_t Process__page_aligned_size(size_t size)
 {
     return (size + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
 }
-
-static Result(FileDescriptor)
-    Process__set_file_descriptor_unlocked(ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle);
-static Result(FileDescriptor) Process__allocate_file_descriptor_unlocked(ProcessPtr self, ProcessIOHandle handle);
-static Result(ProcessIOHandle) Process__get_io_handle_unlocked(ProcessPtr self, FileDescriptor fd);
-static Result(ProcessIOHandle) Process__remove_file_descriptor_unlocked(ProcessPtr self, FileDescriptor fd);
 
 static Address Process__page_base(Address address)
 {
@@ -88,11 +79,6 @@ static const char * UserAllocationType__name(UserAllocationType type)
     }
 
     return "UNKNOWN";
-}
-
-bool ProcessFileDescriptor__equals(ProcessFileDescriptorPtr self, ProcessFileDescriptorPtr other)
-{
-    return self->fd == other->fd;
 }
 
 bool ProcessChildEvent__equals(ProcessChildEventPtr self, ProcessChildEventPtr other)
@@ -134,7 +120,7 @@ bool Process__has_capability(ProcessPtr self, ProcessCapabilities capability)
 
 static bool allocation_matches_virtual(UserAllocationPtr allocation, void * context)
 {
-    Address virtual_address = *(Address *)context;
+    Address virtual_address = *(AddressPtr)context;
     return allocation->address.virtual_addr == virtual_address;
 }
 
@@ -163,14 +149,6 @@ static UserAllocation UserAllocation__new(UserAddress address, size_t size, User
     };
 }
 
-static ProcessFileDescriptor ProcessFileDescriptor__new(FileDescriptor fd, ProcessIOHandle handle)
-{
-    return (ProcessFileDescriptor){
-        .fd = fd,
-        .handle = handle,
-    };
-}
-
 static bool allocation_contains_range(UserAllocationPtr allocation, void * context)
 {
     UserAllocationRangeMatchPtr range = (UserAllocationRangeMatchPtr)context;
@@ -180,39 +158,6 @@ static bool allocation_contains_range(UserAllocationPtr allocation, void * conte
 
     return range->virtual_address >= allocation_start && range_end <= allocation_end &&
            range_end >= range->virtual_address;
-}
-
-static bool file_descriptor_matches_fd(ProcessFileDescriptorPtr descriptor, void * context)
-{
-    FileDescriptor fd = *(FileDescriptor *)context;
-    return descriptor->fd == fd;
-}
-
-static ProcessFileDescriptors Process__inherit_file_descriptors(OptionalPtr(ProcessPtr) parent)
-{
-    ProcessFileDescriptors descriptors = ProcessFileDescriptors__new();
-    match_optional(
-        *parent,
-        some(parent_process)
-        {
-            for_each_ll(ProcessFileDescriptors, parent_process->file_descriptors, descriptor,
-                        { ProcessFileDescriptors__push(&descriptors, descriptor); });
-            return descriptors;
-        },
-        none_do_nothing()
-    );
-
-    return descriptors;
-}
-
-static FileDescriptor Process__inherit_next_file_descriptor(OptionalPtr(ProcessPtr) parent)
-{
-    match_optional(*parent,
-        some(parent_process) { return parent_process->next_file_descriptor; },
-        none_do_nothing()
-    );
-
-    return 3;
 }
 
 static size_t Process__copy_arg(DataPtr target, BStringPtr arg)
@@ -234,24 +179,33 @@ static Result(Address) Process__setup_args(ProcessPtr self, ConstProcessArgument
         {
             Address user_base = args_page.virtual_addr;
             Address kernel_base = args_page.kernel_addr.virtual_addr;
-            Address * argv = ptr(kernel_base, Address);
+            AddressPtr argv = ptr(kernel_base, Address);
             ProcessArguments arguments_copy = *arguments;
 
             *argc = ProcessArguments__len(&arguments_copy);
 
             size_t cursor = sizeof(Address) * (*argc + 1);
-            for_each_fa(ProcessArguments, arguments_copy, i, arg, {
-                if (cursor + (size_t)BString__length(&arg) + 1 > PAGE_SIZE)
+            for_each_fa(
+                ProcessArguments,
+                arguments_copy,
+                i,
+                arg,
                 {
-                    return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
+                    if (cursor + (size_t)BString__length(&arg) + 1 > PAGE_SIZE)
+                    {
+                        return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
+                    }
+                    argv[i] = user_base + cursor;
+                    cursor += Process__copy_arg(ptr(kernel_base + cursor, Data), &arg);
                 }
-                argv[i] = user_base + cursor;
-                cursor += Process__copy_arg(ptr(kernel_base + cursor, Data), &arg);
-            });
+            );
             argv[*argc] = 0;
             return Success(Address, user_base);
         },
-        error(code, message) { return Error(Address, message, code); }
+        error(code, message)
+        {
+            return Error(Address, message, code);
+        }
     );
 
     return Error(Address, argument_too_long, SPAWN_ARG_TOO_LONG);
@@ -262,43 +216,64 @@ static Result(ProcessSetupStatus) Process__map_service_directory(ProcessPtr self
     match_result(
         EmbeddedArchive__map_process(self),
         success_do_nothing(),
-        error(code, message) { return Error(ProcessSetupStatus, message, code); }
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, code);
+        }
     );
     match_result(
         KernelProcessRegistry__map_process(&self->kernel->process_registry, self),
         success_do_nothing(),
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
     );
     match_result(
         KernelDeviceRegistry__map_process(&self->kernel->device_registry, self),
         success_do_nothing(),
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
     );
     if (!self->kernel->service_directory.directory.valid)
     {
         match_result(
             KernelServiceDirectory__init(&self->kernel->service_directory),
             success_do_nothing(),
-            error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+            error(code, message)
+            {
+                return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+            }
         );
     }
 
     match_result(
         KernelServiceDirectory__map_process(&self->kernel->service_directory, self),
-        success(_) { return Success(ProcessSetupStatus, PROCESS_SETUP); },
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+        success(_)
+        {
+            return Success(ProcessSetupStatus, PROCESS_SETUP);
+        },
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
     );
 
     return Error(ProcessSetupStatus, user_allocation_not_found, PROCESS_FAILED_TO_SETUP);
 }
 
 Result(ProcessPtr)
-    Process__new(KernelPtr kernel, ConstBStringPtr name, const ProcessPageTable * page_table, const UserAddress * entry,
-                 const Stack * stack, OptionalPtr(ProcessPtr) parent, ConstProcessArgumentsPtr arguments)
+    Process__new(KernelPtr kernel, ConstBStringPtr name, ConstProcessPageTablePtr page_table, ConstUserAddressPtr entry,
+                 ConstStackPtr stack, OptionalPtr(ProcessPtr) parent, ConstProcessArgumentsPtr arguments)
 {
     ProcessID pid;
 
-    critical_section(pid_lock, pid = ++pid_counter);
+    critical_section(
+        pid_lock,
+        pid = ++pid_counter
+    );
 
     __d_printf(PROCESS, "Creating process with entry point %p\n", entry);
     ProcessPtr proc = ptr(Kernel__alloc_kernel(sizeof(Process)), Process);
@@ -310,7 +285,14 @@ Result(ProcessPtr)
     proc->pid = pid;
     proc->stack = *stack;
     proc->last_tick = 0;
+    proc->dispatched_at = 0;
+    proc->migration_safe = true;
+    proc->preferred_active = false;
+    proc->preferred_warm = false;
+    proc->preferred_ticket = None(RequestTicket);
     proc->cpu_usage = CPUUsage__new();
+    proc->queue_wait_usage = QueueWaitUsage__new();
+    proc->queue_wait_control = None(UserAddress);
     proc->name = *name;
     proc->parked_operations = ParkedOperations__new();
     proc->parent = *parent;
@@ -319,10 +301,18 @@ Result(ProcessPtr)
     proc->allocation_next = USER_ALLOC_BASE;
     proc->user_allocations = UserAllocations__new();
     proc->virtio_device = None(UserAddress);
-    proc->file_descriptors = Process__inherit_file_descriptors(parent);
-    proc->next_file_descriptor = Process__inherit_next_file_descriptor(parent);
+    proc->startup_stdio = SPAWN_STDIO_DEFAULT;
+    match_optional(
+        *parent,
+        some(parent_process)
+        {
+            proc->startup_stdio = parent_process->startup_stdio;
+        },
+        none_do_nothing()
+    );
     proc->abort = None(ProcessAbort);
     proc->process_class = PROCESS_CLASS_NORMAL;
+    proc->exec_load = None(ExecLoadPtr);
     proc->service = ServiceState__new();
     proc->idle_debug_address = None(UserAddress);
     proc->user_id = PROCESS_USER_ROOT;
@@ -338,13 +328,19 @@ Result(ProcessPtr)
             Process__set_identity(proc, parent_process->user_id, parent_process->group_id,
                                   parent_process->capabilities);
         },
-        none() { Process__set_root_identity(proc); }
+        none()
+        {
+            Process__set_root_identity(proc);
+        }
     );
 
     match_result(
         Process__map_service_directory(proc),
         success_do_nothing(),
-        error(code, message) { return Error(ProcessPtr, message, code); }
+        error(code, message)
+        {
+            return Error(ProcessPtr, message, code);
+        }
     );
 
     uint64_t argc;
@@ -363,7 +359,10 @@ Result(ProcessPtr)
                        proc->context);
             return Success(ProcessPtr, proc);
         },
-        error(code, message) { return Error(ProcessPtr, message, code); }
+        error(code, message)
+        {
+            return Error(ProcessPtr, message, code);
+        }
     );
 
     return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG);
@@ -371,209 +370,110 @@ Result(ProcessPtr)
 
 Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation)
 {
-    critical_section(self->lock, {
-        match_result(
-            ParkedOperations__push(&self->parked_operations, operation),
-            success(index) { cs_return Success(CollectionCode, index); },
-            error(code, message) { cs_return Error(CollectionCode, message, code); }
-        );
-    });
+    critical_section(
+        self->lock,
+        {
+            match_result(
+                ParkedOperations__push(&self->parked_operations, operation),
+                success(index)
+                {
+                    cs_return Success(CollectionCode, index);
+                },
+                error(code, message)
+                {
+                    cs_return Error(CollectionCode, message, code);
+                }
+            );
+        }
+    );
 
     return Error(CollectionCode, bstr("Unable to push parked operation"), LINKED_LIST_ALLOCATION_FAILED);
 }
 
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self)
 {
-    critical_section(self->lock, {
-        match_optional(
-            ParkedOperations__remove_at(&self->parked_operations, -1),
-            some(parked_operation) { cs_return Some(ParkedOperationPtr, parked_operation); },
-            none_do_nothing()
-        );
-    });
+    critical_section(
+        self->lock,
+        {
+            match_optional(
+                ParkedOperations__remove_at(&self->parked_operations, -1),
+                some(parked_operation)
+                {
+                    cs_return Some(ParkedOperationPtr, parked_operation);
+                },
+                none_do_nothing()
+            );
+        }
+    );
 
     return None(ParkedOperationPtr);
 }
 
 Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self)
 {
-    critical_section(self->lock, {
-        for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+    critical_section(
+        self->lock,
         {
-            match_optional(
-                ParkedOperations__at(&self->parked_operations, index),
-                some(parked_operation)
-                {
-                    if (ParkedOperation__is_ready(parked_operation))
+            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+            {
+                match_optional(
+                    ParkedOperations__at(&self->parked_operations, index),
+                    some(parked_operation)
                     {
-                        match_optional(
-                            ParkedOperations__remove_at(&self->parked_operations, index),
-                            some(removed) { cs_return Some(ParkedOperationPtr, removed); },
-                            none_do_nothing()
-                        );
-                    }
-                },
-                none_do_nothing()
-            );
+                        if (ParkedOperation__is_ready(parked_operation))
+                        {
+                            match_optional(
+                                ParkedOperations__remove_at(&self->parked_operations, index),
+                                some(removed)
+                                {
+                                    cs_return Some(ParkedOperationPtr, removed);
+                                },
+                                none_do_nothing()
+                            );
+                        }
+                    },
+                    none_do_nothing()
+                );
+            }
         }
-    });
+    );
 
     return None(ParkedOperationPtr);
 }
 
 Optional(ParkReason) Process__top_park_reason(ProcessPtr self)
 {
-    critical_section(self->lock, {
-        match_optional(
-            ParkedOperations__at(&self->parked_operations, -1),
-            some(parked_operation) { cs_return Some(ParkReason, parked_operation->park_reason); },
-            none_do_nothing()
-        );
-    });
+    critical_section(
+        self->lock,
+        {
+            match_optional(
+                ParkedOperations__at(&self->parked_operations, -1),
+                some(parked_operation)
+                {
+                    cs_return Some(ParkReason, parked_operation->park_reason);
+                },
+                none_do_nothing()
+            );
+        }
+    );
 
     return None(ParkReason);
 }
 
 Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self)
 {
-    critical_section(self->lock, {
-        match_optional(
-            ParkedOperations__at(&self->parked_operations, -1),
-            some(parked_operation)
-            {
-                match_optional(
-                    parked_operation->kernel_context->scheduler,
-                    some(scheduler) { cs_return Some(SchedulerPtr, scheduler); },
-                    none_do_nothing()
-                );
-            },
-            none_do_nothing()
-        );
-    });
-
-    return None(SchedulerPtr);
-}
-
-bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
-{
-    critical_section(self->lock, {
-        for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+    critical_section(
+        self->lock,
         {
             match_optional(
-                ParkedOperations__at(&self->parked_operations, index),
+                ParkedOperations__at(&self->parked_operations, -1),
                 some(parked_operation)
                 {
-                    if (parked_operation->park_reason != reason)
-                    {
-                        continue;
-                    }
-
                     match_optional(
-                        *operation_key,
-                        some(key)
+                        parked_operation->kernel_context->scheduler,
+                        some(scheduler)
                         {
-                            match_optional(
-                                parked_operation->operation_key,
-                                some(parked_key)
-                                {
-                                    if (parked_key == key)
-                                    {
-                                        cs_return true;
-                                    }
-                                },
-                                none_do_nothing()
-                            );
-                        },
-                        none() { cs_return true; }
-                    );
-                },
-                none_do_nothing()
-            );
-        }
-    });
-
-    return false;
-}
-
-bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key,
-                                          OptionalPtr(ReturnCode) return_code)
-{
-    critical_section(self->lock, {
-        for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
-        {
-            match_optional(
-                ParkedOperations__at(&self->parked_operations, index),
-                some(parked_operation)
-                {
-                    if (parked_operation->park_reason != reason)
-                    {
-                        continue;
-                    }
-
-                    match_optional(
-                        *operation_key,
-                        some(key)
-                        {
-                            match_optional(
-                                parked_operation->operation_key,
-                                some(parked_key)
-                                {
-                                    if (parked_key == key)
-                                    {
-                                        parked_operation->return_code = *return_code;
-                                        ParkedOperation__mark_ready(parked_operation);
-                                        cs_return true;
-                                    }
-                                },
-                                none_do_nothing()
-                            );
-                        },
-                        none()
-                        {
-                            parked_operation->return_code = *return_code;
-                            ParkedOperation__mark_ready(parked_operation);
-                            cs_return true;
-                        }
-                    );
-                },
-                none_do_nothing()
-            );
-        }
-    });
-
-    return false;
-}
-
-bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
-{
-    critical_section(self->lock, {
-        if (self->state != PROC_STATE_SLEEPING)
-        {
-            cs_return false;
-        }
-
-        for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
-        {
-            match_optional(
-                ParkedOperations__at(&self->parked_operations, index),
-                some(parked_operation)
-                {
-                    if (parked_operation->park_reason != PARK_SLEEP)
-                    {
-                        continue;
-                    }
-
-                    match_optional(
-                        parked_operation->operation_key,
-                        some(deadline)
-                        {
-                            if (current_tick >= deadline)
-                            {
-                                parked_operation->return_code = Some(ReturnCode, PROCESS_SLEEP_OK);
-                                ParkedOperation__mark_ready(parked_operation);
-                                self->state = PROC_STATE_INTERRUPTED;
-                                cs_return true;
-                            }
+                            cs_return Some(SchedulerPtr, scheduler);
                         },
                         none_do_nothing()
                     );
@@ -581,14 +481,219 @@ bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
                 none_do_nothing()
             );
         }
-    });
+    );
+
+    return None(SchedulerPtr);
+}
+
+bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
+{
+    critical_section(
+        self->lock,
+        {
+            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0;
+                 index--)
+            {
+                match_optional(
+                    ParkedOperations__at(&self->parked_operations, index),
+                    some(parked_operation)
+                    {
+                        if (parked_operation->park_reason != reason)
+                        {
+                            continue;
+                        }
+
+                        match_optional(
+                            *operation_key,
+                            some(key)
+                            {
+                                match_optional(
+                                    parked_operation->operation_key,
+                                    some(parked_key)
+                                    {
+                                        if (parked_key == key)
+                                        {
+                                            cs_return true;
+                                        }
+                                    },
+                                    none_do_nothing()
+                                );
+                            },
+                            none()
+                            {
+                                cs_return true;
+                            }
+                        );
+                    },
+                    none_do_nothing()
+                );
+            }
+        }
+    );
+
+    return false;
+}
+
+bool Process__has_ready_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
+{
+    critical_section(
+        self->lock,
+        {
+            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+            {
+                match_optional(
+                    ParkedOperations__at(&self->parked_operations, index),
+                    some(parked_operation)
+                    {
+                        if (parked_operation->park_reason != reason || !ParkedOperation__is_ready(parked_operation))
+                        {
+                            continue;
+                        }
+
+                        match_optional(
+                            *operation_key,
+                            some(key)
+                            {
+                                match_optional(
+                                    parked_operation->operation_key,
+                                    some(parked_key)
+                                    {
+                                        if (parked_key == key)
+                                        {
+                                            cs_return true;
+                                        }
+                                    },
+                                    none_do_nothing()
+                                );
+                            },
+                            none()
+                            {
+                                cs_return true;
+                            }
+                        );
+                    },
+                    none_do_nothing()
+                );
+            }
+        }
+    );
+
+    return false;
+}
+
+bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key,
+                                          OptionalPtr(ReturnCode) return_code)
+{
+    critical_section(
+        self->lock,
+        {
+            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0;
+                 index--)
+            {
+                match_optional(
+                    ParkedOperations__at(&self->parked_operations, index),
+                    some(parked_operation)
+                    {
+                        if (parked_operation->park_reason != reason)
+                        {
+                            continue;
+                        }
+
+                        match_optional(
+                            *operation_key,
+                            some(key)
+                            {
+                                match_optional(
+                                    parked_operation->operation_key,
+                                    some(parked_key)
+                                    {
+                                        if (parked_key == key)
+                                        {
+                                            parked_operation->return_code = *return_code;
+                                            ParkedOperation__mark_ready(parked_operation);
+                                            cs_return true;
+                                        }
+                                    },
+                                    none_do_nothing()
+                                );
+                            },
+                            none()
+                            {
+                                parked_operation->return_code = *return_code;
+                                ParkedOperation__mark_ready(parked_operation);
+                                cs_return true;
+                            }
+                        );
+                    },
+                    none_do_nothing()
+                );
+            }
+        }
+    );
+
+    return false;
+}
+
+bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
+{
+    critical_section(
+        self->lock,
+        {
+            if (self->state != PROC_STATE_SLEEPING && self->state != PROC_STATE_WAITING)
+            {
+                cs_return false;
+            }
+
+            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+            {
+                match_optional(
+                    ParkedOperations__at(&self->parked_operations, index),
+                    some(parked_operation)
+                    {
+                        if (!((parked_operation->park_reason == PARK_SLEEP && self->state == PROC_STATE_SLEEPING) ||
+                              (parked_operation->park_reason == PARK_WAIT_QUEUE && self->state == PROC_STATE_WAITING)))
+                        {
+                            continue;
+                        }
+
+                        match_optional(
+                            parked_operation->operation_key,
+                            some(deadline)
+                            {
+                                if (current_tick >= deadline)
+                                {
+                                parked_operation->return_code = Some(
+                                    ReturnCode, parked_operation->park_reason == PARK_WAIT_QUEUE ? QUEUE_WAIT_TIMEOUT
+                                                                                                 : PROCESS_SLEEP_OK);
+                                ParkedOperation__mark_ready(parked_operation);
+                                self->state = PROC_STATE_INTERRUPTED;
+                                if (parked_operation->park_reason == PARK_WAIT_QUEUE)
+                                {
+                                    QueueWaitUsage__wake(&self->queue_wait_usage, QUEUE_WAIT_TIMEOUT);
+                                }
+                                cs_return true;
+                                }
+                            },
+                            none_do_nothing()
+                        );
+                    },
+                    none_do_nothing()
+                );
+            }
+        }
+    );
 
     return false;
 }
 
 bool Process__is_parked(ProcessPtr self)
 {
-    critical_section(self->lock, { cs_return ParkedOperations__len(&self->parked_operations) > 0; });
+    critical_section(
+        self->lock,
+        {
+            cs_return ParkedOperations__len(&self->parked_operations) > 0;
+        }
+    );
 
     return false;
 }
@@ -596,7 +701,10 @@ bool Process__is_parked(ProcessPtr self)
 bool Process__is_handling_service_irq(ProcessPtr self)
 {
     match_optional(self->service.active_irq_event,
-        some(event) { return true; },
+        some(event)
+        {
+            return true;
+        },
         none_do_nothing()
     );
 
@@ -665,18 +773,16 @@ Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr se
     }
 
     Process__quiesce_device(self);
+    ExecLoad__cancel(self);
     KernelDeviceRegistry__remove_process(&self->kernel->device_registry, self->pid);
-
-    match_result(
-        BlockDeviceRegistry__dispose_process_resources(self),
-        success_do_nothing(),
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
-    );
 
     match_result(
         IRQDispatcher__dispose_process_resources(self->kernel->irq_dispatcher, self),
         success_do_nothing(),
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
     );
 
     return Success(ProcessSetupStatus, PROCESS_SETUP);
@@ -691,7 +797,10 @@ Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self)
 {
     match_optional(
         ProcessChildEvents__pop_front(&self->child_events),
-        some(event) { return Success(ProcessChildEvent, event); },
+        some(event)
+        {
+            return Success(ProcessChildEvent, event);
+        },
         none_do_nothing()
     );
 
@@ -703,13 +812,13 @@ Result(CollectionCode) Process__push_child_event(ProcessPtr self, ConstProcessCh
     return ProcessChildEvents__push(&self->child_events, *event);
 }
 
-Result(ProcessPtr) Process__setup(KernelPtr kernel, const Elf * binary, OptionalPtr(ProcessPtr) parent)
+Result(ProcessPtr) Process__setup(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent)
 {
     ProcessArguments arguments = ProcessArguments__new();
     return Process__setup_with_args(kernel, binary, parent, &arguments);
 }
 
-Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, const Elf * binary, OptionalPtr(ProcessPtr) parent,
+Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent,
                                             ConstProcessArgumentsPtr arguments)
 {
     __d_println(PROCESS, "Process__spawn_from_elf");
@@ -721,17 +830,30 @@ Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, const Elf * binary
     ProcessPageTable page_table;
     match_result(
         ProcessPageTable__new(kernel),
-        success(created_page_table) { page_table = created_page_table; },
-        error(code, message) { return Error(ProcessPtr, message, code); }
+        success(created_page_table)
+        {
+            page_table = created_page_table;
+        },
+        error(code, message)
+        {
+            return Error(ProcessPtr, message, code);
+        }
     );
 
     __d_println(PROCESS, "Page table created");
 
-    for_each_fa(ExpandedSegmentArray, expanded_elf, i, segment, {
-        UserAddress addr = segment.address;
-        __d_printf(MMU, "Mapping segment %i phys=%p, virt=%p\n", i, addr.kernel_addr.phys_addr, addr.virtual_addr);
-        PageTable__map(&page_table, kernel, segment.address, segment.size);
-    });
+    for_each_fa(
+        ExpandedSegmentArray,
+        expanded_elf,
+        i,
+        segment,
+        {
+            UserAddress addr = segment.address;
+            __d_printf(MMU, "Mapping segment %i phys=%p, virt=%p\n", i, addr.kernel_addr.phys_addr,
+                       addr.virtual_addr);
+            PageTable__map(&page_table, kernel, segment.address, segment.size);
+        }
+    );
     __d_println(PROCESS, "Code mapped");
 
     __d_printf(PROCESS, "Creating stack for %s\n", cstr(binary->name));
@@ -755,25 +877,41 @@ Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, const Elf * binary
             match_result(
                 ProcessArguments__push(&process_arguments, binary->name),
                 success_do_nothing(),
-                error(code, message) { return Error(ProcessPtr, message, SPAWN_ARG_TOO_LONG); }
+                error(code, message)
+                {
+                    return Error(ProcessPtr, message, SPAWN_ARG_TOO_LONG);
+                }
             );
             match_result(
                 ProcessArguments__push_all(&process_arguments, &requested_arguments),
                 success_do_nothing(),
-                error(code, message) { return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG); }
+                error(code, message)
+                {
+                    return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG);
+                }
             );
 
             match_result(
                 Process__new(kernel, &binary->name, &page_table, &entry_address, &stack, parent, &process_arguments),
                 success(proc)
                 {
-                    for_each_fa(ExpandedSegmentArray, expanded_elf, segment_index, segment, {
-                        Process__record_user_allocation(proc, segment.address, segment.size, USER_ALLOCATION_ELF);
-                    });
+                    for_each_fa(
+                        ExpandedSegmentArray,
+                        expanded_elf,
+                        segment_index,
+                        segment,
+                        {
+                            Process__record_user_allocation(proc, segment.address, segment.size,
+                                                            USER_ALLOCATION_ELF);
+                        }
+                    );
                     Process__record_user_allocation(proc, stack.base, STACK_SIZE, USER_ALLOCATION_STACK);
                     return Success(ProcessPtr, proc);
                 },
-                error(code, message) { return Error(ProcessPtr, message, code); }
+                error(code, message)
+                {
+                    return Error(ProcessPtr, message, code);
+                }
             );
         },
         none()
@@ -792,33 +930,39 @@ Result(ProcessSetupStatus) Process__dispose(ProcessPtr self)
     {
         match_optional(
             ParkedOperations__remove_at(&self->parked_operations, 0),
-            some(operation) { ParkedOperation__dispose(operation); },
+            some(operation)
+            {
+                ParkedOperation__dispose(operation);
+            },
             none_do_nothing()
         );
     }
     match_result(
         ParkedOperations__dispose(&self->parked_operations),
         success_do_nothing(),
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
-    );
-
-    match_result(
-        ProcessFileDescriptors__dispose(&self->file_descriptors),
-        success_do_nothing(),
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
     );
 
     match_result(
         UserAllocations__dispose(&self->user_allocations),
         success_do_nothing(),
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
     );
 
     ProcessContext__dispose(self->context);
     match_result(
         Kernel__free(addr(self)),
         success_do_nothing(),
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
     );
 
     return Success(ProcessSetupStatus, PROCESS_SETUP);
@@ -856,20 +1000,29 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
 {
     match_optional(
         self->virtio_device,
-        some(device) { return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL); },
+        some(device)
+        {
+            return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
+        },
         none_do_nothing()
     );
-    for_each_ll(UserAllocations, self->user_allocations, allocation, {
-        Address start = allocation.address.virtual_addr;
-        if (allocation.type == USER_ALLOCATION_MMIO && mapping >= start && allocation.size >= 0x100 &&
-            mapping - start <= allocation.size - 0x100 && (mapping & 3) == 0 && Arch__is_virtio_block_device(mapping))
+    for_each_ll(
+        UserAllocations,
+        self->user_allocations,
+        allocation,
         {
-            UserAddress device = allocation.address;
-            device.virtual_addr = mapping;
-            self->virtio_device = Some(UserAddress, device);
-            return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+            Address start = allocation.address.virtual_addr;
+            if (allocation.type == USER_ALLOCATION_MMIO && mapping >= start && allocation.size >= 0x100 &&
+                mapping - start <= allocation.size - 0x100 && (mapping & 3) == 0 &&
+                Arch__is_virtio_block_device(mapping))
+            {
+                UserAddress device = allocation.address;
+                device.virtual_addr = mapping;
+                self->virtio_device = Some(UserAddress, device);
+                return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+            }
         }
-    });
+    );
     return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
 
@@ -893,27 +1046,32 @@ Result(Address) Process__device_address(ProcessPtr self, Address virtual_address
         return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
     }
 
-    for_each_ll(UserAllocations, self->user_allocations, allocation, {
-        Address start = allocation.address.virtual_addr;
-        Address end = start + allocation.size;
-        if (virtual_address >= start && virtual_address < end)
+    for_each_ll(
+        UserAllocations,
+        self->user_allocations,
+        allocation,
         {
-            Address offset = virtual_address - start;
-            if (allocation.type == USER_ALLOCATION_MMIO)
+            Address start = allocation.address.virtual_addr;
+            Address end = start + allocation.size;
+            if (virtual_address >= start && virtual_address < end)
             {
-                return Success(Address, allocation.address.kernel_addr.phys_addr + offset);
-            }
+                Address offset = virtual_address - start;
+                if (allocation.type == USER_ALLOCATION_MMIO)
+                {
+                    return Success(Address, allocation.address.kernel_addr.phys_addr + offset);
+                }
 
-            KernelAddress address =
-                Kernel__from_virtual_address(self->kernel, allocation.address.kernel_addr.virtual_addr + offset);
-            if (!address.valid)
-            {
-                return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
-            }
+                KernelAddress address = Kernel__from_virtual_address(
+                    self->kernel, allocation.address.kernel_addr.virtual_addr + offset);
+                if (!address.valid)
+                {
+                    return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+                }
 
-            return Success(Address, address.phys_addr);
+                return Success(Address, address.phys_addr);
+            }
         }
-    });
+    );
     return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
 
@@ -948,7 +1106,10 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
                 }
             );
         },
-        error(code, message) { return Error(UserAddress, message, PROCESS_MEMORY_FULL); }
+        error(code, message)
+        {
+            return Error(UserAddress, message, PROCESS_MEMORY_FULL);
+        }
     );
 
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
@@ -977,6 +1138,17 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
         UserAllocations__find(&source->user_allocations, allocation_contains_range, &range),
         some(allocation_match)
         {
+            match_optional(
+                source->queue_wait_control,
+                some(control)
+                {
+                    if (control.virtual_addr == allocation_match->address.virtual_addr)
+                    {
+                        return Error(SharedUserPages, static_user_allocation, PROCESS_MEMORY_STATIC_ALLOCATION);
+                    }
+                },
+                none_do_nothing()
+            );
             Offset backing_offset = source_base - allocation_match->address.virtual_addr;
             Address target_base = self->allocation_next;
             KernelAddress mapping_kernel_address =
@@ -1000,7 +1172,10 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
                     self->allocation_next += allocation_size;
                     return Success(SharedUserPages, SharedUserPages__new(allocation, mapping));
                 },
-                error(code, message) { return Error(SharedUserPages, message, code); }
+                error(code, message)
+                {
+                    return Error(SharedUserPages, message, code);
+                }
             );
         },
         none_do_nothing()
@@ -1014,8 +1189,14 @@ Result(UserAddress)
 {
     match_result(
         Process__map_shared_user_pages_with_allocation(self, source, source_virtual_address, size),
-        success(shared) { return Success(UserAddress, shared.mapping); },
-        error(code, message) { return Error(UserAddress, message, code); }
+        success(shared)
+        {
+            return Success(UserAddress, shared.mapping);
+        },
+        error(code, message)
+        {
+            return Error(UserAddress, message, code);
+        }
     );
 
     return Error(UserAddress, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
@@ -1035,7 +1216,10 @@ Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self)
     match_result(
         Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC),
         success_do_nothing(),
-        error(code, message) { return Error(UserAddress, message, code); }
+        error(code, message)
+        {
+            return Error(UserAddress, message, code);
+        }
     );
 
     self->idle_debug_address = Some(UserAddress, allocation);
@@ -1068,7 +1252,10 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
             self->allocation_next += allocation_size;
             return Success(UserAddress, mapping);
         },
-        error(code, message) { return Error(UserAddress, message, code); }
+        error(code, message)
+        {
+            return Error(UserAddress, message, code);
+        }
     );
 
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
@@ -1114,7 +1301,10 @@ Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
                 PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
                 match_result(
                     Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_HEAP),
-                    success(_) { self->heap_mapped_end = mapped_end; },
+                    success(_)
+                    {
+                        self->heap_mapped_end = mapped_end;
+                    },
                     error(code, message)
                     {
                         PageTable__unmap(&self->page_table, self->kernel, allocation.virtual_addr, allocation_size);
@@ -1123,7 +1313,10 @@ Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
                     }
                 );
             },
-            error(code, message) { return Error(Address, message, PROCESS_MEMORY_FULL); }
+            error(code, message)
+            {
+                return Error(Address, message, PROCESS_MEMORY_FULL);
+            }
         );
     }
 
@@ -1168,7 +1361,10 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
             match_result(
                 Kernel__free(kernel_virtual),
                 success_do_nothing(),
-                error(code, message) { return Error(ProcessMemoryCode, message, PROCESS_MEMORY_FREE_FAILED); }
+                error(code, message)
+                {
+                    return Error(ProcessMemoryCode, message, PROCESS_MEMORY_FREE_FAILED);
+                }
             );
 
             return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
@@ -1182,6 +1378,17 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
 Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virtual_address)
 {
     match_optional(
+        self->queue_wait_control,
+        some(mapping)
+        {
+            if (mapping.virtual_addr == virtual_address)
+            {
+                return Error(ProcessMemoryCode, static_user_allocation, PROCESS_MEMORY_STATIC_ALLOCATION);
+            }
+        },
+        none_do_nothing()
+    );
+    match_optional(
         UserAllocations__find(&self->user_allocations, allocation_matches_virtual, &virtual_address),
         some(found)
         {
@@ -1193,7 +1400,10 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
 
             return Process__free_user_allocation_at(self, found.index);
         },
-        none() { return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND); }
+        none()
+        {
+            return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+        }
     );
 
     return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
@@ -1201,141 +1411,89 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
 
 Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self)
 {
+    self->queue_wait_control = None(UserAddress);
     Process__quiesce_device(self);
     while (self->user_allocations.len > 0)
     {
         match_result(
             Process__free_user_allocation_at(self, 0),
             success_do_nothing(),
-            error(code, message) { return Error(ProcessMemoryCode, message, code); }
+            error(code, message)
+            {
+                return Error(ProcessMemoryCode, message, code);
+            }
         );
     }
 
     return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
 }
 
-Result(FileDescriptor) Process__set_file_descriptor(ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle)
+static Result(SpawnFileDescriptor) Process__startup_endpoint(ProcessPtr self, SpawnFileDescriptor descriptor)
 {
-    critical_section(self->lock, cs_return Process__set_file_descriptor_unlocked(self, fd, handle););
-
-    return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
-}
-
-static Result(FileDescriptor)
-    Process__set_file_descriptor_unlocked(ProcessPtr self, FileDescriptor fd, ProcessIOHandle handle)
-{
-    match_find_result_ptr(
-        ProcessFileDescriptors__find(&self->file_descriptors, file_descriptor_matches_fd, &fd),
-        some(descriptor)
-        {
-            descriptor->handle = handle;
-            if (fd >= self->next_file_descriptor)
-            {
-                self->next_file_descriptor = fd + 1;
-            }
-            return Success(FileDescriptor, fd);
-        },
-        none_do_nothing()
-    );
-
-    ProcessFileDescriptor descriptor = ProcessFileDescriptor__new(fd, handle);
-
-    match_result(
-        ProcessFileDescriptors__push(&self->file_descriptors, descriptor),
-        success(_)
-        {
-            if (fd >= self->next_file_descriptor)
-            {
-                self->next_file_descriptor = fd + 1;
-            }
-            return Success(FileDescriptor, fd);
-        },
-        error(code, message) { return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED); }
-    );
-
-    return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
-}
-
-Result(FileDescriptor) Process__allocate_file_descriptor(ProcessPtr self, ProcessIOHandle handle)
-{
-    critical_section(self->lock, cs_return Process__allocate_file_descriptor_unlocked(self, handle););
-
-    return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
-}
-
-static Result(FileDescriptor) Process__allocate_file_descriptor_unlocked(ProcessPtr self, ProcessIOHandle handle)
-{
-    FileDescriptor fd = self->next_file_descriptor;
-    while (fd < MAX_HANDLES_PER_PROCESS)
+    if (IOEndpoint__is_terminal(descriptor))
     {
-        match_find_result(
-            ProcessFileDescriptors__find(&self->file_descriptors, file_descriptor_matches_fd, &fd),
-            some_do_nothing(),
-            none() { return Process__set_file_descriptor_unlocked(self, fd, handle); }
-        );
-
-        fd++;
+        return Success(SpawnFileDescriptor, descriptor);
     }
-
-    return Error(FileDescriptor, file_descriptor_full, IO_REGISTER_FAILED);
+    switch (descriptor)
+    {
+    case 0:
+        return Success(SpawnFileDescriptor, SpawnStdio__stdin_fd(self->startup_stdio));
+    case 1:
+        return Success(SpawnFileDescriptor, SpawnStdio__stdout_fd(self->startup_stdio));
+    case 2:
+        return Success(SpawnFileDescriptor, SpawnStdio__stderr_fd(self->startup_stdio));
+    default:
+        return Error(SpawnFileDescriptor, bstr("Userspace handle transfer is not supported"), SPAWN_FAILED);
+    }
 }
 
-Result(ProcessIOHandle) Process__get_io_handle(ProcessPtr self, FileDescriptor fd)
+Result(SpawnStdio) Process__stdio_for_spawn(ProcessPtr self, ConstSpawnStdioPtr requested)
 {
-    critical_section(self->lock, cs_return Process__get_io_handle_unlocked(self, fd););
-
-    return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
-}
-
-static Result(ProcessIOHandle) Process__get_io_handle_unlocked(ProcessPtr self, FileDescriptor fd)
-{
-    match_find_result_ptr(
-        ProcessFileDescriptors__find(&self->file_descriptors, file_descriptor_matches_fd, &fd),
-        some(descriptor) { return Success(ProcessIOHandle, descriptor->handle); },
-        none() { return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN); }
-    );
-
-    return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
-}
-
-Result(FileDescriptor) Process__copy_file_descriptor(ProcessPtr self, ProcessPtr source, FileDescriptor target_fd,
-                                                     FileDescriptor source_fd)
-{
+    if (!SpawnStdio__is_present(*requested))
+    {
+        return Success(SpawnStdio, self->startup_stdio);
+    }
+    SpawnFileDescriptor input;
+    SpawnFileDescriptor output;
+    SpawnFileDescriptor error_output;
     match_result(
-        Process__get_io_handle(source, source_fd),
-        success(handle) { return Process__set_file_descriptor(self, target_fd, handle); },
-        error(code, message) { return Error(FileDescriptor, message, code); }
-    );
-
-    return Error(FileDescriptor, file_descriptor_not_found, IO_NOT_OPEN);
-}
-
-Result(ProcessIOHandle) Process__remove_file_descriptor(ProcessPtr self, FileDescriptor fd)
-{
-    critical_section(self->lock, cs_return Process__remove_file_descriptor_unlocked(self, fd););
-
-    return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
-}
-
-static Result(ProcessIOHandle) Process__remove_file_descriptor_unlocked(ProcessPtr self, FileDescriptor fd)
-{
-    match_result(
-        Process__get_io_handle_unlocked(self, fd),
-        success(handle)
+        Process__startup_endpoint(self, SpawnStdio__stdin_fd(*requested)),
+        success(value)
         {
-            match_optional(
-                ProcessFileDescriptors__find(&self->file_descriptors, file_descriptor_matches_fd, &fd),
-                some(found) { ProcessFileDescriptors__remove_at(&self->file_descriptors, found.index); },
-                none_do_nothing()
-            );
-            if (fd < self->next_file_descriptor)
-            {
-                self->next_file_descriptor = fd;
-            }
-            return Success(ProcessIOHandle, handle);
+            input = value;
         },
-        error(code, message) { return Error(ProcessIOHandle, message, code); }
+        error(code, message)
+        {
+            return Error(SpawnStdio, message, code);
+        }
     );
+    match_result(
+        Process__startup_endpoint(self, SpawnStdio__stdout_fd(*requested)),
+        success(value)
+        {
+            output = value;
+        },
+        error(code, message)
+        {
+            return Error(SpawnStdio, message, code);
+        }
+    );
+    match_result(
+        Process__startup_endpoint(self, SpawnStdio__stderr_fd(*requested)),
+        success(value)
+        {
+            error_output = value;
+        },
+        error(code, message)
+        {
+            return Error(SpawnStdio, message, code);
+        }
+    );
+    return Success(SpawnStdio, SpawnStdio__new(input, output, error_output));
+}
 
-    return Error(ProcessIOHandle, file_descriptor_not_found, IO_NOT_OPEN);
+void Process__prepare_startup_stdio(ProcessPtr self)
+{
+    Process__set_startup_stdio(self, SpawnStdio__stdin_fd(self->startup_stdio),
+                               SpawnStdio__stdout_fd(self->startup_stdio), SpawnStdio__stderr_fd(self->startup_stdio));
 }

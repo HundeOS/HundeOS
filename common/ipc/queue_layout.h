@@ -5,6 +5,7 @@
 #include "kernel_notification_queue.h"
 #include "../types/address.h"
 #include "../types/atomic_fixed_array.h"
+#include "../types/atomic_record_array.h"
 
 #define QUEUE_LIMIT 1024U
 #define QUEUE_LISTENER_LIMIT 1024U
@@ -27,12 +28,21 @@ typedef enum QueueCode
     QUEUE_PENDING = -107,
 } QueueCode;
 
+typedef struct QueuePublication
+{
+    QueueMessage message;
+    QueueCursor cursor;
+} QueuePublication;
+ResultDef(QueuePublication);
+AtomicRecordArrayDefine(QueuePublication, 1, QueuePublications);
+
 // Each page has one writer. consumed acknowledges the opposite page's messages.
 typedef struct QueuePage
 {
     QueueCursor produced;
     QueueCursor consumed;
     QueueMessage messages[QUEUE_CAPACITY];
+    QueuePublications publication;
 } QueuePage;
 typedef QueuePage * QueuePagePtr;
 
@@ -42,6 +52,7 @@ typedef struct QueueIdentity
     QueueEndpointID endpoint;
     QueueParticipantID client_pid;
     QueueParticipantID server_pid;
+    QueueParticipantID origin_pid;
     QueueStateFlag accepted;
     QueueStateFlag closed;
 } QueueIdentity;

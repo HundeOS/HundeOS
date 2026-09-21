@@ -11,6 +11,12 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     return -1;
 }
 
+IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
+{
+    TEST_FAIL_MESSAGE("Unexpected filesystem link");
+    return IO_OPERATION_NOT_SUPPORTED;
+}
+
 IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset)
 {
     return IOReply__new(IO_PATH_UNMANAGED, 0);

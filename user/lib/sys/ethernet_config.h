@@ -96,7 +96,10 @@ static void EthernetConfigParseState__read_config_line(EthernetConfigParseStateP
     {
         match_optional(
             EthernetConfig__read_line_value(line, &ethernet_config_present_key),
-            some(parsed) { self->found_present = parsed == 1; },
+            some(parsed)
+            {
+                self->found_present = parsed == 1;
+            },
             none_do_nothing()
         );
     }
@@ -168,13 +171,21 @@ static Optional(EthernetConfig) EthernetConfig__parse(ConstDynStringPtr sysinfo)
         DynString__lines(sysinfo),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line, {
-                match_optional(
-                    DynString__bstring(&line),
-                    some(bstring_line) { EthernetConfigParseState__read_config_line(&state, &bstring_line); },
-                    none_do_nothing()
-                );
-            });
+            for_each_ll(
+                DynStringLines,
+                lines,
+                line,
+                {
+                    match_optional(
+                        DynString__bstring(&line),
+                        some(bstring_line)
+                        {
+                            EthernetConfigParseState__read_config_line(&state, &bstring_line);
+                        },
+                        none_do_nothing()
+                    );
+                }
+            );
             DynStringLines__dispose_all(&lines);
         },
         none_do_nothing()

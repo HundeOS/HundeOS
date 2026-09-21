@@ -79,10 +79,8 @@ static void record_call(IOOperation op, const char * path_a, const char * path_b
     call_count++;
 }
 
-Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+static intptr_t fake_io(IOOperation op, intptr_t arg2, intptr_t arg3, intptr_t arg4)
 {
-    TEST_ASSERT_EQUAL(IO_CALL, call);
-    IOOperation op = (IOOperation)arg1;
 
     if (op == IO_OPEN)
     {
@@ -183,7 +181,7 @@ Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, A
         const char * buffer = (const char *)arg3;
         size_t size = (size_t)arg4;
         record_call(op, buffer, NULL, 0, handle, size);
-        return (Anything)size;
+        return (intptr_t)size;
     }
 
     if (op == IO_CLOSE)
@@ -273,4 +271,58 @@ void test_mv_moves_directory_tree_recursively(void)
     TEST_ASSERT_EQUAL(IO_REMOVE, calls[11].op);
     TEST_ASSERT_EQUAL_STRING("/srcdir", calls[11].path_a);
     TEST_ASSERT_EQUAL(IO_REMOVE_RECURSIVE, calls[11].flags);
+}
+
+IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
+{
+    IOPathRequest request = {.path = *path, .flags = flags};
+    IOHandle handle = fake_io(IO_OPEN, (intptr_t)&request, 0, 0);
+    return handle < 0 ? handle : IO_SESSION_HANDLE_BASE + handle;
+}
+ByteCount IOClient__read(IOHandle handle, ChannelDataPtr buffer, size_t size)
+{
+    return fake_io(IO_READ, handle - IO_SESSION_HANDLE_BASE, (intptr_t)buffer, size);
+}
+ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr buffer, size_t size)
+{
+    return fake_io(IO_WRITE, handle - IO_SESSION_HANDLE_BASE, (intptr_t)buffer, size);
+}
+IOStatus IOClient__close(IOHandle handle)
+{
+    return fake_io(IO_CLOSE, handle - IO_SESSION_HANDLE_BASE, 0, 0);
+}
+IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset)
+{
+    if (operation == IO_REQUEST_LIST_DIR)
+    {
+        if (offset > 0)
+        {
+            return IOReply__new(IO_OK, 0);
+        }
+        DirectoryEntry entry;
+        IOListDirRequest request = {.path = *path, .entries = &entry, .max_entries = 1};
+        DirectoryEntryCount count = fake_io(IO_LIST_DIR, (intptr_t)&request, 0, 0);
+        IOReply reply = IOReply__new(count < 0 ? count : IO_OK, count > 0 ? 1 : 0);
+        if (count > 0)
+        {
+            reply.entry = entry;
+        }
+        return reply;
+    }
+    IOPathRequest request = {.path = *path, .flags = flags};
+    TEST_ASSERT_TRUE(operation == IO_REQUEST_MKDIR || operation == IO_REQUEST_REMOVE);
+    IOOperation op = operation == IO_REQUEST_MKDIR ? IO_MKDIR : IO_REMOVE;
+    return IOReply__new(fake_io(op, (intptr_t)&request, 0, 0), 0);
+}
+
+IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
+{
+    TEST_FAIL_MESSAGE("Unexpected filesystem link");
+    return IO_OPERATION_NOT_SUPPORTED;
+}
+
+IOHandle IOClient__accept(IOHandle handle)
+{
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return -1;
 }

@@ -34,7 +34,10 @@ static Result(FiberCode) HundekanalWarter__dispatch_fiber(FiberPtr self, Anythin
         match_result(
             FiberScheduler__await_channel_signal(&context->scheduler, &context->wake),
             success_do_nothing(),
-            error(code, message) { return Error(FiberCode, message, code); }
+            error(code, message)
+            {
+                return Error(FiberCode, message, code);
+            }
         );
     }
 }
@@ -46,7 +49,10 @@ static int HundekanalWarter__run(QueueArrivalsPtr arrivals)
     match_result(
         FiberScheduler__spawn(&context.scheduler, HundekanalWarter__dispatch_fiber, (Anything)&context),
         success_do_nothing(),
-        error(code, message) { return 1; }
+        error(code, message)
+        {
+            return 1;
+        }
     );
     Queue__prepare_wait();
     while (true)
@@ -54,7 +60,10 @@ static int HundekanalWarter__run(QueueArrivalsPtr arrivals)
         match_result(
             FiberScheduler__run_ready_until_blocked(&context.scheduler),
             success_do_nothing(),
-            error(code, message) { return 1; }
+            error(code, message)
+            {
+                return 1;
+            }
         );
         if (!context.progress)
         {
@@ -64,7 +73,10 @@ static int HundekanalWarter__run(QueueArrivalsPtr arrivals)
         match_result(
             FiberScheduler__wake_channel_signal(&context.scheduler, &context.wake),
             success_do_nothing(),
-            error(code, message) { return 1; }
+            error(code, message)
+            {
+                return 1;
+            }
         );
     }
 }
@@ -86,7 +98,10 @@ int HUNDEKANAL_WARTER_ENTRYPOINT(void)
             IO__print(&bstr("hundekanal-warter: ready\n"));
             return HundekanalWarter__run(arrivals);
         },
-        error(code, message) { IO__printf(&bstr("hundekanal-warter: listen failed %i\n"), (int)code); }
+        error(code, message)
+        {
+            IO__printf(&bstr("hundekanal-warter: listen failed %i\n"), (int)code);
+        }
     );
     return 1;
 }

@@ -137,6 +137,11 @@ value and pointer collection results. Callers must not name generated typedefs
 such as `Alias__type`, `Alias__type_ptr__optional`, or `Alias__value_type_ptr`;
 those names are private to the collection macros.
 
+The legacy kernel `HashtableDefine` also declares `AliasBucketPtr` for its
+existing bucket-level implementation. Use that named pointer rather than
+spelling the private `Alias__bucket` type. This does not replace the requirement
+to use collection operations in application code.
+
 ## Atomic Records
 
 For coherent compound records shared with read-only observers, use

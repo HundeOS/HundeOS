@@ -3,6 +3,13 @@
 
 #include "unity.h"
 
+void Queue__prepare_wait(void)
+{
+}
+void Queue__wait_event(void)
+{
+}
+
 #include "../../../common_includes/syscalls/calls.h"
 #include "../../../user/lib/posix/spawn.h"
 
@@ -39,7 +46,10 @@ static void assert_last_request_argument(StringPos index, ConstBStringPtr expect
 {
     match_optional(
         SpawnArguments__at(&last_request.arguments, index),
-        some(argument) { TEST_ASSERT_EQUAL_BSTRING(*expected, argument); },
+        some(argument)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(*expected, argument);
+        },
         none_test_fail()
     );
 }
@@ -71,6 +81,9 @@ void test_posix_spawnv_rejects_missing_path(void)
     match_result(
         POSIX__spawnv(P_NOWAIT, NULL, argv),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL_INT64(SPAWN_NO_PATH, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL_INT64(SPAWN_NO_PATH, code);
+        }
     );
 }

@@ -4,12 +4,9 @@
 
 #include "unity.h"
 
-#include "../../../../user/lib/sys/syscall.h"
 #include "../../../../common_includes/syscalls/io.h"
 
 static IOStatus fake_result;
-static SystemCall last_call;
-static Anything last_arg1;
 static IOLinkRequest last_link_request;
 static char output[512];
 static uint64_t output_position;
@@ -21,8 +18,6 @@ static uint64_t output_position;
 void setUp(void)
 {
     fake_result = IO_OK;
-    last_call = 0;
-    last_arg1 = 0;
     last_link_request = (IOLinkRequest){0};
     output_position = 0;
     output[0] = '\0';
@@ -32,11 +27,9 @@ void tearDown(void)
 {
 }
 
-Anything syscall(SystemCall call, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
-    last_call = call;
-    last_arg1 = arg1;
-    last_link_request = *((IOLinkRequestPtr)arg2);
+    last_link_request = (IOLinkRequest){.source_path = *source_path, .target_path = *target_path};
     return fake_result;
 }
 
@@ -64,13 +57,11 @@ int IO__printf(ConstBStringPtr format, ...)
     return (int)written;
 }
 
-void test_ln_calls_link_syscall_for_two_paths(void)
+void test_ln_links_two_paths(void)
 {
     char * argv[] = {"ln", "src.txt", "/dst.txt"};
 
     TEST_ASSERT_EQUAL_INT(0, ln_main_under_test(3, argv));
-    TEST_ASSERT_EQUAL(IO_CALL, last_call);
-    TEST_ASSERT_EQUAL(IO_LINK, last_arg1);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/src.txt"), last_link_request.source_path);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/dst.txt"), last_link_request.target_path);
 }
@@ -82,4 +73,43 @@ void test_ln_prints_named_error(void)
 
     TEST_ASSERT_EQUAL_INT(1, ln_main_under_test(3, argv));
     TEST_ASSERT_EQUAL_STRING("ln: error IO_OPERATION_NOT_SUPPORTED (-7)\n", output);
+}
+
+IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
+{
+    if (!BString__starts_with(path, &bstr(IO_SOCKET_SCHEME)))
+    {
+        return IO_PATH_UNMANAGED;
+    }
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return -1;
+}
+
+IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset)
+{
+    return IOReply__new(IO_PATH_UNMANAGED, 0);
+}
+
+IOHandle IOClient__accept(IOHandle handle)
+{
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return -1;
+}
+
+IOStatus IOClient__close(IOHandle handle)
+{
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return IO_UNKNOWN_HANDLE;
+}
+
+ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
+{
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return -1;
+}
+
+ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
+{
+    TEST_FAIL_MESSAGE("Unexpected socket IO");
+    return -1;
 }

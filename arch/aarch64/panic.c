@@ -13,7 +13,7 @@ void Kernel__halt()
     }
 }
 
-void Kernel__dump_state(ProcessContext * ctx)
+void Kernel__dump_state(ProcessContextPtr ctx)
 {
     uint64_t esr = read_esr_el1();
 
@@ -60,7 +60,7 @@ void Kernel__dump_state(ProcessContext * ctx)
     }
 }
 
-void Kernel__dump_context(ProcessContext * ctx)
+void Kernel__dump_context(ProcessContextPtr ctx)
 {
     __d_printf(FAULT, "Context: %p\n", ctx);
     __d_printf(FAULT, "PC: %p\n", ctx->elr);

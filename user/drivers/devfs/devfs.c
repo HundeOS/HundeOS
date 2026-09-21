@@ -24,7 +24,10 @@ static Result(FilesystemFileSize)
                     memcpy(data, BString__cstr(&text), BString__length(&text));
                     return Success(FilesystemFileSize, BString__length(&text));
                 },
-                none() { return Error(FilesystemFileSize, bstr("No device"), IO_INVALID_PATH); }
+                none()
+                {
+                    return Error(FilesystemFileSize, bstr("No device"), IO_INVALID_PATH);
+                }
             );
         },
         error(code, message)

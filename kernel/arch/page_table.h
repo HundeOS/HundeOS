@@ -21,6 +21,7 @@ typedef struct ProcessPageTable
 } ProcessPageTable;
 
 typedef ProcessPageTable * ProcessPageTablePtr;
+typedef const ProcessPageTable * ConstProcessPageTablePtr;
 
 ResultDef(ProcessPageTable);
 
@@ -33,6 +34,9 @@ extern size_t ProcessPageTable__page_count(ProcessPageTablePtr self);
 extern Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self, KernelPtr kernel);
 extern Result(KAllocCode) ArchProcessPageTable__dispose(ProcessPageTablePtr self);
 extern void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
+Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
+Result(KAllocCode)
+    PageTable__try_map_shared(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
 extern void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
 extern void ArchPageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size);
 extern void PageTable__map_shared(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);

@@ -212,7 +212,10 @@ void test_bstring_split_first_any_splits_at_first_matching_delimiter(void)
     BStringSplit split = BString__split_first_any(&bstr("alpha beta"), &bstr(" \t"));
 
     match_optional(split.match,
-        some(value) { TEST_ASSERT_EQUAL_BSTRING(bstr("alpha"), value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(bstr("alpha"), value);
+        },
         none_test_fail()
     );
     TEST_ASSERT_EQUAL_BSTRING(bstr("beta"), split.rest);
@@ -226,7 +229,10 @@ void test_bstring_split_first_any_returns_empty_match_when_delimiter_is_first(vo
     BStringSplit split = BString__split_first_any(&bstr("\"tail"), &bstr("\""));
 
     match_optional(split.match,
-        some(value) { TEST_ASSERT_EQUAL_BSTRING(empty_bstr(), value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(empty_bstr(), value);
+        },
         none_test_fail()
     );
     TEST_ASSERT_EQUAL_BSTRING(bstr("tail"), split.rest);
@@ -240,7 +246,10 @@ void test_bstring_split_first_any_returns_whole_input_when_no_delimiter_found(vo
     BStringSplit split = BString__split_first_any(&bstr("token"), &bstr(" \t"));
 
     match_optional(split.match,
-        some(value) { TEST_ASSERT_EQUAL_BSTRING(bstr("token"), value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(bstr("token"), value);
+        },
         none_test_fail()
     );
     TEST_ASSERT_TRUE(BString__is_empty(&split.rest));
@@ -269,7 +278,10 @@ void test_bstring_parse_uint64_returns_value_for_valid_decimal(void)
 
     match_optional(
         BString__parse_uint64(&bstr("12345")),
-        some(value) { TEST_ASSERT_EQUAL_UINT64(12345, value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL_UINT64(12345, value);
+        },
         none_test_fail()
     );
 }
@@ -280,7 +292,10 @@ void test_bstring_parse_uint64_base_zero_accepts_hex_prefix(void)
 
     match_optional(
         BString__parse_uint64_base(&bstr("0xfe340000"), 0),
-        some(value) { TEST_ASSERT_EQUAL_HEX64(0xfe340000, value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL_HEX64(0xfe340000, value);
+        },
         none_test_fail()
     );
 }
@@ -291,7 +306,10 @@ void test_bstring_parse_uint64_base_strips_whitespace(void)
 
     match_optional(
         BString__parse_uint64_base(&bstr(" 126\n"), 0),
-        some(value) { TEST_ASSERT_EQUAL_UINT64(126, value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL_UINT64(126, value);
+        },
         none_test_fail()
     );
 }
@@ -342,7 +360,10 @@ void test_bstring_char_at_returns_character_when_in_bounds(void)
 
     match_optional(
         BString__char_at(&bstr("hello"), 1),
-        some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); },
+        some(ch)
+        {
+            TEST_ASSERT_EQUAL_CHAR('e', ch);
+        },
         none_test_fail()
     );
 }
@@ -376,7 +397,14 @@ void test_bstring_iterate_visits_each_character(void)
 {
     BString output = empty_bstr();
 
-    for_each_bstring(&bstr("abc"), index, ch, { BString__push_char(&output, ch); });
+    for_each_bstring(
+        &bstr("abc"),
+        index,
+        ch,
+        {
+            BString__push_char(&output, ch);
+        }
+    );
 
     TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), output);
 }

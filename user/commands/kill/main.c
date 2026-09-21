@@ -18,7 +18,7 @@ static bool Kill__matches_signal_name(ConstBStringPtr value, ConstBStringPtr exp
     return BString__equals(&uppercase, expected);
 }
 
-static bool Kill__parse_signal_spec(ConstBStringPtr value, ProcessSignal * signal)
+static bool Kill__parse_signal_spec(ConstBStringPtr value, ProcessSignalPtr signal)
 {
     match_optional(
         BString__parse_uint64(value),

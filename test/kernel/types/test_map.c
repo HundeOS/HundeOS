@@ -26,6 +26,9 @@ void test_kernel_map_wrapper_returns_full_error(void)
     match_result(
         TinyTestMap__set(&map, 2, 12),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(MAP_FULL, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(MAP_FULL, code);
+        }
     );
 }

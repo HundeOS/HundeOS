@@ -1,5 +1,10 @@
 # Userspace I/O system
 
+The [Mama bootstrap](bootstrap-services.md) now establishes `/boot`,
+`/boot/config`, and `/sbin` in userspace before configured startup. The filesystem
+service starts empty and accepts authenticated Channel mount requests; it no
+longer reads `fstab` itself. Boot file operations no longer use a syscall bypass.
+
 ## Status
 
 `hund-io-system` mediates sockets and the boot-configured FAT32/EXT2 mounts
@@ -7,7 +12,9 @@ through channels. `hund-dateisystem` owns the userspace mount table and routes
 filesystem paths to the format drivers. FAT32 and EXT2 no longer register with
 the kernel filesystem broker or fetch/complete filesystem requests through
 service syscalls. Their file handles, offsets, and buffers now live in userspace.
-Bootstrap filesystems, console streams, and their descriptors remain in the kernel.
+Console streams now use the same I/O protocol and Channels. The kernel retains
+boot-level-0 embedded executable loading and independent boot/panic output, not
+bootstrap filesystem mounts or console/keyboard data buffering.
 
 ## Common application interface
 
@@ -68,9 +75,19 @@ access rights; they must not emerge accidentally from globally usable handles.
 
 ## Data and progress
 
-Requests, replies, and shared-buffer descriptors travel over channels. Bulk
-data may use separately shared buffers with validated bounds, access modes,
-and lifetime. Do not create parallel request/reply rings in those buffers.
+Requests, replies, and shared-buffer descriptors travel over channels. The
+agreed bulk-data design uses separately shared directional buffers managed by
+[`hunde-puffer`](shared-buffers.md), with common virtual addresses, validated
+bounds, enforced access modes, and explicit lease lifetimes. Protocol open
+responses advertise the buffers; read/write commands and completions remain on
+the Channel. Do not create parallel request/reply rings in those buffers.
+
+The first implementation uses 2 MiB directional leases advertised on open.
+I/O mediators copy in bulk between session buffers. Block commands describe
+multiple sectors per request; hardware callbacks now receive the shared buffer
+directly. VirtIO uses DMA into retained service-to-service backing, while SDHCI
+uses multi-sector PIO. See [release rules](shared-buffers.md#current-release-rules)
+for the temporary boot-lifetime retention policy.
 
 The current channel supports one outstanding request per session. Multiple
 open handles do not change that limit. The server must continue servicing
@@ -112,16 +129,72 @@ not imply that recovery is currently implemented.
 4. Retire the corresponding kernel routing, resource tables, request brokers,
    and syscalls as their callers migrate.
 
-Retain the kernel `/boot/config` filesystem path,
-consoles, and streams. Boot dependencies must allow the embedded channel and
-I/O services to start without depending on the I/O service they are bringing
-up. The root disk mount now lives in userspace. Removing the remaining boot
-configuration EXT2 mount is a separate migration.
+Retain independent boot/panic output and boot-level-0 embedded executable loading.
+Mama starts the Channel and I/O services without filesystem dependencies, then
+establishes userspace `/boot` mounts before configuration is read.
 
 Test routing, multiple handles over one session, permissions, stale and foreign
 handles, close and exit cleanup, backend failure, and progress under blocked
 requests. Verify boot ordering and actual file operations on all configured
 mounts before retiring their old paths.
+
+## Console streams
+
+`hund-io-system` owns a userspace stream-device registry. Stream paths use
+`:name:` syntax: names must be nonempty and contain no colon, slash, NUL, or
+space/tab/newline characters. Each registration associates a BString path and
+one access direction (read or write) with a BString backend service identifier.
+Duplicate name/direction registrations are rejected. Unknown names return
+`IO_NO_DEVICE_FOUND`; malformed names return `IO_INVALID_PATH`, and unsupported
+access returns `IO_PERMISSION_DENIED`. Colon-prefixed opens never fall through
+to the filesystem router.
+
+Boot setup registers the terminal routes below. The mediator and stream-driver
+helpers validate stream syntax, not a built-in list of device names. Backend
+Channels are opened lazily and reused by service identifier, including across
+aliases. Open handles retain backend routing and client ownership independently
+of subsequent path lookup. Registration is local to the I/O service for now;
+there is no driver-controlled registration protocol. `:keyboard:` reads route
+to the `keyboard` service using this same registry and Channel protocol.
+
+Applications open `:tty:` or `:console:` through `hund-io-system`. Reads route
+to `uart_rx`; `:tty:` writes route to `uart_tx`. `:console:` writes use
+`video_term` when a framebuffer is present, otherwise `uart_tx`. These drivers
+use the existing I/O protocol over Channel, with multiple owned handles per
+session, direction checks, close, and session cleanup. They do not fetch or
+complete console buffers through kernel I/O syscalls.
+
+`uart_rx` owns a 1024-byte input buffer and subscribes to UART interrupts through
+`hund-unterbrict`. It drains the FIFO and clears device status before sending
+the interrupt-protocol acknowledgement. When the input buffer fills, it retains
+the pending interrupt until reads make space. `uart_tx` handles FIFO backpressure
+and newline translation. The stream driver retains an empty read at its backend
+until input arrives, so the application request remains blocked without Channel
+request/reply churn. Blocked writes return `IO_WAIT_FOR_DATA` so the mediator can
+service other clients while retrying; this remains necessary for polling output
+drivers without a transmit interrupt.
+
+Initial standard descriptors carry terminal endpoint metadata, not another
+process's channel handles. The kernel passes this metadata in the process
+startup context; userspace lazily opens its own input/output/error handles.
+Login and child commands therefore use independently authenticated sessions.
+General channel-handle inheritance is not implemented. Closing a local standard
+stream does not update the kernel's inherited endpoint metadata.
+
+The kernel stores only the three startup endpoint values, not an open-file
+descriptor table. Spawn may select terminal endpoint markers or the parent's
+standard slots (0, 1, 2); other handle-transfer requests fail. Actual open-resource
+sharing belongs in the future userspace descriptor-inheritance protocol.
+
+Serial boot waits for both UART services before starting login. Framebuffer
+login waits for both `video_term` and `keyboard`. VirtIO keyboard input uses a
+bounded userspace buffer, retaining used-ring events and the outstanding IRQ
+when there is insufficient space for a complete key sequence. Device interrupt
+status is cleared before the completion ACK is sent to `hund-unterbrict`.
+The USB keyboard stub exposes the same stream interface, but does not yet
+acquire hardware input. Only one keyboard backend is configured at a time.
+Kernel boot messages, panic output, and diagnostic logging retain an
+independent architecture UART path and do not depend on these services.
 
 ## Socket protocol
 
@@ -147,21 +220,19 @@ channel waiting for another client's action. Channel replies are retained under
 backpressure without repeating completed writes or opens. One application
 session still supports only one outstanding operation.
 
-Transfers carry at most 256 bytes in the channel payload and can return short
-counts. Open sends a counted endpoint name of at most 255 bytes, reconstructed
+Transfers use the directional shared buffers and can return short counts.
+Open sends a counted endpoint name of at most 255 bytes, reconstructed
 as a `BString` by the service; overlong names are rejected rather than truncated.
-There are no separately shared socket buffers yet. After peer close, buffered
+Socket transport also uses the session's directional buffers. After peer close, buffered
 bytes remain readable, followed by EOF (a successful zero-byte read); writes
 to a closed peer fail. Closing a listener releases unaccepted connections but
 leaves accepted connections alive.
 
-Application handles start at `1 << 32`, outside the kernel descriptor range.
-The userspace library routes those handles to the I/O channel, and routes
-`socket://` opens there directly. Filesystem handles use a separate range
-starting at `1 << 40`. Kernel-owned descriptors retain their syscall route.
-There is no failure-triggered fallback. Socket handles are not
-currently inherited by spawned processes; kernel descriptor inheritance still
-applies only to kernel-owned descriptors. Service-restart recovery is deferred.
+Application handles start at `1 << 32`; filesystem handles use a separate range
+starting at `1 << 40`. The userspace library routes these handles and socket
+opens to the I/O channel. There is no kernel descriptor table or syscall fallback.
+Socket handles are not currently inherited by spawned processes.
+Service-restart recovery is deferred.
 
 Each client disconnect triggers a backend release-client operation. The warden
 sends a channel cancellation notification if a request is in progress, retaining
@@ -174,12 +245,11 @@ loss clears the socket service's resources. This uses current channel closure
 detection; the reliable process-exit notification work described above remains
 outstanding. A live client that never closes can still retain bounded resources.
 
-Hundeschule starts the socket service and `hund-io-system` after the channel
-and interrupt services, waits for readiness, and then probes disks. Disk
-configuration entries for these bootstrap services do not start duplicates.
-The old kernel socket implementation and service syscalls remain compiled for
-now, but the new socket service no longer registers with that broker and normal
-userspace socket calls no longer enter it.
+Mama starts the Channel, interrupt, filesystem, and I/O services. Hundeschule
+starts the socket service later; the I/O service connects to it on demand.
+Configuration entries for already-established core services do not start duplicates.
+The old kernel socket implementation and broker service operations have been
+deleted. Userspace socket calls use the Channel-based socket service.
 
 Implementation: `user/lib/io` contains the protocol, client, shared mediation,
 and channel server loop; `user/services/hund-io-system` selects backends; socket state lives
@@ -196,15 +266,13 @@ and validates them against the delegated client PID and channel session.
 `hund-dateisystem` accepts delegated identities only from the authenticated I/O
 service; each format driver accepts them only from the filesystem service.
 
-Hundeschule starts `hund-dateisystem` after disk discovery/configuration and
-before Hundeschau. It reads `/boot/config/fstab` and installs the configured
-FAT32/EXT2 mount paths. Every target configures `/dev/virtio1 ext2 /`, replacing
-the former kernel root mount. The filesystem service starts the root
-`humpen-wachhund` from that entry and waits for the `/` driver to publish
-readiness before publishing its own readiness. Missing or duplicate root
-configuration, spawn failure, or failed readiness prevents boot from proceeding
-to login. Humpen skips root and starts the remaining format-driver watchdogs
-using that same fstab and the shared `MountConfig` parser.
+Mama starts `hund-dateisystem` with an empty namespace, then establishes `/sbin`,
+`/boot`, and `/boot/config`. Hundeschule subsequently reads `/boot/config/fstab`
+through Channels, registers the configured FAT32/EXT2 mounts, and starts the root
+`humpen-wachhund`. It waits for root readiness before starting Hundeschau. Missing
+or duplicate root configuration, spawn failure, or failed readiness prevents
+startup from reaching login. Humpen skips root and starts the remaining
+format-driver watchdogs using the same fstab and shared `MountConfig` parser.
 Drivers advertise their mountpoint as their service identifier after
 mounting the block device. The namespace connects on demand and retains one
 channel per format-driver process. This startup sequence applies to all targets;
@@ -216,6 +284,18 @@ mount whose driver is unavailable returns an I/O error, never access to an
 underlying bootstrap file at the same path. Backend loss is terminal for that
 connection; restart/remapping remains deferred.
 
+The QEMU Pi UEFI trace configuration mounts `/dev/virtio2` (the EXT2 boot
+configuration image) at `/mnt/ext2user`. `/dev/virtio4` is the FAT EFI system
+disk, not an EXT2 volume. Using it here causes repeated mount failures and
+eventually exhausts the boot-lifetime retained service buffers described in
+[Shared buffers](shared-buffers.md#current-release-rules).
+After correcting that entry, a four-core traced QEMU run listed
+`/mnt/ext2user` and completed 150 consecutive `ps` launches without mount or
+command failures. Debugger snapshots near startup, midway, and after the run
+showed 28 buffer slots and six detached retained buffers throughout; the
+failed-mount accumulation was absent. This is a stability check, not a
+throughput benchmark or proof of general service-restart reclamation.
+
 The implemented operations are open, read, write, close, list directory, mkdir,
 and remove. Routing selects the longest matching complete mount-path prefix;
 root preserves the absolute path forwarded to its driver. Duplicate mountpoints
@@ -225,9 +305,9 @@ The library merges duplicate names, preserving the earlier overlay entry while
 advancing the transport offset independently of the output entry count. This
 keeps `/`, `/mnt`, `/boot`, and `/tmp` discoverable, even when an intermediate
 directory does not exist on disk. Backend failures still propagate as errors.
-The bootstrap `/boot/config`, `/boot/sysinfo`, and named
-`:...:` streams retain direct syscall routing. Other paths use the I/O service;
-only an explicit `IO_PATH_UNMANAGED` reply permits legacy syscall routing.
+`/boot/config` and `/boot/sysinfo` use the same Channel routing as other files.
+Named `:...:` streams and other paths use the I/O service;
+an `IO_PATH_UNMANAGED` reply does not permit legacy syscall routing.
 With `/` configured, ordinary absolute paths are managed even when their driver
 fails: there is no kernel root disk mount to fall back to. A transport error is
 never an unmanaged-path reply.
@@ -241,48 +321,86 @@ Intermediaries remember deferred opens even after a `WOULD_BLOCK` transport repl
 has been consumed. Pending mount operations return `WOULD_BLOCK` to release the
 namespace channel while work continues, allowing another mount to progress.
 
-Current limits are explicit: eight mounts including root, `/tmp`, and `/dev`, 32 open
-files per format driver, 255-byte protocol paths, and 256-byte transfer chunks.
+Current limits are explicit: sixteen mounts including root, `/tmp`, and `/dev`, 32 open
+files per format driver and 255-byte protocol paths. Transport buffers are 2 MiB.
 The client library combines file chunks into the caller's requested transfer.
 The existing format limits remain: 12 KiB read snapshots, 512-byte FAT32 writes,
-and 12 KiB EXT2 writes. Hard links through this protocol, seeking,
+and 12 KiB EXT2 writes. Hard-link creation in filesystem drivers, seeking,
 descriptor inheritance/transfer, service recovery, and full POSIX semantics are
 not implemented. Disk drivers enforce read/write access flags and session
 ownership, but do not yet add Unix mode-bit authorization that the old
 filesystem broker did not enforce. Memfs additionally enforces node permissions
 as described below.
 
-Embedded executable loading reads the immutable archive directly in the kernel,
-without a kernel filesystem mount. Embedded `/sbin` programs continue to boot
-and execute, but spawning an ELF from a channel-backed
-mount, including the root disk, is not supported until executable loading is
-migrated. Moving the root mount does not add a kernel-to-userspace file broker.
+All application file operations now use Channels, including `link_file`. A link
+request carries both paths; the namespace resolves both mounts, rejects links
+across mounts, and forwards mount-relative paths to the same provider. Current
+providers return `IO_OPERATION_NOT_SUPPORTED`; transporting the request does
+not implement on-disk hard links. The application library never retries file
+operations through kernel I/O syscalls, including unmanaged-path replies.
+Directory listing includes namespace mount entries without a kernel merge.
+Legacy kernel handles are rejected; standard streams still lazily open their
+configured userspace stream endpoints.
 
-The old kernel filesystem broker remains compiled for unmigrated callers, but
-the boot FAT32/EXT2 drivers no longer use it. Kernel EXT2 is retained only for
-`/boot/config`; embedded executable loading does not depend on the root disk.
+Normal executable loading uses kernel -> Channel -> `hund-io-system` -> namespace
+-> filesystem provider. Only Mama's `boot_spawn()` can read the embedded archive
+directly, and only before the irreversible `boot_complete()` handoff. Normal
+spawn has no embedded or old filesystem fallback. The loader copies validated
+shared-buffer ranges into a kernel-owned image, bounded to 64 MiB, then validates
+the static ELF before mapping (at most 128 MiB of segment memory). The generic
+FAT32/EXT2 adapter rejects executable opens until it supports execute-permission
+checks; disk spawning therefore remains unavailable. Those providers also impose
+a 12 KiB open-file snapshot limit. Embedded files do not have that provider limit.
+See [Executable loading](bootstrap-filesystem-handoff.md).
+
+The old kernel filesystem broker, bootfs, EXT2, block cache, and memory block
+device have been deleted. The kernel mount syscall and watchdog fallback are
+also retired. Embedded executable loading does not depend on the root disk.
+The generic kernel I/O API, root filesystem/mount router, file-handle tables,
+`kernel/kio` wrappers, and file-I/O syscall handler have also been deleted.
+The old `IO_CALL` number is reserved and returns an unsupported-syscall error.
+Syscall handlers use a keyed map so unregistered numbers cannot dispatch null
+function pointers. Process fault reports go directly to kernel diagnostics,
+independently of userspace stdout/stderr and I/O services.
+The kernel block broker and its request, completion, connection, and buffer
+transport have been deleted. Its syscall numbers remain reserved and reject
+calls. Block-device registration publishes read-only discovery metadata only;
+authorization, memory mappings, shared registries, and executable-loading
+Channels remain kernel mechanisms.
+
+The generic in-kernel message broker has also been deleted. Its I/O and service
+callbacks had no production publishers, and its process-exit broadcasts had no
+production subscribers. Scheduler park/unpark operations remain direct calls;
+process-exit handling, parent notifications, shared Channels, event queues, and
+IRQ delivery do not depend on that broker.
+
+VirtIO block I/O uses only its Channel server and managed shared buffers.
+The separate `sdhci_channelio` executable replaces the old SDHCI driver in
+SD boot configurations. It runs its Channel server in a fibre and retains
+the existing read-only, polling PIO hardware implementation; device interrupt
+signalling remains disabled and it does not subscribe directly to kernel IRQs.
+Interrupt-driven SD transfers and SD write support are not implemented.
+The `channel_blk`/`channel_fs` demo pair also uses the shared BlockServer and
+BlockClient APIs, not private request/reply rings. Unused `IO__block_read` and
+`IO__block_write` syscall helpers are deleted; general fibre support remains.
 Namespace, mediation, routing, format operations, and
 disconnect behavior have userspace tests with fake kernel/block boundaries.
 
-The kernel boot-information provider (`kernel/subsystems/io/file/bootfs`) exposes
-`/boot/sysinfo`, previously `/proc/sysinfo`. Its hardware data and live statistics
-are unchanged. UART, framebuffer, PCI, SD-host, and Ethernet configuration readers
-use the new path before the userspace I/O services are ready. `/boot/config`
-remains a separate EXT2 mount beneath `/boot`. The userspace namespace lists
-both entries and marks `sysinfo` as a read-only file, not a directory.
-Only the exact `/boot/sysinfo` file bypasses channel routing; other `/boot` paths
-remain subject to normal routing unless covered by `/boot/config`. There is no
-kernel `/proc` mount or compatibility alias. A separate userspace procfs is now
-mounted there for process accounting; it does not relocate `/boot/sysinfo`.
+The userspace `sysinfofs` driver exposes `/boot/sysinfo` from the typed kernel
+hardware snapshot described in [Bootstrap services](bootstrap-services.md).
+UART, framebuffer, PCI, SD-host, and Ethernet readers use that file after Mama
+establishes `/boot`. The I/O service uses the typed syscall directly before
+filesystems are ready. `/boot/config` is a nested userspace EXT2 mount. Neither
+path bypasses Channels. `/proc` remains a separate userspace accounting filesystem.
 
 ### Embedded Filesystem
 
-`hund-dateisystem` starts `/sbin/drivers/embedfs` after procfs and waits for
-`/sbin` before publishing readiness on every target. Open, read, close, and
+Mama bootstraps `/sbin/drivers/embedfs` and mounts `/sbin` before handoff.
+Open, read, close, and
 directory listing use the existing Channel-based I/O path. The kernel's embedded
-filesystem implementation is retired to a test fixture.
+filesystem implementation and its obsolete test fixture have been deleted.
 See [Bootstrap filesystem handoff](bootstrap-filesystem-handoff.md) for archive
-mapping, permissions, resource ownership, and the remaining executable-loader
+mapping, permissions, resource ownership, and executable-loader
 boundary.
 
 ### Process Filesystem
@@ -322,12 +440,16 @@ departed owner's records after device quiescence. Metadata already opened is a
 private snapshot, not a grant to access a device that has since exited.
 
 Devfs lists device paths and `hdN` aliases and exposes block metadata as read-only
-files. Mutation and executable opens are rejected. Legacy kernel-backed streams
-such as `/dev/businfo` are registered in the same directory but return explicit
-`IO_PATH_UNMANAGED` on open, retaining their existing kernel stream descriptors.
-Unknown devices and registry/backend failures never trigger that route. Moving
-stream data transport remains a separate step; the kernel device/stream brokers
-and bootstrap block registry are not retired by moving devfs.
+files. Mutation and executable opens are rejected. No kernel stream devices
+remain registered at boot: `/dev/businfo` moved to the `hundebus` Channel
+interface and the `/dev/hello` proof-of-concept driver was deleted.
+Legacy stream recognition and `IO_PATH_UNMANAGED` handling remain compiled,
+but unknown devices and registry/backend failures never trigger that route.
+The unused kernel console and stream backends, their buffered UART IRQ path,
+and backend-specific tests have been removed. Low-level UART output for kernel
+logging and panic remains independent of the I/O subsystem. Legacy stream-server
+operations and their buffer mapping/server maps are also removed. The block
+registry remains for its current clients.
 
 Bootstrap disk discovery continues to use hardware information and service
 registration, not `/dev` file reads. There is no devfs dependency cycle and no
@@ -336,10 +458,10 @@ registry records; service restart recovery remains deferred.
 
 ## Temporary filesystem
 
-`hund-dateisystem` installs a deviceless `memfs` mount at `/tmp` on every target,
-starts the embedded `/sbin/drivers/memfs` program, and waits for its readiness
-before publishing namespace readiness. A conflicting `/tmp` fstab entry or
-failed startup prevents publication. No disk configuration entry is required.
+Hundeschule installs a deviceless `memfs` mount at `/tmp`, starts the embedded
+`/sbin/drivers/memfs` program, and waits for readiness before launching
+Hundeschau. A conflicting `/tmp` fstab entry or failed startup stops that sequence.
+No disk configuration entry is required.
 
 Temporary-file operations follow application -> `hund-io-system` ->
 `hund-dateisystem` -> memfs, over the existing Channel and I/O protocol.
@@ -352,7 +474,7 @@ and directories, with no 12 KiB disk-snapshot limit or fixed file-count table.
 It supports 32 open handles, independent offsets, immediate empty-file creation
 and write-only-open truncation, directory listing, mkdir, file removal, and
 recursive directory removal. Read/write opens preserve existing data. Operations
-use the existing 256-byte protocol chunks. Allocation failures return errors
+use shared directional buffers, up to 2 MiB per request. Allocation failures return errors
 without advancing the handle offset or discarding existing data.
 
 The backend authenticates the filesystem service before accepting delegated

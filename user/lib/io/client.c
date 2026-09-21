@@ -1,8 +1,11 @@
 #include "client.h"
+#include "buffer/client.h"
 
 static Channel io_channel;
 static bool connected;
 static bool failed;
+static BufferPair buffers;
+static uint64_t open_handles;
 
 static IOReply IOClient__submit(IORequestPtr request)
 {
@@ -19,7 +22,10 @@ static IOReply IOClient__submit(IORequestPtr request)
                 io_channel = channel;
                 connected = true;
             },
-            error(code, message) { return IOReply__new(IO_NO_DEVICE_FOUND, 0); }
+            error(code, message)
+            {
+                return IOReply__new(IO_NO_DEVICE_FOUND, 0);
+            }
         );
     }
     IOReply reply;
@@ -30,6 +36,18 @@ static IOReply IOClient__submit(IORequestPtr request)
         {
             if (size == sizeof(reply) && (reply.status != IO_OK || reply.value >= 0))
             {
+                if (reply.status == IO_OK && request->operation == IO_REQUEST_OPEN)
+                {
+                    uint64_t peer = Channel__server_pid(&io_channel);
+                    if ((reply.buffers.read.id != 0 &&
+                         !BufferClient__validate(&reply.buffers.read, peer, BUFFER_READ)) ||
+                        (reply.buffers.write.id != 0 &&
+                         !BufferClient__validate(&reply.buffers.write, peer, BUFFER_WRITE)))
+                    {
+                        return IOReply__new(IO_UNKNOWN_BUFFER, 0);
+                    }
+                    buffers = reply.buffers;
+                }
                 return reply;
             }
         },
@@ -54,6 +72,7 @@ IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr pat
     }
     request.count = BString__copy_to(path, (char *)request.data, sizeof(request.data));
     request.flags = flags;
+    request.buffered = true;
     request.offset = offset;
     return IOClient__submit(&request);
 }
@@ -65,7 +84,24 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     {
         return reply.status;
     }
-    return reply.value >= IO_SESSION_HANDLE_BASE ? reply.value : IO_UNKNOWN_HANDLE;
+    if (reply.value < IO_SESSION_HANDLE_BASE)
+    {
+        return IO_UNKNOWN_HANDLE;
+    }
+    open_handles++;
+    return reply.value;
+}
+
+IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
+{
+    if (BString__length(source_path) >= IO_PROTOCOL_DATA_SIZE || BString__length(target_path) >= IO_PROTOCOL_DATA_SIZE)
+    {
+        return IO_INVALID_PATH;
+    }
+    IORequest request = IORequest__new(IO_REQUEST_LINK, 0);
+    request.count = BString__copy_to(source_path, (char *)request.data, sizeof(request.data));
+    IORequest__set_target_path(&request, target_path);
+    return IOClient__submit(&request).status;
 }
 
 IOHandle IOClient__accept(IOHandle handle)
@@ -76,19 +112,40 @@ IOHandle IOClient__accept(IOHandle handle)
     {
         return reply.status;
     }
-    return reply.value >= IO_SESSION_HANDLE_BASE ? reply.value : IO_UNKNOWN_HANDLE;
+    if (reply.value < IO_SESSION_HANDLE_BASE)
+    {
+        return IO_UNKNOWN_HANDLE;
+    }
+    open_handles++;
+    return reply.value;
 }
 
 IOStatus IOClient__close(IOHandle handle)
 {
     IORequest request = IORequest__new(IO_REQUEST_CLOSE, handle);
-    return IOClient__submit(&request).status;
+    IOStatus status = IOClient__submit(&request).status;
+    if (status == IO_OK && open_handles > 0 && --open_handles == 0)
+    {
+        request = IORequest__new(IO_REQUEST_RELEASE_BUFFERS, 0);
+        status = IOClient__submit(&request).status;
+        if (status == IO_OK)
+        {
+            buffers = BufferPair__new();
+        }
+    }
+    return status;
 }
 
 static ByteCount IOClient__read_chunk(IOHandle handle, ChannelDataPtr data, size_t size)
 {
     IORequest request = IORequest__new(IO_REQUEST_READ, handle);
-    request.count = size < IO_PROTOCOL_DATA_SIZE ? size : IO_PROTOCOL_DATA_SIZE;
+    if (buffers.read.id == 0)
+    {
+        return IO_UNKNOWN_BUFFER;
+    }
+    request.buffered = true;
+    request.buffer = buffers.read.id;
+    request.count = size < BUFFER_SIZE ? size : BUFFER_SIZE;
     IOReply reply = IOClient__submit(&request);
     if (reply.status != IO_OK)
     {
@@ -100,7 +157,7 @@ static ByteCount IOClient__read_chunk(IOHandle handle, ChannelDataPtr data, size
     }
     if (reply.value > 0)
     {
-        __builtin_memcpy(data, reply.data, reply.value);
+        __builtin_memcpy(data, (ConstChannelDataPtr)buffers.read.address, reply.value);
     }
     return reply.value;
 }
@@ -108,10 +165,16 @@ static ByteCount IOClient__read_chunk(IOHandle handle, ChannelDataPtr data, size
 static ByteCount IOClient__write_chunk(IOHandle handle, ConstChannelDataPtr data, size_t size)
 {
     IORequest request = IORequest__new(IO_REQUEST_WRITE, handle);
-    request.count = size < IO_PROTOCOL_DATA_SIZE ? size : IO_PROTOCOL_DATA_SIZE;
+    if (buffers.write.id == 0)
+    {
+        return IO_UNKNOWN_BUFFER;
+    }
+    request.buffered = true;
+    request.buffer = buffers.write.id;
+    request.count = size < BUFFER_SIZE ? size : BUFFER_SIZE;
     if (request.count > 0)
     {
-        __builtin_memcpy(request.data, data, request.count);
+        __builtin_memcpy((ChannelDataPtr)buffers.write.address, data, request.count);
     }
     IOReply reply = IOClient__submit(&request);
     if (reply.status != IO_OK)
@@ -132,7 +195,7 @@ ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
             return total == 0 ? count : (ByteCount)total;
         }
         total += count;
-        if (handle < IO_FILESYSTEM_HANDLE_BASE)
+        if (handle < IO_FILESYSTEM_HANDLE_BASE || handle >= IO_STREAM_HANDLE_BASE)
         {
             break;
         }

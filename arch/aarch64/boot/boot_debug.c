@@ -17,10 +17,10 @@ pc:
     return pc;
 }
 
-__BOOT__(PageTable *) table_at(PageTable * table, unsigned index)
+__BOOT__(PageTablePtr) table_at(PageTablePtr table, unsigned index)
 {
     uint64_t descriptor = table->entries[index];
-    return (PageTable *)(descriptor & PTE_NEXTADDR_MASK);
+    return (PageTablePtr)(descriptor & PTE_NEXTADDR_MASK);
 }
 
 __BOOT__(uint64_t) pa_bits_from_tcr_ips(uint64_t ips)
@@ -174,10 +174,10 @@ __BOOT__(uint64_t) va_to_pa_hw(uint64_t va)
     return (par & 0x0000FFFFFFFFF000ULL) | (va & 0xFFF);
 }
 
-__BOOT__(void) __debug_table(PageTable * table, uint64_t addr, const char * message, int entries)
+__BOOT__(void) __debug_table(PageTablePtr table, uint64_t addr, const char * message, int entries)
 {
-    PageTable * l1_table = table_at(table, idx0(addr));
-    PageTable * l2_table = table_at(l1_table, idx1(addr));
+    PageTablePtr l1_table = table_at(table, idx0(addr));
+    PageTablePtr l2_table = table_at(l1_table, idx1(addr));
 
     boot_debug_print(start_end_dump);
     boot_debug_print(message);
@@ -206,7 +206,7 @@ __BOOT__(void) __debug_table(PageTable * table, uint64_t addr, const char * mess
     boot_debug_print(start_end_dump);
 }
 
-__BOOT__(void) __dump_table(PageTable * table, int entries, const char * level)
+__BOOT__(void) __dump_table(PageTablePtr table, int entries, const char * level)
 {
     boot_debug_print(new_line);
     boot_debug_print(level);
@@ -233,7 +233,7 @@ __BOOT__(void) __dump_table(PageTable * table, int entries, const char * level)
 }
 
 __BOOT__(void)
-debug_table_pool(int entries, PageTable * low_mem_l0_table, PageTable * high_mem_l0_table, PageTable table_pool[],
+debug_table_pool(int entries, PageTablePtr low_mem_l0_table, PageTablePtr high_mem_l0_table, PageTable table_pool[],
                  int cursor)
 {
     boot_debug_print(new_line);

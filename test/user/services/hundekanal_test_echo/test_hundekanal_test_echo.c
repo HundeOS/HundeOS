@@ -19,6 +19,7 @@ void test_echo_copies_binary_payload_without_writing_past_length(void)
     payload->request[2] = 'z';
     payload->reply[3] = 0x7f;
     QueueMessage submit = ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, 3, client.connection);
+    submit.request = (RequestMetadata){.generation = 1, .origin_pid = 42};
     ChannelFixture__push(&client, &submit);
     QueueMessage reply = ChannelFixture__receive(&client);
     TEST_ASSERT_EQUAL(CHANNEL_RESPONSE_REPLIED, reply.kind);

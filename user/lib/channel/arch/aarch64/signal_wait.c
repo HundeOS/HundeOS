@@ -1,8 +1,9 @@
 #include "../../signal.h"
+#include "ipc/ipc_platform.h"
 
 void ChannelSignal__signal(ChannelSignalPtr self)
 {
-    __asm__ __volatile__("sev" ::: "memory");
+    IpcPlatform__signal_event();
 }
 
 void ChannelSignal__wait_for_data_change(ChannelSignalPtr self, uint64_t observed_epoch)
@@ -10,7 +11,7 @@ void ChannelSignal__wait_for_data_change(ChannelSignalPtr self, uint64_t observe
     __asm__ __volatile__("sevl" ::: "memory");
     while (!ChannelSignal__data_changed(self, observed_epoch))
     {
-        __asm__ __volatile__("wfe" ::: "memory");
+        IpcPlatform__wait_event();
     }
 }
 
@@ -19,6 +20,6 @@ void ChannelSignal__wait_for_space_change(ChannelSignalPtr self, uint64_t observ
     __asm__ __volatile__("sevl" ::: "memory");
     while (!ChannelSignal__space_changed(self, observed_epoch))
     {
-        __asm__ __volatile__("wfe" ::: "memory");
+        IpcPlatform__wait_event();
     }
 }

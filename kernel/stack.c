@@ -14,7 +14,7 @@ Stack Stack__new()
     return (Stack){.base = base, .top = top};
 }
 
-void Stack__map(KernelPtr kernel, Stack * self, ProcessPageTablePtr page_table)
+void Stack__map(KernelPtr kernel, StackPtr self, ProcessPageTablePtr page_table)
 {
     __d_printf(MMU, "Stack__map stack=%p base=%p top=%p kbase=%p phys=%p page_table=%p\n", self,
                self->base.virtual_addr, self->top.virtual_addr, self->base.kernel_addr.virtual_addr,

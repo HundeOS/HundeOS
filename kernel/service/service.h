@@ -35,14 +35,6 @@ typedef struct ServiceState
     Optional(ServiceEvent) active_irq_event;
 } ServiceState;
 
-typedef struct ServiceEventDelivery
-{
-    ProcessPtr process;
-    ServiceEvent event;
-} ServiceEventDelivery;
-
-typedef ServiceEventDelivery * ServiceEventDeliveryPtr;
-
 ServiceState ServiceState__new();
 Result(ServiceEvent) Service__pop_next_event(ProcessPtr process);
 Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent event);

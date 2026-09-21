@@ -151,8 +151,14 @@ static void assert_ext2fs_code_success(Result(Ext2fsCode) result)
 {
     match_result(
         result,
-        success(code) { TEST_ASSERT_EQUAL(EXT2FS_OK, code); },
-        error(code, message) { TEST_FAIL_MESSAGE(BString__cstr(&message)); }
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(EXT2FS_OK, code);
+        },
+        error(code, message)
+        {
+            TEST_FAIL_MESSAGE(BString__cstr(&message));
+        }
     );
 }
 
@@ -244,6 +250,22 @@ void test_ext2fs_owns_multiple_handles_and_offsets(void)
     TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 100, 42));
     TEST_ASSERT_EQUAL(0, FilesystemFiles__len(&driver.files));
     TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 100, 42));
+}
+
+void test_ext2fs_rejects_executable_open_until_execute_permissions_are_supported(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    driver.operations.write_capacity = 0;
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/HELLO.TXT"));
+    request.flags = IO_OPEN_READ | IO_OPEN_EXECUTE;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    TEST_ASSERT_EQUAL(1, FilesystemFiles__len(&driver.files));
+    request.flags = IO_OPEN_EXECUTE;
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, FilesystemDriver__execute(&driver, &request).status);
+    request.flags = IO_OPEN_WRITE | IO_OPEN_EXECUTE;
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, FilesystemDriver__execute(&driver, &request).status);
 }
 
 void test_ext2fs_writes_chunks_and_reopens_file(void)

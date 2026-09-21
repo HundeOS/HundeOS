@@ -24,7 +24,10 @@ static void assert_embedded_name(BStringArray * files, ArrayIndex index, ConstBS
 {
     match_optional(
         BStringArray__at(files, index),
-        some(name) { TEST_ASSERT_EQUAL_BSTRING(name, *expected); },
+        some(name)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(name, *expected);
+        },
         none_test_fail()
     );
 }

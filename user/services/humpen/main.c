@@ -95,7 +95,10 @@ static Result(HumpenMountCommand) Humpen__parse_mount_command(ConstBStringPtr in
             return Success(HumpenMountCommand,
                            HumpenMountCommand__new(&config.device_path, &config.filesystem_type, &config.mountpoint));
         },
-        error(code, message) { return Error(HumpenMountCommand, message, code); }
+        error(code, message)
+        {
+            return Error(HumpenMountCommand, message, code);
+        }
     );
 }
 
@@ -121,7 +124,10 @@ static Result(SpawnResult) Humpen__spawn_watchdog_line(ConstBStringPtr line)
                        &command.mountpoint);
             return OS__spawn(P_NOWAIT, command.driver_path, &command.arg0, &command.arg1, &command.arg2);
         },
-        error(code, message) { return Error(SpawnResult, message, code); }
+        error(code, message)
+        {
+            return Error(SpawnResult, message, code);
+        }
     );
 
     return Error(SpawnResult, humpen_invalid_fstab_line, HUMPEN_PARSE_ERROR);
@@ -133,32 +139,40 @@ static Result(MountResult) Humpen__mount_fstab(ConstDynStringPtr fstab)
         DynString__lines(fstab),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line, {
-                match_optional(
-                    DynString__bstring(&line),
-                    some(bstring_line)
-                    {
-                        match_result(
-                            Humpen__spawn_watchdog_line(&bstring_line),
-                            success_do_nothing(),
-                            error(code, message)
-                            {
-                                DynStringLines__dispose_all(&lines);
-                                return Error(MountResult, message, code);
-                            }
-                        );
-                    },
-                    none()
-                    {
-                        DynStringLines__dispose_all(&lines);
-                        return Error(MountResult, bstr("fstab line too long"), HUMPEN_FSTAB_ERROR);
-                    }
-                );
-            });
+            for_each_ll(
+                DynStringLines,
+                lines,
+                line,
+                {
+                    match_optional(
+                        DynString__bstring(&line),
+                        some(bstring_line)
+                        {
+                            match_result(
+                                Humpen__spawn_watchdog_line(&bstring_line),
+                                success_do_nothing(),
+                                error(code, message)
+                                {
+                                    DynStringLines__dispose_all(&lines);
+                                    return Error(MountResult, message, code);
+                                }
+                            );
+                        },
+                        none()
+                        {
+                            DynStringLines__dispose_all(&lines);
+                            return Error(MountResult, bstr("fstab line too long"), HUMPEN_FSTAB_ERROR);
+                        }
+                    );
+                }
+            );
             DynStringLines__dispose_all(&lines);
             return Success(MountResult, 0);
         },
-        none() { return Error(MountResult, bstr("failed to split fstab lines"), HUMPEN_FSTAB_ERROR); }
+        none()
+        {
+            return Error(MountResult, bstr("failed to split fstab lines"), HUMPEN_FSTAB_ERROR);
+        }
     );
 
     return Error(MountResult, bstr("failed to mount fstab"), HUMPEN_FSTAB_ERROR);
@@ -174,7 +188,10 @@ int HUMPEN_ENTRYPOINT(void)
         {
             match_result(
                 Humpen__mount_fstab(&fstab),
-                success(spawn_result) { result = (int)spawn_result; },
+                success(spawn_result)
+                {
+                    result = (int)spawn_result;
+                },
                 error(code, message)
                 {
                     IO__printf(&bstr("humpen: %B (%i)\n"), &message, (int)code);
@@ -183,7 +200,10 @@ int HUMPEN_ENTRYPOINT(void)
             );
             DynString__dispose(&fstab);
         },
-        none() { IO__printf(&bstr("humpen: no fstab found\n")); }
+        none()
+        {
+            IO__printf(&bstr("humpen: no fstab found\n"));
+        }
     );
 
     return result;

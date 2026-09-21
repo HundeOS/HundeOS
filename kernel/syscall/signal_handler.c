@@ -12,7 +12,13 @@ Result(SystemCallResult) Signal__handler(KernelPtr kernel, OptionalPtr(ProcessPt
 
     match_result(
         Scheduler__queue_signal(kernel->scheduler, pid, signal),
-        success(process_id) { return Success(SystemCallResult, PROCESS_SIGNAL_OK); },
-        error(code, message) { return Error(SystemCallResult, message, code); }
+        success(process_id)
+        {
+            return Success(SystemCallResult, PROCESS_SIGNAL_OK);
+        },
+        error(code, message)
+        {
+            return Error(SystemCallResult, message, code);
+        }
     );
 }

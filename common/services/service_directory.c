@@ -30,7 +30,10 @@ Optional(QueueEndpointID) ServiceDirectory__find_endpoint(ServiceDirectoryPtr se
 {
     match_optional(
         ServiceDirectory__find_protected(self, name),
-        some(entry) { return Some(QueueEndpointID, __atomic_load_n(&entry->generation, __ATOMIC_ACQUIRE)); },
+        some(entry)
+        {
+            return Some(QueueEndpointID, __atomic_load_n(&entry->generation, __ATOMIC_ACQUIRE));
+        },
         none_do_nothing()
     );
     return None(QueueEndpointID);
@@ -40,7 +43,10 @@ Optional(uint64_t) ServiceDirectory__find_service_pid(ServiceDirectoryPtr self, 
 {
     match_optional(
         ServiceDirectory__find_protected(self, name),
-        some(entry) { return Some(uint64_t, __atomic_load_n(&entry->service_pid, __ATOMIC_ACQUIRE)); },
+        some(entry)
+        {
+            return Some(uint64_t, __atomic_load_n(&entry->service_pid, __ATOMIC_ACQUIRE));
+        },
         none_do_nothing()
     );
     return None(uint64_t);

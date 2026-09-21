@@ -1,9 +1,8 @@
-#define DRIVER_LOG_TAG "UART-RX"
-
-#include "sys/io_server.h"
-#include "sys/debug.h"
-#include "sys/service.h"
+#include "io/stream_driver.h"
+#include "ipc/io_diagnostics.h"
+#include "interrupt/client.h"
 #include "sys/uart_config.h"
+#include "devices/uart.h"
 
 #define UART_DR 0x000
 #define UART_FR 0x018
@@ -11,118 +10,153 @@
 #define UART_IMSC 0x038
 #define UART_ICR 0x044
 #define FR_RXFE (1u << 4)
-#define CR_UARTEN (1u << 0)
-#define CR_TXE (1u << 8)
-#define CR_RXE (1u << 9)
-#define I_RX (1u << 4)
-#define I_RT (1u << 6)
-#define I_ERR ((1u << 7) | (1u << 8) | (1u << 9) | (1u << 10))
+#define UART_RX_INTERRUPTS ((1u << 4) | (1u << 6))
+#define UART_ERRORS ((1u << 7) | (1u << 8) | (1u << 9) | (1u << 10))
 
-#ifndef UART_RX_ENTRYPOINT
-#define UART_RX_ENTRYPOINT main
-#endif
-
-#if !defined(UART_READ32) || !defined(UART_WRITE32)
-static volatile uint32_t * reg32(void * base, uint64_t offset)
+static bool UartByte__equals(void * first, void * second)
 {
-    return (volatile uint32_t *)((uint64_t)base + offset);
+    return *(uint8_t *)first == *(uint8_t *)second;
 }
-#endif
+OptionalDef(uint8_t);
+FixedArrayDefine(uint8_t, 1024, UartInput, UartByte__equals);
+FixedArrayBodyDefine(UartInput);
 
-#ifndef UART_READ32
-#define UART_READ32(base, offset) (*reg32((base), (offset)))
-#endif
-
-#ifndef UART_WRITE32
-#define UART_WRITE32(base, offset, value) (*reg32((base), (offset)) = (uint32_t)(value))
-#endif
-
-static void configure_uart_rx(void * uart)
+typedef struct UartReceiver
 {
-    UART_WRITE32(uart, UART_ICR, I_RX | I_RT | I_ERR);
-    UART_WRITE32(uart, UART_IMSC, I_RX | I_RT);
-    UART_WRITE32(uart, UART_CR, CR_UARTEN | CR_TXE | CR_RXE);
+    Address registers;
+    UartInput input;
+} UartReceiver;
+typedef UartReceiver * UartReceiverPtr;
+static UartReceiver UartReceiver__new(Address registers)
+{
+    return (UartReceiver){.registers = registers, .input = UartInput__new()};
 }
 
-static uint64_t drain_uart(void * uart, IOServerBufferDataPtr target, uint64_t capacity)
+static bool UartReceiver__drain(UartReceiverPtr self)
 {
-    uint64_t count = 0;
-    while (count < capacity && ((UART_READ32(uart, UART_FR) & FR_RXFE) == 0))
+    bool progress = false;
+    while (UartInput__len(&self->input) < UartInput__max_size &&
+           (Uart__read32(self->registers, UART_FR) & FR_RXFE) == 0)
     {
-        target[count++] = (char)(UART_READ32(uart, UART_DR) & 0xFF);
+        uint8_t value = Uart__read32(self->registers, UART_DR);
+        IODiagnostics__record(IO_DIAGNOSTIC_UART_BYTES, 1);
+        match_result(
+            UartInput__push(&self->input, value),
+            success(code)
+            {
+                progress = true;
+            },
+            error(code, message)
+            {
+                return progress;
+            }
+        );
     }
-    UART_WRITE32(uart, UART_ICR, I_RX | I_RT | I_ERR);
-    return count;
+    return progress;
 }
 
-int UART_RX_ENTRYPOINT(void)
+static IOReply UartReceiver__read(IOServiceContext context, IORequestPtr request)
+{
+    IODiagnostics__record(IO_DIAGNOSTIC_UART_READS, 1);
+    UartReceiverPtr self = context;
+    IOReply reply = IOReply__new(IO_OK, 0);
+    while ((uint64_t)reply.value < request->count)
+    {
+        match_optional(
+            UartInput__pop_front(&self->input),
+            some(value)
+            {
+                IORequest__read_target(request, &reply)[reply.value++] = value;
+            },
+            none()
+            {
+                if (reply.value == 0 && request->count != 0)
+                {
+                    reply.status = IO_WAIT_FOR_DATA;
+                    IODiagnostics__record(IO_DIAGNOSTIC_UART_EMPTY, 1);
+                }
+                return reply;
+            }
+        );
+    }
+    if (reply.value == 0 && request->count != 0)
+    {
+        reply.status = IO_WAIT_FOR_DATA;
+        IODiagnostics__record(IO_DIAGNOSTIC_UART_EMPTY, 1);
+    }
+    return reply;
+}
+
+int main(void)
 {
     if (!service_ok(service_become_service()))
     {
-        DRIVER_DEBUG("uart_rx: service registration failed\n");
         return 1;
     }
-
     UartDriverConfig config;
     if (!UartDriverConfig__load(&config))
     {
-        DRIVER_DEBUG("uart_rx: sysinfo read failed\n");
         return 1;
     }
-
-    ServiceMappedMemoryPtr uart_mapping;
-    if (!service_ok(service_map_mmio(config.physical_base, config.mmio_size, &uart_mapping)))
+    ServiceMappedMemoryPtr mapping;
+    if (!service_ok(service_map_mmio(config.physical_base, config.mmio_size, &mapping)))
     {
-        DRIVER_DEBUG("uart_rx: mmio map failed\n");
         return 1;
     }
-    void * uart = driver_ptr(uart_mapping);
-    configure_uart_rx(uart);
-
-    IOHandle tty = io_server_register(&bstr(":tty:"), IO_SERVER_READ);
-    if (tty < 0)
+    static UartReceiver receiver;
+    receiver = UartReceiver__new((Address)driver_ptr(mapping));
+    Uart__write32(receiver.registers, UART_IMSC, 0);
+    Uart__write32(receiver.registers, UART_ICR, UART_RX_INTERRUPTS | UART_ERRORS);
+    Uart__write32(receiver.registers, UART_CR, (1u << 0) | (1u << 8) | (1u << 9));
+    static IOStreamDriver driver;
+    static IOService service;
+    driver = IOStreamDriver__new(IO_OPEN_READ, &receiver, UartReceiver__read);
+    if (IOService__listen_into(&service, &bstr(IO_UART_RX_SERVICE), &driver, IOStreamDriver__execute,
+                               IOStreamDriver__disconnect) != IO_OK)
     {
-        DRIVER_DEBUG("uart_rx: register error %i\n", (int)tty);
         return 1;
     }
-
-    if (!service_ok(service_subscribe_irq(config.irq)))
+    if (!service_ok(InterruptClient__subscribe(config.irq)))
     {
-        DRIVER_DEBUG("uart_rx: irq subscribe failed\n");
         return 1;
     }
-
-    ServiceEvent event;
-    for (ServiceCode wait_status = service_wait(&event); service_alive(wait_status); wait_status = service_wait(&event))
+    Uart__write32(receiver.registers, UART_IMSC, UART_RX_INTERRUPTS);
+    if (!service_ok(service_publish_ready(&bstr(IO_UART_RX_SERVICE))))
     {
-        DRIVER_DEBUG("uart_rx: wait_status=%i event_type=%i event_source=%i event_data=%i\n", (int)wait_status,
-                     (int)event.type, (int)event.source, (int)event.data);
-        if (service_ok(wait_status))
+        return 1;
+    }
+    bool pending_irq = false;
+    Channel__prepare_wait();
+    while (true)
+    {
+        bool progress = IOService__poll(&service);
+        progress = UartReceiver__drain(&receiver) || progress;
+        ServiceEvent event;
+        ServiceCode status = InterruptClient__poll(&event);
+        if (status == SERVICE_OK)
         {
-            bool uart_irq = event.type == SERVICE_EVENT_IRQ && event.source == config.irq;
-            bool read_request = event.type == SERVICE_EVENT_IO && event.source == SERVICE_IO_READ_REQUEST;
-            DRIVER_DEBUG("uart_rx: uart_irq=%i read_request=%i\n", uart_irq, read_request);
-            if (uart_irq || read_request)
+            IODiagnostics__record(IO_DIAGNOSTIC_UART_IRQS, 1);
+            pending_irq = true;
+            progress = true;
+        }
+        else if (status != SERVICE_EVENT_QUEUE_EMPTY)
+        {
+            return 1;
+        }
+        // Keep the GIC source masked while the userspace buffer is full.
+        if (pending_irq && (Uart__read32(receiver.registers, UART_FR) & FR_RXFE) != 0)
+        {
+            Uart__write32(receiver.registers, UART_ICR, UART_RX_INTERRUPTS | UART_ERRORS);
+            if (!service_ok(InterruptClient__acknowledge(config.irq)))
             {
-                IOServerBuffer buffer;
-                IOStatus buffer_status = io_server_get_buffer(tty, &buffer);
-                DRIVER_DEBUG("uart_rx: get_buffer status=%i capacity=%i data=%p\n", (int)buffer_status,
-                             (int)buffer.capacity, buffer.data);
-                if (buffer_status == IO_OK)
-                {
-                    uint64_t bytes = drain_uart(uart, buffer.data, buffer.capacity);
-                    DRIVER_DEBUG("uart_rx: drained bytes=%i\n", (int)bytes);
-                    if (bytes > 0)
-                    {
-                        DRIVER_DEBUG("uart_rx: first_byte=%i first_byte_hex=%x\n", (int)((unsigned char)buffer.data[0]),
-                                     (unsigned int)((unsigned char)buffer.data[0]));
-                        IOStatus data_status = io_server_data_available(tty, bytes);
-                        DRIVER_DEBUG("uart_rx: data_available status=%i bytes=%i\n", (int)data_status, (int)bytes);
-                    }
-                }
+                return 1;
             }
+            pending_irq = false;
+            progress = true;
+        }
+        if (!progress)
+        {
+            Channel__wait_event();
         }
     }
-
-    return 0;
 }

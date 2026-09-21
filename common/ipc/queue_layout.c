@@ -9,8 +9,14 @@ Optional(QueueConnectionID) QueueArrivals__connection(QueueArrivalsPtr self, Que
 {
     match_optional(
         QueueConnectionSlots__at(&self->connections, index),
-        some(connection) { return Some(QueueConnectionID, connection); },
-        none() { return None(QueueConnectionID); }
+        some(connection)
+        {
+            return Some(QueueConnectionID, connection);
+        },
+        none()
+        {
+            return None(QueueConnectionID);
+        }
     );
 }
 

@@ -44,15 +44,24 @@ void test_atomic_record_array_never_returns_a_torn_record(void)
     {
         match_result(
             TestRecords__at(&records, 0),
-            success(value) { torn |= value.complement != ~value.value; },
-            error(code, message) { torn |= code != ATOMIC_RECORD_BUSY; }
+            success(value)
+            {
+                torn |= value.complement != ~value.value;
+            },
+            error(code, message)
+            {
+                torn |= code != ATOMIC_RECORD_BUSY;
+            }
         );
     } while (!__atomic_load_n(&completed, __ATOMIC_ACQUIRE));
     TEST_ASSERT_EQUAL(0, pthread_join(thread, NULL));
     TEST_ASSERT_FALSE(torn);
     match_result(
         TestRecords__at(&records, 0),
-        success(value) { TEST_ASSERT_EQUAL_UINT64(100000, value.value); },
+        success(value)
+        {
+            TEST_ASSERT_EQUAL_UINT64(100000, value.value);
+        },
         error_test_fail()
     );
 }
@@ -63,11 +72,17 @@ void test_atomic_record_array_validates_indices(void)
     match_result(
         TestRecords__set(&records, 4, &value),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(ATOMIC_RECORD_INVALID, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(ATOMIC_RECORD_INVALID, code);
+        }
     );
     match_result(
         TestRecords__at(&records, 4),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(ATOMIC_RECORD_INVALID, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(ATOMIC_RECORD_INVALID, code);
+        }
     );
 }

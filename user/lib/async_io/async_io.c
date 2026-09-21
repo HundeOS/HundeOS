@@ -7,8 +7,6 @@ static BString fiber_failed = bstr("Async IO fiber operation failed");
 static BString response_queue_full = bstr("Async IO response queue full");
 static BString response_not_found = bstr("Async IO response not found");
 static BString invalid_event_kind = bstr("Async IO invalid event kind");
-static BString block_read_failed = bstr("Async IO block read failed");
-static BString block_write_failed = bstr("Async IO block write failed");
 static BString no_current_async_io = bstr("Async IO has no current context");
 
 typedef struct AsyncIORequestContext
@@ -48,8 +46,14 @@ static Result(AsyncIORequestContextPtr)
     AsyncIORequestContextPtr context;
     match_result(
         mem_alloc_bytes(sizeof(AsyncIORequestContext)),
-        success(allocation) { context = (AsyncIORequestContextPtr)allocation; },
-        error(code, message) { return Error(AsyncIORequestContextPtr, fiber_failed, code); }
+        success(allocation)
+        {
+            context = (AsyncIORequestContextPtr)allocation;
+        },
+        error(code, message)
+        {
+            return Error(AsyncIORequestContextPtr, fiber_failed, code);
+        }
     );
 
     *context = AsyncIORequestContext__new(async_io, service_context, request);
@@ -101,8 +105,14 @@ Result(AsyncIOPtr) AsyncIO__current(void)
 {
     match_optional(
         current_async_io,
-        some(async_io) { return Success(AsyncIOPtr, async_io); },
-        none() { return Error(AsyncIOPtr, no_current_async_io, ASYNC_IO_WAIT_FAILED); }
+        some(async_io)
+        {
+            return Success(AsyncIOPtr, async_io);
+        },
+        none()
+        {
+            return Error(AsyncIOPtr, no_current_async_io, ASYNC_IO_WAIT_FAILED);
+        }
     );
 
     return Error(AsyncIOPtr, no_current_async_io, ASYNC_IO_WAIT_FAILED);
@@ -125,19 +135,28 @@ Result(AsyncIOCode)
     match_result(
         register_service(service_context),
         success_do_nothing(),
-        error(code, message) { return Error(AsyncIOCode, message, ASYNC_IO_REGISTER_FAILED); }
+        error(code, message)
+        {
+            return Error(AsyncIOCode, message, ASYNC_IO_REGISTER_FAILED);
+        }
     );
 
     match_result(
         FiberScheduler__spawn(&self->scheduler, init_service, service_context),
         success_do_nothing(),
-        error(code, message) { return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED); }
+        error(code, message)
+        {
+            return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED);
+        }
     );
 
     match_result(
         FiberScheduler__run_ready_until_blocked(&self->scheduler),
         success_do_nothing(),
-        error(code, message) { return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED); }
+        error(code, message)
+        {
+            return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED);
+        }
     );
 
     while (true)
@@ -156,13 +175,19 @@ Result(AsyncIOCode)
         match_result(
             AsyncIO__handle_event(self, &event),
             success_do_nothing(),
-            error(code, message) { return Error(AsyncIOCode, message, code); }
+            error(code, message)
+            {
+                return Error(AsyncIOCode, message, code);
+            }
         );
 
         match_result(
             FiberScheduler__run_ready_until_blocked(&self->scheduler),
             success_do_nothing(),
-            error(code, message) { return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED); }
+            error(code, message)
+            {
+                return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED);
+            }
         );
     }
 }
@@ -177,7 +202,10 @@ Result(AsyncIOCode)
     match_result(
         register_service(service_context),
         success_do_nothing(),
-        error(code, message) { return Error(AsyncIOCode, message, ASYNC_IO_REGISTER_FAILED); }
+        error(code, message)
+        {
+            return Error(AsyncIOCode, message, ASYNC_IO_REGISTER_FAILED);
+        }
     );
 
     while (true)
@@ -196,13 +224,19 @@ Result(AsyncIOCode)
         match_result(
             AsyncIO__handle_event(self, &event),
             success_do_nothing(),
-            error(code, message) { return Error(AsyncIOCode, message, code); }
+            error(code, message)
+            {
+                return Error(AsyncIOCode, message, code);
+            }
         );
 
         match_result(
             FiberScheduler__run_ready_until_blocked(&self->scheduler),
             success_do_nothing(),
-            error(code, message) { return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED); }
+            error(code, message)
+            {
+                return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED);
+            }
         );
     }
 }
@@ -230,8 +264,14 @@ Result(AsyncIOCode) AsyncIO__spawn_request(AsyncIOPtr self, ServiceEventPtr even
     AsyncIORequestContextPtr context;
     match_result(
         AsyncIORequestContext__heap_new(self, self->service_context, *event),
-        success(created_context) { context = created_context; },
-        error(code, message) { return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED); }
+        success(created_context)
+        {
+            context = created_context;
+        },
+        error(code, message)
+        {
+            return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED);
+        }
     );
 
     match_result(
@@ -255,14 +295,20 @@ Result(AsyncIOCode) AsyncIO__deliver_response(AsyncIOPtr self, ServiceEventPtr e
     match_result(
         AsyncIOResponses__set(&self->responses, request_id, *event),
         success_do_nothing(),
-        error(code, message) { return Error(AsyncIOCode, response_queue_full, ASYNC_IO_RESPONSE_QUEUE_FULL); }
+        error(code, message)
+        {
+            return Error(AsyncIOCode, response_queue_full, ASYNC_IO_RESPONSE_QUEUE_FULL);
+        }
     );
 
     FiberWaitKey key = FiberWaitKey__request(request_id);
     FiberWakeValue value = FiberWakeValue__new(&key, FIBER_OK, request_id);
     match_result(
         FiberScheduler__wake(&self->scheduler, key, value),
-        success(_) { return Success(AsyncIOCode, ASYNC_IO_OK); },
+        success(_)
+        {
+            return Success(AsyncIOCode, ASYNC_IO_OK);
+        },
         error(code, message)
         {
             if (code == FIBER_WAIT_NOT_FOUND)
@@ -286,12 +332,18 @@ Result(ServiceEvent) AsyncIO__take_response(AsyncIOPtr self, uint64_t request_id
             match_result(
                 AsyncIOResponses__delete(&self->responses, request_id),
                 success_do_nothing(),
-                error(code, message) { return Error(ServiceEvent, message, ASYNC_IO_RESPONSE_NOT_FOUND); }
+                error(code, message)
+                {
+                    return Error(ServiceEvent, message, ASYNC_IO_RESPONSE_NOT_FOUND);
+                }
             );
 
             return Success(ServiceEvent, response);
         },
-        none() { return Error(ServiceEvent, response_not_found, ASYNC_IO_RESPONSE_NOT_FOUND); }
+        none()
+        {
+            return Error(ServiceEvent, response_not_found, ASYNC_IO_RESPONSE_NOT_FOUND);
+        }
     );
 
     return Error(ServiceEvent, response_not_found, ASYNC_IO_RESPONSE_NOT_FOUND);
@@ -302,13 +354,22 @@ Result(ServiceEvent) AsyncIO__yield_for_response(uint64_t request_id)
     AsyncIOPtr async_io;
     match_result(
         AsyncIO__current(),
-        success(current) { async_io = current; },
-        error(code, message) { return Error(ServiceEvent, message, code); }
+        success(current)
+        {
+            async_io = current;
+        },
+        error(code, message)
+        {
+            return Error(ServiceEvent, message, code);
+        }
     );
 
     match_result(
         AsyncIO__take_response(async_io, request_id),
-        success(response) { return Success(ServiceEvent, response); },
+        success(response)
+        {
+            return Success(ServiceEvent, response);
+        },
         error(code, message)
         {
             if (code != ASYNC_IO_RESPONSE_NOT_FOUND)
@@ -321,49 +382,13 @@ Result(ServiceEvent) AsyncIO__yield_for_response(uint64_t request_id)
     match_result(
         FiberScheduler__await_current(&async_io->scheduler, FiberWaitKey__request(request_id)),
         success_do_nothing(),
-        error(code, message) { return Error(ServiceEvent, message, code); }
+        error(code, message)
+        {
+            return Error(ServiceEvent, message, code);
+        }
     );
 
     return AsyncIO__take_response(async_io, request_id);
-}
-
-static Result(ServiceBlockReadResult)
-    IO__block_result(ServiceBlockReadResult request_id, uint64_t expected_blocks, ConstBStringPtr error_message)
-{
-    if (request_id <= 0)
-    {
-        return Error(ServiceBlockReadResult, *error_message, request_id);
-    }
-
-    match_result(
-        AsyncIO__yield_for_response((uint64_t)request_id),
-        success(response)
-        {
-            if (response.type != SERVICE_EVENT_BLOCK_IO || response.data == 0 || response.data > expected_blocks)
-            {
-                return Error(ServiceBlockReadResult, *error_message, SERVICE_BLOCK_REQUEST_FAILED);
-            }
-
-            return Success(ServiceBlockReadResult, (ServiceBlockReadResult)response.data);
-        },
-        error(code, message) { return Error(ServiceBlockReadResult, message, code); }
-    );
-
-    return Error(ServiceBlockReadResult, *error_message, SERVICE_BLOCK_REQUEST_FAILED);
-}
-
-Result(ServiceBlockReadResult)
-    IO__block_read(ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size)
-{
-    ServiceBlockReadResult request_id = service_block_read_device_async(path, block, block_count, buffer, buffer_size);
-    return IO__block_result(request_id, block_count, &block_read_failed);
-}
-
-Result(ServiceBlockReadResult)
-    IO__block_write(ConstBStringPtr path, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size)
-{
-    ServiceBlockReadResult request_id = service_block_write_device_async(path, block, block_count, buffer, buffer_size);
-    return IO__block_result(request_id, block_count, &block_write_failed);
 }
 
 size_t AsyncIO__pending_response_count(AsyncIOPtr self)

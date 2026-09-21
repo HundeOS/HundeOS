@@ -75,12 +75,17 @@ static const uint8_t fake_font_data[] = "0020:00000000000000000000000000000000\n
 
 static uint8_t fake_emoji_atlas[16 * 1024 * 1024];
 
-#define VIDEO_TERM_ENTRYPOINT video_term_main_under_test
+#include "../stream_runtime.h"
+#define VIDEO_TERM_ENTRYPOINT video_term_driver_main
 #define VIDEO_TERM_FONT_START fake_font_data
 #define VIDEO_TERM_FONT_END (fake_font_data + sizeof(fake_font_data) - 1)
 #define VIDEO_TERM_EMOJI_ATLAS_START fake_emoji_atlas
 #define VIDEO_TERM_EMOJI_ATLAS_END (fake_emoji_atlas + sizeof(fake_emoji_atlas))
 #include "../../../../user/drivers/video_term/main.c"
+static int video_term_main_under_test(void)
+{
+    return StreamDriverTest__run(video_term_driver_main);
+}
 
 static void VideoTermTest__seed_emoji_pixel(uint32_t codepoint, uint64_t x, uint64_t y, uint8_t red, uint8_t green,
                                             uint8_t blue)
@@ -96,7 +101,10 @@ static void VideoTermTest__seed_emoji_pixel(uint32_t codepoint, uint64_t x, uint
             fake_emoji_atlas[emoji_pixel + 2] = blue;
             fake_emoji_atlas[emoji_pixel + 3] = 0xff;
         },
-        none() { TEST_FAIL_MESSAGE("generated emoji index should include expected codepoint"); }
+        none()
+        {
+            TEST_FAIL_MESSAGE("generated emoji index should include expected codepoint");
+        }
     );
 }
 
@@ -201,7 +209,10 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     match_result(
         DynString__init(&sysinfo, 128),
         success_do_nothing(),
-        error(code, message) { return None(DynString); }
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
@@ -243,60 +254,29 @@ size_t mapped_size(ServiceMappedMemoryPtr memory)
     return memory->size;
 }
 
-IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
-{
-    TEST_ASSERT_EQUAL_BSTRING(bstr(":console:"), *path);
-    TEST_ASSERT_EQUAL_INT(IO_SERVER_WRITE, role);
-    return 43;
-}
-
-ServiceCode service_subscribe_irq(uint64_t irq)
-{
-    TEST_FAIL_MESSAGE("video_term driver should not subscribe to an irq");
-    return SERVICE_OK;
-}
-
-ServiceCode service_wait(ServiceEventPtr event)
+void StreamDriverTest__step(IOStreamDriverPtr driver)
 {
     fake_service_wait_count++;
-    TEST_ASSERT_LESS_THAN_UINT64(3, fake_service_wait_count);
     if (fake_data_consumed)
     {
-        return SERVICE_COMPLETE;
+        StreamDriverTest__stop();
     }
-
-    event->type = SERVICE_EVENT_IO;
-    event->source = SERVICE_IO_WRITE_REQUEST;
-    event->data = 0;
-    return SERVICE_OK;
-}
-
-IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)
-{
-    TEST_ASSERT_EQUAL_INT64(43, handle);
-    buffer->data = fake_io_buffer;
-    buffer->capacity = fake_io_buffer_size;
-    return IO_OK;
-}
-
-IOStatus io_server_data_available(IOHandle handle, uint64_t byte_count)
-{
-    TEST_FAIL_MESSAGE("video_term driver should not publish read data");
-    return IO_OK;
-}
-
-IOStatus io_server_data_consumed(IOHandle handle, uint64_t byte_count)
-{
-    TEST_ASSERT_EQUAL_INT64(43, handle);
-    TEST_ASSERT_EQUAL_UINT64(fake_io_buffer_size, byte_count);
+    size_t offset = 0;
+    while (offset < fake_io_buffer_size)
+    {
+        IORequest request = IORequest__new(IO_REQUEST_WRITE, 0);
+        request.count = fake_io_buffer_size - offset;
+        if (request.count > IO_PROTOCOL_DATA_SIZE)
+        {
+            request.count = IO_PROTOCOL_DATA_SIZE;
+        }
+        __builtin_memcpy(request.data, fake_io_buffer + offset, request.count);
+        IOReply reply = driver->transfer(driver->context, &request);
+        TEST_ASSERT_EQUAL(IO_OK, reply.status);
+        TEST_ASSERT_EQUAL_UINT64(request.count, reply.value);
+        offset += reply.value;
+    }
     fake_data_consumed = true;
-    return IO_OK;
-}
-
-IOStatus io_server_eof(IOHandle handle)
-{
-    TEST_FAIL_MESSAGE("video_term driver should not signal eof");
-    return IO_OK;
 }
 
 static void VideoTermTest__run_and_assert(uint32_t expected_foreground_pixel, uint32_t expected_emoji_pixel)

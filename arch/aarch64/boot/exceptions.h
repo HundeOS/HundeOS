@@ -12,5 +12,6 @@ typedef struct
     uint64_t elr_el1;  // Return PC
     uint64_t spsr_el1; // Saved PSTATE
 } boot_trapframe_t;
+typedef boot_trapframe_t * BootTrapFramePtr;
 
 #endif

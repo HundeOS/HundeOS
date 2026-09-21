@@ -1,4 +1,5 @@
 #include "lifecycle.h"
+#include "ipc/io_diagnostics.h"
 
 #include "sys/mem.h"
 #include "sys/process.h"
@@ -64,8 +65,10 @@ bool ChannelSession__equals(void * first, void * second)
 
 static void ChannelSession__reply(ChannelSessionPtr self, uint64_t kind)
 {
-    self->reply = Some(QueueMessage,
-                       ChannelControlMessage__new(kind, self->address, self->length, Queue__connection(&self->client)));
+    QueueMessage reply =
+        ChannelControlMessage__new(kind, self->address, self->length, Queue__connection(&self->client));
+    reply.request = self->ticket.metadata;
+    self->reply = Some(QueueMessage, reply);
 }
 
 static void ChannelSession__fail(ChannelSessionPtr self)
@@ -84,7 +87,10 @@ static bool ChannelSession__client_disconnected(ChannelSessionPtr self)
 static bool ChannelSession__server_disconnected(ChannelSessionPtr self)
 {
     match_optional(self->server,
-        some(server) { return Queue__status(&server) == QUEUE_CLOSED; },
+        some(server)
+        {
+            return Queue__status(&server) == QUEUE_CLOSED;
+        },
         none_do_nothing()
     );
     return false;
@@ -145,7 +151,10 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__wait_open(Channe
                     }
                     return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_CONNECTING);
                 },
-                error(code, message) { return Error(ConstChannelSessionStatePtr, message, code); }
+                error(code, message)
+                {
+                    return Error(ConstChannelSessionStatePtr, message, code);
+                }
             );
         },
         error(code, message)
@@ -186,7 +195,10 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__connecting(Chann
                     ChannelSession__reply(self, CHANNEL_RESPONSE_OPEN);
                     return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_DELIVERING_OPEN);
                 },
-                error(code, message) { return Error(ConstChannelSessionStatePtr, message, code); }
+                error(code, message)
+                {
+                    return Error(ConstChannelSessionStatePtr, message, code);
+                }
             );
         },
         none_do_nothing()
@@ -249,6 +261,14 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__open(ChannelSess
             {
                 return ChannelSession__close_client_then(self, &CHANNEL_SESSION_CLOSING_SERVER);
             }
+            RequestTicket ticket = ChannelControlMessage__ticket(&request);
+            if (!RequestTicket__valid(&ticket) || ticket.metadata.generation <= self->ticket.metadata.generation ||
+                (ticket.metadata.parent_connection == 0 &&
+                 ticket.metadata.origin_pid != Queue__origin_pid(&self->client)))
+            {
+                return ChannelSession__close_client_then(self, &CHANNEL_SESSION_CLOSING_SERVER);
+            }
+            self->ticket = ticket;
             self->length = request.arg1;
             return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_SUBMITTING);
         },
@@ -272,6 +292,7 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__submitting(Chann
     QueueMessage request = ChannelControlMessage__new(CHANNEL_REQUEST_SERVE, self->address, self->length,
                                                       Queue__connection(&self->client));
     request.arg3 = Queue__peer_pid(&self->client);
+    request.request = self->ticket.metadata;
     match_optional(
         self->server,
         some(server)
@@ -281,6 +302,7 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__submitting(Chann
                 success(status)
                 {
                     self->server = Some(Queue, server);
+                    IODiagnostics__record(IO_DIAGNOSTIC_WARDEN_RELAYS, 1);
                     return ChannelSessionState__working(self);
                 },
                 error(code, message)
@@ -326,8 +348,9 @@ static Result(QueueMessage) ChannelSession__receive_completion(ChannelSessionPtr
 
 static bool ChannelSession__valid_completion(ChannelSessionPtr self, ConstQueueMessagePtr reply)
 {
+    RequestTicket ticket = ChannelControlMessage__ticket(reply);
     return reply->kind == CHANNEL_RESPONSE_REPLIED && reply->arg2 == Queue__connection(&self->client) &&
-           reply->arg1 <= CHANNEL_PAYLOAD_CAPACITY;
+           reply->arg1 < CHANNEL_PAYLOAD_CAPACITY && RequestTicket__equals(&self->ticket, &ticket);
 }
 
 static Result(ConstChannelSessionStatePtr) ChannelSessionState__working(ChannelSessionPtr self)
@@ -367,6 +390,7 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__cancelling(Chann
         {
             QueueMessage cancellation =
                 ChannelControlMessage__new(CHANNEL_REQUEST_CANCEL, 0, 0, Queue__connection(&self->client));
+            cancellation.request = self->ticket.metadata;
             match_result(
                 Queue__push(&server, &cancellation),
                 success(code)
@@ -385,7 +409,10 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__cancelling(Chann
                 }
             );
         },
-        none() { return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_CLOSING_SERVER); }
+        none()
+        {
+            return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_CLOSING_SERVER);
+        }
     );
 }
 
@@ -393,7 +420,10 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__working_client_c
 {
     match_result(
         ChannelSession__receive_completion(self),
-        success(reply) { return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_CLOSING_SERVER); },
+        success(reply)
+        {
+            return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_CLOSING_SERVER);
+        },
         error(code, message)
         {
             if (code == QUEUE_EMPTY)
@@ -426,7 +456,10 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__closing_server(C
     }
     match_optional(
         self->reply,
-        some(reply) { return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_DELIVERING_REPLY); },
+        some(reply)
+        {
+            return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_DELIVERING_REPLY);
+        },
         none_do_nothing()
     );
     return Success(ConstChannelSessionStatePtr, &CHANNEL_SESSION_WAIT_CLIENT_CLOSE);
@@ -478,7 +511,9 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__wait_client_ackn
         Queue__pop(&self->client),
         success(request)
         {
-            if (request.kind != CHANNEL_REQUEST_ACKNOWLEDGE || request.arg2 != Queue__connection(&self->client))
+            RequestTicket ticket = ChannelControlMessage__ticket(&request);
+            if (request.kind != CHANNEL_REQUEST_ACKNOWLEDGE || request.arg2 != Queue__connection(&self->client) ||
+                !RequestTicket__equals(&self->ticket, &ticket))
             {
                 return ChannelSession__close_client_then(self, &CHANNEL_SESSION_CLOSING_SERVER);
             }
@@ -553,14 +588,17 @@ bool ChannelSession__step(ChannelSessionPtr self)
 
 static bool ChannelSession__matches_connection(ChannelSessionPtr self, void * context)
 {
-    return Queue__connection(&self->client) == *(QueueConnectionID *)context;
+    return Queue__connection(&self->client) == *(QueueConnectionIDPtr)context;
 }
 
 bool ChannelSessions__contains(ChannelSessionsPtr self, QueueConnectionID connection)
 {
     match_find_result(
         ChannelSessions__find(self, ChannelSession__matches_connection, &connection),
-        some(exchange) { return true; },
+        some(exchange)
+        {
+            return true;
+        },
         none_do_nothing()
     );
     return false;
@@ -576,40 +614,58 @@ static void ChannelSessions__accept_connection(ChannelSessionsPtr self, QueueCon
             match_result(
                 ChannelSessions__push(self, exchange),
                 success_do_nothing(),
-                error(code, message) { QueueConnection__close(connection); }
+                error(code, message)
+                {
+                    QueueConnection__close(connection);
+                }
             );
         },
-        error(code, message) { QueueConnection__close(connection); }
+        error(code, message)
+        {
+            QueueConnection__close(connection);
+        }
     );
 }
 
 bool ChannelSessions__step(ChannelSessionsPtr self, QueueArrivalsPtr arrivals)
 {
     bool work = false;
-    for_each_atomic_fa_ptr(QueueConnectionSlots, &arrivals->connections, index, id, {
-        if (id == 0 || ChannelSessions__contains(self, id))
+    for_each_atomic_fa_ptr(
+        QueueConnectionSlots,
+        &arrivals->connections,
+        index,
+        id,
         {
-            continue;
-        }
-        ChannelSessions__accept_connection(self, id);
-        work = true;
-    });
-    for_each_fa_ptr(ChannelSessions, self, index, value, {
-        match_optional(
-            ChannelSessions__ptr_at(self, index),
-            some(exchange)
+            if (id == 0 || ChannelSessions__contains(self, id))
             {
-                work |= ChannelSession__step(exchange);
-                if (ChannelSession__state(exchange) != &CHANNEL_SESSION_COMPLETE)
+                continue;
+            }
+            ChannelSessions__accept_connection(self, id);
+            work = true;
+        }
+    );
+    for_each_fa_ptr(
+        ChannelSessions,
+        self,
+        index,
+        value,
+        {
+            match_optional(
+                ChannelSessions__ptr_at(self, index),
+                some(exchange)
                 {
-                    continue;
-                }
-                ChannelSessions__remove(self, value);
-                work = true;
-                break;
-            },
-            none_do_nothing()
-        );
-    });
+                    work |= ChannelSession__step(exchange);
+                    if (ChannelSession__state(exchange) != &CHANNEL_SESSION_COMPLETE)
+                    {
+                        continue;
+                    }
+                    ChannelSessions__remove(self, value);
+                    work = true;
+                    break;
+                },
+                none_do_nothing()
+            );
+        }
+    );
     return work;
 }

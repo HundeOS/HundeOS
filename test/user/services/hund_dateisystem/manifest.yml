@@ -2,5 +2,6 @@ manifest:
   include_default_stubs: false
   include_default_fixtures: false
   source_files:
+    - test/user/buffer_fake.c
     - user/lib/io/mediator.c
     - user/lib/io/mount_config.c

@@ -24,7 +24,10 @@ static void MemoryAccounting__append(MemoryAccountingPtr self, MemoryMapping map
     match_result(
         MemoryMappings__push(&self->mappings, mapping),
         success_do_nothing(),
-        error(code, message) { self->failed = true; }
+        error(code, message)
+        {
+            self->failed = true;
+        }
     );
 }
 
@@ -62,7 +65,10 @@ static void MemoryAccounting__unmap_locked(MemoryAccountingPtr self, Address spa
                     MemoryAccounting__append(self, suffix);
                 }
             },
-            none() { return; }
+            none()
+            {
+                return;
+            }
         );
     }
 }
@@ -73,10 +79,13 @@ void MemoryAccounting__map(MemoryAccountingPtr self, ConstMemoryMappingPtr mappi
     {
         return;
     }
-    critical_section(self->lock, {
-        MemoryAccounting__unmap_locked(self, mapping->space, mapping->start, mapping->size);
-        MemoryAccounting__append(self, *mapping);
-    });
+    critical_section(
+        self->lock,
+        {
+            MemoryAccounting__unmap_locked(self, mapping->space, mapping->start, mapping->size);
+            MemoryAccounting__append(self, *mapping);
+        }
+    );
 }
 
 void MemoryAccounting__unmap(MemoryAccountingPtr self, Address space, Address start, size_t size)
@@ -85,26 +94,40 @@ void MemoryAccounting__unmap(MemoryAccountingPtr self, Address space, Address st
     {
         return;
     }
-    critical_section(self->lock, { MemoryAccounting__unmap_locked(self, space, start, size); });
+    critical_section(
+        self->lock,
+        {
+            MemoryAccounting__unmap_locked(self, space, start, size);
+        }
+    );
 }
 
 static bool MemoryMapping__in_space(MemoryMappingPtr self, void * context)
 {
-    return self->space == *(Address *)context;
+    return self->space == *(AddressPtr)context;
 }
 
 void MemoryAccounting__forget(MemoryAccountingPtr self, Address space)
 {
-    critical_section(self->lock, {
-        while (true)
+    critical_section(
+        self->lock,
         {
-            match_find_result(
-                MemoryMappings__find(&self->mappings, MemoryMapping__in_space, &space),
-                some(found) { MemoryMappings__remove(&self->mappings, found); },
-                none() { cs_return; }
-            );
+            while (true)
+            {
+                match_find_result(
+                    MemoryMappings__find(&self->mappings, MemoryMapping__in_space, &space),
+                    some(found)
+                    {
+                        MemoryMappings__remove(&self->mappings, found);
+                    },
+                    none()
+                    {
+                        cs_return;
+                    }
+                );
+            }
         }
-    });
+    );
 }
 
 static uint64_t MemoryAccounting__shared_overlap(MemoryAccountingPtr self, MemoryMapping mapping)
@@ -117,20 +140,25 @@ static uint64_t MemoryAccounting__shared_overlap(MemoryAccountingPtr self, Memor
     {
         Address covered_end = cursor;
         Address next_start = end;
-        for_each_ll(MemoryMappings, self->mappings, peer, {
-            if (peer.kind != MEMORY_SHARED)
+        for_each_ll(
+            MemoryMappings,
+            self->mappings,
+            peer,
             {
-                continue;
+                if (peer.kind != MEMORY_SHARED)
+                {
+                    continue;
+                }
+                if (peer.backing <= cursor && peer.backing + peer.size > covered_end)
+                {
+                    covered_end = peer.backing + peer.size;
+                }
+                else if (peer.backing > cursor && peer.backing < next_start)
+                {
+                    next_start = peer.backing;
+                }
             }
-            if (peer.backing <= cursor && peer.backing + peer.size > covered_end)
-            {
-                covered_end = peer.backing + peer.size;
-            }
-            else if (peer.backing > cursor && peer.backing < next_start)
-            {
-                next_start = peer.backing;
-            }
-        });
+        );
         if (covered_end > cursor)
         {
             if (covered_end > end)
@@ -150,31 +178,39 @@ static uint64_t MemoryAccounting__shared_overlap(MemoryAccountingPtr self, Memor
 
 Optional(ProcessMemoryUsage) MemoryAccounting__usage(MemoryAccountingPtr self, Address space)
 {
-    critical_section(self->lock, {
-        if (self->failed)
+    critical_section(
+        self->lock,
         {
-            cs_return None(ProcessMemoryUsage);
-        }
-        ProcessMemoryUsage usage = ProcessMemoryUsage__new();
-        for_each_ll(MemoryMappings, self->mappings, mapping, {
-            if (mapping.space == space)
+            if (self->failed)
             {
-                if (mapping.kind == MEMORY_DEVICE)
-                {
-                    usage.device_bytes += mapping.size;
-                }
-                else if (mapping.kind == MEMORY_SHARED)
-                {
-                    usage.shared_bytes += mapping.size;
-                }
-                else
-                {
-                    uint64_t shared = MemoryAccounting__shared_overlap(self, mapping);
-                    usage.shared_bytes += shared;
-                    usage.private_bytes += mapping.size - shared;
-                }
+                cs_return None(ProcessMemoryUsage);
             }
-        });
-        cs_return Some(ProcessMemoryUsage, usage);
-    });
+            ProcessMemoryUsage usage = ProcessMemoryUsage__new();
+            for_each_ll(
+                MemoryMappings,
+                self->mappings,
+                mapping,
+                {
+                    if (mapping.space == space)
+                    {
+                        if (mapping.kind == MEMORY_DEVICE)
+                        {
+                            usage.device_bytes += mapping.size;
+                        }
+                        else if (mapping.kind == MEMORY_SHARED)
+                        {
+                            usage.shared_bytes += mapping.size;
+                        }
+                        else
+                        {
+                            uint64_t shared = MemoryAccounting__shared_overlap(self, mapping);
+                            usage.shared_bytes += shared;
+                            usage.private_bytes += mapping.size - shared;
+                        }
+                    }
+                }
+            );
+            cs_return Some(ProcessMemoryUsage, usage);
+        }
+    );
 }

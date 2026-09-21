@@ -16,13 +16,8 @@ typedef enum IOOperation
     IO_MKDIR,
     IO_REMOVE,
     IO_LINK,
-    IO_MOUNT,
-    IO_SERVER_REGISTER,
-    IO_SERVER_GET_BUFFER,
-    IO_SERVER_DATA_AVAILABLE,
-    IO_SERVER_DATA_CONSUMED,
-    IO_SERVER_EOF,
-    IO_ACCEPT,
+    /* Operations 8-13 were the retired mount and stream-server APIs. */
+    IO_ACCEPT = 14,
 } IOOperation;
 
 typedef enum IOStatus
@@ -56,6 +51,14 @@ typedef enum IOFlags
 } IOFlags;
 
 typedef int64_t IOHandle;
+typedef IOHandle * IOHandlePtr;
+#define IO_ENDPOINT_TTY_INPUT (1LL << 60)
+#define IO_ENDPOINT_CONSOLE_OUTPUT (IO_ENDPOINT_TTY_INPUT + 1)
+#define IO_ENDPOINT_KEYBOARD_INPUT (IO_ENDPOINT_TTY_INPUT + 2)
+static inline bool IOEndpoint__is_terminal(IOHandle handle)
+{
+    return handle >= IO_ENDPOINT_TTY_INPUT && handle <= IO_ENDPOINT_KEYBOARD_INPUT;
+}
 typedef int64_t ByteCount;
 typedef int64_t DirectoryEntryCount;
 typedef uint64_t Flags;
@@ -114,23 +117,6 @@ typedef struct IOLinkRequest
 
 typedef IOLinkRequest * IOLinkRequestPtr;
 
-typedef struct IOMountRequest
-{
-    BString device_path;
-    BString filesystem_type;
-    BString mountpoint;
-} IOMountRequest;
-
-typedef IOMountRequest * IOMountRequestPtr;
-
-typedef struct IOServerRegisterRequest
-{
-    BString path;
-    IOServerRole role;
-} IOServerRegisterRequest;
-
-typedef IOServerRegisterRequest * IOServerRegisterRequestPtr;
-
 #define IO_DIRENT_NAME_MAX 256
 
 #define IO_MODE_TYPE_MASK 0xF000U
@@ -183,24 +169,6 @@ static inline IOLinkRequest IOLinkRequest__new(ConstBStringPtr source_path, Cons
     return (IOLinkRequest){
         .source_path = *source_path,
         .target_path = *target_path,
-    };
-}
-
-static inline IOMountRequest IOMountRequest__new(ConstBStringPtr device_path, ConstBStringPtr filesystem_type,
-                                                 ConstBStringPtr mountpoint)
-{
-    return (IOMountRequest){
-        .device_path = *device_path,
-        .filesystem_type = *filesystem_type,
-        .mountpoint = *mountpoint,
-    };
-}
-
-static inline IOServerRegisterRequest IOServerRegisterRequest__new(ConstBStringPtr path, IOServerRole role)
-{
-    return (IOServerRegisterRequest){
-        .path = *path,
-        .role = role,
     };
 }
 

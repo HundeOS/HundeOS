@@ -30,7 +30,7 @@ Result(Anything) continuation(ParkedOperationPtr operation)
 void setUp(void)
 {
     saved_context.elr = 0x12345;
-    kernel = init_test_kernel_without_filesystem();
+    kernel = init_test_kernel();
     Scheduler__start(kernel->scheduler, cpu);
 
     Optional(ProcessPtr) idle_opt = Scheduler__idle_process(kernel->scheduler, cpu);
@@ -74,7 +74,10 @@ void test_exit_handler_interrupts_and_removes_process_from_scheduler(void)
     Optional(ProcessPtr) current_opt = Scheduler__current_process(kernel->scheduler, cpu);
 
     match_optional(current_opt,
-        some(current) { TEST_ASSERT_EQUAL(process, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(process, current);
+        },
         none_test_fail()
     );
 
@@ -82,7 +85,10 @@ void test_exit_handler_interrupts_and_removes_process_from_scheduler(void)
 
     match_optional(
         Scheduler__current_process(kernel->scheduler, cpu),
-        some(current) { TEST_ASSERT_EQUAL(idle, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(idle, current);
+        },
         none_test_fail()
     );
 
@@ -102,7 +108,10 @@ void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_
     Optional(ProcessPtr) current_opt = Scheduler__current_process(kernel->scheduler, cpu);
 
     match_optional(current_opt,
-        some(current) { TEST_ASSERT_EQUAL(child, current); },
+        some(current)
+        {
+            TEST_ASSERT_EQUAL(child, current);
+        },
         none_test_fail()
     );
 

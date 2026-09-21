@@ -82,7 +82,10 @@ static void assert_command_argument(CommandPtr command, StringPos index, ConstBS
 {
     match_optional(
         CommandArguments__at(&command->args, index),
-        some(argument) { TEST_ASSERT_EQUAL_BSTRING(*expected, argument); },
+        some(argument)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(*expected, argument);
+        },
         none_test_fail()
     );
 }
@@ -91,7 +94,10 @@ static void assert_spawn_argument(StringPos index, ConstBStringPtr expected)
 {
     match_optional(
         SpawnArguments__at(&last_spawn_call.arguments, index),
-        some(argument) { TEST_ASSERT_EQUAL_BSTRING(*expected, argument); },
+        some(argument)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(*expected, argument);
+        },
         none_test_fail()
     );
 }
@@ -116,15 +122,24 @@ SpawnResult spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg
     last_spawn_call.path = *path;
     last_spawn_call.arguments = SpawnArguments__new();
     match_optional(*arg0,
-        some(value) { SpawnArguments__push(&last_spawn_call.arguments, value); },
+        some(value)
+        {
+            SpawnArguments__push(&last_spawn_call.arguments, value);
+        },
         none_do_nothing()
     );
     match_optional(*arg1,
-        some(value) { SpawnArguments__push(&last_spawn_call.arguments, value); },
+        some(value)
+        {
+            SpawnArguments__push(&last_spawn_call.arguments, value);
+        },
         none_do_nothing()
     );
     match_optional(*arg2,
-        some(value) { SpawnArguments__push(&last_spawn_call.arguments, value); },
+        some(value)
+        {
+            SpawnArguments__push(&last_spawn_call.arguments, value);
+        },
         none_do_nothing()
     );
     return next_spawn_result;
@@ -371,7 +386,10 @@ void test_shell_run_once_stores_non_empty_history_entries(void)
 
     match_optional(
         ShellHistory__at(&shell.history, 0),
-        some(entry) { TEST_ASSERT_EQUAL_BSTRING(bstr("cat test.txt"), entry); },
+        some(entry)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(bstr("cat test.txt"), entry);
+        },
         none_test_fail()
     );
 }

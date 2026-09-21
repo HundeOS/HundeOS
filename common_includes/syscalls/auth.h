@@ -6,6 +6,7 @@
 #include "types/bstring.h"
 
 typedef uint64_t AuthTicketID;
+typedef AuthTicketID * AuthTicketIDPtr;
 typedef int64_t AuthResult;
 
 #define AUTH_NO_TICKET 0

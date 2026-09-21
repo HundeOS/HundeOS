@@ -36,5 +36,6 @@ KernelNotificationQueue KernelNotificationQueue__new(void);
 Result(CollectionCode) KernelNotificationQueue__publish(KernelNotificationQueuePtr self, KernelNotificationID id,
                                                         KernelNotificationSequence sequence);
 Optional(KernelNotification) KernelNotificationQueue__pop(KernelNotificationQueuePtr self);
+bool KernelNotificationQueue__has_pending(KernelNotificationQueuePtr self);
 
 #endif

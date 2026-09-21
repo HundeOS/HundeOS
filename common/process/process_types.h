@@ -4,6 +4,7 @@
 #include "../types/bstring.h"
 #include "../types/optional.h"
 typedef uint64_t ProcessState;
+typedef ProcessState * ProcessStatePtr;
 // state bits
 // 6    5      4     3    2         1     0
 // dead stop active sleep wait interrupt ready
@@ -31,6 +32,8 @@ typedef enum ParkReasons
     PARK_WAIT_CHILD_EVENT = 4,
     PARK_WAIT_SERVICE_READY = 5,
     PARK_SLEEP = 6,
+    PARK_WAIT_QUEUE = 7,
+    PARK_WAIT_EXEC_LOAD = 8,
 } ParkReasons;
 
 OptionalDef(ParkReason);

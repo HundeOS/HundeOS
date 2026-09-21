@@ -100,6 +100,7 @@ Result(IRQRegistrationStatus)
 
 Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr self, IRQNumber irq, ProcessPtr process);
 Result(Address) IRQDispatcher__register_manager(IRQDispatcherPtr self, ProcessPtr process);
+bool IRQDispatcher__has_pending_notifications(IRQDispatcherPtr self, ProcessPtr process);
 Result(IRQRegistrationStatus)
     IRQDispatcher__register_managed_irq(IRQDispatcherPtr self, IRQNumber irq, ProcessPtr manager);
 Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispatcherPtr self, ProcessPtr process);

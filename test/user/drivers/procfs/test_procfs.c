@@ -24,7 +24,20 @@ void setUp(void)
         .wait_reason = Some(ParkReason, PARK_WAIT_IO),
         .process_class = PROCESS_CLASS_NORMAL,
         .credentials = ProcessCredentials__new(2, 2),
-        .cpu_usage = {.total_usec = 104900, .long_basis_points = 1049, .short_basis_points = 2500},
+        .cpu_usage = {.total_usec = 104900,
+                      .long_basis_points = 1049,
+                      .short_basis_points = 2500,
+                      .scheduled_usec = 120000,
+                      .scheduled_long_basis_points = 1200,
+                      .scheduled_short_basis_points = 3000},
+        .queue_wait_usage = {.parks = 5,
+                             .activity_wakes = 1,
+                             .timeout_wakes = 3,
+                             .selections = 4,
+                             .parked_usec = 40000,
+                             .max_parked_usec = 12000,
+                             .runnable_usec = 8000,
+                             .max_runnable_usec = 3000},
         .memory = Some(ProcessMemoryUsage,
                        ((ProcessMemoryUsage){.private_bytes = 8192, .shared_bytes = 4096, .device_bytes = 0}))};
     ProcessRegistry__set(&registry, 3, 0, &record);
@@ -69,8 +82,8 @@ void test_procfs_lists_processes_and_read_only_files_with_real_ownership(void)
     TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0555, reply.entry.mode);
     TEST_ASSERT_EQUAL(2, reply.entry.user_id);
     request = request_for(IO_REQUEST_LIST_DIR, &bstr("/42"));
-    const char * names[] = {"status", "cpu", "memory"};
-    for (uint64_t index = 0; index < 3; index++)
+    const char * names[] = {"status", "cpu", "memory", "queue-wait", "ipc"};
+    for (uint64_t index = 0; index < 5; index++)
     {
         request.offset = index;
         reply = FilesystemDriver__execute(&driver, &request);
@@ -78,8 +91,32 @@ void test_procfs_lists_processes_and_read_only_files_with_real_ownership(void)
         TEST_ASSERT_EQUAL_STRING(names[index], reply.entry.name);
         TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.entry.mode);
     }
-    request.offset = 3;
+    request.offset = 5;
     TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
+}
+
+void test_procfs_reports_ipc_counters_and_unavailable_mapping(void)
+{
+    TEST_ASSERT_EQUAL_BSTRING(bstr("diagnostics=unavailable\n"), read_file(&bstr("/42/ipc")));
+    ProcessRecord record = {.pid = 43,
+                            .sampled_at_usec = 1234,
+                            .user_wait_usec = 456,
+                            .io_diagnostics = Some(IODiagnostics, ((IODiagnostics){.uart_bytes = 7,
+                                                                                   .uart_reads = 100,
+                                                                                   .uart_empty = 99,
+                                                                                   .backend_reads = 101,
+                                                                                   .backend_empty = 98,
+                                                                                   .warden_relays = 202,
+                                                                                   .wait_entries = 300,
+                                                                                   .unchanged_wakes = 250,
+                                                                                   .uart_irqs = 2}))};
+    ProcessRegistry__set(&registry, 3, 1, &record);
+    ProcessRegistry__set_count(&registry, 3, 2);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("uart_bytes=7\nuart_irqs=2\nuart_reads=100\nuart_empty=99\n"
+                                   "backend_reads=101\nbackend_empty=98\nwarden_relays=202\n"
+                                   "wait_entries=300\nunchanged_wakes=250\nuser_wait_usec=456\n"
+                                   "sampled_at_usec=1234\n"),
+                              read_file(&bstr("/43/ipc")));
 }
 
 void test_procfs_cpu_matches_ps_and_memory_categories_are_separate(void)
@@ -92,8 +129,19 @@ void test_procfs_cpu_matches_ps_and_memory_categories_are_separate(void)
     TEST_ASSERT_NOT_NULL(strstr(BString__cstr(&cpu), "total_usec=104900"));
     TEST_ASSERT_NOT_NULL(strstr(BString__cstr(&cpu), "CPU% (1s)=10.49"));
     TEST_ASSERT_NOT_NULL(strstr(BString__cstr(&cpu), "CPU% (100ms)=25.00"));
+    TEST_ASSERT_NOT_NULL(strstr(BString__cstr(&cpu), "scheduled_usec=120000"));
+    TEST_ASSERT_NOT_NULL(strstr(BString__cstr(&cpu), "SCHED CPU% (1s)=12.00"));
+    TEST_ASSERT_NOT_NULL(strstr(BString__cstr(&cpu), "SCHED CPU% (100ms)=30.00"));
     BString memory = read_file(&bstr("/42/memory"));
     TEST_ASSERT_NOT_NULL(strstr(BString__cstr(&memory), "private_bytes=8192\nshared_bytes=4096\ndevice_bytes=0"));
+}
+
+void test_procfs_exposes_queue_wait_diagnostics(void)
+{
+    TEST_ASSERT_EQUAL_BSTRING(
+        bstr("parks=5\nactivity_wakes=1\ntimeout_wakes=3\nselections=4\nparked_usec=40000\n"
+             "max_parked_usec=12000\nrunnable_usec=8000\nmax_runnable_usec=3000\nsampled_at_usec=1000000\n"),
+        read_file(&bstr("/42/queue-wait")));
 }
 
 void test_procfs_removal_blocks_new_opens_but_existing_open_keeps_snapshot(void)

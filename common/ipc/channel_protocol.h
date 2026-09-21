@@ -39,4 +39,9 @@ static inline QueueMessage ChannelControlMessage__new(uint64_t kind, uint64_t ad
     return message;
 }
 
+static inline RequestTicket ChannelControlMessage__ticket(ConstQueueMessagePtr self)
+{
+    return RequestTicket__new_with_metadata(self->arg2, &self->request);
+}
+
 #endif

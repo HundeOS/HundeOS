@@ -4,6 +4,7 @@
 
 #include "../../../kernel/types/optional.h"
 #include "../../../kernel/bin/elf.h"
+#include "../../../kernel/kalloc.h"
 #include "../../../kernel/bin/embedded_binaries.h"
 #include "../stubs/panic.h"
 #include "../stubs/kalloc.h"
@@ -26,6 +27,60 @@ void tearDown(void)
 static Elf load_test_elf()
 {
     return unwrap_optional(EmbeddedElf__load(&bstr("hello_world")), (Elf){});
+}
+
+void test_validate_rejects_truncated_header_and_program_table(void)
+{
+    Elf source = load_test_elf();
+    Elf truncated = Elf__new(source.start, source.start + sizeof(Elf64Header) - 1, &source.name);
+    match_result(Elf__validate(&truncated),
+        success_test_fail(),
+        error_test_ok()
+    );
+    Elf table_missing = Elf__new(source.start, source.start + sizeof(Elf64Header), &source.name);
+    match_result(Elf__validate(&table_missing),
+        success_test_fail(),
+        error_test_ok()
+    );
+    match_result(Elf__validate(&source),
+        success_do_nothing(),
+        error_test_fail()
+    );
+}
+
+void test_validate_rejects_wrong_machine_and_out_of_bounds_segments(void)
+{
+    Elf source = load_test_elf();
+    size_t size = source.end - source.start;
+    Address copy = Kernel__alloc_kernel(size);
+    Kernel__memcopy(source.start, copy, size);
+    Elf elf = Elf__new(copy, copy + size, &source.name);
+    Elf64HeaderPtr header = (Elf64HeaderPtr)copy;
+    header->machine = 0;
+    match_result(Elf__validate(&elf),
+        success_test_fail(),
+        error_test_ok()
+    );
+    Kernel__memcopy(source.start, copy, size);
+    ProgramHeaderPtr segment = (ProgramHeaderPtr)(copy + header->program_header_offset);
+    segment->file_size = UINT64_MAX;
+    match_result(Elf__validate(&elf),
+        success_test_fail(),
+        error_test_ok()
+    );
+    Kernel__memcopy(source.start, copy, size);
+    segment->virtual_address = UINT64_MAX - 10;
+    match_result(Elf__validate(&elf),
+        success_test_fail(),
+        error_test_ok()
+    );
+    Kernel__memcopy(source.start, copy, size);
+    header->entry = 0;
+    match_result(Elf__validate(&elf),
+        success_test_fail(),
+        error_test_ok()
+    );
+    Kernel__free(copy);
 }
 
 static void check_section(Optional(SectionHeaderPtr) opt_section, const char * name, SectionType type,

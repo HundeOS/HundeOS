@@ -9,8 +9,14 @@ static Result(QueueMessage) Channel__receive(QueuePtr queue)
     Queue__wait_readable(queue);
     match_result(
         Queue__pop(queue),
-        success(message) { return Success(QueueMessage, message); },
-        error(code, message) { return Error(QueueMessage, channel_transport_failed, code); }
+        success(message)
+        {
+            return Success(QueueMessage, message);
+        },
+        error(code, message)
+        {
+            return Error(QueueMessage, channel_transport_failed, code);
+        }
     );
 }
 
@@ -19,8 +25,14 @@ static Result(QueueCode) Channel__send(QueuePtr queue, ConstQueueMessagePtr mess
     Queue__wait_writable(queue);
     match_result(
         Queue__push(queue, message),
-        success(code) { return Success(QueueCode, code); },
-        error(code, error_message) { return Error(QueueCode, channel_transport_failed, code); }
+        success(code)
+        {
+            return Success(QueueCode, code);
+        },
+        error(code, error_message)
+        {
+            return Error(QueueCode, channel_transport_failed, code);
+        }
     );
 }
 
@@ -64,7 +76,10 @@ static Result(Channel) Channel__connect(ServiceDirectoryPtr directory, QueueEndp
                         }
                     );
                 },
-                error(code, message) { return Error(Channel, channel_transport_failed, code); }
+                error(code, message)
+                {
+                    return Error(Channel, channel_transport_failed, code);
+                }
             );
         },
         none_do_nothing()
@@ -76,7 +91,31 @@ Result(Channel) Channel__open(ServiceDirectoryPtr directory, ConstBStringPtr tar
 {
     match_optional(
         ServiceDirectory__find_endpoint(directory, target_service),
-        some(target) { return Channel__connect(directory, target); },
+        some(target)
+        {
+            uint64_t server = unwrap_optional(ServiceDirectory__find_service_pid(directory, target_service), 0);
+            if (server == 0)
+            {
+                return Error(Channel, channel_service_unavailable, CHANNEL_UNAVAILABLE);
+            }
+            match_result(
+                Channel__connect(directory, target),
+                success(channel)
+                {
+                    if (unwrap_optional(ServiceDirectory__find_endpoint(directory, target_service), 0) != target)
+                    {
+                        Channel__close(&channel);
+                        return Error(Channel, channel_service_unavailable, CHANNEL_UNAVAILABLE);
+                    }
+                    channel.server_pid = server;
+                    return Success(Channel, channel);
+                },
+                error(code, message)
+                {
+                    return Error(Channel, message, code);
+                }
+            );
+        },
         none_do_nothing()
     );
     return Error(Channel, channel_service_unavailable, CHANNEL_UNAVAILABLE);
@@ -84,10 +123,11 @@ Result(Channel) Channel__open(ServiceDirectoryPtr directory, ConstBStringPtr tar
 
 Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr request, size_t request_size)
 {
+    Optional(RequestTicket) parent = ChannelRequestContext__current();
     while (true)
     {
         match_result(
-            Channel__try_request(self, request, request_size),
+            Channel__try_request_with_parent(self, request, request_size, &parent),
             success(code)
             {
                 if (code != CHANNEL_PENDING)
@@ -96,7 +136,10 @@ Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr reques
                 }
                 Queue__wait_writable(&self->control);
             },
-            error(code, message) { return Error(ChannelCode, message, code); }
+            error(code, message)
+            {
+                return Error(ChannelCode, message, code);
+            }
         );
     }
 }
@@ -111,11 +154,20 @@ Result(OptionalChannelReplySize) Channel__poll_reply(ChannelPtr self, ChannelDat
             {
                 match_optional(
                     self->received_reply,
-                    some(pending_size) { Queue__wait_writable(&self->control); },
-                    none() { return Success(OptionalChannelReplySize, size); }
+                    some(pending_size)
+                    {
+                        Queue__wait_writable(&self->control);
+                    },
+                    none()
+                    {
+                        return Success(OptionalChannelReplySize, size);
+                    }
                 );
             },
-            error(code, message) { return Error(OptionalChannelReplySize, message, code); }
+            error(code, message)
+            {
+                return Error(OptionalChannelReplySize, message, code);
+            }
         );
     }
 }
@@ -126,7 +178,10 @@ Result(ChannelReplySize) Channel__submit(ChannelPtr self, ConstChannelDataPtr re
     match_result(
         Channel__request(self, request, request_size),
         success_do_nothing(),
-        error(code, message) { return Error(ChannelReplySize, message, code); }
+        error(code, message)
+        {
+            return Error(ChannelReplySize, message, code);
+        }
     );
     while (true)
     {
@@ -137,11 +192,17 @@ Result(ChannelReplySize) Channel__submit(ChannelPtr self, ConstChannelDataPtr re
             {
                 match_optional(
                     optional_size,
-                    some(size) { return Success(ChannelReplySize, size); },
+                    some(size)
+                    {
+                        return Success(ChannelReplySize, size);
+                    },
                     none_do_nothing()
                 );
             },
-            error(code, message) { return Error(ChannelReplySize, message, code); }
+            error(code, message)
+            {
+                return Error(ChannelReplySize, message, code);
+            }
         );
     }
 }

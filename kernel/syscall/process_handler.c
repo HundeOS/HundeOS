@@ -24,7 +24,10 @@ Result(SystemCallResult) ProcessCredentials__handler(KernelPtr kernel, OptionalP
             *target = credentials;
             return Success(SystemCallResult, PROCESS_CREDENTIALS_OK);
         },
-        error(code, message) { return Error(SystemCallResult, message, code); }
+        error(code, message)
+        {
+            return Error(SystemCallResult, message, code);
+        }
     );
 }
 
@@ -44,7 +47,10 @@ static Result(Anything) ProcessChildEvent__copy_to_target(ResultPtr(Anything) re
             *target = *event;
             return Success(Anything, PROCESS_CHILD_EVENT_OK);
         },
-        error(code, message) { return Error(Anything, message, code); }
+        error(code, message)
+        {
+            return Error(Anything, message, code);
+        }
     );
 
     return Error(Anything, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
@@ -71,7 +77,10 @@ static Result(Anything) Process__complete_wait_child_event_syscall(ParkedOperati
                                     Result(Anything) mapped_result = Success(Anything, (Anything)&event);
                                     return KernelContext__map_result(parked_operation->kernel_context, &mapped_result);
                                 },
-                                error(code, message) { return Error(Anything, message, code); }
+                                error(code, message)
+                                {
+                                    return Error(Anything, message, code);
+                                }
                             );
                         },
                         none_do_nothing()
@@ -132,7 +141,10 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(KernelPtr kernel, Option
                     KernelContext__dispose_heap(kernel_context);
                     match_result(
                         mapped,
-                        success(mapped_code) { return Success(SystemCallResult, mapped_code); },
+                        success(mapped_code)
+                        {
+                            return Success(SystemCallResult, mapped_code);
+                        },
                         error(mapped_code, mapped_message)
                         {
                             return Error(SystemCallResult, mapped_message, mapped_code);
@@ -164,8 +176,14 @@ Result(SystemCallResult) ProcessSleep__handler(KernelPtr kernel, OptionalPtr(Pro
         {
             match_result(
                 Scheduler__sleep_usec(kernel->scheduler, process, (uint64_t)arg1),
-                success(sleeping) { return Error(SystemCallResult, sleep_pending, SYSCALL_IO_BLOCK); },
-                error(code, message) { return Error(SystemCallResult, message, PROCESS_SLEEP_FAILED); }
+                success(sleeping)
+                {
+                    return Error(SystemCallResult, sleep_pending, SYSCALL_IO_BLOCK);
+                },
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, PROCESS_SLEEP_FAILED);
+                }
             );
         },
         none_do_nothing()

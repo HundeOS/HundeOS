@@ -9,6 +9,7 @@ ResultDef(BlockProtocolBlockCount);
 typedef struct BlockClient
 {
     Channel channel;
+    BufferPair buffers;
     BlockProtocolBlockCount block_count;
     bool open;
 } BlockClient;

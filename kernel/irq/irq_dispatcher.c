@@ -45,14 +45,20 @@ Result(IRQRegistrationStatus)
                                                 NULL // hundelint: ignore-no-null
     );
 
-    critical_section(self->lock, {
-        match_optional(
-            IRQConsumerMap__get_ptr(&self->consumers, irq),
-            some(existing) { cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED); },
-            none_do_nothing()
-        );
-        IRQConsumerMap__set(&self->consumers, irq, irq_consumer);
-    });
+    critical_section(
+        self->lock,
+        {
+            match_optional(
+                IRQConsumerMap__get_ptr(&self->consumers, irq),
+                some(existing)
+                {
+                    cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED);
+                },
+                none_do_nothing()
+            );
+            IRQConsumerMap__set(&self->consumers, irq, irq_consumer);
+        }
+    );
 
     return Success(IRQRegistrationStatus, IRQ_REGISTERED);
 }
@@ -83,26 +89,38 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr s
                                                 NULL, // hundelint: ignore-no-null
                                                 process);
 
-    critical_section(self->lock, {
-        match_optional(
-            IRQConsumerMap__get_ptr(&self->consumers, irq),
-            some(existing) { cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED); },
-            none_do_nothing()
-        );
-        IRQConsumerMap__set(&self->consumers, irq, irq_consumer);
-    });
+    critical_section(
+        self->lock,
+        {
+            match_optional(
+                IRQConsumerMap__get_ptr(&self->consumers, irq),
+                some(existing)
+                {
+                    cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED);
+                },
+                none_do_nothing()
+            );
+            IRQConsumerMap__set(&self->consumers, irq, irq_consumer);
+        }
+    );
     __d_printf(IODEV, "irq register service irq=%i pid=%i name=%s\n", irq, process->pid, cstr(process->name));
 
     match_result(
         Scheduler__subscribe_irq(self->scheduler, process, irq),
         success_do_nothing(),
-        error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
+        error(code, message)
+        {
+            return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR);
+        }
     );
 
     match_result(
         Arch__enable_irq(interrupt_controller, irq),
         success_do_nothing(),
-        error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
+        error(code, message)
+        {
+            return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR);
+        }
     );
 
     return Success(IRQRegistrationStatus, IRQ_REGISTERED);
@@ -110,12 +128,15 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr s
 
 Result(Address) IRQDispatcher__register_manager(IRQDispatcherPtr self, ProcessPtr process)
 {
-    critical_section(self->lock, {
-        if (!is_nothing(self->manager))
+    critical_section(
+        self->lock,
         {
-            cs_return Error(Address, interrupt_manager_exists, SERVICE_INTERRUPT_MANAGER_EXISTS);
+            if (!is_nothing(self->manager))
+            {
+                cs_return Error(Address, interrupt_manager_exists, SERVICE_INTERRUPT_MANAGER_EXISTS);
+            }
         }
-    });
+    );
 
     match_result(
         Kernel__try_alloc_user(KERNEL_NOTIFICATION_QUEUE_ADDRESS, KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE, true, true,
@@ -125,22 +146,57 @@ Result(Address) IRQDispatcher__register_manager(IRQDispatcherPtr self, ProcessPt
             KernelNotificationQueuePtr queue = k_v_ptr(memory, KernelNotificationQueue);
             *queue = KernelNotificationQueue__new();
             PageTable__map_shared(&process->page_table, process->kernel, memory, KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE);
-            critical_section(self->lock, {
-                if (!is_nothing(self->manager))
+            critical_section(
+                self->lock,
                 {
-                    PageTable__unmap(&process->page_table, process->kernel, KERNEL_NOTIFICATION_QUEUE_ADDRESS,
-                                     KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE);
-                    Kernel__free(memory.kernel_addr.virtual_addr);
-                    cs_return Error(Address, interrupt_manager_exists, SERVICE_INTERRUPT_MANAGER_EXISTS);
+                    if (!is_nothing(self->manager))
+                    {
+                        PageTable__unmap(&process->page_table, process->kernel, KERNEL_NOTIFICATION_QUEUE_ADDRESS,
+                                         KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE);
+                        Kernel__free(memory.kernel_addr.virtual_addr);
+                        cs_return Error(Address, interrupt_manager_exists, SERVICE_INTERRUPT_MANAGER_EXISTS);
+                    }
+                    self->manager = Some(ProcessPtr, process);
+                    self->manager_queue_memory = Some(UserAddress, memory);
                 }
-                self->manager = Some(ProcessPtr, process);
-                self->manager_queue_memory = Some(UserAddress, memory);
-            });
+            );
             return Success(Address, KERNEL_NOTIFICATION_QUEUE_ADDRESS);
         },
-        error(code, message) { return Error(Address, message, SERVICE_MAP_FAILED); }
+        error(code, message)
+        {
+            return Error(Address, message, SERVICE_MAP_FAILED);
+        }
     );
     return Error(Address, interrupt_manager_required, SERVICE_MAP_FAILED);
+}
+
+bool IRQDispatcher__has_pending_notifications(IRQDispatcherPtr self, ProcessPtr process)
+{
+    critical_section(
+        self->lock,
+        {
+            match_optional(
+                self->manager,
+                some(manager)
+                {
+                    if (manager == process)
+                    {
+                        match_optional(
+                            self->manager_queue_memory,
+                            some(memory)
+                            {
+                                cs_return KernelNotificationQueue__has_pending(
+                                    k_v_ptr(memory, KernelNotificationQueue));
+                            },
+                            none_do_nothing()
+                        );
+                    }
+                },
+                none_do_nothing()
+            );
+        }
+    );
+    return false;
 }
 
 Result(IRQRegistrationStatus)
@@ -155,29 +211,38 @@ Result(IRQRegistrationStatus)
         return Error(IRQRegistrationStatus, missing_interrupt_controller, IRQ_REGISTRATION_ERROR);
     }
 
-    critical_section(self->lock, {
-        match_optional(
-            self->manager,
-            some(registered_manager)
-            {
-                if (registered_manager != manager)
+    critical_section(
+        self->lock,
+        {
+            match_optional(
+                self->manager,
+                some(registered_manager)
+                {
+                    if (registered_manager != manager)
+                    {
+                        cs_return Error(IRQRegistrationStatus, interrupt_manager_required, IRQ_INVALID_CONSUMER);
+                    }
+                },
+                none()
                 {
                     cs_return Error(IRQRegistrationStatus, interrupt_manager_required, IRQ_INVALID_CONSUMER);
                 }
-            },
-            none() { cs_return Error(IRQRegistrationStatus, interrupt_manager_required, IRQ_INVALID_CONSUMER); }
-        );
-        match_optional(
-            IRQConsumerMap__get_ptr(&self->consumers, irq),
-            some(existing) { cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED); },
-            none_do_nothing()
-        );
-        IRQConsumerMap__set(&self->consumers, irq,
-                            IRQConsumer__new(IRQ_CONSUMER_MANAGER,
+            );
+            match_optional(
+                IRQConsumerMap__get_ptr(&self->consumers, irq),
+                some(existing)
+                {
+                    cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED);
+                },
+                none_do_nothing()
+            );
+            IRQConsumerMap__set(&self->consumers, irq,
+                                IRQConsumer__new(IRQ_CONSUMER_MANAGER,
                              NULL, // hundelint: ignore-no-null
                              NULL, // hundelint: ignore-no-null
-                                             manager));
-    });
+                                                 manager));
+        }
+    );
 
     match_optional(
         self->interrupt_controller,
@@ -186,7 +251,10 @@ Result(IRQRegistrationStatus)
             match_result(
                 Arch__enable_irq(&controller, irq),
                 success_do_nothing(),
-                error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
+                error(code, message)
+                {
+                    return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR);
+                }
             );
         },
         none_do_nothing()
@@ -213,40 +281,62 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispat
 
     IRQNumbers stale_irqs = IRQNumbers__new();
 
-    critical_section(self->lock, {
-        for_each_map(IRQConsumerMap, self->consumers, index, irq, consumer, {
-            if ((consumer.type == IRQ_CONSUMER_SERVICE || consumer.type == IRQ_CONSUMER_MANAGER) &&
-                consumer.service_process == process)
-            {
-                match_result(
-                    IRQNumbers__push(&stale_irqs, irq),
-                    success_do_nothing(),
-                    error(code, message) { cs_return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
-                );
-            }
-        });
-        for_each_fa(IRQNumbers, stale_irqs, irq_index, irq, {
-            IRQConsumerMap__delete(&self->consumers, irq);
-            Arch__mask_irq(interrupt_controller, irq);
-        });
-    });
+    critical_section(
+        self->lock,
+        {
+            for_each_map(
+                IRQConsumerMap,
+                self->consumers,
+                index,
+                irq,
+                consumer,
+                {
+                    if ((consumer.type == IRQ_CONSUMER_SERVICE || consumer.type == IRQ_CONSUMER_MANAGER) &&
+                        consumer.service_process == process)
+                    {
+                        match_result(
+                            IRQNumbers__push(&stale_irqs, irq),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                cs_return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR);
+                            }
+                        );
+                    }
+                }
+            );
+            for_each_fa(
+                IRQNumbers,
+                stale_irqs,
+                irq_index,
+                irq,
+                {
+                    IRQConsumerMap__delete(&self->consumers, irq);
+                    Arch__mask_irq(interrupt_controller, irq);
+                }
+            );
+        }
+    );
 
     Optional(UserAddress) manager_memory = None(UserAddress);
-    critical_section(self->lock, {
-        match_optional(
-            self->manager,
-            some(manager)
-            {
-                if (manager == process)
+    critical_section(
+        self->lock,
+        {
+            match_optional(
+                self->manager,
+                some(manager)
                 {
-                    manager_memory = self->manager_queue_memory;
-                    self->manager = None(ProcessPtr);
-                    self->manager_queue_memory = None(UserAddress);
-                }
-            },
-            none_do_nothing()
-        );
-    });
+                    if (manager == process)
+                    {
+                        manager_memory = self->manager_queue_memory;
+                        self->manager = None(ProcessPtr);
+                        self->manager_queue_memory = None(UserAddress);
+                    }
+                },
+                none_do_nothing()
+            );
+        }
+    );
     match_optional(
         manager_memory,
         some(memory)
@@ -256,7 +346,10 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispat
             match_result(
                 Kernel__free(memory.kernel_addr.virtual_addr),
                 success_do_nothing(),
-                error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
+                error(code, message)
+                {
+                    return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR);
+                }
             );
         },
         none_do_nothing()
@@ -265,7 +358,10 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispat
     match_result(
         ServiceEventDispatcher__unsubscribe_process(&self->scheduler->service_event_dispatcher, process),
         success_do_nothing(),
-        error(code, message) { return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR); }
+        error(code, message)
+        {
+            return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR);
+        }
     );
 
     return Success(IRQRegistrationStatus, IRQ_REGISTERED);
@@ -296,8 +392,14 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumb
                 __d_printf(IODEV, "irq dispatcher service irq=%i\n", irq);
                 match_result(
                     Scheduler__send_irq_event(self->scheduler, irq),
-                    success(_) { return Success(IRQDispatchStatus, IRQ_DISPATCH_RESCHEDULE); },
-                    error(code, message) { return Error(IRQDispatchStatus, message, IRQ_DISPATCH_ERROR); }
+                    success(_)
+                    {
+                        return Success(IRQDispatchStatus, IRQ_DISPATCH_RESCHEDULE);
+                    },
+                    error(code, message)
+                    {
+                        return Error(IRQDispatchStatus, message, IRQ_DISPATCH_ERROR);
+                    }
                 );
             }
 
@@ -318,7 +420,18 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumb
                         match_result(
                             KernelNotificationQueue__publish(queue, irq, consumer->delivery_sequence),
                             success_do_nothing(),
-                            error(code, message) { return Error(IRQDispatchStatus, message, IRQ_DISPATCH_ERROR); }
+                            error(code, message)
+                            {
+                                return Error(IRQDispatchStatus, message, IRQ_DISPATCH_ERROR);
+                            }
+                        );
+                        match_optional(
+                            self->manager,
+                            some(manager)
+                            {
+                                Process__wake_shared_wait(manager);
+                            },
+                            none_do_nothing()
                         );
                         IpcPlatform__signal_event();
                         return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);

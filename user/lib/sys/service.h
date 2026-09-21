@@ -17,31 +17,9 @@ ServiceCode service_register_interrupt_manager(ServiceInterruptManagerRegistrati
 ServiceCode service_route_managed_irq(uint64_t client_pid, uint64_t irq);
 ServiceCode service_register_block_device(ConstBStringPtr path, uint64_t block_size, uint64_t block_count);
 ServiceCode service_claim_virtio_device(Address mapping);
-ServiceCode service_block_connect(ConstBStringPtr path, ServiceBlockConnectionRequestPtr channel);
 ServiceCode service_authorize_block_client(uint64_t client_pid);
-ServiceCode service_block_disconnect(BlockConnectionID connection_id);
-ServiceBlockReadResult service_block_read_device(ConstBStringPtr path, uint64_t block, uint64_t block_count,
-                                                 Address buffer, size_t buffer_size);
-ServiceBlockReadResult service_block_write_device(ConstBStringPtr path, uint64_t block, uint64_t block_count,
-                                                  Address buffer, size_t buffer_size);
-ServiceBlockReadResult service_block_read_device_async(ConstBStringPtr path, uint64_t block, uint64_t block_count,
-                                                       Address buffer, size_t buffer_size);
-ServiceBlockReadResult service_block_write_device_async(ConstBStringPtr path, uint64_t block, uint64_t block_count,
-                                                        Address buffer, size_t buffer_size);
-ServiceCode service_block_get_request(uint64_t request_id, ServiceBlockRequestPtr request);
-ServiceCode service_block_complete(uint64_t request_id, ServiceCode status, uint64_t block_count);
-ServiceCode service_register_filesystem(ConstBStringPtr device_path, ConstBStringPtr filesystem_type,
-                                        ConstBStringPtr mountpoint);
-ServiceCode service_filesystem_get_request(uint64_t request_id, ServiceFilesystemRequestPtr request);
-ServiceCode service_filesystem_complete(uint64_t request_id, ServiceCode status, int64_t result);
-ServiceCode service_filesystem_complete_open(uint64_t request_id, ServiceCode status, int64_t result, FileMode mode,
-                                             uint64_t size, uint32_t * blocks);
-ServiceCode service_filesystem_complete_open_without_blocks(uint64_t request_id, ServiceCode status, int64_t result,
-                                                            FileMode mode, uint64_t size);
-ServiceCode service_register_socket_router(void);
-ServiceCode service_socket_get_request(uint64_t request_id, IOSocketRouterRequestPtr request);
-ServiceCode service_socket_complete(uint64_t request_id, IOSocketStatus status, IOHandle result);
-ServiceCode service_device_address(void * driver_address, Address * device_address);
+ServiceCode service_authorize_mount_client(uint64_t client_pid);
+ServiceCode service_device_address(void * driver_address, AddressPtr device_address);
 ServiceCode service_publish_ready(ConstBStringPtr name);
 ServiceCode service_wait_ready(ConstBStringPtr name);
 void * driver_ptr(ServiceMappedMemoryPtr memory);

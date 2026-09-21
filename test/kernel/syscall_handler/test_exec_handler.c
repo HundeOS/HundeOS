@@ -6,9 +6,14 @@
 #include "../fixtures/kernel.h"
 #include "../fixtures/process.h"
 #include "../stubs/process.h"
+#include "../fixtures/exec_channel.h"
 
-#define Exec__handler(kernel, proc, ...) Exec__handler((kernel), &(proc), __VA_ARGS__)
-#define ExecRequest__handler(kernel, proc, ...) ExecRequest__handler((kernel), &(proc), __VA_ARGS__)
+static FakeExecService filesystem;
+FixedArrayDefine(BString, 4, BootEndpointNames, bstring_equals);
+FixedArrayBodyDefine(BootEndpointNames);
+
+#define Exec__handler(kernel, proc, request, ...) FakeExecService__spawn(&filesystem, (kernel), &(proc), request)
+#define ExecRequest__handler(kernel, proc, request, ...) FakeExecService__spawn(&filesystem, (kernel), &(proc), request)
 
 static KernelPtr kernel = NULL;
 static ProcessPtr parent = NULL;
@@ -27,8 +32,14 @@ static UserAllocation allocation_at(ProcessPtr process, uint64_t index)
 {
     match_optional(
         UserAllocations__at(&process->user_allocations, index),
-        some(allocation) { return allocation; },
-        none() { TEST_FAIL(); }
+        some(allocation)
+        {
+            return allocation;
+        },
+        none()
+        {
+            TEST_FAIL();
+        }
     );
 
     return (UserAllocation){0};
@@ -39,14 +50,200 @@ void setUp(void)
     clear_deferred_syscall_result();
     current_process_reset();
     kernel = init_test_kernel();
-    parent = dummy_process(0, cpu, PROC_STATE_RUNNING);
+    parent = dummy_process(1, cpu, PROC_STATE_RUNNING);
     Process__set_hund_identity(parent);
     Scheduler__schedule(kernel->scheduler, parent);
     Scheduler__preempt(kernel->scheduler, cpu, NULL);
+    filesystem = FakeExecService__new(kernel);
 }
 
 void tearDown(void)
 {
+}
+
+void test_boot_handoff_requires_mama_and_registered_services_and_cannot_be_reversed(void)
+{
+    Optional(ProcessPtr) caller = Some(ProcessPtr, parent);
+    SpawnRequest request =
+        test_spawn_request("/sbin/hello_world", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
+    match_result(BootSpawn__handler(kernel, &caller, (Anything)&request, 0, 0, 0, 0),
+        success_test_fail(),
+                 error_test_ok()
+    );
+    kernel->boot_authority = parent->pid;
+    match_result(BootComplete__handler(kernel, &caller, 0, 0, 0, 0, 0),
+        success_test_fail(),
+        error_test_ok()
+    );
+    TEST_ASSERT_FALSE(kernel->boot_complete);
+    match_result(BootSpawn__handler(kernel, &caller, (Anything)&request, 0, 0, 0, 0),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    ServiceDirectoryPtr directory = KernelServiceDirectory__kernel_directory(&kernel->service_directory);
+    QueueEndpointID endpoint = unwrap_optional(ServiceDirectory__find_endpoint(directory, &bstr(IO_SYSTEM_SERVICE)), 0);
+    BootEndpointNames names = BootEndpointNames__new();
+    BootEndpointNames__push(&names, bstr(IO_FILESYSTEM_SERVICE));
+    BootEndpointNames__push(&names, bstr("/sbin"));
+    BootEndpointNames__push(&names, bstr("/boot"));
+    BootEndpointNames__push(&names, bstr("/boot/config"));
+    for_each_fa(
+        BootEndpointNames,
+        names,
+        index,
+        name,
+        {
+            match_result(KernelServiceDirectory__publish_endpoint(&kernel->service_directory, filesystem.io,
+                                                                  &name, endpoint),
+                         success_do_nothing(),
+                error_test_fail()
+            );
+        }
+    );
+    match_result(BootComplete__handler(kernel, &caller, 0, 0, 0, 0, 0),
+        success_test_fail(),
+        error_test_ok()
+    );
+    TEST_ASSERT_FALSE(kernel->boot_complete);
+    match_result(KernelServiceDirectory__publish_endpoint(&kernel->service_directory, filesystem.puffer,
+                                                          &bstr(BUFFER_SERVICE_NAME), endpoint),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(BootComplete__handler(kernel, &caller, 0, 0, 0, 0, 0),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(kernel->boot_complete);
+    match_result(BootComplete__handler(kernel, &caller, 0, 0, 0, 0, 0),
+        success_test_fail(),
+        error_test_ok()
+    );
+    match_result(BootSpawn__handler(kernel, &caller, (Anything)&request, 0, 0, 0, 0),
+        success_test_fail(),
+                 error_test_ok()
+    );
+    match_result(FakeExecService__spawn(&filesystem, kernel, &caller, (Anything)&request),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    TEST_ASSERT_GREATER_THAN(1, filesystem.reads);
+}
+
+void test_normal_spawn_does_not_fall_back_to_embedded_files_when_service_is_absent(void)
+{
+    QueueEndpointID endpoint = unwrap_optional(
+        ServiceDirectory__find_endpoint(KernelServiceDirectory__kernel_directory(&kernel->service_directory),
+                                        &bstr(IO_SYSTEM_SERVICE)),
+        0);
+    KernelServiceDirectory__remove_endpoint(&kernel->service_directory, endpoint);
+    SpawnRequest request =
+        test_spawn_request("/sbin/hello_world", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
+    match_result(
+        ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SPAWN_NO_FILE, code);
+        }
+    );
+    TEST_ASSERT_TRUE(is_nothing(parent->exec_load));
+}
+
+void test_loading_cancels_when_its_payload_mapping_is_revoked(void)
+{
+    SpawnRequest request =
+        test_spawn_request("/sbin/hello_world", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
+    Optional(ProcessPtr) caller = Some(ProcessPtr, parent);
+    match_result((ExecRequest__handler)(kernel, &caller, (Anything)&request, 0, 0, 0, 0),
+        success_test_fail(),
+                 error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SYSCALL_IO_BLOCK, code);
+        }
+    );
+    for (unsigned step = 0; step < 5 && filesystem.payload_address == 0; step++)
+    {
+        FakeExecService__poll(&filesystem, kernel, parent);
+        ExecLoad__continue(parent);
+    }
+    TEST_ASSERT_NOT_EQUAL(0, filesystem.payload_address);
+    match_result(Scheduler__release_shared_page(kernel->scheduler, filesystem.warden, filesystem.payload_address),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    filesystem.payload_address = 0;
+    match_result(
+        ExecLoad__continue(parent),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SPAWN_FAILED, code);
+        }
+    );
+    TEST_ASSERT_TRUE(is_nothing(parent->exec_load));
+    FakeExecService__drain(&filesystem, kernel);
+}
+
+void test_loading_rejects_recycled_payload_at_the_same_address(void)
+{
+    SpawnRequest request =
+        test_spawn_request("/sbin/hello_world", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
+    Optional(ProcessPtr) caller = Some(ProcessPtr, parent);
+    (ExecRequest__handler)(kernel, &caller, (Anything)&request, 0, 0, 0, 0);
+    for (unsigned step = 0; step < 5 && filesystem.payload_address == 0; step++)
+    {
+        FakeExecService__poll(&filesystem, kernel, parent);
+        ExecLoad__continue(parent);
+    }
+    Address address = filesystem.payload_address;
+    TEST_ASSERT_NOT_EQUAL(0, address);
+    match_result(Scheduler__release_shared_page(kernel->scheduler, filesystem.warden, address),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(
+        Scheduler__alloc_shared_page(kernel->scheduler, filesystem.warden, QUEUE_KERNEL_PID, filesystem.io->pid),
+        success(reused)
+        {
+            TEST_ASSERT_EQUAL_UINT64(address, reused);
+        },
+        error_test_fail()
+    );
+    match_result(
+        ExecLoad__continue(parent),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SPAWN_FAILED, code);
+        }
+    );
+    TEST_ASSERT_TRUE(is_nothing(parent->exec_load));
+    FakeExecService__drain(&filesystem, kernel);
+}
+
+void test_process_cleanup_cancels_pending_executable_load(void)
+{
+    SpawnRequest request =
+        test_spawn_request("/sbin/hello_world", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
+    Optional(ProcessPtr) caller = Some(ProcessPtr, parent);
+    (ExecRequest__handler)(kernel, &caller, (Anything)&request, 0, 0, 0, 0);
+    FakeExecService__poll(&filesystem, kernel, parent);
+    match_result(Process__dispose_owned_kernel_resources(parent),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(is_nothing(parent->exec_load));
+    match_optional(
+        filesystem.control,
+        some(control)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_CLOSED, Queue__status(&control));
+        },
+        none_test_fail()
+    );
+    FakeExecService__drain(&filesystem, kernel);
+    TEST_ASSERT_FALSE(Queues__has_kernel_client(&kernel->scheduler->queues, filesystem.warden));
 }
 
 void test_exec_is_called_triggering_new_process()
@@ -55,7 +252,10 @@ void test_exec_is_called_triggering_new_process()
 
     match_result(
         Exec__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
-        success(code) { TEST_ASSERT_GREATER_THAN(0, code); },
+        success(code)
+        {
+            TEST_ASSERT_GREATER_THAN(0, code);
+        },
         error_test_fail()
     );
 
@@ -69,7 +269,10 @@ void test_exec_handler_nowait_spawns_without_parking_parent()
 
     match_result(
         Exec__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
-        success(code) { TEST_ASSERT_GREATER_THAN(0, code); },
+        success(code)
+        {
+            TEST_ASSERT_GREATER_THAN(0, code);
+        },
         error_test_fail()
     );
 
@@ -108,7 +311,7 @@ void test_exec_request_handler_passes_spawn_arguments_to_process_argv(void)
                 some(child)
                 {
                     UserAllocation args = allocation_at(child, 0);
-                    Address * argv = ptr(args.address.kernel_addr.virtual_addr, Address);
+                    AddressPtr argv = ptr(args.address.kernel_addr.virtual_addr, Address);
                     Address user_base = args.address.virtual_addr;
                     Address kernel_base = args.address.kernel_addr.virtual_addr;
 
@@ -138,7 +341,10 @@ void test_exec_request_handler_can_spawn_as_user(void)
 
     match_result(
         ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
-        success(code) { TEST_ASSERT_GREATER_THAN(0, code); },
+        success(code)
+        {
+            TEST_ASSERT_GREATER_THAN(0, code);
+        },
         error_test_fail()
     );
 }
@@ -154,14 +360,20 @@ void test_exec_request_handler_rejects_reused_auth_ticket(void)
 
     match_result(
         ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
-        success(code) { TEST_ASSERT_GREATER_THAN(0, code); },
+        success(code)
+        {
+            TEST_ASSERT_GREATER_THAN(0, code);
+        },
         error_test_fail()
     );
 
     match_result(
         ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code);
+        }
     );
 }
 
@@ -175,20 +387,19 @@ void test_exec_request_handler_can_spawn_root_shell_with_auth_ticket(void)
 
     match_result(
         ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
-        success(code) { TEST_ASSERT_GREATER_THAN(0, code); },
+        success(code)
+        {
+            TEST_ASSERT_GREATER_THAN(0, code);
+        },
         error_test_fail()
     );
 }
 
-void test_exec_request_handler_can_spawn_with_explicit_stdio(void)
+void test_exec_request_handler_can_spawn_with_explicit_terminal_endpoints(void)
 {
-    Process__set_file_descriptor(parent, 7, 0x7000);
-    Process__set_file_descriptor(parent, 8, 0x8000);
-    Process__set_file_descriptor(parent, 9, 0x9000);
-
-    SpawnRequest request =
-        test_spawn_request("/sbin/shell", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SpawnStdio__new(7, 8, 9));
-
+    SpawnStdio stdio =
+        SpawnStdio__new(IO_ENDPOINT_KEYBOARD_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+    SpawnRequest request = test_spawn_request("/sbin/shell", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, stdio);
     match_result(
         ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
         success(pid)
@@ -197,25 +408,27 @@ void test_exec_request_handler_can_spawn_with_explicit_stdio(void)
                 Scheduler__find_process_by_pid(kernel->scheduler, pid),
                 some(child)
                 {
-                    match_result(
-                        Process__get_io_handle(child, 0),
-                        success(handle) { TEST_ASSERT_EQUAL(0x7000, handle); },
-                        error_test_fail()
-                    );
-                    match_result(
-                        Process__get_io_handle(child, 1),
-                        success(handle) { TEST_ASSERT_EQUAL(0x8000, handle); },
-                        error_test_fail()
-                    );
-                    match_result(
-                        Process__get_io_handle(child, 2),
-                        success(handle) { TEST_ASSERT_EQUAL(0x9000, handle); },
-                        error_test_fail()
-                    );
+                    TEST_ASSERT_EQUAL_INT64(IO_ENDPOINT_KEYBOARD_INPUT, SpawnStdio__stdin_fd(child->startup_stdio));
+                    TEST_ASSERT_EQUAL_INT64(IO_ENDPOINT_CONSOLE_OUTPUT, SpawnStdio__stdout_fd(child->startup_stdio));
+                    TEST_ASSERT_EQUAL_INT64(IO_ENDPOINT_CONSOLE_OUTPUT, SpawnStdio__stderr_fd(child->startup_stdio));
                 },
                 none_test_fail()
             );
         },
         error_test_fail()
+    );
+}
+
+void test_exec_request_rejects_unsupported_handle_inheritance(void)
+{
+    SpawnRequest request =
+        test_spawn_request("/sbin/shell", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SpawnStdio__new(7, 8, 9));
+    match_result(
+        ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SPAWN_FAILED, code);
+        }
     );
 }

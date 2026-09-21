@@ -17,7 +17,7 @@ void setUp(void)
     memset(&registry, 0, sizeof(registry));
     registry.version = DEVICE_REGISTRY_VERSION;
     DeviceRecord block = DeviceRecord__new(DEVICE_BLOCK, 12, &bstr("/dev/virtio1"), &bstr("hd0"), 512, 16384);
-    DeviceRecord stream = DeviceRecord__new(DEVICE_KERNEL_STREAM, 13, &bstr("/dev/businfo"), &empty_bstr(), 0, 0);
+    DeviceRecord stream = DeviceRecord__new(DEVICE_KERNEL_STREAM, 13, &bstr("/dev/test-stream"), &empty_bstr(), 0, 0);
     match_result(DeviceRegistry__set(&registry, 0, &block),
         success_do_nothing(),
         error_test_fail()
@@ -48,7 +48,7 @@ static IORequest request_for(IORequestOperation operation, ConstBStringPtr path)
 
 void test_devfs_lists_devices_and_aliases_read_only(void)
 {
-    const char * expected[] = {"virtio1", "hd0", "businfo"};
+    const char * expected[] = {"virtio1", "hd0", "test-stream"};
     IORequest request = request_for(IO_REQUEST_LIST_DIR, &bstr("/"));
     for (uint64_t index = 0; index < 3; index++)
     {
@@ -91,7 +91,7 @@ void test_devfs_rejects_mutation_and_execute_but_preserves_kernel_stream_opens(v
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, FilesystemDriver__execute(&driver, &request).status);
     request.operation = IO_REQUEST_MKDIR;
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, FilesystemDriver__execute(&driver, &request).status);
-    request = request_for(IO_REQUEST_OPEN, &bstr("/businfo"));
+    request = request_for(IO_REQUEST_OPEN, &bstr("/test-stream"));
     TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, FilesystemDriver__execute(&driver, &request).status);
     request.flags = IO_OPEN_WRITE;
     TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, FilesystemDriver__execute(&driver, &request).status);

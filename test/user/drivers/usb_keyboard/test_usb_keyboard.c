@@ -1,133 +1,32 @@
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "unity.h"
-
-#include "../../../../common_includes/syscalls/io.h"
-#include "../../../../common_includes/syscalls/service.h"
-
-static char fake_io_buffer[64];
-static bool fake_became_service;
-static bool fake_registered_keyboard;
-static bool fake_data_available;
-static uint64_t fake_data_available_bytes;
-static bool fake_wait_returned_read_request;
-static IOHandle fake_register_result;
-
+#include "../stream_runtime.h"
 #define USB_KEYBOARD_ENTRYPOINT usb_keyboard_main_under_test
 #include "../../../../user/drivers/usb_keyboard/main.c"
 
 void setUp(void)
 {
-    for (uint64_t index = 0; index < sizeof(fake_io_buffer); index++)
-    {
-        fake_io_buffer[index] = '\0';
-    }
-
-    fake_became_service = false;
-    fake_registered_keyboard = false;
-    fake_data_available = false;
-    fake_data_available_bytes = 0;
-    fake_wait_returned_read_request = false;
-    fake_register_result = 5;
 }
-
 void tearDown(void)
 {
 }
-
-SyslogResult kernel_syslogf(const char * format, ...)
+ServiceCode service_become_service(void)
 {
-    return SYSLOG_OK;
-}
-
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
-{
-    return SYSLOG_OK;
-}
-
-ServiceCode service_become_service()
-{
-    fake_became_service = true;
     return SERVICE_OK;
 }
-
-ServiceCode service_wait(ServiceEventPtr event)
+void StreamDriverTest__step(IOStreamDriverPtr driver)
 {
-    if (!fake_wait_returned_read_request)
-    {
-        fake_wait_returned_read_request = true;
-        event->type = SERVICE_EVENT_IO;
-        event->source = SERVICE_IO_READ_REQUEST;
-        event->data = 0;
-        return SERVICE_OK;
-    }
-
-    return SERVICE_ABORT;
+    TEST_ASSERT_EQUAL(IO_OPEN_READ, driver->access);
+    IORequest request = {.count = 1};
+    TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, driver->transfer(driver->context, &request).status);
+    StreamDriverTest__stop();
 }
-
-IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
+void test_usb_keyboard_stub_serves_read_stream(void)
 {
-    TEST_ASSERT_EQUAL_BSTRING(bstr(":keyboard:"), *path);
-    TEST_ASSERT_EQUAL_INT(IO_SERVER_READ, role);
-    fake_registered_keyboard = true;
-    return fake_register_result;
+    TEST_ASSERT_EQUAL(0, StreamDriverTest__run(usb_keyboard_main_under_test));
 }
-
-IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)
+void test_usb_keyboard_reads_buffer_without_kernel_io(void)
 {
-    TEST_ASSERT_EQUAL_INT64(5, handle);
-    *buffer = (IOServerBuffer){
-        .data = fake_io_buffer,
-        .capacity = sizeof(fake_io_buffer),
-    };
-    return IO_OK;
-}
-
-IOStatus io_server_data_available(IOHandle handle, uint64_t byte_count)
-{
-    TEST_ASSERT_EQUAL_INT64(5, handle);
-    fake_data_available = true;
-    fake_data_available_bytes = byte_count;
-    return IO_OK;
-}
-
-IOStatus io_server_data_consumed(IOHandle handle, uint64_t byte_count)
-{
-    return IO_OK;
-}
-
-IOStatus io_server_eof(IOHandle handle)
-{
-    return IO_OK;
-}
-
-void test_usb_keyboard_registers_keyboard_read_service(void)
-{
-    TEST_ASSERT_EQUAL_INT(0, usb_keyboard_main_under_test());
-
-    TEST_ASSERT_TRUE(fake_became_service);
-    TEST_ASSERT_TRUE(fake_registered_keyboard);
-    TEST_ASSERT_FALSE(fake_data_available);
-}
-
-void test_usb_keyboard_returns_error_when_keyboard_registration_fails(void)
-{
-    fake_register_result = -1;
-
-    TEST_ASSERT_EQUAL_INT(1, usb_keyboard_main_under_test());
-
-    TEST_ASSERT_TRUE(fake_became_service);
-    TEST_ASSERT_TRUE(fake_registered_keyboard);
-}
-
-void test_usb_keyboard_publishes_pending_bytes(void)
-{
-    UsbKeyboard keyboard = {
-        .keyboard = 5,
-        .pending = UsbKeyboardPendingBuffer__new(),
-    };
-
+    UsbKeyboard keyboard = UsbKeyboard__new();
     match_result(UsbKeyboardPendingBuffer__push(&keyboard.pending, 'u'),
         success_do_nothing(),
         error_test_fail()
@@ -136,14 +35,16 @@ void test_usb_keyboard_publishes_pending_bytes(void)
         success_do_nothing(),
         error_test_fail()
     );
-    match_result(UsbKeyboardPendingBuffer__push(&keyboard.pending, 'b'),
-        success_do_nothing(),
-        error_test_fail()
-    );
-
-    UsbKeyboard__publish_pending(&keyboard);
-
-    TEST_ASSERT_TRUE(fake_data_available);
-    TEST_ASSERT_EQUAL_UINT64(3, fake_data_available_bytes);
-    TEST_ASSERT_EQUAL_MEMORY("usb", fake_io_buffer, 3);
+    IORequest request = {.count = 1};
+    IOReply reply = UsbKeyboard__read(&keyboard, &request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(1, reply.value);
+    TEST_ASSERT_EQUAL('u', reply.data[0]);
+    request.count = 0;
+    TEST_ASSERT_EQUAL(IO_OK, UsbKeyboard__read(&keyboard, &request).status);
+    request.count = 64;
+    reply = UsbKeyboard__read(&keyboard, &request);
+    TEST_ASSERT_EQUAL(1, reply.value);
+    TEST_ASSERT_EQUAL('s', reply.data[0]);
+    TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, UsbKeyboard__read(&keyboard, &request).status);
 }

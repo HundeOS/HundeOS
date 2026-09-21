@@ -4,6 +4,7 @@
 #include "address.h"
 #include "types/fixed_array.h"
 #include "types/optional.h"
+#include "hardware/boot_info.h"
 #include "hardware/ethernet.h"
 
 #define MAX_PHYSICAL_MEMORY_REGIONS 64
@@ -35,6 +36,7 @@ bool PhysicalMemoryRegion__equals(void * a, void * b);
 
 FixedArrayDefine(PhysicalMemoryRegion, MAX_PHYSICAL_MEMORY_REGIONS, PhysicalMemoryRegions,
                  PhysicalMemoryRegion__equals);
+typedef PhysicalMemoryRegions * PhysicalMemoryRegionsPtr;
 
 typedef struct UartInfo
 {
@@ -184,6 +186,7 @@ OptionalDef(InterruptControllerInfo);
 typedef struct SystemInfo
 {
     uint64_t cpu_count;
+    BootWaitMode wait_mode;
     size_t heap_coarse_block_size;
     PhysicalMemoryInfo physical_memory;
     MemoryRegion kernel_image;

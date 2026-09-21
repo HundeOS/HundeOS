@@ -128,11 +128,11 @@
                                                                                                                        \
     BucketEntryDefine(alias) OptionalDef(alias##__bucket_entry) ResultDef(alias##__bucket_entry)                       \
         FixedArrayDefine(alias##__bucket_entry, bucket_size, alias##__bucket, value_equals)                            \
-            OptionalDef(alias##__bucket) ResultDef(alias##__bucket)                                                    \
+            OptionalDef(alias##__bucket) ResultDef(alias##__bucket) typedef alias##__bucket * alias##BucketPtr;        \
                                                                                                                        \
-                MapDefine(HashCode, alias##__bucket, table_size, alias##__table, key_equals)                           \
+    MapDefine(HashCode, alias##__bucket, table_size, alias##__table, key_equals)                                       \
                                                                                                                        \
-                    typedef struct alias                                                                               \
+        typedef struct alias                                                                                           \
     {                                                                                                                  \
         alias##__table table;                                                                                          \
     } alias;                                                                                                           \

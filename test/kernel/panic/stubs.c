@@ -22,7 +22,7 @@ void BasicIO__puts(const char * str)
 {
 }
 
-void Kernel__dump_state(ProcessContext * context)
+void Kernel__dump_state(ProcessContextPtr context)
 {
 }
 

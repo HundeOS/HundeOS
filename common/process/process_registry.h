@@ -1,6 +1,7 @@
 #ifndef HUND_PROCESS_REGISTRY_H
 #define HUND_PROCESS_REGISTRY_H
 #include "process_types.h"
+#include "../ipc/io_diagnostics.h"
 #include "../types/atomic_record_array.h"
 #include "syscalls/process.h"
 
@@ -8,7 +9,26 @@
 #define PROCESS_REGISTRY_CPUS 16U
 #define PROCESS_REGISTRY_CPU_CAPACITY 2049U
 #define PROCESS_REGISTRY_CAPACITY (PROCESS_REGISTRY_CPUS * PROCESS_REGISTRY_CPU_CAPACITY)
-#define PROCESS_REGISTRY_VERSION 1ULL
+#define PROCESS_REGISTRY_VERSION 6ULL
+
+typedef struct ProcessUserWait
+{
+    uint64_t started_at_usec;
+    uint64_t elapsed_usec;
+} ProcessUserWait;
+OptionalDef(ProcessUserWait);
+
+typedef struct ProcessQueueWaitUsage
+{
+    uint64_t parks;
+    uint64_t activity_wakes;
+    uint64_t timeout_wakes;
+    uint64_t selections;
+    uint64_t parked_usec;
+    uint64_t max_parked_usec;
+    uint64_t runnable_usec;
+    uint64_t max_runnable_usec;
+} ProcessQueueWaitUsage;
 
 typedef struct ProcessMemoryUsage
 {
@@ -30,9 +50,13 @@ typedef struct ProcessRecord
     BString name;
     ProcessState state;
     Optional(ParkReason) wait_reason;
+    Optional(ProcessUserWait) user_wait;
+    uint64_t user_wait_usec;
     ProcessClass process_class;
     ProcessCredentials credentials;
     ProcessCPUUsage cpu_usage;
+    ProcessQueueWaitUsage queue_wait_usage;
+    Optional(IODiagnostics) io_diagnostics;
     Optional(ProcessMemoryUsage) memory;
 } ProcessRecord;
 typedef ProcessRecord * ProcessRecordPtr;

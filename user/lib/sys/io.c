@@ -2,41 +2,116 @@
 
 #include <stddef.h>
 
-#include "syscall.h"
 #include "io/client.h"
 
 #include "io/path.h"
 
+typedef struct IOStandardStream
+{
+    IOHandle endpoint;
+    IOHandle handle;
+    bool closed;
+} IOStandardStream;
+typedef IOStandardStream * IOStandardStreamPtr;
+OptionalDef(IOStandardStreamPtr);
+static IOStandardStream standard_input;
+static IOStandardStream standard_output;
+static IOStandardStream standard_error;
+
+static IOStandardStream IOStandardStream__new(IOHandle endpoint)
+{
+    return (IOStandardStream){.endpoint = endpoint, .handle = IO_NOT_OPEN};
+}
+
+void IO__set_startup_stdio(IOHandle input, IOHandle output, IOHandle error)
+{
+    standard_input = IOStandardStream__new(input);
+    standard_output = IOStandardStream__new(output);
+    standard_error = IOStandardStream__new(error);
+}
+
+static Optional(IOStandardStreamPtr) IO__standard_stream(IOHandle handle)
+{
+    switch (handle)
+    {
+    case STDIN_FILENO:
+        if (IOEndpoint__is_terminal(standard_input.endpoint))
+        {
+            return Some(IOStandardStreamPtr, &standard_input);
+        }
+        break;
+    case STDOUT_FILENO:
+        if (IOEndpoint__is_terminal(standard_output.endpoint))
+        {
+            return Some(IOStandardStreamPtr, &standard_output);
+        }
+        break;
+    case STDERR_FILENO:
+        if (IOEndpoint__is_terminal(standard_error.endpoint))
+        {
+            return Some(IOStandardStreamPtr, &standard_error);
+        }
+        break;
+    }
+    return None(IOStandardStreamPtr);
+}
+
+static IOHandle IOStandardStream__open(IOStandardStreamPtr self)
+{
+    if (self->closed)
+    {
+        return IO_NOT_OPEN;
+    }
+    if (self->handle >= 0)
+    {
+        return self->handle;
+    }
+    BString path = self->endpoint == IO_ENDPOINT_TTY_INPUT        ? bstr(":tty:")
+                   : self->endpoint == IO_ENDPOINT_KEYBOARD_INPUT ? bstr(":keyboard:")
+                                                                  : bstr(":console:");
+    self->handle = open(&path, self->endpoint == IO_ENDPOINT_CONSOLE_OUTPUT ? IO_OPEN_WRITE : IO_OPEN_READ);
+    return self->handle;
+}
+
 IOHandle open(ConstBStringPtr path, Flags flags)
 {
-    if (!IOPath__is_bootstrap(path))
-    {
-        IOHandle handle = IOClient__open(path, flags);
-        if (handle != IO_PATH_UNMANAGED)
-        {
-            return handle;
-        }
-    }
-    IOPathRequest request = IOPathRequest__new(path, flags);
-    return syscall(IO_CALL, IO_OPEN, any(&request), 0, 0, 0);
+    return IOClient__open(path, flags);
 }
 
 ByteCount read(IOHandle handle, char * buf, size_t size)
 {
+    match_optional(
+        IO__standard_stream(handle),
+        some(stream)
+        {
+            IOHandle opened = IOStandardStream__open(stream);
+            return opened < 0 ? opened : read(opened, buf, size);
+        },
+        none_do_nothing()
+    );
     if (handle >= IO_SESSION_HANDLE_BASE)
     {
         return IOClient__read(handle, (ChannelDataPtr)buf, size);
     }
-    return syscall(IO_CALL, IO_READ, handle, any(buf), size, 0);
+    return IO_UNKNOWN_HANDLE;
 }
 
 ByteCount write(IOHandle handle, char * buf, size_t size)
 {
+    match_optional(
+        IO__standard_stream(handle),
+        some(stream)
+        {
+            IOHandle opened = IOStandardStream__open(stream);
+            return opened < 0 ? opened : write(opened, buf, size);
+        },
+        none_do_nothing()
+    );
     if (handle >= IO_SESSION_HANDLE_BASE)
     {
         return IOClient__write(handle, (ConstChannelDataPtr)buf, size);
     }
-    return syscall(IO_CALL, IO_WRITE, handle, any(buf), size, 0);
+    return IO_UNKNOWN_HANDLE;
 }
 
 IOHandle IO__open(ConstBStringPtr path, Flags flags)
@@ -50,7 +125,7 @@ IOHandle accept(IOHandle handle)
     {
         return IOClient__accept(handle);
     }
-    return syscall(IO_CALL, IO_ACCEPT, handle, 0, 0, 0);
+    return IO_UNKNOWN_HANDLE;
 }
 
 IOHandle IO__accept(IOHandle handle)
@@ -122,7 +197,10 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     match_result(
         DynString__init(&text, max_bytes),
         success_do_nothing(),
-        error(code, message) { return None(DynString); }
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
 
     ByteCount total_read = 0;
@@ -168,17 +246,28 @@ ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
 
 IOStatus close(IOHandle handle)
 {
+    match_optional(
+        IO__standard_stream(handle),
+        some(stream)
+        {
+            if (stream->closed)
+            {
+                return IO_NOT_OPEN;
+            }
+            IOStatus status = stream->handle >= 0 ? close(stream->handle) : IO_OK;
+            if (status == IO_OK)
+            {
+                stream->closed = true;
+            }
+            return status;
+        },
+        none_do_nothing()
+    );
     if (handle >= IO_SESSION_HANDLE_BASE)
     {
         return IOClient__close(handle);
     }
-    IOStatus result = (IOStatus)syscall(IO_CALL, IO_CLOSE, handle, 0, 0, 0);
-    if (result > 0)
-    {
-        return IO_OK;
-    }
-
-    return result;
+    return IO_UNKNOWN_HANDLE;
 }
 
 static bool IO__directory_contains(DirectoryEntryPtr entries, size_t count, ConstBStringPtr name)
@@ -197,7 +286,7 @@ static bool IO__directory_contains(DirectoryEntryPtr entries, size_t count, Cons
 
 DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
 {
-    if (!IOPath__is_bootstrap(path) && max_entries > 0)
+    if (max_entries > 0)
     {
         IOReply reply = IOClient__path_request(IO_REQUEST_LIST_DIR, path, 0, 0);
         if (reply.status == IO_OK)
@@ -228,53 +317,9 @@ DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, si
             }
             return reply.value == 0 || reply.value == 1 ? (DirectoryEntryCount)count : IO_UNKNOWN_BUFFER;
         }
-        if (reply.status != IO_PATH_UNMANAGED)
-        {
-            return reply.status;
-        }
-        IOListDirRequest legacy = IOListDirRequest__new(path, entries, max_entries);
-        DirectoryEntryCount count = syscall(IO_CALL, IO_LIST_DIR, any(&legacy), 0, 0, 0);
-        if (count < 0 && reply.value == 0)
-        {
-            return count;
-        }
-        if (count < 0)
-        {
-            count = 0;
-        }
-        for (uint64_t offset = 0; reply.value == 1 && (size_t)count < max_entries; offset++)
-        {
-            if (reply.entry.name_len >= IO_DIRENT_NAME_MAX)
-            {
-                return IO_UNKNOWN_BUFFER;
-            }
-            BString name = BString__from_chars(reply.entry.name, reply.entry.name_len);
-            bool found = false;
-            // Merge the mount overlay into the caller-owned syscall output buffer.
-            for (DirectoryEntryCount index = 0; index < count; index++)
-            {
-                BString existing = BString__from_chars(entries[index].name, entries[index].name_len);
-                if (BString__equals(&existing, &name))
-                {
-                    entries[index] = reply.entry;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found)
-            {
-                entries[count++] = reply.entry;
-            }
-            reply = IOClient__path_request(IO_REQUEST_LIST_DIR, path, 0, offset + 1);
-            if (reply.status != IO_PATH_UNMANAGED)
-            {
-                return reply.status == IO_OK ? IO_UNKNOWN_BUFFER : reply.status;
-            }
-        }
-        return count;
+        return reply.status;
     }
-    IOListDirRequest request = IOListDirRequest__new(path, entries, max_entries);
-    return syscall(IO_CALL, IO_LIST_DIR, any(&request), 0, 0, 0);
+    return 0;
 }
 
 DirectoryEntryCount IO__list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
@@ -325,16 +370,7 @@ const char * io_status_string(IOStatus status)
 
 IOStatus make_dir(ConstBStringPtr path)
 {
-    if (!IOPath__is_bootstrap(path))
-    {
-        IOStatus status = IOClient__path_request(IO_REQUEST_MKDIR, path, 0, 0).status;
-        if (status != IO_PATH_UNMANAGED)
-        {
-            return status;
-        }
-    }
-    IOPathRequest request = IOPathRequest__new(path, 0);
-    return syscall(IO_CALL, IO_MKDIR, any(&request), 0, 0, 0);
+    return IOClient__path_request(IO_REQUEST_MKDIR, path, 0, 0).status;
 }
 
 IOStatus IO__make_dir(ConstBStringPtr path)
@@ -354,16 +390,7 @@ IOStatus IO__remove_file(ConstBStringPtr path)
 
 IOStatus remove_file_with_flags(ConstBStringPtr path, Flags flags)
 {
-    if (!IOPath__is_bootstrap(path))
-    {
-        IOStatus status = IOClient__path_request(IO_REQUEST_REMOVE, path, flags, 0).status;
-        if (status != IO_PATH_UNMANAGED)
-        {
-            return status;
-        }
-    }
-    IOPathRequest request = IOPathRequest__new(path, flags);
-    return syscall(IO_CALL, IO_REMOVE, any(&request), 0, 0, 0);
+    return IOClient__path_request(IO_REQUEST_REMOVE, path, flags, 0).status;
 }
 
 IOStatus IO__remove_file_with_flags(ConstBStringPtr path, Flags flags)
@@ -373,22 +400,10 @@ IOStatus IO__remove_file_with_flags(ConstBStringPtr path, Flags flags)
 
 IOStatus link_file(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
-    IOLinkRequest request = IOLinkRequest__new(source_path, target_path);
-    return syscall(IO_CALL, IO_LINK, any(&request), 0, 0, 0);
+    return IOClient__link(source_path, target_path);
 }
 
 IOStatus IO__link_file(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
     return link_file(source_path, target_path);
-}
-
-IOStatus mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
-{
-    IOMountRequest request = IOMountRequest__new(device_path, filesystem_type, mountpoint);
-    return syscall(IO_CALL, IO_MOUNT, any(&request), 0, 0, 0);
-}
-
-IOStatus IO__mount_device(ConstBStringPtr device_path, ConstBStringPtr filesystem_type, ConstBStringPtr mountpoint)
-{
-    return mount_device(device_path, filesystem_type, mountpoint);
 }

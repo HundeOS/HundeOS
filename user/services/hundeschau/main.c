@@ -2,6 +2,7 @@
 #include "sys/framebuffer_config.h"
 #include "sys/io.h"
 #include "sys/process.h"
+#include "sys/service.h"
 #include "types/fixed_array.h"
 #include "../../user.h"
 
@@ -154,30 +155,10 @@ static int Hundeschau__spawn_required_process_with_stdio(HundeschauRequiredProce
 
 static int Hundeschau__spawn_login(HundeschauRequiredProcessesPtr processes, ConstBStringPtr input_path)
 {
-    IOHandle stdin_fd = open(input_path, IO_OPEN_READ);
-    if (stdin_fd < 0)
-    {
-        IO__printf(&bstr("hundeschau: failed to open terminal input: %i\n"), (int)stdin_fd);
-        return 1;
-    }
-
-    IOHandle stdout_fd = open(&hundeschau_terminal_output, IO_OPEN_WRITE);
-    if (stdout_fd < 0)
-    {
-        IO__printf(&bstr("hundeschau: failed to open terminal output: %i\n"), (int)stdout_fd);
-        return 1;
-    }
-
-    IOHandle stderr_fd = open(&hundeschau_terminal_output, IO_OPEN_WRITE);
-    if (stderr_fd < 0)
-    {
-        IO__printf(&bstr("hundeschau: failed to open terminal error output: %i\n"), (int)stderr_fd);
-        return 1;
-    }
-
-    return Hundeschau__spawn_required_process_with_stdio(processes, &hundeschau_login_path,
-                                                         (SpawnFileDescriptor)stdin_fd, (SpawnFileDescriptor)stdout_fd,
-                                                         (SpawnFileDescriptor)stderr_fd, true);
+    SpawnFileDescriptor input =
+        BString__equals(input_path, &hundeschau_keyboard_input) ? IO_ENDPOINT_KEYBOARD_INPUT : IO_ENDPOINT_TTY_INPUT;
+    return Hundeschau__spawn_required_process_with_stdio(processes, &hundeschau_login_path, input,
+                                                         IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT, true);
 }
 
 static bool HundeschauRequiredProcess__matches_pid(HundeschauRequiredProcessPtr self, void * context)
@@ -190,7 +171,10 @@ static Optional(HundeschauRequiredProcessPtr)
 {
     match_find_result_ptr(
         HundeschauRequiredProcesses__find(processes, HundeschauRequiredProcess__matches_pid, &pid),
-        some(process) { return Some(HundeschauRequiredProcessPtr, process); },
+        some(process)
+        {
+            return Some(HundeschauRequiredProcessPtr, process);
+        },
         none_do_nothing()
     );
     return None(HundeschauRequiredProcessPtr);
@@ -207,7 +191,10 @@ static BString Hundeschau__line_without_comment(ConstBStringPtr line)
 {
     BStringSplit split = BString__split_first_any(line, &hundeschau_comment_delimiter);
     match_optional(split.match,
-        some(before_comment) { return before_comment; },
+        some(before_comment)
+        {
+            return before_comment;
+        },
         none_do_nothing()
     );
 
@@ -255,8 +242,14 @@ static int Hundeschau__spawn_configured_driver_line(HundeschauRequiredProcessesP
 
     BString command = empty_bstr();
     match_optional(Hundeschau__next_token(&remaining),
-        some(token) { command = token; },
-        none() { return 0; }
+        some(token)
+        {
+            command = token;
+        },
+        none()
+        {
+            return 0;
+        }
     );
 
     if (!BString__equals(&command, &hundeschau_driver_command))
@@ -266,8 +259,14 @@ static int Hundeschau__spawn_configured_driver_line(HundeschauRequiredProcessesP
 
     BString path = empty_bstr();
     match_optional(Hundeschau__next_token(&remaining),
-        some(token) { path = token; },
-        none() { return 1; }
+        some(token)
+        {
+            path = token;
+        },
+        none()
+        {
+            return 1;
+        }
     );
 
     if (BString__is_empty(&path))
@@ -278,7 +277,10 @@ static int Hundeschau__spawn_configured_driver_line(HundeschauRequiredProcessesP
     bool respawn = true;
     BString option = empty_bstr();
     match_optional(Hundeschau__next_token(&remaining),
-        some(token) { option = token; },
+        some(token)
+        {
+            option = token;
+        },
         none_do_nothing()
     );
 
@@ -289,7 +291,10 @@ static int Hundeschau__spawn_configured_driver_line(HundeschauRequiredProcessesP
             respawn = false;
             option = empty_bstr();
             match_optional(Hundeschau__next_token(&remaining),
-                some(token) { option = token; },
+                some(token)
+                {
+                    option = token;
+                },
                 none_do_nothing()
             );
         }
@@ -298,7 +303,10 @@ static int Hundeschau__spawn_configured_driver_line(HundeschauRequiredProcessesP
             respawn = true;
             option = empty_bstr();
             match_optional(Hundeschau__next_token(&remaining),
-                some(token) { option = token; },
+                some(token)
+                {
+                    option = token;
+                },
                 none_do_nothing()
             );
         }
@@ -322,7 +330,10 @@ static int Hundeschau__spawn_configured_driver_line(HundeschauRequiredProcessesP
 
         option = empty_bstr();
         match_optional(Hundeschau__next_token(&remaining),
-            some(token) { option = token; },
+            some(token)
+            {
+                option = token;
+            },
             none_do_nothing()
         );
     }
@@ -349,20 +360,31 @@ static int Hundeschau__spawn_configured_drivers(HundeschauRequiredProcessesPtr p
         DynString__lines(config),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line, {
-                match_optional(
-                    DynString__bstring(&line),
-                    some(bstring_line)
-                    {
-                        failures +=
-                            Hundeschau__spawn_configured_driver_line(processes, &bstring_line, framebuffer_present);
-                    },
-                    none() { failures++; }
-                );
-            });
+            for_each_ll(
+                DynStringLines,
+                lines,
+                line,
+                {
+                    match_optional(
+                        DynString__bstring(&line),
+                        some(bstring_line)
+                        {
+                            failures += Hundeschau__spawn_configured_driver_line(processes, &bstring_line,
+                                                                                 framebuffer_present);
+                        },
+                        none()
+                        {
+                            failures++;
+                        }
+                    );
+                }
+            );
             DynStringLines__dispose_all(&lines);
         },
-        none() { failures++; }
+        none()
+        {
+            failures++;
+        }
     );
 
     return failures;
@@ -395,11 +417,18 @@ static int Hundeschau__initialise_required_processes(HundeschauRequiredProcesses
             failures += Hundeschau__spawn_configured_drivers(processes, &config, framebuffer_present);
             DynString__dispose(&config);
         },
-        none() { failures += Hundeschau__spawn_default_drivers(processes, framebuffer_present); }
+        none()
+        {
+            failures += Hundeschau__spawn_default_drivers(processes, framebuffer_present);
+        }
     );
 
     if (framebuffer_present)
     {
+        if (!service_ok(service_wait_ready(&bstr("video_term"))) || !service_ok(service_wait_ready(&bstr("keyboard"))))
+        {
+            return 1;
+        }
         failures += Hundeschau__spawn_login(processes, &hundeschau_keyboard_input);
     }
     else

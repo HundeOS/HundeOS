@@ -106,7 +106,10 @@ static IOReply execute(uint64_t client, IORequest request)
     {
         match_optional(
             IOMediator__execute(&mediator, client, client + 100, &request),
-            some(reply) { return reply; },
+            some(reply)
+            {
+                return reply;
+            },
             none_do_nothing()
         );
     }

@@ -32,7 +32,10 @@ Result(ServiceCode) KernelServiceDirectory__init(KernelServiceDirectoryPtr self)
             service_directory->version = HUND_SERVICE_DIRECTORY_VERSION;
             return Success(ServiceCode, SERVICE_OK);
         },
-        error(code, message) { return Error(ServiceCode, service_directory_allocation_failed, SERVICE_MAP_FAILED); }
+        error(code, message)
+        {
+            return Error(ServiceCode, service_directory_allocation_failed, SERVICE_MAP_FAILED);
+        }
     );
 
     return Error(ServiceCode, service_directory_allocation_failed, SERVICE_MAP_FAILED);
@@ -56,33 +59,37 @@ Result(ServiceCode) KernelServiceDirectory__publish_endpoint(KernelServiceDirect
     {
         return Error(ServiceCode, service_directory_invalid_name, SERVICE_INVALID_BUFFER);
     }
-    critical_section(self->lock, {
-        ServiceDirectoryPtr directory = KernelServiceDirectory__kernel_directory(self);
-        for (uint64_t index = 0; index < HUND_SERVICE_MAX_SERVICES; index++)
+    critical_section(
+        self->lock,
         {
-            ServiceDirectoryEntryPtr entry = &directory->entries[index];
-            if (__atomic_load_n(&entry->present, __ATOMIC_ACQUIRE) != 0 &&
-                ServiceDirectoryEntry__name_equals(entry, name))
+            ServiceDirectoryPtr directory = KernelServiceDirectory__kernel_directory(self);
+            for (uint64_t index = 0; index < HUND_SERVICE_MAX_SERVICES; index++)
             {
-                cs_return Error(ServiceCode, service_directory_full, SERVICE_DEVICE_ALREADY_REGISTERED);
+                ServiceDirectoryEntryPtr entry = &directory->entries[index];
+                if (__atomic_load_n(&entry->present, __ATOMIC_ACQUIRE) != 0 &&
+                    ServiceDirectoryEntry__name_equals(entry, name))
+                {
+                    cs_return Error(ServiceCode, service_directory_full,
+                                    SERVICE_DEVICE_ALREADY_REGISTERED);
+                }
+            }
+            for (uint64_t index = 0; index < HUND_SERVICE_MAX_SERVICES; index++)
+            {
+                ServiceDirectoryEntryPtr entry = &directory->entries[index];
+                if (__atomic_load_n(&entry->present, __ATOMIC_ACQUIRE) != 0)
+                {
+                    continue;
+                }
+                KernelServiceDirectory__copy_name(entry, name);
+                entry->service_pid = process->pid;
+                entry->generation = endpoint;
+                directory->entry_count++;
+                directory->generation++;
+                __atomic_store_n(&entry->present, 1, __ATOMIC_RELEASE);
+                cs_return Success(ServiceCode, SERVICE_OK);
             }
         }
-        for (uint64_t index = 0; index < HUND_SERVICE_MAX_SERVICES; index++)
-        {
-            ServiceDirectoryEntryPtr entry = &directory->entries[index];
-            if (__atomic_load_n(&entry->present, __ATOMIC_ACQUIRE) != 0)
-            {
-                continue;
-            }
-            KernelServiceDirectory__copy_name(entry, name);
-            entry->service_pid = process->pid;
-            entry->generation = endpoint;
-            directory->entry_count++;
-            directory->generation++;
-            __atomic_store_n(&entry->present, 1, __ATOMIC_RELEASE);
-            cs_return Success(ServiceCode, SERVICE_OK);
-        }
-    });
+    );
     return Error(ServiceCode, service_directory_full, SERVICE_EVENT_QUEUE_FULL);
 }
 
@@ -92,17 +99,21 @@ void KernelServiceDirectory__remove_endpoint(KernelServiceDirectoryPtr self, Que
     {
         return;
     }
-    critical_section(self->lock, {
-        ServiceDirectoryPtr directory = KernelServiceDirectory__kernel_directory(self);
-        for (uint64_t index = 0; index < HUND_SERVICE_MAX_SERVICES; index++)
+    critical_section(
+        self->lock,
         {
-            ServiceDirectoryEntryPtr entry = &directory->entries[index];
-            if (__atomic_load_n(&entry->present, __ATOMIC_ACQUIRE) != 0 && entry->generation == endpoint)
+            ServiceDirectoryPtr directory = KernelServiceDirectory__kernel_directory(self);
+            for (uint64_t index = 0; index < HUND_SERVICE_MAX_SERVICES; index++)
             {
-                __atomic_store_n(&entry->present, 0, __ATOMIC_RELEASE);
-                directory->entry_count--;
-                directory->generation++;
+                ServiceDirectoryEntryPtr entry = &directory->entries[index];
+                if (__atomic_load_n(&entry->present, __ATOMIC_ACQUIRE) != 0 &&
+                    entry->generation == endpoint)
+                {
+                    __atomic_store_n(&entry->present, 0, __ATOMIC_RELEASE);
+                    directory->entry_count--;
+                    directory->generation++;
+                }
             }
         }
-    });
+    );
 }

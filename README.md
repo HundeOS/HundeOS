@@ -5,37 +5,60 @@ userspace drivers. Core kernel code is under `kernel/`, architecture-specific
 code is under `arch/`, userspace code is under `user/`, and unit tests are under
 `test/`.
 
+See [Features TODO](FEATURES-TODO.md) for discussed but unimplemented features,
+grouped by system, feature, and supporting features or architecture.
+
 ## I/O Architecture
+
+The [shared-buffer architecture](docs/shared-buffers.md) uses
+`hunde-puffer` to manage and recycle directional bulk buffers at common virtual
+addresses. Existing Channels carry opens, buffer descriptors, transfer commands,
+and completions. File, executable, and block I/O use 2 MiB directional leases;
+the initial pool retains up to four detached buffers before hard freeing.
+Remaining policy and recovery work is tracked in [Features TODO](FEATURES-TODO.md).
+
+[`hunde-mama`](docs/bootstrap-services.md) brings up the userspace filesystem,
+`/sbin`, `/boot`, and `/boot/config` before `hundeschule` reads startup configuration.
+
+`hundebus` keeps its PCI inventory in userspace and serves read-only
+[bus-information queries](docs/bus-info.md) over Channel. The former
+`/dev/businfo` kernel stream is retired; the planned `sysinfofs` presentation
+and hotplug monitoring are tracked in [Features TODO](FEATURES-TODO.md).
 
 The common userspace I/O front end is `hund-io-system`. Sockets use its channel
 connection to `socket_router`. Boot-configured FAT32 and EXT2 mounts use
 `hund-io-system` -> `hund-dateisystem` -> filesystem driver -> block driver,
 with a bidirectional Channel at every process boundary. This includes the EXT2
-root disk at `/`: `hund-dateisystem` starts its userspace driver and waits for
+root disk at `/`: `hundeschule` starts its userspace driver and waits for
 the mount before boot proceeds to login. Nested mounts override root paths.
-Only `/boot/config` retains kernel EXT2; `/boot/sysinfo`, consoles, and streams
-remain kernel-backed. Embedded `/sbin` is served by userspace `embedfs` over
+`/boot/config` uses userspace EXT2; `/boot/sysinfo` is rendered by userspace `sysinfofs`.
+Console and UART I/O use `hund-io-system` channels to userspace `uart_rx`,
+`uart_tx`, and `video_term`. Embedded `/sbin` is served by userspace `embedfs` over
 the same I/O channels. Memfs runs in userspace at `/tmp`,
-started by `hund-dateisystem` before login on every target. It uses the same
+started by `hundeschule` before login. It uses the same
 I/O channels as disk filesystems, without a block device.
 Devfs also runs in userspace, mounted at `/dev` before login on every target.
 It reads the kernel-owned device registry through a read-only shared mapping;
 device listings and block metadata use the existing filesystem channels.
-Legacy stream opens explicitly retain their kernel route until stream migration.
+Keyboard input uses the userspace stream service. Kernel boot, panic, and
+diagnostic output remain independent of the userspace console services.
 The legacy `virtio_blk` driver is deleted; `virtio_blk_channelio` is the active
-VirtIO block driver. Kernel EXT2 remains necessary for `/boot/config`.
+VirtIO block driver, including for `/boot/config`.
 Memfs records the creator's UID/GID and enforces file and directory permissions;
 new files default to `0644`, directories to `0755`.
-`/boot/sysinfo` provides kernel-generated hardware information and live statistics
-for bootstrap drivers. `/proc` is now a separate read-only userspace filesystem
+`/boot/sysinfo` renders a typed kernel hardware snapshot in userspace.
+`/proc` is a separate read-only userspace filesystem
 backed by the kernel's shared process registry.
 See [Userspace I/O system](docs/io-system.md) for protocol semantics,
 resource lifecycle, limits, and the migration plan.
 
 The [bootstrap filesystem handoff](docs/bootstrap-filesystem-handoff.md) has
-moved `/sbin` file operations to userspace. Embedded executable loading still
-uses a direct kernel archive reader so bootstrap services can start without a
-filesystem dependency. General channel-based executable loading remains pending.
+moved `/sbin` file operations and normal executable reads to userspace Channels.
+Only Mama's `boot_spawn()` uses the direct archive reader; `boot_complete()`
+irreversibly disables it after the basic mounts are established. The kernel
+retains ELF validation and process creation. Executables transfer through shared
+buffers; disk providers reject executable opens pending permission support;
+see the handoff document for current limits.
 
 IPC supports 1024 live queue connections system-wide, with 32 messages per
 direction. A Channel currently retains two queue connections through its manager.
@@ -98,7 +121,13 @@ make qemu-virt-1cpu
 make qemu-virt-2cpus
 make qemu-virt-1cpu-trace
 make qemu-virt-2cpus-trace
+make qemu-virt-tcg-icount-trace
 ```
+
+`qemu-virt-tcg-icount-trace` exposes four guest CPUs but uses single-threaded
+TCG with `-icount shift=auto,sleep=on`. This makes guest `WFE` waits suspend
+under QEMU while retaining the four-CPU scheduler topology. It is intended for
+wait and scheduling traces, not parallel-throughput measurements.
 
 ## Process CPU Usage
 
@@ -111,10 +140,18 @@ The `CPU` column in `ps` is the zero-based ID of the CPU scheduler the process
 is assigned to. Waiting processes retain their assignment; this column does
 not imply that they are currently executing.
 
-`ps` shows cumulative scheduled CPU time in seconds (`CPU TIME(s)`) and recent
-CPU percentages (`CPU% (1s)` and `CPU% (100ms)`). A value of 100% means one fully
-occupied core, not the whole machine. Time includes userspace execution and
-kernel work while that process is scheduled; waiting and sleeping are excluded.
+`ps` shows cumulative active CPU time in seconds (`CPU TIME(s)`) and recent CPU
+percentages (`CPU% (1s)` and `CPU% (100ms)`). A value of 100% means one fully
+occupied core, not the whole machine. Active time includes userspace execution
+and kernel work while that process is scheduled, then subtracts published
+userspace wait growth that overlaps the scheduled slice. Kernel-parked time is
+also excluded. The unadjusted scheduled residency remains available through
+`/proc/<pid>/cpu` as `scheduled_usec` and `SCHED CPU%`.
+
+`USER SLEEP(s)` separately reports cumulative wall time inside published userspace
+queue waits, including an in-flight interval that has been woken but not yet
+closed by userspace. It is advisory diagnostic time; only its overlap with a
+scheduled slice is subtracted from the active counters.
 
 The recent windows cover the last 1,000 and 100 completed 1 ms clock ticks
 (N = 100), respectively. These use the monotonic architecture clock rather than
@@ -139,8 +176,16 @@ make format-check
 
 Both targets use clang-format 22.1.0, downloaded automatically through `uv`.
 The base style is defined in `.clang-format`: four spaces, Allman braces, a
-120-column target, and preserved include order. `tools/hundeformat.py` keeps
-match branches on separate lines and preserves the placement of existing
+120-column target, and preserved include order. Macro-expansion rules put
+`critical_section` and `critical_section_try` block braces on separate lines,
+including single-statement bodies. `tools/hundeformat.py` aligns critical-section
+arguments and blocks one indentation level inside the call, with a separate
+closing `);`, like match macros. The same layout applies to all `for_each_*`
+iteration macros (linked lists, fixed and atomic arrays, maps, ring buffers,
+and BStrings), with each argument on its own line.
+Match branch names, braces, and bodies occupy
+separate lines, even for single statements; no-op branch helpers remain compact.
+The formatter preserves the placement of existing
 line-scoped lint annotations. Those annotations can exceed the column target.
 Use the make targets for the final formatting pass; plain editor clang-format
 does not apply these additional conventions.

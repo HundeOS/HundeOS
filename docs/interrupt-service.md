@@ -34,6 +34,12 @@ source and completes the required GIC end-of-interrupt/deactivation sequence
 before returning to userspace, publishing a notification to the interrupt
 service's shared event queue.
 
+Notification publication completes before `SEV`. The architecture IRQ path also
+broadcasts after non-timer device dispatch, allowing userspace `WFE` waiters on
+other cores to recheck state. This is a wake hint, not an IRQ acknowledgement or
+a request to make kernel-parked processes runnable. Timer preemption is unchanged;
+normal channel waits remain in userspace. See [queue waits](queues.md#bounded-waits).
+
 `hund-unterbrict` owns device IRQ registrations, delivery to consumers,
 outstanding acknowledgements, and rearming. It receives a kernel-authorized
 mapping of the GIC distributor registers needed to manage delegated IRQs.
@@ -148,6 +154,17 @@ consumers. Timeout handling should report the failed delivery and leave the
 IRQ masked until explicit recovery. It must not manufacture successful device
 completion or repeatedly rearm an asserted source. Timer sources, deadlines,
 and recovery policy are deferred; do not add unused timeout machinery now.
+
+## Shared driver client
+
+`user/lib/interrupt/client.c` provides the common Channel-based subscribe,
+poll/wait, and acknowledge client used by VirtIO block, VirtIO keyboard, and UART receive drivers.
+The driver clears its device-specific interrupt source before acknowledging
+the delivery to `hund-unterbrict`; only the interrupt manager requests kernel
+rearm. UART receive retains a pending delivery while its userspace input buffer
+is full, rather than rearming an undrained level-triggered source.
+VirtIO keyboard likewise retains its delivery and unconsumed used-ring events
+until stream reads make space for complete terminal key sequences.
 
 ## Implementation verification
 

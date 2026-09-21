@@ -27,13 +27,23 @@ bool dyn_string_equals(void * a, void * b)
     return true;
 }
 
-void DynStringLines__dispose_all(DynStringLines * self)
+void DynStringLines__dispose_all(DynStringLinesPtr self)
 {
-    for_each_ll(DynStringLines, *self, line, { DynString__dispose(&line); });
+    for_each_ll(
+        DynStringLines,
+        *self,
+        line,
+        {
+            DynString__dispose(&line);
+        }
+    );
 
     match_result(DynStringLines__dispose(self), // hundelint: ignore-trivial-error-branch
         success_do_nothing(),
-        error(code, message) { return; }
+        error(code, message)
+        {
+            return;
+        }
     );
 }
 
@@ -104,7 +114,10 @@ Result(DynStringCode) DynString__push_char(DynStringPtr self, char ch)
         match_result(
             DynString__reserve(self, DynString__next_capacity(self->capacity, required)),
             success_do_nothing(),
-            error(code, message) { return Error(DynStringCode, message, code); }
+            error(code, message)
+            {
+                return Error(DynStringCode, message, code);
+            }
         );
     }
 
@@ -121,7 +134,10 @@ Result(DynStringCode) DynString__append_cstr(DynStringPtr self, const char * tex
         match_result(
             DynString__push_char(self, text[i]),
             success_do_nothing(),
-            error(code, message) { return Error(DynStringCode, message, code); }
+            error(code, message)
+            {
+                return Error(DynStringCode, message, code);
+            }
         );
     }
 
@@ -130,13 +146,21 @@ Result(DynStringCode) DynString__append_cstr(DynStringPtr self, const char * tex
 
 Result(DynStringCode) DynString__append_bstring(DynStringPtr self, ConstBStringPtr text)
 {
-    for_each_bstring(text, i, ch, {
-        match_result(
-            DynString__push_char(self, ch),
-            success_do_nothing(),
-            error(code, message) { return Error(DynStringCode, message, code); }
-        );
-    });
+    for_each_bstring(
+        text,
+        i,
+        ch,
+        {
+            match_result(
+                DynString__push_char(self, ch),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(DynStringCode, message, code);
+                }
+            );
+        }
+    );
 
     return Success(DynStringCode, DYN_STRING_OK);
 }
@@ -185,8 +209,14 @@ Optional(char) DynString__char_at(ConstDynStringPtr self, StringPos index)
 char DynString__char_at_or(ConstDynStringPtr self, StringPos index, char alternate)
 {
     match_optional(DynString__char_at(self, index),
-        some(ch) { return ch; },
-        none() { return alternate; }
+        some(ch)
+        {
+            return ch;
+        },
+        none()
+        {
+            return alternate;
+        }
     );
 }
 
@@ -205,12 +235,18 @@ Optional(BString) DynString__bstring(ConstDynStringPtr self)
     return Some(BString, text);
 }
 
-static bool DynString__push_line(DynStringLines * lines, ConstDynStringPtr line)
+static bool DynString__push_line(DynStringLinesPtr lines, ConstDynStringPtr line)
 {
     match_result(
         DynStringLines__push(lines, *line),
-        success(index) { return true; },
-        error(code, message) { return false; }
+        success(index)
+        {
+            return true;
+        },
+        error(code, message)
+        {
+            return false;
+        }
     );
 
     return false;
@@ -223,7 +259,10 @@ Optional(DynStringLines) DynString__lines(ConstDynStringPtr self)
     match_result(
         DynString__init(&line, 16),
         success_do_nothing(),
-        error(code, message) { return None(DynStringLines); }
+        error(code, message)
+        {
+            return None(DynStringLines);
+        }
     );
 
     for (StringPos i = 0; i < DynString__length(self); i++)

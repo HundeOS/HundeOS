@@ -108,17 +108,22 @@ static Optional(SdHostConfig) SdHostConfig__parse(ConstDynStringPtr sysinfo)
         DynString__lines(sysinfo),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line, {
-                match_optional(
-                    DynString__bstring(&line),
-                    some(bstring_line)
-                    {
-                        SdHostConfig__read_config_line(&bstring_line, &config, &found_present, &found_physical_base,
-                                                       &found_mmio_size, &found_irq);
-                    },
-                    none_do_nothing()
-                );
-            });
+            for_each_ll(
+                DynStringLines,
+                lines,
+                line,
+                {
+                    match_optional(
+                        DynString__bstring(&line),
+                        some(bstring_line)
+                        {
+                            SdHostConfig__read_config_line(&bstring_line, &config, &found_present,
+                                                           &found_physical_base, &found_mmio_size, &found_irq);
+                        },
+                        none_do_nothing()
+                    );
+                }
+            );
             DynStringLines__dispose_all(&lines);
         },
         none_do_nothing()

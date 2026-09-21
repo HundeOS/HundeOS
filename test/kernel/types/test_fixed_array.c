@@ -20,7 +20,10 @@ void test_kernel_fixed_array_heap_new_uses_kernel_allocator(void)
     TEST_ASSERT_EQUAL(0, TestArray__len(array));
 
     match_result(TestArray__push(array, 10),
-        success(index) { TEST_ASSERT_EQUAL(0, index); },
+        success(index)
+        {
+            TEST_ASSERT_EQUAL(0, index);
+        },
         error_test_fail()
     );
 

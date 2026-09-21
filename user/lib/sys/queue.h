@@ -10,7 +10,11 @@ Result(Queue) Queue__connect(QueueEndpointID endpoint);
 Result(Queue) Queue__accept(QueueConnectionID connection);
 QueueCode QueueConnection__close(QueueConnectionID connection);
 
-// These waits recheck all predicates after every architectural event wakeup.
+// Event waits publish shared scheduler observations then use WFE. Registration
+// allocates once; individual waits never invoke a parking syscall.
+// Events are hints: unrelated or spurious wakes remain inside the wait.
+// Readable/writable waits retain their synchronous contract and return only
+// when authoritative state is ready, closed, corrupt, or kernel-notified.
 void Queue__prepare_wait(void);
 void Queue__wait_event(void);
 void Queue__wait_readable(QueuePtr self);

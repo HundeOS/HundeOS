@@ -4,19 +4,17 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "buffer.h"
 
-typedef uint64_t BlockConnectionID;
-typedef uint64_t BlockProtocolRequestID;
 typedef uint64_t BlockProtocolBlockNumber;
 typedef uint64_t BlockProtocolBlockCount;
-typedef uint64_t BlockProtocolDataOffset;
-typedef size_t BlockProtocolByteCount;
 
 typedef enum BlockProtocolOperation
 {
     BLOCK_PROTOCOL_READ = 1,
     BLOCK_PROTOCOL_WRITE = 2,
     BLOCK_PROTOCOL_DESCRIBE = 3,
+    BLOCK_PROTOCOL_CLOSE = 4,
 } BlockProtocolOperation;
 
 typedef enum BlockProtocolStatus
@@ -29,19 +27,21 @@ typedef enum BlockProtocolStatus
     BLOCK_PROTOCOL_IO_ERROR = -5,
 } BlockProtocolStatus;
 
-// Sector transfers fit in the generic channel payload. Larger IO is split by the client.
+// Channels carry transfer descriptors; sector bytes live in shared buffers.
 #define BLOCK_CHANNEL_SECTOR_SIZE 512U
 typedef struct BlockChannelRequest
 {
     BlockProtocolOperation operation;
     BlockProtocolBlockNumber block;
-    uint8_t data[BLOCK_CHANNEL_SECTOR_SIZE];
+    BlockProtocolBlockCount count;
+    BufferID buffer;
 } BlockChannelRequest;
+typedef BlockChannelRequest * BlockChannelRequestPtr;
 typedef struct BlockChannelResponse
 {
     BlockProtocolStatus status;
     BlockProtocolBlockCount block_count;
-    uint8_t data[BLOCK_CHANNEL_SECTOR_SIZE];
+    BufferPair buffers;
 } BlockChannelResponse;
 
 static inline BlockChannelRequest BlockChannelRequest__new(BlockProtocolOperation operation,

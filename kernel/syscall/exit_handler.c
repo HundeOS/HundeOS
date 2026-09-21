@@ -19,6 +19,9 @@ Result(SystemCallResult) Exit__handler(KernelPtr kernel, OptionalPtr(ProcessPtr)
             Scheduler__exit(kernel->scheduler, process, exit_code);
             return Success(SystemCallResult, SYSCALL_OK);
         },
-        none() { return Error(SystemCallResult, process_not_found, SYSCALL_FAILURE); }
+        none()
+        {
+            return Error(SystemCallResult, process_not_found, SYSCALL_FAILURE);
+        }
     );
 }

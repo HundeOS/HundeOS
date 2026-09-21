@@ -25,10 +25,11 @@ typedef MemoryBlock * MemoryBlockPtr;
 OptionalDef(MemoryBlock);
 ResultDef(MemoryBlock);
 
-HashCode Heap__hash_address(Address * self);
+HashCode Heap__hash_address(AddressPtr self);
 
 HashtableDefine(Address, MemoryBlock, BLOCK_TABLE_SIZE, BLOCK_BUCKET_SIZE, AllocatedBlocks, Heap__hash_address,
                 SimpleEquals(uint64_t), never__equals);
+typedef AllocatedBlocks * AllocatedBlocksPtr;
 
 typedef struct Heap
 {

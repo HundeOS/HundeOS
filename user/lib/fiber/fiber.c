@@ -1,5 +1,6 @@
 #include "fiber.h"
 #include "../sys/mem.h"
+#include "ipc/request_ticket.h"
 
 static BString allocation_failed = bstr("Fiber allocation failed");
 static BString invalid_stack_size = bstr("Invalid fiber stack size");
@@ -21,6 +22,7 @@ struct Fiber
     Optional(FiberContextPtr) scheduler_context;
     Address stack_base;
     size_t stack_size;
+    Optional(RequestTicket) request_context;
 };
 
 FiberWaitKey FiberWaitKey__new(FiberWaitKind kind, uint64_t id)
@@ -77,6 +79,7 @@ static Fiber Fiber__new(FiberEntry entry, Anything argument, Address stack_base,
         .scheduler_context = None(FiberContextPtr),
         .stack_base = stack_base,
         .stack_size = stack_size,
+        .request_context = ChannelRequestContext__current(),
     };
 }
 
@@ -100,14 +103,23 @@ Result(FiberPtr) Fiber__heap_new_with_stack_size(FiberEntry entry, Anything argu
     FiberPtr fiber;
     match_result(
         mem_alloc_bytes(sizeof(Fiber)),
-        success(allocation) { fiber = (FiberPtr)allocation; },
-        error(code, message) { return Error(FiberPtr, allocation_failed, code); }
+        success(allocation)
+        {
+            fiber = (FiberPtr)allocation;
+        },
+        error(code, message)
+        {
+            return Error(FiberPtr, allocation_failed, code);
+        }
     );
 
     void * stack;
     match_result(
         mem_alloc_pages_result(stack_size),
-        success(allocation) { stack = (void *)allocation; },
+        success(allocation)
+        {
+            stack = (void *)allocation;
+        },
         error(code, message)
         {
             free(fiber);
@@ -171,7 +183,10 @@ Result(FiberWakeValue) Fiber__take_wake_value(FiberPtr self)
             self->wake_value = None(FiberWakeValue);
             return Success(FiberWakeValue, value);
         },
-        none() { return Error(FiberWakeValue, no_wake_value, FIBER_INVALID_STATE); }
+        none()
+        {
+            return Error(FiberWakeValue, no_wake_value, FIBER_INVALID_STATE);
+        }
     );
 
     return Error(FiberWakeValue, no_wake_value, FIBER_INVALID_STATE);
@@ -234,8 +249,14 @@ static void Fiber__start(FiberPtr self)
 {
     match_result(
         self->entry(self, self->argument),
-        success(code) { self->last_result = Success(FiberCode, code); },
-        error(code, message) { self->last_result = Error(FiberCode, message, code); }
+        success(code)
+        {
+            self->last_result = Success(FiberCode, code);
+        },
+        error(code, message)
+        {
+            self->last_result = Error(FiberCode, message, code);
+        }
     );
 
     if (self->state != FIBER_WAITING)
@@ -243,7 +264,10 @@ static void Fiber__start(FiberPtr self)
         match_result(
             Fiber__mark_done(self),
             success_do_nothing(),
-            error(code, message) { self->last_result = Error(FiberCode, message, code); }
+            error(code, message)
+            {
+                self->last_result = Error(FiberCode, message, code);
+            }
         );
     }
 
@@ -259,12 +283,17 @@ Result(FiberCode) Fiber__resume(FiberPtr self, FiberContextPtr scheduler_context
     match_result(
         Fiber__mark_running(self),
         success_do_nothing(),
-        error(code, message) { return Error(FiberCode, message, code); }
+        error(code, message)
+        {
+            return Error(FiberCode, message, code);
+        }
     );
 
     self->scheduler_context = Some(FiberContextPtr, scheduler_context);
 
+    Optional(RequestTicket) previous = ChannelRequestContext__swap(&self->request_context);
     FiberContext__switch(scheduler_context, &self->context);
+    self->request_context = ChannelRequestContext__swap(&previous);
     return Fiber__last_result(self);
 }
 
@@ -277,7 +306,10 @@ Result(FiberCode) Fiber__yield_to_scheduler(FiberPtr self)
             FiberContext__switch(&self->context, scheduler_context);
             return Fiber__last_result(self);
         },
-        none() { return Error(FiberCode, no_scheduler_context, FIBER_INVALID_STATE); }
+        none()
+        {
+            return Error(FiberCode, no_scheduler_context, FIBER_INVALID_STATE);
+        }
     );
 
     return Error(FiberCode, no_scheduler_context, FIBER_INVALID_STATE);

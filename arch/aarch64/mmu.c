@@ -12,7 +12,7 @@ static PageTable null_table;
 
 mutex_t init_mutex = MUTEX_INIT;
 
-PageTable * MMU__init_null()
+PageTablePtr MMU__init_null()
 {
     mutex_lock(&init_mutex);
 
@@ -42,7 +42,7 @@ void MMU__park_ttbr0(uint64_t guard_L0_pa, uint16_t guard_asid, bool disable_wal
 
 void MMU__install_null_low_mem_table(KernelPtr kernel)
 {
-    PageTable * table = MMU__init_null();
+    PageTablePtr table = MMU__init_null();
     KernelAddress address = PageTable__from_virtual_address(kernel, addr(table));
 
     MMU__park_ttbr0(address.phys_addr, (GUARD_ASID << 48), false);

@@ -19,7 +19,9 @@ typedef struct ChannelServer
     ChannelPayloadPtr payload;
     QueueConnectionID token;
     QueueParticipantID client_pid;
+    QueueParticipantID transport_pid;
     size_t request_size;
+    RequestTicket ticket;
     bool handling_request;
     bool closed;
 } ChannelServer;
@@ -29,6 +31,7 @@ ResultDef(ChannelServer);
 Result(ChannelServer) ChannelServer__accept(QueueConnectionID connection, QueueParticipantID warden_pid);
 QueueConnectionID ChannelServer__connection(ChannelServerPtr self);
 QueueParticipantID ChannelServer__client_pid(ChannelServerPtr self);
+QueueParticipantID ChannelServer__transport_pid(ChannelServerPtr self);
 QueueCode ChannelServer__status(ChannelServerPtr self);
 Result(OptionalChannelServerRequest) ChannelServer__poll(ChannelServerPtr self);
 bool ChannelServer__read_request(ChannelServerPtr self, ChannelDataPtr request, size_t size);

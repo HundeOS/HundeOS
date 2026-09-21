@@ -58,7 +58,10 @@ void test_fixed_array_push_all_and_negative_index(void)
     TestArray__push(&array, 123);
     match_result(
         TestArray__push_all(&array, &other),
-        success(index) { TEST_ASSERT_EQUAL(1, index); },
+        success(index)
+        {
+            TEST_ASSERT_EQUAL(1, index);
+        },
         error_test_fail()
     );
 
@@ -75,7 +78,10 @@ void test_fixed_array_find_remove_and_pop_front(void)
     }
 
     match_optional(TestArray__find_item(&array, 107),
-        some(value) { TEST_ASSERT_EQUAL(7, value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL(7, value);
+        },
         none_test_fail()
     );
 
@@ -85,7 +91,10 @@ void test_fixed_array_find_remove_and_pop_front(void)
     );
 
     match_optional(TestArray__pop_front(&array),
-        some(value) { TEST_ASSERT_EQUAL(100, value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL(100, value);
+        },
         none_test_fail()
     );
 }
@@ -99,7 +108,10 @@ void test_fixed_array_match_find_result_unwraps_found_value(void)
 
     match_find_result(
         TestArray__find(&array, greater_than, &threshold),
-        some(value) { TEST_ASSERT_EQUAL(200, value); },
+        some(value)
+        {
+            TEST_ASSERT_EQUAL(200, value);
+        },
         none_test_fail()
     );
 }
@@ -113,7 +125,10 @@ void test_fixed_array_match_find_result_runs_none_branch(void)
     match_find_result(
         TestArray__find(&array, greater_than, &threshold),
         some_test_fail(),
-        none() { TEST_ASSERT_TRUE(true); }
+        none()
+        {
+            TEST_ASSERT_TRUE(true);
+        }
     );
 }
 
@@ -126,7 +141,10 @@ void test_fixed_array_match_find_result_ptr_unwraps_found_pointer(void)
 
     match_find_result_ptr(
         TestArray__find(&array, greater_than, &threshold),
-        some(value) { *value = 300; },
+        some(value)
+        {
+            *value = 300;
+        },
         none_test_fail()
     );
 
@@ -170,6 +188,9 @@ void test_fixed_array_push_when_full_gives_error(void)
     match_result(
         TinyTestArray__push(&array, 10),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(ARRAY_FULL, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(ARRAY_FULL, code);
+        }
     );
 }

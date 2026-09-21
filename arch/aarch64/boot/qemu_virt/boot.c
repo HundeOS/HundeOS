@@ -71,6 +71,11 @@ __BOOT_STRING__(igrp_) = "IGRPEN1=";
 __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
 {
     qemu_virt_system_info.cpu_count = qemu_virt_platform_info.cpu_count;
+#ifdef BSP_WFE_WAIT
+    qemu_virt_system_info.wait_mode = BOOT_WAIT_WFE;
+#else
+    qemu_virt_system_info.wait_mode = BOOT_WAIT_SPIN;
+#endif
     qemu_virt_system_info.heap_coarse_block_size = SystemInfo__default_heap_coarse_block_size();
 
     qemu_virt_system_info.physical_memory.physical_start = qemu_virt_platform_info.memory_physical_start;

@@ -16,6 +16,7 @@ typedef int64_t ProcessChildEventResult;
 typedef int64_t ProcessSleepResult;
 
 typedef uint64_t ProcessSignal;
+typedef ProcessSignal * ProcessSignalPtr;
 typedef uint64_t ProcessSignalMask;
 typedef uint64_t UserID;
 typedef uint64_t GroupID;
@@ -137,11 +138,14 @@ typedef struct ProcessCPUUsage
     uint64_t total_usec;
     uint64_t short_basis_points;
     uint64_t long_basis_points;
+    uint64_t scheduled_usec;
+    uint64_t scheduled_short_basis_points;
+    uint64_t scheduled_long_basis_points;
 } ProcessCPUUsage;
 
 static inline ProcessCPUUsage ProcessCPUUsage__new(void)
 {
-    return (ProcessCPUUsage){.total_usec = 0, .short_basis_points = 0, .long_basis_points = 0};
+    return (ProcessCPUUsage){0};
 }
 
 typedef struct ProcessInfo
@@ -149,6 +153,7 @@ typedef struct ProcessInfo
     uint64_t pid;
     uint64_t cpu;
     ProcessCPUUsage cpu_usage;
+    uint64_t user_wait_usec;
     char name[PROCESS_INFO_NAME_SIZE];
     char state[PROCESS_INFO_STATE_SIZE];
     char wait_reason[PROCESS_INFO_WAIT_SIZE];

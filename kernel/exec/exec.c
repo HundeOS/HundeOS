@@ -5,15 +5,11 @@
 #include "../types/result.h"
 #include "../bin/elf.h"
 #include "../bin/embedded_binaries.h"
-#include "../kio/io.h"
 #include "../kalloc.h"
 #include "../syscall/deferred.h"
 
-FixedArrayBodyDefine(ElfReadBuffer);
-
 static BString unreachable_code = bstr("unreachable code");
 static BString permission_denied_message = bstr("Permission denied");
-static BString incomplete_elf_message = bstr("Incomplete ELF");
 static const BString drivers_prefix = bstr("/sbin/drivers/");
 static const BString services_prefix = bstr("/sbin/services/");
 static const BString hundeschule_program = bstr("/sbin/services/hundeschule");
@@ -22,17 +18,18 @@ static const BString hundeschau_program = bstr("/sbin/services/hundeschau");
 static const BString hundeschau_boot_program = bstr("services/hundeschau");
 static const BString hundekanal_warter_program = bstr("/sbin/services/hundekanal-warter");
 static const BString hundebus_program = bstr("/sbin/drivers/hundebus");
-static const BString sdhci_program = bstr("/sbin/drivers/sdhci");
+static const BString sdhci_program = bstr("/sbin/drivers/sdhci_channelio");
 static const BString uart_rx_program = bstr("/sbin/drivers/uart_rx");
 static const BString uart_tx_program = bstr("/sbin/drivers/uart_tx");
 
 static bool Exec__is_hund_owned_program(ConstBStringPtr path)
 {
-    return BString__equals(path, &hundeschau_program) || BString__equals(path, &hundeschule_program) ||
-           BString__equals(path, &hundeschule_boot_program) || BString__equals(path, &hundeschau_boot_program) ||
-           BString__equals(path, &hundekanal_warter_program) || BString__equals(path, &hundebus_program) ||
-           BString__equals(path, &sdhci_program) || BString__equals(path, &uart_rx_program) ||
-           BString__equals(path, &uart_tx_program);
+    return BString__equals(path, &bstr("services/hunde-mama")) ||
+           BString__equals(path, &bstr("/sbin/services/hunde-mama")) || BString__equals(path, &hundeschau_program) ||
+           BString__equals(path, &hundeschule_program) || BString__equals(path, &hundeschule_boot_program) ||
+           BString__equals(path, &hundeschau_boot_program) || BString__equals(path, &hundekanal_warter_program) ||
+           BString__equals(path, &hundebus_program) || BString__equals(path, &sdhci_program) ||
+           BString__equals(path, &uart_rx_program) || BString__equals(path, &uart_tx_program);
 }
 
 void Exec__apply_builtin_identity_policy(ProcessPtr self)
@@ -43,7 +40,7 @@ void Exec__apply_builtin_identity_policy(ProcessPtr self)
     }
 }
 
-static bool Exec__can_execute(ConstOriginatingContextPtr context, ConstBStringPtr path)
+bool Exec__can_execute(ConstOriginatingContextPtr context, ConstBStringPtr path)
 {
     if (!BString__starts_with(path, &drivers_prefix) && !BString__starts_with(path, &services_prefix))
     {
@@ -52,7 +49,10 @@ static bool Exec__can_execute(ConstOriginatingContextPtr context, ConstBStringPt
 
     match_optional(
         context->process,
-        some(process) { return process->group_id == PROCESS_GROUP_HUND; },
+        some(process)
+        {
+            return process->group_id == PROCESS_GROUP_HUND;
+        },
         none_do_nothing()
     );
 
@@ -108,10 +108,46 @@ static void Exec__apply_requested_identity(ProcessPtr self, OptionalPtr(UserID) 
     );
 }
 
-static Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, ElfPtr elf, bool wait,
-                                                  OptionalPtr(UserID) requested_user_id,
-                                                  ConstProcessArgumentsPtr arguments, ConstSpawnStdioPtr stdio)
+Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, ElfPtr elf, bool wait,
+                                           OptionalPtr(UserID) requested_user_id, ConstProcessArgumentsPtr arguments,
+                                           ConstSpawnStdioPtr stdio)
 {
+    match_result(
+        Elf__validate(elf),
+        success_do_nothing(),
+        error(code, message)
+        {
+            Kernel__free(elf->start);
+            return Error(ProcessPtr, message, SPAWN_FAILED);
+        }
+    );
+    SpawnStdio startup = SPAWN_STDIO_DEFAULT;
+    match_optional(
+        context->process,
+        some(parent)
+        {
+            match_result(
+                Process__stdio_for_spawn(parent, stdio),
+                success(value)
+                {
+                    startup = value;
+                },
+                error(code, message)
+                {
+                    Kernel__free(elf->start);
+                    return Error(ProcessPtr, message, SPAWN_FAILED);
+                }
+            );
+        },
+        none()
+        {
+            if (SpawnStdio__is_present(*stdio))
+            {
+                Kernel__free(elf->start);
+                return Error(ProcessPtr, bstr("No parent process for stdio"), SPAWN_FAILED);
+            }
+        }
+    );
     __d_printf(EXEC, "Launching elf %s\n", cstr(elf->name));
     KernelPtr kernel = context->kernel;
     Optional(ProcessPtr) parent = context->process;
@@ -124,39 +160,13 @@ static Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr con
             ProcessPtr new_proc = process;
             Exec__apply_requested_identity(new_proc, requested_user_id);
             Exec__apply_builtin_identity_policy(new_proc);
-            if (SpawnStdio__is_present(*stdio))
-            {
-                match_optional(
-                    context->process,
-                    some(parent)
-                    {
-                        match_result(
-                            Process__copy_file_descriptor(new_proc, parent, 0,
-                                                          (FileDescriptor)SpawnStdio__stdin_fd(*stdio)),
-                            success_do_nothing(),
-                            error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
-                        );
-                        match_result(
-                            Process__copy_file_descriptor(new_proc, parent, 1,
-                                                          (FileDescriptor)SpawnStdio__stdout_fd(*stdio)),
-                            success_do_nothing(),
-                            error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
-                        );
-                        match_result(
-                            Process__copy_file_descriptor(new_proc, parent, 2,
-                                                          (FileDescriptor)SpawnStdio__stderr_fd(*stdio)),
-                            success_do_nothing(),
-                            error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
-                        );
-                    },
-                    none() { return Error(ProcessPtr, bstring("No parent process for stdio"), SPAWN_FAILED); }
-                );
-            }
+            new_proc->startup_stdio = startup;
             match_optional(
                 context->process,
                 some(parent)
                 {
                     __d_printf(EXEC, "Parent %p\n", parent);
+                    Process__prepare_startup_stdio(new_proc);
                     Result(CPUID) schedule_result = wait ? Scheduler__cpu_for_process(kernel->scheduler, parent)
                                                          : Scheduler__schedule(kernel->scheduler, new_proc);
                     if (wait)
@@ -167,14 +177,20 @@ static Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr con
                             {
                                 schedule_result = Scheduler__schedule_on_cpu(kernel->scheduler, new_proc, parent_cpu);
                             },
-                            error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
+                            error(code, message)
+                            {
+                                return Error(ProcessPtr, message, SPAWN_FAILED);
+                            }
                         );
                     }
 
                     match_result(
                         schedule_result,
                         success_do_nothing(),
-                        error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
+                        error(code, message)
+                        {
+                            return Error(ProcessPtr, message, SPAWN_FAILED);
+                        }
                     );
 
                     if (wait)
@@ -196,129 +212,12 @@ static Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr con
                 none_do_nothing()
             );
         },
-        error(code, message) { return Error(ProcessPtr, message, SPAWN_FAILED); }
-    );
-    return Error(ProcessPtr, unreachable_code, SPAWN_FAILED);
-}
-
-static Optional(ByteCount) Exec__required_elf_size(DataPtr data, ByteCount bytes_read)
-{
-    if (bytes_read < (ByteCount)sizeof(Elf64Header))
-    {
-        return None(ByteCount);
-    }
-
-    ConstElf64HeaderPtr header = (ConstElf64HeaderPtr)data;
-    if (header->program_header_entry_size != sizeof(ProgramHeader))
-    {
-        return None(ByteCount);
-    }
-
-    ByteCount program_headers_end =
-        (ByteCount)header->program_header_offset +
-        ((ByteCount)header->program_header_entries * (ByteCount)header->program_header_entry_size);
-    if (program_headers_end < (ByteCount)header->program_header_offset || program_headers_end > bytes_read)
-    {
-        return None(ByteCount);
-    }
-
-    ByteCount required_size = program_headers_end;
-    ProgramHeaderPtr headers = (ProgramHeaderPtr)(data + header->program_header_offset);
-    for (uint16_t index = 0; index < header->program_header_entries; index++)
-    {
-        ProgramHeaderPtr program_header = &headers[index];
-        if (program_header->type == Load)
-        {
-            ByteCount segment_end = (ByteCount)program_header->segment_offset + (ByteCount)program_header->file_size;
-            if (segment_end < (ByteCount)program_header->segment_offset)
-            {
-                return None(ByteCount);
-            }
-            if (segment_end > required_size)
-            {
-                required_size = segment_end;
-            }
-        }
-    }
-
-    return Some(ByteCount, required_size);
-}
-
-static Result(ByteCount) Exec__read_remaining_elf(ConstOriginatingContextPtr context, IOHandle handle,
-                                                  Address elf_start, ByteCount bytes_read, ByteCount required_size)
-{
-    ByteCount total_read = bytes_read;
-    while (total_read < required_size)
-    {
-        size_t remaining = (size_t)(required_size - total_read);
-        size_t read_size = remaining < DataBuffer__max_size ? remaining : DataBuffer__max_size;
-        match_result(
-            read_into(*context, handle, ptr(elf_start + total_read, Data), read_size),
-            success(chunk_size)
-            {
-                if (chunk_size <= 0)
-                {
-                    return Error(ByteCount, incomplete_elf_message, SPAWN_FAILED);
-                }
-                total_read += chunk_size;
-            },
-            error(code, message) { return Error(ByteCount, message, code); }
-        );
-    }
-
-    return Success(ByteCount, total_read);
-}
-
-static Result(Elf) Exec__read_elf(ConstOriginatingContextPtr context, IOHandle handle, ConstBStringPtr path)
-{
-    DataBufferPtr buffer = DataBuffer__heap_new();
-    __d_println(EXEC, "Reading elf");
-    match_result(
-        read(*context, handle, buffer),
-        success(bytes_read)
-        {
-            ByteCount required_size = bytes_read;
-            DataPtr elf_data = DataBuffer__data(buffer);
-            match_optional(
-                Exec__required_elf_size(elf_data, bytes_read),
-                some(size) { required_size = size; },
-                none_do_nothing()
-            );
-
-            ByteCount buffer_size = bytes_read > required_size ? bytes_read : required_size;
-            __d_printf(EXEC, "Copying elf read=%i required=%i buffer=%i %s\n", bytes_read, required_size, buffer_size,
-                       cstr(*path));
-            Address elf_start = Kernel__alloc_kernel(buffer_size);
-            Kernel__memcopy(addr(elf_data), elf_start, bytes_read);
-
-            match_result(
-                Exec__read_remaining_elf(context, handle, elf_start, bytes_read, required_size),
-                success(total_read)
-                {
-                    Elf elf = Elf__new(elf_start, offset_addr(elf_start, total_read), path);
-                    DataBuffer__dispose(buffer);
-                    return Success(Elf, elf);
-                },
-                error(code, message)
-                {
-                    Kernel__free(elf_start);
-                    DataBuffer__dispose(buffer);
-                    return Error(Elf, message, code);
-                }
-            );
-        },
         error(code, message)
         {
-            if (code == IO_EOF)
-            {
-                __d_printf(PANIC, "EOF Reading ELF handle = %x\n", handle);
-            }
-            DataBuffer__dispose(buffer);
-            return Error(Elf, message, code);
+            return Error(ProcessPtr, message, SPAWN_FAILED);
         }
     );
-
-    return Error(Elf, unreachable_code, SPAWN_FAILED);
+    return Error(ProcessPtr, unreachable_code, SPAWN_FAILED);
 }
 
 Result(ProcessPtr)
@@ -352,6 +251,22 @@ static Result(ProcessPtr)
         none_do_nothing()
     );
 
+    match_optional(
+        context->process,
+        some(process)
+        {
+            if (__atomic_load_n(&context->kernel->boot_complete, __ATOMIC_ACQUIRE) ||
+                context->kernel->boot_authority != process->pid || context->kernel->boot_authority == 0)
+            {
+                return Error(ProcessPtr, bstr("Bootstrap execution unavailable"), SPAWN_FAILED);
+            }
+        },
+        none()
+        {
+            return Error(ProcessPtr, bstr("No bootstrap authority"), SPAWN_FAILED);
+        }
+    );
+
     // Bootstrap execution reads the immutable archive, not a kernel filesystem.
     if (BString__starts_with(path, &bstr("/sbin/")))
     {
@@ -366,46 +281,13 @@ static Result(ProcessPtr)
                 Elf elf = Elf__new(copy, copy + size, path);
                 return Exec__launch_loaded_elf(context, &elf, wait, requested_user_id, arguments, stdio);
             },
-            none() { return Error(ProcessPtr, bstr("Embedded executable not found"), SPAWN_NO_FILE); }
+            none()
+            {
+                return Error(ProcessPtr, bstr("Embedded executable not found"), SPAWN_NO_FILE);
+            }
         );
     }
-    match_result(
-        open(*context, *path, IO_OPEN_READ),
-        success(handle)
-        {
-            __d_printf(EXEC, "Opened elf %s\n", cstr(*path));
-
-            match_result(
-                Exec__read_elf(context, handle, path),
-                success(elf)
-                {
-                    Result(IOHandle) close_result = close(*context, handle);
-                    match_result(
-                        close_result,
-                        success_do_nothing(),
-                        error(code, message)
-                        {
-                            Kernel__free(elf.start);
-                            return Error(ProcessPtr, message, code);
-                        }
-                    );
-                    return Exec__launch_loaded_elf(context, &elf, wait, requested_user_id, arguments, stdio);
-                },
-                error(code, message)
-                {
-                    close(*context, handle);
-                    __d_printf(EXEC, "loading elf %s failed: %s\n", cstr(*path), cstr(message));
-                    return Error(ProcessPtr, message, SPAWN_FAILED);
-                }
-            );
-        },
-        error(code, message)
-        {
-            __d_printf(EXEC, "Failed to open elf %s\n", cstr(*path));
-            return Error(ProcessPtr, message, SPAWN_NO_FILE);
-        }
-    );
-    return Error(ProcessPtr, unreachable_code, SPAWN_FAILED);
+    return Error(ProcessPtr, bstr("Bootstrap executable must be embedded"), SPAWN_NO_FILE);
 }
 
 Result(ProcessPtr) Exec__exec_as(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,

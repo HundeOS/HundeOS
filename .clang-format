@@ -10,6 +10,20 @@ AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 AllowShortLambdasOnASingleLine: None
+# Formatting-only expansions recognise macro bodies as statement blocks.
+Macros:
+  - 'critical_section(lock, body)=if (lock) body'
+  - 'critical_section_try(lock, body, failed)=if (lock) body else failed'
+  - 'for_each_ll(alias, list, item, body)=for (alias; list; item) body'
+  - 'for_each_ll_ptr(alias, list, item, body)=for (alias; list; item) body'
+  - 'for_each_fa(alias, array, index, value, body)=for (alias; array; index, value) body'
+  - 'for_each_fa_ptr(alias, array, index, value, body)=for (alias; array; index, value) body'
+  - 'for_each_atomic_fa_ptr(alias, array, index, value, body)=for (alias; array; index, value) body'
+  - 'for_each_map(alias, map, index, key, value, body)=for (alias; map; index, key, value) body'
+  - 'for_each_map_ptr(alias, map, index, key, value, body)=for (alias; map; index, key, value) body'
+  - 'for_each_ring_buffer(alias, buffer, index, value, body)=for (alias; buffer; index, value) body'
+  - 'for_each_ring_buffer_ptr(alias, buffer, index, value, body)=for (alias; buffer; index, value) body'
+  - 'for_each_bstring(string, index, ch, body)=for (string; index; ch) body'
 DerivePointerAlignment: false
 PointerAlignment: Middle
 SortIncludes: Never

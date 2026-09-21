@@ -32,7 +32,10 @@ Result(ServiceEvent) Service__pop_next_event(ProcessPtr process)
 
     match_optional(
         ServiceEvents__pop_front(&process->service.events),
-        some(event) { return Success(ServiceEvent, event); },
+        some(event)
+        {
+            return Success(ServiceEvent, event);
+        },
         none_do_nothing()
     );
 
@@ -49,7 +52,10 @@ Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent ev
     match_result(
         ServiceEvents__push(&process->service.events, event),
         success_do_nothing(),
-        error(code, message) { return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL); }
+        error(code, message)
+        {
+            return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL);
+        }
     );
 
     return Success(ServiceCode, SERVICE_OK);
@@ -67,7 +73,10 @@ Result(ServiceEvent) Service__complete_wait(ParkedOperationPtr parked_operation)
                 {
                     match_optional(
                         Scheduler__find_process_by_pid(scheduler, pid),
-                        some(process) { return Scheduler__service_take_next_event(scheduler, process); },
+                        some(process)
+                        {
+                            return Scheduler__service_take_next_event(scheduler, process);
+                        },
                         none_do_nothing()
                     );
                 },

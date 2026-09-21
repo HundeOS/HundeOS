@@ -64,7 +64,10 @@ Result(FiberPtr) FiberScheduler__spawn(FiberSchedulerPtr self, FiberEntry entry,
             self->live_count++;
             return Success(FiberPtr, fiber);
         },
-        error(code, message) { return Error(FiberPtr, message, code); }
+        error(code, message)
+        {
+            return Error(FiberPtr, message, code);
+        }
     );
 
     return Error(FiberPtr, queue_full, FIBER_QUEUE_FULL);
@@ -96,19 +99,28 @@ Result(FiberCode) FiberScheduler__await_current(FiberSchedulerPtr self, FiberWai
             match_result(
                 Fiber__mark_waiting(fiber, &key),
                 success_do_nothing(),
-                error(code, message) { return Error(FiberCode, message, code); }
+                error(code, message)
+                {
+                    return Error(FiberCode, message, code);
+                }
             );
 
             match_result(
                 FiberWaiters__push(&self->waiting, fiber),
                 success_do_nothing(),
-                error(code, message) { return Error(FiberCode, queue_full, FIBER_QUEUE_FULL); }
+                error(code, message)
+                {
+                    return Error(FiberCode, queue_full, FIBER_QUEUE_FULL);
+                }
             );
 
             self->current = None(FiberPtr);
             return Fiber__yield_to_scheduler(fiber);
         },
-        none() { return Error(FiberCode, no_current_fiber, FIBER_NO_CURRENT_FIBER); }
+        none()
+        {
+            return Error(FiberCode, no_current_fiber, FIBER_NO_CURRENT_FIBER);
+        }
     );
 
     return Error(FiberCode, no_current_fiber, FIBER_NO_CURRENT_FIBER);
@@ -126,7 +138,10 @@ static bool Fiber__is_waiting_for(FiberPtr * fiber, void * context)
 
     match_optional(
         Fiber__wait_key(*fiber),
-        some(wait_key) { result = FiberWaitKey__equals(&wait_key, key); },
+        some(wait_key)
+        {
+            result = FiberWaitKey__equals(&wait_key, key);
+        },
         none_do_nothing()
     );
 
@@ -142,30 +157,45 @@ Result(FiberCode) FiberScheduler__wake(FiberSchedulerPtr self, FiberWaitKey key,
             match_result(
                 FiberWaiters__remove(&self->waiting, fiber),
                 success_do_nothing(),
-                error(code, message) { return Error(FiberCode, message, code); }
+                error(code, message)
+                {
+                    return Error(FiberCode, message, code);
+                }
             );
 
             match_result(
                 Fiber__set_wake_value(fiber, &value),
                 success_do_nothing(),
-                error(code, message) { return Error(FiberCode, message, code); }
+                error(code, message)
+                {
+                    return Error(FiberCode, message, code);
+                }
             );
 
             match_result(
                 Fiber__mark_ready(fiber),
                 success_do_nothing(),
-                error(code, message) { return Error(FiberCode, message, code); }
+                error(code, message)
+                {
+                    return Error(FiberCode, message, code);
+                }
             );
 
             match_result(
                 FiberQueue__push(&self->ready, fiber),
                 success_do_nothing(),
-                error(code, message) { return Error(FiberCode, queue_full, FIBER_QUEUE_FULL); }
+                error(code, message)
+                {
+                    return Error(FiberCode, queue_full, FIBER_QUEUE_FULL);
+                }
             );
 
             return Success(FiberCode, FIBER_OK);
         },
-        none() { return Error(FiberCode, wait_not_found, FIBER_WAIT_NOT_FOUND); }
+        none()
+        {
+            return Error(FiberCode, wait_not_found, FIBER_WAIT_NOT_FOUND);
+        }
     );
 
     return Error(FiberCode, wait_not_found, FIBER_WAIT_NOT_FOUND);
@@ -198,7 +228,10 @@ Result(FiberCode) FiberScheduler__run_ready(FiberSchedulerPtr self)
                 }
             );
         },
-        none() { return Error(FiberCode, wait_not_found, FIBER_NO_READY_FIBER); }
+        none()
+        {
+            return Error(FiberCode, wait_not_found, FIBER_NO_READY_FIBER);
+        }
     );
 
     return Error(FiberCode, wait_not_found, FIBER_NO_READY_FIBER);
@@ -211,7 +244,10 @@ Result(FiberCode) FiberScheduler__run_ready_until_blocked(FiberSchedulerPtr self
         match_result(
             FiberScheduler__run_ready(self),
             success_do_nothing(),
-            error(code, message) { return Error(FiberCode, message, code); }
+            error(code, message)
+            {
+                return Error(FiberCode, message, code);
+            }
         );
     }
 

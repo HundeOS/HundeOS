@@ -21,6 +21,8 @@ typedef struct IOServiceConnection
     IORequest request;
     IOReply reply;
     IOServicePhase phase;
+    uint64_t client_pid;
+    BufferPair buffers;
 } IOServiceConnection;
 typedef IOServiceConnection * IOServiceConnectionPtr;
 OptionalDef(IOServiceConnection);
@@ -29,6 +31,7 @@ FixedArrayDefine(IOServiceConnection, QUEUE_LIMIT, IOServiceConnections, IOServi
 
 typedef struct IOService
 {
+    BString name;
     QueueArrivalsPtr arrivals;
     IOServiceConnections connections;
     IOServiceContext context;
@@ -37,6 +40,8 @@ typedef struct IOService
 } IOService;
 typedef IOService * IOServicePtr;
 ResultDef(IOService);
+IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServiceContext context,
+                                IOServiceExecute execute, IOServiceDisconnect disconnect);
 Result(IOService) IOService__listen(ConstBStringPtr name, IOServiceContext context, IOServiceExecute execute,
                                     IOServiceDisconnect disconnect);
 bool IOService__poll(IOServicePtr self);

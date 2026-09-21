@@ -2,7 +2,7 @@
 #define __KERNEL_IO_GICD_H
 #include <stdint.h>
 #include "../../../kernel/types/result.h"
-#include "../../../kernel/arch/init.h"
+#include "../../../kernel/arch/init_code.h"
 #include "../../../kernel/system_info.h"
 
 Result(InitCode) gic_enable_interrupt(InterruptControllerInfoPtr info, uint32_t irq);

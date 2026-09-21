@@ -40,7 +40,10 @@ Result(Anything) KernelContext__map_result(KernelContextPtr self, ResultPtr(Anyt
 {
     match_optional(
         self->result_mapper,
-        some(mapper) { return mapper(result, self->result_mapper_context); },
+        some(mapper)
+        {
+            return mapper(result, self->result_mapper_context);
+        },
         none_do_nothing()
     );
 
@@ -104,7 +107,10 @@ KernelContextPtr KernelContext__from_originating_context_heap(ConstOriginatingCo
     Optional(ProcessID) pid = None(ProcessID);
     match_optional(
         originating_context->process,
-        some(process) { pid = Some(ProcessID, process->pid); },
+        some(process)
+        {
+            pid = Some(ProcessID, process->pid);
+        },
         none_do_nothing()
     );
 
@@ -116,7 +122,10 @@ KernelContext KernelContext__from_originating_context(ConstOriginatingContextPtr
     Optional(ProcessID) pid = None(ProcessID);
     match_optional(
         originating_context->process,
-        some(process) { pid = Some(ProcessID, process->pid); },
+        some(process)
+        {
+            pid = Some(ProcessID, process->pid);
+        },
         none_do_nothing()
     );
 

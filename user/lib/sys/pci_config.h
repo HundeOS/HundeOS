@@ -88,7 +88,10 @@ static void PciConfigParseState__read_config_line(PciConfigParseStatePtr self, C
     {
         match_optional(
             PciConfig__read_line_value(line, &pci_config_present_key),
-            some(parsed) { self->found_present = parsed == 1; },
+            some(parsed)
+            {
+                self->found_present = parsed == 1;
+            },
             none_do_nothing()
         );
     }
@@ -156,13 +159,21 @@ static bool PciConfig__read_config(ConstDynStringPtr sysinfo, PciConfigPtr self)
         DynString__lines(sysinfo),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line, {
-                match_optional(
-                    DynString__bstring(&line),
-                    some(bstring_line) { PciConfigParseState__read_config_line(&state, &bstring_line); },
-                    none_do_nothing()
-                );
-            });
+            for_each_ll(
+                DynStringLines,
+                lines,
+                line,
+                {
+                    match_optional(
+                        DynString__bstring(&line),
+                        some(bstring_line)
+                        {
+                            PciConfigParseState__read_config_line(&state, &bstring_line);
+                        },
+                        none_do_nothing()
+                    );
+                }
+            );
             DynStringLines__dispose_all(&lines);
         },
         none_do_nothing()

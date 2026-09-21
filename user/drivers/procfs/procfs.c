@@ -49,8 +49,14 @@ static Result(ProcessRecord) Procfs__find(ConstProcessRegistryPtr registry, uint
         {
             match_optional(
                 found,
-                some(record) { return Success(ProcessRecord, record); },
-                none() { return Error(ProcessRecord, bstr("Process not found"), IO_INVALID_PATH); }
+                some(record)
+                {
+                    return Success(ProcessRecord, record);
+                },
+                none()
+                {
+                    return Error(ProcessRecord, bstr("Process not found"), IO_INVALID_PATH);
+                }
             );
         },
         error(code, message)
@@ -66,14 +72,26 @@ static Result(FilesystemFileSize)
     ProcPath parsed;
     match_result(
         ProcPath__parse(path),
-        success(value) { parsed = value; },
-        error(code, message) { return Error(FilesystemFileSize, message, code); }
+        success(value)
+        {
+            parsed = value;
+        },
+        error(code, message)
+        {
+            return Error(FilesystemFileSize, message, code);
+        }
     );
     ProcessRecord record;
     match_result(
         Procfs__find(context, parsed.pid),
-        success(value) { record = value; },
-        error(code, message) { return Error(FilesystemFileSize, message, code); }
+        success(value)
+        {
+            record = value;
+        },
+        error(code, message)
+        {
+            return Error(FilesystemFileSize, message, code);
+        }
     );
     BString text;
     if (BString__equals(&parsed.leaf, &bstr("status")))
@@ -94,10 +112,44 @@ static Result(FilesystemFileSize)
     {
         ProcessCPUUsage usage = record.cpu_usage;
         text = BString__sprintf(
-            &bstr(
-                "cpu=%llu\ntotal_usec=%llu\nCPU%% (1s)=%llu.%02llu\nCPU%% (100ms)=%llu.%02llu\nsampled_at_usec=%llu\n"),
+            &bstr("cpu=%llu\ntotal_usec=%llu\nCPU%% (1s)=%llu.%02llu\nCPU%% (100ms)=%llu.%02llu\n"
+                  "scheduled_usec=%llu\nSCHED CPU%% (1s)=%llu.%02llu\nSCHED CPU%% (100ms)=%llu.%02llu\n"
+                  "sampled_at_usec=%llu\n"),
             record.cpu, usage.total_usec, usage.long_basis_points / 100, usage.long_basis_points % 100,
-            usage.short_basis_points / 100, usage.short_basis_points % 100, record.sampled_at_usec);
+            usage.short_basis_points / 100, usage.short_basis_points % 100, usage.scheduled_usec,
+            usage.scheduled_long_basis_points / 100, usage.scheduled_long_basis_points % 100,
+            usage.scheduled_short_basis_points / 100, usage.scheduled_short_basis_points % 100, record.sampled_at_usec);
+    }
+    else if (BString__equals(&parsed.leaf, &bstr("queue-wait")))
+    {
+        ProcessQueueWaitUsage usage = record.queue_wait_usage;
+        text = BString__sprintf(
+            &bstr("parks=%llu\nactivity_wakes=%llu\ntimeout_wakes=%llu\nselections=%llu\n"
+                  "parked_usec=%llu\nmax_parked_usec=%llu\nrunnable_usec=%llu\nmax_runnable_usec=%llu\n"
+                  "sampled_at_usec=%llu\n"),
+            usage.parks, usage.activity_wakes, usage.timeout_wakes, usage.selections, usage.parked_usec,
+            usage.max_parked_usec, usage.runnable_usec, usage.max_runnable_usec, record.sampled_at_usec);
+    }
+    else if (BString__equals(&parsed.leaf, &bstr("ipc")))
+    {
+        match_optional(
+            record.io_diagnostics,
+            some(usage)
+            {
+                text =
+                    BString__sprintf(&bstr("uart_bytes=%llu\nuart_irqs=%llu\nuart_reads=%llu\nuart_empty=%llu\n"
+                                           "backend_reads=%llu\nbackend_empty=%llu\nwarden_relays=%llu\n"
+                                           "wait_entries=%llu\nunchanged_wakes=%llu\nuser_wait_usec=%llu\n"
+                                           "sampled_at_usec=%llu\n"),
+                                     usage.uart_bytes, usage.uart_irqs, usage.uart_reads, usage.uart_empty,
+                                     usage.backend_reads, usage.backend_empty, usage.warden_relays, usage.wait_entries,
+                                     usage.unchanged_wakes, record.user_wait_usec, record.sampled_at_usec);
+            },
+            none()
+            {
+                text = bstr("diagnostics=unavailable\n");
+            }
+        );
     }
     else if (BString__equals(&parsed.leaf, &bstr("memory")))
     {
@@ -109,7 +161,10 @@ static Result(FilesystemFileSize)
                     &bstr("private_bytes=%llu\nshared_bytes=%llu\ndevice_bytes=%llu\nsampled_at_usec=%llu\n"),
                     usage.private_bytes, usage.shared_bytes, usage.device_bytes, record.sampled_at_usec);
             },
-            none() { text = bstr("accounting=unavailable\n"); }
+            none()
+            {
+                text = bstr("accounting=unavailable\n");
+            }
         );
     }
     else
@@ -137,7 +192,10 @@ static Result(OptionalDirectoryEntry) Procfs__list(IOServiceContext context, Con
                             0, record.credentials.user_id, record.credentials.group_id, IO_MODE_TYPE_DIR | 0555, &name);
                         return Success(OptionalDirectoryEntry, Some(DirectoryEntry, entry));
                     },
-                    none() { return Success(OptionalDirectoryEntry, None(DirectoryEntry)); }
+                    none()
+                    {
+                        return Success(OptionalDirectoryEntry, None(DirectoryEntry));
+                    }
                 );
             },
             error(code, message)
@@ -150,8 +208,14 @@ static Result(OptionalDirectoryEntry) Procfs__list(IOServiceContext context, Con
     ProcPath parsed;
     match_result(
         ProcPath__parse(path),
-        success(value) { parsed = value; },
-        error(code, message) { return Error(OptionalDirectoryEntry, message, code); }
+        success(value)
+        {
+            parsed = value;
+        },
+        error(code, message)
+        {
+            return Error(OptionalDirectoryEntry, message, code);
+        }
     );
     if (!BString__is_empty(&parsed.leaf))
     {
@@ -161,16 +225,23 @@ static Result(OptionalDirectoryEntry) Procfs__list(IOServiceContext context, Con
         Procfs__find(context, parsed.pid),
         success(record)
         {
-            if (skip >= 3)
+            if (skip >= 5)
             {
                 return Success(OptionalDirectoryEntry, None(DirectoryEntry));
             }
-            BString name = skip == 0 ? bstr("status") : skip == 1 ? bstr("cpu") : bstr("memory");
+            BString name = skip == 0   ? bstr("status")
+                           : skip == 1 ? bstr("cpu")
+                           : skip == 2 ? bstr("memory")
+                           : skip == 3 ? bstr("queue-wait")
+                                       : bstr("ipc");
             DirectoryEntry entry = DirectoryEntry__new(0, record.credentials.user_id, record.credentials.group_id,
                                                        IO_MODE_TYPE_FILE | 0444, &name);
             return Success(OptionalDirectoryEntry, Some(DirectoryEntry, entry));
         },
-        error(code, message) { return Error(OptionalDirectoryEntry, message, code); }
+        error(code, message)
+        {
+            return Error(OptionalDirectoryEntry, message, code);
+        }
     );
 }
 

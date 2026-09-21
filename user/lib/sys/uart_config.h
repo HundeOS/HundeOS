@@ -87,17 +87,22 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
         DynString__lines(sysinfo),
         some(lines)
         {
-            for_each_ll(DynStringLines, lines, line, {
-                match_optional(
-                    DynString__bstring(&line),
-                    some(bstring_line)
-                    {
-                        UartDriverConfig__read_config_line(&bstring_line, self, &found_physical_base, &found_mmio_size,
-                                                           &found_irq);
-                    },
-                    none_do_nothing()
-                );
-            });
+            for_each_ll(
+                DynStringLines,
+                lines,
+                line,
+                {
+                    match_optional(
+                        DynString__bstring(&line),
+                        some(bstring_line)
+                        {
+                            UartDriverConfig__read_config_line(&bstring_line, self, &found_physical_base,
+                                                               &found_mmio_size, &found_irq);
+                        },
+                        none_do_nothing()
+                    );
+                }
+            );
             DynStringLines__dispose_all(&lines);
         },
         none_do_nothing()

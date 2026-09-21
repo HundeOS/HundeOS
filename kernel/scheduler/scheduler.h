@@ -14,7 +14,8 @@
 #include "../system_info.h"
 #include "../service/event_dispatcher.h"
 #include "../ipc/queues.h"
-#include "subsystems/message/message_broker.h"
+#include "../ipc/buffers.h"
+#include "request_graph.h"
 #include "syscalls/service.h"
 #include "syscalls/mem.h"
 
@@ -46,6 +47,7 @@ typedef struct CPUScheduler
     CPUID cpu;
     bool started;
     uint64_t last_registry_sample_usec;
+    Optional(ProcessPtr) switching_out;
 } CPUScheduler;
 
 typedef CPUScheduler * CPUSchedulerPtr;
@@ -62,6 +64,7 @@ typedef struct ManagedSharedPage
     ProcessID owner_pid;
     ProcessID first_peer_pid;
     ProcessID second_peer_pid;
+    uint64_t generation;
 } ManagedSharedPage;
 
 typedef ManagedSharedPage * ManagedSharedPagePtr;
@@ -73,27 +76,26 @@ ResultDef(MemStatus);
 typedef struct Scheduler
 {
     Optional(KernelPtr) kernel;
-    MessageBrokerPtr message_broker;
     Optional(InterruptControllerInfo) interrupt_controller;
     CPUSchedulers schedulers;
     ServiceEventDispatcher service_event_dispatcher;
     ManagedSharedPages shared_pages;
+    uint64_t shared_page_generation;
     Queues queues;
+    Buffers buffers;
+    ProcessTable preferred;
+    RequestGraph request_graph;
     mutex_t scheduler_lock;
     bool ready;
 } Scheduler;
 
-typedef struct IOSubsystem IOSubsystem;
-typedef IOSubsystem * IOSubsystemPtr;
-
-SchedulerPtr Scheduler__heap_new(MessageBrokerPtr message_broker);
+SchedulerPtr Scheduler__heap_new(void);
 
 Result(SchedulerInitStatus) Scheduler__init(KernelPtr kernel, SchedulerPtr self, Elf idle_process);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
 void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID cpu);
 Result(ProcessID) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc, ReturnCode return_code);
-Result(ProcessID)
-    Scheduler__abort_process(SchedulerPtr scheduler, IOSubsystemPtr io_subsystem, ProcessPtr proc, ProcessAbort abort);
+Result(ProcessID) Scheduler__abort_process(SchedulerPtr scheduler, ProcessPtr proc, ProcessAbort abort);
 
 Result(ProcessPtr) Scheduler__park(SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
                                    OptionalPtr(Continuation) kernel_continuation, ParkReason reason);
@@ -126,6 +128,7 @@ Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);
 bool Scheduler__should_preempt_on_timer(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__find_process_by_pid(SchedulerPtr self, ProcessID pid);
+Optional(ProcessPtr) Scheduler__find_process_by_pid_locked(SchedulerPtr self, ProcessID pid);
 Result(ProcessCredentials) Scheduler__process_credentials(SchedulerPtr self, ProcessID pid);
 Result(ServiceCode)
     Scheduler__require_process_capability(SchedulerPtr self, ProcessID pid, ProcessCapabilities capability);
@@ -135,6 +138,8 @@ Result(Address)
 Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr owner, Address address);
 Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name, size_t length);
 Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id);
+Result(QueueWaitCode)
+    Scheduler__queue_wait(SchedulerPtr self, ProcessPtr process, Address snapshots, uint64_t count, Tick ticks);
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
 ProcessTable Scheduler__all_processes_for_all_cpus(SchedulerPtr self);
 ProcessTable Scheduler__process_snapshot(SchedulerPtr self);
@@ -178,10 +183,10 @@ Result(CollectionCode) Scheduler__resolve_blocked_operation(SchedulerPtr self, P
                                                             ParkedOperationPtr blocked_operation);
 bool Scheduler__parked_operation_is_ready(SchedulerPtr self, ParkedOperationPtr operation);
 
-#define NEW_SCHEDULER(broker)                                                                                          \
+#define NEW_SCHEDULER                                                                                                  \
     (Scheduler)                                                                                                        \
     {                                                                                                                  \
-        .kernel = None(KernelPtr), .message_broker = broker, .interrupt_controller = None(InterruptControllerInfo),    \
+        .kernel = None(KernelPtr), .interrupt_controller = None(InterruptControllerInfo),                              \
         .schedulers = EmptyArray(CPUSchedulers), .service_event_dispatcher = NEW_SERVICE_EVENT_DISPATCHER,             \
         .shared_pages = EmptyArray(ManagedSharedPages), .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT,           \
         .ready = false,                                                                                                \

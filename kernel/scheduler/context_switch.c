@@ -4,13 +4,14 @@
 #include "../debug.h"
 #include "scheduler/scheduler.h"
 #include "../kernel_core.h"
+#include "shared_wait.h"
 
 ContextSwitch ContextSwitch__new(ProcessPtr new_proc, OptionalPtr(ProcessPtr) old_proc)
 {
     return (ContextSwitch){.new_proc = new_proc, .old_proc = *old_proc};
 }
 
-static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
+static bool Process__finalise_deferred_syscalls(ProcessPtr self)
 {
     while (true)
     {
@@ -28,11 +29,16 @@ static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
                         Result(Anything) res = continuation(parked_operation);
                         if (Process__is_parked(self))
                         {
+                            ParkedOperation__dispose(parked_operation);
                             match_optional(
                                 Process__top_parked_operation_scheduler(self),
-                                some(scheduler) { Scheduler__yield_waiting(scheduler, self, CPU__id() - 1); },
+                                some(scheduler)
+                                {
+                                    Scheduler__yield_waiting(scheduler, self, CPU__id() - 1);
+                                },
                                 none_do_nothing()
                             );
+                            return false;
                         }
 
                         match_result(
@@ -51,21 +57,28 @@ static Result(Anything) Process__finalise_deferred_syscalls(ProcessPtr self)
 
                         ParkedOperation__dispose(parked_operation);
                     },
-                    none() { ParkedOperation__dispose(parked_operation); }
+                    none()
+                    {
+                        ParkedOperation__dispose(parked_operation);
+                    }
                 );
             },
-            none() { return Success(Anything, 0); }
+            none()
+            {
+                return true;
+            }
         );
     }
 }
 
-void ContextSwitch__switch(const ContextSwitch * self)
+void ContextSwitch__switch(ConstContextSwitchPtr self)
 {
     match_optional(
         self->old_proc,
         some(proc)
         {
-            CPUUsage__stop(&proc->cpu_usage);
+            CPUTime now = CPU__time_usec();
+            CPUUsage__stop(&proc->cpu_usage, now, Process__user_wait_usec(proc, now));
             if (proc->state != PROC_STATE_DEAD && proc->state != PROC_STATE_WAITING &&
                 proc->state != PROC_STATE_SLEEPING)
             {
@@ -76,7 +89,10 @@ void ContextSwitch__switch(const ContextSwitch * self)
     );
 
     ProcessPtr new_proc = self->new_proc;
-    CPUUsage__start(&new_proc->cpu_usage);
+    new_proc->migration_safe = false;
+    QueueWaitUsage__select(&new_proc->queue_wait_usage);
+    CPUTime now = CPU__time_usec();
+    CPUUsage__start(&new_proc->cpu_usage, now, Process__user_wait_usec(new_proc, now));
     __d_printf(PROCESS_SWITCH, "ContextSwitch__switch target pid=%i name=%s state=%s context=%p page_table=%p\n",
                new_proc->pid, cstr(new_proc->name), ProcessState__to_string(new_proc->state), new_proc->context,
                paddr(ProcessPageTable__root(&new_proc->page_table)));
@@ -111,7 +127,11 @@ void ContextSwitch__switch(const ContextSwitch * self)
         },
         none_do_nothing()
     );
-    Process__finalise_deferred_syscalls(new_proc);
+    if (!Process__finalise_deferred_syscalls(new_proc))
+    {
+        return;
+    }
 
+    new_proc->dispatched_at = CPU__time_usec();
     Process__context_switch(new_proc);
 }

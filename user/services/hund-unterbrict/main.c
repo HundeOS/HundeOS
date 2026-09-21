@@ -87,14 +87,17 @@ static InterruptRegistration InterruptRegistration__new(IRQNumber irq, QueueConn
 
 static bool InterruptClient__matches_connection(InterruptClientPtr self, void * context)
 {
-    return ChannelServer__connection(&self->channel) == *(QueueConnectionID *)context;
+    return ChannelServer__connection(&self->channel) == *(QueueConnectionIDPtr)context;
 }
 
 static bool InterruptClients__contains_connection(InterruptClientsPtr self, QueueConnectionID connection)
 {
     match_find_result(
         InterruptClients__find(self, InterruptClient__matches_connection, &connection),
-        some(client) { return true; },
+        some(client)
+        {
+            return true;
+        },
         none_do_nothing()
     );
     return false;
@@ -102,14 +105,17 @@ static bool InterruptClients__contains_connection(InterruptClientsPtr self, Queu
 
 static bool InterruptRegistration__matches_irq(InterruptRegistrationPtr self, void * context)
 {
-    return self->irq == *(IRQNumber *)context;
+    return self->irq == *(IRQNumberPtr)context;
 }
 
 static bool InterruptRegistrations__contains_irq(InterruptRegistrationsPtr self, IRQNumber irq)
 {
     match_find_result(
         InterruptRegistrations__find(self, InterruptRegistration__matches_irq, &irq),
-        some(registration) { return true; },
+        some(registration)
+        {
+            return true;
+        },
         none_do_nothing()
     );
     return false;
@@ -117,14 +123,17 @@ static bool InterruptRegistrations__contains_irq(InterruptRegistrationsPtr self,
 
 static bool InterruptRegistration__matches_connection(InterruptRegistrationPtr self, void * context)
 {
-    return self->connection == *(QueueConnectionID *)context;
+    return self->connection == *(QueueConnectionIDPtr)context;
 }
 
 static bool InterruptRegistrations__contains_connection(InterruptRegistrationsPtr self, QueueConnectionID connection)
 {
     match_find_result(
         InterruptRegistrations__find(self, InterruptRegistration__matches_connection, &connection),
-        some(registration) { return true; },
+        some(registration)
+        {
+            return true;
+        },
         none_do_nothing()
     );
     return false;
@@ -134,7 +143,10 @@ static bool InterruptClient__send(InterruptClientPtr self, InterruptProtocolResp
 {
     match_result(
         ChannelServer__reply(&self->channel, (ConstChannelDataPtr)&response, sizeof(response)),
-        success(status) { return true; },
+        success(status)
+        {
+            return true;
+        },
         error(code, message)
         {
             if (code == CHANNEL_PENDING)
@@ -163,7 +175,10 @@ static bool InterruptClient__flush(InterruptClientPtr self)
             self->pending = false;
             return true;
         },
-        error(code, message) { return false; }
+        error(code, message)
+        {
+            return false;
+        }
     );
     return false;
 }
@@ -293,7 +308,10 @@ static bool InterruptManager__handle_client(InterruptManagerPtr self, InterruptC
                 none_do_nothing()
             );
         },
-        error(code, message) { return work; }
+        error(code, message)
+        {
+            return work;
+        }
     );
     return work;
 }
@@ -301,26 +319,38 @@ static bool InterruptManager__handle_client(InterruptManagerPtr self, InterruptC
 static bool InterruptManager__accept_clients(InterruptManagerPtr self, QueueParticipantID warden_pid)
 {
     bool work = false;
-    for_each_atomic_fa_ptr(QueueConnectionSlots, &self->arrivals->connections, index, connection, {
-        if (connection == 0 || InterruptClients__contains_connection(&self->clients, connection))
+    for_each_atomic_fa_ptr(
+        QueueConnectionSlots,
+        &self->arrivals->connections,
+        index,
+        connection,
         {
-            continue;
-        }
-        match_result(
-            ChannelServer__accept(connection, warden_pid),
-            success(channel)
+            if (connection == 0 || InterruptClients__contains_connection(&self->clients, connection))
             {
-                InterruptClient client = InterruptClient__new(&channel);
-                match_result(
-                    InterruptClients__push(&self->clients, client),
-                    success_do_nothing(),
-                    error(code, message) { ChannelServer__close(&channel); }
-                );
-            },
-            error(code, message) { QueueConnection__close(connection); }
-        );
-        work = true;
-    });
+                continue;
+            }
+            match_result(
+                ChannelServer__accept(connection, warden_pid),
+                success(channel)
+                {
+                    InterruptClient client = InterruptClient__new(&channel);
+                    match_result(
+                        InterruptClients__push(&self->clients, client),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            ChannelServer__close(&channel);
+                        }
+                    );
+                },
+                error(code, message)
+                {
+                    QueueConnection__close(connection);
+                }
+            );
+            work = true;
+        }
+    );
     return work;
 }
 
@@ -332,7 +362,10 @@ static bool InterruptManager__deliver(InterruptManagerPtr self)
         {
             match_find_result_ptr(
                 InterruptRegistrations__find(&self->registrations, InterruptRegistration__matches_irq, &event.id),
-                some(registration) { registration->pending_delivery = event.sequence; },
+                some(registration)
+                {
+                    registration->pending_delivery = event.sequence;
+                },
                 none_do_nothing()
             );
             return true;
@@ -374,7 +407,10 @@ static bool InterruptManager__step(InterruptManagerPtr self, QueueParticipantID 
     {
         match_optional(
             InterruptClients__ptr_at(&self->clients, index),
-            some(client) { work = InterruptManager__handle_client(self, client) || work; },
+            some(client)
+            {
+                work = InterruptManager__handle_client(self, client) || work;
+            },
             none_do_nothing()
         );
     }
@@ -382,7 +418,10 @@ static bool InterruptManager__step(InterruptManagerPtr self, QueueParticipantID 
     {
         match_optional(
             InterruptRegistrations__ptr_at(&self->registrations, index),
-            some(registration) { work = InterruptManager__deliver_pending(self, registration) || work; },
+            some(registration)
+            {
+                work = InterruptManager__deliver_pending(self, registration) || work;
+            },
             none_do_nothing()
         );
     }
@@ -415,7 +454,10 @@ int main(void)
                 QueueParticipantID warden_pid = 0;
                 match_optional(
                     ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &bstr(CHANNEL_WARDEN_SERVICE_NAME)),
-                    some(pid) { warden_pid = pid; },
+                    some(pid)
+                    {
+                        warden_pid = pid;
+                    },
                     none_do_nothing()
                 );
                 if (!InterruptManager__step(&manager, warden_pid))
@@ -424,7 +466,10 @@ int main(void)
                 }
             }
         },
-        error(code, message) { IO__printf(&bstr("hund-unterbrict: listen failed %i\n"), (int)code); }
+        error(code, message)
+        {
+            IO__printf(&bstr("hund-unterbrict: listen failed %i\n"), (int)code);
+        }
     );
     return 1;
 }

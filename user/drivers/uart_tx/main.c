@@ -1,96 +1,94 @@
-#define DRIVER_LOG_TAG "UART-TX"
-
-#include "sys/io_server.h"
-#include "sys/debug.h"
+#include "io/stream_driver.h"
 #include "sys/service.h"
 #include "sys/uart_config.h"
-
+#include "devices/uart.h"
 #define UART_DR 0x000
 #define UART_FR 0x018
 #define FR_TXFF (1u << 5)
 
-#ifndef UART_TX_ENTRYPOINT
-#define UART_TX_ENTRYPOINT main
-#endif
-
-#if !defined(UART_READ32) || !defined(UART_WRITE32)
-static volatile uint32_t * reg32(void * base, uint64_t offset)
+typedef struct UartTransmitter
 {
-    return (volatile uint32_t *)((uint64_t)base + offset);
+    Address registers;
+    bool pending_carriage_return;
+} UartTransmitter;
+typedef UartTransmitter * UartTransmitterPtr;
+static UartTransmitter UartTransmitter__new(Address registers)
+{
+    return (UartTransmitter){.registers = registers};
 }
-#endif
 
-#ifndef UART_READ32
-#define UART_READ32(base, offset) (*reg32((base), (offset)))
-#endif
-
-#ifndef UART_WRITE32
-#define UART_WRITE32(base, offset, value) (*reg32((base), (offset)) = (uint32_t)(value))
-#endif
-
-static void write_uart(void * uart, char value)
+static bool UartTransmitter__flush(UartTransmitterPtr self)
 {
-    while ((UART_READ32(uart, UART_FR) & FR_TXFF) != 0)
+    if (!self->pending_carriage_return || (Uart__read32(self->registers, UART_FR) & FR_TXFF) != 0)
     {
+        return false;
     }
-    UART_WRITE32(uart, UART_DR, value);
+    Uart__write32(self->registers, UART_DR, '\r');
+    self->pending_carriage_return = false;
+    return true;
 }
 
-int UART_TX_ENTRYPOINT(void)
+static IOReply UartTransmitter__write(IOServiceContext context, IORequestPtr request)
+{
+    UartTransmitterPtr self = context;
+    IOReply reply = IOReply__new(IO_OK, 0);
+    UartTransmitter__flush(self);
+    while (!self->pending_carriage_return && (uint64_t)reply.value < request->count &&
+           (Uart__read32(self->registers, UART_FR) & FR_TXFF) == 0)
+    {
+        uint8_t value = IORequest__write_source(request)[reply.value++];
+        Uart__write32(self->registers, UART_DR, value);
+        if (value == '\n')
+        {
+            self->pending_carriage_return = true;
+            UartTransmitter__flush(self);
+        }
+    }
+    if (reply.value == 0 && request->count != 0)
+    {
+        reply.status = IO_WAIT_FOR_DATA;
+    }
+    return reply;
+}
+
+int main(void)
 {
     if (!service_ok(service_become_service()))
     {
-        DRIVER_DEBUG("uart_tx: service registration failed\n");
         return 1;
     }
-
     UartDriverConfig config;
     if (!UartDriverConfig__load(&config))
     {
-        DRIVER_DEBUG("uart_tx: sysinfo read failed\n");
         return 1;
     }
-
-    ServiceMappedMemoryPtr uart_mapping;
-    if (!service_ok(service_map_mmio(config.physical_base, config.mmio_size, &uart_mapping)))
+    ServiceMappedMemoryPtr mapping;
+    if (!service_ok(service_map_mmio(config.physical_base, config.mmio_size, &mapping)))
     {
-        DRIVER_DEBUG("uart_tx: mmio map failed\n");
         return 1;
     }
-    void * uart = driver_ptr(uart_mapping);
-
-    IOHandle tty = io_server_register(&bstr(":tty:"), IO_SERVER_WRITE);
-    if (tty < 0)
+    static UartTransmitter transmitter;
+    transmitter = UartTransmitter__new((Address)driver_ptr(mapping));
+    static IOStreamDriver driver;
+    static IOService service;
+    driver = IOStreamDriver__new(IO_OPEN_WRITE, &transmitter, UartTransmitter__write);
+    if (IOService__listen_into(&service, &bstr(IO_UART_TX_SERVICE), &driver, IOStreamDriver__execute,
+                               IOStreamDriver__disconnect) != IO_OK)
     {
-        DRIVER_DEBUG("uart_tx: register error %i\n", (int)tty);
         return 1;
     }
-
-    ServiceEvent event;
-    ServiceCode wait_status;
-    for (wait_status = service_wait(&event); service_alive(wait_status); wait_status = service_wait(&event))
+    if (!service_ok(service_publish_ready(&bstr(IO_UART_TX_SERVICE))))
     {
-        if (service_ok(wait_status))
+        return 1;
+    }
+    Channel__prepare_wait();
+    while (true)
+    {
+        bool progress = IOService__poll(&service);
+        progress = UartTransmitter__flush(&transmitter) || progress;
+        if (!progress)
         {
-            bool write_request = event.type == SERVICE_EVENT_IO && event.source == SERVICE_IO_WRITE_REQUEST;
-            if (write_request)
-            {
-                IOServerBuffer buffer;
-                if (io_server_get_buffer(tty, &buffer) == IO_OK)
-                {
-                    for (uint64_t i = 0; i < buffer.capacity; i++)
-                    {
-                        write_uart(uart, buffer.data[i]);
-                        if (buffer.data[i] == '\n')
-                        {
-                            write_uart(uart, '\r');
-                        }
-                    }
-                    io_server_data_consumed(tty, buffer.capacity);
-                }
-            }
+            Channel__wait_event();
         }
     }
-
-    return 0;
 }

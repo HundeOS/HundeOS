@@ -11,13 +11,13 @@ typedef struct VirtioBlkDevice
     uint64_t block_count;
     BString path;
     uint16_t last_used_idx;
+    bool io_failed;
 } VirtioBlkDevice, *VirtioBlkDevicePtr;
 
 ResultDef(VirtioBlkDevice);
 uint32_t VirtioBlkMmio__read32(void * base, uint64_t offset);
 void VirtioBlkMmio__write32(void * base, uint64_t offset, uint32_t value);
 void VirtioBlk__ack_interrupt(void * mmio);
-void VirtioBlk__handle_block_request(VirtioBlkDevicePtr self, uint64_t request_id);
 int VirtioBlk__run(ConstBStringPtr slot_argument, ConstBStringPtr path);
 ServiceCode VirtioBlkRuntime__await_irq(ServiceEventPtr event);
 int VirtioBlkRuntime__run(VirtioBlkDevicePtr device, BlockServerPtr server);

@@ -63,7 +63,12 @@ Result(ServiceCode)
     __d_printf(IODEV, "service event dispatcher subscribe irq=%i pid=%i name=%s\n", irq, process->pid,
                cstr(process->name));
     IRQService service = IRQService__new(process);
-    critical_section(self->lock, { IRQServiceMap__set(&self->irq_services, irq, service); });
+    critical_section(
+        self->lock,
+        {
+            IRQServiceMap__set(&self->irq_services, irq, service);
+        }
+    );
     return Success(ServiceCode, SERVICE_OK);
 }
 
@@ -74,13 +79,19 @@ Result(ServiceCode)
                process->pid, cstr(process->name), event.type, event.source, event.data,
                (int)ServiceEvents__len(&process->service.events));
 
-    critical_section(self->lock, {
-        match_result(
-            Service__push_next_event(process, event),
-            success_do_nothing(),
-            error(code, message) { cs_return Error(ServiceCode, message, code); }
-        );
-    });
+    critical_section(
+        self->lock,
+        {
+            match_result(
+                Service__push_next_event(process, event),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    cs_return Error(ServiceCode, message, code);
+                }
+            );
+        }
+    );
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -92,48 +103,54 @@ Result(ServiceEventDispatch)
     __d_printf(IODEV, "service event dispatcher irq=%i\n", irq);
     ServiceEventDispatch no_dispatch = ServiceEventDispatch__new(&None(ProcessPtr));
 
-    critical_section(self->lock, {
-        match_optional(
-            IRQServiceMap__get_ptr(&self->irq_services, irq),
-            some(service)
-            {
-                ServiceEventDispatch dispatch = no_dispatch;
-                dispatch.process.present = true;
-                dispatch.process.some.val = service->process;
-
-                __d_printf(
-                    IODEV,
-                    "service event dispatcher irq service irq=%i pid=%i pending=%i enabled=%i delivery=%i coalesced=%i\n",
-                    irq, service->process->pid, (int)service->pending, (int)service->enabled,
-                    (int)service->delivery_count, (int)service->coalesced_count);
-                if (!service->enabled)
+    critical_section(
+        self->lock,
+        {
+            match_optional(
+                IRQServiceMap__get_ptr(&self->irq_services, irq),
+                some(service)
                 {
+                    ServiceEventDispatch dispatch = no_dispatch;
+                    dispatch.process.present = true;
+                    dispatch.process.some.val = service->process;
+
+                    __d_printf(
+                        IODEV,
+                        "service event dispatcher irq service irq=%i pid=%i pending=%i enabled=%i delivery=%i coalesced=%i\n",
+                        irq, service->process->pid, (int)service->pending, (int)service->enabled,
+                        (int)service->delivery_count, (int)service->coalesced_count);
+                    if (!service->enabled)
+                    {
+                        cs_return Success(ServiceEventDispatch, dispatch);
+                    }
+
+                    if (service->pending)
+                    {
+                        service->coalesced_count++;
+                        cs_return Success(ServiceEventDispatch, dispatch);
+                    }
+
+                    service->pending = true;
+                    service->delivery_count++;
+                    Arch__mask_irq(interrupt_controller, irq);
+
+                    ServiceEvent event = ServiceEvent__new(SERVICE_EVENT_IRQ, irq, service->coalesced_count);
+
+                    match_result(
+                        Service__push_next_event(service->process, event),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            cs_return Error(ServiceEventDispatch, message, code);
+                        }
+                    );
+
                     cs_return Success(ServiceEventDispatch, dispatch);
-                }
-
-                if (service->pending)
-                {
-                    service->coalesced_count++;
-                    cs_return Success(ServiceEventDispatch, dispatch);
-                }
-
-                service->pending = true;
-                service->delivery_count++;
-                Arch__mask_irq(interrupt_controller, irq);
-
-                ServiceEvent event = ServiceEvent__new(SERVICE_EVENT_IRQ, irq, service->coalesced_count);
-
-                match_result(
-                    Service__push_next_event(service->process, event),
-                    success_do_nothing(),
-                    error(code, message) { cs_return Error(ServiceEventDispatch, message, code); }
-                );
-
-                cs_return Success(ServiceEventDispatch, dispatch);
-            },
-            none_do_nothing()
-        );
-    });
+                },
+                none_do_nothing()
+            );
+        }
+    );
 
     __d_printf(IODEV, "service event dispatcher no irq service irq=%i\n", irq);
     return Success(ServiceEventDispatch, no_dispatch);
@@ -163,17 +180,23 @@ static void ServiceEventDispatcher__mark_active_irq_event_locked(ServiceEventDis
 
 Result(ServiceEvent) ServiceEventDispatcher__take_next(ServiceEventDispatcherPtr self, ProcessPtr process)
 {
-    critical_section(self->lock, {
-        match_result(
-            Service__pop_next_event(process),
-            success(event)
-            {
-                ServiceEventDispatcher__mark_active_irq_event_locked(self, process, event);
-                cs_return Success(ServiceEvent, event);
-            },
-            error(code, message) { cs_return Error(ServiceEvent, message, code); }
-        );
-    });
+    critical_section(
+        self->lock,
+        {
+            match_result(
+                Service__pop_next_event(process),
+                success(event)
+                {
+                    ServiceEventDispatcher__mark_active_irq_event_locked(self, process, event);
+                    cs_return Success(ServiceEvent, event);
+                },
+                error(code, message)
+                {
+                    cs_return Error(ServiceEvent, message, code);
+                }
+            );
+        }
+    );
 
     return Error(ServiceEvent, service_event_queue_empty, SERVICE_EVENT_QUEUE_EMPTY);
 }
@@ -182,33 +205,37 @@ Result(ServiceCode)
     ServiceEventDispatcher__complete_active_irq(ServiceEventDispatcherPtr self,
                                                 InterruptControllerInfoPtr interrupt_controller, ProcessPtr process)
 {
-    critical_section(self->lock, {
-        match_optional(
-            process->service.active_irq_event,
-            some(event)
-            {
-                match_optional(
-                    IRQServiceMap__get_ptr(&self->irq_services, event.source),
-                    some(service)
-                    {
-                        if (service->process == process && service->pending)
+    critical_section(
+        self->lock,
+        {
+            match_optional(
+                process->service.active_irq_event,
+                some(event)
+                {
+                    match_optional(
+                        IRQServiceMap__get_ptr(&self->irq_services, event.source),
+                        some(service)
                         {
-                            __d_printf(IODEV, "service event dispatcher complete active irq=%i pid=%i\n", event.source,
-                                       process->pid);
-                            service->pending = false;
-                            service->coalesced_count = 0;
-                            process->service.active_irq_event = None(ServiceEvent);
-                            Arch__unmask_irq(interrupt_controller, event.source);
-                            cs_return Success(ServiceCode, SERVICE_OK);
-                        }
-                    },
-                    none_do_nothing()
-                );
-                process->service.active_irq_event = None(ServiceEvent);
-            },
-            none_do_nothing()
-        );
-    });
+                            if (service->process == process && service->pending)
+                            {
+                                __d_printf(IODEV,
+                                           "service event dispatcher complete active irq=%i pid=%i\n",
+                                           event.source, process->pid);
+                                service->pending = false;
+                                service->coalesced_count = 0;
+                                process->service.active_irq_event = None(ServiceEvent);
+                                Arch__unmask_irq(interrupt_controller, event.source);
+                                cs_return Success(ServiceCode, SERVICE_OK);
+                            }
+                        },
+                        none_do_nothing()
+                    );
+                    process->service.active_irq_event = None(ServiceEvent);
+                },
+                none_do_nothing()
+            );
+        }
+    );
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -217,21 +244,41 @@ Result(ServiceCode) ServiceEventDispatcher__unsubscribe_process(ServiceEventDisp
 {
     ServiceIRQNumbers stale_irqs = ServiceIRQNumbers__new();
 
-    critical_section(self->lock, {
-        for_each_map(IRQServiceMap, self->irq_services, index, irq, service, {
-            if (service.process == process)
-            {
-                match_result(
-                    ServiceIRQNumbers__push(&stale_irqs, irq),
-                    success_do_nothing(),
-                    error(code, message) { cs_return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL); }
-                );
-            }
-        });
-        for_each_fa(ServiceIRQNumbers, stale_irqs, irq_index, irq,
-                    { IRQServiceMap__delete(&self->irq_services, irq); });
-        process->service.active_irq_event = None(ServiceEvent);
-    });
+    critical_section(
+        self->lock,
+        {
+            for_each_map(
+                IRQServiceMap,
+                self->irq_services,
+                index,
+                irq,
+                service,
+                {
+                    if (service.process == process)
+                    {
+                        match_result(
+                            ServiceIRQNumbers__push(&stale_irqs, irq),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                cs_return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL);
+                            }
+                        );
+                    }
+                }
+            );
+            for_each_fa(
+                ServiceIRQNumbers,
+                stale_irqs,
+                irq_index,
+                irq,
+                {
+                    IRQServiceMap__delete(&self->irq_services, irq);
+                }
+            );
+            process->service.active_irq_event = None(ServiceEvent);
+        }
+    );
 
     return ServiceEventDispatcher__remove_ready_waiter(self, process);
 }
@@ -252,26 +299,38 @@ bool ServiceEventDispatcher__is_ready(ServiceEventDispatcherPtr self, ConstBStri
 {
     bool ready = false;
 
-    critical_section(self->lock, {
-        match_find_result(
-            ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
-            some(match) { ready = true; },
-            none_do_nothing()
-        );
-    });
+    critical_section(
+        self->lock,
+        {
+            match_find_result(
+                ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
+                some(match)
+                {
+                    ready = true;
+                },
+                none_do_nothing()
+            );
+        }
+    );
 
     return ready;
 }
 
 Optional(ProcessPtr) ServiceEventDispatcher__ready_process(ServiceEventDispatcherPtr self, ConstBStringPtr name)
 {
-    critical_section(self->lock, {
-        match_find_result(
-            ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
-            some(match) { cs_return Some(ProcessPtr, match.process); },
-            none_do_nothing()
-        );
-    });
+    critical_section(
+        self->lock,
+        {
+            match_find_result(
+                ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
+                some(match)
+                {
+                    cs_return Some(ProcessPtr, match.process);
+                },
+                none_do_nothing()
+            );
+        }
+    );
 
     return None(ProcessPtr);
 }
@@ -280,51 +339,60 @@ Result(ServiceCode)
     ServiceEventDispatcher__publish_ready(ServiceEventDispatcherPtr self, ProcessPtr process, ConstBStringPtr name,
                                           ServiceReadyProcessesPtr ready_processes)
 {
-    critical_section(self->lock, {
-        match_find_result(
-            ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
-            some_do_nothing(),
-            none()
-            {
-                ServiceReadyName ready_name = ServiceReadyName__new(name, process);
-                match_result(
-                    ServiceReadyNames__push(&self->ready_names, ready_name),
-                    success_do_nothing(),
-                    error(code, message)
-                    {
-                        cs_return Error(ServiceCode, service_ready_names_full, SERVICE_EVENT_QUEUE_FULL);
-                    }
-                );
-            }
-        );
+    critical_section(
+        self->lock,
+        {
+            match_find_result(
+                ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
+                some_do_nothing(),
+                none()
+                {
+                    ServiceReadyName ready_name = ServiceReadyName__new(name, process);
+                    match_result(
+                        ServiceReadyNames__push(&self->ready_names, ready_name),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            cs_return Error(ServiceCode, service_ready_names_full, SERVICE_EVENT_QUEUE_FULL);
+                        }
+                    );
+                }
+            );
 
-        ServiceReadyWaiters retained_waiters = ServiceReadyWaiters__new();
-        for_each_fa(ServiceReadyWaiters, self->ready_waiters, index, waiter, {
-            if (BString__equals(&waiter.name, name))
-            {
-                match_result(
-                    ServiceReadyProcesses__push(ready_processes, waiter.process),
-                    success_do_nothing(),
-                    error(code, message)
+            ServiceReadyWaiters retained_waiters = ServiceReadyWaiters__new();
+            for_each_fa(
+                ServiceReadyWaiters,
+                self->ready_waiters,
+                index,
+                waiter,
+                {
+                    if (BString__equals(&waiter.name, name))
                     {
-                        cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL);
+                        match_result(
+                            ServiceReadyProcesses__push(ready_processes, waiter.process),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL);
+                            }
+                        );
                     }
-                );
-            }
-            else
-            {
-                match_result(
-                    ServiceReadyWaiters__push(&retained_waiters, waiter),
-                    success_do_nothing(),
-                    error(code, message)
+                    else
                     {
-                        cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL);
+                        match_result(
+                            ServiceReadyWaiters__push(&retained_waiters, waiter),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL);
+                            }
+                        );
                     }
-                );
-            }
-        });
-        self->ready_waiters = retained_waiters;
-    });
+                }
+            );
+            self->ready_waiters = retained_waiters;
+        }
+    );
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -332,49 +400,64 @@ Result(ServiceCode)
 Result(ServiceCode)
     ServiceEventDispatcher__wait_ready(ServiceEventDispatcherPtr self, ProcessPtr process, ConstBStringPtr name)
 {
-    critical_section(self->lock, {
-        match_find_result(
-            ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
-            some(match) { cs_return Success(ServiceCode, SERVICE_OK); },
-            none_do_nothing()
-        );
+    critical_section(
+        self->lock,
+        {
+            match_find_result(
+                ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
+                some(match)
+                {
+                    cs_return Success(ServiceCode, SERVICE_OK);
+                },
+                none_do_nothing()
+            );
 
-        ServiceReadyWaiter waiter;
-        waiter.process = process;
-        waiter.name = BString__slice(name, 0, BString__length(name));
+            ServiceReadyWaiter waiter;
+            waiter.process = process;
+            waiter.name = BString__slice(name, 0, BString__length(name));
 
-        match_result(
-            ServiceReadyWaiters__push(&self->ready_waiters, waiter),
-            success_do_nothing(),
-            error(code, message)
-            {
-                cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL);
-            }
-        );
-    });
+            match_result(
+                ServiceReadyWaiters__push(&self->ready_waiters, waiter),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL);
+                }
+            );
+        }
+    );
 
     return Success(ServiceCode, SERVICE_OK);
 }
 
 Result(ServiceCode) ServiceEventDispatcher__remove_ready_waiter(ServiceEventDispatcherPtr self, ProcessPtr process)
 {
-    critical_section(self->lock, {
-        while (true)
+    critical_section(
+        self->lock,
         {
-            match_find_result(
-                ServiceReadyWaiters__find(&self->ready_waiters, ServiceReadyWaiter__matches_process, process),
-                some(waiter)
-                {
-                    match_result(
-                        ServiceReadyWaiters__remove(&self->ready_waiters, waiter),
-                        success_do_nothing(),
-                        error(code, message) { cs_return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR); }
-                    );
-                },
-                none() { cs_return Success(ServiceCode, SERVICE_OK); }
-            );
+            while (true)
+            {
+                match_find_result(
+                    ServiceReadyWaiters__find(&self->ready_waiters, ServiceReadyWaiter__matches_process, process),
+                    some(waiter)
+                    {
+                        match_result(
+                            ServiceReadyWaiters__remove(&self->ready_waiters, waiter),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                cs_return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR);
+                            }
+                        );
+                    },
+                    none()
+                    {
+                        cs_return Success(ServiceCode, SERVICE_OK);
+                    }
+                );
+            }
         }
-    });
+    );
 
     return Success(ServiceCode, SERVICE_OK);
 }

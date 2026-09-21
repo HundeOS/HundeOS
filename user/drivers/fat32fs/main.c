@@ -166,7 +166,10 @@ static ServiceCode Fat32fs__connect_block_protocol(ConstBStringPtr device_path)
             fat32fs_block_protocol = channel;
             return SERVICE_OK;
         },
-        error(code, message) { return (ServiceCode)code; }
+        error(code, message)
+        {
+            return (ServiceCode)code;
+        }
     );
 }
 
@@ -224,7 +227,10 @@ static Result(Fat32fsSectorData) Fat32fs__read_sector(Fat32fsVolumePtr self, uin
                 return Error(Fat32fsSectorData, fat32fs_io_error, FAT32FS_IO_ERROR);
             }
         },
-        error(code, message) { return Error(Fat32fsSectorData, message, code); }
+        error(code, message)
+        {
+            return Error(Fat32fsSectorData, message, code);
+        }
     );
 
     return Success(Fat32fsSectorData, target);
@@ -241,7 +247,10 @@ static Result(Fat32fsCode) Fat32fs__write_sector(Fat32fsVolumePtr self, uint32_t
                 return Error(Fat32fsCode, fat32fs_io_error, FAT32FS_IO_ERROR);
             }
         },
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
 
     return Success(Fat32fsCode, FAT32FS_OK);
@@ -267,7 +276,10 @@ static Result(Fat32fsCode) Fat32fsVolume__mount(Fat32fsVolumePtr self)
     Fat32fsSectorData sector;
     match_result(
         Fat32fs__read_sector(self, 0),
-        success(data) { sector = data; },
+        success(data)
+        {
+            sector = data;
+        },
         error(code, message)
         {
             DRIVER_DEBUG("fat32fs: failed to read boot sector\n");
@@ -489,8 +501,14 @@ static Result(uint32_t) Fat32fsVolume__read_fat_entry(Fat32fsVolumePtr self, uin
     Fat32fsSectorData sector;
     match_result(
         Fat32fs__read_sector(self, self->fat_start_sector + relative_sector),
-        success(data) { sector = data; },
-        error(code, message) { return Error(uint32_t, message, code); }
+        success(data)
+        {
+            sector = data;
+        },
+        error(code, message)
+        {
+            return Error(uint32_t, message, code);
+        }
     );
 
     return Success(uint32_t, Fat32fs__read_u32(sector.data, sector_offset) & 0x0fffffffU);
@@ -508,14 +526,23 @@ static Result(Fat32fsCode) Fat32fsVolume__write_fat_entry(Fat32fsVolumePtr self,
         Fat32fsSectorData sector;
         match_result(
             Fat32fs__read_sector(self, fat_sector),
-            success(data) { sector = data; },
-            error(code, message) { return Error(Fat32fsCode, message, code); }
+            success(data)
+            {
+                sector = data;
+            },
+            error(code, message)
+            {
+                return Error(Fat32fsCode, message, code);
+            }
         );
         Fat32fs__write_u32(sector.data, sector_offset, value & 0x0fffffffU);
         match_result(
             Fat32fs__write_sector(self, fat_sector, &sector.data),
             success_do_nothing(),
-            error(code, message) { return Error(Fat32fsCode, message, code); }
+            error(code, message)
+            {
+                return Error(Fat32fsCode, message, code);
+            }
         );
     }
 
@@ -535,7 +562,10 @@ static Result(uint32_t) Fat32fsVolume__find_free_cluster(Fat32fsVolumePtr self)
                     return Success(uint32_t, current);
                 }
             },
-            error(code, message) { return Error(uint32_t, message, code); }
+            error(code, message)
+            {
+                return Error(uint32_t, message, code);
+            }
         );
     }
 
@@ -554,7 +584,10 @@ static Result(Fat32fsCode) Fat32fsVolume__free_cluster_chain(Fat32fsVolumePtr se
                 match_result(
                     Fat32fsVolume__write_fat_entry(self, cluster, FAT32FS_EMPTY_CLUSTER),
                     success_do_nothing(),
-                    error(code, message) { return Error(Fat32fsCode, message, code); }
+                    error(code, message)
+                    {
+                        return Error(Fat32fsCode, message, code);
+                    }
                 );
 
                 if (Fat32fs__is_end_of_chain(next_cluster) || next_cluster == FAT32FS_EMPTY_CLUSTER)
@@ -564,7 +597,10 @@ static Result(Fat32fsCode) Fat32fsVolume__free_cluster_chain(Fat32fsVolumePtr se
 
                 cluster = next_cluster;
             },
-            error(code, message) { return Error(Fat32fsCode, message, code); }
+            error(code, message)
+            {
+                return Error(Fat32fsCode, message, code);
+            }
         );
     }
 
@@ -584,8 +620,14 @@ static Result(Fat32fsDirectoryEntryLocation)
         Fat32fsSectorData directory_sector;
         match_result(
             Fat32fs__read_sector(self, directory_sector_start + relative_sector),
-            success(data) { directory_sector = data; },
-            error(code, message) { return Error(Fat32fsDirectoryEntryLocation, message, code); }
+            success(data)
+            {
+                directory_sector = data;
+            },
+            error(code, message)
+            {
+                return Error(Fat32fsDirectoryEntryLocation, message, code);
+            }
         );
 
         for (size_t entry_offset = 0; entry_offset < FAT32FS_BYTES_PER_SECTOR; entry_offset += FAT32FS_ROOT_ENTRY_SIZE)
@@ -635,8 +677,14 @@ static Result(Fat32fsDirectoryEntryLocation)
         Fat32fsSectorData directory_sector;
         match_result(
             Fat32fs__read_sector(self, directory_sector_start + relative_sector),
-            success(data) { directory_sector = data; },
-            error(code, message) { return Error(Fat32fsDirectoryEntryLocation, message, code); }
+            success(data)
+            {
+                directory_sector = data;
+            },
+            error(code, message)
+            {
+                return Error(Fat32fsDirectoryEntryLocation, message, code);
+            }
         );
 
         for (size_t entry_offset = 0; entry_offset < FAT32FS_BYTES_PER_SECTOR; entry_offset += FAT32FS_ROOT_ENTRY_SIZE)
@@ -666,8 +714,14 @@ static Result(Fat32fsDirectoryEntries) Fat32fsVolume__list_directory(Fat32fsVolu
         Fat32fsSectorData sector;
         match_result(
             Fat32fs__read_sector(self, directory_sector + relative_sector),
-            success(data) { sector = data; },
-            error(code, message) { return Error(Fat32fsDirectoryEntries, message, code); }
+            success(data)
+            {
+                sector = data;
+            },
+            error(code, message)
+            {
+                return Error(Fat32fsDirectoryEntries, message, code);
+            }
         );
 
         for (size_t offset = 0; offset < FAT32FS_BYTES_PER_SECTOR; offset += FAT32FS_ROOT_ENTRY_SIZE)
@@ -699,7 +753,10 @@ static Result(Fat32fsDirectoryEntries) Fat32fsVolume__list_directory(Fat32fsVolu
             match_result(
                 Fat32fsDirectoryEntries__push(&entries, entry),
                 success_do_nothing(),
-                error(code, message) { return Error(Fat32fsDirectoryEntries, message, code); }
+                error(code, message)
+                {
+                    return Error(Fat32fsDirectoryEntries, message, code);
+                }
             );
             Fat32fs__clear_lfn(&lfn_name, &lfn_checksum, &lfn_valid);
         }
@@ -723,8 +780,14 @@ static Result(Fat32fsResolvedParent) Fat32fsVolume__resolve_parent(Fat32fsVolume
     Fat32fsResolvedParent resolved = Fat32fsResolvedParent__new(self->root_cluster, &empty_name);
     match_optional(
         BStringArray__at(&segments, segment_count - 1),
-        some(segment) { resolved.leaf_name = segment; },
-        none() { return Error(Fat32fsResolvedParent, fat32fs_invalid_path, FAT32FS_INVALID_PATH); }
+        some(segment)
+        {
+            resolved.leaf_name = segment;
+        },
+        none()
+        {
+            return Error(Fat32fsResolvedParent, fat32fs_invalid_path, FAT32FS_INVALID_PATH);
+        }
     );
 
     for (size_t i = 0; i + 1 < segment_count; i++)
@@ -732,22 +795,40 @@ static Result(Fat32fsResolvedParent) Fat32fsVolume__resolve_parent(Fat32fsVolume
         BString segment = empty_bstr();
         match_optional(
             BStringArray__at(&segments, i),
-            some(path_segment) { segment = path_segment; },
-            none() { return Error(Fat32fsResolvedParent, fat32fs_invalid_path, FAT32FS_INVALID_PATH); }
+            some(path_segment)
+            {
+                segment = path_segment;
+            },
+            none()
+            {
+                return Error(Fat32fsResolvedParent, fat32fs_invalid_path, FAT32FS_INVALID_PATH);
+            }
         );
 
         Fat32fsDirectoryEntryLocation location;
         match_result(
             Fat32fsVolume__find_directory_entry(self, resolved.parent_cluster, &segment),
-            success(found) { location = found; },
-            error(code, message) { return Error(Fat32fsResolvedParent, message, code); }
+            success(found)
+            {
+                location = found;
+            },
+            error(code, message)
+            {
+                return Error(Fat32fsResolvedParent, message, code);
+            }
         );
 
         Fat32fsSectorData directory_sector;
         match_result(
             Fat32fs__read_sector(self, location.sector),
-            success(data) { directory_sector = data; },
-            error(code, message) { return Error(Fat32fsResolvedParent, message, code); }
+            success(data)
+            {
+                directory_sector = data;
+            },
+            error(code, message)
+            {
+                return Error(Fat32fsResolvedParent, message, code);
+            }
         );
         uint32_t next_cluster = Fat32fs__read_directory_cluster(&directory_sector.data[location.offset]);
         if (!Fat32fsDirectorySector__entry_is_directory(&directory_sector, location.offset) || next_cluster < 2)
@@ -773,7 +854,10 @@ static Result(Fat32fsDirectoryEntryLocation) Fat32fsVolume__entry_at_path(Fat32f
         {
             return Fat32fsVolume__find_directory_entry(self, resolved.parent_cluster, &resolved.leaf_name);
         },
-        error(code, message) { return Error(Fat32fsDirectoryEntryLocation, message, code); }
+        error(code, message)
+        {
+            return Error(Fat32fsDirectoryEntryLocation, message, code);
+        }
     );
 }
 
@@ -794,7 +878,10 @@ static Result(Fat32fsClusterOffset)
                 }
                 current = next;
             },
-            error(code, message) { return Error(Fat32fsClusterOffset, message, code); }
+            error(code, message)
+            {
+                return Error(Fat32fsClusterOffset, message, code);
+            }
         );
     }
 
@@ -813,8 +900,14 @@ static Result(uint32_t)
     Fat32fsResolvedParent resolved;
     match_result(
         Fat32fsVolume__resolve_parent(self, path),
-        success(value) { resolved = value; },
-        error(code, message) { return Error(uint32_t, message, code); }
+        success(value)
+        {
+            resolved = value;
+        },
+        error(code, message)
+        {
+            return Error(uint32_t, message, code);
+        }
     );
 
     uint8_t encoded_name[11];
@@ -833,8 +926,14 @@ static Result(uint32_t)
             Fat32fsSectorData existing;
             match_result(
                 Fat32fs__read_sector(self, entry_location.sector),
-                success(data) { existing = data; },
-                error(code, message) { return Error(uint32_t, message, code); }
+                success(data)
+                {
+                    existing = data;
+                },
+                error(code, message)
+                {
+                    return Error(uint32_t, message, code);
+                }
             );
             uint32_t old_cluster = Fat32fs__read_directory_cluster(&existing.data[entry_location.offset]);
             if (Fat32fsDirectorySector__entry_is_directory(&existing, entry_location.offset) || old_cluster < 2)
@@ -844,7 +943,10 @@ static Result(uint32_t)
             match_result(
                 Fat32fsVolume__free_cluster_chain(self, old_cluster),
                 success_do_nothing(),
-                error(code, message) { return Error(uint32_t, message, code); }
+                error(code, message)
+                {
+                    return Error(uint32_t, message, code);
+                }
             );
             first_cluster = old_cluster;
         },
@@ -861,15 +963,24 @@ static Result(uint32_t)
     {
         match_result(
             Fat32fsVolume__find_free_cluster(self),
-            success(cluster) { first_cluster = cluster; },
-            error(code, message) { return Error(uint32_t, message, code); }
+            success(cluster)
+            {
+                first_cluster = cluster;
+            },
+            error(code, message)
+            {
+                return Error(uint32_t, message, code);
+            }
         );
     }
 
     match_result(
         Fat32fsVolume__write_fat_entry(self, first_cluster, FAT32FS_END_OF_CHAIN),
         success_do_nothing(),
-        error(code, message) { return Error(uint32_t, message, code); }
+        error(code, message)
+        {
+            return Error(uint32_t, message, code);
+        }
     );
 
     Fat32fsSector file_sector;
@@ -881,23 +992,38 @@ static Result(uint32_t)
     match_result(
         Fat32fs__write_sector(self, Fat32fsVolume__cluster_sector(self, first_cluster), &file_sector),
         success_do_nothing(),
-        error(code, message) { return Error(uint32_t, message, code); }
+        error(code, message)
+        {
+            return Error(uint32_t, message, code);
+        }
     );
 
     if (entry_location.sector == 0)
     {
         match_result(
             Fat32fsVolume__find_free_directory_entry(self, resolved.parent_cluster),
-            success(location) { entry_location = location; },
-            error(code, message) { return Error(uint32_t, message, code); }
+            success(location)
+            {
+                entry_location = location;
+            },
+            error(code, message)
+            {
+                return Error(uint32_t, message, code);
+            }
         );
     }
 
     Fat32fsSectorData directory_sector;
     match_result(
         Fat32fs__read_sector(self, entry_location.sector),
-        success(data) { directory_sector = data; },
-        error(code, message) { return Error(uint32_t, message, code); }
+        success(data)
+        {
+            directory_sector = data;
+        },
+        error(code, message)
+        {
+            return Error(uint32_t, message, code);
+        }
     );
 
     memcpy(&directory_sector.data[entry_location.offset], encoded_name, 11);
@@ -907,7 +1033,10 @@ static Result(uint32_t)
     match_result(
         Fat32fs__write_sector(self, entry_location.sector, &directory_sector.data),
         success_do_nothing(),
-        error(code, message) { return Error(uint32_t, message, code); }
+        error(code, message)
+        {
+            return Error(uint32_t, message, code);
+        }
     );
 
     return Success(uint32_t, first_cluster);
@@ -918,8 +1047,14 @@ static Result(Fat32fsCode) Fat32fsVolume__create_directory_at_path(Fat32fsVolume
     Fat32fsResolvedParent resolved;
     match_result(
         Fat32fsVolume__resolve_parent(self, path),
-        success(value) { resolved = value; },
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        success(value)
+        {
+            resolved = value;
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
 
     uint8_t encoded_name[11];
@@ -930,7 +1065,10 @@ static Result(Fat32fsCode) Fat32fsVolume__create_directory_at_path(Fat32fsVolume
 
     match_result(
         Fat32fsVolume__find_directory_entry(self, resolved.parent_cluster, &resolved.leaf_name),
-        success(existing) { return Error(Fat32fsCode, fat32fs_already_exists, FAT32FS_ALREADY_EXISTS); },
+        success(existing)
+        {
+            return Error(Fat32fsCode, fat32fs_already_exists, FAT32FS_ALREADY_EXISTS);
+        },
         error(code, message)
         {
             if (code != FAT32FS_NOT_FOUND)
@@ -943,19 +1081,34 @@ static Result(Fat32fsCode) Fat32fsVolume__create_directory_at_path(Fat32fsVolume
     uint32_t cluster;
     match_result(
         Fat32fsVolume__find_free_cluster(self),
-        success(found_cluster) { cluster = found_cluster; },
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        success(found_cluster)
+        {
+            cluster = found_cluster;
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
     match_result(
         Fat32fsVolume__write_fat_entry(self, cluster, FAT32FS_END_OF_CHAIN),
         success_do_nothing(),
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
     Fat32fsDirectoryEntryLocation entry_location;
     match_result(
         Fat32fsVolume__find_free_directory_entry(self, resolved.parent_cluster),
-        success(location) { entry_location = location; },
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        success(location)
+        {
+            entry_location = location;
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
 
     Fat32fsSector empty_directory;
@@ -963,14 +1116,23 @@ static Result(Fat32fsCode) Fat32fsVolume__create_directory_at_path(Fat32fsVolume
     match_result(
         Fat32fs__write_sector(self, Fat32fsVolume__cluster_sector(self, cluster), &empty_directory),
         success_do_nothing(),
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
 
     Fat32fsSectorData directory_sector;
     match_result(
         Fat32fs__read_sector(self, entry_location.sector),
-        success(data) { directory_sector = data; },
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        success(data)
+        {
+            directory_sector = data;
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
 
     memcpy(&directory_sector.data[entry_location.offset], encoded_name, 11);
@@ -988,17 +1150,32 @@ static Result(Fat32fsCode) Fat32fsVolume__remove_directory_children(Fat32fsVolum
     Fat32fsDirectoryEntries entries;
     match_result(
         Fat32fsVolume__list_directory(self, directory_cluster),
-        success(result) { entries = result; },
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        success(result)
+        {
+            entries = result;
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
 
-    for_each_fa(Fat32fsDirectoryEntries, entries, index, entry, {
-        match_result(
-            Fat32fsVolume__remove_entry_in_directory(self, directory_cluster, &entry.name, IO_REMOVE_RECURSIVE),
-            success_do_nothing(),
-            error(code, message) { return Error(Fat32fsCode, message, code); }
-        );
-    });
+    for_each_fa(
+        Fat32fsDirectoryEntries,
+        entries,
+        index,
+        entry,
+        {
+            match_result(
+                Fat32fsVolume__remove_entry_in_directory(self, directory_cluster, &entry.name, IO_REMOVE_RECURSIVE),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(Fat32fsCode, message, code);
+                }
+            );
+        }
+    );
 
     return Success(Fat32fsCode, FAT32FS_OK);
 }
@@ -1009,15 +1186,27 @@ static Result(Fat32fsCode) Fat32fsVolume__remove_entry_in_directory(Fat32fsVolum
     Fat32fsDirectoryEntryLocation entry_location;
     match_result(
         Fat32fsVolume__find_directory_entry(self, directory_cluster, name),
-        success(location) { entry_location = location; },
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        success(location)
+        {
+            entry_location = location;
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
 
     Fat32fsSectorData directory_sector;
     match_result(
         Fat32fs__read_sector(self, entry_location.sector),
-        success(data) { directory_sector = data; },
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        success(data)
+        {
+            directory_sector = data;
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
 
     uint32_t first_cluster = Fat32fs__read_directory_cluster(&directory_sector.data[entry_location.offset]);
@@ -1031,8 +1220,14 @@ static Result(Fat32fsCode) Fat32fsVolume__remove_entry_in_directory(Fat32fsVolum
         Fat32fsDirectoryEntries entries;
         match_result(
             Fat32fsVolume__list_directory(self, first_cluster),
-            success(result) { entries = result; },
-            error(code, message) { return Error(Fat32fsCode, message, code); }
+            success(result)
+            {
+                entries = result;
+            },
+            error(code, message)
+            {
+                return Error(Fat32fsCode, message, code);
+            }
         );
         if (Fat32fsDirectoryEntries__len(&entries) > 0 && (flags & IO_REMOVE_RECURSIVE) == 0)
         {
@@ -1043,7 +1238,10 @@ static Result(Fat32fsCode) Fat32fsVolume__remove_entry_in_directory(Fat32fsVolum
             match_result(
                 Fat32fsVolume__remove_directory_children(self, first_cluster),
                 success_do_nothing(),
-                error(code, message) { return Error(Fat32fsCode, message, code); }
+                error(code, message)
+                {
+                    return Error(Fat32fsCode, message, code);
+                }
             );
         }
     }
@@ -1052,7 +1250,10 @@ static Result(Fat32fsCode) Fat32fsVolume__remove_entry_in_directory(Fat32fsVolum
     match_result(
         Fat32fs__write_sector(self, entry_location.sector, &directory_sector.data),
         success_do_nothing(),
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
     return Fat32fsVolume__free_cluster_chain(self, first_cluster);
 }
@@ -1065,7 +1266,10 @@ static Result(Fat32fsCode) Fat32fsVolume__remove_at_path(Fat32fsVolumePtr self, 
         {
             return Fat32fsVolume__remove_entry_in_directory(self, resolved.parent_cluster, &resolved.leaf_name, flags);
         },
-        error(code, message) { return Error(Fat32fsCode, message, code); }
+        error(code, message)
+        {
+            return Error(Fat32fsCode, message, code);
+        }
     );
 }
 
@@ -1086,13 +1290,25 @@ static DirectoryEntryCount Fat32fsVolume__list_dir_from(Fat32fsVolumePtr self, C
         Fat32fsSectorData sector;
         match_result(
             Fat32fsVolume__entry_at_path(self, path),
-            success(entry_location) { location = entry_location; },
-            error(code, message) { return IO_INVALID_PATH; }
+            success(entry_location)
+            {
+                location = entry_location;
+            },
+            error(code, message)
+            {
+                return IO_INVALID_PATH;
+            }
         );
         match_result(
             Fat32fs__read_sector(self, location.sector),
-            success(data) { sector = data; },
-            error(code, message) { return IO_INVALID_PATH; }
+            success(data)
+            {
+                sector = data;
+            },
+            error(code, message)
+            {
+                return IO_INVALID_PATH;
+            }
         );
         if (!Fat32fsDirectorySector__entry_is_directory(&sector, location.offset))
         {
@@ -1104,23 +1320,35 @@ static DirectoryEntryCount Fat32fsVolume__list_dir_from(Fat32fsVolumePtr self, C
     Fat32fsDirectoryEntries source;
     match_result(
         Fat32fsVolume__list_directory(self, cluster),
-        success(entries_result) { source = entries_result; },
-        error(code, message) { return IO_INVALID_PATH; }
+        success(entries_result)
+        {
+            source = entries_result;
+        },
+        error(code, message)
+        {
+            return IO_INVALID_PATH;
+        }
     );
 
     DirectoryEntryCount count = 0;
-    for_each_fa(Fat32fsDirectoryEntries, source, index, entry, {
-        if (skip > 0)
+    for_each_fa(
+        Fat32fsDirectoryEntries,
+        source,
+        index,
+        entry,
         {
-            skip--;
-            continue;
+            if (skip > 0)
+            {
+                skip--;
+                continue;
+            }
+            if ((size_t)count < max_entries)
+            {
+                entries[count] = Fat32fs__directory_entry(&entry);
+                count++;
+            }
         }
-        if ((size_t)count < max_entries)
-        {
-            entries[count] = Fat32fs__directory_entry(&entry);
-            count++;
-        }
-    });
+    );
 
     return count;
 }
@@ -1132,14 +1360,26 @@ static Result(FilesystemFileSize)
     Fat32fsDirectoryEntryLocation location;
     match_result(
         Fat32fsVolume__entry_at_path(volume, path),
-        success(value) { location = value; },
-        error(code, message) { return Error(FilesystemFileSize, message, IO_INVALID_PATH); }
+        success(value)
+        {
+            location = value;
+        },
+        error(code, message)
+        {
+            return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+        }
     );
     Fat32fsSectorData entry;
     match_result(
         Fat32fs__read_sector(volume, location.sector),
-        success(value) { entry = value; },
-        error(code, message) { return Error(FilesystemFileSize, message, IO_INVALID_PATH); }
+        success(value)
+        {
+            entry = value;
+        },
+        error(code, message)
+        {
+            return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+        }
     );
     if (Fat32fsDirectorySector__entry_is_directory(&entry, location.offset))
     {
@@ -1156,8 +1396,14 @@ static Result(FilesystemFileSize)
         Fat32fsClusterOffset cluster;
         match_result(
             Fat32fsVolume__cluster_for_offset(volume, first_cluster, offset),
-            success(value) { cluster = value; },
-            error(code, message) { return Error(FilesystemFileSize, message, IO_INVALID_PATH); }
+            success(value)
+            {
+                cluster = value;
+            },
+            error(code, message)
+            {
+                return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+            }
         );
         match_result(
             Fat32fs__read_sector(volume, Fat32fsVolume__cluster_sector(volume, cluster.cluster)),
@@ -1170,7 +1416,10 @@ static Result(FilesystemFileSize)
                 }
                 memcpy(data + offset, sector.data, count);
             },
-            error(code, message) { return Error(FilesystemFileSize, message, IO_INVALID_PATH); }
+            error(code, message)
+            {
+                return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+            }
         );
     }
     return Success(FilesystemFileSize, size);
@@ -1182,8 +1431,14 @@ static IOStatus Fat32fs__store(IOServiceContext context, ConstBStringPtr path, F
     Fat32fsVolumePtr volume = context;
     match_result(
         Fat32fsVolume__create_file_at_path(volume, path, data, size),
-        success(value) { return IO_OK; },
-        error(code, message) { return IO_INVALID_PATH; }
+        success(value)
+        {
+            return IO_OK;
+        },
+        error(code, message)
+        {
+            return IO_INVALID_PATH;
+        }
     );
 }
 
@@ -1203,8 +1458,14 @@ static IOStatus Fat32fs__mkdir(IOServiceContext context, ConstBStringPtr path)
     Fat32fsVolumePtr volume = context;
     match_result(
         Fat32fsVolume__create_directory_at_path(volume, path),
-        success(value) { return IO_OK; },
-        error(code, message) { return IO_INVALID_PATH; }
+        success(value)
+        {
+            return IO_OK;
+        },
+        error(code, message)
+        {
+            return IO_INVALID_PATH;
+        }
     );
 }
 
@@ -1213,8 +1474,14 @@ static IOStatus Fat32fs__remove(IOServiceContext context, ConstBStringPtr path, 
     Fat32fsVolumePtr volume = context;
     match_result(
         Fat32fsVolume__remove_at_path(volume, path, flags),
-        success(value) { return IO_OK; },
-        error(code, message) { return IO_INVALID_PATH; }
+        success(value)
+        {
+            return IO_OK;
+        },
+        error(code, message)
+        {
+            return IO_INVALID_PATH;
+        }
     );
 }
 

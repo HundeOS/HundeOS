@@ -80,13 +80,13 @@ static __BOOT_DATA__(MappingPermissions) embedded_binaries_perms = { // hundelin
     .memory_type = ATTR_INDEX_NORMAL, .access = ACCESS_EL1_RO_EL0_NO, .shareability = SHARE_INNER, .uxn = 1, .pxn = 1,
 };
 
-__BOOT__(PageTable *) ensure_next_level_table(PageTable * parent_level_table, uint64_t child_index)
+__BOOT__(PageTablePtr) ensure_next_level_table(PageTablePtr parent_level_table, uint64_t child_index)
 {
     uint64_t descriptor = parent_level_table->entries[child_index];
     // Case 1: already a valid TABLE descriptor → return its next-level base.
     if ((descriptor & FLAG_PTE_VALID) && (descriptor & FLAG_PTE_TABLE))
     {
-        return (PageTable *)(descriptor & MASK_PTE_NEXTADDR);
+        return (PageTablePtr)(descriptor & MASK_PTE_NEXTADDR);
     }
 
     // Case 2: slot holds a valid LEAF (block/page) → caller must split it.
@@ -96,7 +96,7 @@ __BOOT__(PageTable *) ensure_next_level_table(PageTable * parent_level_table, ui
         return NULL; // leaf present; cannot "ensure" a table without a split
     }
 
-    PageTable * next_level_table = &table_pool[table_cursor++];
+    PageTablePtr next_level_table = &table_pool[table_cursor++];
 
     for (int i = 0; i < TABLE_SIZE; i++)
     {
@@ -115,10 +115,11 @@ __BOOT__(PageTable *) ensure_next_level_table(PageTable * parent_level_table, ui
     return next_level_table;
 }
 
-__BOOT__(void) map_2M_block(PageTable * table, uint64_t virtual_address, uint64_t phys_addr, MappingPermissions * perms)
+__BOOT__(void)
+map_2M_block(PageTablePtr table, uint64_t virtual_address, uint64_t phys_addr, MappingPermissionsPtr perms)
 {
-    PageTable * l1_tbl = ensure_next_level_table(table, L0_IDX(virtual_address));
-    PageTable * l2_tbl = ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
+    PageTablePtr l1_tbl = ensure_next_level_table(table, L0_IDX(virtual_address));
+    PageTablePtr l2_tbl = ensure_next_level_table(l1_tbl, L1_IDX(virtual_address));
 
     if (l2_tbl->entries[L2_IDX(virtual_address)] & FLAG_PTE_VALID)
     {
@@ -132,7 +133,7 @@ __BOOT__(void) map_2M_block(PageTable * table, uint64_t virtual_address, uint64_
 }
 
 __BOOT__(void)
-map_range_2M(PageTable * table, uint64_t phys_start, uint64_t phys_end, uint64_t target, MappingPermissions * perms)
+map_range_2M(PageTablePtr table, uint64_t phys_start, uint64_t phys_end, uint64_t target, MappingPermissionsPtr perms)
 {
 
     uint64_t from = align_down_2m(phys_start);
@@ -179,22 +180,22 @@ __BOOT__(void) map_embedded_binaries_ro()
     map_range_2M(&high_mem_l0_table, phys_start, phys_end, target, &embedded_binaries_perms);
 }
 
-__BOOT__(void) map_kernel_all_normal_rwx(uint64_t phys_start, uint64_t phys_end, uint64_t target, PageTable * table)
+__BOOT__(void) map_kernel_all_normal_rwx(uint64_t phys_start, uint64_t phys_end, uint64_t target, PageTablePtr table)
 {
     map_range_2M(table, phys_start, phys_end, target, &kernel_perms);
 }
 
-__BOOT__(void) map_uart(PageTable * table, uint64_t virt_addr, uint64_t phys_addr)
+__BOOT__(void) map_uart(PageTablePtr table, uint64_t virt_addr, uint64_t phys_addr)
 {
     map_2M_block(table, virt_addr, phys_addr, &device_perms);
 }
 
-__BOOT__(void) map_gicd_gicr(PageTable * table, BootPlatformInfoPtr platform)
+__BOOT__(void) map_gicd_gicr(PageTablePtr table, BootPlatformInfoPtr platform)
 {
     map_2M_block(table, platform->gic_distributor_virtual_base, platform->gic_distributor_physical_base, &device_perms);
 }
 
-__BOOT__(void) map_framebuffer(PageTable * table, BootPlatformInfoPtr platform)
+__BOOT__(void) map_framebuffer(PageTablePtr table, BootPlatformInfoPtr platform)
 {
     match_optional(
         platform->framebuffer,
@@ -277,7 +278,7 @@ __BOOT__(void) debug_boot_mappings(SystemInfoPtr system_info)
 }
 #endif
 
-__BOOT__(void) zero_table(PageTable * table)
+__BOOT__(void) zero_table(PageTablePtr table)
 {
     for (int i = 0; i < TABLE_SIZE; i++)
     {

@@ -50,7 +50,7 @@ static Result(UserID) Auth__credential_user_id(ConstBStringPtr username, ConstBS
 
 static bool Auth__ticket_id_matches(AuthTicketPtr ticket, void * context)
 {
-    AuthTicketID ticket_id = *((AuthTicketID *)context);
+    AuthTicketID ticket_id = *((AuthTicketIDPtr)context);
     return ticket->id == ticket_id;
 }
 
@@ -73,24 +73,34 @@ Result(AuthTicketID)
         success(user_id)
         {
             Result(AuthTicketID) result = Error(AuthTicketID, ticket_store_full_message, AUTH_TICKET_STORE_FULL);
-            critical_section(self->lock, {
-                AuthTicketID ticket_id = self->next_ticket_id;
-                self->next_ticket_id++;
+            critical_section(
+                self->lock,
+                {
+                    AuthTicketID ticket_id = self->next_ticket_id;
+                    self->next_ticket_id++;
 
-                AuthTicket ticket = AuthTicket__new(ticket_id, process->pid, user_id);
+                    AuthTicket ticket = AuthTicket__new(ticket_id, process->pid, user_id);
 
-                match_result(
-                    AuthTickets__push(&self->tickets, ticket),
-                    success(_) { result = Success(AuthTicketID, ticket_id); },
-                    error(code, message)
-                    {
-                        result = Error(AuthTicketID, ticket_store_full_message, AUTH_TICKET_STORE_FULL);
-                    }
-                );
-            });
+                    match_result(
+                        AuthTickets__push(&self->tickets, ticket),
+                        success(_)
+                        {
+                            result = Success(AuthTicketID, ticket_id);
+                        },
+                        error(code, message)
+                        {
+                            result =
+                                Error(AuthTicketID, ticket_store_full_message, AUTH_TICKET_STORE_FULL);
+                        }
+                    );
+                }
+            );
             return result;
         },
-        error(code, message) { return Error(AuthTicketID, message, code); }
+        error(code, message)
+        {
+            return Error(AuthTicketID, message, code);
+        }
     );
 
     return Error(AuthTicketID, invalid_credentials_message, AUTH_INVALID_CREDENTIALS);
@@ -99,28 +109,35 @@ Result(AuthTicketID)
 Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicketID ticket_id)
 {
     Result(UserID) auth_result = Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET);
-    critical_section(self->lock, {
-        match_find_result_ptr(
-            AuthTickets__find(&self->tickets, Auth__ticket_id_matches, &ticket_id),
-            some(ticket)
-            {
-                if (ticket->issued_to_pid != process->pid)
+    critical_section(
+        self->lock,
+        {
+            match_find_result_ptr(
+                AuthTickets__find(&self->tickets, Auth__ticket_id_matches, &ticket_id),
+                some(ticket)
                 {
-                    auth_result = Error(UserID, ticket_process_mismatch_message, AUTH_TICKET_FOR_DIFFERENT_PROCESS);
-                }
-                else if (ticket->consumed)
+                    if (ticket->issued_to_pid != process->pid)
+                    {
+                        auth_result = Error(UserID, ticket_process_mismatch_message,
+                                            AUTH_TICKET_FOR_DIFFERENT_PROCESS);
+                    }
+                    else if (ticket->consumed)
+                    {
+                        auth_result = Error(UserID, ticket_consumed_message, AUTH_TICKET_CONSUMED);
+                    }
+                    else
+                    {
+                        ticket->consumed = true;
+                        auth_result = Success(UserID, ticket->user_id);
+                    }
+                },
+                none()
                 {
-                    auth_result = Error(UserID, ticket_consumed_message, AUTH_TICKET_CONSUMED);
+                    auth_result = Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET);
                 }
-                else
-                {
-                    ticket->consumed = true;
-                    auth_result = Success(UserID, ticket->user_id);
-                }
-            },
-            none() { auth_result = Error(UserID, invalid_ticket_message, AUTH_INVALID_TICKET); }
-        );
-    });
+            );
+        }
+    );
 
     return auth_result;
 }
@@ -141,11 +158,20 @@ Result(SystemCallResult) Auth__handler(KernelPtr kernel, OptionalPtr(ProcessPtr)
         {
             match_result(
                 Auth__authenticate(&kernel->auth, process, &request->username, &request->password),
-                success(ticket_id) { return Success(SystemCallResult, ticket_id); },
-                error(code, message) { return Error(SystemCallResult, message, code); }
+                success(ticket_id)
+                {
+                    return Success(SystemCallResult, ticket_id);
+                },
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, code);
+                }
             );
         },
-        none() { return Error(SystemCallResult, no_process_message, AUTH_NO_PROCESS); }
+        none()
+        {
+            return Error(SystemCallResult, no_process_message, AUTH_NO_PROCESS);
+        }
     );
 
     return Error(SystemCallResult, no_process_message, AUTH_NO_PROCESS);

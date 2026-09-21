@@ -18,7 +18,7 @@ __BOOT__(void) boot_vectors_init(void)
     write_vbar_el1((uint64_t)&boot_vector_table);
 }
 
-__BOOT__(void) boot_handler(boot_trapframe_t * trap)
+__BOOT__(void) boot_handler(BootTrapFramePtr trap)
 {
     _print(fault);
     uint64_t esr = rd_esr_el1();

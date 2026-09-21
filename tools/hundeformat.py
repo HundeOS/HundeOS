@@ -12,11 +12,23 @@ import hundelint
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_ROOTS = ("arch", "common", "common_includes", "kernel", "user", "test")
-MATCH_MACROS = {
+MULTILINE_MACROS = {
     "match_optional": (1, 2),
     "match_result": (1, 2),
     "match_find_result": (1, 2),
     "match_find_result_ptr": (1, 2),
+    "critical_section": (0, 1),
+    "critical_section_try": (0, 1, 2),
+    "for_each_ll": (0, 1, 2, 3),
+    "for_each_ll_ptr": (0, 1, 2, 3),
+    "for_each_fa": (0, 1, 2, 3, 4),
+    "for_each_fa_ptr": (0, 1, 2, 3, 4),
+    "for_each_atomic_fa_ptr": (0, 1, 2, 3, 4),
+    "for_each_map": (0, 1, 2, 3, 4, 5),
+    "for_each_map_ptr": (0, 1, 2, 3, 4, 5),
+    "for_each_ring_buffer": (0, 1, 2, 3, 4),
+    "for_each_ring_buffer_ptr": (0, 1, 2, 3, 4),
+    "for_each_bstring": (0, 1, 2, 3),
 }
 
 
@@ -33,7 +45,7 @@ def source_paths(root):
             yield path
 
 
-def preserve_conventions(source):
+def formatting_source(source):
     clean = "\n".join(hundelint._sanitise_source(source))
     lines = []
     continued = False
@@ -41,9 +53,13 @@ def preserve_conventions(source):
         directive = continued or line.lstrip().startswith("#")
         continued = directive and line.rstrip().endswith("\\")
         lines.append(re.sub(r"[^\n]", " ", line) if directive else line)
-    clean = "".join(lines)
+    return "".join(lines)
+
+
+def preserve_conventions(source):
+    clean = formatting_source(source)
     edits = {}
-    for macro, branch_indexes in MATCH_MACROS.items():
+    for macro, branch_indexes in MULTILINE_MACROS.items():
         for offset, args, end in hundelint._iter_macro_call_ranges(clean, macro):
             line_start = clean.rfind("\n", 0, offset) + 1
             prefix = clean[line_start:offset]
@@ -63,13 +79,33 @@ def preserve_conventions(source):
                     whitespace -= 1
                 if whitespace > 0 and source[whitespace - 1] != "\n":
                     edits[whitespace, start] = "\n" + indent
+                line_end = source.find("\n", start)
+                if line_end == -1:
+                    line_end = len(source)
+                if "hundelint:" in source[start:line_end]:
+                    continue
                 first_line = branch.split("\n", 1)[0]
-                if "\n" in branch and "{" in first_line:
+                if "{" in first_line and not branch.startswith("{"):
                     brace = start + first_line.index("{")
                     whitespace = brace
                     while whitespace > start and source[whitespace - 1] in " \t":
                         whitespace -= 1
                     edits[whitespace, brace] = "\n" + indent
+                if macro.startswith("match_") and "{" in branch and branch.endswith("}"):
+                    brace = start + branch.index("{")
+                    closing_brace = start + len(branch) - 1
+                    body_start = brace + 1
+                    while body_start < closing_brace and source[body_start].isspace():
+                        body_start += 1
+                    if body_start < closing_brace:
+                        edits[brace + 1, body_start] = "\n" + indent + "    "
+                    else:
+                        edits[brace + 1, closing_brace] = "\n" + indent
+                        continue
+                    body_end = closing_brace
+                    while body_end > body_start and source[body_end - 1].isspace():
+                        body_end -= 1
+                    edits[body_end, closing_brace] = "\n" + indent
             closing = end - 1
             closing_line_start = clean.rfind("\n", 0, closing) + 1
             if clean[closing_line_start:closing].strip():
@@ -79,7 +115,42 @@ def preserve_conventions(source):
     for (start, end), replacement in sorted(edits.items(), reverse=True):
         source = source[:start] + replacement + source[end:]
 
-    return source
+    return align_macro_blocks(source)
+
+
+def align_macro_blocks(source):
+    clean = formatting_source(source)
+    lines = source.splitlines(keepends=True)
+    clean_lines = clean.splitlines()
+    calls = sorted(
+        call
+        for macro in MULTILINE_MACROS
+        if not macro.startswith("match_")
+        for call in hundelint._iter_macro_call_ranges(clean, macro)
+    )
+    # Align outer blocks first so nested macros inherit the corrected indentation.
+    for offset, args, end in calls:
+        macro_line = source.count("\n", 0, offset)
+        if lines[macro_line].lstrip().startswith("#"):
+            continue
+        indent = len(lines[macro_line]) - len(lines[macro_line].lstrip()) + 4
+        opening = clean.index("(", offset, end)
+        for argument, relative in hundelint._split_macro_args_with_offsets(args):
+            if not argument.startswith("{"):
+                continue
+            first = source.count("\n", 0, opening + 1 + relative)
+            last = first + argument.count("\n")
+            current = len(lines[first]) - len(lines[first].lstrip())
+            delta = indent - current
+            for index in range(first, last + 1):
+                if not clean_lines[index].strip():
+                    continue
+                if delta >= 0:
+                    lines[index] = " " * delta + lines[index]
+                else:
+                    removable = len(lines[index]) - len(lines[index].lstrip(" \t"))
+                    lines[index] = lines[index][min(-delta, removable):]
+    return "".join(lines)
 
 
 def format_source(source, path, command):

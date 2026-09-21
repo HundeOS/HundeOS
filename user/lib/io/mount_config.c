@@ -31,26 +31,50 @@ Result(MountConfig) MountConfig__parse(ConstBStringPtr line)
                 return Error(MountConfig, bstr("invalid fstab command"), 1);
             }
         },
-        none() { return Error(MountConfig, bstr("missing fstab command"), 1); }
+        none()
+        {
+            return Error(MountConfig, bstr("missing fstab command"), 1);
+        }
     );
     match_optional(
         MountConfig__take_token(&remaining),
-        some(value) { config.device_path = value; },
-        none() { return Error(MountConfig, bstr("missing fstab device"), 1); }
+        some(value)
+        {
+            config.device_path = value;
+        },
+        none()
+        {
+            return Error(MountConfig, bstr("missing fstab device"), 1);
+        }
     );
     match_optional(
         MountConfig__take_token(&remaining),
-        some(value) { config.filesystem_type = value; },
-        none() { return Error(MountConfig, bstr("missing fstab filesystem"), 1); }
+        some(value)
+        {
+            config.filesystem_type = value;
+        },
+        none()
+        {
+            return Error(MountConfig, bstr("missing fstab filesystem"), 1);
+        }
     );
     match_optional(
         MountConfig__take_token(&remaining),
-        some(value) { config.mountpoint = value; },
-        none() { return Error(MountConfig, bstr("missing fstab mountpoint"), 1); }
+        some(value)
+        {
+            config.mountpoint = value;
+        },
+        none()
+        {
+            return Error(MountConfig, bstr("missing fstab mountpoint"), 1);
+        }
     );
     match_optional(
         MountConfig__take_token(&remaining),
-        some(value) { return Error(MountConfig, bstr("unexpected fstab token"), 1); },
+        some(value)
+        {
+            return Error(MountConfig, bstr("unexpected fstab token"), 1);
+        },
         none_do_nothing()
     );
     return Success(MountConfig, config);

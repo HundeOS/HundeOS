@@ -30,6 +30,7 @@ struct ChannelSession
     ConstChannelSessionStatePtr state;
     uint64_t address;
     uint64_t length;
+    RequestTicket ticket;
     bool client_closed;
 };
 OptionalDef(ChannelSession);

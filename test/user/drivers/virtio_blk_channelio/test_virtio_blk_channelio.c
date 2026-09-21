@@ -7,6 +7,7 @@
 #define Channel__prepare_wait fake_channel_prepare_wait
 #define Channel__wait_event fake_channel_wait_event
 #define Channel__close fake_channel_close
+#include "../../../../user/lib/interrupt/client.c"
 #include "../../../../user/drivers/virtio_blk_channelio/channelio.c"
 
 static InterruptProtocolResponse pending_response;

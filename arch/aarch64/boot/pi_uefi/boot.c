@@ -122,6 +122,7 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     UefiAcpi__apply_system_table(&pi_uefi_platform_info, pi_uefi_system_table);
 
     pi_uefi_system_info.cpu_count = pi_uefi_platform_info.cpu_count;
+    pi_uefi_system_info.wait_mode = BOOT_WAIT_WFE;
     pi_uefi_system_info.heap_coarse_block_size = SystemInfo__default_heap_coarse_block_size();
 
     pi_uefi_system_info.physical_memory.physical_start = pi_uefi_platform_info.memory_physical_start;

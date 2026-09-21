@@ -7,10 +7,95 @@
 #include "../arch/cache.h"
 #include "../all_defs.h"
 #include "../types/fixed_array.h"
+#include "../arch/process.h"
 
 FixedArrayBodyDefine(SectionHeaderArray);
 FixedArrayBodyDefine(ProgramHeaderArray);
 FixedArrayBodyDefine(ExpandedSegmentArray);
+
+Result(Elf) Elf__validate(ConstElfPtr self)
+{
+    BString invalid = bstr("Invalid executable image");
+    if (self->end < self->start || self->end - self->start < sizeof(Elf64Header))
+    {
+        return Error(Elf, invalid, -1);
+    }
+    uint64_t size = self->end - self->start;
+    ConstElf64HeaderPtr header = Elf__read_header(self);
+    if (header->magic[0] != 0x7f || header->magic[1] != 'E' || header->magic[2] != 'L' || header->magic[3] != 'F' ||
+        header->klass != 2 || header->endianness != LittleEndian || header->ei_version != 1 ||
+        header->elf_version != 1 || header->type != Executable || header->machine != Arch__elf_machine() ||
+        header->header_size != sizeof(Elf64Header) || header->program_header_entry_size != sizeof(ProgramHeader) ||
+        header->program_header_entries == 0 || header->program_header_entries > ProgramHeaderArray__max_size ||
+        header->program_header_offset % _Alignof(ProgramHeader) != 0 || header->program_header_offset > size ||
+        header->program_header_entries > (size - header->program_header_offset) / sizeof(ProgramHeader))
+    {
+        return Error(Elf, invalid, -1);
+    }
+    ProgramHeaderArray headers = Elf__read_program_headers(self);
+    bool entry_found = false;
+    uint64_t memory = 0;
+    for_each_fa(
+        ProgramHeaderArray,
+        headers,
+        index,
+        segment,
+        {
+            if (segment->type == Interpreter || segment->type == Dynamic)
+            {
+                return Error(Elf, invalid, -1);
+            }
+            if (segment->type != Load)
+            {
+                continue;
+            }
+            if (segment->memory_size == 0 || segment->file_size > segment->memory_size ||
+                segment->segment_offset > size || segment->file_size > size - segment->segment_offset ||
+                segment->virtual_address < PAGE_SIZE || segment->virtual_address >= BASE_STACK ||
+                segment->memory_size > BASE_STACK - segment->virtual_address ||
+                segment->flags & ~(Read | Write | Execute) ||
+                (segment->alignment > 1 && ((segment->alignment & (segment->alignment - 1)) != 0 ||
+                                            segment->virtual_address % segment->alignment !=
+                                                segment->segment_offset % segment->alignment)))
+            {
+                return Error(Elf, invalid, -1);
+            }
+            memory += segment->memory_size;
+            if (memory > 128ULL * 1024 * 1024)
+            {
+                return Error(Elf, invalid, -1);
+            }
+            Address start = segment->virtual_address & ~(PAGE_SIZE - 1ULL);
+            Address end =
+                (segment->virtual_address + segment->memory_size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1ULL);
+            for_each_fa(
+                ProgramHeaderArray,
+                headers,
+                other_index,
+                other,
+                {
+                    if (other_index >= index || other->type != Load)
+                    {
+                        continue;
+                    }
+                    Address other_start = other->virtual_address & ~(PAGE_SIZE - 1ULL);
+                    Address other_end = (other->virtual_address + other->memory_size + PAGE_SIZE - 1) &
+                                        ~(PAGE_SIZE - 1ULL);
+                    if (start < other_end && other_start < end)
+                    {
+                        return Error(Elf, invalid, -1);
+                    }
+                }
+            );
+            if ((segment->flags & Execute) && header->entry >= segment->virtual_address &&
+                header->entry - segment->virtual_address < segment->file_size)
+            {
+                entry_found = true;
+            }
+        }
+    );
+    return entry_found ? Success(Elf, *self) : Error(Elf, invalid, -1);
+}
 
 static Address Elf__page_start(Address address)
 {
@@ -164,13 +249,19 @@ Optional(ExpandedSegment) Elf__entry_segment(ConstElfPtr self, ExpandedSegmentAr
     Address entry = Elf__read_header(self)->entry;
     ExpandedSegmentArray segments = *expanded_segments;
 
-    for_each_fa(ExpandedSegmentArray, segments, i, segment, {
-        Address start = segment.address.virtual_addr;
-        Address end = start + segment.size;
-        if (entry >= start && entry < end)
+    for_each_fa(
+        ExpandedSegmentArray,
+        segments,
+        i,
+        segment,
         {
-            return Some(ExpandedSegment, segment);
+            Address start = segment.address.virtual_addr;
+            Address end = start + segment.size;
+            if (entry >= start && entry < end)
+            {
+                return Some(ExpandedSegment, segment);
+            }
         }
-    });
+    );
     return None(ExpandedSegment);
 }

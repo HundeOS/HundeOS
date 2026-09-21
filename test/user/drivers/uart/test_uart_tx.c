@@ -35,25 +35,29 @@ static const char fake_sysinfo[] = "uart.physical_base=0x12345000\n"
                                    "uart.irq=99\n"
                                    "uart.mmio_size=0x1000\n";
 
-static uint32_t fake_uart_read32(void * base, uint64_t offset);
-static void fake_uart_write32(void * base, uint64_t offset, uint32_t value);
+uint32_t Uart__read32(Address base, uint64_t offset);
+void Uart__write32(Address base, uint64_t offset, uint32_t value);
 
-#define UART_TX_ENTRYPOINT uart_tx_main_under_test
-#define UART_READ32 fake_uart_read32
-#define UART_WRITE32 fake_uart_write32
+#include "../stream_runtime.h"
+#define main uart_tx_driver_main
 #include "../../../../user/drivers/uart_tx/main.c"
-
-static uint32_t fake_uart_read32(void * base, uint64_t offset)
+#undef main
+static int uart_tx_main_under_test(void)
 {
-    TEST_ASSERT_NOT_NULL(base);
+    return StreamDriverTest__run(uart_tx_driver_main);
+}
+
+uint32_t Uart__read32(Address base, uint64_t offset)
+{
+    TEST_ASSERT_NOT_EQUAL(0, base);
     TEST_ASSERT_EQUAL_UINT64(UART_FR, offset);
     fake_uart_fr_read_count++;
     return fake_uart_fr_read_count == 1 ? FR_TXFF : 0;
 }
 
-static void fake_uart_write32(void * base, uint64_t offset, uint32_t value)
+void Uart__write32(Address base, uint64_t offset, uint32_t value)
 {
-    TEST_ASSERT_NOT_NULL(base);
+    TEST_ASSERT_NOT_EQUAL(0, base);
     TEST_ASSERT_EQUAL_UINT64(UART_DR, offset);
     TEST_ASSERT_LESS_THAN_UINT64(4, fake_uart_write_count);
     fake_uart_writes[fake_uart_write_count++] = value;
@@ -81,16 +85,6 @@ void setUp(void)
 
 void tearDown(void)
 {
-}
-
-SyslogResult kernel_syslogf(const char * format, ...)
-{
-    return SYSLOG_OK;
-}
-
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
-{
-    return SYSLOG_OK;
 }
 
 ServiceCode service_become_service()
@@ -143,7 +137,10 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     match_result(
         DynString__init(&sysinfo, 128),
         success_do_nothing(),
-        error(code, message) { return None(DynString); }
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
     {
@@ -185,60 +182,24 @@ size_t mapped_size(ServiceMappedMemoryPtr memory)
     return memory->size;
 }
 
-IOHandle io_server_register(ConstBStringPtr path, IOServerRole role)
-{
-    TEST_ASSERT_EQUAL_BSTRING(bstr(":tty:"), *path);
-    TEST_ASSERT_EQUAL_INT(IO_SERVER_WRITE, role);
-    return 43;
-}
-
-ServiceCode service_subscribe_irq(uint64_t irq)
-{
-    TEST_FAIL_MESSAGE("tx driver should not subscribe to an irq");
-    return SERVICE_OK;
-}
-
-ServiceCode service_wait(ServiceEventPtr event)
+void StreamDriverTest__step(IOStreamDriverPtr driver)
 {
     fake_service_wait_count++;
-    TEST_ASSERT_LESS_THAN_UINT64(3, fake_service_wait_count);
     if (fake_data_consumed)
     {
-        return SERVICE_COMPLETE;
+        StreamDriverTest__stop();
     }
-
-    event->type = SERVICE_EVENT_IO;
-    event->source = SERVICE_IO_WRITE_REQUEST;
-    event->data = 0;
-    return SERVICE_OK;
-}
-
-IOStatus io_server_get_buffer(IOHandle handle, IOServerBufferPtr buffer)
-{
-    TEST_ASSERT_EQUAL_INT64(43, handle);
-    buffer->data = fake_io_buffer;
-    buffer->capacity = sizeof(fake_io_buffer);
-    return IO_OK;
-}
-
-IOStatus io_server_data_available(IOHandle handle, uint64_t byte_count)
-{
-    TEST_FAIL_MESSAGE("tx driver should not publish read data");
-    return IO_OK;
-}
-
-IOStatus io_server_data_consumed(IOHandle handle, uint64_t byte_count)
-{
-    TEST_ASSERT_EQUAL_INT64(43, handle);
-    TEST_ASSERT_EQUAL_UINT64(2, byte_count);
+    IORequest request = IORequest__new(IO_REQUEST_WRITE, 0);
+    request.count = sizeof(fake_io_buffer);
+    __builtin_memcpy(request.data, fake_io_buffer, request.count);
+    IOReply reply = driver->transfer(driver->context, &request);
+    if (reply.status == IO_WAIT_FOR_DATA)
+    {
+        return;
+    }
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(2, reply.value);
     fake_data_consumed = true;
-    return IO_OK;
-}
-
-IOStatus io_server_eof(IOHandle handle)
-{
-    TEST_FAIL_MESSAGE("tx driver should not signal eof");
-    return IO_OK;
 }
 
 void test_uart_tx_main_maps_registers_waits_for_write_request_and_consumes_data(void)
@@ -249,7 +210,7 @@ void test_uart_tx_main_maps_registers_waits_for_write_request_and_consumes_data(
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     TEST_ASSERT_TRUE(fake_sysinfo_closed);
     TEST_ASSERT_TRUE(fake_data_consumed);
-    TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);
+    TEST_ASSERT_EQUAL_UINT64(3, fake_service_wait_count);
     TEST_ASSERT_EQUAL_UINT64(3, fake_uart_write_count);
     TEST_ASSERT_EQUAL_UINT32('x', fake_uart_writes[0]);
     TEST_ASSERT_EQUAL_UINT32('\n', fake_uart_writes[1]);

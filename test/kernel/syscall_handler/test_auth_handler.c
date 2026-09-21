@@ -23,7 +23,10 @@ void test_auth_authenticates_root_and_issues_ticket(void)
     BString password = bstring("root");
     match_result(
         Auth__authenticate(&kernel->auth, process, &bstr("root"), &bstr("root")),
-        success(ticket_id) { TEST_ASSERT_GREATER_THAN(AUTH_NO_TICKET, ticket_id); },
+        success(ticket_id)
+        {
+            TEST_ASSERT_GREATER_THAN(AUTH_NO_TICKET, ticket_id);
+        },
         error_test_fail()
     );
 }
@@ -35,7 +38,10 @@ void test_auth_rejects_invalid_credentials(void)
     match_result(
         Auth__authenticate(&kernel->auth, process, &bstr("root"), &bstr("bad")),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(AUTH_INVALID_CREDENTIALS, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(AUTH_INVALID_CREDENTIALS, code);
+        }
     );
 }
 
@@ -48,14 +54,20 @@ void test_auth_consumes_ticket_once(void)
 
     match_result(
         Auth__consume_ticket(&kernel->auth, process, ticket_id),
-        success(user_id) { TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, user_id); },
+        success(user_id)
+        {
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, user_id);
+        },
         error_test_fail()
     );
 
     match_result(
         Auth__consume_ticket(&kernel->auth, process, ticket_id),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(AUTH_TICKET_CONSUMED, code);
+        }
     );
 }
 
@@ -68,6 +80,9 @@ void test_auth_rejects_ticket_for_different_process(void)
     match_result(
         Auth__consume_ticket(&kernel->auth, other_process, ticket_id),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(AUTH_TICKET_FOR_DIFFERENT_PROCESS, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(AUTH_TICKET_FOR_DIFFERENT_PROCESS, code);
+        }
     );
 }

@@ -40,7 +40,10 @@ Result(SystemCallResult) Syslog__handler(KernelPtr kernel, OptionalPtr(ProcessPt
     SyslogRequestPtr request = (SyslogRequestPtr)arg1;
     BString tag = bstr("SYSLOG");
     match_optional(request->tag,
-        some(copied_tag) { tag = copied_tag; },
+        some(copied_tag)
+        {
+            tag = copied_tag;
+        },
         none_do_nothing()
     );
 

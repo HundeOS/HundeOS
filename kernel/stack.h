@@ -11,6 +11,7 @@ typedef struct Stack
 } Stack;
 
 typedef Stack * StackPtr;
+typedef const Stack * ConstStackPtr;
 
 Stack Stack__new();
 void Stack__map(KernelPtr kernel, StackPtr self, ProcessPageTablePtr page_table);

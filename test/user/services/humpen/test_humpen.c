@@ -58,7 +58,10 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     match_result(
         DynString__init(&text, max_bytes),
         success_do_nothing(),
-        error(code, message) { return None(DynString); }
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
 
     while (next_fstab[next_fstab_position] != '\0' && next_fstab_position < max_bytes)
@@ -207,7 +210,10 @@ void test_humpen_parse_mount_command_returns_error_for_missing_device_path(void)
 
     match_result(
         Humpen__parse_mount_command(&bstr("device")),
-        success(command) { TEST_FAIL(); },
+        success(command)
+        {
+            TEST_FAIL();
+        },
         error(code, message)
         {
             TEST_ASSERT_EQUAL_INT(HUMPEN_PARSE_ERROR, code);
@@ -229,15 +235,24 @@ void test_humpen_parse_mount_command_builds_watchdog_spawn_command_for_ext2(void
             TEST_ASSERT_EQUAL_BSTRING(bstr("/"), command.mountpoint);
             match_optional(
                 command.arg0,
-                some(arg) { TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio1"), arg); },
+                some(arg)
+                {
+                    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio1"), arg);
+                },
                 none_test_fail()
             );
             match_optional(command.arg1,
-                some(arg) { TEST_ASSERT_EQUAL_BSTRING(bstr("ext2"), arg); },
+                some(arg)
+                {
+                    TEST_ASSERT_EQUAL_BSTRING(bstr("ext2"), arg);
+                },
                 none_test_fail()
             );
             match_optional(command.arg2,
-                some(arg) { TEST_ASSERT_EQUAL_BSTRING(bstr("/"), arg); },
+                some(arg)
+                {
+                    TEST_ASSERT_EQUAL_BSTRING(bstr("/"), arg);
+                },
                 none_test_fail()
             );
         },

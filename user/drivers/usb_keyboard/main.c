@@ -6,14 +6,13 @@
 #define RING_BUFFER_DEBUG_PRINTF(level, format, ...)
 #include "../../../kernel/types/ring_buffer.h"
 #include "sys/debug.h"
-#include "sys/io_server.h"
+#include "io/stream_driver.h"
 #include "sys/service.h"
 
 #ifndef USB_KEYBOARD_ENTRYPOINT
 #define USB_KEYBOARD_ENTRYPOINT main
 #endif
 
-#define USB_KEYBOARD_PATH ":keyboard:"
 #define USB_KEYBOARD_PENDING_BYTES 256U
 
 RingBufferDefine(USB_KEYBOARD_PENDING_BYTES, UsbKeyboardPendingBuffer)
@@ -21,7 +20,6 @@ RingBufferDefine(USB_KEYBOARD_PENDING_BYTES, UsbKeyboardPendingBuffer)
 
         typedef struct UsbKeyboard
 {
-    IOHandle keyboard;
     UsbKeyboardPendingBuffer pending;
 } UsbKeyboard;
 
@@ -30,82 +28,60 @@ typedef UsbKeyboard * UsbKeyboardPtr;
 static UsbKeyboard UsbKeyboard__new(void)
 {
     return (UsbKeyboard){
-        .keyboard = -1,
         .pending = UsbKeyboardPendingBuffer__new(),
     };
 }
 
-static void UsbKeyboard__publish_pending(UsbKeyboardPtr self)
+static IOReply UsbKeyboard__read(IOServiceContext context, IORequestPtr request)
 {
-    if (UsbKeyboardPendingBuffer__item_count(&self->pending) == 0)
+    UsbKeyboardPtr self = context;
+    IOReply reply = IOReply__new(IO_OK, 0);
+    if (request->count == 0)
     {
-        return;
+        return reply;
     }
-
-    IOServerBuffer buffer;
-    if (io_server_get_buffer(self->keyboard, &buffer) != IO_OK)
-    {
-        return;
-    }
-
     match_result(
-        UsbKeyboardPendingBuffer__drain(&self->pending, (CharPtr)buffer.data, buffer.capacity),
+        UsbKeyboardPendingBuffer__drain(&self->pending, (CharPtr)IORequest__read_target(request, &reply),
+                                        request->count),
         success(byte_count)
         {
-            if (byte_count > 0)
-            {
-                io_server_data_available(self->keyboard, byte_count);
-            }
+            reply.value = byte_count;
+            reply.status = byte_count == 0 ? IO_WAIT_FOR_DATA : IO_OK;
+            return reply;
         },
         error(code, message)
         {
-            DRIVER_DEBUG("usb_keyboard: pending drain failed: %s (%i)\n", BString__cstr(&message), (int)code);
-            return;
+            return IOReply__new(IO_PANIC, 0);
         }
     );
 }
 
-static bool UsbKeyboard__init(UsbKeyboardPtr self)
-{
-    *self = UsbKeyboard__new();
-
-    if (!service_ok(service_become_service()))
-    {
-        DRIVER_DEBUG("usb_keyboard: service registration failed\n");
-        return false;
-    }
-
-    self->keyboard = io_server_register(&bstr(USB_KEYBOARD_PATH), IO_SERVER_READ);
-    if (self->keyboard < 0)
-    {
-        DRIVER_DEBUG("usb_keyboard: register failed %i\n", (int)self->keyboard);
-        return false;
-    }
-
-    return true;
-}
-
 int USB_KEYBOARD_ENTRYPOINT(void)
 {
-    UsbKeyboard keyboard;
-    if (!UsbKeyboard__init(&keyboard))
+    if (!service_ok(service_become_service()))
     {
         return 1;
     }
-
-    ServiceEvent event;
-    for (ServiceCode status = service_wait(&event); service_alive(status); status = service_wait(&event))
+    static UsbKeyboard keyboard;
+    static IOStreamDriver driver;
+    static IOService service;
+    keyboard = UsbKeyboard__new();
+    driver = IOStreamDriver__new(IO_OPEN_READ, &keyboard, UsbKeyboard__read);
+    if (IOService__listen_into(&service, &bstr(IO_KEYBOARD_SERVICE), &driver, IOStreamDriver__execute,
+                               IOStreamDriver__disconnect) != IO_OK)
     {
-        if (!service_ok(status))
+        return 1;
+    }
+    if (!service_ok(service_publish_ready(&bstr(IO_KEYBOARD_SERVICE))))
+    {
+        return 1;
+    }
+    Channel__prepare_wait();
+    while (true)
+    {
+        if (!IOService__poll(&service))
         {
-            continue;
-        }
-
-        if (event.type == SERVICE_EVENT_IO && event.source == SERVICE_IO_READ_REQUEST)
-        {
-            UsbKeyboard__publish_pending(&keyboard);
+            Channel__wait_event();
         }
     }
-
-    return 0;
 }

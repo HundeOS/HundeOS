@@ -12,7 +12,7 @@
 
 HashtableBodyDefine(AllocatedBlocks);
 
-HashCode Heap__hash_address(Address * self)
+HashCode Heap__hash_address(AddressPtr self)
 {
     return *self / PAGE_SIZE;
 }
@@ -177,9 +177,9 @@ static void Heap__zero_pages(KernelAddress start, uint64_t pages)
     }
 }
 
-static void AllocatedBlocks__remove_entry(AllocatedBlocks * blocks, uint64_t table_index, uint64_t bucket_index)
+static void AllocatedBlocks__remove_entry(AllocatedBlocksPtr blocks, uint64_t table_index, uint64_t bucket_index)
 {
-    AllocatedBlocks__bucket * bucket = &blocks->table.entries[table_index].value;
+    AllocatedBlocksBucketPtr bucket = &blocks->table.entries[table_index].value;
 
     for (uint64_t i = bucket_index; i + 1 < bucket->len; i++)
     {
@@ -193,7 +193,7 @@ static void AllocatedBlocks__remove_entry(AllocatedBlocks * blocks, uint64_t tab
     }
 }
 
-static bool AllocatedBlocks__remove_key(AllocatedBlocks * blocks, Address key)
+static bool AllocatedBlocks__remove_key(AllocatedBlocksPtr blocks, Address key)
 {
     HashCode hash = Heap__hash_address(&key) % AllocatedBlocks__table_size;
 
@@ -204,7 +204,7 @@ static bool AllocatedBlocks__remove_key(AllocatedBlocks * blocks, Address key)
             continue;
         }
 
-        AllocatedBlocks__bucket * bucket = &blocks->table.entries[table_index].value;
+        AllocatedBlocksBucketPtr bucket = &blocks->table.entries[table_index].value;
 
         for (uint64_t bucket_index = 0; bucket_index < bucket->len; bucket_index++)
         {
@@ -223,7 +223,7 @@ static Optional(MemoryBlock) Heap__take_free_block(HeapPtr self, uint64_t pages)
 {
     for (uint64_t table_index = 0; table_index < (uint64_t)self->free_blocks.table.len; table_index++)
     {
-        AllocatedBlocks__bucket * bucket = &self->free_blocks.table.entries[table_index].value;
+        AllocatedBlocksBucketPtr bucket = &self->free_blocks.table.entries[table_index].value;
 
         for (uint64_t bucket_index = 0; bucket_index < bucket->len; bucket_index++)
         {
@@ -254,7 +254,10 @@ static Result(HeapCode) Heap__record_allocated(HeapPtr self, KernelAddress start
 
     match_result(
         AllocatedBlocks__set(&self->allocated_blocks, start.virtual_addr, block),
-        success(_) { return Success(HeapCode, HEAP_OK); },
+        success(_)
+        {
+            return Success(HeapCode, HEAP_OK);
+        },
         error(code, message)
         {
             __d_printf(SYSLOG, "heap allocation tracking failed addr=%p pages=%i code=%i message=%s\n",
@@ -273,7 +276,7 @@ static bool Heap__coalesce_one_free_block(HeapPtr self, MemoryBlockPtr block)
 
     for (uint64_t table_index = 0; table_index < (uint64_t)self->free_blocks.table.len; table_index++)
     {
-        AllocatedBlocks__bucket * bucket = &self->free_blocks.table.entries[table_index].value;
+        AllocatedBlocksBucketPtr bucket = &self->free_blocks.table.entries[table_index].value;
 
         for (uint64_t bucket_index = 0; bucket_index < bucket->len; bucket_index++)
         {
@@ -358,104 +361,114 @@ KernelAddress Heap__alloc(HeapPtr self)
 
 KernelAddress Heap__alloc_size(HeapPtr self, size_t size)
 {
-    critical_section(self->lock, {
-        uint64_t pages = Heap__pages_for_size(size);
+    critical_section(
+        self->lock,
+        {
+            uint64_t pages = Heap__pages_for_size(size);
 
-        match_optional(
-            Heap__take_free_block(self, pages),
-            some(block)
-            {
-                Heap__zero_pages(block.start, block.pages_allocated);
-                match_result(
-                    Heap__record_allocated(self, block.start, block.pages_allocated),
-                    success(_)
-                    {
-                        __d_printf(MEMORY, "heap alloc reuse addr=%p phys=%p pages=%i size=%i\n",
-                                   block.start.virtual_addr, block.start.phys_addr, block.pages_allocated, size);
-                        cs_return block.start;
-                    },
-                    error(code, message)
-                    {
-                        __d_printf(SYSLOG, "heap reused allocation untracked addr=%p message=%s\n",
-                                   block.start.virtual_addr, BString__cstr(&message));
-                        cs_return INVALID_KERNEL_ADDR;
-                    }
-                );
-            },
-            none_do_nothing()
-        );
+            match_optional(
+                Heap__take_free_block(self, pages),
+                some(block)
+                {
+                    Heap__zero_pages(block.start, block.pages_allocated);
+                    match_result(
+                        Heap__record_allocated(self, block.start, block.pages_allocated),
+                        success(_)
+                        {
+                            __d_printf(MEMORY, "heap alloc reuse addr=%p phys=%p pages=%i size=%i\n",
+                                       block.start.virtual_addr, block.start.phys_addr,
+                                       block.pages_allocated, size);
+                            cs_return block.start;
+                        },
+                        error(code, message)
+                        {
+                            __d_printf(SYSLOG, "heap reused allocation untracked addr=%p message=%s\n",
+                                       block.start.virtual_addr, BString__cstr(&message));
+                            cs_return INVALID_KERNEL_ADDR;
+                        }
+                    );
+                },
+                none_do_nothing()
+            );
 
-        cs_return Heap__alloc_fresh_size(self, size);
-    });
+            cs_return Heap__alloc_fresh_size(self, size);
+        }
+    );
 
     return INVALID_KERNEL_ADDR;
 }
 
 KernelAddress Heap__try_alloc_size(HeapPtr self, size_t size)
 {
-    critical_section(self->lock, {
-        uint64_t pages = Heap__pages_for_size(size);
-
-        match_optional(
-            Heap__take_free_block(self, pages),
-            some(block)
-            {
-                Heap__zero_pages(block.start, block.pages_allocated);
-                match_result(
-                    Heap__record_allocated(self, block.start, block.pages_allocated),
-                    success(_)
-                    {
-                        __d_printf(MEMORY, "heap alloc reuse addr=%p phys=%p pages=%i size=%i\n",
-                                   block.start.virtual_addr, block.start.phys_addr, block.pages_allocated, size);
-                        cs_return block.start;
-                    },
-                    error(code, message)
-                    {
-                        __d_printf(SYSLOG, "heap reused allocation untracked addr=%p message=%s\n",
-                                   block.start.virtual_addr, BString__cstr(&message));
-                        cs_return INVALID_KERNEL_ADDR;
-                    }
-                );
-            },
-            none_do_nothing()
-        );
-
-        if (!Heap__has_fresh_capacity(self, pages))
+    critical_section(
+        self->lock,
         {
-            __d_printf(MEMORY, "heap alloc failed size=%i pages=%i current=%p end=%p\n", size, pages,
-                       self->current_block.start.virtual_addr + (self->current_block.pages_allocated * PAGE_SIZE),
-                       self->end);
-            cs_return INVALID_KERNEL_ADDR;
-        }
+            uint64_t pages = Heap__pages_for_size(size);
 
-        cs_return Heap__alloc_fresh_size(self, size);
-    });
+            match_optional(
+                Heap__take_free_block(self, pages),
+                some(block)
+                {
+                    Heap__zero_pages(block.start, block.pages_allocated);
+                    match_result(
+                        Heap__record_allocated(self, block.start, block.pages_allocated),
+                        success(_)
+                        {
+                            __d_printf(MEMORY, "heap alloc reuse addr=%p phys=%p pages=%i size=%i\n",
+                                       block.start.virtual_addr, block.start.phys_addr, block.pages_allocated, size);
+                            cs_return block.start;
+                        },
+                        error(code, message)
+                        {
+                            __d_printf(SYSLOG, "heap reused allocation untracked addr=%p message=%s\n",
+                                       block.start.virtual_addr, BString__cstr(&message));
+                            cs_return INVALID_KERNEL_ADDR;
+                        }
+                    );
+                },
+                none_do_nothing()
+            );
+
+            if (!Heap__has_fresh_capacity(self, pages))
+            {
+                __d_printf(MEMORY, "heap alloc failed size=%i pages=%i current=%p end=%p\n", size, pages,
+                           self->current_block.start.virtual_addr + (self->current_block.pages_allocated * PAGE_SIZE),
+                           self->end);
+                cs_return INVALID_KERNEL_ADDR;
+            }
+
+            cs_return Heap__alloc_fresh_size(self, size);
+        }
+    );
 
     return INVALID_KERNEL_ADDR;
 }
 
 Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr)
 {
-    critical_section(self->lock, {
-        HashtableOptional(AllocatedBlocks) block = AllocatedBlocks__get(&self->allocated_blocks, addr.virtual_addr);
+    critical_section(
+        self->lock,
+        {
+            HashtableOptional(AllocatedBlocks) block = AllocatedBlocks__get(&self->allocated_blocks, addr.virtual_addr);
 
-        match_optional(
-            block,
-            some(allocated)
-            {
-                AllocatedBlocks__remove_key(&self->allocated_blocks, addr.virtual_addr);
-                MemoryBlock free_block = Heap__coalesce_free_block(self, allocated);
-                AllocatedBlocks__set(&self->free_blocks, free_block.start.virtual_addr, free_block);
-                __d_printf(MEMORY, "heap free addr=%p phys=%p pages=%i coalesced_addr=%p coalesced_pages=%i\n",
-                           allocated.start.virtual_addr, allocated.start.phys_addr, allocated.pages_allocated,
-                           free_block.start.virtual_addr, free_block.pages_allocated);
-                cs_return Success(HeapCode, HEAP_OK);
-            },
-            none_do_nothing()
-        );
+            match_optional(
+                block,
+                some(allocated)
+                {
+                    AllocatedBlocks__remove_key(&self->allocated_blocks, addr.virtual_addr);
+                    MemoryBlock free_block = Heap__coalesce_free_block(self, allocated);
+                    AllocatedBlocks__set(&self->free_blocks, free_block.start.virtual_addr, free_block);
+                    __d_printf(MEMORY, "heap free addr=%p phys=%p pages=%i coalesced_addr=%p coalesced_pages=%i\n",
+                               allocated.start.virtual_addr, allocated.start.phys_addr, allocated.pages_allocated,
+                               free_block.start.virtual_addr, free_block.pages_allocated);
+                    cs_return Success(HeapCode, HEAP_OK);
+                },
+                none_do_nothing()
+            );
 
-        cs_return Error(HeapCode, bstring("address not allocated"), HEAP_NOT_IMPLEMENTED);
-    });
+            cs_return Error(HeapCode, bstring("address not allocated"), HEAP_NOT_IMPLEMENTED);
+        }
+    );
 
     return Error(HeapCode, bstring("address not allocated"), HEAP_NOT_IMPLEMENTED);
 }

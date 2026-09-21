@@ -29,6 +29,9 @@ Result(ProcessSetupStatus) EmbeddedArchive__map_process(ProcessPtr self)
             PageTable__map_shared(&self->page_table, self->kernel, mapping, size);
             return Success(ProcessSetupStatus, PROCESS_SETUP);
         },
-        none() { return Error(ProcessSetupStatus, bstr("Missing system information"), PROCESS_FAILED_TO_SETUP); }
+        none()
+        {
+            return Error(ProcessSetupStatus, bstr("Missing system information"), PROCESS_FAILED_TO_SETUP);
+        }
     );
 }

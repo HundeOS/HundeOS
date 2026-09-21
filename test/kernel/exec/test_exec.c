@@ -32,8 +32,14 @@ static size_t test_hello_world_elf_size(void)
     BString name = bstring("hello_world");
     match_optional(
         EmbeddedElf__load(&name),
-        some(elf) { return elf.end - elf.start; },
-        none() { TEST_FAIL_MESSAGE("hello_world ELF not found"); }
+        some(elf)
+        {
+            return elf.end - elf.start;
+        },
+        none()
+        {
+            TEST_FAIL_MESSAGE("hello_world ELF not found");
+        }
     );
 
     return 0;
@@ -51,7 +57,8 @@ void setUp(void)
     KAllocStub__reset_allocation_tracking();
     reset_cpu_count();
     kernel = init_test_kernel();
-    parent = dummy_process(0, cpu, PROC_STATE_RUNNING);
+    parent = dummy_process(1, cpu, PROC_STATE_RUNNING);
+    kernel->boot_authority = parent->pid;
 
     exec_request = test_spawn_request(&exec_path);
     Optional(ProcessPtr) process = Some(ProcessPtr, parent);
@@ -70,11 +77,13 @@ void tearDown(void)
 
 void test_embedded_exec_does_not_require_a_kernel_filesystem(void)
 {
-    kernel->io_subsystem->root_filesystem = None(FilesystemPtr);
     ProcessArguments arguments = ProcessArguments__new();
     match_result(
         Exec__exec(&context, &exec_path, false, &arguments),
-        success(process) { TEST_ASSERT_EQUAL_BSTRING(process->name, exec_path); },
+        success(process)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(process->name, exec_path);
+        },
         error_test_fail()
     );
 }
@@ -156,6 +165,7 @@ void test_exec_wait_schedules_child_on_parent_cpu(void)
     Scheduler__start(kernel->scheduler, 1);
 
     ProcessPtr cpu1_parent = dummy_process(1, 1, PROC_STATE_RUNNING);
+    kernel->boot_authority = cpu1_parent->pid;
     SpawnRequest request = test_spawn_request(&bstr("/sbin/hello_world"));
     CallContext syscall_context =
         CallContext__new(&Some(ProcessPtr, cpu1_parent), SYSCALL_EXEC, (Anything)&request, 0, 0, 0, 0);
@@ -226,12 +236,24 @@ void test_exec_apply_builtin_identity_policy_marks_boot_hundeschule_as_hund(void
 void test_exec_apply_builtin_identity_policy_marks_sdhci_as_hund(void)
 {
     ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
-    process->name = bstr("/sbin/drivers/sdhci");
+    process->name = bstr("/sbin/drivers/sdhci_channelio");
 
     Exec__apply_builtin_identity_policy(process);
 
     TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, process->user_id);
     TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_HUND, process->group_id);
+}
+
+void test_exec_apply_builtin_identity_policy_marks_mama_as_hund(void)
+{
+    ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
+    process->name = bstr("services/hunde-mama");
+    Exec__apply_builtin_identity_policy(process);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, process->user_id);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_HUND, process->group_id);
+    process->name = bstr("/sbin/services/hunde-mama");
+    Exec__apply_builtin_identity_policy(process);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, process->user_id);
 }
 
 void test_exec_as_can_spawn_shell_as_user(void)
@@ -255,7 +277,10 @@ void test_exec_as_denies_unprivileged_identity_switch(void)
     match_result(
         Exec__exec_as(&context, &bstr("/sbin/shell"), false, &Some(UserID, PROCESS_USER_HUND), &arguments),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(SPAWN_FAILED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SPAWN_FAILED, code);
+        }
     );
 }
 
@@ -266,7 +291,10 @@ void test_exec_denies_service_path_to_user_process(void)
     match_result(
         Exec__exec(&context, &bstr("/sbin/services/humpen"), false, &arguments),
         success_test_fail(),
-        error(code, message) { TEST_ASSERT_EQUAL(SPAWN_FAILED, code); }
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SPAWN_FAILED, code);
+        }
     );
 }
 

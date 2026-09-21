@@ -49,6 +49,7 @@ typedef struct EfiConfigurationTable
     EfiGuid vendor_guid;
     uint64_t vendor_table;
 } EfiConfigurationTable;
+typedef EfiConfigurationTable * EfiConfigurationTablePtr;
 
 typedef struct EfiSystemTable
 {
@@ -65,11 +66,10 @@ typedef struct EfiSystemTable
     uint64_t runtime_services;
     uint64_t boot_services;
     uint64_t number_of_table_entries;
-    EfiConfigurationTable * configuration_table;
+    EfiConfigurationTablePtr configuration_table;
 } EfiSystemTable;
 
 typedef EfiSystemTable * EfiSystemTablePtr;
-typedef EfiConfigurationTable * EfiConfigurationTablePtr;
 
 static __BOOT__(uint8_t) UefiAcpi__read8(uint64_t address)
 {

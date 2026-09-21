@@ -11,11 +11,10 @@ int main(int argc, char ** argv)
     static Memfs filesystem;
     static IOService service;
     filesystem = Memfs__new();
-    match_result(
-        IOService__listen(&mountpoint, &filesystem, Memfs__serve, Memfs__disconnect),
-        success(created) { service = created; },
-        error(code, message) { return 1; }
-    );
+    if (IOService__listen_into(&service, &mountpoint, &filesystem, Memfs__serve, Memfs__disconnect) != IO_OK)
+    {
+        return 1;
+    }
     if (!service_ok(service_publish_ready(&mountpoint)))
     {
         return 1;

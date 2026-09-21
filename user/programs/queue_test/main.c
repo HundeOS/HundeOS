@@ -20,78 +20,102 @@ typedef TestQueues * TestQueuesPtr;
 
 static bool QueueTest__contains(TestQueuesPtr queues, QueueConnectionID id)
 {
-    for_each_fa_ptr(TestQueues, queues, index, queue, {
-        if (queue.connection == id)
+    for_each_fa_ptr(
+        TestQueues,
+        queues,
+        index,
+        queue,
         {
-            return true;
+            if (queue.connection == id)
+            {
+                return true;
+            }
         }
-    });
+    );
     return false;
 }
 
 static bool QueueTest__serve_once(TestQueuesPtr queues, QueueArrivalsPtr arrivals)
 {
     bool work = false;
-    for_each_atomic_fa_ptr(QueueConnectionSlots, &arrivals->connections, index, id, {
-        if (id == 0 || QueueTest__contains(queues, id))
+    for_each_atomic_fa_ptr(
+        QueueConnectionSlots,
+        &arrivals->connections,
+        index,
+        id,
         {
-            continue;
-        }
-        match_result(
-            Queue__accept(id),
-            success(queue) { TestQueues__push(queues, queue); },
-            error(code, message) { QueueConnection__close(id); }
-        );
-        work = true;
-    });
-    for_each_fa_ptr(TestQueues, queues, index, value, {
-        match_optional(
-            TestQueues__ptr_at(queues, index),
-            some(queue)
+            if (id == 0 || QueueTest__contains(queues, id))
             {
-                QueueMessageCount pending =
-                    queue->written - __atomic_load_n(&queue->incoming->consumed, __ATOMIC_ACQUIRE);
-                if (Queue__status(queue) == QUEUE_CLOSED || pending > QUEUE_CAPACITY)
+                continue;
+            }
+            match_result(
+                Queue__accept(id),
+                success(queue)
                 {
-                    QueueConnection__close(queue->connection);
-                    TestQueues__remove(queues, value);
-                    work = true;
-                    break;
-                }
-                if (pending == QUEUE_CAPACITY)
+                    TestQueues__push(queues, queue);
+                },
+                error(code, message)
                 {
-                    continue;
+                    QueueConnection__close(id);
                 }
-                match_result(
-                    Queue__pop(queue),
-                    success(message)
+            );
+            work = true;
+        }
+    );
+    for_each_fa_ptr(
+        TestQueues,
+        queues,
+        index,
+        value,
+        {
+            match_optional(
+                TestQueues__ptr_at(queues, index),
+                some(queue)
+                {
+                    QueueMessageCount pending =
+                        queue->written - __atomic_load_n(&queue->incoming->consumed, __ATOMIC_ACQUIRE);
+                    if (Queue__status(queue) == QUEUE_CLOSED || pending > QUEUE_CAPACITY)
                     {
-                        match_result(
-                            Queue__push(queue, &message),
-                            success_do_nothing(),
-                            error(code, message)
+                        QueueConnection__close(queue->connection);
+                        TestQueues__remove(queues, value);
+                        work = true;
+                        break;
+                    }
+                    if (pending == QUEUE_CAPACITY)
+                    {
+                        continue;
+                    }
+                    match_result(
+                        Queue__pop(queue),
+                        success(message)
+                        {
+                            match_result(
+                                Queue__push(queue, &message),
+                                success_do_nothing(),
+                                error(code, message)
+                                {
+                                    QueueConnection__close(queue->connection);
+                                    TestQueues__remove(queues, value);
+                                    return true;
+                                }
+                            );
+                            work = true;
+                        },
+                        error(code, message)
+                        {
+                            if (code != QUEUE_EMPTY)
                             {
                                 QueueConnection__close(queue->connection);
                                 TestQueues__remove(queues, value);
                                 return true;
                             }
-                        );
-                        work = true;
-                    },
-                    error(code, message)
-                    {
-                        if (code != QUEUE_EMPTY)
-                        {
-                            QueueConnection__close(queue->connection);
-                            TestQueues__remove(queues, value);
-                            return true;
                         }
-                    }
-                );
-            },
-            none_do_nothing()
-        );
-    });
+                    );
+                },
+                none_do_nothing()
+            );
+        }
+    );
     return work;
 }
 
@@ -117,7 +141,10 @@ static int QueueTest__server(void)
                 }
             }
         },
-        error(code, message) { IO__printf(&bstr("queue_test: listen error %i\n"), (int)code); }
+        error(code, message)
+        {
+            IO__printf(&bstr("queue_test: listen error %i\n"), (int)code);
+        }
     );
     return 1;
 }
@@ -181,7 +208,10 @@ int main(int argc, char ** argv)
     QueueEndpointID endpoint;
     match_optional(
         ServiceDirectory__find_endpoint(ServiceDirectory__shared(), &bstr("queue-test")),
-        some(value) { endpoint = value; },
+        some(value)
+        {
+            endpoint = value;
+        },
         none()
         {
             IO__print(&bstr("queue_test: server unavailable\n"));
@@ -217,7 +247,10 @@ int main(int argc, char ** argv)
             IO__print(&bstr("queue_test: 128 round trips passed\n"));
             return 0;
         },
-        error(code, message) { IO__printf(&bstr("queue_test: connect error %i\n"), (int)code); }
+        error(code, message)
+        {
+            IO__printf(&bstr("queue_test: connect error %i\n"), (int)code);
+        }
     );
     return 1;
 }

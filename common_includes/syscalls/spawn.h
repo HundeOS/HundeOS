@@ -47,6 +47,7 @@ typedef enum SpawnErrors
     SPAWN_NO_FILE = -2,
     SPAWN_NO_PATH = -3,
     SPAWN_ARG_TOO_LONG = -4,
+    SPAWN_PENDING = -5,
     SPAWN_FAILED = -128,
 } SpawnErrors;
 

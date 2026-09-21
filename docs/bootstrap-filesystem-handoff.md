@@ -3,7 +3,7 @@
 ## Status
 
 `/sbin` file operations now run in userspace `embedfs`, started and awaited by
-`hund-dateisystem` before namespace readiness. The kernel `/sbin` mount and
+`hunde-mama` before configured startup. The kernel `/sbin` mount and
 its file-handle implementation are retired; the old implementation is only a
 test fixture. Applications use the existing I/O/namespace channels with no
 `/sbin` syscall bypass or failure-triggered fallback.
@@ -18,60 +18,81 @@ PID/session ownership; close, client release, and namespace disconnect release
 them. Drivers and services retain hund-only access; ordinary binaries are
 world-readable/executable. Unknown client credentials fail closed.
 
-Embedded executable loading uses a direct kernel archive reader, independent
-of filesystem mounts, for bootstrap and subsequent embedded launches. This is
-not channel-based executable loading. The EXT2 `/boot/config` mount and
-`/boot/sysinfo` also remain kernel-backed.
+Only Mama's boot-level-0 `boot_spawn()` uses the direct kernel archive reader.
+After `boot_complete()`, that entry point is unavailable. Normal spawn uses
+Channels even for embedded executables. [Mama](bootstrap-services.md) establishes
+the EXT2 `/boot/config` mount and `/boot/sysinfo` in userspace before configured startup.
 
 The Channel payload and nonblocking request/reply implementation now live in
 `common/ipc`, linked separately into kernel and userspace. The existing
-userspace client uses that implementation. Connection establishment, endpoint
-mapping, and waits still live in userspace; the kernel cannot yet open a Channel.
+userspace client uses that implementation. `kernel/ipc/kernel_channel` establishes
+kernel sessions through the same warden, without a filesystem-specific transport.
 
-## Remaining Executable Loading
+## Executable Loading
 
-The target path is kernel -> Channel -> `hund-io-system` -> Channel ->
+The implemented path is kernel -> Channel -> `hund-io-system` -> Channel ->
 `hund-dateisystem` -> Channel -> filesystem driver. Do not introduce a
 filesystem-specific request/reply queue or bypass I/O mediation.
 
 The kernel supplies the originating process identity through an authenticated
 kernel endpoint. Userspace endpoints cannot impersonate it or choose another
-client's PID. Filesystems enforce execute and directory search permissions
-using authoritative credentials.
+client's PID. Embedfs checks authoritative credentials for executable access.
+The generic FAT32/EXT2 adapter rejects executable opens until it can authorize
+them; it must not treat readable file bytes as permission to execute.
 
-The requester parks while I/O is pending. Progress is nonblocking; no scheduler
-mutex remains held across a wait or context switch. Resolve shared payload
-addresses through validated ownership, mapping, bounds, and lifetime checks;
-never trust a peer-supplied address as a kernel pointer. Disconnect, requester
-exit, and malformed replies must release resources and fail explicitly.
+Each process owns at most one pending executable load. The initial syscall copies
+its arguments and consumes an authentication ticket once. The kernel parks that
+syscall as `PARK_WAIT_EXEC_LOAD`; scheduler observation of the kernel Channel's
+atomic queue cursors makes its continuation runnable. The continuation advances
+OPEN, READ, and CLOSE without resubmitting caller pointers or credentials. A
+background spawn completes only after the child is scheduled and returns its PID;
+a waiting spawn transfers into the existing child wait. Each continuation performs
+bounded, nonblocking protocol work, and no scheduler mutex spans a wait or context
+switch. Shared payload addresses are resolved through ownership, peer, bounds, and
+generation checks under the scheduler lock. Disconnect, requester cleanup, and
+malformed replies cancel the job and close its Channel. Service-side handles are
+released through normal session cleanup.
+
+The transport endpoint uses the reserved `QUEUE_KERNEL_PID`, not process PID zero.
+Its Channel ticket separately records the spawning process as the authenticated
+origin, so dependency scheduling can relate userspace services back to the blocked
+caller without pretending the kernel transport endpoint is a schedulable process.
 
 The kernel retains ELF validation, address-space construction, credential
-transitions, and scheduling. Loading requires a stable image snapshot, not
-reads that can mix file versions. The current 12 KiB disk-driver snapshot limit
-must be removed from this path before switching it on.
+transitions, and scheduling. It copies the provider's bytes into an owned image
+before validation. Embedfs is immutable; the current disk providers use per-open
+snapshots. A future mutable provider must preserve snapshot consistency for
+executable opens. The loader accepts static ELF64 images for the current
+architecture, bounds headers and segments, rejects overlaps and invalid entry
+points, and limits image bytes to 64 MiB and segment memory to 128 MiB.
 
-## Remaining Bootstrap Ownership
+Executable loading now uses 2 MiB directional buffers managed by `hunde-puffer`,
+with validated descriptors and bulk copies into the kernel image. Disk providers reject executable opens pending
+execute-permission support, and retain a 12 KiB open-file snapshot limit.
+Embedfs has no such 12 KiB limit. Disk permissions and the snapshot limit remain
+recorded in [Features TODO](../FEATURES-TODO.md).
 
-Use explicit bootstrap -> preparing -> userspace-active states. Bootstrap
-services must start without depending on the filesystem service they establish.
-Preparing retains bootstrap ownership until replacement providers are ready.
+## Bootstrap Ownership
 
-- Embedded binaries: publish a dedicated page-aligned, read-only archive.
-  Exported pages must not expose neighboring kernel memory. Userspace owns
-  file operations; the kernel retains backing-storage ownership.
-- Boot configuration: quiesce kernel block access before transferring the
-  device to the userspace block driver and mounting its EXT2 filesystem.
-  The two drivers must never operate the same device concurrently.
-- Boot information: expose typed read-only shared information and render
-  `/boot/sysinfo` in userspace.
+Mama starts without filesystem access and establishes the providers before
+launching configured startup:
 
-Switch routing only after readiness and ownership transfer succeed. Once
-userspace-active, failures must not silently reopen the old kernel path.
-Restart/remapping recovery remains separate work.
+- Embedded binaries use a dedicated page-aligned, read-only archive. Userspace
+  owns file operations; the kernel retains backing-storage ownership.
+- The userspace block driver owns the boot configuration device from startup;
+  no kernel boot mount accesses it. Its EXT2 provider serves `/boot/config`.
+- A typed hardware-information syscall supplies the snapshot that userspace
+  `sysinfofs` renders as `/boot/sysinfo`.
+
+Readiness gates prevent configured startup before these mounts succeed.
+The old kernel bootfs and EXT2 providers have been deleted, so failures cannot
+reopen them. Restart/remapping recovery remains separate work.
 
 ## Verification Gates
 
-Before activation, test permission rejection, malformed and large executables,
-stable snapshots during mutation, backpressure, requester and service exits,
-and resource cleanup. Verify boot dependencies and mounts across configured
-targets before removing retired kernel providers.
+Tests cover permission and authentication handling, malformed ELF rejection,
+incremental Channel loading, revoked/recycled payloads, requester cleanup, and
+one-way bootstrap handoff. Continue verifying boot dependencies and mounts across
+configured targets when changing the remaining kernel I/O compatibility paths.
+Mutable-provider snapshot consistency and service-restart recovery remain
+separate requirements.

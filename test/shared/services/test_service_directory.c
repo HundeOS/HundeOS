@@ -26,12 +26,18 @@ void test_directory_queries_reach_the_last_of_1024_entries(void)
         (ServiceDirectoryEntry){.present = 1, .generation = 9999, .service_pid = 2345, .name = bstr("last-service")};
     match_optional(
         ServiceDirectory__find_endpoint(&directory, &bstr("last-service")),
-        some(endpoint) { TEST_ASSERT_EQUAL_UINT64(9999, endpoint); },
+        some(endpoint)
+        {
+            TEST_ASSERT_EQUAL_UINT64(9999, endpoint);
+        },
         none_test_fail()
     );
     match_optional(
         ServiceDirectory__find_service_pid(&directory, &bstr("last-service")),
-        some(pid) { TEST_ASSERT_EQUAL_UINT64(2345, pid); },
+        some(pid)
+        {
+            TEST_ASSERT_EQUAL_UINT64(2345, pid);
+        },
         none_test_fail()
     );
 }
@@ -46,12 +52,18 @@ void test_directory_queries_return_optional_endpoint_and_service_pid(void)
 
     match_optional(
         ServiceDirectory__find_endpoint(&directory, &bstr("protected")),
-        some(endpoint) { TEST_ASSERT_EQUAL_UINT64(41, endpoint); },
+        some(endpoint)
+        {
+            TEST_ASSERT_EQUAL_UINT64(41, endpoint);
+        },
         none_test_fail()
     );
     match_optional(
         ServiceDirectory__find_service_pid(&directory, &bstr("protected")),
-        some(pid) { TEST_ASSERT_EQUAL_UINT64(9, pid); },
+        some(pid)
+        {
+            TEST_ASSERT_EQUAL_UINT64(9, pid);
+        },
         none_test_fail()
     );
     match_optional(ServiceDirectory__find_endpoint(&directory, &bstr("missing")),

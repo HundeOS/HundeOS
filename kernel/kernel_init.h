@@ -2,8 +2,7 @@
 #define __KERNEL_KERNEL_INIT_H
 
 #include <stdint.h>
-#include "subsystems/io/io_subsystem.h"
-#include "subsystems/message/message_broker.h"
+#include "types/result.h"
 #include "system_info.h"
 
 typedef enum InitStatus

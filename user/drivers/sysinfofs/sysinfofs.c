@@ -1,0 +1,164 @@
+#include "sysinfofs.h"
+#include "sys/boot_info.h"
+#include <string.h>
+
+typedef struct SysinfoWriter
+{
+    FilesystemFileDataPtr data;
+    FilesystemFileSize size;
+    bool failed;
+} SysinfoWriter;
+typedef SysinfoWriter * SysinfoWriterPtr;
+static SysinfoWriter SysinfoWriter__new(FilesystemFileDataPtr data)
+{
+    return (SysinfoWriter){.data = data};
+}
+
+static void SysinfoWriter__line(SysinfoWriterPtr self, ConstBStringPtr key, uint64_t value)
+{
+    BString line = BString__sprintf(&bstr("%s=%llu\n"), cstr_p(key), value);
+    StringPos size = BString__length(&line);
+    if (self->size + size > FILESYSTEM_FILE_CAPACITY)
+    {
+        self->failed = true;
+        return;
+    }
+    memcpy(self->data + self->size, BString__cstr(&line), size);
+    self->size += size;
+}
+
+Result(FilesystemFileSize) Sysinfofs__render(BootHardwareInfoPtr info, FilesystemFileDataPtr data)
+{
+    SysinfoWriter writer = SysinfoWriter__new(data);
+    SysinfoWriter__line(&writer, &bstr("cpu.count"), info->cpu_count);
+    SysinfoWriter__line(&writer, &bstr("cpu.online_count"), info->online_cpu_count);
+    SysinfoWriter__line(&writer, &bstr("uart.physical_base"), info->uart.physical_base);
+    SysinfoWriter__line(&writer, &bstr("uart.mmio_size"), info->uart.mmio_size);
+    SysinfoWriter__line(&writer, &bstr("uart.irq"), info->uart.irq);
+    match_optional(
+        info->framebuffer,
+        some(value)
+        {
+            SysinfoWriter__line(&writer, &bstr("framebuffer.present"), 1);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.physical_base"), value.physical_base);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.physical_size"), value.size);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.width"), value.width);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.height"), value.height);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.pixels_per_scanline"), value.pixels_per_scanline);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.pixel_format"), value.pixel_format);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.red_mask"), value.red_mask);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.green_mask"), value.green_mask);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.blue_mask"), value.blue_mask);
+            SysinfoWriter__line(&writer, &bstr("framebuffer.reserved_mask"), value.reserved_mask);
+        },
+        none()
+        {
+            SysinfoWriter__line(&writer, &bstr("framebuffer.present"), 0);
+        }
+    );
+    match_optional(
+        info->pci,
+        some(value)
+        {
+            SysinfoWriter__line(&writer, &bstr("pci.present"), 1);
+            SysinfoWriter__line(&writer, &bstr("pci.ecam.physical_base"), value.ecam_physical_base);
+            SysinfoWriter__line(&writer, &bstr("pci.ecam.size"), value.ecam_size);
+            SysinfoWriter__line(&writer, &bstr("pci.bus.start"), value.bus_start);
+            SysinfoWriter__line(&writer, &bstr("pci.bus.end"), value.bus_end);
+        },
+        none()
+        {
+            SysinfoWriter__line(&writer, &bstr("pci.present"), 0);
+        }
+    );
+    match_optional(
+        info->sd_host,
+        some(value)
+        {
+            SysinfoWriter__line(&writer, &bstr("sd_host.present"), 1);
+            SysinfoWriter__line(&writer, &bstr("sd_host.physical_base"), value.physical_base);
+            SysinfoWriter__line(&writer, &bstr("sd_host.mmio_size"), value.mmio_size);
+            SysinfoWriter__line(&writer, &bstr("sd_host.irq"), value.irq);
+        },
+        none()
+        {
+            SysinfoWriter__line(&writer, &bstr("sd_host.present"), 0);
+        }
+    );
+    match_optional(
+        info->ethernet,
+        some(value)
+        {
+            SysinfoWriter__line(&writer, &bstr("ethernet.present"), 1);
+            SysinfoWriter__line(&writer, &bstr("ethernet.mac_kind"), value.kind);
+            SysinfoWriter__line(&writer, &bstr("ethernet.physical_base"), value.device.physical_base);
+            SysinfoWriter__line(&writer, &bstr("ethernet.mmio_size"), value.device.mmio_size);
+            SysinfoWriter__line(&writer, &bstr("ethernet.irq"), value.device.irq);
+        },
+        none()
+        {
+            SysinfoWriter__line(&writer, &bstr("ethernet.present"), 0);
+        }
+    );
+    SysinfoWriter__line(&writer, &bstr("memory.physical_start"), info->memory_start);
+    SysinfoWriter__line(&writer, &bstr("memory.physical_end"), info->memory_end);
+    SysinfoWriter__line(&writer, &bstr("memory.physical_size"), info->memory_end - info->memory_start);
+    SysinfoWriter__line(&writer, &bstr("interrupt_controller.kind"), info->interrupt_controller_kind);
+    SysinfoWriter__line(&writer, &bstr("interrupt_controller.distributor_physical_base"), info->interrupt_distributor);
+    SysinfoWriter__line(&writer, &bstr("interrupt_controller.redistributor_physical_base"),
+                        info->interrupt_redistributor);
+    SysinfoWriter__line(&writer, &bstr("interrupt_controller.cpu_interface_physical_base"),
+                        info->interrupt_cpu_interface);
+    return writer.failed ? Error(FilesystemFileSize, bstr("Sysinfo buffer full"), IO_UNKNOWN_BUFFER)
+                         : Success(FilesystemFileSize, writer.size);
+}
+
+static Result(FilesystemFileSize)
+    Sysinfofs__load(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data)
+{
+    if (!BString__equals(path, &bstr("/sysinfo")))
+    {
+        return Error(FilesystemFileSize, bstr("Unknown boot file"), IO_INVALID_PATH);
+    }
+    match_result(
+        BootHardwareInfo__load(),
+        success(info)
+        {
+            return Sysinfofs__render(&info, data);
+        },
+        error(code, message)
+        {
+            return Error(FilesystemFileSize, message, IO_NO_DEVICE_FOUND);
+        }
+    );
+}
+
+static Result(OptionalDirectoryEntry) Sysinfofs__list(IOServiceContext context, ConstBStringPtr path, uint64_t index)
+{
+    if (!BString__equals(path, &bstr("/")))
+    {
+        return Error(OptionalDirectoryEntry, bstr("Unknown boot directory"), IO_INVALID_PATH);
+    }
+    DirectoryEntry entry = DirectoryEntry__new(IO_DIRENT_ATTR_NONE, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT,
+                                               IO_MODE_TYPE_FILE | 0444, &bstr("sysinfo"));
+    return Success(OptionalDirectoryEntry, index == 0 ? Some(DirectoryEntry, entry) : None(DirectoryEntry));
+}
+
+static IOStatus Sysinfofs__store(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data,
+                                 FilesystemFileSize size)
+{
+    return IO_PERMISSION_DENIED;
+}
+static IOStatus Sysinfofs__mkdir(IOServiceContext context, ConstBStringPtr path)
+{
+    return IO_PERMISSION_DENIED;
+}
+static IOStatus Sysinfofs__remove(IOServiceContext context, ConstBStringPtr path, Flags flags)
+{
+    return IO_PERMISSION_DENIED;
+}
+FilesystemOperations Sysinfofs__operations(void)
+{
+    return FilesystemOperations__new(Sysinfofs__load, Sysinfofs__store, Sysinfofs__list, Sysinfofs__mkdir,
+                                     Sysinfofs__remove, 0);
+}

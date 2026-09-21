@@ -14,6 +14,6 @@ Address PanicScreen__framebuffer_kernel_address(Address mapped_base, Framebuffer
 uint64_t PanicScreen__mapped_rows(FramebufferInfoPtr framebuffer, uint64_t mapped_bytes);
 bool PanicScreen__can_render_text(const char * text);
 
-void Kernel__panic(const char * error, ProcessContext * ctx);
+void Kernel__panic(const char * error, ProcessContextPtr ctx);
 
 #endif

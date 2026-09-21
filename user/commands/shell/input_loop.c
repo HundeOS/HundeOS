@@ -50,7 +50,10 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
         char ch = '\0';
         match_optional(
             ConsoleInputStream__read_char(),
-            some(read_ch) { ch = read_ch; },
+            some(read_ch)
+            {
+                ch = read_ch;
+            },
             none()
             {
                 return line;
@@ -86,7 +89,10 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
             BString escape_sequence = empty_bstr();
             match_optional(
                 ConsoleInputStream__read_escape_sequence(),
-                some(sequence) { escape_sequence = sequence; },
+                some(sequence)
+                {
+                    escape_sequence = sequence;
+                },
                 none()
                 {
                     continue;

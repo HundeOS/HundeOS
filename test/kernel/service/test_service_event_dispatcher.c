@@ -32,7 +32,10 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
 
     match_result(
         ServiceEventDispatcher__subscribe_irq(&dispatcher, process, 48),
-        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 
@@ -42,7 +45,10 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
         {
             match_optional(
                 dispatch.process,
-                some(target) { TEST_ASSERT_EQUAL_PTR(process, target); },
+                some(target)
+                {
+                    TEST_ASSERT_EQUAL_PTR(process, target);
+                },
                 none_test_fail()
             );
         },
@@ -65,7 +71,10 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
 
     match_result(
         ServiceEventDispatcher__complete_active_irq(&dispatcher, &interrupt_controller, process),
-        success(code) { TEST_ASSERT_EQUAL(SERVICE_OK, code); },
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+        },
         error_test_fail()
     );
 

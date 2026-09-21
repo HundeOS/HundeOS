@@ -45,8 +45,14 @@ static Optional(FilesystemFilePtr) FilesystemDriver__find(FilesystemDriverPtr se
 {
     match_find_result_ptr(
         FilesystemFiles__find(&self->files, FilesystemFile__matches, request),
-        some(file) { return Some(FilesystemFilePtr, file); },
-        none() { return None(FilesystemFilePtr); }
+        some(file)
+        {
+            return Some(FilesystemFilePtr, file);
+        },
+        none()
+        {
+            return None(FilesystemFilePtr);
+        }
     );
 }
 
@@ -56,6 +62,10 @@ static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr req
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
+    if ((request->flags & IO_OPEN_EXECUTE) != 0 && (request->flags & IO_OPEN_READ) == 0)
+    {
+        return IOReply__new(IO_PERMISSION_DENIED, 0);
+    }
     if (FilesystemFiles__len(&self->files) == FilesystemFiles__max_size || self->next_handle == INT64_MAX)
     {
         return IOReply__new(IO_REGISTER_FAILED, 0);
@@ -63,14 +73,23 @@ static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr req
     FilesystemFile file = FilesystemFile__new(self->next_handle++, request, path);
     match_result(
         mem_alloc_bytes(FILESYSTEM_FILE_CAPACITY),
-        success(memory) { file.data = (FilesystemFileDataPtr)memory; },
-        error(code, message) { return IOReply__new(IO_REGISTER_FAILED, 0); }
+        success(memory)
+        {
+            file.data = (FilesystemFileDataPtr)memory;
+        },
+        error(code, message)
+        {
+            return IOReply__new(IO_REGISTER_FAILED, 0);
+        }
     );
     if ((request->flags & (IO_OPEN_READ | IO_OPEN_EXECUTE)) != 0 || self->operations.write_capacity == 0)
     {
         match_result(
             self->operations.load(self->volume, path, file.data),
-            success(size) { file.size = size; },
+            success(size)
+            {
+                file.size = size;
+            },
             error(code, message)
             {
                 free(file.data);
@@ -78,7 +97,7 @@ static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr req
             }
         );
     }
-    if (self->operations.write_capacity == 0 && (request->flags & (IO_OPEN_WRITE | IO_OPEN_EXECUTE)) != 0)
+    if (self->operations.write_capacity == 0 && (request->flags & IO_OPEN_WRITE) != 0)
     {
         free(file.data);
         return IOReply__new(IO_PERMISSION_DENIED, 0);
@@ -90,7 +109,10 @@ static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr req
     }
     match_result(
         FilesystemFiles__push(&self->files, file),
-        success(code) { return IOReply__new(IO_OK, file.handle); },
+        success(code)
+        {
+            return IOReply__new(IO_OK, file.handle);
+        },
         error(code, message)
         {
             free(file.data);
@@ -118,7 +140,7 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
         {
             count = request->count;
         }
-        __builtin_memcpy(reply.data, file->data + file->offset, count);
+        __builtin_memcpy(IORequest__read_target(request, &reply), file->data + file->offset, count);
         file->offset += count;
         reply.value = count;
         return reply;
@@ -128,9 +150,20 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
-    uint8_t previous[IO_PROTOCOL_DATA_SIZE];
+    ChannelDataPtr previous;
+    match_result(
+        mem_alloc_bytes(request->count),
+        success(memory)
+        {
+            previous = (ChannelDataPtr)memory;
+        },
+        error(code, message)
+        {
+            return IOReply__new(IO_UNKNOWN_BUFFER, 0);
+        }
+    );
     __builtin_memcpy(previous, file->data + file->offset, request->count);
-    __builtin_memcpy(file->data + file->offset, request->data, request->count);
+    __builtin_memcpy(file->data + file->offset, IORequest__write_source(request), request->count);
     uint64_t size = file->offset + request->count;
     if (size < file->size)
     {
@@ -140,9 +173,11 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
     if (status != IO_OK)
     {
         __builtin_memcpy(file->data + file->offset, previous, request->count);
+        free(previous);
         return IOReply__new(status, 0);
     }
     file->offset += request->count;
+    free(previous);
     file->size = size;
     return IOReply__new(IO_OK, request->count);
 }
@@ -153,7 +188,7 @@ IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request
     {
         return IOReply__new(IO_PERMISSION_DENIED, 0);
     }
-    if (request->count > IO_PROTOCOL_DATA_SIZE)
+    if (request->count > IORequest__capacity(request))
     {
         return IOReply__new(IO_UNKNOWN_BUFFER, 0);
     }
@@ -189,7 +224,10 @@ IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request
                 );
                 return reply;
             },
-            error(code, message) { return IOReply__new((IOStatus)code, 0); }
+            error(code, message)
+            {
+                return IOReply__new((IOStatus)code, 0);
+            }
         );
     case IO_REQUEST_READ:
     case IO_REQUEST_WRITE:
@@ -214,10 +252,16 @@ IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request
                     free(removed.data);
                     return IOReply__new(IO_OK, 0);
                 },
-                error(code, message) { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+                error(code, message)
+                {
+                    return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                }
             );
         },
-        none() { return IOReply__new(IO_UNKNOWN_HANDLE, 0); }
+        none()
+        {
+            return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+        }
     );
 }
 
@@ -240,11 +284,20 @@ bool FilesystemDriver__release(FilesystemDriverPtr self, QueueConnectionID sessi
             {
                 match_result(
                     FilesystemFiles__remove(&self->files, file),
-                    success(code) { free(file.data); },
-                    error(code, message) { return false; }
+                    success(code)
+                    {
+                        free(file.data);
+                    },
+                    error(code, message)
+                    {
+                        return false;
+                    }
                 );
             },
-            none() { return true; }
+            none()
+            {
+                return true;
+            }
         );
     }
 }

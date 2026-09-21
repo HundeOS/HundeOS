@@ -1,7 +1,7 @@
 #include <stdlib.h>
 
 #include "../../../kernel/process.h"
-#include "../../../kernel/subsystems/io/types.h"
+#include "../../../kernel/types/types.h"
 
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
 {

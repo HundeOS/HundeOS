@@ -129,7 +129,10 @@ void test_kstring_char_at_returns_character_when_in_bounds(void)
 
     match_optional(
         BString__char_at(&bstr("hello"), 1),
-        some(ch) { TEST_ASSERT_EQUAL_CHAR('e', ch); },
+        some(ch)
+        {
+            TEST_ASSERT_EQUAL_CHAR('e', ch);
+        },
         none_test_fail()
     );
 }
@@ -140,7 +143,10 @@ void test_kstring_char_at_returns_none_when_out_of_bounds(void)
 
     match_optional(BString__char_at(&bstr("hello"), 5),
         some_test_fail(),
-        none() { TEST_ASSERT_TRUE(true); }
+        none()
+        {
+            TEST_ASSERT_TRUE(true);
+        }
     );
 }
 

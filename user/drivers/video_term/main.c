@@ -2,7 +2,7 @@
 
 #include "sys/debug.h"
 #include "sys/framebuffer_config.h"
-#include "sys/io_server.h"
+#include "io/stream_driver.h"
 #include "sys/service.h"
 #include "types/optional.h"
 #include "emoji_atlas.h"
@@ -987,6 +987,19 @@ static VideoTerm VideoTerm__new(FramebufferConfig config, void * pixels, uint64_
     return self;
 }
 
+static IOReply VideoTerm__write(IOServiceContext context, IORequestPtr request)
+{
+    VideoTermPtr terminal = context;
+    VideoTerm__hide_cursor(terminal);
+    for (uint64_t index = 0; index < request->count; index++)
+    {
+        VideoTerm__write_byte(terminal, IORequest__write_source(request)[index]);
+    }
+    VideoTerm__flush_emoji_cluster(terminal);
+    VideoTerm__show_cursor(terminal);
+    return IOReply__new(IO_OK, request->count);
+}
+
 int VIDEO_TERM_ENTRYPOINT(void)
 {
     if (!service_ok(service_become_service()))
@@ -1017,39 +1030,25 @@ int VIDEO_TERM_ENTRYPOINT(void)
 
     VideoTerm terminal = VideoTerm__new(config, driver_ptr(framebuffer_mapping), mapped_size(framebuffer_mapping));
 
-    IOHandle video = io_server_register(&bstr(VIDEO_TERM_PATH), IO_SERVER_WRITE);
-    if (video < 0)
+    static IOStreamDriver driver;
+    static IOService service;
+    driver = IOStreamDriver__new(IO_OPEN_WRITE, &terminal, VideoTerm__write);
+    if (IOService__listen_into(&service, &bstr(IO_VIDEO_SERVICE), &driver, IOStreamDriver__execute,
+                               IOStreamDriver__disconnect) != IO_OK)
     {
-        DRIVER_DEBUG("video_term: register error %i\n", (int)video);
         return 1;
     }
-
     VideoTerm__show_cursor(&terminal);
-
-    ServiceEvent event;
-    ServiceCode wait_status;
-    for (wait_status = service_wait(&event); service_alive(wait_status); wait_status = service_wait(&event))
+    if (!service_ok(service_publish_ready(&bstr(IO_VIDEO_SERVICE))))
     {
-        if (service_ok(wait_status))
+        return 1;
+    }
+    Channel__prepare_wait();
+    while (true)
+    {
+        if (!IOService__poll(&service))
         {
-            bool write_request = event.type == SERVICE_EVENT_IO && event.source == SERVICE_IO_WRITE_REQUEST;
-            if (write_request)
-            {
-                IOServerBuffer buffer;
-                if (io_server_get_buffer(video, &buffer) == IO_OK)
-                {
-                    VideoTerm__hide_cursor(&terminal);
-                    for (uint64_t i = 0; i < buffer.capacity; i++)
-                    {
-                        VideoTerm__write_byte(&terminal, (uint8_t)buffer.data[i]);
-                    }
-                    VideoTerm__flush_emoji_cluster(&terminal);
-                    VideoTerm__show_cursor(&terminal);
-                    io_server_data_consumed(video, buffer.capacity);
-                }
-            }
+            Channel__wait_event();
         }
     }
-
-    return 0;
 }

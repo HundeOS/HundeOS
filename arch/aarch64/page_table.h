@@ -101,6 +101,7 @@ typedef struct
 } MappingPermissions;
 
 typedef const MappingPermissions * ConstMappingPermissionsPtr;
+typedef MappingPermissions * MappingPermissionsPtr;
 
 static inline MappingPermissions MappingPermissions__new(MairAttribute memory_type, ShareAttribute shareability,
                                                          AccessAttribute access, int uxn, int pxn)

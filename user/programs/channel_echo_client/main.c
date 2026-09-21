@@ -27,7 +27,10 @@ static int ChannelEchoClient__exchange(ChannelPtr client, ConstBStringPtr text)
             IO__print(&result);
             IO__print(&bstr("\n"));
         },
-        error(code, message) { return 1; }
+        error(code, message)
+        {
+            return 1;
+        }
     );
     return 0;
 }

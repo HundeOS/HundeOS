@@ -343,7 +343,10 @@ void test_memfs_directory_permissions_and_sticky_tmp_protect_other_users(void)
     request.client_pid = 21;
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, Memfs__execute(&filesystem, &request).status);
     match_optional(Memfs__find(&filesystem, &bstr("/docs")),
-        some(node) { node->mode = 0700; },
+        some(node)
+        {
+            node->mode = 0700;
+        },
         none_test_fail()
     );
     request = path_request(IO_REQUEST_OPEN, &bstr("/docs/file"), IO_OPEN_READ);
@@ -358,7 +361,10 @@ void test_memfs_group_bits_and_root_identity_follow_permission_rules(void)
 {
     open_file(&bstr("/file"), IO_OPEN_WRITE);
     match_optional(Memfs__find(&filesystem, &bstr("/file")),
-        some(node) { node->mode = 0640; },
+        some(node)
+        {
+            node->mode = 0640;
+        },
         none_test_fail()
     );
     IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/file"), IO_OPEN_READ);

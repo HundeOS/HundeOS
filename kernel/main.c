@@ -12,75 +12,31 @@
 #include "bin/embedded_binaries.h"
 #include "types/bstring.h"
 #include "types/result.h"
-#include "subsystems/io/io_subsystem.h"
 #include "syscalls/io.h"
 #include "../arch/aarch64/io/uart.h"
 #include "system_info.h"
 
 BString panic_message = bstr("Program failed: %B\n");
-static BString console_path = bstr(":console:");
-static BString tty_path = bstr(":tty:");
-
-static Result(IOHandle) open_stdio_handle(KernelPtr kernel, ProcessPtr process, ConstBStringPtr path, Flags flags)
+static void install_default_stdio(KernelPtr kernel, ProcessPtr process)
 {
-    __d_printf(IOSUB, "open_stdio_handle pid=%i name=%s path=%s flags=%i\n", process->pid, cstr(process->name),
-               cstr_p(path), flags);
-    KernelContext kernel_context =
-        KernelContext__new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
-    IOContextPtr context = IOContext__heap_new(&kernel_context, &Some(IOSubsystemPtr, kernel->io_subsystem),
-                                               &None(IOHandle), &None(ExternalBuffer));
-    Result(IOHandle) open_result = IOSubsystem__open(kernel->io_subsystem, context, path, flags);
-    IOContext__dispose(context);
-    match_result(
-        open_result,
-        success(handle)
+    IOHandle input = IO_ENDPOINT_TTY_INPUT;
+    match_optional(
+        kernel->system_info,
+        some(info)
         {
-            __d_printf(IOSUB, "open_stdio_handle success pid=%i flags=%i handle=%p\n", process->pid, flags, handle);
+            match_optional(
+                info.framebuffer,
+                some(framebuffer)
+                {
+                    input = IO_ENDPOINT_KEYBOARD_INPUT;
+                },
+                none_do_nothing()
+            );
         },
-        error(code, message)
-        {
-            __d_printf(IOSUB, "open_stdio_handle error pid=%i flags=%i code=%i message=%s\n", process->pid, flags, code,
-                       cstr(message));
-        }
+        none_do_nothing()
     );
-    return open_result;
-}
-
-static Result(ProcessSetupStatus) install_default_stdio(KernelPtr kernel, ProcessPtr process)
-{
-    __d_printf(IOSUB, "install_default_stdio start pid=%i name=%s\n", process->pid, cstr(process->name));
-    match_result(
-        open_stdio_handle(kernel, process, &tty_path, IO_OPEN_READ),
-        success(handle)
-        {
-            __d_printf(IOSUB, "install_default_stdio fd=0 pid=%i handle=%p\n", process->pid, handle);
-            Process__set_file_descriptor(process, 0, handle);
-        },
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
-    );
-
-    match_result(
-        open_stdio_handle(kernel, process, &console_path, IO_OPEN_WRITE),
-        success(handle)
-        {
-            __d_printf(IOSUB, "install_default_stdio fd=1 pid=%i handle=%p\n", process->pid, handle);
-            Process__set_file_descriptor(process, 1, handle);
-        },
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
-    );
-
-    match_result(
-        open_stdio_handle(kernel, process, &console_path, IO_OPEN_WRITE),
-        success(handle)
-        {
-            __d_printf(IOSUB, "install_default_stdio fd=2 pid=%i handle=%p\n", process->pid, handle);
-            Process__set_file_descriptor(process, 2, handle);
-        },
-        error(code, message) { return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP); }
-    );
-
-    __d_printf(IOSUB, "install_default_stdio done pid=%i name=%s\n", process->pid, cstr(process->name));
-    return Success(ProcessSetupStatus, PROCESS_SETUP);
+    process->startup_stdio = SpawnStdio__new(input, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+    Process__prepare_startup_stdio(process);
 }
 
 void schedule_as(KernelPtr kernel, ConstBStringPtr name, ProcessClass process_class)
@@ -98,20 +54,14 @@ void schedule_as(KernelPtr kernel, ConstBStringPtr name, ProcessClass process_cl
                     __d_printf(PROCESS, "schedule_as setup success pid=%i name=%s process=%p\n", process->pid,
                                cstr(process->name), process);
                     process->process_class = process_class;
+                    if (BString__equals(name, &bstr("services/hunde-mama")))
+                    {
+                        kernel->boot_authority = process->pid;
+                    }
                     Exec__apply_builtin_identity_policy(process);
-                    match_result(
-                        install_default_stdio(kernel, process),
-                        success(_)
-                        {
-                            __d_printf(SCHEDULER, "schedule_as scheduling pid=%i name=%s\n", process->pid,
-                                       cstr(process->name));
-                            Scheduler__schedule(kernel->scheduler, process);
-                        },
-                        error(code, message)
-                        {
-                            Kernel__panic(BString__cstr(&message), NULL); // hundelint: ignore-no-null
-                        }
-                    );
+                    install_default_stdio(kernel, process);
+                    __d_printf(SCHEDULER, "schedule_as scheduling pid=%i name=%s\n", process->pid, cstr(process->name));
+                    Scheduler__schedule(kernel->scheduler, process);
                 },
                 error(code, message)
                 {
@@ -185,7 +135,7 @@ void Kernel_main(CPUID cpu_id)
     if (cpu_id == 1)
     {
         __d_printf(PROGRESS, "Kernel starting loading program: %i\n", cpu_id);
-        schedule(kernel, &bstr("services/hundeschule"));
+        schedule(kernel, &bstr("services/hunde-mama"));
         Scheduler__mark_ready(kernel->scheduler);
     }
     else

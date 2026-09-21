@@ -34,6 +34,7 @@
 typedef uint64_t EfiStatus;
 typedef void * EfiHandle;
 typedef uint64_t EfiPhysicalAddress;
+typedef EfiPhysicalAddress * EfiPhysicalAddressPtr;
 
 typedef struct EfiSimpleTextOutputProtocol EfiSimpleTextOutputProtocol;
 typedef EfiSimpleTextOutputProtocol * EfiSimpleTextOutputProtocolPtr;
@@ -78,7 +79,7 @@ struct EfiBootServices
     EfiTableHeader header;
     void * raise_tpl;
     void * restore_tpl;
-    EfiStatus (*allocate_pages)(int type, int memory_type, uint64_t pages, EfiPhysicalAddress * memory);
+    EfiStatus (*allocate_pages)(int type, int memory_type, uint64_t pages, EfiPhysicalAddressPtr memory);
     EfiStatus (*free_pages)(EfiPhysicalAddress memory, uint64_t pages);
     EfiStatus (*get_memory_map)(uint64_t * memory_map_size, void * memory_map, uint64_t * map_key,
                                 uint64_t * descriptor_size, uint32_t * descriptor_version);

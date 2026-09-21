@@ -3,6 +3,27 @@
 #include "ipc/kernel_notification_queue.h"
 #include "ipc/interrupt_protocol.h"
 
+void test_pending_check_does_not_consume_notification(void)
+{
+    KernelNotificationQueue queue = KernelNotificationQueue__new();
+    TEST_ASSERT_FALSE(KernelNotificationQueue__has_pending(&queue));
+    match_result(KernelNotificationQueue__publish(&queue, 4, 19),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(KernelNotificationQueue__has_pending(&queue));
+    TEST_ASSERT_TRUE(KernelNotificationQueue__has_pending(&queue));
+    match_optional(
+        KernelNotificationQueue__pop(&queue),
+        some(value)
+        {
+            TEST_ASSERT_EQUAL_UINT64(19, value.sequence);
+        },
+        none_test_fail()
+    );
+    TEST_ASSERT_FALSE(KernelNotificationQueue__has_pending(&queue));
+}
+
 void test_kernel_notification_queue_coalesces_each_irq_without_capacity_failure(void)
 {
     KernelNotificationQueue queue = KernelNotificationQueue__new();

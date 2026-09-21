@@ -7,10 +7,8 @@
 #include "../syscall/deferred.h"
 #include "../service/service.h"
 #include "../service/service_directory.h"
-#include "../subsystems/io/block/block_device.h"
-#include "../subsystems/io/file/register.h"
-#include "../subsystems/io/file/userspace_filesystem.h"
-#include "../subsystems/io/socket/socket.h"
+#include "../service/device_registry.h"
+#include "../boot_info.h"
 
 static BString no_process = bstr("No process for service syscall");
 static BString unsupported_operation = bstr("Unsupported service operation");
@@ -41,19 +39,6 @@ static ServiceCode Service__map_irq_registration_status(Code code)
     return SERVICE_IRQ_REGISTRATION_FAILED;
 }
 
-static ServiceCode Service__map_block_registration_status(Code code)
-{
-    if (code == BLOCK_DEVICE_ALREADY_REGISTERED)
-    {
-        return SERVICE_DEVICE_ALREADY_REGISTERED;
-    }
-    if (code == BLOCK_DEVICE_INVALID_ARGUMENT)
-    {
-        return SERVICE_INVALID_BUFFER;
-    }
-    return SERVICE_DEVICE_REGISTRATION_FAILED;
-}
-
 static Result(SystemCallResult) Service__require_capability(ProcessPtr process, ProcessCapabilities capability)
 {
     if (Process__has_capability(process, capability))
@@ -76,7 +61,10 @@ static Result(Anything) ServiceEvent__copy_to_target(ResultPtr(Anything) result,
             *target = *event;
             return Success(Anything, SERVICE_OK);
         },
-        error(code, message) { return Error(Anything, message, code); }
+        error(code, message)
+        {
+            return Error(Anything, message, code);
+        }
     );
 
     return Error(Anything, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
@@ -111,12 +99,55 @@ Result(SystemCallResult)
         *process_opt,
         some(process)
         {
+            if (service_operation == SERVICE_QUEUE_WAIT_CONTROL)
+            {
+                critical_section(
+                    kernel->scheduler->scheduler_lock,
+                    {
+                        match_result(
+                            Process__queue_wait_control(process),
+                            success(address)
+                            {
+                                cs_return Success(SystemCallResult, address);
+                            },
+                            error(code, message)
+                            {
+                                cs_return Error(SystemCallResult, message, code);
+                            }
+                        );
+                    }
+                );
+            }
+            if (service_operation == SERVICE_QUEUE_WAIT)
+            {
+                match_result(
+                    Scheduler__queue_wait(kernel->scheduler, process, arg2, arg3, arg4),
+                    success(value)
+                    {
+                        if (value == QUEUE_WAIT_PARKED)
+                        {
+                            return Error(SystemCallResult, bstr("Queue wait pending"), SYSCALL_IO_BLOCK);
+                        }
+                        return Success(SystemCallResult, value);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
+                );
+            }
             if (service_operation == SERVICE_QUEUE_LISTEN)
             {
                 match_result(
                     Scheduler__queue_listen(kernel->scheduler, process, arg2, arg3),
-                    success(value) { return Success(SystemCallResult, value); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    success(value)
+                    {
+                        return Success(SystemCallResult, value);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
             }
             if (service_operation == SERVICE_QUEUE_CONNECT || service_operation == SERVICE_QUEUE_ACCEPT ||
@@ -124,8 +155,14 @@ Result(SystemCallResult)
             {
                 match_result(
                     Scheduler__queue_operation(kernel->scheduler, process, service_operation, arg2),
-                    success(value) { return Success(SystemCallResult, value); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    success(value)
+                    {
+                        return Success(SystemCallResult, value);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
             }
             if (service_operation == SERVICE_BECOME_SERVICE)
@@ -133,7 +170,10 @@ Result(SystemCallResult)
                 match_result(
                     Service__require_capability(process, PROCESS_CAP_BECOME_SERVICE),
                     success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
                 process->process_class = PROCESS_CLASS_SERVICE;
                 return Success(SystemCallResult, SERVICE_OK);
@@ -166,7 +206,10 @@ Result(SystemCallResult)
                         __d_printf(IODEV, "service wait return pid=%i code=%i\n", process->pid, SERVICE_OK);
                         match_result(
                             mapped,
-                            success(mapped_code) { return Success(SystemCallResult, mapped_code); },
+                            success(mapped_code)
+                            {
+                                return Success(SystemCallResult, mapped_code);
+                            },
                             error(mapped_code, mapped_message)
                             {
                                 return Error(SystemCallResult, mapped_message, mapped_code);
@@ -199,16 +242,42 @@ Result(SystemCallResult)
                         *target = event;
                         return Success(SystemCallResult, SERVICE_OK);
                     },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
             }
 
+            if (service_operation == SERVICE_BOOT_HARDWARE_INFO)
+            {
+                BootHardwareInfoPtr target = (BootHardwareInfoPtr)arg2;
+                if (target == NULL)
+                {
+                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
+                }
+                match_optional(
+                    kernel->system_info,
+                    some(info)
+                    {
+                        *target = BootHardwareInfo__from_system(&info, CPU__count());
+                        return Success(SystemCallResult, SERVICE_OK);
+                    },
+                    none()
+                    {
+                        return Error(SystemCallResult, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
+                    }
+                );
+            }
             if (service_operation == SERVICE_MAP_MMIO)
             {
                 match_result(
                     Service__require_capability(process, PROCESS_CAP_MAP_MMIO),
                     success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
                 ServiceMappedMemoryRequestPtr request = (ServiceMappedMemoryRequestPtr)arg2;
                 if (request == NULL)
@@ -224,7 +293,10 @@ Result(SystemCallResult)
                         request->device_address = request->physical_address;
                         return Success(SystemCallResult, SERVICE_OK);
                     },
-                    error(code, message) { return Error(SystemCallResult, message, SERVICE_MAP_FAILED); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, SERVICE_MAP_FAILED);
+                    }
                 );
             }
 
@@ -233,12 +305,21 @@ Result(SystemCallResult)
                 match_result(
                     Service__require_capability(process, PROCESS_CAP_MAP_MMIO),
                     success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
                 match_result(
                     Process__claim_virtio_device(process, (Address)arg2),
-                    success(code) { return Success(SystemCallResult, SERVICE_OK); },
-                    error(code, message) { return Error(SystemCallResult, message, SERVICE_INVALID_BUFFER); }
+                    success(code)
+                    {
+                        return Success(SystemCallResult, SERVICE_OK);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, SERVICE_INVALID_BUFFER);
+                    }
                 );
             }
             if (service_operation == SERVICE_DEVICE_ADDRESS)
@@ -258,7 +339,10 @@ Result(SystemCallResult)
                         request->device_address = device_address;
                         return Success(SystemCallResult, SERVICE_OK);
                     },
-                    error(code, message) { return Error(SystemCallResult, message, SERVICE_INVALID_BUFFER); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, SERVICE_INVALID_BUFFER);
+                    }
                 );
             }
 
@@ -267,13 +351,19 @@ Result(SystemCallResult)
                 match_result(
                     Service__require_capability(process, PROCESS_CAP_SUBSCRIBE_IRQ),
                     success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
                 uint64_t irq = (uint64_t)arg2;
                 __d_printf(IODEV, "service subscribe irq pid=%i irq=%i\n", process->pid, (int)irq);
                 match_result(
                     IRQDispatcher__register_service(kernel->irq_dispatcher, irq, process),
-                    success(_) { return Success(SystemCallResult, SERVICE_OK); },
+                    success(_)
+                    {
+                        return Success(SystemCallResult, SERVICE_OK);
+                    },
                     error(code, message)
                     {
                         return Error(SystemCallResult, message, Service__map_irq_registration_status(code));
@@ -286,7 +376,10 @@ Result(SystemCallResult)
                 match_result(
                     Service__require_capability(process, PROCESS_CAP_SUBSCRIBE_IRQ),
                     success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
                 ServiceInterruptManagerRegistrationPtr request = (ServiceInterruptManagerRegistrationPtr)arg2;
                 if (request == NULL)
@@ -323,7 +416,10 @@ Result(SystemCallResult)
                         IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, process);
                         return Error(SystemCallResult, unsupported_operation, SERVICE_MAP_FAILED);
                     },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
             }
 
@@ -338,18 +434,27 @@ Result(SystemCallResult)
                     Scheduler__require_process_capability(kernel->scheduler, request->client_pid,
                                                           PROCESS_CAP_SUBSCRIBE_IRQ),
                     success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
-                critical_section(kernel->scheduler->scheduler_lock, {
-                    match_result(
-                        IRQDispatcher__register_managed_irq(kernel->irq_dispatcher, request->irq, process),
-                        success(_) { cs_return Success(SystemCallResult, SERVICE_OK); },
-                        error(code, message)
-                        {
-                            cs_return Error(SystemCallResult, message, Service__map_irq_registration_status(code));
-                        }
-                    );
-                });
+                critical_section(
+                    kernel->scheduler->scheduler_lock,
+                    {
+                        match_result(
+                            IRQDispatcher__register_managed_irq(kernel->irq_dispatcher, request->irq, process),
+                            success(_)
+                            {
+                                cs_return Success(SystemCallResult, SERVICE_OK);
+                            },
+                            error(code, message)
+                            {
+                                cs_return Error(SystemCallResult, message, Service__map_irq_registration_status(code));
+                            }
+                        );
+                    }
+                );
             }
 
             if (service_operation == SERVICE_REGISTER_BLOCK_DEVICE)
@@ -357,84 +462,29 @@ Result(SystemCallResult)
                 match_result(
                     Service__require_capability(process, PROCESS_CAP_REGISTER_BLOCK_DEVICE),
                     success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
                 ServiceBlockDeviceRegistrationPtr request = (ServiceBlockDeviceRegistrationPtr)arg2;
-                if (request == NULL || request->block_size != BLOCK_DEVICE_BLOCK_SIZE)
+                if (request == NULL || request->block_size != BLOCK_CHANNEL_SECTOR_SIZE || request->block_count == 0)
                 {
                     return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
                 }
 
+                DeviceRecord record = DeviceRecord__new(DEVICE_BLOCK, process->pid, &request->path, &empty_bstr(),
+                                                        request->block_size, request->block_count);
                 match_result(
-                    BlockDeviceRegistry__register(&request->path, process, request->block_count,
-                                                  kernel->message_broker),
+                    KernelDeviceRegistry__publish(&kernel->device_registry, &record),
                     success(_)
                     {
-                        match_optional(
-                            kernel->io_subsystem->root_filesystem,
-                            some(root_fs) { FilesystemTable__mount_available_entries(root_fs); },
-                            none_do_nothing()
-                        );
                         return Success(SystemCallResult, SERVICE_OK);
                     },
                     error(code, message)
                     {
-                        return Error(SystemCallResult, message, Service__map_block_registration_status(code));
+                        return Error(SystemCallResult, message, code);
                     }
-                );
-            }
-
-            if (service_operation == SERVICE_BLOCK_GET_REQUEST)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-                uint64_t request_id = (uint64_t)arg2;
-                ServiceBlockRequestPtr target = (ServiceBlockRequestPtr)arg3;
-                if (target == NULL)
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_result(
-                    BlockDeviceRegistry__get_request(process, request_id),
-                    success(request)
-                    {
-                        *target = request;
-                        return Success(SystemCallResult, SERVICE_OK);
-                    },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_BLOCK_READ_DEVICE)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_USE_BLOCK_DEVICES),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-
-                ServiceBlockReadRequestPtr request = (ServiceBlockReadRequestPtr)arg2;
-                if (request == NULL || request->buffer == 0) // hundelint: ignore-no-null
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                KernelContext kernel_context =
-                    KernelContext__new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
-                BlockDevice__set_current_context(&kernel_context);
-                Result(BlockCount) read_result = BlockDeviceRegistry__read_from_process(
-                    process, &request->device_path, request->block, request->block_count, ptr(request->buffer, Data),
-                    request->buffer_size, kernel->message_broker);
-                BlockDevice__clear_current_context();
-
-                match_result(
-                    read_result,
-                    success(blocks) { return Success(SystemCallResult, blocks); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
                 );
             }
 
@@ -443,287 +493,40 @@ Result(SystemCallResult)
                 match_result(
                     Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS),
                     success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
                 match_result(
                     Scheduler__require_process_capability(kernel->scheduler, arg2, PROCESS_CAP_USE_BLOCK_DEVICES),
-                    success(code) { return Success(SystemCallResult, SERVICE_OK); },
-                    error(code, message) { return Error(SystemCallResult, message, SERVICE_PERMISSION_DENIED); }
-                );
-            }
-
-            if (service_operation == SERVICE_BLOCK_CONNECT)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_USE_BLOCK_DEVICES),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-
-                ServiceBlockConnectionRequestPtr request = (ServiceBlockConnectionRequestPtr)arg2;
-                if (request == NULL) // hundelint: ignore-no-null
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_result(
-                    BlockDeviceRegistry__connect(process, request, kernel->message_broker),
-                    success(code) { return Success(SystemCallResult, code); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_BLOCK_DISCONNECT)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_USE_BLOCK_DEVICES),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-
-                ServiceBlockDisconnectionRequestPtr request = (ServiceBlockDisconnectionRequestPtr)arg2;
-                if (request == NULL) // hundelint: ignore-no-null
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_result(
-                    BlockDeviceRegistry__disconnect(process, request),
-                    success(code) { return Success(SystemCallResult, code); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_BLOCK_WRITE_DEVICE)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_USE_BLOCK_DEVICES),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-
-                ServiceBlockReadRequestPtr request = (ServiceBlockReadRequestPtr)arg2;
-                if (request == NULL || request->buffer == 0) // hundelint: ignore-no-null
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                KernelContext kernel_context =
-                    KernelContext__new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
-                BlockDevice__set_current_context(&kernel_context);
-                Result(BlockCount) write_result = BlockDeviceRegistry__write_from_process(
-                    process, &request->device_path, request->block, request->block_count, ptr(request->buffer, Data),
-                    request->buffer_size, kernel->message_broker);
-                BlockDevice__clear_current_context();
-
-                match_result(
-                    write_result,
-                    success(blocks) { return Success(SystemCallResult, blocks); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_BLOCK_READ_DEVICE_ASYNC)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_USE_BLOCK_DEVICES),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-
-                ServiceBlockReadRequestPtr request = (ServiceBlockReadRequestPtr)arg2;
-                if (request == NULL || request->buffer == 0) // hundelint: ignore-no-null
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_result(
-                    BlockDeviceRegistry__read_from_process_async(process, &request->device_path, request->block,
-                                                                 request->block_count, ptr(request->buffer, Data),
-                                                                 request->buffer_size, kernel->message_broker),
-                    success(request_id) { return Success(SystemCallResult, request_id); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_BLOCK_WRITE_DEVICE_ASYNC)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_USE_BLOCK_DEVICES),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-
-                ServiceBlockReadRequestPtr request = (ServiceBlockReadRequestPtr)arg2;
-                if (request == NULL || request->buffer == 0) // hundelint: ignore-no-null
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_result(
-                    BlockDeviceRegistry__write_from_process_async(process, &request->device_path, request->block,
-                                                                  request->block_count, ptr(request->buffer, Data),
-                                                                  request->buffer_size, kernel->message_broker),
-                    success(request_id) { return Success(SystemCallResult, request_id); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_BLOCK_COMPLETE)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_HANDLE_BLOCK_REQUESTS),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-                ServiceBlockCompletionPtr completion = (ServiceBlockCompletionPtr)arg2;
-                if (completion == NULL)
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_result(
-                    BlockDeviceService__complete(process, completion),
-                    success(code) { return Success(SystemCallResult, code); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_REGISTER_FILESYSTEM)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_MOUNT_FILESYSTEM),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-
-                ServiceFilesystemRegistrationPtr request = (ServiceFilesystemRegistrationPtr)arg2;
-                if (request == NULL)
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_optional(
-                    kernel->io_subsystem->root_filesystem,
-                    some(root_filesystem)
+                    success(code)
                     {
-                        match_result(
-                            UserspaceFilesystemRegistry__register(UserspaceFilesystemRegistry__shared(), process,
-                                                                  request, root_filesystem, kernel->message_broker),
-                            success(code) { return Success(SystemCallResult, code); },
-                            error(code, message) { return Error(SystemCallResult, message, code); }
-                        );
-                    },
-                    none_do_nothing()
-                );
-
-                return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-            }
-
-            if (service_operation == SERVICE_FILESYSTEM_GET_REQUEST)
-            {
-                uint64_t request_id = (uint64_t)arg2;
-                ServiceFilesystemRequestPtr target = (ServiceFilesystemRequestPtr)arg3;
-                if (target == NULL)
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_result(
-                    UserspaceFilesystemRegistry__get_request(UserspaceFilesystemRegistry__shared(), process,
-                                                             request_id),
-                    success(request)
-                    {
-                        *target = request;
                         return Success(SystemCallResult, SERVICE_OK);
                     },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_FILESYSTEM_COMPLETE)
-            {
-                ServiceFilesystemCompletionPtr completion = (ServiceFilesystemCompletionPtr)arg2;
-                if (completion == NULL)
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_result(
-                    UserspaceFilesystemRegistry__complete(UserspaceFilesystemRegistry__shared(), process, completion),
-                    success(code) { return Success(SystemCallResult, code); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_REGISTER_SOCKET_ROUTER)
-            {
-                match_result(
-                    Service__require_capability(process, PROCESS_CAP_BECOME_SERVICE),
-                    success_do_nothing(),
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-
-                match_result(
-                    SocketIO__registered_registry(kernel->io_subsystem),
-                    success(registry)
+                    error(code, message)
                     {
-                        match_result(
-                            SocketRegistry__register_router(registry, process, kernel->message_broker),
-                            success(code) { return Success(SystemCallResult, code); },
-                            error(code, message) { return Error(SystemCallResult, message, code); }
-                        );
-                    },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                        return Error(SystemCallResult, message, SERVICE_PERMISSION_DENIED);
+                    }
                 );
             }
 
-            if (service_operation == SERVICE_SOCKET_GET_REQUEST)
+            if (service_operation == SERVICE_AUTHORIZE_MOUNT_CLIENT)
             {
-                uint64_t request_id = (uint64_t)arg2;
-                IOSocketRouterRequestPtr target = (IOSocketRouterRequestPtr)arg3;
-                if (target == NULL)
+                if (!ProcessClass__is_service(process->process_class))
                 {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
+                    return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS);
                 }
-
                 match_result(
-                    SocketIO__registered_registry(kernel->io_subsystem),
-                    success(registry)
+                    Scheduler__require_process_capability(kernel->scheduler, arg2, PROCESS_CAP_MOUNT_FILESYSTEM),
+                    success(code)
                     {
-                        match_result(
-                            SocketRegistry__get_request(registry, process, request_id),
-                            success(request)
-                            {
-                                *target = request;
-                                return Success(SystemCallResult, SERVICE_OK);
-                            },
-                            error(code, message) { return Error(SystemCallResult, message, code); }
-                        );
+                        return Success(SystemCallResult, SERVICE_OK);
                     },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
-                );
-            }
-
-            if (service_operation == SERVICE_SOCKET_COMPLETE)
-            {
-                IOSocketRouterCompletionPtr completion = (IOSocketRouterCompletionPtr)arg2;
-                if (completion == NULL)
-                {
-                    return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
-                }
-
-                match_result(
-                    SocketIO__registered_registry(kernel->io_subsystem),
-                    success(registry)
+                    error(code, message)
                     {
-                        match_result(
-                            SocketRegistry__complete(registry, process, completion),
-                            success(code) { return Success(SystemCallResult, code); },
-                            error(code, message) { return Error(SystemCallResult, message, code); }
-                        );
-                    },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                        return Error(SystemCallResult, message, SERVICE_PERMISSION_DENIED);
+                    }
                 );
             }
 
@@ -742,8 +545,14 @@ Result(SystemCallResult)
 
                 match_result(
                     Scheduler__service_publish_ready(kernel->scheduler, process, &request->name),
-                    success(code) { return Success(SystemCallResult, code); },
-                    error(code, message) { return Error(SystemCallResult, message, code); }
+                    success(code)
+                    {
+                        return Success(SystemCallResult, code);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
                 );
             }
 
@@ -778,7 +587,10 @@ Result(SystemCallResult)
                 );
             }
         },
-        none() { return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS); }
+        none()
+        {
+            return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS);
+        }
     );
 
     return Error(SystemCallResult, unsupported_operation, SERVICE_OPERATION_NOT_SUPPORTED);
