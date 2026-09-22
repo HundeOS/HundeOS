@@ -7,9 +7,6 @@
 #include "../../../../common_includes/syscalls/io.h"
 #include "../../../../common_includes/syscalls/service.h"
 
-#define UART_DR 0x000
-#define UART_FR 0x018
-#define FR_TXFF (1u << 5)
 #define UART_PHYS_BASE 0x12345000ULL
 
 static char fake_io_buffer[2];
@@ -33,10 +30,8 @@ static bool fake_sysinfo_closed;
 static const char fake_sysinfo[] = "uart.physical_base=0x12345000\n"
                                    "uart.virtual_base=0xffff000000000000\n"
                                    "uart.irq=99\n"
+                                   "uart.kind=1\n"
                                    "uart.mmio_size=0x1000\n";
-
-uint32_t Uart__read32(Address base, uint64_t offset);
-void Uart__write32(Address base, uint64_t offset, uint32_t value);
 
 #include "../stream_runtime.h"
 #define main uart_tx_driver_main
@@ -47,18 +42,22 @@ static int uart_tx_main_under_test(void)
     return StreamDriverTest__run(uart_tx_driver_main);
 }
 
-uint32_t Uart__read32(Address base, uint64_t offset)
+UartDevice UartDevice__new(Address registers, UartKind kind)
 {
-    TEST_ASSERT_NOT_EQUAL(0, base);
-    TEST_ASSERT_EQUAL_UINT64(UART_FR, offset);
-    fake_uart_fr_read_count++;
-    return fake_uart_fr_read_count == 1 ? FR_TXFF : 0;
+    TEST_ASSERT_EQUAL(UART_KIND_PL011, kind);
+    return (UartDevice){.registers = registers, .kind = kind};
 }
 
-void Uart__write32(Address base, uint64_t offset, uint32_t value)
+bool UartDevice__can_transmit(ConstUartDevicePtr self)
 {
-    TEST_ASSERT_NOT_EQUAL(0, base);
-    TEST_ASSERT_EQUAL_UINT64(UART_DR, offset);
+    TEST_ASSERT_NOT_EQUAL(0, self->registers);
+    fake_uart_fr_read_count++;
+    return fake_uart_fr_read_count != 1;
+}
+
+void UartDevice__write(UartDevicePtr self, uint8_t value)
+{
+    TEST_ASSERT_NOT_EQUAL(0, self->registers);
     TEST_ASSERT_LESS_THAN_UINT64(4, fake_uart_write_count);
     fake_uart_writes[fake_uart_write_count++] = value;
 }

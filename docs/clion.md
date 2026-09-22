@@ -15,16 +15,17 @@ select Open as Project in the current window. Opening it as a text file does
 not load the build model. Existing Makefile run configurations can still be
 used; the database supplies code analysis, not a replacement build system.
 
-The database records the cross-compiler's absolute path and each compilation's
-actual flags. Kernel sources use `kernel`, `common`, and `common_includes`;
-userspace sources use `user/lib`, `common`, `common_includes`, and the bundled
-newlib headers. Headers such as `lifecycle.h` get their context from the source
-files that include them. Source-root markings alone do not supply these flags.
+The database records both the AArch64 kernel/userspace build and the current
+RISC-V bring-up sources, with each cross-compiler's absolute path and actual
+flags. Kernel sources use `kernel`, `common`, and `common_includes`; userspace
+sources use `user/lib`, `common`, `common_includes`, and the bundled newlib
+headers. Headers such as `lifecycle.h` get their context from the source files
+that include them. Source-root markings alone do not supply these flags.
 
 Regenerate after adding source files or changing build flags. Then use
 Tools > Compilation Database > Reload Compilation Database Project if CLion
 does not reload automatically. The generated JSON is machine-local and ignored
-by Git. This target covers the selected kernel platform and userspace binaries,
-not the separately generated host unit-test builds.
+by Git. This target does not include the separately generated host unit-test
+builds.
 
 Reference: [CLion compilation databases](https://www.jetbrains.com/help/clion/compilation-database.html).

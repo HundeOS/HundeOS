@@ -153,29 +153,20 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     pi_uefi_system_info.uart.physical_base = pi_uefi_platform_info.uart_physical_base;
     pi_uefi_system_info.uart.virtual_base = pi_uefi_platform_info.uart_virtual_base;
     pi_uefi_system_info.uart.irq = pi_uefi_platform_info.uart_irq;
+    pi_uefi_system_info.uart.kind = UART_KIND_PL011;
+    pi_uefi_system_info.virtio_mmio = None(BootVirtioMmioInfo);
     pi_uefi_system_info.framebuffer = pi_uefi_platform_info.framebuffer;
     pi_uefi_system_info.pci = pi_uefi_platform_info.pci;
     pi_uefi_system_info.sd_host = pi_uefi_platform_info.sd_host;
     pi_uefi_system_info.ethernet_mac = pi_uefi_platform_info.ethernet_mac;
 
-    pi_uefi_system_info.gic.distributor_physical_base = pi_uefi_platform_info.gic_distributor_physical_base;
-    pi_uefi_system_info.gic.distributor_virtual_base = (uint64_t)&__gicd_start[0];
-    pi_uefi_system_info.gic.redistributor_physical_base = pi_uefi_platform_info.gic_redistributor_physical_base;
-    pi_uefi_system_info.gic.redistributor_virtual_base = pi_uefi_platform_info.gic_redistributor_virtual_base;
-
-    pi_uefi_system_info.interrupt_controller.kind = pi_uefi_platform_info.interrupt_controller_kind;
-    pi_uefi_system_info.interrupt_controller.distributor_physical_base =
-        pi_uefi_platform_info.gic_distributor_physical_base;
-    pi_uefi_system_info.interrupt_controller.distributor_virtual_base =
-        PI_UEFI_GICD_BASE + (pi_uefi_platform_info.gic_distributor_physical_base & ((2ULL * 1024ULL * 1024ULL) - 1ULL));
-    pi_uefi_system_info.interrupt_controller.redistributor_physical_base =
-        pi_uefi_platform_info.gic_redistributor_physical_base;
-    pi_uefi_system_info.interrupt_controller.redistributor_virtual_base =
-        pi_uefi_platform_info.gic_redistributor_virtual_base;
-    pi_uefi_system_info.interrupt_controller.cpu_interface_physical_base =
-        pi_uefi_platform_info.gic_cpu_interface_physical_base;
-    pi_uefi_system_info.interrupt_controller.cpu_interface_virtual_base =
-        pi_uefi_platform_info.gic_cpu_interface_virtual_base;
+    GicInterruptControllerInfo gic = GicInterruptControllerInfo__new(
+        pi_uefi_platform_info.gic_distributor_physical_base,
+        PI_UEFI_GICD_BASE + (pi_uefi_platform_info.gic_distributor_physical_base & ((2ULL * 1024ULL * 1024ULL) - 1ULL)),
+        pi_uefi_platform_info.gic_redistributor_physical_base, pi_uefi_platform_info.gic_redistributor_virtual_base,
+        pi_uefi_platform_info.gic_cpu_interface_physical_base, pi_uefi_platform_info.gic_cpu_interface_virtual_base);
+    pi_uefi_system_info.interrupt_controller =
+        InterruptControllerInfo__new_gic(pi_uefi_platform_info.interrupt_controller_kind, &gic);
 
     pi_uefi_system_info.physical_memory.free_regions.len = pi_uefi_platform_info.physical_memory_regions.len;
     for (uint64_t index = 0; index < pi_uefi_platform_info.physical_memory_regions.len; index++)

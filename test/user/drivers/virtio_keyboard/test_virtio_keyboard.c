@@ -11,6 +11,11 @@ static bool delivered;
 static bool backpressure;
 static bool fail_subscribe;
 
+#define TEST_VIRTIO_MMIO_PHYSICAL_BASE 0x0a000000ULL
+#define TEST_VIRTIO_MMIO_SLOT_SIZE 0x200ULL
+#define TEST_VIRTIO_MMIO_SLOT_COUNT 32ULL
+#define TEST_VIRTIO_MMIO_FIRST_IRQ 48ULL
+
 #define VIRTIO_KEYBOARD_ENTRYPOINT virtio_keyboard_main_under_test
 #include "../../../../user/drivers/virtio_keyboard/main.c"
 
@@ -47,8 +52,18 @@ ServiceCode service_become_service(void)
 }
 ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)
 {
+    TEST_ASSERT_EQUAL_HEX64(TEST_VIRTIO_MMIO_PHYSICAL_BASE, physical_address);
+    TEST_ASSERT_EQUAL_UINT64(TEST_VIRTIO_MMIO_SLOT_SIZE * TEST_VIRTIO_MMIO_SLOT_COUNT, size);
     *memory = (ServiceMappedMemoryPtr)registers;
     return SERVICE_OK;
+}
+Result(BootHardwareInfo) BootHardwareInfo__load(void)
+{
+    BootHardwareInfo info = BootHardwareInfo__new();
+    BootVirtioMmioInfo virtio_mmio = BootVirtioMmioInfo__new(TEST_VIRTIO_MMIO_PHYSICAL_BASE, TEST_VIRTIO_MMIO_SLOT_SIZE,
+                                                             TEST_VIRTIO_MMIO_SLOT_COUNT, TEST_VIRTIO_MMIO_FIRST_IRQ);
+    info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
+    return Success(BootHardwareInfo, info);
 }
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
@@ -61,7 +76,7 @@ ServiceCode service_device_address(void * driver_address, AddressPtr device_addr
 }
 ServiceCode InterruptClient__subscribe(IRQNumber irq)
 {
-    TEST_ASSERT_EQUAL(VIRTIO_MMIO_FIRST_IRQ_ID, irq);
+    TEST_ASSERT_EQUAL(TEST_VIRTIO_MMIO_FIRST_IRQ, irq);
     return fail_subscribe ? SERVICE_ABORT : SERVICE_OK;
 }
 ServiceCode InterruptClient__poll(ServiceEventPtr event)
@@ -71,12 +86,12 @@ ServiceCode InterruptClient__poll(ServiceEventPtr event)
         return SERVICE_EVENT_QUEUE_EMPTY;
     }
     delivered = true;
-    *event = (ServiceEvent){.type = SERVICE_EVENT_IRQ, .source = VIRTIO_MMIO_FIRST_IRQ_ID};
+    *event = (ServiceEvent){.type = SERVICE_EVENT_IRQ, .source = TEST_VIRTIO_MMIO_FIRST_IRQ};
     return SERVICE_OK;
 }
 ServiceCode InterruptClient__acknowledge(IRQNumber irq)
 {
-    TEST_ASSERT_EQUAL(VIRTIO_MMIO_FIRST_IRQ_ID, irq);
+    TEST_ASSERT_EQUAL(TEST_VIRTIO_MMIO_FIRST_IRQ, irq);
     TEST_ASSERT_EQUAL(1, registers[VIRTIO_MMIO_INTERRUPT_ACK / 4]);
     acknowledgements++;
     return SERVICE_OK;
@@ -134,7 +149,8 @@ void test_keyboard_fails_when_interrupt_registration_fails(void)
 }
 void test_virtio_keyboard_translates_key_events_to_terminal_bytes(void)
 {
-    VirtioKeyboard keyboard = VirtioKeyboard__new();
+    VirtioKeyboardDevice device = VirtioKeyboardDevice__new(registers, 0, TEST_VIRTIO_MMIO_FIRST_IRQ);
+    VirtioKeyboard keyboard = VirtioKeyboard__new(&device);
     VirtioKeyboard__handle_key_event(&keyboard, 30, 1);
     VirtioKeyboard__handle_key_event(&keyboard, 48, 1);
     VirtioKeyboard__handle_key_event(&keyboard, KEY_LEFTSHIFT, 1);
@@ -154,7 +170,8 @@ void test_virtio_keyboard_translates_key_events_to_terminal_bytes(void)
 }
 void test_virtio_keyboard_empty_and_zero_length_reads(void)
 {
-    VirtioKeyboard keyboard = VirtioKeyboard__new();
+    VirtioKeyboardDevice device = VirtioKeyboardDevice__new(registers, 0, TEST_VIRTIO_MMIO_FIRST_IRQ);
+    VirtioKeyboard keyboard = VirtioKeyboard__new(&device);
     VirtioKeyboard__handle_key_event(&keyboard, 30, 0);
     IORequest request = {.count = 1};
     TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, VirtioKeyboard__read(&keyboard, &request).status);

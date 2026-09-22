@@ -11,7 +11,7 @@
 
 static Address gicd_base(InterruptControllerInfoPtr info)
 {
-    return info->distributor_virtual_base;
+    return info->details.gic.distributor_virtual_base;
 }
 
 static void gicd_enable_group1ns(InterruptControllerInfoPtr info)

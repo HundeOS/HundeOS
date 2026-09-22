@@ -13,6 +13,7 @@ static bool handed_off;
 static bool fail_handoff;
 static BString started[9];
 static BString mounted[3];
+static BootVirtioMmioInfo virtio_mmio;
 void setUp(void)
 {
     memset(registers, 0, sizeof(registers));
@@ -23,6 +24,7 @@ void setUp(void)
     registers[31 * 0x200 / 4 + 1] = 1;
     registers[31 * 0x200 / 4 + 2] = 2;
     registers[31 * 0x200 / 4 + 0x100 / 4] = 16384;
+    virtio_mmio = BootVirtioMmioInfo__new(0x0a000000ULL, 0x200, 32, 48);
 }
 void tearDown(void)
 {
@@ -37,8 +39,16 @@ ServiceCode service_publish_ready(ConstBStringPtr name)
 }
 ServiceCode service_map_mmio(uint64_t physical, size_t size, ServiceMappedMemoryPtr * target)
 {
+    TEST_ASSERT_EQUAL_HEX64(virtio_mmio.physical_base, physical);
+    TEST_ASSERT_EQUAL_UINT64(virtio_mmio.slot_size * virtio_mmio.slot_count, size);
     *target = (ServiceMappedMemoryPtr)registers;
     return SERVICE_OK;
+}
+Result(BootHardwareInfo) BootHardwareInfo__load(void)
+{
+    BootHardwareInfo info = BootHardwareInfo__new();
+    info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
+    return Success(BootHardwareInfo, info);
 }
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
@@ -130,13 +140,13 @@ void test_mama_does_not_start_school_when_a_boot_service_fails(void)
 void test_mama_rejects_missing_or_ambiguous_boot_disk(void)
 {
     registers[31 * 0x200 / 4 + 0x100 / 4] = 0;
-    match_result(MamaBootDisk__find(),
+    match_result(MamaBootDisk__find(&virtio_mmio),
         success_test_fail(),
         error_test_ok()
     );
     registers[31 * 0x200 / 4 + 0x100 / 4] = 16384;
     memcpy(registers, registers + 31 * 0x200 / 4, 0x200);
-    match_result(MamaBootDisk__find(),
+    match_result(MamaBootDisk__find(&virtio_mmio),
         success_test_fail(),
         error_test_ok()
     );

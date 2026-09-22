@@ -11,6 +11,10 @@ void IpcPlatform__configure_wait(BootWaitMode mode)
 {
 }
 
+void IpcPlatform__configure_timer_frequency(uint64_t frequency)
+{
+}
+
 uint64_t IpcPlatform__monotonic_usec(void)
 {
     struct timespec now;

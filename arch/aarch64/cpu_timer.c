@@ -25,9 +25,9 @@ inline unsigned cpu_aff0(void)
 void CPUTimer__gicv3_dist_enable_grp1ns(InterruptControllerInfoPtr interrupt_controller)
 {
     // Enable ARE_NS (bit 4) and EnableGrp1NS (bit 1). Leave grp0 off.
-    uint32_t ctlr = r32(interrupt_controller->distributor_virtual_base + GICD_CTLR_OFFSET);
+    uint32_t ctlr = r32(interrupt_controller->details.gic.distributor_virtual_base + GICD_CTLR_OFFSET);
     ctlr |= (1u << 4) /*ARE_NS*/ | (1u << 1) /*EnableGrp1NS*/;
-    w32(interrupt_controller->distributor_virtual_base + GICD_CTLR_OFFSET, ctlr);
+    w32(interrupt_controller->details.gic.distributor_virtual_base + GICD_CTLR_OFFSET, ctlr);
     dsb_ish();
     isb();
 }
@@ -35,7 +35,8 @@ void CPUTimer__gicv3_dist_enable_grp1ns(InterruptControllerInfoPtr interrupt_con
 // Map: redistributor base for this CPU (QEMU virt packs by Aff0)
 inline volatile uint8_t * CPUTimer__gicr_base_this_cpu(InterruptControllerInfoPtr interrupt_controller)
 {
-    return (volatile uint8_t *)(interrupt_controller->redistributor_virtual_base + (uint64_t)cpu_aff0() * GICR_STRIDE);
+    return (volatile uint8_t *)(interrupt_controller->details.gic.redistributor_virtual_base +
+                                (uint64_t)cpu_aff0() * GICR_STRIDE);
 }
 
 /* Configure GICv3 CPU interface + enable PPI for CNTV (27) */

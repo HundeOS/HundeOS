@@ -42,12 +42,15 @@ static SystemInfo test_system_info(void)
         .interrupt_controller =
             {
                 .kind = INTERRUPT_CONTROLLER_GIC_V3,
-                .distributor_physical_base = 0x08000000ULL,
-                .distributor_virtual_base = 0xffff000000400000ULL,
-                .redistributor_physical_base = 0x080a0000ULL,
-                .redistributor_virtual_base = 0xffff0000004a0000ULL,
-                .cpu_interface_physical_base = 0,
-                .cpu_interface_virtual_base = 0,
+                .details.gic =
+                    {
+                        .distributor_physical_base = 0x08000000ULL,
+                        .distributor_virtual_base = 0xffff000000400000ULL,
+                        .redistributor_physical_base = 0x080a0000ULL,
+                        .redistributor_virtual_base = 0xffff0000004a0000ULL,
+                        .cpu_interface_physical_base = 0,
+                        .cpu_interface_virtual_base = 0,
+                    },
             },
     };
 }

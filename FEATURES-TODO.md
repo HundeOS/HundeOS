@@ -513,16 +513,24 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
 
 ### RISC-V Support
 
-Status: deferred. Proposed first target: RV64 on QEMU `virt`, with OpenSBI
-firmware and a supervisor-mode kernel. Confirm the ISA extensions, ABI, and
-virtual-memory mode before implementation; physical-board support is not yet
-selected. QEMU provides a generated device tree and a suitable virtual platform
-for initial bring-up. See the [QEMU RISC-V virt documentation](https://www.qemu.org/docs/master/system/riscv/virt.html).
+Status: in progress. The agreed first target is RV64IMAC on QEMU `virt`, using
+the LP64 soft-float ABI, OpenSBI firmware, supervisor mode, four harts, and Sv39.
+Physical-board support is not yet selected. QEMU provides a generated device
+tree and a suitable virtual platform for initial bring-up. See the
+[QEMU RISC-V virt documentation](https://www.qemu.org/docs/master/system/riscv/virt.html).
 
 #### Build and Architecture Boundaries
 
+- [x] Qualify target artifacts by architecture and platform. AArch64 now builds
+  beneath `build/aarch64`, and RISC-V beneath `build/riscv64`; host tests remain
+  beneath `build/test`.
+- [x] Add the RV64 cross-toolchain flags, early linker script, merged AArch64
+  and RISC-V compilation-database generation, and a QEMU verification target.
 - [ ] Add RISC-V toolchain, assembler, linker scripts, kernel/userspace build
-  targets, embedded binaries, and compilation-database entries.
+  targets, and embedded binaries. The early supervisor payload is complete;
+  the architecture-matched userspace programs and services now compile and
+  link. The full kernel links and boots through the userspace service graph on
+  four-hart QEMU.
 - [ ] Implement the existing `kernel/arch` interfaces in `arch/riscv64`, with
   shared architecture primitives in `common/arch` and userspace assembly under
   the userspace architecture directories. Do not scatter ISA conditionals
@@ -532,24 +540,52 @@ for initial bring-up. See the [QEMU RISC-V virt documentation](https://www.qemu.
 
 #### Boot and Platform Discovery
 
+- [x] Enter the initial payload at `0x80200000` through OpenSBI, preserve the
+  hart ID and device-tree address, establish and clear early memory, print over
+  the QEMU 16550 UART, and shut down through SBI.
 - [ ] Implement entry code, boot stacks, linker layout, early memory setup, and
-  the handoff into the architecture-neutral kernel.
+  the handoff into the architecture-neutral kernel. The payload crosses the
+  architecture-neutral handoff contract carrying the hart ID and populated
+  `SystemInfo`, then enters `CPU__enter_kernel`. The OpenSBI-selected boot hart
+  becomes logical CPU 1; SBI HSM starts the remaining QEMU harts with separate
+  boot stacks and dense logical CPU IDs. The QEMU bootstrap currently maps a
+  fixed `1G` RAM window with 2 MiB leaves; generalizing or removing the temporary
+  bootstrap mappings remains.
 - [ ] Read the device tree for memory, reserved regions, hardware threads
   (harts), timer frequency, interrupt controllers, UART, and VirtIO devices;
-  populate the existing system-information and device-registry interfaces.
+  populate the existing system-information and device-registry interfaces. The
+  bounded early parser now discovers QEMU RAM, enabled harts, timebase, NS16550
+  UART, PLIC, VirtIO-MMIO slots, and PCI ECAM. The boot path now publishes CPU,
+  RAM, UART, PCI, tagged PLIC metadata, FDT reservation-map entries, and
+  `/reserved-memory` children through `SystemInfo`; AArch64 retains tagged GIC
+  metadata. RISC-V free spans are page-aligned and exclude the loaded image,
+  boot stack, and discovered reservations. The general heap consumes these
+  discontiguous spans without permitting allocations to bridge reserved holes.
+  Device-registry publication remains.
 - [ ] Add firmware integration through the Supervisor Binary Interface (SBI),
   selecting and checking required extensions rather than assuming availability.
   See the [SBI specification](https://github.com/riscv-non-isa/riscv-sbi-doc).
-- [ ] Preserve independent early-boot and panic output. Add the initial
-  platform's UART implementation rather than assuming the AArch64 PL011 device.
+- [x] Preserve independent early-boot and panic output and support QEMU's
+  NS16550 UART without assuming the AArch64 PL011 device. Boot metadata selects
+  the UART implementation used by the shared userspace RX and TX drivers.
 
 #### Memory Management and Protection
 
 - [ ] Implement page-table creation, mapping, unmapping, permissions, address
-  space switching, and fault decoding for the selected RV64 paging mode
-  (Sv39 is a proposed starting point).
-- [ ] Implement local and remote translation invalidation, executable-code
-  synchronization, and required memory barriers.
+  space switching, and fault decoding for Sv39. The bootstrap now enables Sv39
+  with 2 MiB leaves for both temporary identity and canonical higher-half QEMU
+  RAM/UART mappings. The low entry stub clears memory, activates translation,
+  and transfers control to the higher-half linked image; the boot stack, DTB,
+  MMIO metadata, kernel image, and heap are then addressed through canonical
+  aliases. The fixed QEMU UART and PLIC apertures are available in both
+  bootstrap address ranges. General process page-table creation, 4 KiB user/MMIO mapping,
+  unmapping, lower-half address-space switching, and local invalidation are
+  implemented. Process roots preserve the active upper-half supervisor
+  mappings. Removing the temporary bootstrap identity mappings and fault
+  decoding remain.
+- [ ] Complete translation maintenance. Local per-page and whole-address-space
+  invalidation plus page-table publication barriers are implemented; remote
+  invalidation and executable-code synchronization remain.
 - [ ] Preserve kernel/user isolation and shared-memory permissions used by
   Channels, notification queues, and read-only registries. Audit DMA and MMIO
   ordering for the chosen platform.
@@ -557,12 +593,24 @@ for initial bring-up. See the [QEMU RISC-V virt documentation](https://www.qemu.
 #### Traps, Scheduling, and Userspace ABI
 
 - [ ] Implement trap entry/return, register save/restore, syscall dispatch,
-  user-mode entry, and process context switching.
+  user-mode entry, and process context switching. Supervisor trap entry now
+  saves/restores the integer context, dispatches syscalls, enters userspace, and
+  switches process contexts on all four QEMU harts. Floating-point/vector
+  context remains.
 - [ ] Port userspace startup, syscall wrappers, atomics, and fibre context
   switching. Define floating-point/vector enablement and state preservation
-  consistently with compiler settings and the selected ABI.
+  consistently with compiler settings and the selected ABI. RV64 userspace now
+  has LP64 startup and syscall entry, shared-memory fences, spin-based Channel
+  waits, PLIC rearming for the initial supervisor context, and integer-only
+  fibre context switching. The DTB timebase is propagated through boot hardware
+  information for userspace `time` conversion. The four-hart runtime reaches the
+  login prompt through the complete userspace service graph.
 - [ ] Implement timers and scheduler tick accounting, then secondary-hart
-  startup, per-hart state, and interprocessor rescheduling.
+  startup, per-hart state, and interprocessor rescheduling. The architectural
+  time counter, timebase conversion, wait/signal primitives, hart identity,
+  per-hart trap installation, PLIC contexts, cache synchronization, SBI HSM
+  startup, and SBI shutdown are implemented. Timer-driven scheduling runs on
+  all four harts; explicit interprocessor rescheduling remains.
 
 #### Interrupts and IPC Wakeups
 
@@ -580,8 +628,18 @@ for initial bring-up. See the [QEMU RISC-V virt documentation](https://www.qemu.
   port hardware-specific UART and VirtIO integration without duplicating their
   protocols or moving userspace ownership back into the kernel.
 - [ ] Bring up one hart first: boot/panic output, memory protection, timer,
-  first userspace process, syscalls, and Channel request/reply.
+  first userspace process, syscalls, and Channel request/reply. This checkpoint
+  is complete; the default full-system target now uses four harts.
 - [ ] Verify login, console input/output, block I/O, and mounted filesystems,
   then multi-hart scheduling, shared-memory races, IRQ delivery, and wakeups.
+  Four-hart QEMU reaches `login:`, accepts interactive input through the NS16550
+  console, mounts the root, SD, Channel I/O FAT32, and Channel I/O ext2
+  filesystems, and schedules work on every hart. Stress coverage for
+  shared-memory races, remote invalidation, IRQ delivery, and wakeups remains.
 - [ ] Add architecture-specific emulator tests and keep architecture-neutral
-  unit tests and existing AArch64 targets passing.
+  unit tests and existing AArch64 targets passing. `make qemu-riscv64-trace`
+  runs a full-system four-hart boot using the dedicated RV64 disk configuration,
+  keeps userspace I/O on the interactive NS16550 console, and writes kernel
+  diagnostics to `build/riscv64/kernel-trace.log` through semihosting. Host tests
+  cover valid, truncated, and incomplete RISC-V device trees plus
+  platform-to-system conversion and Sv39 page-table operations.

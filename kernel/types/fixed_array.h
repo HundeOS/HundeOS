@@ -19,7 +19,7 @@ KernelAddress Kernel__alloc(size_t size);
 #endif
 
 #define FIXED_ARRAY_ALLOC(size) ((void *)Kernel__alloc(size).virtual_addr)
-#define FIXED_ARRAY_ERROR(message) BString__new(message)
+#define FIXED_ARRAY_ERROR(message) bstr(message)
 
 #include "../../common/types/fixed_array.h"
 

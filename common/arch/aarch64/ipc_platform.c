@@ -7,6 +7,10 @@ void IpcPlatform__configure_wait(BootWaitMode mode)
     wait_mode = mode;
 }
 
+void IpcPlatform__configure_timer_frequency(uint64_t frequency)
+{
+}
+
 uint64_t IpcPlatform__monotonic_usec(void)
 {
     uint64_t counter;

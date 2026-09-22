@@ -1,9 +1,10 @@
 # Kernel Experiment
 
-This repository contains an experimental AArch64 kernel, userspace programs, and
-userspace drivers. Core kernel code is under `kernel/`, architecture-specific
-code is under `arch/`, userspace code is under `user/`, and unit tests are under
-`test/`.
+This repository contains an experimental kernel, userspace programs, and
+userspace drivers. AArch64 is the complete target; RV64 on QEMU `virt` has an
+initial OpenSBI supervisor-mode bring-up target. Core kernel code is under
+`kernel/`, architecture-specific code is under `arch/`, userspace code is under
+`user/`, and unit tests are under `test/`.
 
 See [Features TODO](FEATURES-TODO.md) for discussed but unimplemented features,
 grouped by system, feature, and supporting features or architecture.
@@ -79,13 +80,13 @@ Install the cross compiler, QEMU, uv, and FAT filesystem tools.
 On macOS with Homebrew:
 
 ```sh
-brew install aarch64-elf-gcc qemu dosfstools uv
+brew install aarch64-elf-gcc riscv64-elf-gcc riscv64-elf-binutils qemu dosfstools uv
 ```
 
 On Linux:
 
 ```sh
-sudo apt install gcc-aarch64-none-elf qemu-system-arm dosfstools
+sudo apt install gcc-aarch64-none-elf gcc-riscv64-unknown-elf qemu-system-arm qemu-system-misc dosfstools
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
@@ -101,6 +102,10 @@ Build the kernel and userspace binaries:
 ```sh
 make kernel
 ```
+
+Target artifacts are separated first by architecture and then by platform. The
+default AArch64 kernel is written to `build/aarch64/qemu_virt`; its userspace
+binaries are under `build/aarch64/user`.
 
 Run unit tests:
 
@@ -123,6 +128,26 @@ make qemu-virt-1cpu-trace
 make qemu-virt-2cpus-trace
 make qemu-virt-tcg-icount-trace
 ```
+
+Build the RV64 OpenSBI bring-up checkpoint:
+
+```sh
+make riscv64-bringup
+```
+
+Run the full RV64 system with ordinary or file-backed kernel tracing:
+
+```sh
+make qemu-riscv64
+make qemu-riscv64-trace
+```
+
+The RISC-V kernel is under `build/riscv64/qemu_virt`. The trace target keeps
+userspace I/O on the interactive NS16550 console and writes kernel diagnostics
+to `build/riscv64/kernel-trace.log` through QEMU semihosting. The full-system
+targets run four harts, use the `1G` RAM window mapped by the current bootstrap,
+and attach the root, boot configuration, test, SD, and two Channel I/O disk
+images described by `config/qemu_riscv64`.
 
 `qemu-virt-tcg-icount-trace` exposes four guest CPUs but uses single-threaded
 TCG with `-icount shift=auto,sleep=on`. This makes guest `WFE` waits suspend

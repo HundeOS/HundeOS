@@ -38,6 +38,10 @@ extern const uint64_t __gicd_start[];
 #define QEMU_VIRT_PCI_ECAM_SIZE 0x10000000ULL
 #define QEMU_VIRT_PCI_BUS_START 0ULL
 #define QEMU_VIRT_PCI_BUS_END 255ULL
+#define QEMU_VIRT_VIRTIO_MMIO_PHYS_BASE 0x0a000000ULL
+#define QEMU_VIRT_VIRTIO_MMIO_SLOT_SIZE 0x200ULL
+#define QEMU_VIRT_VIRTIO_MMIO_SLOT_COUNT 32ULL
+#define QEMU_VIRT_VIRTIO_MMIO_FIRST_IRQ 48ULL
 
 __BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = { // hundelint: ignore-constructor-required
     .cpu_count = 4,
@@ -109,29 +113,23 @@ __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
     qemu_virt_system_info.uart.physical_base = qemu_virt_platform_info.uart_physical_base;
     qemu_virt_system_info.uart.virtual_base = qemu_virt_platform_info.uart_virtual_base;
     qemu_virt_system_info.uart.irq = qemu_virt_platform_info.uart_irq;
+    qemu_virt_system_info.uart.kind = UART_KIND_PL011;
+    BootVirtioMmioInfo virtio_mmio =
+        BootVirtioMmioInfo__new(QEMU_VIRT_VIRTIO_MMIO_PHYS_BASE, QEMU_VIRT_VIRTIO_MMIO_SLOT_SIZE,
+                                QEMU_VIRT_VIRTIO_MMIO_SLOT_COUNT, QEMU_VIRT_VIRTIO_MMIO_FIRST_IRQ);
+    qemu_virt_system_info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
     qemu_virt_system_info.framebuffer = None(FramebufferInfo);
     qemu_virt_system_info.pci = qemu_virt_platform_info.pci;
     qemu_virt_system_info.sd_host = qemu_virt_platform_info.sd_host;
     qemu_virt_system_info.ethernet_mac = qemu_virt_platform_info.ethernet_mac;
 
-    qemu_virt_system_info.gic.distributor_physical_base = qemu_virt_platform_info.gic_distributor_physical_base;
-    qemu_virt_system_info.gic.distributor_virtual_base = qemu_virt_platform_info.gic_distributor_virtual_base;
-    qemu_virt_system_info.gic.redistributor_physical_base = qemu_virt_platform_info.gic_redistributor_physical_base;
-    qemu_virt_system_info.gic.redistributor_virtual_base = qemu_virt_platform_info.gic_redistributor_virtual_base;
-
-    qemu_virt_system_info.interrupt_controller.kind = qemu_virt_platform_info.interrupt_controller_kind;
-    qemu_virt_system_info.interrupt_controller.distributor_physical_base =
-        qemu_virt_platform_info.gic_distributor_physical_base;
-    qemu_virt_system_info.interrupt_controller.distributor_virtual_base =
-        qemu_virt_platform_info.gic_distributor_virtual_base;
-    qemu_virt_system_info.interrupt_controller.redistributor_physical_base =
-        qemu_virt_platform_info.gic_redistributor_physical_base;
-    qemu_virt_system_info.interrupt_controller.redistributor_virtual_base =
-        qemu_virt_platform_info.gic_redistributor_virtual_base;
-    qemu_virt_system_info.interrupt_controller.cpu_interface_physical_base =
-        qemu_virt_platform_info.gic_cpu_interface_physical_base;
-    qemu_virt_system_info.interrupt_controller.cpu_interface_virtual_base =
-        qemu_virt_platform_info.gic_cpu_interface_virtual_base;
+    GicInterruptControllerInfo gic = GicInterruptControllerInfo__new(
+        qemu_virt_platform_info.gic_distributor_physical_base, qemu_virt_platform_info.gic_distributor_virtual_base,
+        qemu_virt_platform_info.gic_redistributor_physical_base, qemu_virt_platform_info.gic_redistributor_virtual_base,
+        qemu_virt_platform_info.gic_cpu_interface_physical_base,
+        qemu_virt_platform_info.gic_cpu_interface_virtual_base);
+    qemu_virt_system_info.interrupt_controller =
+        InterruptControllerInfo__new_gic(qemu_virt_platform_info.interrupt_controller_kind, &gic);
 
     return &qemu_virt_system_info;
 }

@@ -1,0 +1,7 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - arch/riscv64/boot/qemu_virt/device_tree.c
+    - arch/riscv64/boot/qemu_virt/system_info.c
+    - kernel/system_info.c

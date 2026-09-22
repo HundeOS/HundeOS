@@ -4,6 +4,7 @@
 #include "sys/print.h"
 #include "types/fixed_array.h"
 #include "services/service_directory.h"
+#include "ipc/ipc_platform.h"
 
 OptionalDef(Queue);
 
@@ -135,9 +136,7 @@ static int QueueTest__server(void)
             {
                 if (!QueueTest__serve_once(&queues, arrivals))
                 {
-#if defined(__aarch64__)
-                    __asm__ volatile("wfe" ::: "memory");
-#endif
+                    IpcPlatform__wait_event();
                 }
             }
         },

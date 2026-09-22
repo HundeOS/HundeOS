@@ -38,8 +38,6 @@ typedef struct Heap
     Address end;
     Address phys_start;
     size_t coarse_block_size;
-    uint64_t pages_per_block;
-    MemoryBlock current_block;
     AllocatedBlocks allocated_blocks;
     AllocatedBlocks free_blocks;
 } Heap;
@@ -77,9 +75,8 @@ KernelAddress Heap__try_from_virtual_address(HeapPtr self, Address virtual);
 #define NEW_HEAP                                                                                                       \
     (Heap)                                                                                                             \
     {                                                                                                                  \
-        .lock = MUTEX_INIT, .start = 0, .end = 0, .phys_start = 0, .coarse_block_size = 0, .pages_per_block = 0,       \
-        .current_block = NEW_BLOCK, .allocated_blocks = EmptyHashtable(AllocatedBlocks),                               \
-        .free_blocks = EmptyHashtable(AllocatedBlocks),                                                                \
+        .lock = MUTEX_INIT, .start = 0, .end = 0, .phys_start = 0, .coarse_block_size = 0,                             \
+        .allocated_blocks = EmptyHashtable(AllocatedBlocks), .free_blocks = EmptyHashtable(AllocatedBlocks),           \
     }
 
 #endif

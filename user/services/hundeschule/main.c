@@ -2,6 +2,7 @@
 
 #include "sys/debug.h"
 #include "mounts.h"
+#include "sys/boot_info.h"
 #include "sys/framebuffer_config.h"
 #include "sys/io.h"
 #include "sys/process.h"
@@ -13,11 +14,6 @@
 #ifndef HUNDESCHULE_ENTRYPOINT
 #define HUNDESCHULE_ENTRYPOINT main
 #endif
-
-#define VIRTIO_MMIO_FIRST_PHYS_BASE 0x0a000000ULL
-#define VIRTIO_MMIO_SLOT_SIZE 0x200ULL
-#define VIRTIO_MMIO_SLOT_COUNT 32ULL
-#define VIRTIO_MMIO_REGION_SIZE (VIRTIO_MMIO_SLOT_SIZE * VIRTIO_MMIO_SLOT_COUNT)
 
 #define VIRTIO_MMIO_MAGIC 0x000
 #define VIRTIO_MMIO_VERSION 0x004
@@ -261,8 +257,33 @@ static int Hundeschule__spawn_default_drivers(HundeschuleRequiredProcessesPtr pr
 
 static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesPtr processes, bool framebuffer_present)
 {
+    BootVirtioMmioInfo virtio_mmio;
+    match_result(
+        BootHardwareInfo__load(),
+        success(info)
+        {
+            match_optional(
+                info.virtio_mmio,
+                some(value)
+                {
+                    virtio_mmio = value;
+                },
+                none()
+                {
+                    IO__printf(&bstr("hundeschule: virtio mmio unavailable\n"));
+                    return 1;
+                }
+            );
+        },
+        error(code, message)
+        {
+            IO__printf(&bstr("hundeschule: boot hardware unavailable\n"));
+            return 1;
+        }
+    );
     ServiceMappedMemoryPtr mapping;
-    if (!service_ok(service_map_mmio(VIRTIO_MMIO_FIRST_PHYS_BASE, VIRTIO_MMIO_REGION_SIZE, &mapping)))
+    if (!service_ok(
+            service_map_mmio(virtio_mmio.physical_base, virtio_mmio.slot_size * virtio_mmio.slot_count, &mapping)))
     {
         IO__printf(&bstr("hundeschule: failed to probe virtio mmio\n"));
         return 1;
@@ -273,10 +294,10 @@ static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesP
     bool configured_services_started = false;
     int failures = 0;
     uint64_t virtio_ordinal = 1;
-    for (uint64_t next_slot = VIRTIO_MMIO_SLOT_COUNT; next_slot > 0; next_slot--)
+    for (uint64_t next_slot = virtio_mmio.slot_count; next_slot > 0; next_slot--)
     {
         uint64_t slot = next_slot - 1;
-        void * mmio = driver_ptr_offset(mapping, slot * VIRTIO_MMIO_SLOT_SIZE);
+        void * mmio = driver_ptr_offset(mapping, slot * virtio_mmio.slot_size);
         uint32_t magic = Hundeschule__read32(mmio, VIRTIO_MMIO_MAGIC);
         uint32_t version = Hundeschule__read32(mmio, VIRTIO_MMIO_VERSION);
         uint32_t device_id = Hundeschule__read32(mmio, VIRTIO_MMIO_DEVICE_ID);

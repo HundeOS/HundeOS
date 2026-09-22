@@ -4,15 +4,6 @@
 #include "sys/uart_config.h"
 #include "devices/uart.h"
 
-#define UART_DR 0x000
-#define UART_FR 0x018
-#define UART_CR 0x030
-#define UART_IMSC 0x038
-#define UART_ICR 0x044
-#define FR_RXFE (1u << 4)
-#define UART_RX_INTERRUPTS ((1u << 4) | (1u << 6))
-#define UART_ERRORS ((1u << 7) | (1u << 8) | (1u << 9) | (1u << 10))
-
 static bool UartByte__equals(void * first, void * second)
 {
     return *(uint8_t *)first == *(uint8_t *)second;
@@ -23,22 +14,21 @@ FixedArrayBodyDefine(UartInput);
 
 typedef struct UartReceiver
 {
-    Address registers;
+    UartDevice uart;
     UartInput input;
 } UartReceiver;
 typedef UartReceiver * UartReceiverPtr;
-static UartReceiver UartReceiver__new(Address registers)
+static UartReceiver UartReceiver__new(ConstUartDevicePtr uart)
 {
-    return (UartReceiver){.registers = registers, .input = UartInput__new()};
+    return (UartReceiver){.uart = *uart, .input = UartInput__new()};
 }
 
 static bool UartReceiver__drain(UartReceiverPtr self)
 {
     bool progress = false;
-    while (UartInput__len(&self->input) < UartInput__max_size &&
-           (Uart__read32(self->registers, UART_FR) & FR_RXFE) == 0)
+    while (UartInput__len(&self->input) < UartInput__max_size && UartDevice__can_receive(&self->uart))
     {
-        uint8_t value = Uart__read32(self->registers, UART_DR);
+        uint8_t value = UartDevice__read(&self->uart);
         IODiagnostics__record(IO_DIAGNOSTIC_UART_BYTES, 1);
         match_result(
             UartInput__push(&self->input, value),
@@ -104,10 +94,9 @@ int main(void)
         return 1;
     }
     static UartReceiver receiver;
-    receiver = UartReceiver__new((Address)driver_ptr(mapping));
-    Uart__write32(receiver.registers, UART_IMSC, 0);
-    Uart__write32(receiver.registers, UART_ICR, UART_RX_INTERRUPTS | UART_ERRORS);
-    Uart__write32(receiver.registers, UART_CR, (1u << 0) | (1u << 8) | (1u << 9));
+    UartDevice uart = UartDevice__new((Address)driver_ptr(mapping), config.kind);
+    receiver = UartReceiver__new(&uart);
+    UartDevice__configure_receiver(&receiver.uart);
     static IOStreamDriver driver;
     static IOService service;
     driver = IOStreamDriver__new(IO_OPEN_READ, &receiver, UartReceiver__read);
@@ -120,7 +109,7 @@ int main(void)
     {
         return 1;
     }
-    Uart__write32(receiver.registers, UART_IMSC, UART_RX_INTERRUPTS);
+    UartDevice__enable_receiver_interrupt(&receiver.uart);
     if (!service_ok(service_publish_ready(&bstr(IO_UART_RX_SERVICE))))
     {
         return 1;
@@ -143,10 +132,10 @@ int main(void)
         {
             return 1;
         }
-        // Keep the GIC source masked while the userspace buffer is full.
-        if (pending_irq && (Uart__read32(receiver.registers, UART_FR) & FR_RXFE) != 0)
+        // Keep the interrupt source masked while the userspace buffer is full.
+        if (pending_irq && !UartDevice__can_receive(&receiver.uart))
         {
-            Uart__write32(receiver.registers, UART_ICR, UART_RX_INTERRUPTS | UART_ERRORS);
+            UartDevice__acknowledge_receiver(&receiver.uart);
             if (!service_ok(InterruptClient__acknowledge(config.irq)))
             {
                 return 1;

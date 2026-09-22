@@ -7,12 +7,6 @@
 #include "../../../../common_includes/syscalls/io.h"
 #include "../../../../common_includes/syscalls/service.h"
 
-#define UART_DR 0x000
-#define UART_FR 0x018
-#define UART_CR 0x030
-#define UART_IMSC 0x038
-#define UART_ICR 0x044
-#define FR_RXFE (1u << 4)
 #define UART_PHYS_BASE 0x12345000ULL
 #define UART_IRQ_ID 99ULL
 
@@ -38,6 +32,7 @@ static bool fake_sysinfo_closed;
 static const char fake_sysinfo[] = SYSINFO_PADDING_32 "uart.physical_base=0x12345000\n"
                                                       "uart.virtual_base=0xffff000000000000\n"
                                                       "uart.irq=99\n"
+                                                      "uart.kind=1\n"
                                                       "uart.mmio_size=0x1000\n";
 
 struct ServiceMappedMemory
@@ -49,9 +44,6 @@ struct ServiceMappedMemory
 
 static ServiceMappedMemory fake_uart_mapping;
 
-uint32_t Uart__read32(Address base, uint64_t offset);
-void Uart__write32(Address base, uint64_t offset, uint32_t value);
-
 #include "../stream_runtime.h"
 #define main uart_rx_driver_main
 #include "../../../../user/drivers/uart_rx/main.c"
@@ -62,42 +54,45 @@ static int uart_rx_main_under_test(void)
     return StreamDriverTest__run(uart_rx_driver_main);
 }
 
-uint32_t Uart__read32(Address base, uint64_t offset)
+UartDevice UartDevice__new(Address registers, UartKind kind)
 {
-    TEST_ASSERT_NOT_EQUAL(0, base);
-    if (offset == UART_FR)
-    {
-        return fake_uart_read_index < 3 ? 0 : FR_RXFE;
-    }
-    if (offset == UART_DR)
-    {
-        fake_uart_read_count++;
-        return fake_uart_values[fake_uart_read_index++];
-    }
-    TEST_FAIL_MESSAGE("unexpected uart read offset");
-    return 0;
+    TEST_ASSERT_EQUAL(UART_KIND_PL011, kind);
+    return (UartDevice){.registers = registers, .kind = kind};
 }
 
-void Uart__write32(Address base, uint64_t offset, uint32_t value)
+void UartDevice__configure_receiver(UartDevicePtr self)
 {
-    TEST_ASSERT_NOT_EQUAL(0, base);
-    if (offset == UART_ICR)
-    {
-        TEST_ASSERT_LESS_THAN_UINT64(2, fake_uart_icr_write_count);
-        fake_uart_icr_writes[fake_uart_icr_write_count++] = value;
-        return;
-    }
-    if (offset == UART_IMSC)
-    {
-        fake_uart_imsc = value;
-        return;
-    }
-    if (offset == UART_CR)
-    {
-        fake_uart_cr = value;
-        return;
-    }
-    TEST_FAIL_MESSAGE("unexpected uart write offset");
+    TEST_ASSERT_NOT_EQUAL(0, self->registers);
+    fake_uart_imsc = 0;
+    fake_uart_icr_writes[fake_uart_icr_write_count++] =
+        (1U << 4) | (1U << 6) | (1U << 7) | (1U << 8) | (1U << 9) | (1U << 10);
+    fake_uart_cr = (1U << 0) | (1U << 8) | (1U << 9);
+}
+
+void UartDevice__enable_receiver_interrupt(UartDevicePtr self)
+{
+    TEST_ASSERT_NOT_EQUAL(0, self->registers);
+    fake_uart_imsc = (1U << 4) | (1U << 6);
+}
+
+void UartDevice__acknowledge_receiver(UartDevicePtr self)
+{
+    TEST_ASSERT_NOT_EQUAL(0, self->registers);
+    fake_uart_icr_writes[fake_uart_icr_write_count++] =
+        (1U << 4) | (1U << 6) | (1U << 7) | (1U << 8) | (1U << 9) | (1U << 10);
+}
+
+bool UartDevice__can_receive(ConstUartDevicePtr self)
+{
+    TEST_ASSERT_NOT_EQUAL(0, self->registers);
+    return fake_uart_read_index < 3;
+}
+
+uint8_t UartDevice__read(UartDevicePtr self)
+{
+    TEST_ASSERT_NOT_EQUAL(0, self->registers);
+    fake_uart_read_count++;
+    return fake_uart_values[fake_uart_read_index++];
 }
 
 void setUp(void)
@@ -135,7 +130,8 @@ void tearDown(void)
 
 void test_uart_rx_retains_fifo_bytes_when_userspace_buffer_is_full(void)
 {
-    UartReceiver receiver = UartReceiver__new(UART_PHYS_BASE);
+    UartDevice uart = UartDevice__new(UART_PHYS_BASE, UART_KIND_PL011);
+    UartReceiver receiver = UartReceiver__new(&uart);
     for (uint64_t i = 0; i < UartInput__max_size; i++)
     {
         match_result(UartInput__push(&receiver.input, 'x'),
@@ -155,7 +151,8 @@ void test_uart_rx_retains_fifo_bytes_when_userspace_buffer_is_full(void)
 
 void test_uart_rx_empty_read_waits_but_zero_length_read_completes(void)
 {
-    UartReceiver receiver = UartReceiver__new(UART_PHYS_BASE);
+    UartDevice uart = UartDevice__new(UART_PHYS_BASE, UART_KIND_PL011);
+    UartReceiver receiver = UartReceiver__new(&uart);
     IORequest request = {.operation = IO_REQUEST_READ, .count = 1};
     IOReply reply = UartReceiver__read(&receiver, &request);
     TEST_ASSERT_EQUAL_INT(IO_WAIT_FOR_DATA, reply.status);

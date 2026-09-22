@@ -537,6 +537,43 @@ void test_service_handler_subscribe_irq_maps_duplicate_registration_to_service_c
     TEST_ASSERT_EQUAL_UINT64(1, Arch__enable_count());
 }
 
+void test_service_handler_registers_interrupt_manager_with_plic_mapping(void)
+{
+    const Address plic_physical_base = 0x0c000000;
+    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
+    process->process_class = PROCESS_CLASS_SERVICE;
+    Process__set_hund_identity(process);
+
+    SystemInfo system_info = SystemInfo__new();
+    const uint64_t target_hart_id = 3;
+    PlicInterruptControllerInfo plic = PlicInterruptControllerInfo__new(plic_physical_base, 0, 95, target_hart_id);
+    system_info.interrupt_controller = InterruptControllerInfo__new_plic(&plic);
+    kernel->system_info = Some(SystemInfo, system_info);
+    kernel->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller);
+
+    ServiceInterruptManagerRegistration registration = {0};
+    match_result(
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_INTERRUPT_MANAGER, (Anything)&registration,
+                         0, 0, 0),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_NOT_EQUAL(0, registration.event_queue);
+    TEST_ASSERT_NOT_EQUAL(0, registration.distributor);
+    match_result(
+        Process__device_address(process, registration.distributor),
+        success(device_address)
+        {
+            TEST_ASSERT_EQUAL_UINT64(plic_physical_base + target_hart_id * 0x100, device_address);
+        },
+        error_test_fail()
+    );
+}
+
 void test_service_handler_publishes_block_metadata_without_io_transport(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);

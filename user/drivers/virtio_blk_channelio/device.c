@@ -1,6 +1,7 @@
 #define DRIVER_LOG_TAG "VIRTIO-BLK"
 
 #include "sys/debug.h"
+#include "sys/boot_info.h"
 #include "sys/service.h"
 #include "sys/sync.h"
 #include "channel/signal.h"
@@ -9,12 +10,6 @@
 
 #include "device.h"
 #include "channelio.h"
-
-#define VIRTIO_MMIO_FIRST_PHYS_BASE 0x0a000000ULL
-#define VIRTIO_MMIO_SLOT_SIZE 0x200ULL
-#define VIRTIO_MMIO_SLOT_COUNT 32ULL
-#define VIRTIO_MMIO_REGION_SIZE (VIRTIO_MMIO_SLOT_SIZE * VIRTIO_MMIO_SLOT_COUNT)
-#define VIRTIO_MMIO_FIRST_IRQ_ID 48ULL
 
 #define VIRTIO_MMIO_MAGIC 0x000
 #define VIRTIO_MMIO_VERSION 0x004
@@ -193,28 +188,52 @@ static uint64_t VirtioBlk__read_u64_config(void * mmio, uint64_t offset)
 
 static Result(VirtioBlkDevice) VirtioBlk__bind_device(uint64_t slot, ConstBStringPtr path)
 {
-    if (slot >= VIRTIO_MMIO_SLOT_COUNT)
+    BootVirtioMmioInfo virtio_mmio;
+    match_result(
+        BootHardwareInfo__load(),
+        success(info)
+        {
+            match_optional(
+                info.virtio_mmio,
+                some(value)
+                {
+                    virtio_mmio = value;
+                },
+                none()
+                {
+                    return Error(VirtioBlkDevice, bstr("VirtIO MMIO information unavailable"),
+                                 SERVICE_BLOCK_REQUEST_FAILED);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(VirtioBlkDevice, message, SERVICE_BLOCK_REQUEST_FAILED);
+        }
+    );
+    if (slot >= virtio_mmio.slot_count)
     {
         DRIVER_DEBUG("virtio_blk: slot out of range %i\n", (int)slot);
         return Error(VirtioBlkDevice, bstr("Cannot bind VirtIO device"), SERVICE_BLOCK_REQUEST_FAILED);
     }
 
     ServiceMappedMemoryPtr mapping;
-    if (!service_ok(service_map_mmio(VIRTIO_MMIO_FIRST_PHYS_BASE, VIRTIO_MMIO_REGION_SIZE, &mapping)))
+    if (!service_ok(
+            service_map_mmio(virtio_mmio.physical_base, virtio_mmio.slot_size * virtio_mmio.slot_count, &mapping)))
     {
         DRIVER_DEBUG("virtio_blk: mmio region map failed\n");
         return Error(VirtioBlkDevice, bstr("Cannot bind VirtIO device"), SERVICE_BLOCK_REQUEST_FAILED);
     }
 
-    uint64_t physical_address = VIRTIO_MMIO_FIRST_PHYS_BASE + (slot * VIRTIO_MMIO_SLOT_SIZE);
-    void * mmio = driver_ptr_offset(mapping, slot * VIRTIO_MMIO_SLOT_SIZE);
+    uint64_t physical_address = virtio_mmio.physical_base + (slot * virtio_mmio.slot_size);
+    void * mmio = driver_ptr_offset(mapping, slot * virtio_mmio.slot_size);
     if (!VirtioBlk__probe(mmio, slot, physical_address))
     {
         DRIVER_DEBUG("virtio_blk: requested slot %i is not a block device\n", (int)slot);
         return Error(VirtioBlkDevice, bstr("Cannot bind VirtIO device"), SERVICE_BLOCK_REQUEST_FAILED);
     }
 
-    VirtioBlkDevice device = VirtioBlkDevice__new(mapping, mmio, slot, VIRTIO_MMIO_FIRST_IRQ_ID + slot,
+    VirtioBlkDevice device = VirtioBlkDevice__new(mapping, mmio, slot, virtio_mmio.first_irq + slot,
                                                   VirtioBlk__read_u64_config(mmio, 0), path);
     return Success(VirtioBlkDevice, device);
 }

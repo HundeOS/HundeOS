@@ -35,6 +35,7 @@ Result(FilesystemFileSize) Sysinfofs__render(BootHardwareInfoPtr info, Filesyste
     SysinfoWriter__line(&writer, &bstr("uart.physical_base"), info->uart.physical_base);
     SysinfoWriter__line(&writer, &bstr("uart.mmio_size"), info->uart.mmio_size);
     SysinfoWriter__line(&writer, &bstr("uart.irq"), info->uart.irq);
+    SysinfoWriter__line(&writer, &bstr("uart.kind"), info->uart.kind);
     match_optional(
         info->framebuffer,
         some(value)
@@ -103,12 +104,24 @@ Result(FilesystemFileSize) Sysinfofs__render(BootHardwareInfoPtr info, Filesyste
     SysinfoWriter__line(&writer, &bstr("memory.physical_start"), info->memory_start);
     SysinfoWriter__line(&writer, &bstr("memory.physical_end"), info->memory_end);
     SysinfoWriter__line(&writer, &bstr("memory.physical_size"), info->memory_end - info->memory_start);
-    SysinfoWriter__line(&writer, &bstr("interrupt_controller.kind"), info->interrupt_controller_kind);
-    SysinfoWriter__line(&writer, &bstr("interrupt_controller.distributor_physical_base"), info->interrupt_distributor);
-    SysinfoWriter__line(&writer, &bstr("interrupt_controller.redistributor_physical_base"),
-                        info->interrupt_redistributor);
-    SysinfoWriter__line(&writer, &bstr("interrupt_controller.cpu_interface_physical_base"),
-                        info->interrupt_cpu_interface);
+    SysinfoWriter__line(&writer, &bstr("interrupt_controller.kind"), info->interrupt_controller.kind);
+    if (info->interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V2 ||
+        info->interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V3)
+    {
+        BootGicInfo gic = info->interrupt_controller.details.gic;
+        SysinfoWriter__line(&writer, &bstr("interrupt_controller.distributor_physical_base"),
+                            gic.distributor_physical_base);
+        SysinfoWriter__line(&writer, &bstr("interrupt_controller.redistributor_physical_base"),
+                            gic.redistributor_physical_base);
+        SysinfoWriter__line(&writer, &bstr("interrupt_controller.cpu_interface_physical_base"),
+                            gic.cpu_interface_physical_base);
+    }
+    else if (info->interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC)
+    {
+        BootPlicInfo plic = info->interrupt_controller.details.plic;
+        SysinfoWriter__line(&writer, &bstr("interrupt_controller.plic.physical_base"), plic.physical_base);
+        SysinfoWriter__line(&writer, &bstr("interrupt_controller.plic.source_count"), plic.source_count);
+    }
     return writer.failed ? Error(FilesystemFileSize, bstr("Sysinfo buffer full"), IO_UNKNOWN_BUFFER)
                          : Success(FilesystemFileSize, writer.size);
 }

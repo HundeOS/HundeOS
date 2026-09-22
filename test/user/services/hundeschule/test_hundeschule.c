@@ -7,6 +7,7 @@
 #include "../../../../common_includes/syscalls/service.h"
 #include "../../../../common_includes/syscalls/spawn.h"
 #include "../../../../common_includes/syscalls/syslog.h"
+#include "../../../../common/hardware/boot_info.h"
 
 #define TEST_SERVICE_READY_NAME_MAX 256ULL
 
@@ -41,6 +42,7 @@ static bool fake_config_opened;
 static bool fake_config_closed;
 static uint64_t fake_wait_ready_count;
 static char fake_wait_ready_paths[10][TEST_SERVICE_READY_NAME_MAX];
+static BootVirtioMmioInfo fake_virtio_mmio;
 
 SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
 {
@@ -112,6 +114,7 @@ void setUp(void)
     fake_config_opened = false;
     fake_config_closed = false;
     fake_wait_ready_count = 0;
+    fake_virtio_mmio = BootVirtioMmioInfo__new(0x0a000000ULL, 0x200, 32, 48);
     for (uint64_t i = 0; i < 10; i++)
     {
         fake_wait_ready_paths[i][0] = '\0';
@@ -296,6 +299,13 @@ ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappe
     TEST_ASSERT_EQUAL_UINT64(sizeof(fake_virtio_region), size);
     *memory = &fake_mapping;
     return SERVICE_OK;
+}
+
+Result(BootHardwareInfo) BootHardwareInfo__load(void)
+{
+    BootHardwareInfo info = BootHardwareInfo__new();
+    info.virtio_mmio = Some(BootVirtioMmioInfo, fake_virtio_mmio);
+    return Success(BootHardwareInfo, info);
 }
 
 ServiceCode service_become_service()

@@ -12,6 +12,24 @@ static uint8_t test_heap_memory[PAGE_SIZE * TEST_HEAP_PAGES];
 static KernelAddress many_live_allocations[MANY_LIVE_ALLOCATIONS];
 static const Address test_heap_physical_base = 0x70000000ULL;
 
+static void add_free_region(SystemInfoPtr system_info, Address physical_start, Address physical_end)
+{
+    PhysicalMemoryRegion region = PhysicalMemoryRegion__new(physical_start, physical_end);
+    match_result(PhysicalMemoryRegions__push(&system_info->physical_memory.free_regions, region),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+}
+
+static SystemInfo test_system_info(void)
+{
+    SystemInfo system_info = SystemInfo__new();
+    system_info.kernel_heap.virtual_start = (Address)&test_heap_memory[0];
+    system_info.kernel_heap.physical_start = test_heap_physical_base;
+    system_info.kernel_heap.physical_end = test_heap_physical_base + sizeof(test_heap_memory);
+    return system_info;
+}
+
 static void assert_free_success(KernelAddress addr)
 {
     match_result(Heap__free(&heap, addr),
@@ -30,10 +48,7 @@ static void assert_free_fails(KernelAddress addr)
 
 void setUp(void)
 {
-    SystemInfo system_info = SystemInfo__new();
-    system_info.kernel_heap.virtual_start = (Address)&test_heap_memory[0];
-    system_info.kernel_heap.physical_start = test_heap_physical_base;
-    system_info.kernel_heap.physical_end = test_heap_physical_base + sizeof(test_heap_memory);
+    SystemInfo system_info = test_system_info();
     match_result(Heap__init(&heap, &system_info),
         success_do_nothing(),
         error_test_fail()
@@ -42,11 +57,20 @@ void setUp(void)
 
 static void init_heap_with_coarse_block_size(size_t coarse_block_size)
 {
-    SystemInfo system_info = SystemInfo__new();
+    SystemInfo system_info = test_system_info();
     system_info.heap_coarse_block_size = coarse_block_size;
-    system_info.kernel_heap.virtual_start = (Address)&test_heap_memory[0];
-    system_info.kernel_heap.physical_start = test_heap_physical_base;
-    system_info.kernel_heap.physical_end = test_heap_physical_base + sizeof(test_heap_memory);
+    match_result(Heap__init(&heap, &system_info),
+        success_do_nothing(),
+        error_test_fail()
+    );
+}
+
+static void init_heap_with_two_regions(uint64_t first_pages, uint64_t gap_pages, uint64_t second_pages)
+{
+    SystemInfo system_info = test_system_info();
+    Address second_start = test_heap_physical_base + ((first_pages + gap_pages) * PAGE_SIZE);
+    add_free_region(&system_info, test_heap_physical_base, test_heap_physical_base + (first_pages * PAGE_SIZE));
+    add_free_region(&system_info, second_start, second_start + (second_pages * PAGE_SIZE));
     match_result(Heap__init(&heap, &system_info),
         success_do_nothing(),
         error_test_fail()
@@ -209,4 +233,70 @@ void test_heap_hashes_page_addresses_by_page_number(void)
     Address second = first + PAGE_SIZE;
 
     TEST_ASSERT_EQUAL_UINT64(Heap__hash_address(&first) + 1, Heap__hash_address(&second));
+}
+
+void test_heap_allocates_from_discontiguous_system_info_regions(void)
+{
+    init_heap_with_two_regions(2, 3, 3);
+
+    KernelAddress first = Heap__alloc_size(&heap, 2 * PAGE_SIZE);
+    KernelAddress second = Heap__alloc_size(&heap, 3 * PAGE_SIZE);
+
+    TEST_ASSERT_EQUAL_UINT64(test_heap_physical_base, paddr(first));
+    TEST_ASSERT_EQUAL_UINT64((Address)&test_heap_memory[0], vaddr(first));
+    TEST_ASSERT_EQUAL_UINT64(test_heap_physical_base + (5 * PAGE_SIZE), paddr(second));
+    TEST_ASSERT_EQUAL_UINT64((Address)&test_heap_memory[5 * PAGE_SIZE], vaddr(second));
+}
+
+void test_heap_does_not_join_capacity_across_reserved_hole(void)
+{
+    init_heap_with_two_regions(2, 2, 2);
+
+    KernelAddress crossing = Heap__try_alloc_size(&heap, 3 * PAGE_SIZE);
+
+    TEST_ASSERT_FALSE(crossing.valid);
+    TEST_ASSERT_TRUE(Heap__try_alloc_size(&heap, 2 * PAGE_SIZE).valid);
+    TEST_ASSERT_TRUE(Heap__try_alloc_size(&heap, 2 * PAGE_SIZE).valid);
+}
+
+void test_freed_regions_do_not_coalesce_across_reserved_hole(void)
+{
+    init_heap_with_two_regions(2, 2, 2);
+    KernelAddress first = Heap__alloc_size(&heap, 2 * PAGE_SIZE);
+    KernelAddress second = Heap__alloc_size(&heap, 2 * PAGE_SIZE);
+
+    assert_free_success(first);
+    assert_free_success(second);
+
+    TEST_ASSERT_FALSE(Heap__try_alloc_size(&heap, 4 * PAGE_SIZE).valid);
+    TEST_ASSERT_TRUE(Heap__try_alloc_size(&heap, 2 * PAGE_SIZE).valid);
+    TEST_ASSERT_TRUE(Heap__try_alloc_size(&heap, 2 * PAGE_SIZE).valid);
+}
+
+void test_adjacent_system_info_regions_form_one_contiguous_extent(void)
+{
+    init_heap_with_two_regions(2, 0, 2);
+
+    KernelAddress allocation = Heap__try_alloc_size(&heap, 4 * PAGE_SIZE);
+
+    TEST_ASSERT_TRUE(allocation.valid);
+    TEST_ASSERT_EQUAL_UINT64(test_heap_physical_base, paddr(allocation));
+}
+
+void test_heap_clips_system_info_regions_to_mapped_heap(void)
+{
+    SystemInfo system_info = test_system_info();
+    add_free_region(&system_info, test_heap_physical_base - PAGE_SIZE, test_heap_physical_base + PAGE_SIZE);
+    add_free_region(&system_info, system_info.kernel_heap.physical_end,
+                    system_info.kernel_heap.physical_end + PAGE_SIZE);
+    match_result(Heap__init(&heap, &system_info),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    KernelAddress allocation = Heap__try_alloc_size(&heap, PAGE_SIZE);
+
+    TEST_ASSERT_TRUE(allocation.valid);
+    TEST_ASSERT_EQUAL_UINT64(test_heap_physical_base, paddr(allocation));
+    TEST_ASSERT_FALSE(Heap__try_alloc_size(&heap, PAGE_SIZE).valid);
 }

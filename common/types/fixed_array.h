@@ -35,15 +35,16 @@ OptionalDef(ArrayIndex);
     alias_name alias_name##__new();                                                                                    \
     alias_name * alias_name##__heap_new();
 
-#define ConstructorDefine(alias_name)                                                                                  \
+#define StackConstructorDefine(alias_name)                                                                             \
     alias_name alias_name##__new()                                                                                     \
     {                                                                                                                  \
         alias_name result = {                                                                                          \
             .len = 0,                                                                                                  \
         };                                                                                                             \
         return result;                                                                                                 \
-    }                                                                                                                  \
-                                                                                                                       \
+    }
+
+#define HeapConstructorDefine(alias_name)                                                                              \
     alias_name * alias_name##__heap_new()                                                                              \
     {                                                                                                                  \
         alias_name * array = (alias_name *)FIXED_ARRAY_ALLOC(sizeof(alias_name));                                      \
@@ -54,6 +55,8 @@ OptionalDef(ArrayIndex);
         array->len = 0;                                                                                                \
         return array;                                                                                                  \
     }
+
+#define ConstructorDefine(alias_name) StackConstructorDefine(alias_name) HeapConstructorDefine(alias_name)
 
 #define PushPreDefine(alias_name)                                                                                      \
     Result(CollectionCode) alias_name##__push(alias_name * self, alias_name##__type value);                            \
@@ -98,9 +101,9 @@ OptionalDef(ArrayIndex);
     }
 
 #define for_each_fa_ptr(alias, array, index, value, ...)                                                               \
-    for (uint64_t index = 0; index < array->len; index++)                                                              \
+    for (uint64_t index = 0; index < (array)->len; index++)                                                            \
     {                                                                                                                  \
-        alias##__type value = array->data[index];                                                                      \
+        alias##__type value = (array)->data[index];                                                                    \
         __VA_ARGS__                                                                                                    \
     }
 
@@ -167,7 +170,7 @@ OptionalDef(ArrayIndex);
             return FANone(alias_name);                                                                                 \
         }                                                                                                              \
         FAOptional(alias_name) result = FASome(alias_name, self->data[0]);                                             \
-        for (int i = 1; i < self->len; i++)                                                                            \
+        for (uint64_t i = 1; i < self->len; i++)                                                                       \
         {                                                                                                              \
             self->data[i - 1] = self->data[i];                                                                         \
         }                                                                                                              \
@@ -185,11 +188,11 @@ OptionalDef(ArrayIndex);
     FindResultOptional(alias_name)                                                                                     \
         alias_name##__find(alias_name * self, alias_name##__predicate predicate, void * context)                       \
     {                                                                                                                  \
-        for (int i = 0; i < self->len; i++)                                                                            \
+        for (uint64_t i = 0; i < self->len; i++)                                                                       \
         {                                                                                                              \
             if (predicate(&self->data[i], context))                                                                    \
             {                                                                                                          \
-                FindResult(alias_name) res = FindResultCreate(alias_name, i, &self->data[i]);                          \
+                FindResult(alias_name) res = FindResultCreate(alias_name, (ArrayIndex)i, &self->data[i]);              \
                 return FindResultSome(alias_name, res);                                                                \
             }                                                                                                          \
         }                                                                                                              \
@@ -199,11 +202,11 @@ OptionalDef(ArrayIndex);
     Optional(ArrayIndex) alias_name##__find_item(alias_name * self, alias_name##__type value)                          \
     {                                                                                                                  \
         EqualFunction equals = alias_name##__default__equals;                                                          \
-        for (int i = 0; i < self->len; i++)                                                                            \
+        for (uint64_t i = 0; i < self->len; i++)                                                                       \
         {                                                                                                              \
             if (equals(&self->data[i], &value))                                                                        \
             {                                                                                                          \
-                return Some(ArrayIndex, i);                                                                            \
+                return Some(ArrayIndex, (ArrayIndex)i);                                                                \
             }                                                                                                          \
         }                                                                                                              \
         return None(ArrayIndex);                                                                                       \
@@ -216,7 +219,7 @@ OptionalDef(ArrayIndex);
     alias_name alias_name##__filter(alias_name * self, alias_name##__predicate predicate, void * context)              \
     {                                                                                                                  \
         alias_name result = alias_name##__new();                                                                       \
-        for (int i = 0; i < self->len; i++)                                                                            \
+        for (uint64_t i = 0; i < self->len; i++)                                                                       \
         {                                                                                                              \
             alias_name##__type_ptr val = &self->data[i];                                                               \
             if (predicate(val, context))                                                                               \
@@ -244,16 +247,17 @@ OptionalDef(ArrayIndex);
     {                                                                                                                  \
         if (index < 0)                                                                                                 \
         {                                                                                                              \
-            if (self->len + index >= 0)                                                                                \
+            uint64_t from_end = (uint64_t)(-(index + 1)) + 1U;                                                         \
+            if (from_end <= self->len)                                                                                 \
             {                                                                                                          \
-                index += self->len;                                                                                    \
+                index = (int64_t)(self->len - from_end);                                                               \
             }                                                                                                          \
             else                                                                                                       \
             {                                                                                                          \
                 return FANone(alias_name);                                                                             \
             }                                                                                                          \
         }                                                                                                              \
-        if (index >= self->len)                                                                                        \
+        if ((uint64_t)index >= self->len)                                                                              \
         {                                                                                                              \
             return FANone(alias_name);                                                                                 \
         }                                                                                                              \
@@ -263,16 +267,17 @@ OptionalDef(ArrayIndex);
     {                                                                                                                  \
         if (index < 0)                                                                                                 \
         {                                                                                                              \
-            if (self->len + index >= 0)                                                                                \
+            uint64_t from_end = (uint64_t)(-(index + 1)) + 1U;                                                         \
+            if (from_end <= self->len)                                                                                 \
             {                                                                                                          \
-                index += self->len;                                                                                    \
+                index = (int64_t)(self->len - from_end);                                                               \
             }                                                                                                          \
             else                                                                                                       \
             {                                                                                                          \
                 return FAPtrNone(alias_name);                                                                          \
             }                                                                                                          \
         }                                                                                                              \
-        if (index >= self->len)                                                                                        \
+        if ((uint64_t)index >= self->len)                                                                              \
         {                                                                                                              \
             return FAPtrNone(alias_name);                                                                              \
         }                                                                                                              \
@@ -305,7 +310,7 @@ OptionalDef(ArrayIndex);
             alias_name##__find_item(self, value),                                                                      \
             some(pos) {                                                                                                \
                 {                                                                                                      \
-                    for (int i = pos; i < (self->len - 1); i++)                                                        \
+                    for (uint64_t i = (uint64_t)pos; i < (self->len - 1); i++)                                         \
                     {                                                                                                  \
                         self->data[i] = self->data[i + 1];                                                             \
                     }                                                                                                  \
@@ -333,10 +338,10 @@ OptionalDef(ArrayIndex);
         {                                                                                                              \
             return result;                                                                                             \
         }                                                                                                              \
-        for (int iter = 0; iter < self->len; iter++)                                                                   \
+        for (uint64_t iter = 0; iter < self->len; iter++)                                                              \
         {                                                                                                              \
             alias_name##__type largest;                                                                                \
-            for (int pos = 0; pos < self->len; pos++)                                                                  \
+            for (uint64_t pos = 0; pos < self->len; pos++)                                                             \
             {                                                                                                          \
                 alias_name##__type val = self->data[pos];                                                              \
                 if (iter == 0)                                                                                         \
@@ -377,10 +382,10 @@ OptionalDef(ArrayIndex);
         {                                                                                                              \
             return result;                                                                                             \
         }                                                                                                              \
-        for (int iter = 0; iter < self->len; iter++)                                                                   \
+        for (uint64_t iter = 0; iter < self->len; iter++)                                                              \
         {                                                                                                              \
             alias_name##__type smallest;                                                                               \
-            for (int pos = 0; pos < self->len; pos++)                                                                  \
+            for (uint64_t pos = 0; pos < self->len; pos++)                                                             \
             {                                                                                                          \
                 alias_name##__type val = self->data[pos];                                                              \
                 if (iter == 0)                                                                                         \
@@ -447,6 +452,11 @@ OptionalDef(ArrayIndex);
 
 #define FixedArrayBodyDefine(alias_name)                                                                               \
     ConstructorDefine(alias_name) LenDefine(alias_name) AtDefine(alias_name) PushDefine(alias_name)                    \
+        PopDefine(alias_name) SetDefine(alias_name) FindDefine(alias_name) RemoveDefine(alias_name)                    \
+            SortDefine(alias_name) FilterDefine(alias_name)
+
+#define FixedArrayStackBodyDefine(alias_name)                                                                          \
+    StackConstructorDefine(alias_name) LenDefine(alias_name) AtDefine(alias_name) PushDefine(alias_name)               \
         PopDefine(alias_name) SetDefine(alias_name) FindDefine(alias_name) RemoveDefine(alias_name)                    \
             SortDefine(alias_name) FilterDefine(alias_name)
 

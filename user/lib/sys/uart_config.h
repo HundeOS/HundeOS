@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "hardware/boot_info.h"
 #include "../../common/types/bstring.h"
 #include "../../common/types/dyn_string.h"
 #include "io.h"
@@ -17,6 +18,7 @@ typedef struct UartDriverConfig
     uint64_t physical_base;
     uint64_t mmio_size;
     uint64_t irq;
+    UartKind kind;
 } UartDriverConfig;
 
 typedef UartDriverConfig * UartDriverConfigPtr;
@@ -25,6 +27,7 @@ static const BString uart_config_delimiter = bstr("=");
 static const BString uart_config_physical_base_key = bstr("uart.physical_base");
 static const BString uart_config_mmio_size_key = bstr("uart.mmio_size");
 static const BString uart_config_irq_key = bstr("uart.irq");
+static const BString uart_config_kind_key = bstr("uart.kind");
 
 static bool UartDriverConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key, uint64_t * value)
 {
@@ -60,7 +63,8 @@ static bool UartDriverConfig__read_line_value(ConstBStringPtr line, ConstBString
 }
 
 static void UartDriverConfig__read_config_line(ConstBStringPtr line, UartDriverConfigPtr self,
-                                               bool * found_physical_base, bool * found_mmio_size, bool * found_irq)
+                                               bool * found_physical_base, bool * found_mmio_size, bool * found_irq,
+                                               bool * found_kind)
 {
     if (!*found_physical_base &&
         UartDriverConfig__read_line_value(line, &uart_config_physical_base_key, &self->physical_base))
@@ -75,6 +79,15 @@ static void UartDriverConfig__read_config_line(ConstBStringPtr line, UartDriverC
     {
         *found_irq = true;
     }
+    if (!*found_kind)
+    {
+        uint64_t kind;
+        if (UartDriverConfig__read_line_value(line, &uart_config_kind_key, &kind))
+        {
+            self->kind = (UartKind)kind;
+            *found_kind = true;
+        }
+    }
 }
 
 static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverConfigPtr self)
@@ -82,6 +95,7 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
     bool found_physical_base = false;
     bool found_mmio_size = false;
     bool found_irq = false;
+    bool found_kind = false;
 
     match_optional(
         DynString__lines(sysinfo),
@@ -97,7 +111,7 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
                         some(bstring_line)
                         {
                             UartDriverConfig__read_config_line(&bstring_line, self, &found_physical_base,
-                                                               &found_mmio_size, &found_irq);
+                                                               &found_mmio_size, &found_irq, &found_kind);
                         },
                         none_do_nothing()
                     );
@@ -108,7 +122,7 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
         none_do_nothing()
     );
 
-    return found_physical_base && found_mmio_size && found_irq;
+    return found_physical_base && found_mmio_size && found_irq && found_kind && self->kind != UART_KIND_UNKNOWN;
 }
 
 static bool UartDriverConfig__load(UartDriverConfigPtr self)

@@ -11,11 +11,7 @@ typedef Fiber * FiberPtr;
 
 typedef void (*FiberContextStart)(FiberPtr fiber);
 
-#if __STDC_HOSTED__
-#include "hosted/fiber_context.h"
-#else
-#include "aarch64/fiber_context.h"
-#endif
+#include <fiber_context_arch.h>
 
 Result(FiberCode) FiberContext__init(FiberContextPtr self, Address stack_base, size_t stack_size,
                                      FiberContextStart start, FiberPtr fiber);

@@ -15,8 +15,6 @@
 #include "../../kernel/types/optional.h"
 #include "ipc/ipc_platform.h"
 
-#define CPU_POKE_SGI 1U
-
 // Helper function to get exception syndrome
 inline uint64_t get_esr_el1(void)
 {
@@ -73,16 +71,6 @@ void irq_handler(ProcessContextPtr context, bool current_el)
 
     icc_eoir1(id);
     icc_dir(id);
-
-    if (id == CPU_POKE_SGI)
-    {
-        __d_printf(SCHEDULER, "cpu poke irq cpu=%i current_el=%i\n", cpu, current_el);
-        if (!current_el)
-        {
-            Scheduler__preempt(kernel->scheduler, cpu, context);
-        }
-        return;
-    }
 
     IRQDispatchContext dispatch_context = IRQDispatchContext__new(id, cpu, current_el, context);
 

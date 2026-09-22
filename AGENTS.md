@@ -9,6 +9,13 @@ Interfaces to architecture are defined in kernel/arch
 Architecture specific code. Currently aarch64. Assembly and architecture specific
 integration code goes here, along with bootloaders
 
+### Architecture selection
+Architecture-neutral code must not use compiler architecture macros or conditional
+compilation to select an implementation. Put target-specific code, ABI types, and
+headers beneath an `arch/<target>` directory, and have the build select the matching
+source files and include directories. Hosted test implementations must be selected
+the same way through an `arch/hosted` directory.
+
 ### user
 Userspace code. It includes commands and drivers
 

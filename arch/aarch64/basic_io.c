@@ -103,7 +103,7 @@ void DebugTrace__puts(const char * str)
 #define SEMIHOST_SYS_WRITE0 0x04
 #define SEMIHOST_OPEN_WRITE 4
 
-static const char trace_path[] = "build/kernel-trace.log";
+static const char trace_path[] = KERNEL_TRACE_PATH;
 static uintptr_t trace_handle = (uintptr_t)-1;
 static bool trace_open_attempted = false;
 static volatile uint32_t trace_write_lock = 0;

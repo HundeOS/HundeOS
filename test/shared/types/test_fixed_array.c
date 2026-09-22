@@ -22,6 +22,9 @@ FixedArrayBodyDefine(TestArray);
 FixedArrayDefine(TestType, 1, TinyTestArray, &test_type_equals);
 FixedArrayBodyDefine(TinyTestArray);
 
+FixedArrayDefine(TestType, 2, StackTestArray, &test_type_equals);
+FixedArrayStackBodyDefine(StackTestArray);
+
 static int compare_uint64(TestType * a, TestType * b)
 {
     return *a - *b;
@@ -43,6 +46,29 @@ void test_fixed_array_push_and_at(void)
 
     TEST_ASSERT_EQUAL(1, TestArray__len(&array));
     TEST_ASSERT_EQUAL(10, unwrap_optional(TestArray__at(&array, 0), (TestType){}));
+}
+
+void test_stack_fixed_array_body_supports_existing_storage(void)
+{
+    StackTestArray array = StackTestArray__new();
+
+    match_result(StackTestArray__push(&array, 42),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(1, StackTestArray__len(&array));
+    TEST_ASSERT_EQUAL(42, unwrap_optional(StackTestArray__at(&array, 0), (TestType){}));
+    uint64_t total = 0;
+    for_each_fa_ptr(
+        StackTestArray,
+        &array,
+        index,
+        value,
+        total += value;
+    )
+    ;
+    TEST_ASSERT_EQUAL_UINT64(42, total);
 }
 
 void test_fixed_array_push_all_and_negative_index(void)
@@ -67,6 +93,10 @@ void test_fixed_array_push_all_and_negative_index(void)
 
     TEST_ASSERT_EQUAL(11, TestArray__len(&array));
     TEST_ASSERT_EQUAL(9, unwrap_optional(TestArray__at(&array, -1), (TestType){}));
+    match_optional(TestArray__at(&array, -12),
+        some_test_fail(),
+        none_do_nothing()
+    );
 }
 
 void test_fixed_array_find_remove_and_pop_front(void)

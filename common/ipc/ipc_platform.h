@@ -5,6 +5,7 @@
 #include "hardware/boot_info.h"
 
 void IpcPlatform__configure_wait(BootWaitMode mode);
+void IpcPlatform__configure_timer_frequency(uint64_t frequency);
 void IpcPlatform__signal_event(void);
 // May return spuriously; callers must recheck authoritative shared state.
 void IpcPlatform__wait_event(void);

@@ -1,5 +1,6 @@
 #include "boot/services.h"
 #include "io/mount_client.h"
+#include "sys/boot_info.h"
 #include "sys/process.h"
 #include "sys/service.h"
 #include "sys/syslog.h"
@@ -16,10 +17,11 @@ static MamaBootDisk MamaBootDisk__new(uint64_t slot, ConstBStringPtr path)
     return (MamaBootDisk){slot, *path};
 }
 
-static Result(MamaBootDisk) MamaBootDisk__find(void)
+static Result(MamaBootDisk) MamaBootDisk__find(ConstBootVirtioMmioInfoPtr virtio_mmio)
 {
     ServiceMappedMemoryPtr mapping;
-    ServiceCode status = service_map_mmio(0x0a000000ULL, 32 * 0x200ULL, &mapping);
+    ServiceCode status =
+        service_map_mmio(virtio_mmio->physical_base, virtio_mmio->slot_count * virtio_mmio->slot_size, &mapping);
     if (!service_ok(status))
     {
         return Error(MamaBootDisk, bstr("Cannot probe boot disk"), status);
@@ -27,10 +29,10 @@ static Result(MamaBootDisk) MamaBootDisk__find(void)
     MamaBootDisk found = MamaBootDisk__new(0, &empty_bstr());
     uint64_t matches = 0;
     uint64_t ordinal = 0;
-    for (uint64_t remaining = 32; remaining > 0; remaining--)
+    for (uint64_t remaining = virtio_mmio->slot_count; remaining > 0; remaining--)
     {
         uint64_t slot = remaining - 1;
-        MamaRegisterPtr registers = (MamaRegisterPtr)driver_ptr_offset(mapping, slot * 0x200);
+        MamaRegisterPtr registers = (MamaRegisterPtr)driver_ptr_offset(mapping, slot * virtio_mmio->slot_size);
         if (registers[0] != 0x74726976U || registers[1] < 1 || registers[2] != 2)
         {
             continue;
@@ -131,9 +133,32 @@ static Result(IOStatus) Mama__boot_mounts(ChannelPtr mounts)
             return Error(IOStatus, message, code);
         }
     );
+    BootVirtioMmioInfo virtio_mmio;
+    match_result(
+        BootHardwareInfo__load(),
+        success(info)
+        {
+            match_optional(
+                info.virtio_mmio,
+                some(value)
+                {
+                    virtio_mmio = value;
+                },
+                none()
+                {
+                    return Error(IOStatus, bstr("VirtIO MMIO information unavailable"),
+                                 SERVICE_DEVICE_REGISTRATION_FAILED);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(IOStatus, message, code);
+        }
+    );
     MamaBootDisk disk;
     match_result(
-        MamaBootDisk__find(),
+        MamaBootDisk__find(&virtio_mmio),
         success(value)
         {
             disk = value;

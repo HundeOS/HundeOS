@@ -16,11 +16,21 @@ typedef struct MemoryRegion
     Address physical_end;
 } MemoryRegion;
 
+static inline MemoryRegion MemoryRegion__new(Address virtual_start, Address physical_start, Address physical_end)
+{
+    return (MemoryRegion){
+        .virtual_start = virtual_start,
+        .physical_start = physical_start,
+        .physical_end = physical_end,
+    };
+}
+
 typedef struct PhysicalMemoryRegion
 {
     Address physical_start;
     Address physical_end;
 } PhysicalMemoryRegion;
+typedef const PhysicalMemoryRegion * ConstPhysicalMemoryRegionPtr;
 
 static inline PhysicalMemoryRegion PhysicalMemoryRegion__new(Address physical_start, Address physical_end)
 {
@@ -37,13 +47,25 @@ bool PhysicalMemoryRegion__equals(void * a, void * b);
 FixedArrayDefine(PhysicalMemoryRegion, MAX_PHYSICAL_MEMORY_REGIONS, PhysicalMemoryRegions,
                  PhysicalMemoryRegion__equals);
 typedef PhysicalMemoryRegions * PhysicalMemoryRegionsPtr;
+typedef const PhysicalMemoryRegions * ConstPhysicalMemoryRegionsPtr;
 
 typedef struct UartInfo
 {
     Address physical_base;
     Address virtual_base;
     uint64_t irq;
+    UartKind kind;
 } UartInfo;
+
+static inline UartInfo UartInfo__new(Address physical_base, Address virtual_base, uint64_t irq, UartKind kind)
+{
+    return (UartInfo){
+        .physical_base = physical_base,
+        .virtual_base = virtual_base,
+        .irq = irq,
+        .kind = kind,
+    };
+}
 
 typedef enum FramebufferPixelFormat
 {
@@ -148,13 +170,52 @@ static inline EthernetMacInfo EthernetMacInfo__new(EthernetMacKind kind, Address
 
 OptionalDef(EthernetMacInfo);
 
-typedef struct GicInfo
+typedef struct GicInterruptControllerInfo
 {
     Address distributor_physical_base;
     Address distributor_virtual_base;
     Address redistributor_physical_base;
     Address redistributor_virtual_base;
-} GicInfo;
+    Address cpu_interface_physical_base;
+    Address cpu_interface_virtual_base;
+} GicInterruptControllerInfo;
+typedef const GicInterruptControllerInfo * ConstGicInterruptControllerInfoPtr;
+
+static inline GicInterruptControllerInfo
+GicInterruptControllerInfo__new(Address distributor_physical_base, Address distributor_virtual_base,
+                                Address redistributor_physical_base, Address redistributor_virtual_base,
+                                Address cpu_interface_physical_base, Address cpu_interface_virtual_base)
+{
+    return (GicInterruptControllerInfo){
+        .distributor_physical_base = distributor_physical_base,
+        .distributor_virtual_base = distributor_virtual_base,
+        .redistributor_physical_base = redistributor_physical_base,
+        .redistributor_virtual_base = redistributor_virtual_base,
+        .cpu_interface_physical_base = cpu_interface_physical_base,
+        .cpu_interface_virtual_base = cpu_interface_virtual_base,
+    };
+}
+
+typedef struct PlicInterruptControllerInfo
+{
+    Address physical_base;
+    Address virtual_base;
+    uint64_t source_count;
+    uint64_t target_hart_id;
+} PlicInterruptControllerInfo;
+typedef const PlicInterruptControllerInfo * ConstPlicInterruptControllerInfoPtr;
+
+static inline PlicInterruptControllerInfo PlicInterruptControllerInfo__new(Address physical_base, Address virtual_base,
+                                                                           uint64_t source_count,
+                                                                           uint64_t target_hart_id)
+{
+    return (PlicInterruptControllerInfo){
+        .physical_base = physical_base,
+        .virtual_base = virtual_base,
+        .source_count = source_count,
+        .target_hart_id = target_hart_id,
+    };
+}
 
 typedef struct PhysicalMemoryInfo
 {
@@ -163,29 +224,46 @@ typedef struct PhysicalMemoryInfo
     PhysicalMemoryRegions free_regions;
 } PhysicalMemoryInfo;
 
-typedef enum InterruptControllerKind
+typedef union InterruptControllerDetails
 {
-    INTERRUPT_CONTROLLER_NONE = 0,
-    INTERRUPT_CONTROLLER_GIC_V2 = 1,
-    INTERRUPT_CONTROLLER_GIC_V3 = 2,
-} InterruptControllerKind;
+    GicInterruptControllerInfo gic;
+    PlicInterruptControllerInfo plic;
+} InterruptControllerDetails;
 
 typedef struct InterruptControllerInfo
 {
     InterruptControllerKind kind;
-    Address distributor_physical_base;
-    Address distributor_virtual_base;
-    Address redistributor_physical_base;
-    Address redistributor_virtual_base;
-    Address cpu_interface_physical_base;
-    Address cpu_interface_virtual_base;
+    InterruptControllerDetails details;
 } InterruptControllerInfo;
+
+static inline InterruptControllerInfo InterruptControllerInfo__new_none(void)
+{
+    return (InterruptControllerInfo){};
+}
+
+static inline InterruptControllerInfo InterruptControllerInfo__new_gic(InterruptControllerKind kind,
+                                                                       ConstGicInterruptControllerInfoPtr gic)
+{
+    return (InterruptControllerInfo){
+        .kind = kind,
+        .details.gic = *gic,
+    };
+}
+
+static inline InterruptControllerInfo InterruptControllerInfo__new_plic(ConstPlicInterruptControllerInfoPtr plic)
+{
+    return (InterruptControllerInfo){
+        .kind = INTERRUPT_CONTROLLER_PLIC,
+        .details.plic = *plic,
+    };
+}
 
 OptionalDef(InterruptControllerInfo);
 
 typedef struct SystemInfo
 {
     uint64_t cpu_count;
+    uint64_t timer_frequency;
     BootWaitMode wait_mode;
     size_t heap_coarse_block_size;
     PhysicalMemoryInfo physical_memory;
@@ -195,11 +273,11 @@ typedef struct SystemInfo
     MemoryRegion embedded_binaries;
     MemoryRegion mmio;
     UartInfo uart;
+    Optional(BootVirtioMmioInfo) virtio_mmio;
     Optional(FramebufferInfo) framebuffer;
     Optional(PciInfo) pci;
     Optional(SdHostInfo) sd_host;
     Optional(EthernetMacInfo) ethernet_mac;
-    GicInfo gic;
     InterruptControllerInfo interrupt_controller;
 } SystemInfo;
 
@@ -208,11 +286,13 @@ OptionalDef(SystemInfo);
 typedef MemoryRegion * MemoryRegionPtr;
 typedef PhysicalMemoryRegion * PhysicalMemoryRegionPtr;
 typedef UartInfo * UartInfoPtr;
+typedef const UartInfo * ConstUartInfoPtr;
 typedef FramebufferInfo * FramebufferInfoPtr;
 typedef PciInfo * PciInfoPtr;
 typedef SdHostInfo * SdHostInfoPtr;
 typedef EthernetMacInfo * EthernetMacInfoPtr;
-typedef GicInfo * GicInfoPtr;
+typedef GicInterruptControllerInfo * GicInterruptControllerInfoPtr;
+typedef PlicInterruptControllerInfo * PlicInterruptControllerInfoPtr;
 typedef PhysicalMemoryInfo * PhysicalMemoryInfoPtr;
 typedef InterruptControllerInfo * InterruptControllerInfoPtr;
 typedef SystemInfo * SystemInfoPtr;

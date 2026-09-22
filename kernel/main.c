@@ -13,7 +13,6 @@
 #include "types/bstring.h"
 #include "types/result.h"
 #include "syscalls/io.h"
-#include "../arch/aarch64/io/uart.h"
 #include "system_info.h"
 
 BString panic_message = bstr("Program failed: %B\n");

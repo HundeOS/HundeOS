@@ -2,28 +2,25 @@
 #include "sys/service.h"
 #include "sys/uart_config.h"
 #include "devices/uart.h"
-#define UART_DR 0x000
-#define UART_FR 0x018
-#define FR_TXFF (1u << 5)
 
 typedef struct UartTransmitter
 {
-    Address registers;
+    UartDevice uart;
     bool pending_carriage_return;
 } UartTransmitter;
 typedef UartTransmitter * UartTransmitterPtr;
-static UartTransmitter UartTransmitter__new(Address registers)
+static UartTransmitter UartTransmitter__new(ConstUartDevicePtr uart)
 {
-    return (UartTransmitter){.registers = registers};
+    return (UartTransmitter){.uart = *uart};
 }
 
 static bool UartTransmitter__flush(UartTransmitterPtr self)
 {
-    if (!self->pending_carriage_return || (Uart__read32(self->registers, UART_FR) & FR_TXFF) != 0)
+    if (!self->pending_carriage_return || !UartDevice__can_transmit(&self->uart))
     {
         return false;
     }
-    Uart__write32(self->registers, UART_DR, '\r');
+    UartDevice__write(&self->uart, '\r');
     self->pending_carriage_return = false;
     return true;
 }
@@ -34,10 +31,10 @@ static IOReply UartTransmitter__write(IOServiceContext context, IORequestPtr req
     IOReply reply = IOReply__new(IO_OK, 0);
     UartTransmitter__flush(self);
     while (!self->pending_carriage_return && (uint64_t)reply.value < request->count &&
-           (Uart__read32(self->registers, UART_FR) & FR_TXFF) == 0)
+           UartDevice__can_transmit(&self->uart))
     {
         uint8_t value = IORequest__write_source(request)[reply.value++];
-        Uart__write32(self->registers, UART_DR, value);
+        UartDevice__write(&self->uart, value);
         if (value == '\n')
         {
             self->pending_carriage_return = true;
@@ -68,7 +65,8 @@ int main(void)
         return 1;
     }
     static UartTransmitter transmitter;
-    transmitter = UartTransmitter__new((Address)driver_ptr(mapping));
+    UartDevice uart = UartDevice__new((Address)driver_ptr(mapping), config.kind);
+    transmitter = UartTransmitter__new(&uart);
     static IOStreamDriver driver;
     static IOService service;
     driver = IOStreamDriver__new(IO_OPEN_WRITE, &transmitter, UartTransmitter__write);

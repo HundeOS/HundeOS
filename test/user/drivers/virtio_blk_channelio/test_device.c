@@ -333,6 +333,15 @@ ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappe
     return SERVICE_OK;
 }
 
+Result(BootHardwareInfo) BootHardwareInfo__load(void)
+{
+    BootHardwareInfo info = BootHardwareInfo__new();
+    BootVirtioMmioInfo virtio_mmio = BootVirtioMmioInfo__new(VIRTIO_MMIO_FIRST_PHYS_BASE, VIRTIO_MMIO_SLOT_SIZE,
+                                                             TEST_VIRTIO_SLOT_COUNT, VIRTIO_MMIO_FIRST_IRQ_ID);
+    info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
+    return Success(BootHardwareInfo, info);
+}
+
 void * driver_ptr(ServiceMappedMemoryPtr memory)
 {
     return memory->driver_address;

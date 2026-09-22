@@ -1,6 +1,6 @@
 #include "system_info.h"
 
-FixedArrayBodyDefine(PhysicalMemoryRegions);
+FixedArrayStackBodyDefine(PhysicalMemoryRegions);
 
 bool PhysicalMemoryRegion__equals(void * a, void * b)
 {

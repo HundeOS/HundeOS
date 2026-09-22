@@ -4,55 +4,17 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "arch/basic_io.h"
+#include "arch/varargs.h"
 #include "../common/types/bstring.h"
-
-#define K_PRINTF_AARCH64_GR_SAVE_BYTES 64U
-
-#if defined(__aarch64__) && defined(__ELF__)
-typedef struct KPrintfAArch64VaList
-{
-    void * stack;
-    void * gr_top;
-    void * vr_top;
-    int gr_offs;
-    int vr_offs;
-} KPrintfAArch64VaList;
-
-typedef KPrintfAArch64VaList * KPrintfAArch64VaListPtr;
-#endif
 
 static void trace_puts(const char * str)
 {
     DebugTrace__puts(str);
 }
 
-static bool k_printf__has_general_arg(va_list args)
-{
-#if defined(__aarch64__) && defined(__ELF__)
-    KPrintfAArch64VaListPtr state = (KPrintfAArch64VaListPtr)&args;
-    if (state->gr_offs < 0)
-    {
-        if (state->gr_top == NULL) // hundelint: ignore-no-null
-        {
-            return false;
-        }
-
-        uintptr_t gr_top = (uintptr_t)state->gr_top;
-        uintptr_t cursor = gr_top + (uintptr_t)state->gr_offs;
-        return cursor >= (gr_top - K_PRINTF_AARCH64_GR_SAVE_BYTES) && (cursor + sizeof(uint64_t)) <= gr_top &&
-               (cursor & (sizeof(uint64_t) - 1U)) == 0;
-    }
-
-    return state->stack != NULL // hundelint: ignore-no-null
-          && (((uintptr_t)state->stack) & (sizeof(uint64_t) - 1U)) == 0;
-#else
-    return true;
-#endif
-}
-
 static bool k_printf__require_general_arg(va_list args, const char * conversion)
 {
-    if (k_printf__has_general_arg(args))
+    if (KernelVarArgs__has_general_arg(args))
     {
         return true;
     }

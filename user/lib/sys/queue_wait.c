@@ -50,10 +50,12 @@ static void QueueWait__register_control(void)
         success(info)
         {
             IpcPlatform__configure_wait(info.wait_mode);
+            IpcPlatform__configure_timer_frequency(info.timer_frequency);
         },
         error(code, message)
         {
             IpcPlatform__configure_wait(BOOT_WAIT_SPIN);
+            IpcPlatform__configure_timer_frequency(0);
         }
     );
     SystemCallResult address = syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT_CONTROL, 0, 0, 0, 0);

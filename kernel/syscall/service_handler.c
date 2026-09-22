@@ -15,6 +15,8 @@ static BString unsupported_operation = bstr("Unsupported service operation");
 static BString permission_denied = bstr("Permission denied");
 
 #define SERVICE_GIC_DISTRIBUTOR_SIZE 0x10000ULL
+#define SERVICE_PLIC_ENABLE_SIZE 0x3000ULL
+#define SERVICE_PLIC_ENABLE_HART_STRIDE 0x100ULL
 
 typedef struct ServiceMappedMemoryRequest
 {
@@ -394,14 +396,39 @@ Result(SystemCallResult)
                             kernel->system_info,
                             some(system_info)
                             {
+                                Address physical_address = 0;
+                                size_t mapping_size = 0;
+                                if (system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V2 ||
+                                    system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V3)
+                                {
+                                    physical_address =
+                                        system_info.interrupt_controller.details.gic.distributor_physical_base;
+                                    mapping_size = SERVICE_GIC_DISTRIBUTOR_SIZE;
+                                }
+                                else if (system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC)
+                                {
+                                    PlicInterruptControllerInfoPtr plic =
+                                        &system_info.interrupt_controller.details.plic;
+                                    physical_address = plic->physical_base;
+                                    mapping_size = SERVICE_PLIC_ENABLE_SIZE;
+                                }
+                                if (mapping_size == 0)
+                                {
+                                    IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, process);
+                                    return Error(SystemCallResult, unsupported_operation, SERVICE_MAP_FAILED);
+                                }
                                 match_result(
-                                    Process__map_mmio(process,
-                                                      system_info.interrupt_controller.distributor_physical_base,
-                                                      SERVICE_GIC_DISTRIBUTOR_SIZE),
+                                    Process__map_mmio(process, physical_address, mapping_size),
                                     success(distributor)
                                     {
                                         request->event_queue = queue_address;
                                         request->distributor = distributor.virtual_addr;
+                                        if (system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC)
+                                        {
+                                            request->distributor +=
+                                                system_info.interrupt_controller.details.plic.target_hart_id *
+                                                SERVICE_PLIC_ENABLE_HART_STRIDE;
+                                        }
                                         return Success(SystemCallResult, SERVICE_OK);
                                     },
                                     error(code, message)

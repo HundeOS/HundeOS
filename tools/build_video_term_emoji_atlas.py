@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import subprocess
+import sys
 from pathlib import Path
 
 EMOJI_SIZE = 32
 ASSET_DIR = Path("vendor/noto_emoji/png/128")
 HEADER = Path("user/drivers/video_term/emoji_atlas.h")
-OUTPUT = Path("build/user/drivers/video_term/emoji_atlas.rgba")
 
 
 def parse_codepoints(path):
@@ -65,13 +65,16 @@ def write_header(entries):
 
 
 def main():
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: build_video_term_emoji_atlas.py OUTPUT")
+    output_path = Path(sys.argv[1])
     assets = sorted(ASSET_DIR.glob("emoji_u*.png"))
     if not assets:
         raise SystemExit(f"no emoji assets found in {ASSET_DIR}")
 
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     entries = []
-    with OUTPUT.open("wb") as output:
+    with output_path.open("wb") as output:
         for source in assets:
             codepoints = parse_codepoints(source)
             offset = output.tell()

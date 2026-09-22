@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "sys/debug.h"
+#include "sys/boot_info.h"
 #include "io/stream_driver.h"
 #include "interrupt/client.h"
 #include "sys/service.h"
@@ -12,12 +13,6 @@
 #ifndef VIRTIO_KEYBOARD_ENTRYPOINT
 #define VIRTIO_KEYBOARD_ENTRYPOINT main
 #endif
-
-#define VIRTIO_MMIO_FIRST_PHYS_BASE 0x0a000000ULL
-#define VIRTIO_MMIO_SLOT_SIZE 0x200ULL
-#define VIRTIO_MMIO_SLOT_COUNT 32ULL
-#define VIRTIO_MMIO_REGION_SIZE (VIRTIO_MMIO_SLOT_SIZE * VIRTIO_MMIO_SLOT_COUNT)
-#define VIRTIO_MMIO_FIRST_IRQ_ID 48ULL
 
 #define VIRTIO_MMIO_MAGIC 0x000
 #define VIRTIO_MMIO_VERSION 0x004
@@ -121,6 +116,26 @@ typedef struct VirtioKeyboard
 
 typedef VirtioKeyboard * VirtioKeyboardPtr;
 
+typedef struct VirtioKeyboardDevice
+{
+    void * mmio;
+    uint64_t slot;
+    uint64_t irq_id;
+} VirtioKeyboardDevice;
+
+typedef const VirtioKeyboardDevice * ConstVirtioKeyboardDevicePtr;
+
+OptionalDef(VirtioKeyboardDevice);
+
+static VirtioKeyboardDevice VirtioKeyboardDevice__new(void * mmio, uint64_t slot, uint64_t irq_id)
+{
+    return (VirtioKeyboardDevice){
+        .mmio = mmio,
+        .slot = slot,
+        .irq_id = irq_id,
+    };
+}
+
 static VirtqDesc VirtqDesc__new(uint64_t addr, uint32_t len, uint16_t flags, uint16_t next)
 {
     return (VirtqDesc){
@@ -131,12 +146,12 @@ static VirtqDesc VirtqDesc__new(uint64_t addr, uint32_t len, uint16_t flags, uin
     };
 }
 
-static VirtioKeyboard VirtioKeyboard__new(void)
+static VirtioKeyboard VirtioKeyboard__new(ConstVirtioKeyboardDevicePtr device)
 {
     return (VirtioKeyboard){
-        .mmio = (void *)VIRTIO_MMIO_FIRST_PHYS_BASE,
-        .slot = 0,
-        .irq_id = 0,
+        .mmio = device->mmio,
+        .slot = device->slot,
+        .irq_id = device->irq_id,
         .queue_size = 0,
         .last_used_idx = 0,
         .shift = false,
@@ -427,30 +442,53 @@ static bool VirtioKeyboard__probe(void * mmio)
            VIRTIO_KEYBOARD_READ32(mmio, VIRTIO_MMIO_DEVICE_ID) == VIRTIO_DEVICE_ID_INPUT;
 }
 
-static bool VirtioKeyboard__find_device(VirtioKeyboardPtr self)
+static Optional(VirtioKeyboardDevice) VirtioKeyboard__find_device(void)
 {
+    BootVirtioMmioInfo virtio_mmio;
+    match_result(
+        BootHardwareInfo__load(),
+        success(info)
+        {
+            match_optional(
+                info.virtio_mmio,
+                some(value)
+                {
+                    virtio_mmio = value;
+                },
+                none()
+                {
+                    DRIVER_DEBUG("virtio_keyboard: virtio mmio unavailable\n");
+                    return None(VirtioKeyboardDevice);
+                }
+            );
+        },
+        error(code, message)
+        {
+            DRIVER_DEBUG("virtio_keyboard: boot hardware unavailable\n");
+            return None(VirtioKeyboardDevice);
+        }
+    );
     ServiceMappedMemoryPtr mapping;
-    if (!service_ok(service_map_mmio(VIRTIO_MMIO_FIRST_PHYS_BASE, VIRTIO_MMIO_REGION_SIZE, &mapping)))
+    if (!service_ok(
+            service_map_mmio(virtio_mmio.physical_base, virtio_mmio.slot_size * virtio_mmio.slot_count, &mapping)))
     {
         DRIVER_DEBUG("virtio_keyboard: mmio region map failed\n");
-        return false;
+        return None(VirtioKeyboardDevice);
     }
 
-    for (uint64_t slot = 0; slot < VIRTIO_MMIO_SLOT_COUNT; slot++)
+    for (uint64_t slot = 0; slot < virtio_mmio.slot_count; slot++)
     {
-        void * mmio = driver_ptr_offset(mapping, slot * VIRTIO_MMIO_SLOT_SIZE);
+        void * mmio = driver_ptr_offset(mapping, slot * virtio_mmio.slot_size);
         if (VirtioKeyboard__probe(mmio))
         {
-            self->mmio = mmio;
-            self->slot = slot;
-            self->irq_id = VIRTIO_MMIO_FIRST_IRQ_ID + slot;
-            DRIVER_DEBUG("virtio_keyboard: found slot=%i irq=%i\n", (int)slot, (int)self->irq_id);
-            return true;
+            VirtioKeyboardDevice device = VirtioKeyboardDevice__new(mmio, slot, virtio_mmio.first_irq + slot);
+            DRIVER_DEBUG("virtio_keyboard: found slot=%i irq=%i\n", (int)slot, (int)device.irq_id);
+            return Some(VirtioKeyboardDevice, device);
         }
     }
 
     DRIVER_DEBUG("virtio_keyboard: no virtio input device found\n");
-    return false;
+    return None(VirtioKeyboardDevice);
 }
 
 static void VirtioKeyboard__acknowledge_driver(VirtioKeyboardPtr self)
@@ -588,17 +626,22 @@ static IOReply VirtioKeyboard__read(IOServiceContext context, IORequestPtr reque
 
 static bool VirtioKeyboard__init(VirtioKeyboardPtr self)
 {
-    *self = VirtioKeyboard__new();
-
     if (!service_ok(service_become_service()))
     {
         DRIVER_DEBUG("virtio_keyboard: service registration failed\n");
         return false;
     }
-    if (!VirtioKeyboard__find_device(self))
-    {
-        return false;
-    }
+    match_optional(
+        VirtioKeyboard__find_device(),
+        some(device)
+        {
+            *self = VirtioKeyboard__new(&device);
+        },
+        none()
+        {
+            return false;
+        }
+    );
 
     VirtioKeyboard__acknowledge_driver(self);
     if (!VirtioKeyboard__setup_event_queue(self))
