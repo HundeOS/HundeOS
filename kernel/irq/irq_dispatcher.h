@@ -52,7 +52,7 @@ static inline IRQDispatchContext IRQDispatchContext__new(IRQNumber irq, CPUID cp
     };
 }
 
-typedef Result(IRQDispatchStatus) (*IRQKernelConsumer)(IRQDispatchContextPtr context, void * data);
+typedef Result(IRQDispatchStatus) (*IRQKernelConsumer)(IRQDispatchContextPtr context, KernelPtr kernel);
 
 typedef enum IRQConsumerType
 {
@@ -65,7 +65,7 @@ typedef struct IRQConsumer
 {
     IRQConsumerType type;
     IRQKernelConsumer kernel_consumer;
-    void * kernel_data;
+    Optional(KernelPtr) kernel;
     ProcessPtr service_process;
     InterruptDeliverySequence delivery_sequence;
 } IRQConsumer;
@@ -96,7 +96,7 @@ typedef IRQDispatcher * IRQDispatcherPtr;
     }
 
 Result(IRQRegistrationStatus)
-    IRQDispatcher__register_kernel(IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, void * data);
+    IRQDispatcher__register_kernel(IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, KernelPtr kernel);
 
 Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr self, IRQNumber irq, ProcessPtr process);
 Result(Address) IRQDispatcher__register_manager(IRQDispatcherPtr self, ProcessPtr process);

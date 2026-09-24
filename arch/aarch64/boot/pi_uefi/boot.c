@@ -192,6 +192,7 @@ __BOOT__(void) pi_uefi_enter_kernel(uint64_t cpu)
 
 __BOOT__(void) primary_booted(void)
 {
+    CPUID cpu = rd_mpidr() & 0xff;
     pi_uefi_system_info_init();
     BootUart__set_physical_base(pi_uefi_platform_info.uart_physical_base);
     BootUart__init();
@@ -207,10 +208,11 @@ __BOOT__(void) primary_booted(void)
     enable_fp_simd();
     enable_tbi_for_kernel();
     enable_mmu();
+    CPU__set_boot_id(cpu);
 
     boot_secondary_cpus(pi_uefi_platform_info.cpu_count);
 
-    pi_uefi_enter_kernel(1);
+    pi_uefi_enter_kernel(cpu);
 }
 
 __BOOT__(void) secondary_booted(uint64_t cpu)

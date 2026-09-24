@@ -10,6 +10,7 @@
 #include "../print.h"
 #include "../uart.h"
 
+#include "../../cpu.h"
 #include "../../gicr.h"
 #include "../../../../kernel/cpu.h"
 
@@ -148,6 +149,7 @@ __BOOT__(void) qemu_virt_enter_kernel(uint64_t cpu)
 
 __BOOT__(void) primary_booted(void)
 {
+    CPUID cpu = rd_mpidr() & 0xff;
     uint64_t daif, pmr, igrp;
     asm volatile("mrs %0, DAIF" : "=r"(daif));
     asm volatile("mrs %0, ICC_PMR_EL1" : "=r"(pmr));
@@ -179,10 +181,11 @@ __BOOT__(void) primary_booted(void)
     enable_fp_simd();
     enable_tbi_for_kernel();
     enable_mmu();
+    CPU__set_boot_id(cpu);
 
     boot_secondary_cpus(qemu_virt_platform_info.cpu_count);
 
-    qemu_virt_enter_kernel(1);
+    qemu_virt_enter_kernel(cpu);
 }
 
 __BOOT__(void) secondary_booted(uint64_t cpu)

@@ -357,7 +357,7 @@ static void QueueListener__release(QueueListenerPtr self)
         },
         error(code, message)
         {
-            __d_printf(IODEV, "Queue listener backing quarantined: %i\n", code);
+            __d_printf(MEMORY, "Queue listener backing quarantined: %i\n", code);
         }
     );
 }
@@ -699,7 +699,7 @@ static Result(QueueCode) Queues__close_connection(QueuesPtr self, QueueConnectio
         success_do_nothing(),
         error(code, message)
         {
-            __d_printf(IODEV, "Queue backing quarantined after close: %i\n", code);
+            __d_printf(MEMORY, "Queue backing quarantined after close: %i\n", code);
         }
     );
     return Success(QueueCode, QUEUE_OK);

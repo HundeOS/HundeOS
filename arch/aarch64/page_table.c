@@ -11,15 +11,7 @@
 #define PAGE_MASK (~(PAGE_SIZE - 1ULL))
 #define PAGE_OFF(x) ((uint64_t)(x) & (PAGE_SIZE - 1ULL))
 
-LinkedListBodyDefine(ProcessPageTablePages);
-
 static BString page_table_allocation_failed = bstr("Page table allocation failed");
-
-bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other)
-{
-    return self->valid == other->valid && self->virtual_addr == other->virtual_addr &&
-           self->phys_addr == other->phys_addr;
-}
 
 // VA[47:39] = L0 index (9) - points to next table or a block (if block, rest of output addr is used as offset)
 // VA[38:30] = L1 index (9) - points to next table or a block (if block, rest of output addr is used as offset)
@@ -57,23 +49,6 @@ bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other)
 //  PXN (bit 53)       : Privileged eXecute-Never (blocks EL1 execute)
 //  UXN (bit 54)       : Unprivileged eXecute-Never (blocks EL0 execute)
 
-static Result(KAllocCode) ProcessPageTable__record_page(ProcessPageTablePtr self, KernelAddress page)
-{
-    match_result(
-        ProcessPageTablePages__push(&self->pages, page),
-        success(_)
-        {
-            return Success(KAllocCode, KALLOC_OK);
-        },
-        error(code, message)
-        {
-            return Error(KAllocCode, message, KALLOC_ALLOCATION_FAILED);
-        }
-    );
-
-    return Error(KAllocCode, page_table_allocation_failed, KALLOC_ALLOCATION_FAILED);
-}
-
 Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel)
 {
     KernelAddress table = Kernel__alloc_page();
@@ -108,52 +83,6 @@ Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel)
     __d_printf(MEMORY, "pagetable alloc level=root addr=%p phys=%p size=%i valid=%i\n", table.virtual_addr,
                table.phys_addr, PAGE_SIZE, (int)table.valid);
     return Success(ProcessPageTable, process_page_table);
-}
-
-KernelAddress ProcessPageTable__root(ProcessPageTablePtr self)
-{
-    return self->root;
-}
-
-PageTablePtr ProcessPageTable__root_table(ProcessPageTablePtr self)
-{
-    return v_ptr(ProcessPageTable__root(self), PageTable);
-}
-
-size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
-{
-    return ProcessPageTablePages__len(&self->pages);
-}
-
-Result(KAllocCode) ArchProcessPageTable__dispose(ProcessPageTablePtr self)
-{
-    for_each_ll(
-        ProcessPageTablePages,
-        self->pages,
-        page,
-        {
-            match_result(
-                Kernel__free(page.virtual_addr),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(KAllocCode, message, code);
-                }
-            );
-        }
-    );
-
-    match_result(
-        ProcessPageTablePages__dispose(&self->pages),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(KAllocCode, message, code);
-        }
-    );
-
-    self->root = NULL_KERNEL_ADDRESS;
-    return Success(KAllocCode, KALLOC_OK);
 }
 
 KernelAddress PageTable__from_physical_address(KernelPtr kernel, Address physical)

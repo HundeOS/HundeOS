@@ -28,11 +28,11 @@ ResultDef(ProcessPageTable);
 extern KernelAddress PageTable__create();
 extern KernelAddress PageTable__kernel_address(PageTablePtr self);
 extern Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel);
+extern Result(KAllocCode) ProcessPageTable__record_page(ProcessPageTablePtr self, KernelAddress page);
 extern KernelAddress ProcessPageTable__root(ProcessPageTablePtr self);
 extern PageTablePtr ProcessPageTable__root_table(ProcessPageTablePtr self);
 extern size_t ProcessPageTable__page_count(ProcessPageTablePtr self);
 extern Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self, KernelPtr kernel);
-extern Result(KAllocCode) ArchProcessPageTable__dispose(ProcessPageTablePtr self);
 extern void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
 Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
 Result(KAllocCode)

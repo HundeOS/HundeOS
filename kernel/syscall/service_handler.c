@@ -189,7 +189,7 @@ Result(SystemCallResult)
                     return Error(SystemCallResult, unsupported_operation, SERVICE_INVALID_BUFFER);
                 }
 
-                __d_printf(IODEV, "service wait pid=%i name=%s queued=%i target=%p\n", process->pid,
+                __d_printf(SYSCALL, "service wait pid=%i name=%s queued=%i target=%p\n", process->pid,
                            cstr(process->name), (int)ServiceEvents__len(&process->service.events), arg2);
 
                 KernelContextPtr kernel_context = KernelContext__heap_new_with_mapper(
@@ -205,7 +205,7 @@ Result(SystemCallResult)
                         Result(Anything) mapped =
                             KernelContext__map_result(kernel_context, &Success(Anything, (Anything)&event));
                         KernelContext__dispose_heap(kernel_context);
-                        __d_printf(IODEV, "service wait return pid=%i code=%i\n", process->pid, SERVICE_OK);
+                        __d_printf(SYSCALL, "service wait return pid=%i code=%i\n", process->pid, SERVICE_OK);
                         match_result(
                             mapped,
                             success(mapped_code)
@@ -223,7 +223,7 @@ Result(SystemCallResult)
                         if (code != SERVICE_EVENT_QUEUE_EMPTY)
                         {
                             KernelContext__dispose_heap(kernel_context);
-                            __d_printf(IODEV, "service wait error pid=%i code=%i\n", process->pid, code);
+                            __d_printf(SYSCALL, "service wait error pid=%i code=%i\n", process->pid, code);
                         }
                         return Error(SystemCallResult, message, code);
                     }
@@ -336,7 +336,7 @@ Result(SystemCallResult)
                     Process__device_address(process, request->driver_address),
                     success(device_address)
                     {
-                        __d_printf(IODEV, "service device address pid=%i driver=0x%x device=0x%x\n", (int)process->pid,
+                        __d_printf(MEMORY, "service device address pid=%i driver=0x%x device=0x%x\n", (int)process->pid,
                                    (unsigned int)request->driver_address, (unsigned int)device_address);
                         request->device_address = device_address;
                         return Success(SystemCallResult, SERVICE_OK);
@@ -359,7 +359,7 @@ Result(SystemCallResult)
                     }
                 );
                 uint64_t irq = (uint64_t)arg2;
-                __d_printf(IODEV, "service subscribe irq pid=%i irq=%i\n", process->pid, (int)irq);
+                __d_printf(IRQ, "service subscribe irq pid=%i irq=%i\n", process->pid, (int)irq);
                 match_result(
                     IRQDispatcher__register_service(kernel->irq_dispatcher, irq, process),
                     success(_)

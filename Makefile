@@ -473,6 +473,9 @@ test: $(PYTHON_ENV_STAMP)
 	$(PYTHON) -m pytest
 	make test -C test
 
+smoke-test: $(PYTHON_ENV_STAMP)
+	$(PYTHON) -m pytest test/smoke
+
 .PHONY: format format-check format-test
 format: $(PYTHON_ENV_STAMP)
 	$(PYTHON) tools/hundeformat.py -- $(CLANG_FORMAT)
@@ -689,7 +692,8 @@ qemu-virt-hvf-trace:
 	$(MAKE) $(CHANNELIO_DISK_IMG)
 	$(MAKE) $(CHANNELIO_EXT2_IMG)
 	$(MAKE) KERNEL_BUILD_DIR="$(HVF_TRACE_KERNEL_BUILD_DIR)" ELF="$(HVF_TRACE_ELF)" \
-		CFLAGS="$(CFLAGS) -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE -DKERNEL_LOW_VOLUME_TRACE" $(HVF_TRACE_ELF)
+		EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE -DKERNEL_LOW_VOLUME_TRACE" \
+		$(HVF_TRACE_ELF)
 	mkdir -p $(BUILD_ROOT)
 	: > $(KERNEL_TRACE_LOG)
 	qemu-system-aarch64 \
@@ -724,7 +728,7 @@ qemu-virt-tcg-icount-trace:
 	$(MAKE) $(CHANNELIO_DISK_IMG)
 	$(MAKE) $(CHANNELIO_EXT2_IMG)
 	$(MAKE) KERNEL_BUILD_DIR="$(TCG_ICOUNT_TRACE_KERNEL_BUILD_DIR)" ELF="$(TCG_ICOUNT_TRACE_ELF)" \
-		CFLAGS="$(CFLAGS) -DBSP_WFE_WAIT -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE -DKERNEL_LOW_VOLUME_TRACE" \
+		EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DBSP_WFE_WAIT -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE -DKERNEL_LOW_VOLUME_TRACE" \
 		$(TCG_ICOUNT_TRACE_ELF)
 	mkdir -p $(BUILD_ROOT)
 	: > $(KERNEL_TRACE_LOG)
@@ -782,7 +786,7 @@ qemu-virt-1cpu-trace:
 	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
 	$(MAKE) $(CHANNELIO_EXT2_IMG)
-	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
+	$(MAKE) EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p $(BUILD_ROOT)
 	: > $(KERNEL_TRACE_LOG)
 	qemu-system-aarch64 \
@@ -815,7 +819,7 @@ qemu-virt-2cpus-trace:
 	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
 	$(MAKE) $(CHANNELIO_EXT2_IMG)
-	$(MAKE) CFLAGS="$(CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
+	$(MAKE) EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p $(BUILD_ROOT)
 	: > $(KERNEL_TRACE_LOG)
 	qemu-system-aarch64 \
@@ -874,4 +878,4 @@ qemu-virt-gdb: clean $(ELF)
 		-S \
 		-gdb tcp::1234
 
-.PHONY: all clean setup python-venv disk sd-fat32-disk ext2-disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-hvf qemu-virt-hvf-trace qemu-virt-tcg-icount-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace riscv64-bringup riscv64-bringup-elf qemu-riscv64 qemu-riscv64-run qemu-riscv64-trace qemu-riscv64-trace-build qemu-riscv64-trace-run test hundelint hundelint-strict hundelint-test test_clean
+.PHONY: all clean setup python-venv disk sd-fat32-disk ext2-disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-hvf qemu-virt-hvf-trace qemu-virt-tcg-icount-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace riscv64-bringup riscv64-bringup-elf qemu-riscv64 qemu-riscv64-run qemu-riscv64-trace qemu-riscv64-trace-build qemu-riscv64-trace-run test smoke-test hundelint hundelint-strict hundelint-test test_clean

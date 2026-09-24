@@ -49,7 +49,7 @@ ProcessPtr setup_test_process(void)
     process = dummy_process(100, cpu, PROC_STATE_RUNNING);
 
     Scheduler__schedule(kernel->scheduler, process);
-    Scheduler__preempt(kernel->scheduler, cpu, context);
+    Scheduler__preempt(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
 
     return process;
 }
@@ -62,7 +62,7 @@ ProcessPtr setup_test_process_waiting_on_child_process(ProcessPtr parent)
     parent_context = NEW_KERNEL_CONTEXT(kernel->scheduler, Some(ProcessID, parent->pid));
     Scheduler__park(kernel->scheduler, parent, &parent_context, &Some(Continuation, continuation), PARK_WAIT_CHILD);
     Scheduler__schedule(kernel->scheduler, child);
-    Scheduler__preempt(kernel->scheduler, cpu, context);
+    Scheduler__preempt(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
 
     return child;
 }
@@ -116,8 +116,9 @@ void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_
     );
 
     Exit__handler(kernel, Some(ProcessPtr, child), 0, 0, 0, 0, 0);
-    Scheduler__preempt(kernel->scheduler, cpu,
-                       context); // make sure the parent is woken up ( it was waiting on the child
+    Scheduler__preempt(
+        kernel->scheduler, cpu,
+        &Some(ProcessContextPtr, context)); // make sure the parent is woken up ( it was waiting on the child
 
     match_optional(
         Scheduler__current_process(kernel->scheduler, cpu),

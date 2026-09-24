@@ -60,7 +60,7 @@ ServiceEventDispatcher ServiceEventDispatcher__new()
 Result(ServiceCode)
     ServiceEventDispatcher__subscribe_irq(ServiceEventDispatcherPtr self, ProcessPtr process, IRQNumber irq)
 {
-    __d_printf(IODEV, "service event dispatcher subscribe irq=%i pid=%i name=%s\n", irq, process->pid,
+    __d_printf(IRQ, "service event dispatcher subscribe irq=%i pid=%i name=%s\n", irq, process->pid,
                cstr(process->name));
     IRQService service = IRQService__new(process);
     critical_section(
@@ -75,7 +75,7 @@ Result(ServiceCode)
 Result(ServiceCode)
     ServiceEventDispatcher__enqueue(ServiceEventDispatcherPtr self, ProcessPtr process, ServiceEvent event)
 {
-    __d_printf(IODEV, "service event dispatcher enqueue pid=%i name=%s type=%i source=%i data=%i queued=%i\n",
+    __d_printf(SCHEDULER, "service event dispatcher enqueue pid=%i name=%s type=%i source=%i data=%i queued=%i\n",
                process->pid, cstr(process->name), event.type, event.source, event.data,
                (int)ServiceEvents__len(&process->service.events));
 
@@ -100,7 +100,7 @@ Result(ServiceEventDispatch)
     ServiceEventDispatcher__dispatch_irq(ServiceEventDispatcherPtr self,
                                          InterruptControllerInfoPtr interrupt_controller, IRQNumber irq)
 {
-    __d_printf(IODEV, "service event dispatcher irq=%i\n", irq);
+    __d_printf(IRQ, "service event dispatcher irq=%i\n", irq);
     ServiceEventDispatch no_dispatch = ServiceEventDispatch__new(&None(ProcessPtr));
 
     critical_section(
@@ -115,7 +115,7 @@ Result(ServiceEventDispatch)
                     dispatch.process.some.val = service->process;
 
                     __d_printf(
-                        IODEV,
+                        IRQ,
                         "service event dispatcher irq service irq=%i pid=%i pending=%i enabled=%i delivery=%i coalesced=%i\n",
                         irq, service->process->pid, (int)service->pending, (int)service->enabled,
                         (int)service->delivery_count, (int)service->coalesced_count);
@@ -152,7 +152,7 @@ Result(ServiceEventDispatch)
         }
     );
 
-    __d_printf(IODEV, "service event dispatcher no irq service irq=%i\n", irq);
+    __d_printf(IRQ, "service event dispatcher no irq service irq=%i\n", irq);
     return Success(ServiceEventDispatch, no_dispatch);
 }
 
@@ -170,7 +170,7 @@ static void ServiceEventDispatcher__mark_active_irq_event_locked(ServiceEventDis
         {
             if (service->process == process && service->pending)
             {
-                __d_printf(IODEV, "service event dispatcher active irq=%i pid=%i\n", event.source, process->pid);
+                __d_printf(IRQ, "service event dispatcher active irq=%i pid=%i\n", event.source, process->pid);
                 process->service.active_irq_event = Some(ServiceEvent, event);
             }
         },
@@ -218,8 +218,7 @@ Result(ServiceCode)
                         {
                             if (service->process == process && service->pending)
                             {
-                                __d_printf(IODEV,
-                                           "service event dispatcher complete active irq=%i pid=%i\n",
+                                __d_printf(IRQ, "service event dispatcher complete active irq=%i pid=%i\n",
                                            event.source, process->pid);
                                 service->pending = false;
                                 service->coalesced_count = 0;

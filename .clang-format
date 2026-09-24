@@ -21,6 +21,8 @@ Macros:
   - 'for_each_atomic_fa_ptr(alias, array, index, value, body)=for (alias; array; index, value) body'
   - 'for_each_map(alias, map, index, key, value, body)=for (alias; map; index, key, value) body'
   - 'for_each_map_ptr(alias, map, index, key, value, body)=for (alias; map; index, key, value) body'
+  - 'for_each_hashtable(alias, table, bucket_index, entry_index, key, value, body)=for (alias; table; bucket_index, entry_index, key, value) body'
+  - 'for_each_hashtable_ptr(alias, table, bucket_index, entry_index, key, value, body)=for (alias; table; bucket_index, entry_index, key, value) body'
   - 'for_each_ring_buffer(alias, buffer, index, value, body)=for (alias; buffer; index, value) body'
   - 'for_each_ring_buffer_ptr(alias, buffer, index, value, body)=for (alias; buffer; index, value) body'
   - 'for_each_bstring(string, index, ch, body)=for (string; index; ch) body'

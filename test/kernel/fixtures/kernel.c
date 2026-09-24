@@ -61,6 +61,10 @@ KernelPtr init_test_kernel()
     Elf idle = unwrap_optional(EmbeddedElf__load(&bstr("hello_world")), (Elf){});
 
     Scheduler__init(kernel, scheduler, idle);
+    for (CPUID cpu = 0; cpu < MAX_CPUS; cpu++)
+    {
+        Scheduler__register_cpu(scheduler, cpu);
+    }
     Scheduler__start(scheduler, 0);
 
     return kernel;

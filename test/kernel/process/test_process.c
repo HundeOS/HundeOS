@@ -13,6 +13,7 @@
 #include "../stubs/page_table.h"
 #include "../stubs/kalloc.h"
 #include "../stubs/process.h"
+#include "../stubs/process_context_layout.h"
 
 static KernelPtr kernel;
 
@@ -76,6 +77,72 @@ void setUp(void)
 void tearDown(void)
 {
     TEST_ASSERT_FALSE(panic_occurred());
+}
+
+void test_process_store_context_copies_saved_frame(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    ProcessContext source = {
+        .x = {0x1122},
+        .sp = 0x3344,
+        .elr = 0x5566,
+        .spsr = 0x7788,
+        .fpcr = 0x99aa,
+        .fpsr = 0xbbcc,
+    };
+
+    match_result(
+        Process__store_context(process, &source),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CONTEXT_SAVE_OK, code);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(source.x[0], Process__required_context(process)->x[0]);
+    TEST_ASSERT_EQUAL_UINT64(source.sp, Process__required_context(process)->sp);
+    TEST_ASSERT_EQUAL_UINT64(source.elr, Process__required_context(process)->elr);
+    TEST_ASSERT_EQUAL_UINT64(source.spsr, Process__required_context(process)->spsr);
+    TEST_ASSERT_EQUAL_UINT64(source.fpcr, Process__required_context(process)->fpcr);
+    TEST_ASSERT_EQUAL_UINT64(source.fpsr, Process__required_context(process)->fpsr);
+}
+
+void test_process_store_context_returns_error_when_process_is_not_running(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
+    ProcessContext source = {.elr = 0x5566};
+    uint64_t original_elr = Process__required_context(process)->elr;
+
+    match_result(
+        Process__store_context(process, &source),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CONTEXT_SAVE_INVALID_STATE, code);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("Process not running state=PROC_STATE_WAITING pid=16 name=hello_world\n"),
+                                      message);
+        }
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(original_elr, Process__required_context(process)->elr);
+}
+
+void test_process_save_context_without_a_trap_frame_does_not_change_context(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    uint64_t original_elr = Process__required_context(process)->elr;
+
+    match_result(
+        Process__save_context(process, &None(ProcessContextPtr)),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CONTEXT_SAVE_OK, code);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(original_elr, Process__required_context(process)->elr);
 }
 
 void test_setup_from_elf(void)

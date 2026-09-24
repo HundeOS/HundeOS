@@ -62,9 +62,9 @@ void test_process_list_handler_returns_scheduled_processes(void)
     ready_waiter->process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(ready_waiter);
 
-    Scheduler__schedule(kernel->scheduler, init);
-    Scheduler__schedule(kernel->scheduler, driver);
-    Scheduler__schedule(kernel->scheduler, ready_waiter);
+    Scheduler__schedule_on_cpu(kernel->scheduler, init, cpu);
+    Scheduler__schedule_on_cpu(kernel->scheduler, driver, cpu);
+    Scheduler__schedule_on_cpu(kernel->scheduler, ready_waiter, cpu);
     KernelContext kernel_context =
         KernelContext__new(&Some(ProcessID, driver->pid), &Some(SchedulerPtr, kernel->scheduler));
     Scheduler__park(kernel->scheduler, driver, &kernel_context, &None(Continuation), PARK_WAIT_SERVICE_EVENT);
@@ -263,7 +263,7 @@ void test_signal_handler_queues_running_process_until_next_syscall_boundary(void
 {
     ProcessPtr target = dummy_process(1, cpu, PROC_STATE_RUNNING);
 
-    Scheduler__schedule(kernel->scheduler, target);
+    Scheduler__schedule_on_cpu(kernel->scheduler, target, cpu);
     target->state = PROC_STATE_RUNNING;
 
     match_result(

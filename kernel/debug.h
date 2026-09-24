@@ -21,17 +21,13 @@ typedef enum
     SCHEDULER,
     PROCESS,
     PROCESS_SWITCH,
-    IODEV,
-    IOSUB,
     EXEC,
-    FILESYSTEM,
     SYSLOG,
     PROGRESS,
     UNHANDLED,
     FAULT,
     PANIC,
     FOCUS,
-    FAT32,
     MEMORY,
     LEVEL_COUNT
 } Level;
@@ -64,8 +60,6 @@ inline const char * level_to_string(Level level)
         return "PROGRESS";
     case FOCUS:
         return "FOCUS";
-    case FAT32:
-        return "FAT32";
     case MEMORY:
         return "MEMORY";
     case PANIC:
@@ -80,14 +74,8 @@ inline const char * level_to_string(Level level)
         return "MUTEX";
     case MMU:
         return "MMU";
-    case IOSUB:
-        return "IO SUBSYSTEM";
-    case IODEV:
-        return "IO DEVICE";
     case EXEC:
         return "EXEC";
-    case FILESYSTEM:
-        return "FILESYSTEM";
     case SYSLOG:
         return "SYSLOG";
     case LEVEL_COUNT:
@@ -106,8 +94,8 @@ inline const char * level_to_string(Level level)
      LOG_LEVEL_MASK(PANIC))
 #else
 #define ENABLED_LOG_LEVELS                                                                                             \
-    (LOG_LEVEL_MASK(PROGRESS) | LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(IOSUB) | LOG_LEVEL_MASK(IODEV) |               \
-     LOG_LEVEL_MASK(FAULT) | LOG_LEVEL_MASK(PANIC) | LOG_LEVEL_MASK(SYSCALL) | LOG_LEVEL_MASK(MEMORY))
+    (LOG_LEVEL_MASK(PROGRESS) | LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(FAULT) | LOG_LEVEL_MASK(PANIC) |               \
+     LOG_LEVEL_MASK(SYSCALL) | LOG_LEVEL_MASK(MEMORY))
 #endif
 
 inline bool __d_should_log(Level level)

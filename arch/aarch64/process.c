@@ -68,9 +68,9 @@ ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr
     return context;
 }
 
-void ProcessContext__dispose(ProcessContextPtr self)
+void ProcessContext__copy(ProcessContextPtr self, ProcessContextPtr source)
 {
-    Kernel__free(addr(self));
+    *self = *source;
 }
 
 extern void asm_switch_context(ProcessContextPtr context, Address pagetable);
@@ -78,15 +78,16 @@ extern void asm_switch_kernel_context(ProcessContextPtr context, Address pagetab
 
 void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
 {
-    ProcessContextPtr context = self->context;
+    ProcessContextPtr context = Process__required_context(self);
     context->x[0] = result;
 }
 
 void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error)
 {
-    self->context->x[3] = input;
-    self->context->x[4] = output;
-    self->context->x[5] = error;
+    ProcessContextPtr context = Process__required_context(self);
+    context->x[3] = input;
+    context->x[4] = output;
+    context->x[5] = error;
 }
 
 void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
@@ -104,28 +105,25 @@ void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
     }
 }
 
-static void Process__assert_context_ready(ProcessPtr self)
+static void Process__assert_context_ready(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
 {
-    ProcessContextPtr context = self->context;
     uint64_t mode = context->spsr & 0xf;
 
     if (context->elr == 0 || context->sp == 0 || mode != 0)
     {
-        BString message =
-            BString__sprintf(&invalid_context_format, self->pid, cstr(self->name), context, context->elr, context->sp,
-                             context->spsr, paddr(ProcessPageTable__root(&self->page_table)));
+        BString message = BString__sprintf(&invalid_context_format, self->pid, cstr(self->name), context, context->elr,
+                                           context->sp, context->spsr, paddr(page_table));
         Kernel__panic(cstr(message), context);
     }
 }
 
-__attribute__((noreturn)) void Process__context_switch(ProcessPtr self)
+__attribute__((noreturn)) void Process__switch_context(ProcessPtr self, ProcessContextPtr context,
+                                                       KernelAddress page_table)
 {
-    ProcessContextPtr context = self->context;
-
     const char * name = cstr(self->name);
     __d_printf(PROCESS_SWITCH, "Process context switch name=%s sp=%p tbbr0=%p spsr_el1=%p x0=%p x1=%p x8=%p elr=%p\n",
-               name, self->context->sp, paddr(ProcessPageTable__root(&self->page_table)), self->context->spsr,
-               self->context->x[0], self->context->x[1], self->context->x[8], self->context->elr);
+               name, context->sp, paddr(page_table), context->spsr, context->x[0], context->x[1], context->x[8],
+               context->elr);
 
     Address base = addr(context);
     __d_printf(PROCESS_SWITCH,
@@ -136,44 +134,19 @@ __attribute__((noreturn)) void Process__context_switch(ProcessPtr self)
 
     __d_printf(PROCESS_SWITCH,
                "Process__context_switch asm pid=%i name=%s context=%p elr=%p sp=%p x8=%p page_table=%p\n", self->pid,
-               name, context, context->elr, context->sp, context->x[8],
-               paddr(ProcessPageTable__root(&self->page_table)));
-    Process__assert_context_ready(self);
+               name, context, context->elr, context->sp, context->x[8], paddr(page_table));
+    Process__assert_context_ready(self, context, page_table);
     ProcessContext__assert_user_irqs_unmasked(context);
     __d_println(PROCESS_SWITCH, "Irqs OK");
-    asm_switch_context(context, paddr(ProcessPageTable__root(&self->page_table)));
+    asm_switch_context(context, paddr(page_table));
     __builtin_unreachable();
 }
 
-void Process__activate_address_space(ProcessPtr self)
+void Process__switch_address_space(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
 {
-    ProcessContextPtr context = self->context;
-    asm_switch_kernel_context(context, paddr(ProcessPageTable__root(&self->page_table)));
+    asm_switch_kernel_context(context, paddr(page_table));
 }
 
-void Process__save_context(ProcessPtr self, ProcessContextPtr context)
-{
-    if (self->context == NULL)
-    {
-        Kernel__panic("Process context is NULL", context);
-    }
-    else if (self->state != PROC_STATE_RUNNING)
-    {
-        BString format = BString__new("Process not running state=%s pid=%i name=%s\n");
-        BString message = BString__sprintf(&format, ProcessState__to_string(self->state), self->pid, cstr(self->name));
-
-        Kernel__panic(cstr(message), context);
-    }
-    else if (context != NULL)
-    {
-        __d_printf(PROCESS, "Process context save self=%p context=%p %i\n", self->context, context, self->pid);
-        *self->context = *context;
-    }
-    else
-    {
-        __d_printf(PROCESS, "Process context ignoring save self=%p context=NULL %i\n", self->context, self->pid);
-    }
-}
 uint16_t Arch__elf_machine(void)
 {
     return 0xB7;

@@ -283,7 +283,7 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
     process->process_class = PROCESS_CLASS_SERVICE;
     ServiceEvent target = (ServiceEvent){0};
 
-    Scheduler__schedule(kernel->scheduler, process);
+    Scheduler__schedule_on_cpu(kernel->scheduler, process, cpu);
 
     match_result(
         Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&target, 0, 0, 0),
@@ -356,7 +356,7 @@ void test_service_handler_publish_ready_unparks_waiter(void)
     publisher->process_class = PROCESS_CLASS_SERVICE;
     ServiceReadyRequest request = test_ready_request("/dev/mmc0");
 
-    Scheduler__schedule(kernel->scheduler, waiter);
+    Scheduler__schedule_on_cpu(kernel->scheduler, waiter, cpu);
 
     match_result(
         Service__handler(kernel, Some(ProcessPtr, waiter), SERVICE_WAIT_READY, (Anything)&request, 0, 0, 0),
@@ -411,7 +411,7 @@ void test_service_handler_wait_completes_previous_irq_before_next_wait(void)
     IRQNumber irq = 33;
     ServiceEvent target = (ServiceEvent){0};
 
-    Scheduler__schedule(kernel->scheduler, process);
+    Scheduler__schedule_on_cpu(kernel->scheduler, process, cpu);
 
     match_result(
         Scheduler__subscribe_irq(kernel->scheduler, process, irq),

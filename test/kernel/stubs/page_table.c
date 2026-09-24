@@ -8,14 +8,6 @@
 
 #include "../../../kernel/debug.h"
 
-LinkedListBodyDefine(ProcessPageTablePages);
-
-bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other)
-{
-    return self->valid == other->valid && self->virtual_addr == other->virtual_addr &&
-           self->phys_addr == other->phys_addr;
-}
-
 typedef struct MapRequest
 {
     UserAddress address;
@@ -56,23 +48,6 @@ typedef struct PageTable
     MapRequestArray mapped_addresses;
 } PageTable;
 
-static Result(KAllocCode) ProcessPageTable__record_page(ProcessPageTablePtr self, KernelAddress page)
-{
-    match_result(
-        ProcessPageTablePages__push(&self->pages, page),
-        success(_)
-        {
-            return Success(KAllocCode, KALLOC_OK);
-        },
-        error(code, message)
-        {
-            return Error(KAllocCode, message, code);
-        }
-    );
-
-    return Error(KAllocCode, bstr("Unable to record page table page"), KALLOC_ALLOCATION_FAILED);
-}
-
 Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel)
 {
     PageTablePtr table = v_ptr(Kernel__alloc(sizeof(PageTable)), PageTable);
@@ -93,52 +68,6 @@ Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel)
     );
 
     return Success(ProcessPageTable, process_page_table);
-}
-
-KernelAddress ProcessPageTable__root(ProcessPageTablePtr self)
-{
-    return self->root;
-}
-
-PageTablePtr ProcessPageTable__root_table(ProcessPageTablePtr self)
-{
-    return v_ptr(ProcessPageTable__root(self), PageTable);
-}
-
-size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
-{
-    return ProcessPageTablePages__len(&self->pages);
-}
-
-Result(KAllocCode) ArchProcessPageTable__dispose(ProcessPageTablePtr self)
-{
-    for_each_ll(
-        ProcessPageTablePages,
-        self->pages,
-        page,
-        {
-            match_result(
-                Kernel__free(page.virtual_addr),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(KAllocCode, message, code);
-                }
-            );
-        }
-    );
-
-    match_result(
-        ProcessPageTablePages__dispose(&self->pages),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(KAllocCode, message, code);
-        }
-    );
-
-    self->root = NULL_KERNEL_ADDRESS;
-    return Success(KAllocCode, KALLOC_OK);
 }
 
 void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)

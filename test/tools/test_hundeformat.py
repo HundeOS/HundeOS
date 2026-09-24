@@ -110,6 +110,8 @@ def test_nested_critical_sections_align_with_match_blocks(format_source):
     ("for_each_atomic_fa_ptr", ["Items", "items", "index", "item"]),
     ("for_each_map", ["Items", "items", "index", "key", "item"]),
     ("for_each_map_ptr", ["Items", "items", "index", "key", "item"]),
+    ("for_each_hashtable", ["Items", "items", "bucket_index", "entry_index", "key", "item"]),
+    ("for_each_hashtable_ptr", ["Items", "items", "bucket_index", "entry_index", "key", "item"]),
     ("for_each_ring_buffer", ["Items", "items", "index", "item"]),
     ("for_each_ring_buffer_ptr", ["Items", "items", "index", "item"]),
     ("for_each_bstring", ["text", "index", "ch"]),

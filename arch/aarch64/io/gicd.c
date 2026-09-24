@@ -51,7 +51,7 @@ Result(InitCode) gic_enable_interrupt(InterruptControllerInfoPtr info, uint32_t 
     *GICD_ISENABLER = (1 << bit);
     *GICD_IGROUPR |= (1 << bit);
 
-    __d_printf(IODEV, "gic enable irq=%i reg=%i bit=%i isenabler=0x%x igroupr=0x%x ctlr=0x%x\n", irq, reg, bit,
+    __d_printf(IRQ, "gic enable irq=%i reg=%i bit=%i isenabler=0x%x igroupr=0x%x ctlr=0x%x\n", irq, reg, bit,
                *GICD_ISENABLER, *GICD_IGROUPR, *(volatile uint32_t *)(base + 0x000));
 
     __d_printf(IRQ2, "ISENABLER1=%x\n", *(volatile uint32_t *)(base + 0x104));
@@ -70,7 +70,7 @@ void gic_mask_interrupt(InterruptControllerInfoPtr info, uint32_t irq)
     volatile uint32_t * GICD_ICENABLER = (uint32_t *)(gicd_base(info) + 0x180 + (reg * 4));
     *GICD_ICENABLER = (1u << bit);
     __asm__ volatile("dsb sy; isb" ::: "memory");
-    __d_printf(IODEV, "gic mask irq=%i reg=%i bit=%i\n", irq, reg, bit);
+    __d_printf(IRQ, "gic mask irq=%i reg=%i bit=%i\n", irq, reg, bit);
 }
 
 void gic_unmask_interrupt(InterruptControllerInfoPtr info, uint32_t irq)
@@ -80,7 +80,7 @@ void gic_unmask_interrupt(InterruptControllerInfoPtr info, uint32_t irq)
     volatile uint32_t * GICD_ISENABLER = (uint32_t *)(gicd_base(info) + 0x100 + (reg * 4));
     *GICD_ISENABLER = (1u << bit);
     __asm__ volatile("dsb sy; isb" ::: "memory");
-    __d_printf(IODEV, "gic unmask irq=%i reg=%i bit=%i isenabler=0x%x\n", irq, reg, bit, *GICD_ISENABLER);
+    __d_printf(IRQ, "gic unmask irq=%i reg=%i bit=%i isenabler=0x%x\n", irq, reg, bit, *GICD_ISENABLER);
 }
 
 Result(InitCode) gic_init(InterruptControllerInfoPtr info)

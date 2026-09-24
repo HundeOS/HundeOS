@@ -125,6 +125,12 @@ stable connection slots while the kernel publishes and clears handles.
   queries. Traversal macros are `for_each_map` and `for_each_map_ptr`. This
   implementation uses fixed-capacity storage and linear key lookup; do not
   assume hash-table complexity or scan entries manually for a key.
+- [Hashtable](../common/types/hashtable.h) provides fixed-capacity hashed lookup
+  with bounded collision buckets. Use `__new` to construct a value or `__init`
+  to initialize existing storage without creating a large temporary. Use `__get` or `__get_ptr` for lookup,
+  `__set` for insertion or replacement, `__delete` for removal, and `__len`
+  for the number of stored entries. Traverse entries with `for_each_hashtable` or
+  `for_each_hashtable_ptr`.
 - [RingBuffer](../kernel/types/ring_buffer.h) is the kernel's character ring
   buffer. Its generated operations include `__push`, `__push_all`, `__pop`,
   `__drain`, `__reset`, `__item_count`, and `__free_space`. Use these instead
@@ -142,10 +148,9 @@ arrays that are constructed only in existing storage and must not depend on an
 allocator. It provides the same value constructor and collection operations but
 does not emit the `__heap_new` implementation.
 
-The legacy kernel `HashtableDefine` also declares `AliasBucketPtr` for its
-existing bucket-level implementation. Use that named pointer rather than
-spelling the private `Alias__bucket` type. This does not replace the requirement
-to use collection operations in application code.
+`HashtableDefine` declares `AliasBucketPtr` for use inside collection
+implementations. Application code should use the public collection operations
+and traversal macros rather than accessing buckets directly.
 
 ## Atomic Records
 

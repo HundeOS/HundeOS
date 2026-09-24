@@ -1,6 +1,6 @@
 #include "exception_decode.h"
 
-const char * AArch64Exception__class_name(uint64_t ec)
+const char * Exception__class_name(uint64_t ec)
 {
     switch (ec)
     {
@@ -31,19 +31,19 @@ const char * AArch64Exception__class_name(uint64_t ec)
     }
 }
 
-uint64_t AArch64Exception__fault_status_code(uint64_t esr)
+uint64_t Exception__fault_status_code(ExceptionSyndrome syndrome)
 {
-    return esr & 0x3f;
+    return syndrome & 0x3f;
 }
 
-bool AArch64Exception__has_fault_status(uint64_t ec)
+bool Exception__has_fault_status(uint64_t ec)
 {
     return ec == 0x20 || ec == 0x21 || ec == 0x24 || ec == 0x25;
 }
 
-const char * AArch64Exception__fault_status_name(uint64_t esr)
+const char * Exception__fault_status_name(ExceptionSyndrome syndrome)
 {
-    switch (AArch64Exception__fault_status_code(esr))
+    switch (Exception__fault_status_code(syndrome))
     {
     case 0x00:
         return "address size fault, level 0";
@@ -90,7 +90,7 @@ const char * AArch64Exception__fault_status_name(uint64_t esr)
     }
 }
 
-const char * AArch64Exception__data_abort_access_name(uint64_t esr)
+const char * Exception__data_abort_access_name(ExceptionSyndrome syndrome)
 {
-    return (esr & (1ULL << 6)) ? "write" : "read";
+    return (syndrome & (1ULL << 6)) ? "write" : "read";
 }

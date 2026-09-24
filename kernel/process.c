@@ -5,6 +5,7 @@
 #include "bin/elf.h"
 #include "arch/page_table.h"
 #include "arch/device.h"
+#include "arch/cpu.h"
 #include "arch/process.h"
 #include "arch/process_context.h"
 #include "types/bstring.h"
@@ -39,6 +40,83 @@ static const ProcessCapabilities PROCESS__HUND_CAPABILITIES =
     PROCESS_CAP_BECOME_SERVICE | PROCESS_CAP_MAP_MMIO | PROCESS_CAP_SUBSCRIBE_IRQ | PROCESS_CAP_REGISTER_BLOCK_DEVICE |
     PROCESS_CAP_HANDLE_BLOCK_REQUESTS | PROCESS_CAP_MOUNT_FILESYSTEM | PROCESS_CAP_USE_BLOCK_DEVICES |
     PROCESS_CAP_MANAGE_SHARED_PAGES;
+
+void ProcessContext__dispose(ProcessContextPtr self)
+{
+    Kernel__free(addr(self));
+}
+
+Result(ProcessContextSaveCode) Process__store_context(ProcessPtr self, ProcessContextPtr context)
+{
+    match_optional(
+        self->context,
+        some(destination)
+        {
+            if (self->state != PROC_STATE_RUNNING)
+            {
+                BString format = bstr("Process not running state=%s pid=%i name=%s\n");
+                BString message =
+                    BString__sprintf(&format, ProcessState__to_string(self->state), self->pid, cstr(self->name));
+                return Error(ProcessContextSaveCode, message, PROCESS_CONTEXT_SAVE_INVALID_STATE);
+            }
+
+            __d_printf(PROCESS, "Process context save self=%p context=%p %i\n", destination, context, self->pid);
+            ProcessContext__copy(destination, context);
+            return Success(ProcessContextSaveCode, PROCESS_CONTEXT_SAVE_OK);
+        },
+        none()
+        {
+            return Error(ProcessContextSaveCode, bstr("Process context is missing"),
+                         PROCESS_CONTEXT_SAVE_DESTINATION_MISSING);
+        }
+    );
+}
+
+Result(ProcessContextSaveCode) Process__save_context(ProcessPtr self, const OptionalPtr(ProcessContextPtr) context)
+{
+    match_optional(
+        *context,
+        some(source)
+        {
+            return Process__store_context(self, source);
+        },
+        none()
+        {
+            return Success(ProcessContextSaveCode, PROCESS_CONTEXT_SAVE_OK);
+        }
+    );
+}
+
+ProcessContextPtr Process__required_context(ProcessPtr self)
+{
+    match_optional(
+        self->context,
+        some(context)
+        {
+            return context;
+        },
+        none()
+        {
+            __d_printf(PANIC, "Process context is missing pid=%i name=%s\n", self->pid, cstr(self->name));
+            CPU__halt_all();
+            __builtin_unreachable();
+        }
+    );
+}
+
+void Process__activate_address_space(ProcessPtr self)
+{
+    ProcessContextPtr context = Process__required_context(self);
+    KernelAddress page_table = ProcessPageTable__root(&self->page_table);
+    Process__switch_address_space(self, context, page_table);
+}
+
+void Process__context_switch(ProcessPtr self)
+{
+    ProcessContextPtr context = Process__required_context(self);
+    KernelAddress page_table = ProcessPageTable__root(&self->page_table);
+    Process__switch_context(self, context, page_table);
+}
 
 static ProcessSignalMask ProcessSignal__mask(ProcessSignal signal)
 {
@@ -281,6 +359,7 @@ Result(ProcessPtr)
     proc->kernel = kernel;
     proc->entry_point = *entry;
     proc->page_table = *page_table;
+    proc->context = None(ProcessContextPtr);
     proc->state = PROC_STATE_NEW;
     proc->pid = pid;
     proc->stack = *stack;
@@ -354,9 +433,10 @@ Result(ProcessPtr)
                 proc->pid, proc, &proc->stack, proc->stack.base.virtual_addr, proc->stack.top.virtual_addr, argc, argv,
                 entry->virtual_addr, ProcessPageTable__root(&proc->page_table).phys_addr);
             KernelAddress root = ProcessPageTable__root(&proc->page_table);
-            proc->context = ProcessContext__init(kernel, proc->pid, &proc->stack, *entry, root, argc, argv);
+            ProcessContextPtr context = ProcessContext__init(kernel, proc->pid, &proc->stack, *entry, root, argc, argv);
+            proc->context = Some(ProcessContextPtr, context);
             __d_printf(PROCESS, "Process__new after context init pid=%i proc=%p context=%p\n", proc->pid, proc,
-                       proc->context);
+                       context);
             return Success(ProcessPtr, proc);
         },
         error(code, message)
@@ -955,7 +1035,13 @@ Result(ProcessSetupStatus) Process__dispose(ProcessPtr self)
         }
     );
 
-    ProcessContext__dispose(self->context);
+    match_optional(self->context,
+        some(context)
+        {
+            ProcessContext__dispose(context);
+        },
+        none_do_nothing()
+    );
     match_result(
         Kernel__free(addr(self)),
         success_do_nothing(),

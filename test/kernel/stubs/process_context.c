@@ -29,7 +29,7 @@ ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr
     return context;
 }
 
-void ProcessContext__dispose(ProcessContextPtr self)
+void ProcessContext__copy(ProcessContextPtr self, ProcessContextPtr source)
 {
-    Kernel__free(addr(self));
+    *self = *source;
 }

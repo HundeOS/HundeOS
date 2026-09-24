@@ -2,11 +2,11 @@
 #include <stdint.h>
 #include "cpu.h"
 #include "../../kernel/arch/cpu.h"
-#include "../../kernel/debug.h"
 #include "cpu_common.h"
 #include "ipc/ipc_platform.h"
 
 static uint8_t __attribute__((aligned(16))) cpu_stacks[MAX_CPUS][STACK_SIZE];
+static CPUID boot_cpu_id;
 
 inline void wr_vbar_el1(uint64_t v)
 {
@@ -17,6 +17,16 @@ inline void wr_vbar_el1(uint64_t v)
 uint64_t CPU__id()
 {
     return cpu_id();
+}
+
+void CPU__set_boot_id(CPUID id)
+{
+    boot_cpu_id = id;
+}
+
+bool CPU__is_boot_cpu(void)
+{
+    return CPU__id() == boot_cpu_id;
 }
 
 uint64_t CPU__time_usec(void)
@@ -44,20 +54,12 @@ void CPU__wait_for_interrupt()
     __asm__ __volatile__("wfi");
 }
 
-void CPU__wait()
-{
-    while (true)
-    {
-        CPU__wait_for_interrupt();
-    }
-}
-
 void CPU__yield(void)
 {
     __asm__ __volatile__("yield");
 }
 
-inline void CPU__halt_forever()
+__attribute__((noreturn)) void CPU__halt_forever(void)
 {
     __asm__ volatile("msr daifset, #0xf\n" // mask IRQ, FIQ, SError, Debug
                      "dsb sy\n"
@@ -65,14 +67,6 @@ inline void CPU__halt_forever()
                      "1: wfi\n" // or wfe; we’re not coming back
                      "b 1b\n" ::
                          : "memory");
-}
-
-static _Atomic int halt = 0;
-
-void CPU__halt_all()
-{
-    halt = 1;
-    CPU__halt_forever();
 }
 
 Result(InitCode) CPU__init(SystemInfoPtr system_info)
@@ -95,15 +89,6 @@ Result(InitCode) CPU__init(SystemInfoPtr system_info)
                              : "memory");
 
     return Success(InitCode, ARCH_INIT_OK);
-}
-
-void CPU__check_halt()
-{
-    if (halt)
-    {
-        __d_printf(PANIC, "\n\nCPU %i is halting\n", CPU__id());
-        CPU__halt_forever();
-    }
 }
 
 void CPU__assign_id(uint64_t id)

@@ -1,6 +1,7 @@
 #include "unity.h"
 #include "../stubs/panic.h"
 #include "../stubs/cpu.h"
+#include "../stubs/cpu_timer.h"
 #include "../stubs/process.h"
 #include "../stubs/process_context_layout.h"
 #include "../fixtures/process.h"
@@ -42,6 +43,19 @@ static ProcessContextPtr test_saved_context(void)
     return &saved_context;
 }
 
+static void test_timer_interrupt(IRQNumber irq, CPUID cpu, ProcessContextPtr context, bool current_privilege)
+{
+    IRQDispatchContext irq_context = IRQDispatchContext__new(irq, cpu, current_privilege, context);
+    match_result(
+        CPUTimer__handle_irq(&irq_context, kernel),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status);
+        },
+        error_test_fail()
+    );
+}
+
 static KernelContext test_empty_kernel_context(void)
 {
     return KernelContext__new(&None(ProcessID), &None(SchedulerPtr));
@@ -81,6 +95,7 @@ void setUp(void)
     current_process_reset();
     clear_deferred_syscall_result();
     Arch__reset_irq_tracking();
+    CPUTimerStub__reset();
     kernel = init_test_kernel();
     scheduler = kernel->scheduler;
 }
@@ -285,12 +300,12 @@ void test_scheduler_interrupt_when_no_processes_are_running_stays_in_idle(void)
     ProcessContextPtr context = test_saved_context();
     Scheduler__start(scheduler, cpu_id);
 
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
     ProcessPtr idle = unwrap_optional(Scheduler__idle_process(scheduler, cpu_id), (ProcessPtr){});
     ProcessPtr current = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
 
     TEST_ASSERT_EQUAL(idle, current);
-    TEST_ASSERT_EQUAL(context->elr, idle->context->elr);
+    TEST_ASSERT_EQUAL(context->elr, Process__required_context(idle)->elr);
     TEST_ASSERT_EQUAL(idle->state, PROC_STATE_RUNNING);
     TEST_ASSERT_EQUAL(current_running_process(), idle);
 }
@@ -303,7 +318,7 @@ void test_scheduler_interrupt_before_cpu_start_does_not_context_switch(void)
 
     current_process_reset();
 
-    Scheduler__preempt(scheduler, unstarted_cpu, context);
+    Scheduler__preempt(scheduler, unstarted_cpu, &Some(ProcessContextPtr, context));
 
     TEST_ASSERT_NULL(current_running_process());
     TEST_ASSERT_NOT_EQUAL(PROC_STATE_RUNNING, idle->state);
@@ -325,8 +340,19 @@ void test_scheduler_init_creates_cpu_slots_independent_of_online_cpu_count(void)
         error_test_fail()
     );
 
+    match_optional(Scheduler__idle_process(local_scheduler, 0),
+        some_test_fail(),
+        none_do_nothing()
+    );
+
+    CPUID sparse_cpu = 37;
+    match_result(Scheduler__register_cpu(local_scheduler, sparse_cpu),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
     match_optional(
-        Scheduler__idle_process(local_scheduler, 0),
+        Scheduler__idle_process(local_scheduler, sparse_cpu),
         some(idle_process)
         {
             TEST_ASSERT_NOT_NULL(idle_process);
@@ -375,9 +401,9 @@ void test_all_processes_when_processes_are_scheduled()
     ProcessPtr proc3 = dummy_process(3, 1, PROC_STATE_READY);
 
     Scheduler__start(scheduler, 1);
-    Scheduler__schedule(scheduler, proc1);
-    Scheduler__schedule(scheduler, proc2);
-    Scheduler__schedule(scheduler, proc3);
+    Scheduler__schedule_on_cpu(scheduler, proc1, 1);
+    Scheduler__schedule_on_cpu(scheduler, proc2, 1);
+    Scheduler__schedule_on_cpu(scheduler, proc3, 1);
 
     ProcessTablePtr processes = Scheduler__all_processes(scheduler, 1);
 
@@ -440,22 +466,57 @@ void test_scheduler_save_context_to_current_process(void)
     Scheduler__start(scheduler, cpu_id);
 
     match_optional(
-        Scheduler__save_context(scheduler, cpu_id, context),
+        Scheduler__save_context(scheduler, cpu_id, &Some(ProcessContextPtr, context)),
         some(proc)
         {
-            TEST_ASSERT_EQUAL(context->elr, proc->context->elr);
+            TEST_ASSERT_EQUAL(context->elr, Process__required_context(proc)->elr);
 
             match_optional(
                 Scheduler__current_process(scheduler, cpu_id),
                 some(current)
                 {
-                    TEST_ASSERT_EQUAL(context->elr, current->context->elr);
+                    TEST_ASSERT_EQUAL(context->elr, Process__required_context(current)->elr);
                 },
                 none_test_fail()
             );
         },
         none_test_fail()
     );
+}
+
+void test_scheduler_save_context_returns_none_when_context_save_fails(void)
+{
+    Scheduler__start(scheduler, cpu_id);
+    ProcessPtr current = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
+    Optional(ProcessContextPtr) original_context = current->context;
+    current->context = None(ProcessContextPtr);
+
+    match_optional(Scheduler__save_context(scheduler, cpu_id, &Some(ProcessContextPtr, test_saved_context())),
+                   some_test_fail(),
+        none_do_nothing()
+    );
+
+    current->context = original_context;
+}
+
+void test_scheduler_interrupt_does_not_switch_when_context_save_fails(void)
+{
+    ProcessPtr ready = dummy_process(0, cpu_id, PROC_STATE_READY);
+    Scheduler__schedule_on_cpu(scheduler, ready, cpu_id);
+    Scheduler__start(scheduler, cpu_id);
+    ProcessPtr current = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
+    Tick original_last_tick = current->last_tick;
+    Optional(ProcessContextPtr) original_context = current->context;
+    current->context = None(ProcessContextPtr);
+
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, test_saved_context()));
+
+    TEST_ASSERT_EQUAL_PTR(current, current_running_process());
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, current->state);
+    TEST_ASSERT_EQUAL_UINT64(original_last_tick, current->last_tick);
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, ready->state);
+
+    current->context = original_context;
 }
 
 void test_signal_request_does_not_switch_or_remove_remote_process(void)
@@ -492,7 +553,7 @@ void test_signal_request_does_not_switch_or_remove_remote_process(void)
     );
 
     set_cpu_id(remote_cpu);
-    Scheduler__preempt(scheduler, remote_cpu, test_saved_context());
+    Scheduler__preempt(scheduler, remote_cpu, &Some(ProcessContextPtr, test_saved_context()));
     match_optional(Scheduler__find_process_by_pid(scheduler, pid),
         some_test_fail(),
         none_do_nothing()
@@ -500,26 +561,67 @@ void test_signal_request_does_not_switch_or_remove_remote_process(void)
     TEST_ASSERT_NOT_EQUAL(target, current_running_process());
 }
 
+void test_cpu_timer_interval_uses_requested_frequency(void)
+{
+    TEST_ASSERT_EQUAL_UINT64(10000, CPUTimer__interval(10000000, 1000));
+}
+
+void test_cpu_timer_interval_defaults_to_1000_hz(void)
+{
+    TEST_ASSERT_EQUAL_UINT64(10000, CPUTimer__interval(10000000, 0));
+}
+
+void test_cpu_timer_interval_is_at_least_one_tick(void)
+{
+    TEST_ASSERT_EQUAL_UINT64(1, CPUTimer__interval(100, 1000));
+}
+
 void test_timer_terminates_running_process_without_another_syscall(void)
 {
+    IRQNumber irq = 27;
     ProcessPtr target = dummy_process(100, cpu_id, PROC_STATE_READY);
     ProcessID pid = target->pid;
     Scheduler__schedule_on_cpu(scheduler, target, cpu_id);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, test_saved_context());
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, test_saved_context()));
     TEST_ASSERT_EQUAL_PTR(target, current_running_process());
 
     match_result(Scheduler__queue_signal(scheduler, pid, PROCESS_SIGNAL_TERMINATE),
         success_do_nothing(),
                  error_test_fail()
     );
-    timer_handler(cpu_id, scheduler, test_saved_context());
+    test_timer_interrupt(irq, cpu_id, test_saved_context(), false);
 
+    TEST_ASSERT_EQUAL_UINT64(1, CPUTimerStub__rearm_count());
+    TEST_ASSERT_EQUAL_UINT64(irq, CPUTimerStub__last_irq());
     match_optional(Scheduler__find_process_by_pid(scheduler, pid),
         some_test_fail(),
         none_do_nothing()
     );
     TEST_ASSERT_NOT_EQUAL(target, current_running_process());
+}
+
+void test_kernel_timer_tick_does_not_preempt_interrupted_process(void)
+{
+    IRQNumber irq = 27;
+    ProcessPtr target = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessID pid = target->pid;
+    Scheduler__schedule_on_cpu(scheduler, target, cpu_id);
+    Scheduler__start(scheduler, cpu_id);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, test_saved_context()));
+
+    match_result(Scheduler__queue_signal(scheduler, pid, PROCESS_SIGNAL_TERMINATE),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+
+    test_timer_interrupt(irq, cpu_id, test_saved_context(), true);
+
+    TEST_ASSERT_EQUAL_UINT64(1, CPUTimerStub__rearm_count());
+    TEST_ASSERT_EQUAL_UINT64(irq, CPUTimerStub__last_irq());
+    TEST_ASSERT_EQUAL_PTR(target, current_running_process());
+    TEST_ASSERT_TRUE(Process__has_pending_signal(target));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, target->state);
 }
 
 void test_signal_selects_blocked_process_without_running_its_continuation(void)
@@ -538,7 +640,7 @@ void test_signal_selects_blocked_process_without_running_its_continuation(void)
         error_test_fail()
     );
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, target->state);
-    Scheduler__preempt(scheduler, cpu_id, test_saved_context());
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, test_saved_context()));
     TEST_ASSERT_NULL(continuation_context);
     match_optional(Scheduler__find_process_by_pid(scheduler, pid),
         some_test_fail(),
@@ -565,7 +667,7 @@ void test_signal_precedes_ready_deferred_syscall(void)
         success_do_nothing(),
         error_test_fail()
     );
-    Scheduler__preempt(scheduler, cpu_id, test_saved_context());
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, test_saved_context()));
     TEST_ASSERT_NULL(continuation_context);
     TEST_ASSERT_NULL(active_address_space_process());
     match_optional(Scheduler__find_process_by_pid(scheduler, pid),
@@ -589,7 +691,7 @@ void test_signal_terminates_sleeping_process_before_deadline(void)
         error_test_fail()
     );
     TEST_ASSERT_EQUAL(PROC_STATE_SLEEPING, target->state);
-    Scheduler__preempt(scheduler, cpu_id, test_saved_context());
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, test_saved_context()));
     match_optional(Scheduler__find_process_by_pid(scheduler, pid),
         some_test_fail(),
         none_do_nothing()
@@ -633,7 +735,7 @@ void test_scheduler_exit_removes_process_when_its_current(void)
     ProcessContextPtr context = test_saved_context();
     Scheduler__schedule(scheduler, proc);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     ProcessPtr idle = unwrap_optional(Scheduler__idle_process(scheduler, cpu_id), (ProcessPtr){});
 
@@ -672,14 +774,14 @@ void test_scheduler_exit_unparks_parent_if_waiting(void)
     ProcessContextPtr context = test_saved_context();
     Scheduler__schedule(scheduler, parent);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
     Scheduler__schedule(scheduler, child);
     match_result(
         Scheduler__park(scheduler, parent, &kernel_context, &Some(Continuation, continuation), PARK_WAIT_CHILD),
         success_do_nothing(),
         error_test_fail()
     );
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
@@ -727,14 +829,14 @@ void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
     ProcessContextPtr context = test_saved_context();
     Scheduler__schedule(scheduler, parent);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
     Scheduler__schedule(scheduler, child);
     match_result(
         Scheduler__park(scheduler, parent, &kernel_context, &Some(Continuation, continuation), PARK_WAIT_CHILD),
         success_do_nothing(),
         error_test_fail()
     );
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     ProcessAbort abort = (ProcessAbort){
         .reason = PROCESS_ABORT_DATA_ABORT,
@@ -767,10 +869,10 @@ void test_scheduler_exit_removes_process_when_its_not_current(void)
     ProcessID pid = proc->pid;
     ProcessPtr other_proc = dummy_process(0, cpu_id, PROC_STATE_READY);
     ProcessContextPtr context = test_saved_context();
-    Scheduler__schedule(scheduler, proc);
-    Scheduler__schedule(scheduler, other_proc);
+    Scheduler__schedule_on_cpu(scheduler, proc, cpu_id);
+    Scheduler__schedule_on_cpu(scheduler, other_proc, cpu_id);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
@@ -813,7 +915,7 @@ void test_scheduler_park_switches_process_to_waiting_and_switches_context(void)
 
     Scheduler__schedule(scheduler, proc);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     ProcessPtr idle = unwrap_optional(Scheduler__idle_process(scheduler, cpu_id), (ProcessPtr){});
 
@@ -859,7 +961,7 @@ void test_scheduler_unpark_switches_process_back_to_ready(void)
 
     Scheduler__schedule(scheduler, proc);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
@@ -898,7 +1000,7 @@ void test_scheduler_sleep_usec_wakes_after_rounded_timer_ticks(void)
 
     Scheduler__schedule(scheduler, proc);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, &context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, &context));
 
     match_result(
         Scheduler__sleep_usec(scheduler, proc, 2500),
@@ -910,13 +1012,13 @@ void test_scheduler_sleep_usec_wakes_after_rounded_timer_ticks(void)
         error_test_fail()
     );
 
-    Scheduler__preempt(scheduler, cpu_id, &context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_SLEEPING, proc->state);
 
-    Scheduler__preempt(scheduler, cpu_id, &context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_SLEEPING, proc->state);
 
-    Scheduler__preempt(scheduler, cpu_id, &context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(proc, current_running_process());
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc->state);
     TEST_ASSERT_EQUAL(PROCESS_SLEEP_OK, unwrap_result(deferred_syscall_result(), (Anything){}));
@@ -931,7 +1033,7 @@ void test_scheduler_context_switch_finalises_ready_parked_operation_before_resum
 
     Scheduler__schedule(scheduler, proc);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, &context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, &context));
 
     match_result(Scheduler__park(scheduler, proc, &kernel_context, &Some(Continuation, continuation), PARK_WAIT_IO),
                  success_do_nothing(),
@@ -944,13 +1046,13 @@ void test_scheduler_context_switch_finalises_ready_parked_operation_before_resum
     );
 
     expected_active_process = proc;
-    Scheduler__preempt(scheduler, cpu_id, &context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, &context));
 
     TEST_ASSERT_EQUAL(proc, current_running_process());
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc->state);
     TEST_ASSERT_EQUAL(&kernel_context, continuation_kernel_context);
     TEST_ASSERT_TRUE(continuation_saw_active_address_space);
-    TEST_ASSERT_EQUAL(11, proc->context->x[0]);
+    TEST_ASSERT_EQUAL(11, Process__required_context(proc)->x[0]);
     TEST_ASSERT_EQUAL(11, unwrap_result(deferred_syscall_result(), (Anything){}));
 }
 
@@ -963,7 +1065,7 @@ void test_scheduler_unpark_gives_error_and_doesnt_unpark_if_reasons_dont_match(v
 
     Scheduler__schedule(scheduler, proc);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
@@ -998,10 +1100,10 @@ void test_scheduler_unpark_when_not_idle(void)
 
     KernelContext kernel_context = test_scheduler_kernel_context();
 
-    Scheduler__schedule(scheduler, proc);
-    Scheduler__schedule(scheduler, running_proc);
+    Scheduler__schedule_on_cpu(scheduler, proc, cpu_id);
+    Scheduler__schedule_on_cpu(scheduler, running_proc, cpu_id);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
@@ -1053,10 +1155,10 @@ void test_scheduler_park_switches_process_to_waiting_not_switching_context_when_
         .scheduler = scheduler,
     };
 
-    Scheduler__schedule(scheduler, proc);
-    Scheduler__schedule(scheduler, running);
+    Scheduler__schedule_on_cpu(scheduler, proc, cpu_id);
+    Scheduler__schedule_on_cpu(scheduler, running, cpu_id);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     match_optional(
         Scheduler__current_process(scheduler, cpu_id),
@@ -1100,12 +1202,26 @@ void test_scheduler_preempt_when_idle_with_a_process_ready(void)
 
     match_result(
         Scheduler__schedule(scheduler, dummy),
-        success(cpu)
+        success(status)
         {
-            TEST_ASSERT_EQUAL(scheduled_cpu, cpu);
+            TEST_ASSERT_EQUAL(SCHEDULER_SCHEDULE_OK, status);
         },
         error_test_fail()
     );
+
+    ProcessInfo entries[8];
+    ProcessListResult count = Scheduler__process_info_snapshot(scheduler, entries, 8);
+    bool found_unassigned = false;
+    for (ProcessListResult index = 0; index < count; index++)
+    {
+        if (entries[index].pid == dummy->pid)
+        {
+            found_unassigned = true;
+            TEST_ASSERT_EQUAL_UINT64((CPUID)SCHEDULER_INVALID_CPU, entries[index].cpu);
+        }
+    }
+    TEST_ASSERT_TRUE(found_unassigned);
+
     ProcessPtr idle = unwrap_optional(Scheduler__idle_process(scheduler, scheduled_cpu), (ProcessPtr){});
 
     Scheduler__start(scheduler, scheduled_cpu);
@@ -1113,14 +1229,23 @@ void test_scheduler_preempt_when_idle_with_a_process_ready(void)
     TEST_ASSERT_EQUAL(idle, current_running_process());
     TEST_ASSERT_EQUAL(idle->state, PROC_STATE_RUNNING);
 
-    Scheduler__preempt(scheduler, scheduled_cpu, context);
+    Scheduler__preempt(scheduler, scheduled_cpu, &Some(ProcessContextPtr, context));
     TEST_ASSERT_EQUAL(dummy, current_running_process());
     TEST_ASSERT_EQUAL(0, dummy->last_tick);
     TEST_ASSERT_EQUAL(dummy->state, PROC_STATE_RUNNING);
 
-    TEST_ASSERT_EQUAL(context->elr, idle->context->elr);    // check the context was saved
-    TEST_ASSERT_EQUAL(idle->state, PROC_STATE_INTERRUPTED); // check the context was saved
-    TEST_ASSERT_EQUAL(1, idle->last_tick);                  // check the context was saved
+    match_result(
+        Scheduler__cpu_for_process(scheduler, dummy),
+        success(cpu)
+        {
+            TEST_ASSERT_EQUAL_UINT64(scheduled_cpu, cpu);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(context->elr, Process__required_context(idle)->elr); // check the context was saved
+    TEST_ASSERT_EQUAL(idle->state, PROC_STATE_INTERRUPTED);                // check the context was saved
+    TEST_ASSERT_EQUAL(1, idle->last_tick);                                 // check the context was saved
 
     match_optional(
         Scheduler__current_process(scheduler, scheduled_cpu),
@@ -1142,11 +1267,11 @@ void test_scheduler_preempt_when_idle_with_multiple_processes_ready_selects_long
     ProcessPtr proc_least_recently_run = dummy_process(0, dummy_cpu, PROC_STATE_READY);
 
     Scheduler__start(scheduler, dummy_cpu);
-    Scheduler__schedule(scheduler, proc_most_recently_run);
-    Scheduler__schedule(scheduler, proc_2nd_most_recently_run);
-    Scheduler__schedule(scheduler, proc_least_recently_run);
+    Scheduler__schedule_on_cpu(scheduler, proc_most_recently_run, dummy_cpu);
+    Scheduler__schedule_on_cpu(scheduler, proc_2nd_most_recently_run, dummy_cpu);
+    Scheduler__schedule_on_cpu(scheduler, proc_least_recently_run, dummy_cpu);
 
-    Scheduler__preempt(scheduler, dummy_cpu, context);
+    Scheduler__preempt(scheduler, dummy_cpu, &Some(ProcessContextPtr, context));
     TEST_ASSERT_EQUAL(proc_least_recently_run, current_running_process());
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc_least_recently_run->state);
 
@@ -1170,10 +1295,10 @@ void test_scheduler_preempt_selects_longer_waiting_normal_before_service(void)
     service_proc->process_class = PROCESS_CLASS_SERVICE;
 
     Scheduler__start(scheduler, dummy_cpu);
-    Scheduler__schedule(scheduler, normal_proc);
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, normal_proc, dummy_cpu);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, dummy_cpu);
 
-    Scheduler__preempt(scheduler, dummy_cpu, context);
+    Scheduler__preempt(scheduler, dummy_cpu, &Some(ProcessContextPtr, context));
     TEST_ASSERT_EQUAL(normal_proc, current_running_process());
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, normal_proc->state);
 }
@@ -1187,10 +1312,10 @@ void test_scheduler_preempt_selects_longer_waiting_service_before_normal(void)
     service_proc->process_class = PROCESS_CLASS_SERVICE;
 
     Scheduler__start(scheduler, dummy_cpu);
-    Scheduler__schedule(scheduler, normal_proc);
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, normal_proc, dummy_cpu);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, dummy_cpu);
 
-    Scheduler__preempt(scheduler, dummy_cpu, context);
+    Scheduler__preempt(scheduler, dummy_cpu, &Some(ProcessContextPtr, context));
     TEST_ASSERT_EQUAL(service_proc, current_running_process());
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, service_proc->state);
 }
@@ -1206,10 +1331,10 @@ void test_scheduler_preempt_selects_realtime_service_before_service_process(void
     realtime_proc->process_class = PROCESS_CLASS_REALTIME_SERVICE;
 
     Scheduler__start(scheduler, dummy_cpu);
-    Scheduler__schedule(scheduler, service_proc);
-    Scheduler__schedule(scheduler, realtime_proc);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, dummy_cpu);
+    Scheduler__schedule_on_cpu(scheduler, realtime_proc, dummy_cpu);
 
-    Scheduler__preempt(scheduler, dummy_cpu, context);
+    Scheduler__preempt(scheduler, dummy_cpu, &Some(ProcessContextPtr, context));
     TEST_ASSERT_EQUAL(realtime_proc, current_running_process());
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, realtime_proc->state);
 }
@@ -1222,7 +1347,7 @@ void test_pending_termination_overrides_active_irq_timer_suppression(void)
     service_proc->process_class = PROCESS_CLASS_SERVICE;
     Scheduler__schedule_on_cpu(scheduler, service_proc, cpu_id);
     Scheduler__start(scheduler, cpu_id);
-    Scheduler__preempt(scheduler, cpu_id, test_saved_context());
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, test_saved_context()));
     match_result(Scheduler__subscribe_irq(scheduler, service_proc, irq),
         success_do_nothing(),
         error_test_fail()
@@ -1242,7 +1367,7 @@ void test_pending_termination_overrides_active_irq_timer_suppression(void)
         error_test_fail()
     );
     TEST_ASSERT_TRUE(Scheduler__should_preempt_on_timer(scheduler, cpu_id));
-    timer_handler(cpu_id, scheduler, test_saved_context());
+    test_timer_interrupt(irq, cpu_id, test_saved_context(), false);
     match_optional(Scheduler__find_process_by_pid(scheduler, pid),
         some_test_fail(),
         none_do_nothing()
@@ -1297,10 +1422,10 @@ void test_scheduler_timer_preemption_is_suppressed_for_active_irq_service(void)
     ProcessPtr normal_proc = dummy_process(100, scheduled_cpu, PROC_STATE_READY);
     service_proc->process_class = PROCESS_CLASS_SERVICE;
 
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, scheduled_cpu);
     Scheduler__start(scheduler, scheduled_cpu);
-    Scheduler__preempt(scheduler, scheduled_cpu, context);
-    Scheduler__schedule(scheduler, normal_proc);
+    Scheduler__preempt(scheduler, scheduled_cpu, &Some(ProcessContextPtr, context));
+    Scheduler__schedule_on_cpu(scheduler, normal_proc, scheduled_cpu);
 
     TEST_ASSERT_EQUAL(service_proc, current_running_process());
 
@@ -1359,10 +1484,10 @@ void test_timer_handler_does_not_preempt_active_irq_service(void)
     ProcessPtr normal_proc = dummy_process(100, scheduled_cpu, PROC_STATE_READY);
     service_proc->process_class = PROCESS_CLASS_SERVICE;
 
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, scheduled_cpu);
     Scheduler__start(scheduler, scheduled_cpu);
-    Scheduler__preempt(scheduler, scheduled_cpu, context);
-    Scheduler__schedule(scheduler, normal_proc);
+    Scheduler__preempt(scheduler, scheduled_cpu, &Some(ProcessContextPtr, context));
+    Scheduler__schedule_on_cpu(scheduler, normal_proc, scheduled_cpu);
 
     match_result(
         Scheduler__subscribe_irq(scheduler, service_proc, irq),
@@ -1392,7 +1517,7 @@ void test_timer_handler_does_not_preempt_active_irq_service(void)
         error_test_fail()
     );
 
-    timer_handler(scheduled_cpu, scheduler, context);
+    test_timer_interrupt(irq, scheduled_cpu, context, false);
 
     TEST_ASSERT_EQUAL(service_proc, current_running_process());
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, service_proc->state);
@@ -1413,7 +1538,7 @@ void test_service_wait_parks_service_process_when_no_event_is_available(void)
 
     KernelContext kernel_context = test_scheduler_kernel_context();
 
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, cpu_id);
 
     match_result(
         test_service_wait(service_proc, &kernel_context),
@@ -1442,7 +1567,7 @@ void test_service_enqueue_wakes_parked_service_process_and_wait_returns_event(vo
 
     KernelContext kernel_context = test_scheduler_kernel_context();
 
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, cpu_id);
 
     match_result(
         test_service_wait(service_proc, &kernel_context),
@@ -1489,7 +1614,7 @@ void test_service_enqueue_makes_waiting_service_runnable_when_event_is_queued(vo
 
     KernelContext kernel_context = test_scheduler_kernel_context();
 
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, cpu_id);
 
     match_result(
         test_service_wait(service_proc, &kernel_context),
@@ -1529,7 +1654,7 @@ void test_scheduler_irq_event_wakes_parked_service_process(void)
 
     KernelContext kernel_context = test_scheduler_kernel_context();
 
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, cpu_id);
 
     match_result(
         Scheduler__subscribe_irq(scheduler, service_proc, irq),
@@ -1582,7 +1707,7 @@ void test_scheduler_subscribed_irq_is_sent_to_service_process(void)
     service_proc->process_class = PROCESS_CLASS_SERVICE;
     IRQNumber irq = 33;
 
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, cpu_id);
 
     match_result(
         Scheduler__subscribe_irq(scheduler, service_proc, irq),
@@ -1624,7 +1749,7 @@ void test_scheduler_subscribed_irq_coalesces_while_pending_until_process_complet
     service_proc->process_class = PROCESS_CLASS_SERVICE;
     IRQNumber irq = 33;
 
-    Scheduler__schedule(scheduler, service_proc);
+    Scheduler__schedule_on_cpu(scheduler, service_proc, cpu_id);
 
     match_result(
         Scheduler__subscribe_irq(scheduler, service_proc, irq),
@@ -1707,15 +1832,15 @@ void test_scheduler_interrupt_switch_from_one_ready_process_to_another(void)
 
     Scheduler__start(scheduler, dummy_cpu);
 
-    Scheduler__schedule(scheduler, proc_most_recently_run);
-    Scheduler__schedule(scheduler, proc_least_recently_run);
+    Scheduler__schedule_on_cpu(scheduler, proc_most_recently_run, dummy_cpu);
+    Scheduler__schedule_on_cpu(scheduler, proc_least_recently_run, dummy_cpu);
 
-    Scheduler__preempt(scheduler, dummy_cpu, context);
+    Scheduler__preempt(scheduler, dummy_cpu, &Some(ProcessContextPtr, context));
     TEST_ASSERT_EQUAL(proc_least_recently_run, current_running_process());
     TEST_ASSERT_EQUAL(PROC_STATE_READY, proc_most_recently_run->state);
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc_least_recently_run->state);
 
-    Scheduler__preempt(scheduler, dummy_cpu, context);
+    Scheduler__preempt(scheduler, dummy_cpu, &Some(ProcessContextPtr, context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc_most_recently_run->state);
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, proc_least_recently_run->state);
     TEST_ASSERT_EQUAL(proc_most_recently_run, current_running_process());
@@ -1729,7 +1854,7 @@ void test_scheduler_park_by_pid_puts_process_in_wait(void)
     Scheduler__start(scheduler, cpu_id);
 
     Scheduler__schedule(scheduler, proc);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     ProcessPtr running = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_EQUAL(proc, running);
@@ -1740,7 +1865,7 @@ void test_scheduler_park_by_pid_puts_process_in_wait(void)
         success_do_nothing(),
         error_test_fail()
     );
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     running = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_NOT_EQUAL(proc, running);
@@ -1756,7 +1881,7 @@ void test_scheduler_unpark_by_pid_resumes_io_continuation(void)
     Scheduler__start(scheduler, cpu_id);
 
     Scheduler__schedule(scheduler, proc);
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     ProcessPtr running = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_EQUAL(proc, running);
@@ -1767,7 +1892,7 @@ void test_scheduler_unpark_by_pid_resumes_io_continuation(void)
         success_do_nothing(),
         error_test_fail()
     );
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     running = unwrap_optional(Scheduler__current_process(scheduler, cpu_id), (ProcessPtr){});
     TEST_ASSERT_NOT_EQUAL(proc, running);
@@ -1778,7 +1903,7 @@ void test_scheduler_unpark_by_pid_resumes_io_continuation(void)
         success_do_nothing(),
                  error_test_fail()
     );
-    Scheduler__preempt(scheduler, cpu_id, context);
+    Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
 
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, proc->state);
     TEST_ASSERT_EQUAL(&kernel_context, continuation_kernel_context);

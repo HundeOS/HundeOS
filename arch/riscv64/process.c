@@ -43,21 +43,22 @@ ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr
     return context;
 }
 
-void ProcessContext__dispose(ProcessContextPtr self)
+void ProcessContext__copy(ProcessContextPtr self, ProcessContextPtr source)
 {
-    Kernel__free(addr(self));
+    *self = *source;
 }
 
 void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
 {
-    self->context->x[10] = result;
+    Process__required_context(self)->x[10] = result;
 }
 
 void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error)
 {
-    self->context->x[13] = input;
-    self->context->x[14] = output;
-    self->context->x[15] = error;
+    ProcessContextPtr context = Process__required_context(self);
+    context->x[13] = input;
+    context->x[14] = output;
+    context->x[15] = error;
 }
 
 void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
@@ -68,47 +69,28 @@ void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
     }
 }
 
-static void Process__assert_context_ready(ProcessPtr self)
+static void Process__assert_context_ready(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
 {
-    ProcessContextPtr context = self->context;
     if (context->sepc == 0 || context->x[2] == 0 || (context->sstatus & RISCV_SSTATUS_SPP) != 0)
     {
-        BString message =
-            BString__sprintf(&invalid_context_format, self->pid, cstr(self->name), context, context->sepc,
-                             context->x[2], context->sstatus, paddr(ProcessPageTable__root(&self->page_table)));
+        BString message = BString__sprintf(&invalid_context_format, self->pid, cstr(self->name), context, context->sepc,
+                                           context->x[2], context->sstatus, paddr(page_table));
         Kernel__panic(cstr(message), context);
     }
 }
 
-__attribute__((noreturn)) void Process__context_switch(ProcessPtr self)
+__attribute__((noreturn)) void Process__switch_context(ProcessPtr self, ProcessContextPtr context,
+                                                       KernelAddress page_table)
 {
-    Process__assert_context_ready(self);
-    ProcessContext__assert_user_irqs_unmasked(self->context);
-    RiscVProcess__switch_context(self->context, paddr(ProcessPageTable__root(&self->page_table)));
+    Process__assert_context_ready(self, context, page_table);
+    ProcessContext__assert_user_irqs_unmasked(context);
+    RiscVProcess__switch_context(context, paddr(page_table));
     __builtin_unreachable();
 }
 
-void Process__activate_address_space(ProcessPtr self)
+void Process__switch_address_space(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
 {
-    RiscVProcess__switch_address_space(paddr(ProcessPageTable__root(&self->page_table)));
-}
-
-void Process__save_context(ProcessPtr self, ProcessContextPtr context)
-{
-    if (self->context == NULL)
-    {
-        Kernel__panic("Process context is NULL", context);
-    }
-    else if (self->state != PROC_STATE_RUNNING)
-    {
-        BString format = bstr("Process not running state=%s pid=%i name=%s\n");
-        BString message = BString__sprintf(&format, ProcessState__to_string(self->state), self->pid, cstr(self->name));
-        Kernel__panic(cstr(message), context);
-    }
-    else if (context != NULL)
-    {
-        *self->context = *context;
-    }
+    RiscVProcess__switch_address_space(paddr(page_table));
 }
 
 uint16_t Arch__elf_machine(void)

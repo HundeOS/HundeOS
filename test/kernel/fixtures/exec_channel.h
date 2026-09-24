@@ -272,7 +272,7 @@ static Result(SystemCallResult)
                 if (!is_nothing(parent->exec_load))
                 {
                     FakeExecService__poll(self, kernel, parent);
-                    Scheduler__preempt(kernel->scheduler, 0, NULL); // hundelint: ignore-no-null
+                    Scheduler__preempt(kernel->scheduler, 0, &None(ProcessContextPtr));
                     continue;
                 }
                 FakeExecService__drain(self, kernel);
@@ -288,30 +288,23 @@ static Result(SystemCallResult)
                     },
                     error(code, message)
                     {
+                        ProcessTable processes = Scheduler__process_snapshot(kernel->scheduler);
                         for_each_fa(
-                            CPUSchedulers,
-                            kernel->scheduler->schedulers,
-                            cpu,
-                            scheduler,
+                            ProcessTable,
+                            processes,
+                            index,
+                            child,
                             {
-                                for_each_fa(
-                                    ProcessTable,
-                                    scheduler->processes,
-                                    index,
-                                    child,
+                                match_optional(
+                                    child->parent,
+                                    some(child_parent)
                                     {
-                                        match_optional(
-                                            child->parent,
-                                            some(child_parent)
-                                            {
-                                                if (child_parent == parent)
-                                                {
-                                                    return Success(SystemCallResult, child->pid);
-                                                }
-                                            },
-                                            none_do_nothing()
-                                        );
-                                    }
+                                        if (child_parent == parent)
+                                        {
+                                            return Success(SystemCallResult, child->pid);
+                                        }
+                                    },
+                                    none_do_nothing()
                                 );
                             }
                         );

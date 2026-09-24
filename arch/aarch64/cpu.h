@@ -25,6 +25,7 @@ typedef struct CPU
 void smp_init();
 uint64_t start_secondary_cpus();
 void start_primary_cpu();
+void CPU__set_boot_id(CPUID id);
 
 inline uint64_t get_current_el(void)
 {

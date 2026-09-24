@@ -10,7 +10,7 @@
 static KernelPtr kernel = NULL;
 static bool kernel_consumer_called = false;
 static IRQDispatchContext observed_context;
-static void * observed_data = NULL;
+static KernelPtr observed_kernel = NULL;
 
 void Arch__reset_irq_tracking();
 uint64_t Arch__enabled_irq();
@@ -18,11 +18,11 @@ uint64_t Arch__enable_count();
 uint64_t Arch__masked_irq();
 uint64_t Arch__mask_count();
 
-static Result(IRQDispatchStatus) kernel_consumer(IRQDispatchContextPtr context, void * data)
+static Result(IRQDispatchStatus) kernel_consumer(IRQDispatchContextPtr context, KernelPtr passed_kernel)
 {
     kernel_consumer_called = true;
     observed_context = *context;
-    observed_data = data;
+    observed_kernel = passed_kernel;
     return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);
 }
 
@@ -34,7 +34,7 @@ void setUp(void)
     kernel = init_test_kernel();
     kernel_consumer_called = false;
     observed_context = (IRQDispatchContext){0};
-    observed_data = NULL;
+    observed_kernel = NULL;
 }
 
 void tearDown(void)
@@ -63,7 +63,6 @@ void test_irq_dispatcher_returns_unhandled_when_no_consumer_registered(void)
 
 void test_irq_dispatcher_calls_registered_kernel_consumer(void)
 {
-    uint64_t data = 1234;
     IRQDispatchContext context = (IRQDispatchContext){
         .irq = 27,
         .cpu = 2,
@@ -72,7 +71,7 @@ void test_irq_dispatcher_calls_registered_kernel_consumer(void)
     };
 
     match_result(
-        IRQDispatcher__register_kernel(kernel->irq_dispatcher, 27, kernel_consumer, &data),
+        IRQDispatcher__register_kernel(kernel->irq_dispatcher, 27, kernel_consumer, kernel),
         success(status)
         {
             TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
@@ -92,7 +91,7 @@ void test_irq_dispatcher_calls_registered_kernel_consumer(void)
     TEST_ASSERT_TRUE(kernel_consumer_called);
     TEST_ASSERT_EQUAL_UINT64(27, observed_context.irq);
     TEST_ASSERT_EQUAL_UINT64(2, observed_context.cpu);
-    TEST_ASSERT_EQUAL_PTR(&data, observed_data);
+    TEST_ASSERT_EQUAL_PTR(kernel, observed_kernel);
 }
 
 void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event(void)
@@ -149,8 +148,6 @@ void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event
 
 void test_irq_dispatcher_rejects_duplicate_kernel_registration(void)
 {
-    uint64_t first_data = 1;
-    uint64_t second_data = 2;
     IRQDispatchContext context = (IRQDispatchContext){
         .irq = 27,
         .cpu = 0,
@@ -159,7 +156,7 @@ void test_irq_dispatcher_rejects_duplicate_kernel_registration(void)
     };
 
     match_result(
-        IRQDispatcher__register_kernel(kernel->irq_dispatcher, 27, kernel_consumer, &first_data),
+        IRQDispatcher__register_kernel(kernel->irq_dispatcher, 27, kernel_consumer, kernel),
         success(status)
         {
             TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);
@@ -168,7 +165,7 @@ void test_irq_dispatcher_rejects_duplicate_kernel_registration(void)
     );
 
     match_result(
-        IRQDispatcher__register_kernel(kernel->irq_dispatcher, 27, kernel_consumer, &second_data),
+        IRQDispatcher__register_kernel(kernel->irq_dispatcher, 27, kernel_consumer, kernel),
         success_test_fail(),
         error(code, message)
         {
@@ -185,7 +182,7 @@ void test_irq_dispatcher_rejects_duplicate_kernel_registration(void)
         error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL_PTR(&first_data, observed_data);
+    TEST_ASSERT_EQUAL_PTR(kernel, observed_kernel);
 }
 
 void test_irq_dispatcher_rejects_duplicate_service_registration(void)
@@ -222,7 +219,7 @@ void test_irq_dispatcher_rejects_service_registration_when_kernel_consumer_exist
     process->process_class = PROCESS_CLASS_SERVICE;
 
     match_result(
-        IRQDispatcher__register_kernel(kernel->irq_dispatcher, 48, kernel_consumer, NULL),
+        IRQDispatcher__register_kernel(kernel->irq_dispatcher, 48, kernel_consumer, kernel),
         success(status)
         {
             TEST_ASSERT_EQUAL(IRQ_REGISTERED, status);

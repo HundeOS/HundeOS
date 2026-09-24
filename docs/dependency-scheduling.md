@@ -41,6 +41,21 @@ store the originating process separately on the kernel-owned connection. Their
 root tickets carry that real process PID, allowing a service reply chain to lead
 back to the blocked caller without making the reserved kernel endpoint schedulable.
 
+## CPU Registration and Admission
+
+CPU schedulers are registered in a shared hashtable keyed by the architecture's
+CPU ID. The scheduler does not renumber harts or affinities into a dense logical
+range. Process-registry publication uses a separate compact slot because that
+shared ABI remains a bounded array.
+
+Every newly created process enters one shared FIFO admission queue without a CPU
+assignment. The next CPU making a scheduling decision claims one admitted
+process into its local process table and dispatches it ahead of ordinary local
+selection. Once claimed, the process stays with that CPU through normal
+preemption and waiting; only the priority-driven preferred path below may move
+it to another CPU. This avoids treating process-count distribution as load
+distribution and lets CPUs pull work when they are actually ready for it.
+
 ## Preferred Queue
 
 One shared FIFO holds preferred processes, deduplicated by process. Ordering is
@@ -76,9 +91,10 @@ ancestry traversal need profiling before claiming a throughput improvement.
 
 ## Tests
 
-Coverage includes request generations, stale replies, nested and kernel-originated
-tickets, fibre context isolation, relay/parent authentication, cycles,
-acknowledgement and exit cleanup, FIFO preference, exec-continuation preemption,
-migration eligibility, and dispatch-relative residency. Existing tests retain
-real-blocking and shared-wait precedence checks; processing budget tests replace
-the old dequeue-ends-priority policy.
+Coverage includes sparse architecture CPU registration, shared process admission,
+request generations, stale replies, nested and kernel-originated tickets, fibre
+context isolation, relay/parent authentication, cycles, acknowledgement and exit
+cleanup, FIFO preference, exec-continuation preemption, migration eligibility,
+and dispatch-relative residency. Existing tests retain real-blocking and
+shared-wait precedence checks; processing budget tests replace the old
+dequeue-ends-priority policy.

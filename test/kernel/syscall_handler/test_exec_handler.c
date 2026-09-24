@@ -53,7 +53,7 @@ void setUp(void)
     parent = dummy_process(1, cpu, PROC_STATE_RUNNING);
     Process__set_hund_identity(parent);
     Scheduler__schedule(kernel->scheduler, parent);
-    Scheduler__preempt(kernel->scheduler, cpu, NULL);
+    Scheduler__preempt(kernel->scheduler, cpu, &None(ProcessContextPtr));
     filesystem = FakeExecService__new(kernel);
 }
 

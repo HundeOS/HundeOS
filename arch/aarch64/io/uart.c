@@ -7,16 +7,16 @@
 #include "../../../kernel/types/result.h"
 #include "../../../kernel/types/optional.h"
 
-static UartInfoPtr uart_info = NULL;
+static Address uart_base;
 
 void uart_use_info(UartInfoPtr info)
 {
-    uart_info = info;
+    uart_base = info->virtual_base;
 }
 
 static volatile uint32_t * uart_reg(uint64_t offset)
 {
-    return (volatile uint32_t *)(uart_info->virtual_base + offset);
+    return (volatile uint32_t *)(uart_base + offset);
 }
 
 static bool uart_tx_ready()

@@ -10,9 +10,9 @@
     .equ RISCV_SSTATUS_SUM, (1 << 18)
     .equ KERNEL_STACK_SIZE, 10485760
 
-    .global RiscVException__entry
-    .type RiscVException__entry, @function
-RiscVException__entry:
+    .global Exception__entry
+    .type Exception__entry, @function
+Exception__entry:
     csrrw sp, sscratch, sp
     beqz sp, .Lsupervisor_trap
 
@@ -47,7 +47,11 @@ RiscVException__entry:
     la t1, __boot_stack_virtual_start
     sub t1, sp, t1
     li t2, KERNEL_STACK_SIZE
-    divu tp, t1, t2
+    divu t1, t1, t2
+    slli t1, t1, 3
+    la t2, RiscVBoot__stack_cpu_ids
+    add t1, t1, t2
+    ld tp, 0(t1)
 
 .Lkernel_tp_ready:
     sd s0, 64(sp)
@@ -85,7 +89,7 @@ RiscVException__entry:
     sd t0, CONTEXT_STVAL(sp)
 
     mv a0, sp
-    call RiscVException__handle
+    call Exception__handle
 
     ld t0, CONTEXT_SEPC(sp)
     csrw sepc, t0
@@ -134,4 +138,4 @@ RiscVException__entry:
     ld sp, 16(sp)
     sret
 
-    .size RiscVException__entry, . - RiscVException__entry
+    .size Exception__entry, . - Exception__entry

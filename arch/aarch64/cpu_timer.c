@@ -13,16 +13,14 @@
 #include "gicr.h"
 #include "boot/boot_debug.h"
 
-static uint64_t timer_hz = 1000;
-//static uint64_t timer_irq_counts[MAX_CPUS] = { 0 };
-static const uint64_t TIMER_TRACE_INTERVAL_TICKS = 2000;
+static uint64_t timer_interval = 1;
 
-inline unsigned cpu_aff0(void)
+static inline unsigned CPUTimer__cpu_affinity(void)
 {
     return (unsigned)(rd_mpidr() & 0xff);
 }
 
-void CPUTimer__gicv3_dist_enable_grp1ns(InterruptControllerInfoPtr interrupt_controller)
+static void CPUTimer__gicv3_dist_enable_grp1ns(InterruptControllerInfoPtr interrupt_controller)
 {
     // Enable ARE_NS (bit 4) and EnableGrp1NS (bit 1). Leave grp0 off.
     uint32_t ctlr = r32(interrupt_controller->details.gic.distributor_virtual_base + GICD_CTLR_OFFSET);
@@ -33,17 +31,16 @@ void CPUTimer__gicv3_dist_enable_grp1ns(InterruptControllerInfoPtr interrupt_con
 }
 
 // Map: redistributor base for this CPU (QEMU virt packs by Aff0)
-inline volatile uint8_t * CPUTimer__gicr_base_this_cpu(InterruptControllerInfoPtr interrupt_controller)
+static inline volatile uint8_t * CPUTimer__gicr_base_this_cpu(InterruptControllerInfoPtr interrupt_controller)
 {
     return (volatile uint8_t *)(interrupt_controller->details.gic.redistributor_virtual_base +
-                                (uint64_t)cpu_aff0() * GICR_STRIDE);
+                                (uint64_t)CPUTimer__cpu_affinity() * GICR_STRIDE);
 }
 
 /* Configure GICv3 CPU interface + enable PPI for CNTV (27) */
 __attribute__((noinline)) // keeps return addresses clean for debugging
 static void CPUTimer__enable(SystemInfoPtr system_info, bool use_virtual_timer, uint64_t hz)
 {
-    timer_hz = hz ? hz : 1000u;
     InterruptControllerInfoPtr interrupt_controller = &system_info->interrupt_controller;
 
     if (interrupt_controller->kind != INTERRUPT_CONTROLLER_GIC_V3)
@@ -97,18 +94,18 @@ static void CPUTimer__enable(SystemInfoPtr system_info, bool use_virtual_timer, 
 
     // --- Arm the generic timer (per-CPU) ---
     uint64_t frq = rd_cntfrq();
-    uint64_t tick = frq / timer_hz;
+    timer_interval = CPUTimer__interval(frq, hz);
 
     if (use_virtual_timer)
     {
         wr_cntv_ctl(0); // disable while programming
-        wr_cntv_tval(tick);
+        wr_cntv_tval(timer_interval);
         wr_cntv_ctl(1); // enable
     }
     else
     {
         wr_cntp_ctl(0);
-        wr_cntp_tval(tick);
+        wr_cntp_tval(timer_interval);
         wr_cntp_ctl(1);
     }
 
@@ -124,33 +121,18 @@ void CPUTimer__start(SystemInfoPtr system_info, uint64_t hz)
     CPUTimer__enable(system_info, true, hz);
 }
 
-static void CPUTimer__rearm(IRQNumber irq)
+void CPUTimer__rearm(IRQNumber irq)
 {
-    uint64_t frq;
-    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frq));
     if (irq == PPI_CNTV)
     {
-        __asm__ volatile("msr cntv_tval_el0, %0" ::"r"(frq / timer_hz));
+        __asm__ volatile("msr cntv_tval_el0, %0" ::"r"(timer_interval));
     }
     if (irq == PPI_CNTP)
     {
-        __asm__ volatile("msr cntp_tval_el0, %0" ::"r"(frq / timer_hz));
+        __asm__ volatile("msr cntp_tval_el0, %0" ::"r"(timer_interval));
     }
 
     // Force system register synchronization right here!
     dsb_sy();
     isb();
-}
-
-Result(IRQDispatchStatus) CPUTimer__handle_irq(IRQDispatchContextPtr context, void * data)
-{
-    CPUTimer__rearm(context->irq);
-    dsb_sy();
-    isb();
-    if (!context->current_el)
-    {
-        KernelPtr kernel = Kernel__instance();
-        timer_handler(context->cpu, kernel->scheduler, context->process_context);
-    }
-    return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);
 }

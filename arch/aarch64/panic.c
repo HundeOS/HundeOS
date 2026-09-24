@@ -15,20 +15,20 @@ void Kernel__halt()
 
 void Kernel__dump_state(ProcessContextPtr ctx)
 {
-    uint64_t esr = read_esr_el1();
+    ExceptionSyndrome syndrome = read_esr_el1();
 
-    uint32_t ec = (esr >> 26) & 0x3F;
+    uint32_t ec = (syndrome >> 26) & 0x3F;
 
-    __d_printf(FAULT, "Fault: %s\n", AArch64Exception__class_name(ec));
+    __d_printf(FAULT, "Fault: %s\n", Exception__class_name(ec));
     __d_printf(FAULT, "Exception Class (EC): %p\n", ec);
-    __d_printf(FAULT, "ESR: %p\n", esr);
-    if (AArch64Exception__has_fault_status(ec))
+    __d_printf(FAULT, "ESR: %p\n", syndrome);
+    if (Exception__has_fault_status(ec))
     {
-        __d_printf(FAULT, "Fault Status (FSC): %p %s\n", AArch64Exception__fault_status_code(esr),
-                   AArch64Exception__fault_status_name(esr));
+        __d_printf(FAULT, "Fault Status (FSC): %p %s\n", Exception__fault_status_code(syndrome),
+                   Exception__fault_status_name(syndrome));
         if (ec == 0x24 || ec == 0x25)
         {
-            __d_printf(FAULT, "Access: %s\n", AArch64Exception__data_abort_access_name(esr));
+            __d_printf(FAULT, "Access: %s\n", Exception__data_abort_access_name(syndrome));
         }
     }
     __d_printf(FAULT, "Fault Address (FAR): %p\n", read_far_el1());

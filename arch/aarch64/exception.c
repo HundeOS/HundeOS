@@ -8,6 +8,7 @@
 
 #include "asm_helpers.h"
 #include "exception_decode.h"
+#include "process.h"
 #include "../../kernel/debug.h"
 #include "../../kernel/kernel_core.h"
 #include "../../kernel/irq/irq_dispatcher.h"
@@ -15,29 +16,28 @@
 #include "../../kernel/types/optional.h"
 #include "ipc/ipc_platform.h"
 
-// Helper function to get exception syndrome
-inline uint64_t get_esr_el1(void)
+static inline ExceptionSyndrome Exception__syndrome(void)
 {
-    uint64_t esr;
-    __asm__ volatile("mrs %0, esr_el1" : "=r"(esr));
-    return esr;
+    ExceptionSyndrome syndrome;
+    __asm__ volatile("mrs %0, esr_el1" : "=r"(syndrome));
+    return syndrome;
 }
 
-inline uint64_t get_far_el1(void)
+static inline Address Exception__fault_address(void)
 {
-    uint64_t far;
+    Address far;
     __asm__ volatile("mrs %0, far_el1" : "=r"(far));
     return far;
 }
 
-inline uint64_t get_elr_el1(void)
+static inline Address Exception__return_address(void)
 {
-    uint64_t elr;
+    Address elr;
     __asm__ volatile("mrs %0, elr_el1" : "=r"(elr));
     return elr;
 }
 
-void irq_handler(ProcessContextPtr context, bool current_el)
+static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
 {
     KernelPtr kernel = Kernel__instance();
 
@@ -45,15 +45,16 @@ void irq_handler(ProcessContextPtr context, bool current_el)
     __d_printf(IRQ, "irq: %i\n", id);
     if (id >= 32)
     {
-        __d_printf(IODEV, "irq entry id=%i cpu=%i current_el=%i\n", id, CPU__id() - 1, current_el);
+        __d_printf(IRQ, "irq entry id=%i cpu=%i current_el=%i\n", id, CPU__id(), current_el);
     }
 
-    __d_printf(IRQ, "ELR: %p, SP_ELO: %p\n", get_elr_el1(), read_sp_el0());
+    __d_printf(IRQ, "ELR: %p, SP_ELO: %p\n", Exception__return_address(), read_sp_el0());
 
-    CPUID cpu = CPU__id() - 1;
+    CPUID cpu = CPU__id();
     if (id != PPI_CNTV && id != PPI_CNTP)
     {
-        Optional(ProcessPtr) interrupted_process = Scheduler__save_context(kernel->scheduler, cpu, context);
+        Optional(ProcessPtr) interrupted_process =
+            Scheduler__save_context(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
         match_optional(
             interrupted_process,
             some(proc)
@@ -84,7 +85,7 @@ void irq_handler(ProcessContextPtr context, bool current_el)
             }
             if (id >= 32)
             {
-                __d_printf(IODEV, "irq dispatch id=%i status=%i\n", id, status);
+                __d_printf(IRQ, "irq dispatch id=%i status=%i\n", id, status);
             }
             if (status == IRQ_DISPATCH_UNHANDLED)
             {
@@ -92,8 +93,8 @@ void irq_handler(ProcessContextPtr context, bool current_el)
             }
             if (!current_el && status == IRQ_DISPATCH_RESCHEDULE)
             {
-                __d_printf(IODEV, "irq dispatch id=%i requested reschedule cpu=%i\n", id, cpu);
-                Scheduler__preempt(kernel->scheduler, cpu, context);
+                __d_printf(IRQ, "irq dispatch id=%i requested reschedule cpu=%i\n", id, cpu);
+                Scheduler__preempt(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
             }
         },
         error(code, message)
@@ -103,8 +104,9 @@ void irq_handler(ProcessContextPtr context, bool current_el)
     );
 }
 
-static uint64_t abort_user_process(KernelPtr kernel, OptionalPtr(ProcessPtr) current_process, ProcessContextPtr context,
-                                   ProcessAbortReason reason, uint64_t esr, uint64_t ec)
+static uint64_t Exception__abort_user(KernelPtr kernel, OptionalPtr(ProcessPtr) current_process,
+                                      ProcessContextPtr context, ProcessAbortReason reason, ExceptionSyndrome syndrome,
+                                      uint64_t ec)
 {
     match_optional(
         *current_process,
@@ -112,16 +114,16 @@ static uint64_t abort_user_process(KernelPtr kernel, OptionalPtr(ProcessPtr) cur
         {
             ProcessAbort abort;
             abort.reason = reason;
-            abort.exception_description = AArch64Exception__class_name(ec);
+            abort.exception_description = Exception__class_name(ec);
             abort.fault_status_description =
-                AArch64Exception__has_fault_status(ec) ? AArch64Exception__fault_status_name(esr) : "not applicable";
+                Exception__has_fault_status(ec) ? Exception__fault_status_name(syndrome) : "not applicable";
             abort.access_description =
-                reason == PROCESS_ABORT_DATA_ABORT ? AArch64Exception__data_abort_access_name(esr) : "not applicable";
+                reason == PROCESS_ABORT_DATA_ABORT ? Exception__data_abort_access_name(syndrome) : "not applicable";
             abort.pc = context->elr;
-            abort.fault_address = get_far_el1();
+            abort.fault_address = Exception__fault_address();
             abort.exception_code = ec;
-            abort.fault_status_code = AArch64Exception__fault_status_code(esr);
-            abort.syndrome = esr;
+            abort.fault_status_code = Exception__fault_status_code(syndrome);
+            abort.syndrome = syndrome;
             abort.cpu = CPU__id();
 
             match_result(
@@ -142,7 +144,7 @@ static uint64_t abort_user_process(KernelPtr kernel, OptionalPtr(ProcessPtr) cur
     return 0;
 }
 
-static bool yield_if_process_parked(KernelPtr kernel, OptionalPtr(ProcessPtr) current_process)
+static bool Exception__yield_if_parked(KernelPtr kernel, OptionalPtr(ProcessPtr) current_process)
 {
     match_optional(
         *current_process,
@@ -151,7 +153,7 @@ static bool yield_if_process_parked(KernelPtr kernel, OptionalPtr(ProcessPtr) cu
             if (Process__is_parked(process))
             {
                 __d_printf(SYSCALL, "syscall parked pid=%i name=%s yielding\n", process->pid, cstr(process->name));
-                Scheduler__yield_waiting(kernel->scheduler, process, CPU__id() - 1);
+                Scheduler__yield_waiting(kernel->scheduler, process, CPU__id());
                 return true;
             }
         },
@@ -161,18 +163,20 @@ static bool yield_if_process_parked(KernelPtr kernel, OptionalPtr(ProcessPtr) cu
     return false;
 }
 
-uint64_t handle_sync(ProcessContextPtr context, bool current_el)
+static uint64_t Exception__handle_sync(ProcessContextPtr context, bool current_el)
 {
-    uint64_t esr = get_esr_el1();
-    uint64_t ec = (esr >> 26) & 0x3F; // Exception class
-    uint64_t elr = get_elr_el1();
-    uint64_t far = get_far_el1();
+    ExceptionSyndrome syndrome = Exception__syndrome();
+    uint64_t ec = (syndrome >> 26) & 0x3F; // Exception class
+    Address elr = Exception__return_address();
+    Address far = Exception__fault_address();
 
-    __d_printf(SYSCALL, "sync call: ec=0x%x esr=%p elr=%p far=%p context_elr=%p x8=%p x0=%p current_el=%i cpu=%i\n", ec,
-               esr, elr, far, context->elr, context->x[8], context->x[0], current_el, CPU__id() - 1);
+    __d_printf(SYSCALL,
+               "sync call: ec=0x%x syndrome=%p elr=%p far=%p context_elr=%p x8=%p x0=%p current_el=%i cpu=%i\n", ec,
+               syndrome, elr, far, context->elr, context->x[8], context->x[0], current_el, CPU__id());
 
     KernelPtr kernel = Kernel__instance();
-    Optional(ProcessPtr) current_process = Scheduler__save_context(kernel->scheduler, CPU__id() - 1, context);
+    Optional(ProcessPtr) current_process =
+        Scheduler__save_context(kernel->scheduler, CPU__id(), &Some(ProcessContextPtr, context));
 
     // Handle synchronous exceptions (e.g., undefined instruction, SVC, data abort)
     switch (ec)
@@ -220,7 +224,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el)
                     }
                 );
                 __d_printf(SYSCALL, "syscall result: res=%p\n", call_result);
-                if (yield_if_process_parked(kernel, &current_process))
+                if (Exception__yield_if_parked(kernel, &current_process))
                 {
                     return 0;
                 }
@@ -228,7 +232,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el)
             },
             error(code, message)
             {
-                if (yield_if_process_parked(kernel, &current_process))
+                if (Exception__yield_if_parked(kernel, &current_process))
                 {
                     return 0;
                 }
@@ -258,7 +262,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el)
         {
             Kernel__panic("Instruction abort from current EL", context);
         }
-        return abort_user_process(kernel, &current_process, context, PROCESS_ABORT_INSTRUCTION_ABORT, esr, ec);
+        return Exception__abort_user(kernel, &current_process, context, PROCESS_ABORT_INSTRUCTION_ABORT, syndrome, ec);
         break;
     case 0x21: // Instruction abort from current EL
         Kernel__panic("Instruction abort from current EL", context);
@@ -269,7 +273,7 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el)
         {
             Kernel__panic("Data abort from current EL", context);
         }
-        return abort_user_process(kernel, &current_process, context, PROCESS_ABORT_DATA_ABORT, esr, ec);
+        return Exception__abort_user(kernel, &current_process, context, PROCESS_ABORT_DATA_ABORT, syndrome, ec);
         break;
     case 0x25: // Data abort from current EL
         Kernel__panic("Data abort from current EL", context);
@@ -284,119 +288,108 @@ uint64_t handle_sync(ProcessContextPtr context, bool current_el)
 }
 
 // Current EL with SP0 handlers
-uint64_t c_sync_handler_current_el_sp0(ProcessContextPtr context)
+uint64_t Exception__handle_sync_current_sp0(ProcessContextPtr context)
 {
-    __d_println(IRQ, "\nc_sync_handler_current_el_sp0");
-    return handle_sync(context, true);
+    __d_println(IRQ, "\nException__handle_sync_current_sp0");
+    return Exception__handle_sync(context, true);
 }
 
-void c_irq_handler_current_el_sp0(ProcessContextPtr context)
+void Exception__handle_irq_current_sp0(ProcessContextPtr context)
 {
     // Handle IRQ interrupt
     // Process pending interrupts from interrupt controller
-    __d_println(IRQ, "\nc_irq_handler_current_el_sp0");
-    irq_handler(context, true);
+    __d_println(IRQ, "\nException__handle_irq_current_sp0");
+    Exception__handle_irq(context, true);
 }
 
-void c_fiq_handler_current_el_sp0(ProcessContextPtr context)
+void Exception__handle_fiq_current_sp0(ProcessContextPtr context)
 {
     // Handle FIQ (fast interrupt)
-    __d_println(IRQ, "\nc_fiq_handler_current_el_sp0");
+    __d_println(IRQ, "\nException__handle_fiq_current_sp0");
 }
 
-void c_serror_handler_current_el_sp0(ProcessContextPtr context)
+void Exception__handle_serror_current_sp0(ProcessContextPtr context)
 {
     // Handle system error (SError)
     // This is typically fatal
-    __d_println(PANIC, "\nc_serror_handler_current_el_sp0");
+    __d_println(PANIC, "\nException__handle_serror_current_sp0");
 }
 
 // Current EL with SPx handlers
-uint64_t c_sync_handler_current_el_spx(ProcessContextPtr context)
+uint64_t Exception__handle_sync_current_spx(ProcessContextPtr context)
 {
-    __d_println(IRQ, "\nc_sync_handler_current_el_spx");
-    return handle_sync(context, true);
+    __d_println(IRQ, "\nException__handle_sync_current_spx");
+    return Exception__handle_sync(context, true);
     // Handle synchronous exceptions from current EL
 }
 
-void c_irq_handler_current_el_spx(ProcessContextPtr context)
+void Exception__handle_irq_current_spx(ProcessContextPtr context)
 {
     // Handle IRQ from current EL with SPx
-    __d_println(IRQ, "\nc_irq_handler_current_el_spx");
-    irq_handler(context, true);
+    __d_println(IRQ, "\nException__handle_irq_current_spx");
+    Exception__handle_irq(context, true);
 }
 
-void c_fiq_handler_current_el_spx(ProcessContextPtr context)
+void Exception__handle_fiq_current_spx(ProcessContextPtr context)
 {
     // Handle FIQ from current EL with SPx
-    __d_println(IRQ, "\nc_fiq_handler_current_el_spx");
+    __d_println(IRQ, "\nException__handle_fiq_current_spx");
 }
 
-void c_serror_handler_current_el_spx(ProcessContextPtr context)
+void Exception__handle_serror_current_spx(ProcessContextPtr context)
 {
     // Handle SError from current EL with SPx
-    __d_println(PANIC, "\nc_serror_handler_current_el_spx");
+    __d_println(PANIC, "\nException__handle_serror_current_spx");
 }
 
 // Lower EL using AArch64 handlers
-void c_sync_handler_lower_el_aarch64(ProcessContextPtr context)
+void Exception__handle_sync_lower_aarch64(ProcessContextPtr context)
 {
-    __d_println(IRQ, "\nc_sync_handler_lower_el_aarch64");
-    handle_sync(context, false);
+    __d_println(IRQ, "\nException__handle_sync_lower_aarch64");
+    Exception__handle_sync(context, false);
 }
 
-void c_irq_handler_lower_el_aarch64(ProcessContextPtr context)
+void Exception__handle_irq_lower_aarch64(ProcessContextPtr context)
 {
     // Handle IRQ from lower EL (AArch64)
-    __d_println(IRQ, "\nc_irq_handler_current_el_aarch64");
-    irq_handler(context, false);
+    __d_println(IRQ, "\nException__handle_irq_lower_aarch64");
+    Exception__handle_irq(context, false);
 }
 
-void c_fiq_handler_lower_el_aarch64(ProcessContextPtr context)
+void Exception__handle_fiq_lower_aarch64(ProcessContextPtr context)
 {
     // Handle FIQ from lower EL (AArch64)
-    __d_println(IRQ, "\nc_fiq_handler_current_el_aarch64");
+    __d_println(IRQ, "\nException__handle_fiq_lower_aarch64");
 }
 
-void c_serror_handler_lower_el_aarch64(ProcessContextPtr context)
+void Exception__handle_serror_lower_aarch64(ProcessContextPtr context)
 {
     // Handle SError from lower EL (AArch64)
-    __d_println(PANIC, "\nc_serror_handler_current_el_aarch64");
+    __d_println(PANIC, "\nException__handle_serror_lower_aarch64");
 }
 
 // Lower EL using AArch32 handlers
-void c_sync_handler_lower_el_aarch32(ProcessContextPtr context)
+void Exception__handle_sync_lower_aarch32(ProcessContextPtr context)
 {
     // Handle synchronous exceptions from AArch32 lower EL
-    __d_println(IRQ, "\nc_sync_handler_lower_el_aarch32");
+    __d_println(IRQ, "\nException__handle_sync_lower_aarch32");
 }
 
-void c_irq_handler_lower_el_aarch32(ProcessContextPtr context)
+void Exception__handle_irq_lower_aarch32(ProcessContextPtr context)
 {
     // Handle IRQ from lower EL (AArch32)
-    __d_println(IRQ, "\nc_irq_handler_lower_el_aarch32");
-    irq_handler(context, false);
+    __d_println(IRQ, "\nException__handle_irq_lower_aarch32");
+    Exception__handle_irq(context, false);
 }
 
-void c_fiq_handler_lower_el_aarch32(ProcessContextPtr context)
+void Exception__handle_fiq_lower_aarch32(ProcessContextPtr context)
 {
     // Handle FIQ from lower EL (AArch32)
-    __d_println(IRQ, "\nc_fiq_handler_lower_el_aarch32");
+    __d_println(IRQ, "\nException__handle_fiq_lower_aarch32");
 }
 
-void c_serror_handler_lower_el_aarch32(ProcessContextPtr context)
+void Exception__handle_serror_lower_aarch32(ProcessContextPtr context)
 {
     // Handle SError from lower EL (AArch32)
-    __d_println(PANIC, "\nc_serror_handler_lower_el_aarch32");
-}
-
-// Initialize vector table
-void init_vector_table(void)
-{
-    extern void * vector_table;
-    uint64_t vbar = (uint64_t)&vector_table;
-
-    // Set VBAR_EL1 (or appropriate EL)
-    __asm__ volatile("msr vbar_el1, %0" : : "r"(vbar));
-    __asm__ volatile("isb");
+    __d_println(PANIC, "\nException__handle_serror_lower_aarch32");
 }

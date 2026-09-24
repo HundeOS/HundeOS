@@ -6,6 +6,7 @@
 #include "../types/result.h"
 #include "../types/fixed_array.h"
 #include "../types/map.h"
+#include "../types/hashtable.h"
 #include "types.h"
 #include "kernel_context.h"
 #include "parked.h"
@@ -20,14 +21,21 @@
 #include "syscalls/mem.h"
 
 typedef uint64_t SchedulerInitStatus;
+typedef uint64_t SchedulerScheduleStatus;
 
 ResultDef(SchedulerInitStatus);
+ResultDef(SchedulerScheduleStatus);
 
 typedef enum SchedulerInitStatuses
 {
     SCHEDULER_INIT_OK = 0,
     SCHEDULER_INIT_ERROR = -1,
 } SchedulerInitStatuses;
+
+typedef enum SchedulerScheduleStatuses
+{
+    SCHEDULER_SCHEDULE_OK = 0,
+} SchedulerScheduleStatuses;
 
 typedef enum SchedulerErrors
 {
@@ -45,6 +53,7 @@ typedef struct CPUScheduler
     mutex_t scheduler_lock;
     Tick last_tick;
     CPUID cpu;
+    uint64_t registry_slot;
     bool started;
     uint64_t last_registry_sample_usec;
     Optional(ProcessPtr) switching_out;
@@ -56,7 +65,8 @@ OptionalDef(CPUSchedulerPtr);
 ResultDef(CPUSchedulerPtr);
 OptionalDef(KernelPtr);
 
-FixedArrayDefine(CPUSchedulerPtr, MAX_CPUS, CPUSchedulers, &Ptr__equals);
+HashtableDefine(CPUID, CPUSchedulerPtr, MAX_CPUS, MAX_CPUS, CPUSchedulers, &hash__uint64, SimpleEquals(uint64_t),
+                &Ptr__equals);
 
 typedef struct ManagedSharedPage
 {
@@ -78,6 +88,10 @@ typedef struct Scheduler
     Optional(KernelPtr) kernel;
     Optional(InterruptControllerInfo) interrupt_controller;
     CPUSchedulers schedulers;
+    Address idle_program_start;
+    Address idle_program_end;
+    BString idle_program_name;
+    ProcessTable admission;
     ServiceEventDispatcher service_event_dispatcher;
     ManagedSharedPages shared_pages;
     uint64_t shared_page_generation;
@@ -92,7 +106,8 @@ typedef struct Scheduler
 SchedulerPtr Scheduler__heap_new(void);
 
 Result(SchedulerInitStatus) Scheduler__init(KernelPtr kernel, SchedulerPtr self, Elf idle_process);
-void Scheduler__preempt(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
+Result(SchedulerInitStatus) Scheduler__register_cpu(SchedulerPtr self, CPUID cpu);
+void Scheduler__preempt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessContextPtr) context);
 void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID cpu);
 Result(ProcessID) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc, ReturnCode return_code);
 Result(ProcessID) Scheduler__abort_process(SchedulerPtr scheduler, ProcessPtr proc, ProcessAbort abort);
@@ -147,9 +162,10 @@ ProcessListResult Scheduler__process_info_snapshot(SchedulerPtr self, ProcessInf
 
 uint64_t Scheduler__process_count(SchedulerPtr self);
 
-Optional(ProcessPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, ProcessContextPtr context);
+Optional(ProcessPtr)
+    Scheduler__save_context(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessContextPtr) context);
 
-Result(CPUID) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc);
+Result(SchedulerScheduleStatus) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc);
 Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc, CPUID cpu);
 Result(CPUID) Scheduler__cpu_for_process(SchedulerPtr self, ProcessPtr process);
 Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu);
@@ -187,9 +203,9 @@ bool Scheduler__parked_operation_is_ready(SchedulerPtr self, ParkedOperationPtr 
     (Scheduler)                                                                                                        \
     {                                                                                                                  \
         .kernel = None(KernelPtr), .interrupt_controller = None(InterruptControllerInfo),                              \
-        .schedulers = EmptyArray(CPUSchedulers), .service_event_dispatcher = NEW_SERVICE_EVENT_DISPATCHER,             \
-        .shared_pages = EmptyArray(ManagedSharedPages), .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT,           \
-        .ready = false,                                                                                                \
+        .schedulers = EmptyHashtable(CPUSchedulers), .admission = EmptyArray(ProcessTable),                            \
+        .service_event_dispatcher = NEW_SERVICE_EVENT_DISPATCHER, .shared_pages = EmptyArray(ManagedSharedPages),      \
+        .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT, .ready = false,                                           \
     }
 
 #endif

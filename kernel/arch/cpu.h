@@ -14,6 +14,7 @@ ResultDef(CPUID);
 typedef struct CPU CPU;
 
 extern CPUID CPU__id();
+bool CPU__is_boot_cpu(void);
 uint64_t CPU__time_usec(void);
 
 extern void CPU__noop();
@@ -24,6 +25,8 @@ extern void CPU__wait_for_event();
 extern void CPU__signal_event();
 extern void CPU__check_halt();
 extern void CPU__halt_all();
+
+void CPU__halt_forever(void) __attribute__((noreturn));
 
 extern Result(InitCode) CPU__init(SystemInfoPtr system_info);
 

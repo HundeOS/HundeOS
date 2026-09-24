@@ -4,7 +4,6 @@
 #include "../../../kernel/process.h"
 
 void current_process_reset();
-bool context_saved_with_scheduler_lock(void);
 bool context_switched_with_scheduler_lock(void);
 typedef struct TestStartupStdio
 {

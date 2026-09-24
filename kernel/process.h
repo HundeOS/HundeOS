@@ -19,11 +19,10 @@
 #include "scheduler/types.h"
 #include "scheduler/cpu_usage.h"
 #include "scheduler/queue_wait_usage.h"
+#include "arch/exception.h"
+#include "arch/process_context.h"
 
 OptionalDef(UserAddress);
-
-typedef struct ProcessContext ProcessContext;
-typedef struct ProcessContext * ProcessContextPtr;
 
 typedef struct ParkedOperation ParkedOperation;
 typedef ParkedOperation * ParkedOperationPtr;
@@ -73,7 +72,7 @@ typedef struct ProcessAbort
     Address fault_address;
     uint64_t exception_code;
     uint64_t fault_status_code;
-    uint64_t syndrome;
+    ExceptionSyndrome syndrome;
     uint64_t cpu;
 } ProcessAbort;
 
@@ -167,7 +166,7 @@ typedef struct Process
     KernelPtr kernel;
     ProcessPageTable page_table;
 
-    ProcessContextPtr context;
+    Optional(ProcessContextPtr) context;
     Stack stack;
     Optional(ProcessPtr) parent;
     ProcessID pid;
@@ -214,6 +213,11 @@ OptionalType(ProcessTable *, ProcessTablePtr);
 Result(ProcessPtr) Process__setup(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent);
 Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent,
                                             ConstProcessArgumentsPtr arguments);
+Result(ProcessContextSaveCode) Process__store_context(ProcessPtr self, ProcessContextPtr context);
+Result(ProcessContextSaveCode) Process__save_context(ProcessPtr self, const OptionalPtr(ProcessContextPtr) context);
+ProcessContextPtr Process__required_context(ProcessPtr self);
+void Process__activate_address_space(ProcessPtr self);
+void Process__context_switch(ProcessPtr self);
 Result(ProcessSetupStatus) Process__dispose(ProcessPtr self);
 Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation);
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self);

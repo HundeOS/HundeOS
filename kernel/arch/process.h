@@ -10,10 +10,9 @@ typedef uint64_t ProcessID;
 typedef struct Process Process;
 typedef Process * ProcessPtr;
 
-void Process__activate_address_space(ProcessPtr self);
+void Process__switch_address_space(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table);
+void Process__switch_context(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table);
 uint16_t Arch__elf_machine(void);
-void Process__context_switch(ProcessPtr self);
-void Process__save_context(ProcessPtr self, ProcessContextPtr context);
 void Process__set_syscall_result(ProcessPtr self, SystemCallResult result);
 void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error);
 

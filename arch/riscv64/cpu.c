@@ -1,11 +1,9 @@
 #include "cpu.h"
 
-#include <stdbool.h>
 #include <stdatomic.h>
 
 #include "../../kernel/all_defs.h"
 #include "../../kernel/arch/cpu.h"
-#include "../../kernel/debug.h"
 #include "exception.h"
 
 #define RISCV_COUNTER_TIME (1ULL << 1U)
@@ -15,8 +13,7 @@
 #define PLIC_CONTEXT_HART_STRIDE 0x2000ULL
 
 static uint64_t timebase_frequency;
-static atomic_bool halt_requested = false;
-static atomic_uint_fast64_t physical_hart_ids[MAX_CPUS];
+static CPUID boot_cpu_id;
 
 static uint64_t RiscVCPU__time(void)
 {
@@ -34,18 +31,22 @@ CPUID CPU__id(void)
 {
     uint64_t hart_id;
     __asm__ volatile("mv %0, tp" : "=r"(hart_id));
-    return hart_id + 1U;
+    return hart_id;
 }
 
-void RiscVCPU__assign_hart(CPUID logical_id, uint64_t physical_hart_id)
+void CPU__set_boot_id(CPUID id)
 {
-    atomic_store_explicit(&physical_hart_ids[logical_id - 1U], physical_hart_id, memory_order_release);
-    CPU__assign_id(logical_id);
+    boot_cpu_id = id;
+}
+
+bool CPU__is_boot_cpu(void)
+{
+    return CPU__id() == boot_cpu_id;
 }
 
 uint64_t RiscVCPU__physical_hart_id(void)
 {
-    return atomic_load_explicit(&physical_hart_ids[CPU__id() - 1U], memory_order_acquire);
+    return CPU__id();
 }
 
 uint64_t CPU__time_usec(void)
@@ -81,20 +82,12 @@ void CPU__wait_for_interrupt(void)
     __asm__ volatile("wfi" ::: "memory");
 }
 
-void CPU__wait(void)
-{
-    while (true)
-    {
-        CPU__wait_for_interrupt();
-    }
-}
-
 void CPU__yield(void)
 {
     __asm__ volatile("nop");
 }
 
-static __attribute__((noreturn)) void RiscVCPU__halt_forever(void)
+__attribute__((noreturn)) void CPU__halt_forever(void)
 {
     __asm__ volatile("csrci sstatus, 2" ::: "memory");
     while (true)
@@ -103,15 +96,9 @@ static __attribute__((noreturn)) void RiscVCPU__halt_forever(void)
     }
 }
 
-void CPU__halt_all(void)
-{
-    atomic_store_explicit(&halt_requested, true, memory_order_release);
-    RiscVCPU__halt_forever();
-}
-
 Result(InitCode) CPU__init(SystemInfoPtr system_info)
 {
-    RiscVException__install();
+    Exception__install();
     RiscVCPU__configure_timebase(system_info->timer_frequency);
     __asm__ volatile("csrs scounteren, %0" : : "r"(RISCV_COUNTER_TIME) : "memory");
     if (system_info->interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC)
@@ -130,17 +117,7 @@ Result(InitCode) CPU__init(SystemInfoPtr system_info)
     return Success(InitCode, ARCH_INIT_OK);
 }
 
-void CPU__check_halt(void)
-{
-    if (atomic_load_explicit(&halt_requested, memory_order_acquire))
-    {
-        __d_printf(PANIC, "CPU %i is halting\n", CPU__id());
-        RiscVCPU__halt_forever();
-    }
-}
-
 void CPU__assign_id(CPUID id)
 {
-    uint64_t hart_id = id - 1U;
-    __asm__ volatile("mv tp, %0" : : "r"(hart_id));
+    __asm__ volatile("mv tp, %0" : : "r"(id));
 }

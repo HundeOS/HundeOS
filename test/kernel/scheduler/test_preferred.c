@@ -116,7 +116,7 @@ static void wait_on(ProcessPtr process, QueuePtr queue)
 
 static CPUSchedulerPtr cpu(CPUID id)
 {
-    return unwrap_optional(CPUSchedulers__at(&scheduler->schedulers, id), (CPUSchedulerPtr){});
+    return unwrap_optional(CPUSchedulers__get(&scheduler->schedulers, id), (CPUSchedulerPtr){});
 }
 
 void setUp(void)
@@ -166,8 +166,7 @@ void test_preemption_selects_under_lock_and_switches_after_unlock(void)
     current_process_reset();
     p1->state = PROC_STATE_RUNNING;
     ProcessContext context = {0};
-    Scheduler__preempt(scheduler, 0, &context);
-    TEST_ASSERT_TRUE(context_saved_with_scheduler_lock());
+    Scheduler__preempt(scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_NOT_NULL(current_running_process());
     TEST_ASSERT_NOT_EQUAL(p1, current_running_process());
     TEST_ASSERT_FALSE(context_switched_with_scheduler_lock());
@@ -279,7 +278,7 @@ void test_ready_exec_continuation_preempts_an_active_preferred_process(void)
     p2->preferred_active = true;
 
     current_process_reset();
-    Scheduler__preempt(scheduler, 0, NULL); // hundelint: ignore-no-null
+    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
 
     TEST_ASSERT_EQUAL_PTR(p1, current_running_process());
 }

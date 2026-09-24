@@ -22,10 +22,7 @@ static OriginatingContext context;
 
 static const CPUID cpu = 0;
 
-static ProcessContextPtr no_process_context(void)
-{
-    return NULL; // hundelint: ignore-no-null
-}
+static const Optional(ProcessContextPtr) no_process_context = None(ProcessContextPtr);
 
 static size_t test_hello_world_elf_size(void)
 {
@@ -67,7 +64,7 @@ void setUp(void)
     context = OriginatingContext__syscall(kernel, &syscall_context);
 
     Scheduler__schedule(kernel->scheduler, parent);
-    Scheduler__preempt(kernel->scheduler, cpu, no_process_context());
+    Scheduler__preempt(kernel->scheduler, cpu, &no_process_context);
 }
 
 void tearDown(void)
@@ -151,7 +148,7 @@ void test_exec_spawns_process_and_sets_up_a_defferred_return()
         success(spawned_process)
         {
             Scheduler__exit(kernel->scheduler, spawned_process, return_code);
-            Scheduler__preempt(kernel->scheduler, cpu, no_process_context());
+            Scheduler__preempt(kernel->scheduler, cpu, &no_process_context);
 
             TEST_ASSERT_EQUAL(return_code, unwrap_result(deferred_syscall_result(), 0));
         },
@@ -172,7 +169,7 @@ void test_exec_wait_schedules_child_on_parent_cpu(void)
     OriginatingContext cpu1_context = OriginatingContext__syscall(kernel, &syscall_context);
 
     Scheduler__schedule(kernel->scheduler, cpu1_parent);
-    Scheduler__preempt(kernel->scheduler, 1, no_process_context());
+    Scheduler__preempt(kernel->scheduler, 1, &no_process_context);
 
     ProcessArguments arguments = ProcessArguments__new();
     match_result(

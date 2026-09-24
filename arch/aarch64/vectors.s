@@ -67,7 +67,7 @@ lower_el_aarch32_serror:
 sync_handler_current_el_sp0:
     save_context
     mov x0, sp
-    bl c_sync_handler_current_el_sp0
+    bl Exception__handle_sync_current_sp0
     restore_context_preserve_x0
     eret
 
@@ -75,7 +75,7 @@ sync_handler_current_el_sp0:
 irq_handler_current_el_sp0:
     save_context
     mov x0, sp
-    bl c_irq_handler_current_el_sp0
+    bl Exception__handle_irq_current_sp0
     restore_context
     eret
 
@@ -83,7 +83,7 @@ irq_handler_current_el_sp0:
 fiq_handler_current_el_sp0:
     save_context
     mov x0, sp
-    bl c_fiq_handler_current_el_sp0
+    bl Exception__handle_fiq_current_sp0
     restore_context
     eret
 
@@ -91,7 +91,7 @@ fiq_handler_current_el_sp0:
 serror_handler_current_el_sp0:
     save_context
     mov x0, sp
-    bl c_serror_handler_current_el_sp0
+    bl Exception__handle_serror_current_sp0
     restore_context
     eret
 
@@ -100,7 +100,7 @@ serror_handler_current_el_sp0:
 sync_handler_current_el_spx:
     save_context
     mov x0, sp
-    bl c_sync_handler_current_el_spx
+    bl Exception__handle_sync_current_spx
     restore_context_preserve_x0
     eret
 
@@ -108,7 +108,7 @@ sync_handler_current_el_spx:
 irq_handler_current_el_spx:
     save_context
     mov x0, sp
-    bl c_irq_handler_current_el_spx
+    bl Exception__handle_irq_current_spx
     restore_context
     eret
 
@@ -116,7 +116,7 @@ irq_handler_current_el_spx:
 fiq_handler_current_el_spx:
     save_context
     mov x0, sp
-    bl c_fiq_handler_current_el_spx
+    bl Exception__handle_fiq_current_spx
     restore_context
     eret
 
@@ -124,7 +124,7 @@ fiq_handler_current_el_spx:
 serror_handler_current_el_spx:
     save_context
     mov x0, sp
-    bl c_serror_handler_current_el_spx
+    bl Exception__handle_serror_current_spx
     restore_context
     eret
 
@@ -133,7 +133,7 @@ serror_handler_current_el_spx:
 sync_handler_lower_el_aarch64:
     save_context
     mov x0, sp
-    bl c_sync_handler_lower_el_aarch64
+    bl Exception__handle_sync_lower_aarch64
     restore_context_preserve_x0
     eret
 
@@ -142,7 +142,7 @@ irq_handler_lower_el_aarch64:
     save_context
 
     mov x0, sp
-    bl c_irq_handler_lower_el_aarch64
+    bl Exception__handle_irq_lower_aarch64
     restore_context
     eret
 
@@ -150,7 +150,7 @@ irq_handler_lower_el_aarch64:
 fiq_handler_lower_el_aarch64:
     save_context
     mov x0, sp
-    bl c_fiq_handler_lower_el_aarch64
+    bl Exception__handle_fiq_lower_aarch64
     restore_context
     eret
 
@@ -158,7 +158,7 @@ fiq_handler_lower_el_aarch64:
 serror_handler_lower_el_aarch64:
     save_context
     mov x0, sp
-    bl c_serror_handler_lower_el_aarch64
+    bl Exception__handle_serror_lower_aarch64
     restore_context
     eret
 
@@ -167,7 +167,7 @@ serror_handler_lower_el_aarch64:
 sync_handler_lower_el_aarch32:
     save_context
     mov x0, sp
-    bl c_sync_handler_lower_el_aarch32
+    bl Exception__handle_sync_lower_aarch32
     restore_context_preserve_x0
     eret
 
@@ -175,7 +175,7 @@ sync_handler_lower_el_aarch32:
 irq_handler_lower_el_aarch32:
     save_context
     mov x0, sp
-    bl c_irq_handler_lower_el_aarch32
+    bl Exception__handle_irq_lower_aarch32
     restore_context
     eret
 
@@ -183,7 +183,7 @@ irq_handler_lower_el_aarch32:
 fiq_handler_lower_el_aarch32:
     save_context
     mov x0, sp
-    bl c_fiq_handler_lower_el_aarch32
+    bl Exception__handle_fiq_lower_aarch32
     restore_context
     eret
 
@@ -191,6 +191,6 @@ fiq_handler_lower_el_aarch32:
 serror_handler_lower_el_aarch32:
     save_context
     mov x0, sp
-    bl c_serror_handler_lower_el_aarch32
+    bl Exception__handle_serror_lower_aarch32
     restore_context
     eret

@@ -64,6 +64,5 @@ __BOOT__(void) cpu_booted()
     enable_tbi_for_kernel();
     enable_mmu();
 
-    // Supported platforms number cores by Aff0; kernel IDs are one-based.
-    secondary_booted((rd_mpidr() & 0xff) + 1);
+    secondary_booted(rd_mpidr() & 0xff);
 }

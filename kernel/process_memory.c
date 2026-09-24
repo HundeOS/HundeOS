@@ -1,6 +1,46 @@
 #include "kernel_core.h"
 #include "arch/page_table.h"
 
+LinkedListBodyDefine(ProcessPageTablePages);
+
+bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other)
+{
+    return self->valid == other->valid && self->virtual_addr == other->virtual_addr &&
+           self->phys_addr == other->phys_addr;
+}
+
+Result(KAllocCode) ProcessPageTable__record_page(ProcessPageTablePtr self, KernelAddress page)
+{
+    match_result(
+        ProcessPageTablePages__push(&self->pages, page),
+        success(_)
+        {
+            return Success(KAllocCode, KALLOC_OK);
+        },
+        error(code, message)
+        {
+            return Error(KAllocCode, message, KALLOC_ALLOCATION_FAILED);
+        }
+    );
+
+    return Error(KAllocCode, bstr("Page table allocation failed"), KALLOC_ALLOCATION_FAILED);
+}
+
+KernelAddress ProcessPageTable__root(ProcessPageTablePtr self)
+{
+    return self->root;
+}
+
+PageTablePtr ProcessPageTable__root_table(ProcessPageTablePtr self)
+{
+    return v_ptr(ProcessPageTable__root(self), PageTable);
+}
+
+size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
+{
+    return ProcessPageTablePages__len(&self->pages);
+}
+
 static void PageTable__account(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size,
                                MemoryMappingKind kind)
 {
@@ -66,10 +106,28 @@ void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtua
 Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self, KernelPtr kernel)
 {
     Address space = ProcessPageTable__root(self).virtual_addr;
+
+    for_each_ll(
+        ProcessPageTablePages,
+        self->pages,
+        page,
+        {
+            match_result(
+                Kernel__free(page.virtual_addr),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(KAllocCode, message, code);
+                }
+            );
+        }
+    );
+
     match_result(
-        ArchProcessPageTable__dispose(self),
+        ProcessPageTablePages__dispose(&self->pages),
         success(code)
         {
+            self->root = NULL_KERNEL_ADDRESS;
             MemoryAccounting__forget(&kernel->memory_accounting, space);
             return Success(KAllocCode, code);
         },

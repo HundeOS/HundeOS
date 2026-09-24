@@ -88,7 +88,7 @@ void Kernel_main(CPUID cpu_id)
 {
     KernelPtr kernel = Kernel__instance();
     __d_printf(PROGRESS, "Kernel starting init: %i\n", cpu_id);
-    if (cpu_id == 1)
+    if (CPU__is_boot_cpu())
     {
         __d_printf(PROGRESS, "Kernel starting init: %i\n", cpu_id);
         Kernel__init(kernel);
@@ -131,7 +131,18 @@ void Kernel_main(CPUID cpu_id)
         }
     );
 
-    if (cpu_id == 1)
+    match_result(
+        Scheduler__register_cpu(kernel->scheduler, cpu_id),
+        success_do_nothing(),
+        error(code, message)
+        {
+            __d_printf(PANIC, "CPU scheduler registration failed: %i\n", cpu_id);
+            Kernel__panic(BString__cstr(&message), NULL); // hundelint: ignore-no-null
+            return;
+        }
+    );
+
+    if (CPU__is_boot_cpu())
     {
         __d_printf(PROGRESS, "Kernel starting loading program: %i\n", cpu_id);
         schedule(kernel, &bstr("services/hunde-mama"));
@@ -157,7 +168,7 @@ void Kernel_main(CPUID cpu_id)
     __d_printf(PROGRESS, "Kernel starting scheduler: %i\n", cpu_id);
 
     // starts the idle process and wont return
-    Scheduler__start(kernel->scheduler, cpu_id - 1);
+    Scheduler__start(kernel->scheduler, cpu_id);
 
     CPU__wait();
     Kernel__halt();

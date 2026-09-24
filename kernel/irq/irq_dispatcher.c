@@ -6,6 +6,7 @@
 
 static BString missing_dispatcher = bstr("Missing IRQ dispatcher");
 static BString missing_kernel_consumer = bstr("Missing IRQ kernel consumer");
+static BString missing_kernel = bstr("Missing kernel for IRQ consumer");
 static BString missing_service_process = bstr("Missing IRQ service process");
 static BString missing_scheduler = bstr("Missing scheduler for IRQ service consumer");
 static BString missing_interrupt_controller = bstr("Missing interrupt controller info");
@@ -17,20 +18,20 @@ MapBodyDefine(IRQConsumerMap);
 FixedArrayDefine(IRQNumber, 256, IRQNumbers, SimpleEquals(uint64_t));
 FixedArrayBodyDefine(IRQNumbers);
 
-static IRQConsumer IRQConsumer__new(IRQConsumerType type, IRQKernelConsumer kernel_consumer, void * kernel_data,
-                                    ProcessPtr service_process)
+static IRQConsumer IRQConsumer__new(IRQConsumerType type, IRQKernelConsumer kernel_consumer,
+                                    OptionalPtr(KernelPtr) kernel, ProcessPtr service_process)
 {
     return (IRQConsumer){
         .type = type,
         .kernel_consumer = kernel_consumer,
-        .kernel_data = kernel_data,
+        .kernel = *kernel,
         .service_process = service_process,
         .delivery_sequence = 0,
     };
 }
 
 Result(IRQRegistrationStatus)
-    IRQDispatcher__register_kernel(IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, void * data)
+    IRQDispatcher__register_kernel(IRQDispatcherPtr self, IRQNumber irq, IRQKernelConsumer consumer, KernelPtr kernel)
 {
     if (self == NULL) // hundelint: ignore-no-null
     {
@@ -41,7 +42,7 @@ Result(IRQRegistrationStatus)
         return Error(IRQRegistrationStatus, missing_kernel_consumer, IRQ_INVALID_CONSUMER);
     }
 
-    IRQConsumer irq_consumer = IRQConsumer__new(IRQ_CONSUMER_KERNEL, consumer, data,
+    IRQConsumer irq_consumer = IRQConsumer__new(IRQ_CONSUMER_KERNEL, consumer, &Some(KernelPtr, kernel),
                                                 NULL // hundelint: ignore-no-null
     );
 
@@ -86,8 +87,7 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr s
 
     IRQConsumer irq_consumer = IRQConsumer__new(IRQ_CONSUMER_SERVICE,
                                                 NULL, // hundelint: ignore-no-null
-                                                NULL, // hundelint: ignore-no-null
-                                                process);
+                                                &None(KernelPtr), process);
 
     critical_section(
         self->lock,
@@ -103,7 +103,7 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr s
             IRQConsumerMap__set(&self->consumers, irq, irq_consumer);
         }
     );
-    __d_printf(IODEV, "irq register service irq=%i pid=%i name=%s\n", irq, process->pid, cstr(process->name));
+    __d_printf(IRQ, "irq register service irq=%i pid=%i name=%s\n", irq, process->pid, cstr(process->name));
 
     match_result(
         Scheduler__subscribe_irq(self->scheduler, process, irq),
@@ -239,8 +239,7 @@ Result(IRQRegistrationStatus)
             IRQConsumerMap__set(&self->consumers, irq,
                                 IRQConsumer__new(IRQ_CONSUMER_MANAGER,
                              NULL, // hundelint: ignore-no-null
-                             NULL, // hundelint: ignore-no-null
-                                                 manager));
+                                                 &None(KernelPtr), manager));
         }
     );
 
@@ -371,7 +370,7 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumb
 {
     if (irq >= 32)
     {
-        __d_printf(IODEV, "irq dispatcher dispatch irq=%i\n", irq);
+        __d_printf(IRQ, "irq dispatcher dispatch irq=%i\n", irq);
     }
     if (self == NULL) // hundelint: ignore-no-null
     {
@@ -384,12 +383,22 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumb
         {
             if (consumer->type == IRQ_CONSUMER_KERNEL)
             {
-                return consumer->kernel_consumer(context, consumer->kernel_data);
+                match_optional(
+                    consumer->kernel,
+                    some(kernel)
+                    {
+                        return consumer->kernel_consumer(context, kernel);
+                    },
+                    none()
+                    {
+                        return Error(IRQDispatchStatus, missing_kernel, IRQ_DISPATCH_ERROR);
+                    }
+                );
             }
 
             if (consumer->type == IRQ_CONSUMER_SERVICE)
             {
-                __d_printf(IODEV, "irq dispatcher service irq=%i\n", irq);
+                __d_printf(IRQ, "irq dispatcher service irq=%i\n", irq);
                 match_result(
                     Scheduler__send_irq_event(self->scheduler, irq),
                     success(_)

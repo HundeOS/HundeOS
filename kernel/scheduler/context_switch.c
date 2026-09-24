@@ -34,7 +34,7 @@ static bool Process__finalise_deferred_syscalls(ProcessPtr self)
                                 Process__top_parked_operation_scheduler(self),
                                 some(scheduler)
                                 {
-                                    Scheduler__yield_waiting(scheduler, self, CPU__id() - 1);
+                                    Scheduler__yield_waiting(scheduler, self, CPU__id());
                                 },
                                 none_do_nothing()
                             );
@@ -94,8 +94,8 @@ void ContextSwitch__switch(ConstContextSwitchPtr self)
     CPUTime now = CPU__time_usec();
     CPUUsage__start(&new_proc->cpu_usage, now, Process__user_wait_usec(new_proc, now));
     __d_printf(PROCESS_SWITCH, "ContextSwitch__switch target pid=%i name=%s state=%s context=%p page_table=%p\n",
-               new_proc->pid, cstr(new_proc->name), ProcessState__to_string(new_proc->state), new_proc->context,
-               paddr(ProcessPageTable__root(&new_proc->page_table)));
+               new_proc->pid, cstr(new_proc->name), ProcessState__to_string(new_proc->state),
+               Process__required_context(new_proc), paddr(ProcessPageTable__root(&new_proc->page_table)));
     __d_printf(PROCESS_SWITCH, "Switch to proc: %i %s - %s.\n", new_proc->pid, cstr(new_proc->name),
                ProcessState__to_string(new_proc->state));
 

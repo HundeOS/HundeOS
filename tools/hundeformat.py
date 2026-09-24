@@ -26,6 +26,8 @@ MULTILINE_MACROS = {
     "for_each_atomic_fa_ptr": (0, 1, 2, 3, 4),
     "for_each_map": (0, 1, 2, 3, 4, 5),
     "for_each_map_ptr": (0, 1, 2, 3, 4, 5),
+    "for_each_hashtable": (0, 1, 2, 3, 4, 5, 6),
+    "for_each_hashtable_ptr": (0, 1, 2, 3, 4, 5, 6),
     "for_each_ring_buffer": (0, 1, 2, 3, 4),
     "for_each_ring_buffer_ptr": (0, 1, 2, 3, 4),
     "for_each_bstring": (0, 1, 2, 3),

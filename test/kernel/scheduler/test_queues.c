@@ -274,18 +274,18 @@ void test_scheduler_retains_reply_processing_after_consumption_until_budget_expi
     client->last_tick = 100;
     assert_push_success(&sender, &message);
     ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->state);
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->state);
     match_result(Queue__pop(&receiver),
         success_do_nothing(),
         error_test_fail()
     );
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->state);
     test_cpu_time_usec += SCHEDULER_PREFERRED_BUDGET_USEC;
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, other->state);
 }
 
@@ -310,7 +310,7 @@ void test_scheduler_keeps_blocked_receiver_blocked(void)
     server->state = PROC_STATE_WAITING;
     other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
     ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, other->state);
 }
@@ -327,7 +327,7 @@ void test_unchanged_shared_wait_is_respected_even_with_unread_messages(void)
     TEST_ASSERT_FALSE(Process__shared_wait_ready(server));
     other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
     ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, other->state);
 }
 
@@ -355,13 +355,13 @@ void test_unrelated_message_does_not_schedule_process_waiting_on_another_channel
     TEST_ASSERT_TRUE(Process__has_pending_messages(server));
     TEST_ASSERT_FALSE(Process__shared_wait_ready(server));
     ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, other->state);
 
     QueueMessage message = QueueMessage__new(0, 1);
     assert_push_success(&sender, &message);
     TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
 }
 
@@ -371,13 +371,13 @@ void test_current_receiver_releases_cpu_while_waiting_on_another_channel(void)
     server->state = PROC_STATE_RUNNING;
     other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
     ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, other->state);
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, server->state);
 
     QueueMessage message = QueueMessage__new(0, 1);
     assert_push_success(&sender, &message);
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
 }
 
@@ -393,10 +393,10 @@ void test_scheduler_rotates_between_queued_receivers_after_processing_budget(voi
     client->last_tick = 100;
     other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
     ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
     test_cpu_time_usec += SCHEDULER_PREFERRED_BUDGET_USEC;
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->state);
 }
 
@@ -408,7 +408,7 @@ void test_scheduler_prioritises_pending_service_events(void)
         error_test_fail()
     );
     ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
 }
 
@@ -562,7 +562,7 @@ void test_shared_wait_is_skipped_by_scheduler_and_service_events_override_it(voi
     QueueWaitSnapshot observed = QueueWaitSnapshot__new_connection(&receiver);
     publish_shared_wait(shared_control(server), &observed);
     ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_NOT_EQUAL(PROC_STATE_RUNNING, server->state);
     TEST_ASSERT_TRUE(client->state == PROC_STATE_RUNNING || other->state == PROC_STATE_RUNNING);
     match_result(ServiceEvents__push(&server->service.events, ServiceEvent__new(SERVICE_EVENT_IRQ, 42, 1)),
@@ -588,7 +588,7 @@ void test_queue_wait_parks_and_timer_detects_peer_publication(void)
     assert_push_success(&sender, &message);
     ProcessContext context = {0};
     test_cpu_time_usec = 7000;
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&server->queue_wait_usage);
     TEST_ASSERT_EQUAL_UINT64(1, usage.parks);
     TEST_ASSERT_EQUAL_UINT64(1, usage.activity_wakes);
@@ -609,11 +609,11 @@ void test_queue_wait_times_out_after_requested_ticks(void)
         error_test_fail()
     );
     ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
-    Scheduler__preempt(kernel->scheduler, 0, &context);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, server->state);
 }
 
@@ -761,7 +761,7 @@ void test_queue_timeout_has_distinct_completion_code(void)
         error_test_fail()
     );
     match_optional(
-        CPUSchedulers__at(&kernel->scheduler->schedulers, 0),
+        CPUSchedulers__get(&kernel->scheduler->schedulers, 0),
         some(cpu)
         {
             TEST_ASSERT_FALSE(Process__wake_expired_sleep(server, cpu->last_tick + 2));
@@ -812,7 +812,7 @@ void test_queue_wait_arrivals_are_owned_and_wake_on_connect(void)
             connect_queue(endpoint, client);
             TEST_ASSERT_TRUE(Queues__wait_changed(queues, server));
             ProcessContext context = {0};
-            Scheduler__preempt(kernel->scheduler, 0, &context);
+            Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
             TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, server->state);
         },
         none_test_fail()
@@ -1121,7 +1121,7 @@ void test_signal_keeps_queue_mapped_until_owner_cpu_performs_teardown(void)
     Scheduler__start(kernel->scheduler, 0);
     for (size_t tick = 0; tick < 4; tick++)
     {
-        Scheduler__preempt(kernel->scheduler, 0, &context);
+        Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     }
     match_optional(Scheduler__find_process_by_pid(kernel->scheduler, pid),
         some_test_fail(),

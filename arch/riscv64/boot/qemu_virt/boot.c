@@ -32,6 +32,7 @@ extern const uint8_t __riscv_secondary_entry_virtual[];
 typedef volatile uint8_t * RiscVUartRegistersPtr;
 static uint64_t uart_virtual_base = RISCV_HIGHER_HALF_OFFSET + RISCV_BOOTSTRAP_UART_BASE;
 static KernelEarlyBootInfo kernel_early_boot_info;
+CPUID RiscVBoot__stack_cpu_ids[MAX_CPUS];
 
 static RiscVUartRegistersPtr RiscVUart__registers(void)
 {
@@ -84,11 +85,11 @@ void SBI__shutdown(void)
     __asm__ volatile("ecall" : "+r"(arg0), "+r"(arg1) : "r"(function), "r"(extension) : "memory");
 }
 
-static int64_t SBI__hart_start(uint64_t hart_id, uint64_t entry, uint64_t logical_id)
+static int64_t SBI__hart_start(uint64_t hart_id, uint64_t entry, uint64_t stack_index)
 {
     register uint64_t arg0 __asm__("a0") = hart_id;
     register uint64_t arg1 __asm__("a1") = entry;
-    register uint64_t arg2 __asm__("a2") = logical_id;
+    register uint64_t arg2 __asm__("a2") = stack_index;
     register uint64_t function __asm__("a6") = SBI_HART_START_FUNCTION;
     register uint64_t extension __asm__("a7") = SBI_HSM_EXTENSION;
     __asm__ volatile("fence rw, rw\n"
@@ -102,7 +103,8 @@ static int64_t SBI__hart_start(uint64_t hart_id, uint64_t entry, uint64_t logica
 static uint64_t RiscVBoot__start_secondary_harts(uint64_t boot_hart_id, uint64_t cpu_count)
 {
     uint64_t hart_limit = cpu_count < MAX_CPUS ? cpu_count : MAX_CPUS;
-    uint64_t next_logical_id = 2U;
+    uint64_t started_cpu_count = 1U;
+    uint64_t next_stack_index = 2U;
     for (uint64_t hart_id = 0; hart_id < hart_limit; hart_id++)
     {
         if (hart_id == boot_hart_id)
@@ -111,25 +113,27 @@ static uint64_t RiscVBoot__start_secondary_harts(uint64_t boot_hart_id, uint64_t
         }
 
         uint64_t entry = (uint64_t)__riscv_secondary_entry_virtual - RISCV_HIGHER_HALF_OFFSET;
-        int64_t status = SBI__hart_start(hart_id, entry, next_logical_id);
+        RiscVBoot__stack_cpu_ids[next_stack_index - 1U] = hart_id;
+        int64_t status = SBI__hart_start(hart_id, entry, next_stack_index);
         RiscVUart__puts("SBI hart start physical=");
         RiscVUart__put_hex(hart_id);
-        RiscVUart__puts(" logical=");
-        RiscVUart__put_hex(next_logical_id);
+        RiscVUart__puts(" stack=");
+        RiscVUart__put_hex(next_stack_index);
         RiscVUart__puts(" status=");
         RiscVUart__put_hex((uint64_t)status);
         RiscVUart__puts("\n");
         if (status == SBI_SUCCESS)
         {
-            next_logical_id++;
+            started_cpu_count++;
+            next_stack_index++;
         }
     }
-    return next_logical_id - 1U;
+    return started_cpu_count;
 }
 
-void RiscVBoot__secondary(uint64_t hart_id, uint64_t logical_id)
+void RiscVBoot__secondary(uint64_t hart_id, uint64_t stack_index)
 {
-    RiscVCPU__assign_hart(logical_id, hart_id);
+    CPU__assign_id(hart_id);
     CPU__enter_kernel(&kernel_early_boot_info.system_info);
     SBI__shutdown();
 }
@@ -232,9 +236,11 @@ void RiscVBoot__main(uint64_t hart_id, uint64_t device_tree)
     }
 
     RiscVUart__puts("Architecture-neutral early kernel handoff accepted\n");
+    CPU__set_boot_id(hart_id);
+    RiscVBoot__stack_cpu_ids[0] = hart_id;
     kernel_early_boot_info.system_info.cpu_count =
         RiscVBoot__start_secondary_harts(hart_id, kernel_early_boot_info.system_info.cpu_count);
-    RiscVCPU__assign_hart(1U, hart_id);
+    CPU__assign_id(hart_id);
     CPU__enter_kernel(&kernel_early_boot_info.system_info);
     SBI__shutdown();
 }

@@ -1,12 +1,10 @@
 #include "../../kernel/arch/init.h"
 
-#include "../../kernel/boot.h"
 #include "../../kernel/kernel_core.h"
 #include "../../kernel/kernel_init.h"
 #include "basic_io.h"
 #include "cpu.h"
 #include "exception.h"
-#include "cpu.h"
 
 #define PLIC_PRIORITY_OFFSET 0ULL
 #define PLIC_SUPERVISOR_ENABLE_OFFSET 0x2080ULL
@@ -49,15 +47,11 @@ static void RiscVPlic__set_enabled(ConstPlicInterruptControllerInfoPtr plic, uin
     __asm__ volatile("fence iorw, iorw" ::: "memory");
 }
 
-void Boot__init_bootstrap_system(SystemInfoPtr system_info)
+void Arch__init_bootstrap_system(SystemInfoPtr system_info)
 {
-    KernelPtr kernel = Kernel__instance();
-    kernel->system_info = Some(SystemInfo, *system_info);
-    kernel->scheduler->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
-    kernel->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
     RiscVCPU__configure_timebase(system_info->timer_frequency);
     RiscVBasicIO__configure(&system_info->uart);
-    RiscVException__install();
+    Exception__install();
 }
 
 Result(SubsystemInitStatus) Arch__init(KernelPtr kernel)

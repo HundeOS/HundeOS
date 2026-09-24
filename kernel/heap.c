@@ -36,22 +36,6 @@ static size_t Heap__coarse_block_size(SystemInfoPtr system_info)
     return system_info->heap_coarse_block_size;
 }
 
-static Heap Heap__new(SystemInfoPtr system_info)
-{
-    MemoryRegionPtr kernel_heap = &system_info->kernel_heap;
-    size_t coarse_block_size = Heap__coarse_block_size(system_info);
-
-    return (Heap){
-        .lock = MUTEX_INIT,
-        .start = kernel_heap->virtual_start,
-        .end = kernel_heap->virtual_start + (kernel_heap->physical_end - kernel_heap->physical_start),
-        .phys_start = kernel_heap->physical_start,
-        .coarse_block_size = coarse_block_size,
-        .allocated_blocks = AllocatedBlocks__new(),
-        .free_blocks = AllocatedBlocks__new(),
-    };
-}
-
 static Address Heap__align_up_page(Address value)
 {
     Address remainder = value % PAGE_SIZE;
@@ -119,7 +103,14 @@ static Result(HeapCode) Heap__add_free_region(HeapPtr self, ConstPhysicalMemoryR
 
 Result(HeapCode) Heap__init(HeapPtr self, SystemInfoPtr system_info)
 {
-    *self = Heap__new(system_info);
+    MemoryRegionPtr kernel_heap = &system_info->kernel_heap;
+    self->lock = MUTEX_INIT;
+    self->start = kernel_heap->virtual_start;
+    self->end = kernel_heap->virtual_start + (kernel_heap->physical_end - kernel_heap->physical_start);
+    self->phys_start = kernel_heap->physical_start;
+    self->coarse_block_size = Heap__coarse_block_size(system_info);
+    AllocatedBlocks__init(&self->allocated_blocks);
+    AllocatedBlocks__init(&self->free_blocks);
 
     if (PhysicalMemoryRegions__len(&system_info->physical_memory.free_regions) == 0)
     {
@@ -173,6 +164,7 @@ static void AllocatedBlocks__remove_entry(AllocatedBlocksPtr blocks, uint64_t ta
         bucket->data[i] = bucket->data[i + 1];
     }
     bucket->len--;
+    blocks->len--;
 
     if (bucket->len == 0)
     {
@@ -182,28 +174,13 @@ static void AllocatedBlocks__remove_entry(AllocatedBlocksPtr blocks, uint64_t ta
 
 static bool AllocatedBlocks__remove_key(AllocatedBlocksPtr blocks, Address key)
 {
-    HashCode hash = Heap__hash_address(&key) % AllocatedBlocks__table_size;
-
-    for (uint64_t table_index = 0; table_index < (uint64_t)blocks->table.len; table_index++)
+    if (is_nothing(AllocatedBlocks__get(blocks, key)))
     {
-        if (blocks->table.entries[table_index].key != hash)
-        {
-            continue;
-        }
-
-        AllocatedBlocksBucketPtr bucket = &blocks->table.entries[table_index].value;
-
-        for (uint64_t bucket_index = 0; bucket_index < bucket->len; bucket_index++)
-        {
-            if (bucket->data[bucket_index].key == key)
-            {
-                AllocatedBlocks__remove_entry(blocks, table_index, bucket_index);
-                return true;
-            }
-        }
+        return false;
     }
 
-    return false;
+    AllocatedBlocks__delete(blocks, key);
+    return true;
 }
 
 static Optional(MemoryBlock) Heap__take_free_block(HeapPtr self, uint64_t pages)

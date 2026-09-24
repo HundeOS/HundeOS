@@ -167,25 +167,8 @@ Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, E
                 {
                     __d_printf(EXEC, "Parent %p\n", parent);
                     Process__prepare_startup_stdio(new_proc);
-                    Result(CPUID) schedule_result = wait ? Scheduler__cpu_for_process(kernel->scheduler, parent)
-                                                         : Scheduler__schedule(kernel->scheduler, new_proc);
-                    if (wait)
-                    {
-                        match_result(
-                            schedule_result,
-                            success(parent_cpu)
-                            {
-                                schedule_result = Scheduler__schedule_on_cpu(kernel->scheduler, new_proc, parent_cpu);
-                            },
-                            error(code, message)
-                            {
-                                return Error(ProcessPtr, message, SPAWN_FAILED);
-                            }
-                        );
-                    }
-
                     match_result(
-                        schedule_result,
+                        Scheduler__schedule(kernel->scheduler, new_proc),
                         success_do_nothing(),
                         error(code, message)
                         {

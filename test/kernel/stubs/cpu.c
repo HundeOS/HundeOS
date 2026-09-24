@@ -37,6 +37,11 @@ CPUID CPU__id()
     return cpu_id;
 }
 
+bool CPU__is_boot_cpu(void)
+{
+    return cpu_id == 0;
+}
+
 void CPU__noop()
 {
 }

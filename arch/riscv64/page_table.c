@@ -8,34 +8,9 @@
 #include "../../kernel/kalloc.h"
 #include "../../kernel/kernel_core.h"
 
-LinkedListBodyDefine(ProcessPageTablePages);
-
 static BString page_table_allocation_failed = bstr("Page table allocation failed");
 
 #define RISCV_SATP_PPN_MASK ((1ULL << 44U) - 1U)
-
-bool ProcessPageTablePage__equals(KernelAddressPtr self, KernelAddressPtr other)
-{
-    return self->valid == other->valid && self->virtual_addr == other->virtual_addr &&
-           self->phys_addr == other->phys_addr;
-}
-
-static Result(KAllocCode) ProcessPageTable__record_page(ProcessPageTablePtr self, KernelAddress page)
-{
-    match_result(
-        ProcessPageTablePages__push(&self->pages, page),
-        success(_)
-        {
-            return Success(KAllocCode, KALLOC_OK);
-        },
-        error(code, message)
-        {
-            return Error(KAllocCode, message, KALLOC_ALLOCATION_FAILED);
-        }
-    );
-
-    return Error(KAllocCode, page_table_allocation_failed, KALLOC_ALLOCATION_FAILED);
-}
 
 static bool PageTable__copy_supervisor_mappings(PageTablePtr target, KernelPtr kernel)
 {
@@ -102,52 +77,6 @@ Result(ProcessPageTable) ProcessPageTable__new(KernelPtr kernel)
     __d_printf(MEMORY, "pagetable alloc level=root addr=%p phys=%p size=%i valid=%i\n", table.virtual_addr,
                table.phys_addr, PAGE_SIZE, (int)table.valid);
     return Success(ProcessPageTable, process_page_table);
-}
-
-KernelAddress ProcessPageTable__root(ProcessPageTablePtr self)
-{
-    return self->root;
-}
-
-PageTablePtr ProcessPageTable__root_table(ProcessPageTablePtr self)
-{
-    return v_ptr(ProcessPageTable__root(self), PageTable);
-}
-
-size_t ProcessPageTable__page_count(ProcessPageTablePtr self)
-{
-    return ProcessPageTablePages__len(&self->pages);
-}
-
-Result(KAllocCode) ArchProcessPageTable__dispose(ProcessPageTablePtr self)
-{
-    for_each_ll(
-        ProcessPageTablePages,
-        self->pages,
-        page,
-        {
-            match_result(
-                Kernel__free(page.virtual_addr),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(KAllocCode, message, code);
-                }
-            );
-        }
-    );
-
-    match_result(
-        ProcessPageTablePages__dispose(&self->pages),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(KAllocCode, message, code);
-        }
-    );
-
-    self->root = NULL_KERNEL_ADDRESS;
-    return Success(KAllocCode, KALLOC_OK);
 }
 
 static KernelAddress PageTable__from_physical_address(KernelPtr kernel, Address physical_address)

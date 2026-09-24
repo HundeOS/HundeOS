@@ -5,7 +5,6 @@
 #include "process.h"
 #include "../../../kernel/kernel_core.h"
 static TestStartupStdio initial_stdio;
-static bool saved_with_scheduler_lock;
 static bool switched_with_scheduler_lock;
 
 static bool scheduler_lock_held(ProcessPtr process)
@@ -17,11 +16,6 @@ static bool scheduler_lock_held(ProcessPtr process)
         return false;
     }
     return true;
-}
-
-bool context_saved_with_scheduler_lock(void)
-{
-    return saved_with_scheduler_lock;
 }
 
 bool context_switched_with_scheduler_lock(void)
@@ -52,13 +46,13 @@ void clear_deferred_syscall_result()
     deferred_syscall_res = Error(Anything, bstring("no syscall result"), -1);
 }
 
-void Process__context_switch(ProcessPtr self)
+void Process__switch_context(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
 {
     switched_with_scheduler_lock = scheduler_lock_held(self);
     current_process = self;
 }
 
-void Process__activate_address_space(ProcessPtr self)
+void Process__switch_address_space(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
 {
     active_process = self;
 }
@@ -70,7 +64,6 @@ void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, 
 
 void current_process_reset()
 {
-    saved_with_scheduler_lock = false;
     switched_with_scheduler_lock = false;
     current_process = NULL;
     active_process = NULL;
@@ -86,22 +79,14 @@ ProcessPtr active_address_space_process()
     return active_process;
 }
 
-void Process__save_context(ProcessPtr self, ProcessContextPtr context)
-{
-    saved_with_scheduler_lock = scheduler_lock_held(self);
-    if (context == NULL) // hundelint: ignore-no-null
-    {
-        return;
-    }
-
-    *self->context = *context;
-}
-
 void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
 {
-    if (self->context != NULL)
-    {
-        self->context->x[0] = result;
-    }
+    match_optional(self->context,
+        some(context)
+        {
+            context->x[0] = result;
+        },
+        none_do_nothing()
+    );
     deferred_syscall_res = Success(Anything, result);
 }

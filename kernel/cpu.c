@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdatomic.h>
 #include "cpu.h"
@@ -13,17 +14,41 @@
 
 static atomic_uint_fast64_t cpus_online = 0;
 static atomic_bool bootstrap_ready = false;
+static atomic_bool halt_requested = false;
 
 uint64_t CPU__count()
 {
     return atomic_load_explicit(&cpus_online, memory_order_relaxed);
 }
 
+void CPU__wait(void)
+{
+    while (true)
+    {
+        CPU__wait_for_interrupt();
+    }
+}
+
+void CPU__halt_all(void)
+{
+    atomic_store_explicit(&halt_requested, true, memory_order_release);
+    CPU__halt_forever();
+}
+
+void CPU__check_halt(void)
+{
+    if (atomic_load_explicit(&halt_requested, memory_order_acquire))
+    {
+        __d_printf(PANIC, "CPU %i is halting\n", CPU__id());
+        CPU__halt_forever();
+    }
+}
+
 // Called as each CPU enters the kernel from boot
 void CPU__enter_kernel(SystemInfoPtr boot_system_info)
 {
     CPUID cpu_id = CPU__id();
-    if (cpu_id == 1)
+    if (CPU__is_boot_cpu())
     {
         Boot__init_bootstrap_system(boot_system_info);
         atomic_store_explicit(&bootstrap_ready, true, memory_order_release);

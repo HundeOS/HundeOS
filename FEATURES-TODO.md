@@ -245,6 +245,12 @@ Architecture context: [Userspace I/O system](docs/io-system.md) and
   remove queued processes on exit.
 - [x] Allow preferred selection on another started core after the outgoing
   context-switch tail is safe. Do not steal running or kernel-blocked processes.
+- [x] Admit every newly created process through one shared scheduler queue. The
+  next CPU making a scheduling decision claims an admitted process into its
+  local run table; after that, the process retains CPU affinity unless the
+  dependency-aware preferred path has a priority reason to migrate it. CPU
+  scheduler lookup is keyed by the architecture CPU ID rather than indexing a
+  dense array, and process-registry publication uses a separate compact slot.
 - [ ] Evaluate event-triggered cross-core notification and adaptive residency.
   Current observation uses existing scheduler entries, without a new IPI.
 - Open scope: exclusive cluster budgets/arbitration and context integration for
@@ -547,8 +553,9 @@ tree and a suitable virtual platform for initial bring-up. See the
   the handoff into the architecture-neutral kernel. The payload crosses the
   architecture-neutral handoff contract carrying the hart ID and populated
   `SystemInfo`, then enters `CPU__enter_kernel`. The OpenSBI-selected boot hart
-  becomes logical CPU 1; SBI HSM starts the remaining QEMU harts with separate
-  boot stacks and dense logical CPU IDs. The QEMU bootstrap currently maps a
+  retains its architectural hart ID; SBI HSM starts the remaining QEMU harts
+  with separate boot-stack slots while the kernel and scheduler continue to use
+  their architectural IDs. The QEMU bootstrap currently maps a
   fixed `1G` RAM window with 2 MiB leaves; generalizing or removing the temporary
   bootstrap mappings remains.
 - [ ] Read the device tree for memory, reserved regions, hardware threads
@@ -636,10 +643,12 @@ tree and a suitable virtual platform for initial bring-up. See the
   console, mounts the root, SD, Channel I/O FAT32, and Channel I/O ext2
   filesystems, and schedules work on every hart. Stress coverage for
   shared-memory races, remote invalidation, IRQ delivery, and wakeups remains.
-- [ ] Add architecture-specific emulator tests and keep architecture-neutral
+- [x] Add architecture-specific emulator tests and keep architecture-neutral
   unit tests and existing AArch64 targets passing. `make qemu-riscv64-trace`
   runs a full-system four-hart boot using the dedicated RV64 disk configuration,
   keeps userspace I/O on the interactive NS16550 console, and writes kernel
   diagnostics to `build/riscv64/kernel-trace.log` through semihosting. Host tests
   cover valid, truncated, and incomplete RISC-V device trees plus
-  platform-to-system conversion and Sv39 page-table operations.
+  platform-to-system conversion and Sv39 page-table operations. `make smoke-test`
+  boots the traced AArch64 and RISC-V QEMU targets, logs in, exercises system
+  information, memfs, and process listing, then shuts each guest down cleanly.

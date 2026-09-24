@@ -202,10 +202,12 @@ void Scheduler__refresh_preferred(SchedulerPtr self)
             );
         }
     );
-    for_each_fa(
+    for_each_hashtable(
         CPUSchedulers,
         self->schedulers,
-        index,
+        bucket_index,
+        entry_index,
+        cpu_id,
         cpu,
         {
             for_each_fa(
@@ -243,6 +245,25 @@ static bool CPUScheduler__owns_process(CPUSchedulerPtr * self, void * context)
     return false;
 }
 
+static Optional(CPUSchedulerPtr) Scheduler__scheduler_owning_process(SchedulerPtr self, ProcessPtr process)
+{
+    for_each_hashtable(
+        CPUSchedulers,
+        self->schedulers,
+        bucket_index,
+        entry_index,
+        cpu_id,
+        scheduler,
+        {
+            if (CPUScheduler__owns_process(&scheduler, process))
+            {
+                return Some(CPUSchedulerPtr, scheduler);
+            }
+        }
+    );
+    return None(CPUSchedulerPtr);
+}
+
 Optional(ProcessPtr) Scheduler__take_preferred(SchedulerPtr self, CPUSchedulerPtr cpu)
 {
     for_each_fa(
@@ -255,8 +276,8 @@ Optional(ProcessPtr) Scheduler__take_preferred(SchedulerPtr self, CPUSchedulerPt
             {
                 continue;
             }
-            match_find_result(
-                CPUSchedulers__find(&self->schedulers, CPUScheduler__owns_process, process),
+            match_optional(
+                Scheduler__scheduler_owning_process(self, process),
                 some(owner)
                 {
                     if (!owner->started)
