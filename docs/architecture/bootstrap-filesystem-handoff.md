@@ -70,7 +70,7 @@ Executable loading now uses 2 MiB directional buffers managed by `hunde-puffer`,
 with validated descriptors and bulk copies into the kernel image. Disk providers reject executable opens pending
 execute-permission support, and retain a 12 KiB open-file snapshot limit.
 Embedfs has no such 12 KiB limit. Disk permissions and the snapshot limit remain
-recorded in [Features TODO](../FEATURES-TODO.md).
+recorded in [TODO](../TODO.md).
 
 ## Bootstrap Ownership
 

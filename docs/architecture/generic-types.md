@@ -26,8 +26,8 @@ the ability to invent more parameters does not.
 
 ## Where the Types Live
 
-Most implementations are under [common/types](../common/types). Headers under
-[kernel/types](../kernel/types) and [user/lib/types](../user/lib/types) adapt
+Most implementations are under [common/types](../../common/types). Headers under
+[kernel/types](../../kernel/types) and [user/lib/types](../../user/lib/types) adapt
 shared types to their environment, including allocation. Follow the include
 and definition patterns of neighboring code. Do not introduce kernel or
 architecture dependencies into shared types or userspace to obtain a helper.
@@ -39,12 +39,12 @@ declaration and body macros to avoid duplicate definitions.
 
 ## Optional and Result
 
-- [Optional](../common/types/optional.h) represents presence or absence.
+- [Optional](../../common/types/optional.h) represents presence or absence.
   `OptionalDef(T)` defines the type; `Optional(T)`, `Some(T, value)`, and
   `None(T)` use it. Consume it with `match_optional(expression, some_branch,
   none_branch)` or `unwrap_optional(expression, fallback)` when an explicit
   fallback is appropriate.
-- [Result](../common/types/result.h) represents success or a failure with a
+- [Result](../../common/types/result.h) represents success or a failure with a
   code and `BString` message. Use `ResultDef(T)`, `Result(T)`,
   `Success(T, value)`, and `Error(T, message, code)`. Consume it with
   `match_result(expression, success_branch, error_branch)`. Use
@@ -59,7 +59,7 @@ declaration and body macros to avoid duplicate definitions.
 
 ## Fixed Arrays
 
-[FixedArray](../common/types/fixed_array.h) is a typed collection with a fixed
+[FixedArray](../../common/types/fixed_array.h) is a typed collection with a fixed
 capacity and a current length. `FixedArrayDefine(type, size, alias, equals)`
 declares it; `FixedArrayBodyDefine(alias)` supplies its generated operations.
 
@@ -77,7 +77,7 @@ declares it; `FixedArrayBodyDefine(alias)` supplies its generated operations.
 
 `__find` accepts a predicate taking an element pointer and a context pointer.
 It returns an optional find result. Use
-[`match_find_result` or `match_find_result_ptr`](../common/types/find_result.h)
+[`match_find_result` or `match_find_result_ptr`](../../common/types/find_result.h)
 to obtain the matching element as a value or pointer. `__find_item` instead
 accepts an element value and returns `Optional(ArrayIndex)`.
 
@@ -96,7 +96,7 @@ element pointers across operations that move or remove elements.
 
 ## Other Collections
 
-[AtomicFixedArray](../common/types/atomic_fixed_array.h) is the fixed-slot
+[AtomicFixedArray](../../common/types/atomic_fixed_array.h) is the fixed-slot
 variant for shared scalar storage. Define it with
 `AtomicFixedArrayDefine(type, size, alias)`. It has no length field and never
 compacts slots. Its layout is exactly the underlying scalar array, with the
@@ -113,25 +113,25 @@ multi-step updates. Never access the backing storage directly or copy/reset an
 array while it is shared. Atomic message queue arrivals use this type to retain
 stable connection slots while the kernel publishes and clears handles.
 
-- [LinkedList](../common/types/linked_list.h) provides `LinkedListDefine` and
+- [LinkedList](../../common/types/linked_list.h) provides `LinkedListDefine` and
   `LinkedListBodyDefine`, with generated `__new`, `__len`, `__push`, `__at`,
   `__ptr_at`, `__find`, `__find_item`, `__remove`, `__remove_at`, and `__dispose`
   operations. Use `for_each_ll` or `for_each_ll_ptr` for traversal that is not
   already covered by an operation. Check node and value ownership before
   removal or disposal.
-- [Map](../common/types/map.h) provides `MapDefine(K, V, size, alias, equals)`
+- [Map](../../common/types/map.h) provides `MapDefine(K, V, size, alias, equals)`
   and `MapBodyDefine(alias)`. Use `__get` or `__get_ptr` for lookup, `__set` for
   insertion or replacement, `__delete` for removal, and `__len`/`__key` for
   queries. Traversal macros are `for_each_map` and `for_each_map_ptr`. This
   implementation uses fixed-capacity storage and linear key lookup; do not
   assume hash-table complexity or scan entries manually for a key.
-- [Hashtable](../common/types/hashtable.h) provides fixed-capacity hashed lookup
+- [Hashtable](../../common/types/hashtable.h) provides fixed-capacity hashed lookup
   with bounded collision buckets. Use `__new` to construct a value or `__init`
   to initialize existing storage without creating a large temporary. Use `__get` or `__get_ptr` for lookup,
   `__set` for insertion or replacement, `__delete` for removal, and `__len`
   for the number of stored entries. Traverse entries with `for_each_hashtable` or
   `for_each_hashtable_ptr`.
-- [RingBuffer](../kernel/types/ring_buffer.h) is the kernel's character ring
+- [RingBuffer](../../kernel/types/ring_buffer.h) is the kernel's character ring
   buffer. Its generated operations include `__push`, `__push_all`, `__pop`,
   `__drain`, `__reset`, `__item_count`, and `__free_space`. Use these instead
   of manipulating read/write cursors or reproducing wraparound arithmetic.
@@ -165,7 +165,7 @@ transaction. Device and process registries use this type.
 
 ## Strings
 
-[BString](../common/types/bstring.h) stores bounded text with a separate length.
+[BString](../../common/types/bstring.h) stores bounded text with a separate length.
 Use `bstr("literal")` for literals, `empty_bstr()` for an empty value, and
 `BString__new` or `BString__from_chars` for runtime input as appropriate.
 
@@ -185,7 +185,7 @@ loops. Check whether a function mutates its argument or returns a new string,
 and handle capacity limits and parse failures. Use character-buffer adapters
 only where the receiving interface requires them.
 
-[DynString](../common/types/dyn_string.h) provides dynamically allocated text
+[DynString](../../common/types/dyn_string.h) provides dynamically allocated text
 when growth is required. It has `__init`, `__reserve`, `__push_char`,
 `__append_cstr`, `__append_bstring`, `__clear`, `__dispose`, `__length`,
 `__capacity`, `__char_at`, `__char_at_or`, `__cstr`, `__bstring`, and `__lines`
@@ -202,8 +202,8 @@ meaningful policy or name, and implement them using the built-in operation.
 
 Follow the existing `Type__method(self, ...)` naming, pointer typedefs, typed
 return values, and allocation conventions. Test the extension alongside the
-existing [shared type tests](../test/shared/types),
-[kernel type tests](../test/kernel/types), or
-[userspace type tests](../test/user/types), as appropriate. Cover relevant
+existing [shared type tests](../../test/shared/types),
+[kernel type tests](../../test/kernel/types), or
+[userspace type tests](../../test/user/types), as appropriate. Cover relevant
 empty, missing, full, boundary, and mutation cases. Update this guide if the
 extension changes how callers should choose or use an operation.

@@ -1,9 +1,71 @@
-# Features TODO
+# TODO
 
-Discussed features that are not yet implemented. Organize entries as:
+Granular work and open design questions supporting the high-level
+[project goals](GOALS.md). Organize entries as:
 System (level 2) -> Feature (level 3) -> Supporting features or architecture
 (level 4). Unchecked items are outstanding; record unresolved design choices
 explicitly. Entries are not authorization to start implementation.
+
+## POSIX Compatibility
+
+### Bash Milestone
+
+The target is enough compatible behavior to cross-compile and run Bash, not
+POSIX certification. Existing native commands and APIs remain supported.
+
+#### Compatibility Inventory And Toolchain
+
+- [ ] Establish a reproducible Bash cross-build and use its compile, link, and
+  runtime failures to maintain the required API and behavior inventory.
+- [ ] Provide the libc headers, types, constants, and functions required by the
+  selected Bash release and its build-time configuration checks. Keep hosted
+  build tooling separate from target-runtime behavior.
+- [ ] Add a full-system test that launches Bash and exercises interactive input,
+  builtins, an external command, redirection, and clean exit.
+
+#### Processes, Descriptors, And Signals
+
+- [ ] Complete the fork and descriptor-inheritance work described under
+  [Fork Support](#fork-support), including shared open-resource semantics.
+- [ ] Implement the required `exec` and `wait` family behavior, pipes, descriptor
+  duplication, close-on-exec, and redirection without moving descriptor
+  ownership back into the kernel.
+- [ ] Extend signals from the current termination-oriented process controls to
+  the dispositions, masks, delivery, and interruption behavior required by
+  Bash and its children.
+
+#### Interactive Shell Semantics
+
+- [ ] Define and implement process groups, sessions, controlling terminals, and
+  foreground/background terminal ownership needed for interactive job control.
+- [ ] Fill the required filesystem and environment gaps, including current
+  directory behavior, permissions, metadata, path operations, environment
+  propagation, and error mappings observed by Bash.
+
+## Shared Libraries
+
+### Dynamic ELF Loading
+
+#### Loader Boundary And Format
+
+- [ ] Define the userspace dynamic-loader boundary and its authenticated mapping
+  operations without making filesystem or library policy a kernel concern.
+- [ ] Produce shared objects and dynamically linked executables with the project
+  toolchains, and define the supported ELF interpreter, dynamic tags, symbol
+  visibility, and library search rules.
+- [ ] Implement dependency loading, symbol resolution, and the relocation sets
+  required by AArch64 and RISC-V. Extend the contract when AMD64 support begins.
+
+#### Mapping And Runtime Lifecycle
+
+- [ ] Map load segments with final write/execute permissions, share immutable
+  pages where appropriate, and reject malformed or unsupported dynamic objects.
+- [ ] Support initialization and finalization arrays, thread-local storage needed
+  by the selected libc/runtime, dependency reference lifetimes, and process-exit
+  cleanup.
+- [ ] Add unit coverage for parsing, symbol lookup, relocation, and failure
+  rollback, plus full-system tests running two programs against one shared
+  library.
 
 ## Process Management
 
@@ -34,7 +96,7 @@ not by itself implement this execution model.
   cores. Route device interrupts and ordinary interprocessor interrupts to
   general-purpose cores; exclude realtime cores from routine reschedule requests.
 - [ ] Implement interrupt masking and core-role transitions through the kernel
-  architecture interfaces, for both AArch64 and the planned RISC-V port.
+  architecture interfaces for both AArch64 and RISC-V.
 - [ ] Specify permitted syscalls, voluntary yielding, blocking, and fault
   handling. Disabling interrupts does not remove synchronous faults or explicit
   kernel entry; these must have defined behavior without silently enabling
@@ -108,8 +170,8 @@ opens a new stream handle; this is not sufficient for fork semantics.
   while retaining their shared underlying resources. The inheritance protocol
   and coordination with the kernel remain to be designed.
 
-Architecture context: [Userspace I/O system](docs/io-system.md) and
-[Channels and event queues](docs/channels-and-event-queues.md).
+Architecture context: [Userspace I/O system](architecture/io-system.md) and
+[Channels and event queues](architecture/channels-and-event-queues.md).
 
 ## I/O and Shared Memory
 
@@ -126,7 +188,7 @@ Architecture context: [Userspace I/O system](docs/io-system.md) and
   and normal wait helpers do not invoke kernel parking.
 - Retained kernel parking syscall: 10-tick default timeout, with predicate checks
   on each owning CPU tick. The former 20-microsecond userspace polling phase has
-  been removed. See [queue waits](docs/queues.md#bounded-waits).
+  been removed. See [queue waits](architecture/queues.md#bounded-waits).
 - User comparison on the SDHCI trace target reports substantially better
   responsiveness with kernel parking disabled and tracing unchanged. This
   implicates the parking path, but does not isolate its expensive stage.
@@ -139,14 +201,14 @@ Architecture context: [Userspace I/O system](docs/io-system.md) and
 - [x] Add an isolated timeout probe that parks only itself and compares complete
   call duration with fresh kernel counters. On the SDHCI trace target, 1- and
   10-tick waits left about 18-19 ms per call outside parked/runnable accounting.
-  See [measurements and limitations](docs/queues.md#sdhci-trace-measurement).
+  See [measurements and limitations](architecture/queues.md#sdhci-trace-measurement).
 - [ ] Attribute that remaining entry/completion overhead, including per-park
   allocation/free and tracing costs, before changing the wait implementation.
 - [x] Expose aggregated wake reasons, parked durations, and wake-to-selection
-  delays through [procfs queue-wait diagnostics](docs/process-registry-and-procfs.md#queue-wait-diagnostics).
+  delays through [procfs queue-wait diagnostics](architecture/process-registry-and-procfs.md#queue-wait-diagnostics).
 - [x] Expose userspace UART bytes/IRQs, empty reads, backend read traffic,
   warden forwards, and unchanged event-wait returns through
-  [IPC activity diagnostics](docs/process-registry-and-procfs.md#ipc-activity-diagnostics).
+  [IPC activity diagnostics](architecture/process-registry-and-procfs.md#ipc-activity-diagnostics).
 - [ ] Measure idle-console deltas versus typing after the stable-publication
   change, separating real queue/kernel wakes from spurious `WFE` returns.
 
@@ -164,7 +226,7 @@ Architecture context: [Userspace I/O system](docs/io-system.md) and
   waits have no periodic retry; validated preferred ancestors use the bounded
   warm-residency policy. Treat userspace fields as untrusted hints; never follow
   arbitrary pointers, override genuine kernel blocking, or prevent pending
-  termination from running. See [queue waits](docs/queues.md#bounded-waits).
+  termination from running. See [queue waits](architecture/queues.md#bounded-waits).
 - [x] Add a four-CPU, single-threaded TCG icount trace target using
   `-icount shift=auto,sleep=on`. Boot hardware information selects `WFE` for
   hardware and that target, while HVF and ordinary MTTCG use active rechecks.
@@ -195,15 +257,15 @@ Architecture context: [Userspace I/O system](docs/io-system.md) and
   requests, replies, relay messages, and kernel service notifications. Existing
   class/last-run ordering breaks ties; consuming messages removes the priority.
   Implemented using existing kernel mappings, with no per-message syscall. See
-  [receiver scheduling priority](docs/queues.md#receiver-scheduling-priority).
+  [receiver scheduling priority](architecture/queues.md#receiver-scheduling-priority).
 - [x] Respect an active shared wait before granting receiver priority or retaining
   the running receiver. Unread messages on another Channel cannot override the
   wait: the process may need a peer to run before it can consume those messages.
   Regression tests cover both initial selection and timer retention, then
   restoring receiver priority when the watched Channel progresses. See
-  [receiver scheduling priority](docs/queues.md#receiver-scheduling-priority).
+  [receiver scheduling priority](architecture/queues.md#receiver-scheduling-priority).
 - [x] Add outstanding-request identity and parent propagation independently of
-  unread-message state. See [Channel tickets and preferred scheduling](docs/dependency-scheduling.md).
+  unread-message state. See [Channel tickets and preferred scheduling](architecture/dependency-scheduling.md).
 - [ ] Measure publication-to-eligibility, eligibility-to-selection, and service
   handling separately; tune residency using those measurements.
 - Keep unread transport work distinct from an outstanding request: a server may
@@ -222,7 +284,7 @@ Architecture context: [Userspace I/O system](docs/io-system.md) and
   each active stage until it waits on a Channel/queue, with the warm-wait
   exception below. Implemented as opportunistic FIFO scheduling, not exclusive
   gang scheduling; overlapping chains may interleave. See
-  [Channel tickets and preferred scheduling](docs/dependency-scheduling.md).
+  [Channel tickets and preferred scheduling](architecture/dependency-scheduling.md).
 - User requirement: use a preferred scheduler run queue, distinct from IPC
   message queues. Enqueueing a chain member does not by itself force immediate
   preemption of a busy core whose current process has not handed off to wait.
@@ -264,7 +326,7 @@ Architecture context: [Userspace I/O system](docs/io-system.md) and
   advance a wake generation to return the process to its dispatcher.
 - This foundation gates existing channel hops on actual transport progress.
   It does not yet implement the IRQ token/hop protocol below, stage acknowledgements,
-  or operation-failure timeout reporting. See [queue waits](docs/queues.md#bounded-waits).
+  or operation-failure timeout reporting. See [queue waits](architecture/queues.md#bounded-waits).
 - [ ] Explore the user's shared per-process waiter record containing a token,
   hop count, and deadline, avoiding per-wait syscalls. On IRQ satisfaction,
   schedule the hardware-facing stage before its dependent stages. A completed
@@ -288,7 +350,7 @@ Architecture context: [Userspace I/O system](docs/io-system.md) and
 ### Shared Bulk Buffers: hunde-puffer
 
 Status: initial implementation in place; policy extensions and performance
-measurement remain below. See [Shared buffers](docs/shared-buffers.md).
+measurement remain below. See [Shared buffers](architecture/shared-buffers.md).
 
 #### Allocation and Directional Mappings
 
@@ -348,13 +410,13 @@ measurement remain below. See [Shared buffers](docs/shared-buffers.md).
 - [x] First step: retain backing allocated between two kernel-registered
   services until reboot. Never pool, free, or reassign it, even after close or
   process exit; still revoke exiting processes' mappings. Keep ordinary client
-  cleanup unchanged. See [Shared buffers](docs/shared-buffers.md).
+  cleanup unchanged. See [Shared buffers](architecture/shared-buffers.md).
 - [ ] Replace permanent retention with orchestrated completion/quiescence and
   reclamation. Explicit unmount and hot-unplug cleanup are deferred; service
   restarts do not automatically inherit old mappings or replay I/O.
   The QEMU Pi UEFI trace EXT2 mount now targets the EXT2 disk rather than the
   FAT EFI disk, removing its repeated failed-startup buffer consumption. See
-  [Userspace I/O system](docs/io-system.md). Repeated service failures can still
+  [Userspace I/O system](architecture/io-system.md). Repeated service failures can still
   exhaust retained slots until coordinated reclamation is implemented.
 - [ ] Reuse the client's shared buffer through I/O mediation, FAT32/EXT2, and
   the block driver. Keep control and completions on existing Channels; authorize
@@ -422,7 +484,7 @@ remain design decisions, not settled implementation requirements.
 
 Status: initial PCI scan and read-only Channel queries are implemented in
 `hundebus`. The service remains running and owns its inventory. See
-[Bus information](docs/bus-info.md).
+[Bus information](architecture/bus-info.md).
 
 #### Bus Change Detection
 
@@ -453,7 +515,7 @@ hardware snapshot. Bus presentation and the `/sys` layout remain deferred.
 
 ### Userspace Bootstrap
 
-Implemented: [hunde-mama bootstrap](docs/bootstrap-services.md) establishes
+Implemented: [hunde-mama bootstrap](architecture/bootstrap-services.md) establishes
 `/sbin`, `/boot`, and `/boot/config` before configured startup. The filesystem
 namespace accepts mounts over Channel; later mounts preserve the boot overlays.
 
@@ -471,11 +533,11 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
   while waiting spawn transfers into the ordinary child wait.
 - [x] Keep the immutable archive mapped for embedfs after handoff.
 - [ ] Migrate executable transfers to the
-  [hunde-puffer shared-buffer design](docs/shared-buffers.md) tracked above.
+  [hunde-puffer shared-buffer design](architecture/shared-buffers.md) tracked above.
   The initial shared-buffer implementation replaces the 256-byte bulk replies.
 - [ ] Remove the disk providers' 12 KiB open-file snapshot limit before relying
   on them for larger executables. See
-  [Executable loading](docs/bootstrap-filesystem-handoff.md).
+  [Executable loading](architecture/bootstrap-filesystem-handoff.md).
 - [ ] Add credential-based executable-open authorization to the FAT32/EXT2
   adapters. They currently reject executable opens rather than allowing an
   unchecked disk-backed spawn.
@@ -484,24 +546,24 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
 
 - [x] Remove the unused in-kernel message broker, scheduler message callbacks,
   and unconsumed process-exit broadcasts. Direct scheduler operations and
-  shared IPC remain; see [Userspace I/O system](docs/io-system.md).
+  shared IPC remain; see [Userspace I/O system](architecture/io-system.md).
 - [x] Delete the unused kernel console and stream backends and their UART IRQ
   wiring. Independent kernel logging and panic output remain; see
-  [Userspace I/O system](docs/io-system.md).
+  [Userspace I/O system](architecture/io-system.md).
 - [x] Delete the obsolete kernel socket backend and userspace filesystem
   broker, including unused service operations and wrappers.
 - [x] Remove kernel bootfs, EXT2, the unused block cache and memory block device,
   and the kernel mount API. Filesystem watchdogs only launch userspace providers.
 - [x] Remove legacy stream-server syscalls, buffer mapping, and server maps.
 - [x] Remove userspace file-I/O syscall fallbacks. Route link requests through
-  the existing I/O and filesystem Channels; see [Userspace I/O system](docs/io-system.md).
+  the existing I/O and filesystem Channels; see [Userspace I/O system](architecture/io-system.md).
 - [ ] Implement hard-link creation in supporting filesystem drivers. Channel
   routing exists, but current providers return an explicit unsupported error.
 - [x] Retire file I/O syscalls, generic kernel filesystem/device routing,
   `kernel/kio` wrappers, and process FD tables. Startup stdio retains terminal
   endpoint metadata only; general userspace handle inheritance remains deferred.
   Fault reports use independent kernel diagnostics. Retired syscall numbers
-  remain reserved and fail dispatch. See [Userspace I/O system](docs/io-system.md).
+  remain reserved and fail dispatch. See [Userspace I/O system](architecture/io-system.md).
 - [x] Create the separate fibre-based `sdhci_channelio` driver using existing
   Channels and managed buffers, switch SD boot configurations, and retire the
   old SDHCI executable. The hardware path remains read-only polling PIO.
@@ -511,7 +573,7 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
   General fibre infrastructure remains.
 - [x] Migrate `channel_blk`/`channel_fs` to BlockServer/BlockClient and delete
   the kernel block broker and private transport. Device discovery metadata and
-  capability checks remain in the kernel. See [Userspace I/O system](docs/io-system.md).
+  capability checks remain in the kernel. See [Userspace I/O system](architecture/io-system.md).
 - [ ] Replace the boot disk's size-based identification with an explicit stable
   boot-device identity supplied by the boot environment.
 

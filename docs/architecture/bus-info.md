@@ -45,4 +45,4 @@ change. `/dev/businfo` has no compatibility file or kernel fallback.
 `hundebus` still obtains bootstrap PCI ECAM configuration from `/boot/sysinfo`.
 Replacing that input with a typed system-information syscall is separate work.
 Bus enumeration stays in userspace. The service does not currently launch
-drivers or monitor hotplug; see [Features TODO](../FEATURES-TODO.md).
+drivers or monitor hotplug; see [TODO](../TODO.md).

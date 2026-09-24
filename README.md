@@ -1,30 +1,46 @@
-# Kernel Experiment
+# HundeOS
 
-This repository contains an experimental kernel, userspace programs, and
-userspace drivers. AArch64 is the complete target; RV64 on QEMU `virt` has an
-initial OpenSBI supervisor-mode bring-up target. Core kernel code is under
-`kernel/`, architecture-specific code is under `arch/`, userspace code is under
-`user/`, and unit tests are under `test/`.
+HundeOS is an experimental microkernel operating system with full-system
+AArch64 and RISC-V QEMU targets. Core kernel code is under `kernel/`,
+architecture-specific integration is selected from `arch/`, userspace services,
+commands, and drivers are under `user/`, and tests are under `test/`.
 
-See [Features TODO](FEATURES-TODO.md) for discussed but unimplemented features,
-grouped by system, feature, and supporting features or architecture.
+The privileged kernel owns scheduling and process lifecycle, address spaces and
+memory protection, IPC foundations, hardware authority, interrupt entry and
+routing, and the minimum boot and diagnostic path. Normal I/O is implemented in
+userspace: filesystem routing, file handles, filesystems, block and input
+drivers, console services, sockets, and system-information filesystems exchange
+requests through authenticated Channels and managed shared memory. There is no
+normal file-I/O syscall fallback into a kernel filesystem.
+
+See [Goals](docs/GOALS.md) for project direction, [TODO](docs/TODO.md) for
+granular work and open design questions, and the
+[architecture documents](docs/architecture/) for the current system design.
+
+## Supported Architectures
+
+AArch64 and RV64 both run the complete userspace service graph on four virtual
+CPUs, reach an interactive login, and are covered by traced QEMU smoke tests.
+The AArch64 target supports HVF and TCG configurations. RV64 runs on QEMU
+`virt` through OpenSBI in supervisor mode with Sv39. AMD64 support is a project
+goal but is not yet implemented.
 
 ## I/O Architecture
 
-The [shared-buffer architecture](docs/shared-buffers.md) uses
+The [shared-buffer architecture](docs/architecture/shared-buffers.md) uses
 `hunde-puffer` to manage and recycle directional bulk buffers at common virtual
 addresses. Existing Channels carry opens, buffer descriptors, transfer commands,
 and completions. File, executable, and block I/O use 2 MiB directional leases;
 the initial pool retains up to four detached buffers before hard freeing.
-Remaining policy and recovery work is tracked in [Features TODO](FEATURES-TODO.md).
+Remaining policy and recovery work is tracked in [TODO](docs/TODO.md).
 
-[`hunde-mama`](docs/bootstrap-services.md) brings up the userspace filesystem,
+[`hunde-mama`](docs/architecture/bootstrap-services.md) brings up the userspace filesystem,
 `/sbin`, `/boot`, and `/boot/config` before `hundeschule` reads startup configuration.
 
 `hundebus` keeps its PCI inventory in userspace and serves read-only
-[bus-information queries](docs/bus-info.md) over Channel. The former
+[bus-information queries](docs/architecture/bus-info.md) over Channel. The former
 `/dev/businfo` kernel stream is retired; the planned `sysinfofs` presentation
-and hotplug monitoring are tracked in [Features TODO](FEATURES-TODO.md).
+and hotplug monitoring are tracked in [TODO](docs/TODO.md).
 
 The common userspace I/O front end is `hund-io-system`. Sockets use its channel
 connection to `socket_router`. Boot-configured FAT32 and EXT2 mounts use
@@ -50,10 +66,10 @@ new files default to `0644`, directories to `0755`.
 `/boot/sysinfo` renders a typed kernel hardware snapshot in userspace.
 `/proc` is a separate read-only userspace filesystem
 backed by the kernel's shared process registry.
-See [Userspace I/O system](docs/io-system.md) for protocol semantics,
-resource lifecycle, limits, and the migration plan.
+See [Userspace I/O system](docs/architecture/io-system.md) for protocol semantics,
+resource lifecycle, limits, and remaining work.
 
-The [bootstrap filesystem handoff](docs/bootstrap-filesystem-handoff.md) has
+The [bootstrap filesystem handoff](docs/architecture/bootstrap-filesystem-handoff.md) has
 moved `/sbin` file operations and normal executable reads to userspace Channels.
 Only Mama's `boot_spawn()` uses the direct archive reader; `boot_complete()`
 irreversibly disables it after the basic mounts are established. The kernel
@@ -159,7 +175,7 @@ wait and scheduling traces, not parallel-throughput measurements.
 Userspace procfs exposes `/proc/<pid>/status`, `/cpu`, and `/memory` on every
 target. `ps` reads the same shared records directly. Private RAM, shared RAM, and
 MMIO are accounted separately; shared totals are per-process mappings, not unique
-physical memory. See [Process registry and procfs](docs/process-registry-and-procfs.md).
+physical memory. See [Process registry and procfs](docs/architecture/process-registry-and-procfs.md).
 
 The `CPU` column in `ps` is the zero-based ID of the CPU scheduler the process
 is assigned to. Waiting processes retain their assignment; this column does

@@ -18,7 +18,7 @@ bootstrap filesystem mounts or console/keyboard data buffering.
 
 ## Common application interface
 
-`hund-io-system` will be the common userspace I/O front end for files, sockets,
+`hund-io-system` is the common userspace I/O front end for files, sockets,
 network I/O, and streams. Applications must not have a separate filesystem-only
 front end. Preserve the public userspace I/O API while moving its implementation
 from I/O syscalls to a protocol over the existing `Channel`.

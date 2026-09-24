@@ -6,8 +6,9 @@ Arch specific code in arch/ and linked in.
 Interfaces to architecture are defined in kernel/arch
 
 ### arch
-Architecture specific code. Currently aarch64. Assembly and architecture specific
-integration code goes here, along with bootloaders
+Architecture specific code. AArch64 and RISC-V are current full-system targets;
+AMD64 is a future goal. Assembly and architecture specific integration code
+goes here, along with bootloaders.
 
 ### Architecture selection
 Architecture-neutral code must not use compiler architecture macros or conditional
@@ -28,7 +29,8 @@ run the tests and generate the runners.
 Plan and then tell the user what you plan to do before making changes.
 
 ## Deferred features
-Maintain [Features TODO](FEATURES-TODO.md) for features discussed with the user
+Treat [Goals](docs/GOALS.md) as project direction, not an implementation backlog.
+Maintain [TODO](docs/TODO.md) for granular features discussed with the user
 but not yet implemented. Read relevant entries before working on those features.
 When a discussed feature is deferred, record or update it using the hierarchy
 System -> Feature -> Supporting features or architecture. Distinguish agreed
@@ -71,7 +73,7 @@ the evidence.
 
 # Code standards
 ## Reuse built-in types and operations
-Read [Generic types, collections, and strings](docs/generic-types.md) before
+Read [Generic types, collections, and strings](docs/architecture/generic-types.md) before
 implementing or changing collection, string, Optional, or Result operations.
 
 Before writing a local helper or loop for searching, membership, filtering,
@@ -219,7 +221,7 @@ Add unit tests for any new code in kernel. Some architecture specific code
 may not have unit tests as it is difficult to test..
 
 # Kernel architecture
-Read [Shared buffers: hunde-puffer](docs/shared-buffers.md) before changing bulk
+Read [Shared buffers: hunde-puffer](docs/architecture/shared-buffers.md) before changing bulk
 I/O transfer, buffer allocation, mapping permissions, recycling, or cleanup.
 The agreed target uses separately shared directional buffers managed by
 `hunde-puffer`; existing Channels carry descriptors, commands, and completions.
@@ -227,33 +229,39 @@ Do not treat inline Channel payloads as the bulk-transfer design or introduce
 service-specific buffer transports. The document distinguishes requirements
 from unimplemented behavior and open sizing/recovery decisions.
 
-Read [Userspace I/O system](docs/io-system.md) before changing I/O routing,
+Read [Userspace I/O system](docs/architecture/io-system.md) before changing I/O routing,
 file-handle ownership, filesystem service transport, or socket/stream service
 interfaces. `hund-io-system` is the common application-facing I/O service;
 filesystem, network, and stream protocols use the existing bidirectional Channel.
 
-Read [Channels and event queues](docs/channels-and-event-queues.md) before changing
+Read [Channels and event queues](docs/architecture/channels-and-event-queues.md) before changing
 service discovery, shared queues, channel lifecycle, or managed shared-page memory.
 
-Read [Queues](docs/queues.md) before changing
+Read [Queues](docs/architecture/queues.md) before changing
 queue access permissions, connection establishment, or transport authentication.
 It records the initial atomic message queue API and the remaining migration away
 from globally writable service queues.
 
-Read [Userspace interrupt service](docs/interrupt-service.md) before changing
+Read [Userspace interrupt service](docs/architecture/interrupt-service.md) before changing
 device IRQ delegation, interrupt registration/authentication, or acknowledgement
-and rearm handling. This document describes the proposed `hund-unterbrict` design.
+and rearm handling. This document describes the current `hund-unterbrict` design.
 
-## We will be working towards a "millikernel" architecture
-This means that the kernel is neither monolithic or split up in to micro concerns.
+## Current microkernel architecture
 
-* IO will start in the kernel
-  * Certain subsystems may run in userspace
-* Memory management will start in the kernel
-  * Certain processes may be able to affect page tables in the future
-* Process management will live in the kernel
-* IPC primitives will start in the kernel (message passing)
-* Later on certain interrupts will be passed to specialised processes
+HundeOS is a microkernel system. Keep the privileged kernel focused on:
+
+* Scheduling, process lifecycle, and process identity.
+* Address spaces, memory protection, and managed shared-memory mappings.
+* IPC foundations, authentication, and hardware capability enforcement.
+* Interrupt entry and routing, with device handling delegated to userspace.
+* Minimal early boot, panic, and diagnostic output that works independently of
+  userspace services.
+
+Normal application and device I/O belongs in userspace. This includes filesystem
+namespaces, file handles, filesystems, block and input drivers, console services,
+sockets, and the `/boot`, `/dev`, and `/proc` information filesystems. These
+services use Channels and managed shared buffers; do not add kernel filesystem,
+file-descriptor, stream, socket, or block-I/O fallbacks.
 
 # Other
 - reload this file (AGENTS.md) every time there is user interaction

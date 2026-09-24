@@ -205,5 +205,5 @@ HVF smoke run reached login, spawned shell commands, read `/sbin`, `/boot/sysinf
 FAT32 and EXT2 files, and wrote/read a memfs file under `/tmp`. Quantitative
 throughput benchmarking remains separate work.
 
-See [Features TODO](../FEATURES-TODO.md), [Userspace I/O system](io-system.md),
+See [TODO](../TODO.md), [Userspace I/O system](io-system.md),
 and [Channels and event queues](channels-and-event-queues.md).
