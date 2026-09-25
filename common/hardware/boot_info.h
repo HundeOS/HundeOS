@@ -31,6 +31,7 @@ typedef struct BootGicInfo
     Address redistributor_physical_base;
     Address cpu_interface_physical_base;
 } BootGicInfo;
+
 typedef const BootGicInfo * ConstBootGicInfoPtr;
 
 static inline BootGicInfo BootGicInfo__new(Address distributor_physical_base, Address redistributor_physical_base,
@@ -48,6 +49,7 @@ typedef struct BootPlicInfo
     Address physical_base;
     uint64_t source_count;
 } BootPlicInfo;
+
 typedef const BootPlicInfo * ConstBootPlicInfoPtr;
 
 static inline BootPlicInfo BootPlicInfo__new(Address physical_base, uint64_t source_count)
@@ -98,7 +100,9 @@ typedef struct BootDeviceInfo
     uint64_t mmio_size;
     uint64_t irq;
 } BootDeviceInfo;
+
 typedef const BootDeviceInfo * ConstBootDeviceInfoPtr;
+
 static inline BootDeviceInfo BootDeviceInfo__new(Address physical_base, uint64_t mmio_size, uint64_t irq)
 {
     return (BootDeviceInfo){physical_base, mmio_size, irq};
@@ -111,7 +115,9 @@ typedef struct BootUartInfo
     uint64_t irq;
     UartKind kind;
 } BootUartInfo;
+
 typedef const BootUartInfo * ConstBootUartInfoPtr;
+
 static inline BootUartInfo BootUartInfo__new(Address physical_base, uint64_t mmio_size, uint64_t irq, UartKind kind)
 {
     return (BootUartInfo){
@@ -129,8 +135,10 @@ typedef struct BootVirtioMmioInfo
     uint64_t slot_count;
     uint64_t first_irq;
 } BootVirtioMmioInfo;
+
 typedef const BootVirtioMmioInfo * ConstBootVirtioMmioInfoPtr;
 OptionalDef(BootVirtioMmioInfo);
+
 static inline BootVirtioMmioInfo BootVirtioMmioInfo__new(Address physical_base, uint64_t slot_size, uint64_t slot_count,
                                                          uint64_t first_irq)
 {
@@ -150,7 +158,9 @@ typedef struct BootFramebufferInfo
     uint64_t blue_mask;
     uint64_t reserved_mask;
 } BootFramebufferInfo;
+
 OptionalDef(BootFramebufferInfo);
+
 static inline BootFramebufferInfo BootFramebufferInfo__new(Address physical_base, uint64_t size, uint64_t width,
                                                            uint64_t height, uint64_t stride, uint64_t format,
                                                            uint64_t red, uint64_t green, uint64_t blue,
@@ -158,6 +168,7 @@ static inline BootFramebufferInfo BootFramebufferInfo__new(Address physical_base
 {
     return (BootFramebufferInfo){physical_base, size, width, height, stride, format, red, green, blue, reserved};
 }
+
 OptionalDef(BootDeviceInfo);
 
 typedef struct BootPciInfo
@@ -167,7 +178,9 @@ typedef struct BootPciInfo
     uint64_t bus_start;
     uint64_t bus_end;
 } BootPciInfo;
+
 OptionalDef(BootPciInfo);
+
 static inline BootPciInfo BootPciInfo__new(Address base, uint64_t size, uint64_t first, uint64_t last)
 {
     return (BootPciInfo){base, size, first, last};
@@ -178,7 +191,9 @@ typedef struct BootEthernetInfo
     BootDeviceInfo device;
     uint64_t kind;
 } BootEthernetInfo;
+
 OptionalDef(BootEthernetInfo);
+
 static inline BootEthernetInfo BootEthernetInfo__new(ConstBootDeviceInfoPtr device, uint64_t kind)
 {
     return (BootEthernetInfo){*device, kind};
@@ -200,9 +215,11 @@ typedef struct BootHardwareInfo
     Address memory_end;
     BootInterruptControllerInfo interrupt_controller;
 } BootHardwareInfo;
+
 typedef BootHardwareInfo * BootHardwareInfoPtr;
 typedef const BootHardwareInfo * ConstBootHardwareInfoPtr;
 ResultDef(BootHardwareInfo);
+
 static inline bool BootHardwareInfo__has_framebuffer(ConstBootHardwareInfoPtr self)
 {
     match_optional(self->framebuffer,
@@ -216,6 +233,7 @@ static inline bool BootHardwareInfo__has_framebuffer(ConstBootHardwareInfoPtr se
         }
     );
 }
+
 static inline BootHardwareInfo BootHardwareInfo__new(void)
 {
     return (BootHardwareInfo){.wait_mode = BOOT_WAIT_SPIN,

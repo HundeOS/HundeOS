@@ -18,6 +18,7 @@ typedef struct EchoConnection
     bool pending;
     bool handled;
 } EchoConnection;
+
 typedef EchoConnection * EchoConnectionPtr;
 OptionalDef(EchoConnection);
 
@@ -32,6 +33,7 @@ static bool EchoConnection__equals(void * first, void * second)
     EchoConnectionPtr b = second;
     return Queue__connection(&a->queue) == Queue__connection(&b->queue);
 }
+
 FixedArrayDefine(EchoConnection, QUEUE_LIMIT, EchoConnections, &EchoConnection__equals);
 FixedArrayBodyDefine(EchoConnections);
 typedef EchoConnections * EchoConnectionsPtr;

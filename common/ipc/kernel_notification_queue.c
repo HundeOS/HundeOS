@@ -19,6 +19,7 @@ bool KernelNotificationQueue__has_pending(KernelNotificationQueuePtr self)
             }
         }
     );
+
     return false;
 }
 

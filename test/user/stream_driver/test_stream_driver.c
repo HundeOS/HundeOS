@@ -33,6 +33,7 @@ ServiceDirectoryPtr StreamTest__directory(void)
 {
     return &directory;
 }
+
 static IOReply transfer(IOServiceContext context, IORequestPtr request)
 {
     if (blocked)
@@ -44,6 +45,7 @@ static IOReply transfer(IOServiceContext context, IORequestPtr request)
     __builtin_memset(reply.data, 'x', request->count);
     return reply;
 }
+
 Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr data, size_t size)
 {
     TEST_ASSERT_FALSE(queued);
@@ -51,6 +53,7 @@ Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr data, 
     queued = true;
     return Success(ChannelCode, CHANNEL_OK);
 }
+
 Result(OptionalChannelReplySize) Channel__poll_reply(ChannelPtr self, ChannelDataPtr data, size_t size)
 {
     TEST_ASSERT_TRUE(queued);
@@ -69,11 +72,13 @@ Result(OptionalChannelReplySize) Channel__poll_reply(ChannelPtr self, ChannelDat
     );
     return Error(OptionalChannelReplySize, bstr("Missing stream response"), CHANNEL_TRANSPORT_FAILED);
 }
+
 ChannelCode Channel__close(ChannelPtr self)
 {
     queued = false;
     return CHANNEL_OK;
 }
+
 int IO__printf(ConstBStringPtr format, ...)
 {
     TEST_FAIL();
@@ -102,6 +107,7 @@ void setUp(void)
     opened_service = empty_bstr();
     unavailable = false;
 }
+
 void tearDown(void)
 {
     StreamRegistry__dispose(&registry);
@@ -116,6 +122,7 @@ static IORequest open_request(Flags flags)
     request.client_session = 31;
     return request;
 }
+
 static IOReply execute(QueueConnectionID session, uint64_t pid, IORequest request)
 {
     match_optional(

@@ -5,6 +5,7 @@
 #include "../types/optional.h"
 typedef uint64_t ProcessState;
 typedef ProcessState * ProcessStatePtr;
+
 // state bits
 // 6    5      4     3    2         1     0
 // dead stop active sleep wait interrupt ready
@@ -37,6 +38,7 @@ typedef enum ParkReasons
 } ParkReasons;
 
 OptionalDef(ParkReason);
+
 typedef enum ProcessClass
 {
     PROCESS_CLASS_NORMAL = 0,

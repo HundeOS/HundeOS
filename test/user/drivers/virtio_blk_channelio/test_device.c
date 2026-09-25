@@ -3,6 +3,7 @@
 #include <stdarg.h>
 
 #include "unity.h"
+#include "ipc/trace_protocol.h"
 
 #include "../../../../common/types/bstring.h"
 #include "../../../../common_includes/syscalls/service.h"
@@ -301,17 +302,11 @@ void setUp(void)
     }
 }
 
-SyslogResult kernel_syslogf(const char * format, ...)
-{
-    fake_logged = true;
-    return SYSLOG_OK;
-}
-
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+TraceStatus DriverTrace__writef(const char * tag, const char * format, ...)
 {
     fake_logged = true;
     fake_log_tag = tag;
-    return SYSLOG_OK;
+    return TRACE_OK;
 }
 
 void tearDown(void)
@@ -449,12 +444,15 @@ bool BlockServer__poll(BlockServerPtr self)
 {
     return false;
 }
+
 void Channel__prepare_wait(void)
 {
 }
+
 void Channel__wait_event(void)
 {
 }
+
 ServiceCode service_poll(ServiceEventPtr event)
 {
     return service_wait(event);
@@ -479,6 +477,7 @@ ServiceCode VirtioBlkChannelIO__acknowledge(IRQNumber irq)
 {
     return SERVICE_OK;
 }
+
 ServiceCode VirtioBlkRuntime__await_irq(ServiceEventPtr event)
 {
     return service_wait(event);

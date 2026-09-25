@@ -54,6 +54,7 @@ static StringPos DynString__next_capacity(StringPos current, StringPos required)
     {
         next *= 2;
     }
+
     return next;
 }
 

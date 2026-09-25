@@ -8,6 +8,7 @@ typedef struct ChannelServerRequest
     size_t size;
     QueueParticipantID client_pid;
 } ChannelServerRequest;
+
 typedef ChannelServerRequest * ChannelServerRequestPtr;
 OptionalDef(ChannelServerRequest);
 typedef Optional(ChannelServerRequest) OptionalChannelServerRequest;
@@ -25,6 +26,7 @@ typedef struct ChannelServer
     bool handling_request;
     bool closed;
 } ChannelServer;
+
 typedef ChannelServer * ChannelServerPtr;
 ResultDef(ChannelServer);
 

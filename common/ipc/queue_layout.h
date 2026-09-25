@@ -33,6 +33,7 @@ typedef struct QueuePublication
     QueueMessage message;
     QueueCursor cursor;
 } QueuePublication;
+
 ResultDef(QueuePublication);
 AtomicRecordArrayDefine(QueuePublication, 1, QueuePublications);
 
@@ -44,6 +45,7 @@ typedef struct QueuePage
     QueueMessage messages[QUEUE_CAPACITY];
     QueuePublications publication;
 } QueuePage;
+
 typedef QueuePage * QueuePagePtr;
 
 typedef struct QueueIdentity
@@ -56,6 +58,7 @@ typedef struct QueueIdentity
     QueueStateFlag accepted;
     QueueStateFlag closed;
 } QueueIdentity;
+
 typedef QueueIdentity * QueueIdentityPtr;
 
 AtomicFixedArrayDefine(QueueConnectionID, QUEUE_LIMIT, QueueConnectionSlots);
@@ -66,6 +69,7 @@ typedef struct QueueArrivals
     QueueEpoch epoch;
     QueueConnectionSlots connections;
 } QueueArrivals;
+
 typedef QueueArrivals * QueueArrivalsPtr;
 
 #define QUEUE_ARRIVALS_SIZE ((sizeof(QueueArrivals) + QUEUE_PAGE_SIZE - 1) / QUEUE_PAGE_SIZE * QUEUE_PAGE_SIZE)

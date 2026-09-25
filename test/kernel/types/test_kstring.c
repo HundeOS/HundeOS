@@ -100,6 +100,7 @@ void test_bstring_equals_when_not_equal_same_length(void)
 
 BString delimited_string = bstr("hello/world/how/are/you");
 BString rejoined_string = bstr("hello:world:how:are:you");
+
 void test_kstring_join(void)
 {
     BStringArray strs = BString__split(&delimited_string, '/');

@@ -163,6 +163,7 @@ static BlockChannelResponse BlockServer__execute(BlockServerPtr self, BlockServe
                 }
             );
         }
+
         BlockChannelResponse response = BlockChannelResponse__new(BLOCK_PROTOCOL_OK, self->block_count);
         response.buffers = connection->buffers;
         return response;

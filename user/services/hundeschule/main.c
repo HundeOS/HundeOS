@@ -8,6 +8,7 @@
 #include "sys/process.h"
 #include "sys/service.h"
 #include "sys/spawn.h"
+#include "trace/client.h"
 #include "types/fixed_array.h"
 #include "../../user.h"
 
@@ -28,6 +29,7 @@
 
 static BString hundeschule_empty = empty_bstr();
 static BString hundeschule_hundeschau_path = bstr("/sbin/services/hundeschau");
+static BString hundeschule_trace_path = bstr("/sbin/services/hund-verfolgen");
 static BString hundeschule_hundebus_path = bstr("/sbin/drivers/hundebus");
 static BString hundeschule_virtio_keyboard_path = bstr("/sbin/drivers/virtio_keyboard");
 static BString hundeschule_uart_rx_path = bstr("/sbin/drivers/uart_rx");
@@ -668,7 +670,7 @@ static int Hundeschule__spawn_configured_driver_line(HundeschuleRequiredProcesse
     // These services are already running before disk configuration is available.
     if (BString__equals(&path, &hundeschule_channel_manager_path) ||
         BString__equals(&path, &hundeschule_interrupt_manager_path) ||
-        BString__equals(&path, &hundeschule_socket_router_path) ||
+        BString__equals(&path, &hundeschule_trace_path) || BString__equals(&path, &hundeschule_socket_router_path) ||
         BString__equals(&path, &hundeschule_io_system_path) || BString__equals(&path, &hundeschule_filesystem_path))
     {
         return 0;
@@ -756,6 +758,13 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
         return 1;
     }
 
+    if (Hundeschule__spawn_required_process(processes, &hundeschule_trace_path, &hundeschule_empty, &hundeschule_empty,
+                                            true) != 0 ||
+        !service_ok(service_wait_ready(&bstr(HUND_VERFOLGEN_SERVICE))))
+    {
+        return 1;
+    }
+
     if (Hundeschule__spawn_required_process(processes, &hundeschule_socket_router_path, &hundeschule_empty,
                                             &hundeschule_empty, false) != 0 ||
         !service_ok(service_wait_ready(&bstr("socket_router"))))
@@ -785,6 +794,11 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
             return 1;
         }
     );
+
+    if (DriverTrace__storage_ready() != TRACE_OK)
+    {
+        IO__printf(&bstr("hundeschule: could not enable driver trace file\n"));
+    }
 
     failures += Hundeschule__spawn_required_process(processes, &hundeschule_hundeschau_path, &hundeschule_empty,
                                                     &hundeschule_empty, false);

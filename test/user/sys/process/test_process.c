@@ -41,6 +41,7 @@ void setUp(void)
     list_capacity = 0;
     list_calls = 0;
 }
+
 void tearDown(void)
 {
 }

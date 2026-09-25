@@ -25,23 +25,27 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     last_path_request = (IOPathRequest){.path = *path, .flags = flags};
     return next_result;
 }
+
 IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
     last_operation = IO_REQUEST_LINK;
     last_link_request = (IOLinkRequest){.source_path = *source_path, .target_path = *target_path};
     return next_result;
 }
+
 IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset)
 {
     last_operation = operation;
     last_path_request = (IOPathRequest){.path = *path, .flags = flags};
     return operation == IO_REQUEST_FILE_INFO ? next_path_reply : IOReply__new(next_result, 0);
 }
+
 IOHandle IOClient__accept(IOHandle handle)
 {
     TEST_FAIL_MESSAGE("Unexpected accept");
     return IO_UNKNOWN_HANDLE;
 }
+
 IOStatus IOClient__close(IOHandle handle)
 {
     return IO_OK;
@@ -51,6 +55,7 @@ IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
 {
     return IO_OPERATION_NOT_SUPPORTED;
 }
+
 ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
 {
     last_operation = IO_REQUEST_READ;
@@ -62,6 +67,7 @@ ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
     }
     return next_read_result;
 }
+
 ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
 {
     last_operation = IO_REQUEST_WRITE;

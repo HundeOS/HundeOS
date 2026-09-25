@@ -5,6 +5,7 @@ bool SocketByte__equals(void * first, void * second)
 {
     return *(SocketBytePtr)first == *(SocketBytePtr)second;
 }
+
 bool SocketID__equals(void * first, void * second)
 {
     return *(SocketIDPtr)first == *(SocketIDPtr)second;
@@ -143,6 +144,7 @@ static IOReply SocketService__open(SocketServicePtr self, IORequestPtr request)
     {
         return IOReply__new(IO_INVALID_PATH, 0);
     }
+
     Optional(SocketResourcePtr) listener_opt = None(SocketResourcePtr);
     match_find_result_ptr(
         SocketResources__find(&self->resources, SocketResource__name_matches, &path),
@@ -238,6 +240,7 @@ static IOReply SocketService__read(SocketResourcePtr resource, IORequestPtr requ
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
+
     IOReply reply = IOReply__new(IO_OK, 0);
     if (count == 0)
     {
@@ -280,6 +283,7 @@ static IOReply SocketService__write(SocketServicePtr self, SocketResourcePtr res
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
+
     if (request->count == 0)
     {
         return IOReply__new(IO_OK, 0);
@@ -331,6 +335,7 @@ IOReply SocketService__execute(SocketServicePtr self, IORequestPtr request)
     {
         return IOReply__new(IO_PERMISSION_DENIED, 0);
     }
+
     if (request->operation == IO_REQUEST_RELEASE_CLIENT)
     {
         SocketService__release(self, request->client_session);

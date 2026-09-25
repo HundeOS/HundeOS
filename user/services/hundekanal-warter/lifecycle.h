@@ -33,6 +33,7 @@ struct ChannelSession
     RequestTicket ticket;
     bool client_closed;
 };
+
 OptionalDef(ChannelSession);
 
 extern const ChannelSessionState CHANNEL_SESSION_WAIT_OPEN;

@@ -218,7 +218,9 @@ make format-check
 
 Both targets use clang-format 22.1.0, downloaded automatically through `uv`.
 The base style is defined in `.clang-format`: four spaces, Allman braces, a
-120-column target, and preserved include order. Macro-expansion rules put
+120-column target, preserved include order, and blank lines between function
+definitions and major type definitions such as structures and enumerations.
+Macro-expansion rules put
 `critical_section` and `critical_section_try` block braces on separate lines,
 including single-statement bodies. `tools/hundeformat.py` aligns critical-section
 arguments and blocks one indentation level inside the call, with a separate

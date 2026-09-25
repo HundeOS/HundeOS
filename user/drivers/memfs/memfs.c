@@ -548,6 +548,7 @@ static IOStatus Memfs__can_remove(MemfsPtr self, MemfsNodePtr node, ConstProcess
     {
         return IO_PERMISSION_DENIED;
     }
+
     return IO_OK;
 }
 
@@ -628,6 +629,7 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
     {
         return Memfs__release(self, request);
     }
+
     if (request->operation == IO_REQUEST_OPEN || request->operation == IO_REQUEST_LIST_DIR ||
         request->operation == IO_REQUEST_FILE_INFO || request->operation == IO_REQUEST_MKDIR ||
         request->operation == IO_REQUEST_REMOVE)

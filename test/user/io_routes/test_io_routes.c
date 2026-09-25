@@ -15,6 +15,7 @@ IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr pat
     TEST_ASSERT_LESS_THAN_UINT64(3, offset);
     return replies[offset];
 }
+
 IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
 {
     channel_calls++;
@@ -28,27 +29,32 @@ IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path
     TEST_ASSERT_EQUAL_BSTRING(bstr("/target"), *target_path);
     return replies[0].status;
 }
+
 IOHandle IOClient__accept(IOHandle handle)
 {
     TEST_FAIL_MESSAGE("Not a socket test");
     return IO_UNKNOWN_HANDLE;
 }
+
 IOStatus IOClient__close(IOHandle handle)
 {
     channel_calls++;
     return IO_OK;
 }
+
 IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
 {
     channel_calls++;
     foreground_pid = pid;
     return IO_OK;
 }
+
 ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
 {
     channel_calls++;
     return 0;
 }
+
 ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
 {
     channel_calls++;
@@ -92,6 +98,7 @@ void test_terminal_foreground_control_uses_open_standard_input(void)
     TEST_ASSERT_EQUAL_UINT64(42, foreground_pid);
     TEST_ASSERT_EQUAL_UINT(2, channel_calls);
 }
+
 void tearDown(void)
 {
 }

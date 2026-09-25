@@ -2,10 +2,12 @@
 #include "../../../kernel/memory_accounting.h"
 
 static MemoryAccounting accounting;
+
 void setUp(void)
 {
     accounting = MemoryAccounting__new();
 }
+
 void tearDown(void)
 {
     MemoryAccounting__forget(&accounting, 1);

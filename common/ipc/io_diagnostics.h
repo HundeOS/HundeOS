@@ -28,6 +28,7 @@ typedef struct IODiagnostics
     uint64_t wait_entries;
     uint64_t unchanged_wakes;
 } IODiagnostics;
+
 typedef IODiagnostics * IODiagnosticsPtr;
 typedef const IODiagnostics * ConstIODiagnosticsPtr;
 OptionalDef(IODiagnostics);

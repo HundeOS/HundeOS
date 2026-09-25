@@ -41,14 +41,17 @@ inline unsigned va_idx_l0(uint64_t va)
 {
     return (va >> 39) & 0x1FF;
 }
+
 inline unsigned va_idx_l1(uint64_t va)
 {
     return (va >> 30) & 0x1FF;
 }
+
 inline unsigned va_idx_l2(uint64_t va)
 {
     return (va >> 21) & 0x1FF;
 }
+
 inline unsigned va_idx_l3(uint64_t va)
 {
     return (va >> 12) & 0x1FF;
@@ -59,10 +62,12 @@ inline uint64_t va_off_1g(uint64_t va)
 {
     return va & ((1ULL << 30) - 1);
 } // 1 GiB
+
 inline uint64_t va_off_2m(uint64_t va)
 {
     return va & ((1ULL << 21) - 1);
 } // 2 MiB
+
 inline uint64_t va_off_4k(uint64_t va)
 {
     return va & ((1ULL << 12) - 1);
@@ -74,24 +79,28 @@ inline uint64_t rd_esr_el1(void)
     __asm__ volatile("mrs %0, esr_el1" : "=r"(v));
     return v;
 }
+
 inline uint64_t rd_elr_el1(void)
 {
     uint64_t v;
     __asm__ volatile("mrs %0, elr_el1" : "=r"(v));
     return v;
 }
+
 inline uint64_t rd_far_el1(void)
 {
     uint64_t v;
     __asm__ volatile("mrs %0, far_el1" : "=r"(v));
     return v;
 }
+
 inline uint64_t rd_spsr_el1(void)
 {
     uint64_t v;
     __asm__ volatile("mrs %0, spsr_el1" : "=r"(v));
     return v;
 }
+
 inline uint64_t rd_tcr(void)
 {
     uint64_t v;
@@ -103,10 +112,12 @@ inline void wr_tcr(uint64_t v)
 {
     __asm__ volatile("msr tcr_el1, %0\nisb" ::"r"(v) : "memory");
 }
+
 inline void tlbi_vmalle1(void)
 {
     __asm__ volatile("tlbi vmalle1");
 }
+
 inline void write_vbar_el1(uint64_t v)
 {
     __asm__ volatile("msr vbar_el1,%0" ::"r"(v));
@@ -116,14 +127,17 @@ inline unsigned idx0(uint64_t va)
 {
     return (va >> 39) & 0x1FF;
 }
+
 inline unsigned idx1(uint64_t va)
 {
     return (va >> 30) & 0x1FF;
 }
+
 inline unsigned idx2(uint64_t va)
 {
     return (va >> 21) & 0x1FF;
 }
+
 inline unsigned idx3(uint64_t va)
 {
     return (va >> 12) & 0x1FF;

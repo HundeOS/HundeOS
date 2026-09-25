@@ -4,12 +4,14 @@
 #include "types/linked_list.h"
 
 ResultDef(IOStatus);
+
 typedef struct StreamDevice
 {
     BString name;
     BString service;
     Flags access;
 } StreamDevice;
+
 typedef StreamDevice * StreamDevicePtr;
 OptionalDef(StreamDevice);
 bool StreamDevice__equals(void * first, void * second);
@@ -21,6 +23,7 @@ typedef struct StreamBackend
     IOMediator mediator;
     IOHandle first_handle;
 } StreamBackend;
+
 typedef StreamBackend * StreamBackendPtr;
 OptionalDef(StreamBackend);
 bool StreamBackend__equals(void * first, void * second);
@@ -32,6 +35,7 @@ typedef struct StreamRegistry
     StreamBackends backends;
     IOHandle next_handle;
 } StreamRegistry;
+
 typedef StreamRegistry * StreamRegistryPtr;
 StreamRegistry StreamRegistry__new(void);
 Result(IOStatus)

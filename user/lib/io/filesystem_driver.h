@@ -5,11 +5,13 @@
 #define FILESYSTEM_FILE_CAPACITY (12U * 1024U)
 typedef uint64_t FilesystemFileSize;
 ResultDef(FilesystemFileSize);
+
 typedef struct FilesystemFileInfo
 {
     FilesystemFileSize size;
     FileMode mode;
 } FilesystemFileInfo;
+
 static inline FilesystemFileInfo FilesystemFileInfo__new(FilesystemFileSize size, FileMode mode)
 {
     return (FilesystemFileInfo){
@@ -17,6 +19,7 @@ static inline FilesystemFileInfo FilesystemFileInfo__new(FilesystemFileSize size
         .mode = mode,
     };
 }
+
 ResultDef(FilesystemFileInfo);
 typedef uint8_t * FilesystemFileDataPtr;
 OptionalDef(FilesystemFileDataPtr);
@@ -33,25 +36,30 @@ typedef Result(DirectoryEntryCount) (*FilesystemList)(IOServiceContext context, 
 typedef IOStatus (*FilesystemMkdir)(IOServiceContext context, ConstBStringPtr path);
 typedef IOStatus (*FilesystemRemove)(IOServiceContext context, ConstBStringPtr path, Flags flags);
 typedef IOStatus (*FilesystemLink)(IOServiceContext context, ConstBStringPtr source_path, ConstBStringPtr target_path);
+
 typedef enum FilesystemSourceMode
 {
     FILESYSTEM_SOURCE_SNAPSHOT,
     FILESYSTEM_SOURCE_STREAM,
 } FilesystemSourceMode;
+
 typedef struct FilesystemSnapshotOperations
 {
     FilesystemLoad load;
 } FilesystemSnapshotOperations;
+
 typedef struct FilesystemStreamOperations
 {
     FilesystemDescribe describe;
     FilesystemRead read;
 } FilesystemStreamOperations;
+
 typedef union FilesystemSourceOperations
 {
     FilesystemSnapshotOperations snapshot;
     FilesystemStreamOperations stream;
 } FilesystemSourceOperations;
+
 typedef struct FilesystemOperations
 {
     FilesystemSourceMode source_mode;
@@ -63,6 +71,7 @@ typedef struct FilesystemOperations
     FilesystemLink link;
     FilesystemFileSize write_capacity;
 } FilesystemOperations;
+
 typedef const FilesystemOperations * ConstFilesystemOperationsPtr;
 FilesystemOperations FilesystemOperations__new_snapshot(FilesystemLoad load, FilesystemStore store, FilesystemList list,
                                                         FilesystemMkdir mkdir, FilesystemRemove remove,
@@ -85,6 +94,7 @@ typedef struct FilesystemFile
     FilesystemFileSize offset;
     Optional(FilesystemFileDataPtr) data;
 } FilesystemFile;
+
 typedef FilesystemFile * FilesystemFilePtr;
 OptionalDef(FilesystemFile);
 OptionalDef(FilesystemFilePtr);
@@ -99,6 +109,7 @@ typedef struct FilesystemDriver
     IOHandle next_handle;
     QueueConnectionID namespace_session;
 } FilesystemDriver;
+
 typedef FilesystemDriver * FilesystemDriverPtr;
 FilesystemDriver FilesystemDriver__new(IOServiceContext volume, ConstFilesystemOperationsPtr operations);
 IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request);

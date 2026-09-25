@@ -19,6 +19,7 @@ typedef struct QueueWaitUsage
     uint64_t since_usec;
     ProcessQueueWaitUsage totals;
 } QueueWaitUsage;
+
 typedef QueueWaitUsage * QueueWaitUsagePtr;
 
 QueueWaitUsage QueueWaitUsage__new(void);

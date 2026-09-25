@@ -8,19 +8,24 @@ typedef struct PufferConnection
     BufferReply reply;
     bool pending;
 } PufferConnection;
+
 typedef PufferConnection * PufferConnectionPtr;
 OptionalDef(PufferConnection);
+
 static PufferConnection PufferConnection__new(ChannelServer channel)
 {
     return (PufferConnection){.channel = channel};
 }
+
 static bool PufferConnection__equals(void * first, void * second)
 {
     return ChannelServer__connection(&((PufferConnectionPtr)first)->channel) ==
            ChannelServer__connection(&((PufferConnectionPtr)second)->channel);
 }
+
 FixedArrayDefine(PufferConnection, QUEUE_LIMIT, PufferConnections, PufferConnection__equals);
 FixedArrayBodyDefine(PufferConnections);
+
 static bool PufferConnection__matches(PufferConnectionPtr self, void * context)
 {
     return ChannelServer__connection(&self->channel) == *(QueueConnectionIDPtr)context;

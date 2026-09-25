@@ -6,13 +6,16 @@
 void setUp(void)
 {
 }
+
 void tearDown(void)
 {
 }
+
 ServiceCode service_become_service(void)
 {
     return SERVICE_OK;
 }
+
 void StreamDriverTest__step(IOStreamDriverPtr driver)
 {
     TEST_ASSERT_EQUAL(IO_OPEN_READ, driver->access);
@@ -20,10 +23,12 @@ void StreamDriverTest__step(IOStreamDriverPtr driver)
     TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, driver->transfer(driver->context, &request).status);
     StreamDriverTest__stop();
 }
+
 void test_usb_keyboard_stub_serves_read_stream(void)
 {
     TEST_ASSERT_EQUAL(0, StreamDriverTest__run(usb_keyboard_main_under_test));
 }
+
 void test_usb_keyboard_reads_buffer_without_kernel_io(void)
 {
     UsbKeyboard keyboard = UsbKeyboard__new();

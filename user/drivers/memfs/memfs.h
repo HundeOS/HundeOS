@@ -6,6 +6,7 @@
 typedef uint64_t MemfsNodeID;
 typedef uint8_t * MemfsDataPtr;
 OptionalDef(MemfsDataPtr);
+
 typedef struct MemfsNode
 {
     MemfsNodeID id;
@@ -17,6 +18,7 @@ typedef struct MemfsNode
     size_t size;
     size_t capacity;
 } MemfsNode;
+
 typedef MemfsNode * MemfsNodePtr;
 OptionalDef(MemfsNode);
 OptionalDef(MemfsNodePtr);
@@ -32,6 +34,7 @@ typedef struct MemfsHandle
     Flags flags;
     size_t offset;
 } MemfsHandle;
+
 typedef MemfsHandle * MemfsHandlePtr;
 OptionalDef(MemfsHandle);
 bool MemfsHandle__equals(void * first, void * second);
@@ -45,6 +48,7 @@ typedef struct Memfs
     IOHandle next_handle;
     QueueConnectionID namespace_session;
 } Memfs;
+
 typedef Memfs * MemfsPtr;
 Memfs Memfs__new(void);
 void Memfs__dispose(MemfsPtr self);

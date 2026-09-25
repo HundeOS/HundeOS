@@ -1109,6 +1109,7 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
             }
         }
     );
+
     return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
 
@@ -1323,6 +1324,7 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
     {
         return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_INVALID_SIZE);
     }
+
     Address virtual_base = self->allocation_next;
     Address virtual_address = virtual_base + physical_offset;
 

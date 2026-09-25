@@ -15,6 +15,7 @@ typedef struct VirtioBlkFiberRuntime
     ChannelSignalState work_state;
     ChannelSignal work_available;
 } VirtioBlkFiberRuntime;
+
 typedef VirtioBlkFiberRuntime * VirtioBlkFiberRuntimePtr;
 OptionalDef(VirtioBlkFiberRuntimePtr);
 

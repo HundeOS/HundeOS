@@ -163,6 +163,7 @@ static void AllocatedBlocks__remove_entry(AllocatedBlocksPtr blocks, uint64_t ta
     {
         bucket->data[i] = bucket->data[i + 1];
     }
+
     bucket->len--;
     blocks->len--;
 

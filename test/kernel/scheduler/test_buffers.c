@@ -45,6 +45,7 @@ void setUp(void)
     buffers = &kernel->scheduler->buffers;
     TEST_ASSERT_EQUAL_HEX64(BUFFER_EVENTS_ADDRESS, operation(manager, MEM_BUFFER_REGISTER, 0, 0, 0, 0));
 }
+
 void tearDown(void)
 {
     PageTableStub__fail_mapping_after(-1);
@@ -55,6 +56,7 @@ static bool mapped(ProcessPtr process, Address address, bool write)
     return check_address_mapped(ProcessPageTable__root_table(&process->page_table), address, true, write, false,
                                 BUFFER_SIZE);
 }
+
 static BufferID create(BufferDirection direction)
 {
     return operation(manager, MEM_BUFFER_CREATE, server->pid, client->pid, direction, 0);

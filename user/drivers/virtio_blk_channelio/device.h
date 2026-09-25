@@ -2,6 +2,7 @@
 #define HUND_VIRTIO_BLK_DEVICE_H
 #include "sys/service.h"
 #include "channel/block_server.h"
+
 typedef struct VirtioBlkDevice
 {
     ServiceMappedMemoryPtr mapping;

@@ -16,6 +16,7 @@ typedef struct ProcessUserWait
     uint64_t started_at_usec;
     uint64_t elapsed_usec;
 } ProcessUserWait;
+
 OptionalDef(ProcessUserWait);
 
 typedef struct ProcessQueueWaitUsage
@@ -36,7 +37,9 @@ typedef struct ProcessMemoryUsage
     uint64_t shared_bytes;
     uint64_t device_bytes;
 } ProcessMemoryUsage;
+
 OptionalDef(ProcessMemoryUsage);
+
 static inline ProcessMemoryUsage ProcessMemoryUsage__new(void)
 {
     return (ProcessMemoryUsage){.private_bytes = 0, .shared_bytes = 0, .device_bytes = 0};
@@ -59,6 +62,7 @@ typedef struct ProcessRecord
     Optional(IODiagnostics) io_diagnostics;
     Optional(ProcessMemoryUsage) memory;
 } ProcessRecord;
+
 typedef ProcessRecord * ProcessRecordPtr;
 typedef const ProcessRecord * ConstProcessRecordPtr;
 ResultDef(ProcessRecord);
@@ -68,12 +72,14 @@ ResultDef(OptionalProcessRecord);
 
 AtomicRecordArrayDefine(ProcessRecord, PROCESS_REGISTRY_CAPACITY, ProcessRecords);
 AtomicFixedArrayDefine(uint64_t, PROCESS_REGISTRY_CPUS, ProcessRecordCounts);
+
 typedef struct ProcessRegistry
 {
     uint64_t version;
     ProcessRecordCounts counts;
     ProcessRecords records;
 } ProcessRegistry;
+
 typedef ProcessRegistry * ProcessRegistryPtr;
 typedef const ProcessRegistry * ConstProcessRegistryPtr;
 #define PROCESS_REGISTRY_SIZE (((sizeof(ProcessRegistry) + 4095ULL) / 4096ULL) * 4096ULL)

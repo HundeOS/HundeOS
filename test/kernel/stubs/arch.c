@@ -9,6 +9,7 @@ uint64_t CPU__time_usec(void)
 {
     return test_cpu_time_usec;
 }
+
 bool Arch__is_virtio_block_device(Address mapping)
 {
     return true;

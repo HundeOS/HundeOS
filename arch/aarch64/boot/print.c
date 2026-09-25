@@ -61,6 +61,7 @@ __BOOT__(void) _print(const char * str)
 }
 
 __BOOT_STRING__(HEX_DIGITS) = "0123456789ABCDEF";
+
 __BOOT__(void) _print_base(uint64_t value, const int base)
 {
     char buffer[64]; // Enough for binary representation + null

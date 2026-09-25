@@ -69,6 +69,7 @@ static bool Process__shared_observations_ready(ProcessPtr self, ConstQueueWaitCo
     {
         return true;
     }
+
     if (QueueWaitControl__woken(control, publication->observed_wake_generation))
     {
         return true;
@@ -100,6 +101,7 @@ Optional(QueueWaitPublication) Process__shared_wait(ProcessPtr self)
     {
         return None(QueueWaitPublication);
     }
+
     match_optional(
         self->queue_wait_control,
         some(mapping)

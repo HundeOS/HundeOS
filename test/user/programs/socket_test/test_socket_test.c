@@ -123,10 +123,12 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     IOPathRequest request = IOPathRequest__new(path, flags);
     return record_operation(IO_CALL, IO_OPEN, (Anything)&request, 0, 0, 0);
 }
+
 IOHandle IOClient__accept(IOHandle handle)
 {
     return record_operation(IO_CALL, IO_ACCEPT, handle, 0, 0, 0);
 }
+
 IOStatus IOClient__close(IOHandle handle)
 {
     return record_operation(IO_CALL, IO_CLOSE, handle, 0, 0, 0);
@@ -137,10 +139,12 @@ IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
     TEST_FAIL_MESSAGE("Unexpected terminal control");
     return IO_OPERATION_NOT_SUPPORTED;
 }
+
 ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
 {
     return record_operation(IO_CALL, IO_READ, handle, (Anything)data, size, 0);
 }
+
 ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
 {
     return record_operation(IO_CALL, IO_WRITE, handle, (Anything)data, size, 0);

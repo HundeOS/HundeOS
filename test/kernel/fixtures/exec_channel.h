@@ -20,6 +20,7 @@ typedef struct FakeExecService
     size_t offset;
     unsigned reads;
 } FakeExecService;
+
 typedef FakeExecService * FakeExecServicePtr;
 
 static FakeExecService FakeExecService__new(KernelPtr kernel)

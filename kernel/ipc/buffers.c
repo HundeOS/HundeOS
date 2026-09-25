@@ -5,12 +5,14 @@ bool Buffers__has_pending_notifications(BuffersPtr self, ProcessPtr process)
     return self->manager == process->pid && self->notifications.valid &&
            KernelNotificationQueue__has_pending(k_v_ptr(self->notifications, KernelNotificationQueue));
 }
+
 #include "../scheduler/scheduler.h"
 #include "../kernel_core.h"
 #include "ipc/ipc_platform.h"
 
 FixedArrayBodyDefine(ManagedBuffers);
 static BString buffer_error = bstr("Shared buffer unavailable");
+
 static ManagedBuffer ManagedBuffer__new(ArrayIndex slot)
 {
     return (ManagedBuffer){.id = slot};
@@ -212,11 +214,13 @@ static Result(Address) Buffers__create(BuffersPtr self, SchedulerPtr scheduler, 
     {
         return Error(Address, buffer_error, BUFFER_NO_MEMORY);
     }
+
     if (client == 0 || server == 0 || server == client || server == QUEUE_KERNEL_PID ||
         (direction != BUFFER_READ && direction != BUFFER_WRITE))
     {
         return Error(Address, buffer_error, BUFFER_INVALID);
     }
+
     match_optional(
         Scheduler__find_process_by_pid_locked(scheduler, server),
         some(process)
@@ -349,10 +353,12 @@ static Result(Address) ManagedBuffer__device_address(ManagedBufferPtr self, Proc
     {
         return Error(Address, buffer_error, BUFFER_DENIED);
     }
+
     if (size == 0 || offset >= BUFFER_SIZE || size > BUFFER_SIZE - offset)
     {
         return Error(Address, buffer_error, BUFFER_INVALID);
     }
+
     Address start = self->memory.kernel_addr.virtual_addr + offset;
     KernelAddress first = Kernel__from_virtual_address(caller->kernel, start);
     if (!first.valid)
@@ -393,6 +399,7 @@ Result(Address) Buffers__operation(BuffersPtr self, SchedulerPtr scheduler, Proc
             }
         );
     }
+
     if (operation == MEM_BUFFER_VALIDATE)
     {
         match_optional(

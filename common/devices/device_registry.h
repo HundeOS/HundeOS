@@ -32,6 +32,7 @@ typedef struct DeviceRecord
     uint64_t block_size;
     uint64_t block_count;
 } DeviceRecord;
+
 typedef DeviceRecord * DeviceRecordPtr;
 typedef const DeviceRecord * ConstDeviceRecordPtr;
 ResultDef(DeviceRecord);
@@ -43,11 +44,13 @@ DeviceRecord DeviceRecord__new(DeviceKind kind, uint64_t owner_pid, ConstBString
                                uint64_t block_size, uint64_t block_count);
 
 AtomicRecordArrayDefine(DeviceRecord, DEVICE_REGISTRY_CAPACITY, DeviceRecords);
+
 typedef struct DeviceRegistry
 {
     uint64_t version;
     DeviceRecords records;
 } DeviceRegistry;
+
 typedef DeviceRegistry * DeviceRegistryPtr;
 typedef const DeviceRegistry * ConstDeviceRegistryPtr;
 

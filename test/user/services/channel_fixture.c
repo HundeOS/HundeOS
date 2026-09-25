@@ -96,12 +96,15 @@ uint64_t process_current_pid(void)
 {
     return current_pid;
 }
+
 void Queue__prepare_wait(void)
 {
 }
+
 void Queue__wait_event(void)
 {
 }
+
 void IO__print(ConstBStringPtr str)
 {
     for (StringPos index = 0; index < BString__length(str); index++)
@@ -111,14 +114,17 @@ void IO__print(ConstBStringPtr str)
     }
     output[output_length] = '\0';
 }
+
 int IO__printf(ConstBStringPtr format, ...)
 {
     return 0;
 }
+
 ServiceCode service_become_service(void)
 {
     return SERVICE_OK;
 }
+
 ServiceCode service_publish_ready(ConstBStringPtr name)
 {
     return SERVICE_OK;
@@ -283,6 +289,7 @@ void Queue__wait_writable(QueuePtr queue)
         ChannelFixture__pump();
     }
 }
+
 void Queue__wait_readable(QueuePtr queue)
 {
     while (Queue__status(queue) != QUEUE_CLOSED && queue->incoming->produced == queue->read)
@@ -344,22 +351,27 @@ ChannelSignal ChannelSignal__new(ChannelSignalStatePtr state)
 {
     return (ChannelSignal){.state = state};
 }
+
 FiberScheduler FiberScheduler__new(void)
 {
     return (FiberScheduler){0};
 }
+
 Result(FiberPtr) FiberScheduler__spawn(FiberSchedulerPtr self, FiberEntry entry, Anything argument)
 {
     return Error(FiberPtr, bstr("Not running real fibres in fixture"), FIBER_QUEUE_FULL);
 }
+
 Result(FiberCode) FiberScheduler__run_ready_until_blocked(FiberSchedulerPtr self)
 {
     return Success(FiberCode, FIBER_OK);
 }
+
 Result(FiberCode) FiberScheduler__await_channel_signal(FiberSchedulerPtr self, ChannelSignalPtr channel)
 {
     return Success(FiberCode, FIBER_OK);
 }
+
 Result(FiberCode) FiberScheduler__wake_channel_signal(FiberSchedulerPtr self, ChannelSignalPtr channel)
 {
     return Success(FiberCode, FIBER_OK);

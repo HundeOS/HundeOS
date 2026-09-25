@@ -8,6 +8,7 @@ typedef struct ChannelBlk
 {
     uint8_t storage[CHANNEL_BLK_BLOCK_SIZE * CHANNEL_BLK_BLOCK_COUNT];
 } ChannelBlk;
+
 typedef ChannelBlk * ChannelBlkPtr;
 
 static ChannelBlk ChannelBlk__new(void)

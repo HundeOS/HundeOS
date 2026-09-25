@@ -12,6 +12,7 @@ typedef struct RequestLink
     QueueConnectionID route;
     bool replied;
 } RequestLink;
+
 typedef RequestLink * RequestLinkPtr;
 typedef const RequestLink * ConstRequestLinkPtr;
 OptionalDef(RequestLink);
@@ -22,6 +23,7 @@ typedef struct RequestGraph
 {
     RequestLinks links;
 } RequestGraph;
+
 typedef RequestGraph * RequestGraphPtr;
 
 RequestGraph RequestGraph__new(void);

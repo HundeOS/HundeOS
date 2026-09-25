@@ -63,6 +63,7 @@ __BOOT__(uint64_t) clamp_pa_to_width(uint64_t pa)
 }
 
 __BOOT__(int)
+
 va_to_pa_from_l0(const uint64_t * l0_root, uint64_t va, uint64_t * pa_out,
                  int * leaf_level_out,     // 1,2,3 (optional)
                  uint64_t * leaf_desc_out) // raw descriptor (optional)
@@ -233,6 +234,7 @@ __BOOT__(void) __dump_table(PageTablePtr table, int entries, const char * level)
 }
 
 __BOOT__(void)
+
 debug_table_pool(int entries, PageTablePtr low_mem_l0_table, PageTablePtr high_mem_l0_table, PageTable table_pool[],
                  int cursor)
 {

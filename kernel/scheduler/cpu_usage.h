@@ -13,6 +13,7 @@ typedef struct CPUUsageBucket
     CPUUsageTick tick;
     CPUTime usec;
 } CPUUsageBucket;
+
 typedef CPUUsageBucket * CPUUsageBucketPtr;
 OptionalDef(CPUUsageBucket);
 
@@ -31,6 +32,7 @@ typedef struct CPUUsage
     CPUUsageBuckets active_buckets;
     CPUUsageBuckets scheduled_buckets;
 } CPUUsage;
+
 typedef CPUUsage * CPUUsagePtr;
 
 CPUUsage CPUUsage__new(void);

@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "unity.h"
+#include "ipc/trace_protocol.h"
 #include "../stream_runtime.h"
 
 static uint32_t registers[4096];
@@ -32,24 +33,25 @@ void setUp(void)
     backpressure = false;
     fail_subscribe = false;
 }
+
 void tearDown(void)
 {
 }
-SyslogResult kernel_syslogf(const char * format, ...)
+
+TraceStatus DriverTrace__writef(const char * tag, const char * format, ...)
 {
-    return SYSLOG_OK;
+    return TRACE_OK;
 }
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
-{
-    return SYSLOG_OK;
-}
+
 void __sync_boundary(void)
 {
 }
+
 ServiceCode service_become_service(void)
 {
     return SERVICE_OK;
 }
+
 ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)
 {
     TEST_ASSERT_EQUAL_HEX64(TEST_VIRTIO_MMIO_PHYSICAL_BASE, physical_address);
@@ -57,6 +59,7 @@ ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappe
     *memory = (ServiceMappedMemoryPtr)registers;
     return SERVICE_OK;
 }
+
 Result(BootHardwareInfo) BootHardwareInfo__load(void)
 {
     BootHardwareInfo info = BootHardwareInfo__new();
@@ -65,20 +68,24 @@ Result(BootHardwareInfo) BootHardwareInfo__load(void)
     info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
     return Success(BootHardwareInfo, info);
 }
+
 void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 {
     return (char *)registers + offset;
 }
+
 ServiceCode service_device_address(void * driver_address, AddressPtr device_address)
 {
     *device_address = (Address)driver_address;
     return SERVICE_OK;
 }
+
 ServiceCode InterruptClient__subscribe(IRQNumber irq)
 {
     TEST_ASSERT_EQUAL(TEST_VIRTIO_MMIO_FIRST_IRQ, irq);
     return fail_subscribe ? SERVICE_ABORT : SERVICE_OK;
 }
+
 ServiceCode InterruptClient__poll(ServiceEventPtr event)
 {
     if (delivered)
@@ -89,6 +96,7 @@ ServiceCode InterruptClient__poll(ServiceEventPtr event)
     *event = (ServiceEvent){.type = SERVICE_EVENT_IRQ, .source = TEST_VIRTIO_MMIO_FIRST_IRQ};
     return SERVICE_OK;
 }
+
 ServiceCode InterruptClient__acknowledge(IRQNumber irq)
 {
     TEST_ASSERT_EQUAL(TEST_VIRTIO_MMIO_FIRST_IRQ, irq);
@@ -96,6 +104,7 @@ ServiceCode InterruptClient__acknowledge(IRQNumber irq)
     acknowledgements++;
     return SERVICE_OK;
 }
+
 void StreamDriverTest__step(IOStreamDriverPtr driver)
 {
     VirtioKeyboardPtr keyboard = driver->context;
@@ -133,20 +142,24 @@ void StreamDriverTest__step(IOStreamDriverPtr driver)
     TEST_ASSERT_EQUAL_MEMORY("\033[D", reply.data, 3);
     StreamDriverTest__stop();
 }
+
 void test_keyboard_stream_services_device_before_interrupt_manager_ack(void)
 {
     TEST_ASSERT_EQUAL(0, StreamDriverTest__run(virtio_keyboard_main_under_test));
 }
+
 void test_keyboard_retains_irq_and_event_until_buffer_has_space(void)
 {
     backpressure = true;
     TEST_ASSERT_EQUAL(0, StreamDriverTest__run(virtio_keyboard_main_under_test));
 }
+
 void test_keyboard_fails_when_interrupt_registration_fails(void)
 {
     fail_subscribe = true;
     TEST_ASSERT_EQUAL(1, StreamDriverTest__run(virtio_keyboard_main_under_test));
 }
+
 void test_virtio_keyboard_translates_key_events_to_terminal_bytes(void)
 {
     VirtioKeyboardDevice device = VirtioKeyboardDevice__new(registers, 0, TEST_VIRTIO_MMIO_FIRST_IRQ);
@@ -168,6 +181,7 @@ void test_virtio_keyboard_translates_key_events_to_terminal_bytes(void)
     TEST_ASSERT_EQUAL(5, reply.value);
     TEST_ASSERT_EQUAL_MEMORY("\n\x7f\033[D", reply.data, 5);
 }
+
 void test_virtio_keyboard_empty_and_zero_length_reads(void)
 {
     VirtioKeyboardDevice device = VirtioKeyboardDevice__new(registers, 0, TEST_VIRTIO_MMIO_FIRST_IRQ);

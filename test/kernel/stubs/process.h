@@ -5,6 +5,7 @@
 
 void current_process_reset();
 bool context_switched_with_scheduler_lock(void);
+
 typedef struct TestStartupStdio
 {
     uint64_t pid;
@@ -12,6 +13,7 @@ typedef struct TestStartupStdio
     int64_t output;
     int64_t error;
 } TestStartupStdio;
+
 TestStartupStdio startup_stdio(void);
 ProcessPtr current_running_process();
 ProcessPtr active_address_space_process();

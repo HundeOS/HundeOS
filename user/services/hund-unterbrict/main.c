@@ -14,6 +14,7 @@ typedef struct InterruptClient
     InterruptProtocolResponse pending_response;
     bool pending;
 } InterruptClient;
+
 typedef InterruptClient * InterruptClientPtr;
 OptionalDef(InterruptClient);
 
@@ -42,6 +43,7 @@ typedef struct InterruptRegistration
     InterruptDeliverySequence pending_delivery;
     bool waiting;
 } InterruptRegistration;
+
 typedef InterruptRegistration * InterruptRegistrationPtr;
 OptionalDef(InterruptRegistration);
 
@@ -65,6 +67,7 @@ typedef struct InterruptManager
     InterruptRegistrations registrations;
     InterruptRegistrationGeneration next_generation;
 } InterruptManager;
+
 typedef InterruptManager * InterruptManagerPtr;
 
 static InterruptManager InterruptManager__new(ServiceInterruptManagerRegistrationPtr registration,
@@ -381,6 +384,7 @@ static bool InterruptManager__deliver_pending(InterruptManagerPtr self, Interrup
     {
         return false;
     }
+
     match_find_result_ptr(
         InterruptClients__find(&self->clients, InterruptClient__matches_connection, &registration->connection),
         some(client)
@@ -425,6 +429,7 @@ static bool InterruptManager__step(InterruptManagerPtr self, QueueParticipantID 
             none_do_nothing()
         );
     }
+
     return InterruptManager__deliver(self) || work;
 }
 
@@ -439,6 +444,7 @@ int main(void)
     {
         return 1;
     }
+
     match_result(
         Queue__listen(&bstr(INTERRUPT_MANAGER_SERVICE_NAME)),
         success(arrivals)

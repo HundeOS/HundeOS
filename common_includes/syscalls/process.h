@@ -27,6 +27,7 @@ typedef struct ProcessCredentials
     UserID user_id;
     GroupID group_id;
 } ProcessCredentials;
+
 typedef ProcessCredentials * ProcessCredentialsPtr;
 typedef const ProcessCredentials * ConstProcessCredentialsPtr;
 ResultDef(ProcessCredentials);

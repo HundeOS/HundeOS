@@ -15,6 +15,7 @@ typedef enum ChannelCode
     CHANNEL_PAYLOAD_TOO_LARGE = -4,
     CHANNEL_BUSY = -5,
 } ChannelCode;
+
 ResultDef(ChannelCode);
 
 typedef uint64_t ChannelReplySize;
@@ -34,6 +35,7 @@ typedef struct Channel
     RequestTicket ticket;
     Optional(ChannelReplySize) received_reply;
 } Channel;
+
 typedef Channel * ChannelPtr;
 ResultDef(Channel);
 

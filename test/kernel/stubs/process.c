@@ -22,10 +22,12 @@ bool context_switched_with_scheduler_lock(void)
 {
     return switched_with_scheduler_lock;
 }
+
 uint16_t Arch__elf_machine(void)
 {
     return 0xB7;
 }
+
 TestStartupStdio startup_stdio(void)
 {
     return initial_stdio;

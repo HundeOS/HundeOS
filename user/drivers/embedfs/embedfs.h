@@ -11,6 +11,7 @@ typedef struct EmbedfsHandle
     EmbeddedFsFile file;
     size_t offset;
 } EmbedfsHandle;
+
 typedef EmbedfsHandle * EmbedfsHandlePtr;
 OptionalDef(EmbedfsHandle);
 bool EmbedfsHandle__equals(void * first, void * second);
@@ -24,6 +25,7 @@ typedef struct Embedfs
     IOHandle next_handle;
     QueueConnectionID namespace_session;
 } Embedfs;
+
 typedef Embedfs * EmbedfsPtr;
 Embedfs Embedfs__new(EmbeddedFsPtr archive);
 IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request);

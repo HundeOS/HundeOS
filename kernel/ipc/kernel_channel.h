@@ -22,6 +22,7 @@ typedef struct KernelChannel
     Address payload_address;
     uint64_t payload_generation;
 } KernelChannel;
+
 typedef KernelChannel * KernelChannelPtr;
 ResultDef(KernelChannel);
 

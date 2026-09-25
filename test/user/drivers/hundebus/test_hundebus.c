@@ -6,6 +6,7 @@
 #include <setjmp.h>
 
 #include "unity.h"
+#include "ipc/trace_protocol.h"
 
 #include "../../../../common_includes/syscalls/io.h"
 #include "../../../../common_includes/syscalls/service.h"
@@ -100,14 +101,9 @@ void tearDown(void)
 {
 }
 
-SyslogResult kernel_syslogf(const char * format, ...)
+TraceStatus DriverTrace__writef(const char * tag, const char * format, ...)
 {
-    return SYSLOG_OK;
-}
-
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
-{
-    return SYSLOG_OK;
+    return TRACE_OK;
 }
 
 ServiceCode service_become_service()
@@ -219,6 +215,7 @@ ServiceCode service_publish_ready(ConstBStringPtr name)
     fake_ready = true;
     return SERVICE_OK;
 }
+
 bool IOService__poll(IOServicePtr self)
 {
     TEST_ASSERT_TRUE(fake_ready);
@@ -240,12 +237,15 @@ bool IOService__poll(IOServicePtr self)
     );
     longjmp(test_finished, 1);
 }
+
 void Channel__prepare_wait(void)
 {
 }
+
 void Channel__wait_event(void)
 {
 }
+
 Result(ChannelReplySize) Channel__submit(ChannelPtr self, ConstChannelDataPtr request, size_t request_size,
                                          ChannelDataPtr reply, size_t reply_capacity)
 {

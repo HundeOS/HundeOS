@@ -165,6 +165,7 @@ static uint64_t MemoryAccounting__shared_overlap(MemoryAccountingPtr self, Memor
             {
                 covered_end = end;
             }
+
             shared += covered_end - cursor;
             cursor = covered_end;
         }

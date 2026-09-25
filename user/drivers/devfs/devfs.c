@@ -99,14 +99,17 @@ static IOStatus Devfs__store(IOServiceContext context, ConstBStringPtr path, Fil
 {
     return IO_PERMISSION_DENIED;
 }
+
 static IOStatus Devfs__mkdir(IOServiceContext context, ConstBStringPtr path)
 {
     return IO_PERMISSION_DENIED;
 }
+
 static IOStatus Devfs__remove(IOServiceContext context, ConstBStringPtr path, Flags flags)
 {
     return IO_PERMISSION_DENIED;
 }
+
 FilesystemOperations Devfs__operations(void)
 {
     return FilesystemOperations__new_snapshot(Devfs__load, Devfs__store, Devfs__list, Devfs__mkdir, Devfs__remove,

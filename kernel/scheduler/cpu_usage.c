@@ -168,5 +168,6 @@ ProcessCPUUsage CPUUsage__snapshot(CPUUsagePtr self, CPUTime now, CPUTime user_w
                 scheduled.long_usec * 10000 / (PROCESS_CPU_LONG_TICKS * PROCESS_CPU_TICK_USEC);
         }
     );
+
     return usage;
 }

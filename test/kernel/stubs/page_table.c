@@ -76,6 +76,7 @@ void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress 
 }
 
 static int maps_before_failure = -1;
+
 void PageTableStub__fail_mapping_after(int successful_maps)
 {
     maps_before_failure = successful_maps;

@@ -68,6 +68,7 @@ typedef struct FiberWakeValue
     FiberCode status;
     uint64_t value;
 } FiberWakeValue;
+
 typedef const FiberWakeValue * ConstFiberWakeValuePtr;
 
 typedef Result(FiberCode) (*FiberEntry)(FiberPtr self, Anything argument);

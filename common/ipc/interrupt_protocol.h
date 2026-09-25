@@ -38,6 +38,7 @@ typedef struct InterruptProtocolRequest
     InterruptRegistrationGeneration generation;
     InterruptDeliverySequence sequence;
 } InterruptProtocolRequest;
+
 typedef InterruptProtocolRequest * InterruptProtocolRequestPtr;
 typedef const InterruptProtocolRequest * ConstInterruptProtocolRequestPtr;
 
@@ -49,6 +50,7 @@ typedef struct InterruptProtocolResponse
     InterruptRegistrationGeneration generation;
     InterruptDeliverySequence sequence;
 } InterruptProtocolResponse;
+
 typedef InterruptProtocolResponse * InterruptProtocolResponsePtr;
 typedef const InterruptProtocolResponse * ConstInterruptProtocolResponsePtr;
 

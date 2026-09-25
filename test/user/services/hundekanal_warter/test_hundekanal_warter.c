@@ -4,6 +4,7 @@ void setUp(void)
 {
     ChannelFixture__reset();
 }
+
 void tearDown(void)
 {
 }

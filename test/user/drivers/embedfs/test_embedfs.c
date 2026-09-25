@@ -11,6 +11,7 @@ static struct
     char names[128];
     uint8_t bytes[20000];
 } blob;
+
 static Embedfs filesystem;
 static ServiceDirectory directory;
 static bool exited;

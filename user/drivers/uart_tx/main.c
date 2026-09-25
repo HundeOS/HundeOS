@@ -8,7 +8,9 @@ typedef struct UartTransmitter
     UartDevice uart;
     bool pending_carriage_return;
 } UartTransmitter;
+
 typedef UartTransmitter * UartTransmitterPtr;
+
 static UartTransmitter UartTransmitter__new(ConstUartDevicePtr uart)
 {
     return (UartTransmitter){.uart = *uart};

@@ -275,6 +275,7 @@ Result(SystemCallResult) BootSpawn__handler(KernelPtr kernel, OptionalPtr(Proces
     {
         return Error(SystemCallResult, bstr("Bootstrap authority unavailable"), SPAWN_FAILED);
     }
+
     return ExecRequest__execute(kernel, proc, arg1, arg2, arg3, arg4, arg5, true);
 }
 
@@ -285,6 +286,7 @@ Result(SystemCallResult) BootComplete__handler(KernelPtr kernel, OptionalPtr(Pro
     {
         return Error(SystemCallResult, bstr("Bootstrap authority unavailable"), SPAWN_FAILED);
     }
+
     SchedulerPtr scheduler = kernel->scheduler;
     critical_section(
         scheduler->scheduler_lock,

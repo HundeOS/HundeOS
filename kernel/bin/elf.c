@@ -183,6 +183,7 @@ ProgramHeaderArray Elf__read_program_headers(ConstElfPtr self)
             }
         );
     }
+
     return headers;
 }
 

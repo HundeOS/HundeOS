@@ -11,6 +11,7 @@ typedef struct IOResource
     Flags flags;
     bool listener;
 } IOResource;
+
 typedef IOResource * IOResourcePtr;
 OptionalDef(IOResource);
 bool IOResource__equals(void * first, void * second);
@@ -33,6 +34,7 @@ typedef struct IOMediator
     bool filesystem;
     bool stream;
 } IOMediator;
+
 typedef IOMediator * IOMediatorPtr;
 IOMediator IOMediator__new(Channel backend);
 IOMediator IOMediator__new_filesystem(Channel backend, IOHandle first_handle);

@@ -303,7 +303,7 @@ $(SD_CARD_FAT32_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(SD_CAR
 
 $(ROOTFS_STAMP): Makefile $(shell find $(EXT2_ROOT_DIR) -type f -print) $(ROOTFS_COMMAND_BINARIES)
 	rm -rf $(ROOTFS_DIR)
-	mkdir -p $(ROOTFS_DIR)/usr/local/bin
+	mkdir -p $(ROOTFS_DIR)/usr/local/bin $(ROOTFS_DIR)/var/log
 	cp -R $(EXT2_ROOT_DIR)/. $(ROOTFS_DIR)/
 	$(foreach binary,$(ROOTFS_COMMAND_BINARIES),cp $(binary) $(ROOTFS_DIR)/usr/local/bin/$(basename $(notdir $(binary)));)
 	touch $@

@@ -105,9 +105,11 @@ ServiceCode service_become_service(void)
 {
     return SERVICE_OK;
 }
+
 void IO__print(ConstBStringPtr text)
 {
 }
+
 int IO__printf(ConstBStringPtr format, ...)
 {
     return 0;

@@ -7,6 +7,7 @@ static ServiceDirectoryPtr io_test_directory(void)
 {
     return &directory;
 }
+
 #define ServiceDirectory__shared io_test_directory
 #include "../../../user/lib/io/server.c"
 #include "../../../user/lib/io/client.c"
@@ -92,6 +93,7 @@ void setUp(void)
     file_backend = false;
     file_remaining = 0;
 }
+
 void tearDown(void)
 {
 }

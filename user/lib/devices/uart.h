@@ -12,6 +12,7 @@ typedef struct UartDevice
     Address registers;
     UartKind kind;
 } UartDevice;
+
 typedef UartDevice * UartDevicePtr;
 typedef const UartDevice * ConstUartDevicePtr;
 

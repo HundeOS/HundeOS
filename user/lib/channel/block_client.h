@@ -13,6 +13,7 @@ typedef struct BlockClient
     BlockProtocolBlockCount block_count;
     bool open;
 } BlockClient;
+
 typedef BlockClient * BlockClientPtr;
 ResultDef(BlockClient);
 

@@ -3,6 +3,7 @@
 #include "io/mediator.h"
 
 typedef IOReply (*IOStreamTransfer)(IOServiceContext context, IORequestPtr request);
+
 typedef struct IOStreamDriver
 {
     IOResources resources;
@@ -12,6 +13,7 @@ typedef struct IOStreamDriver
     IOServiceContext context;
     IOStreamTransfer transfer;
 } IOStreamDriver;
+
 typedef IOStreamDriver * IOStreamDriverPtr;
 IOStreamDriver IOStreamDriver__new(Flags access, IOServiceContext context, IOStreamTransfer transfer);
 Optional(IOReply)

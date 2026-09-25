@@ -19,6 +19,7 @@ typedef enum QueueWaitCode
     QUEUE_WAIT_TIMEOUT = 1,
     QUEUE_WAIT_PARKED = 2,
 } QueueWaitCode;
+
 ResultDef(QueueWaitCode);
 
 typedef struct QueueWaitSnapshot
@@ -30,6 +31,7 @@ typedef struct QueueWaitSnapshot
     QueueStateFlag accepted;
     QueueStateFlag closed;
 } QueueWaitSnapshot;
+
 typedef QueueWaitSnapshot * QueueWaitSnapshotPtr;
 typedef const QueueWaitSnapshot * ConstQueueWaitSnapshotPtr;
 OptionalDef(QueueWaitSnapshot);

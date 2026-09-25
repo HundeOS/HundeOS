@@ -5,17 +5,21 @@
 #include "sys/uart_config.h"
 
 static BootHardwareInfo hardware;
+
 void setUp(void)
 {
     hardware = BootHardwareInfo__new();
 }
+
 void tearDown(void)
 {
 }
+
 Result(BootHardwareInfo) BootHardwareInfo__load(void)
 {
     return Success(BootHardwareInfo, hardware);
 }
+
 FilesystemOperations FilesystemOperations__new_snapshot(FilesystemLoad load, FilesystemStore store, FilesystemList list,
                                                         FilesystemMkdir mkdir, FilesystemRemove remove,
                                                         FilesystemLink link, FilesystemFileSize capacity)

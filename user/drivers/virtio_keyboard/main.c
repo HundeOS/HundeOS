@@ -59,6 +59,7 @@ static bool KeyboardByte__equals(void * first, void * second)
 {
     return *(char *)first == *(char *)second;
 }
+
 FixedArrayDefine(char, VIRTIO_KEYBOARD_PENDING_BYTES, KeyboardInput, KeyboardByte__equals);
 FixedArrayBodyDefine(KeyboardInput);
 

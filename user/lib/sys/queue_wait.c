@@ -10,12 +10,14 @@ typedef struct QueueWaitSource
 {
     QueueWaitKind kind;
     QueueHandleID handle;
+
     union
     {
         Queue queue;
         QueueArrivalsPtr arrivals;
     };
 } QueueWaitSource;
+
 typedef QueueWaitSource * QueueWaitSourcePtr;
 OptionalDef(QueueWaitSource);
 
@@ -378,6 +380,7 @@ void Queue__wait_readable(QueuePtr self)
         {
             return;
         }
+
         QueueWaitSource__wait(&source, &observed);
     }
 }
@@ -392,6 +395,7 @@ void Queue__wait_writable(QueuePtr self)
         {
             return;
         }
+
         QueueWaitSource__wait(&source, &observed);
     }
 }

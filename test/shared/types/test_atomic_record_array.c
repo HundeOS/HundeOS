@@ -8,6 +8,7 @@ typedef struct TestRecord
     uint64_t value;
     uint64_t complement;
 } TestRecord;
+
 ResultDef(TestRecord);
 AtomicRecordArrayDefine(TestRecord, 4, TestRecords);
 static TestRecords records;
@@ -20,6 +21,7 @@ void setUp(void)
     TestRecords__set(&records, 0, &record);
     completed = 0;
 }
+
 void tearDown(void)
 {
 }

@@ -59,6 +59,7 @@ void tearDown(void)
 {
     Memfs__dispose(&filesystem);
 }
+
 ServiceDirectoryPtr MemfsTest__directory(void)
 {
     return &directory;

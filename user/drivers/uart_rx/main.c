@@ -9,6 +9,7 @@ static bool UartByte__equals(void * first, void * second)
 {
     return *(uint8_t *)first == *(uint8_t *)second;
 }
+
 OptionalDef(uint8_t);
 FixedArrayDefine(uint8_t, 1024, UartInput, UartByte__equals);
 FixedArrayBodyDefine(UartInput);
@@ -20,7 +21,9 @@ typedef struct UartReceiver
     uint64_t foreground_pid;
     uint64_t interrupted_pid;
 } UartReceiver;
+
 typedef UartReceiver * UartReceiverPtr;
+
 static UartReceiver UartReceiver__new(ConstUartDevicePtr uart)
 {
     return (UartReceiver){.uart = *uart, .input = UartInput__new()};

@@ -116,6 +116,7 @@ __BOOT__(PageTablePtr) ensure_next_level_table(PageTablePtr parent_level_table, 
 }
 
 __BOOT__(void)
+
 map_2M_block(PageTablePtr table, uint64_t virtual_address, uint64_t phys_addr, MappingPermissionsPtr perms)
 {
     PageTablePtr l1_tbl = ensure_next_level_table(table, L0_IDX(virtual_address));
@@ -133,6 +134,7 @@ map_2M_block(PageTablePtr table, uint64_t virtual_address, uint64_t phys_addr, M
 }
 
 __BOOT__(void)
+
 map_range_2M(PageTablePtr table, uint64_t phys_start, uint64_t phys_end, uint64_t target, MappingPermissionsPtr perms)
 {
 

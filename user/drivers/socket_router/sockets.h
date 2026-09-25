@@ -13,11 +13,13 @@ typedef SocketID * SocketIDPtr;
 OptionalDef(SocketID);
 bool SocketID__equals(void * first, void * second);
 FixedArrayDefine(SocketID, 16, SocketPending, SocketID__equals);
+
 typedef enum SocketKind
 {
     SOCKET_LISTENER,
     SOCKET_CONNECTION
 } SocketKind;
+
 typedef struct SocketResource
 {
     SocketID id;
@@ -29,16 +31,19 @@ typedef struct SocketResource
     SocketPending pending;
     SocketBytes bytes;
 } SocketResource;
+
 typedef SocketResource * SocketResourcePtr;
 OptionalDef(SocketResource);
 OptionalDef(SocketResourcePtr);
 bool SocketResource__equals(void * first, void * second);
 FixedArrayDefine(SocketResource, 64, SocketResources, SocketResource__equals);
+
 typedef struct SocketService
 {
     SocketResources resources;
     SocketID next_id;
 } SocketService;
+
 typedef SocketService * SocketServicePtr;
 SocketService SocketService__new(void);
 IOReply SocketService__execute(SocketServicePtr self, IORequestPtr request);

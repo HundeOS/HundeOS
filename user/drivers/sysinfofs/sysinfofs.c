@@ -8,7 +8,9 @@ typedef struct SysinfoWriter
     FilesystemFileSize size;
     bool failed;
 } SysinfoWriter;
+
 typedef SysinfoWriter * SysinfoWriterPtr;
+
 static SysinfoWriter SysinfoWriter__new(FilesystemFileDataPtr data)
 {
     return (SysinfoWriter){.data = data};
@@ -167,14 +169,17 @@ static IOStatus Sysinfofs__store(IOServiceContext context, ConstBStringPtr path,
 {
     return IO_PERMISSION_DENIED;
 }
+
 static IOStatus Sysinfofs__mkdir(IOServiceContext context, ConstBStringPtr path)
 {
     return IO_PERMISSION_DENIED;
 }
+
 static IOStatus Sysinfofs__remove(IOServiceContext context, ConstBStringPtr path, Flags flags)
 {
     return IO_PERMISSION_DENIED;
 }
+
 FilesystemOperations Sysinfofs__operations(void)
 {
     return FilesystemOperations__new_snapshot(Sysinfofs__load, Sysinfofs__store, Sysinfofs__list, Sysinfofs__mkdir,

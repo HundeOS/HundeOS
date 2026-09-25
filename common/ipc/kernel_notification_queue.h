@@ -16,6 +16,7 @@ typedef struct KernelNotification
     KernelNotificationID id;
     KernelNotificationSequence sequence;
 } KernelNotification;
+
 typedef KernelNotification * KernelNotificationPtr;
 OptionalDef(KernelNotification);
 
@@ -30,6 +31,7 @@ typedef struct KernelNotificationQueue
 {
     KernelNotificationSlots pending;
 } KernelNotificationQueue;
+
 typedef KernelNotificationQueue * KernelNotificationQueuePtr;
 
 KernelNotificationQueue KernelNotificationQueue__new(void);

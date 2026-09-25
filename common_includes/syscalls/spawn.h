@@ -62,6 +62,7 @@ typedef struct SpawnStdio
     SpawnFileDescriptor stdout_fd;
     SpawnFileDescriptor stderr_fd;
 } SpawnStdio;
+
 typedef const SpawnStdio * ConstSpawnStdioPtr;
 
 static inline SpawnStdio SpawnStdio__new(SpawnFileDescriptor stdin_fd, SpawnFileDescriptor stdout_fd,

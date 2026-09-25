@@ -19,6 +19,7 @@ typedef struct MemoryMapping
     size_t size;
     MemoryMappingKind kind;
 } MemoryMapping;
+
 OptionalDef(MemoryMapping);
 typedef MemoryMapping * MemoryMappingPtr;
 typedef const MemoryMapping * ConstMemoryMappingPtr;
@@ -32,6 +33,7 @@ typedef struct MemoryAccounting
     MemoryMappings mappings;
     bool failed;
 } MemoryAccounting;
+
 typedef MemoryAccounting * MemoryAccountingPtr;
 MemoryAccounting MemoryAccounting__new(void);
 void MemoryAccounting__map(MemoryAccountingPtr self, ConstMemoryMappingPtr mapping);

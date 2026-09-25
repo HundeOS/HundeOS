@@ -11,24 +11,29 @@ static unsigned closed;
 static bool root;
 static bool fail_start;
 static bool short_reply;
+
 void setUp(void)
 {
     fstab = "device /dev/virtio1 ext2 /\ndevice /dev/virtio4 fat32 /mnt/sd\n";
     registered = started = closed = 0;
     root = fail_start = short_reply = false;
 }
+
 void tearDown(void)
 {
 }
+
 IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/config/fstab"), *path);
     return 7;
 }
+
 IOStatus IO__close(IOHandle handle)
 {
     return IO_OK;
 }
+
 Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos capacity)
 {
     DynString text;
@@ -42,15 +47,18 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos capacity)
     );
     return Some(DynString, text);
 }
+
 Result(Channel) Channel__open(ServiceDirectoryPtr directory, ConstBStringPtr name)
 {
     return Success(Channel, ((Channel){0}));
 }
+
 ChannelCode Channel__close(ChannelPtr channel)
 {
     closed++;
     return CHANNEL_OK;
 }
+
 Result(ChannelReplySize) Channel__submit(ChannelPtr channel, ConstChannelDataPtr data, size_t size,
                                          ChannelDataPtr reply_data, size_t capacity)
 {
@@ -79,6 +87,7 @@ Result(ChannelReplySize) Channel__submit(ChannelPtr channel, ConstChannelDataPtr
     registered++;
     return Success(ChannelReplySize, short_reply ? sizeof(reply) - 1 : sizeof(reply));
 }
+
 Result(SpawnResult) OS__spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0,
                               OptionalPtr(BString) arg1, OptionalPtr(BString) arg2)
 {
@@ -94,16 +103,19 @@ Result(SpawnResult) OS__spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(
     started++;
     return Success(SpawnResult, 42);
 }
+
 ServiceCode service_wait_ready(ConstBStringPtr name)
 {
     return fail_start ? SERVICE_SCHEDULER_ERROR : SERVICE_OK;
 }
+
 Result(ServiceCode)
     BootService__start(ConstBStringPtr path, ConstBStringPtr arg0, ConstBStringPtr arg1, ConstBStringPtr ready)
 {
     started++;
     return fail_start ? Error(ServiceCode, bstr("failed"), SERVICE_SCHEDULER_ERROR) : Success(ServiceCode, SERVICE_OK);
 }
+
 void test_later_mounts_register_root_and_devices_after_reading_boot_config(void)
 {
     match_result(Hundeschule__mount_filesystems(),
@@ -114,6 +126,7 @@ void test_later_mounts_register_root_and_devices_after_reading_boot_config(void)
     TEST_ASSERT_EQUAL(4, started);
     TEST_ASSERT_EQUAL(1, closed);
 }
+
 void test_missing_root_and_duplicate_root_fail_and_close_control_channel(void)
 {
     fstab = "device /dev/virtio4 fat32 /mnt/sd\n";
@@ -131,6 +144,7 @@ void test_missing_root_and_duplicate_root_fail_and_close_control_channel(void)
     TEST_ASSERT_EQUAL(1, started);
     TEST_ASSERT_EQUAL(2, closed);
 }
+
 void test_mount_readiness_failure_stops_later_services(void)
 {
     fail_start = true;
@@ -141,6 +155,7 @@ void test_mount_readiness_failure_stops_later_services(void)
     TEST_ASSERT_EQUAL(1, started);
     TEST_ASSERT_EQUAL(1, closed);
 }
+
 void test_short_mount_reply_is_rejected_before_starting_driver(void)
 {
     short_reply = true;

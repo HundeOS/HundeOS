@@ -31,12 +31,14 @@ typedef struct QueueMessage
     uint64_t arg1;
     uint64_t arg2;
     uint64_t arg3;
+
     union
     {
         uint8_t payload[QUEUE_MESSAGE_PAYLOAD_SIZE];
         RequestMetadata request;
     };
 } QueueMessage;
+
 typedef QueueMessage * QueueMessagePtr;
 typedef const QueueMessage * ConstQueueMessagePtr;
 

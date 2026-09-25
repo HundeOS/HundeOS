@@ -16,6 +16,7 @@ typedef struct Queue
     QueueCursor written;
     QueueCursor acknowledged;
 } Queue;
+
 typedef Queue * QueuePtr;
 ResultDef(QueueCode);
 ResultDef(Queue);
@@ -30,6 +31,7 @@ typedef struct QueueProgress
     QueueStateFlag accepted;
     QueueStateFlag closed;
 } QueueProgress;
+
 typedef const QueueProgress * ConstQueueProgressPtr;
 
 Queue Queue__new(QueueIdentityPtr identity, QueuePagePtr outgoing, QueuePagePtr incoming, QueueConnectionID connection,

@@ -16,6 +16,7 @@
 #include "system_info.h"
 
 BString panic_message = bstr("Program failed: %B\n");
+
 static void install_default_stdio(KernelPtr kernel, ProcessPtr process)
 {
     IOHandle input = IO_ENDPOINT_TTY_INPUT;

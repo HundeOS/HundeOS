@@ -100,6 +100,7 @@ static bool Scheduler__shared_address_available(ProcessPtr process, Address addr
             }
         }
     );
+
     return true;
 }
 
@@ -444,6 +445,7 @@ Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process
     );
     return Error(Address, bstr("Invalid queue operation"), QUEUE_INVALID);
 }
+
 static Tick CPUScheduler__sleep_ticks_from_usec(uint64_t usec)
 {
     Tick ticks = (usec + 999ULL) / 1000ULL;
@@ -871,6 +873,7 @@ static Result(QueueCode)
             }
         }
     );
+
     return Error(QueueCode, bstr("Invalid queue wait mapping"), QUEUE_INVALID);
 }
 
@@ -1739,6 +1742,7 @@ static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_k
             );
         }
     );
+
     BString no_scheduler = BString__sprintf(&bstr("No scheduler found for process: %i\n"), proc->pid);
     return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }

@@ -58,10 +58,12 @@ typedef IOHandle * IOHandlePtr;
 #define IO_ENDPOINT_TTY_INPUT (1LL << 60)
 #define IO_ENDPOINT_CONSOLE_OUTPUT (IO_ENDPOINT_TTY_INPUT + 1)
 #define IO_ENDPOINT_KEYBOARD_INPUT (IO_ENDPOINT_TTY_INPUT + 2)
+
 static inline bool IOEndpoint__is_terminal(IOHandle handle)
 {
     return handle >= IO_ENDPOINT_TTY_INPUT && handle <= IO_ENDPOINT_KEYBOARD_INPUT;
 }
+
 typedef int64_t ByteCount;
 typedef int64_t DirectoryEntryCount;
 ResultDef(DirectoryEntryCount);
@@ -76,6 +78,7 @@ typedef struct IOFileInfo
     GroupID group_id;
     uint64_t size;
 } IOFileInfo;
+
 typedef IOFileInfo * IOFileInfoPtr;
 OptionalDef(IOFileInfo);
 ResultDef(IOFileInfo);

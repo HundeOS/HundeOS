@@ -172,6 +172,7 @@ static Optional(IOReply) FilesystemMount__execute(FilesystemMountPtr self, IOReq
             }
         );
     }
+
     match_optional(
         IOMediator__execute(&self->mediator, request->client_session, request->client_pid, request),
         some(reply)
@@ -263,6 +264,7 @@ static Optional(IOFileInfo) FilesystemNamespace__synthetic_info(FilesystemNamesp
     {
         return Some(IOFileInfo, IOFileInfo__new(IO_MODE_TYPE_DIR | 0755, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, 0));
     }
+
     BString parent = FilesystemNamespace__parent(path);
     BString name = FilesystemNamespace__name(path);
     MountChildren children = FilesystemNamespace__children(self, &parent);

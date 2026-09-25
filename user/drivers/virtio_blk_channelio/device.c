@@ -335,6 +335,7 @@ typedef struct VirtioBlkTransfer
     Address buffer;
     size_t buffer_size;
 } VirtioBlkTransfer;
+
 typedef const VirtioBlkTransfer * ConstVirtioBlkTransferPtr;
 
 static VirtioBlkTransfer VirtioBlkTransfer__new(BlockProtocolOperation operation, BlockProtocolBlockNumber block,

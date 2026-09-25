@@ -18,6 +18,7 @@ typedef struct BlockServerConnection
     bool pending;
     bool authorized;
 } BlockServerConnection;
+
 typedef BlockServerConnection * BlockServerConnectionPtr;
 OptionalDef(BlockServerConnection);
 bool BlockServerConnection__equals(void * first, void * second);
@@ -32,6 +33,7 @@ typedef struct BlockServer
     BlockServerContext context;
     BlockServerTransfer transfer;
 } BlockServer;
+
 typedef BlockServer * BlockServerPtr;
 ResultDef(BlockServer);
 

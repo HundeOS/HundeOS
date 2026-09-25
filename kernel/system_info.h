@@ -30,6 +30,7 @@ typedef struct PhysicalMemoryRegion
     Address physical_start;
     Address physical_end;
 } PhysicalMemoryRegion;
+
 typedef const PhysicalMemoryRegion * ConstPhysicalMemoryRegionPtr;
 
 static inline PhysicalMemoryRegion PhysicalMemoryRegion__new(Address physical_start, Address physical_end)
@@ -179,6 +180,7 @@ typedef struct GicInterruptControllerInfo
     Address cpu_interface_physical_base;
     Address cpu_interface_virtual_base;
 } GicInterruptControllerInfo;
+
 typedef const GicInterruptControllerInfo * ConstGicInterruptControllerInfoPtr;
 
 static inline GicInterruptControllerInfo
@@ -203,6 +205,7 @@ typedef struct PlicInterruptControllerInfo
     uint64_t source_count;
     uint64_t target_hart_id;
 } PlicInterruptControllerInfo;
+
 typedef const PlicInterruptControllerInfo * ConstPlicInterruptControllerInfoPtr;
 
 static inline PlicInterruptControllerInfo PlicInterruptControllerInfo__new(Address physical_base, Address virtual_base,

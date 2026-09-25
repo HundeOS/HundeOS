@@ -6,6 +6,7 @@
 
 static ProcessRegistry registry;
 static FilesystemDriver driver;
+
 Result(Anything) mem_alloc_bytes(size_t size)
 {
     return Success(Anything, (Anything)malloc(size));
@@ -45,6 +46,7 @@ void setUp(void)
     FilesystemOperations operations = Procfs__operations();
     driver = FilesystemDriver__new(&registry, &operations);
 }
+
 void tearDown(void)
 {
     TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 10, 20));

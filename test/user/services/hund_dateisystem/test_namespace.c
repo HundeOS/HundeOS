@@ -12,6 +12,7 @@
 
 static FilesystemNamespace namespace;
 static ServiceDirectory directory;
+
 typedef struct FakeFilesystem
 {
     IORequest request;
@@ -23,6 +24,7 @@ typedef struct FakeFilesystem
     unsigned releases;
     IOStatus list_status;
 } FakeFilesystem;
+
 static FakeFilesystem backends[3];
 static const char * boot_fstab;
 static bool spawn_fails;
@@ -191,12 +193,15 @@ bool IOService__poll(IOServicePtr self)
     TEST_FAIL_MESSAGE("Unexpected service loop");
     return false;
 }
+
 void Channel__prepare_wait(void)
 {
 }
+
 void Channel__wait_event(void)
 {
 }
+
 SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
 {
     return 0;
@@ -337,6 +342,7 @@ void setUp(void)
         error_test_fail()
     );
 }
+
 void tearDown(void)
 {
 }

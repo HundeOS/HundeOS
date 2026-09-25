@@ -51,6 +51,7 @@ static ServiceMappedMemory fake_uart_mapping;
 #include "../../../../user/drivers/uart_rx/main.c"
 #undef main
 static IODiagnostics diagnostics;
+
 static int uart_rx_main_under_test(void)
 {
     return StreamDriverTest__run(uart_rx_driver_main);
@@ -296,12 +297,14 @@ size_t mapped_size(ServiceMappedMemoryPtr memory)
 }
 
 static bool irq_delivered;
+
 ServiceCode InterruptClient__subscribe(IRQNumber irq)
 {
     TEST_ASSERT_EQUAL_UINT64(UART_IRQ_ID, irq);
     irq_delivered = false;
     return SERVICE_OK;
 }
+
 ServiceCode InterruptClient__poll(ServiceEventPtr event)
 {
     if (irq_delivered)
@@ -312,6 +315,7 @@ ServiceCode InterruptClient__poll(ServiceEventPtr event)
     *event = ServiceEvent__new(SERVICE_EVENT_IRQ, UART_IRQ_ID, 1);
     return SERVICE_OK;
 }
+
 ServiceCode InterruptClient__acknowledge(IRQNumber irq)
 {
     TEST_ASSERT_EQUAL_UINT64(UART_IRQ_ID, irq);
@@ -319,6 +323,7 @@ ServiceCode InterruptClient__acknowledge(IRQNumber irq)
     TEST_ASSERT_EQUAL_UINT64(2, fake_uart_icr_write_count);
     return SERVICE_OK;
 }
+
 void StreamDriverTest__step(IOStreamDriverPtr driver)
 {
     fake_service_wait_count++;

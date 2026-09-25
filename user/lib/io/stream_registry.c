@@ -213,6 +213,7 @@ void StreamRegistry__dispose(StreamRegistryPtr self)
             Channel__close(&backend.mediator.backend);
         }
     );
+
     StreamBackends__dispose(&self->backends);
     StreamDevices__dispose(&self->devices);
 }

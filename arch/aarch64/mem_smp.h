@@ -9,10 +9,12 @@ inline void isb(void)
 {
     __asm__ volatile("isb");
 }
+
 inline void dsb_ish(void)
 {
     __asm__ volatile("dsb ish");
 }
+
 inline void tlbi_all(void)
 {
     __asm__ volatile("tlbi vmalle1");
@@ -22,20 +24,24 @@ inline void write_mair_el1(uint64_t v)
 {
     __asm__ volatile("msr mair_el1, %0" ::"r"(v));
 }
+
 inline void write_tcr_el1(uint64_t v)
 {
     __asm__ volatile("msr tcr_el1, %0" ::"r"(v));
 }
+
 inline void write_ttbr0_el1(uint64_t v)
 {
     __asm__ volatile("msr ttbr0_el1, %0" ::"r"(v));
 }
+
 inline uint64_t read_sctlr_el1(void)
 {
     uint64_t v;
     __asm__ volatile("mrs %0, sctlr_el1" : "=r"(v));
     return v;
 }
+
 inline void write_sctlr_el1(uint64_t v)
 {
     __asm__ volatile("msr sctlr_el1, %0" ::"r"(v));

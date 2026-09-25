@@ -8,6 +8,7 @@ typedef struct KernelDeviceRegistry
     mutex_t lock;
     UserAddress mapping;
 } KernelDeviceRegistry;
+
 typedef KernelDeviceRegistry * KernelDeviceRegistryPtr;
 
 static inline KernelDeviceRegistry KernelDeviceRegistry__new(void)

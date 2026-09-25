@@ -6,21 +6,26 @@
 void setUp(void)
 {
 }
+
 void tearDown(void)
 {
 }
+
 ServiceCode service_become_service(void)
 {
     return SERVICE_OK;
 }
+
 ServiceCode service_register_block_device(ConstBStringPtr path, uint64_t size, uint64_t count)
 {
     return SERVICE_OK;
 }
+
 ServiceCode service_publish_ready(ConstBStringPtr name)
 {
     return SERVICE_OK;
 }
+
 Result(BlockServer) BlockServer__listen(ConstBStringPtr name, BlockProtocolBlockCount count, BlockServerContext context,
                                         BlockServerTransfer transfer)
 {

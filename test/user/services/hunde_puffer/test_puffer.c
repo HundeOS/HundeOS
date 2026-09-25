@@ -46,6 +46,7 @@ int64_t BufferMemory__operation(MemOperation operation, uint64_t first, uint64_t
     }
     return BUFFER_INVALID;
 }
+
 void setUp(void)
 {
     directory = (ServiceDirectory){0};
@@ -59,6 +60,7 @@ void setUp(void)
     __builtin_memset(ids, 0, sizeof(ids));
     __builtin_memset(states, 0, sizeof(states));
 }
+
 void tearDown(void)
 {
 }
@@ -69,6 +71,7 @@ static BufferReply acquire(void)
     TEST_ASSERT_TRUE(BufferRequest__set_service(&request, &bstr("block-test")));
     return Puffer__execute(&manager, 8, &request);
 }
+
 static BufferStatus release(BufferID id, BufferParticipant caller, bool pair)
 {
     BufferRequest request = BufferRequest__new(pair ? BUFFER_RELEASE_PAIR : BUFFER_RELEASE, 42, 0, id, 0);
@@ -90,6 +93,7 @@ void test_puffer_retains_live_peer_then_reuses_detached_buffer_with_fresh_id(voi
     TEST_ASSERT_EQUAL(BUFFER_OK, release(first.buffer.id, 8, true));
     TEST_ASSERT_EQUAL(BUFFER_CLIENT_ATTACHED | BUFFER_SERVER_ATTACHED, states[reused.buffer.id % BUFFER_LIMIT]);
 }
+
 void test_puffer_reconciles_exit_and_evicts_above_pool_limit_without_freeing_attached_leases(void)
 {
     BufferReply leases[BUFFER_POOL_LIMIT + 2];
@@ -110,6 +114,7 @@ void test_puffer_reconciles_exit_and_evicts_above_pool_limit_without_freeing_att
     TEST_ASSERT_EQUAL(1, freed);
     TEST_ASSERT_EQUAL(BUFFER_POOL_LIMIT + 1, BufferLeases__len(&manager.leases));
 }
+
 void test_puffer_requires_registered_service_identity(void)
 {
     BufferRequest request = BufferRequest__new(BUFFER_ACQUIRE, 42, BUFFER_READ, 0, 0);

@@ -10,6 +10,7 @@ AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 AllowShortLambdasOnASingleLine: None
+SeparateDefinitionBlocks: Always
 # Formatting-only expansions recognise macro bodies as statement blocks.
 Macros:
   - 'critical_section(lock, body)=if (lock) body'

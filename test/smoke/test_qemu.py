@@ -173,6 +173,9 @@ def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, arch
     sysinfo = session.run_command("/usr/local/bin/cat /boot/sysinfo")
     assert architecture_marker in sysinfo
 
+    driver_log = session.run_command("/usr/local/bin/cat /var/log/driver.log")
+    assert b"pid=" in driver_log
+
     numbered = session.run_command("/usr/local/bin/cat -n /hello.txt")
     assert b"1\thello from ext2" in numbered
 

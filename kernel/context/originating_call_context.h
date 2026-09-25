@@ -36,6 +36,7 @@ typedef struct OriginatingContext
         FaultCallContext fault;
     } call;
 } OriginatingContext;
+
 typedef OriginatingContext * OriginatingContextPtr;
 typedef const OriginatingContext * ConstOriginatingContextPtr;
 

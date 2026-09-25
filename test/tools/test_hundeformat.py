@@ -39,6 +39,26 @@ def test_nested_matches_satisfy_lint_and_are_idempotent(format_source):
     assert "        );\n" in formatted
 
 
+def test_separates_function_definitions(format_source):
+    source = """int first(void) { return 1; }
+int second(void) { return 2; }
+"""
+    formatted = format_source(source)
+    assert "    return 1;\n}\n\nint second(void)" in formatted
+    assert formatted == format_source(formatted)
+
+
+def test_separates_major_type_definitions(format_source):
+    source = """typedef enum First { FIRST_VALUE } First;
+typedef struct Second { int value; } Second;
+union Third { int value; };
+"""
+    formatted = format_source(source)
+    assert "} First;\n\ntypedef struct Second" in formatted
+    assert "} Second;\n\nunion Third" in formatted
+    assert formatted == format_source(formatted)
+
+
 def test_places_all_match_macro_closings_on_an_aligned_line(format_source):
     source = """void example(void) {
     match_optional(optional(), some(value) { report(value); }, none_do_nothing());

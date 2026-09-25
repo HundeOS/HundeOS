@@ -29,6 +29,7 @@ typedef enum BlockProtocolStatus
 
 // Channels carry transfer descriptors; sector bytes live in shared buffers.
 #define BLOCK_CHANNEL_SECTOR_SIZE 512U
+
 typedef struct BlockChannelRequest
 {
     BlockProtocolOperation operation;
@@ -36,7 +37,9 @@ typedef struct BlockChannelRequest
     BlockProtocolBlockCount count;
     BufferID buffer;
 } BlockChannelRequest;
+
 typedef BlockChannelRequest * BlockChannelRequestPtr;
+
 typedef struct BlockChannelResponse
 {
     BlockProtocolStatus status;

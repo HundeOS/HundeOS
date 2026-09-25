@@ -7,6 +7,7 @@ static ServiceDirectoryPtr fixture_directory(void)
 {
     return &directory;
 }
+
 #define ServiceDirectory__shared fixture_directory
 #include "../../../user/lib/channel/block_client.c"
 #include "../../../user/lib/channel/block_server.c"

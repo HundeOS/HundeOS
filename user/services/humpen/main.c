@@ -120,8 +120,6 @@ static Result(SpawnResult) Humpen__spawn_watchdog_line(ConstBStringPtr line)
             {
                 return Success(SpawnResult, 0);
             }
-            IO__printf(&bstr("humpen: mounting %B as %B on %B\n"), &command.device_path, &command.filesystem_type,
-                       &command.mountpoint);
             return OS__spawn(P_NOWAIT, command.driver_path, &command.arg0, &command.arg1, &command.arg2);
         },
         error(code, message)

@@ -19,6 +19,7 @@ typedef struct ChannelPayload
     uint8_t request[CHANNEL_PAYLOAD_CAPACITY];
     uint8_t reply[CHANNEL_PAYLOAD_CAPACITY];
 } ChannelPayload;
+
 typedef ChannelPayload * ChannelPayloadPtr;
 typedef uint8_t * ChannelDataPtr;
 typedef const uint8_t * ConstChannelDataPtr;

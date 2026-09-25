@@ -3,6 +3,7 @@
 #include <stdarg.h>
 
 #include "unity.h"
+#include "ipc/trace_protocol.h"
 
 #include "../../../../common_includes/syscalls/service.h"
 #include "../../../../user/lib/sys/pci_config.h"
@@ -407,17 +408,11 @@ void tearDown(void)
 {
 }
 
-SyslogResult kernel_syslogf(const char * format, ...)
-{
-    fake_logged = true;
-    return SYSLOG_OK;
-}
-
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+TraceStatus DriverTrace__writef(const char * tag, const char * format, ...)
 {
     fake_logged = true;
     fake_log_tag = tag;
-    return SYSLOG_OK;
+    return TRACE_OK;
 }
 
 ServiceCode service_become_service()
@@ -507,13 +502,16 @@ int BlockServer__run(BlockServerPtr self)
     TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK, self->transfer(self->context, BLOCK_PROTOCOL_READ, 3, 1, &buffer));
     return 0;
 }
+
 bool BlockServer__poll(BlockServerPtr self)
 {
     return false;
 }
+
 void Channel__prepare_wait(void)
 {
 }
+
 void Channel__wait_event(void)
 {
 }

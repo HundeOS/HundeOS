@@ -6,6 +6,7 @@ static ServiceDirectoryPtr BusTest__directory(void)
 {
     return &directory;
 }
+
 #define ServiceDirectory__shared BusTest__directory
 #include "../../../user/lib/io/server.c"
 #undef ServiceDirectory__shared
@@ -27,19 +28,23 @@ static Optional(IOReply)
     executions++;
     return BusInfo__execute(context, session, pid, request);
 }
+
 static bool BusTest__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
     disconnects++;
     return BusInfo__disconnect(context, session, pid);
 }
+
 static void BusTest__serve(void)
 {
     IOService__poll(&service);
 }
+
 static Channel BusTest__open(void)
 {
     return unwrap_result(Channel__open(&directory, &bstr(BUS_INFO_SERVICE)), ((Channel){0}));
 }
+
 static void BusTest__close(ChannelPtr channel)
 {
     TEST_ASSERT_EQUAL(CHANNEL_OK, Channel__close(channel));
@@ -47,6 +52,7 @@ static void BusTest__close(ChannelPtr channel)
     TEST_ASSERT_EQUAL(allocated_pages, released_pages);
     TEST_ASSERT_EQUAL(0, IOServiceConnections__len(&service.connections));
 }
+
 void setUp(void)
 {
     ChannelFixture__reset();
@@ -62,6 +68,7 @@ void setUp(void)
     fixture_server_step = BusTest__serve;
     current_pid = 42;
 }
+
 void tearDown(void)
 {
 }

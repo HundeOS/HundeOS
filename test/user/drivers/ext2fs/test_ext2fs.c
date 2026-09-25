@@ -3,6 +3,7 @@
 
 #include "unity.h"
 #include "sys/mem.h"
+#include "ipc/trace_protocol.h"
 
 #include "../../../../common_includes/syscalls/service.h"
 
@@ -179,9 +180,9 @@ ServiceCode service_become_service(void)
     return SERVICE_OK;
 }
 
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+TraceStatus DriverTrace__writef(const char * tag, const char * format, ...)
 {
-    return SYSLOG_OK;
+    return TRACE_OK;
 }
 
 static void assert_ext2fs_code_success(Result(Ext2fsCode) result)

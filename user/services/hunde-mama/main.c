@@ -6,12 +6,15 @@
 #include "sys/syslog.h"
 
 typedef volatile uint32_t * MamaRegisterPtr;
+
 typedef struct MamaBootDisk
 {
     uint64_t slot;
     BString path;
 } MamaBootDisk;
+
 ResultDef(MamaBootDisk);
+
 static MamaBootDisk MamaBootDisk__new(uint64_t slot, ConstBStringPtr path)
 {
     return (MamaBootDisk){slot, *path};

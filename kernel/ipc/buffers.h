@@ -21,11 +21,13 @@ typedef struct ManagedBuffer
     bool retiring;
     bool retained;
 } ManagedBuffer;
+
 typedef ManagedBuffer * ManagedBufferPtr;
 OptionalDef(ManagedBuffer);
 OptionalDef(ManagedBufferPtr);
 bool ManagedBuffer__equals(void * first, void * second);
 FixedArrayDefine(ManagedBuffer, BUFFER_LIMIT, ManagedBuffers, ManagedBuffer__equals);
+
 typedef struct Buffers
 {
     ManagedBuffers allocations;
@@ -33,6 +35,7 @@ typedef struct Buffers
     BufferParticipant manager;
     UserAddress notifications;
 } Buffers;
+
 typedef Buffers * BuffersPtr;
 typedef struct Scheduler * SchedulerPtr;
 // Caller holds the scheduler lock; never wait or switch context inside these operations.

@@ -1410,6 +1410,7 @@ static Result(FilesystemFileInfo) Fat32fs__describe(IOServiceContext context, Co
     {
         return Success(FilesystemFileInfo, FilesystemFileInfo__new(0, IO_MODE_TYPE_DIR | 0755));
     }
+
     Fat32fsDirectoryEntryLocation location;
     match_result(
         Fat32fsVolume__entry_at_path(volume, path),
@@ -1499,6 +1500,7 @@ static Result(FilesystemFileSize)
             }
         );
     }
+
     return Success(FilesystemFileSize, total);
 }
 
@@ -1583,6 +1585,7 @@ int FAT32FS_ENTRYPOINT(int argc, char ** argv)
     {
         return 1;
     }
+
     match_result(
         Fat32fsVolume__mount(&volume),
         success_do_nothing(),

@@ -9,6 +9,7 @@
 
 static uint64_t spawn_count;
 static BString spawned_path;
+
 ServiceCode service_wait_ready(ConstBStringPtr name)
 {
     return SERVICE_OK;

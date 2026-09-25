@@ -11,6 +11,7 @@
 
 static char fake_io_buffer[2];
 static uint32_t fake_uart_writes[4];
+
 struct ServiceMappedMemory
 {
     void * driver_address;
@@ -37,6 +38,7 @@ static const char fake_sysinfo[] = "uart.physical_base=0x12345000\n"
 #define main uart_tx_driver_main
 #include "../../../../user/drivers/uart_tx/main.c"
 #undef main
+
 static int uart_tx_main_under_test(void)
 {
     return StreamDriverTest__run(uart_tx_driver_main);

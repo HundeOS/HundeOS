@@ -49,6 +49,7 @@ typedef struct EfiConfigurationTable
     EfiGuid vendor_guid;
     uint64_t vendor_table;
 } EfiConfigurationTable;
+
 typedef EfiConfigurationTable * EfiConfigurationTablePtr;
 
 typedef struct EfiSystemTable

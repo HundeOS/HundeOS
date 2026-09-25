@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "unity.h"
+#include "ipc/trace_protocol.h"
 
 #include "../../../../common_includes/syscalls/io.h"
 #include "../../../../common_includes/syscalls/service.h"
@@ -82,6 +83,7 @@ static uint8_t fake_emoji_atlas[16 * 1024 * 1024];
 #define VIDEO_TERM_EMOJI_ATLAS_START fake_emoji_atlas
 #define VIDEO_TERM_EMOJI_ATLAS_END (fake_emoji_atlas + sizeof(fake_emoji_atlas))
 #include "../../../../user/drivers/video_term/main.c"
+
 static int video_term_main_under_test(void)
 {
     return StreamDriverTest__run(video_term_driver_main);
@@ -149,14 +151,9 @@ void tearDown(void)
 {
 }
 
-SyslogResult kernel_syslogf(const char * format, ...)
+TraceStatus DriverTrace__writef(const char * tag, const char * format, ...)
 {
-    return SYSLOG_OK;
-}
-
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
-{
-    return SYSLOG_OK;
+    return TRACE_OK;
 }
 
 ServiceCode service_become_service()

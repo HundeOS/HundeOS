@@ -15,6 +15,7 @@ typedef struct QueueListener
     QueueEndpointID endpoint;
     Optional(QueueWaitSnapshot) wait;
 } QueueListener;
+
 typedef QueueListener * QueueListenerPtr;
 OptionalDef(QueueListener);
 bool QueueListener__equals(void * first, void * second);
@@ -34,6 +35,7 @@ typedef struct QueueConnection
     Optional(QueueWaitSnapshot) client_wait;
     Optional(QueueWaitSnapshot) server_wait;
 } QueueConnection;
+
 typedef QueueConnection * QueueConnectionPtr;
 OptionalDef(QueueConnection);
 bool QueueConnection__equals(void * first, void * second);
@@ -45,6 +47,7 @@ typedef struct Queues
     QueueConnections connections;
     QueueHandleGeneration generation;
 } Queues;
+
 typedef Queues * QueuesPtr;
 
 #define QUEUES_INIT                                                                                                    \

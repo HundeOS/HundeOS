@@ -9,6 +9,7 @@
 #include "../../../../common_includes/syscalls/io.h"
 #include "../../../../common_includes/syscalls/service.h"
 #include "../../../../common_includes/syscalls/syslog.h"
+#include "ipc/trace_protocol.h"
 
 #define FAKE_GENET_PHYSICAL_BASE 0xfd580000ULL
 #define FAKE_GENET_MMIO_SIZE 0x10000ULL
@@ -61,14 +62,9 @@ void tearDown(void)
 {
 }
 
-SyslogResult kernel_syslogf(const char * format, ...)
+TraceStatus DriverTrace__writef(const char * tag, const char * format, ...)
 {
-    return SYSLOG_OK;
-}
-
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
-{
-    return SYSLOG_OK;
+    return TRACE_OK;
 }
 
 ServiceCode service_become_service()

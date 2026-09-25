@@ -7,6 +7,7 @@ typedef struct BlockRuntime
     BlockServerPtr server;
     FiberScheduler scheduler;
 } BlockRuntime;
+
 typedef BlockRuntime * BlockRuntimePtr;
 
 static BlockRuntime BlockRuntime__new(BlockServerPtr server)

@@ -155,6 +155,7 @@ typedef struct ServiceInterruptManagerRegistration
     Address event_queue;
     Address distributor;
 } ServiceInterruptManagerRegistration;
+
 typedef ServiceInterruptManagerRegistration * ServiceInterruptManagerRegistrationPtr;
 
 typedef struct ServiceManagedIRQRoute
@@ -162,6 +163,7 @@ typedef struct ServiceManagedIRQRoute
     uint64_t client_pid;
     uint64_t irq;
 } ServiceManagedIRQRoute;
+
 typedef ServiceManagedIRQRoute * ServiceManagedIRQRoutePtr;
 
 static inline ServiceManagedIRQRoute ServiceManagedIRQRoute__new(uint64_t client_pid, uint64_t irq)

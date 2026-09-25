@@ -6,6 +6,7 @@ typedef struct ProcPath
     uint64_t pid;
     BString leaf;
 } ProcPath;
+
 ResultDef(ProcPath);
 
 static ProcPath ProcPath__new(uint64_t pid, ConstBStringPtr leaf)
@@ -256,10 +257,12 @@ static IOStatus Procfs__store(IOServiceContext context, ConstBStringPtr path, Fi
 {
     return IO_PERMISSION_DENIED;
 }
+
 static IOStatus Procfs__mkdir(IOServiceContext context, ConstBStringPtr path)
 {
     return IO_PERMISSION_DENIED;
 }
+
 static IOStatus Procfs__remove(IOServiceContext context, ConstBStringPtr path, Flags flags)
 {
     return IO_PERMISSION_DENIED;

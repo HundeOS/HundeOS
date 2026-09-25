@@ -22,6 +22,7 @@ typedef struct ServiceDirectoryEntry
     uint64_t service_pid;
     BString name;
 } ServiceDirectoryEntry;
+
 typedef ServiceDirectoryEntry * ServiceDirectoryEntryPtr;
 
 typedef struct ServiceDirectory
@@ -32,6 +33,7 @@ typedef struct ServiceDirectory
     uint64_t entry_count;
     ServiceDirectoryEntry entries[HUND_SERVICE_MAX_SERVICES];
 } ServiceDirectory;
+
 typedef ServiceDirectory * ServiceDirectoryPtr;
 
 #define HUND_SERVICE_DIRECTORY_SIZE                                                                                    \

@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "unity.h"
+#include "ipc/trace_protocol.h"
 #include "sys/mem.h"
 
 #include "../../../../common_includes/syscalls/service.h"
@@ -146,9 +147,9 @@ ServiceCode service_become_service(void)
     return SERVICE_OK;
 }
 
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+TraceStatus DriverTrace__writef(const char * tag, const char * format, ...)
 {
-    return SYSLOG_OK;
+    return TRACE_OK;
 }
 
 Result(Anything) mem_alloc_bytes(size_t size)

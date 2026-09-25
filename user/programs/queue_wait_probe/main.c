@@ -18,6 +18,7 @@ typedef struct WaitProbeSummary
     uint64_t max_timeout_usec;
     uint64_t call_usec;
 } WaitProbeSummary;
+
 typedef WaitProbeSummary * WaitProbeSummaryPtr;
 
 static WaitProbeSummary WaitProbeSummary__new(void)

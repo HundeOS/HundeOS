@@ -340,6 +340,7 @@ static Result(Address) QueueConnection__release(QueueConnectionPtr self)
             }
         );
     }
+
     return Success(Address, QUEUE_OK);
 }
 
@@ -389,6 +390,7 @@ Result(Address) Queues__listen(QueuesPtr self, ProcessPtr process, ConstBStringP
             );
         }
     );
+
     uint64_t selected = QueueListeners__len(&self->listeners);
     for_each_fa(
         QueueListeners,
@@ -507,6 +509,7 @@ static Result(QueueConnectionID) Queues__connect_to(QueuesPtr self, QueueListene
     {
         return Error(QueueConnectionID, queue_error, QUEUE_FULL);
     }
+
     Address address = QueueLayout__address(selected);
     match_optional(
         *client,

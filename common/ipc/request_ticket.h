@@ -11,6 +11,7 @@ typedef struct RequestMetadata
     uint64_t parent_connection;
     uint64_t parent_generation;
 } RequestMetadata;
+
 typedef const RequestMetadata * ConstRequestMetadataPtr;
 
 typedef struct RequestTicket
@@ -18,6 +19,7 @@ typedef struct RequestTicket
     uint64_t connection;
     RequestMetadata metadata;
 } RequestTicket;
+
 typedef const RequestTicket * ConstRequestTicketPtr;
 OptionalDef(RequestTicket);
 

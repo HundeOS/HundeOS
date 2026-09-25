@@ -15,6 +15,7 @@ void setUp(void)
     kernel = init_test_kernel();
     process = dummy_process(20, 0, PROC_STATE_READY);
 }
+
 void tearDown(void)
 {
     KAllocStub__set_user_alloc_failure(false);

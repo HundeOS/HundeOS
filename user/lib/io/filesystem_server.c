@@ -50,6 +50,7 @@ int FilesystemDriver__run(FilesystemDriverPtr self, ConstBStringPtr mountpoint)
     {
         return 1;
     }
+
     if (!service_ok(service_publish_ready(mountpoint)))
     {
         return 1;

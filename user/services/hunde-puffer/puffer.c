@@ -1,21 +1,26 @@
 #include "puffer.h"
 FixedArrayBodyDefine(BufferLeases);
+
 bool BufferLease__equals(void * first, void * second)
 {
     return ((BufferLeasePtr)first)->id == ((BufferLeasePtr)second)->id;
 }
+
 Puffer Puffer__new(ServiceDirectoryPtr directory)
 {
     return (Puffer){.leases = BufferLeases__new(), .directory = directory};
 }
+
 static BufferLease BufferLease__new(BufferID id, BufferParticipant server, BufferParticipant client)
 {
     return (BufferLease){.id = id, .server = server, .client = client, .pooled = server == 0 && client == 0};
 }
+
 static bool BufferLease__matches(BufferLeasePtr self, void * context)
 {
     return self->id == *(BufferIDPtr)context;
 }
+
 static bool BufferLease__pooled(BufferLeasePtr self, void * context)
 {
     return self->pooled;

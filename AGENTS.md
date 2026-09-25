@@ -252,6 +252,11 @@ Read [Userspace interrupt service](docs/architecture/interrupt-service.md) befor
 device IRQ delegation, interrupt registration/authentication, or acknowledgement
 and rearm handling. This document describes the current `hund-unterbrict` design.
 
+Read [Userspace driver tracing](docs/architecture/driver-tracing.md) before changing
+`DRIVER_DEBUG`, driver log transport, batching, or `/var/log/driver.log` ownership.
+Ordinary driver diagnostics go through `hund-verfolgen`; independent kernel and
+bootstrap diagnostics must not depend on that service or the root filesystem.
+
 ## Current microkernel architecture
 
 HundeOS is a microkernel system. Keep the privileged kernel focused on:

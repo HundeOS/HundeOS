@@ -56,6 +56,7 @@ typedef struct IORequest
     uint64_t target_path_length;
     uint8_t target_path_data[IO_PROTOCOL_DATA_SIZE];
 } IORequest;
+
 typedef IORequest * IORequestPtr;
 
 typedef struct IODirectoryBatch
@@ -68,6 +69,7 @@ typedef struct IOReply
 {
     IOStatus status;
     Anything value;
+
     union
     {
         uint8_t data[IO_PROTOCOL_DATA_SIZE];
@@ -76,6 +78,7 @@ typedef struct IOReply
         IOFileInfo file_info;
     };
 } IOReply;
+
 typedef IOReply * IOReplyPtr;
 OptionalDef(IOReply);
 

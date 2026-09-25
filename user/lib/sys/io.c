@@ -12,6 +12,7 @@ typedef struct IOStandardStream
     IOHandle handle;
     bool closed;
 } IOStandardStream;
+
 typedef IOStandardStream * IOStandardStreamPtr;
 OptionalDef(IOStandardStreamPtr);
 static IOStandardStream standard_input;

@@ -32,6 +32,7 @@ typedef struct QueueWaitControl
     QueueWaitObservations observations;
     IODiagnostics diagnostics;
 } QueueWaitControl;
+
 typedef QueueWaitControl * QueueWaitControlPtr;
 typedef const QueueWaitControl * ConstQueueWaitControlPtr;
 OptionalDef(QueueWaitControlPtr);
@@ -45,6 +46,7 @@ typedef struct QueueWaitPublication
     QueueWaitDeadline deadline;
     QueueWaitWakeGeneration observed_wake_generation;
 } QueueWaitPublication;
+
 typedef const QueueWaitPublication * ConstQueueWaitPublicationPtr;
 OptionalDef(QueueWaitPublication);
 

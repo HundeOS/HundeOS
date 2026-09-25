@@ -7,6 +7,7 @@ typedef struct SocketServer
     SocketService sockets;
     QueueConnectionID mediator;
 } SocketServer;
+
 typedef SocketServer * SocketServerPtr;
 
 static SocketServer SocketServer__new(void)

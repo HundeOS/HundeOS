@@ -12,6 +12,7 @@ typedef struct IOSystem
     bool filesystem_connected;
     StreamRegistry streams;
 } IOSystem;
+
 typedef IOSystem * IOSystemPtr;
 
 static Optional(IOReply)

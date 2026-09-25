@@ -584,6 +584,7 @@ StringPos BString__copy_to(ConstBStringPtr self, char * target, StringPos target
         target[position] = self->data[position];
         position++;
     }
+
     target[position] = '\0';
     return position;
 }

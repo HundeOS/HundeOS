@@ -21,6 +21,7 @@ typedef struct BusPciDevice
     uint8_t prog_if;
     uint8_t header_type;
 } BusPciDevice;
+
 typedef BusPciDevice * BusPciDevicePtr;
 typedef const BusPciDevice * ConstBusPciDevicePtr;
 OptionalDef(BusPciDevice);
@@ -35,6 +36,7 @@ typedef struct BusInfoPage
     BusDeviceCount count;
     BusPciDevice device;
 } BusInfoPage;
+
 ResultDef(BusInfoPage);
 
 IORequest BusInfo__request(BusDeviceIndex index);

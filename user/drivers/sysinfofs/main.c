@@ -1,5 +1,6 @@
 #include "sysinfofs.h"
 #include "sys/service.h"
+
 int main(void)
 {
     if (!service_ok(service_become_service()))

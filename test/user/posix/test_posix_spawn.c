@@ -6,6 +6,7 @@
 void Queue__prepare_wait(void)
 {
 }
+
 void Queue__wait_event(void)
 {
 }

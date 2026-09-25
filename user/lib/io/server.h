@@ -15,6 +15,7 @@ typedef enum IOServicePhase
     IO_SERVICE_EXECUTE,
     IO_SERVICE_REPLY
 } IOServicePhase;
+
 typedef struct IOServiceConnection
 {
     ChannelServer channel;
@@ -24,6 +25,7 @@ typedef struct IOServiceConnection
     uint64_t client_pid;
     BufferPair buffers;
 } IOServiceConnection;
+
 typedef IOServiceConnection * IOServiceConnectionPtr;
 OptionalDef(IOServiceConnection);
 bool IOServiceConnection__equals(void * first, void * second);
@@ -38,6 +40,7 @@ typedef struct IOService
     IOServiceExecute execute;
     IOServiceDisconnect disconnect;
 } IOService;
+
 typedef IOService * IOServicePtr;
 ResultDef(IOService);
 IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServiceContext context,

@@ -142,6 +142,7 @@ typedef struct SdhciCommand
     uint16_t transfer_mode;
     bool data_present;
 } SdhciCommand;
+
 typedef const SdhciCommand * ConstSdhciCommandPtr;
 
 typedef struct SdhciCommandResult
@@ -149,6 +150,7 @@ typedef struct SdhciCommandResult
     bool ok;
     uint32_t response[4];
 } SdhciCommandResult;
+
 typedef const SdhciCommandResult * ConstSdhciCommandResultPtr;
 
 typedef struct SdhciDevice

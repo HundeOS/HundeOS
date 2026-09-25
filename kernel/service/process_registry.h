@@ -8,11 +8,14 @@ typedef struct KernelProcessRegistry
     mutex_t lock;
     UserAddress mapping;
 } KernelProcessRegistry;
+
 typedef KernelProcessRegistry * KernelProcessRegistryPtr;
+
 static inline KernelProcessRegistry KernelProcessRegistry__new(void)
 {
     return (KernelProcessRegistry){.lock = MUTEX_INIT, .mapping = NULL_USER_ADDRESS};
 }
+
 Result(ServiceCode) KernelProcessRegistry__map_process(KernelProcessRegistryPtr self, ProcessPtr process);
 void KernelProcessRegistry__set(KernelProcessRegistryPtr self, uint64_t cpu, uint64_t index,
                                 ConstProcessRecordPtr record);

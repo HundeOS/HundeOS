@@ -1,5 +1,6 @@
 #include "services.h"
 #include "sys/service.h"
+
 static Result(ServiceCode) BootService__wait(ConstResultPtr(SpawnResult) spawned, ConstBStringPtr ready)
 {
     match_result(

@@ -17,6 +17,7 @@ typedef struct HundekanalWarterContext
     ChannelSignal wake;
     bool progress;
 } HundekanalWarterContext;
+
 typedef HundekanalWarterContext * HundekanalWarterContextPtr;
 
 static HundekanalWarterContext HundekanalWarterContext__new(QueueArrivalsPtr arrivals)

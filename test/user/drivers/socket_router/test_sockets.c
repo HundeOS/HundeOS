@@ -69,6 +69,7 @@ void setUp(void)
     deferred_open = false;
     requests = 0;
 }
+
 void tearDown(void)
 {
 }

@@ -1,8 +1,10 @@
 #include "unity.h"
 #include "boot_info.h"
+
 void setUp(void)
 {
 }
+
 void tearDown(void)
 {
 }

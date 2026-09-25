@@ -33,6 +33,7 @@ static bool QueueTest__contains(TestQueuesPtr queues, QueueConnectionID id)
             }
         }
     );
+
     return false;
 }
 
@@ -204,6 +205,7 @@ int main(int argc, char ** argv)
             return 1;
         }
     }
+
     QueueEndpointID endpoint;
     match_optional(
         ServiceDirectory__find_endpoint(ServiceDirectory__shared(), &bstr("queue-test")),
