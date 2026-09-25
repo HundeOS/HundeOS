@@ -459,6 +459,7 @@ static IOReply Memfs__list(MemfsPtr self, ConstBStringPtr path, uint64_t index, 
     {
         return IOReply__new(access, 0);
     }
+    IOReply reply = IOReply__new(IO_OK, 0);
     for_each_ll_ptr(
         MemfsNodes,
         (&self->nodes),
@@ -469,19 +470,46 @@ static IOReply Memfs__list(MemfsPtr self, ConstBStringPtr path, uint64_t index, 
             {
                 continue;
             }
-            if (index-- != 0)
+            if (index > 0)
             {
+                index--;
                 continue;
             }
             size_t start = BString__equals(path, &bstr("/")) ? 1 : BString__length(path) + 1;
             BString name = BString__slice(&node.path, start, BString__length(&node.path));
-            IOReply reply = IOReply__new(IO_OK, 1);
-reply.entry = DirectoryEntry__new(IO_DIRENT_ATTR_NONE, node.owner.user_id, node.owner.group_id,
+reply.directory.entries[reply.directory.count++] = DirectoryEntry__new(
+IO_DIRENT_ATTR_NONE, node.owner.user_id, node.owner.group_id,
 (node.directory ? IO_MODE_TYPE_DIR : IO_MODE_TYPE_FILE) | node.mode, &name);
+if (reply.directory.count == IO_DIRECTORY_BATCH_CAPACITY)
+{
 return reply;
+}
         }
     );
-    return IOReply__new(IO_OK, 0);
+    return reply;
+}
+
+static IOReply Memfs__file_info(MemfsPtr self, ConstBStringPtr path)
+{
+    IOReply reply = IOReply__new(IO_OK, 0);
+    if (BString__equals(path, &bstr("/")))
+    {
+        reply.file_info = IOFileInfo__new(IO_MODE_TYPE_DIR | 0755, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, 0);
+        return reply;
+    }
+    match_optional(
+        Memfs__find(self, path),
+        some(node)
+        {
+            reply.file_info = IOFileInfo__new((node->directory ? IO_MODE_TYPE_DIR : IO_MODE_TYPE_FILE) | node->mode,
+                                              node->owner.user_id, node->owner.group_id, node->size);
+            return reply;
+        },
+        none()
+        {
+            return IOReply__new(IO_INVALID_PATH, 0);
+        }
+    );
 }
 
 static bool MemfsNode__descendant(MemfsNodePtr self, void * context)
@@ -601,7 +629,8 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
         return Memfs__release(self, request);
     }
     if (request->operation == IO_REQUEST_OPEN || request->operation == IO_REQUEST_LIST_DIR ||
-        request->operation == IO_REQUEST_MKDIR || request->operation == IO_REQUEST_REMOVE)
+        request->operation == IO_REQUEST_FILE_INFO || request->operation == IO_REQUEST_MKDIR ||
+        request->operation == IO_REQUEST_REMOVE)
     {
         BString path = IORequest__path(request);
         if (BString__is_empty(&path))
@@ -635,6 +664,8 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
             return Memfs__open(self, request, &path, &credentials);
         case IO_REQUEST_LIST_DIR:
             return Memfs__list(self, &path, request->offset, &credentials);
+        case IO_REQUEST_FILE_INFO:
+            return Memfs__file_info(self, &path);
         case IO_REQUEST_REMOVE:
             return Memfs__remove(self, &path, request->flags, &credentials);
         default:

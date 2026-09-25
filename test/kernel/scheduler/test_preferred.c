@@ -234,6 +234,36 @@ void test_residency_starts_on_dispatch_and_does_not_reset_on_timer_checks(void)
     TEST_ASSERT_FALSE(Process__retain_preferred(p1));
 }
 
+void test_retained_preferred_process_remains_owned_by_its_running_cpu(void)
+{
+    p1->state = PROC_STATE_RUNNING;
+    p1->preferred_active = true;
+    p1->preferred_warm = true;
+    p1->dispatched_at = 0;
+    p1->migration_safe = false;
+    cpu(0)->switching_out = Some(ProcessPtr, p1);
+    test_cpu_time_usec = SCHEDULER_WARM_RESIDENCY_USEC - 1;
+
+    current_process_reset();
+    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+
+    TEST_ASSERT_NULL(current_running_process());
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, p1->state);
+    TEST_ASSERT_FALSE(p1->migration_safe);
+    match_optional(cpu(0)->switching_out,
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_optional(ProcessTable__find_item(&cpu(0)->processes, p1),
+        some_do_nothing(),
+        none_test_fail()
+    );
+    match_optional(Scheduler__take_preferred(scheduler, cpu(1)),
+        some_test_fail(),
+        none_do_nothing()
+    );
+}
+
 void test_preferred_selection_does_not_migrate_unfinished_switch_or_kernel_wait(void)
 {
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));

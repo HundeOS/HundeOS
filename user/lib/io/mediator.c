@@ -115,8 +115,9 @@ static IOStatus IOMediator__validate(IOMediatorPtr self, QueueConnectionID sessi
         return IO_OPERATION_NOT_SUPPORTED;
     }
     if (request->operation == IO_REQUEST_OPEN ||
-        (self->filesystem && (request->operation == IO_REQUEST_LIST_DIR || request->operation == IO_REQUEST_MKDIR ||
-                              request->operation == IO_REQUEST_REMOVE || request->operation == IO_REQUEST_LINK)))
+        (self->filesystem && (request->operation == IO_REQUEST_LIST_DIR || request->operation == IO_REQUEST_FILE_INFO ||
+                              request->operation == IO_REQUEST_MKDIR || request->operation == IO_REQUEST_REMOVE ||
+                              request->operation == IO_REQUEST_LINK)))
     {
         BString path = IORequest__path(request);
         if (self->stream)
@@ -162,6 +163,8 @@ static IOStatus IOMediator__validate(IOMediatorPtr self, QueueConnectionID sessi
     case IO_REQUEST_WRITE:
         return resource.listener ? IO_OPERATION_NOT_SUPPORTED
                                  : ((resource.flags & IO_OPEN_WRITE) != 0 ? IO_OK : IO_PERMISSION_DENIED);
+    case IO_REQUEST_SET_FOREGROUND_PROCESS:
+        return self->stream && (resource.flags & IO_OPEN_READ) != 0 ? IO_OK : IO_OPERATION_NOT_SUPPORTED;
     case IO_REQUEST_CLOSE:
         return IO_OK;
     default:
@@ -320,7 +323,7 @@ Optional(IOReply)
     }
     if ((opens && reply.value < IO_SESSION_HANDLE_BASE) ||
         ((request->operation == IO_REQUEST_READ || request->operation == IO_REQUEST_WRITE) &&
-         (reply.value < 0 || (uint64_t)reply.value > request->count)))
+         reply.value > request->count))
     {
         self->failed = true;
         Channel__close(&self->backend);
@@ -341,7 +344,7 @@ Optional(IOReply)
             self->buffers = reply.buffers;
         }
         IOResource resource =
-            IOResource__new(self->next_handle++, reply.value, session, pid,
+            IOResource__new(self->next_handle++, (IOHandle)reply.value, session, pid,
                             request->operation == IO_REQUEST_ACCEPT ? IO_OPEN_READ | IO_OPEN_WRITE : request->flags);
         match_result(
             IOResources__push(&self->resources, resource),

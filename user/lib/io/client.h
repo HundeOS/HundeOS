@@ -7,5 +7,6 @@ IOHandle IOClient__accept(IOHandle handle);
 IOStatus IOClient__close(IOHandle handle);
 ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size);
 ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size);
+IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid);
 IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset);
 #endif

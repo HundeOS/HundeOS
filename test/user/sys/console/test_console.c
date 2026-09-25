@@ -11,7 +11,7 @@ static const char * next_input;
 static ByteCount next_input_size;
 static BString printed_output;
 
-ByteCount read(IOHandle handle, char * buf, size_t size)
+ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
 {
     ByteCount copied = 0;
 

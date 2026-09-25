@@ -263,7 +263,11 @@ static bool IOService__serve(IOServicePtr self, IOServiceConnectionPtr connectio
             some(reply)
             {
                 connection->reply = reply;
-                connection->reply.buffers = connection->buffers;
+                if (connection->request.operation == IO_REQUEST_OPEN ||
+                    connection->request.operation == IO_REQUEST_ACCEPT)
+                {
+                    connection->reply.buffers = connection->buffers;
+                }
                 connection->phase = IO_SERVICE_REPLY;
             },
             none()

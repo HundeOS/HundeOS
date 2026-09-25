@@ -13,8 +13,16 @@ RiscVProcess__switch_context:
     or t0, t0, t1
     csrw satp, t0
     sfence.vma zero, zero
+    fence.i
 
-    csrw sscratch, sp
+    la t0, __boot_stack_virtual_start
+    sub t1, sp, t0
+    li t2, 10485760
+    divu t1, t1, t2
+    addi t1, t1, 1
+    mul t1, t1, t2
+    add t0, t0, t1
+    csrw sscratch, t0
     mv sp, a0
     ld t0, CONTEXT_SEPC(sp)
     csrw sepc, t0

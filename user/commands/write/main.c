@@ -73,11 +73,11 @@ int main(int argc, char ** argv)
             if (bytes < 0)
             {
                 IO__printf(&bstr("write: write error %i\n"), (int)bytes);
-                close(handle);
+                IO__close(handle);
                 return 1;
             }
 
-            close(handle);
+            IO__close(handle);
             return 0;
         },
         none_do_nothing()

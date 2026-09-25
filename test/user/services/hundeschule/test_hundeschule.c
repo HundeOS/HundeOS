@@ -202,7 +202,7 @@ SpawnResult spawn_as(SpawnMode mode, UserID requested_user_id, ConstBStringPtr p
     return SPAWN_FAILED;
 }
 
-IOHandle open(ConstBStringPtr path, Flags flags)
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     if (strings_equal(BString__cstr(path), "/boot/sysinfo"))
     {
@@ -270,13 +270,13 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     return Some(DynString, config);
 }
 
-ByteCount read(IOHandle handle, char * buf, size_t size)
+ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
 {
     TEST_FAIL();
     return IO_PANIC;
 }
 
-IOStatus close(IOHandle handle)
+IOStatus IO__close(IOHandle handle)
 {
     if (handle == 1)
     {

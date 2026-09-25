@@ -36,9 +36,10 @@ CFLAGS = -c -MMD -MP -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -
            -nostdlib -nostartfiles $(ARCH_CFLAGS) $(BSP_DEFINES) \
            -DKERNEL_TRACE_PATH=\"$(KERNEL_TRACE_LOG)\" -Ikernel -I./common -I./common_includes $(EXTRA_KERNEL_CFLAGS)
 
-USER_CFLAGS = -c -MMD -MP -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
+USER_CFLAGS = -c -MMD -MP -ffreestanding -fno-pic -fno-pie -fno-stack-protector -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
            -nostdlib -nostartfiles $(ARCH_USER_CFLAGS) \
-           -I./user/lib/fiber/arch/$(ARCH) -I./user/lib -I./common -I./common_includes -I./user/lib/newlib/include
+           -I./user/lib/fiber/arch/$(ARCH) -I./user/lib -I./common -I./common_includes -I./user/lib/newlib/include \
+           -I./vendor/openbsd/src/include
 
 # Assembler flags
 ASFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
@@ -55,7 +56,7 @@ endif
 # Linker flags
 LINKER_SCRIPT ?= arch/$(ARCH)/boot/$(BOOT_PLATFORM)/linker.ld
 LDFLAGS = -nostdlib -T $(LINKER_SCRIPT)
-USER_LDFLAGS = -nostdlib -Wl,-e,_start
+USER_LDFLAGS = -nostdlib -Wl,-e,_start -Wl,--gc-sections
 
 # Output files
 BUILD_ROOT = build/$(ARCH)
@@ -125,6 +126,8 @@ EXT2_IMG = $(IMAGE_BUILD_DIR)/ext2.img
 EXT2_SIZE_MB = 64
 EXT2_LABEL = EXT2FS
 EXT2_ROOT_DIR = tools/ext2_root
+ROOTFS_DIR = $(BUILD_ROOT)/rootfs
+ROOTFS_STAMP = $(ROOTFS_DIR)/.built
 BOOT_CONFIG ?= qemu_virt
 BOOT_CONFIG_EXT2_IMG = $(BUILD_ROOT)/boot_config/$(BOOT_CONFIG).img
 HVF_BOOT_CONFIG_EXT2_IMG = $(BUILD_ROOT)/boot_config/qemu_virt_hvf.img
@@ -133,6 +136,7 @@ BOOT_CONFIG_EXT2_LABEL = BOOTCFG
 BOOT_CONFIG_ROOT_DIR = config/$(BOOT_CONFIG)
 EXT2_IMG_BLOCK_SIZE = 1024
 EXT2_INODE_SIZE = 128
+EXT2_INODE_COUNT = 1024
 EXT2_MKFS ?= genext2fs
 MKFS_FAT ?= mkfs.fat
 SERIAL ?= stdio
@@ -195,6 +199,28 @@ USER_DRIVER_DIRS := $(filter user/drivers/%,$(USER_BINARY_DIRS))
 USER_SERVICE_DIRS := $(filter user/services/%,$(USER_BINARY_DIRS))
 USER_NON_DRIVER_DIRS := $(filter-out $(USER_DRIVER_DIRS) $(USER_SERVICE_DIRS),$(USER_BINARY_DIRS))
 USER_BINARIES := $(patsubst %,$(USER_BUILD_DIR)/%.bin,$(notdir $(USER_BINARY_DIRS)))
+ROOTFS_COMMAND_NAMES := cat ln ls mkdir mv rm
+ROOTFS_COMMAND_DIRS := $(addprefix user/commands/,$(ROOTFS_COMMAND_NAMES))
+ROOTFS_COMMAND_BINARIES := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
+OPENBSD_CAT_SOURCE := vendor/openbsd/src/bin/cat/cat.c
+OPENBSD_CAT_OBJECT := $(USER_BUILD_DIR)/vendor/openbsd/bin/cat/cat.o
+cat_EXTRA_OBJS := $(OPENBSD_CAT_OBJECT)
+OPENBSD_LN_SOURCES := vendor/openbsd/src/bin/ln/ln.c
+OPENBSD_LN_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_LN_SOURCES))
+ln_EXTRA_OBJS := $(OPENBSD_LN_OBJECTS)
+OPENBSD_LS_SOURCES := $(wildcard vendor/openbsd/src/bin/ls/*.c)
+OPENBSD_LS_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_LS_SOURCES))
+ls_EXTRA_OBJS := $(OPENBSD_LS_OBJECTS)
+OPENBSD_MKDIR_SOURCES := vendor/openbsd/src/bin/mkdir/mkdir.c
+OPENBSD_MKDIR_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_MKDIR_SOURCES))
+mkdir_EXTRA_OBJS := $(OPENBSD_MKDIR_OBJECTS)
+OPENBSD_MV_SOURCES := $(wildcard vendor/openbsd/src/bin/mv/*.c)
+OPENBSD_MV_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_MV_SOURCES))
+mv_EXTRA_OBJS := $(OPENBSD_MV_OBJECTS)
+OPENBSD_RM_SOURCE := vendor/openbsd/src/bin/rm/rm.c
+OPENBSD_RM_OBJECT := $(USER_BUILD_DIR)/vendor/openbsd/bin/rm/rm.o
+rm_EXTRA_OBJS := $(OPENBSD_RM_OBJECT)
+EMBEDDED_USER_NON_DRIVER_DIRS := $(filter-out $(ROOTFS_COMMAND_DIRS),$(USER_NON_DRIVER_DIRS))
 USER_VIDEO_TERM_FONT := vendor/unifont/unifont_all-17.0.05.hex
 USER_VIDEO_TERM_FONT_OBJECT := $(USER_BUILD_DIR)/drivers/video_term/unifont_all.o
 USER_VIDEO_TERM_EMOJI_PNGS := $(wildcard vendor/noto_emoji/png/128/emoji_u*.png)
@@ -203,7 +229,7 @@ USER_VIDEO_TERM_EMOJI_ATLAS := $(USER_BUILD_DIR)/drivers/video_term/emoji_atlas.
 USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT := $(USER_BUILD_DIR)/drivers/video_term/emoji_atlas.o
 video_term_EXTRA_OBJS := $(USER_VIDEO_TERM_FONT_OBJECT) $(USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT)
 EMBEDDED_FS_INPUTS := \
-	$(foreach dir,$(USER_NON_DRIVER_DIRS),$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
+	$(foreach dir,$(EMBEDDED_USER_NON_DRIVER_DIRS),$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
 	$(foreach dir,$(USER_DRIVER_DIRS),drivers/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
 	$(foreach dir,$(USER_SERVICE_DIRS),services/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin)
 EMBEDDED_FS := $(BUILD_ROOT)/kernel/embedded.fs
@@ -227,6 +253,10 @@ compile-commands:
 		build/riscv64/qemu_virt/kernel/arch/riscv64/mmu.o
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B ARCH=riscv64 \
 		build/riscv64/user/hello_world.bin
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B ARCH=aarch64 \
+		$(addprefix build/aarch64/user/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B ARCH=riscv64 \
+		$(addprefix build/riscv64/user/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
 
 setup: python-venv
 	mkdir -p $(BUILD_ROOT)
@@ -257,9 +287,9 @@ $(CHANNELIO_EXT2_IMG): $(shell find $(EXT2_ROOT_DIR) -type f -print)
 	rm -f $@.tmp
 	dd if=/dev/zero of=$@.tmp bs=1048576 count=$(EXT2_SIZE_MB)
 	@if [ "$(EXT2_MKFS)" = "genext2fs" ]; then \
-		$(EXT2_MKFS) -b $$(( $(EXT2_SIZE_MB) * 1024 )) -B $(EXT2_IMG_BLOCK_SIZE) -L $(CHANNELIO_EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
+		$(EXT2_MKFS) -b $$(( $(EXT2_SIZE_MB) * 1024 )) -B $(EXT2_IMG_BLOCK_SIZE) -N $(EXT2_INODE_COUNT) -L $(CHANNELIO_EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
 	else \
-		$(EXT2_MKFS) -q -F -t ext2 -b $(EXT2_IMG_BLOCK_SIZE) -I $(EXT2_INODE_SIZE) -L $(CHANNELIO_EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
+		$(EXT2_MKFS) -q -F -t ext2 -b $(EXT2_IMG_BLOCK_SIZE) -I $(EXT2_INODE_SIZE) -N $(EXT2_INODE_COUNT) -L $(CHANNELIO_EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
 	fi
 	mv $@.tmp $@
 
@@ -271,7 +301,14 @@ $(SD_CARD_FAT32_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(SD_CAR
 	$(PYTHON) tools/populate_fat32_image.py $@ CONFIG.TXT $(SD_CARD_FAT32_CONFIG_FILE)
 	$(PYTHON) tools/populate_fat32_image.py $@ DOCS/NOTE.TXT $(SD_CARD_FAT32_NOTE_FILE)
 
-$(EXT2_IMG): $(shell find $(EXT2_ROOT_DIR) -type f -print)
+$(ROOTFS_STAMP): Makefile $(shell find $(EXT2_ROOT_DIR) -type f -print) $(ROOTFS_COMMAND_BINARIES)
+	rm -rf $(ROOTFS_DIR)
+	mkdir -p $(ROOTFS_DIR)/usr/local/bin
+	cp -R $(EXT2_ROOT_DIR)/. $(ROOTFS_DIR)/
+	$(foreach binary,$(ROOTFS_COMMAND_BINARIES),cp $(binary) $(ROOTFS_DIR)/usr/local/bin/$(basename $(notdir $(binary)));)
+	touch $@
+
+$(EXT2_IMG): $(ROOTFS_STAMP)
 	mkdir -p `dirname $@`
 	rm -f $@.tmp
 	dd if=/dev/zero of=$@.tmp bs=1048576 count=$(EXT2_SIZE_MB)
@@ -282,9 +319,9 @@ $(EXT2_IMG): $(shell find $(EXT2_ROOT_DIR) -type f -print)
 		exit 1; \
 	fi
 	@if [ "$(EXT2_MKFS)" = "genext2fs" ]; then \
-		$(EXT2_MKFS) -b $$(( $(EXT2_SIZE_MB) * 1024 )) -B $(EXT2_IMG_BLOCK_SIZE) -L $(EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
+		$(EXT2_MKFS) -b $$(( $(EXT2_SIZE_MB) * 1024 )) -B $(EXT2_IMG_BLOCK_SIZE) -N $(EXT2_INODE_COUNT) -L $(EXT2_LABEL) -d $(ROOTFS_DIR) $@.tmp; \
 	else \
-		$(EXT2_MKFS) -q -F -t ext2 -b $(EXT2_IMG_BLOCK_SIZE) -I $(EXT2_INODE_SIZE) -L $(EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
+		$(EXT2_MKFS) -q -F -t ext2 -b $(EXT2_IMG_BLOCK_SIZE) -I $(EXT2_INODE_SIZE) -N $(EXT2_INODE_COUNT) -L $(EXT2_LABEL) -d $(ROOTFS_DIR) $@.tmp; \
 	fi
 	mv $@.tmp $@
 
@@ -353,6 +390,23 @@ $(USER_BUILD_DIR)/%.o: user/%.s
 	$(AS) $(USER_ASFLAGS) $< -o $@
 
 $(USER_BUILD_DIR)/common/%.o: common/%.c
+	mkdir -p `dirname $@`
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OPENBSD_CAT_OBJECT): $(OPENBSD_CAT_SOURCE)
+	mkdir -p `dirname $@`
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OPENBSD_RM_OBJECT): $(OPENBSD_RM_SOURCE) user/commands/rm/platform.h
+	mkdir -p `dirname $@`
+	$(CC) $(USER_CFLAGS) -include user/commands/rm/platform.h \
+		-Dmain=OpenBSDRm__main -Darc4random_buf=RmPlatform__unsupported_random -c $< -o $@
+
+$(USER_BUILD_DIR)/vendor/openbsd/bin/ls/%.o: vendor/openbsd/src/bin/ls/%.c
+	mkdir -p `dirname $@`
+	$(CC) $(USER_CFLAGS) -DSMALL -c $< -o $@
+
+$(USER_BUILD_DIR)/vendor/openbsd/%.o: vendor/openbsd/src/%.c
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
@@ -441,7 +495,8 @@ qemu-riscv64-trace:
 
 qemu-riscv64-trace-build:
 	$(MAKE) KERNEL_BUILD_DIR="$(RISCV64_TRACE_KERNEL_BUILD_DIR)" \
-		ELF="$(RISCV64_TRACE_ELF)" EXTRA_KERNEL_CFLAGS="-DKERNEL_SEMIHOSTING_TRACE" $(RISCV64_TRACE_ELF)
+		ELF="$(RISCV64_TRACE_ELF)" \
+		EXTRA_KERNEL_CFLAGS="-DKERNEL_SEMIHOSTING_TRACE -DKERNEL_LOW_VOLUME_TRACE" $(RISCV64_TRACE_ELF)
 	$(MAKE) KERNEL_BUILD_DIR="$(RISCV64_TRACE_KERNEL_BUILD_DIR)" \
 		ELF="$(RISCV64_TRACE_ELF)" qemu-riscv64-trace-run
 
@@ -462,7 +517,8 @@ qemu-riscv64-trace-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
-		-nographic -monitor none -no-reboot \
+		-display none -monitor none -no-reboot \
+		-chardev stdio,id=console,signal=off -serial chardev:console \
 		-semihosting-config enable=on,target=native
 
 # Clean build artifacts
@@ -686,7 +742,7 @@ qemu-virt-hvf: $(ELF) $(EXT2_IMG) $(HVF_BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_C
 qemu-virt-hvf-trace: BOOT_CONFIG = qemu_virt_hvf
 qemu-virt-hvf-trace:
 	$(MAKE) $(DISK_IMG)
-	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
+	$(MAKE) $(EXT2_IMG)
 	$(MAKE) $(HVF_BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(SD_CARD_FAT32_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
@@ -701,7 +757,8 @@ qemu-virt-hvf-trace:
 		-smp cpus=4 \
 		-cpu host \
 		-m 4G  \
-		-serial $(SERIAL) \
+		-chardev stdio,id=console,signal=off \
+		-serial chardev:console \
 		-serial file:$(KERNEL_TRACE_LOG) \
 		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
@@ -716,13 +773,13 @@ qemu-virt-hvf-trace:
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
 		-kernel $(HVF_TRACE_ELF) \
-		-nographic \
+		-display none \
 		-monitor telnet::4444,server,nowait
 
 qemu-virt-tcg-icount-trace: BOOT_CONFIG = qemu_virt_hvf
 qemu-virt-tcg-icount-trace:
 	$(MAKE) $(DISK_IMG)
-	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
+	$(MAKE) $(EXT2_IMG)
 	$(MAKE) $(HVF_BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(SD_CARD_FAT32_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
@@ -782,7 +839,7 @@ qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNEL
 qemu-virt-1cpu-trace: BOOT_CONFIG = qemu_virt
 qemu-virt-1cpu-trace:
 	$(MAKE) $(DISK_IMG)
-	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
+	$(MAKE) $(EXT2_IMG)
 	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
 	$(MAKE) $(CHANNELIO_EXT2_IMG)
@@ -815,7 +872,7 @@ qemu-virt-1cpu-trace:
 qemu-virt-2cpus-trace: BOOT_CONFIG = qemu_virt
 qemu-virt-2cpus-trace:
 	$(MAKE) $(DISK_IMG)
-	@if [ ! -f "$(EXT2_IMG)" ]; then $(MAKE) $(EXT2_IMG); fi
+	$(MAKE) $(EXT2_IMG)
 	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
 	$(MAKE) $(CHANNELIO_EXT2_IMG)

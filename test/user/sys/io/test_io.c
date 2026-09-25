@@ -17,6 +17,7 @@ static size_t last_write_size;
 static const char * next_read_data;
 static ByteCount next_read_result;
 static int64_t next_result;
+static IOReply next_path_reply;
 
 IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
 {
@@ -34,7 +35,7 @@ IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr pat
 {
     last_operation = operation;
     last_path_request = (IOPathRequest){.path = *path, .flags = flags};
-    return IOReply__new(next_result, 0);
+    return operation == IO_REQUEST_FILE_INFO ? next_path_reply : IOReply__new(next_result, 0);
 }
 IOHandle IOClient__accept(IOHandle handle)
 {
@@ -44,6 +45,11 @@ IOHandle IOClient__accept(IOHandle handle)
 IOStatus IOClient__close(IOHandle handle)
 {
     return IO_OK;
+}
+
+IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
+{
+    return IO_OPERATION_NOT_SUPPORTED;
 }
 ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
 {
@@ -93,6 +99,7 @@ void setUp(void)
     next_read_data = NULL;
     next_read_result = 0;
     next_result = 0;
+    next_path_reply = IOReply__new(IO_OK, 0);
 }
 
 void tearDown(void)
@@ -110,6 +117,13 @@ void test_io_open_uses_bstring_path(void)
     TEST_ASSERT_EQUAL(IO_REQUEST_OPEN, last_operation);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1/test.txt"), last_path_request.path);
     TEST_ASSERT_EQUAL(IO_OPEN_READ, last_path_request.flags);
+}
+
+void test_io_path_from_arg_normalizes_root_relative_components(void)
+{
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/"), IO__path_from_arg(&bstr(".")));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/usr/local"), IO__path_from_arg(&bstr("./usr//share/../local/")));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/etc"), IO__path_from_arg(&bstr("/../../etc")));
 }
 
 void test_io_read_populates_bstring_and_sets_length(void)
@@ -182,6 +196,26 @@ void test_io_link_uses_bstring_paths(void)
     TEST_ASSERT_EQUAL(IO_REQUEST_LINK, last_operation);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/hello.txt"), last_link_request.source_path);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/copy.txt"), last_link_request.target_path);
+}
+
+void test_io_file_info_uses_one_path_request(void)
+{
+    next_path_reply.file_info = (IOFileInfo){
+        .mode = IO_MODE_TYPE_FILE | 0644, .user_id = PROCESS_USER_USER, .group_id = PROCESS_GROUP_USER, .size = 123};
+
+    match_result(
+        IO__file_info(&bstr("/tmp/file")),
+        success(info)
+        {
+            TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0644, info.mode);
+            TEST_ASSERT_EQUAL(PROCESS_USER_USER, info.user_id);
+            TEST_ASSERT_EQUAL(PROCESS_GROUP_USER, info.group_id);
+            TEST_ASSERT_EQUAL(123, info.size);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(IO_REQUEST_FILE_INFO, last_operation);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/tmp/file"), last_path_request.path);
 }
 
 void test_sd_host_config_parse_reads_present_host(void)

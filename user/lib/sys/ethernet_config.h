@@ -201,14 +201,14 @@ static Optional(EthernetConfig) EthernetConfig__parse(ConstDynStringPtr sysinfo)
 
 static Optional(EthernetConfig) EthernetConfig__load(void)
 {
-    IOHandle handle = open(&bstr(ETHERNET_CONFIG_PATH), IO_OPEN_READ);
+    IOHandle handle = IO__open(&bstr(ETHERNET_CONFIG_PATH), IO_OPEN_READ);
     if (handle < 0)
     {
         return None(EthernetConfig);
     }
 
     Optional(DynString) sysinfo = IO__read_dyn_string(handle, ETHERNET_CONFIG_MAX);
-    close(handle);
+    IO__close(handle);
 
     match_optional(
         sysinfo,

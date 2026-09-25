@@ -66,6 +66,15 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
             return line;
         }
 
+        if (ch == 0x03)
+        {
+            if (echo)
+            {
+                IO__print(&bstr("^C"));
+            }
+            return empty_bstr();
+        }
+
         if (ch == '\b' || ch == 0x7f)
         {
             if (history_cursor != NULL) // hundelint: ignore-no-null

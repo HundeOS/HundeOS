@@ -100,7 +100,8 @@ static IOReply IOStreamDriver__request(IOStreamDriverPtr self, IORequestPtr requ
                 );
             }
             if ((request->operation == IO_REQUEST_READ && self->access == IO_OPEN_READ) ||
-                (request->operation == IO_REQUEST_WRITE && self->access == IO_OPEN_WRITE))
+                (request->operation == IO_REQUEST_WRITE && self->access == IO_OPEN_WRITE) ||
+                (request->operation == IO_REQUEST_SET_FOREGROUND_PROCESS && self->access == IO_OPEN_READ))
             {
                 return self->transfer(self->context, request);
             }

@@ -34,7 +34,7 @@ static IOReply IOClient__submit(IORequestPtr request)
                         sizeof(reply)),
         success(size)
         {
-            if (size == sizeof(reply) && (reply.status != IO_OK || reply.value >= 0))
+            if (size == sizeof(reply))
             {
                 if (reply.status == IO_OK && request->operation == IO_REQUEST_OPEN)
                 {
@@ -89,7 +89,7 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
         return IO_UNKNOWN_HANDLE;
     }
     open_handles++;
-    return reply.value;
+    return (IOHandle)reply.value;
 }
 
 IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
@@ -117,7 +117,7 @@ IOHandle IOClient__accept(IOHandle handle)
         return IO_UNKNOWN_HANDLE;
     }
     open_handles++;
-    return reply.value;
+    return (IOHandle)reply.value;
 }
 
 IOStatus IOClient__close(IOHandle handle)
@@ -134,6 +134,13 @@ IOStatus IOClient__close(IOHandle handle)
         }
     }
     return status;
+}
+
+IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
+{
+    IORequest request = IORequest__new(IO_REQUEST_SET_FOREGROUND_PROCESS, handle);
+    request.foreground_pid = pid;
+    return IOClient__submit(&request).status;
 }
 
 static ByteCount IOClient__read_chunk(IOHandle handle, ChannelDataPtr data, size_t size)
@@ -159,7 +166,7 @@ static ByteCount IOClient__read_chunk(IOHandle handle, ChannelDataPtr data, size
     {
         __builtin_memcpy(data, (ConstChannelDataPtr)buffers.read.address, reply.value);
     }
-    return reply.value;
+    return (ByteCount)reply.value;
 }
 
 static ByteCount IOClient__write_chunk(IOHandle handle, ConstChannelDataPtr data, size_t size)
@@ -181,7 +188,7 @@ static ByteCount IOClient__write_chunk(IOHandle handle, ConstChannelDataPtr data
     {
         return reply.status;
     }
-    return (uint64_t)reply.value <= request.count ? reply.value : IO_UNKNOWN_BUFFER;
+    return reply.value <= request.count ? (ByteCount)reply.value : IO_UNKNOWN_BUFFER;
 }
 
 ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)

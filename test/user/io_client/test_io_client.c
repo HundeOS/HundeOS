@@ -53,6 +53,7 @@ static Optional(IOReply)
         reply.value = request->count;
         break;
     case IO_REQUEST_CLOSE:
+    case IO_REQUEST_SET_FOREGROUND_PROCESS:
         break;
     default:
         reply.status = IO_OPERATION_NOT_SUPPORTED;
@@ -133,6 +134,16 @@ void test_io_client_reuses_one_channel_for_multiple_handles_and_closes(void)
     ChannelFixture__drain();
     TEST_ASSERT_EQUAL_UINT(1, disconnects);
     TEST_ASSERT_EQUAL_UINT64(allocated_pages, released_pages);
+}
+
+void test_io_client_sends_foreground_process_control_on_stream_handle(void)
+{
+    IOHandle handle = IOClient__open(&bstr(":tty:"), IO_OPEN_READ);
+
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__set_foreground_process(handle, 55));
+    TEST_ASSERT_EQUAL(IO_REQUEST_SET_FOREGROUND_PROCESS, last_request.operation);
+    TEST_ASSERT_EQUAL_INT64(handle, last_request.handle);
+    TEST_ASSERT_EQUAL_UINT64(55, last_request.foreground_pid);
 }
 
 void test_service_disconnects_client_with_pending_operation_without_executing_it(void)

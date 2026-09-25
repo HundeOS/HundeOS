@@ -288,14 +288,14 @@ static bool FramebufferConfig__read_config(ConstDynStringPtr sysinfo, Framebuffe
 
 static bool FramebufferConfig__load(FramebufferConfigPtr self)
 {
-    IOHandle handle = open(&bstr(FRAMEBUFFER_CONFIG_PATH), IO_OPEN_READ);
+    IOHandle handle = IO__open(&bstr(FRAMEBUFFER_CONFIG_PATH), IO_OPEN_READ);
     if (handle < 0)
     {
         return false;
     }
 
     Optional(DynString) sysinfo = IO__read_dyn_string(handle, FRAMEBUFFER_CONFIG_MAX);
-    close(handle);
+    IO__close(handle);
 
     match_optional(
         sysinfo,

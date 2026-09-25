@@ -132,6 +132,22 @@ typedef struct Fat32fsClusterOffset
     uint64_t offset;
 } Fat32fsClusterOffset;
 
+typedef struct Fat32fsFile
+{
+    uint32_t first_cluster;
+    FilesystemFileSize size;
+} Fat32fsFile;
+
+static Fat32fsFile Fat32fsFile__new(uint32_t first_cluster, FilesystemFileSize size)
+{
+    return (Fat32fsFile){
+        .first_cluster = first_cluster,
+        .size = size,
+    };
+}
+
+ResultDef(Fat32fsFile);
+
 ResultDef(Fat32fsClusterOffset);
 
 static Fat32fsClusterOffset Fat32fsClusterOffset__new(uint32_t cluster, uint64_t offset)
@@ -1353,10 +1369,47 @@ static DirectoryEntryCount Fat32fsVolume__list_dir_from(Fat32fsVolumePtr self, C
     return count;
 }
 
-static Result(FilesystemFileSize)
-    Fat32fs__load(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data)
+static Result(Fat32fsFile) Fat32fsVolume__file_at_path(Fat32fsVolumePtr self, ConstBStringPtr path)
+{
+    Fat32fsDirectoryEntryLocation location;
+    match_result(
+        Fat32fsVolume__entry_at_path(self, path),
+        success(value)
+        {
+            location = value;
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsFile, message, IO_INVALID_PATH);
+        }
+    );
+    Fat32fsSectorData entry;
+    match_result(
+        Fat32fs__read_sector(self, location.sector),
+        success(value)
+        {
+            entry = value;
+        },
+        error(code, message)
+        {
+            return Error(Fat32fsFile, message, IO_INVALID_PATH);
+        }
+    );
+    if (Fat32fsDirectorySector__entry_is_directory(&entry, location.offset))
+    {
+        return Error(Fat32fsFile, fat32fs_is_a_directory, IO_INVALID_PATH);
+    }
+    return Success(Fat32fsFile, Fat32fsFile__new(Fat32fs__read_directory_cluster(&entry.data[location.offset]),
+                                                 Fat32fs__read_u32(entry.data, location.offset + 28)));
+}
+
+static Result(FilesystemFileInfo) Fat32fs__describe(IOServiceContext context, ConstBStringPtr path)
 {
     Fat32fsVolumePtr volume = context;
+    if (BString__equals(path, &bstr("/")))
+    {
+        return Success(FilesystemFileInfo, FilesystemFileInfo__new(0, IO_MODE_TYPE_DIR | 0755));
+    }
     Fat32fsDirectoryEntryLocation location;
     match_result(
         Fat32fsVolume__entry_at_path(volume, path),
@@ -1366,36 +1419,59 @@ static Result(FilesystemFileSize)
         },
         error(code, message)
         {
-            return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+            return Error(FilesystemFileInfo, message, IO_INVALID_PATH);
         }
     );
-    Fat32fsSectorData entry;
     match_result(
         Fat32fs__read_sector(volume, location.sector),
-        success(value)
+        success(sector)
         {
-            entry = value;
+            FileMode mode = Fat32fsDirectorySector__entry_is_directory(&sector, location.offset)
+                                ? IO_MODE_TYPE_DIR | 0755
+                                : IO_MODE_TYPE_FILE | 0755;
+            FilesystemFileSize size = Fat32fs__read_u32(sector.data, location.offset + 28);
+            return Success(FilesystemFileInfo, FilesystemFileInfo__new(size, mode));
         },
         error(code, message)
         {
-            return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+            return Error(FilesystemFileInfo, message, IO_INVALID_PATH);
         }
     );
-    if (Fat32fsDirectorySector__entry_is_directory(&entry, location.offset))
+}
+
+static Result(FilesystemFileSize)
+    Fat32fs__read(IOServiceContext context, ConstBStringPtr path, FilesystemFileSize offset, FilesystemFileDataPtr data,
+                  FilesystemFileSize capacity)
+{
+    Fat32fsVolumePtr volume = context;
+    Fat32fsFile file;
+    match_result(
+        Fat32fsVolume__file_at_path(volume, path),
+        success(value)
+        {
+            file = value;
+        },
+        error(code, message)
+        {
+            return Error(FilesystemFileSize, message, code);
+        }
+    );
+    if (offset >= file.size || capacity == 0)
     {
-        return Error(FilesystemFileSize, fat32fs_io_error, IO_INVALID_PATH);
+        return Success(FilesystemFileSize, 0);
     }
-    uint64_t size = Fat32fs__read_u32(entry.data, location.offset + 28);
-    if (size > FILESYSTEM_FILE_CAPACITY)
+
+    FilesystemFileSize remaining = file.size - offset;
+    if (remaining > capacity)
     {
-        return Error(FilesystemFileSize, fat32fs_io_error, IO_OPERATION_NOT_SUPPORTED);
+        remaining = capacity;
     }
-    uint32_t first_cluster = Fat32fs__read_directory_cluster(&entry.data[location.offset]);
-    for (uint64_t offset = 0; offset < size; offset += FAT32FS_BYTES_PER_SECTOR)
+    FilesystemFileSize total = 0;
+    while (total < remaining)
     {
         Fat32fsClusterOffset cluster;
         match_result(
-            Fat32fsVolume__cluster_for_offset(volume, first_cluster, offset),
+            Fat32fsVolume__cluster_for_offset(volume, file.first_cluster, offset + total),
             success(value)
             {
                 cluster = value;
@@ -1409,12 +1485,13 @@ static Result(FilesystemFileSize)
             Fat32fs__read_sector(volume, Fat32fsVolume__cluster_sector(volume, cluster.cluster)),
             success(sector)
             {
-                uint64_t count = size - offset;
-                if (count > FAT32FS_BYTES_PER_SECTOR)
+                FilesystemFileSize count = FAT32FS_BYTES_PER_SECTOR - cluster.offset;
+                if (count > remaining - total)
                 {
-                    count = FAT32FS_BYTES_PER_SECTOR;
+                    count = remaining - total;
                 }
-                memcpy(data + offset, sector.data, count);
+                memcpy(data + total, sector.data + cluster.offset, count);
+                total += count;
             },
             error(code, message)
             {
@@ -1422,7 +1499,7 @@ static Result(FilesystemFileSize)
             }
         );
     }
-    return Success(FilesystemFileSize, size);
+    return Success(FilesystemFileSize, total);
 }
 
 static IOStatus Fat32fs__store(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data,
@@ -1442,15 +1519,15 @@ static IOStatus Fat32fs__store(IOServiceContext context, ConstBStringPtr path, F
     );
 }
 
-static Result(OptionalDirectoryEntry) Fat32fs__list(IOServiceContext context, ConstBStringPtr path, uint64_t index)
+static Result(DirectoryEntryCount) Fat32fs__list(IOServiceContext context, ConstBStringPtr path,
+                                                 DirectoryEntryPtr entries, size_t capacity, uint64_t offset)
 {
-    DirectoryEntry entry;
-    DirectoryEntryCount count = Fat32fsVolume__list_dir_from(context, path, &entry, 1, index);
+    DirectoryEntryCount count = Fat32fsVolume__list_dir_from(context, path, entries, capacity, offset);
     if (count < 0)
     {
-        return Error(OptionalDirectoryEntry, bstr("Directory lookup failed"), count);
+        return Error(DirectoryEntryCount, bstr("Directory lookup failed"), count);
     }
-    return Success(OptionalDirectoryEntry, count == 0 ? None(DirectoryEntry) : Some(DirectoryEntry, entry));
+    return Success(DirectoryEntryCount, count);
 }
 
 static IOStatus Fat32fs__mkdir(IOServiceContext context, ConstBStringPtr path)
@@ -1487,8 +1564,9 @@ static IOStatus Fat32fs__remove(IOServiceContext context, ConstBStringPtr path, 
 
 static FilesystemOperations Fat32fs__operations(void)
 {
-    return FilesystemOperations__new(Fat32fs__load, Fat32fs__store, Fat32fs__list, Fat32fs__mkdir, Fat32fs__remove,
-                                     FAT32FS_MAX_FILE_SIZE);
+    return FilesystemOperations__new_stream(Fat32fs__describe, Fat32fs__read, Fat32fs__store, Fat32fs__list,
+                                            Fat32fs__mkdir, Fat32fs__remove, FilesystemOperations__unsupported_link,
+                                            FAT32FS_MAX_FILE_SIZE);
 }
 
 int FAT32FS_ENTRYPOINT(int argc, char ** argv)

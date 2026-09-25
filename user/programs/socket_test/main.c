@@ -36,7 +36,7 @@ static int SocketTest__listen(int argc, char ** argv)
     if (peer < 0)
     {
         IO__printf(&bstr("socket_test: accept error %i\n"), (int)peer);
-        close(listener);
+        IO__close(listener);
         return 1;
     }
 
@@ -45,8 +45,8 @@ static int SocketTest__listen(int argc, char ** argv)
     if (bytes < 0)
     {
         IO__printf(&bstr("socket_test: read error %i\n"), (int)bytes);
-        close(peer);
-        close(listener);
+        IO__close(peer);
+        IO__close(listener);
         return 1;
     }
 
@@ -55,13 +55,13 @@ static int SocketTest__listen(int argc, char ** argv)
     if (bytes < 0)
     {
         IO__printf(&bstr("socket_test: write error %i\n"), (int)bytes);
-        close(peer);
-        close(listener);
+        IO__close(peer);
+        IO__close(listener);
         return 1;
     }
 
-    close(peer);
-    close(listener);
+    IO__close(peer);
+    IO__close(listener);
     return 0;
 }
 
@@ -90,7 +90,7 @@ static int SocketTest__connect(int argc, char ** argv)
     if (bytes < 0)
     {
         IO__printf(&bstr("socket_test: write error %i\n"), (int)bytes);
-        close(socket);
+        IO__close(socket);
         return 1;
     }
 
@@ -99,12 +99,12 @@ static int SocketTest__connect(int argc, char ** argv)
     if (bytes < 0)
     {
         IO__printf(&bstr("socket_test: read error %i\n"), (int)bytes);
-        close(socket);
+        IO__close(socket);
         return 1;
     }
 
     IO__printf(&bstr("socket_test: reply %B\n"), &received);
-    close(socket);
+    IO__close(socket);
     return 0;
 }
 

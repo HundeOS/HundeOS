@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "process.h"
 #include "types/bstring.h"
+#include "types/result.h"
 
 typedef enum IOOperation
 {
@@ -37,6 +38,8 @@ typedef enum IOStatus
     IO_UNKNOWN_PID = -12,
     IO_PERMISSION_DENIED = -13,
     IO_PATH_UNMANAGED = -14,
+    IO_INTERRUPTED = -15,
+    IO_ALREADY_EXISTS = -16,
     IO_PANIC = -255,
 } IOStatus;
 
@@ -61,9 +64,26 @@ static inline bool IOEndpoint__is_terminal(IOHandle handle)
 }
 typedef int64_t ByteCount;
 typedef int64_t DirectoryEntryCount;
+ResultDef(DirectoryEntryCount);
 typedef uint64_t Flags;
 typedef uint16_t FileMode;
 typedef uint64_t DirectoryEntryAttributes;
+
+typedef struct IOFileInfo
+{
+    FileMode mode;
+    UserID user_id;
+    GroupID group_id;
+    uint64_t size;
+} IOFileInfo;
+typedef IOFileInfo * IOFileInfoPtr;
+OptionalDef(IOFileInfo);
+ResultDef(IOFileInfo);
+
+static inline IOFileInfo IOFileInfo__new(FileMode mode, UserID user_id, GroupID group_id, uint64_t size)
+{
+    return (IOFileInfo){.mode = mode, .user_id = user_id, .group_id = group_id, .size = size};
+}
 
 typedef struct DirectoryEntry DirectoryEntry;
 typedef DirectoryEntry * DirectoryEntryPtr;

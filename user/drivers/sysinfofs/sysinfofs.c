@@ -146,15 +146,20 @@ static Result(FilesystemFileSize)
     );
 }
 
-static Result(OptionalDirectoryEntry) Sysinfofs__list(IOServiceContext context, ConstBStringPtr path, uint64_t index)
+static Result(DirectoryEntryCount) Sysinfofs__list(IOServiceContext context, ConstBStringPtr path,
+                                                   DirectoryEntryPtr entries, size_t capacity, uint64_t offset)
 {
     if (!BString__equals(path, &bstr("/")))
     {
-        return Error(OptionalDirectoryEntry, bstr("Unknown boot directory"), IO_INVALID_PATH);
+        return Error(DirectoryEntryCount, bstr("Unknown boot directory"), IO_INVALID_PATH);
     }
-    DirectoryEntry entry = DirectoryEntry__new(IO_DIRENT_ATTR_NONE, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT,
-                                               IO_MODE_TYPE_FILE | 0444, &bstr("sysinfo"));
-    return Success(OptionalDirectoryEntry, index == 0 ? Some(DirectoryEntry, entry) : None(DirectoryEntry));
+    if (capacity == 0 || offset > 0)
+    {
+        return Success(DirectoryEntryCount, 0);
+    }
+    entries[0] = DirectoryEntry__new(IO_DIRENT_ATTR_NONE, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT,
+                                     IO_MODE_TYPE_FILE | 0444, &bstr("sysinfo"));
+    return Success(DirectoryEntryCount, 1);
 }
 
 static IOStatus Sysinfofs__store(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data,
@@ -172,6 +177,6 @@ static IOStatus Sysinfofs__remove(IOServiceContext context, ConstBStringPtr path
 }
 FilesystemOperations Sysinfofs__operations(void)
 {
-    return FilesystemOperations__new(Sysinfofs__load, Sysinfofs__store, Sysinfofs__list, Sysinfofs__mkdir,
-                                     Sysinfofs__remove, 0);
+    return FilesystemOperations__new_snapshot(Sysinfofs__load, Sysinfofs__store, Sysinfofs__list, Sysinfofs__mkdir,
+                                              Sysinfofs__remove, FilesystemOperations__unsupported_link, 0);
 }

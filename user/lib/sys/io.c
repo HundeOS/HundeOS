@@ -69,23 +69,33 @@ static IOHandle IOStandardStream__open(IOStandardStreamPtr self)
     BString path = self->endpoint == IO_ENDPOINT_TTY_INPUT        ? bstr(":tty:")
                    : self->endpoint == IO_ENDPOINT_KEYBOARD_INPUT ? bstr(":keyboard:")
                                                                   : bstr(":console:");
-    self->handle = open(&path, self->endpoint == IO_ENDPOINT_CONSOLE_OUTPUT ? IO_OPEN_WRITE : IO_OPEN_READ);
+    self->handle = IO__open(&path, self->endpoint == IO_ENDPOINT_CONSOLE_OUTPUT ? IO_OPEN_WRITE : IO_OPEN_READ);
     return self->handle;
 }
 
-IOHandle open(ConstBStringPtr path, Flags flags)
+IOStatus IO__set_terminal_foreground(uint64_t pid)
+{
+    IOHandle input = IOStandardStream__open(&standard_input);
+    if (input < 0)
+    {
+        return (IOStatus)input;
+    }
+    return IOClient__set_foreground_process(input, pid);
+}
+
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     return IOClient__open(path, flags);
 }
 
-ByteCount read(IOHandle handle, char * buf, size_t size)
+ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
 {
     match_optional(
         IO__standard_stream(handle),
         some(stream)
         {
             IOHandle opened = IOStandardStream__open(stream);
-            return opened < 0 ? opened : read(opened, buf, size);
+            return opened < 0 ? opened : IO__read_bytes(opened, buf, size);
         },
         none_do_nothing()
     );
@@ -96,14 +106,14 @@ ByteCount read(IOHandle handle, char * buf, size_t size)
     return IO_UNKNOWN_HANDLE;
 }
 
-ByteCount write(IOHandle handle, char * buf, size_t size)
+ByteCount IO__write_bytes(IOHandle handle, const char * buf, size_t size)
 {
     match_optional(
         IO__standard_stream(handle),
         some(stream)
         {
             IOHandle opened = IOStandardStream__open(stream);
-            return opened < 0 ? opened : write(opened, buf, size);
+            return opened < 0 ? opened : IO__write_bytes(opened, buf, size);
         },
         none_do_nothing()
     );
@@ -112,11 +122,6 @@ ByteCount write(IOHandle handle, char * buf, size_t size)
         return IOClient__write(handle, (ConstChannelDataPtr)buf, size);
     }
     return IO_UNKNOWN_HANDLE;
-}
-
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
-{
-    return open(path, flags);
 }
 
 IOHandle accept(IOHandle handle)
@@ -135,18 +140,49 @@ IOHandle IO__accept(IOHandle handle)
 
 BString IO__path_from_arg(ConstBStringPtr arg)
 {
-    BString slash = bstr("/");
-    if (BString__is_empty(arg))
+    BString result = bstr("/");
+    StringPos cursor = 0;
+    while (cursor < BString__length(arg))
     {
-        return slash;
-    }
+        while (cursor < BString__length(arg) && BString__char_at_or(arg, cursor, '\0') == '/')
+        {
+            cursor++;
+        }
+        StringPos component_start = cursor;
+        while (cursor < BString__length(arg) && BString__char_at_or(arg, cursor, '\0') != '/')
+        {
+            cursor++;
+        }
+        StringPos component_length = cursor - component_start;
+        if (component_length == 0 || (component_length == 1 && BString__char_at_or(arg, component_start, '\0') == '.'))
+        {
+            continue;
+        }
+        if (component_length == 2 && BString__char_at_or(arg, component_start, '\0') == '.' &&
+            BString__char_at_or(arg, component_start + 1, '\0') == '.')
+        {
+            while (BString__length(&result) > 1 &&
+                   BString__char_at_or(&result, BString__length(&result) - 1, '\0') != '/')
+            {
+                BString__remove_at(&result, BString__length(&result) - 1);
+            }
+            if (BString__length(&result) > 1)
+            {
+                BString__remove_at(&result, BString__length(&result) - 1);
+            }
+            continue;
+        }
 
-    if (BString__starts_with(arg, &bstr("/")))
-    {
-        return *arg;
+        if (BString__length(&result) > 1)
+        {
+            BString__push_char(&result, '/');
+        }
+        for (StringPos index = 0; index < component_length; index++)
+        {
+            BString__push_char(&result, BString__char_at_or(arg, component_start + index, '\0'));
+        }
     }
-
-    return BString__append(&bstr("/"), arg);
+    return result;
 }
 
 BString IO__path_join(ConstBStringPtr base, ConstBStringPtr child)
@@ -171,7 +207,7 @@ static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr buffer,
     StringPos buffer_max = BSTRING_MAX_SIZE - 1;
     StringPos read_max = max_bytes < buffer_max ? max_bytes : buffer_max;
 
-    ByteCount bytes = read(handle, (char *)BString__cstr(buffer), (size_t)read_max);
+    ByteCount bytes = IO__read_bytes(handle, (char *)BString__cstr(buffer), (size_t)read_max);
     if (bytes <= 0)
     {
         return bytes;
@@ -241,10 +277,10 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 
 ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
 {
-    return write(handle, (char *)BString__cstr(text), (size_t)BString__length(text));
+    return IO__write_bytes(handle, BString__cstr(text), (size_t)BString__length(text));
 }
 
-IOStatus close(IOHandle handle)
+IOStatus IO__close(IOHandle handle)
 {
     match_optional(
         IO__standard_stream(handle),
@@ -254,7 +290,7 @@ IOStatus close(IOHandle handle)
             {
                 return IO_NOT_OPEN;
             }
-            IOStatus status = stream->handle >= 0 ? close(stream->handle) : IO_OK;
+            IOStatus status = stream->handle >= 0 ? IO__close(stream->handle) : IO_OK;
             if (status == IO_OK)
             {
                 stream->closed = true;
@@ -286,45 +322,56 @@ static bool IO__directory_contains(DirectoryEntryPtr entries, size_t count, Cons
 
 DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
 {
-    if (max_entries > 0)
+    if (max_entries == 0)
     {
-        IOReply reply = IOClient__path_request(IO_REQUEST_LIST_DIR, path, 0, 0);
-        if (reply.status == IO_OK)
-        {
-            size_t count = 0;
-            uint64_t offset = 0;
-            while (reply.value == 1 && count < max_entries)
-            {
-                if (reply.entry.name_len >= IO_DIRENT_NAME_MAX)
-                {
-                    return IO_UNKNOWN_BUFFER;
-                }
-                BString name = BString__from_chars(reply.entry.name, reply.entry.name_len);
-                // Namespace overlays arrive first and take precedence over disk entries.
-                if (!IO__directory_contains(entries, count, &name))
-                {
-                    entries[count++] = reply.entry;
-                }
-                if (count == max_entries)
-                {
-                    break;
-                }
-                reply = IOClient__path_request(IO_REQUEST_LIST_DIR, path, 0, ++offset);
-                if (reply.status != IO_OK)
-                {
-                    return reply.status;
-                }
-            }
-            return reply.value == 0 || reply.value == 1 ? (DirectoryEntryCount)count : IO_UNKNOWN_BUFFER;
-        }
-        return reply.status;
+        return 0;
     }
-    return 0;
+    size_t count = 0;
+    uint64_t offset = 0;
+    while (count < max_entries)
+    {
+        IOReply reply = IOClient__path_request(IO_REQUEST_LIST_DIR, path, 0, offset);
+        if (reply.status != IO_OK)
+        {
+            return reply.status;
+        }
+        if (reply.directory.count > IO_DIRECTORY_BATCH_CAPACITY)
+        {
+            return IO_UNKNOWN_BUFFER;
+        }
+        if (reply.directory.count == 0)
+        {
+            return (DirectoryEntryCount)count;
+        }
+        for (uint64_t index = 0; index < reply.directory.count && count < max_entries; index++)
+        {
+            DirectoryEntry entry = reply.directory.entries[index];
+            if (entry.name_len >= IO_DIRENT_NAME_MAX)
+            {
+                return IO_UNKNOWN_BUFFER;
+            }
+            BString name = BString__from_chars(entry.name, entry.name_len);
+            // Namespace overlays arrive first and take precedence over disk entries.
+            if (!IO__directory_contains(entries, count, &name))
+            {
+                entries[count++] = entry;
+            }
+        }
+        offset += reply.directory.count;
+    }
+    return (DirectoryEntryCount)count;
 }
 
 DirectoryEntryCount IO__list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
 {
     return list_dir(path, entries, max_entries);
+}
+
+Result(IOFileInfo) IO__file_info(ConstBStringPtr path)
+{
+    IOReply reply = IOClient__path_request(IO_REQUEST_FILE_INFO, path, 0, 0);
+    return reply.status == IO_OK ? Success(IOFileInfo, reply.file_info)
+                                 : Error(IOFileInfo, bstr("File information unavailable"), reply.status);
 }
 
 const char * io_status_string(IOStatus status)
@@ -361,6 +408,10 @@ const char * io_status_string(IOStatus status)
         return "IO_PERMISSION_DENIED";
     case IO_PATH_UNMANAGED:
         return "IO_PATH_UNMANAGED";
+    case IO_INTERRUPTED:
+        return "IO_INTERRUPTED";
+    case IO_ALREADY_EXISTS:
+        return "IO_ALREADY_EXISTS";
     case IO_PANIC:
         return "IO_PANIC";
     }

@@ -822,6 +822,8 @@ void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
     ProcessPtr parent = dummy_process(1, cpu_id, PROC_STATE_READY);
     ProcessPtr child = dummy_process(2, cpu_id, PROC_STATE_READY);
     ProcessID child_pid = child->pid;
+    BString fault_prefix_format = bstr("process fault: pid=%i name=%s");
+    BString fault_prefix = BString__sprintf(&fault_prefix_format, child_pid, cstr(child->name));
     child->parent = Some(ProcessPtr, parent);
 
     KernelContext kernel_context = test_scheduler_kernel_context();
@@ -859,7 +861,8 @@ void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
 
     Anything return_code = unwrap_result(deferred_syscall_result(), (Anything){});
     TEST_ASSERT_EQUAL(PROCESS_ABORT_EXIT_BASE - PROCESS_ABORT_DATA_ABORT, return_code);
-    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "process fault: data abort"));
+    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), BString__cstr(&fault_prefix)));
+    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "reason=data abort"));
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "pc=0x400100"));
 }
 

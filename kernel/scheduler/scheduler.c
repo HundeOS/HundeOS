@@ -33,7 +33,8 @@ static BString process_permission_denied = bstr("Process permission denied\n");
 BString reason_mismatch_format = bstr("Process was parked for reason %i, not %i\n");
 BString process_wasnt_parked = bstr("Process wasn't parked\n");
 static BString abort_format =
-    bstr("process fault: %s exception=%s fsc=%i:%s access=%s pc=0x%x far=0x%x esr=0x%x ec=0x%x cpu=%i\n");
+    bstr("process fault: pid=%i name=%s reason=%s exception=%s fsc=%i:%s access=%s pc=0x%x far=0x%x "
+         "esr=0x%x ec=0x%x cpu=%i\n");
 static const BString data_abort_reason = bstr("data abort");
 static const BString instruction_abort_reason = bstr("instruction abort");
 static const BString undefined_instruction_reason = bstr("undefined instruction");
@@ -1035,6 +1036,13 @@ static Result(ProcessPtr)
     );
 }
 
+static void CPUScheduler__continue_current(CPUSchedulerPtr self, ProcessPtr process)
+{
+    self->switching_out = None(ProcessPtr);
+    process->migration_safe = false;
+    process->state = PROC_STATE_RUNNING;
+}
+
 Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const OptionalPtr(ProcessContextPtr) context)
 {
     Optional(ProcessPtr) current = CPUScheduler__current_process(self);
@@ -1067,6 +1075,7 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const Opti
                 SchedulerPtr scheduler = proc->kernel->scheduler;
                 if (!Scheduler__ready_exec_continuation_waiting(scheduler, proc))
                 {
+                    CPUScheduler__continue_current(self, proc);
                     return None(ContextSwitch);
                 }
                 Scheduler__forget_preferred(scheduler, proc);
@@ -1095,7 +1104,7 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const Opti
                         {
                             return Some(ContextSwitch, ContextSwitch__new(proc, &current));
                         }
-                        proc->state = PROC_STATE_RUNNING;
+                        CPUScheduler__continue_current(self, proc);
                         return None(ContextSwitch);
                     }
                 },
@@ -1123,7 +1132,7 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const Opti
                         idle->state = PROC_STATE_SWITCHING_CONTEXT;
                         return Some(ContextSwitch, ContextSwitch__new(idle, &current));
                     }
-                    proc->state = PROC_STATE_RUNNING;
+                    CPUScheduler__continue_current(self, proc);
                     __d_printf(SCHEDULER, "no new proc remain with current - %p %s\n", proc, cstr(proc->name));
                     return None(ContextSwitch);
                 },
@@ -1501,9 +1510,9 @@ Result(ProcessID) Scheduler__abort_process(SchedulerPtr self, ProcessPtr proc, P
     proc->abort = Some(ProcessAbort, abort);
     ConstBStringPtr reason = ProcessAbortReason__to_string(abort.reason);
     BString message =
-        BString__sprintf(&abort_format, cstr_p(reason), abort.exception_description, (int)abort.fault_status_code,
-                         abort.fault_status_description, abort.access_description, (unsigned int)abort.pc,
-                         (unsigned int)abort.fault_address, (unsigned int)abort.syndrome,
+        BString__sprintf(&abort_format, proc->pid, cstr(proc->name), cstr_p(reason), abort.exception_description,
+                         (int)abort.fault_status_code, abort.fault_status_description, abort.access_description,
+                         (unsigned int)abort.pc, (unsigned int)abort.fault_address, (unsigned int)abort.syndrome,
                          (unsigned int)abort.exception_code, (int)abort.cpu);
     k_printf("%s", BString__cstr(&message));
     ReturnCode return_code = PROCESS_ABORT_EXIT_BASE - abort.reason;
@@ -1616,6 +1625,7 @@ Result(ProcessID) Scheduler__queue_signal(SchedulerPtr self, ProcessID pid, Proc
                     }
                                  // Only the owning CPU may destroy a target that a context switch can still reference.
                     Process__queue_signal(process, signal);
+                    Process__wake_shared_wait(process);
                     cs_return Success(ProcessID, pid);
                 },
                 none_do_nothing()
@@ -2632,6 +2642,7 @@ Result(ServiceCode)
 
 static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process)
 {
+    Process__wake_shared_wait(process);
     if (Scheduler__is_parked_for(process, PARK_WAIT_CHILD_EVENT))
     {
         for_each_hashtable(

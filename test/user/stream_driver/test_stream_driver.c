@@ -156,6 +156,17 @@ void test_empty_backend_read_remains_pending_until_data_is_ready(void)
     TEST_ASSERT_EQUAL_UINT64(0, totals.backend_empty);
 }
 
+void test_read_stream_forwards_foreground_process_control(void)
+{
+    driver = IOStreamDriver__new(IO_OPEN_READ, &directory, transfer);
+    IOReply opened = execute(31, 21, open_request(IO_OPEN_READ));
+    IORequest request = IORequest__new(IO_REQUEST_SET_FOREGROUND_PROCESS, opened.value);
+    request.foreground_pid = 42;
+
+    TEST_ASSERT_EQUAL(IO_OK, execute(31, 21, request).status);
+    TEST_ASSERT_EQUAL_UINT(1, transfers);
+}
+
 void test_blocked_backend_write_completes_for_mediator_retry(void)
 {
     IOReply opened = execute(31, 21, open_request(IO_OPEN_WRITE));

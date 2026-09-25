@@ -73,6 +73,7 @@ static Optional(BString) Embedfs__relative_path(IORequestPtr request)
 static IOReply Embedfs__list(EmbedfsPtr self, ConstBStringPtr path, uint64_t requested)
 {
     self->children = BStringArray__new();
+    IOReply reply = IOReply__new(IO_OK, 0);
     BString prefix = BString__is_empty(path) ? empty_bstr() : BString__append(path, &bstr("/"));
     for (uint64_t index = 0; index < EmbeddedFs__entry_count(&self->archive); index++)
     {
@@ -103,16 +104,58 @@ static IOReply Embedfs__list(EmbedfsPtr self, ConstBStringPtr path, uint64_t req
                         return IOReply__new(IO_UNKNOWN_BUFFER, 0);
                     }
                 );
-                if ((uint64_t)BStringArray__len(&self->children) - 1 == requested)
+                uint64_t child_index = BStringArray__len(&self->children) - 1;
+                if (child_index >= requested)
                 {
                     BString full = BString__append(&prefix, &child);
                     bool restricted = Embedfs__restricted(&full);
                     bool directory = !BString__is_empty(&split.rest);
-                    IOReply reply = IOReply__new(IO_OK, 1);
-                    reply.entry = DirectoryEntry__new(
+                    reply.directory.entries[reply.directory.count++] = DirectoryEntry__new(
                         0, restricted ? PROCESS_USER_HUND : PROCESS_USER_ROOT,
                         restricted ? PROCESS_GROUP_HUND : PROCESS_GROUP_ROOT,
                         (directory ? IO_MODE_TYPE_DIR : IO_MODE_TYPE_FILE) | (restricted ? 0550 : 0555), &child);
+                    if (reply.directory.count == IO_DIRECTORY_BATCH_CAPACITY)
+                    {
+                        return reply;
+                    }
+                }
+            },
+            none()
+            {
+                return IOReply__new(IO_INVALID_PATH, 0);
+            }
+        );
+    }
+    return BString__is_empty(path) || BStringArray__len(&self->children) > 0 ? reply : IOReply__new(IO_INVALID_PATH, 0);
+}
+
+static IOReply Embedfs__file_info(EmbedfsPtr self, ConstBStringPtr path)
+{
+    IOReply reply = IOReply__new(IO_OK, 0);
+    bool restricted = Embedfs__restricted(path);
+    match_optional(
+        EmbeddedFs__find(&self->archive, path),
+        some(file)
+        {
+            reply.file_info = IOFileInfo__new(
+                IO_MODE_TYPE_FILE | (restricted ? 0550 : 0555), restricted ? PROCESS_USER_HUND : PROCESS_USER_ROOT,
+                restricted ? PROCESS_GROUP_HUND : PROCESS_GROUP_ROOT, file.end - file.start);
+            return reply;
+        },
+        none_do_nothing()
+    );
+    BString prefix = BString__is_empty(path) ? empty_bstr() : BString__append(path, &bstr("/"));
+    for (uint64_t index = 0; index < EmbeddedFs__entry_count(&self->archive); index++)
+    {
+        match_optional(
+            EmbeddedFs__at(&self->archive, index),
+            some(file)
+            {
+                if (BString__is_empty(path) || BString__starts_with(&file.name, &prefix))
+                {
+                    reply.file_info = IOFileInfo__new(IO_MODE_TYPE_DIR | (restricted ? 0550 : 0555),
+                                                      restricted ? PROCESS_USER_HUND : PROCESS_USER_ROOT,
+                                                      restricted ? PROCESS_GROUP_HUND : PROCESS_GROUP_ROOT, 0);
                     return reply;
                 }
             },
@@ -122,7 +165,7 @@ static IOReply Embedfs__list(EmbedfsPtr self, ConstBStringPtr path, uint64_t req
             }
         );
     }
-    return IOReply__new(BString__is_empty(path) || BStringArray__len(&self->children) > 0 ? IO_OK : IO_INVALID_PATH, 0);
+    return IOReply__new(IO_INVALID_PATH, 0);
 }
 
 static IOReply Embedfs__open(EmbedfsPtr self, IORequestPtr request, ConstBStringPtr path)
@@ -193,7 +236,8 @@ IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request)
             );
         }
     }
-    if (request->operation == IO_REQUEST_OPEN || request->operation == IO_REQUEST_LIST_DIR)
+    if (request->operation == IO_REQUEST_OPEN || request->operation == IO_REQUEST_LIST_DIR ||
+        request->operation == IO_REQUEST_FILE_INFO)
     {
         BString path;
         match_optional(
@@ -222,8 +266,12 @@ IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request)
                 return IOReply__new(IO_UNKNOWN_PID, 0);
             }
         );
-        return request->operation == IO_REQUEST_OPEN ? Embedfs__open(self, request, &path)
-                                                     : Embedfs__list(self, &path, request->offset);
+        if (request->operation == IO_REQUEST_OPEN)
+        {
+            return Embedfs__open(self, request, &path);
+        }
+        return request->operation == IO_REQUEST_LIST_DIR ? Embedfs__list(self, &path, request->offset)
+                                                         : Embedfs__file_info(self, &path);
     }
     if (request->operation != IO_REQUEST_READ && request->operation != IO_REQUEST_CLOSE)
     {

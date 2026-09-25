@@ -78,9 +78,9 @@ void test_procfs_lists_processes_and_read_only_files_with_real_ownership(void)
 {
     IORequest request = request_for(IO_REQUEST_LIST_DIR, &bstr("/"));
     IOReply reply = FilesystemDriver__execute(&driver, &request);
-    TEST_ASSERT_EQUAL_STRING("42", reply.entry.name);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0555, reply.entry.mode);
-    TEST_ASSERT_EQUAL(2, reply.entry.user_id);
+    TEST_ASSERT_EQUAL_STRING("42", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0555, reply.directory.entries[0].mode);
+    TEST_ASSERT_EQUAL(2, reply.directory.entries[0].user_id);
     request = request_for(IO_REQUEST_LIST_DIR, &bstr("/42"));
     const char * names[] = {"status", "cpu", "memory", "queue-wait", "ipc"};
     for (uint64_t index = 0; index < 5; index++)
@@ -88,11 +88,11 @@ void test_procfs_lists_processes_and_read_only_files_with_real_ownership(void)
         request.offset = index;
         reply = FilesystemDriver__execute(&driver, &request);
         TEST_ASSERT_EQUAL(IO_OK, reply.status);
-        TEST_ASSERT_EQUAL_STRING(names[index], reply.entry.name);
-        TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.entry.mode);
+        TEST_ASSERT_EQUAL_STRING(names[index], reply.directory.entries[0].name);
+        TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.directory.entries[0].mode);
     }
     request.offset = 5;
-    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
+    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).directory.count);
 }
 
 void test_procfs_reports_ipc_counters_and_unavailable_mapping(void)

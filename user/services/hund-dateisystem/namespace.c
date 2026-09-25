@@ -237,6 +237,51 @@ static MountChildren FilesystemNamespace__children(FilesystemNamespacePtr self, 
     return children;
 }
 
+static BString FilesystemNamespace__parent(ConstBStringPtr path)
+{
+    StringPos end = BString__length(path);
+    while (end > 1 && BString__char_at_or(path, end - 1, 0) != '/')
+    {
+        end--;
+    }
+    return BString__slice(path, 0, end > 1 ? end - 1 : 1);
+}
+
+static BString FilesystemNamespace__name(ConstBStringPtr path)
+{
+    StringPos start = BString__length(path);
+    while (start > 0 && BString__char_at_or(path, start - 1, 0) != '/')
+    {
+        start--;
+    }
+    return BString__slice(path, start, BString__length(path));
+}
+
+static Optional(IOFileInfo) FilesystemNamespace__synthetic_info(FilesystemNamespacePtr self, ConstBStringPtr path)
+{
+    if (BString__equals(path, &bstr("/")))
+    {
+        return Some(IOFileInfo, IOFileInfo__new(IO_MODE_TYPE_DIR | 0755, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, 0));
+    }
+    BString parent = FilesystemNamespace__parent(path);
+    BString name = FilesystemNamespace__name(path);
+    MountChildren children = FilesystemNamespace__children(self, &parent);
+    match_optional(
+        MountChildren__find_item(&children, name),
+        some(found)
+        {
+            FileMode mode = BString__equals(&parent, &bstr("/boot")) && BString__equals(&name, &bstr("sysinfo"))
+                                ? IO_MODE_TYPE_FILE | 0444
+                                : IO_MODE_TYPE_DIR | 0755;
+            return Some(IOFileInfo, IOFileInfo__new(mode, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, 0));
+        },
+        none()
+        {
+            return None(IOFileInfo);
+        }
+    );
+}
+
 static bool FilesystemNamespace__release(FilesystemNamespacePtr self, QueueConnectionID session, uint64_t pid)
 {
     bool complete = true;
@@ -305,8 +350,8 @@ Optional(IOReply) FilesystemNamespace__execute(IOServiceContext context, QueueCo
                    : Some(IOReply, IOReply__new(IO_WAIT_FOR_DATA, 0));
     }
     if (request->operation == IO_REQUEST_OPEN || request->operation == IO_REQUEST_LIST_DIR ||
-        request->operation == IO_REQUEST_MKDIR || request->operation == IO_REQUEST_REMOVE ||
-        request->operation == IO_REQUEST_LINK)
+        request->operation == IO_REQUEST_FILE_INFO || request->operation == IO_REQUEST_MKDIR ||
+        request->operation == IO_REQUEST_REMOVE || request->operation == IO_REQUEST_LINK)
     {
         BString path = IORequest__path(request);
         if (!FilesystemNamespace__valid_path(&path))
@@ -319,25 +364,49 @@ Optional(IOReply) FilesystemNamespace__execute(IOServiceContext context, QueueCo
             return Some(IOReply, IOReply__new(IO_INVALID_PATH, 0));
         }
         Optional(FilesystemMountPtr) route = FilesystemNamespace__route(self, &path);
+        if (request->operation == IO_REQUEST_FILE_INFO)
+        {
+            match_optional(
+                FilesystemNamespace__synthetic_info(self, &path),
+                some(info)
+                {
+                    IOReply reply = IOReply__new(IO_OK, 0);
+                    reply.file_info = info;
+                    return Some(IOReply, reply);
+                },
+                none_do_nothing()
+            );
+        }
         uint64_t child_count = 0;
         if (request->operation == IO_REQUEST_LIST_DIR)
         {
             MountChildren children = FilesystemNamespace__children(self, &path);
             child_count = MountChildren__len(&children);
-            match_optional(
-                MountChildren__at(&children, request->offset),
-                some(name)
-                {
-                    IOReply reply = IOReply__new(IO_OK, 1);
-                    FileMode mode = BString__equals(&path, &bstr("/boot")) && BString__equals(&name, &bstr("sysinfo"))
-                                        ? IO_MODE_TYPE_FILE | 0444
-                                        : IO_MODE_TYPE_DIR | 0755;
-                    reply.entry =
-                        DirectoryEntry__new(IO_DIRENT_ATTR_NONE, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, mode, &name);
-                    return Some(IOReply, reply);
-                },
-                none_do_nothing()
-            );
+            IOReply reply = IOReply__new(IO_OK, 0);
+            while (reply.directory.count < IO_DIRECTORY_BATCH_CAPACITY &&
+                   request->offset + reply.directory.count < child_count)
+            {
+                match_optional(
+                    MountChildren__at(&children, request->offset + reply.directory.count),
+                    some(name)
+                    {
+                        FileMode mode =
+                            BString__equals(&path, &bstr("/boot")) && BString__equals(&name, &bstr("sysinfo"))
+                                ? IO_MODE_TYPE_FILE | 0444
+                                : IO_MODE_TYPE_DIR | 0755;
+                        reply.directory.entries[reply.directory.count++] = DirectoryEntry__new(
+                            IO_DIRENT_ATTR_NONE, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, mode, &name);
+                    },
+                    none()
+                    {
+                        return Some(IOReply, IOReply__new(IO_PANIC, 0));
+                    }
+                );
+            }
+            if (reply.directory.count > 0)
+            {
+                return Some(IOReply, reply);
+            }
         }
         match_optional(
             route,

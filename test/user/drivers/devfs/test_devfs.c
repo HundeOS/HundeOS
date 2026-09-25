@@ -55,11 +55,11 @@ void test_devfs_lists_devices_and_aliases_read_only(void)
         request.offset = index;
         IOReply reply = FilesystemDriver__execute(&driver, &request);
         TEST_ASSERT_EQUAL(IO_OK, reply.status);
-        TEST_ASSERT_EQUAL_STRING(expected[index], reply.entry.name);
-        TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.entry.mode);
+        TEST_ASSERT_EQUAL_STRING(expected[index], reply.directory.entries[0].name);
+        TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.directory.entries[0].mode);
     }
     request.offset = 3;
-    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
+    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).directory.count);
 }
 
 void test_devfs_reads_alias_metadata_with_independent_offsets_and_owner_checks(void)

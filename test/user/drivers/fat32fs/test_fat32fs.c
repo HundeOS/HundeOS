@@ -89,10 +89,15 @@ static void build_test_disk(void)
     write_fat_entry(2, FAT32FS_END_OF_CHAIN);
     write_fat_entry(3, FAT32FS_END_OF_CHAIN);
     write_fat_entry(4, FAT32FS_END_OF_CHAIN);
+    write_fat_entry(5, 6);
+    write_fat_entry(6, FAT32FS_END_OF_CHAIN);
 
     memcpy(disk[35], "hello fat32\n", 12);
+    memset(disk[37], 'a', FAT32FS_BYTES_PER_SECTOR);
+    memset(disk[38], 'b', 188);
     write_dirent(disk[34], 0, "HELLO.TXT", FAT32FS_ATTR_ARCHIVE, 3, 12);
     write_dirent(disk[34], 32, "DOCS", FAT32FS_ATTR_DIRECTORY, 4, 0);
+    write_dirent(disk[34], 64, "BIG.TXT", FAT32FS_ATTR_ARCHIVE, 5, 700);
 }
 
 void setUp(void)
@@ -190,13 +195,52 @@ void test_fat32fs_lists_directory_with_channel_pagination(void)
     IORequest request = request_for(IO_REQUEST_LIST_DIR, 0, &bstr("/"));
     IOReply reply = FilesystemDriver__execute(&driver, &request);
     TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL(1, reply.value);
-    TEST_ASSERT_EQUAL_STRING("HELLO.TXT", reply.entry.name);
-    request.offset = 1;
+    TEST_ASSERT_EQUAL(3, reply.directory.count);
+    TEST_ASSERT_EQUAL_STRING("HELLO.TXT", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL_STRING("DOCS", reply.directory.entries[1].name);
+    TEST_ASSERT_EQUAL_STRING("BIG.TXT", reply.directory.entries[2].name);
+    request.offset = 3;
+    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).directory.count);
+}
+
+void test_fat32fs_reports_file_and_directory_information_by_path(void)
+{
+    Fat32fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_FILE_INFO, 0, &bstr("/HELLO.TXT"));
+    IOReply reply = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0755, reply.file_info.mode);
+    TEST_ASSERT_EQUAL(12, reply.file_info.size);
+
+    request = request_for(IO_REQUEST_FILE_INFO, 0, &bstr("/DOCS"));
     reply = FilesystemDriver__execute(&driver, &request);
-    TEST_ASSERT_EQUAL_STRING("DOCS", reply.entry.name);
-    request.offset = 2;
-    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, reply.file_info.mode);
+
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/DOCS"));
+    request.flags = IO_OPEN_READ;
+    TEST_ASSERT_EQUAL(IO_INVALID_PATH, FilesystemDriver__execute(&driver, &request).status);
+}
+
+void test_fat32fs_streams_an_unaligned_read_across_cluster_boundaries(void)
+{
+    Fat32fsVolume volume = {.device_path = expected_device_path};
+    match_result(Fat32fsVolume__mount(&volume),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    uint8_t data[12];
+    match_result(
+        Fat32fs__read(&volume, &bstr("/BIG.TXT"), FAT32FS_BYTES_PER_SECTOR - 4U, data, sizeof(data)),
+        success(size)
+        {
+            TEST_ASSERT_EQUAL(sizeof(data), size);
+            TEST_ASSERT_EACH_EQUAL_UINT8('a', data, 4U);
+            TEST_ASSERT_EACH_EQUAL_UINT8('b', data + 4U, 8U);
+        },
+        error_test_fail()
+    );
 }
 
 void test_fat32fs_owns_multiple_handles_and_offsets(void)
@@ -270,14 +314,14 @@ void test_fat32fs_creates_and_removes_directory(void)
     IORequest request = request_for(IO_REQUEST_MKDIR, 0, &bstr("/NEWDIR"));
     TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
     request = request_for(IO_REQUEST_LIST_DIR, 0, &bstr("/"));
-    request.offset = 2;
+    request.offset = 3;
     IOReply reply = FilesystemDriver__execute(&driver, &request);
-    TEST_ASSERT_EQUAL_STRING("NEWDIR", reply.entry.name);
+    TEST_ASSERT_EQUAL_STRING("NEWDIR", reply.directory.entries[0].name);
     request = request_for(IO_REQUEST_REMOVE, 0, &bstr("/NEWDIR"));
     TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
     request = request_for(IO_REQUEST_LIST_DIR, 0, &bstr("/"));
-    request.offset = 2;
-    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
+    request.offset = 3;
+    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).directory.count);
 }
 
 void test_fat32fs_preserves_two_full_write_chunks_and_rejects_oversized_requests(void)

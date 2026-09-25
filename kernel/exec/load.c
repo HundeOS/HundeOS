@@ -74,7 +74,7 @@ Result(ProcessPtr)
 
 static Result(ChannelCode) ExecLoad__append(ExecLoadPtr self, SchedulerPtr scheduler, IOReplyPtr reply)
 {
-    if (reply->value < 0 || reply->value > BUFFER_SIZE || self->size > EXEC_IMAGE_LIMIT - reply->value)
+    if (reply->value > BUFFER_SIZE || self->size > EXEC_IMAGE_LIMIT - reply->value)
     {
         return Error(ChannelCode, load_failed, SPAWN_FAILED);
     }
@@ -198,7 +198,7 @@ static Result(ChannelCode) ExecLoad__step(ExecLoadPtr self, SchedulerPtr schedul
         {
             return Error(ChannelCode, load_failed, SPAWN_FAILED);
         }
-        self->handle = reply.value;
+        self->handle = (IOHandle)reply.value;
         if (!BufferDescriptor__valid(&reply.buffers.read, BUFFER_READ))
         {
             return Error(ChannelCode, load_failed, SPAWN_FAILED);

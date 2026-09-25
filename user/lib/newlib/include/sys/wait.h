@@ -1,0 +1,4 @@
+#ifndef __USER_LIB_NEWLIB_SYS_WAIT_H
+#define __USER_LIB_NEWLIB_SYS_WAIT_H
+
+#endif

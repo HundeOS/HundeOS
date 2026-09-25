@@ -136,7 +136,7 @@ size_t mapped_size(ServiceMappedMemoryPtr memory)
     return memory->size;
 }
 
-IOHandle open(ConstBStringPtr path, Flags flags)
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), *path);
     TEST_ASSERT_EQUAL_INT(IO_OPEN_READ, flags);
@@ -144,7 +144,7 @@ IOHandle open(ConstBStringPtr path, Flags flags)
     return 1;
 }
 
-ByteCount read(IOHandle handle, char * buf, size_t size)
+ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
 {
     TEST_ASSERT_EQUAL_INT(1, handle);
     uint64_t index = 0;
@@ -156,7 +156,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size)
     return (ByteCount)index;
 }
 
-IOStatus close(IOHandle handle)
+IOStatus IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL_INT(1, handle);
     fake_sysinfo_closed = true;

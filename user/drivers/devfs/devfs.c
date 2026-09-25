@@ -38,13 +38,19 @@ static Result(FilesystemFileSize)
     );
 }
 
-static Result(OptionalDirectoryEntry) Devfs__list(IOServiceContext context, ConstBStringPtr path, uint64_t skip)
+static Result(DirectoryEntryCount) Devfs__list(IOServiceContext context, ConstBStringPtr path,
+                                               DirectoryEntryPtr entries, size_t capacity, uint64_t skip)
 {
     if (!BString__is_empty(path) && !BString__equals(path, &bstr("/")))
     {
-        return Error(OptionalDirectoryEntry, bstr("Invalid device directory"), IO_INVALID_PATH);
+        return Error(DirectoryEntryCount, bstr("Invalid device directory"), IO_INVALID_PATH);
     }
     ConstDeviceRegistryPtr registry = context;
+    DirectoryEntryCount count = 0;
+    if (capacity == 0)
+    {
+        return Success(DirectoryEntryCount, count);
+    }
     for (uint64_t index = 0; index < DEVICE_REGISTRY_CAPACITY; index++)
     {
         match_result(
@@ -62,23 +68,30 @@ static Result(OptionalDirectoryEntry) Devfs__list(IOServiceContext context, Cons
                     {
                         continue;
                     }
-                    if (skip-- == 0)
+                    if (skip > 0)
+                    {
+                        skip--;
+                    }
+                    else
                     {
                         BString name = BString__slice(device_path, 5, BString__length(device_path));
-                        DirectoryEntry entry = DirectoryEntry__new(0, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT,
-                                                                   IO_MODE_TYPE_FILE | 0444, &name);
-                        return Success(OptionalDirectoryEntry, Some(DirectoryEntry, entry));
+                        entries[count++] = DirectoryEntry__new(0, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT,
+                                                               IO_MODE_TYPE_FILE | 0444, &name);
+                        if ((size_t)count == capacity)
+                        {
+                            return Success(DirectoryEntryCount, count);
+                        }
                     }
                 }
             },
             error(code, message)
             {
-                return Error(OptionalDirectoryEntry, message,
+                return Error(DirectoryEntryCount, message,
                              code == DEVICE_REGISTRY_BUSY ? IO_WAIT_FOR_DATA : IO_NO_DEVICE_FOUND);
             }
         );
     }
-    return Success(OptionalDirectoryEntry, None(DirectoryEntry));
+    return Success(DirectoryEntryCount, count);
 }
 
 static IOStatus Devfs__store(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data,
@@ -96,5 +109,6 @@ static IOStatus Devfs__remove(IOServiceContext context, ConstBStringPtr path, Fl
 }
 FilesystemOperations Devfs__operations(void)
 {
-    return FilesystemOperations__new(Devfs__load, Devfs__store, Devfs__list, Devfs__mkdir, Devfs__remove, 0);
+    return FilesystemOperations__new_snapshot(Devfs__load, Devfs__store, Devfs__list, Devfs__mkdir, Devfs__remove,
+                                              FilesystemOperations__unsupported_link, 0);
 }

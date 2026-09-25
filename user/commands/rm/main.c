@@ -1,30 +1,36 @@
-#include "../../user.h"
-#include "sys/io.h"
+#include <stdio.h>
+#include <string.h>
+
+#include "platform.h"
+
+static bool RmPlatform__secure_overwrite_requested(int argc, char ** argv)
+{
+    for (int index = 1; index < argc; index++)
+    {
+        if (strcmp(argv[index], "--") == 0 || argv[index][0] != '-' || strlen(argv[index]) == 1)
+        {
+            break;
+        }
+        if (strcspn(argv[index] + 1, "P") < strlen(argv[index] + 1))
+        {
+            return true;
+        }
+    }
+    return false;
+}
 
 int main(int argc, char ** argv)
 {
-    if (argc < 2)
+    if (RmPlatform__secure_overwrite_requested(argc, argv))
     {
-        IO__print(&bstr("rm: usage rm [-r] <path>\n"));
+        fprintf(stderr, "rm: -P is not supported\n");
         return 1;
     }
+    return OpenBSDRm__main(argc, argv);
+}
 
-    Flags flags = 0;
-    BString path_arg = BString__new(argv[1]);
-    if (argc > 2 && argv[1][0] == '-' && argv[1][1] == 'r' && argv[1][2] == '\0')
-    {
-        flags = IO_REMOVE_RECURSIVE;
-        path_arg = BString__new(argv[2]);
-    }
-
-    BString path = IO__path_from_arg(&path_arg);
-
-    IOStatus status = IO__remove_file_with_flags(&path, flags);
-    if (status < 0)
-    {
-        IO__printf(&bstr("rm: error %i\n"), (int)status);
-        return 1;
-    }
-
-    return 0;
+void RmPlatform__unsupported_random(void * buffer, size_t size)
+{
+    fprintf(stderr, "rm: secure overwrite is not supported\n");
+    _exit(1);
 }

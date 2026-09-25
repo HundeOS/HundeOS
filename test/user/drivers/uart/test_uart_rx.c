@@ -23,6 +23,8 @@ static bool fake_became_service;
 static uint64_t fake_service_wait_count;
 static bool fake_sysinfo_opened;
 static bool fake_sysinfo_closed;
+static uint64_t signalled_pid;
+static ProcessSignal delivered_signal;
 
 #define SYSINFO_PADDING_LINE "memory.free_region.00.physical_start=0x0\n"
 #define SYSINFO_PADDING_4 SYSINFO_PADDING_LINE SYSINFO_PADDING_LINE SYSINFO_PADDING_LINE SYSINFO_PADDING_LINE
@@ -118,10 +120,42 @@ void setUp(void)
     fake_service_wait_count = 0;
     fake_sysinfo_opened = false;
     fake_sysinfo_closed = false;
+    signalled_pid = 0;
+    delivered_signal = 0;
     for (uint64_t i = 0; i < sizeof(fake_io_buffer); i++)
     {
         fake_io_buffer[i] = 0;
     }
+}
+
+ProcessSignalResult kill_process(uint64_t pid, ProcessSignal signal)
+{
+    signalled_pid = pid;
+    delivered_signal = signal;
+    return PROCESS_SIGNAL_OK;
+}
+
+void test_uart_rx_ctrl_c_signals_foreground_process_and_interrupts_pending_read(void)
+{
+    fake_uart_values[0] = 'a';
+    fake_uart_values[1] = 0x03;
+    fake_uart_values[2] = 'b';
+    UartDevice uart = UartDevice__new(UART_PHYS_BASE, UART_KIND_PL011);
+    UartReceiver receiver = UartReceiver__new(&uart);
+    IORequest foreground = IORequest__new(IO_REQUEST_SET_FOREGROUND_PROCESS, 1);
+    foreground.foreground_pid = 42;
+
+    TEST_ASSERT_EQUAL(IO_OK, UartReceiver__transfer(&receiver, &foreground).status);
+    TEST_ASSERT_TRUE(UartReceiver__drain(&receiver));
+
+    TEST_ASSERT_EQUAL_UINT64(42, signalled_pid);
+    TEST_ASSERT_EQUAL_INT(PROCESS_SIGNAL_INTERRUPT, delivered_signal);
+    TEST_ASSERT_EQUAL_UINT64(2, UartInput__len(&receiver.input));
+    IORequest read_request = IORequest__new(IO_REQUEST_READ, 1);
+    read_request.client_pid = 42;
+    read_request.count = 1;
+    TEST_ASSERT_EQUAL(IO_INTERRUPTED, UartReceiver__transfer(&receiver, &read_request).status);
+    TEST_ASSERT_EQUAL(IO_OK, UartReceiver__transfer(&receiver, &read_request).status);
 }
 
 void tearDown(void)
@@ -142,7 +176,7 @@ void test_uart_rx_retains_fifo_bytes_when_userspace_buffer_is_full(void)
     TEST_ASSERT_FALSE(UartReceiver__drain(&receiver));
     TEST_ASSERT_EQUAL_UINT64(0, fake_uart_read_count);
     IORequest request = {.operation = IO_REQUEST_READ, .count = 2};
-    IOReply reply = UartReceiver__read(&receiver, &request);
+    IOReply reply = UartReceiver__transfer(&receiver, &request);
     TEST_ASSERT_EQUAL_INT64(2, reply.value);
     TEST_ASSERT_TRUE(UartReceiver__drain(&receiver));
     TEST_ASSERT_EQUAL_UINT64(2, fake_uart_read_count);
@@ -154,10 +188,10 @@ void test_uart_rx_empty_read_waits_but_zero_length_read_completes(void)
     UartDevice uart = UartDevice__new(UART_PHYS_BASE, UART_KIND_PL011);
     UartReceiver receiver = UartReceiver__new(&uart);
     IORequest request = {.operation = IO_REQUEST_READ, .count = 1};
-    IOReply reply = UartReceiver__read(&receiver, &request);
+    IOReply reply = UartReceiver__transfer(&receiver, &request);
     TEST_ASSERT_EQUAL_INT(IO_WAIT_FOR_DATA, reply.status);
     request.count = 0;
-    reply = UartReceiver__read(&receiver, &request);
+    reply = UartReceiver__transfer(&receiver, &request);
     TEST_ASSERT_EQUAL_INT(IO_OK, reply.status);
     TEST_ASSERT_EQUAL_INT64(0, reply.value);
     IODiagnostics totals = IODiagnostics__snapshot(&diagnostics);
@@ -180,7 +214,7 @@ ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappe
     return SERVICE_OK;
 }
 
-IOHandle open(ConstBStringPtr path, Flags flags)
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), *path);
     TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
@@ -188,7 +222,7 @@ IOHandle open(ConstBStringPtr path, Flags flags)
     return 7;
 }
 
-ByteCount read(IOHandle handle, char * buf, size_t size)
+ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
 {
     TEST_ASSERT_EQUAL_INT64(7, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
@@ -201,7 +235,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size)
     return (ByteCount)index;
 }
 
-IOStatus close(IOHandle handle)
+IOStatus IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL_INT64(7, handle);
     fake_sysinfo_closed = true;

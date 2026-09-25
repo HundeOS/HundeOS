@@ -157,21 +157,37 @@ void test_service_files_and_directories_require_hund_credentials(void)
     request.client_pid = 21;
     IOReply reply = Embedfs__execute(&filesystem, &request);
     TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL_STRING("first", reply.entry.name);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0550, reply.entry.mode);
+    TEST_ASSERT_EQUAL_STRING("first", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0550, reply.directory.entries[0].mode);
 }
 
 void test_root_listing_deduplicates_directories_and_reports_metadata(void)
 {
     IORequest request = path_request(IO_REQUEST_LIST_DIR, &bstr("/"));
     IOReply reply = Embedfs__execute(&filesystem, &request);
-    TEST_ASSERT_EQUAL_STRING("hello", reply.entry.name);
+    TEST_ASSERT_EQUAL_STRING("hello", reply.directory.entries[0].name);
     request.offset = 1;
     reply = Embedfs__execute(&filesystem, &request);
-    TEST_ASSERT_EQUAL_STRING("services", reply.entry.name);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0550, reply.entry.mode);
+    TEST_ASSERT_EQUAL_STRING("services", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0550, reply.directory.entries[0].mode);
     request.offset = 2;
     TEST_ASSERT_EQUAL(0, Embedfs__execute(&filesystem, &request).value);
+}
+
+void test_embedfs_reports_file_and_directory_information(void)
+{
+    IORequest request = path_request(IO_REQUEST_FILE_INFO, &bstr("/hello"));
+    IOReply reply = Embedfs__execute(&filesystem, &request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0555, reply.file_info.mode);
+    TEST_ASSERT_EQUAL(sizeof(blob.bytes), reply.file_info.size);
+
+    request = path_request(IO_REQUEST_FILE_INFO, &bstr("/services"));
+    request.client_pid = 21;
+    reply = Embedfs__execute(&filesystem, &request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0550, reply.file_info.mode);
+    TEST_ASSERT_EQUAL(PROCESS_USER_HUND, reply.file_info.user_id);
 }
 
 void test_mutation_unknown_processes_and_parent_traversal_are_rejected(void)

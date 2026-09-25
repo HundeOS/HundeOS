@@ -388,14 +388,14 @@ static BString Hundeschule__line_without_comment(ConstBStringPtr line)
 
 static Optional(DynString) Hundeschule__load_config(void)
 {
-    IOHandle handle = open(&bstr(HUNDESCHULE_CONFIG_PATH), IO_OPEN_READ);
+    IOHandle handle = IO__open(&bstr(HUNDESCHULE_CONFIG_PATH), IO_OPEN_READ);
     if (handle < 0)
     {
         return None(DynString);
     }
 
     Optional(DynString) read_result = IO__read_dyn_string(handle, HUNDESCHULE_CONFIG_MAX);
-    close(handle);
+    IO__close(handle);
 
     match_optional(
         read_result,

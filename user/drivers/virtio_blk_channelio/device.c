@@ -291,12 +291,10 @@ void VirtioBlk__ack_interrupt(void * mmio)
 {
     uint32_t status = VirtioBlkMmio__read32(mmio, VIRTIO_MMIO_INTERRUPT_STAT);
     __sync_boundary();
-    DRIVER_DEBUG("virtio_blk: irq status=0x%x\n", status);
     if (status != 0)
     {
         VirtioBlkMmio__write32(mmio, VIRTIO_MMIO_INTERRUPT_ACK, status);
         __sync_boundary();
-        DRIVER_DEBUG("virtio_blk: irq acked status=0x%x\n", status);
     }
 }
 
@@ -304,17 +302,12 @@ static bool VirtioBlk__wait_for_used(VirtioBlkDevicePtr self)
 {
     ServiceEvent event;
     VirtioBlk__invalidate_used(self);
-    DRIVER_DEBUG("virtio_blk: wait used start last=%i used=%i irq=%i\n", (int)self->last_used_idx,
-                 (int)VirtioBlk__used(self)->idx, (int)self->irq_id);
 
     VirtioBlk__invalidate_used(self);
     while (VirtioBlk__used(self)->idx == self->last_used_idx)
     {
         ServiceCode wait_status = VirtioBlkRuntime__await_irq(&event);
         VirtioBlk__invalidate_used(self);
-        DRIVER_DEBUG("virtio_blk: wait returned status=%i event_type=%i source=%i data=%i used=%i last=%i\n",
-                     (int)wait_status, (int)event.type, (int)event.source, (int)event.data,
-                     (int)VirtioBlk__used(self)->idx, (int)self->last_used_idx);
         if (!service_alive(wait_status))
         {
             DRIVER_DEBUG("virtio_blk: wait aborted status=%i\n", (int)wait_status);
@@ -331,7 +324,6 @@ static bool VirtioBlk__wait_for_used(VirtioBlkDevicePtr self)
 
     self->last_used_idx = VirtioBlk__used(self)->idx;
     __sync_cache_invalidate(&virtio_blk_status, sizeof(virtio_blk_status));
-    DRIVER_DEBUG("virtio_blk: wait used done last=%i status=%i\n", (int)self->last_used_idx, (int)virtio_blk_status);
     return true;
 }
 
@@ -379,14 +371,6 @@ static ServiceCode VirtioBlk__execute_dma(VirtioBlkDevicePtr self, ConstVirtioBl
 
     VirtqDescPtr descs = VirtioBlk__descs(self);
     VirtqAvailPtr avail = VirtioBlk__avail(self);
-    VirtqUsedPtr used = VirtioBlk__used(self);
-
-    DRIVER_DEBUG("virtio_blk: submit block=%i op=%i sector=%i header_drv=%p buffer_drv=%p status_drv=%p "
-                 "header_dev=0x%x buffer_dev=0x%x status_dev=0x%x avail=%i used=%i last=%i\n",
-                 (int)request->block, (int)request->operation, (int)virtio_blk_header.sector, &virtio_blk_header,
-                 (void *)request->buffer, &virtio_blk_status, (unsigned int)header_device_address,
-                 (unsigned int)buffer_device_address, (unsigned int)status_device_address, (int)avail->idx,
-                 (int)used->idx, (int)self->last_used_idx);
 
     descs[0] = VirtqDesc__new(header_device_address, sizeof(VirtioBlkOuthdr), VIRTQ_DESC_F_NEXT, 1);
     descs[1] = VirtqDesc__new(
@@ -410,9 +394,6 @@ static ServiceCode VirtioBlk__execute_dma(VirtioBlkDevicePtr self, ConstVirtioBl
     avail->idx++;
     VirtioBlk__clean_queue();
     __sync_boundary();
-    DRIVER_DEBUG("virtio_blk: notify block=%i avail=%i used=%i last=%i ring_slot=%i\n", (int)request->block,
-                 (int)avail->idx, (int)used->idx, (int)self->last_used_idx,
-                 (int)((avail->idx - 1) % VIRTIO_BLK_QUEUE_SIZE));
     VirtioBlkMmio__write32(self->mmio, VIRTIO_MMIO_QUEUE_NOTIFY, VIRTIO_BLK_QUEUE_INDEX);
 
     if (!VirtioBlk__wait_for_used(self))
@@ -428,17 +409,6 @@ static ServiceCode VirtioBlk__execute_dma(VirtioBlkDevicePtr self, ConstVirtioBl
     {
         __sync_cache_invalidate((void *)request->buffer, request->buffer_size);
     }
-
-    if (request->operation == BLOCK_PROTOCOL_READ && request->buffer_size >= 8)
-    {
-        uint8_t * buffer = (uint8_t *)request->buffer;
-        DRIVER_DEBUG("virtio_blk: read block=%i sector=%i driver_buffer_first_bytes=%i,%i,%i,%i,%i,%i,%i,%i\n",
-                     (int)request->block, (int)virtio_blk_header.sector, (int)buffer[0], (int)buffer[1], (int)buffer[2],
-                     (int)buffer[3], (int)buffer[4], (int)buffer[5], (int)buffer[6], (int)buffer[7]);
-    }
-
-    DRIVER_DEBUG("virtio_blk: block=%i completed virtio_status=%i used=%i last=%i\n", (int)request->block,
-                 (int)virtio_blk_status, (int)used->idx, (int)self->last_used_idx);
     return virtio_blk_status == VIRTIO_BLK_S_OK ? SERVICE_OK : SERVICE_BLOCK_REQUEST_FAILED;
 }
 

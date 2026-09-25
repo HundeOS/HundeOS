@@ -20,12 +20,12 @@ void setUp(void)
 void tearDown(void)
 {
 }
-IOHandle open(ConstBStringPtr path, Flags flags)
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/config/fstab"), *path);
     return 7;
 }
-IOStatus close(IOHandle handle)
+IOStatus IO__close(IOHandle handle)
 {
     return IO_OK;
 }

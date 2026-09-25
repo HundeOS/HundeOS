@@ -29,6 +29,7 @@ class QemuSession:
 
     def start(self):
         self.trace_path.unlink(missing_ok=True)
+        (self.trace_path.parent / "images" / "ext2.img").unlink(missing_ok=True)
         master_fd, slave_fd = pty.openpty()
         try:
             self.process = subprocess.Popen(
@@ -167,13 +168,68 @@ def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, arch
     session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
     session.send_line("root")
     session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+    workspace = f"/bsd-smoke-{time.monotonic_ns()}"
 
-    sysinfo = session.run_command("cat /boot/sysinfo")
+    sysinfo = session.run_command("/usr/local/bin/cat /boot/sysinfo")
     assert architecture_marker in sysinfo
+
+    numbered = session.run_command("/usr/local/bin/cat -n /hello.txt")
+    assert b"1\thello from ext2" in numbered
+
+    default_listing = session.run_command("/usr/local/bin/ls")
+    assert b"hello.txt" in default_listing
+    assert b"usr" in default_listing
+
+    root_listing = session.run_command("/usr/local/bin/ls /")
+    assert b"hello.txt" in root_listing
+    assert b"usr" in root_listing
+
+    commands = session.run_command("/usr/local/bin/ls -1 /usr/local/bin")
+    for command in (b"cat", b"ln", b"ls", b"mkdir", b"mv", b"rm"):
+        assert command in commands
+
+    mkdir_result = session.run_command(f"/usr/local/bin/mkdir -p {workspace}/a/b")
+    assert b"mkdir:" not in mkdir_result, mkdir_result
+    write_result = session.run_command(f"write {workspace}/a/b/source bsd-tools")
+    assert b"write:" not in write_result, write_result
+    link_result = session.run_command(f"/usr/local/bin/ln {workspace}/a/b/source {workspace}/a/b/link")
+    assert b"ln:" not in link_result, link_result
+    assert b"bsd-tools" in session.run_command(f"/usr/local/bin/cat {workspace}/a/b/link")
+    move_result = session.run_command(f"/usr/local/bin/mv {workspace}/a {workspace}/moved")
+    assert b"mv:" not in move_result, move_result.decode("utf-8", errors="replace")
+    assert b"bsd-tools" in session.run_command(f"/usr/local/bin/cat {workspace}/moved/b/source")
+    moved_listing = session.run_command(f"/usr/local/bin/ls -1 {workspace}/moved/b")
+    assert b"link" in moved_listing
+    assert b"source" in moved_listing
+
+    secure_remove = session.run_command(f"/usr/local/bin/rm -P {workspace}/moved/b/source")
+    assert b"-P is not supported" in secure_remove
+    assert b"bsd-tools" in session.run_command(f"/usr/local/bin/cat {workspace}/moved/b/source")
+
+    remove_link = session.run_command(f"/usr/local/bin/rm -v {workspace}/moved/b/link")
+    assert f"{workspace}/moved/b/link".encode() in remove_link
+    force_missing = session.run_command(f"/usr/local/bin/rm -f {workspace}/missing")
+    assert b"rm:" not in force_missing, force_missing
+
+    recursive_remove = session.run_command(f"/usr/local/bin/rm -rv {workspace}")
+    assert f"{workspace}/moved/b/source".encode() in recursive_remove
+    assert workspace.encode() in recursive_remove
+    missing_workspace = session.run_command(f"/usr/local/bin/ls -1 {workspace}")
+    assert b"ls:" in missing_workspace, missing_workspace
 
     write_result = session.run_command("write /tmp/qemu-smoke smoke-ok")
     assert b"Command failed" not in write_result
     assert b"smoke-ok" in session.run_command("cat /tmp/qemu-smoke")
+
+    session.send_line("/usr/local/bin/cat")
+    session.send_line("interrupt-me")
+    session.expect(b"interrupt-me", COMMAND_TIMEOUT_SECONDS)
+    os.write(session.master_fd, b"\x03")
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+
+    os.write(session.master_fd, b"partial\x03")
+    cancelled = session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+    assert b"partial^C" in cancelled
 
     processes = session.run_command("ps")
     assert b"/sbin/shell" in processes

@@ -1,12 +1,13 @@
 #include "interpreter.h"
 
 #include "../../user.h"
+#include "sys/io.h"
+#include "sys/process.h"
 #include "sys/spawn.h"
 
 #define SPAWN_ARG_LIMIT SPAWN_MAX_ARGS
 
 static const BString CMD_EXIT = bstr("exit");
-static const BString COMMAND_SEARCH_PATH = bstr("/sbin");
 static const BString QUOTE_DELIMITER = bstr("\"");
 static const BString TOKEN_DELIMITERS = bstr(" \t\n\r");
 static const BString BACKGROUND_OPERATOR = bstr("&");
@@ -43,16 +44,38 @@ static bool Interpreter__matches(ConstBStringPtr str, ConstBStringPtr cmd)
     return BString__equals(str, cmd);
 }
 
-static BString Interpreter__command_path(ConstBStringPtr cmd)
+static BString Interpreter__command_path(ConstBStringPtr directory, ConstBStringPtr cmd)
 {
+    BString prefix = BString__append(directory, &bstr("/"));
+    return BString__append(&prefix, cmd);
+}
 
-    if (BString__starts_with(cmd, &bstr("/")))
+static SpawnResult Interpreter__spawn_in(ConstBStringPtr directory, ConstBStringPtr command, SpawnMode mode,
+                                         ConstSpawnArgumentsPtr arguments)
+{
+    BString path = Interpreter__command_path(directory, command);
+    return spawn_argv(mode, &path, arguments);
+}
+
+static ShellResult Interpreter__wait_for_foreground(SpawnResult child_pid)
+{
+    IOStatus foreground_result = IO__set_terminal_foreground((uint64_t)child_pid);
+    if (foreground_result != IO_OK)
     {
-        return *cmd;
+        kill_process((uint64_t)child_pid, PROCESS_SIGNAL_KILL);
     }
 
-    BString prefix = BString__append(&COMMAND_SEARCH_PATH, &bstr("/"));
-    return BString__append(&prefix, cmd);
+    ProcessChildEvent event = ProcessChildEvent__new();
+    ProcessChildEventResult wait_result;
+    do
+    {
+        wait_result = wait_for_child_event(&event);
+    } while (wait_result == PROCESS_CHILD_EVENT_OK && event.pid != (uint64_t)child_pid);
+
+    IOStatus reset_result = IO__set_terminal_foreground(0);
+    return foreground_result == IO_OK && wait_result == PROCESS_CHILD_EVENT_OK && reset_result == IO_OK
+               ? COMMAND_SUCCESS
+               : COMMAND_FAILED;
 }
 
 Interpreter Interpreter__new(void)
@@ -144,7 +167,6 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
         return COMMAND_FAILED;
     }
 
-    BString path = Interpreter__command_path(&command->name);
     SpawnArguments arguments = SpawnArguments__new();
     CommandArguments command_arguments = command->args;
     for_each_fa(
@@ -163,8 +185,33 @@ ShellResult Interpreter__execute(InterpreterPtr self, CommandPtr command)
             );
         }
     );
-    SpawnMode mode = command->background ? P_NOWAIT : P_WAIT;
-    SpawnResult result = spawn_argv(mode, &path, &arguments);
+    SpawnMode mode = P_NOWAIT;
+    SpawnResult result;
+    if (BString__starts_with(&command->name, &bstr("/")))
+    {
+        result = spawn_argv(mode, &command->name, &arguments);
+    }
+    else
+    {
+        result = Interpreter__spawn_in(&bstr("/usr/local/bin"), &command->name, mode, &arguments);
+        if (result == SPAWN_NO_FILE || result == SPAWN_NO_PATH)
+        {
+            result = Interpreter__spawn_in(&bstr("/usr/bin"), &command->name, mode, &arguments);
+        }
+        if (result == SPAWN_NO_FILE || result == SPAWN_NO_PATH)
+        {
+            result = Interpreter__spawn_in(&bstr("/bin"), &command->name, mode, &arguments);
+        }
+        if (result == SPAWN_NO_FILE || result == SPAWN_NO_PATH)
+        {
+            result = Interpreter__spawn_in(&bstr("/sbin"), &command->name, mode, &arguments);
+        }
+    }
+
+    if (result > SPAWN_SUCCESS && !command->background)
+    {
+        return Interpreter__wait_for_foreground(result);
+    }
 
     if (result >= SPAWN_SUCCESS)
     {

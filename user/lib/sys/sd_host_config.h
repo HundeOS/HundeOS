@@ -139,14 +139,14 @@ static Optional(SdHostConfig) SdHostConfig__parse(ConstDynStringPtr sysinfo)
 
 static Optional(SdHostConfig) SdHostConfig__load(void)
 {
-    IOHandle handle = open(&bstr(SD_HOST_CONFIG_PATH), IO_OPEN_READ);
+    IOHandle handle = IO__open(&bstr(SD_HOST_CONFIG_PATH), IO_OPEN_READ);
     if (handle < 0)
     {
         return None(SdHostConfig);
     }
 
     Optional(DynString) sysinfo = IO__read_dyn_string(handle, SD_HOST_CONFIG_MAX);
-    close(handle);
+    IO__close(handle);
 
     match_optional(
         sysinfo,

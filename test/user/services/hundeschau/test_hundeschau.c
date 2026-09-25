@@ -40,13 +40,13 @@ SpawnResult spawn_with_stdio(SpawnMode mode, ConstBStringPtr path, SpawnFileDesc
     return SPAWN_FAILED;
 }
 
-IOHandle open(ConstBStringPtr path, Flags flags)
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_FAIL_MESSAGE("Unexpected file open");
     return IO_INVALID_PATH;
 }
 
-IOStatus close(IOHandle handle)
+IOStatus IO__close(IOHandle handle)
 {
     TEST_FAIL_MESSAGE("Unexpected file close");
     return IO_OK;

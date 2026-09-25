@@ -44,13 +44,13 @@ static unsigned sbin_spawns;
 static bool sbin_ready;
 static bool sbin_spawn_fails;
 
-IOHandle open(ConstBStringPtr path, Flags flags)
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/config/fstab"), *path);
     return 7;
 }
 
-IOStatus close(IOHandle handle)
+IOStatus IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL(7, handle);
     return IO_OK;
@@ -253,9 +253,15 @@ Result(OptionalChannelReplySize) Channel__poll_reply(ChannelPtr self, ChannelDat
         reply.status = backend->list_status;
         if (reply.status == IO_OK && backend->request.offset == 0)
         {
-            reply.value = 1;
-            reply.entry = DirectoryEntry__new(0, 0, 0, IO_MODE_TYPE_FILE, &bstr("hello.txt"));
+            reply.directory.entries[0] = DirectoryEntry__new(0, 0, 0, IO_MODE_TYPE_FILE, &bstr("hello.txt"));
+            reply.directory.count = 1;
         }
+        break;
+    case IO_REQUEST_FILE_INFO:
+        reply.file_info = (IOFileInfo){.mode = IO_MODE_TYPE_FILE | 0644,
+                                       .user_id = PROCESS_USER_HUND,
+                                       .group_id = PROCESS_GROUP_HUND,
+                                       .size = 123};
         break;
     default:
         break;
@@ -350,6 +356,8 @@ static IOReply execute(IORequestPtr request)
     return unwrap_optional(FilesystemNamespace__execute(&namespace, 30, 50, request), IOReply__new(IO_PANIC, 0));
 }
 
+static void add_root(void);
+
 void test_namespace_routes_only_complete_mount_path_components(void)
 {
     IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/HELLO.TXT"));
@@ -370,14 +378,34 @@ void test_namespace_lists_mount_parents_without_duplicate_names(void)
     IORequest request = path_request(IO_REQUEST_LIST_DIR, &bstr("/"));
     IOReply reply = execute(&request);
     TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL_STRING("mnt", reply.entry.name);
+    TEST_ASSERT_EQUAL_STRING("mnt", reply.directory.entries[0].name);
     request.offset = 6;
-    TEST_ASSERT_EQUAL(0, execute(&request).value);
+    TEST_ASSERT_EQUAL(0, execute(&request).directory.count);
     request = path_request(IO_REQUEST_LIST_DIR, &bstr("/mnt"));
     reply = execute(&request);
-    TEST_ASSERT_EQUAL_STRING("fat", reply.entry.name);
+    TEST_ASSERT_EQUAL_STRING("fat", reply.directory.entries[0].name);
     request.offset = 1;
-    TEST_ASSERT_EQUAL_STRING("ext", execute(&request).entry.name);
+    TEST_ASSERT_EQUAL_STRING("ext", execute(&request).directory.entries[0].name);
+}
+
+void test_namespace_reports_synthetic_and_forwarded_file_information(void)
+{
+    add_root();
+    IORequest request = path_request(IO_REQUEST_FILE_INFO, &bstr("/boot"));
+    IOReply reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, reply.file_info.mode);
+
+    request = path_request(IO_REQUEST_FILE_INFO, &bstr("/boot/sysinfo"));
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.file_info.mode);
+
+    request = path_request(IO_REQUEST_FILE_INFO, &bstr("/hello.txt"));
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0644, reply.file_info.mode);
+    TEST_ASSERT_EQUAL(123, reply.file_info.size);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/hello.txt"), IORequest__path(&backends[2].request));
 }
 
 void test_namespace_authenticates_mediator_and_scopes_handles(void)
@@ -482,18 +510,19 @@ void test_root_listing_includes_bootstrap_overlays_then_disk_entries(void)
 {
     add_root();
     IORequest request = path_request(IO_REQUEST_LIST_DIR, &bstr("/"));
-    const char * names[] = {"mnt", "sbin", "boot", "hello.txt"};
-    for (unsigned index = 0; index < 4; index++)
-    {
-        request.offset = index;
-        IOReply reply = execute(&request);
-        TEST_ASSERT_EQUAL(IO_OK, reply.status);
-        TEST_ASSERT_EQUAL(1, reply.value);
-        TEST_ASSERT_EQUAL_STRING(names[index], reply.entry.name);
-    }
+    IOReply reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(3, reply.directory.count);
+    TEST_ASSERT_EQUAL_STRING("mnt", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL_STRING("sbin", reply.directory.entries[1].name);
+    TEST_ASSERT_EQUAL_STRING("boot", reply.directory.entries[2].name);
+    request.offset = 3;
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL(1, reply.directory.count);
+    TEST_ASSERT_EQUAL_STRING("hello.txt", reply.directory.entries[0].name);
     TEST_ASSERT_EQUAL(0, backends[2].request.offset);
     request.offset = 4;
-    TEST_ASSERT_EQUAL(0, execute(&request).value);
+    TEST_ASSERT_EQUAL(0, execute(&request).directory.count);
 }
 
 void test_root_preserves_bootstrap_paths_and_synthetic_parents(void)
@@ -507,15 +536,15 @@ void test_root_preserves_bootstrap_paths_and_synthetic_parents(void)
     TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
     backends[2].list_status = IO_INVALID_PATH;
     request = path_request(IO_REQUEST_LIST_DIR, &bstr("/boot"));
-    TEST_ASSERT_EQUAL_STRING("config", execute(&request).entry.name);
+    TEST_ASSERT_EQUAL_STRING("config", execute(&request).directory.entries[0].name);
     request.offset = 1;
     IOReply reply = execute(&request);
     TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL_STRING("sysinfo", reply.entry.name);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.entry.mode);
+    TEST_ASSERT_EQUAL_STRING("sysinfo", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.directory.entries[0].mode);
     request.offset = 2;
     reply = execute(&request);
-    TEST_ASSERT_EQUAL(0, reply.value);
+    TEST_ASSERT_EQUAL(0, reply.directory.count);
     request = path_request(IO_REQUEST_LIST_DIR, &bstr("/missing"));
     TEST_ASSERT_EQUAL(IO_INVALID_PATH, execute(&request).status);
 }

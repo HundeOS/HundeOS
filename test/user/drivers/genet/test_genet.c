@@ -103,7 +103,7 @@ void * driver_ptr(ServiceMappedMemoryPtr memory)
     return memory->driver_address;
 }
 
-IOHandle open(ConstBStringPtr path, Flags flags)
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), *path);
     TEST_ASSERT_EQUAL_INT(IO_OPEN_READ, flags);
@@ -111,7 +111,7 @@ IOHandle open(ConstBStringPtr path, Flags flags)
     return 3;
 }
 
-ByteCount read(IOHandle handle, char * buf, size_t size) // hundelint: ignore-no-raw-char-buffer
+ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size) // hundelint: ignore-no-raw-char-buffer
 {
     TEST_ASSERT_EQUAL_INT(3, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
@@ -124,7 +124,7 @@ ByteCount read(IOHandle handle, char * buf, size_t size) // hundelint: ignore-no
     return (ByteCount)index;
 }
 
-IOStatus close(IOHandle handle)
+IOStatus IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL_INT(3, handle);
     fake_sysinfo_closed = true;

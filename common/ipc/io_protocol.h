@@ -5,6 +5,7 @@
 #include "buffer.h"
 #include "syscalls/io.h"
 #include "syscalls/socket.h"
+#include "syscalls/types.h"
 
 #define IO_SYSTEM_SERVICE "hund-io-system"
 #define IO_SOCKET_SERVICE "socket_router"
@@ -17,6 +18,7 @@
 #define IO_UART_TX_SERVICE "uart_tx"
 #define IO_VIDEO_SERVICE "video_term"
 #define IO_KEYBOARD_SERVICE "keyboard"
+#define IO_DIRECTORY_BATCH_CAPACITY 3U
 
 typedef enum IORequestOperation
 {
@@ -32,6 +34,8 @@ typedef enum IORequestOperation
     IO_REQUEST_MOUNT,
     IO_REQUEST_LINK,
     IO_REQUEST_RELEASE_BUFFERS,
+    IO_REQUEST_SET_FOREGROUND_PROCESS,
+    IO_REQUEST_FILE_INFO,
 } IORequestOperation;
 
 typedef struct IORequest
@@ -43,6 +47,7 @@ typedef struct IORequest
     uint64_t offset;
     uint64_t client_pid;
     QueueConnectionID client_session;
+    uint64_t foreground_pid;
     bool buffered;
     BufferID buffer;
     // Receiver-local address: never trusted from a channel message.
@@ -53,13 +58,23 @@ typedef struct IORequest
 } IORequest;
 typedef IORequest * IORequestPtr;
 
+typedef struct IODirectoryBatch
+{
+    DirectoryEntry entries[IO_DIRECTORY_BATCH_CAPACITY];
+    uint64_t count;
+} IODirectoryBatch;
+
 typedef struct IOReply
 {
     IOStatus status;
-    int64_t value;
-    uint8_t data[IO_PROTOCOL_DATA_SIZE];
-    DirectoryEntry entry;
-    BufferPair buffers;
+    Anything value;
+    union
+    {
+        uint8_t data[IO_PROTOCOL_DATA_SIZE];
+        IODirectoryBatch directory;
+        BufferPair buffers;
+        IOFileInfo file_info;
+    };
 } IOReply;
 typedef IOReply * IOReplyPtr;
 OptionalDef(IOReply);
@@ -85,7 +100,7 @@ static inline void IORequest__set_target_path(IORequestPtr self, ConstBStringPtr
     self->target_path_length = BString__copy_to(path, (char *)self->target_path_data, sizeof(self->target_path_data));
 }
 
-static inline IOReply IOReply__new(IOStatus status, int64_t value)
+static inline IOReply IOReply__new(IOStatus status, Anything value)
 {
     return (IOReply){.status = status, .value = value};
 }

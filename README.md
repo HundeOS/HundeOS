@@ -74,8 +74,9 @@ moved `/sbin` file operations and normal executable reads to userspace Channels.
 Only Mama's `boot_spawn()` uses the direct archive reader; `boot_complete()`
 irreversibly disables it after the basic mounts are established. The kernel
 retains ELF validation and process creation. Executables transfer through shared
-buffers; disk providers reject executable opens pending permission support;
-see the handoff document for current limits.
+buffers. The disk rootfs contains a pinned, unmodified OpenBSD `cat` at
+`/usr/local/bin/cat`, built against the initial userspace C/POSIX compatibility
+layer; see the handoff document for current permission limits.
 
 IPC supports 1024 live queue connections system-wide, with 32 messages per
 direction. A Channel currently retains two queue connections through its manager.

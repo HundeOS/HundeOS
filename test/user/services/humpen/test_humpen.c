@@ -43,7 +43,7 @@ void tearDown(void)
 {
 }
 
-IOHandle open(ConstBStringPtr path, Flags flags)
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr(HUMPEN_FSTAB_PATH), *path);
     TEST_ASSERT_EQUAL(IO_OPEN_READ, flags);
@@ -82,7 +82,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     return Some(DynString, text);
 }
 
-IOStatus close(IOHandle handle)
+IOStatus IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL(3, handle);
     return IO_OK;

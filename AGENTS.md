@@ -162,6 +162,12 @@ Additionally the object being acted on should be the first argument to the funct
 as to clearly indicate it is the object being acted on while not clashing with the c++ `this`.
 
 ## Return values
+Use `Anything` for a scalar protocol field or callback argument whose meaning
+intentionally varies by operation, such as a reply slot that may contain a
+handle or a byte count. Convert it to the operation's concrete type at the
+consumer boundary. Do not use `Anything` when the field has one fixed meaning;
+use the domain type instead.
+
 Do not pass multiple pointers to a function just to return several values. It
 is a smell and should not be done. Return a struct with named fields instead.
 
@@ -265,6 +271,14 @@ file-descriptor, stream, socket, or block-I/O fallbacks.
 
 # Other
 - reload this file (AGENTS.md) every time there is user interaction
+
+## Dont be stupid or lazy
+- Dont twist user instructions in to something that is just a hack on the
+  current design or implementation
+- For example "lets bring in the BSD cat and make it work", doesnt mean
+  to hack the current cat implementation to have a BSD license.
+  This would require vendoring source code, and providing the
+  interfaces it needs to compile and link.
 
 ## Dont be overconfident
 - Dont leap in to solution mode changing code when the user gives you an error

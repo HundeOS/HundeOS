@@ -16,11 +16,24 @@ Result(BootHardwareInfo) BootHardwareInfo__load(void)
 {
     return Success(BootHardwareInfo, hardware);
 }
-FilesystemOperations FilesystemOperations__new(FilesystemLoad load, FilesystemStore store, FilesystemList list,
-                                               FilesystemMkdir mkdir, FilesystemRemove remove,
-                                               FilesystemFileSize capacity)
+FilesystemOperations FilesystemOperations__new_snapshot(FilesystemLoad load, FilesystemStore store, FilesystemList list,
+                                                        FilesystemMkdir mkdir, FilesystemRemove remove,
+                                                        FilesystemLink link, FilesystemFileSize capacity)
 {
-    return (FilesystemOperations){load, store, list, mkdir, remove, capacity};
+    return (FilesystemOperations){.source_mode = FILESYSTEM_SOURCE_SNAPSHOT,
+                                  .source.snapshot = {.load = load},
+                                  .store = store,
+                                  .list = list,
+                                  .mkdir = mkdir,
+                                  .remove = remove,
+                                  .link = link,
+                                  .write_capacity = capacity};
+}
+
+IOStatus FilesystemOperations__unsupported_link(IOServiceContext context, ConstBStringPtr source_path,
+                                                ConstBStringPtr target_path)
+{
+    return IO_OPERATION_NOT_SUPPORTED;
 }
 
 void test_sysinfo_renders_configuration_readable_by_existing_drivers(void)
@@ -61,24 +74,20 @@ void test_sysinfo_operations_are_read_only_and_reject_unknown_paths(void)
 {
     FilesystemOperations operations = Sysinfofs__operations();
     uint8_t data[FILESYSTEM_FILE_CAPACITY];
-    match_result(operations.load(&hardware, &bstr("/missing"), data),
+    match_result(operations.source.snapshot.load(&hardware, &bstr("/missing"), data),
         success_test_fail(),
-        error_test_ok()
+                 error_test_ok()
     );
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, operations.store(&hardware, &bstr("/sysinfo"), data, 0));
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, operations.mkdir(&hardware, &bstr("/directory")));
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, operations.remove(&hardware, &bstr("/sysinfo"), 0));
+    DirectoryEntry entries[1];
     match_result(
-        operations.list(&hardware, &bstr("/"), 0),
-        success(entry)
+        operations.list(&hardware, &bstr("/"), entries, 1, 0),
+        success(count)
         {
-            match_optional(entry,
-                some(value)
-                {
-                    TEST_ASSERT_EQUAL_STRING("sysinfo", value.name);
-                },
-                none_test_fail()
-            );
+            TEST_ASSERT_EQUAL(1, count);
+            TEST_ASSERT_EQUAL_STRING("sysinfo", entries[0].name);
         },
         error_test_fail()
     );

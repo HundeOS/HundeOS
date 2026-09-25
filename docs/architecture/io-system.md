@@ -35,6 +35,19 @@ hund-io-system
 These are protocols over the same bidirectional IPC session abstraction, not
 new kinds of channel. Follow [Channels and event queues](channels-and-event-queues.md).
 
+Target programs may use either the native `IO__*` interface or the userspace
+C/POSIX compatibility layer. Native I/O handles begin above `1 << 32`; the
+compatibility layer therefore maps them to process-local `int` descriptors and
+converts native EOF and error statuses to POSIX return values and `errno`.
+Descriptors `0`, `1`, and `2` retain their standard stream meanings. This map
+and the stdio implementation are entirely userspace concerns.
+
+The first consumer is an unmodified, pinned OpenBSD `cat`, built directly from
+`vendor/openbsd` and installed in the disk rootfs at `/usr/local/bin/cat`.
+Current stdio is unbuffered. `fstat` exposes a transfer block size but not full
+filesystem metadata, and `pledge` currently records compatibility rather than
+enforcing a sandbox; neither limitation moves I/O policy into the kernel.
+
 ## Ownership
 
 `hund-io-system` owns application-facing handles, backend and endpoint routing,
@@ -174,6 +187,14 @@ request/reply churn. Blocked writes return `IO_WAIT_FOR_DATA` so the mediator ca
 service other clients while retrying; this remains necessary for polling output
 drivers without a transmit interrupt.
 
+The shell assigns its foreground child to the terminal through its authenticated
+input handle, then waits for that child explicitly. While a foreground process is
+assigned, `uart_rx` consumes the Ctrl-C byte and sends that process
+`PROCESS_SIGNAL_INTERRUPT`; the byte is not returned as input. With no foreground
+child, Ctrl-C reaches the interactive shell and cancels its current input line.
+This is currently single-process foreground ownership. Foreground process groups
+remain necessary before pipelines can receive terminal signals as a unit.
+
 Initial standard descriptors carry terminal endpoint metadata, not another
 process's channel handles. The kernel passes this metadata in the process
 startup context; userspace lazily opens its own input/output/error handles.
@@ -312,10 +333,12 @@ With `/` configured, ordinary absolute paths are managed even when their driver
 fails: there is no kernel root disk mount to fall back to. A transport error is
 never an unmanaged-path reply.
 
-Format-driver file buffers are private userspace allocations, not pointers into
-client memory. Read opens load a bounded file snapshot; handles have independent
-offsets. Writes persist each chunk using the existing whole-file format routines.
-Closing a handle frees its buffer without closing the session. Client departure
+Format-driver write buffers are private userspace allocations, not pointers into
+client memory. Pseudo filesystems may retain a bounded read snapshot, while disk
+format drivers describe the file at open and read requested ranges directly into
+the transport buffer. Handles have independent offsets. Writes remain bounded
+and persist each chunk using the existing whole-file format routines. Closing a
+handle frees any private buffer without closing the session. Client departure
 releases all its resources, including an open that was pending when it exited.
 Intermediaries remember deferred opens even after a `WOULD_BLOCK` transport reply
 has been consumed. Pending mount operations return `WOULD_BLOCK` to release the
@@ -324,8 +347,10 @@ namespace channel while work continues, allowing another mount to progress.
 Current limits are explicit: sixteen mounts including root, `/tmp`, and `/dev`, 32 open
 files per format driver and 255-byte protocol paths. Transport buffers are 2 MiB.
 The client library combines file chunks into the caller's requested transfer.
-The existing format limits remain: 12 KiB read snapshots, 512-byte FAT32 writes,
-and 12 KiB EXT2 writes. Hard-link creation in filesystem drivers, seeking,
+Pseudo-filesystem snapshots remain limited to 12 KiB. Disk reads are streamed;
+EXT2 resolves direct, single-indirect, and double-indirect blocks, while FAT32
+walks cluster chains. The write limits remain 512 bytes for FAT32 and 12 KiB for
+EXT2. Hard-link creation in filesystem drivers, seeking,
 descriptor inheritance/transfer, service recovery, and full POSIX semantics are
 not implemented. Disk drivers enforce read/write access flags and session
 ownership, but do not yet add Unix mode-bit authorization that the old
@@ -347,10 +372,12 @@ Normal executable loading uses kernel -> Channel -> `hund-io-system` -> namespac
 directly, and only before the irreversible `boot_complete()` handoff. Normal
 spawn has no embedded or old filesystem fallback. The loader copies validated
 shared-buffer ranges into a kernel-owned image, bounded to 64 MiB, then validates
-the static ELF before mapping (at most 128 MiB of segment memory). The generic
-FAT32/EXT2 adapter rejects executable opens until it supports execute-permission
-checks; disk spawning therefore remains unavailable. Those providers also impose
-a 12 KiB open-file snapshot limit. Embedded files do not have that provider limit.
+the static ELF before mapping (at most 128 MiB of segment memory). Disk providers
+stream executable reads without the pseudo-filesystem snapshot limit. EXT2
+requires at least one execute mode bit before accepting an executable open;
+FAT32 applies the mount policy's synthesized executable mode. Per-caller Unix
+owner/group mode-bit authorization is not yet implemented. Embedded files do not
+have the pseudo-filesystem snapshot limit.
 See [Executable loading](bootstrap-filesystem-handoff.md).
 
 The old kernel filesystem broker, bootfs, EXT2, block cache, and memory block

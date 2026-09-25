@@ -1,0 +1,8 @@
+#ifndef __USER_LIB_NEWLIB_LIMITS_H
+#define __USER_LIB_NEWLIB_LIMITS_H
+
+#define CHAR_BIT 8
+#define INT_MAX 2147483647
+#define PATH_MAX 256
+
+#endif

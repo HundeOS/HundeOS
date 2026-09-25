@@ -18,12 +18,17 @@ typedef struct SpawnCall
 
 static SpawnCall last_spawn_call;
 static uint64_t spawn_call_count;
-static SpawnResult next_spawn_result = SPAWN_SUCCESS;
+static SpawnResult next_spawn_result = 25;
+static uint64_t missing_spawn_attempts;
 static BString printed_output;
 static bool exit_called;
 static int exit_code;
 static BString console_input;
 static uint64_t console_input_pos;
+static uint64_t foreground_calls[2];
+static uint64_t foreground_call_count;
+static uint64_t waited_child_pid;
+static uint64_t killed_pid;
 
 void fake_exit(int code);
 
@@ -52,7 +57,8 @@ typedef struct TestInputStream
 void setUp(void)
 {
     spawn_call_count = 0;
-    next_spawn_result = SPAWN_SUCCESS;
+    next_spawn_result = 25;
+    missing_spawn_attempts = 0;
     last_spawn_call = (SpawnCall){
         .path = empty_bstr(),
         .arguments = SpawnArguments__new(),
@@ -62,6 +68,32 @@ void setUp(void)
     exit_code = -1;
     console_input = empty_bstr();
     console_input_pos = 0;
+    foreground_call_count = 0;
+    waited_child_pid = 0;
+    killed_pid = 0;
+}
+
+IOStatus IO__set_terminal_foreground(uint64_t pid)
+{
+    foreground_calls[foreground_call_count++] = pid;
+    return IO_OK;
+}
+
+ProcessSignalResult kill_process(uint64_t pid, ProcessSignal signal)
+{
+    killed_pid = pid;
+    return PROCESS_SIGNAL_OK;
+}
+
+ProcessChildEventResult wait_for_child_event(ProcessChildEventPtr event)
+{
+    waited_child_pid = (uint64_t)next_spawn_result;
+    *event = (ProcessChildEvent){
+        .pid = waited_child_pid,
+        .status = 0,
+        .type = PROCESS_CHILD_EVENT_EXITED,
+    };
+    return PROCESS_CHILD_EVENT_OK;
 }
 
 void tearDown(void)
@@ -151,6 +183,11 @@ SpawnResult spawn_argv(SpawnMode mode, ConstBStringPtr path, ConstSpawnArguments
     last_spawn_call.mode = mode;
     last_spawn_call.path = *path;
     last_spawn_call.arguments = *arguments;
+    if (missing_spawn_attempts > 0)
+    {
+        missing_spawn_attempts--;
+        return SPAWN_NO_FILE;
+    }
     return next_spawn_result;
 }
 
@@ -275,8 +312,8 @@ void test_interpreter_execute_spawns_command_with_args(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__execute(&interpreter, &command));
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
-    TEST_ASSERT_EQUAL(P_WAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/cat"), last_spawn_call.path);
+    TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/usr/local/bin/cat"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(1, SpawnArguments__len(&last_spawn_call.arguments));
     assert_spawn_argument(0, &bstr("This is a long filename.txt"));
 }
@@ -292,7 +329,7 @@ void test_interpreter_execute_spawns_background_command_with_same_args(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/cat"), last_spawn_call.path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/usr/local/bin/cat"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(1, SpawnArguments__len(&last_spawn_call.arguments));
     assert_spawn_argument(0, &bstr("test.txt"));
 }
@@ -306,8 +343,8 @@ void test_interpreter_execute_spawns_command_with_more_than_three_args(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__execute(&interpreter, &command));
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
-    TEST_ASSERT_EQUAL(P_WAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/cmd"), last_spawn_call.path);
+    TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/usr/local/bin/cmd"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(4, SpawnArguments__len(&last_spawn_call.arguments));
     assert_spawn_argument(0, &bstr("a"));
     assert_spawn_argument(1, &bstr("b"));
@@ -326,11 +363,28 @@ void test_interpreter_execute_accepts_background_spawn_pid_as_success(void)
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
     TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/socket_test"), last_spawn_call.path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/usr/local/bin/socket_test"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(2, SpawnArguments__len(&last_spawn_call.arguments));
     assert_spawn_argument(0, &bstr("listen"));
     assert_spawn_argument(1, &bstr("socket://proc/demo"));
     TEST_ASSERT_EQUAL_BSTRING(bstr(""), printed_output);
+}
+
+void test_interpreter_execute_assigns_and_waits_for_foreground_child(void)
+{
+    Interpreter interpreter = Interpreter__new();
+    BString input = bstring("cat");
+    Command command = Interpreter__parse(&interpreter, &input);
+    next_spawn_result = 25;
+
+    TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__execute(&interpreter, &command));
+
+    TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
+    TEST_ASSERT_EQUAL_UINT64(25, waited_child_pid);
+    TEST_ASSERT_EQUAL_UINT64(2, foreground_call_count);
+    TEST_ASSERT_EQUAL_UINT64(25, foreground_calls[0]);
+    TEST_ASSERT_EQUAL_UINT64(0, foreground_calls[1]);
+    TEST_ASSERT_EQUAL_UINT64(0, killed_pid);
 }
 
 void test_interpreter_parse_does_not_pass_background_operator_as_argument(void)
@@ -343,6 +397,32 @@ void test_interpreter_parse_does_not_pass_background_operator_as_argument(void)
     TEST_ASSERT_TRUE(command.background);
     TEST_ASSERT_EQUAL_UINT64(1, CommandArguments__len(&command.args));
     assert_command_argument(&command, 0, &bstr("test.txt"));
+}
+
+void test_interpreter_execute_falls_back_to_sbin_for_embedded_commands(void)
+{
+    Interpreter interpreter = Interpreter__new();
+    BString input = bstring("ps");
+    Command command = Interpreter__parse(&interpreter, &input);
+    missing_spawn_attempts = 3;
+
+    TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__execute(&interpreter, &command));
+
+    TEST_ASSERT_EQUAL_UINT64(4, spawn_call_count);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/ps"), last_spawn_call.path);
+}
+
+void test_interpreter_execute_does_not_hide_non_path_spawn_errors(void)
+{
+    Interpreter interpreter = Interpreter__new();
+    BString input = bstring("cat file");
+    Command command = Interpreter__parse(&interpreter, &input);
+    next_spawn_result = SPAWN_FAILED;
+
+    TEST_ASSERT_EQUAL(COMMAND_FAILED, Interpreter__execute(&interpreter, &command));
+
+    TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/usr/local/bin/cat"), last_spawn_call.path);
 }
 
 void test_interpreter_execute_fails_cleanly_when_too_many_args_are_supplied(void)
@@ -402,8 +482,8 @@ void test_interpreter_interpret_groups_double_quoted_argument(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__interpret(&interpreter, &input));
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
-    TEST_ASSERT_EQUAL(P_WAIT, last_spawn_call.mode);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/cat"), last_spawn_call.path);
+    TEST_ASSERT_EQUAL(P_NOWAIT, last_spawn_call.mode);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/usr/local/bin/cat"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(1, SpawnArguments__len(&last_spawn_call.arguments));
     assert_spawn_argument(0, &bstr("This is a long filename.txt"));
 }
@@ -416,7 +496,7 @@ void test_interpreter_interpret_mixes_quoted_and_unquoted_arguments(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__interpret(&interpreter, &input));
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/write"), last_spawn_call.path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/usr/local/bin/write"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(2, SpawnArguments__len(&last_spawn_call.arguments));
     assert_spawn_argument(0, &bstr("/mnt/fs1/out.txt"));
     assert_spawn_argument(1, &bstr("hello world"));
@@ -430,7 +510,7 @@ void test_interpreter_interpret_supports_empty_quoted_argument(void)
     TEST_ASSERT_EQUAL(COMMAND_SUCCESS, Interpreter__interpret(&interpreter, &input));
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_call_count);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/write"), last_spawn_call.path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/usr/local/bin/write"), last_spawn_call.path);
     TEST_ASSERT_EQUAL_UINT64(2, SpawnArguments__len(&last_spawn_call.arguments));
     assert_spawn_argument(0, &bstr(""));
     assert_spawn_argument(1, &bstr("tail"));
@@ -496,6 +576,17 @@ void test_console_input_stream_backspace_removes_before_cursor(void)
     TEST_ASSERT_EQUAL_BSTRING(bstr("bc"), line);
     TEST_ASSERT_EQUAL_BSTRING(bstr("abc\r\033[2K> abc\033[1D\r\033[2K> abc\033[2D\r\033[2K> bc\033[2D"),
                               printed_output);
+}
+
+void test_console_input_stream_ctrl_c_cancels_current_line(void)
+{
+    ConsoleInputStream input = ConsoleInputStream__new();
+    set_console_input("partial\x03");
+
+    BString line = ConsoleInputStream__read_line(&input.input, true);
+
+    TEST_ASSERT_TRUE(BString__is_empty(&line));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("partial^C"), printed_output);
 }
 
 void test_console_input_stream_recalled_history_line_can_move_and_insert(void)

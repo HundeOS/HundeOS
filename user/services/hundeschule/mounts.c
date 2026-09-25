@@ -35,13 +35,13 @@ static Result(IOStatus) Hundeschule__mount_config(ChannelPtr channel, MountConfi
 
 static Result(IOStatus) Hundeschule__mount_configured(ChannelPtr channel)
 {
-    IOHandle file = open(&bstr("/boot/config/fstab"), IO_OPEN_READ);
+    IOHandle file = IO__open(&bstr("/boot/config/fstab"), IO_OPEN_READ);
     if (file < 0)
     {
         return Error(IOStatus, bstr("Cannot open fstab"), file);
     }
     Optional(DynString) text = IO__read_dyn_string(file, 2048);
-    close(file);
+    IO__close(file);
     IOStatus status = IO_OK;
     bool root = false;
     match_optional(

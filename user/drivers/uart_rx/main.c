@@ -1,6 +1,7 @@
 #include "io/stream_driver.h"
 #include "ipc/io_diagnostics.h"
 #include "interrupt/client.h"
+#include "sys/process.h"
 #include "sys/uart_config.h"
 #include "devices/uart.h"
 
@@ -16,6 +17,8 @@ typedef struct UartReceiver
 {
     UartDevice uart;
     UartInput input;
+    uint64_t foreground_pid;
+    uint64_t interrupted_pid;
 } UartReceiver;
 typedef UartReceiver * UartReceiverPtr;
 static UartReceiver UartReceiver__new(ConstUartDevicePtr uart)
@@ -30,6 +33,15 @@ static bool UartReceiver__drain(UartReceiverPtr self)
     {
         uint8_t value = UartDevice__read(&self->uart);
         IODiagnostics__record(IO_DIAGNOSTIC_UART_BYTES, 1);
+        if (value == 0x03 && self->foreground_pid != 0)
+        {
+            if (kill_process(self->foreground_pid, PROCESS_SIGNAL_INTERRUPT) == PROCESS_SIGNAL_OK)
+            {
+                self->interrupted_pid = self->foreground_pid;
+            }
+            progress = true;
+            continue;
+        }
         match_result(
             UartInput__push(&self->input, value),
             success(code)
@@ -45,10 +57,25 @@ static bool UartReceiver__drain(UartReceiverPtr self)
     return progress;
 }
 
-static IOReply UartReceiver__read(IOServiceContext context, IORequestPtr request)
+static IOReply UartReceiver__transfer(IOServiceContext context, IORequestPtr request)
 {
-    IODiagnostics__record(IO_DIAGNOSTIC_UART_READS, 1);
     UartReceiverPtr self = context;
+    if (request->operation == IO_REQUEST_SET_FOREGROUND_PROCESS)
+    {
+        self->foreground_pid = request->foreground_pid;
+        self->interrupted_pid = 0;
+        return IOReply__new(IO_OK, 0);
+    }
+    if (request->operation != IO_REQUEST_READ)
+    {
+        return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+    }
+    IODiagnostics__record(IO_DIAGNOSTIC_UART_READS, 1);
+    if (request->client_pid != 0 && request->client_pid == self->interrupted_pid)
+    {
+        self->interrupted_pid = 0;
+        return IOReply__new(IO_INTERRUPTED, 0);
+    }
     IOReply reply = IOReply__new(IO_OK, 0);
     while ((uint64_t)reply.value < request->count)
     {
@@ -99,7 +126,7 @@ int main(void)
     UartDevice__configure_receiver(&receiver.uart);
     static IOStreamDriver driver;
     static IOService service;
-    driver = IOStreamDriver__new(IO_OPEN_READ, &receiver, UartReceiver__read);
+    driver = IOStreamDriver__new(IO_OPEN_READ, &receiver, UartReceiver__transfer);
     if (IOService__listen_into(&service, &bstr(IO_UART_RX_SERVICE), &driver, IOStreamDriver__execute,
                                IOStreamDriver__disconnect) != IO_OK)
     {

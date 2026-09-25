@@ -15,6 +15,42 @@ POSIX certification. Existing native commands and APIs remain supported.
 
 #### Compatibility Inventory And Toolchain
 
+- [x] Stage an architecture-qualified disk rootfs and build the unmodified,
+  pinned OpenBSD `cat` source under `/usr/local/bin`. Keep it out of the
+  embedded bootstrap archive and exercise raw and formatted reads on AArch64
+  and RISC-V smoke runs. The initial local rewrite has been retired.
+- [x] Introduce the first target C/POSIX compatibility slice required by
+  OpenBSD `cat`: process-local `int` descriptors over native 64-bit I/O handles,
+  POSIX read/write/close behavior and errno mapping, minimal unbuffered stdio,
+  getopt, ctype, err/warn, program identity, and file-status headers.
+- [ ] Replace the compatibility-only `fstat` block-size view with filesystem
+  metadata from the userspace I/O protocol when the next port requires it.
+- [ ] Provide filesystem timestamps through the userspace I/O metadata path and
+  POSIX `stat`, including generated filesystems such as procfs. Define the clock
+  source and creation/modification/access semantics, then make `ls -l` report
+  those values instead of the current Unix-epoch fallback.
+- [ ] Define enforceable process restriction semantics before treating the
+  successful OpenBSD `pledge` compatibility call as a security boundary.
+- [x] Stream disk-file reads through the filesystem provider adapter instead of
+  retaining 12 KiB snapshots. Support EXT2 direct, single-indirect, and
+  double-indirect blocks, FAT32 cluster chains, and executable opens from disk.
+- [ ] Enforce EXT2 execute permission against the caller's resolved user and
+  groups; the first disk-loading slice currently requires any execute bit.
+- [x] Port the pinned OpenBSD `ls`, `ln`, `mv`, `mkdir`, and `rm` sources into
+  `/usr/local/bin`, retire their local implementations, and extend the POSIX
+  compatibility layer from their build and runtime requirements.
+- [ ] Define whether secure overwrite can provide a meaningful guarantee over
+  the userspace filesystem and block-service stack. OpenBSD `rm -P` is rejected
+  without removing the target until that contract exists.
+- [ ] Add symbolic-link creation and lookup to the userspace I/O protocol and
+  filesystem providers so OpenBSD `ln -s` and link-aware `ls` behavior no
+  longer return `EOPNOTSUPP`.
+- [ ] Allocate EXT2 inodes and data blocks across block groups. Writable test
+  images currently reserve enough group-zero inodes for normal operation, but
+  the driver cannot yet consume the free space reported in later groups.
+- [ ] Move post-root services and drivers to the disk rootfs, then mount the
+  embedded archive at a dedicated bootstrap path containing only the programs
+  required to establish the root filesystem and userspace I/O graph.
 - [ ] Establish a reproducible Bash cross-build and use its compile, link, and
   runtime failures to maintain the required API and behavior inventory.
 - [ ] Provide the libc headers, types, constants, and functions required by the
@@ -557,8 +593,9 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
 - [x] Remove legacy stream-server syscalls, buffer mapping, and server maps.
 - [x] Remove userspace file-I/O syscall fallbacks. Route link requests through
   the existing I/O and filesystem Channels; see [Userspace I/O system](architecture/io-system.md).
-- [ ] Implement hard-link creation in supporting filesystem drivers. Channel
-  routing exists, but current providers return an explicit unsupported error.
+- [x] Implement hard-link creation in EXT2 through the userspace filesystem
+  Channel. Providers without inode-sharing semantics continue to return an
+  explicit unsupported error.
 - [x] Retire file I/O syscalls, generic kernel filesystem/device routing,
   `kernel/kio` wrappers, and process FD tables. Startup stdio retains terminal
   endpoint metadata only; general userspace handle inheritance remains deferred.

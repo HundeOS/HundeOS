@@ -27,7 +27,13 @@ static bool FilesystemDriver__disconnect(IOServiceContext context, QueueConnecti
             index,
             file,
             {
-                free(file.data);
+                match_optional(file.data,
+                    some(data)
+                    {
+                        free(data);
+                    },
+                    none_do_nothing()
+                );
             }
         );
         self->files = FilesystemFiles__new();

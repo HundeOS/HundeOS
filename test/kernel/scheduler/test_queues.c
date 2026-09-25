@@ -526,6 +526,50 @@ void test_shared_wait_releases_on_kernel_wake_generation(void)
     TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
 }
 
+void test_signal_wakes_process_from_shared_wait(void)
+{
+    QueueConnectionID id = connect_queue(listen_queue(), client);
+    Queue receiver = attach_queue(id, server);
+    QueueWaitSnapshot observed = QueueWaitSnapshot__new_connection(&receiver);
+    QueueWaitControlPtr control = shared_control(server);
+    publish_shared_wait(control, &observed);
+    QueueWaitWakeGeneration generation = QueueWaitControl__wake_generation(control);
+    TEST_ASSERT_FALSE(Process__shared_wait_ready(server));
+
+    match_result(Scheduler__queue_signal(kernel->scheduler, server->pid, PROCESS_SIGNAL_INTERRUPT),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(generation + 1, QueueWaitControl__wake_generation(control));
+    TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
+}
+
+void test_child_exit_wakes_parent_from_shared_wait(void)
+{
+    QueueConnectionID id = connect_queue(listen_queue(), client);
+    Queue receiver = attach_queue(id, server);
+    QueueWaitSnapshot observed = QueueWaitSnapshot__new_connection(&receiver);
+    QueueWaitControlPtr control = shared_control(server);
+    publish_shared_wait(control, &observed);
+    QueueWaitWakeGeneration generation = QueueWaitControl__wake_generation(control);
+    KernelContext context = KernelContext__new(&Some(ProcessID, server->pid), &Some(SchedulerPtr, kernel->scheduler));
+    match_result(Scheduler__park(kernel->scheduler, server, &context, &None(Continuation), PARK_WAIT_CHILD_EVENT),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    client->parent = Some(ProcessPtr, server);
+
+    match_result(Scheduler__exit(kernel->scheduler, client, 0),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(generation + 1, QueueWaitControl__wake_generation(control));
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, server->state);
+    TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
+}
+
 void test_shared_wait_mapping_is_reused_and_cannot_be_freed_or_shared(void)
 {
     QueueWaitControlPtr first = shared_control(server);

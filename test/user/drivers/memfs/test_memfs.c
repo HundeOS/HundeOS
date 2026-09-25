@@ -231,10 +231,10 @@ void test_memfs_directories_recursive_remove_and_recreated_paths_do_not_revive_h
     IOHandle old = open_file(&bstr("/docs/file"), IO_OPEN_WRITE);
     request = path_request(IO_REQUEST_LIST_DIR, &bstr("/docs"), 0);
     IOReply reply = Memfs__execute(&filesystem, &request);
-    TEST_ASSERT_EQUAL(1, reply.value);
-    TEST_ASSERT_EQUAL_STRING("file", reply.entry.name);
+    TEST_ASSERT_EQUAL(1, reply.directory.count);
+    TEST_ASSERT_EQUAL_STRING("file", reply.directory.entries[0].name);
     request.offset = 1;
-    TEST_ASSERT_EQUAL(0, Memfs__execute(&filesystem, &request).value);
+    TEST_ASSERT_EQUAL(0, Memfs__execute(&filesystem, &request).directory.count);
     request = path_request(IO_REQUEST_REMOVE, &bstr("/docs"), 0);
     TEST_ASSERT_EQUAL(IO_OPERATION_NOT_SUPPORTED, Memfs__execute(&filesystem, &request).status);
     request.flags = IO_REMOVE_RECURSIVE;
@@ -286,9 +286,9 @@ void test_memfs_records_creator_identity_and_non_executable_file_mode(void)
     open_file(&bstr("/file"), IO_OPEN_WRITE);
     IORequest request = path_request(IO_REQUEST_LIST_DIR, &bstr("/"), 0);
     IOReply reply = Memfs__execute(&filesystem, &request);
-    TEST_ASSERT_EQUAL(PROCESS_USER_USER, reply.entry.user_id);
-    TEST_ASSERT_EQUAL(PROCESS_GROUP_USER, reply.entry.group_id);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0644, reply.entry.mode);
+    TEST_ASSERT_EQUAL(PROCESS_USER_USER, reply.directory.entries[0].user_id);
+    TEST_ASSERT_EQUAL(PROCESS_GROUP_USER, reply.directory.entries[0].group_id);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0644, reply.directory.entries[0].mode);
     request = path_request(IO_REQUEST_OPEN, &bstr("/file"), IO_OPEN_EXECUTE);
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, Memfs__execute(&filesystem, &request).status);
     request = path_request(IO_REQUEST_MKDIR, &bstr("/docs"), 0);
@@ -297,9 +297,26 @@ void test_memfs_records_creator_identity_and_non_executable_file_mode(void)
     request = path_request(IO_REQUEST_LIST_DIR, &bstr("/"), 0);
     request.offset = 1;
     reply = Memfs__execute(&filesystem, &request);
-    TEST_ASSERT_EQUAL(PROCESS_USER_HUND, reply.entry.user_id);
-    TEST_ASSERT_EQUAL(PROCESS_GROUP_HUND, reply.entry.group_id);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, reply.entry.mode);
+    TEST_ASSERT_EQUAL(PROCESS_USER_HUND, reply.directory.entries[0].user_id);
+    TEST_ASSERT_EQUAL(PROCESS_GROUP_HUND, reply.directory.entries[0].group_id);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, reply.directory.entries[0].mode);
+}
+
+void test_memfs_reports_file_information_without_listing_parent(void)
+{
+    IOHandle handle = open_file(&bstr("/file"), IO_OPEN_WRITE);
+    IORequest write = IORequest__new(IO_REQUEST_WRITE, handle);
+    write.client_pid = 20;
+    write.client_session = 30;
+    write.count = 4;
+    __builtin_memcpy(write.data, "data", 4);
+    TEST_ASSERT_EQUAL(4, Memfs__execute(&filesystem, &write).value);
+
+    IORequest request = path_request(IO_REQUEST_FILE_INFO, &bstr("/file"), 0);
+    IOReply reply = Memfs__execute(&filesystem, &request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0644, reply.file_info.mode);
+    TEST_ASSERT_EQUAL(4, reply.file_info.size);
 }
 
 void test_memfs_other_user_can_read_but_cannot_truncate_or_remove_file(void)

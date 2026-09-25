@@ -175,35 +175,41 @@ static Result(FilesystemFileSize)
     return Success(FilesystemFileSize, BString__length(&text));
 }
 
-static Result(OptionalDirectoryEntry) Procfs__list(IOServiceContext context, ConstBStringPtr path, uint64_t skip)
+static Result(DirectoryEntryCount) Procfs__list(IOServiceContext context, ConstBStringPtr path,
+                                                DirectoryEntryPtr entries, size_t capacity, uint64_t offset)
 {
+    DirectoryEntryCount count = 0;
     if (BString__is_empty(path) || BString__equals(path, &bstr("/")))
     {
-        match_result(
-            ProcessRegistry__at(context, skip),
-            success(found)
-            {
-                match_optional(
-                    found,
-                    some(record)
-                    {
-                        BString name = BString__sprintf(&bstr("%llu"), record.pid);
-                        DirectoryEntry entry = DirectoryEntry__new(
-                            0, record.credentials.user_id, record.credentials.group_id, IO_MODE_TYPE_DIR | 0555, &name);
-                        return Success(OptionalDirectoryEntry, Some(DirectoryEntry, entry));
-                    },
-                    none()
-                    {
-                        return Success(OptionalDirectoryEntry, None(DirectoryEntry));
-                    }
-                );
-            },
-            error(code, message)
-            {
-                return Error(OptionalDirectoryEntry, message,
-                             code == ATOMIC_RECORD_BUSY ? IO_WAIT_FOR_DATA : IO_NO_DEVICE_FOUND);
-            }
-        );
+        while ((size_t)count < capacity && offset < PROCESS_REGISTRY_CAPACITY)
+        {
+            match_result(
+                ProcessRegistry__at(context, offset++),
+                success(found)
+                {
+                    match_optional(
+                        found,
+                        some(record)
+                        {
+                            BString name = BString__sprintf(&bstr("%llu"), record.pid);
+                            entries[count++] =
+                                DirectoryEntry__new(0, record.credentials.user_id, record.credentials.group_id,
+                                                    IO_MODE_TYPE_DIR | 0555, &name);
+                        },
+                        none()
+                        {
+                            return Success(DirectoryEntryCount, count);
+                        }
+                    );
+                },
+                error(code, message)
+                {
+                    return Error(DirectoryEntryCount, message,
+                                 code == ATOMIC_RECORD_BUSY ? IO_WAIT_FOR_DATA : IO_NO_DEVICE_FOUND);
+                }
+            );
+        }
+        return Success(DirectoryEntryCount, count);
     }
     ProcPath parsed;
     match_result(
@@ -214,33 +220,33 @@ static Result(OptionalDirectoryEntry) Procfs__list(IOServiceContext context, Con
         },
         error(code, message)
         {
-            return Error(OptionalDirectoryEntry, message, code);
+            return Error(DirectoryEntryCount, message, code);
         }
     );
     if (!BString__is_empty(&parsed.leaf))
     {
-        return Error(OptionalDirectoryEntry, bstr("Not a process directory"), IO_INVALID_PATH);
+        return Error(DirectoryEntryCount, bstr("Not a process directory"), IO_INVALID_PATH);
     }
     match_result(
         Procfs__find(context, parsed.pid),
         success(record)
         {
-            if (skip >= 5)
+            while ((size_t)count < capacity && offset < 5)
             {
-                return Success(OptionalDirectoryEntry, None(DirectoryEntry));
-            }
-            BString name = skip == 0   ? bstr("status")
-                           : skip == 1 ? bstr("cpu")
-                           : skip == 2 ? bstr("memory")
-                           : skip == 3 ? bstr("queue-wait")
-                                       : bstr("ipc");
-            DirectoryEntry entry = DirectoryEntry__new(0, record.credentials.user_id, record.credentials.group_id,
+                BString name = offset == 0   ? bstr("status")
+                               : offset == 1 ? bstr("cpu")
+                               : offset == 2 ? bstr("memory")
+                               : offset == 3 ? bstr("queue-wait")
+                                             : bstr("ipc");
+                entries[count++] = DirectoryEntry__new(0, record.credentials.user_id, record.credentials.group_id,
                                                        IO_MODE_TYPE_FILE | 0444, &name);
-            return Success(OptionalDirectoryEntry, Some(DirectoryEntry, entry));
+                offset++;
+            }
+            return Success(DirectoryEntryCount, count);
         },
         error(code, message)
         {
-            return Error(OptionalDirectoryEntry, message, code);
+            return Error(DirectoryEntryCount, message, code);
         }
     );
 }
@@ -261,5 +267,6 @@ static IOStatus Procfs__remove(IOServiceContext context, ConstBStringPtr path, F
 
 FilesystemOperations Procfs__operations(void)
 {
-    return FilesystemOperations__new(Procfs__load, Procfs__store, Procfs__list, Procfs__mkdir, Procfs__remove, 0);
+    return FilesystemOperations__new_snapshot(Procfs__load, Procfs__store, Procfs__list, Procfs__mkdir, Procfs__remove,
+                                              FilesystemOperations__unsupported_link, 0);
 }

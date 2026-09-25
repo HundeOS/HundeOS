@@ -9,10 +9,13 @@
 #define EXT2FS_ENTRYPOINT ext2fs_main_under_test
 #include "../../../../user/drivers/ext2fs/main.c"
 
-#define TEST_EXT2FS_BLOCK_COUNT 16U
+#define TEST_EXT2FS_BLOCK_COUNT 320U
+#define TEST_EXT2FS_BIG_FILE_BLOCKS (EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK + 2U)
 
 static uint8_t disk[TEST_EXT2FS_BLOCK_COUNT][EXT2FS_BLOCK_SIZE];
 static BString expected_device_path;
+static uint64_t list_calls;
+static size_t list_capacity;
 
 static void write_u16(uint8_t * data, size_t offset, uint16_t value)
 {
@@ -38,6 +41,20 @@ static void write_inode(uint32_t inode_number, FileMode mode, uint32_t size, uin
     write_u32(disk[block], offset + 4U, size);
     write_u16(disk[block], offset + 26U, (mode & EXT2FS_MODE_DIR) != 0 ? 2 : 1);
     write_u32(disk[block], offset + 40U, first_block);
+}
+
+static void write_inode_block(uint32_t inode_number, uint32_t index, uint32_t data_block)
+{
+    uint32_t inode_offset = (inode_number - 1U) * 128U;
+    uint32_t block = 5U + inode_offset / EXT2FS_BLOCK_SIZE;
+    uint32_t offset = inode_offset % EXT2FS_BLOCK_SIZE;
+
+    write_u32(disk[block], offset + 40U + index * sizeof(uint32_t), data_block);
+}
+
+static uint8_t big_file_byte(uint32_t logical_block)
+{
+    return (uint8_t)(logical_block % 251U + 1U);
 }
 
 static void write_dirent(uint8_t * block, size_t offset, uint32_t inode, uint16_t rec_len, uint8_t type,
@@ -72,11 +89,11 @@ static void build_test_disk(void)
     write_u16(disk[2], 14U, 4);
     write_u16(disk[2], 16U, 2);
 
-    for (uint32_t i = 0; i <= 12; i++)
+    for (uint32_t i = 0; i <= 292; i++)
     {
         disk[3][i / 8U] = (uint8_t)(disk[3][i / 8U] | (1U << (i % 8U)));
     }
-    for (uint32_t i = 0; i < 4; i++)
+    for (uint32_t i = 0; i < 5; i++)
     {
         disk[4][i / 8U] = (uint8_t)(disk[4][i / 8U] | (1U << (i % 8U)));
     }
@@ -84,12 +101,32 @@ static void build_test_disk(void)
     write_inode(EXT2FS_ROOT_INODE, EXT2FS_MODE_DIR | 0755, EXT2FS_BLOCK_SIZE, 10);
     write_inode(3, EXT2FS_MODE_FILE | 0644, 12, 12);
     write_inode(4, EXT2FS_MODE_DIR | 0755, EXT2FS_BLOCK_SIZE, 11);
+    write_inode(5, EXT2FS_MODE_FILE | 0755, TEST_EXT2FS_BIG_FILE_BLOCKS * EXT2FS_BLOCK_SIZE, 20);
     memcpy(disk[12], "hello world\n", 12);
+
+    for (uint32_t i = 0; i < EXT2FS_NDIR_BLOCKS; i++)
+    {
+        write_inode_block(5, i, 20U + i);
+        memset(disk[20U + i], big_file_byte(i), EXT2FS_BLOCK_SIZE);
+    }
+    write_inode_block(5, EXT2FS_NDIR_BLOCKS, 32U);
+    for (uint32_t i = 0; i < EXT2FS_POINTERS_PER_BLOCK; i++)
+    {
+        write_u32(disk[32], i * sizeof(uint32_t), 33U + i);
+        memset(disk[33U + i], big_file_byte(EXT2FS_NDIR_BLOCKS + i), EXT2FS_BLOCK_SIZE);
+    }
+    write_inode_block(5, EXT2FS_NDIR_BLOCKS + 1U, 289U);
+    write_u32(disk[289], 0, 290U);
+    write_u32(disk[290], 0, 291U);
+    write_u32(disk[290], sizeof(uint32_t), 292U);
+    memset(disk[291], big_file_byte(EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK), EXT2FS_BLOCK_SIZE);
+    memset(disk[292], big_file_byte(EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK + 1U), EXT2FS_BLOCK_SIZE);
 
     write_dirent(disk[10], 0U, EXT2FS_ROOT_INODE, 12U, EXT2FS_DIRENT_TYPE_DIR, ".");
     write_dirent(disk[10], 12U, EXT2FS_ROOT_INODE, 12U, EXT2FS_DIRENT_TYPE_DIR, "..");
     write_dirent(disk[10], 24U, 3U, 20U, 1U, "HELLO.TXT");
-    write_dirent(disk[10], 44U, 4U, EXT2FS_BLOCK_SIZE - 44U, EXT2FS_DIRENT_TYPE_DIR, "DOCS");
+    write_dirent(disk[10], 44U, 4U, 16U, EXT2FS_DIRENT_TYPE_DIR, "DOCS");
+    write_dirent(disk[10], 60U, 5U, EXT2FS_BLOCK_SIZE - 60U, EXT2FS_DIRENT_TYPE_FILE, "BIG.BIN");
 }
 
 void setUp(void)
@@ -193,6 +230,14 @@ static FilesystemDriver mounted_driver(Ext2fsVolumePtr volume)
     return FilesystemDriver__new(volume, &operations);
 }
 
+static Result(DirectoryEntryCount) counted_list(IOServiceContext context, ConstBStringPtr path,
+                                                DirectoryEntryPtr entries, size_t capacity, uint64_t offset)
+{
+    list_calls++;
+    list_capacity = capacity;
+    return Ext2fs__list(context, path, entries, capacity, offset);
+}
+
 void test_ext2fs_main_starts_channel_filesystem(void)
 {
     char * argv[] = {"ext2fs", "/dev/test", "/"};
@@ -202,17 +247,47 @@ void test_ext2fs_main_starts_channel_filesystem(void)
 void test_ext2fs_lists_directory_with_channel_pagination(void)
 {
     Ext2fsVolume volume = {.device_path = expected_device_path};
-    FilesystemDriver driver = mounted_driver(&volume);
+    match_result(Ext2fsVolume__mount(&volume),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    FilesystemOperations operations = Ext2fs__operations();
+    operations.list = counted_list;
+    FilesystemDriver driver = FilesystemDriver__new(&volume, &operations);
+    list_calls = 0;
+    list_capacity = 0;
     IORequest request = request_for(IO_REQUEST_LIST_DIR, 0, &bstr("/"));
     IOReply reply = FilesystemDriver__execute(&driver, &request);
     TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL(1, reply.value);
-    TEST_ASSERT_EQUAL_STRING("HELLO.TXT", reply.entry.name);
-    request.offset = 1;
+    TEST_ASSERT_EQUAL(3, reply.directory.count);
+    TEST_ASSERT_EQUAL(1, list_calls);
+    TEST_ASSERT_EQUAL(IO_DIRECTORY_BATCH_CAPACITY, list_capacity);
+    TEST_ASSERT_EQUAL_STRING("HELLO.TXT", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL_STRING("DOCS", reply.directory.entries[1].name);
+    TEST_ASSERT_EQUAL_STRING("BIG.BIN", reply.directory.entries[2].name);
+    request.offset = 3;
+    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).directory.count);
+    TEST_ASSERT_EQUAL(2, list_calls);
+}
+
+void test_ext2fs_reports_file_information_without_channel_pagination(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_FILE_INFO, 0, &bstr("/HELLO.TXT"));
+    IOReply reply = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0644, reply.file_info.mode);
+    TEST_ASSERT_EQUAL(12, reply.file_info.size);
+
+    request = request_for(IO_REQUEST_FILE_INFO, 0, &bstr("/DOCS"));
     reply = FilesystemDriver__execute(&driver, &request);
-    TEST_ASSERT_EQUAL_STRING("DOCS", reply.entry.name);
-    request.offset = 2;
-    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR, reply.file_info.mode & IO_MODE_TYPE_MASK);
+
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/DOCS"));
+    request.flags = IO_OPEN_READ;
+    TEST_ASSERT_EQUAL(IO_INVALID_PATH, FilesystemDriver__execute(&driver, &request).status);
 }
 
 void test_ext2fs_owns_multiple_handles_and_offsets(void)
@@ -252,7 +327,7 @@ void test_ext2fs_owns_multiple_handles_and_offsets(void)
     TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 100, 42));
 }
 
-void test_ext2fs_rejects_executable_open_until_execute_permissions_are_supported(void)
+void test_ext2fs_requires_execute_permission_and_opens_executable_files(void)
 {
     Ext2fsVolume volume = {.device_path = expected_device_path};
     FilesystemDriver driver = mounted_driver(&volume);
@@ -260,12 +335,47 @@ void test_ext2fs_rejects_executable_open_until_execute_permissions_are_supported
     IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/HELLO.TXT"));
     request.flags = IO_OPEN_READ | IO_OPEN_EXECUTE;
     IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, opened.status);
+    TEST_ASSERT_EQUAL(0, FilesystemFiles__len(&driver.files));
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/BIG.BIN"));
+    request.flags = IO_OPEN_READ | IO_OPEN_EXECUTE;
+    opened = FilesystemDriver__execute(&driver, &request);
     TEST_ASSERT_EQUAL(IO_OK, opened.status);
     TEST_ASSERT_EQUAL(1, FilesystemFiles__len(&driver.files));
     request.flags = IO_OPEN_EXECUTE;
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, FilesystemDriver__execute(&driver, &request).status);
     request.flags = IO_OPEN_WRITE | IO_OPEN_EXECUTE;
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, FilesystemDriver__execute(&driver, &request).status);
+}
+
+void test_ext2fs_streams_across_direct_single_and_double_indirect_boundaries(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    uint8_t data[16];
+    FilesystemFileSize direct_boundary = EXT2FS_NDIR_BLOCKS * EXT2FS_BLOCK_SIZE;
+    match_result(
+        Ext2fs__read(&volume, &bstr("/BIG.BIN"), direct_boundary - 8U, data, sizeof(data)),
+        success(size)
+        {
+            TEST_ASSERT_EQUAL(sizeof(data), size);
+            TEST_ASSERT_EACH_EQUAL_UINT8(big_file_byte(EXT2FS_NDIR_BLOCKS - 1U), data, 8U);
+            TEST_ASSERT_EACH_EQUAL_UINT8(big_file_byte(EXT2FS_NDIR_BLOCKS), data + 8U, 8U);
+        },
+        error_test_fail()
+    );
+
+    FilesystemFileSize double_boundary = (EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK) * EXT2FS_BLOCK_SIZE;
+    match_result(
+        Ext2fs__read(&volume, &bstr("/BIG.BIN"), double_boundary - 8U, data, sizeof(data)),
+        success(size)
+        {
+            TEST_ASSERT_EQUAL(sizeof(data), size);
+            TEST_ASSERT_EACH_EQUAL_UINT8(big_file_byte(EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK - 1U), data, 8U);
+            TEST_ASSERT_EACH_EQUAL_UINT8(big_file_byte(EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK), data + 8U, 8U);
+        },
+        error_test_fail()
+    );
 }
 
 void test_ext2fs_writes_chunks_and_reopens_file(void)
@@ -302,14 +412,57 @@ void test_ext2fs_creates_and_removes_directory(void)
     IORequest request = request_for(IO_REQUEST_MKDIR, 0, &bstr("/NEWDIR"));
     TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
     request = request_for(IO_REQUEST_LIST_DIR, 0, &bstr("/"));
-    request.offset = 2;
+    request.offset = 3;
     IOReply reply = FilesystemDriver__execute(&driver, &request);
-    TEST_ASSERT_EQUAL_STRING("NEWDIR", reply.entry.name);
+    TEST_ASSERT_EQUAL_STRING("NEWDIR", reply.directory.entries[0].name);
     request = request_for(IO_REQUEST_REMOVE, 0, &bstr("/NEWDIR"));
     TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
     request = request_for(IO_REQUEST_LIST_DIR, 0, &bstr("/"));
-    request.offset = 2;
-    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
+    request.offset = 3;
+    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).directory.count);
+}
+
+void test_ext2fs_creates_hard_link_and_preserves_inode_until_last_name_is_removed(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_LINK, 0, &bstr("/HELLO.TXT"));
+    IORequest__set_target_path(&request, &bstr("/HELLO.LINK"));
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+
+    request = request_for(IO_REQUEST_REMOVE, 0, &bstr("/HELLO.TXT"));
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/HELLO.LINK"));
+    request.flags = IO_OPEN_READ;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    request = request_for(IO_REQUEST_READ, opened.value, &empty_bstr());
+    request.count = sizeof("hello world\n") - 1;
+    IOReply reply = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(sizeof("hello world\n") - 1, reply.value);
+    TEST_ASSERT_EQUAL_MEMORY("hello world\n", reply.data, sizeof("hello world\n") - 1);
+}
+
+void test_ext2fs_writes_inside_directories_created_after_a_hard_link(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_LINK, 0, &bstr("/HELLO.TXT"));
+    IORequest__set_target_path(&request, &bstr("/HELLO.LINK"));
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+
+    request = request_for(IO_REQUEST_MKDIR, 0, &bstr("/MOVED/"));
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    request = request_for(IO_REQUEST_MKDIR, 0, &bstr("/MOVED/B"));
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/MOVED/B/COPY"));
+    request.flags = IO_OPEN_WRITE;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    request = request_for(IO_REQUEST_WRITE, opened.value, &bstr("copy"));
+    IOReply written = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, written.status);
+    TEST_ASSERT_EQUAL(4, written.value);
 }
 
 void test_ext2fs_preserves_two_full_write_chunks_and_rejects_oversized_requests(void)

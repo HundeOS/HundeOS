@@ -12,11 +12,11 @@
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 void IO__set_startup_stdio(IOHandle input, IOHandle output, IOHandle error);
+IOStatus IO__set_terminal_foreground(uint64_t pid);
 
-IOHandle open(ConstBStringPtr path, Flags flags);
-ByteCount read(IOHandle handle, char * buf, size_t size);
-ByteCount write(IOHandle handle, char * buf, size_t size);
 IOHandle IO__open(ConstBStringPtr path, Flags flags);
+ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size);
+ByteCount IO__write_bytes(IOHandle handle, const char * buf, size_t size);
 IOHandle accept(IOHandle handle);
 IOHandle IO__accept(IOHandle handle);
 BString IO__path_from_arg(ConstBStringPtr arg);
@@ -24,9 +24,10 @@ BString IO__path_join(ConstBStringPtr base, ConstBStringPtr child);
 ByteCount IO__read(IOHandle handle, BStringPtr buffer);
 Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes);
 ByteCount IO__write(IOHandle handle, ConstBStringPtr text);
-IOStatus close(IOHandle handle);
+IOStatus IO__close(IOHandle handle);
 DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries);
 DirectoryEntryCount IO__list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries);
+Result(IOFileInfo) IO__file_info(ConstBStringPtr path);
 const char * io_status_string(IOStatus status);
 IOStatus make_dir(ConstBStringPtr path);
 IOStatus IO__make_dir(ConstBStringPtr path);
