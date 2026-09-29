@@ -195,7 +195,7 @@ void test_uart_rx_empty_read_waits_but_zero_length_read_completes(void)
     reply = UartReceiver__transfer(&receiver, &request);
     TEST_ASSERT_EQUAL_INT(IO_OK, reply.status);
     TEST_ASSERT_EQUAL_INT64(0, reply.value);
-    IODiagnostics totals = IODiagnostics__snapshot(&diagnostics);
+    IODiagnosticsSnapshot totals = IODiagnostics__snapshot(&diagnostics);
     TEST_ASSERT_EQUAL_UINT64(2, totals.uart_reads);
     TEST_ASSERT_EQUAL_UINT64(1, totals.uart_empty);
     TEST_ASSERT_EQUAL_UINT64(0, totals.uart_bytes);
@@ -355,7 +355,7 @@ void test_uart_rx_main_maps_registers_subscribes_irq_and_publishes_read_data(voi
     TEST_ASSERT_EQUAL_UINT64(3, fake_service_wait_count);
     TEST_ASSERT_EQUAL_UINT64(3, fake_uart_read_count);
     TEST_ASSERT_EQUAL_CHAR('a', fake_io_buffer[0]);
-    IODiagnostics totals = IODiagnostics__snapshot(&diagnostics);
+    IODiagnosticsSnapshot totals = IODiagnostics__snapshot(&diagnostics);
     TEST_ASSERT_EQUAL_UINT64(3, totals.uart_bytes);
     TEST_ASSERT_EQUAL_UINT64(1, totals.uart_irqs);
     TEST_ASSERT_EQUAL_CHAR('b', fake_io_buffer[1]);

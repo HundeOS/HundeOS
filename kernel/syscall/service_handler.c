@@ -9,6 +9,7 @@
 #include "../service/service_directory.h"
 #include "../service/device_registry.h"
 #include "../boot_info.h"
+#include "../arch/cpu.h"
 
 static BString no_process = bstr("No process for service syscall");
 static BString unsupported_operation = bstr("Unsupported service operation");
@@ -131,6 +132,24 @@ Result(SystemCallResult)
                             return Error(SystemCallResult, bstr("Queue wait pending"), SYSCALL_IO_BLOCK);
                         }
                         return Success(SystemCallResult, value);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
+                );
+            }
+            if (service_operation == SERVICE_QUEUE_DATA_AVAILABLE)
+            {
+                match_result(
+                    Scheduler__queue_data_available(kernel->scheduler, process, arg2),
+                    success(notification)
+                    {
+                        if (notification.reschedule)
+                        {
+                            CPU__request_reschedule(notification.cpu);
+                        }
+                        return Success(SystemCallResult, SERVICE_OK);
                     },
                     error(code, message)
                     {
@@ -429,7 +448,19 @@ Result(SystemCallResult)
                                                 system_info.interrupt_controller.details.plic.target_hart_id *
                                                 SERVICE_PLIC_ENABLE_HART_STRIDE;
                                         }
-                                        return Success(SystemCallResult, SERVICE_OK);
+                                        match_result(
+                                            Scheduler__promote_realtime(kernel->scheduler, process),
+                                            success(_)
+                                            {
+                                                return Success(SystemCallResult, SERVICE_OK);
+                                            },
+                                            error(code, message)
+                                            {
+                                                IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher,
+                                                                                         process);
+                                                return Error(SystemCallResult, message, SERVICE_SCHEDULER_ERROR);
+                                            }
+                                        );
                                     },
                                     error(code, message)
                                     {

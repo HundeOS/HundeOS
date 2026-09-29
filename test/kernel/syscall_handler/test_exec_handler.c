@@ -279,6 +279,30 @@ void test_exec_handler_nowait_spawns_without_parking_parent()
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
 }
 
+void test_exec_redirect_preserves_requested_process_name(void)
+{
+    filesystem.redirect_open = true;
+    SpawnRequest request =
+        test_spawn_request(cstr(exec_path), P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
+
+    match_result(
+        Exec__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
+        success(pid)
+        {
+            match_optional(
+                Scheduler__find_process_by_pid(kernel->scheduler, pid),
+                some(child)
+                {
+                    TEST_ASSERT_TRUE(filesystem.redirected);
+                    TEST_ASSERT_EQUAL_BSTRING(exec_path, child->name);
+                },
+                none_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+}
+
 void test_exec_request_handler_passes_spawn_arguments_to_process_argv(void)
 {
     SpawnArguments arguments = SpawnArguments__new();

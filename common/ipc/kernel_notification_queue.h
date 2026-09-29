@@ -15,28 +15,36 @@ typedef struct KernelNotification
 {
     KernelNotificationID id;
     KernelNotificationSequence sequence;
+    uint64_t occurred_at_usec;
 } KernelNotification;
 
 typedef KernelNotification * KernelNotificationPtr;
+typedef const KernelNotification * ConstKernelNotificationPtr;
 OptionalDef(KernelNotification);
 
-static inline KernelNotification KernelNotification__new(KernelNotificationID id, KernelNotificationSequence sequence)
+static inline KernelNotification KernelNotification__new(KernelNotificationID id, KernelNotificationSequence sequence,
+                                                         uint64_t occurred_at_usec)
 {
-    return (KernelNotification){.id = id, .sequence = sequence};
+    return (KernelNotification){.id = id, .sequence = sequence, .occurred_at_usec = occurred_at_usec};
 }
 
 AtomicFixedArrayDefine(KernelNotificationSequence, KERNEL_NOTIFICATION_QUEUE_CAPACITY, KernelNotificationSlots);
+AtomicFixedArrayDefine(uint64_t, KERNEL_NOTIFICATION_QUEUE_CAPACITY, KernelNotificationTimestamps);
 
 typedef struct KernelNotificationQueue
 {
     KernelNotificationSlots pending;
+    KernelNotificationTimestamps occurred_at_usec;
 } KernelNotificationQueue;
 
 typedef KernelNotificationQueue * KernelNotificationQueuePtr;
 
+_Static_assert(sizeof(KernelNotificationQueue) <= KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE,
+               "Kernel notification queue exceeds its shared page");
+
 KernelNotificationQueue KernelNotificationQueue__new(void);
 Result(CollectionCode) KernelNotificationQueue__publish(KernelNotificationQueuePtr self, KernelNotificationID id,
-                                                        KernelNotificationSequence sequence);
+                                                        KernelNotificationSequence sequence, uint64_t occurred_at_usec);
 Optional(KernelNotification) KernelNotificationQueue__pop(KernelNotificationQueuePtr self);
 bool KernelNotificationQueue__has_pending(KernelNotificationQueuePtr self);
 

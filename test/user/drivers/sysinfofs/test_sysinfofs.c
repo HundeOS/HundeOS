@@ -25,13 +25,11 @@ FilesystemOperations FilesystemOperations__new_snapshot(FilesystemLoad load, Fil
                                                         FilesystemLink link, FilesystemFileSize capacity)
 {
     return (FilesystemOperations){.source_mode = FILESYSTEM_SOURCE_SNAPSHOT,
-                                  .source.snapshot = {.load = load},
-                                  .store = store,
+                                  .source.snapshot = {.load = load, .store = store, .write_capacity = capacity},
                                   .list = list,
                                   .mkdir = mkdir,
                                   .remove = remove,
-                                  .link = link,
-                                  .write_capacity = capacity};
+                                  .link = link};
 }
 
 IOStatus FilesystemOperations__unsupported_link(IOServiceContext context, ConstBStringPtr source_path,
@@ -82,7 +80,7 @@ void test_sysinfo_operations_are_read_only_and_reject_unknown_paths(void)
         success_test_fail(),
                  error_test_ok()
     );
-    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, operations.store(&hardware, &bstr("/sysinfo"), data, 0));
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, operations.source.snapshot.store(&hardware, &bstr("/sysinfo"), data, 0));
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, operations.mkdir(&hardware, &bstr("/directory")));
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, operations.remove(&hardware, &bstr("/sysinfo"), 0));
     DirectoryEntry entries[1];

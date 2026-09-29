@@ -135,9 +135,11 @@ static int QueueTest__server(void)
             IO__print(&bstr("queue_test: listening\n"));
             while (true)
             {
+                ConstIpcEventPtr event = IpcDoorbell__event(IpcPlatform__local_doorbell());
+                IpcEventGeneration observed = IpcPlatform__prepare_wait(event);
                 if (!QueueTest__serve_once(&queues, arrivals))
                 {
-                    IpcPlatform__wait_event();
+                    IpcPlatform__wait_event(event, observed);
                 }
             }
         },

@@ -11,7 +11,8 @@ static unsigned fail_start;
 static bool school_started;
 static bool handed_off;
 static bool fail_handoff;
-static BString started[9];
+static bool disk_ready_waited;
+static BString started[8];
 static BString mounted[3];
 static BootVirtioMmioInfo virtio_mmio;
 
@@ -21,6 +22,7 @@ void setUp(void)
     starts = mounts = fail_start = 0;
     school_started = false;
     handed_off = fail_handoff = false;
+    disk_ready_waited = false;
     registers[31 * 0x200 / 4] = 0x74726976;
     registers[31 * 0x200 / 4 + 1] = 1;
     registers[31 * 0x200 / 4 + 2] = 2;
@@ -39,6 +41,13 @@ ServiceCode service_become_service(void)
 
 ServiceCode service_publish_ready(ConstBStringPtr name)
 {
+    return SERVICE_OK;
+}
+
+ServiceCode service_wait_ready(ConstBStringPtr name)
+{
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio1"), *name);
+    disk_ready_waited = true;
     return SERVICE_OK;
 }
 
@@ -65,7 +74,7 @@ void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 Result(ServiceCode)
     BootService__bootstrap(ConstBStringPtr path, ConstBStringPtr arg0, ConstBStringPtr arg1, ConstBStringPtr ready)
 {
-    TEST_ASSERT_LESS_THAN(9, starts);
+    TEST_ASSERT_LESS_THAN(8, starts);
     started[starts++] = *ready;
     return starts == fail_start ? Error(ServiceCode, bstr("failed"), SERVICE_SCHEDULER_ERROR)
                                 : Success(ServiceCode, SERVICE_OK);
@@ -133,13 +142,14 @@ void test_mama_establishes_boot_mounts_before_starting_school(void)
 {
     TEST_ASSERT_EQUAL(1, mama_main());
     TEST_ASSERT_TRUE(school_started);
-    TEST_ASSERT_EQUAL(9, starts);
+    TEST_ASSERT_TRUE(disk_ready_waited);
+    TEST_ASSERT_EQUAL(8, starts);
     TEST_ASSERT_EQUAL_BSTRING(bstr("hundekanal-warter"), started[0]);
     TEST_ASSERT_EQUAL_BSTRING(bstr("hunde-puffer"), started[1]);
     TEST_ASSERT_EQUAL_BSTRING(bstr("hund-unterbrict"), started[2]);
     TEST_ASSERT_EQUAL_BSTRING(bstr(IO_FILESYSTEM_SERVICE), started[3]);
     TEST_ASSERT_EQUAL_BSTRING(bstr(IO_SYSTEM_SERVICE), started[4]);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio1"), started[7]);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/config"), started[7]);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin"), mounted[0]);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot"), mounted[1]);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/config"), mounted[2]);
@@ -147,7 +157,7 @@ void test_mama_establishes_boot_mounts_before_starting_school(void)
 
 void test_mama_does_not_start_school_when_a_boot_service_fails(void)
 {
-    fail_start = 9;
+    fail_start = 8;
     TEST_ASSERT_EQUAL(1, mama_main());
     TEST_ASSERT_FALSE(school_started);
     TEST_ASSERT_EQUAL(2, mounts);

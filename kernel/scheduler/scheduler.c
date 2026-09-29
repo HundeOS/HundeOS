@@ -66,6 +66,32 @@ static Result(ProcessPtr)
 static Optional(ProcessPtr) Scheduler__current_process_locked(SchedulerPtr self, CPUID cpu);
 static ProcessTable Scheduler__all_processes_for_all_cpus_locked(SchedulerPtr self);
 static ProcessTable Scheduler__process_snapshot_locked(SchedulerPtr self);
+static bool Scheduler__queue_wait_changed(SchedulerPtr self, ProcessPtr process);
+
+static bool CPUScheduler__owns_process(CPUSchedulerPtr self, ProcessPtr process)
+{
+    return !is_nothing(ProcessTable__find_item(&self->processes, process));
+}
+
+static Optional(CPUSchedulerPtr) Scheduler__scheduler_owning_process_locked(SchedulerPtr self, ProcessPtr process)
+{
+    for_each_hashtable(
+        CPUSchedulers,
+        self->schedulers,
+        bucket_index,
+        entry_index,
+        cpu_id,
+        cpu,
+        {
+            if (CPUScheduler__owns_process(cpu, process))
+            {
+                return Some(CPUSchedulerPtr, cpu);
+            }
+        }
+    );
+
+    return None(CPUSchedulerPtr);
+}
 
 static BString shared_memory_error = bstr("Shared page operation failed");
 
@@ -446,6 +472,70 @@ Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process
     return Error(Address, bstr("Invalid queue operation"), QUEUE_INVALID);
 }
 
+static Result(SchedulerWake) Scheduler__wake_shared_wait_locked(SchedulerPtr self, ProcessPtr process)
+{
+    bool userspace_waiting = Process__shared_wait_armed(process);
+    Process__wake_shared_wait(process);
+    bool parked_waiting = process->state == PROC_STATE_WAITING &&
+                          Process__has_parked_operation(process, PARK_WAIT_QUEUE, &None(OperationKey)) &&
+                          Scheduler__queue_wait_changed(self, process);
+    if (parked_waiting && Process__mark_parked_operation_ready(process, PARK_WAIT_QUEUE, &None(OperationKey),
+                                                               &Some(ReturnCode, QUEUE_WAIT_CHANGED)))
+    {
+        process->state = PROC_STATE_INTERRUPTED;
+        QueueWaitUsage__wake(&process->queue_wait_usage, QUEUE_WAIT_CHANGED);
+        Queues__clear_wait(&self->queues, process);
+    }
+    else if (!userspace_waiting || (process->state != PROC_STATE_READY && process->state != PROC_STATE_INTERRUPTED))
+    {
+        return Success(SchedulerWake, SchedulerWake__new(false, 0));
+    }
+
+    match_optional(
+        Scheduler__scheduler_owning_process_locked(self, process),
+        some(scheduler)
+        {
+            return Success(SchedulerWake, SchedulerWake__new(true, scheduler->cpu));
+        },
+        none_do_nothing()
+    );
+    return Error(SchedulerWake, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
+Result(SchedulerWake) Scheduler__wake_shared_wait(SchedulerPtr self, ProcessPtr process)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            cs_return Scheduler__wake_shared_wait_locked(self, process);
+        }
+    );
+    return Error(SchedulerWake, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
+Result(SchedulerWake)
+    Scheduler__queue_data_available(SchedulerPtr self, ProcessPtr process, QueueConnectionID connection)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_result(
+                Queues__peer_process(&self->queues, process, connection),
+                success(peer)
+                {
+                    cs_return Scheduler__wake_shared_wait_locked(self, peer);
+                },
+                error(code, message)
+                {
+                    cs_return Error(SchedulerWake, message, code);
+                }
+            );
+        }
+    );
+
+    return Error(SchedulerWake, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
 static Tick CPUScheduler__sleep_ticks_from_usec(uint64_t usec)
 {
     Tick ticks = (usec + 999ULL) / 1000ULL;
@@ -500,7 +590,7 @@ bool process_in_state(ProcessPtr * proc, void * compare_state)
     return state & compare;
 }
 
-static bool CPUScheduler__can_resume(ProcessPtr * process, void * compare_state)
+static bool CPUScheduler__can_resume(ProcessPtr * process, void * context)
 {
     ProcessPtr proc = *process;
     switch (proc->state)
@@ -591,10 +681,12 @@ int longest_waiting(ProcessPtr * proc1, ProcessPtr * proc2)
     {
         return 1;
     }
+
     if ((*proc2)->last_tick < (*proc1)->last_tick)
     {
         return -1;
     }
+
     return 0;
 }
 
@@ -639,12 +731,106 @@ static Optional(ProcessPtr) CPUScheduler__select_ready(CPUSchedulerPtr self)
         },
         none_do_nothing()
     );
-    ProcessState ready_state = PROC_STATE_READY | PROC_STATE_INTERRUPTED;
-    ProcessTable ready = ProcessTable__filter(&self->processes, CPUScheduler__can_resume, &ready_state);
+    ProcessTable ready = ProcessTable__filter(&self->processes, CPUScheduler__can_resume, self);
     ProcessTable receivers = ProcessTable__filter(&ready, process_has_pending_messages, self);
     ProcessTable sorted = ProcessTable__sort_desc(ProcessTable__len(&receivers) != 0 ? &receivers : &ready,
                                                   service_priority_then_longest_waiting);
     return ProcessTable__at(&sorted, 0);
+}
+
+typedef struct SpeculativeWaitCandidate
+{
+    ProcessPtr process;
+    uint64_t dependency_weight;
+    uint64_t recent_active_basis_points;
+} SpeculativeWaitCandidate;
+
+typedef SpeculativeWaitCandidate * SpeculativeWaitCandidatePtr;
+typedef const SpeculativeWaitCandidate * ConstSpeculativeWaitCandidatePtr;
+OptionalDef(SpeculativeWaitCandidate);
+
+static bool Process__speculative_wait_eligible(ProcessPtr self, const OptionalPtr(ProcessPtr) current)
+{
+    bool schedulable = self->state == PROC_STATE_READY || self->state == PROC_STATE_INTERRUPTED;
+    match_optional(*current,
+        some(process)
+        {
+            schedulable = schedulable || process == self;
+        },
+        none_do_nothing()
+    );
+    return schedulable && !Process__shared_wait_ready(self);
+}
+
+static SpeculativeWaitCandidate SpeculativeWaitCandidate__new(SchedulerPtr scheduler, ProcessPtr process)
+{
+    uint64_t now = CPU__time_usec();
+    ProcessCPUUsage usage = CPUUsage__snapshot(&process->cpu_usage, now, Process__user_wait_usec(process, now));
+    return (SpeculativeWaitCandidate){
+        .process = process,
+        .dependency_weight = RequestGraph__dependency_weight(&scheduler->request_graph, process),
+        .recent_active_basis_points = usage.short_basis_points,
+    };
+}
+
+static bool SpeculativeWaitCandidate__precedes(ConstSpeculativeWaitCandidatePtr self,
+                                               ConstSpeculativeWaitCandidatePtr other)
+{
+    if (self->dependency_weight != other->dependency_weight)
+    {
+        return self->dependency_weight > other->dependency_weight;
+    }
+    if (self->recent_active_basis_points != other->recent_active_basis_points)
+    {
+        return self->recent_active_basis_points > other->recent_active_basis_points;
+    }
+
+    return self->process->last_tick < other->process->last_tick;
+}
+
+static Optional(ProcessPtr)
+    CPUScheduler__select_speculative_waiter(CPUSchedulerPtr self, const OptionalPtr(ProcessPtr) current)
+{
+    SchedulerPtr scheduler = self->idle_process->kernel->scheduler;
+    Optional(SpeculativeWaitCandidate) selected = None(SpeculativeWaitCandidate);
+    for_each_fa(
+        ProcessTable,
+        self->processes,
+        index,
+        process,
+        {
+            if (!Process__speculative_wait_eligible(process, current))
+            {
+                continue;
+            }
+            SpeculativeWaitCandidate candidate = SpeculativeWaitCandidate__new(scheduler, process);
+            match_optional(
+                selected,
+                some(existing)
+                {
+                    if (SpeculativeWaitCandidate__precedes(&candidate, &existing))
+                    {
+                        selected = Some(SpeculativeWaitCandidate, candidate);
+                    }
+                },
+                none()
+                {
+                    selected = Some(SpeculativeWaitCandidate, candidate);
+                }
+            );
+        }
+    );
+
+    match_optional(
+        selected,
+        some(candidate)
+        {
+            QueueWaitUsage__select_speculative(&candidate.process->queue_wait_usage);
+            return Some(ProcessPtr, candidate.process);
+        },
+        none_do_nothing()
+    );
+    return None(ProcessPtr);
 }
 
 Optional(ProcessPtr) CPUScheduler__current_process(CPUSchedulerPtr self)
@@ -788,6 +974,7 @@ static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, C
             );
         }
     );
+
     return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
@@ -833,6 +1020,7 @@ static bool Scheduler__queue_wait_changed(SchedulerPtr self, ProcessPtr process)
             events_pending = ServiceEvents__len(&process->service.events) != 0;
         }
     );
+
     return events_pending || Queues__wait_changed(&self->queues, process) ||
            Buffers__has_pending_notifications(&self->buffers, process) ||
            IRQDispatcher__has_pending_notifications(process->kernel->irq_dispatcher, process);
@@ -880,7 +1068,7 @@ static Result(QueueCode)
 Result(QueueWaitCode)
     Scheduler__queue_wait(SchedulerPtr self, ProcessPtr process, Address snapshots, uint64_t count, Tick ticks)
 {
-    if (count > QUEUE_WAIT_LIMIT || ticks == 0 || ticks > QUEUE_WAIT_MAX_TICKS)
+    if (count > QUEUE_WAIT_LIMIT || ticks > QUEUE_WAIT_MAX_TICKS)
     {
         return Error(QueueWaitCode, bstr("Invalid queue wait bounds"), QUEUE_INVALID);
     }
@@ -918,8 +1106,11 @@ Result(QueueWaitCode)
                                 &Some(ProcessID, process->pid), &Some(SchedulerPtr, self));
                             Optional(Continuation) continuation =
                                 Some(Continuation, SystemCall__Complete);
-                            Optional(OperationKey) deadline =
-                                Some(OperationKey, sched->last_tick + ticks);
+                            Optional(OperationKey) deadline = None(OperationKey);
+                            if (ticks != QUEUE_WAIT_INDEFINITE_TICKS)
+                            {
+                                deadline = Some(OperationKey, sched->last_tick + ticks);
+                            }
                                                         // Only mark parked here. The syscall dispatcher switches after this lock is released.
                             match_result(
                                 CPUScheduler__park(sched, process, context, &continuation,
@@ -944,10 +1135,11 @@ Result(QueueWaitCode)
             Queues__clear_wait(&self->queues, process);
         }
     );
+
     return Error(QueueWaitCode, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
-static void Scheduler__poll_queue_waiters(SchedulerPtr self, CPUSchedulerPtr cpu)
+static void CPUScheduler__poll_queue_waiters(SchedulerPtr self, CPUSchedulerPtr cpu)
 {
     for_each_fa(
         ProcessTable,
@@ -972,6 +1164,21 @@ static void Scheduler__poll_queue_waiters(SchedulerPtr self, CPUSchedulerPtr cpu
             {
                 Queues__clear_wait(&self->queues, process);
             }
+        }
+    );
+}
+
+static void Scheduler__poll_queue_waiters(SchedulerPtr self)
+{
+    for_each_hashtable(
+        CPUSchedulers,
+        self->schedulers,
+        bucket_index,
+        entry_index,
+        cpu,
+        scheduler,
+        {
+            CPUScheduler__poll_queue_waiters(self, scheduler);
         }
     );
 }
@@ -1122,6 +1329,27 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const Opti
         none()
         {
             match_optional(
+                CPUScheduler__select_speculative_waiter(self, &current),
+                some(waiter)
+                {
+                    match_optional(
+                        current,
+                        some(proc)
+                        {
+                            if (proc == waiter)
+                            {
+                                CPUScheduler__continue_current(self, proc);
+                                return None(ContextSwitch);
+                            }
+                        },
+                        none_do_nothing()
+                    );
+                    waiter->state = PROC_STATE_SWITCHING_CONTEXT;
+                    return Some(ContextSwitch, ContextSwitch__new(waiter, &current));
+                },
+                none_do_nothing()
+            );
+            match_optional(
                 current,
                 some(proc)
                 {
@@ -1167,6 +1395,15 @@ static Optional(ContextSwitch) CPUScheduler__yield_waiting(CPUSchedulerPtr self,
         },
         none()
         {
+            match_optional(
+                CPUScheduler__select_speculative_waiter(self, &None(ProcessPtr)),
+                some(waiter)
+                {
+                    waiter->state = PROC_STATE_SWITCHING_CONTEXT;
+                    return Some(ContextSwitch, ContextSwitch__new(waiter, &Some(ProcessPtr, waiting_proc)));
+                },
+                none_do_nothing()
+            );
             ProcessPtr idle = self->idle_process;
             idle->state = PROC_STATE_SWITCHING_CONTEXT;
             return Some(ContextSwitch, ContextSwitch__new(idle, &Some(ProcessPtr, waiting_proc)));
@@ -1253,6 +1490,7 @@ static ProcessTable Scheduler__process_snapshot_locked(SchedulerPtr self)
             ProcessTable__push_all(&processes, &sched->processes);
         }
     );
+
     return processes;
 }
 
@@ -1479,6 +1717,7 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
             );
         }
     );
+
     BString no_scheduler = BString__sprintf(&bstr("Process not found: %i\n"), pid);
     return Error(ProcessID, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
@@ -1581,6 +1820,7 @@ Result(ProcessCredentials) Scheduler__process_credentials(SchedulerPtr self, Pro
             );
         }
     );
+
     return Error(ProcessCredentials, process_not_found, PROCESS_CREDENTIALS_NOT_FOUND);
 }
 
@@ -1604,6 +1844,7 @@ Result(ServiceCode)
             );
         }
     );
+
     return Error(ServiceCode, process_not_found, SERVICE_PERMISSION_DENIED);
 }
 
@@ -1855,6 +2096,7 @@ static Result(ProcessPtr)
             );
         }
     );
+
     BString no_scheduler = BString__sprintf(&bstr("Process not found: %i\n"), proc->pid);
     return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
@@ -2196,6 +2438,35 @@ Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc,
     );
 
     return Error(CPUID, unreachable_code, SCHEDULER_GENERAL_ERROR);
+}
+
+Result(SchedulerScheduleStatus) Scheduler__promote_realtime(SchedulerPtr self, ProcessPtr process)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_optional(
+                Scheduler__scheduler_owning_process_locked(self, process),
+                some(owner)
+                {
+                    if (!owner->started)
+                    {
+                        cs_return Error(SchedulerScheduleStatus, bstr("Process CPU is not started"),
+                                        SCHEDULER_NOT_STARTED);
+                    }
+                    process->process_class = PROCESS_CLASS_REALTIME_SERVICE;
+                    Scheduler__forget_preferred(self, process);
+                    cs_return Success(SchedulerScheduleStatus, SCHEDULER_SCHEDULE_OK);
+                },
+                none()
+                {
+                    cs_return Error(SchedulerScheduleStatus, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
+                }
+            );
+        }
+    );
+
+    return Error(SchedulerScheduleStatus, unreachable_code, SCHEDULER_GENERAL_ERROR);
 }
 
 Result(CPUID) Scheduler__cpu_for_process(SchedulerPtr self, ProcessPtr process)
@@ -2701,7 +2972,7 @@ Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, const
                         none_do_nothing()
                     );
                     scheduler->switching_out = None(ProcessPtr);
-                    Scheduler__poll_queue_waiters(self, scheduler);
+                    Scheduler__poll_queue_waiters(self);
                     Scheduler__poll_exec_load_waiters(scheduler);
                     Scheduler__refresh_preferred(self);
                                  // cs_return unlocks before evaluating its return expression.
@@ -2744,6 +3015,7 @@ void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID 
                 CPUSchedulers__get(&self->schedulers, cpu),
                 some(scheduler)
                 {
+                    Scheduler__poll_queue_waiters(self);
                     Scheduler__refresh_preferred(self);
                     context_switch = CPUScheduler__yield_waiting(scheduler, waiting_proc);
                 },

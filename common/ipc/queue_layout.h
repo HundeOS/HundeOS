@@ -9,10 +9,12 @@
 
 #define QUEUE_LIMIT 1024U
 #define QUEUE_LISTENER_LIMIT 1024U
+#define QUEUE_CLIENT_CONNECTION_LIMIT 64U
 #define QUEUE_PAGE_SIZE 4096ULL
 #define QUEUE_LISTENER_BASE ((Address)0x74000000ULL)
 #define QUEUE_CONNECTION_BASE ((Address)0x72400000ULL)
 #define QUEUE_CONNECTION_SIZE (3 * QUEUE_PAGE_SIZE)
+#define QUEUE_PEER_DOORBELL_BASE ((Address)0x73000000ULL)
 #define QUEUE_CAPACITY 32U
 
 typedef enum QueueCode
@@ -83,12 +85,15 @@ _Static_assert(KERNEL_NOTIFICATION_QUEUE_ADDRESS + KERNEL_NOTIFICATION_QUEUE_PAG
                "Kernel notification queue overlaps connections");
 _Static_assert(QUEUE_CONNECTION_BASE + QUEUE_LIMIT * QUEUE_CONNECTION_SIZE <= 0x73000000ULL,
                "Connection region overflow");
+_Static_assert(QUEUE_PEER_DOORBELL_BASE + QUEUE_LIMIT * QUEUE_PAGE_SIZE <= QUEUE_LISTENER_BASE,
+               "Peer doorbell region overlaps arrivals");
 _Static_assert(QUEUE_CONNECTION_BASE + QUEUE_LIMIT * QUEUE_CONNECTION_SIZE <= QUEUE_LISTENER_BASE,
                "Connections overlap arrivals");
 _Static_assert(offsetof(QueueArrivals, connections) == 2 * sizeof(uint64_t), "Arrivals slot offset changed");
 _Static_assert(sizeof(QueueArrivals) == (2 + QUEUE_LIMIT) * sizeof(uint64_t), "Arrivals layout changed");
 
 Address QueueLayout__address(QueueConnectionID connection);
+Address QueueLayout__peer_doorbell_address(QueueConnectionID connection);
 Optional(QueueConnectionID) QueueArrivals__connection(QueueArrivalsPtr self, QueueSlotIndex index);
 QueueEpoch QueueArrivals__epoch(QueueArrivalsPtr self);
 

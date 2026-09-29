@@ -3,6 +3,7 @@ ARCH ?= aarch64
 
 ifeq ($(ARCH),aarch64)
 CROSS_COMPILE ?= aarch64-elf-
+BASH_HOST = aarch64-unknown-hunde
 ARCH_CFLAGS = -mcmodel=large -march=armv8-a -mno-outline-atomics -mgeneral-regs-only
 ARCH_USER_CFLAGS = -mcmodel=small -march=armv8-a -mno-outline-atomics
 ARCH_ASFLAGS = -mcmodel=small
@@ -10,9 +11,10 @@ OBJCOPY_BINARY_FORMAT = elf64-littleaarch64
 OBJCOPY_BINARY_ARCH = aarch64
 else ifeq ($(ARCH),riscv64)
 CROSS_COMPILE ?= riscv64-elf-
-ARCH_CFLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64 -mno-relax -msmall-data-limit=0
-ARCH_USER_CFLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64 -mno-relax -msmall-data-limit=0
-ARCH_ASFLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64 -mno-relax -msmall-data-limit=0
+BASH_HOST = riscv64-unknown-hunde
+ARCH_CFLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei_zawrs -mabi=lp64 -mno-relax -msmall-data-limit=0
+ARCH_USER_CFLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei_zawrs -mabi=lp64 -mno-relax -msmall-data-limit=0
+ARCH_ASFLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei_zawrs -mabi=lp64 -mno-relax -msmall-data-limit=0
 OBJCOPY_BINARY_FORMAT = elf64-littleriscv
 OBJCOPY_BINARY_ARCH = riscv
 else
@@ -57,6 +59,20 @@ endif
 LINKER_SCRIPT ?= arch/$(ARCH)/boot/$(BOOT_PLATFORM)/linker.ld
 LDFLAGS = -nostdlib -T $(LINKER_SCRIPT)
 USER_LDFLAGS = -nostdlib -Wl,-e,_start -Wl,--gc-sections
+
+BASH_VENDOR_DIR = $(abspath vendor/bash/src)
+BASH_PORT_DIR = $(abspath user/ports/bash)
+BASH_PORT_ROOT = $(BUILD_ROOT)/bash
+BASH_PORT_SOURCE_DIR = $(BASH_PORT_ROOT)/source
+BASH_PORT_BUILD_DIR = $(BASH_PORT_ROOT)/build
+BASH_PORT_SOURCE_STAMP = $(BASH_PORT_SOURCE_DIR)/.prepared
+BASH_PORT_CONFIGURE_STAMP = $(BASH_PORT_BUILD_DIR)/.configured
+BASH_PORT_PATCHES = $(wildcard user/ports/bash/patches/*.patch)
+BASH_BUILD = $(shell sh vendor/bash/src/support/config.guess)
+BASH_CPPFLAGS = -I$(abspath user/lib/newlib/include) -I$(abspath user/lib) \
+	-I$(abspath common) -I$(abspath common_includes)
+BASH_CFLAGS = -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector $(ARCH_USER_CFLAGS)
+BASH_LDFLAGS = -nostdlib
 
 # Output files
 BUILD_ROOT = build/$(ARCH)
@@ -199,12 +215,15 @@ USER_DRIVER_DIRS := $(filter user/drivers/%,$(USER_BINARY_DIRS))
 USER_SERVICE_DIRS := $(filter user/services/%,$(USER_BINARY_DIRS))
 USER_NON_DRIVER_DIRS := $(filter-out $(USER_DRIVER_DIRS) $(USER_SERVICE_DIRS),$(USER_BINARY_DIRS))
 USER_BINARIES := $(patsubst %,$(USER_BUILD_DIR)/%.bin,$(notdir $(USER_BINARY_DIRS)))
-ROOTFS_COMMAND_NAMES := cat ln ls mkdir mv rm
+ROOTFS_COMMAND_NAMES := cat cp fs-latency grep ln ls mkdir mv rm tail
 ROOTFS_COMMAND_DIRS := $(addprefix user/commands/,$(ROOTFS_COMMAND_NAMES))
 ROOTFS_COMMAND_BINARIES := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
 OPENBSD_CAT_SOURCE := vendor/openbsd/src/bin/cat/cat.c
 OPENBSD_CAT_OBJECT := $(USER_BUILD_DIR)/vendor/openbsd/bin/cat/cat.o
 cat_EXTRA_OBJS := $(OPENBSD_CAT_OBJECT)
+OPENBSD_CP_SOURCES := $(wildcard vendor/openbsd/src/bin/cp/*.c)
+OPENBSD_CP_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_CP_SOURCES))
+cp_EXTRA_OBJS := $(OPENBSD_CP_OBJECTS)
 OPENBSD_LN_SOURCES := vendor/openbsd/src/bin/ln/ln.c
 OPENBSD_LN_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_LN_SOURCES))
 ln_EXTRA_OBJS := $(OPENBSD_LN_OBJECTS)
@@ -220,6 +239,15 @@ mv_EXTRA_OBJS := $(OPENBSD_MV_OBJECTS)
 OPENBSD_RM_SOURCE := vendor/openbsd/src/bin/rm/rm.c
 OPENBSD_RM_OBJECT := $(USER_BUILD_DIR)/vendor/openbsd/bin/rm/rm.o
 rm_EXTRA_OBJS := $(OPENBSD_RM_OBJECT)
+OPENBSD_TAIL_SOURCES := $(wildcard vendor/openbsd/src/usr.bin/tail/*.c)
+OPENBSD_TAIL_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_TAIL_SOURCES))
+tail_EXTRA_OBJS := $(OPENBSD_TAIL_OBJECTS)
+OPENBSD_GREP_SOURCES := $(wildcard vendor/openbsd/src/usr.bin/grep/*.c)
+OPENBSD_GREP_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_GREP_SOURCES))
+OPENBSD_REGEX_SOURCES := vendor/openbsd/src/lib/libc/regex/regcomp.c vendor/openbsd/src/lib/libc/regex/regexec.c \
+	vendor/openbsd/src/lib/libc/regex/regerror.c vendor/openbsd/src/lib/libc/regex/regfree.c
+OPENBSD_REGEX_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_REGEX_SOURCES))
+grep_EXTRA_OBJS := $(OPENBSD_GREP_OBJECTS) $(OPENBSD_REGEX_OBJECTS)
 EMBEDDED_USER_NON_DRIVER_DIRS := $(filter-out $(ROOTFS_COMMAND_DIRS),$(USER_NON_DRIVER_DIRS))
 USER_VIDEO_TERM_FONT := vendor/unifont/unifont_all-17.0.05.hex
 USER_VIDEO_TERM_FONT_OBJECT := $(USER_BUILD_DIR)/drivers/video_term/unifont_all.o
@@ -228,6 +256,10 @@ USER_VIDEO_TERM_EMOJI_HEADER := user/drivers/video_term/emoji_atlas.h
 USER_VIDEO_TERM_EMOJI_ATLAS := $(USER_BUILD_DIR)/drivers/video_term/emoji_atlas.rgba
 USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT := $(USER_BUILD_DIR)/drivers/video_term/emoji_atlas.o
 video_term_EXTRA_OBJS := $(USER_VIDEO_TERM_FONT_OBJECT) $(USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT)
+hund-unterbrict_EXTRA_OBJS := \
+	$(USER_BUILD_DIR)/drivers/virtio_blk_channelio/device.o \
+	$(USER_BUILD_DIR)/drivers/virtio_blk_channelio/mmio.o \
+	$(USER_BUILD_DIR)/drivers/virtio_blk_channelio/runtime.o
 EMBEDDED_FS_INPUTS := \
 	$(foreach dir,$(EMBEDDED_USER_NON_DRIVER_DIRS),$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
 	$(foreach dir,$(USER_DRIVER_DIRS),drivers/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
@@ -237,6 +269,57 @@ EMBEDDED_FS := $(BUILD_ROOT)/kernel/embedded.fs
 .PRECIOUS: $(USER_BUILD_DIR)/lib/arch/%.o
 
 all: $(BIN)
+
+.PHONY: bash bash-configure bash-build bash-configure-all bash-build-all
+
+bash: bash-build
+
+bash-configure: $(BASH_PORT_CONFIGURE_STAMP)
+
+bash-build: $(BASH_PORT_CONFIGURE_STAMP)
+	$(MAKE) -C $(BASH_PORT_BUILD_DIR)
+
+bash-configure-all:
+	$(MAKE) ARCH=aarch64 bash-configure
+	$(MAKE) ARCH=riscv64 bash-configure
+
+bash-build-all:
+	$(MAKE) ARCH=aarch64 bash-build
+	$(MAKE) ARCH=riscv64 bash-build
+
+$(BASH_PORT_SOURCE_STAMP): vendor/bash/README.md vendor/bash/SHA256SUMS \
+		vendor/bash/src/patchlevel.h $(BASH_PORT_PATCHES)
+	mkdir -p $(BASH_PORT_SOURCE_DIR)
+	cp -R $(BASH_VENDOR_DIR)/. $(BASH_PORT_SOURCE_DIR)/
+	for patch_file in $(abspath $(BASH_PORT_PATCHES)); do \
+		patch -s -d $(BASH_PORT_SOURCE_DIR) -p1 < $$patch_file; \
+	done
+	touch $@
+
+$(BASH_PORT_CONFIGURE_STAMP): $(BASH_PORT_SOURCE_STAMP) Makefile \
+		$(shell find user/lib/newlib/include -type f -print)
+	mkdir -p $(BASH_PORT_BUILD_DIR)
+	cd $(BASH_PORT_BUILD_DIR) && \
+		CONFIG_SITE=/dev/null \
+		CC=$(CC) \
+		CC_FOR_BUILD=cc \
+		AR=$(CROSS_COMPILE)ar \
+		RANLIB=$(CROSS_COMPILE)ranlib \
+		STRIP=$(CROSS_COMPILE)strip \
+		CPPFLAGS="$(BASH_CPPFLAGS)" \
+		CFLAGS="$(BASH_CFLAGS)" \
+		LDFLAGS="$(BASH_LDFLAGS)" \
+		../source/configure \
+			--build=$(BASH_BUILD) \
+			--host=$(BASH_HOST) \
+			--prefix=/usr/local \
+			--disable-nls \
+			--disable-net-redirections \
+			--disable-multibyte \
+			--enable-job-control \
+			--enable-readline \
+			--without-bash-malloc
+	touch $@
 
 # Semihosting version (better for QEMU debugging)
 elf: $(ELF)
@@ -397,6 +480,10 @@ $(OPENBSD_CAT_OBJECT): $(OPENBSD_CAT_SOURCE)
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+$(USER_BUILD_DIR)/vendor/openbsd/bin/cp/cp.o: vendor/openbsd/src/bin/cp/cp.c user/commands/cp/platform.h
+	mkdir -p `dirname $@`
+	$(CC) $(USER_CFLAGS) -include user/commands/cp/platform.h -Dmain=OpenBSDCp__main -c $< -o $@
+
 $(OPENBSD_RM_OBJECT): $(OPENBSD_RM_SOURCE) user/commands/rm/platform.h
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -include user/commands/rm/platform.h \
@@ -405,6 +492,14 @@ $(OPENBSD_RM_OBJECT): $(OPENBSD_RM_SOURCE) user/commands/rm/platform.h
 $(USER_BUILD_DIR)/vendor/openbsd/bin/ls/%.o: vendor/openbsd/src/bin/ls/%.c
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -DSMALL -c $< -o $@
+
+$(USER_BUILD_DIR)/vendor/openbsd/usr.bin/grep/%.o: vendor/openbsd/src/usr.bin/grep/%.c user/commands/grep/platform.h
+	mkdir -p `dirname $@`
+	$(CC) -I./vendor/openbsd/src/sys $(USER_CFLAGS) -DSMALL -DNOZ -include user/commands/grep/platform.h -c $< -o $@
+
+$(USER_BUILD_DIR)/vendor/openbsd/lib/libc/regex/%.o: vendor/openbsd/src/lib/libc/regex/%.c user/commands/grep/platform.h
+	mkdir -p `dirname $@`
+	$(CC) $(USER_CFLAGS) -include user/commands/grep/platform.h -c $< -o $@
 
 $(USER_BUILD_DIR)/vendor/openbsd/%.o: vendor/openbsd/src/%.c
 	mkdir -p `dirname $@`
@@ -474,7 +569,7 @@ qemu-riscv64:
 	$(MAKE) ARCH=riscv64 BOOT_CONFIG=qemu_riscv64 qemu-riscv64-run
 
 qemu-riscv64-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
-	qemu-system-riscv64 -machine virt -cpu rv64 -smp 4 -m 1G -bios default \
+	qemu-system-riscv64 -machine virt -cpu rv64,zawrs=true -smp 4 -m 1G -bios default \
 		-kernel $(ELF) \
 		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
@@ -503,7 +598,7 @@ qemu-riscv64-trace-build:
 qemu-riscv64-trace-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
 	mkdir -p `dirname $(KERNEL_TRACE_LOG)`
 	: > $(KERNEL_TRACE_LOG)
-	qemu-system-riscv64 -machine virt -cpu rv64 -smp 4 -m 1G -bios default \
+	qemu-system-riscv64 -machine virt -cpu rv64,zawrs=true -smp 4 -m 1G -bios default \
 		-kernel $(ELF) \
 		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \

@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "../sys/io.h"
+#include "posix_io.h"
 
 static int PosixPath__absolute(const char * path, BStringPtr result)
 {
@@ -175,8 +176,34 @@ int chflags(const char * path, unsigned long flags)
 
 off_t lseek(int descriptor, off_t offset, int whence)
 {
-    errno = ENOSYS;
-    return -1;
+    IOHandle handle = PosixIO__native_handle(descriptor);
+    if (handle < 0)
+    {
+        return -1;
+    }
+    IOSeekWhence io_whence;
+    switch (whence)
+    {
+    case SEEK_SET:
+        io_whence = IO_SEEK_SET;
+        break;
+    case SEEK_CUR:
+        io_whence = IO_SEEK_CURRENT;
+        break;
+    case SEEK_END:
+        io_whence = IO_SEEK_END;
+        break;
+    default:
+        errno = EINVAL;
+        return -1;
+    }
+    IOSeekResult reply = IO__seek(handle, offset, io_whence);
+    if (reply.status != IO_OK)
+    {
+        errno = reply.status == IO_UNKNOWN_HANDLE ? EBADF : EINVAL;
+        return -1;
+    }
+    return (off_t)reply.position;
 }
 
 int ftruncate(int descriptor, off_t length)

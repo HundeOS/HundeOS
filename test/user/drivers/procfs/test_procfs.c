@@ -35,6 +35,7 @@ void setUp(void)
                              .activity_wakes = 1,
                              .timeout_wakes = 3,
                              .selections = 4,
+                             .speculative_selections = 2,
                              .parked_usec = 40000,
                              .max_parked_usec = 12000,
                              .runnable_usec = 8000,
@@ -71,9 +72,54 @@ static BString read_file(ConstBStringPtr path)
     request.operation = IO_REQUEST_READ;
     request.handle = opened.value;
     request.count = IO_PROTOCOL_DATA_SIZE;
-    IOReply reply = FilesystemDriver__execute(&driver, &request);
-    TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    return BString__from_chars((char *)reply.data, reply.value);
+    BString contents = empty_bstr();
+    while (true)
+    {
+        IOReply reply = FilesystemDriver__execute(&driver, &request);
+        TEST_ASSERT_EQUAL(IO_OK, reply.status);
+        BString chunk = BString__from_chars((char *)reply.data, reply.value);
+        contents = BString__append(&contents, &chunk);
+        if (reply.value < request.count)
+        {
+            return contents;
+        }
+    }
+}
+
+typedef struct ProcfsFileContents
+{
+    size_t length;
+    uint8_t data[2048];
+} ProcfsFileContents;
+
+static ProcfsFileContents read_file_contents(ConstBStringPtr path)
+{
+    IORequest request = request_for(IO_REQUEST_OPEN, path);
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    request.operation = IO_REQUEST_READ;
+    request.handle = opened.value;
+    request.count = IO_PROTOCOL_DATA_SIZE;
+    ProcfsFileContents contents = {0};
+    while (true)
+    {
+        IOReply reply = FilesystemDriver__execute(&driver, &request);
+        TEST_ASSERT_EQUAL(IO_OK, reply.status);
+        TEST_ASSERT_LESS_OR_EQUAL_UINT64(sizeof(contents.data), contents.length + reply.value);
+        memcpy(contents.data + contents.length, reply.data, reply.value);
+        contents.length += reply.value;
+        if (reply.value < request.count)
+        {
+            return contents;
+        }
+    }
+}
+
+static void IODiagnosticsTest__record_block_sample(uint64_t stage_usec, bool succeeded)
+{
+    Optional(BlockDeviceTiming) timing =
+        BlockDeviceTiming__new(0, stage_usec, stage_usec * 2U, stage_usec * 3U, stage_usec * 4U, stage_usec * 5U);
+    IODiagnostics__record_block_submission(8, stage_usec * 5U, succeeded, &timing);
 }
 
 void test_procfs_lists_processes_and_read_only_files_with_real_ownership(void)
@@ -100,25 +146,58 @@ void test_procfs_lists_processes_and_read_only_files_with_real_ownership(void)
 void test_procfs_reports_ipc_counters_and_unavailable_mapping(void)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("diagnostics=unavailable\n"), read_file(&bstr("/42/ipc")));
-    ProcessRecord record = {.pid = 43,
-                            .sampled_at_usec = 1234,
-                            .user_wait_usec = 456,
-                            .io_diagnostics = Some(IODiagnostics, ((IODiagnostics){.uart_bytes = 7,
-                                                                                   .uart_reads = 100,
-                                                                                   .uart_empty = 99,
-                                                                                   .backend_reads = 101,
-                                                                                   .backend_empty = 98,
-                                                                                   .warden_relays = 202,
-                                                                                   .wait_entries = 300,
-                                                                                   .unchanged_wakes = 250,
-                                                                                   .uart_irqs = 2}))};
+    IODiagnostics diagnostics = {0};
+    IODiagnostics__attach(&diagnostics);
+    IODiagnostics__record(IO_DIAGNOSTIC_UART_BYTES, 7);
+    IODiagnostics__record(IO_DIAGNOSTIC_UART_IRQS, 2);
+    IODiagnostics__record(IO_DIAGNOSTIC_UART_READS, 100);
+    IODiagnostics__record(IO_DIAGNOSTIC_UART_EMPTY, 99);
+    IODiagnostics__record(IO_DIAGNOSTIC_BACKEND_READS, 101);
+    IODiagnostics__record(IO_DIAGNOSTIC_BACKEND_EMPTY, 98);
+    IODiagnostics__record(IO_DIAGNOSTIC_WARDEN_RELAYS, 202);
+    IODiagnostics__record(IO_DIAGNOSTIC_WAIT_ENTRIES, 300);
+    IODiagnostics__record(IO_DIAGNOSTIC_UNCHANGED_WAKES, 250);
+    IODiagnostics__record(IO_DIAGNOSTIC_BLOCK_CACHE_HITS, 77);
+    IODiagnostics__record(IO_DIAGNOSTIC_BLOCK_CACHE_MISSES, 11);
+    IODiagnostics__record(IO_DIAGNOSTIC_BLOCK_CACHE_EVICTIONS, 3);
+    IODiagnostics__record(IO_DIAGNOSTIC_INODE_CACHE_HITS, 55);
+    IODiagnostics__record(IO_DIAGNOSTIC_INODE_CACHE_MISSES, 9);
+    IODiagnostics__record(IO_DIAGNOSTIC_INODE_CACHE_EVICTIONS, 2);
+    IODiagnosticsTest__record_block_sample(1, false);
+    IODiagnosticsTest__record_block_sample(4, true);
+    IODiagnosticsTest__record_block_sample(16, true);
+    IODiagnosticsTest__record_block_sample(64, true);
+    ProcessRecord record = {
+        .pid = 43,
+        .sampled_at_usec = 1234,
+        .user_wait_usec = 456,
+        .io_diagnostics = Some(IODiagnosticsSnapshot, IODiagnostics__snapshot(&diagnostics)),
+    };
     ProcessRegistry__set(&registry, 3, 1, &record);
     ProcessRegistry__set_count(&registry, 3, 2);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("uart_bytes=7\nuart_irqs=2\nuart_reads=100\nuart_empty=99\n"
+    static const char expected[] = "uart_bytes=7\nuart_irqs=2\nuart_reads=100\nuart_empty=99\n"
                                    "backend_reads=101\nbackend_empty=98\nwarden_relays=202\n"
+                                   "block_submissions=4\nblock_blocks=32\nblock_failures=1\n"
+                                   "block_cache_hits=77\nblock_cache_misses=11\nblock_cache_evictions=3\n"
+                                   "inode_cache_hits=55\ninode_cache_misses=9\ninode_cache_evictions=2\n"
+                                   "block_device_usec_p50=23\nblock_device_usec_p70=95\n"
+                                   "block_device_usec_p90=383\nblock_device_usec_p99=383\n"
+                                   "block_segmented_submissions=4\n"
+                                   "block_device_irq_usec_p50=4\nblock_device_irq_usec_p70=19\n"
+                                   "block_device_irq_usec_p90=79\nblock_device_irq_usec_p99=79\n"
+                                   "block_manager_wake_usec_p50=4\nblock_manager_wake_usec_p70=19\n"
+                                   "block_manager_wake_usec_p90=79\nblock_manager_wake_usec_p99=79\n"
+                                   "block_irq_relay_usec_p50=4\nblock_irq_relay_usec_p70=19\n"
+                                   "block_irq_relay_usec_p90=79\nblock_irq_relay_usec_p99=79\n"
+                                   "block_fiber_wake_usec_p50=4\nblock_fiber_wake_usec_p70=19\n"
+                                   "block_fiber_wake_usec_p90=79\nblock_fiber_wake_usec_p99=79\n"
+                                   "block_completion_usec_p50=4\nblock_completion_usec_p70=19\n"
+                                   "block_completion_usec_p90=79\nblock_completion_usec_p99=79\n"
                                    "wait_entries=300\nunchanged_wakes=250\nuser_wait_usec=456\n"
-                                   "sampled_at_usec=1234\n"),
-                              read_file(&bstr("/43/ipc")));
+                                   "sampled_at_usec=1234\n";
+    ProcfsFileContents contents = read_file_contents(&bstr("/43/ipc"));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(expected) - 1U, contents.length);
+    TEST_ASSERT_EQUAL_MEMORY(expected, contents.data, contents.length);
 }
 
 void test_procfs_cpu_matches_ps_and_memory_categories_are_separate(void)
@@ -141,7 +220,8 @@ void test_procfs_cpu_matches_ps_and_memory_categories_are_separate(void)
 void test_procfs_exposes_queue_wait_diagnostics(void)
 {
     TEST_ASSERT_EQUAL_BSTRING(
-        bstr("parks=5\nactivity_wakes=1\ntimeout_wakes=3\nselections=4\nparked_usec=40000\n"
+        bstr("parks=5\nactivity_wakes=1\ntimeout_wakes=3\nselections=4\nspeculative_selections=2\n"
+             "parked_usec=40000\n"
              "max_parked_usec=12000\nrunnable_usec=8000\nmax_runnable_usec=3000\nsampled_at_usec=1000000\n"),
         read_file(&bstr("/42/queue-wait")));
 }
@@ -160,6 +240,22 @@ void test_procfs_removal_blocks_new_opens_but_existing_open_keeps_snapshot(void)
     TEST_ASSERT_EQUAL_MEMORY("pid=42", reply.data, 6);
     request.client_pid = 21;
     TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, FilesystemDriver__execute(&driver, &request).status);
+}
+
+void test_open_file_owns_its_path_after_the_request_is_reused(void)
+{
+    IORequest request = request_for(IO_REQUEST_OPEN, &bstr("/42/status"));
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+
+    memset(request.data, 'x', sizeof(request.data));
+    request.operation = IO_REQUEST_READ;
+    request.handle = opened.value;
+    request.count = 6;
+    IOReply reply = FilesystemDriver__execute(&driver, &request);
+
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL_MEMORY("pid=42", reply.data, 6);
 }
 
 void test_procfs_rejects_bad_paths_and_mutations(void)

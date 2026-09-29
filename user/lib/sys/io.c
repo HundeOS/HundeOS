@@ -125,6 +125,32 @@ ByteCount IO__write_bytes(IOHandle handle, const char * buf, size_t size)
     return IO_UNKNOWN_HANDLE;
 }
 
+IOSeekResult IO__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
+{
+    if (handle < IO_SESSION_HANDLE_BASE)
+    {
+        return IOSeekResult__new(IO_OPERATION_NOT_SUPPORTED, 0);
+    }
+    IOReply reply = IOClient__seek(handle, offset, whence);
+    return IOSeekResult__new(reply.status, reply.value);
+}
+
+IOWatchResult IO__watch_file(IOHandle handle)
+{
+    if (handle < IO_SESSION_HANDLE_BASE)
+    {
+        return IOWatchResult__new(IO_OPERATION_NOT_SUPPORTED, IOFileChange__new(0, 0, 0));
+    }
+    IOReply reply = IOClient__watch_file(handle);
+    return IOWatchResult__new(reply.status, reply.file_change);
+}
+
+IOWatchResult IO__wait_file_change(IOFileWatch * watches, size_t count)
+{
+    IOReply reply = IOClient__wait_file_change(watches, count);
+    return IOWatchResult__new(reply.status, reply.file_change);
+}
+
 IOHandle accept(IOHandle handle)
 {
     if (handle >= IO_SESSION_HANDLE_BASE)
@@ -334,6 +360,10 @@ DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, si
         IOReply reply = IOClient__path_request(IO_REQUEST_LIST_DIR, path, 0, offset);
         if (reply.status != IO_OK)
         {
+            if (reply.status == IO_INVALID_PATH && count > 0)
+            {
+                return (DirectoryEntryCount)count;
+            }
             return reply.status;
         }
         if (reply.directory.count > IO_DIRECTORY_BATCH_CAPACITY)
@@ -413,6 +443,8 @@ const char * io_status_string(IOStatus status)
         return "IO_INTERRUPTED";
     case IO_ALREADY_EXISTS:
         return "IO_ALREADY_EXISTS";
+    case IO_REDIRECT:
+        return "IO_REDIRECT";
     case IO_PANIC:
         return "IO_PANIC";
     }

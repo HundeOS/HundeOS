@@ -6,11 +6,13 @@
 #include "../fixtures/process.h"
 #include "../stubs/panic.h"
 #include "../stubs/process.h"
+#include "../stubs/cpu.h"
 
 static KernelPtr kernel = NULL;
 static bool kernel_consumer_called = false;
 static IRQDispatchContext observed_context;
 static KernelPtr observed_kernel = NULL;
+extern uint64_t test_cpu_time_usec;
 
 void Arch__reset_irq_tracking();
 uint64_t Arch__enabled_irq();
@@ -30,9 +32,11 @@ void setUp(void)
 {
     clear_panic_state();
     current_process_reset();
+    reset_cpu_reschedule();
     Arch__reset_irq_tracking();
     kernel = init_test_kernel();
     kernel_consumer_called = false;
+    test_cpu_time_usec = 1234;
     observed_context = (IRQDispatchContext){0};
     observed_kernel = NULL;
 }
@@ -284,6 +288,10 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
 {
     ProcessPtr manager = dummy_process(1, 0, PROC_STATE_READY);
     manager->process_class = PROCESS_CLASS_SERVICE;
+    match_result(Scheduler__schedule_on_cpu(kernel->scheduler, manager, 0),
+        success_do_nothing(),
+        error_test_fail()
+    );
     TEST_ASSERT_FALSE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, manager));
 
     match_result(
@@ -302,18 +310,27 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
         },
         error_test_fail()
     );
+    match_result(
+        Scheduler__queue_wait(kernel->scheduler, manager, 0, 0, QUEUE_WAIT_INDEFINITE_TICKS),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, status);
+        },
+        error_test_fail()
+    );
 
     IRQDispatchContext context = IRQDispatchContext__new(48, 0, false, NULL);
     match_result(
         IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context),
         success(status)
         {
-            TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status);
+            TEST_ASSERT_EQUAL(IRQ_DISPATCH_RESCHEDULE, status);
         },
         error_test_fail()
     );
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__masked_irq());
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->state);
     TEST_ASSERT_TRUE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, manager));
     ProcessPtr other = dummy_process(2, 0, PROC_STATE_READY);
     TEST_ASSERT_FALSE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, other));
@@ -329,6 +346,7 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
                 {
                     TEST_ASSERT_EQUAL_UINT64(48, event.id);
                     TEST_ASSERT_EQUAL_UINT64(1, event.sequence);
+                    TEST_ASSERT_EQUAL_UINT64(test_cpu_time_usec, event.occurred_at_usec);
                 },
                 none_test_fail()
             );
@@ -336,4 +354,46 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
         },
         none_test_fail()
     );
+}
+
+void test_irq_dispatcher_pokes_remote_cpu_for_parked_interrupt_manager(void)
+{
+    CPUID manager_cpu = 1;
+    ProcessPtr manager = dummy_process(1, manager_cpu, PROC_STATE_READY);
+    manager->process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    Scheduler__start(kernel->scheduler, manager_cpu);
+    match_result(Scheduler__schedule_on_cpu(kernel->scheduler, manager, manager_cpu),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(IRQDispatcher__register_manager(kernel->irq_dispatcher, manager),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(IRQDispatcher__register_managed_irq(kernel->irq_dispatcher, 48, manager),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(
+        Scheduler__queue_wait(kernel->scheduler, manager, 0, 0, QUEUE_WAIT_INDEFINITE_TICKS),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, status);
+        },
+        error_test_fail()
+    );
+
+    IRQDispatchContext context = IRQDispatchContext__new(48, 0, false, NULL);
+    match_result(
+        IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->state);
+    TEST_ASSERT_EQUAL_UINT64(1, CPUStub__reschedule_count());
+    TEST_ASSERT_EQUAL_UINT64(manager_cpu, CPUStub__rescheduled_cpu());
 }

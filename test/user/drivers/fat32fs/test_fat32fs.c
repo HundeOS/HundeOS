@@ -358,3 +358,36 @@ void test_fat32fs_preserves_two_full_write_chunks_and_rejects_oversized_requests
     TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
     TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 100, 42));
 }
+
+void test_fat32fs_writes_new_file_across_multiple_clusters(void)
+{
+    Fat32fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/MULTI.BIN"));
+    request.flags = IO_OPEN_WRITE;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+
+    for (uint32_t chunk = 0; chunk < 3; chunk++)
+    {
+        request = request_for(IO_REQUEST_WRITE, opened.value, &empty_bstr());
+        request.count = IO_PROTOCOL_DATA_SIZE;
+        memset(request.data, (int)('a' + chunk), sizeof(request.data));
+        TEST_ASSERT_EQUAL(IO_PROTOCOL_DATA_SIZE, FilesystemDriver__execute(&driver, &request).value);
+    }
+
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/MULTI.BIN"));
+    request.flags = IO_OPEN_READ;
+    opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    request = request_for(IO_REQUEST_SEEK, opened.value, &empty_bstr());
+    request.flags = IO_SEEK_SET;
+    request.offset = FAT32FS_BYTES_PER_SECTOR - 1U;
+    TEST_ASSERT_EQUAL(request.offset, FilesystemDriver__execute(&driver, &request).value);
+    request.operation = IO_REQUEST_READ;
+    request.count = 2;
+    IOReply reply = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(2, reply.value);
+    TEST_ASSERT_EQUAL_UINT8('b', reply.data[0]);
+    TEST_ASSERT_EQUAL_UINT8('c', reply.data[1]);
+}

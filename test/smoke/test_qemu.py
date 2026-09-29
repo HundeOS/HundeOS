@@ -2,6 +2,7 @@ import errno
 import os
 import pathlib
 import pty
+import re
 import select
 import signal
 import subprocess
@@ -144,30 +145,32 @@ def qemu_session():
 
 
 @pytest.mark.parametrize(
-    ("target", "trace_path", "architecture_marker"),
+    ("target", "trace_path", "architecture_marker", "shell_timeout"),
     [
         pytest.param(
             "qemu-virt-hvf-trace",
             "build/aarch64/kernel-trace.log",
             b"interrupt_controller.redistributor_physical_base=",
+            COMMAND_TIMEOUT_SECONDS,
             id="aarch64",
         ),
         pytest.param(
             "qemu-riscv64-trace",
             "build/riscv64/kernel-trace.log",
             b"interrupt_controller.plic.physical_base=",
+            2 * COMMAND_TIMEOUT_SECONDS,
             id="riscv64",
         ),
     ],
 )
-def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, architecture_marker):
+def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, architecture_marker, shell_timeout):
     session = qemu_session(target, trace_path)
 
     session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)
     session.send_line("root")
     session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
     session.send_line("root")
-    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+    session.expect(PROMPT, shell_timeout)
     workspace = f"/bsd-smoke-{time.monotonic_ns()}"
 
     sysinfo = session.run_command("/usr/local/bin/cat /boot/sysinfo")
@@ -175,6 +178,13 @@ def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, arch
 
     driver_log = session.run_command("/usr/local/bin/cat /var/log/driver.log")
     assert b"pid=" in driver_log
+
+    driver_log_tail = session.run_command("/usr/local/bin/tail -100 /var/log/driver.log")
+    assert b"pid=" in driver_log_tail
+
+    processes = session.run_command("ps")
+    assert b"/sbin/services/hund-unterbrict" in processes
+    assert b"/sbin/drivers/virtio_blk_channelio" not in processes
 
     numbered = session.run_command("/usr/local/bin/cat -n /hello.txt")
     assert b"1\thello from ext2" in numbered
@@ -188,13 +198,83 @@ def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, arch
     assert b"usr" in root_listing
 
     commands = session.run_command("/usr/local/bin/ls -1 /usr/local/bin")
-    for command in (b"cat", b"ln", b"ls", b"mkdir", b"mv", b"rm"):
+    for command in (b"cat", b"cp", b"grep", b"ln", b"ls", b"mkdir", b"mv", b"rm", b"tail"):
         assert command in commands
+
+    grepped = session.run_command("/usr/local/bin/grep -n hello.*ext2 /hello.txt")
+    assert b"1:hello from ext2" in grepped
+
+    tailed = session.run_command("/usr/local/bin/tail -n 1 /hello.txt")
+    assert b"hello from ext2" in tailed
+
+    io_latency = session.run_command(
+        "/usr/local/bin/grep -a -m 1 "
+        "IO-LATENCY.*request_scheduler_observed=1.*return_scheduler_observed=1 /tmp/io-trace.log"
+    )
+    assert b"IO-LATENCY " in io_latency, session.run_command(
+        "/usr/local/bin/tail -n 20 /var/log/driver.log"
+    )
+    for timing in (
+        b"queue_usec=",
+        b"request_observe_usec=",
+        b"request_runnable_usec=",
+        b"request_dispatch_usec=",
+        b"request_userspace_usec=",
+        b"service_usec=",
+        b"return_usec=",
+        b"return_observe_usec=",
+        b"return_runnable_usec=",
+        b"return_dispatch_usec=",
+        b"return_userspace_usec=",
+        b"total_usec=",
+    ):
+        assert timing in io_latency
+
+    short_trace = session.run_command("/usr/local/bin/fs-latency /usr/local/bin/cp 1")
+    short_trace_pid = re.search(rb"fs-latency pid=(\d+)", short_trace)
+    assert short_trace_pid is not None, short_trace
+    assert b"io_hop client=" + short_trace_pid.group(1) + b" server=" in short_trace, short_trace
+
+    follow_path = f"/tail-follow-{time.monotonic_ns()}"
+    session.run_command(f"write {follow_path} seed")
+    session.run_command(f"/usr/local/bin/tail -f {follow_path} &")
+    followed = session.run_command(f"write {follow_path} seedfollowed")
+    assert followed.count(b"seed") >= 2
 
     mkdir_result = session.run_command(f"/usr/local/bin/mkdir -p {workspace}/a/b")
     assert b"mkdir:" not in mkdir_result, mkdir_result
     write_result = session.run_command(f"write {workspace}/a/b/source bsd-tools")
     assert b"write:" not in write_result, write_result
+    copy_result = session.run_command(f"/usr/local/bin/cp {workspace}/a/b/source {workspace}/a/b/copy")
+    assert b"cp:" not in copy_result, copy_result
+    assert b"bsd-tools" in session.run_command(f"/usr/local/bin/cat {workspace}/a/b/copy")
+    binary_copy_result = session.run_command(f"/usr/local/bin/cp /usr/local/bin/cat {workspace}/cat-copy")
+    assert b"cp:" not in binary_copy_result, binary_copy_result
+    source_listing = session.run_command("/usr/local/bin/ls -l /usr/local/bin/cat")
+    copied_listing = session.run_command(f"/usr/local/bin/ls -l {workspace}/cat-copy")
+    source_line = next(
+        line for line in source_listing.splitlines() if line.strip().startswith(b"-")
+    )
+    copied_path = f"{workspace}/cat-copy".encode()
+    copied_line = next(
+        line for line in copied_listing.splitlines() if line.strip().startswith(b"-")
+    )
+    source_size = int(source_line.split()[4])
+    copied_size = int(copied_line.split()[4])
+    assert copied_size == source_size
+    assert copied_size > 12 * 1024
+    copied_marker = session.run_command(f"/usr/local/bin/grep -al raw_cat {workspace}/cat-copy")
+    assert copied_path in copied_marker
+    overwrite_result = session.run_command(f"/usr/local/bin/cp {workspace}/a/b/source {workspace}/a/b/copy")
+    assert b"cp:" not in overwrite_result, overwrite_result
+    session.run_command(f"/usr/local/bin/mkdir {workspace}/copies")
+    multiple_result = session.run_command(
+        f"/usr/local/bin/cp {workspace}/a/b/source {workspace}/a/b/copy {workspace}/copies"
+    )
+    assert b"cp:" not in multiple_result, multiple_result
+    recursive_result = session.run_command(f"/usr/local/bin/cp -R {workspace}/a {workspace}/recursive")
+    assert b"cp:" not in recursive_result, recursive_result
+    assert b"bsd-tools" in session.run_command(f"/usr/local/bin/cat {workspace}/recursive/b/source")
     link_result = session.run_command(f"/usr/local/bin/ln {workspace}/a/b/source {workspace}/a/b/link")
     assert b"ln:" not in link_result, link_result
     assert b"bsd-tools" in session.run_command(f"/usr/local/bin/cat {workspace}/a/b/link")

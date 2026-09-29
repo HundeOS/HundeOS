@@ -13,19 +13,6 @@
 static FilesystemNamespace namespace;
 static ServiceDirectory directory;
 
-typedef struct FakeFilesystem
-{
-    IORequest request;
-    bool queued;
-    bool blocked;
-    bool broken;
-    IOHandle next_handle;
-    unsigned opens;
-    unsigned releases;
-    IOStatus list_status;
-} FakeFilesystem;
-
-static FakeFilesystem backends[3];
 static const char * boot_fstab;
 static bool spawn_fails;
 static bool root_ready;
@@ -42,6 +29,7 @@ static bool dev_spawn_fails;
 static unsigned proc_spawns;
 static bool proc_ready;
 static bool proc_spawn_fails;
+
 static unsigned sbin_spawns;
 static bool sbin_ready;
 static bool sbin_spawn_fails;
@@ -212,76 +200,6 @@ ServiceDirectoryPtr NamespaceTest__directory(void)
     return &directory;
 }
 
-Result(Channel) Channel__open(ServiceDirectoryPtr registry, ConstBStringPtr service)
-{
-    return Success(Channel, ((Channel){.token = BString__equals(service, &bstr("/"))          ? 3
-                                                : BString__equals(service, &bstr("/mnt/fat")) ? 1
-                                                                                              : 2}));
-}
-
-Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr data, size_t size)
-{
-    FakeFilesystem * backend = &backends[self->token - 1];
-    TEST_ASSERT_FALSE(backend->queued);
-    if (backend->broken)
-    {
-        return Error(ChannelCode, bstr("backend exited"), CHANNEL_UNAVAILABLE);
-    }
-    __builtin_memcpy(&backend->request, data, size);
-    backend->queued = true;
-    return Success(ChannelCode, CHANNEL_OK);
-}
-
-Result(OptionalChannelReplySize) Channel__poll_reply(ChannelPtr self, ChannelDataPtr data, size_t capacity)
-{
-    FakeFilesystem * backend = &backends[self->token - 1];
-    TEST_ASSERT_TRUE(backend->queued);
-    if (backend->blocked)
-    {
-        return Success(OptionalChannelReplySize, None(ChannelReplySize));
-    }
-    IOReply reply = IOReply__new(IO_OK, 0);
-    switch (backend->request.operation)
-    {
-    case IO_REQUEST_OPEN:
-        reply.value = backend->next_handle++;
-        backend->opens++;
-        break;
-    case IO_REQUEST_RELEASE_CLIENT:
-        backend->releases++;
-        break;
-    case IO_REQUEST_READ:
-        reply.value = backend->request.count;
-        __builtin_memset(reply.data, 'x', reply.value);
-        break;
-    case IO_REQUEST_LIST_DIR:
-        reply.status = backend->list_status;
-        if (reply.status == IO_OK && backend->request.offset == 0)
-        {
-            reply.directory.entries[0] = DirectoryEntry__new(0, 0, 0, IO_MODE_TYPE_FILE, &bstr("hello.txt"));
-            reply.directory.count = 1;
-        }
-        break;
-    case IO_REQUEST_FILE_INFO:
-        reply.file_info = (IOFileInfo){.mode = IO_MODE_TYPE_FILE | 0644,
-                                       .user_id = PROCESS_USER_HUND,
-                                       .group_id = PROCESS_GROUP_HUND,
-                                       .size = 123};
-        break;
-    default:
-        break;
-    }
-    backend->queued = false;
-    __builtin_memcpy(data, &reply, sizeof(reply));
-    return Success(OptionalChannelReplySize, Some(ChannelReplySize, sizeof(reply)));
-}
-
-ChannelCode Channel__close(ChannelPtr self)
-{
-    backends[self->token - 1].queued = false;
-    return CHANNEL_OK;
-}
-
 int IO__printf(ConstBStringPtr format, ...)
 {
     TEST_FAIL_MESSAGE("Unexpected collection error");
@@ -316,9 +234,6 @@ void setUp(void)
     directory.entries[2] =
         (ServiceDirectoryEntry){.present = 1, .generation = 1, .service_pid = 52, .name = bstr("/mnt/ext")};
     directory.entries[3] = (ServiceDirectoryEntry){.present = 1, .generation = 1, .service_pid = 53, .name = bstr("/")};
-    backends[0] = (FakeFilesystem){.next_handle = IO_SESSION_HANDLE_BASE};
-    backends[1] = (FakeFilesystem){.next_handle = IO_SESSION_HANDLE_BASE};
-    backends[2] = (FakeFilesystem){.next_handle = IO_SESSION_HANDLE_BASE};
     match_result(
         MountConfig__parse(&bstr("device /dev/virtio4 fat32 /mnt/fat # boot")),
         success(config)
@@ -362,121 +277,6 @@ static IOReply execute(IORequestPtr request)
     return unwrap_optional(FilesystemNamespace__execute(&namespace, 30, 50, request), IOReply__new(IO_PANIC, 0));
 }
 
-static void add_root(void);
-
-void test_namespace_routes_only_complete_mount_path_components(void)
-{
-    IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/HELLO.TXT"));
-    IOReply opened = execute(&request);
-    TEST_ASSERT_EQUAL(IO_OK, opened.status);
-    TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, opened.value);
-    BString relative = IORequest__path(&backends[0].request);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/HELLO.TXT"), relative);
-    TEST_ASSERT_EQUAL(100, backends[0].request.client_pid);
-    request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fatter/file"));
-    TEST_ASSERT_EQUAL(IO_INVALID_PATH, execute(&request).status);
-    request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/../ext/file"));
-    TEST_ASSERT_EQUAL(IO_INVALID_PATH, execute(&request).status);
-}
-
-void test_namespace_lists_mount_parents_without_duplicate_names(void)
-{
-    IORequest request = path_request(IO_REQUEST_LIST_DIR, &bstr("/"));
-    IOReply reply = execute(&request);
-    TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL_STRING("mnt", reply.directory.entries[0].name);
-    request.offset = 6;
-    TEST_ASSERT_EQUAL(0, execute(&request).directory.count);
-    request = path_request(IO_REQUEST_LIST_DIR, &bstr("/mnt"));
-    reply = execute(&request);
-    TEST_ASSERT_EQUAL_STRING("fat", reply.directory.entries[0].name);
-    request.offset = 1;
-    TEST_ASSERT_EQUAL_STRING("ext", execute(&request).directory.entries[0].name);
-}
-
-void test_namespace_reports_synthetic_and_forwarded_file_information(void)
-{
-    add_root();
-    IORequest request = path_request(IO_REQUEST_FILE_INFO, &bstr("/boot"));
-    IOReply reply = execute(&request);
-    TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, reply.file_info.mode);
-
-    request = path_request(IO_REQUEST_FILE_INFO, &bstr("/boot/sysinfo"));
-    reply = execute(&request);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.file_info.mode);
-
-    request = path_request(IO_REQUEST_FILE_INFO, &bstr("/hello.txt"));
-    reply = execute(&request);
-    TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0644, reply.file_info.mode);
-    TEST_ASSERT_EQUAL(123, reply.file_info.size);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/hello.txt"), IORequest__path(&backends[2].request));
-}
-
-void test_namespace_authenticates_mediator_and_scopes_handles(void)
-{
-    IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/file"));
-    IOReply denied =
-        unwrap_optional(FilesystemNamespace__execute(&namespace, 30, 99, &request), IOReply__new(IO_PANIC, 0));
-    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, denied.status);
-    IOReply opened = execute(&request);
-    request.operation = IO_REQUEST_READ;
-    request.handle = opened.value;
-    request.count = 8;
-    request.client_session++;
-    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, execute(&request).status);
-    request.client_session--;
-    TEST_ASSERT_EQUAL(8, execute(&request).value);
-    request.operation = IO_REQUEST_CLOSE;
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, execute(&request).status);
-}
-
-void test_blocked_mount_does_not_hold_namespace_channel(void)
-{
-    IORequest first = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/file"));
-    backends[0].blocked = true;
-    TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, execute(&first).status);
-    IORequest second = path_request(IO_REQUEST_OPEN, &bstr("/mnt/ext/file"));
-    second.client_session++;
-    second.client_pid++;
-    TEST_ASSERT_EQUAL(IO_OK, execute(&second).status);
-    backends[0].blocked = false;
-    TEST_ASSERT_EQUAL(IO_OK, execute(&first).status);
-    TEST_ASSERT_EQUAL(1, backends[0].opens);
-}
-
-void test_namespace_cleans_open_completed_after_client_exit(void)
-{
-    IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/file"));
-    backends[0].blocked = true;
-    TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, execute(&request).status);
-    request.operation = IO_REQUEST_RELEASE_CLIENT;
-    TEST_ASSERT_EQUAL(IO_WAIT_FOR_DATA, execute(&request).status);
-    backends[0].blocked = false;
-    IOReply reply = execute(&request);
-    for (unsigned i = 0; i < 10 && reply.status == IO_WAIT_FOR_DATA; i++)
-    {
-        reply = execute(&request);
-    }
-    TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL(1, backends[0].opens);
-    TEST_ASSERT_EQUAL(1, backends[0].releases);
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    TEST_ASSERT_EQUAL(1, backends[0].releases);
-}
-
-void test_failed_mount_never_becomes_unmanaged(void)
-{
-    IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/file"));
-    backends[0].broken = true;
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, execute(&request).status);
-    backends[0].broken = false;
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, execute(&request).status);
-    TEST_ASSERT_EQUAL(0, backends[0].opens);
-}
-
 static void add_root(void)
 {
     MountConfig root = {.device_path = bstr("/dev/virtio1"), .filesystem_type = bstr("ext2"), .mountpoint = bstr("/")};
@@ -490,15 +290,17 @@ void test_root_routes_absolute_paths_and_nested_mounts_win_regardless_of_order(v
 {
     add_root();
     IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/hello.txt"));
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    BString relative = IORequest__path(&backends[2].request);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/hello.txt"), relative);
+    IOReply reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_REDIRECT, reply.status);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/"), IORoute__service(&reply.route));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/hello.txt"), IORoute__path(&reply.route));
     request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/file"));
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    TEST_ASSERT_EQUAL(1, backends[0].opens);
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fat"), IORoute__service(&reply.route));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/file"), IORoute__path(&reply.route));
     request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fatter/file"));
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    TEST_ASSERT_EQUAL(2, backends[2].opens);
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/"), IORoute__service(&reply.route));
     namespace = FilesystemNamespace__new();
     add_root();
     MountConfig nested = {
@@ -508,73 +310,120 @@ void test_root_routes_absolute_paths_and_nested_mounts_win_regardless_of_order(v
         error_test_fail()
     );
     request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/file"));
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    TEST_ASSERT_EQUAL(2, backends[0].opens);
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fat"), IORoute__service(&reply.route));
 }
 
-void test_root_listing_includes_bootstrap_overlays_then_disk_entries(void)
+void test_namespace_routes_only_complete_valid_path_components(void)
+{
+    IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/HELLO.TXT"));
+    IOReply reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_REDIRECT, reply.status);
+    TEST_ASSERT_TRUE(reply.route.final);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fat"), IORoute__service(&reply.route));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/HELLO.TXT"), IORoute__path(&reply.route));
+    request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fatter/file"));
+    TEST_ASSERT_EQUAL(IO_INVALID_PATH, execute(&request).status);
+    request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/../ext/file"));
+    TEST_ASSERT_EQUAL(IO_INVALID_PATH, execute(&request).status);
+}
+
+void test_namespace_lists_immediate_mount_children_before_routing_the_backend(void)
 {
     add_root();
     IORequest request = path_request(IO_REQUEST_LIST_DIR, &bstr("/"));
     IOReply reply = execute(&request);
     TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL(3, reply.directory.count);
+    TEST_ASSERT_EQUAL_UINT64(1, reply.directory.count);
     TEST_ASSERT_EQUAL_STRING("mnt", reply.directory.entries[0].name);
-    TEST_ASSERT_EQUAL_STRING("sbin", reply.directory.entries[1].name);
-    TEST_ASSERT_EQUAL_STRING("boot", reply.directory.entries[2].name);
-    request.offset = 3;
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, reply.directory.entries[0].mode);
+
+    request.offset = 1;
     reply = execute(&request);
-    TEST_ASSERT_EQUAL(1, reply.directory.count);
-    TEST_ASSERT_EQUAL_STRING("hello.txt", reply.directory.entries[0].name);
-    TEST_ASSERT_EQUAL(0, backends[2].request.offset);
-    request.offset = 4;
-    TEST_ASSERT_EQUAL(0, execute(&request).directory.count);
+    TEST_ASSERT_EQUAL(IO_REDIRECT, reply.status);
+    TEST_ASSERT_EQUAL_UINT64(0, reply.value);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/"), IORoute__service(&reply.route));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/"), IORoute__path(&reply.route));
 }
 
-void test_root_preserves_bootstrap_paths_and_synthetic_parents(void)
+void test_namespace_lists_nested_mount_children_without_duplicates(void)
 {
     add_root();
-    IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/sbin/commands/ls"));
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    request = path_request(IO_REQUEST_OPEN, &bstr("/boot/config/fstab"));
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    request = path_request(IO_REQUEST_OPEN, &bstr("/boot/sysinfo"));
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    backends[2].list_status = IO_INVALID_PATH;
-    request = path_request(IO_REQUEST_LIST_DIR, &bstr("/boot"));
-    TEST_ASSERT_EQUAL_STRING("config", execute(&request).directory.entries[0].name);
-    request.offset = 1;
+    IORequest request = path_request(IO_REQUEST_LIST_DIR, &bstr("/mnt"));
     IOReply reply = execute(&request);
     TEST_ASSERT_EQUAL(IO_OK, reply.status);
-    TEST_ASSERT_EQUAL_STRING("sysinfo", reply.directory.entries[0].name);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.directory.entries[0].mode);
-    request.offset = 2;
-    reply = execute(&request);
-    TEST_ASSERT_EQUAL(0, reply.directory.count);
-    request = path_request(IO_REQUEST_LIST_DIR, &bstr("/missing"));
-    TEST_ASSERT_EQUAL(IO_INVALID_PATH, execute(&request).status);
-}
+    TEST_ASSERT_EQUAL_UINT64(2, reply.directory.count);
+    TEST_ASSERT_EQUAL_STRING("fat", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL_STRING("ext", reply.directory.entries[1].name);
 
-void test_sbin_mount_routes_to_embedfs_and_does_not_fall_back_on_failure(void)
-{
-    add_root();
-    directory.entry_count = 5;
-    directory.entries[4] =
-        (ServiceDirectoryEntry){.present = 1, .generation = 1, .service_pid = 54, .name = bstr("/sbin")};
-    MountConfig mount = MountConfig__new(&empty_bstr(), &bstr("embedfs"), &bstr("/sbin"));
-    match_result(FilesystemNamespace__add(&namespace, mount),
+    request = path_request(IO_REQUEST_LIST_DIR, &bstr("/mnt/"));
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL_UINT64(2, reply.directory.count);
+    TEST_ASSERT_EQUAL_STRING("fat", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL_STRING("ext", reply.directory.entries[1].name);
+
+    MountConfig nested = {
+        .device_path = bstr("/dev/virtio5"), .filesystem_type = bstr("fat32"), .mountpoint = bstr("/mnt/fat/nested")};
+    match_result(FilesystemNamespace__add(&namespace, nested),
         success_do_nothing(),
         error_test_fail()
     );
-    IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/sbin/hello"));
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    BString relative = IORequest__path(&backends[1].request);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/hello"), relative);
-    backends[1].broken = true;
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, execute(&request).status);
+    request.offset = 0;
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL_UINT64(2, reply.directory.count);
 }
 
-void test_duplicate_root_is_rejected_and_failed_root_has_no_kernel_fallback(void)
+void test_namespace_pages_mount_children_and_adjusts_the_backend_offset(void)
+{
+    add_root();
+    MountConfig sbin = {.device_path = bstr("-"), .filesystem_type = bstr("embedfs"), .mountpoint = bstr("/sbin")};
+    MountConfig tmp = {.device_path = bstr("-"), .filesystem_type = bstr("memfs"), .mountpoint = bstr("/tmp")};
+    MountConfig dev = {.device_path = bstr("-"), .filesystem_type = bstr("devfs"), .mountpoint = bstr("/dev")};
+    match_result(FilesystemNamespace__add(&namespace, sbin),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(FilesystemNamespace__add(&namespace, tmp),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(FilesystemNamespace__add(&namespace, dev),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    IORequest request = path_request(IO_REQUEST_LIST_DIR, &bstr("/"));
+    IOReply reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL_UINT64(IO_DIRECTORY_BATCH_CAPACITY, reply.directory.count);
+
+    request.offset = IO_DIRECTORY_BATCH_CAPACITY;
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL_UINT64(1, reply.directory.count);
+
+    request.offset = 6;
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_REDIRECT, reply.status);
+    TEST_ASSERT_EQUAL_UINT64(2, reply.value);
+}
+
+void test_namespace_routes_file_information_without_synthetic_results(void)
+{
+    add_root();
+    IORequest request = path_request(IO_REQUEST_FILE_INFO, &bstr("/boot"));
+    IOReply reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_REDIRECT, reply.status);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/"), IORoute__service(&reply.route));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/boot"), IORoute__path(&reply.route));
+    request = path_request(IO_REQUEST_FILE_INFO, &bstr("/boot/sysinfo"));
+    reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_REDIRECT, reply.status);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), IORoute__path(&reply.route));
+}
+
+void test_duplicate_root_is_rejected(void)
 {
     add_root();
     MountConfig root = {.device_path = bstr("/dev/virtio1"), .filesystem_type = bstr("ext2"), .mountpoint = bstr("/")};
@@ -589,25 +438,18 @@ void test_duplicate_root_is_rejected_and_failed_root_has_no_kernel_fallback(void
             TEST_ASSERT_EQUAL(IO_INVALID_MOUNT_POINT, code);
         }
     );
-    backends[2].broken = true;
     IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/hello.txt"));
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, execute(&request).status);
-    request = path_request(IO_REQUEST_LIST_DIR, &bstr("/"));
-    request.offset = 6;
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, execute(&request).status);
+    TEST_ASSERT_EQUAL(IO_REDIRECT, execute(&request).status);
 }
 
-void test_tmp_mount_is_managed_even_when_its_driver_is_unavailable(void)
+void test_namespace_rejects_handle_operations_and_missing_identity(void)
 {
-    add_root();
-    MountConfig tmp = MountConfig__new(&empty_bstr(), &bstr("memfs"), &bstr("/tmp"));
-    match_result(FilesystemNamespace__add(&namespace, tmp),
-        success_do_nothing(),
-        error_test_fail()
-    );
-    IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/tmp/file"));
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, execute(&request).status);
-    TEST_ASSERT_EQUAL(0, backends[2].opens);
+    IORequest request = IORequest__new(IO_REQUEST_READ, IO_SESSION_HANDLE_BASE);
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, execute(&request).status);
+    request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/file"));
+    IOReply reply =
+        unwrap_optional(FilesystemNamespace__execute(&namespace, 30, 0, &request), IOReply__new(IO_PANIC, 0));
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, reply.status);
 }
 
 void test_namespace_starts_without_reading_configuration_or_spawning_drivers(void)
@@ -653,14 +495,32 @@ void test_mama_can_add_boot_mount_before_root_and_duplicate_mount_is_rejected(vo
     TEST_ASSERT_EQUAL(IO_OK, reply.status);
 }
 
+void test_namespace_owns_mount_text_after_the_request_is_reused(void)
+{
+    namespace = FilesystemNamespace__new();
+    IORequest request = path_request(IO_REQUEST_MOUNT, &bstr("device /dev/virtio4 fat32 /mnt/fat"));
+    IOReply mounted =
+        unwrap_optional(FilesystemNamespace__execute(&namespace, 45, 60, &request), IOReply__new(IO_PANIC, 0));
+    TEST_ASSERT_EQUAL(IO_OK, mounted.status);
+
+    __builtin_memset(request.data, 'x', sizeof(request.data));
+    request = path_request(IO_REQUEST_OPEN, &bstr("/mnt/fat/file"));
+    IOReply routed = execute(&request);
+
+    TEST_ASSERT_EQUAL(IO_REDIRECT, routed.status);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fat"), IORoute__service(&routed.route));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/file"), IORoute__path(&routed.route));
+}
+
 void test_link_routes_both_paths_relative_to_the_same_mount(void)
 {
     IORequest request = path_request(IO_REQUEST_LINK, &bstr("/mnt/fat/source"));
     IORequest__set_target_path(&request, &bstr("/mnt/fat/target"));
-    TEST_ASSERT_EQUAL(IO_OK, execute(&request).status);
-    TEST_ASSERT_EQUAL(IO_REQUEST_LINK, backends[0].request.operation);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/source"), IORequest__path(&backends[0].request));
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/target"), IORequest__target_path(&backends[0].request));
+    IOReply reply = execute(&request);
+    TEST_ASSERT_EQUAL(IO_REDIRECT, reply.status);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fat"), IORoute__service(&reply.route));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/source"), IORoute__path(&reply.route));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/target"), IORoute__target_path(&reply.route));
 }
 
 void test_link_rejects_cross_mount_and_invalid_targets(void)
@@ -674,6 +534,4 @@ void test_link_rejects_cross_mount_and_invalid_targets(void)
     TEST_ASSERT_EQUAL(IO_INVALID_PATH, execute(&request).status);
     request.target_path_length = IO_PROTOCOL_DATA_SIZE;
     TEST_ASSERT_EQUAL(IO_INVALID_PATH, execute(&request).status);
-    TEST_ASSERT_EQUAL(0, backends[0].request.operation);
-    TEST_ASSERT_EQUAL(0, backends[1].request.operation);
 }

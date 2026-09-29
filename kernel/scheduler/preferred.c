@@ -12,14 +12,57 @@ static bool Process__has_ready_exec_continuation(ProcessPtr self)
     return Process__has_ready_parked_operation(self, PARK_WAIT_EXEC_LOAD, &None(OperationKey));
 }
 
+static void Process__observe_preferred_ticket(ProcessPtr self, ConstRequestTicketPtr ticket)
+{
+    bool already_observed = false;
+    match_optional(
+        self->preferred_ticket,
+        some(current)
+        {
+            already_observed = RequestTicket__equals(&current, ticket);
+        },
+        none_do_nothing()
+    );
+    if (already_observed)
+    {
+        return;
+    }
+    self->preferred_ticket = Some(RequestTicket, *ticket);
+    self->preferred_eligible_at_usec = CPU__time_usec();
+    self->preferred_selected_at_usec = 0;
+    self->preferred_dispatched_at_usec = 0;
+    self->preferred_trace_pending = true;
+}
+
 static bool Scheduler__enqueue_preferred(SchedulerPtr self, ProcessPtr process, bool warm,
                                          const OptionalPtr(RequestTicket) ticket)
 {
+    match_optional(*ticket,
+        some(value)
+        {
+            Process__observe_preferred_ticket(process, &value);
+        },
+        none_do_nothing()
+    );
     if (process->state == PROC_STATE_RUNNING)
     {
         process->preferred_active = true;
         process->preferred_warm = warm;
-        process->preferred_ticket = *ticket;
+        match_optional(
+            process->preferred_ticket,
+            some(value)
+            {
+                if (process->preferred_trace_pending)
+                {
+                    uint64_t now = CPU__time_usec();
+                    process->preferred_selected_at_usec = now;
+                    process->preferred_dispatched_at_usec = now;
+                    Process__publish_dispatch_trace(process, &value, process->preferred_eligible_at_usec, now, now);
+                    process->preferred_trace_pending = false;
+                }
+            },
+            none_do_nothing()
+        );
         return true;
     }
     if (process->state == PROC_STATE_SWITCHING_CONTEXT)
@@ -79,6 +122,10 @@ void Scheduler__forget_preferred(SchedulerPtr self, ProcessPtr process)
     process->preferred_active = false;
     process->preferred_warm = false;
     process->preferred_ticket = None(RequestTicket);
+    process->preferred_eligible_at_usec = 0;
+    process->preferred_selected_at_usec = 0;
+    process->preferred_dispatched_at_usec = 0;
+    process->preferred_trace_pending = false;
 }
 
 static bool Scheduler__preferred_valid(SchedulerPtr self, ProcessPtr process)
@@ -336,6 +383,17 @@ Optional(ProcessPtr) Scheduler__take_preferred(SchedulerPtr self, CPUSchedulerPt
                     );
                     process->preferred_active = true;
                     process->migration_safe = false;
+                    match_optional(
+                        process->preferred_ticket,
+                        some(ticket)
+                        {
+                            if (process->preferred_trace_pending)
+                            {
+                                process->preferred_selected_at_usec = CPU__time_usec();
+                            }
+                        },
+                        none_do_nothing()
+                    );
                     return Some(ProcessPtr, process);
                 },
                 none_do_nothing()

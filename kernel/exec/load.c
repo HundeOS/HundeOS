@@ -4,18 +4,38 @@
 #define EXEC_IMAGE_LIMIT (64ULL * 1024 * 1024)
 static BString load_failed = bstr("Executable loading failed");
 
+static void ExecLoad__set_path(ExecLoadPtr self, ConstBStringPtr path)
+{
+    self->path_length = BString__copy_to(path, (char *)self->path_data, sizeof(self->path_data));
+}
+
+static BString ExecLoad__path(ExecLoadPtr self)
+{
+    return BString__from_chars((const char *)self->path_data,
+                               self->path_length < IO_PROTOCOL_DATA_SIZE ? self->path_length : 0);
+}
+
+static BString ExecLoad__requested_path(ExecLoadPtr self)
+{
+    return BString__from_chars((const char *)self->requested_path_data,
+                               self->requested_path_length < IO_PROTOCOL_DATA_SIZE ? self->requested_path_length : 0);
+}
+
 static ExecLoad ExecLoad__new(KernelChannel channel, ConstOriginatingContextPtr context, ConstBStringPtr path,
                               bool wait, OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
                               ConstSpawnStdioPtr stdio)
 {
-    return (ExecLoad){.channel = channel,
-                      .context = *context,
-                      .path = *path,
-                      .wait = wait,
-                      .user = *user,
-                      .arguments = *arguments,
-                      .stdio = *stdio,
-                      .phase = EXEC_LOAD_OPEN};
+    ExecLoad self = {.channel = channel,
+                     .context = *context,
+                     .wait = wait,
+                     .user = *user,
+                     .arguments = *arguments,
+                     .stdio = *stdio,
+                     .phase = EXEC_LOAD_OPEN};
+    self.requested_path_length =
+        BString__copy_to(path, (char *)self.requested_path_data, sizeof(self.requested_path_data));
+    ExecLoad__set_path(&self, path);
+    return self;
 }
 
 Result(ProcessPtr)
@@ -117,17 +137,52 @@ static Result(ChannelCode) ExecLoad__append(ExecLoadPtr self, SchedulerPtr sched
     return Success(ChannelCode, CHANNEL_OK);
 }
 
-static Result(ChannelCode) ExecLoad__step(ExecLoadPtr self, SchedulerPtr scheduler, ProcessID pid)
+static Result(ChannelCode)
+    ExecLoad__redirect(ExecLoadPtr self, SchedulerPtr scheduler, ProcessPtr process, IOReplyPtr reply)
 {
+    if (self->redirects == IO_ROUTE_LIMIT)
+    {
+        return Error(ChannelCode, load_failed, SPAWN_FAILED);
+    }
+    BString service = IORoute__service(&reply->route);
+    BString path = IORoute__path(&reply->route);
+    if (BString__is_empty(&service) || BString__length(&path) >= IO_PROTOCOL_DATA_SIZE)
+    {
+        return Error(ChannelCode, load_failed, SPAWN_FAILED);
+    }
+    KernelChannel__close(&self->channel, scheduler);
+    match_result(
+        KernelChannel__open(scheduler,
+                            KernelServiceDirectory__kernel_directory(&self->context.kernel->service_directory),
+                            &service, process),
+        success(channel)
+        {
+            self->channel = channel;
+            ExecLoad__set_path(self, &path);
+            self->route_final = reply->route.final;
+            self->redirects++;
+            return Success(ChannelCode, CHANNEL_PENDING);
+        },
+        error(code, message)
+        {
+            return Error(ChannelCode, message, SPAWN_NO_FILE);
+        }
+    );
+}
+
+static Result(ChannelCode) ExecLoad__step(ExecLoadPtr self, SchedulerPtr scheduler, ProcessPtr process)
+{
+    ProcessID pid = process->pid;
+    BString path = ExecLoad__path(self);
     IORequest request = IORequest__new(self->phase == EXEC_LOAD_OPEN   ? IO_REQUEST_OPEN
                                        : self->phase == EXEC_LOAD_READ ? IO_REQUEST_READ
                                                                        : IO_REQUEST_CLOSE,
                                        self->handle);
     request.client_pid = pid;
-    request.buffered = true;
+    request.buffered = self->phase != EXEC_LOAD_OPEN || self->route_final;
     if (self->phase == EXEC_LOAD_OPEN)
     {
-        request.count = BString__copy_to(&self->path, (char *)request.data, sizeof(request.data));
+        request.count = BString__copy_to(&path, (char *)request.data, sizeof(request.data));
         request.flags = IO_OPEN_READ | IO_OPEN_EXECUTE;
     }
     else if (self->phase == EXEC_LOAD_READ)
@@ -179,6 +234,10 @@ static Result(ChannelCode) ExecLoad__step(ExecLoadPtr self, SchedulerPtr schedul
         }
     );
     self->pending = false;
+    if (reply.status == IO_REDIRECT && self->phase == EXEC_LOAD_OPEN)
+    {
+        return ExecLoad__redirect(self, scheduler, process, &reply);
+    }
     if (reply.status == IO_WAIT_FOR_DATA)
     {
         return Success(ChannelCode, CHANNEL_PENDING);
@@ -189,6 +248,8 @@ static Result(ChannelCode) ExecLoad__step(ExecLoadPtr self, SchedulerPtr schedul
     }
     if (reply.status != IO_OK)
     {
+        __d_printf(PROGRESS, "exec load I/O failed pid=%i phase=%i status=%i path=%s\n", pid, self->phase, reply.status,
+                   cstr(path));
         return Error(ChannelCode, load_failed, self->phase == EXEC_LOAD_OPEN ? SPAWN_NO_FILE : SPAWN_FAILED);
     }
     switch (self->phase)
@@ -196,11 +257,14 @@ static Result(ChannelCode) ExecLoad__step(ExecLoadPtr self, SchedulerPtr schedul
     case EXEC_LOAD_OPEN:
         if (reply.value < IO_SESSION_HANDLE_BASE)
         {
+            __d_printf(PROGRESS, "exec load returned invalid handle pid=%i handle=%i path=%s\n", pid, (int)reply.value,
+                       cstr(path));
             return Error(ChannelCode, load_failed, SPAWN_FAILED);
         }
         self->handle = (IOHandle)reply.value;
         if (!BufferDescriptor__valid(&reply.buffers.read, BUFFER_READ))
         {
+            __d_printf(PROGRESS, "exec load returned invalid read buffer pid=%i path=%s\n", pid, cstr(path));
             return Error(ChannelCode, load_failed, SPAWN_FAILED);
         }
         self->transfer = reply.buffers.read;
@@ -268,7 +332,7 @@ Result(ProcessPtr) ExecLoad__continue(ProcessPtr process)
                     scheduler->scheduler_lock,
                     {
                         before = KernelChannel__progress(&load->channel);
-                        progress = ExecLoad__step(load, scheduler, process->pid);
+                        progress = ExecLoad__step(load, scheduler, process);
                         after = KernelChannel__progress(&load->channel);
                     }
                 );
@@ -308,7 +372,8 @@ Result(ProcessPtr) ExecLoad__continue(ProcessPtr process)
                 Kernel__free((Address)load);
                 return Error(ProcessPtr, load_failed, SPAWN_FAILED);
             }
-            Elf elf = Elf__new(load->buffer.virtual_addr, load->buffer.virtual_addr + load->size, &load->path);
+            BString path = ExecLoad__requested_path(load);
+            Elf elf = Elf__new(load->buffer.virtual_addr, load->buffer.virtual_addr + load->size, &path);
             Result(ProcessPtr) result =
                 Exec__launch_loaded_elf(&load->context, &elf, load->wait, &load->user, &load->arguments, &load->stdio);
             Kernel__free((Address)load);

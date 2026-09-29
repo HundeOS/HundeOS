@@ -379,7 +379,7 @@ void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
                    "framebuffer.pixel_format=0\n";
     fake_config = "# hundeschule driver config\n"
                   "driver /sbin/drivers/hundebus once\n"
-                  "driver /sbin/services/hundekanal-test-echo once\n"
+                  "driver /sbin/drivers/sysinfofs once\n"
                   "driver /sbin/drivers/sdhci_channelio once\n"
                   "driver /sbin/drivers/virtio_keyboard respawn framebuffer\n"
                   "driver /sbin/drivers/uart_rx respawn no-framebuffer\n";
@@ -393,7 +393,7 @@ void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk_channelio", spawn_calls[3].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/socket_router", spawn_calls[1].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[4].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundekanal-test-echo", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sysinfofs", spawn_calls[5].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sdhci_channelio", spawn_calls[6].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_keyboard", spawn_calls[7].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[8].path);

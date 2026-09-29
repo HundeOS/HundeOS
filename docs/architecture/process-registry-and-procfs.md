@@ -86,6 +86,9 @@ these are snapshots, not a promise of instantaneous state when a reader runs.
 - `parked_usec` and `max_parked_usec`: total and longest monotonic elapsed time
   from successful park to being marked runnable.
 - `selections`: queue wakeups subsequently selected by a context switch.
+- `speculative_selections`: times an unchanged userspace queue waiter was selected
+  as the CPU's final alternative to the idle process. These are independent of
+  kernel queue-wait parks and wakeups.
 - `runnable_usec` and `max_runnable_usec`: total and longest elapsed time from
   that wake to context-switch selection, before deferred syscall completion and
   architecture resume. This is not a measurement of time until userspace executes.
@@ -96,9 +99,10 @@ can therefore have unmatched counts. Termination before a normal queue wake is
 not counted as an activity wake. Divide parked time by total wakes, and runnable
 time by selections, for lifetime averages; differences between two snapshots
 give interval averages. Counts are cumulative per process, not windowed CPU usage.
-Userspace queue helpers use `WFE` rather than kernel parking.
-Their event waits do not increment these counters; on a fresh boot these
-counters should remain zero unless another caller invokes the kernel wait syscall.
+Userspace queue helpers use architecture event waits rather than kernel parking.
+Their event waits do not increment the kernel park/wake counters. They can
+increment `speculative_selections` when no preferred, admitted, or normally
+runnable process is available on their assigned CPU.
 
 ## IPC Activity Diagnostics
 
@@ -112,12 +116,38 @@ inputs. A process without that mapping reports `diagnostics=unavailable`.
 - `uart_irqs`: IRQ notifications consumed by the UART RX service, not raw hardware edges.
 - `uart_reads`: read-handler calls, including zero-length reads.
 - `uart_empty`: nonzero reads answered with `IO_WAIT_FOR_DATA` and no bytes.
-- `backend_reads`: successful backend Channel read submissions by mediators.
+- `backend_reads`: successful downstream Channel read submissions by services.
 - `backend_empty`: completed backend reads returning `IO_WAIT_FOR_DATA`.
   Repeated submissions and empty completions expose retry traffic; these are
   aggregated across the process's backends, not only UART.
 - `warden_relays`: successful request forwards to Channel servers, not failed
   enqueue attempts or replies.
+- `block_submissions`: virtio block requests notified to the device. A logical
+  Channel transfer can produce multiple submissions when its shared buffer is
+  not physically contiguous.
+- `block_blocks`: 512-byte blocks included in those hardware submissions.
+- `block_failures`: notified submissions that fail while awaiting completion or
+  complete with a non-successful virtio status.
+- `block_device_usec_p50`, `block_device_usec_p70`, `block_device_usec_p90`,
+  and `block_device_usec_p99`: lifetime latency percentiles from the virtqueue
+  MMIO notification until the used-ring completion is observed. These include
+  device/emulator time, IRQ delivery, and time until the driver fibre runs; they
+  exclude Channel queueing and request preparation before notification.
+- `block_segmented_submissions`: submissions for which all IRQ-path timestamps
+  were present and monotonic. IRQ-free completions remain in `block_submissions`
+  but are not included here.
+- `block_device_irq_usec_*`: virtqueue notification to kernel IRQ ingress.
+- `block_manager_wake_usec_*`: kernel IRQ ingress to `hund-unterbrict`
+  consuming the notification.
+- `block_irq_relay_usec_*`: manager consumption to the block driver receiving
+  the relayed delivery.
+- `block_fiber_wake_usec_*`: driver delivery receipt to the waiting block fibre
+  resuming.
+- `block_completion_usec_*`: fibre resumption to used-ring observation.
+  Each segmented group reports `p50`, `p70`, `p90`, and `p99`, using
+  `block_segmented_submissions` as its sample count. Percentiles are bounded
+  upper-bound estimates from a 128-bucket logarithmic lifetime histogram with
+  four buckets per power-of-two range; samples are not retained individually.
 - `wait_entries`: actual calls to the userspace event wait primitive.
 - `unchanged_wakes`: returns from that primitive with unchanged watched queue
   state. IRQs, retained events and other notifications can legitimately cause

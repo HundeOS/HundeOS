@@ -37,22 +37,11 @@ static int PosixStat__absolute_path(const char * path, BStringPtr result)
     return 0;
 }
 
-static ino_t PosixStat__inode(ConstBStringPtr path)
-{
-    ino_t value = 1469598103934665603ULL;
-    for (StringPos index = 0; index < BString__length(path); index++)
-    {
-        value ^= (unsigned char)BString__char_at_or(path, index, '\0');
-        value *= 1099511628211ULL;
-    }
-    return value;
-}
-
-static void PosixStat__fill(struct stat * status, ConstBStringPtr path, IOFileInfo info)
+static void PosixStat__fill(struct stat * status, IOFileInfo info)
 {
     *status = (struct stat){
         .st_dev = 1,
-        .st_ino = PosixStat__inode(path),
+        .st_ino = info.identity,
         .st_mode = info.mode,
         .st_nlink = 1,
         .st_uid = info.user_id,
@@ -68,7 +57,7 @@ static int PosixStat__path(ConstBStringPtr path, struct stat * status)
         IO__file_info(path),
         success(info)
         {
-            PosixStat__fill(status, path, info);
+            PosixStat__fill(status, info);
             if (S_ISDIR(status->st_mode))
             {
                 status->st_nlink = 2;

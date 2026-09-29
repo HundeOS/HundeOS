@@ -70,6 +70,16 @@ void QueueWaitUsage__select(QueueWaitUsagePtr self)
     );
 }
 
+void QueueWaitUsage__select_speculative(QueueWaitUsagePtr self)
+{
+    critical_section(
+        self->lock,
+        {
+            self->totals.speculative_selections++;
+        }
+    );
+}
+
 ProcessQueueWaitUsage QueueWaitUsage__snapshot(QueueWaitUsagePtr self)
 {
     critical_section(

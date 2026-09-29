@@ -2,6 +2,7 @@
 #include "../fixtures/kernel.h"
 #include "../fixtures/process.h"
 #include "../stubs/page_table.h"
+#include "../../../common/ipc/buffer.h"
 #include "../../../kernel/bin/embedded_mapping.h"
 #include <string.h>
 
@@ -31,6 +32,12 @@ void setUp(void)
 
 void tearDown(void)
 {
+}
+
+void test_archive_mapping_does_not_overlap_shared_buffers(void)
+{
+    Address buffer_end = BUFFER_BASE + BUFFER_LIMIT * BUFFER_SIZE;
+    TEST_ASSERT_TRUE(buffer_end <= EMBEDDED_FS_VADDR);
 }
 
 void test_archive_is_only_mapped_into_embedfs_read_only_and_non_executable(void)

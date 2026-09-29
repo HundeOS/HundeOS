@@ -3,6 +3,7 @@ manifest:
   include_default_fixtures: false
   source_files:
     - test/user/buffer_fake.c
+    - test/user/io_trace_fake.c
     - user/lib/bus/info.c
     - user/lib/channel/channel.c
     - user/lib/channel/server.c

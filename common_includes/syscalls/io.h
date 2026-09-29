@@ -7,6 +7,8 @@
 #include "types/bstring.h"
 #include "types/result.h"
 
+#define IO_FILE_WATCH_CAPACITY 16U
+
 typedef enum IOOperation
 {
     IO_OPEN,
@@ -40,6 +42,7 @@ typedef enum IOStatus
     IO_PATH_UNMANAGED = -14,
     IO_INTERRUPTED = -15,
     IO_ALREADY_EXISTS = -16,
+    IO_REDIRECT = -17,
     IO_PANIC = -255,
 } IOStatus;
 
@@ -71,12 +74,68 @@ typedef uint64_t Flags;
 typedef uint16_t FileMode;
 typedef uint64_t DirectoryEntryAttributes;
 
+typedef enum IOSeekWhence
+{
+    IO_SEEK_SET,
+    IO_SEEK_CURRENT,
+    IO_SEEK_END,
+} IOSeekWhence;
+
+typedef enum IOFileChangeFlags
+{
+    IO_FILE_CHANGE_WRITE = 1 << 0,
+    IO_FILE_CHANGE_DELETE = 1 << 1,
+    IO_FILE_CHANGE_RENAME = 1 << 2,
+    IO_FILE_CHANGE_TRUNCATE = 1 << 3,
+} IOFileChangeFlags;
+
+typedef struct IOFileChange
+{
+    IOHandle handle;
+    uint64_t generation;
+    Flags events;
+} IOFileChange;
+
+typedef struct IOFileWatch
+{
+    IOHandle handle;
+    uint64_t generation;
+} IOFileWatch;
+
+static inline IOFileWatch IOFileWatch__new(IOHandle handle, uint64_t generation)
+{
+    return (IOFileWatch){.handle = handle, .generation = generation};
+}
+
+typedef struct IOSeekResult
+{
+    IOStatus status;
+    uint64_t position;
+} IOSeekResult;
+
+typedef struct IOWatchResult
+{
+    IOStatus status;
+    IOFileChange change;
+} IOWatchResult;
+
+static inline IOSeekResult IOSeekResult__new(IOStatus status, uint64_t position)
+{
+    return (IOSeekResult){.status = status, .position = position};
+}
+
+static inline IOWatchResult IOWatchResult__new(IOStatus status, IOFileChange change)
+{
+    return (IOWatchResult){.status = status, .change = change};
+}
+
 typedef struct IOFileInfo
 {
     FileMode mode;
     UserID user_id;
     GroupID group_id;
     uint64_t size;
+    uint64_t identity;
 } IOFileInfo;
 
 typedef IOFileInfo * IOFileInfoPtr;

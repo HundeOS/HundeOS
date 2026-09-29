@@ -1,6 +1,7 @@
 #include "puffer.h"
 #include "channel/server.h"
 #include "sys/service.h"
+#include "trace/io_trace.h"
 
 typedef struct PufferConnection
 {
@@ -86,6 +87,7 @@ static bool PufferConnection__serve(PufferConnectionPtr self, PufferPtr manager)
 
 int main(void)
 {
+    IOTrace__set_enabled(false);
     static Puffer manager;
     static PufferConnections connections;
     manager = Puffer__new(ServiceDirectory__shared());

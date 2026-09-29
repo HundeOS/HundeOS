@@ -6,6 +6,8 @@
 #include "syscall.h"
 #include "syscalls/service.h"
 
+#define QUEUE_WAIT_WARM_SPIN_USEC 100ULL
+
 typedef struct QueueWaitSource
 {
     QueueWaitKind kind;
@@ -68,6 +70,19 @@ static void QueueWait__register_control(void)
     }
 }
 
+Optional(QueueDispatchTrace) QueueWait__take_dispatch_trace(ConstRequestTicketPtr ticket)
+{
+    match_optional(
+        wait_control,
+        some(control)
+        {
+            return QueueWaitControl__take_dispatch(control, ticket);
+        },
+        none_do_nothing()
+    );
+    return None(QueueDispatchTrace);
+}
+
 static void QueueWait__clear_control(void)
 {
     match_optional(wait_control,
@@ -120,6 +135,23 @@ static Result(QueueCode) QueueWait__arm_control(void)
         none_do_nothing()
     );
     return Success(QueueCode, QUEUE_OK);
+}
+
+static void QueueWait__park(ConstQueueWaitSnapshotPtr observed, size_t count)
+{
+    syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, (Anything)observed, count, QUEUE_WAIT_INDEFINITE_TICKS, 0);
+}
+
+static void QueueWait__park_all(void)
+{
+    match_optional(
+        QueueWaitSnapshots__ptr_at(&snapshots, 0),
+        some(first)
+        {
+            QueueWait__park(first, QueueWaitSnapshots__len(&snapshots));
+        },
+        none_do_nothing()
+    );
 }
 
 static QueueWaitSource QueueWaitSource__new_queue(QueuePtr queue)
@@ -306,9 +338,19 @@ void Queue__wait_event(void)
         }
         IODiagnostics__record(IO_DIAGNOSTIC_WAIT_ENTRIES, 1);
         uint64_t unchanged_wakes = 0;
+        QueueWait__park_all();
+        uint64_t spin_started_at_usec = IpcPlatform__monotonic_usec();
         while (!QueueWait__changed())
         {
-            IpcPlatform__wait_event();
+            if (IpcPlatform__monotonic_usec() - spin_started_at_usec >= QUEUE_WAIT_WARM_SPIN_USEC)
+            {
+                QueueWait__park_all();
+                spin_started_at_usec = IpcPlatform__monotonic_usec();
+            }
+            else
+            {
+                IpcPlatform__relax();
+            }
             if (!QueueWait__changed())
             {
                 unchanged_wakes++;
@@ -352,10 +394,25 @@ static void QueueWaitSource__wait(QueueWaitSourcePtr self, ConstQueueWaitSnapsho
         );
         IODiagnostics__record(IO_DIAGNOSTIC_WAIT_ENTRIES, 1);
         uint64_t unchanged_wakes = 0;
+        QueueWait__park(observed, 1);
+        uint64_t spin_started_at_usec = IpcPlatform__monotonic_usec();
         while (true)
         {
-            IpcPlatform__wait_event();
             QueueWaitSnapshot after = QueueWaitSource__snapshot(self);
+            if (!QueueWaitSnapshot__equals(observed, &after))
+            {
+                break;
+            }
+            if (IpcPlatform__monotonic_usec() - spin_started_at_usec >= QUEUE_WAIT_WARM_SPIN_USEC)
+            {
+                QueueWait__park(observed, 1);
+                spin_started_at_usec = IpcPlatform__monotonic_usec();
+            }
+            else
+            {
+                IpcPlatform__relax();
+            }
+            after = QueueWaitSource__snapshot(self);
             if (!QueueWaitSnapshot__equals(observed, &after))
             {
                 break;

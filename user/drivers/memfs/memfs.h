@@ -46,7 +46,6 @@ typedef struct Memfs
     MemfsHandles handles;
     MemfsNodeID next_node;
     IOHandle next_handle;
-    QueueConnectionID namespace_session;
 } Memfs;
 
 typedef Memfs * MemfsPtr;

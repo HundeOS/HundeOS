@@ -490,3 +490,13 @@ void test_bstring_sprintf_formats_star_precision_for_string(void)
 
     TEST_ASSERT_EQUAL_BSTRING(bstr("abc   !"), formatted);
 }
+
+void test_bstring_hash_is_stable_and_includes_embedded_nul(void)
+{
+    BString first = BString__from_chars("a\0b", 3);
+    BString same = BString__from_chars("a\0b", 3);
+    BString shorter = BString__from_chars("a", 1);
+
+    TEST_ASSERT_EQUAL_UINT64(BString__hash(&first), BString__hash(&same));
+    TEST_ASSERT_NOT_EQUAL(BString__hash(&first), BString__hash(&shorter));
+}

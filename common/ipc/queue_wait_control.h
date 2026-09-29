@@ -3,6 +3,7 @@
 
 #include "queue_wait.h"
 #include "io_diagnostics.h"
+#include "request_ticket.h"
 #include "../types/atomic_record_array.h"
 
 typedef uint64_t QueueWaitGeneration;
@@ -18,7 +19,29 @@ OptionalDef(QueueWaitStartedAt);
 ResultDef(QueueWaitSnapshot);
 AtomicRecordArrayDefine(QueueWaitSnapshot, QUEUE_WAIT_LIMIT, QueueWaitObservations);
 
-// Userspace writes the publication. The kernel only increments wake_generation;
+typedef struct QueueDispatchTrace
+{
+    RequestTicket ticket;
+    uint64_t eligible_at_usec;
+    uint64_t selected_at_usec;
+    uint64_t dispatched_at_usec;
+} QueueDispatchTrace;
+
+typedef const QueueDispatchTrace * ConstQueueDispatchTracePtr;
+OptionalDef(QueueDispatchTrace);
+
+QueueDispatchTrace QueueDispatchTrace__new(ConstRequestTicketPtr ticket, uint64_t eligible_at_usec,
+                                           uint64_t selected_at_usec, uint64_t dispatched_at_usec);
+
+typedef struct QueueDispatchTraceSlot
+{
+    uint64_t generation;
+    uint64_t consumed_generation;
+    QueueDispatchTrace trace;
+} QueueDispatchTraceSlot;
+
+// Userspace writes wait publications and consumes dispatch diagnostics. The
+// kernel increments wake_generation and publishes the lossy dispatch trace;
 // odd publication generations denote an update and must never suppress scheduling.
 typedef struct QueueWaitControl
 {
@@ -31,6 +54,7 @@ typedef struct QueueWaitControl
     QueueWaitWakeGeneration observed_wake_generation;
     QueueWaitObservations observations;
     IODiagnostics diagnostics;
+    QueueDispatchTraceSlot dispatch_trace;
 } QueueWaitControl;
 
 typedef QueueWaitControl * QueueWaitControlPtr;
@@ -62,5 +86,7 @@ QueueWaitWakeGeneration QueueWaitControl__wake_generation(ConstQueueWaitControlP
 bool QueueWaitControl__woken(ConstQueueWaitControlPtr self, QueueWaitWakeGeneration observed_wake_generation);
 Optional(QueueWaitPublication) QueueWaitControl__publication(ConstQueueWaitControlPtr self);
 bool QueueWaitControl__unchanged(ConstQueueWaitControlPtr self, ConstQueueWaitPublicationPtr publication);
+void QueueWaitControl__publish_dispatch(QueueWaitControlPtr self, ConstQueueDispatchTracePtr trace);
+Optional(QueueDispatchTrace) QueueWaitControl__take_dispatch(QueueWaitControlPtr self, ConstRequestTicketPtr ticket);
 
 #endif

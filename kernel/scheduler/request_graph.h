@@ -30,5 +30,6 @@ RequestGraph RequestGraph__new(void);
 void RequestGraph__refresh(RequestGraphPtr self, QueuesPtr queues);
 Optional(RequestLink) RequestGraph__find(RequestGraphPtr self, uint64_t connection, uint64_t generation);
 bool RequestGraph__valid(RequestGraphPtr self, ConstRequestLinkPtr link);
+uint64_t RequestGraph__dependency_weight(RequestGraphPtr self, ProcessPtr process);
 
 #endif

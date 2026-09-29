@@ -2,8 +2,9 @@
 
 ## Status and scope
 
-This architecture now has an initial implementation in `hund-unterbrict` and
-the separate `virtio_blk_channelio` driver. It builds on
+This architecture now has an initial driver-host implementation in
+`hund-unterbrict`. VirtIO block driver instances execute inside that process;
+other interrupt consumers still use the client Channel protocol. It builds on
 [Channels and event queues](channels-and-event-queues.md) and the
 [queue transport](queues.md) design.
 
@@ -12,13 +13,12 @@ masks an IRQ before publishing it, so every routed IRQ has a dedicated pending
 slot and queue capacity cannot discard another IRQ. Driver control and delivery
 messages use persistent bidirectional `Channel` sessions; the interrupt
 protocol does not define another channel or expose its internal queues.
-All VirtIO disks, including the root and boot-configuration disks, now select
-`virtio_blk_channelio`. Hundeschule starts the embedded channel manager and
-interrupt server and waits for both before probing disks. Their startup does
-not depend on disk configuration. The legacy kernel IRQ subscription and wait
-APIs remain for other unmigrated callers; the old `virtio_blk` driver has been
-deleted. `virtio_blk_channelio` owns the hardware implementation and uses only
-its fibre runtime and interrupt-manager channel.
+All VirtIO disks, including the root and boot-configuration disks, are probed
+and registered by `hund-unterbrict` before it publishes readiness. The reusable
+`virtio_blk_channelio` runtime owns the hardware implementation and exposes the
+same block Channels as before, but hosted instances receive IRQs by direct local
+dispatch. The standalone executable remains as a compatibility harness while
+the hosted path is validated; normal bootstrap does not spawn it.
 
 The objective is to keep device IRQ routing and acknowledgement policy in
 userspace. Hardware interrupt entry still runs in the kernel. Registration,
@@ -29,26 +29,32 @@ notification and acknowledgement should not.
 
 The kernel owns exception entry, privileged GIC CPU-interface operations,
 process identity, token validation, and process-exit notifications. It retains
-timer interrupts and scheduling IPIs. For delegated device IRQs it masks the
-source and completes the required GIC end-of-interrupt/deactivation sequence
+timer interrupts and scheduling IPIs on every CPU. For delegated device IRQs it
+masks the source and completes the required GIC
+end-of-interrupt/deactivation sequence
 before returning to userspace, publishing a notification to the interrupt
 service's shared event queue.
 
-Notification publication completes before `SEV`. The architecture IRQ path also
-broadcasts after non-timer device dispatch, allowing userspace `WFE` waiters on
-other cores to recheck state. This is a wake hint, not an IRQ acknowledgement or
-a request to make kernel-parked processes runnable. Timer preemption is unchanged;
-normal channel waits remain in userspace. See [queue waits](queues.md#bounded-waits).
+Notification publication completes before the interrupt manager is made
+runnable. If the manager is parked in a queue wait, the kernel completes that
+wait and immediately reschedules its owning CPU, using an IPI when the IRQ was
+handled on another CPU. `SEV` remains a hint for resident userspace waiters and
+is not an IRQ acknowledgement. See [queue waits](queues.md#bounded-waits).
 
-`hund-unterbrict` owns device IRQ registrations, delivery to consumers,
-outstanding acknowledgements, and rearming. It receives a kernel-authorized
+`hund-unterbrict` owns device IRQ registrations, hosted hardware drivers,
+delivery to external consumers, outstanding acknowledgements, and rearming. It receives a kernel-authorized
 mapping of the GIC distributor registers needed to manage delegated IRQs.
 It consumes kernel IRQ events together with channel requests in one logical
 event loop using event waits. Kernel notifications use a one-way
 `KernelNotificationQueue`; each driver uses a separate `Channel`. The queue
 transport beneath a channel is not part of the interrupt protocol.
 
-Device drivers own their device MMIO registers. They service the device and
+Hosted driver instances own their device MMIO registers and use per-instance
+DMA rings and fibre schedulers. An IRQ notification is matched to the owning
+instance and wakes its fibre without a Channel exchange or another process
+scheduling decision. External device drivers retain the Channel flow below.
+
+Device drivers service the device and
 clear its interrupt source before acknowledging completion to the interrupt
 service. They do not map the GIC themselves.
 
@@ -91,18 +97,31 @@ and acknowledgements remain channel exchanges in userspace.
 
 ## Interrupt and acknowledgement flow
 
+After successful privileged interrupt-manager registration, the kernel promotes
+`hund-unterbrict` to the realtime-service process class. This class has the
+highest runnable priority but does not reserve a CPU or disable scheduling
+ticks. The manager drains IRQ and hosted-driver work, then parks through its
+normal Channel wait. Other work can use the CPU while the manager is parked.
+
 1. The kernel accepts a delegated IRQ, masks its GIC source, and completes the
-   privileged CPU-interface handling. It records and publishes the IRQ event
+   privileged CPU-interface handling. It timestamps and publishes the IRQ event
    to `hund-unterbrict`.
 2. The service records an outstanding delivery and notifies the registered
    consumer through its channel. The notification identifies the IRQ,
-   registration generation, and delivery sequence.
+   registration generation, delivery sequence, kernel IRQ timestamp, and the
+   time at which the manager consumed the kernel notification. The shared
+   interrupt client records when the driver receives that delivery.
 3. The driver services the device, including MMIO acknowledgement of its
    interrupt source and required memory/device ordering.
 4. The driver sends a completion acknowledgement over its channel to
    `hund-unterbrict`, identifying that delivery.
 5. The service validates the consumer and delivery identity, retires the
    outstanding acknowledgement, and unmasks the IRQ through GIC MMIO.
+
+For a hosted driver, steps 2, 4, and 5 are local calls: the manager records the
+kernel and manager timestamps, wakes the matching driver fibre, and the driver
+requests rearm directly after acknowledging its device. No interrupt-protocol
+Channel is created for a hosted instance.
 
 An acknowledgement from another process, an old registration, or an already
 completed delivery must not rearm the IRQ. Shared-memory publication and
@@ -119,6 +138,13 @@ Retain pending notifications for retry and leave the source masked until its
 delivery can complete. The same reliability requirement applies to process-exit
 events used for cleanup; current bounded-queue exit delivery is not sufficient
 to guarantee this without overflow recovery.
+
+The timestamps carried with the existing delivery are advisory diagnostics;
+they do not add another message or acknowledgement. VirtIO block uses them,
+together with timestamps at fibre resumption and used-ring observation, to
+separate emulator/device latency from manager wakeup, userspace relay, and
+driver scheduling latency. A completion observed without an IRQ still counts
+in overall block latency but cannot produce a segmented sample.
 
 ## Consumer death and cleanup
 

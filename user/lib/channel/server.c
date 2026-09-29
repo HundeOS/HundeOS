@@ -1,5 +1,8 @@
 #include "server.h"
 
+#include "ipc/ipc_platform.h"
+#include "trace/io_trace.h"
+
 static BString channel_server_invalid_request = bstr("Invalid channel server request");
 static BString channel_server_transport_failed = bstr("Channel server transport failed");
 static BString channel_server_wrong_warden = bstr("Channel connection did not come from the warden");
@@ -100,6 +103,9 @@ Result(OptionalChannelServerRequest) ChannelServer__poll(ChannelServerPtr self)
             self->transport_pid = message.arg3;
             self->handling_request = true;
             self->ticket = ticket;
+            uint64_t received_at_usec = IpcPlatform__monotonic_usec();
+            IOTrace__record_with_peer(IO_TRACE_SERVER_RECEIVE, &self->ticket, received_at_usec, self->transport_pid,
+                                      ChannelPayload__request_published_at(self->payload));
             return Success(OptionalChannelServerRequest,
                            Some(ChannelServerRequest, ChannelServerRequest__new(self->request_size, self->client_pid)));
         },
@@ -130,10 +136,12 @@ Result(ChannelCode) ChannelServer__reply(ChannelServerPtr self, ConstChannelData
     }
     QueueMessage response = ChannelControlMessage__new(CHANNEL_RESPONSE_REPLIED, 0, size, self->token);
     response.request = self->ticket.metadata;
+    uint64_t replied_at_usec = IpcPlatform__monotonic_usec();
     match_result(
         Queue__push(&self->control, &response),
         success(code)
         {
+            IOTrace__record(IO_TRACE_SERVER_REPLY, &self->ticket, replied_at_usec);
             self->handling_request = false;
             return Success(ChannelCode, CHANNEL_OK);
         },

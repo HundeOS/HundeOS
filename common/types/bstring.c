@@ -459,6 +459,21 @@ bool BString__equals(ConstBStringPtr self, ConstBStringPtr other)
     return true;
 }
 
+uint64_t BString__hash(ConstBStringPtr self)
+{
+    uint64_t hash = 14695981039346656037ULL;
+    for_each_bstring(
+        self,
+        index,
+        character,
+        {
+            hash ^= (uint8_t)character;
+            hash *= 1099511628211ULL;
+        }
+    );
+    return hash;
+}
+
 BString BString__from_chars(const char * chars, StringPos length)
 {
     BString result = empty_bstr();
@@ -521,6 +536,7 @@ BString BString__join(BStringArrayPtr array, char delimiter)
             }
         }
     );
+
     return result;
 }
 
@@ -644,6 +660,7 @@ Optional(uint64_t) BString__parse_uint64_base(ConstBStringPtr self, uint64_t bas
             base = 8;
         }
     }
+
     else if (base == 16 && stripped.len >= 2 && stripped.data[0] == '0' &&
              (stripped.data[1] == 'x' || stripped.data[1] == 'X'))
     {

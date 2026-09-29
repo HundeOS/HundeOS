@@ -41,6 +41,20 @@ void * memmove(void * dest, const void * src, size_t size)
     return dest;
 }
 
+void * memchr(const void * buffer, int character, size_t size)
+{
+    const unsigned char * bytes = buffer;
+    unsigned char target = (unsigned char)character;
+    for (size_t index = 0; index < size; index++)
+    {
+        if (bytes[index] == target)
+        {
+            return (void *)&bytes[index];
+        }
+    }
+    return NULL;
+}
+
 size_t strlen(const char * text)
 {
     size_t length = 0;

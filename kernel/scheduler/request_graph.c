@@ -267,3 +267,42 @@ bool RequestGraph__valid(RequestGraphPtr self, ConstRequestLinkPtr link)
     }
     return false;
 }
+
+uint64_t RequestGraph__dependency_weight(RequestGraphPtr self, ProcessPtr process)
+{
+    uint64_t weight = 0;
+    for_each_fa(
+        RequestLinks,
+        self->links,
+        index,
+        link,
+        {
+            if (link.responder != process || link.replied || !RequestGraph__valid(self, &link))
+            {
+                continue;
+            }
+            RequestLink current = link;
+            for (uint64_t depth = 0; depth < RequestLinks__len(&self->links); depth++)
+            {
+                weight++;
+                if (current.ticket.metadata.parent_connection == 0)
+                {
+                    break;
+                }
+                match_optional(
+                    RequestGraph__find(self, current.ticket.metadata.parent_connection,
+                                       current.ticket.metadata.parent_generation),
+                    some(parent)
+                    {
+                        current = parent;
+                    },
+                    none()
+                    {
+                        break;
+                    }
+                );
+            }
+        }
+    );
+    return weight;
+}

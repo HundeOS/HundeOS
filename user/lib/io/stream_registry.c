@@ -2,31 +2,24 @@
 #include "path.h"
 
 LinkedListBodyDefine(StreamDevices);
-LinkedListBodyDefine(StreamBackends);
 
 bool StreamDevice__equals(void * first, void * second)
 {
     StreamDevicePtr left = first;
     StreamDevicePtr right = second;
-    return left->access == right->access && BString__equals(&left->name, &right->name);
-}
-
-bool StreamBackend__equals(void * first, void * second)
-{
-    StreamBackendPtr left = first;
-    StreamBackendPtr right = second;
-    return BString__equals(&left->service, &right->service);
+    BString left_name = IORoute__path(&left->route);
+    BString right_name = IORoute__path(&right->route);
+    return left->access == right->access && BString__equals(&left_name, &right_name);
 }
 
 StreamRegistry StreamRegistry__new(void)
 {
-    return (StreamRegistry){
-        .devices = StreamDevices__new(), .backends = StreamBackends__new(), .next_handle = IO_STREAM_HANDLE_BASE};
+    return (StreamRegistry){.devices = StreamDevices__new()};
 }
 
 static StreamDevice StreamDevice__new(ConstBStringPtr name, Flags access, ConstBStringPtr service)
 {
-    return (StreamDevice){.name = *name, .access = access, .service = *service};
+    return (StreamDevice){.route = IORoute__new(service, name, &empty_bstr(), true), .access = access};
 }
 
 static bool StreamDevice__matches(StreamDevicePtr self, void * context)
@@ -65,98 +58,20 @@ Result(IOStatus)
 
 static bool StreamDevice__named(StreamDevicePtr self, void * context)
 {
-    return BString__equals(&self->name, context);
+    BString name = IORoute__path(&self->route);
+    return BString__equals(&name, context);
 }
 
-static bool StreamBackend__named(StreamBackendPtr self, void * context)
-{
-    return BString__equals(&self->service, context);
-}
-
-static bool StreamBackend__owns(StreamBackendPtr self, void * context)
-{
-    IOHandle handle = *(IOHandlePtr)context;
-    return handle >= self->first_handle && handle < self->first_handle + IO_SESSION_HANDLE_BASE;
-}
-
-static StreamBackend StreamBackend__new(ConstBStringPtr service, Channel channel, IOHandle first_handle)
-{
-    return (StreamBackend){
-        .service = *service, .mediator = IOMediator__new_stream(channel, first_handle), .first_handle = first_handle};
-}
-
-static Optional(IOReply) StreamRegistry__forward(StreamRegistryPtr self, ConstBStringPtr service,
-                                                 QueueConnectionID session, uint64_t pid, IORequestPtr request)
-{
-    match_find_result_ptr(
-        StreamBackends__find(&self->backends, StreamBackend__named, (BStringPtr)service),
-        some(backend)
-        {
-            return IOMediator__execute(&backend->mediator, session, pid, request);
-        },
-        none_do_nothing()
-    );
-    if (self->next_handle > INT64_MAX - IO_SESSION_HANDLE_BASE)
-    {
-        return Some(IOReply, IOReply__new(IO_REGISTER_FAILED, 0));
-    }
-    match_result(
-        Channel__open(ServiceDirectory__shared(), service),
-        success(channel)
-        {
-            StreamBackend backend = StreamBackend__new(service, channel, self->next_handle);
-            match_result(
-                StreamBackends__push(&self->backends, backend),
-                success(code)
-                {
-                    self->next_handle += IO_SESSION_HANDLE_BASE;
-                },
-                error(code, message)
-                {
-                    Channel__close(&channel);
-                    return Some(IOReply, IOReply__new(IO_REGISTER_FAILED, 0));
-                }
-            );
-        },
-        error(code, message)
-        {
-            return Some(IOReply, IOReply__new(IO_NO_DEVICE_FOUND, 0));
-        }
-    );
-    match_find_result_ptr(
-        StreamBackends__find(&self->backends, StreamBackend__named, (BStringPtr)service),
-        some(backend)
-        {
-            return IOMediator__execute(&backend->mediator, session, pid, request);
-        },
-        none()
-        {
-            return Some(IOReply, IOReply__new(IO_NO_DEVICE_FOUND, 0));
-        }
-    );
-}
-
-Optional(IOReply)
-    StreamRegistry__execute(StreamRegistryPtr self, QueueConnectionID session, uint64_t pid, IORequestPtr request)
+IOReply StreamRegistry__route(StreamRegistryPtr self, IORequestPtr request)
 {
     if (request->operation != IO_REQUEST_OPEN)
     {
-        match_find_result_ptr(
-            StreamBackends__find(&self->backends, StreamBackend__owns, &request->handle),
-            some(backend)
-            {
-                return IOMediator__execute(&backend->mediator, session, pid, request);
-            },
-            none()
-            {
-                return Some(IOReply, IOReply__new(IO_UNKNOWN_HANDLE, 0));
-            }
-        );
+        return IOReply__new(IO_UNKNOWN_HANDLE, 0);
     }
     BString name = IORequest__path(request);
     if (request->count > IO_PROTOCOL_DATA_SIZE || !IOPath__is_stream(&name))
     {
-        return Some(IOReply, IOReply__new(IO_INVALID_PATH, 0));
+        return IOReply__new(IO_INVALID_PATH, 0);
     }
     match_find_result(
         StreamDevices__find(&self->devices, StreamDevice__named, &name),
@@ -165,7 +80,7 @@ Optional(IOReply)
         },
         none()
         {
-            return Some(IOReply, IOReply__new(IO_NO_DEVICE_FOUND, 0));
+            return IOReply__new(IO_NO_DEVICE_FOUND, 0);
         }
     );
     StreamDevice key = StreamDevice__new(&name, request->flags, &empty_bstr());
@@ -173,47 +88,18 @@ Optional(IOReply)
         StreamDevices__find(&self->devices, StreamDevice__matches, &key),
         some(device)
         {
-            return StreamRegistry__forward(self, &device.service, session, pid, request);
+            IOReply reply = IOReply__new(IO_REDIRECT, 0);
+            reply.route = device.route;
+            return reply;
         },
         none()
         {
-            return Some(IOReply, IOReply__new(IO_PERMISSION_DENIED, 0));
+            return IOReply__new(IO_PERMISSION_DENIED, 0);
         }
     );
-}
-
-bool StreamRegistry__disconnect(StreamRegistryPtr self, QueueConnectionID session, uint64_t pid)
-{
-    bool complete = true;
-    // The linked-list iteration macros copy values; acquire pointers to mutate mediators.
-    for (ListIndex index = 0; index < StreamBackends__len(&self->backends); index++)
-    {
-        match_optional(
-            StreamBackends__ptr_at(&self->backends, index),
-            some(backend)
-            {
-                complete = IOMediator__disconnect(&backend->mediator, session, pid) && complete;
-            },
-            none()
-            {
-                return false;
-            }
-        );
-    }
-    return complete;
 }
 
 void StreamRegistry__dispose(StreamRegistryPtr self)
 {
-    for_each_ll(
-        StreamBackends,
-        self->backends,
-        backend,
-        {
-            Channel__close(&backend.mediator.backend);
-        }
-    );
-
-    StreamBackends__dispose(&self->backends);
     StreamDevices__dispose(&self->devices);
 }

@@ -4,6 +4,11 @@
 #include "syscall.h"
 #include "syscalls/service.h"
 
+static void Queue__notify_data_available(QueueConnectionID connection)
+{
+    syscall(SERVICE_CALL, SERVICE_QUEUE_DATA_AVAILABLE, connection, 0, 0, 0);
+}
+
 Result(QueueArrivalsPtr) Queue__listen(ConstBStringPtr name)
 {
     SystemCallResult value =
@@ -29,7 +34,8 @@ static Result(Queue) queue_attach(QueueConnectionID connection)
     Address address = QueueLayout__address(connection);
     match_result(
         Queue__attach((QueueIdentityPtr)address, (QueuePagePtr)(address + QUEUE_PAGE_SIZE),
-                      (QueuePagePtr)(address + 2 * QUEUE_PAGE_SIZE), connection, process_current_pid()),
+                      (QueuePagePtr)(address + 2 * QUEUE_PAGE_SIZE), connection, process_current_pid(),
+                      (IpcDoorbellPtr)QueueLayout__peer_doorbell_address(connection), &Queue__notify_data_available),
         success(queue)
         {
             match_result(

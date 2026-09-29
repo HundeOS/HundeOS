@@ -3,6 +3,7 @@
 #include <stdarg.h>
 
 #include "unity.h"
+#include "ipc/io_diagnostics.h"
 #include "ipc/trace_protocol.h"
 
 #include "../../../../common/types/bstring.h"
@@ -112,6 +113,7 @@ static uint8_t fake_shared_buffer[2 * 1024 * 1024];
 static uint64_t fake_dma_limit;
 static unsigned fake_dma_submissions;
 static bool fake_dma_denied;
+static IODiagnostics fake_io_diagnostics;
 
 #include "../../../../user/drivers/virtio_blk_channelio/device.c"
 
@@ -219,7 +221,7 @@ void VirtioBlkMmio__write32(void * base, uint64_t offset, uint32_t value)
             TEST_ASSERT_LESS_OR_EQUAL_UINT64((Address)fake_shared_buffer + sizeof(fake_shared_buffer),
                                              descriptors[1].addr + descriptors[1].len);
             TEST_ASSERT_LESS_OR_EQUAL_UINT64(fake_dma_limit, descriptors[1].len);
-            if (virtio_blk_header.type == VIRTIO_BLK_T_IN)
+            if (VirtioBlk__header(fake_active_device)->type == VIRTIO_BLK_T_IN)
             {
                 __builtin_memset((void *)descriptors[1].addr, 0x5a, descriptors[1].len);
             }
@@ -228,7 +230,7 @@ void VirtioBlkMmio__write32(void * base, uint64_t offset, uint32_t value)
                 TEST_ASSERT_EACH_EQUAL_UINT8(0xa5, (void *)descriptors[1].addr, descriptors[1].len);
                 TEST_ASSERT_EQUAL_UINT16(VIRTQ_DESC_F_NEXT, descriptors[1].flags);
             }
-            virtio_blk_status = VIRTIO_BLK_S_OK;
+            *VirtioBlk__status(fake_active_device) = VIRTIO_BLK_S_OK;
             VirtioBlk__used(fake_active_device)->idx++;
             fake_dma_submissions++;
         }
@@ -271,6 +273,8 @@ void setUp(void)
     fake_dma_denied = false;
     fake_dma_limit = sizeof(fake_shared_buffer);
     fake_dma_submissions = 0;
+    fake_io_diagnostics = (IODiagnostics){0};
+    IODiagnostics__attach(&fake_io_diagnostics);
     __builtin_memset(fake_shared_buffer, 0, sizeof(fake_shared_buffer));
     fake_service_wait_count = 0;
     fake_expected_irqs[0] = VIRTIO_MMIO_FIRST_IRQ_ID;
@@ -478,9 +482,14 @@ ServiceCode VirtioBlkChannelIO__acknowledge(IRQNumber irq)
     return SERVICE_OK;
 }
 
-ServiceCode VirtioBlkRuntime__await_irq(ServiceEventPtr event)
+ServiceCode VirtioBlkRuntime__await_irq(VirtioBlkDevicePtr device, ServiceEventPtr event)
 {
     return service_wait(event);
+}
+
+ServiceCode VirtioBlkRuntime__rearm_irq(VirtioBlkDevicePtr device)
+{
+    return VirtioBlkChannelIO__acknowledge(device->irq_id);
 }
 
 // A synchronous test runtime drives the real hardware implementation with fake events.
@@ -504,9 +513,32 @@ int VirtioBlkRuntime__run(VirtioBlkDevicePtr device, BlockServerPtr server)
 
 static int virtio_blk_main_under_test(int argc, char ** argv)
 {
-    BString slot = BString__new(argv[1]);
+    if (!service_ok(service_become_service()))
+    {
+        return 1;
+    }
+    BString slot_argument = BString__new(argv[1]);
+    uint64_t slot = unwrap_optional(BString__parse_uint64(&slot_argument), UINT64_MAX);
     BString path = BString__new(argv[2]);
-    return VirtioBlk__run(&slot, &path);
+    VirtioBlkDevice device;
+    match_result(
+        VirtioBlk__start(slot, &path),
+        success(started)
+        {
+            device = started;
+        },
+        error(code, message)
+        {
+            return 1;
+        }
+    );
+    BlockServer server;
+    if (VirtioBlk__listen(&device, &server) != CHANNEL_OK || !service_ok(service_publish_ready(&device.path)) ||
+        !service_ok(VirtioBlkChannelIO__subscribe(device.irq_id)))
+    {
+        return 1;
+    }
+    return VirtioBlkRuntime__run(&device, &server);
 }
 
 void test_virtio_blk_main_maps_first_mmio_slot_and_acknowledges_irq(void)
@@ -613,6 +645,10 @@ void test_virtio_reads_full_shared_buffer_in_one_hardware_submission(void)
                                                                      BUFFER_SIZE / BLOCK_CHANNEL_SECTOR_SIZE, &buffer));
     TEST_ASSERT_EQUAL_UINT(1, fake_dma_submissions);
     TEST_ASSERT_EACH_EQUAL_UINT8(0x5a, fake_shared_buffer, sizeof(fake_shared_buffer));
+    IODiagnosticsSnapshot diagnostics = IODiagnostics__snapshot(&fake_io_diagnostics);
+    TEST_ASSERT_EQUAL_UINT64(1, diagnostics.block_submissions);
+    TEST_ASSERT_EQUAL_UINT64(BUFFER_SIZE / BLOCK_CHANNEL_SECTOR_SIZE, diagnostics.block_blocks);
+    TEST_ASSERT_EQUAL_UINT64(0, diagnostics.block_failures);
 }
 
 void test_virtio_splits_noncontiguous_shared_ranges_without_staging(void)
@@ -623,8 +659,12 @@ void test_virtio_splits_noncontiguous_shared_ranges_without_staging(void)
                       VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_READ, 3, 16, &buffer));
     TEST_ASSERT_EQUAL_UINT(2, fake_dma_submissions);
     TEST_ASSERT_EACH_EQUAL_UINT8(0x5a, fake_shared_buffer, 8192);
-    TEST_ASSERT_EQUAL_UINT64(11, virtio_blk_header.sector);
+    TEST_ASSERT_EQUAL_UINT64(11, VirtioBlk__header(fake_active_device)->sector);
     TEST_ASSERT_EQUAL_UINT8(0, fake_shared_buffer[8192]);
+    IODiagnosticsSnapshot diagnostics = IODiagnostics__snapshot(&fake_io_diagnostics);
+    TEST_ASSERT_EQUAL_UINT64(2, diagnostics.block_submissions);
+    TEST_ASSERT_EQUAL_UINT64(16, diagnostics.block_blocks);
+    TEST_ASSERT_EQUAL_UINT64(0, diagnostics.block_failures);
 }
 
 void test_virtio_writes_from_the_shared_buffer_without_staging(void)
@@ -635,7 +675,7 @@ void test_virtio_writes_from_the_shared_buffer_without_staging(void)
     TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK,
                       VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_WRITE, 0, 16, &buffer));
     TEST_ASSERT_EQUAL_UINT(1, fake_dma_submissions);
-    TEST_ASSERT_EQUAL_UINT32(VIRTIO_BLK_T_OUT, virtio_blk_header.type);
+    TEST_ASSERT_EQUAL_UINT32(VIRTIO_BLK_T_OUT, VirtioBlk__header(fake_active_device)->type);
 }
 
 void test_virtio_rejects_denied_or_oversized_shared_transfers_without_submission(void)
@@ -657,6 +697,10 @@ void test_virtio_does_not_reuse_queue_after_uncertain_completion(void)
     TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_IO_ERROR,
                       VirtioBlk__transfer_channel(fake_active_device, BLOCK_PROTOCOL_READ, 0, 1, &buffer));
     TEST_ASSERT_TRUE(fake_active_device->io_failed);
+    IODiagnosticsSnapshot diagnostics = IODiagnostics__snapshot(&fake_io_diagnostics);
+    TEST_ASSERT_EQUAL_UINT64(1, diagnostics.block_submissions);
+    TEST_ASSERT_EQUAL_UINT64(1, diagnostics.block_blocks);
+    TEST_ASSERT_EQUAL_UINT64(1, diagnostics.block_failures);
     uint16_t submitted = VirtioBlk__avail(fake_active_device)->idx;
     fake_direct_dma = true;
     TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_IO_ERROR,

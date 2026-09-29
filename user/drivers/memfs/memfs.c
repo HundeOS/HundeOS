@@ -415,6 +415,37 @@ static IOReply MemfsNode__transfer(MemfsNodePtr self, MemfsHandlePtr handle, IOR
     );
 }
 
+static IOReply MemfsNode__seek(MemfsNodePtr self, MemfsHandlePtr handle, IORequestPtr request)
+{
+    int64_t base;
+    switch ((IOSeekWhence)request->flags)
+    {
+    case IO_SEEK_SET:
+        base = 0;
+        break;
+    case IO_SEEK_CURRENT:
+        base = (int64_t)handle->offset;
+        break;
+    case IO_SEEK_END:
+        base = (int64_t)self->size;
+        break;
+    default:
+        return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+    }
+    int64_t delta = (int64_t)request->offset;
+    if ((delta < 0 && (delta == INT64_MIN || base < -delta)) || (delta > 0 && base > INT64_MAX - delta))
+    {
+        return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+    }
+    int64_t position = base + delta;
+    if (position < 0)
+    {
+        return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+    }
+    handle->offset = (size_t)position;
+    return IOReply__new(IO_OK, (Anything)handle->offset);
+}
+
 static bool MemfsHandle__matches(MemfsHandlePtr self, void * context)
 {
     IORequestPtr request = context;
@@ -687,7 +718,7 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
         }
     }
     if (request->operation != IO_REQUEST_READ && request->operation != IO_REQUEST_WRITE &&
-        request->operation != IO_REQUEST_CLOSE)
+        request->operation != IO_REQUEST_SEEK && request->operation != IO_REQUEST_CLOSE)
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
@@ -713,6 +744,10 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
                 MemfsNodes__find(&self->nodes, MemfsNode__id_matches, handle),
                 some(node)
                 {
+                    if (request->operation == IO_REQUEST_SEEK)
+                    {
+                        return MemfsNode__seek(node, handle, request);
+                    }
                     return MemfsNode__transfer(node, handle, request);
                 },
                 none()
@@ -731,23 +766,18 @@ IOReply Memfs__execute(MemfsPtr self, IORequestPtr request)
 Optional(IOReply) Memfs__serve(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request)
 {
     MemfsPtr self = context;
-    uint64_t namespace_pid = unwrap_optional(
-        ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &bstr(IO_FILESYSTEM_SERVICE)), 0);
-    if (pid == 0 || pid != namespace_pid || (self->namespace_session != 0 && self->namespace_session != session))
+    if (pid == 0)
     {
         return Some(IOReply, IOReply__new(IO_PERMISSION_DENIED, 0));
     }
-    self->namespace_session = session;
     return Some(IOReply, Memfs__execute(self, request));
 }
 
 bool Memfs__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
     MemfsPtr self = context;
-    if (self->namespace_session == session)
-    {
-        self->handles = MemfsHandles__new();
-        self->namespace_session = 0;
-    }
-    return true;
+    IORequest request = IORequest__new(IO_REQUEST_RELEASE_CLIENT, 0);
+    request.client_session = session;
+    request.client_pid = pid;
+    return Memfs__release(self, &request).status == IO_OK;
 }

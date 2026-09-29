@@ -1,9 +1,68 @@
 #include "shared_wait.h"
 #include "../kernel_core.h"
+#include "ipc/doorbell.h"
 #include "ipc/queue_wait_control.h"
+
+Result(UserAddress) Process__doorbell(ProcessPtr self)
+{
+    match_optional(self->ipc_doorbell,
+        some(mapping)
+        {
+            return Success(UserAddress, mapping);
+        },
+        none_do_nothing()
+    );
+    match_result(
+        Kernel__try_alloc_user(IPC_DOORBELL_ADDRESS, IPC_DOORBELL_PAGE_SIZE, true, true, false),
+        success(mapping)
+        {
+            Kernel__memset(mapping.kernel_addr.virtual_addr, 0, IPC_DOORBELL_PAGE_SIZE);
+            PageTable__map(&self->page_table, self->kernel, mapping, IPC_DOORBELL_PAGE_SIZE);
+            match_result(
+                Process__record_user_allocation(self, mapping, IPC_DOORBELL_PAGE_SIZE, USER_ALLOCATION_DYNAMIC),
+                success(_)
+                {
+                    self->ipc_doorbell = Some(UserAddress, mapping);
+                    return Success(UserAddress, mapping);
+                },
+                error(code, message)
+                {
+                    PageTable__unmap(&self->page_table, self->kernel, mapping.virtual_addr, IPC_DOORBELL_PAGE_SIZE);
+                    Kernel__free(mapping.kernel_addr.virtual_addr);
+                    return Error(UserAddress, message, code);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(UserAddress, message, code);
+        }
+    );
+    return Error(UserAddress, bstr("Doorbell allocation failed"), SERVICE_MAP_FAILED);
+}
+
+void Process__ring_doorbell(ProcessPtr self)
+{
+    match_optional(
+        self->ipc_doorbell,
+        some(mapping)
+        {
+            IpcEvent__ring(IpcDoorbell__mutable_event(k_v_ptr(mapping, IpcDoorbell)));
+        },
+        none_do_nothing()
+    );
+}
 
 Result(Address) Process__queue_wait_control(ProcessPtr self)
 {
+    match_result(
+        Process__doorbell(self),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(Address, message, code);
+        }
+    );
     match_optional(
         self->queue_wait_control,
         some(mapping)
@@ -30,11 +89,27 @@ Result(Address) Process__queue_wait_control(ProcessPtr self)
 
 void Process__wake_shared_wait(ProcessPtr self)
 {
+    Process__ring_doorbell(self);
     match_optional(
         self->queue_wait_control,
         some(mapping)
         {
             QueueWaitControl__wake(k_v_ptr(mapping, QueueWaitControl));
+        },
+        none_do_nothing()
+    );
+}
+
+void Process__publish_dispatch_trace(ProcessPtr self, ConstRequestTicketPtr ticket, uint64_t eligible_at_usec,
+                                     uint64_t selected_at_usec, uint64_t dispatched_at_usec)
+{
+    match_optional(
+        self->queue_wait_control,
+        some(mapping)
+        {
+            QueueDispatchTrace trace =
+                QueueDispatchTrace__new(ticket, eligible_at_usec, selected_at_usec, dispatched_at_usec);
+            QueueWaitControl__publish_dispatch(k_v_ptr(mapping, QueueWaitControl), &trace);
         },
         none_do_nothing()
     );
@@ -134,6 +209,27 @@ bool Process__shared_wait_ready(ProcessPtr self)
         none_do_nothing()
     );
     return true;
+}
+
+bool Process__shared_wait_armed(ProcessPtr self)
+{
+    match_optional(
+        self->queue_wait_control,
+        some(mapping)
+        {
+            ConstQueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
+            match_optional(
+                QueueWaitControl__publication(control),
+                some(publication)
+                {
+                    return !QueueWaitControl__woken(control, publication.observed_wake_generation);
+                },
+                none_do_nothing()
+            );
+        },
+        none_do_nothing()
+    );
+    return false;
 }
 
 QueueWaitCompletedUsec Process__user_wait_usec(ProcessPtr self, QueueWaitStartedAt sampled_at_usec)

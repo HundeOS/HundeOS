@@ -77,3 +77,14 @@ void test_queue_wait_usage_snapshot_excludes_incomplete_intervals(void)
     TEST_ASSERT_EQUAL_UINT64(0, snapshot.selections);
     TEST_ASSERT_EQUAL_UINT64(0, snapshot.runnable_usec);
 }
+
+void test_queue_wait_usage_counts_speculative_selections_independently(void)
+{
+    QueueWaitUsage__select_speculative(&usage);
+    QueueWaitUsage__select_speculative(&usage);
+
+    ProcessQueueWaitUsage snapshot = QueueWaitUsage__snapshot(&usage);
+    TEST_ASSERT_EQUAL_UINT64(2, snapshot.speculative_selections);
+    TEST_ASSERT_EQUAL_UINT64(0, snapshot.selections);
+    TEST_ASSERT_EQUAL_UINT64(0, snapshot.parks);
+}

@@ -22,8 +22,7 @@ Embedfs Embedfs__new(EmbeddedFsPtr archive)
     return (Embedfs){.archive = *archive,
                      .handles = EmbedfsHandles__new(),
                      .children = BStringArray__new(),
-                     .next_handle = IO_SESSION_HANDLE_BASE,
-                     .namespace_session = 0};
+                     .next_handle = IO_SESSION_HANDLE_BASE};
 }
 
 static bool EmbedfsHandle__matches(EmbedfsHandlePtr self, void * context)
@@ -313,23 +312,19 @@ Optional(IOReply)
     Embedfs__serve(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request)
 {
     EmbedfsPtr self = context;
-    uint64_t namespace_pid = unwrap_optional(
-        ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &bstr(IO_FILESYSTEM_SERVICE)), 0);
-    if (pid == 0 || pid != namespace_pid || (self->namespace_session != 0 && self->namespace_session != session))
+    if (pid == 0)
     {
         return Some(IOReply, IOReply__new(IO_PERMISSION_DENIED, 0));
     }
-    self->namespace_session = session;
     return Some(IOReply, Embedfs__execute(self, request));
 }
 
 bool Embedfs__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
     EmbedfsPtr self = context;
-    if (self->namespace_session == session)
-    {
-        self->handles = EmbedfsHandles__new();
-        self->namespace_session = 0;
-    }
-    return true;
+    IORequest request = IORequest__new(IO_REQUEST_RELEASE_CLIENT, 0);
+    request.client_session = session;
+    request.client_pid = pid;
+    IOReply reply = Embedfs__execute(self, &request);
+    return reply.status == IO_OK;
 }

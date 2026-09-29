@@ -19,6 +19,8 @@ typedef struct FakeExecService
     size_t image_size;
     size_t offset;
     unsigned reads;
+    bool redirect_open;
+    bool redirected;
 } FakeExecService;
 
 typedef FakeExecService * FakeExecServicePtr;
@@ -105,7 +107,8 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
                 Address base = connection.memory.kernel_addr.virtual_addr;
                 match_result(
                     Queue__attach((QueueIdentityPtr)base, (QueuePagePtr)(base + QUEUE_PAGE_SIZE),
-                                  (QueuePagePtr)(base + 2 * QUEUE_PAGE_SIZE), id, self->warden->pid),
+                                  (QueuePagePtr)(base + 2 * QUEUE_PAGE_SIZE), id, self->warden->pid,
+                                  k_v_ptr(connection.client_doorbell, IpcDoorbell), &Queue__ignore_data_available),
                     success(control)
                     {
                         self->control = Some(Queue, control);
@@ -163,7 +166,22 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
                         if (request.operation == IO_REQUEST_OPEN)
                         {
                             BString path = IORequest__path(&request);
-                            BString name = BString__slice(&path, 6, BString__length(&path));
+                            if (self->redirect_open && !self->redirected)
+                            {
+                                reply = IOReply__redirect(&bstr(IO_SYSTEM_SERVICE), &bstr("/hello_world"),
+                                                          &empty_bstr(), true);
+                                self->redirected = true;
+                                TEST_ASSERT_TRUE(ChannelPayload__write_reply(self->payload, (ConstChannelDataPtr)&reply,
+                                                                             sizeof(reply)));
+                                match_result(Queue__push(&control, &response),
+                                    success_do_nothing(),
+                                    error_test_fail()
+                                );
+                                self->control = Some(Queue, control);
+                                return;
+                            }
+                            StringPos name_start = BString__starts_with(&path, &bstr("/sbin/")) ? 6 : 1;
+                            BString name = BString__slice(&path, name_start, BString__length(&path));
                             match_optional(
                                 EmbeddedElf__load(&name),
                                 some(elf)

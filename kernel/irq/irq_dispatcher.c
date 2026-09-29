@@ -1,5 +1,6 @@
 #include "irq_dispatcher.h"
 
+#include "../arch/cpu.h"
 #include "../arch/page_table.h"
 #include "../kernel_core.h"
 #include "../../common/ipc/ipc_platform.h"
@@ -427,7 +428,7 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumb
                     {
                         KernelNotificationQueuePtr queue = k_v_ptr(memory, KernelNotificationQueue);
                         match_result(
-                            KernelNotificationQueue__publish(queue, irq, consumer->delivery_sequence),
+                            KernelNotificationQueue__publish(queue, irq, consumer->delivery_sequence, CPU__time_usec()),
                             success_do_nothing(),
                             error(code, message)
                             {
@@ -438,12 +439,33 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumb
                             self->manager,
                             some(manager)
                             {
-                                Process__wake_shared_wait(manager);
+                                match_result(
+                                    Scheduler__wake_shared_wait(self->scheduler, manager),
+                                    success(wake)
+                                    {
+                                        IpcPlatform__signal_event();
+                                        if (!wake.reschedule)
+                                        {
+                                            return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);
+                                        }
+                                        if (wake.cpu == context->cpu && !context->current_el)
+                                        {
+                                            return Success(IRQDispatchStatus, IRQ_DISPATCH_RESCHEDULE);
+                                        }
+                                        CPU__request_reschedule(wake.cpu);
+                                        return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);
+                                    },
+                                    error(code, message)
+                                    {
+                                        return Error(IRQDispatchStatus, message, IRQ_DISPATCH_ERROR);
+                                    }
+                                );
                             },
-                            none_do_nothing()
+                            none()
+                            {
+                                return Error(IRQDispatchStatus, interrupt_manager_required, IRQ_DISPATCH_ERROR);
+                            }
                         );
-                        IpcPlatform__signal_event();
-                        return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);
                     },
                     none_do_nothing()
                 );

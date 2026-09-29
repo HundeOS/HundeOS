@@ -2,6 +2,11 @@
 
 static BootWaitMode wait_mode = BOOT_WAIT_SPIN;
 
+IpcDoorbellPtr IpcPlatform__local_doorbell(void)
+{
+    return (IpcDoorbellPtr)IPC_DOORBELL_ADDRESS;
+}
+
 void IpcPlatform__configure_wait(BootWaitMode mode)
 {
     wait_mode = mode;
@@ -30,8 +35,17 @@ void IpcPlatform__signal_event(void)
     __asm__ __volatile__("dsb ishst; sev" ::: "memory");
 }
 
-void IpcPlatform__wait_event(void)
+IpcEventGeneration IpcPlatform__prepare_wait(ConstIpcEventPtr event)
 {
+    return IpcEvent__generation(event);
+}
+
+void IpcPlatform__wait_event(ConstIpcEventPtr event, IpcEventGeneration observed)
+{
+    if (IpcEvent__changed(event, observed))
+    {
+        return;
+    }
     if (wait_mode == BOOT_WAIT_WFE)
     {
         __asm__ __volatile__("wfe" ::: "memory");

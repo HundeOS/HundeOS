@@ -28,15 +28,20 @@ static QueueListener QueueListener__new(UserAddress arrivals, OptionalPtr(Proces
 
 static QueueConnection QueueConnection__new(UserAddress memory, OptionalPtr(ProcessPtr) client,
                                             OptionalPtr(ProcessPtr) server, QueueConnectionID connection,
-                                            QueueSlotIndex listener_index)
+                                            QueueSlotIndex listener_index, UserAddress client_doorbell,
+                                            UserAddress server_doorbell)
 {
     return (QueueConnection){
         .memory = memory,
+        .client_doorbell = client_doorbell,
+        .server_doorbell = server_doorbell,
         .client = *client,
         .server = *server,
         .kernel_origin = None(ProcessPtr),
         .connection = connection,
         .listener_index = listener_index,
+        .client_peer_doorbell_mapped = false,
+        .server_peer_doorbell_mapped = false,
     };
 }
 
@@ -61,8 +66,10 @@ static bool QueueConnection__has_unread_messages(QueueConnectionPtr self, void *
         return false;
     }
     Address base = self->memory.kernel_addr.virtual_addr;
+    UserAddress peer_doorbell = client ? self->server_doorbell : self->client_doorbell;
     Queue queue = Queue__new((QueueIdentityPtr)base, (QueuePagePtr)(base + (client ? 1 : 2) * QUEUE_PAGE_SIZE),
-                             (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), self->connection, 0);
+                             (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), self->connection, 0,
+                             k_v_ptr(peer_doorbell, IpcDoorbell), &Queue__ignore_data_available);
     return Queue__has_unread_messages(&queue);
 }
 
@@ -122,6 +129,42 @@ Result(QueueCode) Queues__watch(QueuesPtr self, ProcessPtr process, ConstQueueWa
     return Error(QueueCode, queue_error, QUEUE_INVALID);
 }
 
+Result(ProcessPtr) Queues__peer_process(QueuesPtr self, ProcessPtr process, QueueConnectionID connection)
+{
+    match_optional(
+        QueueConnections__ptr_at(&self->connections, connection % QUEUE_LIMIT),
+        some(stored)
+        {
+            if (!stored->memory.valid || stored->connection != connection)
+            {
+                return Error(ProcessPtr, queue_error, QUEUE_INVALID);
+            }
+            if (Queues__belongs_to(&stored->client, process))
+            {
+                match_optional(stored->server,
+                    some(peer)
+                    {
+                        return Success(ProcessPtr, peer);
+                    },
+                    none_do_nothing()
+                );
+            }
+            if (Queues__belongs_to(&stored->server, process))
+            {
+                match_optional(stored->client,
+                    some(peer)
+                    {
+                        return Success(ProcessPtr, peer);
+                    },
+                    none_do_nothing()
+                );
+            }
+        },
+        none_do_nothing()
+    );
+    return Error(ProcessPtr, queue_error, QUEUE_DENIED);
+}
+
 static bool QueueConnection__wait_changed(QueueConnectionPtr self, bool client)
 {
     match_optional(
@@ -129,8 +172,10 @@ static bool QueueConnection__wait_changed(QueueConnectionPtr self, bool client)
         some(observed)
         {
             Address base = self->memory.kernel_addr.virtual_addr;
+            UserAddress peer_doorbell = client ? self->server_doorbell : self->client_doorbell;
             Queue queue = Queue__new((QueueIdentityPtr)base, (QueuePagePtr)(base + (client ? 1 : 2) * QUEUE_PAGE_SIZE),
-                                     (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), self->connection, 0);
+                                     (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), self->connection, 0,
+                                     k_v_ptr(peer_doorbell, IpcDoorbell), &Queue__ignore_data_available);
             QueueWaitSnapshot current = QueueWaitSnapshot__new_connection(&queue);
             return !QueueWaitSnapshot__equals(&observed, &current);
         },
@@ -169,9 +214,11 @@ bool Queues__observation_changed(QueuesPtr self, ProcessPtr process, ConstQueueW
                     (client || Queues__belongs_to(&connection->server, process)))
                 {
                     Address base = connection->memory.kernel_addr.virtual_addr;
-                    Queue queue = Queue__new(
-                        (QueueIdentityPtr)base, (QueuePagePtr)(base + (client ? 1 : 2) * QUEUE_PAGE_SIZE),
-                        (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), connection->connection, 0);
+                    UserAddress peer_doorbell = client ? connection->server_doorbell : connection->client_doorbell;
+                    Queue queue =
+                        Queue__new((QueueIdentityPtr)base, (QueuePagePtr)(base + (client ? 1 : 2) * QUEUE_PAGE_SIZE),
+                                   (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), connection->connection, 0,
+                                   k_v_ptr(peer_doorbell, IpcDoorbell), &Queue__ignore_data_available);
                     QueueWaitSnapshot current = QueueWaitSnapshot__new_connection(&queue);
                     return !QueueWaitSnapshot__equals(observed, &current);
                 }
@@ -292,6 +339,13 @@ static void QueueListener__notify(QueueListenerPtr self)
 {
     QueueArrivalsPtr arrivals = k_v_ptr(self->arrivals, QueueArrivals);
     __atomic_add_fetch(&arrivals->epoch, 1, __ATOMIC_RELEASE);
+    match_optional(self->process,
+        some(process)
+        {
+            Process__ring_doorbell(process);
+        },
+        none_do_nothing()
+    );
     IpcPlatform__signal_event();
 }
 
@@ -305,6 +359,31 @@ static Result(QueueHandleID) Queues__next_id(QueuesPtr self, QueueSlotIndex inde
     return Success(QueueHandleID, self->generation * QUEUE_LIMIT + index);
 }
 
+static Result(UserAddress) Queues__kernel_doorbell(QueuesPtr self, KernelPtr kernel)
+{
+    match_optional(self->kernel_doorbell,
+        some(mapping)
+        {
+            return Success(UserAddress, mapping);
+        },
+        none_do_nothing()
+    );
+    match_result(
+        Kernel__try_alloc_user(IPC_DOORBELL_ADDRESS, IPC_DOORBELL_PAGE_SIZE, true, true, false),
+        success(mapping)
+        {
+            Kernel__memset(mapping.kernel_addr.virtual_addr, 0, IPC_DOORBELL_PAGE_SIZE);
+            self->kernel_doorbell = Some(UserAddress, mapping);
+            return Success(UserAddress, mapping);
+        },
+        error(code, message)
+        {
+            return Error(UserAddress, message, QUEUE_NO_MEMORY);
+        }
+    );
+    return Error(UserAddress, queue_error, QUEUE_NO_MEMORY);
+}
+
 static void QueueConnection__map(QueueConnectionPtr self, ProcessPtr process, bool client)
 {
     for (uint64_t index = 0; index < 3; index++)
@@ -313,15 +392,48 @@ static void QueueConnection__map(QueueConnectionPtr self, ProcessPtr process, bo
         page.write = index == (client ? 1U : 2U);
         PageTable__map_shared(&process->page_table, process->kernel, page, QUEUE_PAGE_SIZE);
     }
+    UserAddress peer = client ? self->server_doorbell : self->client_doorbell;
+    UserAddress alias = UserAddress__new(QueueLayout__peer_doorbell_address(self->connection), peer.kernel_addr, true,
+                                         true, false, true);
+    PageTable__map_shared(&process->page_table, process->kernel, alias, QUEUE_PAGE_SIZE);
+    if (client)
+    {
+        self->client_peer_doorbell_mapped = true;
+    }
+    else
+    {
+        self->server_peer_doorbell_mapped = true;
+    }
 }
 
-static void QueueConnection__unmap(QueueConnectionPtr self, ProcessPtr process)
+static void QueueConnection__unmap_peer_doorbell(QueueConnectionPtr self, ProcessPtr process, bool client)
+{
+    bool mapped = client ? self->client_peer_doorbell_mapped : self->server_peer_doorbell_mapped;
+    if (!mapped)
+    {
+        return;
+    }
+    PageTable__unmap(&process->page_table, process->kernel, QueueLayout__peer_doorbell_address(self->connection),
+                     QUEUE_PAGE_SIZE);
+    if (client)
+    {
+        self->client_peer_doorbell_mapped = false;
+    }
+
+    else
+    {
+        self->server_peer_doorbell_mapped = false;
+    }
+}
+
+static void QueueConnection__unmap(QueueConnectionPtr self, ProcessPtr process, bool client)
 {
     for (uint64_t index = 0; index < 3; index++)
     {
         PageTable__unmap(&process->page_table, process->kernel, self->memory.virtual_addr + index * QUEUE_PAGE_SIZE,
                          QUEUE_PAGE_SIZE);
     }
+    QueueConnection__unmap_peer_doorbell(self, process, client);
 }
 
 static Result(Address) QueueConnection__release(QueueConnectionPtr self)
@@ -332,7 +444,8 @@ static Result(Address) QueueConnection__release(QueueConnectionPtr self)
             Kernel__free(self->memory.kernel_addr.virtual_addr),
             success(_)
             {
-                *self = QueueConnection__new(NULL_USER_ADDRESS, &None(ProcessPtr), &None(ProcessPtr), 0, 0);
+                *self = QueueConnection__new(NULL_USER_ADDRESS, &None(ProcessPtr), &None(ProcessPtr), 0, 0,
+                                             NULL_USER_ADDRESS, NULL_USER_ADDRESS);
             },
             error(code, message)
             {
@@ -370,16 +483,20 @@ Result(Address) Queues__listen(QueuesPtr self, ProcessPtr process, ConstBStringP
     {
         return Error(Address, queue_error, QUEUE_DENIED);
     }
+    match_result(
+        Process__doorbell(process),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(Address, message, QUEUE_NO_MEMORY);
+        }
+    );
     for_each_fa(
         QueueListeners,
         self->listeners,
         index,
         listener,
         {
-            if (Queues__belongs_to(&listener.process, process))
-            {
-                return Error(Address, queue_error, QUEUE_OCCUPIED);
-            }
             match_optional(
                 QueueListeners__ptr_at(&self->listeners, index),
                 some(slot)
@@ -410,6 +527,7 @@ Result(Address) Queues__listen(QueuesPtr self, ProcessPtr process, ConstBStringP
     {
         return Error(Address, queue_error, QUEUE_FULL);
     }
+
     QueueEndpointID endpoint;
     match_result(
         Queues__next_id(self, selected),
@@ -476,9 +594,53 @@ static Result(QueueConnectionID) Queues__connect_to(QueuesPtr self, QueueListene
             client_limit = ProcessClass__is_service(process->process_class) &&
                                    Process__has_capability(process, PROCESS_CAP_MANAGE_SHARED_PAGES)
                                ? QUEUE_LIMIT
-                               : 4;
+                               : QUEUE_CLIENT_CONNECTION_LIMIT;
         },
         none_do_nothing()
+    );
+    UserAddress server_doorbell;
+    match_result(
+        Process__doorbell(server),
+        success(mapping)
+        {
+            server_doorbell = mapping;
+        },
+        error(code, message)
+        {
+            return Error(QueueConnectionID, message, QUEUE_NO_MEMORY);
+        }
+    );
+    UserAddress client_doorbell;
+    match_optional(
+        *client,
+        some(process)
+        {
+            match_result(
+                Process__doorbell(process),
+                success(mapping)
+                {
+                    client_doorbell = mapping;
+                },
+                error(code, message)
+                {
+                    return Error(QueueConnectionID, message, QUEUE_NO_MEMORY);
+                }
+            );
+        },
+        none()
+        {
+            match_result(
+                Queues__kernel_doorbell(self, server->kernel),
+                success(mapping)
+                {
+                    client_doorbell = mapping;
+                },
+                error(code, message)
+                {
+                    return Error(QueueConnectionID, message, QUEUE_NO_MEMORY);
+                }
+            );
+        }
     );
     uint64_t selected = QueueConnections__len(&self->connections);
     uint64_t client_count = 0;
@@ -549,10 +711,9 @@ static Result(QueueConnectionID) Queues__connect_to(QueuesPtr self, QueueListene
             identity->client_pid = client_pid;
             identity->server_pid = server->pid;
             identity->origin_pid = client_pid;
-            QueueConnection connection =
-                QueueConnection__new(memory, client, &Some(ProcessPtr, server), id, listener_index);
+            QueueConnection connection = QueueConnection__new(memory, client, &Some(ProcessPtr, server), id,
+                                                              listener_index, client_doorbell, server_doorbell);
             connection.kernel_client = is_nothing((*client));
-            QueueConnections__set(&self->connections, selected, connection);
             match_optional(
                 *client,
                 some(process)
@@ -562,6 +723,7 @@ static Result(QueueConnectionID) Queues__connect_to(QueuesPtr self, QueueListene
                 none_do_nothing()
             );
             QueueConnection__map(&connection, server, false);
+            QueueConnections__set(&self->connections, selected, connection);
             QueueArrivalsPtr arrivals = k_v_ptr(listener->arrivals, QueueArrivals);
             match_result(
                 QueueConnectionSlots__set(&arrivals->connections, selected, id),
@@ -643,6 +805,7 @@ Result(QueueCode) Queues__accept(QueuesPtr self, ProcessPtr process, QueueConnec
                     return Error(QueueCode, queue_error, QUEUE_OCCUPIED);
                 }
                 __atomic_store_n(&identity->accepted, 1, __ATOMIC_RELEASE);
+                IpcEvent__ring(IpcDoorbell__mutable_event(k_v_ptr(connection->client_doorbell, IpcDoorbell)));
                 IpcPlatform__signal_event();
                 return Success(QueueCode, QUEUE_OK);
             }
@@ -660,15 +823,34 @@ static Result(QueueCode) Queues__close_connection(QueuesPtr self, QueueConnectio
     {
         return Error(QueueCode, queue_error, QUEUE_DENIED);
     }
+
     QueueIdentityPtr identity = k_v_ptr(connection->memory, QueueIdentity);
     __atomic_store_n(&identity->closed, 1, __ATOMIC_RELEASE);
-    QueueConnection__unmap(connection, process);
+    QueueConnection__unmap(connection, process, client);
     if (client)
     {
+        match_optional(
+            connection->server,
+            some(peer)
+            {
+                Process__ring_doorbell(peer);
+                QueueConnection__unmap_peer_doorbell(connection, peer, false);
+            },
+            none_do_nothing()
+        );
         connection->client = None(ProcessPtr);
     }
     if (server)
     {
+        match_optional(
+            connection->client,
+            some(peer)
+            {
+                Process__ring_doorbell(peer);
+                QueueConnection__unmap_peer_doorbell(connection, peer, true);
+            },
+            none_do_nothing()
+        );
         connection->server = None(ProcessPtr);
     }
     match_optional(
@@ -837,7 +1019,9 @@ Result(Queue) Queues__connect_kernel(QueuesPtr self, QueueEndpointID endpoint, O
                                     Address base = connection->memory.kernel_addr.virtual_addr;
                                     return Queue__attach((QueueIdentityPtr)base, (QueuePagePtr)(base + QUEUE_PAGE_SIZE),
                                                          (QueuePagePtr)(base + 2 * QUEUE_PAGE_SIZE), id,
-                                                         QUEUE_KERNEL_PID);
+                                                         QUEUE_KERNEL_PID,
+                                                         k_v_ptr(connection->server_doorbell, IpcDoorbell),
+                                                         &Queue__ignore_data_available);
                                 },
                                 none_do_nothing()
                             );
@@ -866,6 +1050,15 @@ Result(QueueCode) Queues__close_kernel(QueuesPtr self, QueueConnectionID id)
             {
                 QueueIdentityPtr identity = k_v_ptr(connection->memory, QueueIdentity);
                 __atomic_store_n(&identity->closed, 1, __ATOMIC_RELEASE);
+                match_optional(
+                    connection->server,
+                    some(server)
+                    {
+                        Process__ring_doorbell(server);
+                        QueueConnection__unmap_peer_doorbell(connection, server, false);
+                    },
+                    none_do_nothing()
+                );
                 connection->kernel_client = false;
                 IpcPlatform__signal_event();
                 QueueConnection__release(connection);

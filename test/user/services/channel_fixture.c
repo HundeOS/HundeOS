@@ -7,8 +7,7 @@
 
 #define HUNDEKANAL_WARTER_ENTRYPOINT warden_main_under_test
 #include "../../../user/services/hundekanal-warter/main.c"
-#define HUNDEKANAL_TEST_ECHO_ENTRYPOINT echo_main_under_test
-#include "../../../user/services/hundekanal-test-echo/main.c"
+#include "channel_echo_fixture.c"
 #define CHANNEL_ECHO_CLIENT_ENTRYPOINT client_main_under_test
 #include "../../../user/programs/channel_echo_client/main.c"
 
@@ -17,6 +16,8 @@ typedef struct TestTransport
     QueueIdentity identity;
     QueuePage client;
     QueuePage server;
+    IpcDoorbell client_doorbell;
+    IpcDoorbell server_doorbell;
     bool client_closed;
     bool server_closed;
 } TestTransport;
@@ -44,6 +45,7 @@ static void (*fixture_server_step)(void);
 static bool fixture_listener_available;
 static char output[4096];
 static size_t output_length;
+static void ChannelFixture__pump(void);
 
 static void ChannelFixture__push(QueuePtr queue, ConstQueueMessagePtr message)
 {
@@ -103,6 +105,7 @@ void Queue__prepare_wait(void)
 
 void Queue__wait_event(void)
 {
+    ChannelFixture__pump();
 }
 
 void IO__print(ConstBStringPtr str)
@@ -173,7 +176,8 @@ Result(Queue) Queue__connect(QueueEndpointID endpoint)
         );
         arrivals->epoch++;
         return Queue__attach(&transport->identity, &transport->client, &transport->server,
-                             transport->identity.connection, client);
+                             transport->identity.connection, client, &transport->server_doorbell,
+                             &Queue__ignore_data_available);
     }
     return Error(Queue, bstr("Full"), QUEUE_FULL);
 }
@@ -190,7 +194,8 @@ Result(Queue) Queue__accept(QueueConnectionID id)
         return Error(Queue, bstr("Closed"), QUEUE_CLOSED);
     }
     transport->identity.accepted = 1;
-    return Queue__attach(&transport->identity, &transport->client, &transport->server, id, current_pid);
+    return Queue__attach(&transport->identity, &transport->client, &transport->server, id, current_pid,
+                         &transport->client_doorbell, &Queue__ignore_data_available);
 }
 
 QueueCode QueueConnection__close(QueueConnectionID id)

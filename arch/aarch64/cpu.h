@@ -27,6 +27,8 @@ uint64_t start_secondary_cpus();
 void start_primary_cpu();
 void CPU__set_boot_id(CPUID id);
 
+#define CPU_RESCHEDULE_INTERRUPT 1U
+
 inline uint64_t get_current_el(void)
 {
     uint64_t el;

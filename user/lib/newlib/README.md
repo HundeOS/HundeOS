@@ -14,7 +14,8 @@ end-to-end consumers. Native I/O handles do not fit in POSIX `int` descriptors,
 so `posix_io.c` maintains a process-local descriptor map and converts native
 status values to `errno` behavior.
 
-Current deliberate limitations include unbuffered stdio, an `fstat` view that
-only supplies a transfer block size, and a successful `pledge` compatibility
+The stdio subset provides seek-aware buffered file reads and line-buffered
+standard output. Current deliberate limitations include an `fstat` view that
+only supplies a transfer block size and a successful `pledge` compatibility
 call without sandbox enforcement. These are compatibility boundaries, not
 kernel I/O fallbacks.

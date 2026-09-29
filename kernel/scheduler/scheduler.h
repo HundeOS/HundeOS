@@ -25,6 +25,7 @@ typedef uint64_t SchedulerScheduleStatus;
 
 ResultDef(SchedulerInitStatus);
 ResultDef(SchedulerScheduleStatus);
+OptionalDef(CPUID);
 
 typedef enum SchedulerInitStatuses
 {
@@ -45,6 +46,19 @@ typedef enum SchedulerErrors
     SCHEDULER_PROCESS_NOT_FOUND = -4,
     SCHEDULER_CANT_UNPARK = -5,
 } SchedulerErrors;
+
+typedef struct SchedulerWake
+{
+    bool reschedule;
+    CPUID cpu;
+} SchedulerWake;
+
+static inline SchedulerWake SchedulerWake__new(bool reschedule, CPUID cpu)
+{
+    return (SchedulerWake){.reschedule = reschedule, .cpu = cpu};
+}
+
+ResultDef(SchedulerWake);
 
 typedef struct CPUScheduler
 {
@@ -153,6 +167,9 @@ Result(Address)
 Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr owner, Address address);
 Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name, size_t length);
 Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id);
+Result(SchedulerWake)
+    Scheduler__queue_data_available(SchedulerPtr self, ProcessPtr process, QueueConnectionID connection);
+Result(SchedulerWake) Scheduler__wake_shared_wait(SchedulerPtr self, ProcessPtr process);
 Result(QueueWaitCode)
     Scheduler__queue_wait(SchedulerPtr self, ProcessPtr process, Address snapshots, uint64_t count, Tick ticks);
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
@@ -168,6 +185,7 @@ Optional(ProcessPtr)
 Result(SchedulerScheduleStatus) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc);
 Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc, CPUID cpu);
 Result(CPUID) Scheduler__cpu_for_process(SchedulerPtr self, ProcessPtr process);
+Result(SchedulerScheduleStatus) Scheduler__promote_realtime(SchedulerPtr self, ProcessPtr process);
 Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu);
 void Scheduler__mark_ready(SchedulerPtr self);
 bool Scheduler__ready(SchedulerPtr self);

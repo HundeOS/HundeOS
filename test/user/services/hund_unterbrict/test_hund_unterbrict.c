@@ -8,12 +8,26 @@
 static QueueIdentity identity;
 static QueuePage client_page;
 static QueuePage server_page;
+static IpcDoorbell client_doorbell;
+static IpcDoorbell server_doorbell;
 static Queue client_queue;
 static ChannelPayload payload;
 static KernelNotificationQueue event_queue;
 static uint64_t routed_client_pid;
 static IRQNumber routed_irq;
 static IRQNumber unmasked_irq;
+static IRQNumber hosted_irq;
+static uint64_t hosted_irq_at_usec;
+static uint64_t hosted_manager_at_usec;
+
+bool VirtioBlkRuntime__handle_irq(VirtioBlkRuntimePtr self, ConstKernelNotificationPtr event,
+                                  uint64_t manager_received_at_usec)
+{
+    hosted_irq = event->id;
+    hosted_irq_at_usec = event->occurred_at_usec;
+    hosted_manager_at_usec = manager_received_at_usec;
+    return true;
+}
 
 void setUp(void)
 {
@@ -25,7 +39,39 @@ void setUp(void)
     routed_client_pid = 0;
     routed_irq = 0;
     unmasked_irq = 0;
-    client_queue = unwrap_result(Queue__attach(&identity, &client_page, &server_page, 17, 4), (Queue){0});
+    hosted_irq = 0;
+    hosted_irq_at_usec = 0;
+    hosted_manager_at_usec = 0;
+    client_doorbell = (IpcDoorbell){0};
+    server_doorbell = (IpcDoorbell){0};
+    client_queue = unwrap_result(
+        Queue__attach(&identity, &client_page, &server_page, 17, 4, &server_doorbell, &Queue__ignore_data_available),
+        (Queue){0});
+}
+
+void test_interrupt_manager_dispatches_hosted_irq_without_client_relay(void)
+{
+    ServiceInterruptManagerRegistration kernel_registration = {
+        .event_queue = (Address)&event_queue,
+        .distributor = 0x1000,
+    };
+    InterruptManager manager = InterruptManager__new(&kernel_registration, 0);
+    VirtioBlkRuntime runtime = {0};
+    runtime.device.irq_id = 51;
+    match_result(HostedBlockDrivers__push(&manager.block_drivers, &runtime),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(KernelNotificationQueue__publish(&event_queue, 51, 7, 1234),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    TEST_ASSERT_TRUE(InterruptManager__deliver(&manager));
+    TEST_ASSERT_EQUAL_UINT64(51, hosted_irq);
+    TEST_ASSERT_EQUAL_UINT64(1234, hosted_irq_at_usec);
+    TEST_ASSERT_GREATER_THAN_UINT64(hosted_irq_at_usec, hosted_manager_at_usec);
+    TEST_ASSERT_EQUAL_UINT64(0, InterruptRegistrations__len(&manager.registrations));
 }
 
 void tearDown(void)
@@ -34,7 +80,9 @@ void tearDown(void)
 
 static InterruptClient test_client(void)
 {
-    Queue server_queue = unwrap_result(Queue__attach(&identity, &client_page, &server_page, 17, 5), (Queue){0});
+    Queue server_queue = unwrap_result(
+        Queue__attach(&identity, &client_page, &server_page, 17, 5, &client_doorbell, &Queue__ignore_data_available),
+        (Queue){0});
     ChannelServer channel = {
         .control = server_queue,
         .payload = &payload,
@@ -156,7 +204,7 @@ void test_interrupt_manager_routes_channel_client_delivers_and_acknowledges(void
         none_test_fail()
     );
 
-    match_result(KernelNotificationQueue__publish(&event_queue, 48, 9),
+    match_result(KernelNotificationQueue__publish(&event_queue, 48, 9, 1234),
         success_do_nothing(),
         error_test_fail()
     );
@@ -172,6 +220,8 @@ void test_interrupt_manager_routes_channel_client_delivers_and_acknowledges(void
     InterruptProtocolResponse delivery = take_response();
     TEST_ASSERT_EQUAL_UINT64(INTERRUPT_PROTOCOL_DELIVERY, delivery.kind);
     TEST_ASSERT_EQUAL_UINT64(9, delivery.sequence);
+    TEST_ASSERT_EQUAL_UINT64(1234, delivery.kernel_irq_at_usec);
+    TEST_ASSERT_GREATER_THAN_UINT64(delivery.kernel_irq_at_usec, delivery.manager_received_at_usec);
 
     match_optional(
         InterruptClients__ptr_at(&manager.clients, 0),

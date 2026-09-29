@@ -171,15 +171,10 @@ static Result(IOStatus) Mama__boot_mounts(ChannelPtr mounts)
             return Error(IOStatus, message, code);
         }
     );
-    BString slot = BString__sprintf(&bstr("%llu"), disk.slot);
-    match_result(
-        BootService__bootstrap(&bstr("/sbin/drivers/virtio_blk_channelio"), &slot, &disk.path, &disk.path),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
+    if (!service_ok(service_wait_ready(&disk.path)))
+    {
+        return Error(IOStatus, bstr("Hosted boot block device unavailable"), SERVICE_DEVICE_REGISTRATION_FAILED);
+    }
     match_result(
         BootService__bootstrap(&bstr("/sbin/drivers/ext2fs"), &disk.path, &bstr("/boot/config"), &bstr("/boot/config")),
         success_do_nothing(),

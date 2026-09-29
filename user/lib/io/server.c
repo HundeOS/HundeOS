@@ -216,6 +216,8 @@ static bool IOService__serve(IOServicePtr self, IOServiceConnectionPtr connectio
                             else
                             {
                                 connection->client_pid = client;
+                                connection->request.client_pid = client;
+                                connection->request.client_session = ChannelServer__connection(&connection->channel);
                                 Optional(RequestTicket) previous =
                                     ChannelRequestContext__swap(&Some(RequestTicket, connection->channel.ticket));
                                 IOStatus status = IOServiceConnection__prepare(connection, &self->name);
@@ -263,8 +265,8 @@ static bool IOService__serve(IOServicePtr self, IOServiceConnectionPtr connectio
             some(reply)
             {
                 connection->reply = reply;
-                if (connection->request.operation == IO_REQUEST_OPEN ||
-                    connection->request.operation == IO_REQUEST_ACCEPT)
+                if (connection->reply.status == IO_OK && (connection->request.operation == IO_REQUEST_OPEN ||
+                                                          connection->request.operation == IO_REQUEST_ACCEPT))
                 {
                     connection->reply.buffers = connection->buffers;
                 }

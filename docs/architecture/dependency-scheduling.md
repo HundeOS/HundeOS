@@ -81,13 +81,38 @@ budget. Normal shared waiting releases the CPU at the next scheduler decision;
 warm waiting gets the bounded exception. Kernel blocking releases it and
 termination overrides retention. Repeated timer checks never restart these windows.
 
+If the preferred, admission, and ordinary runnable tiers are all empty, a CPU
+selects one of its own unchanged userspace waiters instead of entering the idle
+process. This speculative idle fallback never resumes a kernel-blocked, sleeping,
+stopped, or exiting process and does not migrate work between CPUs. Candidates
+are ordered by the number of validated request-chain stages depending on them,
+then by active CPU usage in the completed 100 ms window after userspace wait time
+has been removed, then by longest time since dispatch. The choice is recomputed
+at the next normal scheduling decision; it does not grant renewable preferred
+residency. Ordinary and preferred work always takes precedence.
+
+The interrupt manager uses the same CPUs and wait machinery as other services.
+Its realtime process class wins ordinary runnable selection, while a delegated
+IRQ explicitly completes its parked queue wait and requests an immediate local
+or remote reschedule. When it has drained its work and parks again, other work
+uses that CPU normally.
+
 These constants are initial policy choices, not measured optimal values or
-latency guarantees. Publication is observed at existing scheduler entries;
-there is no new reschedule IPI. This is opportunistic chain scheduling, not
+latency guarantees. Speculative selection count is exposed through procfs so its
+effect can be separated from architecture and emulator wait behavior. A successful
+queue push now makes an authenticated data-available syscall after publishing its
+shared cursor. When that publication satisfies a parked receiver's wait, the
+kernel marks the receiver runnable and sends one reschedule IPI to its owning CPU; repeated notices
+coalesce until it parks again. This is opportunistic chain scheduling, not
 exclusive gang scheduling: overlapping clusters can interleave. Adaptive
-residency, cluster-wide budgets, event-triggered cross-core notification, and
-publication-to-dispatch tracing remain open. Bounded graph rebuilding and
-ancestry traversal need profiling before claiming a throughput improvement.
+residency, cluster-wide budgets, and kernel publication-to-dispatch tracing remain
+open.
+Userspace Channel lifecycle tracing now measures client publication, server
+acceptance, reply publication, and client-visible completion, including parent
+ticket identity for nested chains. See [userspace driver tracing](driver-tracing.md#channel-latency-tracing).
+It does not yet split kernel eligibility from scheduler selection and dispatch.
+Bounded graph rebuilding and ancestry traversal need profiling before claiming
+a throughput improvement.
 
 ## Tests
 

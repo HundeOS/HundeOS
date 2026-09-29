@@ -9,7 +9,7 @@
 #define PROCESS_REGISTRY_CPUS 16U
 #define PROCESS_REGISTRY_CPU_CAPACITY 2049U
 #define PROCESS_REGISTRY_CAPACITY (PROCESS_REGISTRY_CPUS * PROCESS_REGISTRY_CPU_CAPACITY)
-#define PROCESS_REGISTRY_VERSION 6ULL
+#define PROCESS_REGISTRY_VERSION 8ULL
 
 typedef struct ProcessUserWait
 {
@@ -25,6 +25,7 @@ typedef struct ProcessQueueWaitUsage
     uint64_t activity_wakes;
     uint64_t timeout_wakes;
     uint64_t selections;
+    uint64_t speculative_selections;
     uint64_t parked_usec;
     uint64_t max_parked_usec;
     uint64_t runnable_usec;
@@ -59,7 +60,7 @@ typedef struct ProcessRecord
     ProcessCredentials credentials;
     ProcessCPUUsage cpu_usage;
     ProcessQueueWaitUsage queue_wait_usage;
-    Optional(IODiagnostics) io_diagnostics;
+    Optional(IODiagnosticsSnapshot) io_diagnostics;
     Optional(ProcessMemoryUsage) memory;
 } ProcessRecord;
 

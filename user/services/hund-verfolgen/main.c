@@ -1,13 +1,23 @@
 #include "trace_buffer.h"
+#include "io_latency.h"
 
+#include "buffer/client.h"
 #include "channel/server.h"
+#include "ipc/ipc_platform.h"
+#include "ipc/io_trace.h"
 #include "ipc/trace_protocol.h"
+#include "process/process_registry.h"
 #include "services/service_directory.h"
 #include "sys/io.h"
+#include "sys/process.h"
 #include "sys/service.h"
+#include "trace/io_trace.h"
 #include "types/fixed_array.h"
 
 #define TRACE_LOG_PATH "/var/log/driver.log"
+#define IO_TRACE_DRAIN_BATCH 64U
+#define IO_TRACE_REAP_USEC 1000000ULL
+#define IO_TRACE_SOURCE_GRACE_USEC 5000000ULL
 
 typedef struct TraceClient
 {
@@ -35,23 +45,67 @@ FixedArrayDefine(TraceClient, QUEUE_LIMIT, TraceClients, &TraceClient__equals);
 FixedArrayBodyDefine(TraceClients);
 typedef TraceClients * TraceClientsPtr;
 
+typedef struct TraceSource
+{
+    uint64_t pid;
+    BufferDescriptor buffer;
+    uint64_t cursor;
+    uint64_t missing_since_usec;
+} TraceSource;
+
+typedef TraceSource * TraceSourcePtr;
+OptionalDef(TraceSource);
+
+static TraceSource TraceSource__new(uint64_t pid, BufferDescriptor buffer)
+{
+    return (TraceSource){.pid = pid, .buffer = buffer};
+}
+
+static bool TraceSource__equals(void * first, void * second)
+{
+    TraceSourcePtr left = first;
+    TraceSourcePtr right = second;
+    return left->pid == right->pid;
+}
+
+static bool TraceSource__matches_pid(TraceSourcePtr self, void * context)
+{
+    return self->pid == *(uint64_t *)context;
+}
+
+FixedArrayDefine(TraceSource, BUFFER_LIMIT, TraceSources, &TraceSource__equals);
+FixedArrayBodyDefine(TraceSources);
+
 typedef struct TraceService
 {
     QueueArrivalsPtr arrivals;
     TraceClients clients;
+    TraceSources sources;
     TraceBuffer records;
+    TraceBuffer io_records;
+    IOLatencyTracker io_latency;
     IOHandle log;
+    IOHandle io_log;
+    uint64_t reap_at_usec;
+    bool io_write_failure_reported;
 } TraceService;
 
 typedef TraceService * TraceServicePtr;
+
+static bool TraceSource__drain(TraceServicePtr self, TraceSourcePtr source);
+static bool TraceService__flush_io(TraceServicePtr self);
 
 static TraceService TraceService__new(QueueArrivalsPtr arrivals)
 {
     return (TraceService){
         .arrivals = arrivals,
         .clients = TraceClients__new(),
+        .sources = TraceSources__new(),
         .records = TraceBuffer__new(),
+        .io_records = TraceBuffer__new(),
+        .io_latency = IOLatencyTracker__new(),
         .log = IO_NOT_OPEN,
+        .io_log = IO_NOT_OPEN,
     };
 }
 
@@ -73,9 +127,8 @@ static bool TraceClients__contains_connection(TraceClientsPtr self, QueueConnect
     return false;
 }
 
-static bool TraceClient__reply(TraceClientPtr self, TraceStatus status)
+static bool TraceClient__reply(TraceClientPtr self, TraceReply reply)
 {
-    TraceReply reply = TraceReply__new(status);
     match_result(
         ChannelServer__reply(&self->channel, (ConstChannelDataPtr)&reply, sizeof(reply)),
         success(code)
@@ -132,31 +185,161 @@ static TraceStatus TraceService__record(TraceServicePtr self, TraceClientPtr cli
 
 static TraceStatus TraceService__enable_storage(TraceServicePtr self)
 {
-    if (self->log >= 0)
+    if (self->log < 0)
     {
-        return TRACE_OK;
+        IOHandle log = IO__open(&bstr(TRACE_LOG_PATH), IO_OPEN_WRITE);
+        if (log < 0)
+        {
+            return TRACE_IO_FAILED;
+        }
+        self->log = log;
     }
-    IOHandle log = IO__open(&bstr(TRACE_LOG_PATH), IO_OPEN_WRITE);
-    if (log < 0)
+    if (self->io_log < 0)
     {
-        return TRACE_IO_FAILED;
+        IOHandle io_log = IO__open(&bstr(IO_TRACE_LOG_PATH), IO_OPEN_WRITE);
+        if (io_log < 0)
+        {
+            BString notice =
+                BString__sprintf(&bstr("HUND-VERFOLGEN pid=0: io latency log open failed status=%lld"), io_log);
+            TraceBuffer__append(&self->records, &notice);
+            return TRACE_IO_FAILED;
+        }
+        self->io_log = io_log;
     }
-    self->log = log;
     return TRACE_OK;
 }
 
-static TraceStatus TraceService__handle_request(TraceServicePtr self, TraceClientPtr client,
-                                                ConstTraceRequestPtr request)
+static Optional(TraceSource) TraceService__find_io_source(TraceServicePtr self, uint64_t pid)
+{
+    match_find_result(
+        TraceSources__find(&self->sources, &TraceSource__matches_pid, &pid),
+        some(source)
+        {
+            return Some(TraceSource, source);
+        },
+        none_do_nothing()
+    );
+    return None(TraceSource);
+}
+
+static TraceStatus TraceService__drain_sources(TraceServicePtr self, uint64_t pid)
+{
+    bool registered = false;
+    match_find_result_ptr(
+        TraceSources__find(&self->sources, &TraceSource__matches_pid, &pid),
+        some(source)
+        {
+            registered = true;
+        },
+        none_do_nothing()
+    );
+    if (!registered)
+    {
+        return TRACE_UNAVAILABLE;
+    }
+
+    while (!TraceBuffer__is_empty(&self->io_records))
+    {
+        if (!TraceService__flush_io(self))
+        {
+            return TRACE_IO_FAILED;
+        }
+    }
+
+    for_each_fa_ptr(
+        TraceSources,
+        &self->sources,
+        index,
+        value,
+        {
+            match_optional(
+                TraceSources__ptr_at(&self->sources, index),
+                some(source)
+                {
+                    IOTraceRingPtr ring = (IOTraceRingPtr)source->buffer.address;
+                    uint64_t produced = IOTraceRing__produced(ring);
+                    while (source->cursor < produced)
+                    {
+                        if (!TraceSource__drain(self, source))
+                        {
+                            return TRACE_UNAVAILABLE;
+                        }
+                        while (!TraceBuffer__is_empty(&self->io_records))
+                        {
+                            if (!TraceService__flush_io(self))
+                            {
+                                return TRACE_IO_FAILED;
+                            }
+                        }
+                    }
+                },
+                none_do_nothing()
+            );
+        }
+    );
+    return TRACE_OK;
+}
+
+static TraceReply TraceService__register_io(TraceServicePtr self, TraceClientPtr client)
+{
+    TraceReply reply = TraceReply__new(TRACE_OK);
+    uint64_t pid = ChannelServer__transport_pid(&client->channel);
+    match_optional(
+        TraceService__find_io_source(self, pid),
+        some(source)
+        {
+            reply.buffer = source.buffer;
+            return reply;
+        },
+        none_do_nothing()
+    );
+    match_result(
+        BufferClient__acquire(&bstr(HUND_VERFOLGEN_SERVICE), pid, BUFFER_WRITE),
+        success(buffer)
+        {
+            TraceSource source = TraceSource__new(pid, buffer);
+            match_result(
+                TraceSources__push(&self->sources, source),
+                success(code)
+                {
+                    reply.buffer = buffer;
+                },
+                error(code, message)
+                {
+                    BufferClient__release(&buffer);
+                    reply.status = TRACE_UNAVAILABLE;
+                }
+            );
+        },
+        error(code, message)
+        {
+            reply.status = TRACE_UNAVAILABLE;
+        }
+    );
+    return reply;
+}
+
+static TraceReply TraceService__handle_request(TraceServicePtr self, TraceClientPtr client,
+                                               ConstTraceRequestPtr request)
 {
     if (request->operation == TRACE_OPERATION_RECORD)
     {
-        return TraceService__record(self, client, request);
+        return TraceReply__new(TraceService__record(self, client, request));
     }
+
     if (request->operation == TRACE_OPERATION_STORAGE_READY)
     {
-        return TraceService__enable_storage(self);
+        return TraceReply__new(TraceService__enable_storage(self));
     }
-    return TRACE_INVALID_REQUEST;
+    if (request->operation == TRACE_OPERATION_REGISTER_IO)
+    {
+        return TraceService__register_io(self, client);
+    }
+    if (request->operation == TRACE_OPERATION_DRAIN_IO)
+    {
+        return TraceReply__new(TraceService__drain_sources(self, ChannelServer__transport_pid(&client->channel)));
+    }
+    return TraceReply__new(TRACE_INVALID_REQUEST);
 }
 
 static bool TraceService__handle_client(TraceServicePtr self, TraceClientPtr client)
@@ -166,6 +349,7 @@ static bool TraceService__handle_client(TraceServicePtr self, TraceClientPtr cli
     {
         return work;
     }
+
     match_result(
         ChannelServer__poll(&client->channel),
         success(optional_request)
@@ -175,13 +359,13 @@ static bool TraceService__handle_client(TraceServicePtr self, TraceClientPtr cli
                 some(metadata)
                 {
                     TraceRequest request;
-                    TraceStatus status = TRACE_INVALID_REQUEST;
+                    TraceReply reply = TraceReply__new(TRACE_INVALID_REQUEST);
                     if (metadata.size == sizeof(request) &&
                         ChannelServer__read_request(&client->channel, (ChannelDataPtr)&request, sizeof(request)))
                     {
-                        status = TraceService__handle_request(self, client, &request);
+                        reply = TraceService__handle_request(self, client, &request);
                     }
-                    TraceClient__reply(client, status);
+                    TraceClient__reply(client, reply);
                     return true;
                 },
                 none_do_nothing()
@@ -263,6 +447,163 @@ static bool TraceService__handle_clients(TraceServicePtr self)
     return work;
 }
 
+static bool TraceSource__drain(TraceServicePtr self, TraceSourcePtr source)
+{
+    IOTraceRingPtr ring = (IOTraceRingPtr)source->buffer.address;
+    if (!IOTraceRing__ready(ring))
+    {
+        return false;
+    }
+    uint64_t produced = IOTraceRing__produced(ring);
+    uint64_t oldest = IOTraceRing__oldest(ring, produced);
+    if (source->cursor < oldest)
+    {
+        uint64_t dropped = oldest - source->cursor;
+        BString notice = BString__sprintf(&bstr("IO-LATENCY-DROPPED pid=%llu events=%llu"), source->pid, dropped);
+        TraceBuffer__append(&self->io_records, &notice);
+        source->cursor = oldest;
+    }
+    bool work = false;
+    size_t drained = 0;
+    while (source->cursor < produced && drained < IO_TRACE_DRAIN_BATCH)
+    {
+        bool read = false;
+        match_optional(
+            IOTraceRing__read(ring, source->cursor),
+            some(event)
+            {
+                read = true;
+                if (event.ticket.metadata.origin_pid == process_current_pid())
+                {
+                    source->cursor++;
+                    drained++;
+                    work = true;
+                    continue;
+                }
+                match_optional(
+                    IOLatencyTracker__hop(source->pid, &event),
+                    some(summary)
+                    {
+                        BString line = BString__sprintf(&bstr("IO-HOP %B"), &summary);
+                        TraceBuffer__append(&self->io_records, &line);
+                    },
+                    none_do_nothing()
+                );
+                match_optional(
+                    IOLatencyTracker__record(&self->io_latency, source->pid, &event),
+                    some(summary)
+                    {
+                        BString line = BString__sprintf(&bstr("IO-LATENCY %B"), &summary);
+                        TraceBuffer__append(&self->io_records, &line);
+                    },
+                    none_do_nothing()
+                );
+            },
+            none_do_nothing()
+        );
+        if (!read)
+        {
+            break;
+        }
+        source->cursor++;
+        drained++;
+        work = true;
+    }
+    return work;
+}
+
+static bool TraceService__drain_io(TraceServicePtr self)
+{
+    bool work = false;
+    for_each_fa_ptr(
+        TraceSources,
+        &self->sources,
+        index,
+        client,
+        {
+            match_optional(
+                TraceSources__ptr_at(&self->sources, index),
+                some(source)
+                {
+                    work |= TraceSource__drain(self, source);
+                },
+                none_do_nothing()
+            );
+        }
+    );
+    return work;
+}
+
+static bool TraceService__reap_io(TraceServicePtr self)
+{
+    uint64_t now = IpcPlatform__monotonic_usec();
+    if (now < self->reap_at_usec)
+    {
+        return false;
+    }
+    self->reap_at_usec = now + IO_TRACE_REAP_USEC;
+    for_each_fa_ptr(
+        TraceSources,
+        &self->sources,
+        index,
+        source,
+        {
+            bool live = true;
+            match_result(
+                ProcessRegistry__find(ProcessRegistry__shared(), source.pid),
+                success(record)
+                {
+                    match_optional(
+                        record,
+                        some(process)
+                        {
+                            live = true;
+                            match_optional(
+                                TraceSources__ptr_at(&self->sources, index),
+                                some(registered_source)
+                                {
+                                    registered_source->missing_since_usec = 0;
+                                },
+                                none_do_nothing()
+                            );
+                        },
+                        none()
+                        {
+                            match_optional(
+                                TraceSources__ptr_at(&self->sources, index),
+                                some(registered_source)
+                                {
+                                    if (registered_source->missing_since_usec == 0)
+                                    {
+                                        registered_source->missing_since_usec = now;
+                                    }
+                                    uint64_t missing_usec =
+                                        now >= registered_source->missing_since_usec
+                                            ? now - registered_source->missing_since_usec
+                                            : 0;
+                                    live = missing_usec < IO_TRACE_SOURCE_GRACE_USEC;
+                                },
+                                none_do_nothing()
+                            );
+                        }
+                    );
+                },
+                error(code, message)
+                {
+                    return false;
+                }
+            );
+            if (!live)
+            {
+                TraceSources__remove(&self->sources, source);
+                BufferClient__release(&source.buffer);
+                return true;
+            }
+        }
+    );
+    return false;
+}
+
 static bool TraceService__flush(TraceServicePtr self)
 {
     if (self->log < 0 || TraceBuffer__is_empty(&self->records))
@@ -291,18 +632,56 @@ static bool TraceService__flush(TraceServicePtr self)
     return true;
 }
 
+static bool TraceService__flush_io(TraceServicePtr self)
+{
+    if (self->io_log < 0 || TraceBuffer__is_empty(&self->io_records))
+    {
+        return false;
+    }
+
+    size_t length = TraceBuffer__length(&self->io_records);
+    ByteCount written = IO__write_bytes(self->io_log, (const char *)TraceBuffer__data(&self->io_records), length);
+    if (written <= 0)
+    {
+        if (!self->io_write_failure_reported)
+        {
+            BString notice = BString__sprintf(&bstr("IO-TRACE-WRITE-FAILED handle=%lld status=%lld length=%llu"),
+                                              self->io_log, written, (uint64_t)length);
+            TraceBuffer__append(&self->records, &notice);
+            self->io_write_failure_reported = true;
+        }
+        return false;
+    }
+    if ((size_t)written < length)
+    {
+        return TraceBuffer__consume(&self->io_records, (size_t)written);
+    }
+    uint64_t dropped = TraceBuffer__clear(&self->io_records);
+    if (dropped > 0)
+    {
+        BString notice = BString__sprintf(&bstr("IO-LATENCY-DROPPED output_records=%llu"), dropped);
+        TraceBuffer__append(&self->io_records, &notice);
+    }
+
+    return true;
+}
+
 static bool TraceService__step(TraceServicePtr self)
 {
     QueueParticipantID warden_pid =
         unwrap_optional(ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &bstr("hundekanal-warter")), 0);
     bool work = TraceService__accept_clients(self, warden_pid);
     work |= TraceService__handle_clients(self);
+    work |= TraceService__drain_io(self);
+    work |= TraceService__reap_io(self);
     work |= TraceService__flush(self);
+    work |= TraceService__flush_io(self);
     return work;
 }
 
 int main(void)
 {
+    IOTrace__set_enabled(false);
     if (!service_ok(service_become_service()))
     {
         return 1;

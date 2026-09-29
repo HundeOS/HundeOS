@@ -1,14 +1,17 @@
 #ifndef HUND_FILESYSTEM_NAMESPACE_H
 #define HUND_FILESYSTEM_NAMESPACE_H
-#include "io/mediator.h"
+#include "io/server.h"
 #include "io/mount_config.h"
 
 typedef struct FilesystemMount
 {
     MountConfig config;
-    IOMediator mediator;
-    IOHandle first_handle;
-    bool connected;
+    uint64_t device_path_length;
+    uint8_t device_path_data[IO_PROTOCOL_DATA_SIZE];
+    uint64_t filesystem_type_length;
+    uint8_t filesystem_type_data[IO_PROTOCOL_DATA_SIZE];
+    uint64_t mountpoint_length;
+    uint8_t mountpoint_data[IO_PROTOCOL_DATA_SIZE];
 } FilesystemMount;
 
 typedef FilesystemMount * FilesystemMountPtr;
@@ -21,7 +24,6 @@ FixedArrayDefine(FilesystemMount, 16, FilesystemMounts, FilesystemMount__equals)
 typedef struct FilesystemNamespace
 {
     FilesystemMounts mounts;
-    QueueConnectionID mediator_session;
 } FilesystemNamespace;
 
 typedef FilesystemNamespace * FilesystemNamespacePtr;

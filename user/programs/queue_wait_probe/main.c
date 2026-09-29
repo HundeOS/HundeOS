@@ -4,7 +4,7 @@
 #include "sys/print.h"
 #include "sys/process.h"
 #include "syscalls/service.h"
-#include "diagnostics.h"
+#include "sys/process_metrics.h"
 
 #define WAIT_PROBE_SAMPLES 16ULL
 
@@ -91,15 +91,15 @@ int main(int argc, char ** argv)
                summary.timeouts, summary.activity, summary.failures, summary.min_timeout_usec,
                summary.timeouts == 0 ? 0 : summary.timeout_usec / summary.timeouts, summary.max_timeout_usec);
     match_result(
-        WaitProbe__snapshot(ProcessRegistry__shared(), process_current_pid(), IpcPlatform__monotonic_usec()),
+        ProcessMetrics__snapshot_after(ProcessRegistry__shared(), process_current_pid(), IpcPlatform__monotonic_usec()),
         success(record)
         {
             ProcessQueueWaitUsage usage = record.queue_wait_usage;
             IO__printf(&bstr("cpu=%llu call_total_usec=%llu kernel_parks=%llu kernel_timeouts=%llu "
-                             "kernel_activity=%llu kernel_selections=%llu\n"
+                             "kernel_activity=%llu kernel_selections=%llu speculative_selections=%llu\n"
                              "kernel_parked_usec=%llu kernel_runnable_usec=%llu\n"),
                        record.cpu, summary.call_usec, usage.parks, usage.timeout_wakes, usage.activity_wakes,
-                       usage.selections, usage.parked_usec, usage.runnable_usec);
+                       usage.selections, usage.speculative_selections, usage.parked_usec, usage.runnable_usec);
         },
         error(code, message)
         {

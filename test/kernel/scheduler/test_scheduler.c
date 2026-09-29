@@ -1342,6 +1342,48 @@ void test_scheduler_preempt_selects_realtime_service_before_service_process(void
     TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, realtime_proc->state);
 }
 
+void test_realtime_promotion_keeps_process_on_cpu_and_allows_other_work(void)
+{
+    CPUID scheduled_cpu = 4;
+    ProcessPtr realtime_proc = dummy_process(100, scheduled_cpu, PROC_STATE_READY);
+    ProcessPtr normal_proc = dummy_process(101, scheduled_cpu, PROC_STATE_READY);
+
+    Scheduler__start(scheduler, scheduled_cpu);
+    match_result(Scheduler__schedule_on_cpu(scheduler, realtime_proc, scheduled_cpu),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Scheduler__schedule_on_cpu(scheduler, normal_proc, scheduled_cpu),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Scheduler__promote_realtime(scheduler, realtime_proc),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROCESS_CLASS_REALTIME_SERVICE, realtime_proc->process_class);
+    match_result(
+        Scheduler__cpu_for_process(scheduler, realtime_proc),
+        success(owner_cpu)
+        {
+            TEST_ASSERT_EQUAL_UINT64(scheduled_cpu, owner_cpu);
+        },
+        error_test_fail()
+    );
+
+    match_result(
+        Scheduler__queue_wait(scheduler, realtime_proc, 0, 0, QUEUE_WAIT_INDEFINITE_TICKS),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, status);
+        },
+        error_test_fail()
+    );
+    Scheduler__preempt(scheduler, scheduled_cpu, &Some(ProcessContextPtr, test_saved_context()));
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, realtime_proc->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, normal_proc->state);
+}
+
 void test_pending_termination_overrides_active_irq_timer_suppression(void)
 {
     ProcessPtr service_proc = dummy_process(100, cpu_id, PROC_STATE_READY);

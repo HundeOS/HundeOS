@@ -4,8 +4,12 @@
 
 static pthread_mutex_t event_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t event_condition = PTHREAD_COND_INITIALIZER;
-static uint64_t event_generation;
-static _Thread_local uint64_t observed_generation;
+static IpcDoorbell local_doorbell;
+
+IpcDoorbellPtr IpcPlatform__local_doorbell(void)
+{
+    return &local_doorbell;
+}
 
 void IpcPlatform__configure_wait(BootWaitMode mode)
 {
@@ -29,18 +33,22 @@ void IpcPlatform__relax(void)
 void IpcPlatform__signal_event(void)
 {
     pthread_mutex_lock(&event_mutex);
-    event_generation++;
+    IpcEvent__ring(IpcDoorbell__mutable_event(&local_doorbell));
     pthread_cond_broadcast(&event_condition);
     pthread_mutex_unlock(&event_mutex);
 }
 
-void IpcPlatform__wait_event(void)
+IpcEventGeneration IpcPlatform__prepare_wait(ConstIpcEventPtr event)
+{
+    return IpcEvent__generation(event);
+}
+
+void IpcPlatform__wait_event(ConstIpcEventPtr event, IpcEventGeneration observed)
 {
     pthread_mutex_lock(&event_mutex);
-    if (observed_generation == event_generation)
+    if (!IpcEvent__changed(event, observed))
     {
         pthread_cond_wait(&event_condition, &event_mutex);
     }
-    observed_generation = event_generation;
     pthread_mutex_unlock(&event_mutex);
 }

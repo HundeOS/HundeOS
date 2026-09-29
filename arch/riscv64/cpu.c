@@ -8,6 +8,7 @@
 
 #define RISCV_COUNTER_TIME (1ULL << 1U)
 #define RISCV_SIE_SEIE (1ULL << 9U)
+#define RISCV_SIE_SSIE (1ULL << 1U)
 #define RISCV_SSTATUS_SIE (1ULL << 1U)
 #define PLIC_SUPERVISOR_CONTEXT_OFFSET 0x201000ULL
 #define PLIC_CONTEXT_HART_STRIDE 0x2000ULL
@@ -77,6 +78,15 @@ void CPU__signal_event(void)
     __asm__ volatile("fence rw, rw" ::: "memory");
 }
 
+void CPU__request_reschedule(CPUID cpu)
+{
+    register uint64_t hart_mask __asm__("a0") = 1;
+    register uint64_t hart_mask_base __asm__("a1") = cpu;
+    register uint64_t function __asm__("a6") = 0;
+    register uint64_t extension __asm__("a7") = 0x735049ULL;
+    __asm__ volatile("ecall" : "+r"(hart_mask), "+r"(hart_mask_base) : "r"(function), "r"(extension) : "memory");
+}
+
 void CPU__wait_for_interrupt(void)
 {
     __asm__ volatile("wfi" ::: "memory");
@@ -109,9 +119,10 @@ Result(InitCode) CPU__init(SystemInfoPtr system_info)
         *(volatile uint32_t *)threshold = 0;
         __asm__ volatile("fence iorw, iorw\n"
                          "csrs sie, %0\n"
+                         "csrs sie, %2\n"
                          "csrs sstatus, %1"
                          :
-                         : "r"(RISCV_SIE_SEIE), "r"(RISCV_SSTATUS_SIE)
+                         : "r"(RISCV_SIE_SEIE), "r"(RISCV_SSTATUS_SIE), "r"(RISCV_SIE_SSIE)
                          : "memory");
     }
     return Success(InitCode, ARCH_INIT_OK);

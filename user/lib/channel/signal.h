@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "ipc/channel_signal.h"
+#include "ipc/doorbell.h"
 
 typedef struct ChannelSignal ChannelSignal;
 typedef ChannelSignal * ChannelSignalPtr;
@@ -31,6 +32,8 @@ void ChannelSignal__notify_data(ChannelSignalPtr self);
 void ChannelSignal__notify_space(ChannelSignalPtr self);
 bool ChannelSignal__data_changed(ChannelSignalPtr self, uint64_t observed_epoch);
 bool ChannelSignal__space_changed(ChannelSignalPtr self, uint64_t observed_epoch);
+ConstIpcEventPtr ChannelSignal__data_event(ChannelSignalPtr self);
+ConstIpcEventPtr ChannelSignal__space_event(ChannelSignalPtr self);
 
 void ChannelSignal__signal(ChannelSignalPtr self);
 void ChannelSignal__wait_for_data_change(ChannelSignalPtr self, uint64_t observed_epoch);

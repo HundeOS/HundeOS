@@ -41,7 +41,8 @@ int IO__printf(ConstBStringPtr format, ...)
     return 0;
 }
 
-Result(ProcessRecord) WaitProbe__snapshot(ConstProcessRegistryPtr registry, uint64_t pid, uint64_t sampled_after)
+Result(ProcessRecord)
+    ProcessMetrics__snapshot_after(ConstProcessRegistryPtr registry, uint64_t pid, uint64_t sampled_after)
 {
     TEST_ASSERT_EQUAL_UINT64(42, pid);
     return Success(ProcessRecord, ((ProcessRecord){.pid = pid, .sampled_at_usec = sampled_after}));

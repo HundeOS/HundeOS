@@ -49,6 +49,13 @@ void CPU__signal_event()
     __asm__ __volatile__("sev" ::: "memory");
 }
 
+void CPU__request_reschedule(CPUID cpu)
+{
+    uint64_t target = 1ULL << (cpu & 0xfU);
+    uint64_t value = target | ((uint64_t)CPU_RESCHEDULE_INTERRUPT << 24U);
+    __asm__ __volatile__("dsb ishst; msr ICC_SGI1R_EL1, %0; isb" : : "r"(value) : "memory");
+}
+
 void CPU__wait_for_interrupt()
 {
     __asm__ __volatile__("wfi");

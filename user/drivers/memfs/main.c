@@ -1,5 +1,6 @@
 #include "memfs.h"
 #include "sys/service.h"
+#include "trace/io_trace.h"
 
 int main(int argc, char ** argv)
 {
@@ -11,6 +12,10 @@ int main(int argc, char ** argv)
     static Memfs filesystem;
     static IOService service;
     filesystem = Memfs__new();
+    if (IOTrace__prepare() != TRACE_OK)
+    {
+        return 1;
+    }
     if (IOService__listen_into(&service, &mountpoint, &filesystem, Memfs__serve, Memfs__disconnect) != IO_OK)
     {
         return 1;

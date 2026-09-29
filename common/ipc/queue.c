@@ -27,7 +27,7 @@ static QueueProgress QueueProgress__new(QueueCursor incoming_produced, QueueCurs
 }
 
 Queue Queue__new(QueueIdentityPtr identity, QueuePagePtr outgoing, QueuePagePtr incoming, QueueConnectionID connection,
-                 QueueParticipantID peer_pid)
+                 QueueParticipantID peer_pid, IpcDoorbellPtr peer_doorbell, QueueDataNotifier notify_data_available)
 {
     return (Queue){
         .identity = identity,
@@ -35,23 +35,31 @@ Queue Queue__new(QueueIdentityPtr identity, QueuePagePtr outgoing, QueuePagePtr 
         .incoming = incoming,
         .connection = connection,
         .peer_pid = peer_pid,
+        .peer_doorbell = peer_doorbell,
+        .notify_data_available = notify_data_available,
         .read = 0,
         .written = 0,
         .acknowledged = 0,
     };
 }
 
-Result(Queue) Queue__attach(QueueIdentityPtr identity, QueuePagePtr client, QueuePagePtr server,
-                            QueueConnectionID connection, QueueParticipantID pid)
+Result(Queue)
+    Queue__attach(QueueIdentityPtr identity, QueuePagePtr client, QueuePagePtr server, QueueConnectionID connection,
+                  QueueParticipantID pid, IpcDoorbellPtr peer_doorbell, QueueDataNotifier notify_data_available)
 {
     if (identity->connection != connection || (pid != identity->client_pid && pid != identity->server_pid))
     {
         return Error(Queue, queue_invalid_identity, QUEUE_INVALID);
     }
     bool is_client = pid == identity->client_pid;
-    Queue queue = Queue__new(identity, is_client ? client : server, is_client ? server : client, connection,
-                             is_client ? identity->server_pid : identity->client_pid);
+    Queue queue =
+        Queue__new(identity, is_client ? client : server, is_client ? server : client, connection,
+                   is_client ? identity->server_pid : identity->client_pid, peer_doorbell, notify_data_available);
     return Success(Queue, queue);
+}
+
+void Queue__ignore_data_available(QueueConnectionID connection)
+{
 }
 
 QueueCode Queue__status(QueuePtr self)
@@ -151,7 +159,9 @@ Result(QueueCode) Queue__push(QueuePtr self, ConstQueueMessagePtr message)
     );
     self->written++;
     __atomic_store_n(&self->outgoing->produced, self->written, __ATOMIC_RELEASE);
+    IpcEvent__ring(IpcDoorbell__mutable_event(self->peer_doorbell));
     IpcPlatform__signal_event();
+    self->notify_data_available(self->connection);
     return Success(QueueCode, QUEUE_OK);
 }
 
@@ -177,6 +187,7 @@ Result(QueueMessage) Queue__pop(QueuePtr self)
     message.sender_pid = self->peer_pid;
     self->read++;
     __atomic_store_n(&self->outgoing->consumed, self->read, __ATOMIC_RELEASE);
+    IpcEvent__ring(IpcDoorbell__mutable_event(self->peer_doorbell));
     IpcPlatform__signal_event();
     return Success(QueueMessage, message);
 }

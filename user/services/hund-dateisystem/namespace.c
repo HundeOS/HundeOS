@@ -1,13 +1,11 @@
 #include "namespace.h"
-#include "types/bstring_additional_types.h"
 #include "io/path.h"
-#include "sys/print.h"
 #include "sys/service.h"
 
 FixedArrayBodyDefine(FilesystemMounts);
-FixedArrayDefine(BString, 13, MountChildren, bstring_equals);
-FixedArrayBodyDefine(MountChildren);
-typedef MountChildren * MountChildrenPtr;
+FixedArrayDefine(BString, 16, FilesystemNamespaceChildren, bstring_equals);
+FixedArrayStackBodyDefine(FilesystemNamespaceChildren);
+typedef FilesystemNamespaceChildren * FilesystemNamespaceChildrenPtr;
 
 bool FilesystemMount__equals(void * first, void * second)
 {
@@ -59,9 +57,26 @@ bool FilesystemMount__matches_mountpoint(FilesystemMountPtr self, void * context
     return BString__equals(&self->config.mountpoint, context);
 }
 
-static FilesystemMount FilesystemMount__new(MountConfigPtr config, IOHandle first_handle)
+static void FilesystemMount__bind_config(FilesystemMountPtr self)
 {
-    return (FilesystemMount){.config = *config, .first_handle = first_handle};
+    BString device_path = BString__from_chars((const char *)self->device_path_data, self->device_path_length);
+    BString filesystem_type =
+        BString__from_chars((const char *)self->filesystem_type_data, self->filesystem_type_length);
+    BString mountpoint = BString__from_chars((const char *)self->mountpoint_data, self->mountpoint_length);
+    self->config = MountConfig__new(&device_path, &filesystem_type, &mountpoint);
+}
+
+static FilesystemMount FilesystemMount__new(MountConfigPtr config)
+{
+    FilesystemMount self = {0};
+    self.device_path_length =
+        BString__copy_to(&config->device_path, (char *)self.device_path_data, sizeof(self.device_path_data));
+    self.filesystem_type_length = BString__copy_to(&config->filesystem_type, (char *)self.filesystem_type_data,
+                                                   sizeof(self.filesystem_type_data));
+    self.mountpoint_length =
+        BString__copy_to(&config->mountpoint, (char *)self.mountpoint_data, sizeof(self.mountpoint_data));
+    FilesystemMount__bind_config(&self);
+    return self;
 }
 
 Result(IOStatus) FilesystemNamespace__add(FilesystemNamespacePtr self, MountConfig config)
@@ -87,12 +102,22 @@ Result(IOStatus) FilesystemNamespace__add(FilesystemNamespacePtr self, MountConf
         },
         none_do_nothing()
     );
-    FilesystemMount mount = FilesystemMount__new(
-        &config, IO_FILESYSTEM_HANDLE_BASE + FilesystemMounts__len(&self->mounts) * IO_SESSION_HANDLE_BASE);
+    FilesystemMount mount = FilesystemMount__new(&config);
     match_result(
         FilesystemMounts__push(&self->mounts, mount),
-        success(code)
+        success(index)
         {
+            match_optional(
+                FilesystemMounts__ptr_at(&self->mounts, index),
+                some(stored)
+                {
+                    FilesystemMount__bind_config(stored);
+                },
+                none()
+                {
+                    return Error(IOStatus, bstr("Stored mount is unavailable"), IO_REGISTER_FAILED);
+                }
+            );
             return Success(IOStatus, IO_OK);
         },
         error(code, message)
@@ -131,12 +156,6 @@ static Optional(FilesystemMountPtr) FilesystemNamespace__route(FilesystemNamespa
     return selected;
 }
 
-static bool FilesystemMount__matches_handle(FilesystemMountPtr self, void * context)
-{
-    IOHandle handle = *(IOHandlePtr)context;
-    return handle >= self->first_handle && handle < self->first_handle + IO_SESSION_HANDLE_BASE;
-}
-
 static BString FilesystemMount__relative_path(FilesystemMountPtr self, ConstBStringPtr path)
 {
     BString relative = BString__equals(&self->config.mountpoint, &bstr("/"))
@@ -145,163 +164,89 @@ static BString FilesystemMount__relative_path(FilesystemMountPtr self, ConstBStr
     return BString__is_empty(&relative) ? bstr("/") : relative;
 }
 
-static Optional(IOReply) FilesystemMount__execute(FilesystemMountPtr self, IORequestPtr request)
+static Optional(BString) FilesystemNamespace__child_name(ConstBStringPtr path, ConstBStringPtr mountpoint)
 {
-    if (!self->connected)
+    if (BString__equals(path, mountpoint) || !BString__starts_with(mountpoint, path))
     {
-        match_optional(
-            ServiceDirectory__find_endpoint(ServiceDirectory__shared(), &self->config.mountpoint),
-            some(endpoint)
-            {
-            },
-            none()
-            {
-                return Some(IOReply, IOReply__new(IO_NO_DEVICE_FOUND, 0));
-            }
-        );
-        match_result(
-            Channel__open(ServiceDirectory__shared(), &self->config.mountpoint),
-            success(channel)
-            {
-                self->mediator = IOMediator__new_filesystem(channel, self->first_handle);
-                self->connected = true;
-            },
-            error(code, message)
-            {
-                return Some(IOReply, IOReply__new(IO_NO_DEVICE_FOUND, 0));
-            }
-        );
+        return None(BString);
     }
 
-    match_optional(
-        IOMediator__execute(&self->mediator, request->client_session, request->client_pid, request),
-        some(reply)
-        {
-            return Some(IOReply, reply);
-        },
-        none()
-        {
-            return Some(IOReply, IOReply__new(IO_WAIT_FOR_DATA, 0));
-        }
-    );
-}
-
-static void MountChildren__add_path(MountChildrenPtr self, ConstBStringPtr parent, ConstBStringPtr mountpoint)
-{
-    if (!BString__starts_with(mountpoint, parent))
+    StringPos path_length = BString__length(path);
+    bool root = BString__equals(path, &bstr("/"));
+    bool trailing_slash = BString__char_at_or(path, path_length - 1, 0) == '/';
+    StringPos child_start = path_length + 1;
+    if (root)
     {
-        return;
+        child_start = 1;
     }
-    BString relative = BString__slice(mountpoint, BString__length(parent), BString__length(mountpoint));
-    BStringSplit split = BString__split_first_token(&relative, &bstr("/"));
-    match_optional(
-        split.match,
-        some(name)
-        {
-            match_optional(MountChildren__find_item(self, name),
-                some(found)
-                {
-                    return;
-                },
-                none_do_nothing()
-            );
-            // At most eight configured mounts and five bootstrap paths contribute.
-            match_result(
-                MountChildren__push(self, name),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    IO__printf(&bstr("Mount overlay capacity exceeded: %B\n"), &message);
-                }
-            );
-        },
-        none_do_nothing()
-    );
+    else if (trailing_slash)
+    {
+        child_start = path_length;
+    }
+    if ((!root && !trailing_slash && BString__char_at_or(mountpoint, path_length, 0) != '/') ||
+        child_start >= BString__length(mountpoint))
+    {
+        return None(BString);
+    }
+
+    BString descendants = BString__slice(mountpoint, child_start, BString__length(mountpoint));
+    BStringSplit split = BString__split_first_token(&descendants, &bstr("/"));
+    return split.match;
 }
 
-static MountChildren FilesystemNamespace__children(FilesystemNamespacePtr self, ConstBStringPtr path)
+static FilesystemNamespaceChildren FilesystemNamespace__children(FilesystemNamespacePtr self, ConstBStringPtr path)
 {
-    BString parent = BString__equals(path, &bstr("/")) ? *path : BString__append(path, &bstr("/"));
-    MountChildren children = MountChildren__new();
+    FilesystemNamespaceChildren children = FilesystemNamespaceChildren__new();
     for_each_fa_ptr(
         FilesystemMounts,
         (&self->mounts),
         index,
         mount,
         {
-            MountChildren__add_path(&children, &parent, &mount.config.mountpoint);
+            match_optional(
+                FilesystemNamespace__child_name(path, &mount.config.mountpoint),
+                some(child)
+                {
+                    match_optional(
+                        FilesystemNamespaceChildren__find_item(&children, child),
+                        some_do_nothing(),
+                        none()
+                        {
+                            match_result(
+                                FilesystemNamespaceChildren__push(&children, child),
+                                success_do_nothing(),
+                                error(code, message)
+                                {
+                                    return children;
+                                }
+                            );
+                        }
+                    );
+                },
+                none_do_nothing()
+            );
         }
     );
-    MountChildren__add_path(&children, &parent, &bstr("/sbin"));
-    MountChildren__add_path(&children, &parent, &bstr("/boot/config"));
-    MountChildren__add_path(&children, &parent, &bstr("/boot/sysinfo"));
     return children;
 }
 
-static BString FilesystemNamespace__parent(ConstBStringPtr path)
+static IOReply FilesystemNamespaceChildren__list(FilesystemNamespaceChildrenPtr self, uint64_t offset)
 {
-    StringPos end = BString__length(path);
-    while (end > 1 && BString__char_at_or(path, end - 1, 0) != '/')
-    {
-        end--;
-    }
-    return BString__slice(path, 0, end > 1 ? end - 1 : 1);
-}
-
-static BString FilesystemNamespace__name(ConstBStringPtr path)
-{
-    StringPos start = BString__length(path);
-    while (start > 0 && BString__char_at_or(path, start - 1, 0) != '/')
-    {
-        start--;
-    }
-    return BString__slice(path, start, BString__length(path));
-}
-
-static Optional(IOFileInfo) FilesystemNamespace__synthetic_info(FilesystemNamespacePtr self, ConstBStringPtr path)
-{
-    if (BString__equals(path, &bstr("/")))
-    {
-        return Some(IOFileInfo, IOFileInfo__new(IO_MODE_TYPE_DIR | 0755, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, 0));
-    }
-
-    BString parent = FilesystemNamespace__parent(path);
-    BString name = FilesystemNamespace__name(path);
-    MountChildren children = FilesystemNamespace__children(self, &parent);
-    match_optional(
-        MountChildren__find_item(&children, name),
-        some(found)
-        {
-            FileMode mode = BString__equals(&parent, &bstr("/boot")) && BString__equals(&name, &bstr("sysinfo"))
-                                ? IO_MODE_TYPE_FILE | 0444
-                                : IO_MODE_TYPE_DIR | 0755;
-            return Some(IOFileInfo, IOFileInfo__new(mode, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, 0));
-        },
-        none()
-        {
-            return None(IOFileInfo);
-        }
-    );
-}
-
-static bool FilesystemNamespace__release(FilesystemNamespacePtr self, QueueConnectionID session, uint64_t pid)
-{
-    bool complete = true;
-    for (ArrayIndex index = 0; index < FilesystemMounts__len(&self->mounts); index++)
+    IOReply reply = IOReply__new(IO_OK, 0);
+    for (uint64_t index = offset;
+         index < FilesystemNamespaceChildren__len(self) && reply.directory.count < IO_DIRECTORY_BATCH_CAPACITY; index++)
     {
         match_optional(
-            FilesystemMounts__ptr_at(&self->mounts, index),
-            some(mount)
+            FilesystemNamespaceChildren__ptr_at(self, index),
+            some(child)
             {
-                if (mount->connected)
-                {
-                    complete = IOMediator__disconnect(&mount->mediator, session, pid) && complete;
-                }
+                reply.directory.entries[reply.directory.count++] = DirectoryEntry__new(
+                    IO_DIRENT_ATTR_NONE, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, IO_MODE_TYPE_DIR | 0755, child);
             },
             none_do_nothing()
         );
     }
-    return complete;
+    return reply;
 }
 
 Optional(IOReply) FilesystemNamespace__execute(IOServiceContext context, QueueConnectionID session, uint64_t pid,
@@ -337,19 +282,10 @@ Optional(IOReply) FilesystemNamespace__execute(IOServiceContext context, QueueCo
             }
         );
     }
-    uint64_t io_pid =
-        unwrap_optional(ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &bstr(IO_SYSTEM_SERVICE)), 0);
-    if (pid == 0 || pid != io_pid || (self->mediator_session != 0 && self->mediator_session != session) ||
-        request->client_pid == 0 || request->client_session == 0)
+
+    if (pid == 0)
     {
         return Some(IOReply, IOReply__new(IO_PERMISSION_DENIED, 0));
-    }
-    self->mediator_session = session;
-    if (request->operation == IO_REQUEST_RELEASE_CLIENT)
-    {
-        return FilesystemNamespace__release(self, request->client_session, request->client_pid)
-                   ? Some(IOReply, IOReply__new(IO_OK, 0))
-                   : Some(IOReply, IOReply__new(IO_WAIT_FOR_DATA, 0));
     }
     if (request->operation == IO_REQUEST_OPEN || request->operation == IO_REQUEST_LIST_DIR ||
         request->operation == IO_REQUEST_FILE_INFO || request->operation == IO_REQUEST_MKDIR ||
@@ -365,51 +301,17 @@ Optional(IOReply) FilesystemNamespace__execute(IOServiceContext context, QueueCo
         {
             return Some(IOReply, IOReply__new(IO_INVALID_PATH, 0));
         }
-        Optional(FilesystemMountPtr) route = FilesystemNamespace__route(self, &path);
-        if (request->operation == IO_REQUEST_FILE_INFO)
-        {
-            match_optional(
-                FilesystemNamespace__synthetic_info(self, &path),
-                some(info)
-                {
-                    IOReply reply = IOReply__new(IO_OK, 0);
-                    reply.file_info = info;
-                    return Some(IOReply, reply);
-                },
-                none_do_nothing()
-            );
-        }
         uint64_t child_count = 0;
         if (request->operation == IO_REQUEST_LIST_DIR)
         {
-            MountChildren children = FilesystemNamespace__children(self, &path);
-            child_count = MountChildren__len(&children);
-            IOReply reply = IOReply__new(IO_OK, 0);
-            while (reply.directory.count < IO_DIRECTORY_BATCH_CAPACITY &&
-                   request->offset + reply.directory.count < child_count)
+            FilesystemNamespaceChildren children = FilesystemNamespace__children(self, &path);
+            child_count = FilesystemNamespaceChildren__len(&children);
+            if (request->offset < child_count)
             {
-                match_optional(
-                    MountChildren__at(&children, request->offset + reply.directory.count),
-                    some(name)
-                    {
-                        FileMode mode =
-                            BString__equals(&path, &bstr("/boot")) && BString__equals(&name, &bstr("sysinfo"))
-                                ? IO_MODE_TYPE_FILE | 0444
-                                : IO_MODE_TYPE_DIR | 0755;
-                        reply.directory.entries[reply.directory.count++] = DirectoryEntry__new(
-                            IO_DIRENT_ATTR_NONE, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, mode, &name);
-                    },
-                    none()
-                    {
-                        return Some(IOReply, IOReply__new(IO_PANIC, 0));
-                    }
-                );
-            }
-            if (reply.directory.count > 0)
-            {
-                return Some(IOReply, reply);
+                return Some(IOReply, FilesystemNamespaceChildren__list(&children, request->offset));
             }
         }
+        Optional(FilesystemMountPtr) route = FilesystemNamespace__route(self, &path);
         match_optional(
             route,
             some(mount)
@@ -436,71 +338,23 @@ Optional(IOReply) FilesystemNamespace__execute(IOServiceContext context, QueueCo
                         }
                     );
                 }
-                if (request->operation == IO_REQUEST_LIST_DIR)
-                {
-                    forwarded.offset -= child_count;
-                    match_optional(
-                        FilesystemMount__execute(mount, &forwarded),
-                        some(reply)
-                        {
-                            if (reply.status == IO_INVALID_PATH && child_count > 0)
-                            {
-                                return Some(IOReply, IOReply__new(IO_OK, 0));
-                            }
-                            return Some(IOReply, reply);
-                        },
-                        none()
-                        {
-                            return None(IOReply);
-                        }
-                    );
-                }
-                return FilesystemMount__execute(mount, &forwarded);
+                BString rewritten = IORequest__path(&forwarded);
+                BString rewritten_target = IORequest__target_path(&forwarded);
+                IOReply reply = IOReply__redirect(&mount->config.mountpoint, &rewritten, &rewritten_target, true);
+                reply.value =
+                    request->operation == IO_REQUEST_LIST_DIR ? forwarded.offset - child_count : forwarded.offset;
+                return Some(IOReply, reply);
             },
             none()
             {
-                return Some(
-                    IOReply,
-                    IOReply__new(request->operation == IO_REQUEST_LIST_DIR && child_count > 0 ? IO_OK : IO_INVALID_PATH,
-                                 0));
+                return Some(IOReply, IOReply__new(IO_INVALID_PATH, 0));
             }
         );
     }
-    match_find_result_ptr(
-        FilesystemMounts__find(&self->mounts, FilesystemMount__matches_handle, &request->handle),
-        some(mount)
-        {
-            return FilesystemMount__execute(mount, request);
-        },
-        none()
-        {
-            return Some(IOReply, IOReply__new(IO_UNKNOWN_HANDLE, 0));
-        }
-    );
+    return Some(IOReply, IOReply__new(IO_UNKNOWN_HANDLE, 0));
 }
 
 bool FilesystemNamespace__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
-    FilesystemNamespacePtr self = context;
-    if (self->mediator_session != session)
-    {
-        return true;
-    }
-    for (ArrayIndex index = 0; index < FilesystemMounts__len(&self->mounts); index++)
-    {
-        match_optional(
-            FilesystemMounts__ptr_at(&self->mounts, index),
-            some(mount)
-            {
-                if (mount->connected && !mount->mediator.failed)
-                {
-                    Channel__close(&mount->mediator.backend);
-                    mount->mediator.failed = true;
-                }
-            },
-            none_do_nothing()
-        );
-    }
-    self->mediator_session = 0;
     return true;
 }

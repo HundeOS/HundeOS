@@ -2,6 +2,11 @@
 
 static uint64_t timer_frequency;
 
+IpcDoorbellPtr IpcPlatform__local_doorbell(void)
+{
+    return (IpcDoorbellPtr)IPC_DOORBELL_ADDRESS;
+}
+
 void IpcPlatform__configure_wait(BootWaitMode mode)
 {
 }
@@ -32,7 +37,17 @@ void IpcPlatform__signal_event(void)
     __asm__ __volatile__("fence rw, rw" ::: "memory");
 }
 
-void IpcPlatform__wait_event(void)
+IpcEventGeneration IpcPlatform__prepare_wait(ConstIpcEventPtr event)
 {
-    IpcPlatform__relax();
+    IpcEventGeneration generation;
+    __asm__ __volatile__("lr.d.aq %0, (%1)" : "=r"(generation) : "r"(event) : "memory");
+    return generation;
+}
+
+void IpcPlatform__wait_event(ConstIpcEventPtr event, IpcEventGeneration observed)
+{
+    if (!IpcEvent__changed(event, observed))
+    {
+        __asm__ __volatile__("wrs.nto" ::: "memory");
+    }
 }

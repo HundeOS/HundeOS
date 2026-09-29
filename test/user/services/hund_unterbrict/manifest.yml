@@ -2,6 +2,7 @@ manifest:
   include_default_stubs: false
   include_default_fixtures: false
   source_files:
+    - test/user/io_trace_fake.c
     - common/types/bstring.c
     - common/types/dyn_string.c
     - common/arch/hosted/ipc_platform.c

@@ -5,7 +5,6 @@
 typedef struct SocketServer
 {
     SocketService sockets;
-    QueueConnectionID mediator;
 } SocketServer;
 
 typedef SocketServer * SocketServerPtr;
@@ -19,24 +18,18 @@ static Optional(IOReply)
     SocketServer__execute(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request)
 {
     SocketServerPtr self = context;
-    uint64_t mediator_pid =
-        unwrap_optional(ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &bstr(IO_SYSTEM_SERVICE)), 0);
-    if (pid == 0 || pid != mediator_pid || (self->mediator != 0 && self->mediator != session))
+    if (pid == 0)
     {
         return Some(IOReply, IOReply__new(IO_PERMISSION_DENIED, 0));
     }
-    self->mediator = session;
-    return Some(IOReply, SocketService__execute(&self->sockets, request));
+    IOReply reply = SocketService__execute(&self->sockets, request);
+    return reply.status == IO_WAIT_FOR_DATA ? None(IOReply) : Some(IOReply, reply);
 }
 
 static bool SocketServer__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
     SocketServerPtr self = context;
-    if (self->mediator == session)
-    {
-        self->sockets.resources = SocketResources__new();
-        self->mediator = 0;
-    }
+    SocketService__release(&self->sockets, session);
     return true;
 }
 

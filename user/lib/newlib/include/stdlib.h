@@ -12,6 +12,8 @@ void * reallocarray(void * address, size_t count, size_t size);
 void exit(int code);
 int atoi(const char * text);
 unsigned long long strtoull(const char * text, char ** endptr, int base);
+long long strtoll(const char * text, char ** endptr, int base);
+void * recallocarray(void * address, size_t old_count, size_t new_count, size_t size);
 const char * getprogname(void);
 char * getenv(const char * name);
 long long strtonum(const char * text, long long minimum, long long maximum, const char ** error);

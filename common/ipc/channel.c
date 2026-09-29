@@ -1,4 +1,5 @@
 #include "channel.h"
+#include "ipc_platform.h"
 
 static BString channel_transport_failed = bstr("Channel transport failed");
 static BString channel_invalid_reply = bstr("Invalid channel reply");
@@ -55,6 +56,7 @@ Result(ChannelCode) Channel__try_request_with_parent(ChannelPtr self, ConstChann
     }
     QueueMessage submit = ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, request_size, self->token);
     submit.request = ticket.metadata;
+    ChannelPayload__begin_request(self->payload, IpcPlatform__monotonic_usec());
     match_result(
         Queue__push(&self->control, &submit),
         success(code)

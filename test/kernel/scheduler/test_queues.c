@@ -7,6 +7,7 @@
 #include "../stubs/kalloc.h"
 #include "../stubs/panic.h"
 #include "../stubs/process_context_layout.h"
+#include "../stubs/cpu.h"
 #include "../../../kernel/scheduler/shared_wait.h"
 #include "../../../kernel/scheduler/preferred.h"
 #include "ipc/queue_wait_control.h"
@@ -21,6 +22,7 @@ extern uint64_t test_cpu_time_usec;
 void setUp(void)
 {
     test_cpu_time_usec = 0;
+    reset_cpu_reschedule();
     KAllocStub__set_free_failure(false);
     clear_panic_state();
     KAllocStub__reset_allocation_tracking();
@@ -75,6 +77,19 @@ static QueueWaitControlPtr shared_control(ProcessPtr process)
             return k_v_ptr(mapping, QueueWaitControl);
         },
         none_test_fail()
+    );
+    __builtin_trap();
+}
+
+static IpcDoorbellPtr process_doorbell(ProcessPtr process)
+{
+    match_result(
+        Process__doorbell(process),
+        success(mapping)
+        {
+            return k_v_ptr(mapping, IpcDoorbell);
+        },
+        error_test_fail()
     );
     __builtin_trap();
 }
@@ -194,9 +209,14 @@ static Queue attach_queue(QueueConnectionID id, ProcessPtr process)
 {
     UserAddress memory = connection_memory(id);
     Address base = memory.kernel_addr.virtual_addr;
+    QueueConnection connection =
+        unwrap_optional(QueueConnections__at(&queues->connections, id % QUEUE_LIMIT), (QueueConnection){0});
+    UserAddress peer_doorbell = process->pid == k_v_ptr(memory, QueueIdentity)->client_pid ? connection.server_doorbell
+                                                                                           : connection.client_doorbell;
     match_result(
         Queue__attach(ptr(base, QueueIdentity), ptr((base + QUEUE_PAGE_SIZE), QueuePage),
-                      ptr((base + 2 * QUEUE_PAGE_SIZE), QueuePage), id, process->pid),
+                      ptr((base + 2 * QUEUE_PAGE_SIZE), QueuePage), id, process->pid,
+                      k_v_ptr(peer_doorbell, IpcDoorbell), &Queue__ignore_data_available),
         success(queue)
         {
             return queue;
@@ -520,9 +540,12 @@ void test_shared_wait_releases_on_kernel_wake_generation(void)
     QueueWaitSnapshot observed = QueueWaitSnapshot__new_connection(&receiver);
     publish_shared_wait(shared_control(server), &observed);
     TEST_ASSERT_FALSE(Process__shared_wait_ready(server));
+    IpcDoorbellPtr doorbell = process_doorbell(server);
+    IpcEventGeneration generation = IpcEvent__generation(IpcDoorbell__event(doorbell));
 
     Process__wake_shared_wait(server);
 
+    TEST_ASSERT_EQUAL_UINT64(generation + 1, IpcEvent__generation(IpcDoorbell__event(doorbell)));
     TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
 }
 
@@ -642,6 +665,194 @@ void test_queue_wait_parks_and_timer_detects_peer_publication(void)
     TEST_ASSERT_FALSE(Queues__wait_changed(queues, server));
 }
 
+void test_queue_wait_on_another_cpu_detects_peer_publication_when_process_yields(void)
+{
+    ProcessPtr remote_server = dummy_process(40, 1, PROC_STATE_READY);
+    remote_server->process_class = PROCESS_CLASS_SERVICE;
+    Process__set_hund_identity(remote_server);
+    match_result(Scheduler__schedule_on_cpu(kernel->scheduler, remote_server, 1),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    QueueEndpointID endpoint;
+    match_result(
+        Queues__listen(queues, remote_server, &bstr("remote-test")),
+        success(address)
+        {
+            endpoint = find_endpoint(&bstr("remote-test"));
+        },
+        error_test_fail()
+    );
+    QueueConnectionID id = connect_queue(endpoint, client);
+    match_result(Queues__accept(queues, remote_server, id),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    Queue sender = attach_queue(id, client);
+    Queue receiver = attach_queue(id, remote_server);
+    QueueWaitSnapshot observed = QueueWaitSnapshot__new_connection(&receiver);
+    TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_snapshot(remote_server, &observed, QUEUE_WAIT_INDEFINITE_TICKS));
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, remote_server->state);
+
+    QueueMessage message = {0};
+    assert_push_success(&sender, &message);
+    client->state = PROC_STATE_WAITING;
+    test_cpu_time_usec = 7000;
+    Scheduler__yield_waiting(kernel->scheduler, client, 0);
+
+    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&remote_server->queue_wait_usage);
+    TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, remote_server->state);
+    TEST_ASSERT_EQUAL_UINT64(1, usage.activity_wakes);
+    TEST_ASSERT_EQUAL_UINT64(7000, usage.parked_usec);
+    TEST_ASSERT_FALSE(Queues__wait_changed(queues, remote_server));
+}
+
+void test_queue_notification_wakes_remote_waiter_and_coalesces_reschedule(void)
+{
+    ProcessPtr remote_server = dummy_process(40, 1, PROC_STATE_READY);
+    remote_server->process_class = PROCESS_CLASS_SERVICE;
+    Process__set_hund_identity(remote_server);
+    match_result(Scheduler__schedule_on_cpu(kernel->scheduler, remote_server, 1),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Queues__listen(queues, remote_server, &bstr("notify-test")),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    QueueConnectionID id = connect_queue(find_endpoint(&bstr("notify-test")), client);
+    match_result(Queues__accept(queues, remote_server, id),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    Queue sender = attach_queue(id, client);
+    Queue receiver = attach_queue(id, remote_server);
+    QueueWaitSnapshot observed = QueueWaitSnapshot__new_connection(&receiver);
+    TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_snapshot(remote_server, &observed, QUEUE_WAIT_INDEFINITE_TICKS));
+
+    QueueMessage message = {0};
+    assert_push_success(&sender, &message);
+    test_cpu_time_usec = 7000;
+    match_result(
+        Scheduler__queue_data_available(kernel->scheduler, client, id),
+        success(notification)
+        {
+            TEST_ASSERT_TRUE(notification.reschedule);
+            TEST_ASSERT_EQUAL_UINT64(1, notification.cpu);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, remote_server->state);
+    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&remote_server->queue_wait_usage);
+    TEST_ASSERT_EQUAL_UINT64(1, usage.activity_wakes);
+    TEST_ASSERT_EQUAL_UINT64(7000, usage.parked_usec);
+
+    match_result(
+        Scheduler__queue_data_available(kernel->scheduler, client, id),
+        success(notification)
+        {
+            TEST_ASSERT_FALSE(notification.reschedule);
+        },
+        error_test_fail()
+    );
+    match_result(
+        Scheduler__queue_data_available(kernel->scheduler, other, id),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_DENIED, code);
+        }
+    );
+}
+
+static void assert_notification_pokes_userspace_waiter(ProcessState state)
+{
+    ProcessPtr remote_server = dummy_process(40, 1, PROC_STATE_READY);
+    remote_server->process_class = PROCESS_CLASS_SERVICE;
+    Process__set_hund_identity(remote_server);
+    match_result(Scheduler__schedule_on_cpu(kernel->scheduler, remote_server, 1),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Queues__listen(queues, remote_server, &bstr("userspace-notify-test")),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    QueueConnectionID id = connect_queue(find_endpoint(&bstr("userspace-notify-test")), client);
+    match_result(Queues__accept(queues, remote_server, id),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    Queue sender = attach_queue(id, client);
+    Queue receiver = attach_queue(id, remote_server);
+    QueueWaitSnapshot observed = QueueWaitSnapshot__new_connection(&receiver);
+    publish_shared_wait(shared_control(remote_server), &observed);
+    remote_server->state = state;
+
+    QueueMessage message = {0};
+    assert_push_success(&sender, &message);
+    match_result(
+        Scheduler__queue_data_available(kernel->scheduler, client, id),
+        success(notification)
+        {
+            TEST_ASSERT_TRUE(notification.reschedule);
+            TEST_ASSERT_EQUAL_UINT64(1, notification.cpu);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(state, remote_server->state);
+
+    match_result(
+        Scheduler__queue_data_available(kernel->scheduler, client, id),
+        success(notification)
+        {
+            TEST_ASSERT_FALSE(notification.reschedule);
+        },
+        error_test_fail()
+    );
+}
+
+void test_queue_notification_pokes_interrupted_userspace_waiter(void)
+{
+    assert_notification_pokes_userspace_waiter(PROC_STATE_INTERRUPTED);
+}
+
+void test_queue_notification_does_not_interrupt_running_userspace_waiter(void)
+{
+    ProcessPtr remote_server = dummy_process(40, 1, PROC_STATE_READY);
+    remote_server->process_class = PROCESS_CLASS_SERVICE;
+    Process__set_hund_identity(remote_server);
+    match_result(Scheduler__schedule_on_cpu(kernel->scheduler, remote_server, 1),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Queues__listen(queues, remote_server, &bstr("running-notify-test")),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    QueueConnectionID id = connect_queue(find_endpoint(&bstr("running-notify-test")), client);
+    match_result(Queues__accept(queues, remote_server, id),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    Queue sender = attach_queue(id, client);
+    Queue receiver = attach_queue(id, remote_server);
+    QueueWaitSnapshot observed = QueueWaitSnapshot__new_connection(&receiver);
+    publish_shared_wait(shared_control(remote_server), &observed);
+    remote_server->state = PROC_STATE_RUNNING;
+
+    QueueMessage message = {0};
+    assert_push_success(&sender, &message);
+    match_result(
+        Scheduler__queue_data_available(kernel->scheduler, client, id),
+        success(notification)
+        {
+            TEST_ASSERT_FALSE(notification.reschedule);
+        },
+        error_test_fail()
+    );
+}
+
 void test_queue_wait_times_out_after_requested_ticks(void)
 {
     match_result(
@@ -659,6 +870,27 @@ void test_queue_wait_times_out_after_requested_ticks(void)
     TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
     Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
     TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, server->state);
+}
+
+void test_indefinite_queue_wait_does_not_expire_on_timer_interrupts(void)
+{
+    match_result(
+        Scheduler__queue_wait(kernel->scheduler, server, 0, 0, QUEUE_WAIT_INDEFINITE_TICKS),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, code);
+        },
+        error_test_fail()
+    );
+    ProcessContext context = {0};
+    for (Tick tick = 0; tick < QUEUE_WAIT_MAX_TICKS + 1; tick++)
+    {
+        Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
+    }
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
+    TEST_ASSERT_TRUE(Process__has_parked_operation(server, PARK_WAIT_QUEUE, &None(OperationKey)));
+    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&server->queue_wait_usage);
+    TEST_ASSERT_EQUAL_UINT64(0, usage.timeout_wakes);
 }
 
 void test_queue_wait_watches_consumption_acceptance_and_close(void)
@@ -738,14 +970,6 @@ void test_queue_wait_validates_boundary_and_timeout(void)
     );
     match_result(
         Scheduler__queue_wait(kernel->scheduler, server, 0, QUEUE_WAIT_LIMIT + 1, 3),
-        success_test_fail(),
-        error(code, message)
-        {
-            TEST_ASSERT_EQUAL(QUEUE_INVALID, code);
-        }
-    );
-    match_result(
-        Scheduler__queue_wait(kernel->scheduler, server, 0, 0, 0),
         success_test_fail(),
         error(code, message)
         {
@@ -907,6 +1131,34 @@ void test_queue_pages_have_isolated_asymmetric_permissions(void)
         TEST_ASSERT_FALSE(mapped(other, address + page * QUEUE_PAGE_SIZE, true));
         TEST_ASSERT_FALSE(mapped(other, address + page * QUEUE_PAGE_SIZE, false));
     }
+}
+
+void test_connection_maps_peer_doorbells_and_unmaps_aliases_when_an_endpoint_closes(void)
+{
+    QueueEndpointID endpoint = listen_queue();
+    QueueConnectionID id = connect_queue(endpoint, client);
+    Address peer_alias = QueueLayout__peer_doorbell_address(id);
+
+    TEST_ASSERT_TRUE(mapped(server, IPC_DOORBELL_ADDRESS, true));
+    TEST_ASSERT_TRUE(mapped(client, IPC_DOORBELL_ADDRESS, true));
+    TEST_ASSERT_TRUE(mapped(server, peer_alias, true));
+    TEST_ASSERT_TRUE(mapped(client, peer_alias, true));
+    TEST_ASSERT_FALSE(mapped(other, peer_alias, true));
+
+    IpcDoorbellPtr client_event = process_doorbell(client);
+    IpcEventGeneration accepted_generation = IpcEvent__generation(IpcDoorbell__event(client_event));
+    accept_queue(id);
+    TEST_ASSERT_EQUAL_UINT64(accepted_generation + 1, IpcEvent__generation(IpcDoorbell__event(client_event)));
+
+    IpcDoorbellPtr server_event = process_doorbell(server);
+    IpcEventGeneration closed_generation = IpcEvent__generation(IpcDoorbell__event(server_event));
+    close_queue(id, client);
+    TEST_ASSERT_TRUE(IpcEvent__changed(IpcDoorbell__event(server_event), closed_generation));
+    TEST_ASSERT_FALSE(mapped(client, peer_alias, true));
+    TEST_ASSERT_FALSE(mapped(server, peer_alias, true));
+    TEST_ASSERT_TRUE(mapped(server, QueueLayout__address(id), false));
+
+    close_queue(id, server);
 }
 
 void test_kernel_connection_maps_only_server_and_retains_backing_after_server_exit(void)
@@ -1254,7 +1506,7 @@ void test_listener_permission_duplicate_name_and_connection_admission(void)
             TEST_ASSERT_EQUAL(SERVICE_DEVICE_ALREADY_REGISTERED, code);
         }
     );
-    for (uint64_t index = 0; index < 4; index++)
+    for (uint64_t index = 0; index < QUEUE_CLIENT_CONNECTION_LIMIT; index++)
     {
         connect_queue(endpoint, client);
     }
@@ -1267,6 +1519,24 @@ void test_listener_permission_duplicate_name_and_connection_admission(void)
         }
     );
     connect_queue(endpoint, other);
+}
+
+void test_service_can_listen_on_multiple_named_endpoints(void)
+{
+    QueueEndpointID first = listen_queue();
+    match_result(
+        Queues__listen(queues, server, &bstr("second-protected-test")),
+        success(address)
+        {
+            TEST_ASSERT_EQUAL_HEX64(QUEUE_LISTENER_BASE + QUEUE_ARRIVALS_SIZE, address);
+        },
+        error_test_fail()
+    );
+
+    QueueEndpointID second = find_endpoint(&bstr("second-protected-test"));
+    TEST_ASSERT_NOT_EQUAL(first, second);
+    connect_queue(first, client);
+    connect_queue(second, other);
 }
 
 void test_allocation_failure_publishes_no_connection_and_invalid_name_pointer_is_rejected(void)
@@ -1293,12 +1563,12 @@ void test_allocation_failure_publishes_no_connection_and_invalid_name_pointer_is
     );
 }
 
-void test_shared_memory_manager_can_broker_more_than_four_channels(void)
+void test_shared_memory_manager_can_broker_more_than_ordinary_client_limit(void)
 {
     QueueEndpointID endpoint = listen_queue();
     other->process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(other);
-    for (uint64_t index = 0; index < 6; index++)
+    for (uint64_t index = 0; index < QUEUE_CLIENT_CONNECTION_LIMIT + 1; index++)
     {
         connect_queue(endpoint, other);
     }

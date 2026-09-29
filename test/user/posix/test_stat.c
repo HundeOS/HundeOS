@@ -74,3 +74,8 @@ void test_stat_maps_missing_path_without_directory_scan(void)
     TEST_ASSERT_EQUAL(ENOENT, errno);
     TEST_ASSERT_EQUAL(1, file_info_requests);
 }
+
+void test_stat_exposes_bsd_sticky_bit_name(void)
+{
+    TEST_ASSERT_EQUAL(S_ISTXT, S_ISVTX);
+}

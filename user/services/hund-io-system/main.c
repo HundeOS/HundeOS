@@ -1,83 +1,57 @@
-#include "io/mediator.h"
-#include "io/stream_registry.h"
 #include "io/path.h"
-#include "sys/service.h"
+#include "io/server.h"
+#include "io/stream_registry.h"
 #include "sys/boot_info.h"
+#include "sys/service.h"
 
 typedef struct IOSystem
 {
-    IOMediator sockets;
-    bool sockets_connected;
-    IOMediator filesystem;
-    bool filesystem_connected;
     StreamRegistry streams;
 } IOSystem;
 
 typedef IOSystem * IOSystemPtr;
 
+static IOSystem IOSystem__new(void)
+{
+    return (IOSystem){.streams = StreamRegistry__new()};
+}
+
 static Optional(IOReply)
     IOSystem__execute(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request)
 {
     IOSystemPtr self = context;
+    if (request->operation != IO_REQUEST_OPEN && request->operation != IO_REQUEST_LIST_DIR &&
+        request->operation != IO_REQUEST_FILE_INFO && request->operation != IO_REQUEST_MKDIR &&
+        request->operation != IO_REQUEST_REMOVE && request->operation != IO_REQUEST_LINK)
+    {
+        return Some(IOReply, IOReply__new(IO_UNKNOWN_HANDLE, 0));
+    }
+
     BString path = IORequest__path(request);
-    bool terminal = request->operation == IO_REQUEST_OPEN ? BString__starts_with(&path, &bstr(":"))
-                                                          : request->handle >= IO_STREAM_HANDLE_BASE;
-    if (terminal)
+    if (request->operation == IO_REQUEST_OPEN && IOPath__is_stream(&path))
     {
-        return StreamRegistry__execute(&self->streams, session, pid, request);
+        return Some(IOReply, StreamRegistry__route(&self->streams, request));
     }
-    bool socket = request->operation == IO_REQUEST_OPEN
-                      ? BString__starts_with(&path, &bstr(IO_SOCKET_SCHEME))
-                      : request->handle >= IO_SESSION_HANDLE_BASE && request->handle < IO_FILESYSTEM_HANDLE_BASE;
-    if (socket)
+
+    BString target_path = IORequest__target_path(request);
+    BString service =
+        BString__starts_with(&path, &bstr(IO_SOCKET_SCHEME)) ? bstr(IO_SOCKET_SERVICE) : bstr(IO_FILESYSTEM_SERVICE);
+    bool final = BString__equals(&service, &bstr(IO_SOCKET_SERVICE));
+    IOReply reply = IOReply__redirect(&service, &path, &target_path, final);
+    if (request->operation == IO_REQUEST_LIST_DIR)
     {
-        if (!self->sockets_connected)
-        {
-            match_result(
-                Channel__open(ServiceDirectory__shared(), &bstr(IO_SOCKET_SERVICE)),
-                success(channel)
-                {
-                    self->sockets = IOMediator__new(channel);
-                    self->sockets_connected = true;
-                },
-                error(code, message)
-                {
-                    return Some(IOReply, IOReply__new(IO_NO_DEVICE_FOUND, 0));
-                }
-            );
-        }
-        return IOMediator__execute(&self->sockets, session, pid, request);
+        reply.value = request->offset;
     }
-    if (!self->filesystem_connected)
-    {
-        match_result(
-            Channel__open(ServiceDirectory__shared(), &bstr(IO_FILESYSTEM_SERVICE)),
-            success(channel)
-            {
-                self->filesystem = IOMediator__new_filesystem(channel, IO_FILESYSTEM_HANDLE_BASE);
-                self->filesystem_connected = true;
-            },
-            error(code, message)
-            {
-                return Some(IOReply, IOReply__new(IO_NO_DEVICE_FOUND, 0));
-            }
-        );
-    }
-    return IOMediator__execute(&self->filesystem, session, pid, request);
+    return Some(IOReply, reply);
 }
 
 static bool IOSystem__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
-    IOSystemPtr self = context;
-    bool sockets = !self->sockets_connected || IOMediator__disconnect(&self->sockets, session, pid);
-    bool filesystem = !self->filesystem_connected || IOMediator__disconnect(&self->filesystem, session, pid);
-    bool streams = StreamRegistry__disconnect(&self->streams, session, pid);
-    return sockets && filesystem && streams;
+    return true;
 }
 
 static Result(IOStatus) IOSystem__register_streams(IOSystemPtr self, bool video)
 {
-    self->streams = StreamRegistry__new();
     match_result(
         StreamRegistry__register(&self->streams, &bstr(":keyboard:"), IO_OPEN_READ, &bstr(IO_KEYBOARD_SERVICE)),
         success_do_nothing(),
@@ -114,10 +88,12 @@ static Result(IOStatus) IOSystem__register_streams(IOSystemPtr self, bool video)
     return StreamRegistry__register(&self->streams, &bstr(":console:"), IO_OPEN_WRITE, &output);
 }
 
+#ifndef HUND_IO_SYSTEM_NO_MAIN
 int main(void)
 {
-    static IOSystem mediator;
+    static IOSystem router;
     static IOService service;
+    router = IOSystem__new();
     if (!service_ok(service_become_service()))
     {
         return 1;
@@ -135,16 +111,16 @@ int main(void)
         }
     );
     match_result(
-        IOSystem__register_streams(&mediator, video),
+        IOSystem__register_streams(&router, video),
         success_do_nothing(),
         error(code, message)
         {
-            StreamRegistry__dispose(&mediator.streams);
+            StreamRegistry__dispose(&router.streams);
             return 1;
         }
     );
-    if (IOService__listen_into(&service, &bstr(IO_SYSTEM_SERVICE), &mediator, IOSystem__execute,
-                               IOSystem__disconnect) != IO_OK)
+    if (IOService__listen_into(&service, &bstr(IO_SYSTEM_SERVICE), &router, IOSystem__execute, IOSystem__disconnect) !=
+        IO_OK)
     {
         return 1;
     }
@@ -161,3 +137,4 @@ int main(void)
         }
     }
 }
+#endif

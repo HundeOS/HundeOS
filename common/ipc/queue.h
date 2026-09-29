@@ -2,7 +2,10 @@
 #define HUND_QUEUE_H
 
 #include "queue_layout.h"
+#include "doorbell.h"
 #include "../types/result.h"
+
+typedef void (*QueueDataNotifier)(QueueConnectionID connection);
 
 // Private per-endpoint cursors must not be reconstructed from peer-writable state.
 typedef struct Queue
@@ -12,6 +15,8 @@ typedef struct Queue
     QueuePagePtr incoming;
     QueueConnectionID connection;
     QueueParticipantID peer_pid;
+    IpcDoorbellPtr peer_doorbell;
+    QueueDataNotifier notify_data_available;
     QueueCursor read;
     QueueCursor written;
     QueueCursor acknowledged;
@@ -35,9 +40,11 @@ typedef struct QueueProgress
 typedef const QueueProgress * ConstQueueProgressPtr;
 
 Queue Queue__new(QueueIdentityPtr identity, QueuePagePtr outgoing, QueuePagePtr incoming, QueueConnectionID connection,
-                 QueueParticipantID peer_pid);
-Result(Queue) Queue__attach(QueueIdentityPtr identity, QueuePagePtr client, QueuePagePtr server,
-                            QueueConnectionID connection, QueueParticipantID pid);
+                 QueueParticipantID peer_pid, IpcDoorbellPtr peer_doorbell, QueueDataNotifier notify_data_available);
+Result(Queue)
+    Queue__attach(QueueIdentityPtr identity, QueuePagePtr client, QueuePagePtr server, QueueConnectionID connection,
+                  QueueParticipantID pid, IpcDoorbellPtr peer_doorbell, QueueDataNotifier notify_data_available);
+void Queue__ignore_data_available(QueueConnectionID connection);
 QueueCode Queue__status(QueuePtr self);
 // Observes shared cursors without consuming messages or changing endpoint state.
 bool Queue__has_unread_messages(QueuePtr self);

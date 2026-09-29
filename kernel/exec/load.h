@@ -15,12 +15,17 @@ struct ExecLoad
 {
     KernelChannel channel;
     OriginatingContext context;
-    BString path;
+    uint64_t requested_path_length;
+    uint8_t requested_path_data[IO_PROTOCOL_DATA_SIZE];
+    uint64_t path_length;
+    uint8_t path_data[IO_PROTOCOL_DATA_SIZE];
     ProcessArguments arguments;
     Optional(UserID) user;
     SpawnStdio stdio;
     bool wait;
     bool pending;
+    bool route_final;
+    uint64_t redirects;
     ExecLoadPhase phase;
     IOHandle handle;
     KernelAddress buffer;

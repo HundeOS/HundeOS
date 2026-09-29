@@ -23,6 +23,7 @@ extern void CPU__yield();
 extern void CPU__wait_for_interrupt();
 extern void CPU__wait_for_event();
 extern void CPU__signal_event();
+void CPU__request_reschedule(CPUID cpu);
 extern void CPU__check_halt();
 extern void CPU__halt_all();
 

@@ -169,8 +169,12 @@ Each `Channel` uses one pair of control connections:
 8. `Channel__close` closes the client control connection. The warden then closes
    the server connection and releases the payload once neither peer uses it.
 
-Setup, acceptance, allocation and teardown require syscalls. Queue publication,
-consumption and payload exchange do not require per-message send/wait syscalls.
+Setup, acceptance, allocation and teardown require syscalls. Queue payload and
+cursor exchange remains shared-memory based, but each successful push now makes a
+small authenticated data-available syscall. It can wake and interrupt a parked
+receiver's CPU without copying the message through the kernel. Pop publishes its
+consumed cursor in shared memory but does not announce schedulable work. Payload
+exchange itself does not require a per-message kernel transfer.
 Connections and payload pages persist across submissions to the same `Channel`.
 Clients may use blocking `Channel__submit`, or pair `Channel__request` with
 `Channel__poll_reply` when an event loop or fibre must continue handling other
@@ -222,8 +226,10 @@ blocked I/O operations to be cleaned up when the client departs.
 | Device registry | `0x70800000` (size rounded to pages) | Read-only |
 | Process registry | `0x78000000` (size rounded to pages) | Read-only |
 | Managed payload pages | `0x71000000` onward | Read/write for the owner and two peers only |
+| Process IPC doorbell | `0x722ff000` | Read/write, owning process only |
 | Protected arrival pages | `0x74000000` to `0x74c00000` (exclusive) | Read-only, listener only |
 | Protected connections | `0x72400000` to `0x73000000` (exclusive) | Participant-only, asymmetric permissions |
+| Peer doorbell aliases | `0x73000000` to `0x73400000` (exclusive) | Read/write, connection participants only |
 
 The service directory stores service names as `BString` values. Its mapping size
 is derived from the directory structure and rounded to whole pages. The directory
@@ -233,14 +239,18 @@ and listener table each accommodate 1024 services; this is separate from the
 Each control connection has a kernel-written identity page read-only to both
 peers, a client-written message page, and a server-written message page. Each
 peer can read but cannot write the other direction. Unrelated processes receive
-none of the connection or payload mappings. All mappings are non-executable.
+none of the connection, doorbell alias, or payload mappings. Queue operations
+increment the mapped peer doorbell after publishing cursor progress, so protocol
+implementations do not carry a separate wake operation. Doorbell aliases are
+removed before their owner's backing can be released. All mappings are
+non-executable.
 
 Payload pages contain two fixed byte buffers. Length, ownership, status and
 addresses are not read from writable payload metadata. Message fields are copied
 into private memory before validation. A peer can corrupt its own payload, but
 cannot use its length or address fields to redirect another exchange.
 
-The kernel bounds the system to 1024 protected connections and four outgoing
+The kernel bounds the system to 1024 protected connections and 64 outgoing
 connections per ordinary process. Services with shared-page management capability
 may broker outgoing connections up to the global limit. Each channel needs two
 transport connections; other queue users also consume the system-wide limit. Admission failures are
@@ -449,21 +459,13 @@ mount's handle.
 - `user/lib/channel/protocol.h`: payload and protocol definitions.
 - `user/services/hundekanal-warter/lifecycle.h`: private exchange state machine.
 - `user/services/hundekanal-warter/main.c`: listening and fibre dispatch.
-- `user/services/hundekanal-test-echo/main.c`: protected dispatch and echo replies.
 - `user/programs/channel_echo_client/main.c`: end-to-end client.
 - `test/user/services/channel_fixture.c`: integration fixture using real queue
-  operations with stubbed kernel establishment/mapping calls.
+  operations, a test-only echo peer, and stubbed kernel establishment/mapping
+  calls.
 - `test/user/services/hundekanal_warter` and `hundekanal_test_echo`: exchange,
   peer closure, bounds, impersonation attempts, backpressure and stale handles.
 
-Boot the services through `hundeschule`, then run `channel_echo_client "hello"`.
-The warden no longer prints unrelated processes' exit events.
-
-Four-core QEMU verification completed ten sequential exchanges without cleanup
-faults after the close-contract correction. Killing the echo service produced
-a clean unavailable-service result. Using a temporary boot configuration with
-`respawn`, new exchanges succeeded after separately restarting the echo service
-and the idle warden. The repository's normal `once` configuration is unchanged.
-An intermittent early-boot instruction-abort panic was also observed before the
-services started; reset allowed the verification to proceed. This is not a
-claim that startup or in-flight warden recovery has been fixed.
+The echo peer is test-only; production boot configurations do not publish a
+`hundekanal-test-echo` service. The warden no longer prints unrelated processes'
+exit events.

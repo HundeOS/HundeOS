@@ -613,3 +613,14 @@ void test_console_input_stream_appends_without_full_redraw(void)
     TEST_ASSERT_EQUAL_BSTRING(bstr("hello"), line);
     TEST_ASSERT_EQUAL_BSTRING(bstr("hello"), printed_output);
 }
+
+void test_console_input_stream_does_not_execute_partial_line_after_read_failure(void)
+{
+    ConsoleInputStream input = ConsoleInputStream__new();
+    set_console_input("partial");
+
+    BString line = ConsoleInputStream__read_line(&input.input, true);
+
+    TEST_ASSERT_TRUE(BString__is_empty(&line));
+    TEST_ASSERT_EQUAL_BSTRING(bstr("partial"), printed_output);
+}

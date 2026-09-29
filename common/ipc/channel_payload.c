@@ -32,3 +32,13 @@ bool ChannelPayload__read_reply(ChannelPayloadPtr self, ChannelDataPtr data, siz
 {
     return ChannelPayload__copy(data, self->reply, size);
 }
+
+void ChannelPayload__begin_request(ChannelPayloadPtr self, uint64_t published_at_usec)
+{
+    self->request_published_at_usec = published_at_usec;
+}
+
+uint64_t ChannelPayload__request_published_at(ChannelPayloadPtr self)
+{
+    return self->request_published_at_usec;
+}

@@ -3,6 +3,7 @@
 #include "../../kernel/kernel.h"
 #include "cpu_timer.h"
 #include "exception.h"
+#include "cpu.h"
 
 #include <stdint.h>
 
@@ -72,6 +73,16 @@ static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
 
     icc_eoir1(id);
     icc_dir(id);
+
+    if (id == CPU_RESCHEDULE_INTERRUPT)
+    {
+        IpcPlatform__signal_event();
+        if (!current_el)
+        {
+            Scheduler__preempt(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
+        }
+        return;
+    }
 
     IRQDispatchContext dispatch_context = IRQDispatchContext__new(id, cpu, current_el, context);
 

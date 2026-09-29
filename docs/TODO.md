@@ -10,73 +10,172 @@ explicitly. Entries are not authorization to start implementation.
 
 ### Bash Milestone
 
-The target is enough compatible behavior to cross-compile and run Bash, not
-POSIX certification. Existing native commands and APIs remain supported.
+Status: active project focus. The target is enough compatible behavior to
+cross-compile and run Bash, including an interactive shell with external
+commands, pipelines, redirection, signals, and job control. POSIX certification
+is not the objective, and existing native commands and APIs remain supported.
 
-#### Compatibility Inventory And Toolchain
+Work through the following sections in order. Each stage must leave a tested
+interface for both AArch64 and RISC-V rather than adding declarations or stubs
+only to advance the Bash build.
+
+#### 1. Reproducible Cross Build And Target Runtime
+
+- [ ] Pin the Bash release and patches, record source checksums and configuration
+  switches, and add reproducible out-of-tree AArch64 and RISC-V build targets.
+- [ ] Define a HundeOS target triplet and teach the selected Bash release's
+  `config.sub` about it, without pretending that HundeOS has another system's ABI.
+- [ ] Build an architecture-qualified target sysroot containing only HundeOS
+  headers, startup objects, static userspace libraries, and required compiler
+  runtime support. Do not link every userspace library object into every program.
+- [ ] Provide a reusable userspace CRT and link specification for `_start`, static
+  libraries, garbage collection, architecture flags, and any required `libgcc`
+  helpers.
+- [ ] Add a reviewed cross-configure cache for probes that cannot run target
+  executables, including wait-status layout, signal behavior, process groups,
+  named pipes, `dup2`, collation, byte order, and type sizes.
+- [ ] Keep Bash host generators such as `mksignames` and `mkbuiltins` on the host
+  compiler and headers while all target objects use only the HundeOS sysroot.
+- [ ] Install the resulting static executable into the architecture-qualified
+  disk rootfs and include both Bash builds in `make compile-commands`.
+
+#### 2. Non-Local Control Flow
+
+- [ ] Add `<setjmp.h>` with `jmp_buf`, `setjmp`, `longjmp`, `sigsetjmp`, and
+  `siglongjmp`, backed by tested AArch64 and RISC-V context implementations.
+- [ ] Define which signal-mask state `sigsetjmp` preserves, and test nested jumps,
+  restored callee-saved registers, stack restoration, and zero-to-one return
+  conversion on both architectures.
+
+#### 3. Signal Foundation
+
+- [ ] Add `<signal.h>` with `sig_atomic_t`, `sigset_t`, `struct sigaction`, the
+  required `SIG_*` values, disposition constants, mask operations, and flags.
+- [ ] Implement `sigemptyset`, `sigfillset`, `sigaddset`, `sigdelset`, and
+  `sigismember` in the userspace compatibility layer.
+- [ ] Extend kernel signal delivery beyond termination to default, ignored, and
+  userspace-handler dispositions; per-process masks and pending signals; handler
+  entry and return; and architecture context restoration.
+- [ ] Implement `signal`, `sigaction`, `sigprocmask`, `sigsuspend`, `sigpending`,
+  `raise`, `alarm`, and `kill`, with defined syscall interruption/restart behavior.
+- [ ] Preserve or reset signal state correctly across fork and exec, and retain
+  the independent early-boot and panic paths.
+
+#### 4. Compile And Static Link Closure
+
+- [ ] Add the process, wait, terminal, time, resource, system-identification, and
+  selection headers and types required by Bash: `pid_t`, `clock_t`, `sig_atomic_t`,
+  `sigset_t`, `fd_set`, `timeval`, `rlimit`, `tms`, `utsname`, and `termios`.
+- [ ] Fill the constants and macros required by the build, including wait-status
+  macros and options, descriptor and open flags, signal and terminal constants,
+  integer limits, `ARG_MAX`, `OPEN_MAX`, and the expanded errno set.
+- [ ] Complete the string and algorithm surface required by Bash, including
+  `qsort`, `strncpy`, `strcat`, `strdup`, `strpbrk`, `strstr`, `strcasecmp`, and
+  `strncasecmp`. Use Bash's bundled implementations where they are suitable.
+- [ ] Complete numeric conversion and math declarations, including `strtol`,
+  `strtoul`, `strtod`, range handling, `<inttypes.h>`, and `<math.h>`.
+- [ ] Complete the required stdio surface, including `sprintf`, `vsnprintf`,
+  `vprintf`, `puts`, character and line I/O, `perror`, `setlinebuf`, and `dprintf`.
+- [ ] Add the time, identity, system, and resource interfaces needed to close the
+  link: `gettimeofday`, `clock_gettime`, `nanosleep`, meaningful calendar time,
+  process IDs and credentials, `uname`, `times`, `sysconf`, `pathconf`, and the
+  resource-limit family.
+- [ ] Disable NLS, dynamic loadable builtins, network pseudo-paths, and multibyte
+  locales for the first static port. Record each as an optional capability rather
+  than providing false-success stubs; bundled Readline and termcap remain enabled.
+- [ ] Iterate configure, compile, and link failures into this inventory until an
+  unmodified Bash source tree produces a static HundeOS ELF on both architectures.
+
+#### 5. Fork, Exec, And Wait
+
+- [ ] Complete the address-space and execution-state fork work described under
+  [Fork Support](#fork-support), with defined copying semantics and rollback.
+- [ ] Implement `fork` and the supported `vfork` behavior required by Bash.
+- [ ] Implement `execve` and the required `exec*` family over the native overlay
+  operation, including argv, environment, credentials, errors, inherited
+  descriptors, and close-on-exec processing.
+- [ ] Implement `wait`, `waitpid`, and required `wait3` behavior over child events,
+  including selected-child waits, `WNOHANG`, stopped and continued children,
+  signal termination, and POSIX status encoding.
+- [ ] Add `getpid`, `getppid`, effective credential and group queries, and the
+  parent/child lifecycle state needed by Bash.
+
+#### 6. Pipes And Shared Descriptors
+
+- [ ] Implement a userspace pipe service with paired descriptors, blocking reads,
+  EOF, bounded atomic writes, backpressure, nonblocking behavior, and `SIGPIPE`.
+- [ ] Implement `pipe`, `dup`, `dup2`, and descriptor `fcntl`, including descriptor
+  flags, `FD_CLOEXEC`, open-file status flags, and redirection behavior.
+- [ ] Give each child its own descriptor table referring to shared open resources;
+  share file offsets and pipe endpoints while keeping descriptor flags and closes
+  process-local.
+- [ ] Authorize inherited references through each child's own authenticated
+  `hund-io-system` session, with reference counting, rollback, exit cleanup, and
+  no globally usable handle numbers.
+
+#### 7. Environment, Current Directory, And Filesystem Semantics
+
+- [ ] Add `environ`, startup `envp`, `getenv`, `setenv`, `unsetenv`, and `putenv`,
+  then propagate a copied environment through fork and exec.
+- [ ] Add a per-process current directory with `chdir`, inherited cwd, relative
+  path lookup, and truthful `getcwd` rather than resolving every path from root.
+- [ ] Implement the open semantics Bash relies on: append, exclusive create,
+  creation modes, truncation without remove/recreate, nonblocking state, and
+  close-on-exec.
+- [ ] Implement working rename, symbolic links and `readlink`, hard links,
+  temporary-file creation, unlink-while-open, and cleanup of here-documents.
+- [ ] Complete `access`, effective-identity permission checks, timestamps, link
+  counts, ownership, `umask`, filesystem metadata, and precise errno mappings.
+- [ ] Provide usable `/dev/tty`, `/dev/null`, and `/dev/fd` behavior, or configure
+  Bash explicitly for an agreed equivalent where it does not change semantics.
+- [ ] Replace the sixteen-argument spawn limit with defined argv and environment
+  byte limits, report `E2BIG`, and test large command invocations.
+
+#### 8. Terminal Sessions And Job Control
+
+- [ ] Implement `<termios.h>`, `tcgetattr`, `tcsetattr`, terminal control
+  characters and modes, `isatty`, `ttyname`, and working window-size `ioctl`.
+- [ ] Implement process groups and sessions with `setpgid`, `getpgrp`, `setsid`,
+  `killpg`, and group-aware parent/child lifecycle rules.
+- [ ] Add controlling-terminal ownership and `tcgetpgrp`/`tcsetpgrp`, including
+  foreground and background access checks.
+- [ ] Deliver terminal-generated `SIGINT`, `SIGQUIT`, `SIGTSTP`, `SIGTTIN`,
+  `SIGTTOU`, and `SIGHUP` to the correct foreground process group, with stopped
+  and continued child reporting.
+- [ ] Exercise bundled Readline against real terminal modes, resize reporting,
+  signal interruption, input editing, and history files.
+
+#### 9. Bash System Validation
+
+- [ ] Add userspace unit and integration tests for each compatibility interface,
+  using native-service fakes or alternate linked implementations as appropriate.
+- [ ] Add AArch64 and RISC-V full-system tests for startup, builtins, variables,
+  environment propagation, scripts, external commands, exit status, and cleanup.
+- [ ] Test redirection, pipelines, command substitution, here-documents, Ctrl-C,
+  stopped and resumed jobs, foreground/background jobs, and clean shell exit.
+- [ ] Run representative upstream Bash tests that match the supported feature
+  set and record deliberate unsupported optional facilities.
+
+### Existing Command Compatibility
 
 - [x] Stage an architecture-qualified disk rootfs and build the unmodified,
-  pinned OpenBSD `cat` source under `/usr/local/bin`. Keep it out of the
-  embedded bootstrap archive and exercise raw and formatted reads on AArch64
-  and RISC-V smoke runs. The initial local rewrite has been retired.
-- [x] Introduce the first target C/POSIX compatibility slice required by
-  OpenBSD `cat`: process-local `int` descriptors over native 64-bit I/O handles,
-  POSIX read/write/close behavior and errno mapping, minimal unbuffered stdio,
-  getopt, ctype, err/warn, program identity, and file-status headers.
-- [ ] Replace the compatibility-only `fstat` block-size view with filesystem
-  metadata from the userspace I/O protocol when the next port requires it.
-- [ ] Provide filesystem timestamps through the userspace I/O metadata path and
-  POSIX `stat`, including generated filesystems such as procfs. Define the clock
-  source and creation/modification/access semantics, then make `ls -l` report
-  those values instead of the current Unix-epoch fallback.
+  pinned OpenBSD `cat` source under `/usr/local/bin`. Keep it out of the embedded
+  bootstrap archive and exercise raw and formatted reads on both architectures.
+- [x] Introduce process-local `int` descriptors over native 64-bit I/O handles,
+  POSIX read/write/close behavior and errno mapping, compatibility stdio, getopt,
+  ctype, err/warn, program identity, and file-status headers.
+- [x] Port the pinned OpenBSD `ls`, `ln`, `mv`, `mkdir`, `rm`, `cp`, `grep`, and
+  `tail` sources into `/usr/local/bin`, with their existing full-system coverage.
+- [x] Stream disk reads through filesystem providers, including EXT2 direct,
+  single-indirect, and double-indirect blocks and FAT32 cluster chains.
 - [ ] Define enforceable process restriction semantics before treating the
   successful OpenBSD `pledge` compatibility call as a security boundary.
-- [x] Stream disk-file reads through the filesystem provider adapter instead of
-  retaining 12 KiB snapshots. Support EXT2 direct, single-indirect, and
-  double-indirect blocks, FAT32 cluster chains, and executable opens from disk.
-- [ ] Enforce EXT2 execute permission against the caller's resolved user and
-  groups; the first disk-loading slice currently requires any execute bit.
-- [x] Port the pinned OpenBSD `ls`, `ln`, `mv`, `mkdir`, and `rm` sources into
-  `/usr/local/bin`, retire their local implementations, and extend the POSIX
-  compatibility layer from their build and runtime requirements.
 - [ ] Define whether secure overwrite can provide a meaningful guarantee over
-  the userspace filesystem and block-service stack. OpenBSD `rm -P` is rejected
-  without removing the target until that contract exists.
-- [ ] Add symbolic-link creation and lookup to the userspace I/O protocol and
-  filesystem providers so OpenBSD `ln -s` and link-aware `ls` behavior no
-  longer return `EOPNOTSUPP`.
-- [ ] Allocate EXT2 inodes and data blocks across block groups. Writable test
-  images currently reserve enough group-zero inodes for normal operation, but
-  the driver cannot yet consume the free space reported in later groups.
+  the userspace filesystem and block-service stack before supporting `rm -P`.
+- [ ] Allocate EXT2 inodes and data blocks across block groups; writable images
+  currently reserve enough group-zero inodes for normal operation.
 - [ ] Move post-root services and drivers to the disk rootfs, then mount the
-  embedded archive at a dedicated bootstrap path containing only the programs
-  required to establish the root filesystem and userspace I/O graph.
-- [ ] Establish a reproducible Bash cross-build and use its compile, link, and
-  runtime failures to maintain the required API and behavior inventory.
-- [ ] Provide the libc headers, types, constants, and functions required by the
-  selected Bash release and its build-time configuration checks. Keep hosted
-  build tooling separate from target-runtime behavior.
-- [ ] Add a full-system test that launches Bash and exercises interactive input,
-  builtins, an external command, redirection, and clean exit.
-
-#### Processes, Descriptors, And Signals
-
-- [ ] Complete the fork and descriptor-inheritance work described under
-  [Fork Support](#fork-support), including shared open-resource semantics.
-- [ ] Implement the required `exec` and `wait` family behavior, pipes, descriptor
-  duplication, close-on-exec, and redirection without moving descriptor
-  ownership back into the kernel.
-- [ ] Extend signals from the current termination-oriented process controls to
-  the dispositions, masks, delivery, and interruption behavior required by
-  Bash and its children.
-
-#### Interactive Shell Semantics
-
-- [ ] Define and implement process groups, sessions, controlling terminals, and
-  foreground/background terminal ownership needed for interactive job control.
-- [ ] Fill the required filesystem and environment gaps, including current
-  directory behavior, permissions, metadata, path operations, environment
-  propagation, and error mappings observed by Bash.
+  embedded archive at a dedicated bootstrap path containing only bootstrap code.
 
 ## Shared Libraries
 
@@ -105,75 +204,54 @@ POSIX certification. Existing native commands and APIs remain supported.
 
 ## Process Management
 
-### Asymmetric Multiprocessing With Dedicated Realtime Cores
+### Event-Driven Realtime Services
 
-Status: deferred. Realtime services should be granted exclusive use of an
-available realtime core. General-purpose cores retain normal scheduling and
-interrupt handling; an assigned realtime core runs without preemption or
-maskable interrupt delivery. The existing realtime-service process class does
-not by itself implement this execution model.
+Status: `hund-unterbrict` is a realtime-priority service without CPU
+reservation. It parks when it has no work. Delegated IRQ publication makes a
+parked manager runnable and requests an immediate reschedule on its owning CPU,
+using an IPI for remote wakeup. Scheduler ticks remain enabled on every CPU.
 
-#### Core Allocation and Admission
+- [x] Promote the registered interrupt manager to the highest runnable process
+  class without changing its CPU ownership.
+- [x] Wake a manager parked in a queue wait when a delegated IRQ is published,
+  with direct local preemption or a remote reschedule IPI.
+- [x] Allow ordinary admission, preferred selection, ordinary selection, and
+  speculative waiting on every CPU while the manager is parked.
+- [ ] Measure IRQ-publication-to-manager-dispatch latency under CPU and I/O load.
+- [ ] Audit shared locks and service dependencies for priority inversion and
+  unbounded work in the interrupt-manager path.
+- [ ] Define whether an active realtime handler needs a bounded run-to-block
+  budget if measurements show harmful timer preemption during IRQ processing.
+- [ ] Define failure cleanup for a crashed interrupt manager while keeping its
+  delegated IRQ sources masked.
 
-- [ ] Track general-purpose cores, available realtime cores, and realtime-core
-  ownership. Decide whether the partition is configured at boot or can change
-  at runtime, while preserving capacity for kernel and housekeeping services.
-- [ ] Provide an authorized request/grant operation for a realtime service to
-  acquire an available core. Return an explicit unavailable result when no core
-  can be granted; do not silently substitute ordinary scheduled execution.
-- [ ] Pin the admitted service to its granted core and exclude that core from
-  general-purpose scheduling, load balancing, and unrelated kernel work.
-- [ ] Define transitions into and out of realtime ownership, including setup,
-  explicit release, process exit, and restoring a core before reuse.
+### Userspace Driver Host
 
-#### Non-Preemptive Execution and Interrupt Isolation
+Status: VirtIO block is hosted in `hund-unterbricht`. The host probes all VirtIO
+block slots during bootstrap, publishes the existing `/dev/virtioN` Channel
+services, dispatches their IRQs directly to per-device fibres, and owns all
+claimed devices as one process. Filesystems and block clients retain their
+existing protocols.
 
-- [ ] Disable scheduler ticks and involuntary preemption on assigned realtime
-  cores. Route device interrupts and ordinary interprocessor interrupts to
-  general-purpose cores; exclude realtime cores from routine reschedule requests.
-- [ ] Implement interrupt masking and core-role transitions through the kernel
-  architecture interfaces for both AArch64 and RISC-V.
-- [ ] Specify permitted syscalls, voluntary yielding, blocking, and fault
-  handling. Disabling interrupts does not remove synchronous faults or explicit
-  kernel entry; these must have defined behavior without silently enabling
-  preemption. Document any unavoidable platform/firmware exceptions.
-
-#### IPC, Memory, and Shared Kernel State
-
-- [ ] Retain the existing Channels and queues for communication with services
-  on general-purpose cores. Define polling or event-based waiting that does not
-  depend on delivery of a masked interrupt, including full-queue backpressure.
-- [ ] Audit IPC signaling so routine notifications do not introduce interrupt
-  handling on realtime cores. An event wakeup must not imply a context switch.
-- [ ] Define memory preparation before admission, avoiding demand allocation
-  or other unbounded work during realtime execution. Resolve how shared-memory
-  unmapping and translation invalidation coordinate with a non-interruptible
-  owner before any pages are reclaimed.
-- [ ] Audit shared locks and service dependencies for unbounded waiting or
-  priority inversion. Core dedication alone does not guarantee bounded latency;
-  shared caches, memory bandwidth, and device activity also need consideration.
-
-#### Lifecycle, Recovery, and Observability
-
-- [ ] Define cooperative stop/release and handling of a crashed service.
-  Recovery from an unresponsive service is an open design question: ordinary
-  preemption or an interrupt-based kill cannot be assumed under this model.
-  Decide whether forced recovery requires a core/platform reset or an explicit
-  exception to the isolation contract.
-- [ ] Expose core roles, ownership, and realtime process state through the
-  process registry and `ps`, with CPU accounting that does not require periodic
-  interrupts on the realtime core.
-- [ ] Test exclusive grants, exhaustion, release/reuse, IRQ routing, continued
-  general-purpose progress, IPC backpressure, and exit/fault cleanup. Measure
-  realtime jitter under load; define timing guarantees separately from simply
-  disabling preemption and interrupts.
+- [x] Extract the VirtIO block implementation into an instance runtime with
+  per-device DMA queue state.
+- [x] Permit one process to claim and safely quiesce multiple VirtIO devices.
+- [x] Dispatch hosted block IRQs without the interrupt client Channel relay.
+- [ ] Remove the standalone `virtio_blk_channelio` compatibility executable
+  after full-system parity and latency measurements pass on AArch64 and RISC-V.
+- [ ] Decide whether UART, input, and bus drivers belong in the same host or in
+  separate failure domains using the block-driver measurements as evidence.
+- [ ] Define host crash recovery and atomic cleanup of all device claims and IRQ
+  routes before relying on automatic host restart.
 
 ### Fork Support
 
-Status: deferred. A child must inherit references to the parent's open resources,
-not reopen their paths. General fork and userspace descriptor inheritance are
-not implemented. Current console startup passes an endpoint marker and lazily
-opens a new stream handle; this is not sufficient for fork semantics.
+Status: required by stage 5 of the active Bash milestone. Implementation follows
+the cross-build, non-local control-flow, signal, and static-link stages above. A
+child must inherit references to the parent's open resources, not reopen their
+paths. General fork and userspace descriptor inheritance are not implemented.
+Current console startup passes an endpoint marker and lazily opens a new stream
+handle; this is not sufficient for fork semantics.
 
 #### Process Creation
 
@@ -232,8 +310,9 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   in a controlled diagnostic run, separating activity wakes from timeouts.
   Include syscall entry-to-park and selection-to-return overhead. Current
   counters omit these intervals and publication timestamps; average parked
-  duration is not message-delivery latency. Normal builds use event waits;
-  reintroducing kernel parking requires measurements and approval.
+  duration is not message-delivery latency. A queue push now uses an authenticated
+  data-available syscall and reschedule IPI for a changed parked receiver;
+  quantify that path separately from message service time.
 - [x] Add an isolated timeout probe that parks only itself and compares complete
   call duration with fresh kernel counters. On the SDHCI trace target, 1- and
   10-tick waits left about 18-19 ms per call outside parked/runnable accounting.
@@ -302,8 +381,28 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   [receiver scheduling priority](architecture/queues.md#receiver-scheduling-priority).
 - [x] Add outstanding-request identity and parent propagation independently of
   unread-message state. See [Channel tickets and preferred scheduling](architecture/dependency-scheduling.md).
-- [ ] Measure publication-to-eligibility, eligibility-to-selection, and service
-  handling separately; tune residency using those measurements.
+- [x] Trace client publication, server acceptance, reply publication, and
+  client-visible completion for Channel requests, retaining parent tickets so
+  nested I/O chains can be reconstructed. Records are batched through lossy
+  per-process shared rings into the memfs-backed `/tmp/io-trace.log`. See
+  [Channel latency tracing](architecture/driver-tracing.md#channel-latency-tracing).
+- [x] Add ticket-correlated kernel timestamps for publication-to-eligibility and
+  eligibility-to-selection/dispatch to the Channel latency trace.
+- [ ] Tune scheduler residency using the measured Channel latency breakdown.
+- [x] Retain the final trace records of short-lived processes by synchronously
+  draining a bounded snapshot of every registered source before acknowledging
+  the exiting process's drain request.
+- [x] Record the exact monotonic publication timestamp in each Channel payload
+  and emit an `IO-HOP` record at consumption, allowing `fs-latency` to report
+  publish-to-consume percentiles for each immediate client/server pair.
+- [x] Preserve absolute Channel lifecycle timestamps in completed trace records
+  and correlate parent and child tickets in `fs-latency`. Report parent
+  pickup-to-child-publication, child roundtrip, and final-child-completion-to-parent-
+  reply separately, including serial sibling requests.
+- [ ] Make high-volume Channel tracing preserve enough records for balanced
+  per-hop sample counts without allowing diagnostics to block I/O. Current
+  rings are deliberately lossy, so fan-out-heavy filesystem workloads can
+  retain different sample counts at successive hops.
 - Keep unread transport work distinct from an outstanding request: a server may
   consume a request and then wait on another service. Account for the warden's
   existing relay stages and cross-CPU
@@ -343,14 +442,24 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   remove queued processes on exit.
 - [x] Allow preferred selection on another started core after the outgoing
   context-switch tail is safe. Do not steal running or kernel-blocked processes.
+- [x] Treat the idle process as the final scheduling choice. When a CPU has no
+  preferred, newly admitted, or ordinarily runnable process, select one of its
+  unchanged userspace waiters. Rank local candidates by validated dependent-chain
+  impact, recent wait-adjusted activity, and longest time since dispatch. Do not
+  migrate this fallback or override real kernel blocking. Expose speculative
+  selections through procfs for RISC-V versus AArch64 measurement.
 - [x] Admit every newly created process through one shared scheduler queue. The
   next CPU making a scheduling decision claims an admitted process into its
   local run table; after that, the process retains CPU affinity unless the
   dependency-aware preferred path has a priority reason to migrate it. CPU
   scheduler lookup is keyed by the architecture CPU ID rather than indexing a
   dense array, and process-registry publication uses a separate compact slot.
-- [ ] Evaluate event-triggered cross-core notification and adaptive residency.
-  Current observation uses existing scheduler entries, without a new IPI.
+- [x] Add event-triggered cross-core queue notification. A successful push
+  publishes shared progress first, authenticates the live connection in the
+  kernel, wakes a changed parked receiver, and sends one coalesced reschedule IPI
+  to its owning CPU. Pop only publishes consumption and does not announce new
+  schedulable work. A park-time recheck closes the notify-before-park race.
+- [ ] Evaluate adaptive residency using the resulting latency measurements.
 - Open scope: exclusive cluster budgets/arbitration and context integration for
   custom asynchronous dispatchers outside the common I/O/block wrappers.
 
@@ -411,8 +520,8 @@ measurement remain below. See [Shared buffers](architecture/shared-buffers.md).
   the existing single outstanding request serializing buffer access. Treat
   producer bytes as mutable/untrusted, despite read-only consumer mappings.
 - [x] Migrate file I/O, executable loading, and filesystem/block-driver paths
-  away from 256/512-byte inline bulk transfers. The mediator still copies
-  between separate upstream and downstream buffer pairs.
+  away from 256/512-byte inline bulk transfers. Remove I/O mediator copies by
+  redirecting clients to final services, which allocate the client-facing pair.
 - [x] Bootstrap the manager before buffer-dependent services without creating
   an executable-loader startup dependency cycle.
 
@@ -454,7 +563,7 @@ measurement remain below. See [Shared buffers](architecture/shared-buffers.md).
   FAT EFI disk, removing its repeated failed-startup buffer consumption. See
   [Userspace I/O system](architecture/io-system.md). Repeated service failures can still
   exhaust retained slots until coordinated reclamation is implemented.
-- [ ] Reuse the client's shared buffer through I/O mediation, FAT32/EXT2, and
+- [ ] Reuse the client's final-service shared buffer through FAT32/EXT2 and
   the block driver. Keep control and completions on existing Channels; authorize
   downstream attachments through `hunde-puffer` rather than allocating and
   copying into a separate buffer at each layer.
@@ -474,6 +583,30 @@ measurement remain below. See [Shared buffers](architecture/shared-buffers.md).
 - [ ] Define downstream attachment authorization and in-flight range ownership
   before implementation. CPU read-only mappings do not freeze producer bytes
   or constrain device DMA. This is an agreed target, not implemented behavior.
+
+### Filesystem Read Latency
+
+Status: bounded userspace block and inode caches are implemented and EXT2 uses
+them. Service consolidation remains staged work so its effect can be measured
+independently.
+
+- [x] Add a reusable 1024-sector (512 KiB) scan-resistant LRU cache above
+  `BlockClient`. Preserve contiguous miss batching, protect blocks after a
+  repeat access, update resident sectors after successful writes without
+  admitting streaming writes, and expose hit, miss, and eviction counts through
+  `/proc/<pid>/ipc`.
+- [x] Route EXT2 block reads and writes through the cache. Repeated pathname
+  traversal can reuse cached inode-table and directory blocks without another
+  block-service request.
+- [x] Add a bounded 256-entry EXT2 inode cache using the shared scan-resistant
+  cache type. Update it after successful inode writes, invalidate freed inodes,
+  and export separate hit, miss, and eviction counters through procfs.
+- [ ] After block and inode cache measurements, merge the filesystem adapters
+  into `hund-dateisystem` to remove the filesystem-service Channel hop while
+  retaining the existing application-facing I/O protocol and failure handling.
+- [ ] Revisit filesystem realtime scheduling only after cache and consolidation
+  measurements identify residual scheduler latency; do not infer realtime
+  suitability from service placement alone.
 
 ## User Management
 

@@ -1,25 +1,34 @@
 #include "stream_driver.h"
 #include "path.h"
 
+FixedArrayBodyDefine(IOStreamResources);
+
+bool IOStreamResource__equals(void * first, void * second)
+{
+    IOStreamResourcePtr left = first;
+    IOStreamResourcePtr right = second;
+    return left->handle == right->handle;
+}
+
 IOStreamDriver IOStreamDriver__new(Flags access, IOServiceContext context, IOStreamTransfer transfer)
 {
-    return (IOStreamDriver){.resources = IOResources__new(),
+    return (IOStreamDriver){.resources = IOStreamResources__new(),
                             .next_handle = IO_SESSION_HANDLE_BASE,
                             .access = access,
                             .context = context,
                             .transfer = transfer};
 }
 
-static bool IOStreamResource__matches(IOResourcePtr self, void * context)
+static bool IOStreamResource__matches(IOStreamResourcePtr self, void * context)
 {
     IORequestPtr request = context;
     return self->session == request->client_session && self->pid == request->client_pid &&
            (request->operation == IO_REQUEST_RELEASE_CLIENT || self->handle == request->handle);
 }
 
-static IOResource IOStreamResource__new(IOHandle handle, IORequestPtr request)
+static IOStreamResource IOStreamResource__new(IOHandle handle, IORequestPtr request)
 {
-    return (IOResource){
+    return (IOStreamResource){
         .handle = handle, .session = request->client_session, .pid = request->client_pid, .flags = request->flags};
 }
 
@@ -34,11 +43,11 @@ static IOReply IOStreamDriver__request(IOStreamDriverPtr self, IORequestPtr requ
         while (true)
         {
             match_find_result(
-                IOResources__find(&self->resources, IOStreamResource__matches, request),
+                IOStreamResources__find(&self->resources, IOStreamResource__matches, request),
                 some(resource)
                 {
                     match_result(
-                        IOResources__remove(&self->resources, resource),
+                        IOStreamResources__remove(&self->resources, resource),
                         success_do_nothing(),
                         error(code, message)
                         {
@@ -68,9 +77,9 @@ static IOReply IOStreamDriver__request(IOStreamDriverPtr self, IORequestPtr requ
         {
             return IOReply__new(IO_REGISTER_FAILED, 0);
         }
-        IOResource resource = IOStreamResource__new(self->next_handle++, request);
+        IOStreamResource resource = IOStreamResource__new(self->next_handle++, request);
         match_result(
-            IOResources__push(&self->resources, resource),
+            IOStreamResources__push(&self->resources, resource),
             success(code)
             {
                 return IOReply__new(IO_OK, resource.handle);
@@ -82,13 +91,13 @@ static IOReply IOStreamDriver__request(IOStreamDriverPtr self, IORequestPtr requ
         );
     }
     match_find_result(
-        IOResources__find(&self->resources, IOStreamResource__matches, request),
+        IOStreamResources__find(&self->resources, IOStreamResource__matches, request),
         some(resource)
         {
             if (request->operation == IO_REQUEST_CLOSE)
             {
                 match_result(
-                    IOResources__remove(&self->resources, resource),
+                    IOStreamResources__remove(&self->resources, resource),
                     success(code)
                     {
                         return IOReply__new(IO_OK, 0);
@@ -118,13 +127,10 @@ Optional(IOReply)
     IOStreamDriver__execute(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request)
 {
     IOStreamDriverPtr self = context;
-    uint64_t mediator =
-        unwrap_optional(ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &bstr(IO_SYSTEM_SERVICE)), 0);
-    if (pid == 0 || pid != mediator || (self->mediator != 0 && self->mediator != session))
+    if (pid == 0)
     {
         return Some(IOReply, IOReply__new(IO_PERMISSION_DENIED, 0));
     }
-    self->mediator = session;
     IOReply reply = IOStreamDriver__request(self, request);
     if (request->operation == IO_REQUEST_READ && reply.status == IO_WAIT_FOR_DATA)
     {
@@ -136,10 +142,9 @@ Optional(IOReply)
 bool IOStreamDriver__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
     IOStreamDriverPtr self = context;
-    if (self->mediator == session)
-    {
-        self->resources = IOResources__new();
-        self->mediator = 0;
-    }
+    IORequest owner = IORequest__new(IO_REQUEST_RELEASE_CLIENT, 0);
+    owner.client_session = session;
+    owner.client_pid = pid;
+    IOStreamDriver__request(self, &owner);
     return true;
 }

@@ -3,6 +3,7 @@
 #include "sys/io.h"
 #include "sys/print.h"
 #include "sys/service.h"
+#include "trace/io_trace.h"
 
 #ifndef HUNDEKANAL_WARTER_ENTRYPOINT
 #define HUNDEKANAL_WARTER_ENTRYPOINT main
@@ -84,6 +85,7 @@ static int HundekanalWarter__run(QueueArrivalsPtr arrivals)
 
 int HUNDEKANAL_WARTER_ENTRYPOINT(void)
 {
+    IOTrace__set_enabled(false);
     if (!service_ok(service_become_service()))
     {
         return 1;

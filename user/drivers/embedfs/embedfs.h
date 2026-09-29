@@ -23,7 +23,6 @@ typedef struct Embedfs
     EmbedfsHandles handles;
     BStringArray children;
     IOHandle next_handle;
-    QueueConnectionID namespace_session;
 } Embedfs;
 
 typedef Embedfs * EmbedfsPtr;

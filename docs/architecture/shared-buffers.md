@@ -49,6 +49,9 @@ never directly trusted as a kernel pointer.
 The implementation reserves `0x80000000` through `0xa0000000` for 256 2 MiB
 slots. ELF segments, stacks, heaps, dynamic/MMIO mappings, and shared registries
 use disjoint ranges. New checked shared mappings roll back partial failures.
+The embedded bootstrap archive begins at `0xa0000000`, immediately after the
+buffer window, and may occupy up to 128 MiB. Compile-time layout checks prevent
+the two reserved regions from overlapping.
 The manager notification page is at `0x7f000000`. A read/write pair consumes
 4 MiB of backing, not 4 MiB per participant. Larger transfers use repeated
 buffer-sized requests; variable-sized leases remain deferred.
@@ -63,9 +66,10 @@ page-table block mapping. DMA constraints need explicit handling.
 | Write: client produces, server consumes | Read/write | Read-only |
 
 All mappings are non-executable. Direction is relative to each protocol's
-client/server roles. Mediators and downstream drivers receive only explicitly
-authorized attachments and necessary permissions. Management authority need not
-give every service, or even the manager, unrestricted data mappings.
+client/server roles. Final services and downstream drivers receive only
+explicitly authorized attachments and necessary permissions. Routing services
+never receive bulk-buffer mappings. Management authority need not give every
+service, or even the manager, unrestricted data mappings.
 
 ## Protocol Semantics
 
@@ -103,9 +107,8 @@ a malicious client obeys the instruction not to modify an in-flight write buffer
 One Channel carries multiple protocol resources. This implementation shares one
 directional pair across the session, serializing access with the existing
 one-outstanding-request limit. Transfers start at buffer offset zero; count is
-bounded by capacity. The I/O mediator has a separate pair on each backend session
-and copies bulk bytes between its upstream and downstream buffers. It must not
-copy a departed client's drained completion into a revoked upstream buffer.
+bounded by capacity. Routing services do not allocate, retain, or copy bulk
+buffers. The I/O client uses the pair advertised by the final service.
 
 ## Cleanup and Recycling
 
@@ -177,7 +180,7 @@ yet reconstruct all live manager records or remap sessions to replacement PIDs.
   This uses the existing physical-address device model, not an IOMMU mapping.
   Cache maintenance surrounds DMA; uncertain completion disables further
   submissions on that device. SDHCI reads multiple sectors through PIO directly
-  into the shared buffer. Filesystem-local and mediator copies still remain.
+  into the shared buffer. Filesystem-local copies still remain.
 
 ## Integration and Verification
 
@@ -187,7 +190,8 @@ the buffer service. Keep core policy architecture-neutral, with mapping,
 translation invalidation, and device integration behind architecture interfaces.
 
 Migrate both file/executable I/O and filesystem-to-block-driver transfers.
-`hund-io-system` remains the mediator. Forward descriptors only after authorizing
+`hund-io-system` remains the application-facing router. Final services advertise
+their descriptors directly to clients. Forward descriptors only after authorizing
 downstream attachments; do not copy every 256/512 bytes through intermediaries.
 Whether a stage can share a lease end-to-end or needs another buffer depends on
 its transformation and permissions. This is not a promise of universal zero-copy.

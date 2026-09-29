@@ -2,11 +2,23 @@
 #include "interrupts/interrupt_controller.h"
 #include "interrupts/interrupt_types.h"
 #include "ipc/interrupt_protocol.h"
+#include "ipc/ipc_platform.h"
 #include "ipc/kernel_notification_queue.h"
 #include "services/service_directory.h"
+#include "sys/boot_info.h"
 #include "sys/io.h"
+#include "sys/process.h"
 #include "sys/service.h"
+#include "sys/syslog.h"
 #include "types/fixed_array.h"
+#include "../../drivers/virtio_blk_channelio/runtime.h"
+
+#define INTERRUPT_MANAGER_BLOCK_DRIVER_LIMIT 16
+#define VIRTIO_MMIO_MAGIC 0x000
+#define VIRTIO_MMIO_VERSION 0x004
+#define VIRTIO_MMIO_DEVICE_ID 0x008
+#define VIRTIO_MMIO_MAGIC_VALUE 0x74726976U
+#define VIRTIO_DEVICE_ID_BLOCK 2U
 
 typedef struct InterruptClient
 {
@@ -41,6 +53,8 @@ typedef struct InterruptRegistration
     InterruptRegistrationGeneration generation;
     InterruptDeliverySequence outstanding;
     InterruptDeliverySequence pending_delivery;
+    uint64_t pending_kernel_irq_at_usec;
+    uint64_t pending_manager_received_at_usec;
     bool waiting;
 } InterruptRegistration;
 
@@ -58,6 +72,18 @@ FixedArrayDefine(InterruptRegistration, IRQ_COUNT, InterruptRegistrations, &Inte
 FixedArrayBodyDefine(InterruptRegistrations);
 typedef InterruptRegistrations * InterruptRegistrationsPtr;
 
+static bool InterruptRegistrations__contains_irq(InterruptRegistrationsPtr self, IRQNumber irq);
+
+static bool VirtioBlkRuntimePtr__equals(void * first, void * second)
+{
+    return *(VirtioBlkRuntimePtr *)first == *(VirtioBlkRuntimePtr *)second;
+}
+
+FixedArrayDefine(VirtioBlkRuntimePtr, INTERRUPT_MANAGER_BLOCK_DRIVER_LIMIT, HostedBlockDrivers,
+                 &VirtioBlkRuntimePtr__equals);
+FixedArrayBodyDefine(HostedBlockDrivers);
+typedef HostedBlockDrivers * HostedBlockDriversPtr;
+
 typedef struct InterruptManager
 {
     KernelNotificationQueuePtr events;
@@ -65,6 +91,7 @@ typedef struct InterruptManager
     QueueArrivalsPtr arrivals;
     InterruptClients clients;
     InterruptRegistrations registrations;
+    HostedBlockDrivers block_drivers;
     InterruptRegistrationGeneration next_generation;
 } InterruptManager;
 
@@ -79,7 +106,113 @@ static InterruptManager InterruptManager__new(ServiceInterruptManagerRegistratio
         .arrivals = arrivals,
         .clients = InterruptClients__new(),
         .registrations = InterruptRegistrations__new(),
+        .block_drivers = HostedBlockDrivers__new(),
     };
+}
+
+static bool VirtioBlkRuntime__matches_irq(VirtioBlkRuntimePtr * self, void * context)
+{
+    return (*self)->device.irq_id == *(IRQNumberPtr)context;
+}
+
+static ServiceCode InterruptManager__subscribe_hosted(Anything context, IRQNumber irq)
+{
+    InterruptManagerPtr self = (InterruptManagerPtr)context;
+    if (InterruptRegistrations__contains_irq(&self->registrations, irq))
+    {
+        return SERVICE_IRQ_ALREADY_REGISTERED;
+    }
+    return service_route_managed_irq(process_current_pid(), irq);
+}
+
+static ServiceCode InterruptManager__rearm_hosted(Anything context, IRQNumber irq)
+{
+    InterruptManagerPtr self = (InterruptManagerPtr)context;
+    InterruptController__unmask(self->distributor, irq);
+    return SERVICE_OK;
+}
+
+static uint32_t InterruptManager__virtio_read32(void * base, uint64_t offset)
+{
+    return *(volatile uint32_t *)((Address)base + offset);
+}
+
+static bool InterruptManager__is_block_slot(void * mmio)
+{
+    return InterruptManager__virtio_read32(mmio, VIRTIO_MMIO_MAGIC) == VIRTIO_MMIO_MAGIC_VALUE &&
+           InterruptManager__virtio_read32(mmio, VIRTIO_MMIO_VERSION) >= 1 &&
+           InterruptManager__virtio_read32(mmio, VIRTIO_MMIO_DEVICE_ID) == VIRTIO_DEVICE_ID_BLOCK;
+}
+
+static ServiceCode InterruptManager__start_block_drivers(InterruptManagerPtr self)
+{
+    BootVirtioMmioInfo virtio_mmio;
+    match_result(
+        BootHardwareInfo__load(),
+        success(info)
+        {
+            match_optional(info.virtio_mmio,
+                some(value)
+                {
+                    virtio_mmio = value;
+                },
+                none()
+                {
+                    return SERVICE_OK;
+                }
+            );
+        },
+        error(code, message)
+        {
+            return code;
+        }
+    );
+
+    ServiceMappedMemoryPtr mapping;
+    ServiceCode mapped =
+        service_map_mmio(virtio_mmio.physical_base, virtio_mmio.slot_size * virtio_mmio.slot_count, &mapping);
+    if (!service_ok(mapped))
+    {
+        return mapped;
+    }
+
+    static VirtioBlkRuntime runtimes[INTERRUPT_MANAGER_BLOCK_DRIVER_LIMIT];
+    uint64_t ordinal = 1;
+    for (uint64_t next_slot = virtio_mmio.slot_count; next_slot > 0; next_slot--)
+    {
+        uint64_t slot = next_slot - 1;
+        void * mmio = driver_ptr_offset(mapping, slot * virtio_mmio.slot_size);
+        if (!InterruptManager__is_block_slot(mmio))
+        {
+            continue;
+        }
+        if (HostedBlockDrivers__len(&self->block_drivers) >= INTERRUPT_MANAGER_BLOCK_DRIVER_LIMIT)
+        {
+            return SERVICE_DEVICE_REGISTRATION_FAILED;
+        }
+
+        BString path = BString__sprintf(&bstr("/dev/virtio%llu"), ordinal);
+        VirtioBlkRuntimePtr runtime = &runtimes[HostedBlockDrivers__len(&self->block_drivers)];
+        VirtioBlkInterruptBackend interrupts = VirtioBlkInterruptBackend__new(
+            (Anything)self, InterruptManager__subscribe_hosted, InterruptManager__rearm_hosted);
+        ServiceCode started = VirtioBlkRuntime__start(runtime, slot, &path, &interrupts);
+        if (!service_ok(started))
+        {
+            kernel_syslog_tagf("hund-unterbrict", "hosted block start failed slot=%i path=%B status=%i", (int)slot,
+                               &path, (int)started);
+            return started;
+        }
+        match_result(
+            HostedBlockDrivers__push(&self->block_drivers, runtime),
+            success_do_nothing(),
+            error(code, message)
+            {
+                return SERVICE_DEVICE_REGISTRATION_FAILED;
+            }
+        );
+        ordinal++;
+    }
+    return SERVICE_OK;
 }
 
 static InterruptRegistration InterruptRegistration__new(IRQNumber irq, QueueConnectionID connection,
@@ -363,11 +496,24 @@ static bool InterruptManager__deliver(InterruptManagerPtr self)
         KernelNotificationQueue__pop(self->events),
         some(event)
         {
+            uint64_t received_at_usec = IpcPlatform__monotonic_usec();
+            IRQNumber irq = event.id;
+            match_find_result_ptr(
+                HostedBlockDrivers__find(&self->block_drivers, VirtioBlkRuntime__matches_irq, &irq),
+                some(runtime)
+                {
+                    VirtioBlkRuntime__handle_irq(*runtime, &event, received_at_usec);
+                    return true;
+                },
+                none_do_nothing()
+            );
             match_find_result_ptr(
                 InterruptRegistrations__find(&self->registrations, InterruptRegistration__matches_irq, &event.id),
                 some(registration)
                 {
                     registration->pending_delivery = event.sequence;
+                    registration->pending_kernel_irq_at_usec = event.occurred_at_usec;
+                    registration->pending_manager_received_at_usec = received_at_usec;
                 },
                 none_do_nothing()
             );
@@ -389,12 +535,16 @@ static bool InterruptManager__deliver_pending(InterruptManagerPtr self, Interrup
         InterruptClients__find(&self->clients, InterruptClient__matches_connection, &registration->connection),
         some(client)
         {
-            if (!client->pending &&
-                InterruptClient__send(client, InterruptProtocol__delivery(registration->irq, registration->generation,
-                                                                          registration->pending_delivery)))
+            if (!client->pending && InterruptClient__send(client, InterruptProtocol__delivery(
+                                                                      registration->irq, registration->generation,
+                                                                      registration->pending_delivery,
+                                                                      registration->pending_kernel_irq_at_usec,
+                                                                      registration->pending_manager_received_at_usec)))
             {
                 registration->outstanding = registration->pending_delivery;
                 registration->pending_delivery = 0;
+                registration->pending_kernel_irq_at_usec = 0;
+                registration->pending_manager_received_at_usec = 0;
                 registration->waiting = false;
                 return true;
             }
@@ -430,6 +580,22 @@ static bool InterruptManager__step(InterruptManagerPtr self, QueueParticipantID 
         );
     }
 
+    for_each_fa_ptr(
+        HostedBlockDrivers,
+        &self->block_drivers,
+        index,
+        driver,
+        {
+            match_result(VirtioBlkRuntime__step(driver),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return true;
+                }
+            );
+        }
+    );
+
     return InterruptManager__deliver(self) || work;
 }
 
@@ -437,11 +603,13 @@ int main(void)
 {
     if (!service_ok(service_become_service()))
     {
+        kernel_syslog_tagf("hund-unterbrict", "cannot become service");
         return 1;
     }
     ServiceInterruptManagerRegistration kernel_registration;
     if (!service_ok(service_register_interrupt_manager(&kernel_registration)))
     {
+        kernel_syslog_tagf("hund-unterbrict", "cannot register interrupt manager");
         return 1;
     }
 
@@ -449,11 +617,17 @@ int main(void)
         Queue__listen(&bstr(INTERRUPT_MANAGER_SERVICE_NAME)),
         success(arrivals)
         {
-            if (!service_ok(service_publish_ready(&bstr(INTERRUPT_MANAGER_SERVICE_NAME))))
+            InterruptManager manager = InterruptManager__new(&kernel_registration, arrivals);
+            if (!service_ok(InterruptManager__start_block_drivers(&manager)))
             {
+                kernel_syslog_tagf("hund-unterbrict", "cannot start hosted block drivers");
                 return 1;
             }
-            InterruptManager manager = InterruptManager__new(&kernel_registration, arrivals);
+            if (!service_ok(service_publish_ready(&bstr(INTERRUPT_MANAGER_SERVICE_NAME))))
+            {
+                kernel_syslog_tagf("hund-unterbrict", "cannot publish interrupt manager readiness");
+                return 1;
+            }
             Channel__prepare_wait();
             while (true)
             {

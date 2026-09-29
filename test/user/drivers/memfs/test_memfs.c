@@ -142,6 +142,34 @@ void test_memfs_empty_create_truncate_and_independent_handles(void)
     TEST_ASSERT_EQUAL(0, operation(IO_REQUEST_READ, empty).value);
 }
 
+void test_memfs_seek_supports_start_current_and_end(void)
+{
+    IOHandle writer = open_file(&bstr("/seek"), IO_OPEN_WRITE);
+    IORequest write = request_for(IO_REQUEST_WRITE, writer);
+    write.count = 6;
+    __builtin_memcpy(write.data, "abcdef", 6);
+    TEST_ASSERT_EQUAL(IO_OK, Memfs__execute(&filesystem, &write).status);
+
+    IOHandle reader = open_file(&bstr("/seek"), IO_OPEN_READ);
+    IORequest seek = request_for(IO_REQUEST_SEEK, reader);
+    seek.flags = IO_SEEK_END;
+    seek.offset = (uint64_t)-2;
+    TEST_ASSERT_EQUAL_UINT64(4, Memfs__execute(&filesystem, &seek).value);
+
+    IORequest read = request_for(IO_REQUEST_READ, reader);
+    read.count = 2;
+    IOReply reply = Memfs__execute(&filesystem, &read);
+    TEST_ASSERT_EQUAL_UINT64(2, reply.value);
+    TEST_ASSERT_EQUAL_MEMORY("ef", reply.data, 2);
+
+    seek.flags = IO_SEEK_SET;
+    seek.offset = 1;
+    TEST_ASSERT_EQUAL_UINT64(1, Memfs__execute(&filesystem, &seek).value);
+    seek.flags = IO_SEEK_CURRENT;
+    seek.offset = 2;
+    TEST_ASSERT_EQUAL_UINT64(3, Memfs__execute(&filesystem, &seek).value);
+}
+
 void test_memfs_failed_growth_preserves_contents_and_offset(void)
 {
     IOHandle writer = open_file(&bstr("/file"), IO_OPEN_WRITE);
@@ -264,22 +292,28 @@ void test_memfs_keeps_more_than_64_files_and_validates_paths_and_lengths(void)
     TEST_ASSERT_EQUAL(IO_UNKNOWN_BUFFER, Memfs__execute(&filesystem, &request).status);
 }
 
-void test_memfs_authenticates_namespace_and_disconnect_releases_handles_not_files(void)
+void test_memfs_accepts_direct_clients_and_disconnect_releases_only_their_handles(void)
 {
     IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/file"), IO_OPEN_WRITE);
-    IOReply denied = unwrap_optional(Memfs__serve(&filesystem, 100, 71, &request), IOReply__new(IO_PANIC, 0));
-    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, denied.status);
-    IOReply opened = unwrap_optional(Memfs__serve(&filesystem, 100, 70, &request), IOReply__new(IO_PANIC, 0));
+    request.client_session = 100;
+    IOReply opened = unwrap_optional(Memfs__serve(&filesystem, 100, 20, &request), IOReply__new(IO_PANIC, 0));
     TEST_ASSERT_EQUAL(IO_OK, opened.status);
-    denied = unwrap_optional(Memfs__serve(&filesystem, 101, 70, &request), IOReply__new(IO_PANIC, 0));
-    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, denied.status);
-    Memfs__disconnect(&filesystem, 101, 70);
+    request = path_request(IO_REQUEST_OPEN, &bstr("/second"), IO_OPEN_WRITE);
+    request.client_pid = 23;
+    request.client_session = 101;
+    TEST_ASSERT_EQUAL(IO_OK,
+                      unwrap_optional(Memfs__serve(&filesystem, 101, 23, &request), IOReply__new(IO_PANIC, 0)).status);
+    TEST_ASSERT_EQUAL(2, MemfsHandles__len(&filesystem.handles));
+    Memfs__disconnect(&filesystem, 101, 23);
     TEST_ASSERT_EQUAL(1, MemfsHandles__len(&filesystem.handles));
-    Memfs__disconnect(&filesystem, 100, 70);
+    Memfs__disconnect(&filesystem, 100, 20);
     TEST_ASSERT_EQUAL(0, MemfsHandles__len(&filesystem.handles));
-    TEST_ASSERT_EQUAL(1, MemfsNodes__len(&filesystem.nodes));
+    TEST_ASSERT_EQUAL(2, MemfsNodes__len(&filesystem.nodes));
     TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, operation(IO_REQUEST_CLOSE, opened.value).status);
     open_file(&bstr("/file"), IO_OPEN_READ);
+
+    IOReply denied = unwrap_optional(Memfs__serve(&filesystem, 100, 0, &request), IOReply__new(IO_PANIC, 0));
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, denied.status);
 }
 
 void test_memfs_records_creator_identity_and_non_executable_file_mode(void)
@@ -410,7 +444,9 @@ void test_memfs_missing_pid_fails_closed_but_cleanup_does_not_resolve_credential
     TEST_ASSERT_EQUAL(IO_OK, Memfs__execute(&filesystem, &request).status);
     TEST_ASSERT_EQUAL(previous, credential_lookups);
     request = path_request(IO_REQUEST_OPEN, &bstr("/forged"), IO_OPEN_WRITE);
+    request.client_pid = 999;
+    request.client_session = 100;
     IOReply denied = unwrap_optional(Memfs__serve(&filesystem, 100, 999, &request), IOReply__new(IO_PANIC, 0));
-    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, denied.status);
-    TEST_ASSERT_EQUAL(previous, credential_lookups);
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_PID, denied.status);
+    TEST_ASSERT_EQUAL(previous + 1, credential_lookups);
 }

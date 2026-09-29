@@ -191,6 +191,27 @@ static Result(FiberCode) immediate_entry(FiberPtr self, Anything argument)
     return Success(FiberCode, FIBER_OK);
 }
 
+void test_fiber_scheduler_can_spawn_with_a_smaller_stack(void)
+{
+    FiberScheduler scheduler = FiberScheduler__new();
+    TestFiberContext context = TestFiberContext__new(&scheduler);
+
+    match_result(
+        FiberScheduler__spawn_with_stack_size(&scheduler, immediate_entry, (Anything)&context, 65536),
+        success(fiber)
+        {
+            TEST_ASSERT_EQUAL_UINT64(65536, Fiber__stack_size(fiber));
+            TEST_ASSERT_EQUAL_UINT64(65536, allocated_stack_size);
+        },
+        error_test_fail()
+    );
+
+    match_result(FiberScheduler__run_ready(&scheduler),
+        success_do_nothing(),
+        error_test_fail()
+    );
+}
+
 static Result(FiberCode) channel_waiting_entry(FiberPtr self, Anything argument)
 {
     TestFiberContextPtr context = (TestFiberContextPtr)argument;

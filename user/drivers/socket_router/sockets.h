@@ -26,7 +26,9 @@ typedef struct SocketResource
     QueueConnectionID session;
     uint64_t pid;
     SocketKind kind;
-    BString name;
+    Flags flags;
+    uint64_t name_length;
+    uint8_t name_data[IO_PROTOCOL_DATA_SIZE];
     Optional(SocketID) peer;
     SocketPending pending;
     SocketBytes bytes;

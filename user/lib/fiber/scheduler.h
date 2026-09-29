@@ -25,6 +25,8 @@ struct FiberScheduler
 FiberScheduler FiberScheduler__new(void);
 FiberScheduler FiberScheduler__new_with_max_fibers(size_t max_fibers);
 Result(FiberPtr) FiberScheduler__spawn(FiberSchedulerPtr self, FiberEntry entry, Anything argument);
+Result(FiberPtr) FiberScheduler__spawn_with_stack_size(FiberSchedulerPtr self, FiberEntry entry, Anything argument,
+                                                       size_t stack_size);
 Result(FiberCode) FiberScheduler__run_ready(FiberSchedulerPtr self);
 Result(FiberCode) FiberScheduler__run_ready_until_blocked(FiberSchedulerPtr self);
 Result(FiberCode) FiberScheduler__await_current(FiberSchedulerPtr self, FiberWaitKey key);

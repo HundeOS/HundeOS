@@ -41,6 +41,8 @@ static const ProcessCapabilities PROCESS__HUND_CAPABILITIES =
     PROCESS_CAP_HANDLE_BLOCK_REQUESTS | PROCESS_CAP_MOUNT_FILESYSTEM | PROCESS_CAP_USE_BLOCK_DEVICES |
     PROCESS_CAP_MANAGE_SHARED_PAGES;
 
+FixedArrayBodyDefine(ProcessVirtioDevices);
+
 void ProcessContext__dispose(ProcessContextPtr self)
 {
     Kernel__free(addr(self));
@@ -238,6 +240,36 @@ static bool allocation_contains_range(UserAllocationPtr allocation, void * conte
            range_end >= range->virtual_address;
 }
 
+static Optional(Address) Process__find_free_user_range(ProcessPtr self, size_t size)
+{
+    Address candidate = USER_ALLOC_BASE;
+    while (candidate < HUND_SERVICE_DIRECTORY_VADDR && size <= HUND_SERVICE_DIRECTORY_VADDR - candidate)
+    {
+        Address candidate_end = candidate + size;
+        Address next_candidate = candidate;
+        for_each_ll(
+            UserAllocations,
+            self->user_allocations,
+            allocation,
+            {
+                Address allocation_start = allocation.address.virtual_addr;
+                Address allocation_end = allocation_start + allocation.size;
+                if (allocation_start < candidate_end && candidate < allocation_end &&
+                    allocation_end > next_candidate)
+                {
+                    next_candidate = allocation_end;
+                }
+            }
+        );
+        if (next_candidate == candidate)
+        {
+            return Some(Address, candidate);
+        }
+        candidate = next_candidate;
+    }
+    return None(Address);
+}
+
 static size_t Process__copy_arg(DataPtr target, BStringPtr arg)
 {
     StringPos length = BString__length(arg);
@@ -369,17 +401,21 @@ Result(ProcessPtr)
     proc->preferred_active = false;
     proc->preferred_warm = false;
     proc->preferred_ticket = None(RequestTicket);
+    proc->preferred_eligible_at_usec = 0;
+    proc->preferred_selected_at_usec = 0;
+    proc->preferred_dispatched_at_usec = 0;
+    proc->preferred_trace_pending = false;
     proc->cpu_usage = CPUUsage__new();
     proc->queue_wait_usage = QueueWaitUsage__new();
     proc->queue_wait_control = None(UserAddress);
+    proc->ipc_doorbell = None(UserAddress);
     proc->name = *name;
     proc->parked_operations = ParkedOperations__new();
     proc->parent = *parent;
     proc->heap_break = USER_HEAP_BASE;
     proc->heap_mapped_end = USER_HEAP_BASE;
-    proc->allocation_next = USER_ALLOC_BASE;
     proc->user_allocations = UserAllocations__new();
-    proc->virtio_device = None(UserAddress);
+    proc->virtio_devices = ProcessVirtioDevices__new();
     proc->startup_stdio = SPAWN_STDIO_DEFAULT;
     match_optional(
         *parent,
@@ -1017,6 +1053,7 @@ Result(ProcessSetupStatus) Process__dispose(ProcessPtr self)
             none_do_nothing()
         );
     }
+
     match_result(
         ParkedOperations__dispose(&self->parked_operations),
         success_do_nothing(),
@@ -1084,14 +1121,6 @@ Result(ProcessMemoryCode)
 
 Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address mapping)
 {
-    match_optional(
-        self->virtio_device,
-        some(device)
-        {
-            return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
-        },
-        none_do_nothing()
-    );
     for_each_ll(
         UserAllocations,
         self->user_allocations,
@@ -1102,10 +1131,25 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
                 mapping - start <= allocation.size - 0x100 && (mapping & 3) == 0 &&
                 Arch__is_virtio_block_device(mapping))
             {
-                UserAddress device = allocation.address;
-                device.virtual_addr = mapping;
-                self->virtio_device = Some(UserAddress, device);
-                return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+                match_optional(
+                    ProcessVirtioDevices__find_item(&self->virtio_devices, mapping),
+                    some(index)
+                    {
+                        return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+                    },
+                    none_do_nothing()
+                );
+                match_result(
+                    ProcessVirtioDevices__push(&self->virtio_devices, mapping),
+                    success(_)
+                    {
+                        return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+                    },
+                    error(code, message)
+                    {
+                        return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
+                    }
+                );
             }
         }
     );
@@ -1115,15 +1159,17 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
 
 void Process__quiesce_device(ProcessPtr self)
 {
-    match_optional(
-        self->virtio_device,
-        some(device)
+    for_each_fa_ptr(
+        ProcessVirtioDevices,
+        &self->virtio_devices,
+        index,
+        device,
         {
-            Arch__reset_virtio_device(device.virtual_addr, self->page_table.root.phys_addr);
-            self->virtio_device = None(UserAddress);
-        },
-        none_do_nothing()
+            Arch__reset_virtio_device(device, self->page_table.root.phys_addr);
+        }
     );
+
+    self->virtio_devices = ProcessVirtioDevices__new();
 }
 
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address)
@@ -1159,18 +1205,29 @@ Result(Address) Process__device_address(ProcessPtr self, Address virtual_address
             }
         }
     );
+
     return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
 
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
 {
-    if (size == 0 || self->allocation_next >= HUND_SERVICE_DIRECTORY_VADDR ||
-        size > HUND_SERVICE_DIRECTORY_VADDR - self->allocation_next)
+    if (size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1))
     {
         return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_INVALID_SIZE);
     }
     size_t allocation_size = Process__page_aligned_size(size);
-    Address virtual_address = self->allocation_next;
+    Address virtual_address;
+    match_optional(
+        Process__find_free_user_range(self, allocation_size),
+        some(found)
+        {
+            virtual_address = found;
+        },
+        none()
+        {
+            return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+        }
+    );
 
     match_result(
         Kernel__try_alloc_user(virtual_address, allocation_size, true, true, false),
@@ -1182,7 +1239,6 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
                 Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC),
                 success(_)
                 {
-                    self->allocation_next += allocation_size;
                     return Success(UserAddress, allocation);
                 },
                 error(code, message)
@@ -1212,13 +1268,23 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
 
     Address source_base = Process__page_base(source_virtual_address);
     Offset source_offset = source_virtual_address - source_base;
-    size_t allocation_size = Process__page_aligned_size(source_offset + size);
-    if (source_offset + size < size || allocation_size < size ||
-        self->allocation_next >= HUND_SERVICE_DIRECTORY_VADDR ||
-        allocation_size > HUND_SERVICE_DIRECTORY_VADDR - self->allocation_next)
+    if (source_offset + size < size || source_offset + size > SIZE_MAX - (PAGE_SIZE - 1))
     {
         return Error(SharedUserPages, user_allocation_full, PROCESS_MEMORY_INVALID_SIZE);
     }
+    size_t allocation_size = Process__page_aligned_size(source_offset + size);
+    Address target_base;
+    match_optional(
+        Process__find_free_user_range(self, allocation_size),
+        some(found)
+        {
+            target_base = found;
+        },
+        none()
+        {
+            return Error(SharedUserPages, user_allocation_full, PROCESS_MEMORY_FULL);
+        }
+    );
     UserAllocationRangeMatch range = UserAllocationRangeMatch__new(source_base, allocation_size);
 
     match_find_result_ptr(
@@ -1236,8 +1302,18 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
                 },
                 none_do_nothing()
             );
+            match_optional(
+                source->ipc_doorbell,
+                some(doorbell)
+                {
+                    if (doorbell.virtual_addr == allocation_match->address.virtual_addr)
+                    {
+                        return Error(SharedUserPages, static_user_allocation, PROCESS_MEMORY_STATIC_ALLOCATION);
+                    }
+                },
+                none_do_nothing()
+            );
             Offset backing_offset = source_base - allocation_match->address.virtual_addr;
-            Address target_base = self->allocation_next;
             KernelAddress mapping_kernel_address =
                 KERNEL_ADDR(allocation_match->address.kernel_addr.virtual_addr + backing_offset + source_offset,
                             allocation_match->address.kernel_addr.phys_addr + backing_offset + source_offset);
@@ -1256,7 +1332,6 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
                 Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_SHARED),
                 success(_)
                 {
-                    self->allocation_next += allocation_size;
                     return Success(SharedUserPages, SharedUserPages__new(allocation, mapping));
                 },
                 error(code, message)
@@ -1317,15 +1392,24 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
 {
     Address physical_base = Process__page_base(physical);
     Address physical_offset = physical - physical_base;
-    size_t allocation_size = Process__page_aligned_size(size + physical_offset);
-    if (size == 0 || size + physical_offset < size || allocation_size < size ||
-        self->allocation_next >= HUND_SERVICE_DIRECTORY_VADDR ||
-        allocation_size > HUND_SERVICE_DIRECTORY_VADDR - self->allocation_next)
+    if (size == 0 || size + physical_offset < size || size + physical_offset > SIZE_MAX - (PAGE_SIZE - 1))
     {
         return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_INVALID_SIZE);
     }
+    size_t allocation_size = Process__page_aligned_size(size + physical_offset);
 
-    Address virtual_base = self->allocation_next;
+    Address virtual_base;
+    match_optional(
+        Process__find_free_user_range(self, allocation_size),
+        some(found)
+        {
+            virtual_base = found;
+        },
+        none()
+        {
+            return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+        }
+    );
     Address virtual_address = virtual_base + physical_offset;
 
     UserAddress mapping = UserAddress__new(virtual_address, KERNEL_ADDR(physical, physical), true, true, false, true);
@@ -1337,7 +1421,6 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
         Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_MMIO),
         success(_)
         {
-            self->allocation_next += allocation_size;
             return Success(UserAddress, mapping);
         },
         error(code, message)
@@ -1418,18 +1501,19 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
         UserAllocations__at(&self->user_allocations, index),
         some(allocation)
         {
-            match_optional(
-                self->virtio_device,
-                some(device)
+            for_each_fa_ptr(
+                ProcessVirtioDevices,
+                &self->virtio_devices,
+                device_index,
+                device,
                 {
                     if (allocation.type == USER_ALLOCATION_MMIO &&
-                        device.virtual_addr >= allocation.address.virtual_addr &&
-                        device.virtual_addr - allocation.address.virtual_addr < allocation.size)
+                        device >= allocation.address.virtual_addr &&
+                        device - allocation.address.virtual_addr < allocation.size)
                     {
                         return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FREE_FAILED);
                     }
-                },
-                none_do_nothing()
+                }
             );
             __d_printf(MEMORY, "process free pid=%i name=%s type=%s user=%p kernel=%p phys=%p size=%i tracked=%i\n",
                        self->pid, cstr(self->name), UserAllocationType__name(allocation.type),
@@ -1477,6 +1561,17 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
         none_do_nothing()
     );
     match_optional(
+        self->ipc_doorbell,
+        some(mapping)
+        {
+            if (mapping.virtual_addr == virtual_address)
+            {
+                return Error(ProcessMemoryCode, static_user_allocation, PROCESS_MEMORY_STATIC_ALLOCATION);
+            }
+        },
+        none_do_nothing()
+    );
+    match_optional(
         UserAllocations__find(&self->user_allocations, allocation_matches_virtual, &virtual_address),
         some(found)
         {
@@ -1500,6 +1595,7 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
 Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self)
 {
     self->queue_wait_control = None(UserAddress);
+    self->ipc_doorbell = None(UserAddress);
     Process__quiesce_device(self);
     while (self->user_allocations.len > 0)
     {
@@ -1522,6 +1618,7 @@ static Result(SpawnFileDescriptor) Process__startup_endpoint(ProcessPtr self, Sp
     {
         return Success(SpawnFileDescriptor, descriptor);
     }
+
     switch (descriptor)
     {
     case 0:

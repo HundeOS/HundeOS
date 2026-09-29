@@ -7,8 +7,8 @@ longer reads `fstab` itself. Boot file operations no longer use a syscall bypass
 
 ## Status
 
-`hund-io-system` mediates sockets and the boot-configured FAT32/EXT2 mounts
-through channels. `hund-dateisystem` owns the userspace mount table and routes
+`hund-io-system` routes sockets, streams, and filesystem paths without retaining
+per-request or per-handle state. `hund-dateisystem` owns the userspace mount table and routes
 filesystem paths to the format drivers. FAT32 and EXT2 no longer register with
 the kernel filesystem broker or fetch/complete filesystem requests through
 service syscalls. Their file handles, offsets, and buffers now live in userspace.
@@ -25,11 +25,11 @@ from I/O syscalls to a protocol over the existing `Channel`.
 
 ```text
 Application
-    | Channel: I/O protocol
-hund-io-system
-    |-- Channel --> hund-dateisystem --> Channel --> FAT32/EXT2 --> Channel --> block driver
-    |-- Channel --> socket/network service
-    `-- Channel --> stream/console service
+    |-- route request --> hund-io-system
+    |                     `-- filesystem route --> hund-dateisystem
+    |                                              `-- mount route reply
+    `-- direct Channel --> final filesystem/socket/stream service
+                           `-- Channel --> block driver where required
 ```
 
 These are protocols over the same bidirectional IPC session abstraction, not
@@ -42,20 +42,39 @@ converts native EOF and error statuses to POSIX return values and `errno`.
 Descriptors `0`, `1`, and `2` retain their standard stream meanings. This map
 and the stdio implementation are entirely userspace concerns.
 
-The first consumer is an unmodified, pinned OpenBSD `cat`, built directly from
-`vendor/openbsd` and installed in the disk rootfs at `/usr/local/bin/cat`.
-Current stdio is unbuffered. `fstat` exposes a transfer block size but not full
-filesystem metadata, and `pledge` currently records compatibility rather than
-enforcing a sandbox; neither limitation moves I/O policy into the kernel.
+Pinned, unmodified OpenBSD `cat`, `cp`, `grep`, and `tail` sources are built
+directly from `vendor/openbsd` and installed in the disk rootfs under
+`/usr/local/bin`.
+The compatibility stdio layer uses seek-aware file read buffering and
+line-buffered standard output to avoid an I/O-service request for each
+character. `fstat` exposes a transfer block size but not full filesystem
+metadata, and `pledge` currently records compatibility rather than enforcing a
+sandbox; neither limitation moves I/O policy into the kernel.
+
+`tail -f` registers file handles with `hund-io-system` and blocks on a batched
+userspace I/O request containing its watched handles and last-seen generations.
+Filesystem writes, removals, and recreations advance the corresponding path's
+generation. The service completes the blocked request only when one generation
+changes, allowing the ordinary channel wait path to deschedule `tail` without a
+polling timer or a kernel filesystem watcher. The libc `kqueue` compatibility
+subset translates these notifications for the unchanged OpenBSD source.
 
 ## Ownership
 
-`hund-io-system` owns application-facing handles, backend and endpoint routing,
-access checks, operation dispatch, and cleanup of its clients' I/O resources.
-It routes common operations such as read, write, and close to the appropriate
-backend. Resource-specific operations, such as directory listing or socket
-accept, use that same interface without pretending all resource types support
-every operation. Unsupported operations return an explicit error.
+`hund-io-system` owns only top-level endpoint selection. It returns a bounded
+redirect describing the next service, rewritten path, and whether that service
+is final. `hund-dateisystem` similarly performs mount selection and path
+rewriting, with one namespace-specific responsibility: directory enumeration
+includes immediate child mountpoints before redirecting to the backing
+filesystem. It does not manufacture file metadata. Neither routing service owns
+client handles, buffers, pending requests, or backend Channels.
+
+The application I/O client follows at most eight redirects and then opens or
+reuses a direct Channel to the final service. It gives callers process-local
+opaque handles and maps them to the final service's handles. The final
+filesystem, socket, or stream service owns resource state, access checks, and
+cleanup for its authenticated client sessions. Unsupported operations return an
+explicit error.
 
 `hund-dateisystem` owns the filesystem namespace, configured mount table, and
 mount selection. Format drivers own filesystem format knowledge and open-file
@@ -71,13 +90,14 @@ memory protection, authenticated IPC primitives, and process-exit notification.
 ## Identity and handles
 
 Identify clients by authenticated PID and services by their `BString` service
-identifier. Do not trust a PID supplied in a request payload. A backend must
-authenticate `hund-io-system` before accepting any delegated client identity;
-the intermediary must not turn an unprivileged request into privileged access.
+identifier. Do not trust a PID or session supplied in a request payload. The
+common I/O server overwrites both fields with authenticated Channel metadata
+before calling a service. Kernel-originated executable loads retain their
+authenticated origin PID while following the same redirect protocol.
 
 One client/service channel session carries multiple independent resource
 handles. Opening another file or socket does not allocate another channel.
-Likewise, `hund-io-system` reuses its backend sessions across resources.
+Likewise, the client library reuses each direct final-service session across resources.
 Validate each handle against its owning client session; stale or foreign
 handles must not access a recycled resource.
 
@@ -95,18 +115,40 @@ bounds, enforced access modes, and explicit lease lifetimes. Protocol open
 responses advertise the buffers; read/write commands and completions remain on
 the Channel. Do not create parallel request/reply rings in those buffers.
 
-The first implementation uses 2 MiB directional leases advertised on open.
-I/O mediators copy in bulk between session buffers. Block commands describe
+The first implementation uses 2 MiB directional leases advertised by the final
+service on open. Routing services do not allocate or copy bulk buffers. Block commands describe
 multiple sectors per request; hardware callbacks now receive the shared buffer
 directly. VirtIO uses DMA into retained service-to-service backing, while SDHCI
 uses multi-sector PIO. See [release rules](shared-buffers.md#current-release-rules)
 for the temporary boot-lifetime retention policy.
+
+EXT2 places a bounded 1024-sector (512 KiB) scan-resistant LRU cache above its
+`BlockClient`. Reads retain contiguous miss batching. A repeated access protects
+a sector, while one-off sectors remain probationary and are evicted first.
+Writes reach the block service before updating sectors already resident in the
+cache; uncached streaming writes are not admitted. This keeps device coherence
+simple without displacing the hot read working set. Cache hits, misses, and
+evictions are exported with the filesystem process's I/O diagnostics through
+`/proc/<pid>/ipc`. The cache is userspace filesystem policy; it does not restore
+a kernel block cache.
+
+EXT2 also keeps a bounded 256-entry inode cache using the same generic
+scan-resistant cache policy. Reads are keyed by inode number. Successful
+inode-table writes update the cached value only after the block write completes,
+and freeing an inode invalidates it after the bitmap write completes. Inode
+cache hits, misses, and evictions are reported separately through
+`/proc/<pid>/ipc`.
 
 The current channel supports one outstanding request per session. Multiple
 open handles do not change that limit. The server must continue servicing
 other sessions while a backend operation waits; it must not block its entire
 dispatcher on one device or client. Additional in-flight request support
 requires an explicit protocol change, not extra channels per resource.
+
+Routing requests complete synchronously with a redirect or error and therefore
+need no per-request fibres. A final service may retain a request by returning no
+reply while it waits for data. Its other authenticated sessions continue to be
+polled by the common server loop.
 
 ## Cleanup and failure
 
@@ -162,10 +204,10 @@ Duplicate name/direction registrations are rejected. Unknown names return
 access returns `IO_PERMISSION_DENIED`. Colon-prefixed opens never fall through
 to the filesystem router.
 
-Boot setup registers the terminal routes below. The mediator and stream-driver
-helpers validate stream syntax, not a built-in list of device names. Backend
+Boot setup registers the terminal routes below. The registry and stream-driver
+helpers validate stream syntax, not a built-in list of device names. Direct
 Channels are opened lazily and reused by service identifier, including across
-aliases. Open handles retain backend routing and client ownership independently
+aliases. Open handles retain final-service routing and client ownership independently
 of subsequent path lookup. Registration is local to the I/O service for now;
 there is no driver-controlled registration protocol. `:keyboard:` reads route
 to the `keyboard` service using this same registry and Channel protocol.
@@ -183,9 +225,8 @@ the interrupt-protocol acknowledgement. When the input buffer fills, it retains
 the pending interrupt until reads make space. `uart_tx` handles FIFO backpressure
 and newline translation. The stream driver retains an empty read at its backend
 until input arrives, so the application request remains blocked without Channel
-request/reply churn. Blocked writes return `IO_WAIT_FOR_DATA` so the mediator can
-service other clients while retrying; this remains necessary for polling output
-drivers without a transmit interrupt.
+request/reply churn. Blocked writes return `IO_WAIT_FOR_DATA`; empty reads remain
+pending at the final service without bouncing retries through routing services.
 
 The shell assigns its foreground child to the terminal through its authenticated
 input handle, then waits for that child explicitly. While a foreground process is
@@ -219,27 +260,26 @@ independent architecture UART path and do not depend on these services.
 
 ## Socket protocol
 
-The implemented path is application -> Channel -> `hund-io-system` -> Channel
--> `socket_router`. The I/O service mediates requests and data; it does not
-redirect applications to a backend. All socket buffers, connection pairing,
+The implemented control path is application -> `hund-io-system` redirect ->
+`socket_router`; subsequent operations use the application's direct Channel to
+`socket_router`. All socket buffers, connection pairing,
 listener backlogs, and accept queues for this path live in userspace.
 `socket://name` remains a socket-registry name, not a filesystem node. This is
 local socket communication, not a TCP/IP stack.
 
 The protocol provides open (listen or connect selected by flags), accept,
 read, write, and close. Replies contain an explicit I/O status and a handle
-or byte count. The I/O service owns application handles, validates operation
-kind and read/write flags, and translates handles to backend resources. It
-overwrites delegated identity with authenticated channel metadata. The socket
-service accepts delegated operations only from the directory-identified I/O
-service, through a warden-authenticated channel.
+or byte count. The client library owns local handles and translates them to
+socket-service handles. The common server overwrites request identity with
+authenticated Channel metadata; `socket_router` validates operation kind,
+access flags, and resource ownership against that direct session.
 
 Backend operations are nonblocking. An empty accept/read or a full write buffer
-returns `IO_WAIT_FOR_DATA` (`WOULD_BLOCK`). The mediator retains the application
-request and retries while scanning other sessions. It never holds the backend
-channel waiting for another client's action. Channel replies are retained under
-backpressure without repeating completed writes or opens. One application
-session still supports only one outstanding operation.
+returns `IO_WAIT_FOR_DATA` (`WOULD_BLOCK`). The socket server retains an empty
+accept or read without publishing an interim reply while continuing to scan
+other sessions. Channel replies are retained under backpressure without
+repeating completed writes or opens. One application session still supports
+only one outstanding operation.
 
 Transfers use the directional shared buffers and can return short counts.
 Open sends a counted endpoint name of at most 255 bytes, reconstructed
@@ -255,14 +295,10 @@ opens to the I/O channel. There is no kernel descriptor table or syscall fallbac
 Socket handles are not currently inherited by spawned processes.
 Service-restart recovery is deferred.
 
-Each client disconnect triggers a backend release-client operation. The warden
-sends a channel cancellation notification if a request is in progress, retaining
-the payload until the server replies or disconnects. This lets the I/O server
-notice departure even when it is holding a blocked accept/read. The
-mediator drains an outstanding reply first, including an open that succeeded
-after the client departed, then releases all resources for that session.
-Backend loss fails requests without replay or reconnection. Mediator-channel
-loss clears the socket service's resources. This uses current channel closure
+Each client disconnect releases the socket resources owned by that authenticated
+session. The warden sends a channel cancellation notification if a request is in
+progress, retaining the payload until the server replies or disconnects. Backend
+loss fails requests without replay or reconnection. This uses current channel closure
 detection; the reliable process-exit notification work described above remains
 outstanding. A live client that never closes can still retain bounded resources.
 
@@ -272,20 +308,18 @@ Configuration entries for already-established core services do not start duplica
 The old kernel socket implementation and broker service operations have been
 deleted. Userspace socket calls use the Channel-based socket service.
 
-Implementation: `user/lib/io` contains the protocol, client, shared mediation,
-and channel server loop; `user/services/hund-io-system` selects backends; socket state lives
-in `user/drivers/socket_router/sockets.c`. Tests cover mediation with an
-asynchronous fake backend transport, the real channel client/server path,
-ownership, backpressure, EOF, and teardown during an outstanding request.
+Implementation: `user/lib/io` contains the protocol, redirect-following client,
+and channel server loop; `user/services/hund-io-system` selects routes; socket
+state lives in `user/drivers/socket_router/sockets.c`. Tests cover routing, the
+real channel client/server path, ownership, backpressure, EOF, and teardown.
 
 ## Boot filesystem namespace
 
-The filesystem path is application -> `hund-io-system` -> `hund-dateisystem`
--> FAT32/EXT2 service -> block driver. Every arrow is an existing Channel,
-not a service-specific transport. Each intermediary translates resource handles
-and validates them against the delegated client PID and channel session.
-`hund-dateisystem` accepts delegated identities only from the authenticated I/O
-service; each format driver accepts them only from the filesystem service.
+The filesystem control path is application -> `hund-io-system` redirect ->
+`hund-dateisystem` redirect -> FAT32/EXT2 service. The application then talks
+directly to that final filesystem service; its block operations use a separate
+Channel to the block driver. Every arrow is an existing Channel, not a
+service-specific transport. Routing services translate paths, not handles.
 
 Mama starts `hund-dateisystem` with an empty namespace, then establishes `/sbin`,
 `/boot`, and `/boot/config`. Hundeschule subsequently reads `/boot/config/fstab`
@@ -294,9 +328,8 @@ through Channels, registers the configured FAT32/EXT2 mounts, and starts the roo
 or duplicate root configuration, spawn failure, or failed readiness prevents
 startup from reaching login. Humpen skips root and starts the remaining
 format-driver watchdogs using the same fstab and shared `MountConfig` parser.
-Drivers advertise their mountpoint as their service identifier after
-mounting the block device. The namespace connects on demand and retains one
-channel per format-driver process. This startup sequence applies to all targets;
+Drivers advertise their mountpoint as their service identifier after mounting
+the block device. The namespace returns that identifier in its redirect. This startup sequence applies to all targets;
 there is no HVF-only mount list in the code.
 
 The HVF configuration includes `/`, `/mnt/sd`, `/mnt/channelio`, and
@@ -320,12 +353,12 @@ throughput benchmark or proof of general service-restart reclamation.
 The implemented operations are open, read, write, close, list directory, mkdir,
 and remove. Routing selects the longest matching complete mount-path prefix;
 root preserves the absolute path forwarded to its driver. Duplicate mountpoints
-are rejected, but nested mounts are supported. Directory entries are paged over
-the channel: synthetic mount-parent entries precede backing filesystem entries.
-The library merges duplicate names, preserving the earlier overlay entry while
-advancing the transport offset independently of the output entry count. This
-keeps `/`, `/mnt`, `/boot`, and `/tmp` discoverable, even when an intermediate
-directory does not exist on disk. Backend failures still propagate as errors.
+are rejected, but nested mounts are supported. Directory enumeration first
+returns the immediate child mountpoints owned by the namespace, including
+synthetic parents such as `/mnt`, and then redirects to the selected filesystem
+driver with an adjusted paging offset. The client removes duplicate backend
+names so a mounted directory is authoritative. Other metadata requests are
+redirected unchanged, and backend failures still propagate as errors.
 `/boot/config` and `/boot/sysinfo` use the same Channel routing as other files.
 Named `:...:` streams and other paths use the I/O service;
 an `IO_PATH_UNMANAGED` reply does not permit legacy syscall routing.
@@ -410,7 +443,7 @@ Interrupt-driven SD transfers and SD write support are not implemented.
 The `channel_blk`/`channel_fs` demo pair also uses the shared BlockServer and
 BlockClient APIs, not private request/reply rings. Unused `IO__block_read` and
 `IO__block_write` syscall helpers are deleted; general fibre support remains.
-Namespace, mediation, routing, format operations, and
+Namespace routing, client redirects, format operations, and
 disconnect behavior have userspace tests with fake kernel/block boundaries.
 
 The userspace `sysinfofs` driver exposes `/boot/sysinfo` from the typed kernel
@@ -490,8 +523,9 @@ Hundeschule installs a deviceless `memfs` mount at `/tmp`, starts the embedded
 Hundeschau. A conflicting `/tmp` fstab entry or failed startup stops that sequence.
 No disk configuration entry is required.
 
-Temporary-file operations follow application -> `hund-io-system` ->
-`hund-dateisystem` -> memfs, over the existing Channel and I/O protocol.
+Temporary-file route discovery follows application -> `hund-io-system` ->
+`hund-dateisystem` -> memfs. Operations after the redirect use the application's
+direct Channel to memfs and the existing I/O protocol.
 The former kernel `/tmp/memfs` mount and syscall bypass have been removed.
 The old implementation exists only as a kernel-test fixture and is not linked
 into the kernel.
@@ -504,9 +538,10 @@ recursive directory removal. Read/write opens preserve existing data. Operations
 use shared directional buffers, up to 2 MiB per request. Allocation failures return errors
 without advancing the handle offset or discarding existing data.
 
-The backend authenticates the filesystem service before accepting delegated
-client PID/session identities. Close and client release dispose of handles,
-not files; namespace disconnect releases all handles but preserves files.
+The backend receives authenticated client PID/session identities from its direct
+Channel. Close and client release dispose of handles, not files; a client
+disconnect releases only that session's handles and preserves files and other
+clients' handles.
 Removal frees storage and invalidates handles to the removed node; recreating
 the same path cannot revive them. Nonrecursive directory removal remains
 unsupported, matching the previous memfs behavior. Contents are volatile and

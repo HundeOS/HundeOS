@@ -1,5 +1,16 @@
 #include "queue_wait_control.h"
 
+QueueDispatchTrace QueueDispatchTrace__new(ConstRequestTicketPtr ticket, uint64_t eligible_at_usec,
+                                           uint64_t selected_at_usec, uint64_t dispatched_at_usec)
+{
+    return (QueueDispatchTrace){
+        .ticket = *ticket,
+        .eligible_at_usec = eligible_at_usec,
+        .selected_at_usec = selected_at_usec,
+        .dispatched_at_usec = dispatched_at_usec,
+    };
+}
+
 void QueueWaitControl__begin(QueueWaitControlPtr self)
 {
     uint64_t generation = __atomic_load_n(&self->generation, __ATOMIC_RELAXED);
@@ -112,4 +123,32 @@ bool QueueWaitControl__unchanged(ConstQueueWaitControlPtr self, ConstQueueWaitPu
 {
     __atomic_thread_fence(__ATOMIC_ACQ_REL);
     return __atomic_load_n(&self->generation, __ATOMIC_ACQUIRE) == publication->generation;
+}
+
+void QueueWaitControl__publish_dispatch(QueueWaitControlPtr self, ConstQueueDispatchTracePtr trace)
+{
+    uint64_t generation = __atomic_load_n(&self->dispatch_trace.generation, __ATOMIC_RELAXED);
+    uint64_t updating = (generation + 1) | 1ULL;
+    __atomic_store_n(&self->dispatch_trace.generation, updating, __ATOMIC_SEQ_CST);
+    self->dispatch_trace.trace = *trace;
+    __atomic_store_n(&self->dispatch_trace.generation, updating + 1, __ATOMIC_RELEASE);
+}
+
+Optional(QueueDispatchTrace) QueueWaitControl__take_dispatch(QueueWaitControlPtr self, ConstRequestTicketPtr ticket)
+{
+    uint64_t before = __atomic_load_n(&self->dispatch_trace.generation, __ATOMIC_ACQUIRE);
+    uint64_t consumed = __atomic_load_n(&self->dispatch_trace.consumed_generation, __ATOMIC_ACQUIRE);
+    if (before == 0 || (before & 1) != 0 || before == consumed)
+    {
+        return None(QueueDispatchTrace);
+    }
+    QueueDispatchTrace trace = self->dispatch_trace.trace;
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (__atomic_load_n(&self->dispatch_trace.generation, __ATOMIC_ACQUIRE) != before ||
+        !RequestTicket__equals(&trace.ticket, ticket))
+    {
+        return None(QueueDispatchTrace);
+    }
+    __atomic_store_n(&self->dispatch_trace.consumed_generation, before, __ATOMIC_RELEASE);
+    return Some(QueueDispatchTrace, trace);
 }

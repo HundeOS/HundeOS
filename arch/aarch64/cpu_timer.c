@@ -8,6 +8,7 @@
 #include "../../kernel/kernel_init.h"
 
 #include "cpu_timer.h"
+#include "cpu.h"
 #include "asm_helpers.h"
 #include "mmio_helpers.h"
 #include "gicr.h"
@@ -78,9 +79,10 @@ static void CPUTimer__enable(SystemInfoPtr system_info, bool use_virtual_timer, 
     uint8_t * priority_reg = (gicr + GICR_IPRIORITYR_OFFSET(ppi));
     // Priority (byte-per-interrupt). Lower = higher prio; 0x80 is mid.
     *(volatile uint8_t *)(priority_reg) = 0x80;
+    *(volatile uint8_t *)(gicr + GICR_IPRIORITYR_OFFSET(CPU_RESCHEDULE_INTERRUPT)) = 0x40;
 
-    // Enable the timer PPI
-    mmio_write32(1u << ppi, gicr + GICR_ISENABLER0_OFFSET);
+    // Enable the timer PPI and the scheduler SGI.
+    mmio_write32((1u << ppi) | (1u << CPU_RESCHEDULE_INTERRUPT), gicr + GICR_ISENABLER0_OFFSET);
 
     // Ensure GICR writes land before we enable the CPU interface
     dsb_ish();
@@ -133,6 +135,22 @@ void CPUTimer__rearm(IRQNumber irq)
     }
 
     // Force system register synchronization right here!
+    dsb_sy();
+    isb();
+}
+
+void CPUTimer__suspend(void)
+{
+    wr_cntv_ctl(0);
+    dsb_sy();
+    isb();
+}
+
+void CPUTimer__resume(void)
+{
+    wr_cntv_ctl(0);
+    wr_cntv_tval(timer_interval);
+    wr_cntv_ctl(1);
     dsb_sy();
     isb();
 }

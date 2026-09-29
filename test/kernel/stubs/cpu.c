@@ -6,6 +6,8 @@
 
 static CPUID cpu_id = 0;
 static uint64_t cpu_count = MAX_CPUS;
+static CPUID rescheduled_cpu;
+static uint64_t reschedule_count;
 
 void reset_cpu_id()
 {
@@ -15,6 +17,12 @@ void reset_cpu_id()
 void reset_cpu_count()
 {
     cpu_count = MAX_CPUS;
+}
+
+void reset_cpu_reschedule(void)
+{
+    rescheduled_cpu = 0;
+    reschedule_count = 0;
 }
 
 void set_cpu_id(CPUID id)
@@ -52,6 +60,22 @@ void CPU__wait()
 
 void CPU__signal_event()
 {
+}
+
+void CPU__request_reschedule(CPUID cpu)
+{
+    rescheduled_cpu = cpu;
+    reschedule_count++;
+}
+
+CPUID CPUStub__rescheduled_cpu(void)
+{
+    return rescheduled_cpu;
+}
+
+uint64_t CPUStub__reschedule_count(void)
+{
+    return reschedule_count;
 }
 
 uint64_t CPU__count()

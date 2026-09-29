@@ -32,13 +32,19 @@ FiberScheduler FiberScheduler__new_with_max_fibers(size_t max_fibers)
 
 Result(FiberPtr) FiberScheduler__spawn(FiberSchedulerPtr self, FiberEntry entry, Anything argument)
 {
+    return FiberScheduler__spawn_with_stack_size(self, entry, argument, FIBER_DEFAULT_STACK_SIZE);
+}
+
+Result(FiberPtr) FiberScheduler__spawn_with_stack_size(FiberSchedulerPtr self, FiberEntry entry, Anything argument,
+                                                       size_t stack_size)
+{
     if (self->live_count >= self->max_fibers || self->live_count >= FIBER_SCHEDULER_MAX_FIBERS)
     {
         return Error(FiberPtr, fiber_limit_reached, FIBER_LIMIT_REACHED);
     }
 
     match_result(
-        Fiber__heap_new(entry, argument),
+        Fiber__heap_new_with_stack_size(entry, argument, stack_size),
         success(fiber)
         {
             match_result(

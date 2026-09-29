@@ -3,4 +3,6 @@ manifest:
   include_default_fixtures: false
   source_files:
     - common/types/bstring.c
+    - common/ipc/request_ticket.c
     - user/services/hund-verfolgen/trace_buffer.c
+    - user/services/hund-verfolgen/io_latency.c

@@ -203,30 +203,42 @@ void test_mutation_unknown_processes_and_parent_traversal_are_rejected(void)
     TEST_ASSERT_EQUAL(IO_UNKNOWN_PID, Embedfs__execute(&filesystem, &request).status);
 }
 
-void test_only_namespace_can_delegate_and_disconnect_clears_resources(void)
+void test_direct_clients_are_isolated_and_disconnect_releases_their_resources(void)
 {
     IORequest request = path_request(IO_REQUEST_OPEN, &bstr("/hello"));
     match_optional(
-        Embedfs__serve(&filesystem, 50, 99, &request),
-        some(reply)
-        {
-            TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, reply.status);
-        },
-        none_test_fail()
-    );
-    match_optional(
-        Embedfs__serve(&filesystem, 50, 70, &request),
+        Embedfs__serve(&filesystem, 30, 20, &request),
         some(reply)
         {
             TEST_ASSERT_EQUAL(IO_OK, reply.status);
         },
         none_test_fail()
     );
+    request = path_request(IO_REQUEST_OPEN, &bstr("/services/first"));
+    request.client_pid = 21;
+    request.client_session = 31;
+    match_optional(
+        Embedfs__serve(&filesystem, 31, 21, &request),
+        some(reply)
+        {
+            TEST_ASSERT_EQUAL(IO_OK, reply.status);
+        },
+        none_test_fail()
+    );
+    TEST_ASSERT_EQUAL(2, EmbedfsHandles__len(&filesystem.handles));
+    TEST_ASSERT_TRUE(Embedfs__disconnect(&filesystem, 31, 21));
     TEST_ASSERT_EQUAL(1, EmbedfsHandles__len(&filesystem.handles));
-    TEST_ASSERT_TRUE(Embedfs__disconnect(&filesystem, 51, 70));
-    TEST_ASSERT_EQUAL(1, EmbedfsHandles__len(&filesystem.handles));
-    TEST_ASSERT_TRUE(Embedfs__disconnect(&filesystem, 50, 70));
+    TEST_ASSERT_TRUE(Embedfs__disconnect(&filesystem, 30, 20));
     TEST_ASSERT_EQUAL(0, EmbedfsHandles__len(&filesystem.handles));
+
+    match_optional(
+        Embedfs__serve(&filesystem, 30, 0, &request),
+        some(reply)
+        {
+            TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, reply.status);
+        },
+        none_test_fail()
+    );
 }
 
 void test_archive_entry_bounds_reject_overflow_and_names_need_no_terminator(void)

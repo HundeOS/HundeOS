@@ -49,6 +49,8 @@ typedef struct InterruptProtocolResponse
     IRQNumber irq;
     InterruptRegistrationGeneration generation;
     InterruptDeliverySequence sequence;
+    uint64_t kernel_irq_at_usec;
+    uint64_t manager_received_at_usec;
 } InterruptProtocolResponse;
 
 typedef InterruptProtocolResponse * InterruptProtocolResponsePtr;
@@ -60,7 +62,8 @@ InterruptProtocolRequest InterruptProtocol__acknowledgement(IRQNumber irq, Inter
                                                             InterruptDeliverySequence sequence);
 InterruptProtocolResponse InterruptProtocol__subscribed(IRQNumber irq, InterruptRegistrationGeneration generation);
 InterruptProtocolResponse InterruptProtocol__delivery(IRQNumber irq, InterruptRegistrationGeneration generation,
-                                                      InterruptDeliverySequence sequence);
+                                                      InterruptDeliverySequence sequence, uint64_t kernel_irq_at_usec,
+                                                      uint64_t manager_received_at_usec);
 InterruptProtocolResponse InterruptProtocol__acknowledged(IRQNumber irq, InterruptRegistrationGeneration generation,
                                                           InterruptDeliverySequence sequence);
 InterruptProtocolResponse InterruptProtocol__error(IRQNumber irq, InterruptProtocolCode code);

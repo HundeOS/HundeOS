@@ -150,6 +150,24 @@ ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size
     return record_operation(IO_CALL, IO_WRITE, handle, (Anything)data, size, 0);
 }
 
+IOReply IOClient__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
+{
+    TEST_FAIL_MESSAGE("Unexpected filesystem seek");
+    return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+}
+
+IOReply IOClient__watch_file(IOHandle handle)
+{
+    TEST_FAIL_MESSAGE("Unexpected filesystem watch");
+    return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+}
+
+IOReply IOClient__wait_file_change(IOFileWatch * watches, size_t count)
+{
+    TEST_FAIL_MESSAGE("Unexpected filesystem wait");
+    return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+}
+
 void IO__print(ConstBStringPtr message)
 {
     StringPos written = BString__copy_to(message, output + output_position, sizeof(output) - output_position);

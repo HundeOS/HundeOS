@@ -44,6 +44,7 @@ typedef enum ServiceOperation
     SERVICE_QUEUE_WAIT,
     SERVICE_QUEUE_WAIT_CONTROL,
     SERVICE_AUTHORIZE_MOUNT_CLIENT,
+    SERVICE_QUEUE_DATA_AVAILABLE,
 } ServiceOperation;
 
 typedef enum ServiceEventType

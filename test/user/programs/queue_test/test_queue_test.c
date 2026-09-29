@@ -8,6 +8,8 @@
 static QueueIdentity identity;
 static QueuePage client_page;
 static QueuePage server_page;
+static IpcDoorbell client_doorbell;
+static IpcDoorbell server_doorbell;
 static QueueArrivals arrivals;
 static TestQueues server_queues;
 static uint64_t close_count;
@@ -29,7 +31,7 @@ static void assert_push_success(QueuePtr queue, ConstQueueMessagePtr message)
 static Queue client_queue(void)
 {
     match_result(
-        Queue__attach(&identity, &client_page, &server_page, 16, 1),
+        Queue__attach(&identity, &client_page, &server_page, 16, 1, &server_doorbell, &Queue__ignore_data_available),
         success(queue)
         {
             return queue;
@@ -44,6 +46,8 @@ void setUp(void)
     identity = (QueueIdentity){.connection = 16, .endpoint = 32, .client_pid = 1, .server_pid = 2};
     client_page = (QueuePage){0};
     server_page = (QueuePage){0};
+    client_doorbell = (IpcDoorbell){0};
+    server_doorbell = (IpcDoorbell){0};
     arrivals = (QueueArrivals){.endpoint = 32};
     match_result(QueueConnectionSlots__set(&arrivals.connections, 0, 16),
         success_do_nothing(),
@@ -67,7 +71,8 @@ Result(Queue) Queue__accept(QueueConnectionID connection)
         return Error(Queue, bstr("Rejected"), QUEUE_CLOSED);
     }
     identity.accepted = 1;
-    return Queue__attach(&identity, &client_page, &server_page, connection, 2);
+    return Queue__attach(&identity, &client_page, &server_page, connection, 2, &client_doorbell,
+                         &Queue__ignore_data_available);
 }
 
 QueueCode QueueConnection__close(QueueConnectionID connection)

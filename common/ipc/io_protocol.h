@@ -19,6 +19,7 @@
 #define IO_VIDEO_SERVICE "video_term"
 #define IO_KEYBOARD_SERVICE "keyboard"
 #define IO_DIRECTORY_BATCH_CAPACITY 3U
+#define IO_ROUTE_LIMIT 8U
 
 typedef enum IORequestOperation
 {
@@ -36,7 +37,15 @@ typedef enum IORequestOperation
     IO_REQUEST_RELEASE_BUFFERS,
     IO_REQUEST_SET_FOREGROUND_PROCESS,
     IO_REQUEST_FILE_INFO,
+    IO_REQUEST_SEEK,
+    IO_REQUEST_WATCH_FILE,
+    IO_REQUEST_WAIT_FILE_CHANGE,
 } IORequestOperation;
+
+static inline IOFileChange IOFileChange__new(IOHandle handle, uint64_t generation, Flags events)
+{
+    return (IOFileChange){.handle = handle, .generation = generation, .events = events};
+}
 
 typedef struct IORequest
 {
@@ -65,6 +74,48 @@ typedef struct IODirectoryBatch
     uint64_t count;
 } IODirectoryBatch;
 
+typedef struct IORoute
+{
+    bool final;
+    uint64_t service_length;
+    uint8_t service[IO_PROTOCOL_DATA_SIZE];
+    uint64_t path_length;
+    uint8_t path[IO_PROTOCOL_DATA_SIZE];
+    uint64_t target_path_length;
+    uint8_t target_path[IO_PROTOCOL_DATA_SIZE];
+} IORoute;
+
+typedef IORoute * IORoutePtr;
+typedef const IORoute * ConstIORoutePtr;
+
+static inline IORoute IORoute__new(ConstBStringPtr service, ConstBStringPtr path, ConstBStringPtr target_path,
+                                   bool final)
+{
+    IORoute route = {.final = final};
+    route.service_length = BString__copy_to(service, (char *)route.service, sizeof(route.service));
+    route.path_length = BString__copy_to(path, (char *)route.path, sizeof(route.path));
+    route.target_path_length = BString__copy_to(target_path, (char *)route.target_path, sizeof(route.target_path));
+    return route;
+}
+
+static inline BString IORoute__service(ConstIORoutePtr self)
+{
+    return BString__from_chars((const char *)self->service,
+                               self->service_length < IO_PROTOCOL_DATA_SIZE ? self->service_length : 0);
+}
+
+static inline BString IORoute__path(ConstIORoutePtr self)
+{
+    return BString__from_chars((const char *)self->path,
+                               self->path_length < IO_PROTOCOL_DATA_SIZE ? self->path_length : 0);
+}
+
+static inline BString IORoute__target_path(ConstIORoutePtr self)
+{
+    return BString__from_chars((const char *)self->target_path,
+                               self->target_path_length < IO_PROTOCOL_DATA_SIZE ? self->target_path_length : 0);
+}
+
 typedef struct IOReply
 {
     IOStatus status;
@@ -76,6 +127,8 @@ typedef struct IOReply
         IODirectoryBatch directory;
         BufferPair buffers;
         IOFileInfo file_info;
+        IOFileChange file_change;
+        IORoute route;
     };
 } IOReply;
 
@@ -108,6 +161,14 @@ static inline IOReply IOReply__new(IOStatus status, Anything value)
     return (IOReply){.status = status, .value = value};
 }
 
+static inline IOReply IOReply__redirect(ConstBStringPtr service, ConstBStringPtr path, ConstBStringPtr target_path,
+                                        bool final)
+{
+    IOReply reply = IOReply__new(IO_REDIRECT, 0);
+    reply.route = IORoute__new(service, path, target_path, final);
+    return reply;
+}
+
 static inline uint64_t IORequest__capacity(IORequestPtr self)
 {
     bool transfer = self->operation == IO_REQUEST_READ || self->operation == IO_REQUEST_WRITE;
@@ -122,6 +183,11 @@ static inline ChannelDataPtr IORequest__read_target(IORequestPtr self, IOReplyPt
 static inline ConstChannelDataPtr IORequest__write_source(IORequestPtr self)
 {
     return self->transfer_address != 0 ? (ConstChannelDataPtr)self->transfer_address : self->data;
+}
+
+static inline IOFileWatch * IORequest__file_watches(IORequestPtr self)
+{
+    return (IOFileWatch *)self->data;
 }
 
 _Static_assert(sizeof(IORequest) < CHANNEL_PAYLOAD_CAPACITY, "IO request exceeds channel payload");

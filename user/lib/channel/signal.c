@@ -89,6 +89,16 @@ bool ChannelSignal__space_changed(ChannelSignalPtr self, uint64_t observed_epoch
     return ChannelSignalState__space_changed(ChannelSignal__state(self), observed_epoch);
 }
 
+ConstIpcEventPtr ChannelSignal__data_event(ChannelSignalPtr self)
+{
+    return (ConstIpcEventPtr)&ChannelSignal__state(self)->data_epoch;
+}
+
+ConstIpcEventPtr ChannelSignal__space_event(ChannelSignalPtr self)
+{
+    return (ConstIpcEventPtr)&ChannelSignal__state(self)->space_epoch;
+}
+
 void __attribute__((weak)) ChannelSignal__signal(ChannelSignalPtr self)
 {
 }

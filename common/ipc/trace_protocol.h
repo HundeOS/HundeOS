@@ -4,7 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "buffer.h"
 #include "channel_protocol.h"
+#include "io_trace.h"
 #include "types/bstring.h"
 
 #define HUND_VERFOLGEN_SERVICE "hund-verfolgen"
@@ -15,6 +17,8 @@ typedef enum TraceOperation
 {
     TRACE_OPERATION_RECORD = 1,
     TRACE_OPERATION_STORAGE_READY,
+    TRACE_OPERATION_REGISTER_IO,
+    TRACE_OPERATION_DRAIN_IO,
 } TraceOperation;
 
 typedef enum TraceStatus
@@ -41,7 +45,10 @@ typedef const TraceRequest * ConstTraceRequestPtr;
 typedef struct TraceReply
 {
     TraceStatus status;
+    BufferDescriptor buffer;
 } TraceReply;
+
+typedef const TraceReply * ConstTraceReplyPtr;
 
 static inline TraceRequest TraceRequest__new(TraceOperation operation)
 {
@@ -60,6 +67,16 @@ static inline TraceRequest TraceRequest__record(ConstBStringPtr tag, ConstBStrin
 static inline TraceRequest TraceRequest__storage_ready(void)
 {
     return TraceRequest__new(TRACE_OPERATION_STORAGE_READY);
+}
+
+static inline TraceRequest TraceRequest__register_io(void)
+{
+    return TraceRequest__new(TRACE_OPERATION_REGISTER_IO);
+}
+
+static inline TraceRequest TraceRequest__drain_io(void)
+{
+    return TraceRequest__new(TRACE_OPERATION_DRAIN_IO);
 }
 
 static inline bool TraceRequest__valid_record(ConstTraceRequestPtr self)
@@ -85,5 +102,6 @@ static inline TraceReply TraceReply__new(TraceStatus status)
 
 _Static_assert(sizeof(TraceRequest) < CHANNEL_PAYLOAD_CAPACITY, "Trace request exceeds channel payload");
 _Static_assert(sizeof(TraceReply) < CHANNEL_PAYLOAD_CAPACITY, "Trace reply exceeds channel payload");
+_Static_assert(sizeof(IOTraceRing) <= BUFFER_SIZE, "I/O trace ring exceeds shared buffer");
 
 #endif

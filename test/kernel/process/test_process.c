@@ -569,6 +569,48 @@ void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
     );
 }
 
+void test_process_alloc_user_pages_reuses_freed_dynamic_allocation(void)
+{
+    Elf elf = load_hello_world_elf();
+    match_result(
+        Process__setup(kernel, &elf, &None(ProcessPtr)),
+        success(process)
+        {
+            UserAddress first = alloc_user_pages_for_test(process, PAGE_SIZE);
+            UserAddress second = alloc_user_pages_for_test(process, PAGE_SIZE);
+            TEST_ASSERT_EQUAL(USER_ALLOC_BASE + PAGE_SIZE, first.virtual_addr);
+            TEST_ASSERT_EQUAL(first.virtual_addr + PAGE_SIZE, second.virtual_addr);
+            TEST_ASSERT_EQUAL(PROCESS_MEMORY_OK, unwrap_result(Process__free_user_pages(process, first.virtual_addr),
+                                                               PROCESS_MEMORY_FREE_FAILED));
+
+            UserAddress replacement = alloc_user_pages_for_test(process, PAGE_SIZE);
+            TEST_ASSERT_EQUAL(first.virtual_addr, replacement.virtual_addr);
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_alloc_user_pages_reuses_fragmented_range_only_when_it_fits(void)
+{
+    Elf elf = load_hello_world_elf();
+    match_result(
+        Process__setup(kernel, &elf, &None(ProcessPtr)),
+        success(process)
+        {
+            UserAddress first = alloc_user_pages_for_test(process, PAGE_SIZE);
+            UserAddress hole = alloc_user_pages_for_test(process, PAGE_SIZE * 2);
+            UserAddress last = alloc_user_pages_for_test(process, PAGE_SIZE);
+            TEST_ASSERT_EQUAL(PROCESS_MEMORY_OK, unwrap_result(Process__free_user_pages(process, hole.virtual_addr),
+                                                               PROCESS_MEMORY_FREE_FAILED));
+
+            UserAddress reused = alloc_user_pages_for_test(process, PAGE_SIZE * 2);
+            TEST_ASSERT_EQUAL(hole.virtual_addr, reused.virtual_addr);
+            TEST_ASSERT_EQUAL(first.virtual_addr + PAGE_SIZE * 3, last.virtual_addr);
+        },
+        error_test_fail()
+    );
+}
+
 void test_process_free_user_pages_rejects_static_allocation(void)
 {
     Elf elf = load_hello_world_elf();
@@ -669,13 +711,37 @@ void test_process_claimed_device_is_reset_before_memory_disposal(void)
                 error_test_fail()
             );
             TEST_ASSERT_EQUAL_UINT64(mmio.virtual_addr, test_reset_device);
-            match_optional(process->virtio_device,
-                some_test_fail(),
-                none_do_nothing()
-            );
+            TEST_ASSERT_EQUAL_UINT64(0, ProcessVirtioDevices__len(&process->virtio_devices));
             test_reset_device = 0;
             Process__quiesce_device(process);
             TEST_ASSERT_EQUAL_UINT64(0, test_reset_device);
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_claims_and_quiesces_multiple_virtio_devices(void)
+{
+    extern Address test_reset_device;
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    match_result(
+        Process__map_mmio(process, 0x0a000000, PAGE_SIZE),
+        success(mmio)
+        {
+            match_result(Process__claim_virtio_device(process, mmio.virtual_addr),
+                success_do_nothing(),
+                         error_test_fail()
+            );
+            match_result(Process__claim_virtio_device(process, mmio.virtual_addr + 0x200),
+                success_do_nothing(),
+                         error_test_fail()
+            );
+            TEST_ASSERT_EQUAL_UINT64(2, ProcessVirtioDevices__len(&process->virtio_devices));
+
+            test_reset_device = 0;
+            Process__quiesce_device(process);
+            TEST_ASSERT_EQUAL_UINT64(mmio.virtual_addr + 0x200, test_reset_device);
+            TEST_ASSERT_EQUAL_UINT64(0, ProcessVirtioDevices__len(&process->virtio_devices));
         },
         error_test_fail()
     );
@@ -896,13 +962,21 @@ void test_process_allocations_cannot_grow_into_service_or_shared_page_regions(vo
         Process__setup(kernel, &elf, &None(ProcessPtr)),
         success(process)
         {
-            process->allocation_next = HUND_SERVICE_DIRECTORY_VADDR;
+            match_optional(
+                UserAllocations__ptr_at(&process->user_allocations, 0),
+                some(allocation)
+                {
+                    allocation->address.virtual_addr = USER_ALLOC_BASE;
+                    allocation->size = HUND_SERVICE_DIRECTORY_VADDR - USER_ALLOC_BASE;
+                },
+                none_test_fail()
+            );
             match_result(
                 Process__alloc_user_pages(process, PAGE_SIZE),
                 success_test_fail(),
                 error(code, message)
                 {
-                    TEST_ASSERT_EQUAL(PROCESS_MEMORY_INVALID_SIZE, code);
+                    TEST_ASSERT_EQUAL(PROCESS_MEMORY_FULL, code);
                 }
             );
             match_result(
@@ -910,7 +984,7 @@ void test_process_allocations_cannot_grow_into_service_or_shared_page_regions(vo
                 success_test_fail(),
                 error(code, message)
                 {
-                    TEST_ASSERT_EQUAL(PROCESS_MEMORY_INVALID_SIZE, code);
+                    TEST_ASSERT_EQUAL(PROCESS_MEMORY_FULL, code);
                 }
             );
             match_result(

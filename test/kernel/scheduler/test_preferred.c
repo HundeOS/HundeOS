@@ -31,8 +31,12 @@ static Queue attach(QueueConnectionID id, ProcessPtr process)
     QueueConnection connection =
         unwrap_optional(QueueConnections__at(&scheduler->queues.connections, id % QUEUE_LIMIT), (QueueConnection){0});
     Address base = connection.memory.kernel_addr.virtual_addr;
+    UserAddress peer_doorbell = process->pid == k_v_ptr(connection.memory, QueueIdentity)->client_pid
+                                    ? connection.server_doorbell
+                                    : connection.client_doorbell;
     return unwrap_result(Queue__attach((QueueIdentityPtr)base, (QueuePagePtr)(base + QUEUE_PAGE_SIZE),
-                                       (QueuePagePtr)(base + 2 * QUEUE_PAGE_SIZE), id, process->pid),
+                                       (QueuePagePtr)(base + 2 * QUEUE_PAGE_SIZE), id, process->pid,
+                                       k_v_ptr(peer_doorbell, IpcDoorbell), &Queue__ignore_data_available),
                          (Queue){0});
 }
 
@@ -192,6 +196,87 @@ void test_graph_authenticates_nested_requests_and_origin(void)
     TEST_ASSERT_FALSE(RequestGraph__valid(&scheduler->request_graph, &link));
 }
 
+void test_dependency_weight_counts_valid_waiting_ancestry(void)
+{
+    TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
+    request(p2, p3, &bstr("a"), &bstr("d"), &Some(RequestTicket, root.ticket));
+    RequestGraph__refresh(&scheduler->request_graph, &scheduler->queues);
+
+    TEST_ASSERT_EQUAL_UINT64(0, RequestGraph__dependency_weight(&scheduler->request_graph, p1));
+    TEST_ASSERT_EQUAL_UINT64(1, RequestGraph__dependency_weight(&scheduler->request_graph, p2));
+    TEST_ASSERT_EQUAL_UINT64(2, RequestGraph__dependency_weight(&scheduler->request_graph, p3));
+}
+
+void test_idle_fallback_selects_the_waiter_with_the_largest_dependency_impact(void)
+{
+    TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
+    TestRequest child = request(p2, p3, &bstr("a"), &bstr("d"), &Some(RequestTicket, root.ticket));
+    wait_on(p1, &root.caller);
+    wait_on(p2, &child.caller);
+    wait_on(p3, &child.responder);
+    relay->state = PROC_STATE_WAITING;
+    cpu(0)->idle_process->state = PROC_STATE_RUNNING;
+
+    current_process_reset();
+    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+
+    TEST_ASSERT_EQUAL_PTR(p3, current_running_process());
+    TEST_ASSERT_EQUAL_UINT64(1, QueueWaitUsage__snapshot(&p3->queue_wait_usage).speculative_selections);
+}
+
+void test_idle_fallback_uses_recent_activity_then_longest_waiting(void)
+{
+    QueueConnectionID id = connect(p1, p2, &bstr("activity"));
+    Queue first = attach(id, p1);
+    Queue second = attach(id, p2);
+    CPUUsage__start(&p1->cpu_usage, test_cpu_time_usec, 0);
+    test_cpu_time_usec = PROCESS_CPU_TICK_USEC;
+    CPUUsage__stop(&p1->cpu_usage, test_cpu_time_usec, 0);
+    test_cpu_time_usec = PROCESS_CPU_TICK_USEC * 2;
+    wait_on(p1, &first);
+    wait_on(p2, &second);
+    p1->last_tick = 10;
+    p2->last_tick = 0;
+    p3->state = PROC_STATE_WAITING;
+    relay->state = PROC_STATE_WAITING;
+    cpu(0)->idle_process->state = PROC_STATE_RUNNING;
+
+    current_process_reset();
+    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+    TEST_ASSERT_EQUAL_PTR(p1, current_running_process());
+
+    p1->state = PROC_STATE_WAITING;
+    p2->last_tick = 0;
+    p3->state = PROC_STATE_READY;
+    QueueConnectionID other_id = connect(p2, p3, &bstr("fairness"));
+    Queue third = attach(other_id, p3);
+    wait_on(p3, &third);
+    p3->last_tick = 5;
+    cpu(0)->idle_process->state = PROC_STATE_RUNNING;
+    current_process_reset();
+    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+    TEST_ASSERT_EQUAL_PTR(p2, current_running_process());
+}
+
+void test_idle_fallback_never_resumes_a_kernel_blocked_user_waiter(void)
+{
+    QueueConnectionID id = connect(p1, p2, &bstr("blocked"));
+    Queue queue = attach(id, p1);
+    wait_on(p1, &queue);
+    p1->state = PROC_STATE_WAITING;
+    p2->state = PROC_STATE_WAITING;
+    p3->state = PROC_STATE_WAITING;
+    relay->state = PROC_STATE_WAITING;
+    cpu(0)->idle_process->state = PROC_STATE_RUNNING;
+
+    current_process_reset();
+    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+
+    TEST_ASSERT_NOT_EQUAL(p1, current_running_process());
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, p1->state);
+    TEST_ASSERT_EQUAL_UINT64(0, QueueWaitUsage__snapshot(&p1->queue_wait_usage).speculative_selections);
+}
+
 void test_reply_queues_caller_and_warm_ancestor_without_preemption(void)
 {
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
@@ -220,6 +305,7 @@ void test_residency_starts_on_dispatch_and_does_not_reset_on_timer_checks(void)
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
     wait_on(p1, &root.caller);
     reply(&root);
+    test_cpu_time_usec = 1000;
     Scheduler__refresh_preferred(scheduler);
     Scheduler__forget_preferred(scheduler, relay);
     test_cpu_time_usec = 5000;
@@ -227,6 +313,17 @@ void test_residency_starts_on_dispatch_and_does_not_reset_on_timer_checks(void)
     ContextSwitch selected = ContextSwitch__new(p1, &None(ProcessPtr));
     ContextSwitch__switch(&selected);
     TEST_ASSERT_EQUAL_UINT64(5000, p1->dispatched_at);
+    UserAddress mapping = unwrap_optional(p1->queue_wait_control, (UserAddress){0});
+    match_optional(
+        QueueWaitControl__take_dispatch(k_v_ptr(mapping, QueueWaitControl), &root.ticket),
+        some(trace)
+        {
+            TEST_ASSERT_EQUAL_UINT64(1000, trace.eligible_at_usec);
+            TEST_ASSERT_EQUAL_UINT64(5000, trace.selected_at_usec);
+            TEST_ASSERT_EQUAL_UINT64(5000, trace.dispatched_at_usec);
+        },
+        none_test_fail()
+    );
     test_cpu_time_usec = 5000 + SCHEDULER_WARM_RESIDENCY_USEC - 1;
     TEST_ASSERT_TRUE(Process__retain_preferred(p1));
     TEST_ASSERT_EQUAL_UINT64(5000, p1->dispatched_at);

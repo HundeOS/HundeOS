@@ -96,6 +96,16 @@ element pointers across operations that move or remove elements.
 
 ## Other Collections
 
+[Cache](../../common/types/cache.h) defines typed, bounded caches with
+`CacheDefine` and `CacheBodyDefine`. `Alias__get` returns an Optional value and
+promotes the entry after a repeated access. `Alias__put` inserts or updates and
+reports whether it inserted, updated, or evicted an entry. `Alias__replace`
+updates only a resident entry, `Alias__invalidate` removes a key, and
+`Alias__len` reports occupancy. Eviction is scan resistant: one-off entries are
+probationary and the oldest probationary entry is replaced before a frequently
+used entry. Keep domain fetch, persistence, coherence, and diagnostics outside
+the generic type.
+
 [AtomicFixedArray](../../common/types/atomic_fixed_array.h) is the fixed-slot
 variant for shared scalar storage. Define it with
 `AtomicFixedArrayDefine(type, size, alias)`. It has no length field and never
@@ -172,7 +182,7 @@ Use `bstr("literal")` for literals, `empty_bstr()` for an empty value, and
 | Need | Existing operation |
 | --- | --- |
 | Length or emptiness | `BString__length`, `BString__is_empty` |
-| Equality, prefix, or character membership | `BString__equals`, `BString__starts_with`, `BString__contains_char` |
+| Equality, hashing, prefix, or character membership | `BString__equals`, `BString__hash`, `BString__starts_with`, `BString__contains_char` |
 | Read characters | `BString__char_at`, `BString__char_at_or` |
 | Edit characters | `BString__push_char`, `BString__insert_char`, `BString__set_char_at`, `BString__remove_at` |
 | Split or extract text | `BString__split`, `BString__split_first_any`, `BString__split_first_token`, `BString__slice`, `BString__strip` |

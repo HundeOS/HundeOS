@@ -18,6 +18,7 @@
 #define RISCV_SSTATUS_SPP (1ULL << 8U)
 #define RISCV_INTERRUPT_FLAG (1ULL << 63U)
 #define RISCV_INTERRUPT_SUPERVISOR_EXTERNAL 9ULL
+#define RISCV_INTERRUPT_SUPERVISOR_SOFTWARE 1ULL
 #define RISCV_EXCEPTION_USER_ECALL 8ULL
 #define RISCV_EXCEPTION_INSTRUCTION_ACCESS 1ULL
 #define RISCV_EXCEPTION_ILLEGAL_INSTRUCTION 2ULL
@@ -226,6 +227,15 @@ void Exception__handle(ProcessContextPtr context)
                 Kernel__panic(cstr(message), context);
             }
         );
+        return;
+    }
+    if (interrupt && cause == RISCV_INTERRUPT_SUPERVISOR_SOFTWARE)
+    {
+        __asm__ volatile("csrc sip, %0" : : "r"(1ULL << RISCV_INTERRUPT_SUPERVISOR_SOFTWARE) : "memory");
+        if (!current_privilege)
+        {
+            Scheduler__preempt(Kernel__instance()->scheduler, CPU__id(), &Some(ProcessContextPtr, context));
+        }
         return;
     }
     if (interrupt && cause == RISCV_INTERRUPT_SUPERVISOR_EXTERNAL)

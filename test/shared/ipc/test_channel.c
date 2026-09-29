@@ -7,6 +7,8 @@ static QueuePage server_page;
 static ChannelPayload payload;
 static Channel channel;
 static Queue server;
+static IpcDoorbell client_doorbell;
+static IpcDoorbell server_doorbell;
 
 void setUp(void)
 {
@@ -14,8 +16,11 @@ void setUp(void)
     client_page = (QueuePage){0};
     server_page = (QueuePage){0};
     payload = (ChannelPayload){0};
-    Queue client = Queue__new(&identity, &client_page, &server_page, 17, 5);
-    server = Queue__new(&identity, &server_page, &client_page, 17, 4);
+    client_doorbell = (IpcDoorbell){0};
+    server_doorbell = (IpcDoorbell){0};
+    Queue client =
+        Queue__new(&identity, &client_page, &server_page, 17, 5, &server_doorbell, &Queue__ignore_data_available);
+    server = Queue__new(&identity, &server_page, &client_page, 17, 4, &client_doorbell, &Queue__ignore_data_available);
     channel = Channel__new(&client, &payload);
 }
 
@@ -33,6 +38,7 @@ static void request(void)
         },
         error_test_fail()
     );
+    TEST_ASSERT_GREATER_THAN_UINT64(0, ChannelPayload__request_published_at(&payload));
 }
 
 static void respond(QueueConnectionID token)

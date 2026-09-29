@@ -61,6 +61,24 @@ ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size
     return size;
 }
 
+IOReply IOClient__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
+{
+    channel_calls++;
+    return replies[0];
+}
+
+IOReply IOClient__watch_file(IOHandle handle)
+{
+    channel_calls++;
+    return replies[0];
+}
+
+IOReply IOClient__wait_file_change(IOFileWatch * watches, size_t count)
+{
+    channel_calls++;
+    return replies[0];
+}
+
 SystemCallResult syscall(SystemCall call, Anything operation, Anything arg2, Anything arg3, Anything arg4,
                          Anything arg5)
 {
@@ -296,6 +314,19 @@ void test_root_overlay_wins_over_disk_entry_without_repeating_a_page(void)
     DirectoryEntry entries[3];
     TEST_ASSERT_EQUAL(1, list_dir(&bstr("/"), entries, 3));
     TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, entries[0].mode);
+    TEST_ASSERT_EQUAL(2, channel_calls);
+    TEST_ASSERT_EQUAL(0, kernel_calls);
+}
+
+void test_synthetic_directory_entries_survive_a_missing_backing_directory(void)
+{
+    replies[0] = IOReply__new(IO_OK, 0);
+    replies[0].directory.entries[0] = DirectoryEntry__new(0, 0, 0, IO_MODE_TYPE_DIR | 0755, &bstr("sd"));
+    replies[0].directory.count = 1;
+    replies[1] = IOReply__new(IO_INVALID_PATH, 0);
+    DirectoryEntry entries[3];
+    TEST_ASSERT_EQUAL(1, list_dir(&bstr("/mnt"), entries, 3));
+    TEST_ASSERT_EQUAL_STRING("sd", entries[0].name);
     TEST_ASSERT_EQUAL(2, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }

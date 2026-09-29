@@ -1,6 +1,7 @@
 #include "context_switch.h"
 #include "../process.h"
 #include "../arch/process.h"
+#include "../arch/cpu_timer.h"
 #include "../debug.h"
 #include "scheduler/scheduler.h"
 #include "../kernel_core.h"
@@ -133,5 +134,21 @@ void ContextSwitch__switch(ConstContextSwitchPtr self)
     }
 
     new_proc->dispatched_at = CPU__time_usec();
+    match_optional(
+        new_proc->preferred_ticket,
+        some(ticket)
+        {
+            if (new_proc->preferred_trace_pending)
+            {
+                new_proc->preferred_dispatched_at_usec = new_proc->dispatched_at;
+                Process__publish_dispatch_trace(new_proc, &ticket, new_proc->preferred_eligible_at_usec,
+                                                new_proc->preferred_selected_at_usec,
+                                                new_proc->preferred_dispatched_at_usec);
+                new_proc->preferred_trace_pending = false;
+            }
+        },
+        none_do_nothing()
+    );
+    CPUTimer__resume();
     Process__context_switch(new_proc);
 }

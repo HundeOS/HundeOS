@@ -30,9 +30,10 @@ kernel sessions through the same warden, without a filesystem-specific transport
 
 ## Executable Loading
 
-The implemented path is kernel -> Channel -> `hund-io-system` -> Channel ->
-`hund-dateisystem` -> Channel -> filesystem driver. Do not introduce a
-filesystem-specific request/reply queue or bypass I/O mediation.
+The kernel follows the same bounded redirects as a userspace client:
+`hund-io-system` -> `hund-dateisystem` -> final filesystem driver. It then uses
+a direct kernel Channel to that final driver. Do not introduce a
+filesystem-specific request/reply queue or bypass userspace I/O routing.
 
 The kernel supplies the originating process identity through an authenticated
 kernel endpoint. Userspace endpoints cannot impersonate it or choose another

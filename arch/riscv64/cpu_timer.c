@@ -40,3 +40,15 @@ void CPUTimer__start(SystemInfoPtr system_info, uint64_t hz)
     CPUTimer__rearm(RISCV_INTERRUPT_SUPERVISOR_TIMER);
     __asm__ volatile("csrs sie, %0" : : "r"(RISCV_SIE_STIE) : "memory");
 }
+
+void CPUTimer__suspend(void)
+{
+    __asm__ volatile("csrc sie, %0" : : "r"(RISCV_SIE_STIE) : "memory");
+    CPUTimer__set(UINT64_MAX);
+}
+
+void CPUTimer__resume(void)
+{
+    CPUTimer__rearm(RISCV_INTERRUPT_SUPERVISOR_TIMER);
+    __asm__ volatile("csrs sie, %0" : : "r"(RISCV_SIE_STIE) : "memory");
+}

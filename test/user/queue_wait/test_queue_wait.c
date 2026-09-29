@@ -10,6 +10,7 @@
 static QueueIdentity identity;
 static QueuePage outgoing;
 static QueuePage incoming;
+static IpcDoorbell peer_doorbell;
 static Queue queue;
 static QueueArrivals arrivals;
 static unsigned waits;
@@ -31,9 +32,16 @@ SystemCallResult syscall(SystemCall number, Anything operation, Anything address
         info->wait_mode = BOOT_WAIT_WFE;
         return SERVICE_OK;
     }
-    waits++;
-    TEST_FAIL_MESSAGE("Userspace event waits must not make a syscall");
-    return QUEUE_WAIT_TIMEOUT;
+    if (number == SERVICE_CALL && operation == SERVICE_QUEUE_WAIT)
+    {
+        waits++;
+        TEST_ASSERT_NOT_EQUAL(0, address);
+        TEST_ASSERT_GREATER_THAN(0, count);
+        TEST_ASSERT_EQUAL_UINT64(QUEUE_WAIT_INDEFINITE_TICKS, ticks);
+        return QUEUE_WAIT_TIMEOUT;
+    }
+    TEST_FAIL_MESSAGE("Unexpected syscall");
+    return SERVICE_OPERATION_NOT_SUPPORTED;
 }
 
 static void * publish_after_delay(void * context)
@@ -84,10 +92,13 @@ void setUp(void)
     identity = (QueueIdentity){.connection = 123, .client_pid = 1, .server_pid = 2, .accepted = 1};
     outgoing = (QueuePage){0};
     incoming = (QueuePage){0};
-    queue = Queue__new(&identity, &outgoing, &incoming, 123, 2);
+    peer_doorbell = (IpcDoorbell){0};
+    queue = Queue__new(&identity, &outgoing, &incoming, 123, 2, &peer_doorbell, &Queue__ignore_data_available);
     waits = 0;
+    ConstIpcEventPtr event = IpcDoorbell__event(IpcPlatform__local_doorbell());
+    IpcEventGeneration observed = IpcPlatform__prepare_wait(event);
     IpcPlatform__signal_event();
-    IpcPlatform__wait_event();
+    IpcPlatform__wait_event(event, observed);
     match_result(QueueWait__remember_queue(&queue),
         success_do_nothing(),
         error_test_fail()
@@ -101,13 +112,12 @@ void tearDown(void)
         none_do_nothing()
     );
     QueueWait__forget(123);
-    TEST_ASSERT_EQUAL(0, waits);
     TEST_ASSERT_EQUAL(1, registrations);
 }
 
 void test_idle_wait_ignores_unrelated_event_until_watched_queue_changes(void)
 {
-    IODiagnostics before = IODiagnostics__snapshot(&control.diagnostics);
+    IODiagnosticsSnapshot before = IODiagnostics__snapshot(&control.diagnostics);
     QueueWaitCompletedUsec wait_before = QueueWaitControl__completed_wait_usec(&control);
     Queue__prepare_wait();
     pthread_t peer;
@@ -115,10 +125,10 @@ void test_idle_wait_ignores_unrelated_event_until_watched_queue_changes(void)
     Queue__wait_event();
     TEST_ASSERT_EQUAL(0, pthread_join(peer, NULL));
     TEST_ASSERT_EQUAL_UINT64(1, incoming.produced);
-    TEST_ASSERT_EQUAL(0, waits);
-    IODiagnostics after = IODiagnostics__snapshot(&control.diagnostics);
+    TEST_ASSERT_GREATER_THAN(0, waits);
+    IODiagnosticsSnapshot after = IODiagnostics__snapshot(&control.diagnostics);
     TEST_ASSERT_EQUAL_UINT64(before.wait_entries + 1, after.wait_entries);
-    TEST_ASSERT_EQUAL_UINT64(before.unchanged_wakes + 2, after.unchanged_wakes);
+    TEST_ASSERT_GREATER_THAN_UINT64(before.unchanged_wakes, after.unchanged_wakes);
     TEST_ASSERT_GREATER_THAN_UINT64(wait_before, QueueWaitControl__completed_wait_usec(&control));
 }
 
@@ -130,7 +140,7 @@ void test_event_before_wait_does_not_end_wait_without_authoritative_change(void)
     TEST_ASSERT_EQUAL(0, pthread_create(&peer, NULL, publish_after_delay, NULL));
     Queue__wait_event();
     TEST_ASSERT_EQUAL(0, pthread_join(peer, NULL));
-    TEST_ASSERT_EQUAL(0, waits);
+    TEST_ASSERT_GREATER_THAN(0, waits);
 }
 
 void test_kernel_wake_generation_returns_to_dispatch_without_queue_change(void)
@@ -141,7 +151,7 @@ void test_kernel_wake_generation_returns_to_dispatch_without_queue_change(void)
     Queue__wait_event();
     TEST_ASSERT_EQUAL(0, pthread_join(peer, NULL));
     TEST_ASSERT_EQUAL_UINT64(0, incoming.produced);
-    TEST_ASSERT_EQUAL(0, waits);
+    TEST_ASSERT_GREATER_THAN(0, waits);
 }
 
 void test_activity_between_prepare_and_wait_stays_in_userspace(void)
@@ -176,7 +186,7 @@ void test_readable_and_writable_waits_do_not_park_when_ready(void)
     TEST_ASSERT_EQUAL(0, waits);
 }
 
-void test_empty_read_and_full_write_wait_for_peer_without_syscalls(void)
+void test_empty_read_and_full_write_park_until_peer_progress(void)
 {
     pthread_t peer;
     TEST_ASSERT_EQUAL(0, pthread_create(&peer, NULL, publish_after_delay, NULL));
@@ -189,7 +199,7 @@ void test_empty_read_and_full_write_wait_for_peer_without_syscalls(void)
     Queue__wait_writable(&queue);
     TEST_ASSERT_EQUAL_UINT64(1, __atomic_load_n(&incoming.consumed, __ATOMIC_ACQUIRE));
     TEST_ASSERT_EQUAL(0, pthread_join(peer, NULL));
-    TEST_ASSERT_EQUAL(0, waits);
+    TEST_ASSERT_GREATER_THAN(0, waits);
 }
 
 void test_registration_change_and_empty_registry_return_without_parking(void)
@@ -216,7 +226,7 @@ void test_forgetting_unaccepted_arrival_is_idempotent(void)
     TEST_ASSERT_EQUAL(0, pthread_create(&peer, NULL, publish_after_delay, NULL));
     Queue__wait_event();
     TEST_ASSERT_EQUAL(0, pthread_join(peer, NULL));
-    TEST_ASSERT_EQUAL(0, waits);
+    TEST_ASSERT_GREATER_THAN(0, waits);
 }
 
 void test_arrival_wait_observes_callers_epoch(void)
@@ -230,5 +240,5 @@ void test_arrival_wait_observes_callers_epoch(void)
     TEST_ASSERT_EQUAL(0, pthread_create(&peer, NULL, publish_arrival_after_delay, NULL));
     QueueArrivals__wait(&arrivals, 2);
     TEST_ASSERT_EQUAL(0, pthread_join(peer, NULL));
-    TEST_ASSERT_EQUAL(0, waits);
+    TEST_ASSERT_GREATER_THAN(0, waits);
 }

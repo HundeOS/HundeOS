@@ -4,4 +4,3 @@ manifest:
   source_files:
     - test/user/buffer_fake.c
     - user/drivers/socket_router/sockets.c
-    - user/lib/io/mediator.c

@@ -18,6 +18,7 @@
 #define EMFILE 24
 #define EFBIG 27
 #define ENOSPC 28
+#define ESPIPE 29
 #define EROFS 30
 #define EMLINK 31
 #define EPIPE 32

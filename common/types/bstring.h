@@ -50,6 +50,7 @@ BStringSplit BString__split_first_any(ConstBStringPtr self, ConstBStringPtr deli
 BStringSplit BString__split_first_token(ConstBStringPtr self, ConstBStringPtr delimiters);
 BStringArray BString__split(ConstBStringPtr self, char delimiter);
 bool BString__equals(ConstBStringPtr self, ConstBStringPtr other);
+uint64_t BString__hash(ConstBStringPtr self);
 bool bstring_equals(void * a, void * b);
 BString BString__append(ConstBStringPtr self, ConstBStringPtr other);
 BString BString__join(BStringArrayPtr array, char delimiter);

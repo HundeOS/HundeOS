@@ -2,6 +2,10 @@
 #define HUND_VIRTIO_BLK_DEVICE_H
 #include "sys/service.h"
 #include "channel/block_server.h"
+#include "interrupt/client.h"
+
+typedef struct VirtioBlkRuntime VirtioBlkRuntime;
+typedef VirtioBlkRuntime * VirtioBlkRuntimePtr;
 
 typedef struct VirtioBlkDevice
 {
@@ -13,13 +17,19 @@ typedef struct VirtioBlkDevice
     BString path;
     uint16_t last_used_idx;
     bool io_failed;
+    Optional(InterruptDeliveryTiming) irq_timing;
+    uint64_t fiber_resumed_at_usec;
+    VirtioBlkRuntimePtr runtime;
 } VirtioBlkDevice, *VirtioBlkDevicePtr;
+
+typedef const VirtioBlkDevice * ConstVirtioBlkDevicePtr;
 
 ResultDef(VirtioBlkDevice);
 uint32_t VirtioBlkMmio__read32(void * base, uint64_t offset);
 void VirtioBlkMmio__write32(void * base, uint64_t offset, uint32_t value);
 void VirtioBlk__ack_interrupt(void * mmio);
-int VirtioBlk__run(ConstBStringPtr slot_argument, ConstBStringPtr path);
-ServiceCode VirtioBlkRuntime__await_irq(ServiceEventPtr event);
-int VirtioBlkRuntime__run(VirtioBlkDevicePtr device, BlockServerPtr server);
+Result(VirtioBlkDevice) VirtioBlk__start(uint64_t slot, ConstBStringPtr path);
+ChannelCode VirtioBlk__listen(VirtioBlkDevicePtr self, BlockServerPtr server);
+ServiceCode VirtioBlkRuntime__await_irq(VirtioBlkDevicePtr device, ServiceEventPtr event);
+ServiceCode VirtioBlkRuntime__rearm_irq(VirtioBlkDevicePtr device);
 #endif

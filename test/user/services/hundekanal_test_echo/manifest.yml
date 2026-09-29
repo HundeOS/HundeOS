@@ -2,5 +2,6 @@ manifest:
   include_default_stubs: false
   include_default_fixtures: false
   source_files:
+    - test/user/io_trace_fake.c
     - user/lib/channel/channel.c
     - user/services/hundekanal-warter/lifecycle.c

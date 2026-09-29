@@ -1,5 +1,7 @@
 #include "buffers.h"
 
+#include "../arch/cpu.h"
+
 bool Buffers__has_pending_notifications(BuffersPtr self, ProcessPtr process)
 {
     return self->manager == process->pid && self->notifications.valid &&
@@ -44,7 +46,7 @@ static void Buffers__notify(BuffersPtr self, SchedulerPtr scheduler, ManagedBuff
     if (self->notifications.valid)
     {
         KernelNotificationQueue__publish(k_v_ptr(self->notifications, KernelNotificationQueue),
-                                         buffer->id % BUFFER_LIMIT, buffer->id);
+                                         buffer->id % BUFFER_LIMIT, buffer->id, CPU__time_usec());
         match_optional(
             Scheduler__find_process_by_pid_locked(scheduler, self->manager),
             some(manager)

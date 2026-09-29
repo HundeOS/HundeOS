@@ -35,6 +35,16 @@ void * reallocarray(void * address, size_t count, size_t size)
     return realloc(address, count * size);
 }
 
+void * recallocarray(void * address, size_t old_count, size_t new_count, size_t size)
+{
+    void * resized = reallocarray(address, new_count, size);
+    if (resized != NULL && new_count > old_count)
+    {
+        memset((char *)resized + old_count * size, 0, (new_count - old_count) * size);
+    }
+    return resized;
+}
+
 char * getenv(const char * name)
 {
     return NULL;
@@ -196,6 +206,28 @@ unsigned long long strtoull(const char * text, char ** endptr, int base)
     }
 
     return value;
+}
+
+long long strtoll(const char * text, char ** endptr, int base)
+{
+    bool negative = false;
+    const char * cursor = text;
+    while (stdlib_is_space(*cursor))
+    {
+        cursor++;
+    }
+    if (*cursor == '-' || *cursor == '+')
+    {
+        negative = *cursor == '-';
+        cursor++;
+    }
+    char * end;
+    unsigned long long value = strtoull(cursor, &end, base);
+    if (endptr != NULL)
+    {
+        *endptr = end == cursor ? (char *)text : end;
+    }
+    return negative ? -(long long)value : (long long)value;
 }
 
 int atoi(const char * text)

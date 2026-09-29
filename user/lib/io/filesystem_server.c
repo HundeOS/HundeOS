@@ -6,40 +6,22 @@ static Optional(IOReply)
     FilesystemDriver__serve(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request)
 {
     FilesystemDriverPtr self = context;
-    uint64_t namespace_pid = unwrap_optional(
-        ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &bstr(IO_FILESYSTEM_SERVICE)), 0);
-    if (pid == 0 || pid != namespace_pid || (self->namespace_session != 0 && self->namespace_session != session))
+    if (pid == 0)
     {
         return Some(IOReply, IOReply__new(IO_PERMISSION_DENIED, 0));
     }
-    self->namespace_session = session;
-    return Some(IOReply, FilesystemDriver__execute(self, request));
+    IOReply reply = FilesystemDriver__execute(self, request);
+    if (request->operation == IO_REQUEST_WAIT_FILE_CHANGE && reply.status == IO_WAIT_FOR_DATA)
+    {
+        return None(IOReply);
+    }
+    return Some(IOReply, reply);
 }
 
 static bool FilesystemDriver__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
     FilesystemDriverPtr self = context;
-    if (self->namespace_session == session)
-    {
-        for_each_fa_ptr(
-            FilesystemFiles,
-            (&self->files),
-            index,
-            file,
-            {
-                match_optional(file.data,
-                    some(data)
-                    {
-                        free(data);
-                    },
-                    none_do_nothing()
-                );
-            }
-        );
-        self->files = FilesystemFiles__new();
-        self->namespace_session = 0;
-    }
-    return true;
+    return FilesystemDriver__release(self, session, pid);
 }
 
 int FilesystemDriver__run(FilesystemDriverPtr self, ConstBStringPtr mountpoint)

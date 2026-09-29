@@ -56,8 +56,7 @@ static BString ConsoleInputStream__read_line(InputStreamPtr self, bool echo)
             },
             none()
             {
-                return line;
-                ;
+                return empty_bstr();
             }
         );
 

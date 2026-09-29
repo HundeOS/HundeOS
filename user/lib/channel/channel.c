@@ -1,5 +1,8 @@
 #include "channel.h"
 
+#include "ipc/ipc_platform.h"
+#include "trace/io_trace.h"
+
 static BString channel_service_unavailable = bstr("Channel service unavailable");
 static BString channel_transport_failed = bstr("Channel transport failed");
 static BString channel_invalid_reply = bstr("Invalid channel reply");
@@ -121,13 +124,33 @@ Result(Channel) Channel__open(ServiceDirectoryPtr directory, ConstBStringPtr tar
     return Error(Channel, channel_service_unavailable, CHANNEL_UNAVAILABLE);
 }
 
-Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr request, size_t request_size)
+Result(ChannelCode) Channel__request_once(ChannelPtr self, ConstChannelDataPtr request, size_t request_size)
 {
     Optional(RequestTicket) parent = ChannelRequestContext__current();
+    match_result(
+        Channel__try_request_with_parent(self, request, request_size, &parent),
+        success(code)
+        {
+            if (code == CHANNEL_OK)
+            {
+                IOTrace__record(IO_TRACE_CLIENT_PUBLISH, &self->ticket,
+                                ChannelPayload__request_published_at(self->payload));
+            }
+            return Success(ChannelCode, code);
+        },
+        error(code, message)
+        {
+            return Error(ChannelCode, message, code);
+        }
+    );
+}
+
+Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr request, size_t request_size)
+{
     while (true)
     {
         match_result(
-            Channel__try_request_with_parent(self, request, request_size, &parent),
+            Channel__request_once(self, request, request_size),
             success(code)
             {
                 if (code != CHANNEL_PENDING)
@@ -144,12 +167,45 @@ Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr reques
     }
 }
 
+Result(OptionalChannelReplySize) Channel__poll_reply_once(ChannelPtr self, ChannelDataPtr reply, size_t reply_capacity)
+{
+    match_result(
+        Channel__try_poll_reply(self, reply, reply_capacity),
+        success(size)
+        {
+            match_optional(
+                self->received_reply,
+                some(pending_size)
+                {
+                    return Success(OptionalChannelReplySize, None(ChannelReplySize));
+                },
+                none()
+                {
+                    match_optional(
+                        size,
+                        some(completed_size)
+                        {
+                            IOTrace__record(IO_TRACE_CLIENT_COMPLETE, &self->ticket, IpcPlatform__monotonic_usec());
+                        },
+                        none_do_nothing()
+                    );
+                    return Success(OptionalChannelReplySize, size);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(OptionalChannelReplySize, message, code);
+        }
+    );
+}
+
 Result(OptionalChannelReplySize) Channel__poll_reply(ChannelPtr self, ChannelDataPtr reply, size_t reply_capacity)
 {
     while (true)
     {
         match_result(
-            Channel__try_poll_reply(self, reply, reply_capacity),
+            Channel__poll_reply_once(self, reply, reply_capacity),
             success(size)
             {
                 match_optional(

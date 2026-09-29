@@ -54,7 +54,7 @@ void KernelProcessRegistry__set_count(KernelProcessRegistryPtr self, uint64_t cp
 ProcessRecord ProcessRecord__new(ProcessPtr process, uint64_t cpu)
 {
     uint64_t sampled_at_usec = CPU__time_usec();
-    Optional(IODiagnostics) diagnostics = None(IODiagnostics);
+    Optional(IODiagnosticsSnapshot) diagnostics = None(IODiagnosticsSnapshot);
     Optional(ProcessUserWait) user_wait = None(ProcessUserWait);
     uint64_t user_wait_usec = Process__user_wait_usec(process, sampled_at_usec);
     match_optional(
@@ -62,7 +62,7 @@ ProcessRecord ProcessRecord__new(ProcessPtr process, uint64_t cpu)
         some(mapping)
         {
             ConstQueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
-            diagnostics = Some(IODiagnostics, IODiagnostics__snapshot(&control->diagnostics));
+            diagnostics = Some(IODiagnosticsSnapshot, IODiagnostics__snapshot(&control->diagnostics));
         },
         none_do_nothing()
     );

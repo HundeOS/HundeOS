@@ -34,24 +34,57 @@ or token authorization.
 
 ## Bounded Waits
 
-Userspace helpers use `WFE` after checking authoritative queue state, without a
-per-wait kernel parking syscall. The first queue registration obtains a private
-shared wait-control allocation through `SERVICE_QUEUE_WAIT_CONTROL`. Idle paths
-publish snapshots there before `WFE`. Spurious and unrelated event returns leave
-the publication armed and repeat `WFE`; queue progress, connection closure, or a
-kernel wake generation returns to the dispatcher and clears it. The scheduler
-excludes an ordinary process with unchanged observations. If no eligible process
-exists, it selects the CPU's idle process rather than retaining the waiter.
+Userspace helpers publish authoritative queue snapshots and enter
+`SERVICE_QUEUE_WAIT` without a deadline. The kernel authenticates and copies the
+snapshots, rechecks them while holding the scheduler lock, and parks the process
+only while they remain unchanged. Normal queue waits therefore do not wake merely
+to retry or apply a timeout backoff. A timed form remains available to explicit
+diagnostic callers such as `queue_wait_probe`.
 
-The control allocation persists until process exit and cannot be explicitly freed
+Every voluntary wait reschedule and timer-driven scheduler entry checks queue
+waiters owned by every CPU before selecting the next process. In addition, each
+successful queue push issues an authenticated data-available notification after
+publishing the shared cursor and ringing the receiver's doorbell. A pop publishes
+consumption and rings the sender's shared-memory doorbell, but does not announce
+new schedulable work. The kernel derives the receiver from the live connection
+rather than accepting a userspace PID. If that receiver is parked on an
+authoritative queue wait which has changed, the kernel makes it runnable
+immediately and sends its CPU a reschedule IPI. A ready or interrupted receiver
+with an armed userspace wait publication is also poked, forcing an immediate
+scheduling decision instead of waiting for the next timer tick. A running receiver
+is not interrupted: the queue publication's architecture event already releases
+its event wait. Further notifications coalesce after the shared wake generation
+changes. If the peer has not published or parked yet, the park-time cursor recheck
+observes the progress and refuses to sleep. Timer and device interrupts remain
+fallback scheduler entries for externally initiated progress.
+After an unrelated return, userspace performs a bounded 100-microsecond warm
+recheck before parking again.
+
+Queue listen/connect allocates the private doorbell page. The first wait
+registration obtains the private shared wait-control allocation through
+`SERVICE_QUEUE_WAIT_CONTROL`. The control publication remains available to the
+dependency scheduler and diagnostics while the kernel-owned parked operation
+controls whether the process is runnable.
+
+Each connection maps the peer process's doorbell at the connection's fixed alias
+address. `Queue__push` publishes the produced cursor before incrementing the
+receiver's doorbell, and `Queue__pop` publishes consumption before incrementing
+the sender's doorbell. Protocol code therefore does not ring doorbells itself.
+Kernel-side acceptance, closure, listener arrival, service event, and signal
+publication ring the affected process's owned doorbell. A generation is only a
+wake predicate: increments may be coalesced and are not an event count.
+
+The data-available syscall does not carry message data or decide readiness;
+it authenticates a connection and prompts the kernel to recheck the existing
+shared state. The control allocation persists until process exit and cannot be explicitly freed
 or shared with another process. Observations contain handles, not kernel-followed
 user pointers. The kernel authenticates each handle, reads atomic records, and
 rechecks the publication generation. Invalid, incomplete, or changing records
 leave the process runnable. No allocation or deferred syscall occurs on each wait.
 Ordinary shared waits have no periodic retry deadline. Kernel notification
-producers increment the control's wake generation before broadcasting `SEV`, so
-both a resident waiter and the scheduler can distinguish real kernel work from an
-unrelated architectural event.
+producers increment the control's wake generation and the process doorbell before
+issuing the architecture wake, so both a resident waiter and the scheduler can
+distinguish real kernel work from an unrelated return.
 
 This gates each transport hop on its actual queue progress. Explicit propagated
 IRQ tokens, hop numbers, stage acknowledgements, and operation-timeout results
@@ -86,35 +119,42 @@ process's preferred processing budget.
 
 This is strict receiver priority: sustained unread traffic can starve processes
 without messages. Shared cursor values remain untrusted scheduling hints, not
-proof of useful work. Selection observes activity at existing scheduler entry
-points; publication does not introduce a reschedule interrupt. Preferred
-selection now supports cross-CPU migration. Tests cover receiver direction, consumption, cursor bounds/wraparound,
+proof of useful work. Queue progress can introduce a reschedule interrupt when it
+makes a parked peer runnable. Preferred selection now supports cross-CPU
+migration. Tests cover receiver direction, consumption, cursor bounds/wraparound,
 shared waits, timer retention, yielding, and blocked-process eligibility,
 including an unrelated unread message while waiting on a second Channel.
 The wait-precedence correction passed two four-core traced QEMU boots to login;
 an interactive run also completed login, `ls /boot`, and `ps`. This verifies
 startup progress, not a throughput improvement.
 
-Publication completes with `DSB ISHST` before `SEV`.
-An event arriving between the check and `WFE` remains pending. Event and arrival
-waits return only when an authoritative observation changes or the kernel advances
-the wake generation. Synchronous readable/writable waits use the same rule and
-recheck until ready or closed. Events may be coalesced or spurious: they are never
-a message count and do not by themselves cause another dispatch scan.
+On AArch64, publication completes with `DSB ISHST` before `SEV`; a waiter compares
+the armed generation and uses `WFE`. An event arriving between the check and
+`WFE` remains pending. On RISC-V, the waiter establishes an `LR` reservation on
+the generation and uses `WRS.NTO`; the peer's atomic generation update invalidates
+that reservation. The RISC-V QEMU targets enable the `Zawrs` extension explicitly.
+Event and arrival waits return only when an authoritative observation changes or
+the kernel advances the wake generation. Synchronous queue waits use the process
+doorbell. `ChannelSignal` waits directly on its data or space epoch because each
+such wait has a single authoritative address. All waits recheck until ready or
+closed. Wakeups may be coalesced or spurious: they are never a message count and
+do not by themselves cause another dispatch scan.
 
 Device IRQ dispatch broadcasts an event after the handler publishes state.
 Timer preemption remains enabled, without a global broadcast on every tick.
 Context restoration sets the local event latch with `SEVL`, allowing resumed
 waiters to recheck even if another process consumed an earlier event on that CPU.
-Ready fibres run before idle waits. `WFE` is not a scheduler yield and does not
-make kernel-parked processes runnable. There is no 20-microsecond WFE deadline.
-The kernel wait syscall and diagnostics remain available for explicit callers;
-normal event waits do not increment park counters.
+Ready fibres run before queue waits. `WFE` is not a scheduler yield and does not
+make kernel-parked processes runnable. Normal queue waits now enter the kernel
+immediately and increment park counters; they carry no timeout. Architecture
+event waits remain available to lower-level signal primitives whose process is
+still resident.
 
-Boot hardware information selects whether the architecture wait primitive uses
+On AArch64, boot hardware information selects whether the wait primitive uses
 `WFE` or an active `YIELD` recheck. Hardware and the single-threaded TCG icount
 trace target use `WFE`; HVF and ordinary MTTCG use the spin mode because their
-event-wait behavior does not provide the required sleep semantics. The
+event-wait behavior does not provide the required sleep semantics. RISC-V uses
+`WRS.NTO` on the doorbell reservation. The
 `qemu-virt-tcg-icount-trace` target exposes four guest CPUs but serializes them
 on one host TCG thread, so it is suitable for wait behavior and scheduler traces,
 not parallel-throughput measurements.
@@ -240,10 +280,12 @@ No performance improvement is assumed without measurement.
   dispatch on any event. Ready fibres run before waiting. See [bounded waits](#bounded-waits).
 - `QueueConnection__close(connection)` is the calling endpoint's final acknowledgement:
   stop all local users of that handle before calling it. The kernel publishes
-  closed state and removes only the caller's mappings. The surviving endpoint
-  retains its mappings until it closes too. Once both are detached, backing is
-  freed after unmapping/TLB invalidation. Process exit performs the same local
-  detachment. The legacy process-exit event queue has been removed.
+  closed state and removes the caller's connection mappings. It also removes the
+  survivor's alias to the departing process's doorbell before that doorbell can
+  be freed. The surviving endpoint retains the three connection pages until it
+  closes too. Once both are detached, connection backing is freed after
+  unmapping/TLB invalidation. Process exit performs the same detachment. The
+  legacy process-exit event queue has been removed.
   A backing-free failure after detachment does not turn close into a failed
   detach: the kernel quarantines the backing for retry on a later connect and
   returns success. Callers must discard their handle after successful close.
@@ -254,6 +296,11 @@ overlap checks, and teardown use the page-rounded `QUEUE_ARRIVALS_SIZE`.
 Connections start at `0x72400000`, with three pages per connection slot; their
 12 MiB address range ends at `0x73000000`. Neither region overlaps the kernel
 notification queue at `0x72300000`.
+
+Each process owns a private doorbell page at `0x722ff000`. Connection-specific
+aliases to peer doorbells occupy `0x73000000` through `0x73400000` (exclusive),
+one page per connection slot. The aliases are mapped only into the two
+participants and are removed as their corresponding endpoints detach.
 
 | Page | Client | Server | Contents |
 | --- | --- | --- | --- |
@@ -266,7 +313,7 @@ while a surviving endpoint retains its mappings. New handles use a monotonic
 generation so stale accepts/closes cannot affect a replacement. Existing tracked
 allocations overlapping the chosen virtual range cause setup to fail.
 
-The bounds are 1024 listener slots, 1024 connections system-wide, and four active
+The bounds are 1024 listener slots, 1024 connections system-wide, and 64 active
 client connections per ordinary process. Services with shared-page management
 capability may broker connections up to the system-wide limit. Listeners share the 1024-entry service
 directory. Admission limits are fixed, not yet configurable. Each

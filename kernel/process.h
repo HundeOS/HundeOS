@@ -149,6 +149,10 @@ static inline SharedUserPages SharedUserPages__new(UserAddress allocation, UserA
 
 LinkedListDefine(UserAllocation, UserAllocations, (EqualFunction)UserAllocation__equals);
 
+#define PROCESS_VIRTIO_DEVICE_LIMIT 16
+OptionalDef(Address);
+FixedArrayDefine(Address, PROCESS_VIRTIO_DEVICE_LIMIT, ProcessVirtioDevices, SimpleEquals(uint64_t));
+
 typedef struct Process Process;
 typedef struct ExecLoad ExecLoad;
 typedef ExecLoad * ExecLoadPtr;
@@ -178,15 +182,19 @@ typedef struct Process
     bool preferred_active;
     bool preferred_warm;
     Optional(RequestTicket) preferred_ticket;
+    uint64_t preferred_eligible_at_usec;
+    uint64_t preferred_selected_at_usec;
+    uint64_t preferred_dispatched_at_usec;
+    bool preferred_trace_pending;
     CPUUsage cpu_usage;
     QueueWaitUsage queue_wait_usage;
     Optional(UserAddress) queue_wait_control;
+    Optional(UserAddress) ipc_doorbell;
     BString name;
     Address heap_break;
     Address heap_mapped_end;
-    Address allocation_next;
     UserAllocations user_allocations;
-    Optional(UserAddress) virtio_device;
+    ProcessVirtioDevices virtio_devices;
     SpawnStdio startup_stdio;
     Optional(ProcessAbort) abort;
     ProcessClass process_class;
@@ -253,6 +261,8 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
 void Process__quiesce_device(ProcessPtr self);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
 Result(Address) Process__queue_wait_control(ProcessPtr self);
+Result(UserAddress) Process__doorbell(ProcessPtr self);
+void Process__ring_doorbell(ProcessPtr self);
 void Process__wake_shared_wait(ProcessPtr self);
 Result(UserAddress)
     Process__map_shared_user_pages(ProcessPtr self, ProcessPtr source, Address source_virtual_address, size_t size);

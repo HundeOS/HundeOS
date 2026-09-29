@@ -29,14 +29,17 @@ SocketService SocketService__new(void)
 
 static SocketResource SocketResource__new(SocketID id, IORequestPtr request, SocketKind kind)
 {
-    return (SocketResource){.id = id,
-                            .session = request->client_session,
-                            .pid = request->client_pid,
-                            .kind = kind,
-                            .name = IORequest__path(request),
-                            .peer = None(SocketID),
-                            .pending = SocketPending__new(),
-                            .bytes = SocketBytes__new()};
+    SocketResource self = {.id = id,
+                           .session = request->client_session,
+                           .pid = request->client_pid,
+                           .kind = kind,
+                           .flags = request->flags,
+                           .peer = None(SocketID),
+                           .pending = SocketPending__new(),
+                           .bytes = SocketBytes__new()};
+    BString name = IORequest__path(request);
+    self.name_length = BString__copy_to(&name, (char *)self.name_data, sizeof(self.name_data));
+    return self;
 }
 
 static bool SocketResource__id_matches(SocketResourcePtr self, void * context)
@@ -61,7 +64,8 @@ static Optional(SocketResourcePtr) SocketService__find(SocketServicePtr self, So
 
 static bool SocketResource__name_matches(SocketResourcePtr self, void * context)
 {
-    return self->kind == SOCKET_LISTENER && BString__equals(&self->name, context);
+    BString name = BString__from_chars((const char *)self->name_data, self->name_length);
+    return self->kind == SOCKET_LISTENER && BString__equals(&name, context);
 }
 
 static bool SocketResource__session_matches(SocketResourcePtr self, void * context)
@@ -201,6 +205,7 @@ static IOReply SocketService__open(SocketServicePtr self, IORequestPtr request)
     SocketResource server = SocketResource__new(self->next_id++, request, SOCKET_CONNECTION);
     server.session = listener->session;
     server.pid = listener->pid;
+    server.flags = IO_OPEN_READ | IO_OPEN_WRITE;
     client.peer = Some(SocketID, server.id);
     server.peer = Some(SocketID, client.id);
     match_result(
@@ -383,8 +388,16 @@ IOReply SocketService__execute(SocketServicePtr self, IORequestPtr request)
             }
         );
     case IO_REQUEST_READ:
+        if (resource->kind == SOCKET_CONNECTION && (resource->flags & IO_OPEN_READ) == 0)
+        {
+            return IOReply__new(IO_PERMISSION_DENIED, 0);
+        }
         return SocketService__read(resource, request);
     case IO_REQUEST_WRITE:
+        if (resource->kind == SOCKET_CONNECTION && (resource->flags & IO_OPEN_WRITE) == 0)
+        {
+            return IOReply__new(IO_PERMISSION_DENIED, 0);
+        }
         return SocketService__write(self, resource, request);
     default:
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);

@@ -17,6 +17,18 @@ static uint8_t disk[TEST_EXT2FS_BLOCK_COUNT][EXT2FS_BLOCK_SIZE];
 static BString expected_device_path;
 static uint64_t list_calls;
 static size_t list_capacity;
+static uint64_t block_read_calls;
+static uint64_t largest_block_read;
+static uint64_t block_reads[TEST_EXT2FS_BLOCK_COUNT];
+static IODiagnostics diagnostics;
+static bool fail_block_writes;
+
+static void reset_block_read_diagnostics(void)
+{
+    block_read_calls = 0;
+    largest_block_read = 0;
+    memset(block_reads, 0, sizeof(block_reads));
+}
 
 static void write_u16(uint8_t * data, size_t offset, uint16_t value)
 {
@@ -134,6 +146,10 @@ void setUp(void)
 {
     expected_device_path = bstr("/dev/test");
     build_test_disk();
+    reset_block_read_diagnostics();
+    diagnostics = (IODiagnostics){0};
+    IODiagnostics__attach(&diagnostics);
+    fail_block_writes = false;
 }
 
 void tearDown(void)
@@ -154,18 +170,33 @@ Result(BlockClient) BlockClient__open(ConstBStringPtr device_path)
 Result(BlockProtocolBlockCount)
     BlockClient__read(BlockClientPtr self, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size)
 {
-    TEST_ASSERT_EQUAL_UINT64(EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK, block_count);
-    TEST_ASSERT_EQUAL_UINT64(EXT2FS_BLOCK_SIZE, buffer_size);
+    TEST_ASSERT_EQUAL_UINT64(block_count * EXT2FS_DEVICE_BLOCK_SIZE, buffer_size);
 
-    uint64_t ext2_block = block / EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK;
-    TEST_ASSERT_LESS_THAN_UINT64(TEST_EXT2FS_BLOCK_COUNT, ext2_block);
-    memcpy((void *)buffer, disk[ext2_block], EXT2FS_BLOCK_SIZE);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT64(TEST_EXT2FS_BLOCK_COUNT * EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK,
+                                     block + block_count);
+    block_read_calls++;
+    uint64_t first_ext2_block = block / EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK;
+    uint64_t last_ext2_block = (block + block_count - 1U) / EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK;
+    uint64_t ext2_block_count = last_ext2_block - first_ext2_block + 1U;
+    if (ext2_block_count > largest_block_read)
+    {
+        largest_block_read = ext2_block_count;
+    }
+    for (uint64_t ext2_block = first_ext2_block; ext2_block <= last_ext2_block; ext2_block++)
+    {
+        block_reads[ext2_block]++;
+    }
+    memcpy((void *)buffer, (uint8_t *)disk + block * EXT2FS_DEVICE_BLOCK_SIZE, buffer_size);
     return Success(BlockProtocolBlockCount, block_count);
 }
 
 Result(BlockProtocolBlockCount)
     BlockClient__write(BlockClientPtr self, uint64_t block, uint64_t block_count, Address buffer, size_t buffer_size)
 {
+    if (fail_block_writes)
+    {
+        return Error(BlockProtocolBlockCount, bstr("test block write failed"), EXT2FS_IO_ERROR);
+    }
     TEST_ASSERT_EQUAL_UINT64(EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK, block_count);
     TEST_ASSERT_EQUAL_UINT64(EXT2FS_BLOCK_SIZE, buffer_size);
 
@@ -291,6 +322,77 @@ void test_ext2fs_reports_file_information_without_channel_pagination(void)
     TEST_ASSERT_EQUAL(IO_INVALID_PATH, FilesystemDriver__execute(&driver, &request).status);
 }
 
+void test_ext2fs_reuses_cached_metadata_for_repeated_describe(void)
+{
+    Ext2fsVolume volume = Ext2fsVolume__new(&expected_device_path);
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    reset_block_read_diagnostics();
+
+    match_result(Ext2fs__describe(&volume, &bstr("/HELLO.TXT")),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    uint64_t first_describe_reads = block_read_calls;
+    TEST_ASSERT_GREATER_THAN_UINT64(0, first_describe_reads);
+
+    match_result(Ext2fs__describe(&volume, &bstr("/HELLO.TXT")),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(first_describe_reads, block_read_calls);
+    IODiagnosticsSnapshot snapshot = IODiagnostics__snapshot(&diagnostics);
+    TEST_ASSERT_GREATER_THAN_UINT64(0, snapshot.inode_cache_hits);
+    TEST_ASSERT_GREATER_THAN_UINT64(0, snapshot.inode_cache_misses);
+}
+
+void test_ext2fs_inode_write_updates_cached_value(void)
+{
+    Ext2fsVolume volume = Ext2fsVolume__new(&expected_device_path);
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    Ext2fsInode inode = unwrap_result(Ext2fsVolume__read_inode(&volume, 3), (Ext2fsInode){0});
+    inode.size = 37;
+
+    assert_ext2fs_code_success(Ext2fsVolume__write_inode(&volume, 3, &inode));
+    Ext2fsInode cached = unwrap_result(Ext2fsVolume__read_inode(&volume, 3), (Ext2fsInode){0});
+    TEST_ASSERT_EQUAL_UINT32(37, cached.size);
+    TEST_ASSERT_EQUAL_UINT32(37, Ext2fs__read_u32(disk[5], 2U * 128U + 4U));
+}
+
+void test_ext2fs_failed_inode_write_preserves_cached_value(void)
+{
+    Ext2fsVolume volume = Ext2fsVolume__new(&expected_device_path);
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    Ext2fsInode original = unwrap_result(Ext2fsVolume__read_inode(&volume, 3), (Ext2fsInode){0});
+    Ext2fsInode changed = original;
+    changed.size = 37;
+    fail_block_writes = true;
+
+    match_result(
+        Ext2fsVolume__write_inode(&volume, 3, &changed),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(EXT2FS_IO_ERROR, code);
+        }
+    );
+    Ext2fsInode cached = unwrap_result(Ext2fsVolume__read_inode(&volume, 3), (Ext2fsInode){0});
+    TEST_ASSERT_EQUAL_UINT32(original.size, cached.size);
+    TEST_ASSERT_EQUAL_UINT32(original.size, Ext2fs__read_u32(disk[5], 2U * 128U + 4U));
+}
+
+void test_ext2fs_free_inode_invalidates_cached_value(void)
+{
+    Ext2fsVolume volume = Ext2fsVolume__new(&expected_device_path);
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    unwrap_result(Ext2fsVolume__read_inode(&volume, 3), (Ext2fsInode){0});
+
+    assert_ext2fs_code_success(Ext2fsVolume__free_inode(&volume, 3));
+    match_optional(Ext2fsInodeCache__get(&volume.inode_cache, 3),
+        some_test_fail(),
+        none_do_nothing()
+    );
+}
+
 void test_ext2fs_owns_multiple_handles_and_offsets(void)
 {
     Ext2fsVolume volume = {.device_path = expected_device_path};
@@ -332,7 +434,6 @@ void test_ext2fs_requires_execute_permission_and_opens_executable_files(void)
 {
     Ext2fsVolume volume = {.device_path = expected_device_path};
     FilesystemDriver driver = mounted_driver(&volume);
-    driver.operations.write_capacity = 0;
     IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/HELLO.TXT"));
     request.flags = IO_OPEN_READ | IO_OPEN_EXECUTE;
     IOReply opened = FilesystemDriver__execute(&driver, &request);
@@ -377,6 +478,76 @@ void test_ext2fs_streams_across_direct_single_and_double_indirect_boundaries(voi
         },
         error_test_fail()
     );
+}
+
+void test_ext2fs_batches_contiguous_direct_blocks(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    reset_block_read_diagnostics();
+    uint8_t data[10U * EXT2FS_BLOCK_SIZE];
+    match_result(
+        Ext2fs__read(&volume, &bstr("/BIG.BIN"), 0, data, sizeof(data)),
+        success(size)
+        {
+            TEST_ASSERT_EQUAL(sizeof(data), size);
+            for (uint32_t i = 0; i < 10U; i++)
+            {
+                TEST_ASSERT_EACH_EQUAL_UINT8(big_file_byte(i), data + i * EXT2FS_BLOCK_SIZE, EXT2FS_BLOCK_SIZE);
+            }
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(10, largest_block_read);
+    TEST_ASSERT_EQUAL_UINT64(1, block_reads[20]);
+    TEST_ASSERT_EQUAL_UINT64(1, block_reads[29]);
+}
+
+void test_ext2fs_caches_single_indirect_block_and_batches_data(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    reset_block_read_diagnostics();
+    uint8_t data[4U * EXT2FS_BLOCK_SIZE];
+    match_result(
+        Ext2fs__read(&volume, &bstr("/BIG.BIN"), EXT2FS_NDIR_BLOCKS * EXT2FS_BLOCK_SIZE, data, sizeof(data)),
+        success(size)
+        {
+            TEST_ASSERT_EQUAL(sizeof(data), size);
+            for (uint32_t i = 0; i < 4U; i++)
+            {
+                TEST_ASSERT_EACH_EQUAL_UINT8(big_file_byte(EXT2FS_NDIR_BLOCKS + i), data + i * EXT2FS_BLOCK_SIZE,
+                                             EXT2FS_BLOCK_SIZE);
+            }
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(1, block_reads[32]);
+    TEST_ASSERT_EQUAL_UINT64(4, largest_block_read);
+}
+
+void test_ext2fs_caches_double_indirect_blocks_and_batches_data(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    reset_block_read_diagnostics();
+    uint8_t data[2U * EXT2FS_BLOCK_SIZE];
+    FilesystemFileSize offset = (EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK) * EXT2FS_BLOCK_SIZE;
+    match_result(
+        Ext2fs__read(&volume, &bstr("/BIG.BIN"), offset, data, sizeof(data)),
+        success(size)
+        {
+            TEST_ASSERT_EQUAL(sizeof(data), size);
+            TEST_ASSERT_EACH_EQUAL_UINT8(big_file_byte(EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK), data,
+                                         EXT2FS_BLOCK_SIZE);
+            TEST_ASSERT_EACH_EQUAL_UINT8(big_file_byte(EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK + 1U),
+                                         data + EXT2FS_BLOCK_SIZE, EXT2FS_BLOCK_SIZE);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(1, block_reads[289]);
+    TEST_ASSERT_EQUAL_UINT64(1, block_reads[290]);
+    TEST_ASSERT_EQUAL_UINT64(2, largest_block_read);
 }
 
 void test_ext2fs_writes_chunks_and_reopens_file(void)
@@ -498,4 +669,86 @@ void test_ext2fs_preserves_two_full_write_chunks_and_rejects_oversized_requests(
     TEST_ASSERT_EQUAL_CHAR('b', reply.data[255]);
     TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
     TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 100, 42));
+}
+
+void test_ext2fs_writes_new_file_beyond_direct_blocks(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/INDIRECT.BIN"));
+    request.flags = IO_OPEN_WRITE;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+
+    const uint32_t chunk_count = (EXT2FS_NDIR_BLOCKS + 1U) * EXT2FS_BLOCK_SIZE / IO_PROTOCOL_DATA_SIZE;
+    for (uint32_t chunk = 0; chunk < chunk_count; chunk++)
+    {
+        request = request_for(IO_REQUEST_WRITE, opened.value, &empty_bstr());
+        request.count = IO_PROTOCOL_DATA_SIZE;
+        memset(request.data, (int)(chunk + 1U), sizeof(request.data));
+        TEST_ASSERT_EQUAL(IO_PROTOCOL_DATA_SIZE, FilesystemDriver__execute(&driver, &request).value);
+    }
+
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/INDIRECT.BIN"));
+    request.flags = IO_OPEN_READ;
+    opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    request = request_for(IO_REQUEST_SEEK, opened.value, &empty_bstr());
+    request.flags = IO_SEEK_SET;
+    request.offset = EXT2FS_NDIR_BLOCKS * EXT2FS_BLOCK_SIZE - 1U;
+    TEST_ASSERT_EQUAL(request.offset, FilesystemDriver__execute(&driver, &request).value);
+    request.operation = IO_REQUEST_READ;
+    request.count = 2;
+    IOReply reply = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(2, reply.value);
+    TEST_ASSERT_EQUAL_UINT8(EXT2FS_NDIR_BLOCKS * EXT2FS_BLOCK_SIZE / IO_PROTOCOL_DATA_SIZE, reply.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(EXT2FS_NDIR_BLOCKS * EXT2FS_BLOCK_SIZE / IO_PROTOCOL_DATA_SIZE + 1U, reply.data[1]);
+
+    Ext2fsInode inode;
+    match_result(
+        Ext2fsVolume__inode_for_path(&volume, &bstr("/INDIRECT.BIN")),
+        success(value)
+        {
+            inode = value;
+        },
+        error_test_fail()
+    );
+    uint32_t direct_block = inode.block[0];
+    uint32_t indirect_block = inode.block[EXT2FS_NDIR_BLOCKS];
+    uint32_t indirect_data_block = Ext2fs__read_u32(disk[indirect_block], 0);
+    TEST_ASSERT_TRUE(Ext2fs__bitmap_bit_is_set(disk[3], direct_block));
+    TEST_ASSERT_TRUE(Ext2fs__bitmap_bit_is_set(disk[3], indirect_block));
+    TEST_ASSERT_TRUE(Ext2fs__bitmap_bit_is_set(disk[3], indirect_data_block));
+
+    request = request_for(IO_REQUEST_REMOVE, 0, &bstr("/INDIRECT.BIN"));
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    TEST_ASSERT_FALSE(Ext2fs__bitmap_bit_is_set(disk[3], direct_block));
+    TEST_ASSERT_FALSE(Ext2fs__bitmap_bit_is_set(disk[3], indirect_block));
+    TEST_ASSERT_FALSE(Ext2fs__bitmap_bit_is_set(disk[3], indirect_data_block));
+}
+
+void test_ext2fs_overwrites_across_single_and_double_indirect_blocks(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    assert_ext2fs_code_success(Ext2fsVolume__mount(&volume));
+    FilesystemFileSize boundary = (EXT2FS_NDIR_BLOCKS + EXT2FS_POINTERS_PER_BLOCK) * EXT2FS_BLOCK_SIZE;
+    uint8_t replacement[8] = {'r', 'e', 'p', 'l', 'a', 'c', 'e', 'd'};
+    match_result(
+        Ext2fs__write(&volume, &bstr("/BIG.BIN"), boundary - 4U, replacement, sizeof(replacement)),
+        success(size)
+        {
+            TEST_ASSERT_EQUAL(sizeof(replacement), size);
+        },
+        error_test_fail()
+    );
+    uint8_t data[8];
+    match_result(
+        Ext2fs__read(&volume, &bstr("/BIG.BIN"), boundary - 4U, data, sizeof(data)),
+        success(size)
+        {
+            TEST_ASSERT_EQUAL(sizeof(data), size);
+            TEST_ASSERT_EQUAL_MEMORY(replacement, data, sizeof(data));
+        },
+        error_test_fail()
+    );
 }

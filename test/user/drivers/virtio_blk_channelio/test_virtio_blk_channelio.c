@@ -23,6 +23,7 @@ void setUp(void)
     subscribed_irq = 48;
     registration_generation = 7;
     delivery_sequence = 0;
+    delivery_timing = None(InterruptDeliveryTiming);
     pending_response = (InterruptProtocolResponse){0};
     pending_response_present = false;
     last_request = (InterruptProtocolRequest){0};
@@ -98,7 +99,7 @@ ChannelCode fake_channel_close(ChannelPtr self)
 
 void test_channelio_converts_delivery_to_irq_event_and_acknowledges_same_sequence(void)
 {
-    pending_response = InterruptProtocol__delivery(48, 7, 19);
+    pending_response = InterruptProtocol__delivery(48, 7, 19, 100, 120);
     pending_response_present = true;
 
     ServiceEvent event;
@@ -106,6 +107,17 @@ void test_channelio_converts_delivery_to_irq_event_and_acknowledges_same_sequenc
     TEST_ASSERT_EQUAL(SERVICE_EVENT_IRQ, event.type);
     TEST_ASSERT_EQUAL_UINT64(48, event.source);
     TEST_ASSERT_EQUAL_UINT64(19, event.data);
+    match_optional(
+        InterruptClient__delivery_timing(event.data),
+        some(timing)
+        {
+            TEST_ASSERT_EQUAL_UINT64(19, timing.sequence);
+            TEST_ASSERT_EQUAL_UINT64(100, timing.kernel_irq_at_usec);
+            TEST_ASSERT_EQUAL_UINT64(120, timing.manager_received_at_usec);
+            TEST_ASSERT_GREATER_THAN_UINT64(timing.manager_received_at_usec, timing.driver_received_at_usec);
+        },
+        none_test_fail()
+    );
 
     TEST_ASSERT_EQUAL(SERVICE_EVENT_QUEUE_EMPTY, VirtioBlkChannelIO__poll(&event));
     TEST_ASSERT_EQUAL_UINT(1, reply_polls);

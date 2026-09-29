@@ -1,6 +1,7 @@
 #include "client.h"
 
 #include "channel/channel.h"
+#include "ipc/ipc_platform.h"
 #include "services/service_directory.h"
 
 OptionalDef(ChannelPtr);
@@ -10,6 +11,17 @@ static Optional(ChannelPtr) interrupt_channel = None(ChannelPtr);
 static IRQNumber subscribed_irq;
 static InterruptRegistrationGeneration registration_generation;
 static InterruptDeliverySequence delivery_sequence;
+static Optional(InterruptDeliveryTiming) delivery_timing = None(InterruptDeliveryTiming);
+
+InterruptDeliveryTiming InterruptDeliveryTiming__new(InterruptDeliverySequence sequence, uint64_t kernel_irq_at_usec,
+                                                     uint64_t manager_received_at_usec,
+                                                     uint64_t driver_received_at_usec)
+{
+    return (InterruptDeliveryTiming){.sequence = sequence,
+                                     .kernel_irq_at_usec = kernel_irq_at_usec,
+                                     .manager_received_at_usec = manager_received_at_usec,
+                                     .driver_received_at_usec = driver_received_at_usec};
+}
 
 static ServiceCode InterruptClient__request_wait(ChannelPtr channel)
 {
@@ -53,6 +65,7 @@ ServiceCode InterruptClient__subscribe(IRQNumber irq)
                     }
                     subscribed_irq = irq;
                     registration_generation = response.generation;
+                    delivery_timing = None(InterruptDeliveryTiming);
                     interrupt_channel_storage = channel;
                     interrupt_channel = Some(ChannelPtr, &interrupt_channel_storage);
                     return InterruptClient__request_wait(&interrupt_channel_storage);
@@ -96,6 +109,11 @@ ServiceCode InterruptClient__poll(ServiceEventPtr event)
                                 response.generation == registration_generation && response.sequence != 0)
                             {
                                 delivery_sequence = response.sequence;
+                                delivery_timing =
+                                    Some(InterruptDeliveryTiming,
+                                         InterruptDeliveryTiming__new(response.sequence, response.kernel_irq_at_usec,
+                                                                      response.manager_received_at_usec,
+                                                                      IpcPlatform__monotonic_usec()));
                                 *event = ServiceEvent__new(SERVICE_EVENT_IRQ, subscribed_irq, delivery_sequence);
                                 return SERVICE_OK;
                             }
@@ -116,6 +134,19 @@ ServiceCode InterruptClient__poll(ServiceEventPtr event)
         }
     );
     return SERVICE_EVENT_QUEUE_EMPTY;
+}
+
+Optional(InterruptDeliveryTiming) InterruptClient__delivery_timing(InterruptDeliverySequence sequence)
+{
+    match_optional(
+        delivery_timing,
+        some(timing)
+        {
+            return timing.sequence == sequence ? Some(InterruptDeliveryTiming, timing) : None(InterruptDeliveryTiming);
+        },
+        none_do_nothing()
+    );
+    return None(InterruptDeliveryTiming);
 }
 
 ServiceCode InterruptClient__wait(ServiceEventPtr event)

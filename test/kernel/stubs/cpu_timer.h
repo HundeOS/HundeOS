@@ -6,5 +6,7 @@
 void CPUTimerStub__reset(void);
 uint64_t CPUTimerStub__rearm_count(void);
 IRQNumber CPUTimerStub__last_irq(void);
+uint64_t CPUTimerStub__suspend_count(void);
+uint64_t CPUTimerStub__resume_count(void);
 
 #endif

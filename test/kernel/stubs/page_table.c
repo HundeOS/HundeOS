@@ -40,7 +40,7 @@ static bool MapRequest__is_covered_by_unmap(MapRequestPtr mapped_address, Addres
 }
 
 OptionalDef(MapRequest);
-FixedArrayDefine(MapRequest, 3 * QUEUE_LIMIT + 64, MapRequestArray, (EqualFunction)MapRequest__equals);
+FixedArrayDefine(MapRequest, 4 * QUEUE_LIMIT + 64, MapRequestArray, (EqualFunction)MapRequest__equals);
 FixedArrayBodyDefine(MapRequestArray);
 
 typedef struct PageTable

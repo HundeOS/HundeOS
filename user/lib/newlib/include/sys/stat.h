@@ -37,6 +37,7 @@ struct stat
 #define S_ISUID 0004000
 #define S_ISGID 0002000
 #define S_ISTXT 0001000
+#define S_ISVTX S_ISTXT
 #define S_IRWXU 0000700
 #define S_IRUSR 0000400
 #define S_IWUSR 0000200

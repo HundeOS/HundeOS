@@ -22,6 +22,7 @@ static inline FilesystemFileInfo FilesystemFileInfo__new(FilesystemFileSize size
 
 ResultDef(FilesystemFileInfo);
 typedef uint8_t * FilesystemFileDataPtr;
+typedef const uint8_t * ConstFilesystemFileDataPtr;
 OptionalDef(FilesystemFileDataPtr);
 typedef Result(FilesystemFileSize) (*FilesystemLoad)(IOServiceContext context, ConstBStringPtr path,
                                                      FilesystemFileDataPtr data);
@@ -29,6 +30,9 @@ typedef Result(FilesystemFileInfo) (*FilesystemDescribe)(IOServiceContext contex
 typedef Result(FilesystemFileSize) (*FilesystemRead)(IOServiceContext context, ConstBStringPtr path,
                                                      FilesystemFileSize offset, FilesystemFileDataPtr data,
                                                      FilesystemFileSize capacity);
+typedef Result(FilesystemFileSize) (*FilesystemWrite)(IOServiceContext context, ConstBStringPtr path,
+                                                      FilesystemFileSize offset, ConstFilesystemFileDataPtr data,
+                                                      FilesystemFileSize size);
 typedef IOStatus (*FilesystemStore)(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data,
                                     FilesystemFileSize size);
 typedef Result(DirectoryEntryCount) (*FilesystemList)(IOServiceContext context, ConstBStringPtr path,
@@ -46,12 +50,15 @@ typedef enum FilesystemSourceMode
 typedef struct FilesystemSnapshotOperations
 {
     FilesystemLoad load;
+    FilesystemStore store;
+    FilesystemFileSize write_capacity;
 } FilesystemSnapshotOperations;
 
 typedef struct FilesystemStreamOperations
 {
     FilesystemDescribe describe;
     FilesystemRead read;
+    FilesystemWrite write;
 } FilesystemStreamOperations;
 
 typedef union FilesystemSourceOperations
@@ -64,12 +71,10 @@ typedef struct FilesystemOperations
 {
     FilesystemSourceMode source_mode;
     FilesystemSourceOperations source;
-    FilesystemStore store;
     FilesystemList list;
     FilesystemMkdir mkdir;
     FilesystemRemove remove;
     FilesystemLink link;
-    FilesystemFileSize write_capacity;
 } FilesystemOperations;
 
 typedef const FilesystemOperations * ConstFilesystemOperationsPtr;
@@ -77,18 +82,25 @@ FilesystemOperations FilesystemOperations__new_snapshot(FilesystemLoad load, Fil
                                                         FilesystemMkdir mkdir, FilesystemRemove remove,
                                                         FilesystemLink link, FilesystemFileSize write_capacity);
 FilesystemOperations FilesystemOperations__new_stream(FilesystemDescribe describe, FilesystemRead read,
-                                                      FilesystemStore store, FilesystemList list, FilesystemMkdir mkdir,
-                                                      FilesystemRemove remove, FilesystemLink link,
-                                                      FilesystemFileSize write_capacity);
+                                                      FilesystemWrite write, FilesystemList list, FilesystemMkdir mkdir,
+                                                      FilesystemRemove remove, FilesystemLink link);
 IOStatus FilesystemOperations__unsupported_link(IOServiceContext context, ConstBStringPtr source_path,
                                                 ConstBStringPtr target_path);
+
+typedef struct FilesystemPath
+{
+    uint64_t length;
+    uint8_t data[IO_PROTOCOL_DATA_SIZE];
+} FilesystemPath;
+
+typedef FilesystemPath * FilesystemPathPtr;
 
 typedef struct FilesystemFile
 {
     IOHandle handle;
     QueueConnectionID session;
     uint64_t pid;
-    BString path;
+    FilesystemPath path;
     Flags flags;
     FilesystemFileSize size;
     FilesystemFileSize offset;
@@ -101,13 +113,29 @@ OptionalDef(FilesystemFilePtr);
 bool FilesystemFile__equals(void * first, void * second);
 FixedArrayDefine(FilesystemFile, 32, FilesystemFiles, FilesystemFile__equals);
 
+typedef struct FilesystemFileState
+{
+    FilesystemPath path;
+    uint64_t generation;
+    uint64_t identity;
+    Flags events;
+    bool present;
+} FilesystemFileState;
+
+typedef FilesystemFileState * FilesystemFileStatePtr;
+OptionalDef(FilesystemFileState);
+OptionalDef(FilesystemFileStatePtr);
+bool FilesystemFileState__equals(void * first, void * second);
+FixedArrayDefine(FilesystemFileState, 64, FilesystemFileStates, FilesystemFileState__equals);
+
 typedef struct FilesystemDriver
 {
     IOServiceContext volume;
     FilesystemOperations operations;
     FilesystemFiles files;
+    FilesystemFileStates file_states;
     IOHandle next_handle;
-    QueueConnectionID namespace_session;
+    uint64_t next_file_identity;
 } FilesystemDriver;
 
 typedef FilesystemDriver * FilesystemDriverPtr;

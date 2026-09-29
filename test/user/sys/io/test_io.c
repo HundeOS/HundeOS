@@ -77,6 +77,21 @@ ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size
     return next_result;
 }
 
+IOReply IOClient__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
+{
+    return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+}
+
+IOReply IOClient__watch_file(IOHandle handle)
+{
+    return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+}
+
+IOReply IOClient__wait_file_change(IOFileWatch * watches, size_t count)
+{
+    return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+}
+
 #include "../../../../user/lib/sys/io.c"
 #include "../../../../user/lib/sys/sd_host_config.h"
 

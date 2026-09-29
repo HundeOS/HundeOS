@@ -42,10 +42,11 @@ Remaining policy and recovery work is tracked in [TODO](docs/TODO.md).
 `/dev/businfo` kernel stream is retired; the planned `sysinfofs` presentation
 and hotplug monitoring are tracked in [TODO](docs/TODO.md).
 
-The common userspace I/O front end is `hund-io-system`. Sockets use its channel
-connection to `socket_router`. Boot-configured FAT32 and EXT2 mounts use
-`hund-io-system` -> `hund-dateisystem` -> filesystem driver -> block driver,
-with a bidirectional Channel at every process boundary. This includes the EXT2
+The common userspace I/O entry point is `hund-io-system`. It redirects clients
+to final socket and stream services, or through `hund-dateisystem` for mount
+selection. Clients then use a direct Channel to `socket_router` or the selected
+filesystem driver; filesystem drivers use another Channel to their block driver.
+This includes the EXT2
 root disk at `/`: `hundeschule` starts its userspace driver and waits for
 the mount before boot proceeds to login. Nested mounts override root paths.
 `/boot/config` uses userspace EXT2; `/boot/sysinfo` is rendered by userspace `sysinfofs`.
@@ -74,9 +75,10 @@ moved `/sbin` file operations and normal executable reads to userspace Channels.
 Only Mama's `boot_spawn()` uses the direct archive reader; `boot_complete()`
 irreversibly disables it after the basic mounts are established. The kernel
 retains ELF validation and process creation. Executables transfer through shared
-buffers. The disk rootfs contains a pinned, unmodified OpenBSD `cat` at
-`/usr/local/bin/cat`, built against the initial userspace C/POSIX compatibility
-layer; see the handoff document for current permission limits.
+buffers. The disk rootfs contains pinned, unmodified OpenBSD file and text
+commands under `/usr/local/bin`, including `cat`, `cp`, `grep`, `ln`, `ls`,
+`mkdir`, `mv`, `rm`, and `tail`. They are built against the userspace C/POSIX
+compatibility layer; see the handoff document for current permission limits.
 
 IPC supports 1024 live queue connections system-wide, with 32 messages per
 direction. A Channel currently retains two queue connections through its manager.

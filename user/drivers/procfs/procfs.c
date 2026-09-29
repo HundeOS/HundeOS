@@ -9,6 +9,46 @@ typedef struct ProcPath
 
 ResultDef(ProcPath);
 
+typedef struct ProcfsWriter
+{
+    FilesystemFileDataPtr data;
+    FilesystemFileSize size;
+    bool failed;
+} ProcfsWriter;
+
+typedef ProcfsWriter * ProcfsWriterPtr;
+
+static ProcfsWriter ProcfsWriter__new(FilesystemFileDataPtr data)
+{
+    return (ProcfsWriter){.data = data};
+}
+
+static void ProcfsWriter__line(ProcfsWriterPtr self, ConstBStringPtr key, uint64_t value)
+{
+    BString line = BString__sprintf(&bstr("%s=%llu\n"), cstr_p(key), value);
+    StringPos size = BString__length(&line);
+    if (self->size + size > FILESYSTEM_FILE_CAPACITY)
+    {
+        self->failed = true;
+        return;
+    }
+    memcpy(self->data + self->size, BString__cstr(&line), size);
+    self->size += size;
+}
+
+static void ProcfsWriter__latency(ProcfsWriterPtr self, ConstBStringPtr name,
+                                  ConstIODiagnosticLatencyPercentilesPtr latency)
+{
+    BString p50_key = BString__sprintf(&bstr("block_%s_usec_p50"), cstr_p(name));
+    BString p70_key = BString__sprintf(&bstr("block_%s_usec_p70"), cstr_p(name));
+    BString p90_key = BString__sprintf(&bstr("block_%s_usec_p90"), cstr_p(name));
+    BString p99_key = BString__sprintf(&bstr("block_%s_usec_p99"), cstr_p(name));
+    ProcfsWriter__line(self, &p50_key, latency->p50_usec);
+    ProcfsWriter__line(self, &p70_key, latency->p70_usec);
+    ProcfsWriter__line(self, &p90_key, latency->p90_usec);
+    ProcfsWriter__line(self, &p99_key, latency->p99_usec);
+}
+
 static ProcPath ProcPath__new(uint64_t pid, ConstBStringPtr leaf)
 {
     return (ProcPath){.pid = pid, .leaf = *leaf};
@@ -126,10 +166,12 @@ static Result(FilesystemFileSize)
         ProcessQueueWaitUsage usage = record.queue_wait_usage;
         text = BString__sprintf(
             &bstr("parks=%llu\nactivity_wakes=%llu\ntimeout_wakes=%llu\nselections=%llu\n"
+                  "speculative_selections=%llu\n"
                   "parked_usec=%llu\nmax_parked_usec=%llu\nrunnable_usec=%llu\nmax_runnable_usec=%llu\n"
                   "sampled_at_usec=%llu\n"),
-            usage.parks, usage.activity_wakes, usage.timeout_wakes, usage.selections, usage.parked_usec,
-            usage.max_parked_usec, usage.runnable_usec, usage.max_runnable_usec, record.sampled_at_usec);
+            usage.parks, usage.activity_wakes, usage.timeout_wakes, usage.selections, usage.speculative_selections,
+            usage.parked_usec, usage.max_parked_usec, usage.runnable_usec, usage.max_runnable_usec,
+            record.sampled_at_usec);
     }
     else if (BString__equals(&parsed.leaf, &bstr("ipc")))
     {
@@ -137,14 +179,40 @@ static Result(FilesystemFileSize)
             record.io_diagnostics,
             some(usage)
             {
-                text =
-                    BString__sprintf(&bstr("uart_bytes=%llu\nuart_irqs=%llu\nuart_reads=%llu\nuart_empty=%llu\n"
-                                           "backend_reads=%llu\nbackend_empty=%llu\nwarden_relays=%llu\n"
-                                           "wait_entries=%llu\nunchanged_wakes=%llu\nuser_wait_usec=%llu\n"
-                                           "sampled_at_usec=%llu\n"),
-                                     usage.uart_bytes, usage.uart_irqs, usage.uart_reads, usage.uart_empty,
-                                     usage.backend_reads, usage.backend_empty, usage.warden_relays, usage.wait_entries,
-                                     usage.unchanged_wakes, record.user_wait_usec, record.sampled_at_usec);
+                ProcfsWriter writer = ProcfsWriter__new(data);
+                ProcfsWriter__line(&writer, &bstr("uart_bytes"), usage.uart_bytes);
+                ProcfsWriter__line(&writer, &bstr("uart_irqs"), usage.uart_irqs);
+                ProcfsWriter__line(&writer, &bstr("uart_reads"), usage.uart_reads);
+                ProcfsWriter__line(&writer, &bstr("uart_empty"), usage.uart_empty);
+                ProcfsWriter__line(&writer, &bstr("backend_reads"), usage.backend_reads);
+                ProcfsWriter__line(&writer, &bstr("backend_empty"), usage.backend_empty);
+                ProcfsWriter__line(&writer, &bstr("warden_relays"), usage.warden_relays);
+                ProcfsWriter__line(&writer, &bstr("block_submissions"), usage.block_submissions);
+                ProcfsWriter__line(&writer, &bstr("block_blocks"), usage.block_blocks);
+                ProcfsWriter__line(&writer, &bstr("block_failures"), usage.block_failures);
+                ProcfsWriter__line(&writer, &bstr("block_cache_hits"), usage.block_cache_hits);
+                ProcfsWriter__line(&writer, &bstr("block_cache_misses"), usage.block_cache_misses);
+                ProcfsWriter__line(&writer, &bstr("block_cache_evictions"), usage.block_cache_evictions);
+                ProcfsWriter__line(&writer, &bstr("inode_cache_hits"), usage.inode_cache_hits);
+                ProcfsWriter__line(&writer, &bstr("inode_cache_misses"), usage.inode_cache_misses);
+                ProcfsWriter__line(&writer, &bstr("inode_cache_evictions"), usage.inode_cache_evictions);
+                ProcfsWriter__latency(&writer, &bstr("device"), &usage.block_device);
+                ProcfsWriter__line(&writer, &bstr("block_segmented_submissions"), usage.block_segmented_submissions);
+                ProcfsWriter__latency(&writer, &bstr("device_irq"), &usage.block_device_irq);
+                ProcfsWriter__latency(&writer, &bstr("manager_wake"), &usage.block_manager_wake);
+                ProcfsWriter__latency(&writer, &bstr("irq_relay"), &usage.block_irq_relay);
+                ProcfsWriter__latency(&writer, &bstr("fiber_wake"), &usage.block_fiber_wake);
+                ProcfsWriter__latency(&writer, &bstr("completion"), &usage.block_completion);
+                ProcfsWriter__line(&writer, &bstr("wait_entries"), usage.wait_entries);
+                ProcfsWriter__line(&writer, &bstr("unchanged_wakes"), usage.unchanged_wakes);
+                ProcfsWriter__line(&writer, &bstr("user_wait_usec"), record.user_wait_usec);
+                ProcfsWriter__line(&writer, &bstr("sampled_at_usec"), record.sampled_at_usec);
+                if (writer.failed)
+                {
+                    return Error(FilesystemFileSize, bstr("Process diagnostics exceed file capacity"),
+                                 IO_REGISTER_FAILED);
+                }
+                return Success(FilesystemFileSize, writer.size);
             },
             none()
             {
