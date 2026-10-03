@@ -40,6 +40,7 @@ static BString hundeschule_virtio_blk_channelio_path = bstr("/sbin/drivers/virti
 static BString hundeschule_socket_router_path = bstr("/sbin/drivers/socket_router");
 static BString hundeschule_filesystem_path = bstr("/sbin/services/hund-dateisystem");
 static BString hundeschule_io_system_path = bstr("/sbin/services/hund-io-system");
+static BString hundeschule_pipe_path = bstr("/sbin/services/hund-rohr");
 static BString hundeschule_space_delimiters = bstr(" \t\r");
 static BString hundeschule_comment_delimiter = bstr("#");
 static BString hundeschule_driver_command = bstr("driver");
@@ -798,6 +799,13 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
     if (DriverTrace__storage_ready() != TRACE_OK)
     {
         IO__printf(&bstr("hundeschule: could not enable driver trace file\n"));
+    }
+
+    if (Hundeschule__spawn_required_process(processes, &hundeschule_pipe_path, &hundeschule_empty, &hundeschule_empty,
+                                            false) != 0 ||
+        !service_ok(service_wait_ready(&bstr(IO_PIPE_SERVICE))))
+    {
+        return 1;
     }
 
     failures += Hundeschule__spawn_required_process(processes, &hundeschule_hundeschau_path, &hundeschule_empty,

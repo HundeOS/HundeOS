@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include "../sys/io.h"
+#include "current_directory.h"
 #include "posix_io.h"
 
 enum
@@ -13,29 +14,6 @@ enum
 };
 
 static mode_t creation_mask = 0022;
-
-static int PosixStat__absolute_path(const char * path, BStringPtr result)
-{
-    if (path == NULL)
-    {
-        errno = EFAULT;
-        return -1;
-    }
-    size_t length = strlen(path);
-    if (length == 0)
-    {
-        errno = ENOENT;
-        return -1;
-    }
-    if (length >= BSTRING_MAX_SIZE || (path[0] != '/' && length + 1 >= BSTRING_MAX_SIZE))
-    {
-        errno = ENAMETOOLONG;
-        return -1;
-    }
-    BString argument = BString__new(path);
-    *result = IO__path_from_arg(&argument);
-    return 0;
-}
 
 static void PosixStat__fill(struct stat * status, IOFileInfo info)
 {
@@ -80,7 +58,7 @@ int stat(const char * path, struct stat * status)
         return -1;
     }
     BString absolute;
-    return PosixStat__absolute_path(path, &absolute) == 0 ? PosixStat__path(&absolute, status) : -1;
+    return PosixPath__absolute(path, &absolute) == 0 ? PosixStat__path(&absolute, status) : -1;
 }
 
 int lstat(const char * path, struct stat * status)
@@ -119,14 +97,14 @@ int fstat(int descriptor, struct stat * status)
 int mkdir(const char * path, mode_t mode)
 {
     BString absolute;
-    if (PosixStat__absolute_path(path, &absolute) != 0)
+    if (PosixPath__absolute(path, &absolute) != 0)
     {
         return -1;
     }
     IOStatus result = IO__make_dir(&absolute);
     if (result != IO_OK)
     {
-        errno = result == IO_PERMISSION_DENIED ? EACCES : EIO;
+        errno = result == IO_PERMISSION_DENIED ? EACCES : result == IO_ALREADY_EXISTS ? EEXIST : EIO;
         return -1;
     }
     return 0;

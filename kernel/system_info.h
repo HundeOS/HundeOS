@@ -6,6 +6,7 @@
 #include "types/optional.h"
 #include "hardware/boot_info.h"
 #include "hardware/ethernet.h"
+#include "time/clock_page.h"
 
 #define MAX_PHYSICAL_MEMORY_REGIONS 64
 
@@ -281,6 +282,8 @@ typedef struct SystemInfo
     Optional(PciInfo) pci;
     Optional(SdHostInfo) sd_host;
     Optional(EthernetMacInfo) ethernet_mac;
+    Optional(BootRtcInfo) rtc;
+    Optional(RealtimeClockSample) realtime_clock;
     InterruptControllerInfo interrupt_controller;
 } SystemInfo;
 
@@ -309,6 +312,8 @@ static inline SystemInfo SystemInfo__new()
 {
     SystemInfo info = {};
     info.heap_coarse_block_size = SystemInfo__default_heap_coarse_block_size();
+    info.rtc = None(BootRtcInfo);
+    info.realtime_clock = None(RealtimeClockSample);
     return info;
 }
 

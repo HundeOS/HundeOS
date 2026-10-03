@@ -20,6 +20,10 @@ static Optional(IOReply)
     IOSystem__execute(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request)
 {
     IOSystemPtr self = context;
+    if (request->operation == IO_REQUEST_PIPE_CREATE)
+    {
+        return Some(IOReply, IOReply__redirect(&bstr(IO_PIPE_SERVICE), &empty_bstr(), &empty_bstr(), true));
+    }
     if (request->operation != IO_REQUEST_OPEN && request->operation != IO_REQUEST_LIST_DIR &&
         request->operation != IO_REQUEST_FILE_INFO && request->operation != IO_REQUEST_MKDIR &&
         request->operation != IO_REQUEST_REMOVE && request->operation != IO_REQUEST_LINK)

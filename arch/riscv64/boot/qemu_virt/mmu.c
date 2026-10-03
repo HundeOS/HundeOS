@@ -47,6 +47,10 @@ RISCV_BOOT_TEXT void RiscVMmu__activate_bootstrap(void)
 
 RISCV_BOOT_TEXT void RiscVMmu__enable_bootstrap(void)
 {
+    uint64_t rtc_megapage = RISCV_BOOTSTRAP_RTC_BASE & ~(RISCV_MEGAPAGE_SIZE - 1U);
+    uint64_t rtc_index = (rtc_megapage >> 21) & 0x1ffU;
+    device_page_table[rtc_index] = RiscVMmu__leaf_entry(rtc_megapage);
+
     uint64_t uart_megapage = RISCV_BOOTSTRAP_UART_BASE & ~(RISCV_MEGAPAGE_SIZE - 1U);
     uint64_t uart_index = (uart_megapage >> 21) & 0x1ffU;
     device_page_table[uart_index] = RiscVMmu__leaf_entry(uart_megapage);

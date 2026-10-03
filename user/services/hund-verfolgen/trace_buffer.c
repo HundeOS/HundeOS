@@ -1,6 +1,6 @@
 #include "trace_buffer.h"
 
-#include <string.h>
+#include "memory.h"
 
 TraceBuffer TraceBuffer__new(void)
 {
@@ -18,7 +18,7 @@ bool TraceBuffer__append(TraceBufferPtr self, ConstBStringPtr line)
         return false;
     }
 
-    memcpy(self->bytes + self->length, BString__cstr(line), length);
+    Mem__memcpy(self->bytes + self->length, BString__cstr(line), length);
     self->length += length;
     if (needs_newline)
     {
@@ -54,7 +54,7 @@ bool TraceBuffer__consume(TraceBufferPtr self, size_t length)
         return false;
     }
 
-    memmove(self->bytes, self->bytes + length, self->length - length);
+    Mem__memmove(self->bytes, self->bytes + length, self->length - length);
     self->length -= length;
     return true;
 }

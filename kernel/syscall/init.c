@@ -50,10 +50,16 @@ Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
                 REGISTER(self, SYSCALL_PROCESS_WAIT_CHILD_EVENT, &ProcessWaitChildEvent__handler);
                 REGISTER(self, SYSCALL_SYSLOG, &Syslog__handler);
                 REGISTER(self, SYSCALL_PROCESS_SIGNAL, &Signal__handler);
+                REGISTER(self, SYSCALL_PROCESS_SIGNAL_CONTROL, &SignalControl__handler);
+                REGISTER(self, SYSCALL_PROCESS_SIGNAL_RETURN, &SignalReturn__handler);
                 REGISTER(self, SYSCALL_SHUTDOWN, &Shutdown__handler);
                 REGISTER(self, SYSCALL_AUTH, &Auth__handler);
                 REGISTER(self, SYSCALL_PANIC, &Panic__handler);
                 REGISTER(self, SYSCALL_SLEEP, &ProcessSleep__handler);
+                REGISTER(self, SYSCALL_PROCESS_TIMES, &ProcessTimes__handler);
+                REGISTER(self, SYSCALL_PROCESS_IDENTITY, &ProcessIdentity__handler);
+                REGISTER(self, SYSCALL_PROCESS_FORK, &ProcessFork__handler);
+                REGISTER(self, SYSCALL_PROCESS_GROUP, &ProcessGroup__handler);
                 self->init_done = true;
                 __d_println(SYSCALL, "Init__syscalls() - done ok");
             }

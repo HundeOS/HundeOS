@@ -110,7 +110,7 @@ static void Exec__apply_requested_identity(ProcessPtr self, OptionalPtr(UserID) 
 
 Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, ElfPtr elf, bool wait,
                                            OptionalPtr(UserID) requested_user_id, ConstProcessArgumentsPtr arguments,
-                                           ConstSpawnStdioPtr stdio)
+                                           ConstSpawnStdioPtr stdio, bool overlay, KernelAddress overlay_payload)
 {
     match_result(
         Elf__validate(elf),
@@ -121,6 +121,43 @@ Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, E
             return Error(ProcessPtr, message, SPAWN_FAILED);
         }
     );
+    if (overlay)
+    {
+        match_optional(
+            context->process,
+            some(process)
+            {
+                match_result(
+                    Process__setup_overlay_candidate(process, elf, (ConstExecPayloadPtr)overlay_payload.virtual_addr),
+                    success(candidate)
+                    {
+                        Kernel__free(elf->start);
+                        match_result(
+                            Process__commit_overlay(process, candidate),
+                            success(_)
+                            {
+                                return Success(ProcessPtr, process);
+                            },
+                            error(code, message)
+                            {
+                                return Error(ProcessPtr, message, code);
+                            }
+                        );
+                    },
+                    error(code, message)
+                    {
+                        Kernel__free(elf->start);
+                        return Error(ProcessPtr, message, code);
+                    }
+                );
+            },
+            none()
+            {
+                Kernel__free(elf->start);
+                return Error(ProcessPtr, bstr("No process to overlay"), SPAWN_FAILED);
+            }
+        );
+    }
     SpawnStdio startup = SPAWN_STDIO_DEFAULT;
     match_optional(
         context->process,
@@ -262,7 +299,8 @@ static Result(ProcessPtr)
                 Address copy = Kernel__alloc_kernel(size);
                 Kernel__memcopy(embedded.start, copy, size);
                 Elf elf = Elf__new(copy, copy + size, path);
-                return Exec__launch_loaded_elf(context, &elf, wait, requested_user_id, arguments, stdio);
+                return Exec__launch_loaded_elf(context, &elf, wait, requested_user_id, arguments, stdio, false,
+                                               NULL_KERNEL_ADDRESS);
             },
             none()
             {

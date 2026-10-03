@@ -430,6 +430,50 @@ void test_ext2fs_owns_multiple_handles_and_offsets(void)
     TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 100, 42));
 }
 
+void test_ext2fs_inherited_handle_shares_offset_after_parent_closes(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/HELLO.TXT"));
+    request.flags = IO_OPEN_READ;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+
+    request = request_for(IO_REQUEST_READ, opened.value, &empty_bstr());
+    request.count = 5;
+    IOReply first_read = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, first_read.status);
+    TEST_ASSERT_EQUAL_MEMORY("hello", first_read.data, 5);
+
+    request = request_for(IO_REQUEST_INHERIT_PREPARE, opened.value, &empty_bstr());
+    IOReply prepared = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, prepared.status);
+    request = request_for(IO_REQUEST_INHERIT_COMMIT, 0, &empty_bstr());
+    request.inheritance_token = prepared.value;
+    request.inheritance_pid = 43;
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+
+    request = request_for(IO_REQUEST_CLOSE, opened.value, &empty_bstr());
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    TEST_ASSERT_EQUAL_UINT64(1, FilesystemFiles__len(&driver.files));
+
+    request = request_for(IO_REQUEST_INHERIT_CLAIM, 0, &empty_bstr());
+    request.client_session = 101;
+    request.client_pid = 43;
+    request.inheritance_token = prepared.value;
+    IOReply claimed = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, claimed.status);
+    TEST_ASSERT_EQUAL_INT64(opened.value, claimed.value);
+
+    request = request_for(IO_REQUEST_READ, claimed.value, &empty_bstr());
+    request.client_session = 101;
+    request.client_pid = 43;
+    request.count = 5;
+    IOReply continued = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, continued.status);
+    TEST_ASSERT_EQUAL_MEMORY(" worl", continued.data, 5);
+}
+
 void test_ext2fs_requires_execute_permission_and_opens_executable_files(void)
 {
     Ext2fsVolume volume = {.device_path = expected_device_path};
@@ -575,6 +619,59 @@ void test_ext2fs_writes_chunks_and_reopens_file(void)
     TEST_ASSERT_EQUAL_MEMORY("new data", reply.data, 8);
     TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
     TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 100, 42));
+}
+
+void test_ext2fs_exclusive_create_materializes_an_empty_file_and_rejects_collision(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/EXCLUSIVE.TXT"));
+    request.flags = IO_OPEN_WRITE | IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE;
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    TEST_ASSERT_EQUAL(IO_ALREADY_EXISTS, FilesystemDriver__execute(&driver, &request).status);
+
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/EXCLUSIVE.TXT"));
+    request.flags = IO_OPEN_READ;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    request = request_for(IO_REQUEST_READ, opened.value, &empty_bstr());
+    request.count = 1;
+    TEST_ASSERT_EQUAL_UINT64(0, FilesystemDriver__execute(&driver, &request).value);
+}
+
+void test_ext2fs_append_refreshes_size_for_independent_handles(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/APPEND.TXT"));
+    request.flags = IO_OPEN_WRITE;
+    IOReply first = FilesystemDriver__execute(&driver, &request);
+    IOReply second = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, first.status);
+    TEST_ASSERT_EQUAL(IO_OK, second.status);
+
+    request = request_for(IO_REQUEST_WRITE, first.value, &bstr("a"));
+    request.flags = IO_TRANSFER_APPEND;
+    TEST_ASSERT_EQUAL_UINT64(1, FilesystemDriver__execute(&driver, &request).value);
+    request.handle = second.value;
+    request.data[0] = 'b';
+    TEST_ASSERT_EQUAL_UINT64(1, FilesystemDriver__execute(&driver, &request).value);
+
+    request = request_for(IO_REQUEST_SEEK, first.value, &empty_bstr());
+    request.flags = IO_SEEK_SET;
+    TEST_ASSERT_EQUAL_UINT64(0, FilesystemDriver__execute(&driver, &request).value);
+    request = request_for(IO_REQUEST_WRITE, first.value, &bstr("c"));
+    request.flags = IO_TRANSFER_APPEND;
+    TEST_ASSERT_EQUAL_UINT64(1, FilesystemDriver__execute(&driver, &request).value);
+
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/APPEND.TXT"));
+    request.flags = IO_OPEN_READ;
+    IOReply reader = FilesystemDriver__execute(&driver, &request);
+    request = request_for(IO_REQUEST_READ, reader.value, &empty_bstr());
+    request.count = 3;
+    IOReply reply = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL_UINT64(3, reply.value);
+    TEST_ASSERT_EQUAL_MEMORY("abc", reply.data, 3);
 }
 
 void test_ext2fs_creates_and_removes_directory(void)

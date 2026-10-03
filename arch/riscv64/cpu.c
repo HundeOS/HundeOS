@@ -14,7 +14,6 @@
 #define PLIC_CONTEXT_HART_STRIDE 0x2000ULL
 
 static uint64_t timebase_frequency;
-static CPUID boot_cpu_id;
 
 static uint64_t RiscVCPU__time(void)
 {
@@ -26,28 +25,6 @@ static uint64_t RiscVCPU__time(void)
 void RiscVCPU__configure_timebase(uint64_t frequency)
 {
     timebase_frequency = frequency;
-}
-
-CPUID CPU__id(void)
-{
-    uint64_t hart_id;
-    __asm__ volatile("mv %0, tp" : "=r"(hart_id));
-    return hart_id;
-}
-
-void CPU__set_boot_id(CPUID id)
-{
-    boot_cpu_id = id;
-}
-
-bool CPU__is_boot_cpu(void)
-{
-    return CPU__id() == boot_cpu_id;
-}
-
-uint64_t RiscVCPU__physical_hart_id(void)
-{
-    return CPU__id();
 }
 
 uint64_t CPU__time_usec(void)
@@ -126,9 +103,4 @@ Result(InitCode) CPU__init(SystemInfoPtr system_info)
                          : "memory");
     }
     return Success(InitCode, ARCH_INIT_OK);
-}
-
-void CPU__assign_id(CPUID id)
-{
-    __asm__ volatile("mv tp, %0" : : "r"(id));
 }

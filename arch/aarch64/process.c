@@ -33,7 +33,7 @@ inline uint64_t Process__spsr_for_el0(unsigned mask_irqs /*bits [9:6]*/)
 }
 
 ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr stack, UserAddress entry_point,
-                                       KernelAddress page_table, uint64_t argc, Address argv)
+                                       KernelAddress page_table, ConstProcessStartupPtr startup)
 {
     KernelAddress context_addr = Kernel__alloc(sizeof(ProcessContext));
     ProcessContextPtr context = v_ptr(context_addr, ProcessContext);
@@ -58,9 +58,11 @@ ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr
 
     context->elr = vaddr(entry_point);
 
-    context->x[0] = argc;
-    context->x[1] = argv;
-    context->x[2] = pid;
+    context->x[0] = startup->argument_count;
+    context->x[1] = startup->arguments;
+    context->x[2] = startup->environment;
+    context->x[3] = pid;
+    context->x[7] = startup->exec_payload;
     context->x[8] = vaddr(entry_point);
 
     __d_printf(PROCESS, "ProcessContext__init done context=%p elr=%p sp=%p x0=%p x1=%p x8=%p page_table=%p\n", context,
@@ -73,21 +75,44 @@ void ProcessContext__copy(ProcessContextPtr self, ProcessContextPtr source)
     *self = *source;
 }
 
+void ProcessContext__set_syscall_result(ProcessContextPtr self, SystemCallResult result)
+{
+    self->x[0] = result;
+}
+
+void ProcessContext__restart_syscall(ProcessContextPtr self)
+{
+    self->elr -= sizeof(uint32_t);
+}
+
+ProcessContextPtr ProcessContext__clone(KernelPtr kernel, ProcessContextPtr source)
+{
+    ProcessContextPtr context = v_ptr(Kernel__alloc(sizeof(ProcessContext)), ProcessContext);
+    ProcessContext__copy(context, source);
+    return context;
+}
+
+void ProcessContext__enter_signal(ProcessContextPtr self, ProcessSignal signal, Address handler, Address restorer)
+{
+    self->x[0] = signal;
+    self->x[30] = restorer;
+    self->elr = handler;
+}
+
 extern void asm_switch_context(ProcessContextPtr context, Address pagetable);
 extern void asm_switch_kernel_context(ProcessContextPtr context, Address pagetable);
 
 void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
 {
-    ProcessContextPtr context = Process__required_context(self);
-    context->x[0] = result;
+    ProcessContext__set_syscall_result(Process__required_context(self), result);
 }
 
 void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error)
 {
     ProcessContextPtr context = Process__required_context(self);
-    context->x[3] = input;
-    context->x[4] = output;
-    context->x[5] = error;
+    context->x[4] = input;
+    context->x[5] = output;
+    context->x[6] = error;
 }
 
 void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)

@@ -24,6 +24,12 @@ typedef enum SystemCall
     SYSCALL_BOOT_SPAWN = 0x8E,
     SYSCALL_BOOT_COMPLETE = 0x8F,
     // 0x90 retired: executable loading now completes as a deferred exec syscall.
+    SYSCALL_PROCESS_TIMES = 0x91,
+    SYSCALL_PROCESS_IDENTITY = 0x92,
+    SYSCALL_PROCESS_FORK = 0x93,
+    SYSCALL_PROCESS_SIGNAL_CONTROL = 0x94,
+    SYSCALL_PROCESS_SIGNAL_RETURN = 0x95,
+    SYSCALL_PROCESS_GROUP = 0x96,
     PING = 0xFF,
 } SystemCall;
 
@@ -31,7 +37,9 @@ typedef enum SystemCallResults
 {
     SYSCALL_OK = 0,
     SYSCALL_FAILURE = -1,
-    SYSCALL_IO_BLOCK = -2
+    SYSCALL_IO_BLOCK = -2,
+    SYSCALL_INTERRUPTED = -4096,
+    SYSCALL_CONTEXT_RESTORED = 1,
 } SystemCallResults;
 
 #endif

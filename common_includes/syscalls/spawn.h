@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "auth.h"
+#include "exec.h"
 #include "process.h"
 #include "types/bstring.h"
 
@@ -104,9 +105,12 @@ typedef struct SpawnRequest
     AuthTicketID auth_ticket_id;
     SpawnStdio stdio;
     SpawnArguments arguments;
+    uint64_t overlay_payload;
+    uint64_t overlay_payload_size;
 } SpawnRequest;
 
 typedef SpawnRequest * SpawnRequestPtr;
+typedef const SpawnRequest * ConstSpawnRequestPtr;
 
 static inline Optional(BString) SpawnArg__from_bstring(ConstBStringPtr value)
 {
@@ -129,6 +133,21 @@ static inline SpawnRequest SpawnRequest__new(SpawnMode mode, ConstBStringPtr pat
         .auth_ticket_id = auth_ticket_id,
         .stdio = stdio,
         .arguments = *arguments,
+        .overlay_payload = 0,
+        .overlay_payload_size = 0,
+    };
+}
+
+static inline SpawnRequest SpawnRequest__overlay(ConstExecPayloadPtr payload)
+{
+    return (SpawnRequest){
+        .mode = P_OVERLAY,
+        .requested_user_id = SPAWN_INHERIT_USER_ID,
+        .auth_ticket_id = SPAWN_INHERIT_AUTH_TICKET,
+        .stdio = SPAWN_STDIO_DEFAULT,
+        .arguments = EmptyArray(SpawnArguments),
+        .overlay_payload = (uint64_t)payload,
+        .overlay_payload_size = ExecPayload__size(payload),
     };
 }
 

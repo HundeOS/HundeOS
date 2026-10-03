@@ -9,6 +9,12 @@ static ServiceDirectoryPtr io_test_directory(void)
 }
 
 #define ServiceDirectory__shared io_test_directory
+
+void QueueWait__reset_after_fork(void)
+{
+}
+
+#include "../../../user/lib/io/inheritance.c"
 #include "../../../user/lib/io/server.c"
 #include "../../../user/lib/io/client.c"
 #undef ServiceDirectory__shared
@@ -30,7 +36,8 @@ static IOHandle next_backend_handle;
 static bool path_operation(IORequestOperation operation)
 {
     return operation == IO_REQUEST_OPEN || operation == IO_REQUEST_LIST_DIR || operation == IO_REQUEST_FILE_INFO ||
-           operation == IO_REQUEST_MKDIR || operation == IO_REQUEST_REMOVE || operation == IO_REQUEST_LINK;
+           operation == IO_REQUEST_MKDIR || operation == IO_REQUEST_REMOVE || operation == IO_REQUEST_LINK ||
+           operation == IO_REQUEST_PIPE_CREATE;
 }
 
 static Optional(IOReply)
@@ -65,6 +72,9 @@ static Optional(IOReply)
     case IO_REQUEST_ACCEPT:
         reply.value = next_backend_handle++;
         break;
+    case IO_REQUEST_PIPE_CREATE:
+        reply.pipe = (IOPipe){.read = next_backend_handle++, .write = next_backend_handle++};
+        break;
     case IO_REQUEST_READ:
         if (file_backend)
         {
@@ -86,11 +96,15 @@ static Optional(IOReply)
     case IO_REQUEST_WATCH_FILE:
         reply.file_change = IOFileChange__new(request->handle, 7, IO_FILE_CHANGE_WRITE);
         break;
+    case IO_REQUEST_GET_TERMINAL_ATTRIBUTES:
+        reply.terminal_attributes = IOTerminalAttributes__default();
+        break;
     case IO_REQUEST_WAIT_FILE_CHANGE:
         reply.file_change = IOFileChange__new(IORequest__file_watches(request)[0].handle, 8, IO_FILE_CHANGE_DELETE);
         break;
     case IO_REQUEST_CLOSE:
     case IO_REQUEST_SET_FOREGROUND_PROCESS:
+    case IO_REQUEST_SET_TERMINAL_ATTRIBUTES:
     case IO_REQUEST_LINK:
         break;
     default:
@@ -114,6 +128,18 @@ static void serve(void)
 static IOClientSessionPtr backend_session(void)
 {
     return unwrap_optional(IOClient__find_session(&bstr(TEST_BACKEND_SERVICE)), NULL);
+}
+
+void test_io_client_reports_channel_wait_interruption_without_discarding_session(void)
+{
+    TEST_ASSERT_GREATER_OR_EQUAL_INT64(IO_SESSION_HANDLE_BASE, IOClient__open(&bstr("/mnt/ext/file"), IO_OPEN_READ));
+    IOClientSessionPtr session = backend_session();
+    TEST_ASSERT_NOT_NULL(session);
+    IORequest request = IORequest__new(IO_REQUEST_READ, IO_FILESYSTEM_HANDLE_BASE);
+    fixture_wait_interrupted = true;
+
+    TEST_ASSERT_EQUAL(IO_INTERRUPTED, IOClient__submit_to(session, &request).status);
+    TEST_ASSERT_FALSE(session->failed);
 }
 
 static void close_client_channels(void)
@@ -214,6 +240,40 @@ void test_client_translates_local_handles_for_direct_backend_operations(void)
     TEST_ASSERT_EQUAL_UINT(1, route_calls);
 }
 
+void test_pipe_registers_two_local_handles_with_shared_buffers(void)
+{
+    IOPipe pipe = unwrap_result(IOClient__pipe(), ((IOPipe){0}));
+
+    TEST_ASSERT_GREATER_OR_EQUAL_INT64(IO_SESSION_HANDLE_BASE, pipe.read);
+    TEST_ASSERT_GREATER_THAN_INT64(pipe.read, pipe.write);
+    TEST_ASSERT_EQUAL_UINT(1, route_calls);
+    TEST_ASSERT_EQUAL_UINT(1, backend_calls);
+    TEST_ASSERT_EQUAL(IO_REQUEST_PIPE_CREATE, last_request.operation);
+    TEST_ASSERT_TRUE(last_request.buffered);
+    TEST_ASSERT_NOT_EQUAL(0, backend_session()->buffers.read.id);
+    TEST_ASSERT_NOT_EQUAL(0, backend_session()->buffers.write.id);
+
+    uint8_t bytes[] = {1, 2, 3};
+    TEST_ASSERT_EQUAL_INT64(sizeof(bytes), IOClient__write(pipe.write, bytes, sizeof(bytes)));
+    TEST_ASSERT_EQUAL_INT64(2, IOClient__read(pipe.read, bytes, sizeof(bytes)));
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__close(pipe.read));
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__close(pipe.write));
+    TEST_ASSERT_EQUAL_UINT64(0, backend_session()->buffers.read.id);
+    TEST_ASSERT_EQUAL_UINT64(0, backend_session()->buffers.write.id);
+}
+
+void test_client_carries_transfer_flags_on_read_and_write_requests(void)
+{
+    IOPipe pipe = unwrap_result(IOClient__pipe(), ((IOPipe){0}));
+    uint8_t bytes[] = {1, 2, 3};
+
+    TEST_ASSERT_EQUAL_INT64(sizeof(bytes),
+                            IOClient__write_with_flags(pipe.write, bytes, sizeof(bytes), IO_TRANSFER_NONBLOCK));
+    TEST_ASSERT_EQUAL_UINT64(IO_TRANSFER_NONBLOCK, last_request.flags);
+    TEST_ASSERT_EQUAL_INT64(2, IOClient__read_with_flags(pipe.read, bytes, sizeof(bytes), IO_TRANSFER_NONBLOCK));
+    TEST_ASSERT_EQUAL_UINT64(IO_TRANSFER_NONBLOCK, last_request.flags);
+}
+
 void test_client_transports_control_seek_and_file_change_requests(void)
 {
     file_backend = true;
@@ -223,6 +283,15 @@ void test_client_transports_control_seek_and_file_change_requests(void)
     TEST_ASSERT_EQUAL(IO_OK, IOClient__set_foreground_process(first, 55));
     TEST_ASSERT_EQUAL(IO_REQUEST_SET_FOREGROUND_PROCESS, last_request.operation);
     TEST_ASSERT_EQUAL_UINT64(55, last_request.foreground_pid);
+
+    IOTerminalAttributesResult terminal = IOClient__get_terminal_attributes(first);
+    TEST_ASSERT_EQUAL(IO_OK, terminal.status);
+    TEST_ASSERT_EQUAL_UINT32(IO_TERMINAL_LOCAL_CANONICAL | IO_TERMINAL_LOCAL_ECHO,
+                             terminal.attributes.local_flags & (IO_TERMINAL_LOCAL_CANONICAL | IO_TERMINAL_LOCAL_ECHO));
+    terminal.attributes.local_flags &= ~IO_TERMINAL_LOCAL_ECHO;
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__set_terminal_attributes(first, terminal.attributes));
+    TEST_ASSERT_EQUAL(IO_REQUEST_SET_TERMINAL_ATTRIBUTES, last_request.operation);
+    TEST_ASSERT_EQUAL_UINT32(terminal.attributes.local_flags, last_request.terminal_attributes.local_flags);
 
     IOReply seek = IOClient__seek(first, -12, IO_SEEK_END);
     TEST_ASSERT_EQUAL(IO_OK, seek.status);

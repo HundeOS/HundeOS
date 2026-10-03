@@ -121,6 +121,7 @@ OptionalDef(IODiagnosticsSnapshot);
 
 // The process owns the counters. They are advisory, never scheduler inputs.
 void IODiagnostics__attach(IODiagnosticsPtr self);
+void IODiagnostics__detach(void);
 void IODiagnostics__record(IODiagnosticEvent event, uint64_t amount);
 void IODiagnosticLatency__record(IODiagnosticLatencyPtr self, uint64_t value);
 uint64_t IODiagnosticLatency__percentile(ConstIODiagnosticLatencyPtr self, uint64_t percentile);

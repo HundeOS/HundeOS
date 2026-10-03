@@ -1,6 +1,6 @@
 #include "../../fiber.h"
 
-#include <string.h>
+#include "memory.h"
 
 static BString invalid_context_stack = bstr("Invalid fiber context stack");
 
@@ -12,7 +12,7 @@ Result(FiberCode) FiberContext__init(FiberContextPtr self, Address stack_base, s
         return Error(FiberCode, invalid_context_stack, FIBER_INVALID_STACK_SIZE);
     }
 
-    memset(self, 0, sizeof(FiberContext));
+    Mem__memset(self, 0, sizeof(FiberContext));
     Address stack_top = (stack_base + stack_size) & ~((Address)FIBER_STACK_ALIGNMENT - 1);
     self->sp = stack_top;
     self->lr = (uint64_t)start;

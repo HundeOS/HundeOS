@@ -1,4 +1,3 @@
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -10,6 +9,18 @@
 
 static const char * program_name = "program";
 char * __progname = "program";
+static uint32_t rand_state = 1;
+
+int rand(void)
+{
+    rand_state = rand_state * UINT32_C(1103515245) + UINT32_C(12345);
+    return (int)(rand_state & (uint32_t)RAND_MAX);
+}
+
+void srand(unsigned int seed)
+{
+    rand_state = seed;
+}
 
 void LibC__set_program_name(const char * argument_zero)
 {
@@ -43,11 +54,6 @@ void * recallocarray(void * address, size_t old_count, size_t new_count, size_t 
         memset((char *)resized + old_count * size, 0, (new_count - old_count) * size);
     }
     return resized;
-}
-
-char * getenv(const char * name)
-{
-    return NULL;
 }
 
 long long strtonum(const char * text, long long minimum, long long maximum, const char ** error)
@@ -109,147 +115,7 @@ const char * getprogname(void)
     return program_name;
 }
 
-static bool stdlib_is_space(char ch)
-{
-    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v';
-}
-
-static int stdlib_digit_value(char ch)
-{
-    if (ch >= '0' && ch <= '9')
-    {
-        return ch - '0';
-    }
-    if (ch >= 'a' && ch <= 'z')
-    {
-        return 10 + ch - 'a';
-    }
-    if (ch >= 'A' && ch <= 'Z')
-    {
-        return 10 + ch - 'A';
-    }
-
-    return 36;
-}
-
-static int stdlib_detect_base(const char ** cursor, int base)
-{
-    if (base == 0)
-    {
-        if ((*cursor)[0] == '0' && ((*cursor)[1] == 'x' || (*cursor)[1] == 'X'))
-        {
-            *cursor += 2;
-            return 16;
-        }
-        if ((*cursor)[0] == '0')
-        {
-            return 8;
-        }
-
-        return 10;
-    }
-
-    if (base == 16 && (*cursor)[0] == '0' && ((*cursor)[1] == 'x' || (*cursor)[1] == 'X'))
-    {
-        *cursor += 2;
-    }
-
-    return base;
-}
-
-unsigned long long strtoull(const char * text, char ** endptr, int base)
-{
-    const char * cursor = text;
-    const char * digits_start;
-    unsigned long long value = 0;
-    bool negative = false;
-
-    while (stdlib_is_space(*cursor))
-    {
-        cursor++;
-    }
-
-    if (*cursor == '-' || *cursor == '+')
-    {
-        negative = *cursor == '-';
-        cursor++;
-    }
-
-    base = stdlib_detect_base(&cursor, base);
-    digits_start = cursor;
-
-    while (base >= 2 && base <= 36)
-    {
-        int digit = stdlib_digit_value(*cursor);
-        if (digit >= base)
-        {
-            break;
-        }
-
-        value = (value * (unsigned long long) base) + (unsigned long long) digit;
-        cursor++;
-    }
-
-    if (cursor == digits_start)
-    {
-        cursor = text;
-    }
-
-    if (endptr != NULL)
-    {
-        *endptr = (char *) cursor;
-    }
-
-    if (negative)
-    {
-        return (unsigned long long) -value;
-    }
-
-    return value;
-}
-
-long long strtoll(const char * text, char ** endptr, int base)
-{
-    bool negative = false;
-    const char * cursor = text;
-    while (stdlib_is_space(*cursor))
-    {
-        cursor++;
-    }
-    if (*cursor == '-' || *cursor == '+')
-    {
-        negative = *cursor == '-';
-        cursor++;
-    }
-    char * end;
-    unsigned long long value = strtoull(cursor, &end, base);
-    if (endptr != NULL)
-    {
-        *endptr = end == cursor ? (char *)text : end;
-    }
-    return negative ? -(long long)value : (long long)value;
-}
-
 int atoi(const char * text)
 {
-    bool negative = false;
-
-    while (stdlib_is_space(*text))
-    {
-        text++;
-    }
-
-    if (*text == '-' || *text == '+')
-    {
-        negative = *text == '-';
-        text++;
-    }
-
-    unsigned long long value = strtoull(text, NULL, 10);
-    if (negative)
-    {
-        return -(int) value;
-    }
-
-    return (int) value;
+    return (int)strtol(text, NULL, 10);
 }

@@ -104,8 +104,8 @@ inline UserAddress UserAddress__new(Address virtual_addr, KernelAddressPtr kerne
 #define k_p_ptr(a, type) ((type *)a.kernel_addr.phys_addr)
 #define void_k_p_ptr(a) ((void *)a.kernel_addr.phys_addr)
 
-#define ptr(a, type) ((type *)a)
-#define void_ptr(a) ((void *)a)
+#define ptr(a, type) ((type *)(a))
+#define void_ptr(a) ((void *)(a))
 
 #define offset_ptr(a, o, type) ((type *)(a + o))
 #define offset_void_ptr(a, o) ((void *)(a + o))

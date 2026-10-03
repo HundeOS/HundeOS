@@ -1,5 +1,5 @@
 #include "devfs.h"
-#include <string.h>
+#include "memory.h"
 
 static Result(FilesystemFileSize)
     Devfs__load(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data)
@@ -21,7 +21,7 @@ static Result(FilesystemFileSize)
                     BString text =
                         BString__sprintf(&bstr("path=%B\nblock_size=%llu\nblock_count=%llu\nuserspace_service=1\n"),
                                          &record.path, record.block_size, record.block_count);
-                    memcpy(data, BString__cstr(&text), BString__length(&text));
+                    Mem__memcpy(data, BString__cstr(&text), BString__length(&text));
                     return Success(FilesystemFileSize, BString__length(&text));
                 },
                 none()

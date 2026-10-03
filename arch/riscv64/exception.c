@@ -34,6 +34,33 @@
 
 extern void Exception__entry(void);
 
+static void Exception__account_current_process(KernelPtr kernel, CPUUsageMode mode)
+{
+    match_optional(
+        Scheduler__current_process(kernel->scheduler, CPU__id()),
+        some(process)
+        {
+            Process__account_cpu_mode(process, mode);
+        },
+        none_do_nothing()
+    );
+}
+
+static void Exception__prepare_user_return(KernelPtr kernel, ProcessContextPtr context)
+{
+    match_optional(
+        Scheduler__current_process(kernel->scheduler, CPU__id()),
+        some(process)
+        {
+            if (Scheduler__deliver_pending_signal(kernel->scheduler, process, context) == PROCESS_SIGNAL_DELIVERY_STOP)
+            {
+                Scheduler__yield_waiting(kernel->scheduler, process, CPU__id());
+            }
+        },
+        none_do_nothing()
+    );
+}
+
 static volatile uint32_t * Exception__plic_claim_register(ConstPlicInterruptControllerInfoPtr plic)
 {
     Address context = PLIC_SUPERVISOR_CONTEXT_OFFSET + RiscVCPU__physical_hart_id() * PLIC_CONTEXT_HART_STRIDE;
@@ -72,6 +99,14 @@ static void Exception__handle_syscall(ProcessContextPtr context)
     context->sepc += 4U;
     Optional(ProcessPtr) current_process =
         Scheduler__save_context(kernel->scheduler, CPU__id(), &Some(ProcessContextPtr, context));
+    match_optional(
+        current_process,
+        some(process)
+        {
+            Process__account_cpu_mode(process, CPU_USAGE_SYSTEM);
+        },
+        none_do_nothing()
+    );
 
     Result(SystemCallResult) result =
         SyscallDispatcher__dispatch(&kernel->syscall_dispatcher, kernel, &current_process, context->x[17],
@@ -82,7 +117,23 @@ static void Exception__handle_syscall(ProcessContextPtr context)
         {
             if (!Exception__yield_if_parked(kernel, &current_process))
             {
-                context->x[10] = value;
+                if (SystemCallResult__restores_context(context->x[17], value))
+                {
+                    match_optional(
+                        current_process,
+                        some(process)
+                        {
+                            ProcessContext__copy(context, Process__required_context(process));
+                        },
+                        none_do_nothing()
+                    );
+                }
+                else
+                {
+                    context->x[10] = value;
+                }
+                Exception__account_current_process(kernel, CPU_USAGE_USER);
+                Exception__prepare_user_return(kernel, context);
             }
         },
         error(code, message)
@@ -90,6 +141,8 @@ static void Exception__handle_syscall(ProcessContextPtr context)
             if (!Exception__yield_if_parked(kernel, &current_process))
             {
                 context->x[10] = code;
+                Exception__account_current_process(kernel, CPU_USAGE_USER);
+                Exception__prepare_user_return(kernel, context);
             }
         }
     );
@@ -215,18 +268,29 @@ void Exception__handle(ProcessContextPtr context)
     bool current_privilege = (context->sstatus & RISCV_SSTATUS_SPP) != 0;
     bool interrupt = (context->scause & RISCV_INTERRUPT_FLAG) != 0;
     uint64_t cause = context->scause & ~RISCV_INTERRUPT_FLAG;
+    KernelPtr kernel = Kernel__instance();
+
+    if (interrupt && !current_privilege)
+    {
+        Exception__account_current_process(kernel, CPU_USAGE_PAUSED);
+    }
 
     if (interrupt && cause == RISCV_INTERRUPT_SUPERVISOR_TIMER)
     {
         IRQDispatchContext irq_context = IRQDispatchContext__new(cause, CPU__id(), current_privilege, context);
         match_result(
-            CPUTimer__handle_irq(&irq_context, Kernel__instance()),
+            CPUTimer__handle_irq(&irq_context, kernel),
             success_do_nothing(),
             error(code, message)
             {
                 Kernel__panic(cstr(message), context);
             }
         );
+        if (!current_privilege)
+        {
+            Exception__account_current_process(kernel, CPU_USAGE_USER);
+            Exception__prepare_user_return(kernel, context);
+        }
         return;
     }
     if (interrupt && cause == RISCV_INTERRUPT_SUPERVISOR_SOFTWARE)
@@ -234,13 +298,20 @@ void Exception__handle(ProcessContextPtr context)
         __asm__ volatile("csrc sip, %0" : : "r"(1ULL << RISCV_INTERRUPT_SUPERVISOR_SOFTWARE) : "memory");
         if (!current_privilege)
         {
-            Scheduler__preempt(Kernel__instance()->scheduler, CPU__id(), &Some(ProcessContextPtr, context));
+            Scheduler__preempt(kernel->scheduler, CPU__id(), &Some(ProcessContextPtr, context));
+            Exception__account_current_process(kernel, CPU_USAGE_USER);
+            Exception__prepare_user_return(kernel, context);
         }
         return;
     }
     if (interrupt && cause == RISCV_INTERRUPT_SUPERVISOR_EXTERNAL)
     {
         Exception__handle_external(context, current_privilege);
+        if (!current_privilege)
+        {
+            Exception__account_current_process(kernel, CPU_USAGE_USER);
+            Exception__prepare_user_return(kernel, context);
+        }
         return;
     }
     if (!interrupt && !current_privilege && cause == RISCV_EXCEPTION_USER_ECALL)

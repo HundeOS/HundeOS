@@ -27,6 +27,8 @@ void test_boot_info_copies_hardware_without_kernel_virtual_addresses(void)
                                   255, 65280, 16711680, 0));
     system.pci = Some(PciInfo, PciInfo__new(0x40000000, 0x100000, 0, 7));
     system.sd_host = Some(SdHostInfo, SdHostInfo__new(0x50000000, 4096, 60));
+    BootDeviceInfo rtc_device = BootDeviceInfo__new(0x9010000, 4096, 34);
+    system.rtc = Some(BootRtcInfo, BootRtcInfo__new(&rtc_device, RTC_KIND_PL031));
     GicInterruptControllerInfo gic =
         GicInterruptControllerInfo__new(0x8000000, 0xffff000008000000, 0x80a0000, 0xffff0000080a0000, 0, 0);
     system.interrupt_controller = InterruptControllerInfo__new_gic(INTERRUPT_CONTROLLER_GIC_V3, &gic);
@@ -78,6 +80,16 @@ void test_boot_info_copies_hardware_without_kernel_virtual_addresses(void)
         some_test_fail(),
         none_do_nothing()
     );
+    match_optional(
+        result.rtc,
+        some(value)
+        {
+            TEST_ASSERT_EQUAL(RTC_KIND_PL031, value.kind);
+            TEST_ASSERT_EQUAL_HEX64(0x9010000, value.device.physical_base);
+            TEST_ASSERT_EQUAL_UINT64(34, value.device.irq);
+        },
+        none_test_fail()
+    );
 }
 
 void test_boot_info_exports_plic_without_kernel_virtual_addresses(void)
@@ -110,6 +122,10 @@ void test_boot_info_preserves_absent_devices(void)
         none_do_nothing()
     );
     match_optional(result.virtio_mmio,
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_optional(result.rtc,
         some_test_fail(),
         none_do_nothing()
     );

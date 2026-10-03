@@ -1,6 +1,6 @@
 #include "embedfs.h"
+#include "memory.h"
 #include "sys/process.h"
-#include <string.h>
 
 FixedArrayBodyDefine(EmbedfsHandles);
 
@@ -297,7 +297,8 @@ IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request)
             size_t remaining = handle->file.end - handle->file.start - handle->offset;
             size_t size = request->count < remaining ? request->count : remaining;
             IOReply reply = IOReply__new(IO_OK, size);
-            memcpy(IORequest__read_target(request, &reply), (const void *)(handle->file.start + handle->offset), size);
+            Mem__memcpy(IORequest__read_target(request, &reply), (const void *)(handle->file.start + handle->offset),
+                        size);
             handle->offset += size;
             return reply;
         },

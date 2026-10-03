@@ -38,9 +38,40 @@ static inline Address Exception__return_address(void)
     return elr;
 }
 
+static void Exception__account_current_process(KernelPtr kernel, CPUUsageMode mode)
+{
+    match_optional(
+        Scheduler__current_process(kernel->scheduler, CPU__id()),
+        some(process)
+        {
+            Process__account_cpu_mode(process, mode);
+        },
+        none_do_nothing()
+    );
+}
+
+static void Exception__prepare_user_return(KernelPtr kernel, ProcessContextPtr context)
+{
+    match_optional(
+        Scheduler__current_process(kernel->scheduler, CPU__id()),
+        some(process)
+        {
+            if (Scheduler__deliver_pending_signal(kernel->scheduler, process, context) == PROCESS_SIGNAL_DELIVERY_STOP)
+            {
+                Scheduler__yield_waiting(kernel->scheduler, process, CPU__id());
+            }
+        },
+        none_do_nothing()
+    );
+}
+
 static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
 {
     KernelPtr kernel = Kernel__instance();
+    if (!current_el)
+    {
+        Exception__account_current_process(kernel, CPU_USAGE_PAUSED);
+    }
 
     uint32_t id = icc_iar1();
     __d_printf(IRQ, "irq: %i\n", id);
@@ -80,6 +111,8 @@ static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
         if (!current_el)
         {
             Scheduler__preempt(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
+            Exception__account_current_process(kernel, CPU_USAGE_USER);
+            Exception__prepare_user_return(kernel, context);
         }
         return;
     }
@@ -113,6 +146,11 @@ static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
             __d_printf(UNHANDLED, "irq dispatch error %i for irq %i\n", code, id);
         }
     );
+    if (!current_el)
+    {
+        Exception__account_current_process(kernel, CPU_USAGE_USER);
+        Exception__prepare_user_return(kernel, context);
+    }
 }
 
 static uint64_t Exception__abort_user(KernelPtr kernel, OptionalPtr(ProcessPtr) current_process,
@@ -197,6 +235,7 @@ static uint64_t Exception__handle_sync(ProcessContextPtr context, bool current_e
             current_process,
             some(proc)
             {
+                Process__account_cpu_mode(proc, CPU_USAGE_SYSTEM);
                 __d_printf(SYSCALL, "syscall entry pid=%i name=%s id=%p elr=%p args=%p,%p,%p,%p,%p current_el=%i\n",
                            proc->pid, cstr(proc->name), context->x[8], context->elr, context->x[0], context->x[1],
                            context->x[2], context->x[3], context->x[4], current_el);
@@ -239,7 +278,24 @@ static uint64_t Exception__handle_sync(ProcessContextPtr context, bool current_e
                 {
                     return 0;
                 }
-                return call_result;
+                if (SystemCallResult__restores_context(context->x[8], call_result))
+                {
+                    match_optional(
+                        current_process,
+                        some(proc)
+                        {
+                            ProcessContext__copy(context, Process__required_context(proc));
+                        },
+                        none_do_nothing()
+                    );
+                }
+                else
+                {
+                    context->x[0] = call_result;
+                }
+                Exception__account_current_process(kernel, CPU_USAGE_USER);
+                Exception__prepare_user_return(kernel, context);
+                return context->x[0];
             },
             error(code, message)
             {
@@ -247,6 +303,8 @@ static uint64_t Exception__handle_sync(ProcessContextPtr context, bool current_e
                 {
                     return 0;
                 }
+                context->x[0] = code;
+                Exception__account_current_process(kernel, CPU_USAGE_USER);
                 match_optional(
                     current_process,
                     some(proc)
@@ -263,7 +321,8 @@ static uint64_t Exception__handle_sync(ProcessContextPtr context, bool current_e
                     }
                 );
                 __d_printf(SYSCALL, "syscall error: %s code=%i\n", BString__cstr(&message), code);
-                return code;
+                Exception__prepare_user_return(kernel, context);
+                return context->x[0];
             }
         );
         return 0;
@@ -354,10 +413,10 @@ void Exception__handle_serror_current_spx(ProcessContextPtr context)
 }
 
 // Lower EL using AArch64 handlers
-void Exception__handle_sync_lower_aarch64(ProcessContextPtr context)
+uint64_t Exception__handle_sync_lower_aarch64(ProcessContextPtr context)
 {
     __d_println(IRQ, "\nException__handle_sync_lower_aarch64");
-    Exception__handle_sync(context, false);
+    return Exception__handle_sync(context, false);
 }
 
 void Exception__handle_irq_lower_aarch64(ProcessContextPtr context)

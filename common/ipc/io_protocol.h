@@ -9,6 +9,7 @@
 
 #define IO_SYSTEM_SERVICE "hund-io-system"
 #define IO_SOCKET_SERVICE "socket_router"
+#define IO_PIPE_SERVICE "hund-rohr"
 #define IO_FILESYSTEM_SERVICE "hund-dateisystem"
 #define IO_PROTOCOL_DATA_SIZE 256U
 #define IO_SESSION_HANDLE_BASE (1LL << 32)
@@ -40,6 +41,13 @@ typedef enum IORequestOperation
     IO_REQUEST_SEEK,
     IO_REQUEST_WATCH_FILE,
     IO_REQUEST_WAIT_FILE_CHANGE,
+    IO_REQUEST_PIPE_CREATE,
+    IO_REQUEST_GET_TERMINAL_ATTRIBUTES,
+    IO_REQUEST_SET_TERMINAL_ATTRIBUTES,
+    IO_REQUEST_INHERIT_PREPARE,
+    IO_REQUEST_INHERIT_COMMIT,
+    IO_REQUEST_INHERIT_CLAIM,
+    IO_REQUEST_INHERIT_ABORT,
 } IORequestOperation;
 
 static inline IOFileChange IOFileChange__new(IOHandle handle, uint64_t generation, Flags events)
@@ -57,6 +65,9 @@ typedef struct IORequest
     uint64_t client_pid;
     QueueConnectionID client_session;
     uint64_t foreground_pid;
+    uint64_t inheritance_token;
+    uint64_t inheritance_pid;
+    IOTerminalAttributes terminal_attributes;
     bool buffered;
     BufferID buffer;
     // Receiver-local address: never trusted from a channel message.
@@ -120,14 +131,17 @@ typedef struct IOReply
 {
     IOStatus status;
     Anything value;
+    IOPipe pipe;
+    BufferPair buffers;
+    Flags inheritance_flags;
 
     union
     {
         uint8_t data[IO_PROTOCOL_DATA_SIZE];
         IODirectoryBatch directory;
-        BufferPair buffers;
         IOFileInfo file_info;
         IOFileChange file_change;
+        IOTerminalAttributes terminal_attributes;
         IORoute route;
     };
 } IOReply;

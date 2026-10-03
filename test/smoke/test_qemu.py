@@ -12,7 +12,7 @@ import pytest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-PROMPT = b"> "
+PROMPT = b"bash-5.3# "
 BOOT_TIMEOUT_SECONDS = 600
 COMMAND_TIMEOUT_SECONDS = 60
 SHUTDOWN_TIMEOUT_SECONDS = 60
@@ -201,6 +201,12 @@ def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, arch
     for command in (b"cat", b"cp", b"grep", b"ln", b"ls", b"mkdir", b"mv", b"rm", b"tail"):
         assert command in commands
 
+    setjmp_probe = session.run_command("setjmp_probe")
+    assert b"setjmp_probe: ok" in setjmp_probe
+
+    libc_probe = session.run_command("libc_probe")
+    assert b"libc_probe: ok" in libc_probe
+
     grepped = session.run_command("/usr/local/bin/grep -n hello.*ext2 /hello.txt")
     assert b"1:hello from ext2" in grepped
 
@@ -315,7 +321,7 @@ def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, arch
     assert b"partial^C" in cancelled
 
     processes = session.run_command("ps")
-    assert b"/sbin/shell" in processes
+    assert b"/usr/local/bin/bash" in processes
 
     session.send_line("shutdown")
     session.wait_for_exit(SHUTDOWN_TIMEOUT_SECONDS)

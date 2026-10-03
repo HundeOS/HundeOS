@@ -168,8 +168,8 @@ void test_login_authenticates_user_and_spawns_shell_as_user(void)
     TEST_ASSERT_EQUAL_STRING("user", last_auth_password);
     TEST_ASSERT_EQUAL(P_WAIT, last_mode);
     TEST_ASSERT_EQUAL_UINT64(42, last_auth_ticket_id);
-    TEST_ASSERT_EQUAL_STRING("/sbin/shell", last_path);
-    TEST_ASSERT_TRUE(contains_text(output, "login: failed to start shell: -1\n"));
+    TEST_ASSERT_EQUAL_STRING("/usr/local/bin/bash", last_path);
+    TEST_ASSERT_TRUE(contains_text(output, "login: failed to start bash: -1\n"));
 }
 
 void test_login_retries_after_invalid_credentials(void)
@@ -183,5 +183,5 @@ void test_login_retries_after_invalid_credentials(void)
     TEST_ASSERT_EQUAL_INT(1, login_main_under_test());
     TEST_ASSERT_EQUAL_UINT64(42, last_auth_ticket_id);
     TEST_ASSERT_TRUE(contains_text(output, "login: invalid credentials\n"));
-    TEST_ASSERT_TRUE(contains_text(output, "login: failed to start shell: -1\n"));
+    TEST_ASSERT_TRUE(contains_text(output, "login: failed to start bash: -1\n"));
 }

@@ -20,6 +20,8 @@ struct ExecLoad
     uint64_t path_length;
     uint8_t path_data[IO_PROTOCOL_DATA_SIZE];
     ProcessArguments arguments;
+    KernelAddress overlay_payload;
+    bool overlay;
     Optional(UserID) user;
     SpawnStdio stdio;
     bool wait;
@@ -36,9 +38,9 @@ struct ExecLoad
     size_t size;
 };
 
-Result(ProcessPtr)
-    ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait, OptionalPtr(UserID) user,
-                    ConstProcessArgumentsPtr arguments, ConstSpawnStdioPtr stdio);
+Result(ProcessPtr) ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,
+                                   OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
+                                   ConstSpawnStdioPtr stdio, bool overlay, KernelAddress overlay_payload);
 Result(ProcessPtr) ExecLoad__continue(ProcessPtr process);
 bool ExecLoad__ready(ProcessPtr process);
 void ExecLoad__cancel(ProcessPtr process);

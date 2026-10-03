@@ -21,69 +21,202 @@ only to advance the Bash build.
 
 #### 1. Reproducible Cross Build And Target Runtime
 
-- [ ] Pin the Bash release and patches, record source checksums and configuration
+- [x] Pin the Bash release and patches, record source checksums and configuration
   switches, and add reproducible out-of-tree AArch64 and RISC-V build targets.
-- [ ] Define a HundeOS target triplet and teach the selected Bash release's
+- [x] Define a HundeOS target triplet and teach the selected Bash release's
   `config.sub` about it, without pretending that HundeOS has another system's ABI.
-- [ ] Build an architecture-qualified target sysroot containing only HundeOS
+- [x] Build an architecture-qualified target sysroot containing only HundeOS
   headers, startup objects, static userspace libraries, and required compiler
   runtime support. Do not link every userspace library object into every program.
-- [ ] Provide a reusable userspace CRT and link specification for `_start`, static
+- [x] Provide a reusable userspace CRT and link specification for `_start`, static
   libraries, garbage collection, architecture flags, and any required `libgcc`
-  helpers.
+  helpers. The packaged artifacts and smoke target are documented in
+  `user/ports/bash/README.md`.
 - [ ] Add a reviewed cross-configure cache for probes that cannot run target
   executables, including wait-status layout, signal behavior, process groups,
   named pipes, `dup2`, collation, byte order, and type sizes.
+  - [x] Seed the cache with the verified header implementation of `isblank` and
+    the deliberate absence of signal-mask-preserving `sigsetjmp`.
+  - [x] Record the tested POSIX wait-status exit-code offset of eight bits.
+  - [ ] Review and record the remaining runtime-only probes as their underlying
+    interfaces are implemented and tested.
 - [ ] Keep Bash host generators such as `mksignames` and `mkbuiltins` on the host
   compiler and headers while all target objects use only the HundeOS sysroot.
-- [ ] Install the resulting static executable into the architecture-qualified
+- [x] Install the resulting static executable into the architecture-qualified
   disk rootfs and include both Bash builds in `make compile-commands`.
 
 #### 2. Non-Local Control Flow
 
-- [ ] Add `<setjmp.h>` with `jmp_buf`, `setjmp`, `longjmp`, `sigsetjmp`, and
-  `siglongjmp`, backed by tested AArch64 and RISC-V context implementations.
-- [ ] Define which signal-mask state `sigsetjmp` preserves, and test nested jumps,
-  restored callee-saved registers, stack restoration, and zero-to-one return
-  conversion on both architectures.
+- [x] Add `<setjmp.h>` with architecture-specific `jmp_buf`, `setjmp`, and
+  `longjmp`. The AArch64 and RISC-V QEMU smoke tests cover nested jumps, restored
+  stacks, zero-to-one return conversion, and every ABI callee-saved register.
+- [ ] Add `sigjmp_buf`, `sigsetjmp`, and `siglongjmp` after process signal masks
+  exist. Define which mask state they preserve and test saved and unsaved mask
+  modes on both architectures.
 
 #### 3. Signal Foundation
 
-- [ ] Add `<signal.h>` with `sig_atomic_t`, `sigset_t`, `struct sigaction`, the
+- [x] Add `<signal.h>` with `sig_atomic_t`, `sigset_t`, `struct sigaction`, the
   required `SIG_*` values, disposition constants, mask operations, and flags.
-- [ ] Implement `sigemptyset`, `sigfillset`, `sigaddset`, `sigdelset`, and
+- [x] Implement `sigemptyset`, `sigfillset`, `sigaddset`, `sigdelset`, and
   `sigismember` in the userspace compatibility layer.
-- [ ] Extend kernel signal delivery beyond termination to default, ignored, and
-  userspace-handler dispositions; per-process masks and pending signals; handler
-  entry and return; and architecture context restoration.
-- [ ] Implement `signal`, `sigaction`, `sigprocmask`, `sigsuspend`, `sigpending`,
-  `raise`, `alarm`, and `kill`, with defined syscall interruption/restart behavior.
-- [ ] Preserve or reset signal state correctly across fork and exec, and retain
-  the independent early-boot and panic paths.
+- [ ] Complete POSIX kernel signal delivery semantics.
+  - [x] Add kernel-backed default, ignored, and userspace-handler dispositions;
+    per-process masks and pending signals; nested handler entry and `sigreturn`;
+    and AArch64/RISC-V context restoration. All signals numbered 1 through 32
+    can now be queued, and `SIGKILL` and `SIGSTOP` cannot be caught or blocked.
+  - [x] Implement the default stop/continue actions for `SIGSTOP`, `SIGTSTP`,
+    `SIGTTIN`, `SIGTTOU`, and `SIGCONT`, including scheduler stopped state and
+    stopped/continued child events.
+  - [ ] Complete signal generation at the remaining subsystem boundaries,
+    including terminal-generated signals and `SIGPIPE` from pipe writes.
+- [x] Implement `raise` and positive-PID `kill`, including signal-zero existence
+  probes and errno translation.
+- [ ] Complete the userspace signal interfaces and interruption behavior.
+  - [x] Back `signal`, `sigaction`, `sigprocmask`, and `sigpending` with kernel
+    process state and delivery.
+  - [x] Replace the immediate-`EINTR` `sigsuspend` compatibility behavior with
+    an atomic temporary-mask-and-wait operation.
+  - [x] Implement `alarm` and process-group `kill`.
+  - [x] Define and implement interrupted syscall behavior for child waits,
+    sleeps, and queue-backed I/O. Caught handlers return `EINTR` or restart the
+    saved syscall according to `SA_RESTART`; `SA_NOCLDSTOP` and `SA_NOCLDWAIT`
+    control child signal and event generation.
+- [x] Preserve signal dispositions and masks across fork without inheriting
+  pending signals. Across exec, preserve ignored dispositions, the mask, and
+  pending signals while resetting caught handlers and active handler frames.
+  Early-boot and panic output remain independent of userspace signal delivery.
+
+##### OpenBSD Command Acceptance Targets
+
+- [x] Vendor the pinned OpenBSD `bin/kill/kill.c` unchanged, build it for AArch64
+  and RISC-V, and provide its `NSIG`/signal-name table, `strcasecmp`,
+  `strncasecmp`, signed PID type, positive-PID targeting, signal-zero checks,
+  errno mappings, and command tests.
+- [x] Complete OpenBSD `kill` acceptance with process-group targeting and
+  sender/target permission rules, including PID `0`, `-1`, negative process
+  groups, signal-zero probes, and same-session `SIGCONT` behavior.
+- [ ] Provide `fg` and `bg` behavior through Bash job-control support rather
+  than standalone executables. They require a shell-owned job table,
+  `SIGCHLD` masking and delivery, stopped/continued child events, `waitpid` with
+  job-control status, process groups, `SIGCONT`, `sigsuspend`, `tcsetpgrp`, and
+  saved/restored terminal state. Keep the vendored OpenBSD source unchanged and
+  put HundeOS integration outside the vendor tree.
 
 #### 4. Compile And Static Link Closure
 
 - [ ] Add the process, wait, terminal, time, resource, system-identification, and
   selection headers and types required by Bash: `pid_t`, `clock_t`, `sig_atomic_t`,
   `sigset_t`, `fd_set`, `timeval`, `rlimit`, `tms`, `utsname`, and `termios`.
+  - [x] Add terminal-backed `ttyname` and `isatty`. Startup UART and keyboard/video
+    endpoints report their logical terminal identity, duplicates preserve it,
+    and invalid or non-terminal descriptors report `EBADF` or `ENOTTY`.
+  - [x] Provide `<termios.h>`, `tcgetattr`, `tcsetattr`, `tcdrain`, and `tcflow`
+    through the userspace I/O protocol. Terminal stream owners persist the
+    attributes, Bash selects its POSIX terminal driver, and `nojobs.c` now
+    compiles through the former `<sgtty.h>` boundary. Bash now compiles through
+    `fork`, `puts`, its POSIX signal selection, `bashline.c`, and the remaining
+    main shell objects and builtins. Libc now provides deterministic `rand` and
+    `srand` plus collision-retrying `mktemp`, `mkstemp`, and `mkdtemp`.
+    `mkstemp` uses exclusive creation and `mkdtemp` uses directory creation for
+    atomic collision protection. Bash remains unpatched and `lib/sh/tmpfile.c`
+    compiles on both targets.
+  - [x] Provide `struct timeval`, `fgets`, and iteration over the built-in group
+    database. Multibyte support avoids Bash 5.3's malformed fallback-only
+    `rl_point++:` statement without modifying vendored source.
 - [ ] Fill the constants and macros required by the build, including wait-status
   macros and options, descriptor and open flags, signal and terminal constants,
   integer limits, `ARG_MAX`, `OPEN_MAX`, and the expanded errno set.
+  - [x] Add `<sys/param.h>` as a compatibility entry point for the limits already
+    defined by HundeOS. Both target sysroots include it successfully, and Bash's
+    configure detects it on AArch64 and RISC-V.
+  - [x] Add `O_APPEND` with shared open-description state and atomic
+    append-at-write behavior in the filesystem services.
 - [ ] Complete the string and algorithm surface required by Bash, including
   `qsort`, `strncpy`, `strcat`, `strdup`, `strpbrk`, `strstr`, `strcasecmp`, and
-  `strncasecmp`. Use Bash's bundled implementations where they are suitable.
+  `strncasecmp`. Core memory, string, character-classification, and sorting
+  routines come from an explicitly verified Newlib libc member allowlist;
+  HundeOS retains its local `strdup`, `strcasecmp`, and `strncasecmp` adapters.
+  - [x] Add and test the standard `strncpy` declaration and implementation,
+    including NUL padding, truncation without forced termination, zero-length
+    copies, and the returned destination pointer.
+  - [x] Add and test the standard `strcat` declaration and implementation,
+    including empty-source behavior and the returned destination pointer.
+  - [x] Add and test allocating `strdup`, including empty strings and ownership
+    independent of the source buffer. Bash's `lib/sh/itos.c` compiles on both
+    targets.
+  - [x] Select and target-test Newlib's `qsort` for arbitrary-sized elements.
+  - [x] Add deterministic `rand` and `srand` for non-cryptographic compatibility.
+    The implementation is reproducible when reseeded and does not claim entropy.
+  - [x] Add `mktemp`, `mkstemp`, and `mkdtemp` with validated templates,
+    deterministic candidate names, collision retries, and atomic creation for
+    files and directories. `mktemp` remains a compatibility-only, non-atomic
+    name query.
+  - [ ] Design and implement a secure system entropy source before exposing
+    `getrandom`, `/dev/urandom`, or using random values for salts, tokens, or
+    other security-sensitive purposes.
 - [ ] Complete numeric conversion and math declarations, including `strtol`,
   `strtoul`, `strtod`, range handling, `<inttypes.h>`, and `<math.h>`.
+  - [x] Pin Newlib `4.6.0.20260123` and build its `math.h` dependency closure
+    and `libm.a` for AArch64 and RISC-V. The sysroot deliberately does not
+    expose unsupported Newlib libc headers. The math smoke binary links on both
+    targets, and Bash compiles into its fallback `strtod` implementation.
+  - [x] Provide Newlib's `strtol`, `strtoul`, `strtoll`, and `strtoull` through
+    the verified libc member allowlist. The target probe covers bases, end
+    pointers, signed and unsigned limits, `ERANGE`, and invalid-base `EINVAL`
+    behavior on AArch64 and RISC-V.
+- [x] Add the `abort` declaration and terminating implementation. `SIGABRT` uses
+  the kernel's fatal-signal path and reports signal termination to the parent.
 - [ ] Complete the required stdio surface, including `sprintf`, `vsnprintf`,
   `vprintf`, `puts`, character and line I/O, `perror`, `setlinebuf`, and `dprintf`.
+  - [x] Provide `sprintf`, `vsprintf`, `snprintf`, `vsnprintf`, and `putc` over
+    the existing bounded formatter and descriptor-backed streams.
+  - [x] Provide and test `puts`, including its trailing newline and output-failure
+    behavior. Bash compiles through `mailcheck.c` on AArch64 and RISC-V.
 - [ ] Add the time, identity, system, and resource interfaces needed to close the
   link: `gettimeofday`, `clock_gettime`, `nanosleep`, meaningful calendar time,
   process IDs and credentials, `uname`, `times`, `sysconf`, `pathconf`, and the
   resource-limit family.
-- [ ] Disable NLS, dynamic loadable builtins, network pseudo-paths, and multibyte
-  locales for the first static port. Record each as an optional capability rather
-  than providing false-success stubs; bundled Readline and termcap remain enabled.
-- [ ] Iterate configure, compile, and link failures into this inventory until an
+  - [x] Provide `clock_gettime(CLOCK_MONOTONIC)` from the architecture counter
+    and a sequence-protected, kernel-owned page mapped read-only into every
+    process. See
+    [Shared clock page](architecture/clock-page.md).
+  - [x] Provide `gettimeofday` from an optional boot-time wall-clock and
+    monotonic correlation sample. QEMU uses PL031 or Goldfish RTC hardware and
+    Raspberry Pi UEFI uses firmware `GetTime`; absence reports `ENOSYS`. This
+    gives Bash seed variation but is not secure entropy. See
+    [Shared clock page](architecture/clock-page.md).
+    Bash now compiles through `lib/sh/random.c`; Newlib supplies the completed
+    math and integer-conversion surfaces. HundeOS defines terminal window-size
+    ioctls for source compatibility, but the ioctls and libc's `tcgetwinsize`
+    and `tcsetwinsize` entry points validate the terminal and report
+    `EOPNOTSUPP`; Readline uses its environment or fixed-size fallback. Both
+    target builds now compile all Bash and Readline objects and statically link
+    Bash ELFs with no unresolved symbols. The build uses bundled termcap as the
+    owner of its globals, libc supports allocating `getcwd`, and weak POSIX
+    environment entry points allow Bash's definitions to override libc without
+    losing scoped HundeOS implementations.
+  - [ ] Add post-boot wall-clock correction and synchronization semantics.
+  - [x] Provide `times()` with microsecond ticks, separate user/system accounting,
+    interrupt and scheduler exclusion, and cumulative CPU time for waited-for
+    children. See [Process CPU time](architecture/process-cpu-time.md).
+  - [x] Provide `sleep` over the native microsecond sleep syscall. Signal delivery
+    can interrupt the kernel sleep; the compatibility function deliberately
+    returns zero rather than calculating unslept seconds.
+  - [x] Provide the fixed compatibility hostname `hundeos`. Bash detects
+    `gethostname` and compiles `lib/sh/oslib.c` on AArch64 and RISC-V.
+  - [x] Provide kernel-backed `alarm`, including replacement, cancellation,
+    previous remaining-time reporting, and one-shot `SIGALRM` delivery.
+- [ ] Disable NLS, dynamic loadable builtins, and network pseudo-paths for the
+  first static port. Record each as an optional capability rather than providing
+  false-success stubs; bundled Readline and termcap remain enabled.
+  - [x] Patch Bash's network-disabled `netopen` fallback to include its existing
+    diagnostic declarations. The fallback compiles on AArch64 and RISC-V without
+    adding socket interfaces to libc.
+  - [x] Add strict UTF-8 multibyte conversion, wide-character classification and
+    display widths, and `C`/`C.UTF-8` locale selection, then enable Bash's
+    multibyte paths.
+- [x] Iterate configure, compile, and link failures into this inventory until an
   unmodified Bash source tree produces a static HundeOS ELF on both architectures.
 
 #### 5. Fork, Exec, And Wait
@@ -94,18 +227,51 @@ only to advance the Bash build.
 - [ ] Implement `execve` and the required `exec*` family over the native overlay
   operation, including argv, environment, credentials, errors, inherited
   descriptors, and close-on-exec processing.
-- [ ] Implement `wait`, `waitpid`, and required `wait3` behavior over child events,
-  including selected-child waits, `WNOHANG`, stopped and continued children,
-  signal termination, and POSIX status encoding.
-- [ ] Add `getpid`, `getppid`, effective credential and group queries, and the
-  parent/child lifecycle state needed by Bash.
+  - [x] Define and test the bounded 64 KiB offset-based path, argv, and envp
+    payload used at the future exec syscall boundary. See
+    [Process image overlay](architecture/exec.md).
+  - [x] Validate and copy the payload in the kernel, build a candidate process
+    image, and commit it atomically into the existing PID. The public `execve`
+    entry point uses the existing exec syscall with `P_OVERLAY`; candidate
+    construction failure leaves the calling image unchanged. See
+    [Process image overlay](architecture/exec.md).
+  - [x] Prepare and claim non-`FD_CLOEXEC` open resources through fresh
+    authenticated sessions, with rollback before image commit.
+- [x] Implement `wait` and `waitpid` over child events for any or selected
+  positive-PID children, blocking waits, `WNOHANG`, normal exits, signal
+  termination, `ECHILD`, and POSIX status encoding.
+- [x] Complete process-group selection, stopped and continued child events, and
+  interruption by delivered signals for `waitpid`.
+- [ ] Implement the required `wait3` behavior.
+- [ ] Complete effective group queries and parent/child lifecycle state needed
+  by Bash, including reparenting children when their recorded parent exits.
+  - [x] Add `getpid` and kernel-backed `getppid`. Processes retain the parent PID
+    assigned at creation so the query does not dereference a departed parent.
+  - [x] Back `getuid`, `getgid`, `geteuid`, and `getegid` with the kernel's
+    current process credentials. Real and effective IDs are identical in the
+    current single-identity model; `setuid` and `setgid` accept only unchanged
+    identities and reject mutations with `EPERM` until a kernel operation and
+    authorization rules exist.
 
 #### 6. Pipes And Shared Descriptors
 
-- [ ] Implement a userspace pipe service with paired descriptors, blocking reads,
-  EOF, bounded atomic writes, backpressure, nonblocking behavior, and `SIGPIPE`.
-- [ ] Implement `pipe`, `dup`, `dup2`, and descriptor `fcntl`, including descriptor
-  flags, `FD_CLOEXEC`, open-file status flags, and redirection behavior.
+- [x] Implement the `hund-rohr` userspace anonymous-pipe service with authenticated
+  paired endpoints, blocking reads, EOF after the final writer closes, 64 KiB
+  bounded storage, atomic writes through 4096 bytes, backpressure, and `EPIPE`
+  after the final reader closes. It uses the common I/O Channel and directional
+  `hunde-puffer` buffers and is started by `hundeschule`.
+- [x] Implement `pipe`, `dup`, `dup2`, and `F_DUPFD` over process-local
+  descriptors and reference-counted open descriptions. Duplicates share the
+  native endpoint, close it only after the final local descriptor closes, and
+  clear `FD_CLOEXEC` on the new descriptor.
+- [x] Implement userspace `F_GETFD` and `F_SETFD` storage for `FD_CLOEXEC`,
+  including standard descriptors.
+- [x] Add shared open-file status flags and `F_GETFL`/`F_SETFL`, preserving the
+  access mode while allowing `O_NONBLOCK` to change. Nonblocking pipe reads and
+  writes return `EAGAIN`; blocking descriptors retain the existing wait path.
+- [ ] Deliver `SIGPIPE` as well as returning `EPIPE` once userspace signal
+  dispositions and masks are implemented.
+- [ ] Release `FD_CLOEXEC` descriptors reliably after a successful exec overlay.
 - [ ] Give each child its own descriptor table referring to shared open resources;
   share file offsets and pipe endpoints while keeping descriptor flags and closes
   process-local.
@@ -115,13 +281,22 @@ only to advance the Bash build.
 
 #### 7. Environment, Current Directory, And Filesystem Semantics
 
-- [ ] Add `environ`, startup `envp`, `getenv`, `setenv`, `unsetenv`, and `putenv`,
-  then propagate a copied environment through fork and exec.
-- [ ] Add a per-process current directory with `chdir`, inherited cwd, relative
+- [ ] Propagate a copied environment through fork and exec.
+  - [x] Add startup `envp`, mutable `environ`, `getenv`, `setenv`, `unsetenv`, and
+    `putenv`. Existing native spawn callers receive an empty environment until
+    they migrate to the exec payload.
+  - [x] Copy `envp` into the replacement image during `execve`.
+  - [ ] Copy the environment during fork once fork is implemented.
+- [x] Add a per-process current directory with `chdir`, inherited cwd, relative
   path lookup, and truthful `getcwd` rather than resolving every path from root.
-- [ ] Implement the open semantics Bash relies on: append, exclusive create,
-  creation modes, truncation without remove/recreate, nonblocking state, and
-  close-on-exec.
+  The libc-owned state, fork/exec inheritance, and kernel startup transport are
+  documented in [Userspace I/O system](architecture/io-system.md#common-application-interface).
+- [ ] Implement the remaining open semantics Bash relies on.
+  - [x] Implement atomic exclusive creation and create empty files at open time.
+  - [ ] Apply creation modes and `umask`.
+  - [ ] Implement truncation without remove/recreate.
+  - [ ] Enforce close-on-exec. Append is implemented by the service owning each
+    file offset.
 - [ ] Implement working rename, symbolic links and `readlink`, hard links,
   temporary-file creation, unlink-while-open, and cleanup of here-documents.
 - [ ] Complete `access`, effective-identity permission checks, timestamps, link
@@ -130,12 +305,21 @@ only to advance the Bash build.
   Bash explicitly for an agreed equivalent where it does not change semantics.
 - [ ] Replace the sixteen-argument spawn limit with defined argv and environment
   byte limits, report `E2BIG`, and test large command invocations.
+  - [x] Define `ARG_MAX` as 64 KiB and enforce it in the exec payload builder.
+    Native spawn remains limited to sixteen arguments and still needs migration.
 
 #### 8. Terminal Sessions And Job Control
 
 - [ ] Implement `<termios.h>`, `tcgetattr`, `tcsetattr`, terminal control
-  characters and modes, `isatty`, `ttyname`, and working window-size `ioctl`.
-- [ ] Implement process groups and sessions with `setpgid`, `getpgrp`, `setsid`,
+  characters and modes, and working window-size `ioctl`.
+  - [x] Implement `isatty` and `ttyname` from userspace terminal endpoint
+    identity, including descriptors duplicated from standard streams.
+  - [x] Transport and persist POSIX terminal attributes in terminal stream
+    services. `TCSANOW` and `TCSADRAIN` are accepted; unsupported software flow
+    control reports `EOPNOTSUPP`.
+  - [ ] Apply canonical input, echo, special-character, and flow-control modes
+    in the terminal input/output services, and implement window-size control.
+- [x] Implement process groups and sessions with `setpgid`, `getpgrp`, `setsid`,
   `killpg`, and group-aware parent/child lifecycle rules.
 - [ ] Add controlling-terminal ownership and `tcgetpgrp`/`tcsetpgrp`, including
   foreground and background access checks.
@@ -247,42 +431,81 @@ existing protocols.
 ### Fork Support
 
 Status: required by stage 5 of the active Bash milestone. Implementation follows
-the cross-build, non-local control-flow, signal, and static-link stages above. A
-child must inherit references to the parent's open resources, not reopen their
-paths. General fork and userspace descriptor inheritance are not implemented.
-Current console startup passes an endpoint marker and lazily opens a new stream
-handle; this is not sufficient for fork semantics.
+the cross-build, non-local control-flow, signal, and static-link stages above.
+The staged implementation plan is documented in
+[Fork and copy-on-write](architecture/fork.md). The first functional increment
+uses eager private-memory copies; COW follows without changing the syscall or
+I/O inheritance contract. The first implementation keeps the child unpublished
+until libc commits service-side descriptor grants, then the child opens fresh
+authenticated sessions and claims those grants before `fork()` returns.
+Ordinary filesystem and stream descriptors inherit by shared underlying
+resource rather than by reopening paths; pipes, sockets, close-on-exec, and
+committed-grant cleanup for children that die before claiming remain open work.
+Architecture details are documented in
+[Fork and copy-on-write](architecture/fork.md).
 
 #### Process Creation
 
-- [ ] Add fork support for creating a child from the calling process's execution
-  state and address space. The memory-copying strategy remains undecided.
-- [ ] Coordinate child creation with I/O inheritance so the child cannot use
-  inherited descriptors before its access is established. Failure handling and
-  rollback need to be designed.
+- [x] Add a typed fork syscall and architecture-specific context result helpers;
+  return the child PID to the parent and zero to the cloned child.
+- [x] Implement transactional eager copying of private allocations into a fresh
+  child page table, recreating kernel mappings and excluding IPC, device, and
+  in-flight process state.
+- [x] Keep the child unpublished and non-runnable until memory and inherited I/O
+  references commit; roll back every allocation, mapping, grant, and scheduler
+  insertion on failure.
+- [x] Reject service processes, MMIO mappings, shared allocations, and live IPC
+  state atomically in the initial eager-copy implementation. Queue wait and
+  doorbell mappings are reset rather than inherited as live wait state.
+
+#### Copy-On-Write
+
+- [ ] Choose extent- or page-based backing ownership consistent with allocator
+  release semantics, then add reference counting and memory-accounting support.
+- [ ] Add architecture-neutral mapping inspection, read-only sharing, page
+  replacement, and translation-invalidation operations with AArch64 and RISC-V
+  implementations.
+- [ ] Normalize architecture write-fault information and recover only tracked COW
+  faults; preserve process aborts for all other user faults.
+- [ ] Replace eager copying with COW for writable private pages and cover writes,
+  multiple fork generations, exit, exec, `sbrk`, memory pressure, and rollback.
 
 #### I/O Subsystem: Shared File Descriptors
 
-- [ ] Give the child its own descriptor table with the parent's fd numbers,
-  including stdin (`0`), stdout (`1`), and stderr (`2`).
-- [ ] Have `hund-io-system` authorize child-PID-owned references to the same open
-  resources. Copying a parent-owned handle number alone must not grant access.
-- [ ] Share open-resource state where appropriate: file offsets for the same
-  open file, the same socket connection, and the same stream destination.
-- [ ] Reference-count shared open resources while keeping descriptor lifetimes
-  independent. Closing one process's descriptor must not invalidate another
-  process's reference; release the resource when its final reference is gone.
+- [x] Give the child its own descriptor table with the parent's fd numbers for
+  ordinary libc descriptors, including stdin (`0`), stdout (`1`), and stderr
+  (`2`).
+- [x] Have final resource-owning services authorize child-PID-owned references to
+  the same open resources. Copying a parent-owned handle number alone must not
+  grant access.
+- [x] Share open-resource state for implemented resource kinds: filesystem open
+  file offsets and stream destinations.
+- [x] Reference-count shared open resources while keeping descriptor lifetimes
+  independent for filesystem and stream handles. Closing one process's
+  descriptor must not invalidate another process's reference; release the
+  resource when its final reference is gone.
 - [ ] Release each process's references on exit, including crashes and missed
-  closes, using reliable process-exit notification and service cleanup.
+  closes, using reliable process-exit notification and service cleanup. Parent
+  session loss releases uncommitted grants; committed grants are retained until
+  child claim and still need orphan cleanup if the child exits first.
+- [x] Add prepare, child-PID-bound commit, single-use claim, and abort operations
+  to final resource-owning services; keep `hund-io-system` as a router.
+- [ ] Extend descriptor inheritance to pipes and sockets.
+- [ ] Release `FD_CLOEXEC` descriptors reliably after a successful exec overlay.
 
 #### IPC Sessions
 
-- [ ] Establish the child's own authenticated Channel session to
+- [x] Establish the child's own authenticated Channel session to
   `hund-io-system`; do not duplicate the parent's Channel queues, cursors, or
   in-flight request state.
-- [ ] Define how inherited descriptors are associated with that new session
-  while retaining their shared underlying resources. The inheritance protocol
-  and coordination with the kernel remain to be designed.
+- [x] Define how inherited descriptors are associated with that new session
+  while retaining their shared underlying resources. The child fork-return path
+  must discard copied session state, open fresh Channels, and claim committed
+  service grants before application code can run.
+- [x] Choose the coordinator that keeps the child non-runnable during grant
+  commit and guarantees rollback if the parent exits mid-transaction. Libc
+  prepares and commits I/O grants around the staged kernel fork calls, then
+  resumes the unpublished child only after commit succeeds.
 
 Architecture context: [Userspace I/O system](architecture/io-system.md) and
 [Channels and event queues](architecture/channels-and-event-queues.md).
@@ -762,6 +985,10 @@ tree and a suitable virtual platform for initial bring-up. See the
 - [x] Qualify target artifacts by architecture and platform. AArch64 now builds
   beneath `build/aarch64`, and RISC-V beneath `build/riscv64`; host tests remain
   beneath `build/test`.
+- [ ] Fix `test/run_tests.py` cleanup to remove the repository `build/test`
+  directory and shared fixture/stub objects. Its current relative cleanup removes
+  `test/build`, while per-suite cleans miss sibling objects; run top-level
+  `make clean` before tests after changing shared structure layouts meanwhile.
 - [x] Add the RV64 cross-toolchain flags, early linker script, merged AArch64
   and RISC-V compilation-database generation, and a QEMU verification target.
 - [ ] Add RISC-V toolchain, assembler, linker scripts, kernel/userspace build

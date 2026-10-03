@@ -129,7 +129,7 @@ int main(void)
     UartDevice__configure_receiver(&receiver.uart);
     static IOStreamDriver driver;
     static IOService service;
-    driver = IOStreamDriver__new(IO_OPEN_READ, &receiver, UartReceiver__transfer);
+    driver = IOStreamDriver__new_terminal(IO_OPEN_READ, &receiver, UartReceiver__transfer);
     if (IOService__listen_into(&service, &bstr(IO_UART_RX_SERVICE), &driver, IOStreamDriver__execute,
                                IOStreamDriver__disconnect) != IO_OK)
     {

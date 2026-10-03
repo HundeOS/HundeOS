@@ -272,10 +272,15 @@ int getchar(void)
     return getc(stdin);
 }
 
-int putchar(int character)
+int putc(int character, FILE * stream)
 {
     unsigned char output = (unsigned char)character;
-    return fwrite(&output, 1, 1, stdout) == 1 ? output : EOF;
+    return fwrite(&output, 1, 1, stream) == 1 ? output : EOF;
+}
+
+int putchar(int character)
+{
+    return putc(character, stdout);
 }
 
 int fputs(const char * text, FILE * stream)
@@ -618,24 +623,4 @@ int printf(const char * format, ...)
     int result = vfprintf(stdout, format, arguments);
     va_end(arguments);
     return result;
-}
-
-int snprintf(char * buffer, size_t size, const char * format, ...)
-{
-    if ((buffer == NULL && size != 0) || format == NULL)
-    {
-        errno = EINVAL;
-        return -1;
-    }
-    va_list arguments;
-    va_start(arguments, format);
-    BString format_string = BString__new(format);
-    BString formatted = BString__vsprintf(&format_string, arguments);
-    va_end(arguments);
-    size_t length = (size_t)BString__length(&formatted);
-    if (size > 0)
-    {
-        BString__copy_to(&formatted, buffer, (StringPos)size);
-    }
-    return (int)length;
 }

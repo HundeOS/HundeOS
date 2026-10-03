@@ -12,3 +12,10 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
     __asm__ __volatile__("ecall" : "+r"(a0) : "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a7) : "memory");
     return a0;
 }
+
+__attribute__((naked, noreturn)) void process_signal_restorer(void)
+{
+    __asm__ volatile("li a7, 0x95\n"
+                     "ecall\n"
+                     "unimp\n");
+}

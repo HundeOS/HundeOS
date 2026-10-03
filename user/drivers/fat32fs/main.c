@@ -1,6 +1,6 @@
 #define DRIVER_LOG_TAG "FAT32FS"
 
-#include <string.h>
+#include "memory.h"
 
 #include "sys/debug.h"
 #include "sys/service.h"
@@ -471,7 +471,7 @@ static bool Fat32fs__names_equal(ConstBStringPtr left, ConstBStringPtr right)
 
 static bool Fat32fs__encode_83_name(ConstBStringPtr name, uint8_t target[11])
 {
-    memset(target, ' ', 11);
+    Mem__memset(target, ' ', 11);
     BString uppercase = BString__uppercase(name);
     StringPos dot = -1;
     for (StringPos i = 0; i < BString__length(&uppercase); i++)
@@ -1009,11 +1009,11 @@ static Result(Fat32fsCode)
         }
         if (zero_fill)
         {
-            memset(sector.data + target.offset, 0, count);
+            Mem__memset(sector.data + target.offset, 0, count);
         }
         else
         {
-            memcpy(sector.data + target.offset, data + written, count);
+            Mem__memcpy(sector.data + target.offset, data + written, count);
         }
         match_result(
             Fat32fs__write_sector(self, Fat32fsVolume__cluster_sector(self, target.cluster), &sector.data),
@@ -1196,7 +1196,7 @@ static Result(uint32_t) Fat32fsVolume__write_file_at_path(Fat32fsVolumePtr self,
         }
     );
 
-    memcpy(&directory_sector.data[entry_location.offset], encoded_name, 11);
+    Mem__memcpy(&directory_sector.data[entry_location.offset], encoded_name, 11);
     Fat32fsDirectorySector__set_entry_attributes(&directory_sector, entry_location.offset, FAT32FS_ATTR_ARCHIVE);
     Fat32fs__write_directory_cluster(&directory_sector.data[entry_location.offset], first_cluster);
     Fat32fs__write_u32(directory_sector.data, entry_location.offset + 28, (uint32_t)final_size);
@@ -1282,7 +1282,7 @@ static Result(Fat32fsCode) Fat32fsVolume__create_directory_at_path(Fat32fsVolume
     );
 
     Fat32fsSector empty_directory;
-    memset(empty_directory, 0, sizeof(empty_directory));
+    Mem__memset(empty_directory, 0, sizeof(empty_directory));
     match_result(
         Fat32fs__write_sector(self, Fat32fsVolume__cluster_sector(self, cluster), &empty_directory),
         success_do_nothing(),
@@ -1305,7 +1305,7 @@ static Result(Fat32fsCode) Fat32fsVolume__create_directory_at_path(Fat32fsVolume
         }
     );
 
-    memcpy(&directory_sector.data[entry_location.offset], encoded_name, 11);
+    Mem__memcpy(&directory_sector.data[entry_location.offset], encoded_name, 11);
     Fat32fsDirectorySector__set_entry_attributes(&directory_sector, entry_location.offset, FAT32FS_ATTR_DIRECTORY);
     Fat32fs__write_directory_cluster(&directory_sector.data[entry_location.offset], cluster);
     Fat32fs__write_u32(directory_sector.data, entry_location.offset + 28, 0);
@@ -1645,7 +1645,7 @@ static Result(FilesystemFileSize)
                 {
                     count = remaining - total;
                 }
-                memcpy(data + total, sector.data + cluster.offset, count);
+                Mem__memcpy(data + total, sector.data + cluster.offset, count);
                 total += count;
             },
             error(code, message)

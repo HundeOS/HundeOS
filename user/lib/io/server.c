@@ -121,7 +121,9 @@ static IOStatus IOServiceConnection__prepare(IOServiceConnectionPtr self, ConstB
     IORequestPtr request = &self->request;
     request->transfer_address = 0;
     uint64_t client = ChannelServer__transport_pid(&self->channel);
-    if (request->operation == IO_REQUEST_OPEN && request->buffered)
+    if ((request->operation == IO_REQUEST_OPEN || request->operation == IO_REQUEST_PIPE_CREATE ||
+         request->operation == IO_REQUEST_INHERIT_CLAIM) &&
+        request->buffered)
     {
         if ((request->flags & (IO_OPEN_READ | IO_OPEN_BIND | IO_OPEN_LISTEN)) && self->buffers.read.id == 0)
         {
@@ -266,7 +268,9 @@ static bool IOService__serve(IOServicePtr self, IOServiceConnectionPtr connectio
             {
                 connection->reply = reply;
                 if (connection->reply.status == IO_OK && (connection->request.operation == IO_REQUEST_OPEN ||
-                                                          connection->request.operation == IO_REQUEST_ACCEPT))
+                                                          connection->request.operation == IO_REQUEST_ACCEPT ||
+                                                          connection->request.operation == IO_REQUEST_PIPE_CREATE ||
+                                                          connection->request.operation == IO_REQUEST_INHERIT_CLAIM))
                 {
                     connection->reply.buffers = connection->buffers;
                 }

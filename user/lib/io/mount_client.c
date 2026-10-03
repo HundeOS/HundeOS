@@ -1,6 +1,6 @@
 #include "mount_client.h"
+#include "memory.h"
 #include "protocol.h"
-#include <string.h>
 
 Result(IOStatus) MountClient__add(ChannelPtr self, MountConfig config)
 {
@@ -14,7 +14,7 @@ Result(IOStatus) MountClient__add(ChannelPtr self, MountConfig config)
         BString__sprintf(&bstr("device %s %s %s"), cstr(device), cstr(config.filesystem_type), cstr(config.mountpoint));
     IORequest request = IORequest__new(IO_REQUEST_MOUNT, 0);
     request.count = BString__length(&line);
-    memcpy(request.data, BString__cstr(&line), request.count);
+    Mem__memcpy(request.data, BString__cstr(&line), request.count);
     IOReply reply;
     match_result(
         Channel__submit(self, (ConstChannelDataPtr)&request, sizeof(request), (ChannelDataPtr)&reply, sizeof(reply)),

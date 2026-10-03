@@ -70,6 +70,7 @@ __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = { // hundelint: i
 __BOOT_DATA__(static SystemInfo) pi_uefi_system_info;
 __BOOT_DATA__(static uint64_t) pi_uefi_image_handle = 0;
 __BOOT_DATA__(static uint64_t) pi_uefi_system_table = 0;
+__BOOT_DATA__(static Optional(RealtimeClockSample)) pi_uefi_realtime_clock;
 
 static __BOOT__(void) PiUefiPlatformInfo__set_fixed_devices(BootPlatformInfoPtr self)
 {
@@ -85,6 +86,7 @@ pi_uefi_set_entry_args(uint64_t image_handle, uint64_t system_table, uint64_t ph
 {
     pi_uefi_image_handle = image_handle;
     pi_uefi_system_table = system_table;
+    pi_uefi_realtime_clock = None(RealtimeClockSample);
     if (handoff_magic == PI_UEFI_HANDOFF_MAGIC && physical_memory_end != 0 && handoff_address != 0)
     {
         pi_uefi_platform_info.memory_physical_end = physical_memory_end;
@@ -113,6 +115,12 @@ pi_uefi_set_entry_args(uint64_t image_handle, uint64_t system_table, uint64_t ph
                                           (FramebufferPixelFormat)handoff->framebuffer.pixel_format,
                                           handoff->framebuffer.red_mask, handoff->framebuffer.green_mask,
                                           handoff->framebuffer.blue_mask, handoff->framebuffer.reserved_mask));
+        }
+        if (handoff->realtime_clock_present != 0)
+        {
+            pi_uefi_realtime_clock =
+                Some(RealtimeClockSample,
+                     RealtimeClockSample__new(handoff->realtime_unix_usec, handoff->realtime_monotonic_usec));
         }
     }
 }
@@ -155,6 +163,8 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     pi_uefi_system_info.uart.virtual_base = pi_uefi_platform_info.uart_virtual_base;
     pi_uefi_system_info.uart.irq = pi_uefi_platform_info.uart_irq;
     pi_uefi_system_info.uart.kind = UART_KIND_PL011;
+    pi_uefi_system_info.rtc = None(BootRtcInfo);
+    pi_uefi_system_info.realtime_clock = pi_uefi_realtime_clock;
     pi_uefi_system_info.virtio_mmio = None(BootVirtioMmioInfo);
     pi_uefi_system_info.framebuffer = pi_uefi_platform_info.framebuffer;
     pi_uefi_system_info.pci = pi_uefi_platform_info.pci;

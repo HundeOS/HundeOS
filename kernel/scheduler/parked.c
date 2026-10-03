@@ -13,6 +13,7 @@ static ParkedOperation ParkedOperation__new(KernelContextPtr kernel_context, Opt
         .ready = false,
         .continuation = *continuation,
         .operation_key = None(OperationKey),
+        .operation_context = 0,
         .park_reason = park_reason,
         .blocked_operations = BlockedParkedOperations__new(),
         .pending_operations = 0,

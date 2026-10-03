@@ -9,7 +9,10 @@ static BString channel_invalid_reply = bstr("Invalid channel reply");
 
 static Result(QueueMessage) Channel__receive(QueuePtr queue)
 {
-    Queue__wait_readable(queue);
+    if (!Queue__wait_readable_interruptible(queue))
+    {
+        return Error(QueueMessage, channel_transport_failed, CHANNEL_INTERRUPTED);
+    }
     match_result(
         Queue__pop(queue),
         success(message)
@@ -25,7 +28,10 @@ static Result(QueueMessage) Channel__receive(QueuePtr queue)
 
 static Result(QueueCode) Channel__send(QueuePtr queue, ConstQueueMessagePtr message)
 {
-    Queue__wait_writable(queue);
+    if (!Queue__wait_writable_interruptible(queue))
+    {
+        return Error(QueueCode, channel_transport_failed, CHANNEL_INTERRUPTED);
+    }
     match_result(
         Queue__push(queue, message),
         success(code)
@@ -157,7 +163,10 @@ Result(ChannelCode) Channel__request(ChannelPtr self, ConstChannelDataPtr reques
                 {
                     return Success(ChannelCode, code);
                 }
-                Queue__wait_writable(&self->control);
+                if (!Queue__wait_writable_interruptible(&self->control))
+                {
+                    return Error(ChannelCode, channel_transport_failed, CHANNEL_INTERRUPTED);
+                }
             },
             error(code, message)
             {
@@ -212,7 +221,10 @@ Result(OptionalChannelReplySize) Channel__poll_reply(ChannelPtr self, ChannelDat
                     self->received_reply,
                     some(pending_size)
                     {
-                        Queue__wait_writable(&self->control);
+                        if (!Queue__wait_writable_interruptible(&self->control))
+                        {
+                            return Error(OptionalChannelReplySize, channel_transport_failed, CHANNEL_INTERRUPTED);
+                        }
                     },
                     none()
                     {
@@ -241,7 +253,10 @@ Result(ChannelReplySize) Channel__submit(ChannelPtr self, ConstChannelDataPtr re
     );
     while (true)
     {
-        Queue__wait_readable(&self->control);
+        if (!Queue__wait_readable_interruptible(&self->control))
+        {
+            return Error(ChannelReplySize, channel_transport_failed, CHANNEL_INTERRUPTED);
+        }
         match_result(
             Channel__poll_reply(self, reply, reply_capacity),
             success(optional_size)

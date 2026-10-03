@@ -66,7 +66,7 @@ int USB_KEYBOARD_ENTRYPOINT(void)
     static IOStreamDriver driver;
     static IOService service;
     keyboard = UsbKeyboard__new();
-    driver = IOStreamDriver__new(IO_OPEN_READ, &keyboard, UsbKeyboard__read);
+    driver = IOStreamDriver__new_terminal(IO_OPEN_READ, &keyboard, UsbKeyboard__read);
     if (IOService__listen_into(&service, &bstr(IO_KEYBOARD_SERVICE), &driver, IOStreamDriver__execute,
                                IOStreamDriver__disconnect) != IO_OK)
     {

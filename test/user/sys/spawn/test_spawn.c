@@ -178,7 +178,8 @@ void test_os_spawn_with_stdio_uses_exec_request_syscall(void)
     next_result = 42;
 
     match_result(
-        OS__spawn_with_stdio(P_NOWAIT, &bstr("/sbin/shell"), 3, 4, 5, &SPAWN_NO_ARG, &SPAWN_NO_ARG, &SPAWN_NO_ARG),
+        OS__spawn_with_stdio(P_NOWAIT, &bstr("/usr/local/bin/bash"), 3, 4, 5, &SPAWN_NO_ARG, &SPAWN_NO_ARG,
+                             &SPAWN_NO_ARG),
         success(pid)
         {
             TEST_ASSERT_EQUAL_INT64(42, pid);

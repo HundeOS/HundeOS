@@ -35,6 +35,7 @@ typedef enum ParkReasons
     PARK_SLEEP = 6,
     PARK_WAIT_QUEUE = 7,
     PARK_WAIT_EXEC_LOAD = 8,
+    PARK_WAIT_SIGNAL = 9,
 } ParkReasons;
 
 OptionalDef(ParkReason);

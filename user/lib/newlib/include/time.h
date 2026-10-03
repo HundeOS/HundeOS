@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+typedef int clockid_t;
+
+#define CLOCK_MONOTONIC 1
+
 struct tm
 {
     int tm_sec;
@@ -20,5 +24,6 @@ struct tm
 time_t time(time_t * value);
 struct tm * localtime(const time_t * value);
 size_t strftime(char * buffer, size_t size, const char * format, const struct tm * value);
+int clock_gettime(clockid_t clock_id, struct timespec * value);
 
 #endif

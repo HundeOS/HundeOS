@@ -1,5 +1,5 @@
 #include "procfs.h"
-#include <string.h>
+#include "memory.h"
 
 typedef struct ProcPath
 {
@@ -32,7 +32,7 @@ static void ProcfsWriter__line(ProcfsWriterPtr self, ConstBStringPtr key, uint64
         self->failed = true;
         return;
     }
-    memcpy(self->data + self->size, BString__cstr(&line), size);
+    Mem__memcpy(self->data + self->size, BString__cstr(&line), size);
     self->size += size;
 }
 
@@ -143,9 +143,9 @@ static Result(FilesystemFileSize)
             record.pid, record.credentials.user_id, record.credentials.group_id, info.state, info.wait_reason,
             info.class_name, record.cpu, record.sampled_at_usec);
         size_t prefix = BString__length(&text);
-        memcpy(data, BString__cstr(&text), prefix);
+        Mem__memcpy(data, BString__cstr(&text), prefix);
         size_t length = BString__length(&record.name);
-        memcpy((char *)data + prefix, BString__cstr(&record.name), length);
+        Mem__memcpy((char *)data + prefix, BString__cstr(&record.name), length);
         ((char *)data)[prefix + length] = '\n';
         return Success(FilesystemFileSize, prefix + length + 1);
     }
@@ -240,7 +240,7 @@ static Result(FilesystemFileSize)
     {
         return Error(FilesystemFileSize, bstr("Unknown process file"), IO_INVALID_PATH);
     }
-    memcpy(data, BString__cstr(&text), BString__length(&text));
+    Mem__memcpy(data, BString__cstr(&text), BString__length(&text));
     return Success(FilesystemFileSize, BString__length(&text));
 }
 

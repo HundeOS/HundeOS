@@ -21,7 +21,7 @@ UNITY = {unity_dir}
 UNITY_SOURCE = $(UNITY)/src/unity.c
 UNITY_OBJECT = {unity_object}
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -mno-outline-atomics -include {hundetest_header} -I{fiber_arch_include} -I$(USER_LIB_INCLUDE) -I{kernel_dir} -I{common_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
+CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -mno-outline-atomics -D_XOPEN_SOURCE=700 -D_DARWIN_C_SOURCE -include {hundetest_header} -I{fiber_arch_include} -I$(USER_LIB_INCLUDE) -I{kernel_dir} -I{common_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
 
 # Assembler flags
 ASFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -nostdlib -latomic -I{stubs_dir} -I{fixtures_dir}

@@ -1,6 +1,6 @@
 #define DRIVER_LOG_TAG "EXT2FS"
 
-#include <string.h>
+#include "memory.h"
 
 #include "sys/debug.h"
 #include "sys/service.h"
@@ -1096,7 +1096,7 @@ static void Ext2fsInode__reset_dir(Ext2fsInodePtr inode, uint32_t block)
 
 static void Ext2fs__initialise_dir_block(uint8_t * block, uint32_t self_inode, uint32_t parent_inode)
 {
-    memset(block, 0, EXT2FS_BLOCK_SIZE);
+    Mem__memset(block, 0, EXT2FS_BLOCK_SIZE);
 
     Ext2fs__write_u32(block, 0, self_inode);
     Ext2fs__write_u16(block, 4, 12);
@@ -1358,7 +1358,7 @@ static Result(Ext2fsCode)
                 return Error(Ext2fsCode, message, code);
             }
         );
-        memcpy(block.data + block_offset, data + written, copy_size);
+        Mem__memcpy(block.data + block_offset, data + written, copy_size);
 
         match_result(
             Ext2fs__write_block(self, block_number, &block.data),
@@ -2029,7 +2029,7 @@ static Result(Ext2fsCode)
             }
         );
 
-        memset(target_inode, 0, sizeof(*target_inode));
+        Mem__memset(target_inode, 0, sizeof(*target_inode));
         match_result(
             Ext2fsVolume__write_inode(self, target_inode_number, target_inode),
             success_do_nothing(),
@@ -2101,7 +2101,7 @@ static Result(Ext2fsCode)
         }
     );
 
-    memset(target_inode, 0, sizeof(*target_inode));
+    Mem__memset(target_inode, 0, sizeof(*target_inode));
     match_result(
         Ext2fsVolume__write_inode(self, target_inode_number, target_inode),
         success_do_nothing(),
@@ -2518,7 +2518,7 @@ static Result(FilesystemFileSize)
         );
         if (block_number == 0)
         {
-            memset(data + total, 0, count);
+            Mem__memset(data + total, 0, count);
         }
         else if (block_offset == 0 && count == EXT2FS_BLOCK_SIZE)
         {
@@ -2559,7 +2559,7 @@ static Result(FilesystemFileSize)
                 Ext2fs__read_block(volume, block_number),
                 success(block)
                 {
-                    memcpy(data + total, block.data + block_offset, count);
+                    Mem__memcpy(data + total, block.data + block_offset, count);
                 },
                 error(code, message)
                 {

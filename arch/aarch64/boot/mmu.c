@@ -20,7 +20,6 @@ extern const uint64_t __text_phys;
 #ifdef __BOOT_DEBUG
 extern const uint64_t vector_table;
 extern void CPU__enter_kernel(SystemInfoPtr system_info);
-extern void memset(void * ptr, int value, size_t size);
 #endif
 
 extern const uint64_t __k_stack_high[];

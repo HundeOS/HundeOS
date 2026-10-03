@@ -23,13 +23,15 @@ static BString ExecLoad__requested_path(ExecLoadPtr self)
 
 static ExecLoad ExecLoad__new(KernelChannel channel, ConstOriginatingContextPtr context, ConstBStringPtr path,
                               bool wait, OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
-                              ConstSpawnStdioPtr stdio)
+                              ConstSpawnStdioPtr stdio, bool overlay, KernelAddress overlay_payload)
 {
     ExecLoad self = {.channel = channel,
                      .context = *context,
                      .wait = wait,
                      .user = *user,
                      .arguments = *arguments,
+                     .overlay_payload = overlay_payload,
+                     .overlay = overlay,
                      .stdio = *stdio,
                      .phase = EXEC_LOAD_OPEN};
     self.requested_path_length =
@@ -38,9 +40,9 @@ static ExecLoad ExecLoad__new(KernelChannel channel, ConstOriginatingContextPtr 
     return self;
 }
 
-Result(ProcessPtr)
-    ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait, OptionalPtr(UserID) user,
-                    ConstProcessArgumentsPtr arguments, ConstSpawnStdioPtr stdio)
+Result(ProcessPtr) ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,
+                                   OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
+                                   ConstSpawnStdioPtr stdio, bool overlay, KernelAddress overlay_payload)
 {
     if (!Exec__can_execute(context, path) || !BString__starts_with(path, &bstr("/")) ||
         BString__length(path) >= IO_PROTOCOL_DATA_SIZE)
@@ -72,7 +74,8 @@ Result(ProcessPtr)
                             &bstr(IO_SYSTEM_SERVICE), process),
                         success(channel)
                         {
-                            *load = ExecLoad__new(channel, context, path, wait, user, arguments, stdio);
+                            *load = ExecLoad__new(channel, context, path, wait, user, arguments, stdio,
+                                                  overlay, overlay_payload);
                             process->exec_load = Some(ExecLoadPtr, load);
                         },
                         error(code, message)
@@ -308,6 +311,10 @@ void ExecLoad__cancel(ProcessPtr process)
             {
                 Kernel__free(load->buffer.virtual_addr);
             }
+            if (load->overlay_payload.valid)
+            {
+                Kernel__free(load->overlay_payload.virtual_addr);
+            }
             process->exec_load = None(ExecLoadPtr);
             Kernel__free((Address)load);
         },
@@ -374,8 +381,14 @@ Result(ProcessPtr) ExecLoad__continue(ProcessPtr process)
             }
             BString path = ExecLoad__requested_path(load);
             Elf elf = Elf__new(load->buffer.virtual_addr, load->buffer.virtual_addr + load->size, &path);
+            KernelAddress overlay_payload = load->overlay_payload;
             Result(ProcessPtr) result =
-                Exec__launch_loaded_elf(&load->context, &elf, load->wait, &load->user, &load->arguments, &load->stdio);
+                Exec__launch_loaded_elf(&load->context, &elf, load->wait, &load->user, &load->arguments, &load->stdio,
+                                        load->overlay, overlay_payload);
+            if (overlay_payload.valid)
+            {
+                Kernel__free(overlay_payload.virtual_addr);
+            }
             Kernel__free((Address)load);
             return result;
         },

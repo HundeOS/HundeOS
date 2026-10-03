@@ -1,6 +1,8 @@
 #include "process.h"
 #include "unity.h"
 #include "../../../kernel/kernel_init.h"
+#include "../../../kernel/kernel_core.h"
+#include "../../../kernel/service/clock.h"
 
 static KernelPtr test_kernel = NULL;
 
@@ -11,12 +13,25 @@ void ProcessFixture__set_kernel(KernelPtr kernel)
 
 static KernelPtr ProcessFixture__kernel()
 {
+    KernelPtr kernel;
     if (test_kernel != NULL)
     {
-        return test_kernel;
+        kernel = test_kernel;
+    }
+    else
+    {
+        kernel = Kernel__instance();
     }
 
-    return Kernel__instance();
+    if (!kernel->clock.mapping.valid)
+    {
+        Optional(RealtimeClockSample) realtime_clock = None(RealtimeClockSample);
+        match_result(KernelClock__init(&kernel->clock, 0, &realtime_clock),
+            success_do_nothing(),
+            error_test_fail()
+        );
+    }
+    return kernel;
 }
 
 ProcessPtr dummy_process(Tick last_tick, CPUID cpu, ProcessState state)

@@ -4,4 +4,5 @@ manifest:
   source_files:
     - user/lib/channel/block_cache.c
     - user/lib/io/filesystem_driver.c
+    - user/lib/io/inheritance.c
     - common/types/bstring.c

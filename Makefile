@@ -24,6 +24,10 @@ endif
 AS = $(CROSS_COMPILE)gcc
 CC = $(CROSS_COMPILE)gcc
 LD = $(CROSS_COMPILE)gcc
+AR = $(CROSS_COMPILE)ar
+RANLIB = $(CROSS_COMPILE)ranlib
+NM = $(CROSS_COMPILE)nm
+RAW_LD = $(CROSS_COMPILE)ld
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
 UNITY_PATH=vendor/Unity
@@ -39,9 +43,9 @@ CFLAGS = -c -MMD -MP -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -
            -DKERNEL_TRACE_PATH=\"$(KERNEL_TRACE_LOG)\" -Ikernel -I./common -I./common_includes $(EXTRA_KERNEL_CFLAGS)
 
 USER_CFLAGS = -c -MMD -MP -ffreestanding -fno-pic -fno-pie -fno-stack-protector -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
-           -nostdlib -nostartfiles $(ARCH_USER_CFLAGS) \
-           -I./user/lib/fiber/arch/$(ARCH) -I./user/lib -I./common -I./common_includes -I./user/lib/newlib/include \
-           -I./vendor/openbsd/src/include
+	           -nostdlib -nostartfiles $(ARCH_USER_CFLAGS) \
+	           -I./user/lib/arch/$(ARCH)/include -I./user/lib/fiber/arch/$(ARCH) -I./user/lib -I./common -I./common_includes -I./user/lib/newlib/include \
+	           -I./vendor/openbsd/src/include -idirafter $(NEWLIB_INCLUDE_DIR)
 
 # Assembler flags
 ASFLAGS = -c -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
@@ -58,24 +62,92 @@ endif
 # Linker flags
 LINKER_SCRIPT ?= arch/$(ARCH)/boot/$(BOOT_PLATFORM)/linker.ld
 LDFLAGS = -nostdlib -T $(LINKER_SCRIPT)
-USER_LDFLAGS = -nostdlib -Wl,-e,_start -Wl,--gc-sections
+USER_LDFLAGS = -nostdlib $(ARCH_USER_CFLAGS) -Wl,-e,_start -Wl,--gc-sections
 
 BASH_VENDOR_DIR = $(abspath vendor/bash/src)
 BASH_PORT_DIR = $(abspath user/ports/bash)
 BASH_PORT_ROOT = $(BUILD_ROOT)/bash
 BASH_PORT_SOURCE_DIR = $(BASH_PORT_ROOT)/source
 BASH_PORT_BUILD_DIR = $(BASH_PORT_ROOT)/build
+BASH_PORT_BINARY = $(BASH_PORT_BUILD_DIR)/bash
 BASH_PORT_SOURCE_STAMP = $(BASH_PORT_SOURCE_DIR)/.prepared
 BASH_PORT_CONFIGURE_STAMP = $(BASH_PORT_BUILD_DIR)/.configured
 BASH_PORT_PATCHES = $(wildcard user/ports/bash/patches/*.patch)
+BASH_PORT_CONFIG_CACHE = $(BASH_PORT_DIR)/config.cache
+BASH_BUILD_CONFIG_CACHE = $(abspath $(BASH_PORT_BUILD_DIR)/config.cache)
 BASH_BUILD = $(shell sh vendor/bash/src/support/config.guess)
-BASH_CPPFLAGS = -I$(abspath user/lib/newlib/include) -I$(abspath user/lib) \
-	-I$(abspath common) -I$(abspath common_includes)
+BASH_SYSROOT = $(abspath $(BUILD_ROOT)/sysroot)
+BASH_CPPFLAGS = --sysroot=$(BASH_SYSROOT) -isystem $(BASH_SYSROOT)/usr/include -DNEED_EXTERN_PC
 BASH_CFLAGS = -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector $(ARCH_USER_CFLAGS)
-BASH_LDFLAGS = -nostdlib
+BASH_LDFLAGS = -nostdlib $(ARCH_USER_CFLAGS) $(BASH_SYSROOT)/usr/lib/crt0.o -L$(BASH_SYSROOT)/usr/lib \
+	-Wl,-e,_start -Wl,--gc-sections
+BASH_LIBS = -Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group
 
 # Output files
 BUILD_ROOT = build/$(ARCH)
+NEWLIB_VENDOR_DIR = $(abspath vendor/newlib/src)
+NEWLIB_TARGET = $(patsubst %-,%,$(CROSS_COMPILE))
+NEWLIB_BUILD_DIR = $(abspath $(BUILD_ROOT)/newlib/build)
+NEWLIB_INSTALL_DIR = $(abspath $(BUILD_ROOT)/newlib/install)
+NEWLIB_INSTALL_PREFIX = $(NEWLIB_INSTALL_DIR)/usr/$(NEWLIB_TARGET)
+NEWLIB_INCLUDE_DIR = $(NEWLIB_INSTALL_PREFIX)/include
+NEWLIB_LIB_DIR = $(NEWLIB_INSTALL_PREFIX)/lib
+NEWLIB_CONFIGURE_STAMP = $(NEWLIB_BUILD_DIR)/.configured
+NEWLIB_INSTALL_STAMP = $(NEWLIB_INSTALL_DIR)/.installed
+NEWLIB_CFLAGS = -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector $(ARCH_USER_CFLAGS)
+NEWLIB_LIBC_ARCHIVE = $(NEWLIB_LIB_DIR)/libc.a
+NEWLIB_LIBC_SELECTED_DIR = $(BUILD_ROOT)/newlib/libc-selected
+NEWLIB_LIBC_SELECTED_STAMP = $(NEWLIB_LIBC_SELECTED_DIR)/.extracted
+NEWLIB_LIBC_VERIFY_OBJECT = $(NEWLIB_LIBC_SELECTED_DIR)/selected.o
+NEWLIB_LIBC_MEMBERS = \
+	libc_a-bcopy.o \
+	libc_a-ctype_.o \
+	libc_a-memchr.o \
+	libc_a-memcmp.o \
+	libc_a-memcpy.o \
+	libc_a-memmove.o \
+	libc_a-memset.o \
+	libc_a-qsort.o \
+	libc_a-strcat.o \
+	libc_a-strchr.o \
+	libc_a-strcmp.o \
+	libc_a-strcpy.o \
+	libc_a-strcspn.o \
+	libc_a-strlcpy.o \
+	libc_a-strlen.o \
+	libc_a-strncat.o \
+	libc_a-strncmp.o \
+	libc_a-strncpy.o \
+	libc_a-strnlen.o \
+	libc_a-strpbrk.o \
+	libc_a-strrchr.o \
+	libc_a-strspn.o \
+	libc_a-strstr.o \
+	libc_a-strtol.o \
+	libc_a-strtoll.o \
+	libc_a-strtoul.o \
+	libc_a-strtoull.o
+NEWLIB_LIBC_OBJECTS = $(addprefix $(NEWLIB_LIBC_SELECTED_DIR)/,$(NEWLIB_LIBC_MEMBERS))
+NEWLIB_LIBC_ALLOWED_UNDEFINED = __errno _impure_ptr
+ifeq ($(COMPILE_COMMANDS),1)
+NEWLIB_INSTALL_PREREQUISITE =
+else
+NEWLIB_INSTALL_PREREQUISITE = $(NEWLIB_INSTALL_STAMP)
+endif
+NEWLIB_MATH_HEADERS = \
+	_ansi.h \
+	_newlib_version.h \
+	machine/_default_types.h \
+	machine/_types.h \
+	machine/ieeefp.h \
+	math.h \
+	newlib.h \
+	sys/_types.h \
+	sys/cdefs.h \
+	sys/config.h \
+	sys/features.h \
+	sys/lock.h \
+	sys/reent.h
 TARGET_BUILD_DIR = $(BUILD_ROOT)/$(BOOT_PLATFORM)
 KERNEL_BUILD_DIR = $(TARGET_BUILD_DIR)/kernel
 USER_BUILD_DIR = $(BUILD_ROOT)/user
@@ -102,12 +174,14 @@ RISCV64_BRINGUP_BUILD_DIR = $(BUILD_ROOT)/qemu_virt/bringup
 RISCV64_BRINGUP_ELF = $(BUILD_ROOT)/qemu_virt/bringup.elf
 RISCV64_BRINGUP_LOG = $(BUILD_ROOT)/qemu_virt/bringup.log
 RISCV64_BRINGUP_C_SOURCES = \
+	arch/riscv64/cpu_identity.c \
 	arch/riscv64/boot/qemu_virt/boot.c \
 	arch/riscv64/boot/qemu_virt/device_tree.c \
 	arch/riscv64/boot/qemu_virt/mmu.c \
 	arch/riscv64/boot/qemu_virt/runtime.c \
 	arch/riscv64/boot/qemu_virt/system_info.c \
 	arch/riscv64/boot/qemu_virt/trap.c \
+	common/memory.c \
 	kernel/early_boot.c \
 	kernel/system_info.c
 RISCV64_BRINGUP_ASM_SOURCES = \
@@ -208,22 +282,48 @@ USER_LIB_ASM_SOURCES := $(USER_LIB_COMMON_ASM_SOURCES) $(USER_LIB_ARCH_ASM_SOURC
 USER_LIB_OBJECTS := $(patsubst ./user/%,$(USER_BUILD_DIR)/%,$(USER_LIB_SOURCES:.c=.o))
 USER_LIB_ASM_OBJECTS := $(patsubst ./user/%,$(USER_BUILD_DIR)/%,$(USER_LIB_ASM_SOURCES:.s=.o))
 COMMON_USER_OBJECTS := $(patsubst ./common/%.c,$(USER_BUILD_DIR)/common/%.o,$(COMMON_SOURCES) $(COMMON_ARCH_SOURCES))
+USER_CRT_OBJECT := $(USER_BUILD_DIR)/lib/arch/$(ARCH)/start.o
+USER_LIBC_SOURCES := $(filter ./user/lib/newlib/%,$(USER_LIB_SOURCES))
+USER_LIBC_C_OBJECTS := $(patsubst ./user/%,$(USER_BUILD_DIR)/%,$(USER_LIBC_SOURCES:.c=.o))
+USER_LIBC_ASM_OBJECTS := $(USER_BUILD_DIR)/lib/arch/$(ARCH)/setjmp.o
+USER_LIBC_OBJECTS := $(USER_LIBC_C_OBJECTS) $(USER_LIBC_ASM_OBJECTS)
+USER_HUNDE_OBJECTS := $(COMMON_USER_OBJECTS) \
+	$(filter-out $(USER_CRT_OBJECT) $(USER_LIBC_C_OBJECTS),$(USER_LIB_OBJECTS)) \
+	$(filter-out $(USER_LIBC_ASM_OBJECTS),$(USER_LIB_ASM_OBJECTS))
+
+SYSROOT_DIR := $(BUILD_ROOT)/sysroot
+SYSROOT_INCLUDE_DIR := $(SYSROOT_DIR)/usr/include
+SYSROOT_LIB_DIR := $(SYSROOT_DIR)/usr/lib
+SYSROOT_INCLUDE_STAMP := $(SYSROOT_INCLUDE_DIR)/.staged
+SYSROOT_CRT := $(SYSROOT_LIB_DIR)/crt0.o
+SYSROOT_LIBC := $(SYSROOT_LIB_DIR)/libc.a
+SYSROOT_LIBHUNDE := $(SYSROOT_LIB_DIR)/libhunde.a
+SYSROOT_LIBM := $(SYSROOT_LIB_DIR)/libm.a
+SYSROOT_FILES := $(SYSROOT_INCLUDE_STAMP) $(SYSROOT_CRT) $(SYSROOT_LIBC) $(SYSROOT_LIBHUNDE) $(SYSROOT_LIBM)
+SYSROOT_SMOKE_SOURCE := user/ports/bash/sysroot_smoke.c
+SYSROOT_SMOKE_OBJECT := $(BUILD_ROOT)/sysroot-smoke/sysroot_smoke.o
+SYSROOT_SMOKE_BINARY := $(BUILD_ROOT)/sysroot-smoke/sysroot_smoke.bin
 
 USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
-USER_BINARY_DIRS := $(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null))
+USER_RETIRED_BINARY_DIRS := user/commands/shell
+USER_BINARY_DIRS := $(filter-out $(USER_RETIRED_BINARY_DIRS),$(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)))
 USER_DRIVER_DIRS := $(filter user/drivers/%,$(USER_BINARY_DIRS))
 USER_SERVICE_DIRS := $(filter user/services/%,$(USER_BINARY_DIRS))
 USER_NON_DRIVER_DIRS := $(filter-out $(USER_DRIVER_DIRS) $(USER_SERVICE_DIRS),$(USER_BINARY_DIRS))
 USER_BINARIES := $(patsubst %,$(USER_BUILD_DIR)/%.bin,$(notdir $(USER_BINARY_DIRS)))
-ROOTFS_COMMAND_NAMES := cat cp fs-latency grep ln ls mkdir mv rm tail
-ROOTFS_COMMAND_DIRS := $(addprefix user/commands/,$(ROOTFS_COMMAND_NAMES))
+ROOTFS_COMMAND_NAMES := cat cp env fs-latency grep kill ln ls mkdir mv ps rm shutdown tail write
+ROOTFS_COMMAND_DIRS := $(wildcard $(addprefix user/commands/,$(ROOTFS_COMMAND_NAMES)))
 ROOTFS_COMMAND_BINARIES := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
 OPENBSD_CAT_SOURCE := vendor/openbsd/src/bin/cat/cat.c
 OPENBSD_CAT_OBJECT := $(USER_BUILD_DIR)/vendor/openbsd/bin/cat/cat.o
 cat_EXTRA_OBJS := $(OPENBSD_CAT_OBJECT)
 OPENBSD_CP_SOURCES := $(wildcard vendor/openbsd/src/bin/cp/*.c)
 OPENBSD_CP_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_CP_SOURCES))
-cp_EXTRA_OBJS := $(OPENBSD_CP_OBJECTS)
+OPENBSD_CP_BINARY := $(USER_BUILD_DIR)/cp.bin
+USER_BINARIES += $(OPENBSD_CP_BINARY)
+OPENBSD_ENV_SOURCES := vendor/openbsd/src/usr.bin/env/env.c
+OPENBSD_ENV_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_ENV_SOURCES))
+env_EXTRA_OBJS := $(OPENBSD_ENV_OBJECTS)
 OPENBSD_LN_SOURCES := vendor/openbsd/src/bin/ln/ln.c
 OPENBSD_LN_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_LN_SOURCES))
 ln_EXTRA_OBJS := $(OPENBSD_LN_OBJECTS)
@@ -238,7 +338,9 @@ OPENBSD_MV_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor
 mv_EXTRA_OBJS := $(OPENBSD_MV_OBJECTS)
 OPENBSD_RM_SOURCE := vendor/openbsd/src/bin/rm/rm.c
 OPENBSD_RM_OBJECT := $(USER_BUILD_DIR)/vendor/openbsd/bin/rm/rm.o
-rm_EXTRA_OBJS := $(OPENBSD_RM_OBJECT)
+OPENBSD_RM_PLATFORM_OBJECT := $(USER_BUILD_DIR)/ports/openbsd/rm/unsupported_random.o
+OPENBSD_RM_BINARY := $(USER_BUILD_DIR)/rm.bin
+USER_BINARIES += $(OPENBSD_RM_BINARY)
 OPENBSD_TAIL_SOURCES := $(wildcard vendor/openbsd/src/usr.bin/tail/*.c)
 OPENBSD_TAIL_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_TAIL_SOURCES))
 tail_EXTRA_OBJS := $(OPENBSD_TAIL_OBJECTS)
@@ -247,7 +349,13 @@ OPENBSD_GREP_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vend
 OPENBSD_REGEX_SOURCES := vendor/openbsd/src/lib/libc/regex/regcomp.c vendor/openbsd/src/lib/libc/regex/regexec.c \
 	vendor/openbsd/src/lib/libc/regex/regerror.c vendor/openbsd/src/lib/libc/regex/regfree.c
 OPENBSD_REGEX_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_REGEX_SOURCES))
-grep_EXTRA_OBJS := $(OPENBSD_GREP_OBJECTS) $(OPENBSD_REGEX_OBJECTS)
+OPENBSD_GREP_BINARY := $(USER_BUILD_DIR)/grep.bin
+USER_BINARIES += $(OPENBSD_GREP_BINARY)
+OPENBSD_KILL_SOURCE := vendor/openbsd/src/bin/kill/kill.c
+OPENBSD_KILL_SOURCES := $(OPENBSD_KILL_SOURCE) vendor/openbsd/src/lib/libc/gen/signame.c
+OPENBSD_KILL_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_KILL_SOURCES))
+kill_EXTRA_OBJS := $(OPENBSD_KILL_OBJECTS)
+setjmp_probe_EXTRA_OBJS := $(USER_BUILD_DIR)/programs/setjmp_probe/arch/$(ARCH)/registers.o
 EMBEDDED_USER_NON_DRIVER_DIRS := $(filter-out $(ROOTFS_COMMAND_DIRS),$(USER_NON_DRIVER_DIRS))
 USER_VIDEO_TERM_FONT := vendor/unifont/unifont_all-17.0.05.hex
 USER_VIDEO_TERM_FONT_OBJECT := $(USER_BUILD_DIR)/drivers/video_term/unifont_all.o
@@ -270,14 +378,110 @@ EMBEDDED_FS := $(BUILD_ROOT)/kernel/embedded.fs
 
 all: $(BIN)
 
+.PHONY: sysroot sysroot-all sysroot-smoke sysroot-smoke-all
+
+sysroot: $(SYSROOT_FILES)
+
+sysroot-all:
+	$(MAKE) ARCH=aarch64 sysroot
+	$(MAKE) ARCH=riscv64 sysroot
+
+sysroot-smoke: $(SYSROOT_SMOKE_BINARY)
+
+sysroot-smoke-all:
+	$(MAKE) ARCH=aarch64 sysroot-smoke
+	$(MAKE) ARCH=riscv64 sysroot-smoke
+
+$(NEWLIB_CONFIGURE_STAMP): user/lib/newlib/configure.sh vendor/newlib/README.md vendor/newlib/src/configure
+	mkdir -p $(NEWLIB_BUILD_DIR)
+	cd $(NEWLIB_BUILD_DIR) && sh $(abspath user/lib/newlib/configure.sh) \
+		$(NEWLIB_VENDOR_DIR) $(NEWLIB_TARGET) "$(NEWLIB_CFLAGS)"
+	touch $@
+
+$(NEWLIB_INSTALL_STAMP): $(NEWLIB_CONFIGURE_STAMP)
+	$(MAKE) -C $(NEWLIB_BUILD_DIR) all-target-newlib
+	$(MAKE) -C $(NEWLIB_BUILD_DIR) install-target-newlib DESTDIR=$(NEWLIB_INSTALL_DIR)
+	touch $@
+
+$(NEWLIB_LIBC_SELECTED_STAMP): $(NEWLIB_INSTALL_PREREQUISITE) Makefile
+	mkdir -p $(NEWLIB_LIBC_SELECTED_DIR)
+	for member in $(NEWLIB_LIBC_MEMBERS); do \
+		count=`$(AR) t $(NEWLIB_LIBC_ARCHIVE) | awk -v expected=$$member '$$0 == expected { count++ } END { print count + 0 }'`; \
+		if [ "$$count" -ne 1 ]; then \
+			echo "Newlib libc member $$member occurs $$count times; expected exactly once" >&2; \
+			exit 1; \
+		fi; \
+	done
+	cd $(NEWLIB_LIBC_SELECTED_DIR) && $(AR) x $(NEWLIB_LIBC_ARCHIVE) $(NEWLIB_LIBC_MEMBERS)
+	touch $@
+
+$(NEWLIB_LIBC_OBJECTS): $(NEWLIB_LIBC_SELECTED_STAMP)
+	test -f $@
+
+$(NEWLIB_LIBC_VERIFY_OBJECT): $(NEWLIB_LIBC_OBJECTS) Makefile
+	$(RAW_LD) -r -o $@ $(NEWLIB_LIBC_OBJECTS)
+	for symbol in `$(NM) -u $@ | awk '{ print $$2 }'`; do \
+		case " $(NEWLIB_LIBC_ALLOWED_UNDEFINED) " in \
+			*" $$symbol "*) ;; \
+			*) echo "Newlib libc selection has unapproved dependency $$symbol" >&2; exit 1 ;; \
+		esac; \
+	done
+
+$(SYSROOT_INCLUDE_STAMP): $(NEWLIB_INSTALL_PREREQUISITE) $(shell find user/lib/newlib/include user/lib/arch/$(ARCH)/include -type f -print)
+	rm -rf $(SYSROOT_INCLUDE_DIR)
+	mkdir -p $(SYSROOT_INCLUDE_DIR)/machine $(SYSROOT_INCLUDE_DIR)/sys
+	for header in $(NEWLIB_MATH_HEADERS); do \
+		cp $(NEWLIB_INCLUDE_DIR)/$$header $(SYSROOT_INCLUDE_DIR)/$$header; \
+	done
+	cp -R user/lib/newlib/include/. $(SYSROOT_INCLUDE_DIR)/
+	cp -R user/lib/arch/$(ARCH)/include/. $(SYSROOT_INCLUDE_DIR)/
+	touch $@
+
+$(SYSROOT_CRT): $(USER_CRT_OBJECT)
+	mkdir -p `dirname $@`
+	cp $< $@
+
+$(SYSROOT_LIBC): $(USER_LIBC_OBJECTS) $(NEWLIB_LIBC_OBJECTS) $(NEWLIB_LIBC_VERIFY_OBJECT)
+	mkdir -p `dirname $@`
+	rm -f $@
+	$(AR) rcsP $@ $(USER_LIBC_OBJECTS) $(NEWLIB_LIBC_OBJECTS)
+	$(RANLIB) $@
+	for member in `$(AR) t $@ | awk '/^libc_a-/ { print }'`; do \
+		case " $(NEWLIB_LIBC_MEMBERS) " in \
+			*" $$member "*) ;; \
+			*) echo "HundeOS libc contains unapproved Newlib member $$member" >&2; exit 1 ;; \
+		esac; \
+	done
+
+$(SYSROOT_LIBHUNDE): $(USER_HUNDE_OBJECTS)
+	mkdir -p `dirname $@`
+	rm -f $@
+	$(AR) rcsP $@ $^
+	$(RANLIB) $@
+
+$(SYSROOT_LIBM): $(NEWLIB_INSTALL_PREREQUISITE)
+	mkdir -p `dirname $@`
+	cp $(NEWLIB_LIB_DIR)/libm.a $@
+
+$(SYSROOT_SMOKE_OBJECT): $(SYSROOT_SMOKE_SOURCE) $(SYSROOT_INCLUDE_STAMP)
+	mkdir -p `dirname $@`
+	$(CC) $(BASH_CFLAGS) --sysroot=$(abspath $(SYSROOT_DIR)) \
+		-isystem $(abspath $(SYSROOT_INCLUDE_DIR)) -c $< -o $@
+
+$(SYSROOT_SMOKE_BINARY): $(SYSROOT_SMOKE_OBJECT) $(SYSROOT_CRT) $(SYSROOT_LIBC) $(SYSROOT_LIBHUNDE) $(SYSROOT_LIBM)
+	$(LD) -nostdlib $(ARCH_USER_CFLAGS) $(SYSROOT_CRT) $< -L$(SYSROOT_LIB_DIR) -Wl,-e,_start -Wl,--gc-sections \
+		-Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
+
 .PHONY: bash bash-configure bash-build bash-configure-all bash-build-all
 
 bash: bash-build
 
 bash-configure: $(BASH_PORT_CONFIGURE_STAMP)
 
-bash-build: $(BASH_PORT_CONFIGURE_STAMP)
-	$(MAKE) -C $(BASH_PORT_BUILD_DIR)
+bash-build: $(BASH_PORT_BINARY)
+
+$(BASH_PORT_BINARY): $(BASH_PORT_CONFIGURE_STAMP)
+	$(MAKE) -C $(BASH_PORT_BUILD_DIR) bash
 
 bash-configure-all:
 	$(MAKE) ARCH=aarch64 bash-configure
@@ -294,11 +498,15 @@ $(BASH_PORT_SOURCE_STAMP): vendor/bash/README.md vendor/bash/SHA256SUMS \
 	for patch_file in $(abspath $(BASH_PORT_PATCHES)); do \
 		patch -s -d $(BASH_PORT_SOURCE_DIR) -p1 < $$patch_file; \
 	done
+	touch $(BASH_PORT_SOURCE_DIR)/configure \
+		$(BASH_PORT_SOURCE_DIR)/y.tab.c \
+		$(BASH_PORT_SOURCE_DIR)/y.tab.h \
+		$(BASH_PORT_SOURCE_DIR)/parser-built
 	touch $@
 
-$(BASH_PORT_CONFIGURE_STAMP): $(BASH_PORT_SOURCE_STAMP) Makefile \
-		$(shell find user/lib/newlib/include -type f -print)
+$(BASH_PORT_CONFIGURE_STAMP): $(BASH_PORT_SOURCE_STAMP) $(BASH_PORT_CONFIG_CACHE) Makefile $(SYSROOT_FILES)
 	mkdir -p $(BASH_PORT_BUILD_DIR)
+	cp $(BASH_PORT_CONFIG_CACHE) $(BASH_BUILD_CONFIG_CACHE)
 	cd $(BASH_PORT_BUILD_DIR) && \
 		CONFIG_SITE=/dev/null \
 		CC=$(CC) \
@@ -309,13 +517,14 @@ $(BASH_PORT_CONFIGURE_STAMP): $(BASH_PORT_SOURCE_STAMP) Makefile \
 		CPPFLAGS="$(BASH_CPPFLAGS)" \
 		CFLAGS="$(BASH_CFLAGS)" \
 		LDFLAGS="$(BASH_LDFLAGS)" \
+		LIBS="$(BASH_LIBS)" \
 		../source/configure \
+			--cache-file=$(BASH_BUILD_CONFIG_CACHE) \
 			--build=$(BASH_BUILD) \
 			--host=$(BASH_HOST) \
 			--prefix=/usr/local \
 			--disable-nls \
 			--disable-net-redirections \
-			--disable-multibyte \
 			--enable-job-control \
 			--enable-readline \
 			--without-bash-malloc
@@ -329,16 +538,24 @@ kernel: hundelint user_binaries $(BIN)
 .PHONY: compile-commands
 compile-commands:
 	rm -f compile_commands.json
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --overwrite --full-path make -B ARCH=aarch64 elf
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B ARCH=riscv64 riscv64-bringup-elf
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B ARCH=riscv64 \
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --overwrite --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 elf
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 riscv64-bringup-elf
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
 		build/riscv64/qemu_virt/kernel/arch/riscv64/page_table.o \
 		build/riscv64/qemu_virt/kernel/arch/riscv64/mmu.o
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B ARCH=riscv64 \
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
 		build/riscv64/user/hello_world.bin
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B ARCH=aarch64 \
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 \
+		build/aarch64/user/setjmp_probe.bin
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+		build/riscv64/user/setjmp_probe.bin
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 sysroot-smoke
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 sysroot-smoke
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 bash-build
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 bash-build
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 \
 		$(addprefix build/aarch64/user/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B ARCH=riscv64 \
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
 		$(addprefix build/riscv64/user/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
 
 setup: python-venv
@@ -384,11 +601,12 @@ $(SD_CARD_FAT32_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(SD_CAR
 	$(PYTHON) tools/populate_fat32_image.py $@ CONFIG.TXT $(SD_CARD_FAT32_CONFIG_FILE)
 	$(PYTHON) tools/populate_fat32_image.py $@ DOCS/NOTE.TXT $(SD_CARD_FAT32_NOTE_FILE)
 
-$(ROOTFS_STAMP): Makefile $(shell find $(EXT2_ROOT_DIR) -type f -print) $(ROOTFS_COMMAND_BINARIES)
+$(ROOTFS_STAMP): Makefile $(shell find $(EXT2_ROOT_DIR) -type f -print) $(ROOTFS_COMMAND_BINARIES) $(BASH_PORT_BINARY)
 	rm -rf $(ROOTFS_DIR)
 	mkdir -p $(ROOTFS_DIR)/usr/local/bin $(ROOTFS_DIR)/var/log
 	cp -R $(EXT2_ROOT_DIR)/. $(ROOTFS_DIR)/
 	$(foreach binary,$(ROOTFS_COMMAND_BINARIES),cp $(binary) $(ROOTFS_DIR)/usr/local/bin/$(basename $(notdir $(binary)));)
+	cp $(BASH_PORT_BINARY) $(ROOTFS_DIR)/usr/local/bin/bash
 	touch $@
 
 $(EXT2_IMG): $(ROOTFS_STAMP)
@@ -464,7 +682,7 @@ $(KERNEL_BUILD_DIR)/./kernel/bin/embedded_fs.o: kernel/bin/embedded_fs.S $(EMBED
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) -DEMBEDDED_FS_PATH=\"$(abspath $(EMBEDDED_FS))\" $< -o $@
 
-$(USER_BUILD_DIR)/%.o: user/%.c
+$(USER_BUILD_DIR)/%.o: user/%.c $(NEWLIB_INSTALL_PREREQUISITE)
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
@@ -480,26 +698,22 @@ $(OPENBSD_CAT_OBJECT): $(OPENBSD_CAT_SOURCE)
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(USER_BUILD_DIR)/vendor/openbsd/bin/cp/cp.o: vendor/openbsd/src/bin/cp/cp.c user/commands/cp/platform.h
+$(OPENBSD_RM_OBJECT): $(OPENBSD_RM_SOURCE) user/ports/openbsd/rm/unsupported_random.h
 	mkdir -p `dirname $@`
-	$(CC) $(USER_CFLAGS) -include user/commands/cp/platform.h -Dmain=OpenBSDCp__main -c $< -o $@
-
-$(OPENBSD_RM_OBJECT): $(OPENBSD_RM_SOURCE) user/commands/rm/platform.h
-	mkdir -p `dirname $@`
-	$(CC) $(USER_CFLAGS) -include user/commands/rm/platform.h \
-		-Dmain=OpenBSDRm__main -Darc4random_buf=RmPlatform__unsupported_random -c $< -o $@
+	$(CC) $(USER_CFLAGS) -include user/ports/openbsd/rm/unsupported_random.h -c $< -o $@
 
 $(USER_BUILD_DIR)/vendor/openbsd/bin/ls/%.o: vendor/openbsd/src/bin/ls/%.c
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -DSMALL -c $< -o $@
 
-$(USER_BUILD_DIR)/vendor/openbsd/usr.bin/grep/%.o: vendor/openbsd/src/usr.bin/grep/%.c user/commands/grep/platform.h
+$(USER_BUILD_DIR)/vendor/openbsd/usr.bin/grep/%.o: vendor/openbsd/src/usr.bin/grep/%.c user/ports/openbsd/grep/namespace_compat.h
 	mkdir -p `dirname $@`
-	$(CC) -I./vendor/openbsd/src/sys $(USER_CFLAGS) -DSMALL -DNOZ -include user/commands/grep/platform.h -c $< -o $@
+	$(CC) -I./vendor/openbsd/src/sys $(USER_CFLAGS) -DSMALL -DNOZ \
+		-include user/ports/openbsd/grep/namespace_compat.h -c $< -o $@
 
-$(USER_BUILD_DIR)/vendor/openbsd/lib/libc/regex/%.o: vendor/openbsd/src/lib/libc/regex/%.c user/commands/grep/platform.h
+$(USER_BUILD_DIR)/vendor/openbsd/lib/libc/regex/%.o: vendor/openbsd/src/lib/libc/regex/%.c user/ports/openbsd/grep/namespace_compat.h
 	mkdir -p `dirname $@`
-	$(CC) $(USER_CFLAGS) -include user/commands/grep/platform.h -c $< -o $@
+	$(CC) $(USER_CFLAGS) -include user/ports/openbsd/grep/namespace_compat.h -c $< -o $@
 
 $(USER_BUILD_DIR)/vendor/openbsd/%.o: vendor/openbsd/src/%.c
 	mkdir -p `dirname $@`
@@ -655,11 +869,25 @@ $(notdir $(1))_ASM_SRCS := $$(wildcard $(1)/*.s)
 $(notdir $(1))_OBJS := $$(patsubst user/%.c,$$(USER_BUILD_DIR)/%.o,$$($(notdir $(1))_SRCS))
 $(notdir $(1))_ASM_OBJS := $$(patsubst user/%.s,$$(USER_BUILD_DIR)/%.o,$$($(notdir $(1))_ASM_SRCS))
 
-$$(USER_BUILD_DIR)/$(notdir $(1)).bin: $$($(notdir $(1))_OBJS) $$($(notdir $(1))_ASM_OBJS) $$($(notdir $(1))_EXTRA_OBJS) $$(COMMON_USER_OBJECTS) $$(USER_LIB_OBJECTS) $$(USER_LIB_ASM_OBJECTS)
-	$$(LD) $$(USER_LDFLAGS) $$^ -o $$@
+$$(USER_BUILD_DIR)/$(notdir $(1)).bin: $$($(notdir $(1))_OBJS) $$($(notdir $(1))_ASM_OBJS) $$($(notdir $(1))_EXTRA_OBJS) $$(SYSROOT_FILES)
+	$$(LD) $$(USER_LDFLAGS) $$(SYSROOT_CRT) $$($(notdir $(1))_OBJS) $$($(notdir $(1))_ASM_OBJS) \
+		$$($(notdir $(1))_EXTRA_OBJS) -L$$(SYSROOT_LIB_DIR) \
+		-Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $$@
 endef
 
 $(foreach dir,$(USER_BINARY_DIRS),$(eval $(call make-user-bin,$(dir))))
+
+$(OPENBSD_CP_BINARY): $(OPENBSD_CP_OBJECTS) $(SYSROOT_FILES)
+	$(LD) $(USER_LDFLAGS) $(SYSROOT_CRT) $(OPENBSD_CP_OBJECTS) -L$(SYSROOT_LIB_DIR) \
+		-Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
+
+$(OPENBSD_RM_BINARY): $(OPENBSD_RM_OBJECT) $(OPENBSD_RM_PLATFORM_OBJECT) $(SYSROOT_FILES)
+	$(LD) $(USER_LDFLAGS) $(SYSROOT_CRT) $(OPENBSD_RM_OBJECT) $(OPENBSD_RM_PLATFORM_OBJECT) \
+		-L$(SYSROOT_LIB_DIR) -Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
+
+$(OPENBSD_GREP_BINARY): $(OPENBSD_GREP_OBJECTS) $(OPENBSD_REGEX_OBJECTS) $(SYSROOT_FILES)
+	$(LD) $(USER_LDFLAGS) $(SYSROOT_CRT) $(OPENBSD_GREP_OBJECTS) $(OPENBSD_REGEX_OBJECTS) \
+		-L$(SYSROOT_LIB_DIR) -Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
 
 -include $(shell find $(BUILD_ROOT) -type f -name "*.d" -print 2>/dev/null)
 

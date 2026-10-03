@@ -1,4 +1,7 @@
 #include "unity.h"
+
+#include <string.h>
+
 #define ServiceDirectory__shared EmbedfsTest__directory
 #include "../../../../user/drivers/embedfs/embedfs.c"
 #undef ServiceDirectory__shared

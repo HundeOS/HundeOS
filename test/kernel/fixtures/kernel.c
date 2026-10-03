@@ -3,6 +3,7 @@
 
 #include "unity.h"
 #include "../../../kernel/service/service_directory.h"
+#include "../../../kernel/service/clock.h"
 #include "../../../kernel/irq/irq_dispatcher.h"
 #include "../../../kernel/kalloc.h"
 #include "../../../kernel/all_defs.h"
@@ -19,6 +20,7 @@ static KernelPtr TestKernel__heap_new(SchedulerPtr scheduler)
 
     SystemInfo system_info = SystemInfo__new();
     system_info.cpu_count = MAX_CPUS;
+    system_info.realtime_clock = Some(RealtimeClockSample, RealtimeClockSample__new(1700000000000000ULL, 123000ULL));
     kernel->system_info = Some(SystemInfo, system_info);
     kernel->heap = NEW_HEAP;
     kernel->heap.coarse_block_size = system_info.heap_coarse_block_size;
@@ -28,9 +30,18 @@ static KernelPtr TestKernel__heap_new(SchedulerPtr scheduler)
     kernel->service_directory = KERNEL_SERVICE_DIRECTORY_INIT;
     kernel->device_registry = KernelDeviceRegistry__new();
     kernel->process_registry = KernelProcessRegistry__new();
+    kernel->clock = KernelClock__new();
     kernel->memory_accounting = MemoryAccounting__new();
     match_result(
         KernelServiceDirectory__init(&kernel->service_directory),
+        success_do_nothing(),
+        error(code, message)
+        {
+            TEST_FAIL();
+        }
+    );
+    match_result(
+        KernelClock__init(&kernel->clock, system_info.timer_frequency, &system_info.realtime_clock),
         success_do_nothing(),
         error(code, message)
         {

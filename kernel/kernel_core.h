@@ -13,6 +13,7 @@
 #include "service/device_registry.h"
 #include "memory_accounting.h"
 #include "service/process_registry.h"
+#include "service/clock.h"
 
 typedef uint64_t KernelInitStatus;
 
@@ -29,6 +30,7 @@ typedef struct Kernel
     KernelServiceDirectory service_directory;
     KernelDeviceRegistry device_registry;
     KernelProcessRegistry process_registry;
+    KernelClock clock;
     MemoryAccounting memory_accounting;
     Auth auth;
     ProcessID boot_authority;

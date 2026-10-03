@@ -7,6 +7,7 @@ BootHardwareInfo BootHardwareInfo__from_system(SystemInfoPtr info, uint64_t onli
     result.online_cpu_count = online_cpu_count;
     result.timer_frequency = info->timer_frequency;
     result.wait_mode = info->wait_mode;
+    result.rtc = info->rtc;
     result.uart = BootUartInfo__new(info->uart.physical_base, 0x1000, info->uart.irq, info->uart.kind);
     result.virtio_mmio = info->virtio_mmio;
     result.memory_start = info->physical_memory.physical_start;

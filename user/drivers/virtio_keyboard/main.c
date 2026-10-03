@@ -668,7 +668,7 @@ int VIRTIO_KEYBOARD_ENTRYPOINT(void)
 
     static IOStreamDriver driver;
     static IOService service;
-    driver = IOStreamDriver__new(IO_OPEN_READ, &keyboard, VirtioKeyboard__read);
+    driver = IOStreamDriver__new_terminal(IO_OPEN_READ, &keyboard, VirtioKeyboard__read);
     if (IOService__listen_into(&service, &bstr(IO_KEYBOARD_SERVICE), &driver, IOStreamDriver__execute,
                                IOStreamDriver__disconnect) != IO_OK)
     {

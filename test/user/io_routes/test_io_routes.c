@@ -22,6 +22,12 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     return opened;
 }
 
+Result(IOPipe) IOClient__pipe(void)
+{
+    TEST_FAIL_MESSAGE("Not a pipe test");
+    return Error(IOPipe, bstr("unexpected pipe"), IO_OPERATION_NOT_SUPPORTED);
+}
+
 IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
     channel_calls++;
@@ -49,16 +55,38 @@ IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
     return IO_OK;
 }
 
+IOTerminalAttributesResult IOClient__get_terminal_attributes(IOHandle handle)
+{
+    channel_calls++;
+    return IOTerminalAttributesResult__new(IO_OK, IOTerminalAttributes__default());
+}
+
+IOStatus IOClient__set_terminal_attributes(IOHandle handle, IOTerminalAttributes attributes)
+{
+    channel_calls++;
+    return IO_OK;
+}
+
 ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
 {
     channel_calls++;
     return 0;
 }
 
+ByteCount IOClient__read_with_flags(IOHandle handle, ChannelDataPtr data, size_t size, Flags flags)
+{
+    return IOClient__read(handle, data, size);
+}
+
 ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
 {
     channel_calls++;
     return size;
+}
+
+ByteCount IOClient__write_with_flags(IOHandle handle, ConstChannelDataPtr data, size_t size, Flags flags)
+{
+    return IOClient__write(handle, data, size);
 }
 
 IOReply IOClient__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
@@ -115,6 +143,25 @@ void test_terminal_foreground_control_uses_open_standard_input(void)
 
     TEST_ASSERT_EQUAL_UINT64(42, foreground_pid);
     TEST_ASSERT_EQUAL_UINT(2, channel_calls);
+}
+
+void test_terminal_paths_reflect_startup_endpoints_and_closed_streams(void)
+{
+    IO__set_startup_stdio(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+
+    TEST_ASSERT_EQUAL_BSTRING(bstr(":tty:"), unwrap_optional(IO__terminal_path(STDIN_FILENO), empty_bstr()));
+    TEST_ASSERT_EQUAL_BSTRING(bstr(":console:"), unwrap_optional(IO__terminal_path(STDOUT_FILENO), empty_bstr()));
+    TEST_ASSERT_FALSE(is_something(IO__terminal_path(4)));
+
+    TEST_ASSERT_EQUAL(IO_OK, IO__close(STDIN_FILENO));
+    TEST_ASSERT_FALSE(is_something(IO__terminal_path(STDIN_FILENO)));
+}
+
+void test_keyboard_input_reports_the_logical_console_terminal(void)
+{
+    IO__set_startup_stdio(IO_ENDPOINT_KEYBOARD_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+
+    TEST_ASSERT_EQUAL_BSTRING(bstr(":console:"), unwrap_optional(IO__terminal_path(STDIN_FILENO), empty_bstr()));
 }
 
 void tearDown(void)

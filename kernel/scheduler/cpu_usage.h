@@ -8,6 +8,13 @@
 typedef uint64_t CPUTime;
 typedef uint64_t CPUUsageTick;
 
+typedef enum CPUUsageMode
+{
+    CPU_USAGE_PAUSED,
+    CPU_USAGE_USER,
+    CPU_USAGE_SYSTEM,
+} CPUUsageMode;
+
 typedef struct CPUUsageBucket
 {
     CPUUsageTick tick;
@@ -28,6 +35,9 @@ typedef struct CPUUsage
     CPUTime scheduled_usec;
     CPUTime started_at;
     CPUTime observed_user_wait_usec;
+    CPUTime user_usec;
+    CPUTime system_usec;
+    CPUUsageMode mode;
     bool running;
     CPUUsageBuckets active_buckets;
     CPUUsageBuckets scheduled_buckets;
@@ -37,6 +47,8 @@ typedef CPUUsage * CPUUsagePtr;
 
 CPUUsage CPUUsage__new(void);
 void CPUUsage__start(CPUUsagePtr self, CPUTime now, CPUTime user_wait_usec);
+void CPUUsage__start_mode(CPUUsagePtr self, CPUTime now, CPUTime user_wait_usec, CPUUsageMode mode);
+void CPUUsage__transition(CPUUsagePtr self, CPUTime now, CPUTime user_wait_usec, CPUUsageMode mode);
 void CPUUsage__stop(CPUUsagePtr self, CPUTime now, CPUTime user_wait_usec);
 ProcessCPUUsage CPUUsage__snapshot(CPUUsagePtr self, CPUTime now, CPUTime user_wait_usec);
 

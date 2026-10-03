@@ -81,7 +81,7 @@ void ContextSwitch__switch(ConstContextSwitchPtr self)
             CPUTime now = CPU__time_usec();
             CPUUsage__stop(&proc->cpu_usage, now, Process__user_wait_usec(proc, now));
             if (proc->state != PROC_STATE_DEAD && proc->state != PROC_STATE_WAITING &&
-                proc->state != PROC_STATE_SLEEPING)
+                proc->state != PROC_STATE_SLEEPING && proc->state != PROC_STATE_STOPPED)
             {
                 proc->state = PROC_STATE_INTERRUPTED;
             }
@@ -93,7 +93,7 @@ void ContextSwitch__switch(ConstContextSwitchPtr self)
     new_proc->migration_safe = false;
     QueueWaitUsage__select(&new_proc->queue_wait_usage);
     CPUTime now = CPU__time_usec();
-    CPUUsage__start(&new_proc->cpu_usage, now, Process__user_wait_usec(new_proc, now));
+    CPUUsage__start_mode(&new_proc->cpu_usage, now, Process__user_wait_usec(new_proc, now), CPU_USAGE_PAUSED);
     __d_printf(PROCESS_SWITCH, "ContextSwitch__switch target pid=%i name=%s state=%s context=%p page_table=%p\n",
                new_proc->pid, cstr(new_proc->name), ProcessState__to_string(new_proc->state),
                Process__required_context(new_proc), paddr(ProcessPageTable__root(&new_proc->page_table)));
@@ -101,35 +101,39 @@ void ContextSwitch__switch(ConstContextSwitchPtr self)
                ProcessState__to_string(new_proc->state));
 
     new_proc->state = PROC_STATE_RUNNING;
-    match_optional(
-        Process__take_pending_signal(new_proc),
-        some(signal)
-        {
-            match_result(
-                Process__dispose_owned_kernel_resources(new_proc),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    __d_printf(PANIC, "Signal resource cleanup failed: %s\n", cstr(message));
-                    CPU__halt_all();
-                    return;
-                }
-            );
-            match_result(
-                Scheduler__exit(new_proc->kernel->scheduler, new_proc, ProcessSignal__exit_code(signal)),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    __d_printf(PANIC, "Signal termination failed: %s\n", cstr(message));
-                    CPU__halt_all();
-                }
-            );
-            return;
-        },
-        none_do_nothing()
-    );
+    Process__account_cpu_mode(new_proc, CPU_USAGE_SYSTEM);
+    if (Process__has_pending_kill(new_proc) &&
+        Scheduler__deliver_pending_signal(new_proc->kernel->scheduler, new_proc, Process__required_context(new_proc)) ==
+            PROCESS_SIGNAL_DELIVERY_TERMINATE)
+    {
+        return;
+    }
     if (!Process__finalise_deferred_syscalls(new_proc))
     {
+        return;
+    }
+    ProcessSignalDeliveryKind delivery =
+        Scheduler__deliver_pending_signal(new_proc->kernel->scheduler, new_proc, Process__required_context(new_proc));
+    if (delivery == PROCESS_SIGNAL_DELIVERY_TERMINATE)
+    {
+        return;
+    }
+    if (delivery == PROCESS_SIGNAL_DELIVERY_STOP)
+    {
+        Scheduler__yield_waiting(new_proc->kernel->scheduler, new_proc, CPU__id());
+        return;
+    }
+    if (Process__is_parked(new_proc))
+    {
+        match_optional(
+            Process__top_park_reason(new_proc),
+            some(reason)
+            {
+                new_proc->state = reason == PARK_SLEEP ? PROC_STATE_SLEEPING : PROC_STATE_WAITING;
+            },
+            none_do_nothing()
+        );
+        Scheduler__yield_waiting(new_proc->kernel->scheduler, new_proc, CPU__id());
         return;
     }
 
@@ -149,6 +153,7 @@ void ContextSwitch__switch(ConstContextSwitchPtr self)
         },
         none_do_nothing()
     );
+    Process__account_cpu_mode(new_proc, CPU_USAGE_USER);
     CPUTimer__resume();
     Process__context_switch(new_proc);
 }

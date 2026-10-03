@@ -125,3 +125,18 @@ void test_cpu_usage_clamps_untrusted_user_wait_growth_to_the_scheduled_slice(voi
     TEST_ASSERT_EQUAL_UINT64(0, snapshot.total_usec);
     TEST_ASSERT_EQUAL_UINT64(5000, snapshot.scheduled_usec);
 }
+
+void test_cpu_usage_separates_user_system_and_paused_time(void)
+{
+    CPUUsage__start_mode(&usage, 0, 0, CPU_USAGE_USER);
+    CPUUsage__transition(&usage, 10, 0, CPU_USAGE_SYSTEM);
+    CPUUsage__transition(&usage, 25, 0, CPU_USAGE_PAUSED);
+    CPUUsage__transition(&usage, 50, 0, CPU_USAGE_USER);
+    CPUUsage__stop(&usage, 60, 0);
+
+    ProcessCPUUsage snapshot = CPUUsage__snapshot(&usage, 60, 0);
+    TEST_ASSERT_EQUAL_UINT64(60, snapshot.total_usec);
+    TEST_ASSERT_EQUAL_UINT64(20, snapshot.user_usec);
+    TEST_ASSERT_EQUAL_UINT64(15, snapshot.system_usec);
+    TEST_ASSERT_EQUAL_UINT64(60, snapshot.scheduled_usec);
+}

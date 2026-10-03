@@ -1,7 +1,7 @@
 #include "../../user.h"
 #include <stdbool.h>
 
-#include "sys/wait.h"
+#include "sys/interrupt.h"
 
 int main(void)
 {

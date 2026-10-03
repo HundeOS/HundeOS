@@ -58,6 +58,7 @@ FilesystemDriver FilesystemDriver__new(IOServiceContext volume, ConstFilesystemO
                               .operations = *operations,
                               .files = FilesystemFiles__new(),
                               .file_states = FilesystemFileStates__new(),
+                              .inheritance = IOInheritanceRegistry__new(),
                               .next_handle = IO_SESSION_HANDLE_BASE,
                               .next_file_identity = 1ULL << 63};
 }
@@ -152,20 +153,27 @@ static void FilesystemDriver__record_change(FilesystemDriverPtr self, ConstBStri
 
 static FilesystemFile FilesystemFile__new(IOHandle handle, IORequestPtr request, ConstBStringPtr path)
 {
-    return (FilesystemFile){.handle = handle,
-                            .session = request->client_session,
-                            .pid = request->client_pid,
-                            .path = FilesystemPath__new(path),
-                            .flags = request->flags,
-                            .data = None(FilesystemFileDataPtr)};
+    FilesystemFile file = {.handle = handle,
+                           .owners = IOResourceOwners__new(),
+                           .path = FilesystemPath__new(path),
+                           .flags = request->flags,
+                           .data = None(FilesystemFileDataPtr)};
+    IOResourceOwners__add(&file.owners, request->client_session, request->client_pid);
+    return file;
 }
 
 static bool FilesystemFile__matches(FilesystemFilePtr self, void * context)
 {
     IORequestPtr request = context;
     bool watch = request->operation == IO_REQUEST_WAIT_FILE_CHANGE;
-    return self->handle == request->handle && self->pid == request->client_pid &&
-           (watch || self->session == request->client_session);
+    return self->handle == request->handle &&
+           (watch ? IOResourceOwners__contains_pid(&self->owners, request->client_pid)
+                  : IOResourceOwners__contains(&self->owners, request->client_session, request->client_pid));
+}
+
+static bool FilesystemFile__has_handle(FilesystemFilePtr self, void * context)
+{
+    return self->handle == *(IOHandlePtr)context;
 }
 
 static Optional(FilesystemFilePtr) FilesystemDriver__find(FilesystemDriverPtr self, IORequestPtr request)
@@ -185,7 +193,12 @@ static Optional(FilesystemFilePtr) FilesystemDriver__find(FilesystemDriverPtr se
 
 static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr request, ConstBStringPtr path)
 {
-    if (request->flags == 0 || (request->flags & ~(IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_EXECUTE)) != 0)
+    Flags access_flags = request->flags & (IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_EXECUTE);
+    Flags creation_flags = request->flags & (IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE);
+    if (access_flags == 0 ||
+        (request->flags & ~(IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_EXECUTE | IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE)) !=
+            0 ||
+        (creation_flags != 0 && ((access_flags & IO_OPEN_WRITE) == 0 || (creation_flags & IO_OPEN_CREATE) == 0)))
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
@@ -197,7 +210,44 @@ static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr req
     {
         return IOReply__new(IO_REGISTER_FAILED, 0);
     }
+    if (creation_flags != 0 && self->operations.source_mode != FILESYSTEM_SOURCE_STREAM)
+    {
+        return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+    }
     FilesystemFile file = FilesystemFile__new(self->next_handle++, request, path);
+    if (creation_flags != 0)
+    {
+        match_result(
+            self->operations.source.stream.describe(self->volume, path),
+            success(info)
+            {
+                if ((request->flags & IO_OPEN_EXCLUSIVE) != 0)
+                {
+                    return IOReply__new(IO_ALREADY_EXISTS, 0);
+                }
+                if ((info.mode & IO_MODE_TYPE_MASK) != IO_MODE_TYPE_FILE)
+                {
+                    return IOReply__new(IO_INVALID_PATH, 0);
+                }
+                file.size = info.size;
+            },
+            error(code, message)
+            {
+                uint8_t empty = 0;
+                match_result(
+                    self->operations.source.stream.write(self->volume, path, 0, &empty, 0),
+                    success(size)
+                    {
+                        file.size = size;
+                    },
+                    error(write_code, write_message)
+                    {
+                        return IOReply__new((IOStatus)write_code, 0);
+                    }
+                );
+            }
+        );
+    }
     if (self->operations.source_mode == FILESYSTEM_SOURCE_SNAPSHOT)
     {
         if ((request->flags & IO_OPEN_EXECUTE) != 0)
@@ -302,7 +352,13 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
 {
     IOReply reply = IOReply__new(IO_OK, 0);
     BString path = FilesystemPath__value(&file->path);
-    Flags required = request->operation == IO_REQUEST_READ ? IO_OPEN_READ : IO_OPEN_WRITE;
+    bool writing = request->operation == IO_REQUEST_WRITE;
+    Flags supported_flags = IO_TRANSFER_NONBLOCK | (writing ? IO_TRANSFER_APPEND : 0);
+    if ((request->flags & ~supported_flags) != 0)
+    {
+        return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+    }
+    Flags required = writing ? IO_OPEN_WRITE : IO_OPEN_READ;
     if ((file->flags & required) == 0)
     {
         return IOReply__new(IO_PERMISSION_DENIED, 0);
@@ -311,7 +367,7 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
     {
         return reply;
     }
-    if (request->operation == IO_REQUEST_READ)
+    if (!writing)
     {
         if (self->operations.source_mode == FILESYSTEM_SOURCE_STREAM)
         {
@@ -372,10 +428,38 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
             }
         );
     }
+    FilesystemFileSize write_offset = file->offset;
+    if ((request->flags & IO_TRANSFER_APPEND) != 0)
+    {
+        if (self->operations.source_mode == FILESYSTEM_SOURCE_STREAM)
+        {
+            match_result(
+                self->operations.source.stream.describe(self->volume, &path),
+                success(info)
+                {
+                    file->size = info.size;
+                    write_offset = info.size;
+                },
+                error(code, message)
+                {
+                    if (code != IO_INVALID_PATH)
+                    {
+                        return IOReply__new((IOStatus)code, 0);
+                    }
+                    file->size = 0;
+                    write_offset = 0;
+                }
+            );
+        }
+        else
+        {
+            write_offset = file->size;
+        }
+    }
     if (self->operations.source_mode == FILESYSTEM_SOURCE_STREAM)
     {
         match_result(
-            self->operations.source.stream.write(self->volume, &path, file->offset, IORequest__write_source(request),
+            self->operations.source.stream.write(self->volume, &path, write_offset, IORequest__write_source(request),
                                                  request->count),
             success(bytes)
             {
@@ -383,7 +467,7 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
                 {
                     return IOReply__new(IO_UNKNOWN_BUFFER, 0);
                 }
-                file->offset += bytes;
+                file->offset = write_offset + bytes;
                 if (file->offset > file->size)
                 {
                     file->size = file->offset;
@@ -397,7 +481,7 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
         );
     }
     FilesystemFileSize write_capacity = self->operations.source.snapshot.write_capacity;
-    if (file->offset > write_capacity || request->count > write_capacity - file->offset)
+    if (write_offset > write_capacity || request->count > write_capacity - write_offset)
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
@@ -424,9 +508,9 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
             return IOReply__new(IO_UNKNOWN_BUFFER, 0);
         }
     );
-    __builtin_memcpy(previous, data + file->offset, request->count);
-    __builtin_memcpy(data + file->offset, IORequest__write_source(request), request->count);
-    uint64_t size = file->offset + request->count;
+    __builtin_memcpy(previous, data + write_offset, request->count);
+    __builtin_memcpy(data + write_offset, IORequest__write_source(request), request->count);
+    uint64_t size = write_offset + request->count;
     if (size < file->size)
     {
         size = file->size;
@@ -434,11 +518,11 @@ static IOReply FilesystemDriver__transfer(FilesystemDriverPtr self, FilesystemFi
     IOStatus status = self->operations.source.snapshot.store(self->volume, &path, data, size);
     if (status != IO_OK)
     {
-        __builtin_memcpy(data + file->offset, previous, request->count);
+        __builtin_memcpy(data + write_offset, previous, request->count);
         free(previous);
         return IOReply__new(status, 0);
     }
-    file->offset += request->count;
+    file->offset = write_offset + request->count;
     free(previous);
     file->size = size;
     return IOReply__new(IO_OK, request->count);
@@ -696,6 +780,47 @@ IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request
             FilesystemDriver__release(self, request->client_session, request->client_pid) ? IO_OK : IO_UNKNOWN_HANDLE,
             0);
     }
+    if (request->operation == IO_REQUEST_INHERIT_COMMIT)
+    {
+        return IOReply__new(IOInheritanceRegistry__commit(&self->inheritance, request), 0);
+    }
+    if (request->operation == IO_REQUEST_INHERIT_ABORT)
+    {
+        return IOReply__new(IOInheritanceRegistry__abort(&self->inheritance, request), 0);
+    }
+    if (request->operation == IO_REQUEST_INHERIT_CLAIM)
+    {
+        match_optional(
+            IOInheritanceRegistry__claim(&self->inheritance, request),
+            some(grant)
+            {
+                match_find_result_ptr(
+                    FilesystemFiles__find(&self->files, FilesystemFile__has_handle, &grant->handle),
+                    some(file)
+                    {
+                        IOStatus status =
+                            IOResourceOwners__add(&file->owners, request->client_session, request->client_pid);
+                        if (status != IO_OK)
+                        {
+                            return IOReply__new(status, 0);
+                        }
+                        IOReply reply = IOReply__new(IO_OK, file->handle);
+                        reply.inheritance_flags = grant->flags;
+                        IOInheritanceRegistry__complete(&self->inheritance, grant);
+                        return reply;
+                    },
+                    none()
+                    {
+                        return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                    }
+                );
+            },
+            none()
+            {
+                return IOReply__new(IO_PERMISSION_DENIED, 0);
+            }
+        );
+    }
     BString path = IORequest__path(request);
     switch (request->operation)
     {
@@ -762,6 +887,7 @@ IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request
     case IO_REQUEST_SEEK:
     case IO_REQUEST_CLOSE:
     case IO_REQUEST_WATCH_FILE:
+    case IO_REQUEST_INHERIT_PREPARE:
         break;
     default:
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
@@ -770,6 +896,11 @@ IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request
         FilesystemDriver__find(self, request),
         some(file)
         {
+            if (request->operation == IO_REQUEST_INHERIT_PREPARE)
+            {
+                return IOInheritanceRegistry__prepare(&self->inheritance, file->handle, file->flags,
+                                                      request->client_session, request->client_pid);
+            }
             if (request->operation == IO_REQUEST_SEEK)
             {
                 return FilesystemDriver__seek(self, file, request);
@@ -787,6 +918,15 @@ IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request
                     FilesystemDriver__record_change(self, &path, IO_FILE_CHANGE_WRITE);
                 }
                 return reply;
+            }
+            if (IOResourceOwners__remove_owner(&file->owners, request->client_session, request->client_pid) != IO_OK)
+            {
+                return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+            }
+            if (IOResourceOwners__len(&file->owners) != 0 ||
+                IOInheritanceRegistry__retains_handle(&self->inheritance, file->handle))
+            {
+                return IOReply__new(IO_OK, 0);
             }
             FilesystemFile removed = *file;
             match_result(
@@ -817,34 +957,50 @@ IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request
 
 static bool FilesystemFile__owned(FilesystemFilePtr self, void * context)
 {
-    IORequestPtr owner = context;
-    return self->session == owner->client_session && self->pid == owner->client_pid;
+    IOResourceOwnerPtr owner = context;
+    return IOResourceOwners__contains(&self->owners, owner->session, owner->pid);
 }
 
 bool FilesystemDriver__release(FilesystemDriverPtr self, QueueConnectionID session, uint64_t pid)
 {
-    IORequest owner = IORequest__new(IO_REQUEST_RELEASE_CLIENT, 0);
-    owner.client_session = session;
-    owner.client_pid = pid;
+    IOResourceOwner owner = IOResourceOwner__new(session, pid);
     while (true)
     {
         match_find_result(
             FilesystemFiles__find(&self->files, FilesystemFile__owned, &owner),
             some(file)
             {
-                match_result(
-                    FilesystemFiles__remove(&self->files, file),
-                    success(code)
+                match_find_result_ptr(
+                    FilesystemFiles__find(&self->files, FilesystemFile__has_handle, &file.handle),
+                    some(found)
                     {
-                        match_optional(file.data,
-                        some(data)
+                        if (IOResourceOwners__remove_owner(&found->owners, session, pid) != IO_OK)
                         {
-                            free(data);
-                        },
-                        none_do_nothing()
-                    );
+                            return false;
+                        }
+                        if (IOResourceOwners__len(&found->owners) != 0 ||
+                            IOInheritanceRegistry__retains_handle(&self->inheritance, found->handle))
+                        {
+                            continue;
+                        }
+                        FilesystemFile removed = *found;
+                        match_result(
+                            FilesystemFiles__remove(&self->files, removed),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                return false;
+                            }
+                        );
+                        match_optional(removed.data,
+                            some(data)
+                            {
+                                free(data);
+                            },
+                            none_do_nothing()
+                        );
                     },
-                    error(code, message)
+                    none()
                     {
                         return false;
                     }
@@ -852,6 +1008,7 @@ bool FilesystemDriver__release(FilesystemDriverPtr self, QueueConnectionID sessi
             },
             none()
             {
+                IOInheritanceRegistry__release(&self->inheritance, session, pid);
                 return true;
             }
         );

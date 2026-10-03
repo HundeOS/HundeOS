@@ -1,6 +1,6 @@
 #include "block_cache.h"
 
-#include <string.h>
+#include "memory.h"
 
 #include "../../../common/ipc/io_diagnostics.h"
 
@@ -14,7 +14,7 @@ CacheBodyDefine(BlockCacheSectors, BlockCache__keys_equal);
 static void BlockCache__store(BlockCachePtr self, BlockProtocolBlockNumber block, const uint8_t * data)
 {
     BlockCacheSector sector;
-    memcpy(sector.data, data, sizeof(sector.data));
+    Mem__memcpy(sector.data, data, sizeof(sector.data));
     if (BlockCacheSectors__put(&self->sectors, block, sector) == CACHE_EVICTED)
     {
         IODiagnostics__record(IO_DIAGNOSTIC_BLOCK_CACHE_EVICTIONS, 1);
@@ -24,7 +24,7 @@ static void BlockCache__store(BlockCachePtr self, BlockProtocolBlockNumber block
 static void BlockCache__update_resident(BlockCachePtr self, BlockProtocolBlockNumber block, const uint8_t * data)
 {
     BlockCacheSector sector;
-    memcpy(sector.data, data, sizeof(sector.data));
+    Mem__memcpy(sector.data, data, sizeof(sector.data));
     BlockCacheSectors__replace(&self->sectors, block, sector);
 }
 
@@ -51,7 +51,7 @@ Result(BlockProtocolBlockCount)
             BlockCacheSectors__get(&self->sectors, current),
             some(sector)
             {
-                memcpy((void *)(buffer + index * BLOCK_CHANNEL_SECTOR_SIZE), sector.data, sizeof(sector.data));
+                Mem__memcpy((void *)(buffer + index * BLOCK_CHANNEL_SECTOR_SIZE), sector.data, sizeof(sector.data));
                 IODiagnostics__record(IO_DIAGNOSTIC_BLOCK_CACHE_HITS, 1);
                 index++;
                 continue;

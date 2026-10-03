@@ -25,6 +25,8 @@ typedef uint64_t SchedulerScheduleStatus;
 
 ResultDef(SchedulerInitStatus);
 ResultDef(SchedulerScheduleStatus);
+ResultDef(ProcessGroupID);
+ResultDef(ProcessSessionID);
 OptionalDef(CPUID);
 
 typedef enum SchedulerInitStatuses
@@ -146,6 +148,7 @@ Result(ProcessID) Scheduler__park_by_pid_with_context_ownership_and_operation_ke
 Result(ProcessPtr)
     Scheduler__unpark(SchedulerPtr self, ProcessPtr proc, ParkReason reason, OptionalPtr(ReturnCode) return_code);
 Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, uint64_t usec);
+Result(ProcessPtr) Scheduler__signal_suspend(SchedulerPtr self, ProcessPtr process, ProcessSignalMask mask);
 
 Result(ProcessID)
     Scheduler__unpark_by_pid(SchedulerPtr self, ProcessID pid, ParkReason reason, OptionalPtr(ReturnCode) return_code);
@@ -159,9 +162,17 @@ bool Scheduler__should_preempt_on_timer(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__find_process_by_pid(SchedulerPtr self, ProcessID pid);
 Optional(ProcessPtr) Scheduler__find_process_by_pid_locked(SchedulerPtr self, ProcessID pid);
 Result(ProcessCredentials) Scheduler__process_credentials(SchedulerPtr self, ProcessID pid);
+Result(ProcessGroupID) Scheduler__process_group(SchedulerPtr self, ProcessPtr caller, int64_t pid);
+Result(ProcessGroupID)
+    Scheduler__set_process_group(SchedulerPtr self, ProcessPtr caller, int64_t pid, int64_t process_group_id);
+Result(ProcessSessionID) Scheduler__create_session(SchedulerPtr self, ProcessPtr caller);
+ProcessTimes Scheduler__process_times(SchedulerPtr self, ProcessPtr process);
 Result(ServiceCode)
     Scheduler__require_process_capability(SchedulerPtr self, ProcessID pid, ProcessCapabilities capability);
 Result(ProcessID) Scheduler__queue_signal(SchedulerPtr self, ProcessID pid, ProcessSignal signal);
+Result(ProcessID) Scheduler__send_signal(SchedulerPtr self, ProcessPtr sender, int64_t target, ProcessSignal signal);
+ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, ProcessPtr process,
+                                                            ProcessContextPtr context);
 Result(Address)
     Scheduler__alloc_shared_page(SchedulerPtr self, ProcessPtr owner, ProcessID first_peer, ProcessID second_peer);
 Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr owner, Address address);
@@ -201,8 +212,10 @@ Result(ServiceEvent)
                                                    OptionalPtr(Continuation) continuation, bool owns_kernel_context);
 Result(ProcessChildEvent)
     Scheduler__child_wait_with_context_ownership(SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context,
-                                                 OptionalPtr(Continuation) continuation, bool owns_kernel_context);
-Result(ProcessChildEvent) Scheduler__child_take_next_event(SchedulerPtr self, ProcessPtr process);
+                                                 OptionalPtr(Continuation) continuation, bool owns_kernel_context,
+                                                 int64_t child_selection, uint64_t options);
+Result(ProcessChildEvent)
+    Scheduler__child_take_event(SchedulerPtr self, ProcessPtr process, int64_t child_selection, uint64_t options);
 Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr process, ConstServiceEventPtr event);
 Result(ServiceCode) Scheduler__service_publish_ready(SchedulerPtr self, ProcessPtr process, ConstBStringPtr name);
 Optional(ProcessPtr) Scheduler__service_ready_process(SchedulerPtr self, ConstBStringPtr name);

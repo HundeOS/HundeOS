@@ -62,6 +62,16 @@ void Process__switch_address_space(ProcessPtr self, ProcessContextPtr context, K
 void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error)
 {
     initial_stdio = (TestStartupStdio){.pid = self->pid, .input = input, .output = output, .error = error};
+    match_optional(
+        self->context,
+        some(context)
+        {
+            context->x[4] = input;
+            context->x[5] = output;
+            context->x[6] = error;
+        },
+        none_do_nothing()
+    );
 }
 
 void current_process_reset()

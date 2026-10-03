@@ -55,6 +55,14 @@ static void CPUUsage__update(CPUUsagePtr self, CPUTime now, CPUTime user_wait_us
     CPUTime active_usec = scheduled_usec - user_wait_growth;
     self->scheduled_usec += scheduled_usec;
     self->active_usec += active_usec;
+    if (self->mode == CPU_USAGE_USER)
+    {
+        self->user_usec += active_usec;
+    }
+    if (self->mode == CPU_USAGE_SYSTEM)
+    {
+        self->system_usec += active_usec;
+    }
     self->started_at = now;
     self->observed_user_wait_usec = user_wait_usec;
 
@@ -89,6 +97,11 @@ static void CPUUsage__update(CPUUsagePtr self, CPUTime now, CPUTime user_wait_us
 
 void CPUUsage__start(CPUUsagePtr self, CPUTime now, CPUTime user_wait_usec)
 {
+    CPUUsage__start_mode(self, now, user_wait_usec, CPU_USAGE_USER);
+}
+
+void CPUUsage__start_mode(CPUUsagePtr self, CPUTime now, CPUTime user_wait_usec, CPUUsageMode mode)
+{
     critical_section(
         self->lock,
         {
@@ -96,7 +109,22 @@ void CPUUsage__start(CPUUsagePtr self, CPUTime now, CPUTime user_wait_usec)
             {
                 self->started_at = now;
                 self->observed_user_wait_usec = user_wait_usec;
+                self->mode = mode;
                 self->running = true;
+            }
+        }
+    );
+}
+
+void CPUUsage__transition(CPUUsagePtr self, CPUTime now, CPUTime user_wait_usec, CPUUsageMode mode)
+{
+    critical_section(
+        self->lock,
+        {
+            if (self->running && self->mode != mode)
+            {
+                CPUUsage__update(self, now, user_wait_usec);
+                self->mode = mode;
             }
         }
     );
@@ -154,6 +182,8 @@ ProcessCPUUsage CPUUsage__snapshot(CPUUsagePtr self, CPUTime now, CPUTime user_w
         {
             CPUUsage__update(self, now, user_wait_usec);
             usage.total_usec = self->active_usec;
+            usage.user_usec = self->user_usec;
+            usage.system_usec = self->system_usec;
             usage.scheduled_usec = self->scheduled_usec;
             CPUUsageTick tick = now / PROCESS_CPU_TICK_USEC;
             CPUUsageWindow active = CPUUsageBuckets__window(&self->active_buckets, tick);

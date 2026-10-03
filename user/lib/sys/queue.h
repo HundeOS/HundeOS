@@ -19,6 +19,8 @@ void Queue__prepare_wait(void);
 void Queue__wait_event(void);
 void Queue__wait_readable(QueuePtr self);
 void Queue__wait_writable(QueuePtr self);
+bool Queue__wait_readable_interruptible(QueuePtr self);
+bool Queue__wait_writable_interruptible(QueuePtr self);
 void QueueArrivals__wait(QueueArrivalsPtr self, QueueEpoch observed_epoch);
 
 #endif

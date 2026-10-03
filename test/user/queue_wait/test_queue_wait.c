@@ -16,6 +16,7 @@ static QueueArrivals arrivals;
 static unsigned waits;
 static unsigned registrations;
 static QueueWaitControl control;
+static SystemCallResult wait_result;
 
 SystemCallResult syscall(SystemCall number, Anything operation, Anything address, Anything count, Anything ticks,
                          Anything unused)
@@ -38,7 +39,7 @@ SystemCallResult syscall(SystemCall number, Anything operation, Anything address
         TEST_ASSERT_NOT_EQUAL(0, address);
         TEST_ASSERT_GREATER_THAN(0, count);
         TEST_ASSERT_EQUAL_UINT64(QUEUE_WAIT_INDEFINITE_TICKS, ticks);
-        return QUEUE_WAIT_TIMEOUT;
+        return wait_result;
     }
     TEST_FAIL_MESSAGE("Unexpected syscall");
     return SERVICE_OPERATION_NOT_SUPPORTED;
@@ -95,6 +96,7 @@ void setUp(void)
     peer_doorbell = (IpcDoorbell){0};
     queue = Queue__new(&identity, &outgoing, &incoming, 123, 2, &peer_doorbell, &Queue__ignore_data_available);
     waits = 0;
+    wait_result = QUEUE_WAIT_TIMEOUT;
     ConstIpcEventPtr event = IpcDoorbell__event(IpcPlatform__local_doorbell());
     IpcEventGeneration observed = IpcPlatform__prepare_wait(event);
     IpcPlatform__signal_event();
@@ -200,6 +202,16 @@ void test_empty_read_and_full_write_park_until_peer_progress(void)
     TEST_ASSERT_EQUAL_UINT64(1, __atomic_load_n(&incoming.consumed, __ATOMIC_ACQUIRE));
     TEST_ASSERT_EQUAL(0, pthread_join(peer, NULL));
     TEST_ASSERT_GREATER_THAN(0, waits);
+}
+
+void test_interruptible_queue_waits_report_signal_interruption(void)
+{
+    wait_result = SYSCALL_INTERRUPTED;
+
+    TEST_ASSERT_FALSE(Queue__wait_readable_interruptible(&queue));
+    queue.written = QUEUE_CAPACITY;
+    TEST_ASSERT_FALSE(Queue__wait_writable_interruptible(&queue));
+    TEST_ASSERT_EQUAL_UINT(2, waits);
 }
 
 void test_registration_change_and_empty_registry_return_without_parking(void)

@@ -96,6 +96,14 @@ static IOReply operation(IORequestOperation kind, IOHandle handle)
     return Memfs__execute(&filesystem, &request);
 }
 
+void test_memfs_exclusive_create_is_atomic(void)
+{
+    IORequest request =
+        path_request(IO_REQUEST_OPEN, &bstr("/exclusive"), IO_OPEN_WRITE | IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE);
+    TEST_ASSERT_EQUAL(IO_OK, Memfs__execute(&filesystem, &request).status);
+    TEST_ASSERT_EQUAL(IO_ALREADY_EXISTS, Memfs__execute(&filesystem, &request).status);
+}
+
 void test_memfs_grows_beyond_disk_snapshot_limit_and_persists_after_close(void)
 {
     IOHandle writer = open_file(&bstr("/large"), IO_OPEN_WRITE);
@@ -168,6 +176,33 @@ void test_memfs_seek_supports_start_current_and_end(void)
     seek.flags = IO_SEEK_CURRENT;
     seek.offset = 2;
     TEST_ASSERT_EQUAL_UINT64(3, Memfs__execute(&filesystem, &seek).value);
+}
+
+void test_memfs_append_uses_current_size_for_independent_handles(void)
+{
+    IOHandle first = open_file(&bstr("/append"), IO_OPEN_WRITE);
+    IOHandle second = open_file(&bstr("/append"), IO_OPEN_WRITE);
+    IORequest write = request_for(IO_REQUEST_WRITE, first);
+    write.flags = IO_TRANSFER_APPEND;
+    write.count = 1;
+    write.data[0] = 'a';
+    TEST_ASSERT_EQUAL_UINT64(1, Memfs__execute(&filesystem, &write).value);
+
+    write.handle = second;
+    write.data[0] = 'b';
+    TEST_ASSERT_EQUAL_UINT64(1, Memfs__execute(&filesystem, &write).value);
+
+    IORequest seek = request_for(IO_REQUEST_SEEK, first);
+    seek.flags = IO_SEEK_SET;
+    TEST_ASSERT_EQUAL_UINT64(0, Memfs__execute(&filesystem, &seek).value);
+    write.handle = first;
+    write.data[0] = 'c';
+    TEST_ASSERT_EQUAL_UINT64(1, Memfs__execute(&filesystem, &write).value);
+
+    IOHandle reader = open_file(&bstr("/append"), IO_OPEN_READ);
+    IOReply reply = operation(IO_REQUEST_READ, reader);
+    TEST_ASSERT_EQUAL_UINT64(3, reply.value);
+    TEST_ASSERT_EQUAL_MEMORY("abc", reply.data, 3);
 }
 
 void test_memfs_failed_growth_preserves_contents_and_offset(void)

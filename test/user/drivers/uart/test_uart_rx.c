@@ -129,7 +129,7 @@ void setUp(void)
     }
 }
 
-ProcessSignalResult kill_process(uint64_t pid, ProcessSignal signal)
+ProcessSignalResult kill_process(int64_t pid, ProcessSignal signal)
 {
     signalled_pid = pid;
     delivered_signal = signal;

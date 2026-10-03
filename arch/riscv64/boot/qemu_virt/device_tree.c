@@ -39,6 +39,7 @@ typedef struct FdtNode
     bool memory;
     bool cpu;
     bool uart;
+    bool rtc;
     bool plic;
     bool virtio_mmio;
     bool pci_ecam;
@@ -268,6 +269,7 @@ static RiscVDeviceTreeStatus FdtNode__read_property(FdtNodePtr self, ConstFdtByt
     if (FdtProperty__name_equals(name, name_available, "compatible", 10))
     {
         self->uart = FdtStringList__contains(value, length, "ns16550a", 8);
+        self->rtc = FdtStringList__contains(value, length, "google,goldfish-rtc", 19);
         self->plic = FdtStringList__contains(value, length, "sifive,plic-1.0.0", 17) ||
                      FdtStringList__contains(value, length, "riscv,plic0", 11);
         self->virtio_mmio = FdtStringList__contains(value, length, "virtio,mmio", 11);
@@ -336,6 +338,12 @@ static RiscVDeviceTreeStatus FdtNode__finish(FdtNodePtr self, RiscVPlatformInfoP
         platform->uart_base = self->reg.base;
         platform->uart_size = self->reg.size;
         platform->uart_irq = self->interrupt;
+    }
+    if (self->rtc && self->reg.present && self->has_interrupt)
+    {
+        platform->rtc_base = self->reg.base;
+        platform->rtc_size = self->reg.size;
+        platform->rtc_irq = self->interrupt;
     }
     if (self->plic && self->reg.present && self->has_plic_source_count)
     {

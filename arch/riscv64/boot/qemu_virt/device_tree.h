@@ -14,6 +14,9 @@ typedef struct RiscVPlatformInfo
     uint64_t uart_base;
     uint64_t uart_size;
     uint64_t uart_irq;
+    uint64_t rtc_base;
+    uint64_t rtc_size;
+    uint64_t rtc_irq;
     uint64_t plic_base;
     uint64_t plic_size;
     uint64_t plic_source_count;

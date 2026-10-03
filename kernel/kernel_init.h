@@ -33,5 +33,6 @@ void Kernel__init(KernelPtr self);
 InitStatus Kernel__init_status(KernelPtr self);
 
 Result(InitStatus) Kernel__wait_for_init(KernelPtr self);
+Result(SubsystemInitStatus) Kernel__init_clock(KernelPtr self);
 
 #endif

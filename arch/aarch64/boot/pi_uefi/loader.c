@@ -9,6 +9,7 @@
 #define EFI_NOT_FOUND (EFI_ERROR_BIT | 14ULL)
 #define EFI_LOAD_ERROR (EFI_ERROR_BIT | 1ULL)
 #define EFI_ABORTED (EFI_ERROR_BIT | 21ULL)
+#define EFI_UNSPECIFIED_TIMEZONE 0x07ff
 
 #define EFI_ALLOCATE_ANY_PAGES 0
 #define EFI_ALLOCATE_ADDRESS 2
@@ -42,6 +43,8 @@ typedef struct EfiBootServices EfiBootServices;
 typedef EfiBootServices * EfiBootServicesPtr;
 typedef struct EfiSystemTable EfiSystemTable;
 typedef EfiSystemTable * EfiSystemTablePtr;
+typedef struct EfiRuntimeServices EfiRuntimeServices;
+typedef EfiRuntimeServices * EfiRuntimeServicesPtr;
 typedef struct EfiSimpleFileSystemProtocol EfiSimpleFileSystemProtocol;
 typedef EfiSimpleFileSystemProtocol * EfiSimpleFileSystemProtocolPtr;
 typedef struct EfiFileProtocol EfiFileProtocol;
@@ -67,6 +70,39 @@ typedef struct EfiTableHeader
     uint32_t crc32;
     uint32_t reserved;
 } EfiTableHeader;
+
+typedef struct EfiTime
+{
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+    uint8_t pad1;
+    uint32_t nanosecond;
+    int16_t timezone;
+    uint8_t daylight;
+    uint8_t pad2;
+} EfiTime;
+
+typedef EfiTime * EfiTimePtr;
+typedef const EfiTime * ConstEfiTimePtr;
+
+typedef struct EfiTimeCapabilities
+{
+    uint32_t resolution;
+    uint32_t accuracy;
+    uint8_t sets_to_zero;
+} EfiTimeCapabilities;
+
+typedef EfiTimeCapabilities * EfiTimeCapabilitiesPtr;
+
+struct EfiRuntimeServices
+{
+    EfiTableHeader header;
+    EfiStatus (*get_time)(EfiTimePtr time, EfiTimeCapabilitiesPtr capabilities);
+};
 
 struct EfiSimpleTextOutputProtocol
 {
@@ -130,7 +166,7 @@ struct EfiSystemTable
     EfiSimpleTextOutputProtocolPtr console_out;
     EfiHandle standard_error_handle;
     EfiSimpleTextOutputProtocolPtr standard_error;
-    void * runtime_services;
+    EfiRuntimeServicesPtr runtime_services;
     EfiBootServicesPtr boot_services;
     uint64_t number_of_table_entries;
     void * configuration_table;
@@ -446,6 +482,83 @@ static int is_physical_memory_type(uint32_t type)
 static int is_free_physical_memory_type(uint32_t type)
 {
     return type == EFI_CONVENTIONAL_MEMORY;
+}
+
+static int EfiTime__is_leap_year(uint16_t year)
+{
+    return year % 4U == 0 && (year % 100U != 0 || year % 400U == 0);
+}
+
+static uint8_t EfiTime__days_in_month(uint16_t year, uint8_t month)
+{
+    static const uint8_t days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month == 2 && EfiTime__is_leap_year(year))
+    {
+        return 29;
+    }
+    return days[month - 1U];
+}
+
+static int EfiTime__valid(ConstEfiTimePtr self)
+{
+    if (self->year < 1970 || self->month < 1 || self->month > 12 || self->hour > 23 || self->minute > 59 ||
+        self->second > 59 || self->nanosecond >= 1000000000U)
+    {
+        return 0;
+    }
+    if (self->day < 1 || self->day > EfiTime__days_in_month(self->year, self->month))
+    {
+        return 0;
+    }
+    return self->timezone == EFI_UNSPECIFIED_TIMEZONE || (self->timezone >= -1440 && self->timezone <= 1440);
+}
+
+static uint64_t EfiTime__unix_usec(ConstEfiTimePtr self)
+{
+    uint64_t days = 0;
+    for (uint16_t year = 1970; year < self->year; year++)
+    {
+        days += EfiTime__is_leap_year(year) ? 366U : 365U;
+    }
+    for (uint8_t month = 1; month < self->month; month++)
+    {
+        days += EfiTime__days_in_month(self->year, month);
+    }
+    days += self->day - 1U;
+
+    int64_t seconds =
+        (int64_t)(days * 86400ULL + (uint64_t)self->hour * 3600ULL + (uint64_t)self->minute * 60ULL + self->second);
+    if (self->timezone != EFI_UNSPECIFIED_TIMEZONE)
+    {
+        seconds -= (int64_t)self->timezone * 60;
+    }
+    return (uint64_t)seconds * 1000000ULL + self->nanosecond / 1000U;
+}
+
+static void fill_realtime_handoff(EfiSystemTablePtr system_table, PiUefiHandoffPtr handoff)
+{
+    if (system_table->runtime_services == 0 || system_table->runtime_services->get_time == 0)
+    {
+        return;
+    }
+
+    uint64_t before;
+    uint64_t after;
+    uint64_t frequency;
+    EfiTime time = {0}; // hundelint: ignore-constructor-required
+    __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(before)::"memory");
+    EfiStatus status = system_table->runtime_services->get_time(&time, 0);
+    __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(after)::"memory");
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+    if (status != EFI_SUCCESS || frequency == 0 || !EfiTime__valid(&time))
+    {
+        return;
+    }
+
+    uint64_t counter = before + ((after - before) / 2U);
+    handoff->realtime_clock_present = 1;
+    handoff->realtime_unix_usec = EfiTime__unix_usec(&time);
+    handoff->realtime_monotonic_usec = counter / frequency * 1000000ULL + counter % frequency * 1000000ULL / frequency;
 }
 
 static void fill_framebuffer_handoff(EfiSystemTablePtr system_table, PiUefiHandoffPtr handoff)
@@ -850,6 +963,7 @@ EfiStatus efi_main(EfiHandle image_handle, EfiSystemTablePtr system_table)
     print(system_table, loader_start);
     loader_memset(&pi_uefi_handoff, 0, sizeof(pi_uefi_handoff));
     fill_framebuffer_handoff(system_table, &pi_uefi_handoff);
+    fill_realtime_handoff(system_table, &pi_uefi_handoff);
 
     EfiFileProtocolPtr kernel_file = 0;
     EfiStatus status = open_kernel_file(image_handle, system_table, &kernel_file);

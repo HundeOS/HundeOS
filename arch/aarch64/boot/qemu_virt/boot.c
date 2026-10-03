@@ -43,6 +43,28 @@ extern const uint64_t __gicd_start[];
 #define QEMU_VIRT_VIRTIO_MMIO_SLOT_SIZE 0x200ULL
 #define QEMU_VIRT_VIRTIO_MMIO_SLOT_COUNT 32ULL
 #define QEMU_VIRT_VIRTIO_MMIO_FIRST_IRQ 48ULL
+#define QEMU_VIRT_RTC_PHYS_BASE 0x09010000ULL
+#define QEMU_VIRT_RTC_MMIO_SIZE 0x1000ULL
+#define QEMU_VIRT_RTC_IRQ 34ULL
+
+static __BOOT__(Optional(RealtimeClockSample)) QemuVirtRtc__sample(void)
+{
+    uint64_t before;
+    uint64_t after;
+    uint64_t frequency;
+    __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(before)::"memory");
+    uint64_t unix_seconds = *(volatile uint32_t *)QEMU_VIRT_RTC_PHYS_BASE;
+    __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(after)::"memory");
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+    if (unix_seconds == 0 || frequency == 0)
+    {
+        return None(RealtimeClockSample);
+    }
+
+    uint64_t counter = before + ((after - before) / 2U);
+    uint64_t monotonic_usec = counter / frequency * 1000000ULL + counter % frequency * 1000000ULL / frequency;
+    return Some(RealtimeClockSample, RealtimeClockSample__new(unix_seconds * 1000000ULL, monotonic_usec));
+}
 
 __BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = { // hundelint: ignore-constructor-required
     .cpu_count = 4,
@@ -123,6 +145,10 @@ __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
     qemu_virt_system_info.pci = qemu_virt_platform_info.pci;
     qemu_virt_system_info.sd_host = qemu_virt_platform_info.sd_host;
     qemu_virt_system_info.ethernet_mac = qemu_virt_platform_info.ethernet_mac;
+    BootDeviceInfo rtc_device =
+        BootDeviceInfo__new(QEMU_VIRT_RTC_PHYS_BASE, QEMU_VIRT_RTC_MMIO_SIZE, QEMU_VIRT_RTC_IRQ);
+    qemu_virt_system_info.rtc = Some(BootRtcInfo, BootRtcInfo__new(&rtc_device, RTC_KIND_PL031));
+    qemu_virt_system_info.realtime_clock = QemuVirtRtc__sample();
 
     GicInterruptControllerInfo gic = GicInterruptControllerInfo__new(
         qemu_virt_platform_info.gic_distributor_physical_base, qemu_virt_platform_info.gic_distributor_virtual_base,

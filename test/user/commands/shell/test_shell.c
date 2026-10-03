@@ -79,7 +79,7 @@ IOStatus IO__set_terminal_foreground(uint64_t pid)
     return IO_OK;
 }
 
-ProcessSignalResult kill_process(uint64_t pid, ProcessSignal signal)
+ProcessSignalResult kill_process(int64_t pid, ProcessSignal signal)
 {
     killed_pid = pid;
     return PROCESS_SIGNAL_OK;

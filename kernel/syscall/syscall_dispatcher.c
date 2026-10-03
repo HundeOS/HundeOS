@@ -18,30 +18,6 @@ MapBodyDefine(Handlers);
 static BString unhandled_syscall = bstr("Unhandled syscall");
 static BString unhandled_syscall_format = bstr("Unhandled syscall %i");
 
-static Result(SystemCallResult)
-    SyscallDispatcher__deliver_pending_signal(KernelPtr kernel, OptionalPtr(ProcessPtr) process_opt,
-                                              ConstResultPtr(SystemCallResult) syscall_result)
-{
-    match_optional(
-        *process_opt,
-        some(process)
-        {
-            match_optional(
-                Process__take_pending_signal(process),
-                some(signal)
-                {
-                    Process__dispose_owned_kernel_resources(process);
-                    Scheduler__exit(kernel->scheduler, process, ProcessSignal__exit_code(signal));
-                },
-                none_do_nothing()
-            );
-        },
-        none_do_nothing()
-    );
-
-    return *syscall_result;
-}
-
 Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, SystemCall syscall, Handler handler)
 {
     match_result(
@@ -69,8 +45,7 @@ Result(SystemCallResult)
         Handlers__get(&self->handlers, syscall_id),
         some(handler)
         {
-            Result(SystemCallResult) handler_result = handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5);
-            return SyscallDispatcher__deliver_pending_signal(kernel, process_opt, &handler_result);
+            return handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5);
         },
         none()
         {

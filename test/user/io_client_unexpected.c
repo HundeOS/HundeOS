@@ -11,6 +11,12 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     return -1;
 }
 
+Result(IOPipe) IOClient__pipe(void)
+{
+    TEST_FAIL_MESSAGE("Unexpected pipe IO");
+    return Error(IOPipe, bstr("unexpected pipe"), IO_OPERATION_NOT_SUPPORTED);
+}
+
 IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
     TEST_FAIL_MESSAGE("Unexpected filesystem link");
@@ -40,8 +46,18 @@ ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
     return -1;
 }
 
+ByteCount IOClient__read_with_flags(IOHandle handle, ChannelDataPtr data, size_t size, Flags flags)
+{
+    return IOClient__read(handle, data, size);
+}
+
 ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
 {
     TEST_FAIL_MESSAGE("Unexpected socket IO");
     return -1;
+}
+
+ByteCount IOClient__write_with_flags(IOHandle handle, ConstChannelDataPtr data, size_t size, Flags flags)
+{
+    return IOClient__write(handle, data, size);
 }

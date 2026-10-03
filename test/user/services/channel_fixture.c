@@ -43,6 +43,7 @@ static bool connect_as_kernel;
 static QueueParticipantID kernel_origin_pid;
 static void (*fixture_server_step)(void);
 static bool fixture_listener_available;
+static bool fixture_wait_interrupted;
 static char output[4096];
 static size_t output_length;
 static void ChannelFixture__pump(void);
@@ -90,6 +91,7 @@ static void ChannelFixture__reset(void)
     kernel_origin_pid = 0;
     fixture_server_step = NULL;
     fixture_listener_available = false;
+    fixture_wait_interrupted = false;
     output_length = 0;
     output[0] = '\0';
 }
@@ -286,22 +288,44 @@ static void ChannelFixture__pump(void)
     current_pid = caller;
 }
 
-void Queue__wait_writable(QueuePtr queue)
+bool Queue__wait_writable_interruptible(QueuePtr queue)
 {
+    if (fixture_wait_interrupted)
+    {
+        fixture_wait_interrupted = false;
+        return false;
+    }
     while (Queue__status(queue) == QUEUE_PENDING)
     {
         TEST_ASSERT_LESS_THAN_UINT64(1000, ++waits);
         ChannelFixture__pump();
     }
+    return true;
 }
 
-void Queue__wait_readable(QueuePtr queue)
+bool Queue__wait_readable_interruptible(QueuePtr queue)
 {
+    if (fixture_wait_interrupted)
+    {
+        fixture_wait_interrupted = false;
+        return false;
+    }
     while (Queue__status(queue) != QUEUE_CLOSED && queue->incoming->produced == queue->read)
     {
         TEST_ASSERT_LESS_THAN_UINT64(1000, ++waits);
         ChannelFixture__pump();
     }
+    return true;
+}
+
+void Queue__wait_writable(QueuePtr queue)
+{
+    Queue__wait_writable_interruptible(queue);
+}
+
+void Queue__wait_readable(QueuePtr queue)
+{
+    Queue__wait_readable_interruptible(queue);
 }
 
 static Queue ChannelFixture__client(void)

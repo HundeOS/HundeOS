@@ -1,6 +1,6 @@
 #include "../../fiber.h"
 
-#include <string.h>
+#include "memory.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -52,7 +52,7 @@ Result(FiberCode) FiberContext__init(FiberContextPtr self, Address stack_base, s
         return Error(FiberCode, invalid_context_stack, FIBER_INVALID_STACK_SIZE);
     }
 
-    memset(self, 0, sizeof(FiberContext));
+    Mem__memset(self, 0, sizeof(FiberContext));
     match_result(
         FiberContext__allocate_slot(self),
         success(slot)

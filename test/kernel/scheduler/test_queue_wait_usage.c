@@ -88,3 +88,19 @@ void test_queue_wait_usage_counts_speculative_selections_independently(void)
     TEST_ASSERT_EQUAL_UINT64(0, snapshot.selections);
     TEST_ASSERT_EQUAL_UINT64(0, snapshot.parks);
 }
+
+void test_queue_wait_usage_cancel_finishes_park_without_a_wake(void)
+{
+    QueueWaitUsage__park(&usage);
+    test_cpu_time_usec = 250;
+    QueueWaitUsage__cancel(&usage);
+    test_cpu_time_usec = 500;
+    QueueWaitUsage__select(&usage);
+
+    ProcessQueueWaitUsage snapshot = QueueWaitUsage__snapshot(&usage);
+    TEST_ASSERT_EQUAL_UINT64(1, snapshot.parks);
+    TEST_ASSERT_EQUAL_UINT64(250, snapshot.parked_usec);
+    TEST_ASSERT_EQUAL_UINT64(0, snapshot.activity_wakes);
+    TEST_ASSERT_EQUAL_UINT64(0, snapshot.timeout_wakes);
+    TEST_ASSERT_EQUAL_UINT64(0, snapshot.selections);
+}

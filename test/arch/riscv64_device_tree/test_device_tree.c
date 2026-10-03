@@ -211,6 +211,12 @@ static uintptr_t FdtFixture__qemu_virt(FdtFixturePtr self, bool include_plic, bo
     FdtFixture__property_u32(self, "interrupts", 10);
     FdtFixture__end_node(self);
 
+    FdtFixture__begin_node(self, "rtc@101000");
+    FdtFixture__property_string(self, "compatible", "google,goldfish-rtc");
+    FdtFixture__property_reg64(self, 0x00101000, 0x1000);
+    FdtFixture__property_u32(self, "interrupts", 11);
+    FdtFixture__end_node(self);
+
     if (include_plic)
     {
         FdtFixture__begin_node(self, "plic@c000000");
@@ -257,6 +263,9 @@ void test_riscv_device_tree_discovers_qemu_virt_platform(void)
     TEST_ASSERT_EQUAL_UINT64(10000000, result.platform.timebase_frequency);
     TEST_ASSERT_EQUAL_UINT64(0x10000000, result.platform.uart_base);
     TEST_ASSERT_EQUAL_UINT64(10, result.platform.uart_irq);
+    TEST_ASSERT_EQUAL_HEX64(0x00101000, result.platform.rtc_base);
+    TEST_ASSERT_EQUAL_UINT64(0x1000, result.platform.rtc_size);
+    TEST_ASSERT_EQUAL_UINT64(11, result.platform.rtc_irq);
     TEST_ASSERT_EQUAL_UINT64(0x0c000000, result.platform.plic_base);
     TEST_ASSERT_EQUAL_UINT64(95, result.platform.plic_source_count);
     TEST_ASSERT_EQUAL_UINT64(1, result.platform.virtio_mmio_count);
@@ -325,6 +334,17 @@ void test_riscv_platform_populates_controller_neutral_system_info(void)
     );
     TEST_ASSERT_EQUAL_HEX64(0x10000000, info.uart.physical_base);
     TEST_ASSERT_EQUAL_HEX64(RISCV_HIGHER_HALF_OFFSET + 0x10000000, info.uart.virtual_base);
+    match_optional(
+        info.rtc,
+        some(rtc)
+        {
+            TEST_ASSERT_EQUAL_HEX64(0x00101000, rtc.device.physical_base);
+            TEST_ASSERT_EQUAL_UINT64(0x1000, rtc.device.mmio_size);
+            TEST_ASSERT_EQUAL_UINT64(11, rtc.device.irq);
+            TEST_ASSERT_EQUAL(RTC_KIND_GOLDFISH, rtc.kind);
+        },
+        none_test_fail()
+    );
     TEST_ASSERT_EQUAL(INTERRUPT_CONTROLLER_PLIC, info.interrupt_controller.kind);
     TEST_ASSERT_EQUAL_HEX64(0x0c000000, info.interrupt_controller.details.plic.physical_base);
     TEST_ASSERT_EQUAL_HEX64(RISCV_HIGHER_HALF_OFFSET + 0x0c000000, info.interrupt_controller.details.plic.virtual_base);

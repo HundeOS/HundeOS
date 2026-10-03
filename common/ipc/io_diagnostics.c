@@ -96,6 +96,11 @@ void IODiagnostics__attach(IODiagnosticsPtr self)
     counters = Some(IODiagnosticsPtr, self);
 }
 
+void IODiagnostics__detach(void)
+{
+    counters = None(IODiagnosticsPtr);
+}
+
 void IODiagnostics__record(IODiagnosticEvent event, uint64_t amount)
 {
     match_optional(

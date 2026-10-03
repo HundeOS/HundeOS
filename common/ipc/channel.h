@@ -14,6 +14,7 @@ typedef enum ChannelCode
     CHANNEL_INVALID_REPLY = -3,
     CHANNEL_PAYLOAD_TOO_LARGE = -4,
     CHANNEL_BUSY = -5,
+    CHANNEL_INTERRUPTED = -6,
 } ChannelCode;
 
 ResultDef(ChannelCode);

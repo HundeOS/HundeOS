@@ -1,5 +1,6 @@
 #include "client.h"
 #include "buffer/client.h"
+#include "sys/queue_wait.h"
 #include "types/fixed_array.h"
 
 #define IO_CLIENT_SESSION_LIMIT 24U
@@ -103,6 +104,11 @@ static IOClientSessions sessions = EmptyArray(IOClientSessions);
 static IOClientHandles handles = EmptyArray(IOClientHandles);
 static IOHandle next_handle = IO_SESSION_HANDLE_BASE;
 
+static BString IOClientInheritance__service(IOClientInheritance * self)
+{
+    return BString__from_chars((const char *)self->service_data, self->service_length);
+}
+
 static bool IOClientSession__named(IOClientSessionPtr self, void * context)
 {
     BString service = IOClientSession__service(self);
@@ -177,6 +183,10 @@ static IOReply IOClient__submit_to(IOClientSessionPtr session, IORequestPtr requ
         },
         error(code, message)
         {
+            if (code == CHANNEL_INTERRUPTED)
+            {
+                return IOReply__new(IO_INTERRUPTED, 0);
+            }
             session->failed = true;
             Channel__close(&session->channel);
             return IOReply__new(IO_NO_DEVICE_FOUND, 0);
@@ -291,6 +301,126 @@ static IOReply IOClient__submit_handle(IOHandle handle, IORequestPtr request)
     return IOClient__submit_to(session, request);
 }
 
+static IOClientInheritance IOClientInheritance__new(IOHandle local, uint64_t token, Flags flags, bool single_transfer,
+                                                    ConstBStringPtr service)
+{
+    IOClientInheritance self = {.local = local, .token = token, .flags = flags, .single_transfer = single_transfer};
+    self.service_length = BString__copy_to(service, (char *)self.service_data, sizeof(self.service_data));
+    return self;
+}
+
+Result(IOClientInheritance) IOClient__prepare_inheritance(IOHandle handle)
+{
+    IOClientHandlePtr resource;
+    match_optional(
+        IOClient__find_handle(handle),
+        some(found)
+        {
+            resource = found;
+        },
+        none()
+        {
+            return Error(IOClientInheritance, bstr("Unknown inherited handle"), IO_UNKNOWN_HANDLE);
+        }
+    );
+    IORequest request = IORequest__new(IO_REQUEST_INHERIT_PREPARE, resource->backend);
+    IOReply reply = IOClient__submit_handle(handle, &request);
+    if (reply.status != IO_OK || reply.value == 0)
+    {
+        return Error(IOClientInheritance, bstr("Handle does not support inheritance"), reply.status);
+    }
+    BString service = IOClientHandle__service(resource);
+    IOClientInheritance inheritance =
+        IOClientInheritance__new(handle, reply.value, reply.inheritance_flags, resource->single_transfer, &service);
+    return Success(IOClientInheritance, inheritance);
+}
+
+static IOStatus IOClient__inheritance_request(IOClientInheritancePtr inheritance, IORequestOperation operation,
+                                              uint64_t child_pid)
+{
+    BString service = IOClientInheritance__service(inheritance);
+    IOClientSessionPtr session;
+    match_optional(
+        IOClient__find_session(&service),
+        some(found)
+        {
+            session = found;
+        },
+        none()
+        {
+            return IO_NO_DEVICE_FOUND;
+        }
+    );
+    IORequest request = IORequest__new(operation, 0);
+    request.inheritance_token = inheritance->token;
+    request.inheritance_pid = child_pid;
+    return IOClient__submit_to(session, &request).status;
+}
+
+IOStatus IOClient__commit_inheritance(IOClientInheritance * inheritance, uint64_t child_pid)
+{
+    return IOClient__inheritance_request(inheritance, IO_REQUEST_INHERIT_COMMIT, child_pid);
+}
+
+IOStatus IOClient__abort_inheritance(IOClientInheritance * inheritance)
+{
+    return IOClient__inheritance_request(inheritance, IO_REQUEST_INHERIT_ABORT, 0);
+}
+
+void IOClient__reset_after_fork(void)
+{
+    sessions = EmptyArray(IOClientSessions);
+    handles = EmptyArray(IOClientHandles);
+    QueueWait__reset_after_fork();
+}
+
+IOStatus IOClient__claim_inheritance(IOClientInheritance * inheritance)
+{
+    BString service = IOClientInheritance__service(inheritance);
+    IOClientSessionPtr session;
+    match_optional(
+        IOClient__session(&service),
+        some(found)
+        {
+            session = found;
+        },
+        none()
+        {
+            return IO_NO_DEVICE_FOUND;
+        }
+    );
+    IORequest request = IORequest__new(IO_REQUEST_INHERIT_CLAIM, 0);
+    request.inheritance_token = inheritance->token;
+    request.flags = inheritance->flags;
+    request.buffered = true;
+    IOReply reply = IOClient__submit_to(session, &request);
+    if (reply.status != IO_OK || reply.value < IO_SESSION_HANDLE_BASE)
+    {
+        return reply.status == IO_OK ? IO_UNKNOWN_HANDLE : reply.status;
+    }
+    uint64_t peer = Channel__server_pid(&session->channel);
+    if ((reply.buffers.read.id != 0 && !BufferClient__validate(&reply.buffers.read, peer, BUFFER_READ)) ||
+        (reply.buffers.write.id != 0 && !BufferClient__validate(&reply.buffers.write, peer, BUFFER_WRITE)))
+    {
+        return IO_UNKNOWN_BUFFER;
+    }
+    session->buffers = reply.buffers;
+    IOClientHandle resource =
+        IOClientHandle__new(inheritance->local, (IOHandle)reply.value, &service, inheritance->single_transfer);
+    match_result(
+        IOClientHandles__push(&handles, resource),
+        success(code)
+        {
+            session->open_handles++;
+            return IO_OK;
+        },
+        error(code, message)
+        {
+            return IO_REGISTER_FAILED;
+        }
+    );
+}
+
 IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset)
 {
     IORequest request = IORequest__new(operation, 0);
@@ -359,6 +489,86 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
             return IO_REGISTER_FAILED;
         }
     );
+}
+
+static void IOClient__discard_pipe(IOClientSessionPtr session, IOPipe pipe)
+{
+    IORequest close_reader = IORequest__new(IO_REQUEST_CLOSE, pipe.read);
+    IORequest close_writer = IORequest__new(IO_REQUEST_CLOSE, pipe.write);
+    IORequest release = IORequest__new(IO_REQUEST_RELEASE_BUFFERS, 0);
+    IOClient__submit_to(session, &close_reader);
+    IOClient__submit_to(session, &close_writer);
+    if (session->open_handles == 0)
+    {
+        IOClient__submit_to(session, &release);
+        session->buffers = BufferPair__new();
+    }
+}
+
+Result(IOPipe) IOClient__pipe(void)
+{
+    if (IOClientHandles__len(&handles) > IOClientHandles__max_size - 2 || next_handle > INT64_MAX - 1)
+    {
+        return Error(IOPipe, bstr("No client handles available for pipe"), IO_REGISTER_FAILED);
+    }
+    IORequest request = IORequest__new(IO_REQUEST_PIPE_CREATE, 0);
+    request.flags = IO_OPEN_READ | IO_OPEN_WRITE;
+    IOClientExchange exchange = IOClient__path_exchange(&request);
+    if (exchange.reply.status != IO_OK)
+    {
+        return Error(IOPipe, bstr("Pipe service rejected creation"), exchange.reply.status);
+    }
+    BString service = IORoute__service(&exchange.route);
+    IOClientSessionPtr session;
+    match_optional(
+        IOClient__find_session(&service),
+        some(found)
+        {
+            session = found;
+        },
+        none()
+        {
+            return Error(IOPipe, bstr("Pipe service session unavailable"), IO_NO_DEVICE_FOUND);
+        }
+    );
+    if (exchange.reply.pipe.read < IO_SESSION_HANDLE_BASE || exchange.reply.pipe.write < IO_SESSION_HANDLE_BASE)
+    {
+        IOClient__discard_pipe(session, exchange.reply.pipe);
+        return Error(IOPipe, bstr("Pipe service returned invalid handles"), IO_UNKNOWN_HANDLE);
+    }
+    uint64_t peer = Channel__server_pid(&session->channel);
+    if (exchange.reply.buffers.read.id == 0 || exchange.reply.buffers.write.id == 0 ||
+        !BufferClient__validate(&exchange.reply.buffers.read, peer, BUFFER_READ) ||
+        !BufferClient__validate(&exchange.reply.buffers.write, peer, BUFFER_WRITE))
+    {
+        IOClient__discard_pipe(session, exchange.reply.pipe);
+        return Error(IOPipe, bstr("Pipe service returned invalid buffers"), IO_UNKNOWN_BUFFER);
+    }
+    session->buffers = exchange.reply.buffers;
+
+    IOClientHandle reader = IOClientHandle__new(next_handle++, exchange.reply.pipe.read, &service, true);
+    IOClientHandle writer = IOClientHandle__new(next_handle++, exchange.reply.pipe.write, &service, true);
+    match_result(
+        IOClientHandles__push(&handles, reader),
+        success_do_nothing(),
+        error(code, message)
+        {
+            IOClient__discard_pipe(session, exchange.reply.pipe);
+            return Error(IOPipe, bstr("Failed to register pipe reader"), IO_REGISTER_FAILED);
+        }
+    );
+    match_result(
+        IOClientHandles__push(&handles, writer),
+        success_do_nothing(),
+        error(code, message)
+        {
+            IOClientHandles__remove(&handles, reader);
+            IOClient__discard_pipe(session, exchange.reply.pipe);
+            return Error(IOPipe, bstr("Failed to register pipe writer"), IO_REGISTER_FAILED);
+        }
+    );
+    session->open_handles += 2;
+    return Success(IOPipe, IOPipe__new(reader.local, writer.local));
 }
 
 IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
@@ -472,6 +682,20 @@ IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
 {
     IORequest request = IORequest__new(IO_REQUEST_SET_FOREGROUND_PROCESS, handle);
     request.foreground_pid = pid;
+    return IOClient__submit_handle(handle, &request).status;
+}
+
+IOTerminalAttributesResult IOClient__get_terminal_attributes(IOHandle handle)
+{
+    IORequest request = IORequest__new(IO_REQUEST_GET_TERMINAL_ATTRIBUTES, handle);
+    IOReply reply = IOClient__submit_handle(handle, &request);
+    return IOTerminalAttributesResult__new(reply.status, reply.terminal_attributes);
+}
+
+IOStatus IOClient__set_terminal_attributes(IOHandle handle, IOTerminalAttributes attributes)
+{
+    IORequest request = IORequest__new(IO_REQUEST_SET_TERMINAL_ATTRIBUTES, handle);
+    request.terminal_attributes = attributes;
     return IOClient__submit_handle(handle, &request).status;
 }
 
@@ -652,7 +876,7 @@ IOReply IOClient__wait_file_change(IOFileWatch * watches, size_t count)
     }
 }
 
-static ByteCount IOClient__read_chunk(IOClientHandlePtr resource, ChannelDataPtr data, size_t size)
+static ByteCount IOClient__read_chunk(IOClientHandlePtr resource, ChannelDataPtr data, size_t size, Flags flags)
 {
     IOClientSessionPtr session;
     BString service = IOClientHandle__service(resource);
@@ -675,6 +899,7 @@ static ByteCount IOClient__read_chunk(IOClientHandlePtr resource, ChannelDataPtr
     request.buffered = true;
     request.buffer = session->buffers.read.id;
     request.count = size < BUFFER_SIZE ? size : BUFFER_SIZE;
+    request.flags = flags;
     IOReply reply = IOClient__submit_to(session, &request);
     if (reply.status != IO_OK)
     {
@@ -691,7 +916,7 @@ static ByteCount IOClient__read_chunk(IOClientHandlePtr resource, ChannelDataPtr
     return (ByteCount)reply.value;
 }
 
-static ByteCount IOClient__write_chunk(IOClientHandlePtr resource, ConstChannelDataPtr data, size_t size)
+static ByteCount IOClient__write_chunk(IOClientHandlePtr resource, ConstChannelDataPtr data, size_t size, Flags flags)
 {
     IOClientSessionPtr session;
     BString service = IOClientHandle__service(resource);
@@ -714,6 +939,7 @@ static ByteCount IOClient__write_chunk(IOClientHandlePtr resource, ConstChannelD
     request.buffered = true;
     request.buffer = session->buffers.write.id;
     request.count = size < BUFFER_SIZE ? size : BUFFER_SIZE;
+    request.flags = flags;
     if (request.count > 0)
     {
         __builtin_memcpy((ChannelDataPtr)session->buffers.write.address, data, request.count);
@@ -726,7 +952,7 @@ static ByteCount IOClient__write_chunk(IOClientHandlePtr resource, ConstChannelD
     return reply.value <= request.count ? (ByteCount)reply.value : IO_UNKNOWN_BUFFER;
 }
 
-ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
+ByteCount IOClient__read_with_flags(IOHandle handle, ChannelDataPtr data, size_t size, Flags flags)
 {
     IOClientHandlePtr resource;
     match_optional(
@@ -743,7 +969,43 @@ ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
     size_t total = 0;
     do
     {
-        ByteCount count = IOClient__read_chunk(resource, data + total, size - total);
+        ByteCount count = IOClient__read_chunk(resource, data + total, size - total, flags);
+        if (count <= 0)
+        {
+            return total == 0 ? count : (ByteCount)total;
+        }
+        total += count;
+        if (resource->single_transfer)
+        {
+            break;
+        }
+    } while (total < size);
+    return total;
+}
+
+ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
+{
+    return IOClient__read_with_flags(handle, data, size, 0);
+}
+
+ByteCount IOClient__write_with_flags(IOHandle handle, ConstChannelDataPtr data, size_t size, Flags flags)
+{
+    IOClientHandlePtr resource;
+    match_optional(
+        IOClient__find_handle(handle),
+        some(found)
+        {
+            resource = found;
+        },
+        none()
+        {
+            return IO_UNKNOWN_HANDLE;
+        }
+    );
+    size_t total = 0;
+    do
+    {
+        ByteCount count = IOClient__write_chunk(resource, data + total, size - total, flags);
         if (count <= 0)
         {
             return total == 0 ? count : (ByteCount)total;
@@ -759,31 +1021,5 @@ ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
 
 ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
 {
-    IOClientHandlePtr resource;
-    match_optional(
-        IOClient__find_handle(handle),
-        some(found)
-        {
-            resource = found;
-        },
-        none()
-        {
-            return IO_UNKNOWN_HANDLE;
-        }
-    );
-    size_t total = 0;
-    do
-    {
-        ByteCount count = IOClient__write_chunk(resource, data + total, size - total);
-        if (count <= 0)
-        {
-            return total == 0 ? count : (ByteCount)total;
-        }
-        total += count;
-        if (resource->single_transfer)
-        {
-            break;
-        }
-    } while (total < size);
-    return total;
+    return IOClient__write_with_flags(handle, data, size, 0);
 }

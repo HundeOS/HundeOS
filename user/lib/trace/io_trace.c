@@ -122,6 +122,13 @@ void IOTrace__set_enabled(bool value)
     enabled = value;
 }
 
+void IOTrace__reset_after_fork(void)
+{
+    registering = false;
+    retry_at_usec = 0;
+    ring = None(IOTraceRingPtr);
+}
+
 TraceStatus IOTrace__prepare(void)
 {
     if (!enabled || is_something(ring))

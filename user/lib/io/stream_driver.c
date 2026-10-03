@@ -13,23 +13,80 @@ bool IOStreamResource__equals(void * first, void * second)
 IOStreamDriver IOStreamDriver__new(Flags access, IOServiceContext context, IOStreamTransfer transfer)
 {
     return (IOStreamDriver){.resources = IOStreamResources__new(),
+                            .inheritance = IOInheritanceRegistry__new(),
                             .next_handle = IO_SESSION_HANDLE_BASE,
                             .access = access,
                             .context = context,
                             .transfer = transfer};
 }
 
+IOStreamDriver IOStreamDriver__new_terminal(Flags access, IOServiceContext context, IOStreamTransfer transfer)
+{
+    IOStreamDriver driver = IOStreamDriver__new(access, context, transfer);
+    driver.terminal = true;
+    driver.terminal_attributes = IOTerminalAttributes__default();
+    return driver;
+}
+
 static bool IOStreamResource__matches(IOStreamResourcePtr self, void * context)
 {
     IORequestPtr request = context;
-    return self->session == request->client_session && self->pid == request->client_pid &&
-           (request->operation == IO_REQUEST_RELEASE_CLIENT || self->handle == request->handle);
+    return self->handle == request->handle &&
+           IOResourceOwners__contains(&self->owners, request->client_session, request->client_pid);
 }
 
 static IOStreamResource IOStreamResource__new(IOHandle handle, IORequestPtr request)
 {
-    return (IOStreamResource){
-        .handle = handle, .session = request->client_session, .pid = request->client_pid, .flags = request->flags};
+    IOStreamResource resource = {.handle = handle, .owners = IOResourceOwners__new(), .flags = request->flags};
+    IOResourceOwners__add(&resource.owners, request->client_session, request->client_pid);
+    return resource;
+}
+
+static bool IOStreamResource__has_handle(IOStreamResourcePtr self, void * context)
+{
+    return self->handle == *(IOHandlePtr)context;
+}
+
+static bool IOStreamResource__owned(IOStreamResourcePtr self, void * context)
+{
+    IOResourceOwnerPtr owner = context;
+    return IOResourceOwners__contains(&self->owners, owner->session, owner->pid);
+}
+
+static bool IOStreamDriver__release_owner(IOStreamDriverPtr self, QueueConnectionID session, uint64_t pid)
+{
+    IOResourceOwner owner = IOResourceOwner__new(session, pid);
+    while (true)
+    {
+        match_find_result_ptr(
+            IOStreamResources__find(&self->resources, IOStreamResource__owned, &owner),
+            some(resource)
+            {
+                if (IOResourceOwners__remove_owner(&resource->owners, session, pid) != IO_OK)
+                {
+                    return false;
+                }
+                if (IOResourceOwners__len(&resource->owners) == 0 &&
+                    !IOInheritanceRegistry__retains_handle(&self->inheritance, resource->handle))
+                {
+                    IOStreamResource removed = *resource;
+                    match_result(
+                        IOStreamResources__remove(&self->resources, removed),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return false;
+                        }
+                    );
+                }
+            },
+            none()
+            {
+                IOInheritanceRegistry__release(&self->inheritance, session, pid);
+                return true;
+            }
+        );
+    }
 }
 
 static IOReply IOStreamDriver__request(IOStreamDriverPtr self, IORequestPtr request)
@@ -40,27 +97,10 @@ static IOReply IOStreamDriver__request(IOStreamDriverPtr self, IORequestPtr requ
     }
     if (request->operation == IO_REQUEST_RELEASE_CLIENT)
     {
-        while (true)
-        {
-            match_find_result(
-                IOStreamResources__find(&self->resources, IOStreamResource__matches, request),
-                some(resource)
-                {
-                    match_result(
-                        IOStreamResources__remove(&self->resources, resource),
-                        success_do_nothing(),
-                        error(code, message)
-                        {
-                            return IOReply__new(IO_UNKNOWN_HANDLE, 0);
-                        }
-                    );
-                },
-                none()
-                {
-                    return IOReply__new(IO_OK, 0);
-                }
-            );
-        }
+        return IOReply__new(IOStreamDriver__release_owner(self, request->client_session, request->client_pid)
+                                ? IO_OK
+                                : IO_UNKNOWN_HANDLE,
+                            0);
     }
     if (request->operation == IO_REQUEST_OPEN)
     {
@@ -90,23 +130,88 @@ static IOReply IOStreamDriver__request(IOStreamDriverPtr self, IORequestPtr requ
             }
         );
     }
-    match_find_result(
-        IOStreamResources__find(&self->resources, IOStreamResource__matches, request),
-        some(resource)
-        {
-            if (request->operation == IO_REQUEST_CLOSE)
+    if (request->operation == IO_REQUEST_INHERIT_COMMIT)
+    {
+        return IOReply__new(IOInheritanceRegistry__commit(&self->inheritance, request), 0);
+    }
+    if (request->operation == IO_REQUEST_INHERIT_ABORT)
+    {
+        return IOReply__new(IOInheritanceRegistry__abort(&self->inheritance, request), 0);
+    }
+    if (request->operation == IO_REQUEST_INHERIT_CLAIM)
+    {
+        match_optional(
+            IOInheritanceRegistry__claim(&self->inheritance, request),
+            some(grant)
             {
-                match_result(
-                    IOStreamResources__remove(&self->resources, resource),
-                    success(code)
+                match_find_result_ptr(
+                    IOStreamResources__find(&self->resources, IOStreamResource__has_handle, &grant->handle),
+                    some(resource)
                     {
-                        return IOReply__new(IO_OK, 0);
+                        IOStatus status =
+                            IOResourceOwners__add(&resource->owners, request->client_session, request->client_pid);
+                        if (status != IO_OK)
+                        {
+                            return IOReply__new(status, 0);
+                        }
+                        IOReply reply = IOReply__new(IO_OK, resource->handle);
+                        reply.inheritance_flags = grant->flags;
+                        IOInheritanceRegistry__complete(&self->inheritance, grant);
+                        return reply;
                     },
-                    error(code, message)
+                    none()
                     {
                         return IOReply__new(IO_UNKNOWN_HANDLE, 0);
                     }
                 );
+            },
+            none()
+            {
+                return IOReply__new(IO_PERMISSION_DENIED, 0);
+            }
+        );
+    }
+    match_find_result_ptr(
+        IOStreamResources__find(&self->resources, IOStreamResource__matches, request),
+        some(resource)
+        {
+            if (request->operation == IO_REQUEST_INHERIT_PREPARE)
+            {
+                return IOInheritanceRegistry__prepare(&self->inheritance, resource->handle, resource->flags,
+                                                      request->client_session, request->client_pid);
+            }
+            if (request->operation == IO_REQUEST_CLOSE)
+            {
+                if (IOResourceOwners__remove_owner(&resource->owners, request->client_session, request->client_pid) !=
+                    IO_OK)
+                {
+                    return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                }
+                if (IOResourceOwners__len(&resource->owners) == 0 &&
+                    !IOInheritanceRegistry__retains_handle(&self->inheritance, resource->handle))
+                {
+                    IOStreamResource removed = *resource;
+                    match_result(
+                        IOStreamResources__remove(&self->resources, removed),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return IOReply__new(IO_UNKNOWN_HANDLE, 0);
+                        }
+                    );
+                }
+                return IOReply__new(IO_OK, 0);
+            }
+            if (self->terminal && request->operation == IO_REQUEST_GET_TERMINAL_ATTRIBUTES)
+            {
+                IOReply reply = IOReply__new(IO_OK, 0);
+                reply.terminal_attributes = self->terminal_attributes;
+                return reply;
+            }
+            if (self->terminal && request->operation == IO_REQUEST_SET_TERMINAL_ATTRIBUTES)
+            {
+                self->terminal_attributes = request->terminal_attributes;
+                return IOReply__new(IO_OK, 0);
             }
             if ((request->operation == IO_REQUEST_READ && self->access == IO_OPEN_READ) ||
                 (request->operation == IO_REQUEST_WRITE && self->access == IO_OPEN_WRITE) ||
@@ -142,9 +247,5 @@ Optional(IOReply)
 bool IOStreamDriver__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
     IOStreamDriverPtr self = context;
-    IORequest owner = IORequest__new(IO_REQUEST_RELEASE_CLIENT, 0);
-    owner.client_session = session;
-    owner.client_pid = pid;
-    IOStreamDriver__request(self, &owner);
-    return true;
+    return IOStreamDriver__release_owner(self, session, pid);
 }

@@ -71,7 +71,7 @@ int main(void)
     transmitter = UartTransmitter__new(&uart);
     static IOStreamDriver driver;
     static IOService service;
-    driver = IOStreamDriver__new(IO_OPEN_WRITE, &transmitter, UartTransmitter__write);
+    driver = IOStreamDriver__new_terminal(IO_OPEN_WRITE, &transmitter, UartTransmitter__write);
     if (IOService__listen_into(&service, &bstr(IO_UART_TX_SERVICE), &driver, IOStreamDriver__execute,
                                IOStreamDriver__disconnect) != IO_OK)
     {

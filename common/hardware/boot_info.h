@@ -17,6 +17,13 @@ typedef enum UartKind
     UART_KIND_NS16550 = 2,
 } UartKind;
 
+typedef enum RtcKind
+{
+    RTC_KIND_UNKNOWN = 0,
+    RTC_KIND_PL031 = 1,
+    RTC_KIND_GOLDFISH = 2,
+} RtcKind;
+
 typedef enum InterruptControllerKind
 {
     INTERRUPT_CONTROLLER_NONE = 0,
@@ -171,6 +178,19 @@ static inline BootFramebufferInfo BootFramebufferInfo__new(Address physical_base
 
 OptionalDef(BootDeviceInfo);
 
+typedef struct BootRtcInfo
+{
+    BootDeviceInfo device;
+    RtcKind kind;
+} BootRtcInfo;
+
+OptionalDef(BootRtcInfo);
+
+static inline BootRtcInfo BootRtcInfo__new(ConstBootDeviceInfoPtr device, RtcKind kind)
+{
+    return (BootRtcInfo){.device = *device, .kind = kind};
+}
+
 typedef struct BootPciInfo
 {
     Address ecam_physical_base;
@@ -211,6 +231,7 @@ typedef struct BootHardwareInfo
     Optional(BootPciInfo) pci;
     Optional(BootDeviceInfo) sd_host;
     Optional(BootEthernetInfo) ethernet;
+    Optional(BootRtcInfo) rtc;
     Address memory_start;
     Address memory_end;
     BootInterruptControllerInfo interrupt_controller;
@@ -242,7 +263,8 @@ static inline BootHardwareInfo BootHardwareInfo__new(void)
                               .framebuffer = None(BootFramebufferInfo),
                               .pci = None(BootPciInfo),
                               .sd_host = None(BootDeviceInfo),
-                              .ethernet = None(BootEthernetInfo)};
+                              .ethernet = None(BootEthernetInfo),
+                              .rtc = None(BootRtcInfo)};
 }
 
 #endif

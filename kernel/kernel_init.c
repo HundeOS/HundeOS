@@ -9,11 +9,13 @@
 #include "kernel_core.h"
 #include "irq/irq_dispatcher.h"
 #include "service/service_directory.h"
+#include "service/clock.h"
 #include "bin/embedded_binaries.h"
 #include "scheduler/scheduler.h"
 
 static BString failed_to_find_idle_process = bstr("failed to find idle process");
 static BString heap_init_progress = bstr("heap initialised");
+static BString clock_init_progress = bstr("clock page initialised");
 static BString service_directory_init_progress = bstr("service directory initialised");
 static BString syscall_init_progress = bstr("syscall handlers initialised");
 static BString scheduler_init_progress = bstr("scheduler initialised");
@@ -116,6 +118,29 @@ Result(SubsystemInitStatus) Kernel__init_service_directory(KernelPtr self)
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
+Result(SubsystemInitStatus) Kernel__init_clock(KernelPtr self)
+{
+    match_optional(
+        self->system_info,
+        some(system_info)
+        {
+            match_result(
+                KernelClock__init(&self->clock, system_info.timer_frequency, &system_info.realtime_clock),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+                }
+            );
+            return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
+        },
+        none()
+        {
+            return Error(SubsystemInitStatus, missing_system_info, SUBSYSTEM_INIT_FAILED);
+        }
+    );
+}
+
 Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
 {
     if (is_nothing(self->system_info))
@@ -157,6 +182,7 @@ void Kernel__init(KernelPtr self)
     __atomic_store_n(&self->status, INIT_IN_PROGRESS, __ATOMIC_RELEASE);
 
     PanicOnError(Kernel__init_heap(self), self, &heap_init_progress);
+    PanicOnError(Kernel__init_clock(self), self, &clock_init_progress);
     PanicOnError(Kernel__init_service_directory(self), self, &service_directory_init_progress);
     PanicOnError(Kernel__init_syscall_handlers(self), self, &syscall_init_progress);
     PanicOnError(Kernel__init_scheduler(self), self, &scheduler_init_progress);

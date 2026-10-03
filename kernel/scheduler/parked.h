@@ -20,6 +20,7 @@ struct ParkedOperation
     bool ready;
     Optional(Continuation) continuation;
     Optional(OperationKey) operation_key;
+    Anything operation_context;
     ParkReason park_reason;
     Optional(ReturnCode) return_code;
     // Owned dependencies that must resolve before this operation can continue.

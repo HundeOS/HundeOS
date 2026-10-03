@@ -8,6 +8,7 @@
 #include "../print.h"
 #include "../all_defs.h"
 #include "../kernel_core.h"
+#include "../panic.h"
 #include "../exec/load.h"
 #include "../spin.h"
 #include "parked.h"
@@ -48,11 +49,16 @@ static BString missing_interrupt_controller = bstr("Missing interrupt controller
 static BString no_cpus_available = bstr("No CPUs available");
 
 static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
-static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process);
+static Result(ServiceCode)
+    Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process, ProcessID child_pid,
+                                          ProcessGroupID child_process_group_id, uint64_t event_type);
 static Result(ServiceCode)
     Scheduler__service_ready_mark_runnable_locked(SchedulerPtr self, ProcessPtr process, ServiceCode result);
 static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(SchedulerPtr self, ProcessPtr parent,
                                                                       ProcessPtr child, ReturnCode return_code);
+static Result(ServiceCode)
+    Scheduler__notify_parent_child_state_locked(SchedulerPtr self, ProcessPtr parent, ProcessPtr child,
+                                                uint64_t event_type, ProcessSignal signal);
 static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_key(
     SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, OptionalPtr(Continuation) kernel_continuation,
     ParkReason reason, bool owns_kernel_context, OptionalPtr(OperationKey) operation_key);
@@ -544,6 +550,7 @@ static Tick CPUScheduler__sleep_ticks_from_usec(uint64_t usec)
 
 static void CPUScheduler__wake_expired_sleepers(CPUSchedulerPtr self)
 {
+    uint64_t now_usec = CPU__time_usec();
     for_each_fa(
         ProcessTable,
         self->processes,
@@ -551,6 +558,11 @@ static void CPUScheduler__wake_expired_sleepers(CPUSchedulerPtr self)
         proc,
         {
             Process__wake_expired_sleep(proc, self->last_tick);
+            if (Process__take_expired_alarm(proc, now_usec))
+            {
+                Process__queue_signal(proc, PROCESS_SIGNAL_ALARM);
+                Process__wake_shared_wait(proc);
+            }
         }
     );
 }
@@ -600,8 +612,9 @@ static bool CPUScheduler__can_resume(ProcessPtr * process, void * context)
         return Process__shared_wait_ready(proc);
     case PROC_STATE_WAITING:
     case PROC_STATE_SLEEPING:
+        return Process__can_resume_for_signal(proc);
     case PROC_STATE_STOPPED:
-        return Process__has_pending_signal(proc);
+        return Process__has_pending_resume_signal(proc);
     default:
         return false;
     }
@@ -978,9 +991,10 @@ static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, C
     return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
-static Result(ProcessPtr) CPUScheduler__park(CPUSchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
-                                             OptionalPtr(Continuation) kernel_continuation, ParkReason reason,
-                                             bool owns_kernel_context, OptionalPtr(OperationKey) operation_key)
+static Result(ProcessPtr)
+    CPUScheduler__park(CPUSchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
+                       OptionalPtr(Continuation) kernel_continuation, ParkReason reason, bool owns_kernel_context,
+                       OptionalPtr(OperationKey) operation_key, Anything operation_context)
 {
     __d_printf(SCHEDULER, "CPUScheduler__park %s\n", cstr(proc->name));
     match_optional(
@@ -990,6 +1004,7 @@ static Result(ProcessPtr) CPUScheduler__park(CPUSchedulerPtr self, ProcessPtr pr
             ParkedOperationPtr parked = ParkedOperation__heap_new_with_context_ownership(
                 kernel_context, kernel_continuation, reason, owns_kernel_context);
             parked->operation_key = *operation_key;
+            parked->operation_context = operation_context;
             CPUTime now = CPU__time_usec();
             CPUUsage__stop(&proc->cpu_usage, now, Process__user_wait_usec(proc, now));
             proc->state = reason == PARK_SLEEP ? PROC_STATE_SLEEPING : PROC_STATE_WAITING;
@@ -1114,7 +1129,7 @@ Result(QueueWaitCode)
                                                         // Only mark parked here. The syscall dispatcher switches after this lock is released.
                             match_result(
                                 CPUScheduler__park(sched, process, context, &continuation,
-                                                   PARK_WAIT_QUEUE, true, &deadline),
+                                                   PARK_WAIT_QUEUE, true, &deadline, 0),
                                 success(value)
                                 {
                                     QueueWaitUsage__park(&process->queue_wait_usage);
@@ -1610,6 +1625,28 @@ static bool Scheduler__is_parked_for(ProcessPtr proc, ParkReason reason)
     return Process__has_parked_operation(proc, reason, &None(OperationKey));
 }
 
+static ProcessTimes Scheduler__process_times_at(ProcessPtr process, CPUTime now)
+{
+    ProcessCPUUsage usage = CPUUsage__snapshot(&process->cpu_usage, now, Process__user_wait_usec(process, now));
+    ProcessTimes times = ProcessTimes__new();
+    times.elapsed_usec = now;
+    times.user_usec = usage.user_usec;
+    times.system_usec = usage.system_usec;
+    times.children_user_usec = process->children_user_usec;
+    times.children_system_usec = process->children_system_usec;
+    return times;
+}
+
+ProcessTimes Scheduler__process_times(SchedulerPtr self, ProcessPtr process)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            cs_return Scheduler__process_times_at(process, CPU__time_usec());
+        }
+    );
+}
+
 static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, ProcessPtr proc, ReturnCode return_code)
 {
     Process__quiesce_device(proc);
@@ -1652,6 +1689,10 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
                             }
                             if (Scheduler__is_parked_for(parent, PARK_WAIT_CHILD))
                             {
+                                ProcessTimes child_times = Scheduler__process_times_at(proc, CPU__time_usec());
+                                parent->children_user_usec += child_times.user_usec + child_times.children_user_usec;
+                                parent->children_system_usec +=
+                                    child_times.system_usec + child_times.children_system_usec;
                                 __d_printf(
                                     PROGRESS,
                                     "scheduler child complete child_pid=%i child_name=%s parent_pid=%i parent_name=%s return_code=%i\n",
@@ -1725,11 +1766,66 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
 static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(SchedulerPtr self, ProcessPtr parent,
                                                                       ProcessPtr child, ReturnCode return_code)
 {
-    ProcessChildEvent event;
+    ProcessTimes child_times = Scheduler__process_times_at(child, CPU__time_usec());
+    ProcessChildEvent event = ProcessChildEvent__new();
     event.pid = child->pid;
-    event.status = return_code;
+    event.process_group_id = child->process_group_id;
+    if (return_code <= PROCESS_SIGNAL_EXIT_BASE - 1 && return_code >= PROCESS_SIGNAL_EXIT_BASE - 127)
+    {
+        event.status = PROCESS_WAIT_STATUS_SIGNALED(PROCESS_SIGNAL_EXIT_BASE - return_code);
+    }
+    else if (return_code <= PROCESS_ABORT_EXIT_BASE - 1 && return_code >= PROCESS_ABORT_EXIT_BASE - 127)
+    {
+        event.status = PROCESS_WAIT_STATUS_SIGNALED(PROCESS_WAIT_ABORT_SIGNAL);
+    }
+    else
+    {
+        event.status = PROCESS_WAIT_STATUS_EXITED(return_code);
+    }
     event.type = PROCESS_CHILD_EVENT_EXITED;
+    event.user_usec = child_times.user_usec + child_times.children_user_usec;
+    event.system_usec = child_times.system_usec + child_times.children_system_usec;
 
+    ProcessSignalAction action = Process__signal_action(parent, PROCESS_SIGNAL_CHILD);
+    bool retains_child_event =
+        (action.flags & PROCESS_SIGNAL_ACTION_NOCLDWAIT) == 0 && action.handler != PROCESS_SIGNAL_IGNORE_HANDLER;
+    if (retains_child_event)
+    {
+        match_result(
+            Process__push_child_event(parent, &event),
+            success_do_nothing(),
+            error(code, message)
+            {
+                return Error(ServiceCode, message, code);
+            }
+        );
+        match_result(
+            Scheduler__child_mark_runnable_locked(self, parent, child->pid, child->process_group_id, event.type),
+            success_do_nothing(),
+            error(code, message)
+            {
+                return Error(ServiceCode, message, code);
+            }
+        );
+    }
+    Process__queue_signal(parent, PROCESS_SIGNAL_CHILD);
+    if (!retains_child_event)
+    {
+        Process__wake_shared_wait(parent);
+    }
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+static Result(ServiceCode)
+    Scheduler__notify_parent_child_state_locked(SchedulerPtr self, ProcessPtr parent, ProcessPtr child,
+                                                uint64_t event_type, ProcessSignal signal)
+{
+    ProcessChildEvent event = ProcessChildEvent__new();
+    event.pid = child->pid;
+    event.process_group_id = child->process_group_id;
+    event.type = event_type;
+    event.status =
+        event_type == PROCESS_CHILD_EVENT_STOPPED ? PROCESS_WAIT_STATUS_STOPPED(signal) : PROCESS_WAIT_STATUS_CONTINUED;
     match_result(
         Process__push_child_event(parent, &event),
         success_do_nothing(),
@@ -1738,8 +1834,21 @@ static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(SchedulerP
             return Error(ServiceCode, message, code);
         }
     );
+    match_result(
+        Scheduler__child_mark_runnable_locked(self, parent, child->pid, child->process_group_id, event.type),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ServiceCode, message, code);
+        }
+    );
 
-    return Scheduler__child_mark_runnable_locked(self, parent);
+    ProcessSignalAction action = Process__signal_action(parent, PROCESS_SIGNAL_CHILD);
+    if ((action.flags & PROCESS_SIGNAL_ACTION_NOCLDSTOP) == 0)
+    {
+        Process__queue_signal(parent, PROCESS_SIGNAL_CHILD);
+    }
+    return Success(ServiceCode, SERVICE_OK);
 }
 
 Result(ProcessID) Scheduler__exit(SchedulerPtr self, ProcessPtr proc, ReturnCode return_code)
@@ -1824,6 +1933,136 @@ Result(ProcessCredentials) Scheduler__process_credentials(SchedulerPtr self, Pro
     return Error(ProcessCredentials, process_not_found, PROCESS_CREDENTIALS_NOT_FOUND);
 }
 
+typedef struct ProcessGroupSelection
+{
+    ProcessGroupID process_group_id;
+    ProcessSessionID session_id;
+} ProcessGroupSelection;
+
+typedef ProcessGroupSelection * ProcessGroupSelectionPtr;
+
+static ProcessGroupSelection ProcessGroupSelection__new(ProcessGroupID process_group_id, ProcessSessionID session_id)
+{
+    return (ProcessGroupSelection){
+        .process_group_id = process_group_id,
+        .session_id = session_id,
+    };
+}
+
+static bool Scheduler__matches_process_group(ProcessPtr * candidate, void * context)
+{
+    ProcessGroupSelectionPtr selection = context;
+    return (*candidate)->process_group_id == selection->process_group_id &&
+           (*candidate)->session_id == selection->session_id;
+}
+
+static bool Scheduler__caller_can_set_process_group(ProcessPtr caller, ProcessPtr target)
+{
+    if (caller == target)
+    {
+        return true;
+    }
+    match_optional(
+        target->parent,
+        some(parent)
+        {
+            return parent == caller && !target->execed_since_fork;
+        },
+        none_do_nothing()
+    );
+    return false;
+}
+
+Result(ProcessGroupID) Scheduler__process_group(SchedulerPtr self, ProcessPtr caller, int64_t pid)
+{
+    if (pid < 0)
+    {
+        return Error(ProcessGroupID, bstr("Invalid process group query"), PROCESS_GROUP_INVALID_ARGUMENT);
+    }
+    ProcessID target_pid = pid == 0 ? caller->pid : (ProcessID)pid;
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_optional(
+                Scheduler__find_process_by_pid_locked(self, target_pid),
+                some(target)
+                {
+                    cs_return Success(ProcessGroupID, target->process_group_id);
+                },
+                none_do_nothing()
+            );
+        }
+    );
+    return Error(ProcessGroupID, process_not_found, PROCESS_GROUP_PROCESS_NOT_FOUND);
+}
+
+Result(ProcessGroupID)
+    Scheduler__set_process_group(SchedulerPtr self, ProcessPtr caller, int64_t pid, int64_t process_group_id)
+{
+    if (pid < 0 || process_group_id < 0)
+    {
+        return Error(ProcessGroupID, bstr("Invalid process group change"), PROCESS_GROUP_INVALID_ARGUMENT);
+    }
+    ProcessID target_pid = pid == 0 ? caller->pid : (ProcessID)pid;
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_optional(
+                Scheduler__find_process_by_pid_locked(self, target_pid),
+                some(target)
+                {
+                    ProcessGroupID requested = process_group_id == 0 ? target->pid : (ProcessGroupID)process_group_id;
+                    if (!Scheduler__caller_can_set_process_group(caller, target) ||
+                        target->session_id != caller->session_id || target->session_id == target->pid)
+                    {
+                        cs_return Error(ProcessGroupID, process_permission_denied, PROCESS_GROUP_PERMISSION_DENIED);
+                    }
+                    if (requested != target->pid)
+                    {
+                        ProcessGroupSelection selection = ProcessGroupSelection__new(requested, caller->session_id);
+                        ProcessTable processes = Scheduler__all_processes_for_all_cpus_locked(self);
+                        bool group_exists = false;
+                        match_find_result(
+                            ProcessTable__find(&processes, Scheduler__matches_process_group, &selection),
+                            some(member)
+                            {
+                                group_exists = true;
+                            },
+                            none_do_nothing()
+                        );
+                        if (!group_exists)
+                        {
+                            cs_return Error(ProcessGroupID, process_permission_denied, PROCESS_GROUP_PERMISSION_DENIED);
+                        }
+                    }
+                    target->process_group_id = requested;
+                    cs_return Success(ProcessGroupID, requested);
+                },
+                none_do_nothing()
+            );
+        }
+    );
+    return Error(ProcessGroupID, process_not_found, PROCESS_GROUP_PROCESS_NOT_FOUND);
+}
+
+Result(ProcessSessionID) Scheduler__create_session(SchedulerPtr self, ProcessPtr caller)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            if (caller->process_group_id == caller->pid)
+            {
+                cs_return Error(ProcessSessionID, process_permission_denied,
+                                PROCESS_GROUP_PERMISSION_DENIED);
+            }
+            caller->session_id = caller->pid;
+            caller->process_group_id = caller->pid;
+            cs_return Success(ProcessSessionID, caller->session_id);
+        }
+    );
+    return Error(ProcessSessionID, process_permission_denied, PROCESS_GROUP_PERMISSION_DENIED);
+}
+
 Result(ServiceCode)
     Scheduler__require_process_capability(SchedulerPtr self, ProcessID pid, ProcessCapabilities capability)
 {
@@ -1848,6 +2087,52 @@ Result(ServiceCode)
     return Error(ServiceCode, process_not_found, SERVICE_PERMISSION_DENIED);
 }
 
+static Result(ProcessID)
+    Scheduler__queue_signal_to_process_locked(SchedulerPtr self, ProcessPtr process, ProcessSignal signal)
+{
+    if (signal != 0 && !Process__supports_signal(process, signal))
+    {
+        return Error(ProcessID, bstring("Unsupported signal"), PROCESS_SIGNAL_UNSUPPORTED);
+    }
+    if (signal == 0)
+    {
+        return Success(ProcessID, process->pid);
+    }
+
+    // Only the owning CPU may destroy a target that a context switch can still reference.
+    Process__queue_signal(process, signal);
+    Process__wake_shared_wait(process);
+    if (Process__mark_signal_suspend_ready(process))
+    {
+        process->state = PROC_STATE_INTERRUPTED;
+    }
+    if (process->state == PROC_STATE_STOPPED && signal == PROCESS_SIGNAL_CONTINUE)
+    {
+        process->state = PROC_STATE_INTERRUPTED;
+        match_optional(
+            process->parent,
+            some(parent)
+            {
+                match_result(
+                    Scheduler__notify_parent_child_state_locked(self, parent, process, PROCESS_CHILD_EVENT_CONTINUED,
+                                                                signal),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        return Error(ProcessID, message, code);
+                    }
+                );
+            },
+            none_do_nothing()
+        );
+    }
+    else if (process->state == PROC_STATE_STOPPED && signal == PROCESS_SIGNAL_KILL)
+    {
+        process->state = PROC_STATE_INTERRUPTED;
+    }
+    return Success(ProcessID, process->pid);
+}
+
 Result(ProcessID) Scheduler__queue_signal(SchedulerPtr self, ProcessID pid, ProcessSignal signal)
 {
     if (pid == 0)
@@ -1862,15 +2147,7 @@ Result(ProcessID) Scheduler__queue_signal(SchedulerPtr self, ProcessID pid, Proc
                 Scheduler__find_process_by_pid_locked(self, pid),
                 some(process)
                 {
-                    if (!Process__supports_signal(process, signal))
-                    {
-                        cs_return Error(ProcessID, bstring("Unsupported signal"),
-                                        PROCESS_SIGNAL_UNSUPPORTED);
-                    }
-                                 // Only the owning CPU may destroy a target that a context switch can still reference.
-                    Process__queue_signal(process, signal);
-                    Process__wake_shared_wait(process);
-                    cs_return Success(ProcessID, pid);
+                    cs_return Scheduler__queue_signal_to_process_locked(self, process, signal);
                 },
                 none_do_nothing()
             );
@@ -1878,6 +2155,169 @@ Result(ProcessID) Scheduler__queue_signal(SchedulerPtr self, ProcessID pid, Proc
     );
 
     return Error(ProcessID, bstring("Process not found"), PROCESS_SIGNAL_PROCESS_NOT_FOUND);
+}
+
+static bool Scheduler__signal_target_matches(ProcessPtr sender, ProcessPtr candidate, int64_t target)
+{
+    if (target > 0)
+    {
+        return candidate->pid == (ProcessID)target;
+    }
+    if (target == 0)
+    {
+        return candidate->process_group_id == sender->process_group_id;
+    }
+    if (target == -1)
+    {
+        return candidate != sender;
+    }
+    return target != INT64_MIN && candidate->process_group_id == (ProcessGroupID)-target;
+}
+
+static bool Scheduler__signal_permitted(ProcessPtr sender, ProcessPtr target, ProcessSignal signal)
+{
+    return Process__is_root(sender) || sender->user_id == target->user_id ||
+           (signal == PROCESS_SIGNAL_CONTINUE && sender->session_id == target->session_id);
+}
+
+Result(ProcessID) Scheduler__send_signal(SchedulerPtr self, ProcessPtr sender, int64_t target, ProcessSignal signal)
+{
+    if (target == INT64_MIN || signal > PROCESS_SIGNAL_COUNT)
+    {
+        return Error(ProcessID, bstr("Invalid signal request"), PROCESS_SIGNAL_INVALID_ARGUMENT);
+    }
+
+    critical_section(
+        self->scheduler_lock,
+        {
+            ProcessTable processes = Scheduler__all_processes_for_all_cpus_locked(self);
+            uint64_t matched = 0;
+            uint64_t delivered = 0;
+            for_each_fa(
+                ProcessTable,
+                processes,
+                process_index,
+                candidate,
+                {
+                    if (Scheduler__signal_target_matches(sender, candidate, target))
+                    {
+                        matched++;
+                        if (Scheduler__signal_permitted(sender, candidate, signal))
+                        {
+                            match_result(
+                                Scheduler__queue_signal_to_process_locked(self, candidate, signal),
+                                success(pid)
+                                {
+                                    delivered++;
+                                },
+                                error(code, message)
+                                {
+                                    cs_return Error(ProcessID, message, code);
+                                }
+                            );
+                        }
+                    }
+                }
+            );
+            if (delivered > 0)
+            {
+                cs_return Success(ProcessID, delivered);
+            }
+            if (matched > 0)
+            {
+                cs_return Error(ProcessID, process_permission_denied, PROCESS_SIGNAL_PERMISSION_DENIED);
+            }
+        }
+    );
+
+    return Error(ProcessID, process_not_found, PROCESS_SIGNAL_PROCESS_NOT_FOUND);
+}
+
+ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, ProcessPtr process,
+                                                            ProcessContextPtr context)
+{
+    ProcessSignalDelivery delivery = ProcessSignalDelivery__new(PROCESS_SIGNAL_DELIVERY_NONE, 0);
+    match_result(
+        Process__deliver_pending_signal(process, context),
+        success(prepared)
+        {
+            delivery = prepared;
+        },
+        error(code, message)
+        {
+            delivery.kind = PROCESS_SIGNAL_DELIVERY_TERMINATE;
+            delivery.signal = PROCESS_SIGNAL_KILL;
+        }
+    );
+
+    match_optional(
+        delivery.interrupted_operation,
+        some(operation)
+        {
+            if (operation->park_reason == PARK_WAIT_QUEUE)
+            {
+                Queues__clear_wait(&self->queues, process);
+                QueueWaitUsage__cancel(&process->queue_wait_usage);
+            }
+            ParkedOperation__dispose(operation);
+        },
+        none_do_nothing()
+    );
+
+    if (delivery.kind == PROCESS_SIGNAL_DELIVERY_TERMINATE)
+    {
+        match_result(
+            Process__dispose_owned_kernel_resources(process),
+            success_do_nothing(),
+            error(code, message)
+            {
+                Kernel__panic(cstr(message), context);
+            }
+        );
+        match_result(
+            Scheduler__exit(self, process, ProcessSignal__exit_code(delivery.signal)),
+            success_do_nothing(),
+            error(code, message)
+            {
+                Kernel__panic(cstr(message), context);
+            }
+        );
+    }
+    else if (delivery.kind == PROCESS_SIGNAL_DELIVERY_STOP && process->state != PROC_STATE_STOPPED)
+    {
+        match_result(
+            Process__store_context(process, context),
+            success_do_nothing(),
+            error(code, message)
+            {
+                Kernel__panic(cstr(message), context);
+            }
+        );
+        critical_section(
+            self->scheduler_lock,
+            {
+                process->state = PROC_STATE_STOPPED;
+                match_optional(
+                    process->parent,
+                    some(parent)
+                    {
+                        match_result(
+                            Scheduler__notify_parent_child_state_locked(
+                                self, parent, process, PROCESS_CHILD_EVENT_STOPPED, delivery.signal),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                Kernel__panic(cstr(message), context);
+                            }
+                        );
+                    },
+                    none_do_nothing()
+                );
+            }
+        );
+    }
+
+    return delivery.kind;
 }
 
 Result(ProcessID) Scheduler__park_by_pid(SchedulerPtr self, ProcessID pid, KernelContextPtr kernel_context,
@@ -1955,7 +2395,7 @@ static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_k
         sched,
         {
             Result(ProcessPtr) res = CPUScheduler__park(sched, proc, kernel_context, kernel_continuation,
-                                                        reason, owns_kernel_context, operation_key);
+                                                        reason, owns_kernel_context, operation_key, 0);
             match_result(
                 res,
                 success(exited)
@@ -2058,6 +2498,59 @@ Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, 
 
     BString no_scheduler = BString__sprintf(&bstr("No scheduler found for process: %i\n"), process->pid);
     return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
+Result(ProcessPtr) Scheduler__signal_suspend(SchedulerPtr self, ProcessPtr process, ProcessSignalMask mask)
+{
+    ProcessSignalMask previous_mask = Process__signal_mask(process);
+    match_result(
+        Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_SET, mask),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ProcessPtr, message, code);
+        }
+    );
+
+    critical_section(
+        self->scheduler_lock,
+        {
+            for_each_hashtable(
+                CPUSchedulers,
+                self->schedulers,
+                bucket_index,
+                entry_index,
+                cpu,
+                sched,
+                {
+                    if (is_something(ProcessTable__find_item(&sched->processes, process)))
+                    {
+                        KernelContextPtr context =
+                            KernelContext__heap_new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, self));
+                        match_result(
+                            CPUScheduler__park(sched, process, context, &Some(Continuation, SystemCall__Complete),
+                                               PARK_WAIT_SIGNAL, true, &None(OperationKey), previous_mask),
+                            success(parked)
+                            {
+                                if (Process__mark_signal_suspend_ready(process))
+                                {
+                                    process->state = PROC_STATE_INTERRUPTED;
+                                }
+                                cs_return Success(ProcessPtr, parked);
+                            },
+                            error(code, message)
+                            {
+                                Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_SET, previous_mask);
+                                cs_return Error(ProcessPtr, message, code);
+                            }
+                        );
+                    }
+                }
+            );
+        }
+    );
+    Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_SET, previous_mask);
+    return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
 static Result(ProcessPtr)
@@ -2565,12 +3058,13 @@ Result(ServiceEvent) Scheduler__service_take_next_event(SchedulerPtr self, Proce
     return Error(ServiceEvent, service_event_queue_empty, SERVICE_EVENT_QUEUE_EMPTY);
 }
 
-Result(ProcessChildEvent) Scheduler__child_take_next_event(SchedulerPtr self, ProcessPtr process)
+Result(ProcessChildEvent)
+    Scheduler__child_take_event(SchedulerPtr self, ProcessPtr process, int64_t child_selection, uint64_t options)
 {
     critical_section(
         self->scheduler_lock,
         {
-            cs_return Process__pop_next_child_event(process);
+            cs_return Process__pop_child_event(process, child_selection, options);
         }
     );
 
@@ -2632,7 +3126,7 @@ Result(ServiceEvent)
                 {
                     match_result(
                         CPUScheduler__park(sched, process, kernel_context, continuation, PARK_WAIT_SERVICE_EVENT,
-                                           owns_kernel_context, &None(OperationKey)),
+                                           owns_kernel_context, &None(OperationKey), 0),
                         success(parked)
                         {
                             cs_return Error(ServiceEvent, service_event_queue_empty, SERVICE_EVENT_QUEUE_EMPTY);
@@ -2654,15 +3148,94 @@ Result(ServiceEvent)
     return Error(ServiceEvent, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
+typedef struct ChildSelection
+{
+    ProcessPtr parent;
+    int64_t child_selection;
+} ChildSelection;
+
+typedef ChildSelection * ChildSelectionPtr;
+
+static ChildSelection ChildSelection__new(ProcessPtr parent, int64_t child_selection)
+{
+    return (ChildSelection){
+        .parent = parent,
+        .child_selection = child_selection,
+    };
+}
+
+static bool Scheduler__matches_child(ProcessPtr * candidate, void * context)
+{
+    ChildSelectionPtr selection = context;
+    int64_t child_selection = selection->child_selection;
+    bool selected = (child_selection > 0 && (*candidate)->pid == (ProcessID)child_selection) || child_selection == -1 ||
+                    (child_selection == 0 && (*candidate)->process_group_id == selection->parent->process_group_id) ||
+                    (child_selection < -1 && (*candidate)->process_group_id == (ProcessGroupID)-child_selection);
+    if (!selected)
+    {
+        return false;
+    }
+
+    match_optional((*candidate)->parent,
+        some(parent)
+        {
+            return parent == selection->parent;
+        },
+        none_do_nothing()
+    );
+
+    return false;
+}
+
+static bool Scheduler__has_live_child_locked(SchedulerPtr self, ProcessPtr process, int64_t child_selection)
+{
+    ChildSelection selection = ChildSelection__new(process, child_selection);
+    bool found = false;
+    match_find_result(
+        ProcessTable__find(&self->admission, Scheduler__matches_child, &selection),
+        some(child)
+        {
+            return true;
+        },
+        none_do_nothing()
+    );
+
+    for_each_hashtable(
+        CPUSchedulers,
+        self->schedulers,
+        bucket_index,
+        entry_index,
+        cpu,
+        sched,
+        {
+            match_find_result(
+                ProcessTable__find(&sched->processes, Scheduler__matches_child, &selection),
+                some(child)
+                {
+                    found = true;
+                },
+                none_do_nothing()
+            );
+            if (found)
+            {
+                break;
+            }
+        }
+    );
+
+    return found;
+}
+
 Result(ProcessChildEvent)
     Scheduler__child_wait_with_context_ownership(SchedulerPtr self, ProcessPtr process, KernelContextPtr kernel_context,
-                                                 OptionalPtr(Continuation) continuation, bool owns_kernel_context)
+                                                 OptionalPtr(Continuation) continuation, bool owns_kernel_context,
+                                                 int64_t child_selection, uint64_t options)
 {
     critical_section(
         self->scheduler_lock,
         {
             match_result(
-                Process__pop_next_child_event(process),
+                Process__pop_child_event(process, child_selection, options),
                 success(event)
                 {
                     cs_return Success(ProcessChildEvent, event);
@@ -2676,6 +3249,16 @@ Result(ProcessChildEvent)
                 }
             );
 
+            if (!Scheduler__has_live_child_locked(self, process, child_selection))
+            {
+                cs_return Error(ProcessChildEvent, bstr("No matching child process"), PROCESS_CHILD_EVENT_NO_CHILD);
+            }
+
+            if ((options & PROCESS_CHILD_WAIT_NOHANG) != 0)
+            {
+                cs_return Error(ProcessChildEvent, child_event_queue_empty, PROCESS_CHILD_EVENT_PENDING);
+            }
+
             for_each_hashtable(
                 CPUSchedulers,
                 self->schedulers,
@@ -2687,7 +3270,7 @@ Result(ProcessChildEvent)
                     match_result(
                         CPUScheduler__park(sched, process, kernel_context, continuation,
                                            PARK_WAIT_CHILD_EVENT, owns_kernel_context,
-                                           &None(OperationKey)),
+                                           &Some(OperationKey, (OperationKey)child_selection), options),
                         success(parked)
                         {
                             cs_return Error(ProcessChildEvent, child_event_queue_empty,
@@ -2887,10 +3470,12 @@ Result(ServiceCode)
                         {
                             match_result(
                                 CPUScheduler__park(sched, process, kernel_context, continuation,
-                                                   PARK_WAIT_SERVICE_READY, owns_kernel_context, &None(OperationKey)),
+                                                   PARK_WAIT_SERVICE_READY, owns_kernel_context,
+                                                   &None(OperationKey), 0),
                                 success(parked)
                                 {
-                                    cs_return Error(ServiceCode, service_event_queue_empty, SERVICE_EVENT_QUEUE_EMPTY);
+                                    cs_return Error(ServiceCode, service_event_queue_empty,
+                                                    SERVICE_EVENT_QUEUE_EMPTY);
                                 },
                                 error(code, message)
                                 {
@@ -2915,35 +3500,14 @@ Result(ServiceCode)
     return Error(ServiceCode, no_scheduler, SERVICE_SCHEDULER_ERROR);
 }
 
-static Result(ServiceCode) Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process)
+static Result(ServiceCode)
+    Scheduler__child_mark_runnable_locked(SchedulerPtr self, ProcessPtr process, ProcessID child_pid,
+                                          ProcessGroupID child_process_group_id, uint64_t event_type)
 {
     Process__wake_shared_wait(process);
-    if (Scheduler__is_parked_for(process, PARK_WAIT_CHILD_EVENT))
+    if (Process__mark_child_wait_ready(process, child_pid, child_process_group_id, event_type))
     {
-        for_each_hashtable(
-            CPUSchedulers,
-            self->schedulers,
-            bucket_index,
-            entry_index,
-            cpu,
-            sched,
-            {
-                match_result(
-                    CPUScheduler__unpark(sched, process, PARK_WAIT_CHILD_EVENT, &None(ReturnCode)),
-                    success(unparked)
-                    {
-                        return Success(ServiceCode, SERVICE_OK);
-                    },
-                    error(code, message)
-                    {
-                        if (code != SCHEDULER_PROCESS_NOT_FOUND)
-                        {
-                            return Error(ServiceCode, message, code);
-                        }
-                    }
-                );
-            }
-        );
+        process->state = PROC_STATE_INTERRUPTED;
     }
 
     return Success(ServiceCode, SERVICE_OK);

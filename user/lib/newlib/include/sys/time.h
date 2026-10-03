@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 
+int gettimeofday(struct timeval * value, void * timezone);
 int utimensat(int descriptor, const char * path, const struct timespec times[2], int flags);
 
 #endif

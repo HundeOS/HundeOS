@@ -3,9 +3,11 @@
 #include "../../../common_includes/syscalls/spawn.h"
 #include "../../../kernel/syscall/auth.h"
 #include "../../../kernel/syscall/exec_handler.h"
+#include "../../../user/lib/newlib/exec_payload.c"
 #include "../fixtures/kernel.h"
 #include "../fixtures/process.h"
 #include "../stubs/process.h"
+#include "../stubs/process_context_layout.h"
 #include "../fixtures/exec_channel.h"
 
 static FakeExecService filesystem;
@@ -351,6 +353,124 @@ void test_exec_request_handler_passes_spawn_arguments_to_process_argv(void)
         },
         error_test_fail()
     );
+}
+
+void test_exec_overlay_replaces_the_calling_image_and_preserves_process_identity(void)
+{
+    ProcessID pid = parent->pid;
+    ProcessPageTable old_page_table = parent->page_table;
+    ProcessContextPtr old_context = Process__required_context(parent);
+    ProcessTable before = Scheduler__process_snapshot(kernel->scheduler);
+    Process__set_user_identity(parent);
+    parent->startup_stdio =
+        SpawnStdio__new(IO_ENDPOINT_KEYBOARD_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+    ProcessSignalAction caught = {
+        .handler = 0x12340000,
+        .restorer = 0x56780000,
+    };
+    ProcessSignalAction ignored = {
+        .handler = PROCESS_SIGNAL_IGNORE_HANDLER,
+    };
+    ProcessSignalMask blocked = 1ULL << (PROCESS_SIGNAL_USER_1 - 1);
+    match_result(Process__set_signal_action(parent, PROCESS_SIGNAL_INTERRUPT, &caught),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Process__set_signal_action(parent, PROCESS_SIGNAL_CHILD, &ignored),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Process__set_signal_mask(parent, PROCESS_SIGNAL_MASK_SET, blocked),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    Process__queue_signal(parent, PROCESS_SIGNAL_USER_1);
+    char * arguments[] = {"hello_world", "overlay", NULL};
+    char * environment[] = {"PATH=/sbin", "HOME=/", NULL};
+    ExecPayloadPtr payload =
+        PosixExecPayload__new("/sbin/hello_world", "/work", arguments, environment, NULL, 0, NULL, 0);
+    TEST_ASSERT_NOT_NULL(payload);
+    SpawnRequest request = SpawnRequest__overlay(payload);
+    Optional(ProcessPtr) caller = Some(ProcessPtr, parent);
+
+    match_result(
+        FakeExecService__spawn(&filesystem, kernel, &caller, (Anything)&request),
+        success(result)
+        {
+            TEST_ASSERT_EQUAL_UINT64(2, result);
+        },
+        error_test_fail()
+    );
+    PosixExecPayload__dispose(payload);
+
+    ProcessTable after = Scheduler__process_snapshot(kernel->scheduler);
+    TEST_ASSERT_EQUAL_PTR(parent, unwrap_optional(Scheduler__find_process_by_pid(kernel->scheduler, pid), NULL));
+    TEST_ASSERT_EQUAL_UINT64(ProcessTable__len(&before), ProcessTable__len(&after));
+    TEST_ASSERT_EQUAL_UINT64(pid, parent->pid);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_USER, parent->user_id);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_USER, parent->group_id);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/hello_world"), parent->name);
+    TEST_ASSERT_NOT_EQUAL(ProcessPageTable__root(&old_page_table).virtual_addr,
+                          ProcessPageTable__root(&parent->page_table).virtual_addr);
+    TEST_ASSERT_TRUE(old_context != Process__required_context(parent));
+    TEST_ASSERT_EQUAL_PTR(parent, active_address_space_process());
+    TEST_ASSERT_EQUAL_INT64(IO_ENDPOINT_KEYBOARD_INPUT, SpawnStdio__stdin_fd(parent->startup_stdio));
+    TEST_ASSERT_EQUAL_INT64(IO_ENDPOINT_CONSOLE_OUTPUT, SpawnStdio__stdout_fd(parent->startup_stdio));
+    ProcessContextPtr context = Process__required_context(parent);
+    TEST_ASSERT_EQUAL_INT64(IO_ENDPOINT_KEYBOARD_INPUT, context->x[4]);
+    TEST_ASSERT_EQUAL_INT64(IO_ENDPOINT_CONSOLE_OUTPUT, context->x[5]);
+    TEST_ASSERT_EQUAL_INT64(IO_ENDPOINT_CONSOLE_OUTPUT, context->x[6]);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_SIGNAL_DEFAULT_HANDLER,
+                             Process__signal_action(parent, PROCESS_SIGNAL_INTERRUPT).handler);
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_SIGNAL_IGNORE_HANDLER,
+                             Process__signal_action(parent, PROCESS_SIGNAL_CHILD).handler);
+    TEST_ASSERT_EQUAL_UINT64(blocked, Process__signal_mask(parent));
+    TEST_ASSERT_EQUAL_UINT64(blocked, Process__pending_signal_mask(parent));
+
+    UserAllocation startup = allocation_at(parent, 0);
+    AddressPtr argv = ptr(startup.address.kernel_addr.virtual_addr, Address);
+    Address user_base = startup.address.virtual_addr;
+    Address kernel_base = startup.address.kernel_addr.virtual_addr;
+    AddressPtr envp = argv + 3;
+    TEST_ASSERT_EQUAL(0, argv[2]);
+    TEST_ASSERT_EQUAL_STRING("hello_world", ptr(kernel_base + (argv[0] - user_base), char));
+    TEST_ASSERT_EQUAL_STRING("overlay", ptr(kernel_base + (argv[1] - user_base), char));
+    TEST_ASSERT_EQUAL(0, envp[2]);
+    TEST_ASSERT_EQUAL_STRING("PATH=/sbin", ptr(kernel_base + (envp[0] - user_base), char));
+    TEST_ASSERT_EQUAL_STRING("HOME=/", ptr(kernel_base + (envp[1] - user_base), char));
+    ConstExecPayloadPtr startup_payload = ptr(kernel_base + (context->x[7] - user_base), ExecPayload);
+    TEST_ASSERT_EQUAL_STRING("/work", ExecPayload__current_directory(startup_payload));
+}
+
+void test_exec_overlay_rejects_invalid_payload_without_changing_the_caller(void)
+{
+    ProcessID pid = parent->pid;
+    KernelAddress page_table = ProcessPageTable__root(&parent->page_table);
+    ProcessContextPtr context = Process__required_context(parent);
+    ProcessTable before = Scheduler__process_snapshot(kernel->scheduler);
+    char * arguments[] = {"hello_world", NULL};
+    char * environment[] = {"PATH=/sbin", NULL};
+    ExecPayloadPtr payload = PosixExecPayload__new("/sbin/hello_world", "/", arguments, environment, NULL, 0, NULL, 0);
+    TEST_ASSERT_NOT_NULL(payload);
+    payload->environment_offset = payload->size;
+    SpawnRequest request = SpawnRequest__overlay(payload);
+
+    match_result(
+        ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SPAWN_FAILED, code);
+        }
+    );
+    PosixExecPayload__dispose(payload);
+
+    ProcessTable after = Scheduler__process_snapshot(kernel->scheduler);
+    TEST_ASSERT_EQUAL_UINT64(ProcessTable__len(&before), ProcessTable__len(&after));
+    TEST_ASSERT_EQUAL_PTR(parent, unwrap_optional(Scheduler__find_process_by_pid(kernel->scheduler, pid), NULL));
+    TEST_ASSERT_EQUAL_UINT64(page_table.virtual_addr, ProcessPageTable__root(&parent->page_table).virtual_addr);
+    TEST_ASSERT_EQUAL_PTR(context, Process__required_context(parent));
+    TEST_ASSERT_TRUE(is_nothing(parent->exec_load));
 }
 
 void test_exec_request_handler_can_spawn_as_user(void)

@@ -1032,7 +1032,7 @@ int VIDEO_TERM_ENTRYPOINT(void)
 
     static IOStreamDriver driver;
     static IOService service;
-    driver = IOStreamDriver__new(IO_OPEN_WRITE, &terminal, VideoTerm__write);
+    driver = IOStreamDriver__new_terminal(IO_OPEN_WRITE, &terminal, VideoTerm__write);
     if (IOService__listen_into(&service, &bstr(IO_VIDEO_SERVICE), &driver, IOStreamDriver__execute,
                                IOStreamDriver__disconnect) != IO_OK)
     {

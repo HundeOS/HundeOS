@@ -1,12 +1,9 @@
 #include <dirent.h>
 #include <errno.h>
-#include <grp.h>
 #include <locale.h>
-#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -14,6 +11,7 @@
 #include <util.h>
 
 #include "../sys/io.h"
+#include "current_directory.h"
 
 enum
 {
@@ -36,8 +34,12 @@ DIR * opendir(const char * path)
         errno = ENOMEM;
         return NULL;
     }
-    BString argument = BString__new(path);
-    BString absolute = IO__path_from_arg(&argument);
+    BString absolute;
+    if (PosixPath__absolute(path, &absolute) != 0)
+    {
+        free(directory);
+        return NULL;
+    }
     directory->count = IO__list_dir(&absolute, directory->entries, POSIX_DIRECTORY_ENTRY_CAPACITY);
     directory->index = 0;
     if (directory->count < 0)
@@ -74,60 +76,6 @@ int closedir(DIR * directory)
     }
     free(directory);
     return 0;
-}
-
-static const char * PosixIdentity__user(uid_t user)
-{
-    switch (user)
-    {
-    case PROCESS_USER_ROOT:
-        return "root";
-    case PROCESS_USER_HUND:
-        return "hund";
-    case PROCESS_USER_USER:
-        return "user";
-    default:
-        return "unknown";
-    }
-}
-
-static const char * PosixIdentity__group(gid_t group)
-{
-    switch (group)
-    {
-    case PROCESS_GROUP_ROOT:
-        return "root";
-    case PROCESS_GROUP_HUND:
-        return "hund";
-    case PROCESS_GROUP_USER:
-        return "user";
-    default:
-        return "unknown";
-    }
-}
-
-struct passwd * getpwuid(uid_t user)
-{
-    static struct passwd result;
-    result = (struct passwd){.pw_name = (char *)PosixIdentity__user(user), .pw_uid = user, .pw_gid = user};
-    return &result;
-}
-
-struct group * getgrgid(gid_t group)
-{
-    static struct group result;
-    result = (struct group){.gr_name = (char *)PosixIdentity__group(group), .gr_gid = group};
-    return &result;
-}
-
-const char * user_from_uid(uid_t user, int nouser)
-{
-    return PosixIdentity__user(user);
-}
-
-const char * group_from_gid(gid_t group, int nogroup)
-{
-    return PosixIdentity__group(group);
 }
 
 char * getbsize(int * header_length, long * block_size)
@@ -170,18 +118,6 @@ char * fflagstostr(unsigned long flags)
 int fmt_scaled(long long number, char * output)
 {
     return snprintf(output, FMT_SCALED_STRSIZE, "%lld", number) < 0 ? -1 : 0;
-}
-
-int ioctl(int descriptor, unsigned long request, ...)
-{
-    errno = ENOSYS;
-    return -1;
-}
-
-char * setlocale(int category, const char * locale)
-{
-    static char name[] = "C";
-    return name;
 }
 
 time_t time(time_t * value)

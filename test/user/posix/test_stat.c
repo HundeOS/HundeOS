@@ -8,6 +8,7 @@
 static unsigned file_info_requests;
 static IOStatus file_info_status;
 static IOFileInfo file_info;
+static IOStatus make_dir_status;
 
 Result(IOFileInfo) IO__file_info(ConstBStringPtr path)
 {
@@ -17,14 +18,15 @@ Result(IOFileInfo) IO__file_info(ConstBStringPtr path)
                                      : Error(IOFileInfo, bstr("missing"), file_info_status);
 }
 
-BString IO__path_from_arg(ConstBStringPtr path)
+int PosixPath__absolute(const char * path, BStringPtr result)
 {
-    return *path;
+    *result = BString__new(path);
+    return 0;
 }
 
 IOStatus IO__make_dir(ConstBStringPtr path)
 {
-    return IO_OPERATION_NOT_SUPPORTED;
+    return make_dir_status;
 }
 
 IOHandle PosixIO__native_handle(int descriptor)
@@ -47,6 +49,7 @@ void setUp(void)
     file_info_status = IO_OK;
     file_info = (IOFileInfo){
         .mode = IO_MODE_TYPE_FILE | 0755, .user_id = PROCESS_USER_HUND, .group_id = PROCESS_GROUP_HUND, .size = 1234};
+    make_dir_status = IO_OPERATION_NOT_SUPPORTED;
 }
 
 void tearDown(void)
@@ -78,4 +81,12 @@ void test_stat_maps_missing_path_without_directory_scan(void)
 void test_stat_exposes_bsd_sticky_bit_name(void)
 {
     TEST_ASSERT_EQUAL(S_ISTXT, S_ISVTX);
+}
+
+void test_mkdir_reports_an_existing_path_as_eexist(void)
+{
+    make_dir_status = IO_ALREADY_EXISTS;
+
+    TEST_ASSERT_EQUAL_INT(-1, mkdir("/tmp/existing", 0700));
+    TEST_ASSERT_EQUAL_INT(EEXIST, errno);
 }

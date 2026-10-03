@@ -8,6 +8,19 @@
 #include "types/result.h"
 
 #define IO_FILE_WATCH_CAPACITY 16U
+#define IO_TERMINAL_CONTROL_CHARACTER_COUNT 20U
+#define IO_TERMINAL_INPUT_CR_TO_NL 0000400U
+#define IO_TERMINAL_INPUT_START_STOP_OUTPUT 0002000U
+#define IO_TERMINAL_OUTPUT_PROCESSING 0000001U
+#define IO_TERMINAL_OUTPUT_NL_TO_CR_NL 0000004U
+#define IO_TERMINAL_CONTROL_CHARACTER_SIZE_8 0000060U
+#define IO_TERMINAL_LOCAL_SIGNALS 0000001U
+#define IO_TERMINAL_LOCAL_CANONICAL 0000002U
+#define IO_TERMINAL_LOCAL_ECHO 0000010U
+#define IO_TERMINAL_LOCAL_ECHO_ERASE 0000020U
+#define IO_TERMINAL_LOCAL_ECHO_KILL 0000040U
+#define IO_TERMINAL_LOCAL_EXTENDED 0100000U
+#define IO_TERMINAL_SPEED_38400 0000017U
 
 typedef enum IOOperation
 {
@@ -43,6 +56,8 @@ typedef enum IOStatus
     IO_INTERRUPTED = -15,
     IO_ALREADY_EXISTS = -16,
     IO_REDIRECT = -17,
+    IO_BROKEN_PIPE = -18,
+    IO_WOULD_BLOCK = -19,
     IO_PANIC = -255,
 } IOStatus;
 
@@ -54,10 +69,81 @@ typedef enum IOFlags
     IO_OPEN_EXECUTE = 0x8,
     IO_OPEN_BIND = 0x10,
     IO_OPEN_LISTEN = 0x20,
+    IO_OPEN_CREATE = 0x40,
+    IO_OPEN_EXCLUSIVE = 0x80,
 } IOFlags;
+
+typedef enum IOTransferFlags
+{
+    IO_TRANSFER_NONBLOCK = 0x1,
+    IO_TRANSFER_APPEND = 0x2,
+} IOTransferFlags;
+
+typedef struct IOTerminalAttributes
+{
+    uint32_t input_flags;
+    uint32_t output_flags;
+    uint32_t control_flags;
+    uint32_t local_flags;
+    uint32_t input_speed;
+    uint32_t output_speed;
+    uint8_t control_characters[IO_TERMINAL_CONTROL_CHARACTER_COUNT];
+} IOTerminalAttributes;
+
+typedef IOTerminalAttributes * IOTerminalAttributesPtr;
+
+typedef struct IOTerminalAttributesResult
+{
+    IOStatus status;
+    IOTerminalAttributes attributes;
+} IOTerminalAttributesResult;
+
+static inline IOTerminalAttributes IOTerminalAttributes__default(void)
+{
+    IOTerminalAttributes attributes = {
+        .input_flags = IO_TERMINAL_INPUT_CR_TO_NL | IO_TERMINAL_INPUT_START_STOP_OUTPUT,
+        .output_flags = IO_TERMINAL_OUTPUT_PROCESSING | IO_TERMINAL_OUTPUT_NL_TO_CR_NL,
+        .control_flags = IO_TERMINAL_CONTROL_CHARACTER_SIZE_8,
+        .local_flags = IO_TERMINAL_LOCAL_SIGNALS | IO_TERMINAL_LOCAL_CANONICAL | IO_TERMINAL_LOCAL_ECHO |
+                       IO_TERMINAL_LOCAL_ECHO_ERASE | IO_TERMINAL_LOCAL_ECHO_KILL | IO_TERMINAL_LOCAL_EXTENDED,
+        .input_speed = IO_TERMINAL_SPEED_38400,
+        .output_speed = IO_TERMINAL_SPEED_38400,
+    };
+    attributes.control_characters[0] = 3;
+    attributes.control_characters[1] = 28;
+    attributes.control_characters[2] = 127;
+    attributes.control_characters[3] = 21;
+    attributes.control_characters[4] = 4;
+    attributes.control_characters[6] = 1;
+    attributes.control_characters[8] = 17;
+    attributes.control_characters[9] = 19;
+    attributes.control_characters[10] = 26;
+    return attributes;
+}
+
+static inline IOTerminalAttributesResult IOTerminalAttributesResult__new(IOStatus status,
+                                                                         IOTerminalAttributes attributes)
+{
+    return (IOTerminalAttributesResult){.status = status, .attributes = attributes};
+}
 
 typedef int64_t IOHandle;
 typedef IOHandle * IOHandlePtr;
+
+typedef struct IOPipe
+{
+    IOHandle read;
+    IOHandle write;
+} IOPipe;
+
+typedef IOPipe * IOPipePtr;
+ResultDef(IOPipe);
+
+static inline IOPipe IOPipe__new(IOHandle read, IOHandle write)
+{
+    return (IOPipe){.read = read, .write = write};
+}
+
 #define IO_ENDPOINT_TTY_INPUT (1LL << 60)
 #define IO_ENDPOINT_CONSOLE_OUTPUT (IO_ENDPOINT_TTY_INPUT + 1)
 #define IO_ENDPOINT_KEYBOARD_INPUT (IO_ENDPOINT_TTY_INPUT + 2)

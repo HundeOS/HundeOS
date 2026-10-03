@@ -145,6 +145,337 @@ void test_process_save_context_without_a_trap_frame_does_not_change_context(void
     TEST_ASSERT_EQUAL_UINT64(original_elr, Process__required_context(process)->elr);
 }
 
+void test_process_supports_the_complete_signal_range(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+
+    TEST_ASSERT_TRUE(Process__supports_signal(process, PROCESS_SIGNAL_HANGUP));
+    TEST_ASSERT_TRUE(Process__supports_signal(process, PROCESS_SIGNAL_THREAD));
+    TEST_ASSERT_FALSE(Process__supports_signal(process, 0));
+    TEST_ASSERT_FALSE(Process__supports_signal(process, PROCESS_SIGNAL_COUNT + 1));
+}
+
+void test_process_keeps_blocked_signals_pending_until_unblocked(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    ProcessSignalMask interrupt = 1ULL << (PROCESS_SIGNAL_INTERRUPT - 1);
+
+    match_result(Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_BLOCK, interrupt),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    Process__queue_signal(process, PROCESS_SIGNAL_INTERRUPT);
+
+    TEST_ASSERT_EQUAL_UINT64(interrupt, Process__pending_signal_mask(process));
+    TEST_ASSERT_TRUE(is_nothing(Process__take_pending_signal(process)));
+
+    match_result(Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_UNBLOCK, interrupt),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INTERRUPT,
+                      unwrap_optional(Process__take_pending_signal(process), (ProcessSignal)0));
+    TEST_ASSERT_FALSE(Process__has_pending_signal(process));
+}
+
+void test_process_signal_handler_entry_and_return_restore_context_and_mask(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    ProcessSignalMask user_mask = 1ULL << (PROCESS_SIGNAL_USER_1 - 1);
+    ProcessSignalMask handler_mask = 1ULL << (PROCESS_SIGNAL_USER_2 - 1);
+    ProcessSignalAction action = {
+        .handler = 0x12340000,
+        .restorer = 0x56780000,
+        .mask = handler_mask,
+        .flags = 0,
+    };
+    ProcessContext interrupted = {
+        .x = {0x1122},
+        .sp = 0x3344,
+        .elr = 0x5566,
+        .spsr = 0x7788,
+    };
+
+    match_result(Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_SET, user_mask),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Process__set_signal_action(process, PROCESS_SIGNAL_INTERRUPT, &action),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    Process__queue_signal(process, PROCESS_SIGNAL_INTERRUPT);
+
+    match_result(
+        Process__deliver_pending_signal(process, &interrupted),
+        success(delivery)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_DELIVERY_HANDLER, delivery.kind);
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INTERRUPT, delivery.signal);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_SIGNAL_INTERRUPT, interrupted.x[0]);
+    TEST_ASSERT_EQUAL_UINT64(action.restorer, interrupted.x[30]);
+    TEST_ASSERT_EQUAL_UINT64(action.handler, interrupted.elr);
+    TEST_ASSERT_EQUAL_UINT64(user_mask | handler_mask | (1ULL << (PROCESS_SIGNAL_INTERRUPT - 1)),
+                             Process__signal_mask(process));
+    TEST_ASSERT_EQUAL_UINT64(1, ProcessSignalFrames__len(&process->signal_frames));
+
+    match_result(Process__restore_signal_context(process),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(user_mask, Process__signal_mask(process));
+    TEST_ASSERT_EQUAL_UINT64(0, ProcessSignalFrames__len(&process->signal_frames));
+    TEST_ASSERT_EQUAL_UINT64(0x1122, Process__required_context(process)->x[0]);
+    TEST_ASSERT_EQUAL_UINT64(0x3344, Process__required_context(process)->sp);
+    TEST_ASSERT_EQUAL_UINT64(0x5566, Process__required_context(process)->elr);
+    TEST_ASSERT_EQUAL_UINT64(0x7788, Process__required_context(process)->spsr);
+}
+
+void test_process_signal_handler_interrupts_nonrestartable_wait_with_eintr(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
+    ProcessSignalAction action = {
+        .handler = 0x12340000,
+        .restorer = 0x56780000,
+    };
+    ProcessContext interrupted = {
+        .x = {0x1122},
+        .elr = 0x5568,
+    };
+    KernelContext kernel_context = {0};
+    ParkedOperationPtr operation = ParkedOperation__heap_new(&kernel_context, &None(Continuation), PARK_SLEEP);
+    match_result(Process__push_parked_operation(process, operation),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Process__set_signal_action(process, PROCESS_SIGNAL_INTERRUPT, &action),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    Process__queue_signal(process, PROCESS_SIGNAL_INTERRUPT);
+
+    match_result(
+        Process__deliver_pending_signal(process, &interrupted),
+        success(delivery)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_DELIVERY_HANDLER, delivery.kind);
+            match_optional(
+                delivery.interrupted_operation,
+                some(interrupted_operation)
+                {
+                    TEST_ASSERT_EQUAL_PTR(operation, interrupted_operation);
+                    ParkedOperation__dispose(interrupted_operation);
+                },
+                none_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_FALSE(Process__is_parked(process));
+
+    match_result(Process__restore_signal_context(process),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_INT64(SYSCALL_INTERRUPTED, (int64_t)Process__required_context(process)->x[0]);
+    TEST_ASSERT_EQUAL_UINT64(0x5568, Process__required_context(process)->elr);
+}
+
+void test_process_signal_handler_restarts_restartable_wait_when_requested(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
+    ProcessSignalAction action = {
+        .handler = 0x12340000,
+        .restorer = 0x56780000,
+        .flags = PROCESS_SIGNAL_ACTION_RESTART,
+    };
+    ProcessContext interrupted = {
+        .x = {0x1122},
+        .elr = 0x5568,
+    };
+    KernelContext kernel_context = {0};
+    ParkedOperationPtr operation =
+        ParkedOperation__heap_new(&kernel_context, &None(Continuation), PARK_WAIT_CHILD_EVENT);
+    match_result(Process__push_parked_operation(process, operation),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Process__set_signal_action(process, PROCESS_SIGNAL_INTERRUPT, &action),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    Process__queue_signal(process, PROCESS_SIGNAL_INTERRUPT);
+
+    match_result(
+        Process__deliver_pending_signal(process, &interrupted),
+        success(delivery)
+        {
+            match_optional(
+                delivery.interrupted_operation,
+                some(interrupted_operation)
+                {
+                    ParkedOperation__dispose(interrupted_operation);
+                },
+                none_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    match_result(Process__restore_signal_context(process),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(0x1122, Process__required_context(process)->x[0]);
+    TEST_ASSERT_EQUAL_UINT64(0x5564, Process__required_context(process)->elr);
+}
+
+void test_process_defers_caught_signals_during_exec_load_but_allows_kill(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
+    KernelContext kernel_context = {0};
+    ParkedOperationPtr operation = ParkedOperation__heap_new(&kernel_context, &None(Continuation), PARK_WAIT_EXEC_LOAD);
+    match_result(Process__push_parked_operation(process, operation),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    Process__queue_signal(process, PROCESS_SIGNAL_INTERRUPT);
+    TEST_ASSERT_FALSE(Process__can_resume_for_signal(process));
+    Process__queue_signal(process, PROCESS_SIGNAL_KILL);
+    TEST_ASSERT_TRUE(Process__can_resume_for_signal(process));
+}
+
+void test_process_alarm_replaces_cancels_and_expires_once(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+
+    TEST_ASSERT_EQUAL_UINT64(0, Process__set_alarm(process, 1000000, 5));
+    TEST_ASSERT_EQUAL_UINT64(3, Process__set_alarm(process, 3200000, 7));
+    TEST_ASSERT_FALSE(Process__take_expired_alarm(process, 10199999));
+    TEST_ASSERT_TRUE(Process__take_expired_alarm(process, 10200000));
+    TEST_ASSERT_FALSE(Process__take_expired_alarm(process, 10200000));
+    TEST_ASSERT_EQUAL_UINT64(0, Process__set_alarm(process, 11000000, 4));
+    TEST_ASSERT_EQUAL_UINT64(4, Process__set_alarm(process, 11000000, 0));
+    TEST_ASSERT_FALSE(Process__take_expired_alarm(process, 20000000));
+}
+
+void test_process_default_and_ignored_signal_dispositions_are_delivered(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    ProcessContext context = {0};
+
+    Process__queue_signal(process, PROCESS_SIGNAL_CHILD);
+    match_result(
+        Process__deliver_pending_signal(process, &context),
+        success(delivery)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_DELIVERY_NONE, delivery.kind);
+        },
+        error_test_fail()
+    );
+
+    Process__queue_signal(process, PROCESS_SIGNAL_TERMINATE);
+    match_result(
+        Process__deliver_pending_signal(process, &context),
+        success(delivery)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_DELIVERY_TERMINATE, delivery.kind);
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_TERMINATE, delivery.signal);
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_default_stop_and_continue_dispositions_are_distinct(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    ProcessContext context = {0};
+
+    Process__queue_signal(process, PROCESS_SIGNAL_TERMINAL_STOP);
+    match_result(
+        Process__deliver_pending_signal(process, &context),
+        success(delivery)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_DELIVERY_STOP, delivery.kind);
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_TERMINAL_STOP, delivery.signal);
+        },
+        error_test_fail()
+    );
+
+    Process__queue_signal(process, PROCESS_SIGNAL_CONTINUE);
+    match_result(
+        Process__deliver_pending_signal(process, &context),
+        success(delivery)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_DELIVERY_CONTINUE, delivery.kind);
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_CONTINUE, delivery.signal);
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_stop_and_continue_generation_discards_conflicting_pending_signals(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+
+    Process__queue_signal(process, PROCESS_SIGNAL_TERMINAL_STOP);
+    Process__queue_signal(process, PROCESS_SIGNAL_CONTINUE);
+    TEST_ASSERT_TRUE(Process__has_pending_resume_signal(process));
+    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_CONTINUE,
+                      unwrap_optional(Process__take_pending_signal(process), (ProcessSignal)0));
+    TEST_ASSERT_FALSE(Process__has_pending_signal(process));
+
+    Process__queue_signal(process, PROCESS_SIGNAL_CONTINUE);
+    Process__queue_signal(process, PROCESS_SIGNAL_TERMINAL_INPUT);
+    TEST_ASSERT_FALSE(Process__has_pending_resume_signal(process));
+    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_TERMINAL_INPUT,
+                      unwrap_optional(Process__take_pending_signal(process), (ProcessSignal)0));
+    TEST_ASSERT_FALSE(Process__has_pending_signal(process));
+}
+
+void test_process_child_event_selection_preserves_unrequested_state_changes(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    ProcessChildEvent stopped = {
+        .pid = 42,
+        .status = PROCESS_WAIT_STATUS_STOPPED(PROCESS_SIGNAL_TERMINAL_STOP),
+        .type = PROCESS_CHILD_EVENT_STOPPED,
+    };
+    ProcessChildEvent exited = {
+        .pid = 43,
+        .status = PROCESS_WAIT_STATUS_EXITED(7),
+        .type = PROCESS_CHILD_EVENT_EXITED,
+    };
+    match_result(Process__push_child_event(process, &stopped),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Process__push_child_event(process, &exited),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    match_result(
+        Process__pop_child_event(process, -1, 0),
+        success(event)
+        {
+            TEST_ASSERT_EQUAL_UINT64(exited.pid, event.pid);
+        },
+        error_test_fail()
+    );
+    match_result(
+        Process__pop_child_event(process, -1, PROCESS_CHILD_WAIT_UNTRACED),
+        success(event)
+        {
+            TEST_ASSERT_EQUAL_UINT64(stopped.pid, event.pid);
+        },
+        error_test_fail()
+    );
+}
+
 void test_setup_from_elf(void)
 {
     Elf elf = load_hello_world_elf();
@@ -200,6 +531,103 @@ void test_setup_tracks_static_user_allocations(void)
     );
 }
 
+void test_fork_eagerly_copies_private_memory_and_resets_process_state(void)
+{
+    ProcessPtr parent = dummy_process(80, 0, PROC_STATE_RUNNING);
+    Process__set_identity(parent, PROCESS_USER_USER, PROCESS_GROUP_USER, PROCESS_CAP_NONE);
+    ProcessSignalMask blocked = 1ULL << (PROCESS_SIGNAL_USER_1 - 1);
+    ProcessSignalAction action = {
+        .handler = 0x12340000,
+        .restorer = 0x56780000,
+    };
+    parent->pending_signals = 1ULL << (PROCESS_SIGNAL_INTERRUPT - 1);
+    match_result(Process__set_signal_mask(parent, PROCESS_SIGNAL_MASK_SET, blocked),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Process__set_signal_action(parent, PROCESS_SIGNAL_INTERRUPT, &action),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    UserAllocation shared = {.type = USER_ALLOCATION_SHARED};
+    match_result(UserAllocations__push(&parent->user_allocations, shared),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    parent->queue_wait_control = Some(UserAddress, (UserAddress){.valid = true});
+    parent->ipc_doorbell = Some(UserAddress, (UserAddress){.valid = true});
+    match_result(
+        Process__alloc_user_pages(parent, PAGE_SIZE),
+        success(allocation)
+        {
+            Kernel__memset(allocation.kernel_addr.virtual_addr, 0x5a, PAGE_SIZE);
+        },
+        error_test_fail()
+    );
+
+    match_result(
+        Process__fork(parent),
+        success(child)
+        {
+            TEST_ASSERT_EQUAL_UINT64(parent->pid, unwrap_optional(child->parent_pid, 0));
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_USER, child->user_id);
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_USER, child->group_id);
+            TEST_ASSERT_EQUAL_UINT64(0, child->pending_signals);
+            TEST_ASSERT_EQUAL_UINT64(blocked, Process__signal_mask(child));
+            TEST_ASSERT_EQUAL_UINT64(action.handler, Process__signal_action(child, PROCESS_SIGNAL_INTERRUPT).handler);
+            TEST_ASSERT_EQUAL(PROC_STATE_NEW, child->state);
+            TEST_ASSERT_EQUAL(UserAllocations__len(&parent->user_allocations) - 1,
+                              UserAllocations__len(&child->user_allocations));
+            TEST_ASSERT_TRUE(is_nothing(child->queue_wait_control));
+            TEST_ASSERT_TRUE(is_nothing(child->ipc_doorbell));
+            TEST_ASSERT_EQUAL_UINT64(0, Process__required_context(child)->x[0]);
+
+            ListIndex parent_dynamic_index = (ListIndex)UserAllocations__len(&parent->user_allocations) - 1;
+            ListIndex child_dynamic_index = (ListIndex)UserAllocations__len(&child->user_allocations) - 1;
+            UserAllocation parent_allocation = unwrap_optional(
+                UserAllocations__at(&parent->user_allocations, parent_dynamic_index), (UserAllocation){});
+            UserAllocation child_allocation =
+                unwrap_optional(UserAllocations__at(&child->user_allocations, child_dynamic_index), (UserAllocation){});
+            TEST_ASSERT_EQUAL_UINT64(parent_allocation.address.virtual_addr, child_allocation.address.virtual_addr);
+            TEST_ASSERT_NOT_EQUAL(parent_allocation.address.kernel_addr.virtual_addr,
+                                  child_allocation.address.kernel_addr.virtual_addr);
+            TEST_ASSERT_EQUAL_MEMORY((void *)parent_allocation.address.kernel_addr.virtual_addr,
+                                     (void *)child_allocation.address.kernel_addr.virtual_addr, PAGE_SIZE);
+            *(uint8_t *)child_allocation.address.kernel_addr.virtual_addr = 0xa5;
+            TEST_ASSERT_EQUAL_HEX8(0x5a, *(uint8_t *)parent_allocation.address.kernel_addr.virtual_addr);
+
+            match_result(Process__dispose_user_allocations(child),
+                success_do_nothing(),
+                error_test_fail()
+            );
+            match_result(Process__dispose_page_table(child),
+                success_do_nothing(),
+                error_test_fail()
+            );
+            match_result(Process__dispose(child),
+                success_do_nothing(),
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+}
+
+void test_fork_rejects_service_process_without_creating_a_child(void)
+{
+    ProcessPtr parent = dummy_process(81, 0, PROC_STATE_RUNNING);
+    parent->process_class = PROCESS_CLASS_SERVICE;
+
+    match_result(
+        Process__fork(parent),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_FORK_UNSUPPORTED_STATE, code);
+        }
+    );
+}
+
 void test_setup_with_args_sets_up_multiple_argv_entries(void)
 {
     Elf elf = load_hello_world_elf();
@@ -214,14 +642,18 @@ void test_setup_with_args_sets_up_multiple_argv_entries(void)
         {
             UserAllocation args = allocation_at(process, 0);
             AddressPtr argv = ptr(args.address.kernel_addr.virtual_addr, Address);
+            AddressPtr envp = argv + 5;
             Address user_base = args.address.virtual_addr;
             Address kernel_base = args.address.kernel_addr.virtual_addr;
 
             TEST_ASSERT_EQUAL(0, argv[4]);
+            TEST_ASSERT_EQUAL(0, envp[0]);
             TEST_ASSERT_EQUAL_STRING("hello_world", ptr(kernel_base + (argv[0] - user_base), char));
             TEST_ASSERT_EQUAL_STRING("one", ptr(kernel_base + (argv[1] - user_base), char));
             TEST_ASSERT_EQUAL_STRING("two", ptr(kernel_base + (argv[2] - user_base), char));
             TEST_ASSERT_EQUAL_STRING("three", ptr(kernel_base + (argv[3] - user_base), char));
+            ProcessContextPtr context = Process__required_context(process);
+            TEST_ASSERT_EQUAL_UINT64(0, context->x[7]);
         },
         error_test_fail()
     );

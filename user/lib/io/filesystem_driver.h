@@ -98,8 +98,7 @@ typedef FilesystemPath * FilesystemPathPtr;
 typedef struct FilesystemFile
 {
     IOHandle handle;
-    QueueConnectionID session;
-    uint64_t pid;
+    IOResourceOwners owners;
     FilesystemPath path;
     Flags flags;
     FilesystemFileSize size;
@@ -134,6 +133,7 @@ typedef struct FilesystemDriver
     FilesystemOperations operations;
     FilesystemFiles files;
     FilesystemFileStates file_states;
+    IOInheritanceRegistry inheritance;
     IOHandle next_handle;
     uint64_t next_file_identity;
 } FilesystemDriver;

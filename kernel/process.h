@@ -10,6 +10,7 @@
 #include "types/fixed_array.h"
 #include "types/bstring_additional_types.h"
 #include "types/linked_list.h"
+#include "types/map.h"
 #include "mutex.h"
 #include "syscalls/io.h"
 #include "../common_includes/syscalls/process.h"
@@ -35,14 +36,69 @@ typedef uint64_t ProcessID;
 typedef ProcessID * ProcessIDPtr;
 #include "../common/process/process_types.h"
 typedef uint64_t Tick;
+typedef uint64_t ProcessAlarmDeadline;
+OptionalDef(ProcessAlarmDeadline);
 
 OptionalDef(ProcessID);
 ResultDef(ProcessID);
 OptionalDef(ProcessSignal);
+ResultDef(ProcessSignalResult);
 OptionalDef(ProcessChildEvent);
 ResultDef(ProcessChildEvent);
 OptionalDef(UserID);
 OptionalDef(GroupID);
+OptionalDef(ProcessSignalAction);
+
+bool ProcessSignal__numbers_equal(void * left, void * right);
+MapDefine(ProcessSignal, ProcessSignalAction, PROCESS_SIGNAL_COUNT, ProcessSignalActions, ProcessSignal__numbers_equal);
+
+typedef struct ProcessSignalFrame
+{
+    ProcessContextPtr context;
+    ProcessSignalMask mask;
+} ProcessSignalFrame;
+
+typedef ProcessSignalFrame * ProcessSignalFramePtr;
+typedef const ProcessSignalFrame * ConstProcessSignalFramePtr;
+
+OptionalDef(ProcessSignalFrame);
+bool ProcessSignalFrame__equals(ProcessSignalFramePtr self, ProcessSignalFramePtr other);
+LinkedListDefine(ProcessSignalFrame, ProcessSignalFrames, (EqualFunction)ProcessSignalFrame__equals);
+
+static inline ProcessSignalFrame ProcessSignalFrame__new(ProcessContextPtr context, ProcessSignalMask mask)
+{
+    return (ProcessSignalFrame){
+        .context = context,
+        .mask = mask,
+    };
+}
+
+typedef enum ProcessSignalDeliveryKind
+{
+    PROCESS_SIGNAL_DELIVERY_NONE = 0,
+    PROCESS_SIGNAL_DELIVERY_HANDLER = 1,
+    PROCESS_SIGNAL_DELIVERY_TERMINATE = 2,
+    PROCESS_SIGNAL_DELIVERY_STOP = 3,
+    PROCESS_SIGNAL_DELIVERY_CONTINUE = 4,
+} ProcessSignalDeliveryKind;
+
+typedef struct ProcessSignalDelivery
+{
+    ProcessSignalDeliveryKind kind;
+    ProcessSignal signal;
+    Optional(ParkedOperationPtr) interrupted_operation;
+} ProcessSignalDelivery;
+
+static inline ProcessSignalDelivery ProcessSignalDelivery__new(ProcessSignalDeliveryKind kind, ProcessSignal signal)
+{
+    return (ProcessSignalDelivery){
+        .kind = kind,
+        .signal = signal,
+        .interrupted_operation = None(ParkedOperationPtr),
+    };
+}
+
+ResultDef(ProcessSignalDelivery);
 
 typedef enum ProcessErrors
 {
@@ -127,6 +183,7 @@ typedef struct UserAllocation
 } UserAllocation;
 
 typedef UserAllocation * UserAllocationPtr;
+typedef const UserAllocation * ConstUserAllocationPtr;
 
 OptionalDef(UserAllocation);
 bool UserAllocation__equals(UserAllocationPtr self, UserAllocationPtr other);
@@ -173,7 +230,12 @@ typedef struct Process
     Optional(ProcessContextPtr) context;
     Stack stack;
     Optional(ProcessPtr) parent;
+    Optional(ProcessPtr) pending_fork_child;
+    Optional(ProcessID) parent_pid;
     ProcessID pid;
+    ProcessGroupID process_group_id;
+    ProcessSessionID session_id;
+    bool execed_since_fork;
     ProcessState state;
     UserAddress entry_point;
     Tick last_tick;
@@ -191,6 +253,7 @@ typedef struct Process
     Optional(UserAddress) queue_wait_control;
     Optional(UserAddress) ipc_doorbell;
     BString name;
+    uint64_t startup_argument_count;
     Address heap_break;
     Address heap_mapped_end;
     UserAllocations user_allocations;
@@ -204,8 +267,15 @@ typedef struct Process
     UserID user_id;
     GroupID group_id;
     ProcessCapabilities capabilities;
+    ProcessSignalActions signal_actions;
+    ProcessSignalMask signal_mask;
     ProcessSignalMask pending_signals;
+    Optional(ProcessSignal) forced_signal;
+    ProcessSignalFrames signal_frames;
+    Optional(ProcessAlarmDeadline) alarm_deadline_usec;
     ProcessChildEvents child_events;
+    uint64_t children_user_usec;
+    uint64_t children_system_usec;
 
     ParkedOperations parked_operations;
 } Process;
@@ -221,6 +291,10 @@ OptionalType(ProcessTable *, ProcessTablePtr);
 Result(ProcessPtr) Process__setup(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent);
 Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent,
                                             ConstProcessArgumentsPtr arguments);
+Result(ProcessPtr) Process__fork(ProcessPtr self);
+void Process__abort_pending_fork(ProcessPtr self);
+Result(ProcessPtr) Process__setup_overlay_candidate(ProcessPtr self, ConstElfPtr binary, ConstExecPayloadPtr payload);
+Result(ProcessSetupStatus) Process__commit_overlay(ProcessPtr self, ProcessPtr candidate);
 Result(ProcessContextSaveCode) Process__store_context(ProcessPtr self, ProcessContextPtr context);
 Result(ProcessContextSaveCode) Process__save_context(ProcessPtr self, const OptionalPtr(ProcessContextPtr) context);
 ProcessContextPtr Process__required_context(ProcessPtr self);
@@ -236,6 +310,9 @@ bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalP
 bool Process__has_ready_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key);
 bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key,
                                           OptionalPtr(ReturnCode) return_code);
+bool Process__mark_child_wait_ready(ProcessPtr self, ProcessID child_pid, ProcessGroupID child_process_group_id,
+                                    uint64_t event_type);
+bool Process__mark_signal_suspend_ready(ProcessPtr self);
 bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick);
 bool Process__is_parked(ProcessPtr self);
 bool Process__is_handling_service_irq(ProcessPtr self);
@@ -248,10 +325,24 @@ bool Process__has_capability(ProcessPtr self, ProcessCapabilities capability);
 bool Process__supports_signal(ProcessPtr self, ProcessSignal signal);
 void Process__queue_signal(ProcessPtr self, ProcessSignal signal);
 bool Process__has_pending_signal(ProcessPtr self);
+bool Process__has_pending_kill(ProcessPtr self);
+bool Process__has_pending_resume_signal(ProcessPtr self);
+bool Process__can_resume_for_signal(ProcessPtr self);
 Optional(ProcessSignal) Process__take_pending_signal(ProcessPtr self);
+ProcessSignalAction Process__signal_action(ProcessPtr self, ProcessSignal signal);
+Result(ProcessSignalResult)
+    Process__set_signal_action(ProcessPtr self, ProcessSignal signal, ConstProcessSignalActionPtr action);
+ProcessSignalMask Process__signal_mask(ProcessPtr self);
+Result(ProcessSignalResult) Process__set_signal_mask(ProcessPtr self, uint64_t operation, ProcessSignalMask mask);
+ProcessSignalMask Process__pending_signal_mask(ProcessPtr self);
+Result(ProcessSignalDelivery) Process__deliver_pending_signal(ProcessPtr self, ProcessContextPtr context);
+Result(ProcessSignalResult) Process__restore_signal_context(ProcessPtr self);
+uint64_t Process__set_alarm(ProcessPtr self, uint64_t now_usec, uint64_t seconds);
+bool Process__take_expired_alarm(ProcessPtr self, uint64_t now_usec);
 ReturnCode ProcessSignal__exit_code(ProcessSignal signal);
-Result(ProcessChildEvent) Process__pop_next_child_event(ProcessPtr self);
+Result(ProcessChildEvent) Process__pop_child_event(ProcessPtr self, int64_t child_selection, uint64_t options);
 Result(CollectionCode) Process__push_child_event(ProcessPtr self, ConstProcessChildEventPtr event);
+void Process__account_cpu_mode(ProcessPtr self, CPUUsageMode mode);
 Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr self);
 Result(KAllocCode) Process__dispose_page_table(ProcessPtr self);
 Result(ProcessMemoryCode)

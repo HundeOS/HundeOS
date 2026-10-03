@@ -31,6 +31,13 @@ void IO__set_startup_stdio(IOHandle input, IOHandle output, IOHandle error)
     standard_error = IOStandardStream__new(error);
 }
 
+void IO__reset_after_fork(void)
+{
+    standard_input.handle = IO_NOT_OPEN;
+    standard_output.handle = IO_NOT_OPEN;
+    standard_error.handle = IO_NOT_OPEN;
+}
+
 static Optional(IOStandardStreamPtr) IO__standard_stream(IOHandle handle)
 {
     switch (handle)
@@ -55,6 +62,25 @@ static Optional(IOStandardStreamPtr) IO__standard_stream(IOHandle handle)
         break;
     }
     return None(IOStandardStreamPtr);
+}
+
+Optional(BString) IO__terminal_path(int descriptor)
+{
+    match_optional(
+        IO__standard_stream(descriptor),
+        some(stream)
+        {
+            if (stream->closed)
+            {
+                return None(BString);
+            }
+            return Some(BString, stream->endpoint == IO_ENDPOINT_TTY_INPUT ? bstr(":tty:") : bstr(":console:"));
+        },
+        none()
+        {
+            return None(BString);
+        }
+    );
 }
 
 static IOHandle IOStandardStream__open(IOStandardStreamPtr self)
@@ -84,45 +110,96 @@ IOStatus IO__set_terminal_foreground(uint64_t pid)
     return IOClient__set_foreground_process(input, pid);
 }
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
-{
-    return IOClient__open(path, flags);
-}
-
-ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
+IOTerminalAttributesResult IO__get_terminal_attributes(IOHandle handle)
 {
     match_optional(
         IO__standard_stream(handle),
         some(stream)
         {
             IOHandle opened = IOStandardStream__open(stream);
-            return opened < 0 ? opened : IO__read_bytes(opened, buf, size);
+            if (opened < 0)
+            {
+                return IOTerminalAttributesResult__new((IOStatus)opened, IOTerminalAttributes__default());
+            }
+            return IO__get_terminal_attributes(opened);
+        },
+        none_do_nothing()
+    );
+    if (handle < IO_SESSION_HANDLE_BASE)
+    {
+        return IOTerminalAttributesResult__new(IO_UNKNOWN_HANDLE, IOTerminalAttributes__default());
+    }
+    return IOClient__get_terminal_attributes(handle);
+}
+
+IOStatus IO__set_terminal_attributes(IOHandle handle, IOTerminalAttributes attributes)
+{
+    match_optional(
+        IO__standard_stream(handle),
+        some(stream)
+        {
+            IOHandle opened = IOStandardStream__open(stream);
+            return opened < 0 ? (IOStatus)opened : IO__set_terminal_attributes(opened, attributes);
+        },
+        none_do_nothing()
+    );
+    return handle < IO_SESSION_HANDLE_BASE ? IO_UNKNOWN_HANDLE : IOClient__set_terminal_attributes(handle, attributes);
+}
+
+IOHandle IO__open(ConstBStringPtr path, Flags flags)
+{
+    return IOClient__open(path, flags);
+}
+
+Result(IOPipe) IO__pipe(void)
+{
+    return IOClient__pipe();
+}
+
+ByteCount IO__read_bytes_with_flags(IOHandle handle, char * buf, size_t size, Flags flags)
+{
+    match_optional(
+        IO__standard_stream(handle),
+        some(stream)
+        {
+            IOHandle opened = IOStandardStream__open(stream);
+            return opened < 0 ? opened : IO__read_bytes_with_flags(opened, buf, size, flags);
         },
         none_do_nothing()
     );
     if (handle >= IO_SESSION_HANDLE_BASE)
     {
-        return IOClient__read(handle, (ChannelDataPtr)buf, size);
+        return IOClient__read_with_flags(handle, (ChannelDataPtr)buf, size, flags);
+    }
+    return IO_UNKNOWN_HANDLE;
+}
+
+ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
+{
+    return IO__read_bytes_with_flags(handle, buf, size, 0);
+}
+
+ByteCount IO__write_bytes_with_flags(IOHandle handle, const char * buf, size_t size, Flags flags)
+{
+    match_optional(
+        IO__standard_stream(handle),
+        some(stream)
+        {
+            IOHandle opened = IOStandardStream__open(stream);
+            return opened < 0 ? opened : IO__write_bytes_with_flags(opened, buf, size, flags);
+        },
+        none_do_nothing()
+    );
+    if (handle >= IO_SESSION_HANDLE_BASE)
+    {
+        return IOClient__write_with_flags(handle, (ConstChannelDataPtr)buf, size, flags);
     }
     return IO_UNKNOWN_HANDLE;
 }
 
 ByteCount IO__write_bytes(IOHandle handle, const char * buf, size_t size)
 {
-    match_optional(
-        IO__standard_stream(handle),
-        some(stream)
-        {
-            IOHandle opened = IOStandardStream__open(stream);
-            return opened < 0 ? opened : IO__write_bytes(opened, buf, size);
-        },
-        none_do_nothing()
-    );
-    if (handle >= IO_SESSION_HANDLE_BASE)
-    {
-        return IOClient__write(handle, (ConstChannelDataPtr)buf, size);
-    }
-    return IO_UNKNOWN_HANDLE;
+    return IO__write_bytes_with_flags(handle, buf, size, 0);
 }
 
 IOSeekResult IO__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
@@ -445,6 +522,10 @@ const char * io_status_string(IOStatus status)
         return "IO_ALREADY_EXISTS";
     case IO_REDIRECT:
         return "IO_REDIRECT";
+    case IO_BROKEN_PIPE:
+        return "IO_BROKEN_PIPE";
+    case IO_WOULD_BLOCK:
+        return "IO_WOULD_BLOCK";
     case IO_PANIC:
         return "IO_PANIC";
     }

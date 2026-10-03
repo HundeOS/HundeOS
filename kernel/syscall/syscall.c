@@ -11,3 +11,8 @@ CallContext CallContext__new(OptionalPtr(ProcessPtr) process, SystemCall syscall
                          .arg4 = arg4,
                          .arg5 = arg5};
 }
+
+bool SystemCallResult__restores_context(SystemCall syscall_id, SystemCallResult result)
+{
+    return syscall_id == SYSCALL_PROCESS_SIGNAL_RETURN && result == SYSCALL_CONTEXT_RESTORED;
+}

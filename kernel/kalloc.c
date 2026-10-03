@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "memory.h"
 #include "debug.h"
 #include "address.h"
 #include "kernel_core.h"
@@ -245,36 +246,20 @@ Result(KAllocCode) Kernel__free_debug(Address virtual_address, ConstKAllocSource
 
 void * memcpy(void * dst, const void * src, size_t n)
 {
-    uint8_t * d = dst;
-    const uint8_t * s = src;
-    while (n--)
-        *d++ = *s++;
-    return dst;
+    return Mem__memcpy(dst, src, n);
 }
 
 void * memset(void * dst, int c, size_t n)
 {
-    uint8_t * d = (uint8_t *)dst;
-    uint8_t v = (uint8_t)c;
-    while (n--)
-    {
-        *d++ = v;
-    }
-    return dst;
+    return Mem__memset(dst, c, n);
 }
 
 void Kernel__memcopy(Address src, Address target, size_t size)
 {
-    void * v_src = (void *)src;
-    void * v_target = (void *)target;
-
-    for (int i = 0; i < size; i++)
-    {
-        ((char *)v_target)[i] = ((char *)v_src)[i];
-    }
+    Mem__memcpy(void_ptr(target), (const void *)src, size);
 }
 
 void Kernel__memset(Address addr, int val, size_t size)
 {
-    memset(void_ptr(addr), val, size);
+    Mem__memset(void_ptr(addr), val, size);
 }

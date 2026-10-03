@@ -1,4 +1,4 @@
-#include "sys/wait.h"
+#include "sys/interrupt.h"
 
 void wait_for_interrupt(void)
 {

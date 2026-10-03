@@ -30,9 +30,38 @@ extern const uint8_t __boot_stack_virtual_top[];
 extern const uint8_t __riscv_secondary_entry_virtual[];
 
 typedef volatile uint8_t * RiscVUartRegistersPtr;
+typedef volatile uint32_t * RiscVGoldfishRtcRegistersPtr;
 static uint64_t uart_virtual_base = RISCV_HIGHER_HALF_OFFSET + RISCV_BOOTSTRAP_UART_BASE;
 static KernelEarlyBootInfo kernel_early_boot_info;
 CPUID RiscVBoot__stack_cpu_ids[MAX_CPUS];
+
+static Optional(RealtimeClockSample) RiscVGoldfishRtc__sample(ConstRiscVPlatformInfoPtr platform)
+{
+    if (platform->rtc_size == 0 || platform->timebase_frequency == 0)
+    {
+        return None(RealtimeClockSample);
+    }
+
+    uint64_t before;
+    uint64_t after;
+    __asm__ volatile("rdtime %0" : "=r"(before)::"memory");
+    RiscVGoldfishRtcRegistersPtr registers =
+        (RiscVGoldfishRtcRegistersPtr)(RISCV_HIGHER_HALF_OFFSET + platform->rtc_base);
+    uint64_t low = registers[0];
+    uint64_t high = registers[1];
+    __asm__ volatile("rdtime %0" : "=r"(after)::"memory");
+
+    uint64_t unix_nanoseconds = (high << 32) | low;
+    if (unix_nanoseconds == 0)
+    {
+        return None(RealtimeClockSample);
+    }
+
+    uint64_t counter = before + ((after - before) / 2U);
+    uint64_t frequency = platform->timebase_frequency;
+    uint64_t monotonic_usec = counter / frequency * 1000000ULL + counter % frequency * 1000000ULL / frequency;
+    return Some(RealtimeClockSample, RealtimeClockSample__new(unix_nanoseconds / 1000ULL, monotonic_usec));
+}
 
 static RiscVUartRegistersPtr RiscVUart__registers(void)
 {
@@ -222,6 +251,7 @@ void RiscVBoot__main(uint64_t hart_id, uint64_t device_tree)
                           (uint64_t)__boot_stack_virtual_start - RISCV_HIGHER_HALF_OFFSET,
                           (uint64_t)__boot_stack_virtual_top - RISCV_HIGHER_HALF_OFFSET));
     SystemInfo system_info = RiscVPlatformInfo__system_info(platform, &layout, hart_id);
+    system_info.realtime_clock = RiscVGoldfishRtc__sample(platform);
     RiscVUart__puts("SystemInfo free regions=");
     RiscVUart__put_hex(PhysicalMemoryRegions__len(&system_info.physical_memory.free_regions));
     RiscVUart__puts("\n");

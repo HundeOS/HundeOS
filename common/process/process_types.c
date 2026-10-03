@@ -20,6 +20,8 @@ BString ParkReason__to_string(ParkReason reason)
         return bstr("PARK_WAIT_QUEUE");
     case PARK_WAIT_EXEC_LOAD:
         return bstr("PARK_WAIT_EXEC_LOAD");
+    case PARK_WAIT_SIGNAL:
+        return bstr("PARK_WAIT_SIGNAL");
     default:
         return bstr("PARK_WAIT_UNKNOWN");
     }

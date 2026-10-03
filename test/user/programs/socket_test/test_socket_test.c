@@ -17,6 +17,12 @@ IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path
     return IO_OPERATION_NOT_SUPPORTED;
 }
 
+Result(IOPipe) IOClient__pipe(void)
+{
+    TEST_FAIL_MESSAGE("Unexpected pipe request in socket program");
+    return Error(IOPipe, bstr("unexpected pipe"), IO_OPERATION_NOT_SUPPORTED);
+}
+
 #include "../../../../common_includes/syscalls/calls.h"
 #include "../../../../common_includes/syscalls/io.h"
 
@@ -140,14 +146,36 @@ IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
     return IO_OPERATION_NOT_SUPPORTED;
 }
 
+IOTerminalAttributesResult IOClient__get_terminal_attributes(IOHandle handle)
+{
+    TEST_FAIL_MESSAGE("Unexpected terminal control");
+    return IOTerminalAttributesResult__new(IO_OPERATION_NOT_SUPPORTED, (IOTerminalAttributes){0});
+}
+
+IOStatus IOClient__set_terminal_attributes(IOHandle handle, IOTerminalAttributes attributes)
+{
+    TEST_FAIL_MESSAGE("Unexpected terminal control");
+    return IO_OPERATION_NOT_SUPPORTED;
+}
+
 ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
 {
     return record_operation(IO_CALL, IO_READ, handle, (Anything)data, size, 0);
 }
 
+ByteCount IOClient__read_with_flags(IOHandle handle, ChannelDataPtr data, size_t size, Flags flags)
+{
+    return IOClient__read(handle, data, size);
+}
+
 ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
 {
     return record_operation(IO_CALL, IO_WRITE, handle, (Anything)data, size, 0);
+}
+
+ByteCount IOClient__write_with_flags(IOHandle handle, ConstChannelDataPtr data, size_t size, Flags flags)
+{
+    return IOClient__write(handle, data, size);
 }
 
 IOReply IOClient__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)

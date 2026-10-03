@@ -246,7 +246,12 @@ static IOStatus Memfs__create(MemfsPtr self, ConstBStringPtr path, bool director
 static IOReply Memfs__open(MemfsPtr self, IORequestPtr request, ConstBStringPtr path,
                            ConstProcessCredentialsPtr credentials)
 {
-    if (request->flags == 0 || (request->flags & ~(IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_EXECUTE)) != 0)
+    Flags access_flags = request->flags & (IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_EXECUTE);
+    Flags creation_flags = request->flags & (IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE);
+    if (access_flags == 0 ||
+        (request->flags & ~(IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_EXECUTE | IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE)) !=
+            0 ||
+        (creation_flags != 0 && ((access_flags & IO_OPEN_WRITE) == 0 || (creation_flags & IO_OPEN_CREATE) == 0)))
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
@@ -260,7 +265,13 @@ static IOReply Memfs__open(MemfsPtr self, IORequestPtr request, ConstBStringPtr 
     }
     match_optional(
         Memfs__find(self, path),
-        some_do_nothing(),
+        some(node)
+        {
+            if ((request->flags & IO_OPEN_EXCLUSIVE) != 0)
+            {
+                return IOReply__new(IO_ALREADY_EXISTS, 0);
+            }
+        },
         none()
         {
             if ((request->flags & IO_OPEN_WRITE) == 0)
@@ -355,14 +366,20 @@ static IOStatus MemfsNode__reserve(MemfsNodePtr self, size_t required)
 static IOReply MemfsNode__transfer(MemfsNodePtr self, MemfsHandlePtr handle, IORequestPtr request)
 {
     bool writing = request->operation == IO_REQUEST_WRITE;
+    Flags supported_flags = IO_TRANSFER_NONBLOCK | (writing ? IO_TRANSFER_APPEND : 0);
+    if ((request->flags & ~supported_flags) != 0)
+    {
+        return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+    }
     if ((handle->flags & (writing ? IO_OPEN_WRITE : IO_OPEN_READ)) == 0)
     {
         return IOReply__new(IO_PERMISSION_DENIED, 0);
     }
     size_t count = request->count;
+    size_t transfer_offset = writing && (request->flags & IO_TRANSFER_APPEND) != 0 ? self->size : handle->offset;
     if (!writing)
     {
-        size_t available = handle->offset < self->size ? self->size - handle->offset : 0;
+        size_t available = transfer_offset < self->size ? self->size - transfer_offset : 0;
         if (count > available)
         {
             count = available;
@@ -374,11 +391,11 @@ static IOReply MemfsNode__transfer(MemfsNodePtr self, MemfsHandlePtr handle, IOR
     }
     if (writing)
     {
-        if (handle->offset > SIZE_MAX - count)
+        if (transfer_offset > SIZE_MAX - count)
         {
             return IOReply__new(IO_UNKNOWN_BUFFER, 0);
         }
-        IOStatus status = MemfsNode__reserve(self, handle->offset + count);
+        IOStatus status = MemfsNode__reserve(self, transfer_offset + count);
         if (status != IO_OK)
         {
             return IOReply__new(status, 0);
@@ -391,21 +408,21 @@ static IOReply MemfsNode__transfer(MemfsNodePtr self, MemfsHandlePtr handle, IOR
             IOReply reply = IOReply__new(IO_OK, count);
             if (writing)
             {
-                if (handle->offset > self->size)
+                if (transfer_offset > self->size)
                 {
-                    __builtin_memset(data + self->size, 0, handle->offset - self->size);
+                    __builtin_memset(data + self->size, 0, transfer_offset - self->size);
                 }
-                __builtin_memcpy(data + handle->offset, IORequest__write_source(request), count);
-                if (self->size < handle->offset + count)
+                __builtin_memcpy(data + transfer_offset, IORequest__write_source(request), count);
+                if (self->size < transfer_offset + count)
                 {
-                    self->size = handle->offset + count;
+                    self->size = transfer_offset + count;
                 }
             }
             else
             {
-                __builtin_memcpy(IORequest__read_target(request, &reply), data + handle->offset, count);
+                __builtin_memcpy(IORequest__read_target(request, &reply), data + transfer_offset, count);
             }
-            handle->offset += count;
+            handle->offset = transfer_offset + count;
             return reply;
         },
         none()

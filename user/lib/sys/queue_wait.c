@@ -42,6 +42,17 @@ static QueueWaitWakeGeneration prepared_wake_generation;
 static Optional(QueueWaitControlPtr) wait_control = None(QueueWaitControlPtr);
 static bool registration_attempted;
 
+void QueueWait__reset_after_fork(void)
+{
+    sources = EmptyArray(QueueWaitSources);
+    snapshots = EmptyArray(QueueWaitSnapshots);
+    prepared = false;
+    prepared_wake_generation = 0;
+    wait_control = None(QueueWaitControlPtr);
+    registration_attempted = false;
+    IODiagnostics__detach();
+}
+
 static void QueueWait__register_control(void)
 {
     if (registration_attempted)
@@ -137,21 +148,23 @@ static Result(QueueCode) QueueWait__arm_control(void)
     return Success(QueueCode, QUEUE_OK);
 }
 
-static void QueueWait__park(ConstQueueWaitSnapshotPtr observed, size_t count)
+static bool QueueWait__park(ConstQueueWaitSnapshotPtr observed, size_t count)
 {
-    syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, (Anything)observed, count, QUEUE_WAIT_INDEFINITE_TICKS, 0);
+    return (int64_t)syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, (Anything)observed, count, QUEUE_WAIT_INDEFINITE_TICKS,
+                            0) != SYSCALL_INTERRUPTED;
 }
 
-static void QueueWait__park_all(void)
+static bool QueueWait__park_all(void)
 {
     match_optional(
         QueueWaitSnapshots__ptr_at(&snapshots, 0),
         some(first)
         {
-            QueueWait__park(first, QueueWaitSnapshots__len(&snapshots));
+            return QueueWait__park(first, QueueWaitSnapshots__len(&snapshots));
         },
         none_do_nothing()
     );
+    return true;
 }
 
 static QueueWaitSource QueueWaitSource__new_queue(QueuePtr queue)
@@ -338,13 +351,21 @@ void Queue__wait_event(void)
         }
         IODiagnostics__record(IO_DIAGNOSTIC_WAIT_ENTRIES, 1);
         uint64_t unchanged_wakes = 0;
-        QueueWait__park_all();
+        if (!QueueWait__park_all())
+        {
+            QueueWait__complete_control();
+            Queue__prepare_wait();
+            return;
+        }
         uint64_t spin_started_at_usec = IpcPlatform__monotonic_usec();
         while (!QueueWait__changed())
         {
             if (IpcPlatform__monotonic_usec() - spin_started_at_usec >= QUEUE_WAIT_WARM_SPIN_USEC)
             {
-                QueueWait__park_all();
+                if (!QueueWait__park_all())
+                {
+                    break;
+                }
                 spin_started_at_usec = IpcPlatform__monotonic_usec();
             }
             else
@@ -367,7 +388,7 @@ void Queue__wait_event(void)
     Queue__prepare_wait();
 }
 
-static void QueueWaitSource__wait(QueueWaitSourcePtr self, ConstQueueWaitSnapshotPtr observed)
+static bool QueueWaitSource__wait(QueueWaitSourcePtr self, ConstQueueWaitSnapshotPtr observed)
 {
     QueueWaitSnapshot current = QueueWaitSource__snapshot(self);
     if (QueueWaitSnapshot__equals(observed, &current))
@@ -394,7 +415,11 @@ static void QueueWaitSource__wait(QueueWaitSourcePtr self, ConstQueueWaitSnapsho
         );
         IODiagnostics__record(IO_DIAGNOSTIC_WAIT_ENTRIES, 1);
         uint64_t unchanged_wakes = 0;
-        QueueWait__park(observed, 1);
+        if (!QueueWait__park(observed, 1))
+        {
+            QueueWait__complete_control();
+            return false;
+        }
         uint64_t spin_started_at_usec = IpcPlatform__monotonic_usec();
         while (true)
         {
@@ -405,7 +430,11 @@ static void QueueWaitSource__wait(QueueWaitSourcePtr self, ConstQueueWaitSnapsho
             }
             if (IpcPlatform__monotonic_usec() - spin_started_at_usec >= QUEUE_WAIT_WARM_SPIN_USEC)
             {
-                QueueWait__park(observed, 1);
+                if (!QueueWait__park(observed, 1))
+                {
+                    QueueWait__complete_control();
+                    return false;
+                }
                 spin_started_at_usec = IpcPlatform__monotonic_usec();
             }
             else
@@ -425,9 +454,10 @@ static void QueueWaitSource__wait(QueueWaitSourcePtr self, ConstQueueWaitSnapsho
         }
         QueueWait__complete_control();
     }
+    return true;
 }
 
-void Queue__wait_readable(QueuePtr self)
+bool Queue__wait_readable_interruptible(QueuePtr self)
 {
     QueueWaitSource source = QueueWaitSource__new_queue(self);
     while (true)
@@ -435,14 +465,17 @@ void Queue__wait_readable(QueuePtr self)
         QueueWaitSnapshot observed = QueueWaitSource__snapshot(&source);
         if (observed.closed != 0 || (observed.accepted != 0 && observed.produced != self->read))
         {
-            return;
+            return true;
         }
 
-        QueueWaitSource__wait(&source, &observed);
+        if (!QueueWaitSource__wait(&source, &observed))
+        {
+            return false;
+        }
     }
 }
 
-void Queue__wait_writable(QueuePtr self)
+bool Queue__wait_writable_interruptible(QueuePtr self)
 {
     QueueWaitSource source = QueueWaitSource__new_queue(self);
     while (true)
@@ -450,11 +483,24 @@ void Queue__wait_writable(QueuePtr self)
         QueueWaitSnapshot observed = QueueWaitSource__snapshot(&source);
         if (observed.closed != 0 || (observed.accepted != 0 && self->written - observed.consumed != QUEUE_CAPACITY))
         {
-            return;
+            return true;
         }
 
-        QueueWaitSource__wait(&source, &observed);
+        if (!QueueWaitSource__wait(&source, &observed))
+        {
+            return false;
+        }
     }
+}
+
+void Queue__wait_readable(QueuePtr self)
+{
+    Queue__wait_readable_interruptible(self);
+}
+
+void Queue__wait_writable(QueuePtr self)
+{
+    Queue__wait_writable_interruptible(self);
 }
 
 void QueueArrivals__wait(QueueArrivalsPtr self, QueueEpoch observed_epoch)

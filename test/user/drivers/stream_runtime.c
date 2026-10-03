@@ -22,6 +22,14 @@ IOStreamDriver IOStreamDriver__new(Flags access, IOServiceContext context, IOStr
     return (IOStreamDriver){.access = access, .context = context, .transfer = transfer};
 }
 
+IOStreamDriver IOStreamDriver__new_terminal(Flags access, IOServiceContext context, IOStreamTransfer transfer)
+{
+    IOStreamDriver driver = IOStreamDriver__new(access, context, transfer);
+    driver.terminal = true;
+    driver.terminal_attributes = IOTerminalAttributes__default();
+    return driver;
+}
+
 Optional(IOReply)
     IOStreamDriver__execute(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request)
 {

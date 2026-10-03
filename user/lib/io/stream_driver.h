@@ -5,8 +5,7 @@
 typedef struct IOStreamResource
 {
     IOHandle handle;
-    QueueConnectionID session;
-    uint64_t pid;
+    IOResourceOwners owners;
     Flags flags;
 } IOStreamResource;
 
@@ -21,14 +20,18 @@ typedef IOReply (*IOStreamTransfer)(IOServiceContext context, IORequestPtr reque
 typedef struct IOStreamDriver
 {
     IOStreamResources resources;
+    IOInheritanceRegistry inheritance;
     IOHandle next_handle;
     Flags access;
     IOServiceContext context;
     IOStreamTransfer transfer;
+    bool terminal;
+    IOTerminalAttributes terminal_attributes;
 } IOStreamDriver;
 
 typedef IOStreamDriver * IOStreamDriverPtr;
 IOStreamDriver IOStreamDriver__new(Flags access, IOServiceContext context, IOStreamTransfer transfer);
+IOStreamDriver IOStreamDriver__new_terminal(Flags access, IOServiceContext context, IOStreamTransfer transfer);
 Optional(IOReply)
     IOStreamDriver__execute(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request);
 bool IOStreamDriver__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid);

@@ -1424,6 +1424,7 @@ void test_pending_signals_preserve_other_bits_and_prioritize_kill(void)
     ProcessPtr process = dummy_process(100, cpu_id, PROC_STATE_READY);
     Process__queue_signal(process, PROCESS_SIGNAL_INTERRUPT);
     Process__queue_signal(process, PROCESS_SIGNAL_TERMINATE);
+    Process__queue_signal(process, PROCESS_SIGNAL_ABORT);
     Process__queue_signal(process, PROCESS_SIGNAL_KILL);
     match_optional(
         Process__take_pending_signal(process),
@@ -1438,7 +1439,7 @@ void test_pending_signals_preserve_other_bits_and_prioritize_kill(void)
         Process__take_pending_signal(process),
         some(signal)
         {
-            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_TERMINATE, signal);
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INTERRUPT, signal);
         },
         none_test_fail()
     );
@@ -1446,7 +1447,15 @@ void test_pending_signals_preserve_other_bits_and_prioritize_kill(void)
         Process__take_pending_signal(process),
         some(signal)
         {
-            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INTERRUPT, signal);
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_ABORT, signal);
+        },
+        none_test_fail()
+    );
+    match_optional(
+        Process__take_pending_signal(process),
+        some(signal)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_TERMINATE, signal);
         },
         none_test_fail()
     );
@@ -1455,6 +1464,207 @@ void test_pending_signals_preserve_other_bits_and_prioritize_kill(void)
         some_test_fail(),
         none_do_nothing()
     );
+}
+
+void test_stop_and_continue_update_scheduler_state_and_parent_events(void)
+{
+    ProcessPtr parent = dummy_process(90, cpu_id, PROC_STATE_READY);
+    ProcessPtr child = dummy_process_with_parent(91, cpu_id, PROC_STATE_RUNNING, parent);
+    Scheduler__schedule_on_cpu(scheduler, parent, cpu_id);
+    Scheduler__schedule_on_cpu(scheduler, child, cpu_id);
+    child->state = PROC_STATE_RUNNING;
+    ProcessContext context = *Process__required_context(child);
+
+    Process__queue_signal(child, PROCESS_SIGNAL_TERMINAL_STOP);
+    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_DELIVERY_STOP, Scheduler__deliver_pending_signal(scheduler, child, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_STOPPED, child->state);
+    TEST_ASSERT_FALSE(Process__has_pending_resume_signal(child));
+    match_result(
+        Scheduler__child_take_event(scheduler, parent, child->pid, PROCESS_CHILD_WAIT_UNTRACED),
+        success(event)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_STOPPED, event.type);
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_WAIT_STATUS_STOPPED(PROCESS_SIGNAL_TERMINAL_STOP), event.status);
+        },
+        error_test_fail()
+    );
+
+    match_result(Scheduler__queue_signal(scheduler, child->pid, PROCESS_SIGNAL_CONTINUE),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, child->state);
+    match_result(
+        Scheduler__child_take_event(scheduler, parent, child->pid, PROCESS_CHILD_WAIT_CONTINUED),
+        success(event)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_CONTINUED, event.type);
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_WAIT_STATUS_CONTINUED, event.status);
+        },
+        error_test_fail()
+    );
+}
+
+void test_stopped_process_only_becomes_runnable_for_continue_or_kill(void)
+{
+    ProcessPtr process = dummy_process(92, cpu_id, PROC_STATE_STOPPED);
+    Scheduler__schedule_on_cpu(scheduler, process, cpu_id);
+    process->state = PROC_STATE_STOPPED;
+
+    match_result(Scheduler__queue_signal(scheduler, process->pid, PROCESS_SIGNAL_USER_1),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_STOPPED, process->state);
+
+    match_result(Scheduler__queue_signal(scheduler, process->pid, PROCESS_SIGNAL_KILL),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, process->state);
+}
+
+void test_process_group_changes_enforce_session_child_and_exec_rules(void)
+{
+    ProcessPtr caller = dummy_process(100, cpu_id, PROC_STATE_READY);
+    ProcessPtr group_member = dummy_process(101, cpu_id, PROC_STATE_READY);
+    ProcessPtr child = dummy_process_with_parent(102, cpu_id, PROC_STATE_READY, caller);
+    caller->session_id = 10;
+    caller->process_group_id = 20;
+    group_member->session_id = 10;
+    group_member->process_group_id = group_member->pid;
+    child->session_id = 10;
+    child->process_group_id = 20;
+    child->execed_since_fork = false;
+    match_result(Scheduler__schedule_on_cpu(scheduler, caller, cpu_id),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Scheduler__schedule_on_cpu(scheduler, group_member, cpu_id),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Scheduler__schedule_on_cpu(scheduler, child, cpu_id),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    match_result(
+        Scheduler__set_process_group(scheduler, caller, child->pid, group_member->pid),
+        success(group)
+        {
+            TEST_ASSERT_EQUAL_UINT64(group_member->pid, group);
+        },
+        error_test_fail()
+    );
+    child->execed_since_fork = true;
+    match_result(
+        Scheduler__set_process_group(scheduler, caller, child->pid, child->pid),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_GROUP_PERMISSION_DENIED, code);
+        }
+    );
+    match_result(
+        Scheduler__set_process_group(scheduler, caller, 0, 999),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_GROUP_PERMISSION_DENIED, code);
+        }
+    );
+
+    match_result(
+        Scheduler__create_session(scheduler, caller),
+        success(session)
+        {
+            TEST_ASSERT_EQUAL_UINT64(caller->pid, session);
+            TEST_ASSERT_EQUAL_UINT64(caller->pid, caller->session_id);
+            TEST_ASSERT_EQUAL_UINT64(caller->pid, caller->process_group_id);
+        },
+        error_test_fail()
+    );
+    match_result(
+        Scheduler__create_session(scheduler, caller),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_GROUP_PERMISSION_DENIED, code);
+        }
+    );
+}
+
+void test_group_signal_delivery_obeys_target_and_identity_permissions(void)
+{
+    ProcessPtr sender = dummy_process(110, cpu_id, PROC_STATE_READY);
+    ProcessPtr peer = dummy_process(111, cpu_id, PROC_STATE_READY);
+    ProcessPtr denied = dummy_process(112, cpu_id, PROC_STATE_READY);
+    sender->session_id = 50;
+    sender->process_group_id = 60;
+    peer->session_id = 50;
+    peer->process_group_id = 60;
+    denied->session_id = 50;
+    denied->process_group_id = 60;
+    Process__set_identity(sender, 100, 100, PROCESS_CAP_NONE);
+    Process__set_identity(peer, 100, 100, PROCESS_CAP_NONE);
+    Process__set_identity(denied, 200, 200, PROCESS_CAP_NONE);
+    Scheduler__schedule_on_cpu(scheduler, sender, cpu_id);
+    Scheduler__schedule_on_cpu(scheduler, peer, cpu_id);
+    Scheduler__schedule_on_cpu(scheduler, denied, cpu_id);
+
+    match_result(
+        Scheduler__send_signal(scheduler, sender, 0, PROCESS_SIGNAL_USER_1),
+        success(delivered)
+        {
+            TEST_ASSERT_EQUAL_UINT64(2, delivered);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(Process__has_pending_signal(sender));
+    TEST_ASSERT_TRUE(Process__has_pending_signal(peer));
+    TEST_ASSERT_FALSE(Process__has_pending_signal(denied));
+
+    match_result(
+        Scheduler__send_signal(scheduler, sender, denied->pid, PROCESS_SIGNAL_CONTINUE),
+        success(delivered)
+        {
+            TEST_ASSERT_EQUAL_UINT64(1, delivered);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(Process__has_pending_resume_signal(denied));
+}
+
+void test_signal_suspend_atomically_restores_mask_and_wakes_for_handler(void)
+{
+    ProcessPtr process = dummy_process(120, cpu_id, PROC_STATE_READY);
+    Scheduler__schedule_on_cpu(scheduler, process, cpu_id);
+    ProcessSignalMask original = 1ULL << (PROCESS_SIGNAL_USER_1 - 1);
+    ProcessSignalMask temporary = 1ULL << (PROCESS_SIGNAL_USER_2 - 1);
+    ProcessSignalAction action = ProcessSignalAction__new(0x1000, 0x2000, 0, 0);
+    match_result(Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_SET, original),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    match_result(Process__set_signal_action(process, PROCESS_SIGNAL_INTERRUPT, &action),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+
+    match_result(Scheduler__signal_suspend(scheduler, process, temporary),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, process->state);
+    TEST_ASSERT_EQUAL_UINT64(temporary, Process__signal_mask(process));
+    match_result(Scheduler__queue_signal(scheduler, process->pid, PROCESS_SIGNAL_INTERRUPT),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, process->state);
+    TEST_ASSERT_EQUAL_UINT64(original, Process__signal_mask(process));
+    TEST_ASSERT_TRUE(Process__has_ready_parked_operation(process, PARK_WAIT_SIGNAL, &None(OperationKey)));
 }
 
 void test_scheduler_timer_preemption_is_suppressed_for_active_irq_service(void)

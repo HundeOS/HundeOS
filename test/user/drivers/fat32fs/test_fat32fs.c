@@ -308,6 +308,24 @@ void test_fat32fs_writes_chunks_and_reopens_file(void)
     TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 100, 42));
 }
 
+void test_fat32fs_exclusive_create_materializes_an_empty_file_and_rejects_collision(void)
+{
+    Fat32fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/EXCLUSIV.TXT"));
+    request.flags = IO_OPEN_WRITE | IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE;
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    TEST_ASSERT_EQUAL(IO_ALREADY_EXISTS, FilesystemDriver__execute(&driver, &request).status);
+
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/EXCLUSIV.TXT"));
+    request.flags = IO_OPEN_READ;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    request = request_for(IO_REQUEST_READ, opened.value, &empty_bstr());
+    request.count = 1;
+    TEST_ASSERT_EQUAL_UINT64(0, FilesystemDriver__execute(&driver, &request).value);
+}
+
 void test_fat32fs_creates_and_removes_directory(void)
 {
     Fat32fsVolume volume = {.device_path = expected_device_path};

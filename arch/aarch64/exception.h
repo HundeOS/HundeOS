@@ -14,7 +14,7 @@ void Exception__handle_irq_current_spx(ProcessContextPtr context);
 void Exception__handle_fiq_current_spx(ProcessContextPtr context);
 void Exception__handle_serror_current_spx(ProcessContextPtr context);
 
-void Exception__handle_sync_lower_aarch64(ProcessContextPtr context);
+uint64_t Exception__handle_sync_lower_aarch64(ProcessContextPtr context);
 void Exception__handle_irq_lower_aarch64(ProcessContextPtr context);
 void Exception__handle_fiq_lower_aarch64(ProcessContextPtr context);
 void Exception__handle_serror_lower_aarch64(ProcessContextPtr context);

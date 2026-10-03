@@ -4,3 +4,4 @@ manifest:
   source_files:
     - user/drivers/devfs/devfs.c
     - user/lib/io/filesystem_driver.c
+    - user/lib/io/inheritance.c

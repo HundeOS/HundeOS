@@ -11,6 +11,53 @@
 
 static BString exec_load_pending = bstr("Executable load pending");
 
+typedef struct ValidatedExecPayload
+{
+    KernelAddress allocation;
+    BString path;
+} ValidatedExecPayload;
+
+ResultDef(ValidatedExecPayload);
+
+static ValidatedExecPayload ValidatedExecPayload__new(KernelAddress allocation, ConstBStringPtr path)
+{
+    return (ValidatedExecPayload){.allocation = allocation, .path = *path};
+}
+
+static Result(ValidatedExecPayload) ExecPayload__copy_from_user(ConstSpawnRequestPtr request)
+{
+    if (request->overlay_payload == 0 || request->overlay_payload_size < sizeof(ExecPayload))
+    {
+        return Error(ValidatedExecPayload, bstr("Invalid exec payload"), SPAWN_FAILED);
+    }
+    if (request->overlay_payload_size > EXEC_PAYLOAD_MAX)
+    {
+        return Error(ValidatedExecPayload, bstr("Exec payload too large"), SPAWN_ARG_TOO_LONG);
+    }
+    KernelAddress allocation = Kernel__alloc(request->overlay_payload_size);
+    if (!allocation.valid)
+    {
+        return Error(ValidatedExecPayload, bstr("Cannot allocate exec payload"), SPAWN_NO_MEM);
+    }
+    Kernel__memcopy(request->overlay_payload, allocation.virtual_addr, request->overlay_payload_size);
+    ConstExecPayloadPtr payload = (ConstExecPayloadPtr)allocation.virtual_addr;
+    ExecPayloadStatus status = ExecPayload__validate(payload, request->overlay_payload_size);
+    if (status != EXEC_PAYLOAD_OK)
+    {
+        Kernel__free(allocation.virtual_addr);
+        return Error(ValidatedExecPayload, bstr("Invalid exec payload"),
+                     status == EXEC_PAYLOAD_TOO_LARGE ? SPAWN_ARG_TOO_LONG : SPAWN_FAILED);
+    }
+    size_t path_length = ExecPayload__bounded_string_length(payload, payload->path_offset);
+    if (path_length >= IO_PROTOCOL_DATA_SIZE)
+    {
+        Kernel__free(allocation.virtual_addr);
+        return Error(ValidatedExecPayload, bstr("Exec path too long"), SPAWN_NO_PATH);
+    }
+    BString path = BString__from_chars(ExecPayload__path(payload), path_length);
+    return Success(ValidatedExecPayload, ValidatedExecPayload__new(allocation, &path));
+}
+
 static Result(ProcessPtr) ExecLoad__caller(ParkedOperationPtr parked_operation)
 {
     match_optional(
@@ -48,7 +95,7 @@ static Result(Anything) ExecLoad__complete_syscall(ParkedOperationPtr parked_ope
                 ExecLoad__continue(process),
                 success(child)
                 {
-                    return Success(Anything, child->pid);
+                    return Success(Anything, child == process ? process->startup_argument_count : child->pid);
                 },
                 error(code, message)
                 {
@@ -84,10 +131,11 @@ static Result(Anything) ExecLoad__complete_syscall(ParkedOperationPtr parked_ope
 
 static Result(SystemCallResult)
     ExecLoad__start_syscall(ProcessPtr process, ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,
-                            OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments, ConstSpawnStdioPtr stdio)
+                            OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments, ConstSpawnStdioPtr stdio,
+                            bool overlay, KernelAddress overlay_payload)
 {
     match_result(
-        ExecLoad__begin(context, path, wait, user, arguments, stdio),
+        ExecLoad__begin(context, path, wait, user, arguments, stdio, overlay, overlay_payload),
         success(child)
         {
             return Success(SystemCallResult, child->pid);
@@ -96,6 +144,10 @@ static Result(SystemCallResult)
         {
             if (code != SPAWN_PENDING)
             {
+                if (overlay_payload.valid)
+                {
+                    Kernel__free(overlay_payload.virtual_addr);
+                }
                 return Error(SystemCallResult, message, code);
             }
         }
@@ -104,7 +156,7 @@ static Result(SystemCallResult)
         ExecLoad__continue(process),
         success(child)
         {
-            return Success(SystemCallResult, child->pid);
+            return Success(SystemCallResult, child == process ? process->startup_argument_count : child->pid);
         },
         error(code, message)
         {
@@ -165,44 +217,70 @@ static Result(SystemCallResult)
         }
     );
 
-    SpawnRequestPtr request = (SpawnRequestPtr)arg1;
+    SpawnRequest request = *(SpawnRequestPtr)arg1;
 
-    __d_printf(EXEC, "exec request handler path=%s mode=%i requested_user=%i auth_ticket=%i\n", cstr(request->path),
-               request->mode, (int)request->requested_user_id, (int)request->auth_ticket_id);
+    bool overlay = request.mode == P_OVERLAY;
+    if (overlay && (bootstrap || request.auth_ticket_id != SPAWN_INHERIT_AUTH_TICKET))
+    {
+        return Error(SystemCallResult, bstr("Invalid process overlay request"), SPAWN_FAILED);
+    }
+    KernelAddress overlay_payload = NULL_KERNEL_ADDRESS;
+    BString requested_path = request.path;
+    if (overlay)
+    {
+        match_result(
+            ExecPayload__copy_from_user(&request),
+            success(validated)
+            {
+                overlay_payload = validated.allocation;
+                requested_path = validated.path;
+            },
+            error(code, message)
+            {
+                return Error(SystemCallResult, message, code);
+            }
+        );
+    }
+
+    __d_printf(EXEC, "exec request handler path=%s mode=%i requested_user=%i auth_ticket=%i\n", cstr(requested_path),
+               request.mode, (int)request.requested_user_id, (int)request.auth_ticket_id);
 
     ProcessArguments arguments = ProcessArguments__new();
-    SpawnArguments requested_arguments = request->arguments;
-    for_each_fa(
-        SpawnArguments,
-        requested_arguments,
-        argument_index,
-        argument,
-        {
-            match_result(
-                ProcessArguments__push(&arguments, argument),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(SystemCallResult, message, SPAWN_ARG_TOO_LONG);
-                }
-            );
-        }
-    );
+    if (!overlay)
+    {
+        SpawnArguments requested_arguments = request.arguments;
+        for_each_fa(
+            SpawnArguments,
+            requested_arguments,
+            argument_index,
+            argument,
+            {
+                match_result(
+                    ProcessArguments__push(&arguments, argument),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, SPAWN_ARG_TOO_LONG);
+                    }
+                );
+            }
+        );
+    }
 
-    CallContext call_context = CallContext__new(proc, EXEC, arg1, arg2, arg3, arg4, arg5);
+    CallContext call_context = CallContext__new(proc, SYSCALL_EXEC_REQUEST, arg1, arg2, arg3, arg4, arg5);
     OriginatingContext originating_context = OriginatingContext__syscall(kernel, &call_context);
 
-    SpawnMode mode = request->mode;
+    SpawnMode mode = request.mode;
     bool wait = mode == P_WAIT;
     Optional(UserID) requested_user_id = None(UserID);
-    if (request->auth_ticket_id != SPAWN_INHERIT_AUTH_TICKET)
+    if (request.auth_ticket_id != SPAWN_INHERIT_AUTH_TICKET)
     {
         match_optional(
             *proc,
             some(process)
             {
                 match_result(
-                    Auth__consume_ticket(&kernel->auth, process, request->auth_ticket_id),
+                    Auth__consume_ticket(&kernel->auth, process, request.auth_ticket_id),
                     success(user_id)
                     {
                         requested_user_id = Some(UserID, user_id);
@@ -223,21 +301,21 @@ static Result(SystemCallResult)
 
     if (!bootstrap)
     {
-        return ExecLoad__start_syscall(process, &originating_context, &request->path, wait, &requested_user_id,
-                                       &arguments, &request->stdio);
+        return ExecLoad__start_syscall(process, &originating_context, &requested_path, wait, &requested_user_id,
+                                       &arguments, &request.stdio, overlay, overlay_payload);
     }
-    Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(&originating_context, &request->path, wait,
-                                                                      &requested_user_id, &arguments, &request->stdio);
+    Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(&originating_context, &requested_path, wait,
+                                                                      &requested_user_id, &arguments, &request.stdio);
     match_result(
         exec_res,
         success(spawned_proc)
         {
-            __d_printf(EXEC, "exec request handler success path=%s pid=%i\n", cstr(request->path), spawned_proc->pid);
+            __d_printf(EXEC, "exec request handler success path=%s pid=%i\n", cstr(requested_path), spawned_proc->pid);
             return Success(SystemCallResult, spawned_proc->pid);
         },
         error(code, message)
         {
-            __d_printf(EXEC, "exec request handler error path=%s code=%i message=%s\n", cstr(request->path), code,
+            __d_printf(EXEC, "exec request handler error path=%s code=%i message=%s\n", cstr(requested_path), code,
                        cstr(message));
             return Error(SystemCallResult, message, code);
         }

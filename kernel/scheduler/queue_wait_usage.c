@@ -49,6 +49,26 @@ void QueueWaitUsage__wake(QueueWaitUsagePtr self, QueueWaitCode reason)
     );
 }
 
+void QueueWaitUsage__cancel(QueueWaitUsagePtr self)
+{
+    critical_section(
+        self->lock,
+        {
+            if (self->state != QUEUE_WAIT_USAGE_PARKED)
+            {
+                cs_return;
+            }
+            uint64_t elapsed = CPU__time_usec() - self->since_usec;
+            self->totals.parked_usec += elapsed;
+            if (elapsed > self->totals.max_parked_usec)
+            {
+                self->totals.max_parked_usec = elapsed;
+            }
+            self->state = QUEUE_WAIT_USAGE_IDLE;
+        }
+    );
+}
+
 void QueueWaitUsage__select(QueueWaitUsagePtr self)
 {
     critical_section(

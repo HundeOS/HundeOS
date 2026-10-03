@@ -42,9 +42,22 @@ converts native EOF and error statuses to POSIX return values and `errno`.
 Descriptors `0`, `1`, and `2` retain their standard stream meanings. This map
 and the stdio implementation are entirely userspace concerns.
 
+The POSIX compatibility layer also owns each process's current working
+directory. It resolves relative paths before sending absolute paths to
+`hund-io-system`; `chdir` verifies the destination through the ordinary file
+information request, and `getcwd` reports the stored normalized path. Fork
+inherits this userspace state with the rest of the address space. Exec carries
+the path in its validated startup payload so the replacement image retains the
+same directory, while native kernel spawns begin at `/`. The kernel transports
+this startup string but does not resolve paths or own filesystem namespace
+state.
+
 Pinned, unmodified OpenBSD `cat`, `cp`, `grep`, and `tail` sources are built
 directly from `vendor/openbsd` and installed in the disk rootfs under
-`/usr/local/bin`.
+`/usr/local/bin`. The pinned, unmodified OpenBSD `kill` source is also built and
+installed there. Its positive-PID and signal-zero paths use the shared signal
+compatibility layer; process-group targets remain unsupported until the process
+group and permission work recorded in `docs/TODO.md` is complete.
 The compatibility stdio layer uses seek-aware file read buffering and
 line-buffered standard output to avoid an I/O-service request for each
 character. `fstat` exposes a transfer block size but not full filesystem
@@ -82,6 +95,35 @@ state. Socket/network services own their network-specific state.
 Device drivers own device operations. Moving the front end must move real
 ownership out of the kernel, not introduce a service that forwards the same
 I/O syscalls back into the kernel.
+
+Anonymous pipes are owned by the `hund-rohr` userspace service. `hund-io-system`
+only returns a final redirect for pipe creation. Each pipe has independently
+authenticated read and write endpoint handles and a service-private 64 KiB byte
+ring. Reads wait while the ring is empty and a writer remains, then return EOF
+after the final writer closes. Writes of at most 4096 bytes are admitted
+atomically; larger writes may make partial progress. A full ring retains the
+request through the ordinary I/O server wait path. A transfer carrying
+`IO_TRANSFER_NONBLOCK` instead receives `IO_WOULD_BLOCK`, which the POSIX layer
+maps to `EAGAIN`; blocking descriptors continue to use the retained-request
+path. A write with no readers returns `IO_BROKEN_PIPE`. Data still moves through
+the session's directional
+`hunde-puffer` buffers; the pipe ring is service state, not another IPC
+transport.
+
+The POSIX compatibility layer maps each descriptor to a reference-counted local
+open description. `dup`, `dup2`, and `F_DUPFD` therefore share one native pipe
+endpoint, its access mode and `O_NONBLOCK` status, and close it only after the
+final local descriptor closes. `F_GETFL` and `F_SETFL` operate on that shared
+open description, while `FD_CLOEXEC` remains local to each descriptor. These
+local references do not authorize another process. Fork inheritance still
+requires a child-owned Channel session and an explicit service grant to the same
+open resource, as tracked in `docs/TODO.md`.
+
+`O_APPEND` is also shared through the local open description. Libc marks each
+write request with `IO_TRANSFER_APPEND`; the final filesystem service selects
+the file's current size and performs the write in the same service operation.
+Seeking an append descriptor therefore does not change the next write position,
+and independent append handles cannot select the same stale end offset.
 
 `hundekanal-warter` remains responsible for channel establishment and session
 lifecycle. It does not interpret I/O operations. The kernel retains scheduling,
@@ -242,6 +284,14 @@ startup context; userspace lazily opens its own input/output/error handles.
 Login and child commands therefore use independently authenticated sessions.
 General channel-handle inheritance is not implemented. Closing a local standard
 stream does not update the kernel's inherited endpoint metadata.
+
+The userspace compatibility layer also derives terminal identity from that
+metadata. UART descriptors report `:tty:` and keyboard/video descriptors report
+the logical `:console:` terminal. `ttyname` and `isatty` preserve this identity
+when a standard descriptor is duplicated, and reject closed, invalid, and
+non-terminal descriptors. This identity does not yet provide a `/dev/tty` node
+or a bidirectional terminal open; those remain part of controlling-terminal
+support.
 
 The kernel stores only the three startup endpoint values, not an open-file
 descriptor table. Spawn may select terminal endpoint markers or the parent's

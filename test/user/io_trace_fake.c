@@ -4,6 +4,10 @@ void IOTrace__set_enabled(bool enabled)
 {
 }
 
+void IOTrace__reset_after_fork(void)
+{
+}
+
 TraceStatus IOTrace__prepare(void)
 {
     return TRACE_OK;

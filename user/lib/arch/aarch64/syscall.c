@@ -12,3 +12,11 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
     __asm__ __volatile__("svc #0\n" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x8) : "memory", "cc");
     return x0; // syscall result
 }
+
+__attribute__((noreturn)) void process_signal_restorer(void)
+{
+    __asm__ volatile("mov x8, #0x95\n"
+                     "svc #0\n"
+                     "brk #0\n");
+    __builtin_unreachable();
+}

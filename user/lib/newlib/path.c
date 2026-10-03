@@ -9,30 +9,8 @@
 #include <unistd.h>
 
 #include "../sys/io.h"
+#include "current_directory.h"
 #include "posix_io.h"
-
-static int PosixPath__absolute(const char * path, BStringPtr result)
-{
-    if (path == NULL)
-    {
-        errno = EFAULT;
-        return -1;
-    }
-    size_t length = strlen(path);
-    if (length == 0)
-    {
-        errno = ENOENT;
-        return -1;
-    }
-    if (length >= BSTRING_MAX_SIZE || (path[0] != '/' && length + 1 >= BSTRING_MAX_SIZE))
-    {
-        errno = ENAMETOOLONG;
-        return -1;
-    }
-    BString argument = BString__new(path);
-    *result = IO__path_from_arg(&argument);
-    return 0;
-}
 
 int access(const char * path, int mode)
 {
@@ -108,37 +86,10 @@ int rename(const char * source, const char * target)
     return -1;
 }
 
-int isatty(int descriptor)
-{
-    return descriptor >= STDIN_FILENO && descriptor <= STDERR_FILENO;
-}
-
 int readlink(const char * path, char * buffer, size_t size)
 {
     errno = EINVAL;
     return -1;
-}
-
-uid_t getuid(void)
-{
-    return 0;
-}
-
-gid_t getgid(void)
-{
-    return 0;
-}
-
-char * getcwd(char * buffer, size_t size)
-{
-    if (buffer == NULL || size < 2)
-    {
-        errno = EINVAL;
-        return NULL;
-    }
-    buffer[0] = '/';
-    buffer[1] = '\0';
-    return buffer;
 }
 
 char * realpath(const char * path, char * resolved)

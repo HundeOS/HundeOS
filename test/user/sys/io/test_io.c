@@ -26,6 +26,12 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     return next_result;
 }
 
+Result(IOPipe) IOClient__pipe(void)
+{
+    TEST_FAIL_MESSAGE("Unexpected pipe");
+    return Error(IOPipe, bstr("unexpected pipe"), IO_OPERATION_NOT_SUPPORTED);
+}
+
 IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
     last_operation = IO_REQUEST_LINK;
@@ -56,6 +62,16 @@ IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
     return IO_OPERATION_NOT_SUPPORTED;
 }
 
+IOTerminalAttributesResult IOClient__get_terminal_attributes(IOHandle handle)
+{
+    return IOTerminalAttributesResult__new(IO_OPERATION_NOT_SUPPORTED, (IOTerminalAttributes){0});
+}
+
+IOStatus IOClient__set_terminal_attributes(IOHandle handle, IOTerminalAttributes attributes)
+{
+    return IO_OPERATION_NOT_SUPPORTED;
+}
+
 ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
 {
     last_operation = IO_REQUEST_READ;
@@ -68,6 +84,11 @@ ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
     return next_read_result;
 }
 
+ByteCount IOClient__read_with_flags(IOHandle handle, ChannelDataPtr data, size_t size, Flags flags)
+{
+    return IOClient__read(handle, data, size);
+}
+
 ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size)
 {
     last_operation = IO_REQUEST_WRITE;
@@ -75,6 +96,11 @@ ByteCount IOClient__write(IOHandle handle, ConstChannelDataPtr data, size_t size
     last_write_data = data;
     last_write_size = size;
     return next_result;
+}
+
+ByteCount IOClient__write_with_flags(IOHandle handle, ConstChannelDataPtr data, size_t size, Flags flags)
+{
+    return IOClient__write(handle, data, size);
 }
 
 IOReply IOClient__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)

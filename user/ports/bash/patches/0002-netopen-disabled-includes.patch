@@ -1,0 +1,21 @@
+diff --git a/lib/sh/netopen.c b/lib/sh/netopen.c
+--- a/lib/sh/netopen.c
++++ b/lib/sh/netopen.c
+@@ -24,6 +24,9 @@
+ 
+ #include <config.h>
+ 
++#include <bashintl.h>
++#include <error.h>
++
+ #if defined (HAVE_NETWORK)
+ 
+ #if defined (HAVE_UNISTD_H)
+@@ -51,7 +54,6 @@
+ #endif
+ 
+ #include <bashansi.h>
+-#include <bashintl.h>
+ 
+ #include <errno.h>
+ 

@@ -32,6 +32,9 @@ typedef struct PiUefiHandoff
     PiUefiPhysicalMemoryRegion physical_memory_regions[PI_UEFI_MAX_PHYSICAL_MEMORY_REGIONS];
     uint64_t framebuffer_present;
     PiUefiFramebuffer framebuffer;
+    uint64_t realtime_clock_present;
+    uint64_t realtime_unix_usec;
+    uint64_t realtime_monotonic_usec;
 } PiUefiHandoff;
 
 typedef PiUefiHandoff * PiUefiHandoffPtr;

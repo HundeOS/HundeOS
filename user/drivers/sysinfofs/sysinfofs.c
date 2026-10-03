@@ -1,6 +1,6 @@
 #include "sysinfofs.h"
+#include "memory.h"
 #include "sys/boot_info.h"
-#include <string.h>
 
 typedef struct SysinfoWriter
 {
@@ -25,7 +25,7 @@ static void SysinfoWriter__line(SysinfoWriterPtr self, ConstBStringPtr key, uint
         self->failed = true;
         return;
     }
-    memcpy(self->data + self->size, BString__cstr(&line), size);
+    Mem__memcpy(self->data + self->size, BString__cstr(&line), size);
     self->size += size;
 }
 
@@ -38,6 +38,21 @@ Result(FilesystemFileSize) Sysinfofs__render(BootHardwareInfoPtr info, Filesyste
     SysinfoWriter__line(&writer, &bstr("uart.mmio_size"), info->uart.mmio_size);
     SysinfoWriter__line(&writer, &bstr("uart.irq"), info->uart.irq);
     SysinfoWriter__line(&writer, &bstr("uart.kind"), info->uart.kind);
+    match_optional(
+        info->rtc,
+        some(value)
+        {
+            SysinfoWriter__line(&writer, &bstr("rtc.present"), 1);
+            SysinfoWriter__line(&writer, &bstr("rtc.physical_base"), value.device.physical_base);
+            SysinfoWriter__line(&writer, &bstr("rtc.mmio_size"), value.device.mmio_size);
+            SysinfoWriter__line(&writer, &bstr("rtc.irq"), value.device.irq);
+            SysinfoWriter__line(&writer, &bstr("rtc.kind"), value.kind);
+        },
+        none()
+        {
+            SysinfoWriter__line(&writer, &bstr("rtc.present"), 0);
+        }
+    );
     match_optional(
         info->framebuffer,
         some(value)

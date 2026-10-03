@@ -577,11 +577,16 @@ void test_child_exit_wakes_parent_from_shared_wait(void)
     publish_shared_wait(control, &observed);
     QueueWaitWakeGeneration generation = QueueWaitControl__wake_generation(control);
     KernelContext context = KernelContext__new(&Some(ProcessID, server->pid), &Some(SchedulerPtr, kernel->scheduler));
-    match_result(Scheduler__park(kernel->scheduler, server, &context, &None(Continuation), PARK_WAIT_CHILD_EVENT),
-                 success_do_nothing(),
-        error_test_fail()
-    );
     client->parent = Some(ProcessPtr, server);
+    match_result(
+        Scheduler__child_wait_with_context_ownership(kernel->scheduler, server, &context, &None(Continuation), false,
+                                                     -1, false),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_QUEUE_EMPTY, code);
+        }
+    );
 
     match_result(Scheduler__exit(kernel->scheduler, client, 0),
         success_do_nothing(),

@@ -4,6 +4,7 @@
 #include "ipc/io_diagnostics.h"
 #include "sys/mem.h"
 #include "../../../user/lib/io/stream_driver.c"
+#include "../../../user/lib/io/inheritance.c"
 #include "../../../user/lib/io/stream_registry.c"
 
 static IOStreamDriver driver;
@@ -127,6 +128,39 @@ void test_read_stream_forwards_foreground_process_control(void)
     TEST_ASSERT_EQUAL_UINT64(42, last_transfer.foreground_pid);
 }
 
+void test_terminal_stream_persists_attributes_without_forwarding_control(void)
+{
+    driver = IOStreamDriver__new_terminal(IO_OPEN_READ, 0, transfer);
+    IOHandle handle = open_stream(31, 21, IO_OPEN_READ);
+    IORequest get = IORequest__new(IO_REQUEST_GET_TERMINAL_ATTRIBUTES, handle);
+    IOReply initial = execute(31, 21, get);
+
+    TEST_ASSERT_EQUAL(IO_OK, initial.status);
+    TEST_ASSERT_BITS(IO_TERMINAL_LOCAL_CANONICAL | IO_TERMINAL_LOCAL_ECHO,
+                     IO_TERMINAL_LOCAL_CANONICAL | IO_TERMINAL_LOCAL_ECHO, initial.terminal_attributes.local_flags);
+    TEST_ASSERT_EQUAL_UINT8(3, initial.terminal_attributes.control_characters[0]);
+
+    IORequest set = IORequest__new(IO_REQUEST_SET_TERMINAL_ATTRIBUTES, handle);
+    set.terminal_attributes = initial.terminal_attributes;
+    set.terminal_attributes.local_flags &= ~(IO_TERMINAL_LOCAL_CANONICAL | IO_TERMINAL_LOCAL_ECHO);
+    set.terminal_attributes.control_characters[6] = 7;
+    TEST_ASSERT_EQUAL(IO_OK, execute(31, 21, set).status);
+
+    IOReply changed = execute(31, 21, get);
+    TEST_ASSERT_EQUAL_UINT32(0, changed.terminal_attributes.local_flags &
+                                    (IO_TERMINAL_LOCAL_CANONICAL | IO_TERMINAL_LOCAL_ECHO));
+    TEST_ASSERT_EQUAL_UINT8(7, changed.terminal_attributes.control_characters[6]);
+    TEST_ASSERT_EQUAL_UINT(0, transfers);
+}
+
+void test_ordinary_stream_rejects_terminal_attribute_operations(void)
+{
+    IOHandle handle = open_stream(31, 21, IO_OPEN_WRITE);
+    IORequest get = IORequest__new(IO_REQUEST_GET_TERMINAL_ATTRIBUTES, handle);
+
+    TEST_ASSERT_EQUAL(IO_OPERATION_NOT_SUPPORTED, execute(31, 21, get).status);
+}
+
 void test_registry_returns_final_routes_for_registered_streams(void)
 {
     register_stream(&bstr(":printer:"), IO_OPEN_WRITE, &bstr("print-service"));
@@ -227,6 +261,33 @@ void test_close_and_disconnect_release_only_owned_handles(void)
     TEST_ASSERT_TRUE(IOStreamDriver__disconnect(&driver, 32, 22));
     TEST_ASSERT_EQUAL_UINT64(0, IOStreamResources__len(&driver.resources));
     TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, execute(32, 22, IORequest__new(IO_REQUEST_WRITE, second)).status);
+}
+
+void test_committed_inheritance_retains_stream_until_authenticated_child_claims(void)
+{
+    IOHandle handle = open_stream(31, 21, IO_OPEN_WRITE);
+    IOReply prepared = execute(31, 21, IORequest__new(IO_REQUEST_INHERIT_PREPARE, handle));
+    TEST_ASSERT_EQUAL(IO_OK, prepared.status);
+
+    IORequest commit = IORequest__new(IO_REQUEST_INHERIT_COMMIT, 0);
+    commit.inheritance_token = prepared.value;
+    commit.inheritance_pid = 22;
+    TEST_ASSERT_EQUAL(IO_OK, execute(31, 21, commit).status);
+    TEST_ASSERT_TRUE(IOStreamDriver__disconnect(&driver, 31, 21));
+    TEST_ASSERT_EQUAL_UINT64(1, IOStreamResources__len(&driver.resources));
+
+    IORequest claim = IORequest__new(IO_REQUEST_INHERIT_CLAIM, 0);
+    claim.inheritance_token = prepared.value;
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, execute(32, 23, claim).status);
+    IOReply claimed = execute(32, 22, claim);
+    TEST_ASSERT_EQUAL(IO_OK, claimed.status);
+    TEST_ASSERT_EQUAL_INT64(handle, claimed.value);
+
+    IORequest write = IORequest__new(IO_REQUEST_WRITE, handle);
+    write.count = 1;
+    TEST_ASSERT_EQUAL(IO_OK, execute(32, 22, write).status);
+    TEST_ASSERT_EQUAL(IO_OK, execute(32, 22, IORequest__new(IO_REQUEST_CLOSE, handle)).status);
+    TEST_ASSERT_EQUAL_UINT64(0, IOStreamResources__len(&driver.resources));
 }
 
 void test_stream_rejects_missing_identity_and_oversized_data(void)

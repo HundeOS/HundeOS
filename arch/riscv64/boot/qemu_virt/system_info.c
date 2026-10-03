@@ -129,6 +129,11 @@ SystemInfo RiscVPlatformInfo__system_info(ConstRiscVPlatformInfoPtr self, ConstR
     Address uart_virtual_base = RISCV_HIGHER_HALF_OFFSET + self->uart_base;
     info.mmio = MemoryRegion__new(uart_virtual_base, self->uart_base, self->uart_base + self->uart_size);
     info.uart = UartInfo__new(self->uart_base, uart_virtual_base, self->uart_irq, UART_KIND_NS16550);
+    if (self->rtc_size != 0)
+    {
+        BootDeviceInfo device = BootDeviceInfo__new(self->rtc_base, self->rtc_size, self->rtc_irq);
+        info.rtc = Some(BootRtcInfo, BootRtcInfo__new(&device, RTC_KIND_GOLDFISH));
+    }
     BootVirtioMmioInfo virtio_mmio = BootVirtioMmioInfo__new(self->virtio_mmio_base, self->virtio_mmio_size,
                                                              self->virtio_mmio_count, self->virtio_mmio_first_irq);
     info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);

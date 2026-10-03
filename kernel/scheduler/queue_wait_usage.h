@@ -25,6 +25,7 @@ typedef QueueWaitUsage * QueueWaitUsagePtr;
 QueueWaitUsage QueueWaitUsage__new(void);
 void QueueWaitUsage__park(QueueWaitUsagePtr self);
 void QueueWaitUsage__wake(QueueWaitUsagePtr self, QueueWaitCode reason);
+void QueueWaitUsage__cancel(QueueWaitUsagePtr self);
 void QueueWaitUsage__select(QueueWaitUsagePtr self);
 void QueueWaitUsage__select_speculative(QueueWaitUsagePtr self);
 ProcessQueueWaitUsage QueueWaitUsage__snapshot(QueueWaitUsagePtr self);

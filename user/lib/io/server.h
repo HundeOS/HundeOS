@@ -1,6 +1,7 @@
 #ifndef HUND_IO_PROTOCOL_SERVER_H
 #define HUND_IO_PROTOCOL_SERVER_H
 #include "protocol.h"
+#include "inheritance.h"
 #include "channel/server.h"
 #include "types/fixed_array.h"
 

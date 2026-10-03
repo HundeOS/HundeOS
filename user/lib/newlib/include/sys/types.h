@@ -5,8 +5,11 @@
 #include <stdint.h>
 
 typedef int64_t off_t;
+typedef int64_t pid_t;
 typedef int64_t ssize_t;
 typedef int64_t time_t;
+typedef int64_t suseconds_t;
+typedef int64_t clock_t;
 typedef uint64_t blkcnt_t;
 typedef uint64_t blksize_t;
 typedef uint64_t dev_t;
@@ -21,6 +24,12 @@ struct timespec
 {
     time_t tv_sec;
     long tv_nsec;
+};
+
+struct timeval
+{
+    time_t tv_sec;
+    suseconds_t tv_usec;
 };
 
 #define __dead __attribute__((noreturn))
