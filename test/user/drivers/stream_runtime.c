@@ -1,7 +1,13 @@
 #include "stream_runtime.h"
 #include <setjmp.h>
+#include "syscalls/syslog.h"
 static jmp_buf completed;
 static IOStreamDriverPtr active_driver;
+
+SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+{
+    return SYSLOG_OK;
+}
 
 int StreamDriverTest__run(int (*entry)(void))
 {
@@ -39,13 +45,6 @@ Optional(IOReply)
 bool IOStreamDriver__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid)
 {
     return true;
-}
-
-Result(IOService) IOService__listen(ConstBStringPtr name, IOServiceContext context, IOServiceExecute execute,
-                                    IOServiceDisconnect disconnect)
-{
-    active_driver = context;
-    return Success(IOService, ((IOService){0}));
 }
 
 IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServiceContext context,

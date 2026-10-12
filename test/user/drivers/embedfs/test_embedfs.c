@@ -61,7 +61,7 @@ void setUp(void)
         blob.bytes[index] = index % 251;
     }
     EmbeddedFs archive = EmbeddedFs__new((Address)&blob, (Address)&blob + sizeof(blob));
-    filesystem = Embedfs__new(&archive);
+    Embedfs__init(&filesystem, &archive);
     memset(&directory, 0, sizeof(directory));
     directory.magic = HUND_SERVICE_DIRECTORY_MAGIC;
     directory.version = HUND_SERVICE_DIRECTORY_VERSION;
@@ -75,6 +75,13 @@ void setUp(void)
 
 void tearDown(void)
 {
+}
+
+void test_init_uses_existing_storage(void)
+{
+    TEST_ASSERT_EQUAL(0, EmbedfsHandles__len(&filesystem.handles));
+    TEST_ASSERT_EQUAL(0, BStringArray__len(&filesystem.children));
+    TEST_ASSERT_EQUAL(IO_SESSION_HANDLE_BASE, filesystem.next_handle);
 }
 
 static IORequest request_for(IORequestOperation operation, IOHandle handle)

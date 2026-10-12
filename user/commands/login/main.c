@@ -25,11 +25,19 @@ int LOGIN_ENTRYPOINT(void)
             continue;
         }
 
-        SpawnResult result = spawn_with_auth(P_WAIT, (AuthTicketID)ticket, &bstr("/usr/local/bin/bash"), &SPAWN_NO_ARG,
-                                             &SPAWN_NO_ARG, &SPAWN_NO_ARG);
+        SpawnAbortReport abort_report = SpawnAbortReport__none();
+        SpawnResult result = spawn_with_auth_report(P_WAIT, (AuthTicketID)ticket, &bstr("/usr/local/bin/bash"),
+                                                    &abort_report, &SPAWN_NO_ARG, &SPAWN_NO_ARG, &SPAWN_NO_ARG);
         if (result < 0)
         {
             IO__printf(&bstr("login: failed to start bash: %i\n"), (int)result);
+            if (SpawnAbortReport__is_present(abort_report))
+            {
+                IO__printf(&bstr("login: bash fault reason=%llu cause=0x%llx pc=0x%llx address=0x%llx\n"),
+                           (unsigned long long)abort_report.reason,
+                           (unsigned long long)abort_report.exception_code, (unsigned long long)abort_report.pc,
+                           (unsigned long long)abort_report.fault_address);
+            }
             return 1;
         }
     }

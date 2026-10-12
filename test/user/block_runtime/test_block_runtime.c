@@ -1,8 +1,17 @@
 #include <stdlib.h>
 #include "unity.h"
+#include "../../../user/lib/sys/boot_info.h"
 #include "../../../user/lib/sys/mem.h"
 #include "../../../user/lib/channel/block_runtime.c"
 #include "../../../user/lib/channel/signal.c"
+
+Result(BootHardwareInfo) BootHardwareInfo__load(void)
+{
+    BootHardwareInfo info = BootHardwareInfo__new();
+    info.default_user_stack_size = FIBER_DEFAULT_STACK_SIZE;
+    return Success(BootHardwareInfo, info);
+}
+
 #include "../../../user/lib/fiber/fiber.c"
 #include "../../../user/lib/fiber/scheduler.c"
 

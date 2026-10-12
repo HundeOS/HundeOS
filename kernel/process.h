@@ -251,6 +251,7 @@ typedef struct Process
     CPUUsage cpu_usage;
     QueueWaitUsage queue_wait_usage;
     Optional(UserAddress) queue_wait_control;
+    Optional(IpcEventGeneration) queue_wait_doorbell;
     Optional(UserAddress) ipc_doorbell;
     BString name;
     uint64_t startup_argument_count;
@@ -310,6 +311,7 @@ bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalP
 bool Process__has_ready_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key);
 bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key,
                                           OptionalPtr(ReturnCode) return_code);
+bool Process__write_child_abort_report(ProcessPtr self, SpawnAbortReport report);
 bool Process__mark_child_wait_ready(ProcessPtr self, ProcessID child_pid, ProcessGroupID child_process_group_id,
                                     uint64_t event_type);
 bool Process__mark_signal_suspend_ready(ProcessPtr self);
@@ -348,6 +350,9 @@ Result(KAllocCode) Process__dispose_page_table(ProcessPtr self);
 Result(ProcessMemoryCode)
     Process__record_user_allocation(ProcessPtr self, UserAddress address, size_t size, UserAllocationType type);
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address);
+Optional(UserAddress) Process__readable_mmio_mapping(ProcessPtr self, Address virtual_address, size_t size);
+Optional(UserAddress) Process__writable_mmio_mapping(ProcessPtr self, Address virtual_address, size_t size);
+Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, Address virtual_address, size_t size);
 Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address mapping);
 void Process__quiesce_device(ProcessPtr self);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
@@ -361,6 +366,7 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
                                                                        Address source_virtual_address, size_t size);
 Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self);
 Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size);
+Result(UserAddress) Process__map_trapped_mmio(ProcessPtr self, Address physical, size_t size);
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment);
 Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virtual_address);
 Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self);

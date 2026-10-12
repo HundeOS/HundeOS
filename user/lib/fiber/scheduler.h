@@ -20,6 +20,7 @@ struct FiberScheduler
     Optional(FiberPtr) current;
     size_t live_count;
     size_t max_fibers;
+    size_t default_stack_size;
 };
 
 FiberScheduler FiberScheduler__new(void);

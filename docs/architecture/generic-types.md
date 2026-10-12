@@ -65,7 +65,7 @@ declares it; `FixedArrayBodyDefine(alias)` supplies its generated operations.
 
 | Need | Existing operation |
 | --- | --- |
-| Initialize or query length | `Alias__new`, `Alias__len` |
+| Initialize or query length | `Alias__init`, `Alias__new`, `Alias__len` |
 | Search using a predicate and context | `Alias__find` |
 | Locate a value using the configured equality function | `Alias__find_item` |
 | Select matching elements | `Alias__filter` |
@@ -86,6 +86,10 @@ predicate search: use `ChannelSessions__find` with a predicate comparing the
 connection ID, then match the result to determine presence. Do not write
 another traversal in `ChannelSessions__contains`, or construct a dummy
 exchange solely to search for one field with `__find_item`.
+
+Use `Alias__init` when the collection already has storage, especially for large
+fixed arrays where returning a new collection value would create a large
+temporary. `Alias__new` remains appropriate for ordinary local values.
 
 Check whether an operation returns a copy or a pointer before mutating an
 element. In particular, the `_ptr` suffix on `for_each_fa_ptr` refers to the

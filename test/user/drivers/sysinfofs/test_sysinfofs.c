@@ -40,11 +40,14 @@ IOStatus FilesystemOperations__unsupported_link(IOServiceContext context, ConstB
 
 void test_sysinfo_renders_configuration_readable_by_existing_drivers(void)
 {
-    hardware.uart = BootUartInfo__new(0x9000000, 4096, 33, UART_KIND_PL011);
+    hardware.uart = BootUartInfo__new(0x9000000, 4096, 33, UART_KIND_PL011, 0, 4);
     hardware.framebuffer =
         Some(BootFramebufferInfo, BootFramebufferInfo__new(0x30000000, 8192, 64, 32, 64, 0, 0, 0, 0, 0));
     BootDeviceInfo rtc_device = BootDeviceInfo__new(0x9010000, 4096, 34);
     hardware.rtc = Some(BootRtcInfo, BootRtcInfo__new(&rtc_device, RTC_KIND_PL031));
+    BootDeviceInfo sd_device = BootDeviceInfo__new(0x4310000, 0x1000, 36);
+    hardware.sd_host =
+        Some(BootSdHostInfo, BootSdHostInfo__new(&sd_device, SD_HOST_KIND_CV181X, 375000000));
     uint8_t data[FILESYSTEM_FILE_CAPACITY + 1] = {0};
     match_result(
         Sysinfofs__render(&hardware, data),
@@ -71,10 +74,14 @@ void test_sysinfo_renders_configuration_readable_by_existing_drivers(void)
     TEST_ASSERT_TRUE(UartDriverConfig__read_config(&text, &uart));
     TEST_ASSERT_EQUAL_UINT64(33, uart.irq);
     TEST_ASSERT_EQUAL(UART_KIND_PL011, uart.kind);
+    TEST_ASSERT_EQUAL_UINT64(0, uart.register_shift);
+    TEST_ASSERT_EQUAL_UINT64(4, uart.register_width);
     TEST_ASSERT_NOT_NULL(strstr((const char *)data, "rtc.present=1\n"));
     TEST_ASSERT_NOT_NULL(strstr((const char *)data, "rtc.physical_base=151060480\n"));
     TEST_ASSERT_NOT_NULL(strstr((const char *)data, "rtc.irq=34\n"));
     TEST_ASSERT_NOT_NULL(strstr((const char *)data, "rtc.kind=1\n"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)data, "sd_host.kind=2\n"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)data, "sd_host.source_clock_hz=375000000\n"));
     DynString__dispose(&text);
 }
 

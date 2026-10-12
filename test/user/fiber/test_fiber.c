@@ -5,12 +5,23 @@
 #include "unity.h"
 
 #include "../../../user/lib/fiber/scheduler.h"
+#include "../../../user/lib/sys/boot_info.h"
 #include "../../../user/lib/sys/mem.h"
 
 static size_t allocated_stack_size = 0;
 static void * allocated_stack;
 static bool allocated_stack_present;
 static uint64_t freed_stack_count = 0;
+static uint64_t configured_default_stack_size;
+static uint64_t boot_info_load_count;
+
+Result(BootHardwareInfo) BootHardwareInfo__load(void)
+{
+    BootHardwareInfo info = BootHardwareInfo__new();
+    info.default_user_stack_size = configured_default_stack_size;
+    boot_info_load_count++;
+    return Success(BootHardwareInfo, info);
+}
 
 void * mem_alloc_pages(size_t size)
 {
@@ -72,6 +83,8 @@ void setUp(void)
     allocated_stack_size = 0;
     allocated_stack_present = false;
     freed_stack_count = 0;
+    configured_default_stack_size = FIBER_DEFAULT_STACK_SIZE;
+    boot_info_load_count = 0;
 }
 
 static Result(FiberCode) ticket_entry(FiberPtr self, Anything argument)
@@ -202,6 +215,30 @@ void test_fiber_scheduler_can_spawn_with_a_smaller_stack(void)
         {
             TEST_ASSERT_EQUAL_UINT64(65536, Fiber__stack_size(fiber));
             TEST_ASSERT_EQUAL_UINT64(65536, allocated_stack_size);
+        },
+        error_test_fail()
+    );
+
+    match_result(FiberScheduler__run_ready(&scheduler),
+        success_do_nothing(),
+        error_test_fail()
+    );
+}
+
+void test_fiber_scheduler_captures_configured_default_stack_size(void)
+{
+    configured_default_stack_size = 2 * 1024 * 1024;
+    FiberScheduler scheduler = FiberScheduler__new();
+    configured_default_stack_size = 1024 * 1024;
+    TestFiberContext context = TestFiberContext__new(&scheduler);
+
+    match_result(
+        FiberScheduler__spawn(&scheduler, immediate_entry, (Anything)&context),
+        success(fiber)
+        {
+            TEST_ASSERT_EQUAL_UINT64(2 * 1024 * 1024, Fiber__stack_size(fiber));
+            TEST_ASSERT_EQUAL_UINT64(2 * 1024 * 1024, allocated_stack_size);
+            TEST_ASSERT_EQUAL_UINT64(1, boot_info_load_count);
         },
         error_test_fail()
     );

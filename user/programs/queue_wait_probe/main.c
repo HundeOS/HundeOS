@@ -1,5 +1,6 @@
 #include "ipc/ipc_platform.h"
 #include "ipc/queue_wait.h"
+#include "ipc/queue_wait_control.h"
 #include "sys/syscall.h"
 #include "sys/print.h"
 #include "sys/process.h"
@@ -79,12 +80,23 @@ int main(int argc, char ** argv)
     }
     IO__printf(&bstr("queue_wait_probe: pid=%llu ticks=%llu samples=%llu\n"), process_current_pid(), ticks,
                WAIT_PROBE_SAMPLES);
+    SystemCallResult control_address = syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT_CONTROL, 0, 0, 0, 0);
+    if ((int64_t)control_address < 0)
+    {
+        return 1;
+    }
+    QueueWaitControlPtr control = (QueueWaitControlPtr)control_address;
     WaitProbeSummary summary = WaitProbeSummary__new();
     for (uint64_t sample = 0; sample < WAIT_PROBE_SAMPLES; sample++)
     {
+        IpcEventGeneration observed =
+            IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
         uint64_t start = IpcPlatform__monotonic_usec();
-        SystemCallResult result = syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, 0, 0, ticks, 0);
+        QueueWaitControl__begin(control);
+        QueueWaitControl__commit(control, start, QUEUE_WAIT_NO_DEADLINE, observed);
+        SystemCallResult result = syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, observed, ticks, 0, 0);
         uint64_t elapsed = IpcPlatform__monotonic_usec() - start;
+        QueueWaitControl__complete_wait(control, start + elapsed);
         WaitProbeSummary__record(&summary, result, elapsed);
     }
     IO__printf(&bstr("timeouts=%llu activity=%llu failures=%llu timeout_call_usec: min=%llu avg=%llu max=%llu\n"),

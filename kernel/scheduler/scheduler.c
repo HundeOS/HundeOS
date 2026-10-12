@@ -61,7 +61,7 @@ static Result(ServiceCode)
                                                 uint64_t event_type, ProcessSignal signal);
 static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_key(
     SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, OptionalPtr(Continuation) kernel_continuation,
-    ParkReason reason, bool owns_kernel_context, OptionalPtr(OperationKey) operation_key);
+    ParkReason reason, bool owns_kernel_context, OptionalPtr(OperationKey) operation_key, Anything operation_context);
 static Result(ProcessPtr)
     Scheduler__unpark_with_operation_key(SchedulerPtr self, ProcessPtr proc, ParkReason reason,
                                          OptionalPtr(ReturnCode) return_code, OptionalPtr(OperationKey) operation_key);
@@ -72,7 +72,7 @@ static Result(ProcessPtr)
 static Optional(ProcessPtr) Scheduler__current_process_locked(SchedulerPtr self, CPUID cpu);
 static ProcessTable Scheduler__all_processes_for_all_cpus_locked(SchedulerPtr self);
 static ProcessTable Scheduler__process_snapshot_locked(SchedulerPtr self);
-static bool Scheduler__queue_wait_changed(SchedulerPtr self, ProcessPtr process);
+static bool Scheduler__queue_wait_changed(ProcessPtr process);
 
 static bool CPUScheduler__owns_process(CPUSchedulerPtr self, ProcessPtr process)
 {
@@ -484,15 +484,47 @@ static Result(SchedulerWake) Scheduler__wake_shared_wait_locked(SchedulerPtr sel
     Process__wake_shared_wait(process);
     bool parked_waiting = process->state == PROC_STATE_WAITING &&
                           Process__has_parked_operation(process, PARK_WAIT_QUEUE, &None(OperationKey)) &&
-                          Scheduler__queue_wait_changed(self, process);
+                          Scheduler__queue_wait_changed(process);
     if (parked_waiting && Process__mark_parked_operation_ready(process, PARK_WAIT_QUEUE, &None(OperationKey),
                                                                &Some(ReturnCode, QUEUE_WAIT_CHANGED)))
     {
         process->state = PROC_STATE_INTERRUPTED;
         QueueWaitUsage__wake(&process->queue_wait_usage, QUEUE_WAIT_CHANGED);
-        Queues__clear_wait(&self->queues, process);
+        Process__clear_kernel_queue_wait(process);
     }
     else if (!userspace_waiting || (process->state != PROC_STATE_READY && process->state != PROC_STATE_INTERRUPTED))
+    {
+        return Success(SchedulerWake, SchedulerWake__new(false, 0));
+    }
+
+    match_optional(
+        Scheduler__scheduler_owning_process_locked(self, process),
+        some(scheduler)
+        {
+            return Success(SchedulerWake, SchedulerWake__new(true, scheduler->cpu));
+        },
+        none_do_nothing()
+    );
+    return Error(SchedulerWake, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
+}
+
+static Result(SchedulerWake) Scheduler__wake_queue_wait_locked(SchedulerPtr self, ProcessPtr process)
+{
+    bool parked_waiting = process->state == PROC_STATE_WAITING &&
+                          Process__has_parked_operation(process, PARK_WAIT_QUEUE, &None(OperationKey)) &&
+                          Scheduler__queue_wait_changed(process);
+    bool completed_queue_wait = process->state == PROC_STATE_INTERRUPTED &&
+                                Process__has_ready_parked_operation(process, PARK_WAIT_QUEUE, &None(OperationKey));
+    if (parked_waiting && Process__mark_parked_operation_ready(process, PARK_WAIT_QUEUE, &None(OperationKey),
+                                                               &Some(ReturnCode, QUEUE_WAIT_CHANGED)))
+    {
+        process->state = PROC_STATE_INTERRUPTED;
+        QueueWaitUsage__wake(&process->queue_wait_usage, QUEUE_WAIT_CHANGED);
+        Process__clear_kernel_queue_wait(process);
+    }
+    else if (!Process__has_pending_messages(process) ||
+             (process->state != PROC_STATE_READY &&
+              (process->state != PROC_STATE_INTERRUPTED || completed_queue_wait)))
     {
         return Success(SchedulerWake, SchedulerWake__new(false, 0));
     }
@@ -529,7 +561,17 @@ Result(SchedulerWake)
                 Queues__peer_process(&self->queues, process, connection),
                 success(peer)
                 {
-                    cs_return Scheduler__wake_shared_wait_locked(self, peer);
+                    match_result(
+                        Scheduler__wake_queue_wait_locked(self, peer),
+                        success(wake)
+                        {
+                            cs_return Success(SchedulerWake, wake);
+                        },
+                        error(code, message)
+                        {
+                            cs_return Error(SchedulerWake, message, code);
+                        }
+                    );
                 },
                 error(code, message)
                 {
@@ -1026,85 +1068,27 @@ static Result(ProcessPtr)
     );
 }
 
-static bool Scheduler__queue_wait_changed(SchedulerPtr self, ProcessPtr process)
+static bool Scheduler__queue_wait_changed(ProcessPtr process)
 {
-    bool events_pending = false;
-    critical_section(
-        self->service_event_dispatcher.lock,
-        {
-            events_pending = ServiceEvents__len(&process->service.events) != 0;
-        }
-    );
-
-    return events_pending || Queues__wait_changed(&self->queues, process) ||
-           Buffers__has_pending_notifications(&self->buffers, process) ||
-           IRQDispatcher__has_pending_notifications(process->kernel->irq_dispatcher, process);
-}
-
-static Result(QueueCode)
-    Scheduler__watch_queues(SchedulerPtr self, ProcessPtr process, Address snapshots, uint64_t count)
-{
-    if (count == 0)
-    {
-        return Success(QueueCode, QUEUE_OK);
-    }
-    for_each_ll(
-        UserAllocations,
-        process->user_allocations,
-        allocation,
-        {
-            Address start = allocation.address.virtual_addr;
-            if (allocation.address.read && snapshots >= start && snapshots - start <= allocation.size &&
-                count * sizeof(QueueWaitSnapshot) <= allocation.size - (snapshots - start))
-            {
-                Address source = allocation.address.kernel_addr.virtual_addr + snapshots - start;
-                for (uint64_t index = 0; index < count; index++)
-                {
-                            // Copy each boundary value before authenticating it; retain no user pointer.
-                    QueueWaitSnapshot snapshot;
-                    Kernel__memcopy(source + index * sizeof(snapshot), (Address)&snapshot, sizeof(snapshot));
-                    match_result(
-                        Queues__watch(&self->queues, process, &snapshot),
-                        success_do_nothing(),
-                        error(code, message)
-                        {
-                            return Error(QueueCode, message, code);
-                        }
-                    );
-                }
-                return Success(QueueCode, QUEUE_OK);
-            }
-        }
-    );
-
-    return Error(QueueCode, bstr("Invalid queue wait mapping"), QUEUE_INVALID);
+    return Process__kernel_queue_wait_ready(process);
 }
 
 Result(QueueWaitCode)
-    Scheduler__queue_wait(SchedulerPtr self, ProcessPtr process, Address snapshots, uint64_t count, Tick ticks)
+    Scheduler__queue_wait(SchedulerPtr self, ProcessPtr process, IpcEventGeneration observed, Tick ticks)
 {
-    if (count > QUEUE_WAIT_LIMIT || ticks > QUEUE_WAIT_MAX_TICKS)
+    if (ticks > QUEUE_WAIT_MAX_TICKS)
     {
         return Error(QueueWaitCode, bstr("Invalid queue wait bounds"), QUEUE_INVALID);
     }
     critical_section(
         self->scheduler_lock,
         {
-            Queues__clear_wait(&self->queues, process);
-            match_result(
-                Scheduler__watch_queues(self, process, snapshots, count),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    Queues__clear_wait(&self->queues, process);
-                    cs_return Error(QueueWaitCode, message, code);
-                }
-            );
-            if (Scheduler__queue_wait_changed(self, process))
+            if (Process__doorbell_changed(process, observed) || Process__has_pending_signal(process) ||
+                Process__has_pending_queue_wait(process))
             {
-                Queues__clear_wait(&self->queues, process);
                 cs_return Success(QueueWaitCode, QUEUE_WAIT_CHANGED);
             }
+            Process__arm_kernel_queue_wait(process, observed);
             for_each_hashtable(
                 CPUSchedulers,
                 self->schedulers,
@@ -1126,10 +1110,10 @@ Result(QueueWaitCode)
                             {
                                 deadline = Some(OperationKey, sched->last_tick + ticks);
                             }
-                                                        // Only mark parked here. The syscall dispatcher switches after this lock is released.
+                            // Mark parked only; the syscall dispatcher switches after lock release.
                             match_result(
                                 CPUScheduler__park(sched, process, context, &continuation,
-                                                   PARK_WAIT_QUEUE, true, &deadline, 0),
+                                                   PARK_WAIT_QUEUE, true, &deadline, observed),
                                 success(value)
                                 {
                                     QueueWaitUsage__park(&process->queue_wait_usage);
@@ -1137,7 +1121,7 @@ Result(QueueWaitCode)
                                 },
                                 error(code, message)
                                 {
-                                    Queues__clear_wait(&self->queues, process);
+                                    Process__clear_kernel_queue_wait(process);
                                     KernelContext__dispose_heap(context);
                                     cs_return Error(QueueWaitCode, message, code);
                                 }
@@ -1147,10 +1131,10 @@ Result(QueueWaitCode)
                     );
                 }
             );
-            Queues__clear_wait(&self->queues, process);
         }
     );
 
+    Process__clear_kernel_queue_wait(process);
     return Error(QueueWaitCode, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
@@ -1167,17 +1151,20 @@ static void CPUScheduler__poll_queue_waiters(SchedulerPtr self, CPUSchedulerPtr 
             {
                 continue;
             }
-            if (Scheduler__queue_wait_changed(self, process))
+            if (Scheduler__queue_wait_changed(process))
             {
                 Process__mark_parked_operation_ready(process, PARK_WAIT_QUEUE, &None(OperationKey),
                                                      &Some(ReturnCode, QUEUE_WAIT_CHANGED));
                 process->state = PROC_STATE_INTERRUPTED;
                 QueueWaitUsage__wake(&process->queue_wait_usage, QUEUE_WAIT_CHANGED);
-                Queues__clear_wait(&self->queues, process);
+                Process__clear_kernel_queue_wait(process);
             }
-            else if (Process__wake_expired_sleep(process, cpu->last_tick + 1))
+            else
             {
-                Queues__clear_wait(&self->queues, process);
+                if (Process__wake_expired_sleep(process, cpu->last_tick + 1))
+                {
+                    Process__clear_kernel_queue_wait(process);
+                }
             }
         }
     );
@@ -1689,6 +1676,16 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
                             }
                             if (Scheduler__is_parked_for(parent, PARK_WAIT_CHILD))
                             {
+                                match_optional(
+                                    proc->abort,
+                                    some(abort)
+                                    {
+                                        Process__write_child_abort_report(
+                                            parent, SpawnAbortReport__new(abort.reason, abort.exception_code,
+                                                                         abort.pc, abort.fault_address));
+                                    },
+                                    none_do_nothing()
+                                );
                                 ProcessTimes child_times = Scheduler__process_times_at(proc, CPU__time_usec());
                                 parent->children_user_usec += child_times.user_usec + child_times.children_user_usec;
                                 parent->children_system_usec +=
@@ -2256,7 +2253,7 @@ ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, P
         {
             if (operation->park_reason == PARK_WAIT_QUEUE)
             {
-                Queues__clear_wait(&self->queues, process);
+                Process__clear_kernel_queue_wait(process);
                 QueueWaitUsage__cancel(&process->queue_wait_usage);
             }
             ParkedOperation__dispose(operation);
@@ -2348,7 +2345,7 @@ Result(ProcessID) Scheduler__park_by_pid_with_context_ownership_and_operation_ke
         {
             match_result(
                 Scheduler__park_with_context_ownership_and_operation_key(
-                    self, proc, kernel_context, kernel_continuation, reason, owns_kernel_context, operation_key),
+                    self, proc, kernel_context, kernel_continuation, reason, owns_kernel_context, operation_key, 0),
                 success(proc)
                 {
                     return Success(ProcessID, pid);
@@ -2369,7 +2366,7 @@ Result(ProcessPtr) Scheduler__park(SchedulerPtr self, ProcessPtr proc, KernelCon
 {
     Optional(OperationKey) operation_key = None(OperationKey);
     return Scheduler__park_with_context_ownership_and_operation_key(self, proc, kernel_context, kernel_continuation,
-                                                                    reason, false, &None(OperationKey));
+                                                                    reason, false, &None(OperationKey), 0);
 }
 
 Result(ProcessPtr)
@@ -2379,12 +2376,30 @@ Result(ProcessPtr)
 {
     Optional(OperationKey) operation_key = None(OperationKey);
     return Scheduler__park_with_context_ownership_and_operation_key(self, proc, kernel_context, kernel_continuation,
-                                                                    reason, owns_kernel_context, &None(OperationKey));
+                                                                    reason, owns_kernel_context, &None(OperationKey), 0);
+}
+
+Result(ProcessPtr) Scheduler__park_wait_child(SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
+                                              OptionalPtr(Continuation) kernel_continuation,
+                                              OptionalPtr(KernelAddress) abort_report, bool owns_kernel_context)
+{
+    Anything operation_context = 0;
+    match_optional(
+        *abort_report,
+        some(address)
+        {
+            operation_context = address.virtual_addr;
+        },
+        none_do_nothing()
+    );
+    return Scheduler__park_with_context_ownership_and_operation_key(
+        self, proc, kernel_context, kernel_continuation, PARK_WAIT_CHILD, owns_kernel_context, &None(OperationKey),
+        operation_context);
 }
 
 static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_key(
     SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context, OptionalPtr(Continuation) kernel_continuation,
-    ParkReason reason, bool owns_kernel_context, OptionalPtr(OperationKey) operation_key)
+    ParkReason reason, bool owns_kernel_context, OptionalPtr(OperationKey) operation_key, Anything operation_context)
 {
     for_each_hashtable(
         CPUSchedulers,
@@ -2395,7 +2410,7 @@ static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_k
         sched,
         {
             Result(ProcessPtr) res = CPUScheduler__park(sched, proc, kernel_context, kernel_continuation,
-                                                        reason, owns_kernel_context, operation_key, 0);
+                                                        reason, owns_kernel_context, operation_key, operation_context);
             match_result(
                 res,
                 success(exited)
@@ -2489,7 +2504,7 @@ Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, 
                     Optional(Continuation) continuation = Some(Continuation, SystemCall__Complete);
                     Optional(OperationKey) operation_key = Some(OperationKey, deadline);
                     return Scheduler__park_with_context_ownership_and_operation_key(
-                        self, process, kernel_context, &continuation, PARK_SLEEP, true, &operation_key);
+                        self, process, kernel_context, &continuation, PARK_SLEEP, true, &operation_key, 0);
                 },
                 none_do_nothing()
             );
@@ -2804,7 +2819,8 @@ bool Scheduler__should_preempt_on_timer(SchedulerPtr self, CPUID cpu)
                 CPUSchedulers__get(&self->schedulers, cpu),
                 some(scheduler)
                 {
-                    if (scheduler->started && CPU__time_usec() - scheduler->last_registry_sample_usec >=
+                    uint64_t now_usec = CPU__time_usec();
+                    if (scheduler->started && now_usec - scheduler->last_registry_sample_usec >=
                                                   PROCESS_CPU_SHORT_TICKS * PROCESS_CPU_TICK_USEC)
                     {
                         CPUScheduler__publish_processes(scheduler);
@@ -3539,7 +3555,7 @@ Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, const
                     Scheduler__poll_queue_waiters(self);
                     Scheduler__poll_exec_load_waiters(scheduler);
                     Scheduler__refresh_preferred(self);
-                                 // cs_return unlocks before evaluating its return expression.
+                    // cs_return unlocks before evaluating its return expression.
                     Optional(ContextSwitch) next = CPUScheduler__interrupt(scheduler, context);
                     cs_return next;
                 },
@@ -3559,9 +3575,9 @@ void Scheduler__preempt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessC
 {
     Optional(ContextSwitch) context_switch = Scheduler__interrupt(self, cpu, context);
     match_optional(context_switch,
-        some(context)
+        some(next)
         {
-            ContextSwitch__switch(&context);
+            ContextSwitch__switch(&next);
         },
         none_do_nothing()
     );

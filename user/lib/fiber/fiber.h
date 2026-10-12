@@ -82,6 +82,7 @@ ResultDef(FiberWakeValue);
 #define FIBER_DEFAULT_STACK_SIZE (1024 * 1024 * 10)
 #define FIBER_STACK_ALIGNMENT 16
 
+size_t Fiber__default_stack_size(void);
 FiberWaitKey FiberWaitKey__new(FiberWaitKind kind, uint64_t id);
 FiberWaitKey FiberWaitKey__none(void);
 FiberWaitKey FiberWaitKey__request(uint64_t request_id);

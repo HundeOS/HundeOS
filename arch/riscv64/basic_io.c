@@ -10,41 +10,88 @@
 #define UART_LINE_STATUS 5ULL
 #define UART_TRANSMIT_EMPTY (1U << 5U)
 
-typedef volatile uint8_t * RiscVUartRegistersPtr;
+typedef volatile uint8_t * RiscVUartRegister8Ptr;
+typedef volatile uint32_t * RiscVUartRegister32Ptr;
 
-static Address uart_base;
-
-void RiscVBasicIO__configure(ConstUartInfoPtr uart)
+typedef struct RiscVUart
 {
-    uart_base = uart->virtual_base;
+    Address base;
+    uint64_t register_shift;
+    uint64_t register_width;
+} RiscVUart;
+
+typedef RiscVUart * RiscVUartPtr;
+typedef const RiscVUart * ConstRiscVUartPtr;
+
+static RiscVUart console_uart;
+static RiscVUart trace_uart;
+
+static void RiscVUart__configure(RiscVUartPtr self, ConstUartInfoPtr uart)
+{
+    self->base = uart->virtual_base;
+    self->register_shift = uart->register_shift;
+    self->register_width = uart->register_width;
 }
 
-static void RiscVBasicIO__put_char(char character)
+void RiscVBasicIO__configure_console(ConstUartInfoPtr uart)
 {
-    RiscVUartRegistersPtr registers = (RiscVUartRegistersPtr)uart_base;
-    if (registers == (RiscVUartRegistersPtr)0)
+    RiscVUart__configure(&console_uart, uart);
+}
+
+void RiscVBasicIO__configure_trace(ConstUartInfoPtr uart)
+{
+    RiscVUart__configure(&trace_uart, uart);
+}
+
+static uint32_t RiscVUart__read(ConstRiscVUartPtr self, uint64_t index)
+{
+    Address address = self->base + (index << self->register_shift);
+    return self->register_width == 4 ? *(RiscVUartRegister32Ptr)address : *(RiscVUartRegister8Ptr)address;
+}
+
+static void RiscVUart__write(ConstRiscVUartPtr self, uint64_t index, uint8_t value)
+{
+    Address address = self->base + (index << self->register_shift);
+    if (self->register_width == 4)
+    {
+        *(RiscVUartRegister32Ptr)address = value;
+    }
+    else
+    {
+        *(RiscVUartRegister8Ptr)address = value;
+    }
+}
+
+static void RiscVUart__put_char(ConstRiscVUartPtr self, char character)
+{
+    if (self->base == 0)
     {
         return;
     }
 
-    while ((registers[UART_LINE_STATUS] & UART_TRANSMIT_EMPTY) == 0)
+    while ((RiscVUart__read(self, UART_LINE_STATUS) & UART_TRANSMIT_EMPTY) == 0)
     {
         __asm__ volatile("nop");
     }
-    registers[UART_TRANSMIT] = (uint8_t)character;
+    RiscVUart__write(self, UART_TRANSMIT, (uint8_t)character);
 }
 
-void BasicIO__puts(const char * str)
+static void RiscVUart__puts(ConstRiscVUartPtr self, const char * str)
 {
     while (*str != '\0')
     {
         if (*str == '\n')
         {
-            RiscVBasicIO__put_char('\r');
+            RiscVUart__put_char(self, '\r');
         }
-        RiscVBasicIO__put_char(*str);
+        RiscVUart__put_char(self, *str);
         str++;
     }
+}
+
+void BasicIO__puts(const char * str)
+{
+    RiscVUart__puts(&console_uart, str);
 }
 
 void BasicIO__put_int(int num)
@@ -55,7 +102,7 @@ void BasicIO__put_int(int num)
 
     if (num < 0)
     {
-        RiscVBasicIO__put_char('-');
+        RiscVUart__put_char(&console_uart, '-');
     }
     do
     {
@@ -65,7 +112,7 @@ void BasicIO__put_int(int num)
 
     while (count > 0)
     {
-        RiscVBasicIO__put_char(digits[--count]);
+        RiscVUart__put_char(&console_uart, digits[--count]);
     }
 }
 
@@ -152,6 +199,6 @@ void DebugTrace__puts(const char * str)
 #else
 void DebugTrace__puts(const char * str)
 {
-    BasicIO__puts(str);
+    RiscVUart__puts(&trace_uart, str);
 }
 #endif

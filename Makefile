@@ -29,6 +29,8 @@ RANLIB = $(CROSS_COMPILE)ranlib
 NM = $(CROSS_COMPILE)nm
 RAW_LD = $(CROSS_COMPILE)ld
 OBJCOPY = $(CROSS_COMPILE)objcopy
+DTC ?= dtc
+LZMA ?= xz
 
 UNITY_PATH=vendor/Unity
 BOOT_PLATFORM ?= qemu_virt
@@ -40,7 +42,8 @@ PYTHON_ENV_STAMP = .venv/.uv-sync
 # Compiler flags
 CFLAGS = -c -MMD -MP -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
            -nostdlib -nostartfiles $(ARCH_CFLAGS) $(BSP_DEFINES) \
-           -DKERNEL_TRACE_PATH=\"$(KERNEL_TRACE_LOG)\" -Ikernel -I./common -I./common_includes $(EXTRA_KERNEL_CFLAGS)
+           -DKERNEL_TRACE_PATH=\"$(KERNEL_TRACE_LOG)\" -Ikernel -I./common -I./common_includes \
+           -I./arch/$(ARCH)/boot/common -I./arch/$(ARCH)/boot/$(BOOT_PLATFORM) $(EXTRA_KERNEL_CFLAGS)
 
 USER_CFLAGS = -c -MMD -MP -ffreestanding -fno-pic -fno-pie -fno-stack-protector -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
 	           -nostdlib -nostartfiles $(ARCH_USER_CFLAGS) \
@@ -66,7 +69,7 @@ USER_LDFLAGS = -nostdlib $(ARCH_USER_CFLAGS) -Wl,-e,_start -Wl,--gc-sections
 
 BASH_VENDOR_DIR = $(abspath vendor/bash/src)
 BASH_PORT_DIR = $(abspath user/ports/bash)
-BASH_PORT_ROOT = $(BUILD_ROOT)/bash
+BASH_PORT_ROOT = $(PLATFORM_BUILD_ROOT)/bash
 BASH_PORT_SOURCE_DIR = $(BASH_PORT_ROOT)/source
 BASH_PORT_BUILD_DIR = $(BASH_PORT_ROOT)/build
 BASH_PORT_BINARY = $(BASH_PORT_BUILD_DIR)/bash
@@ -76,7 +79,7 @@ BASH_PORT_PATCHES = $(wildcard user/ports/bash/patches/*.patch)
 BASH_PORT_CONFIG_CACHE = $(BASH_PORT_DIR)/config.cache
 BASH_BUILD_CONFIG_CACHE = $(abspath $(BASH_PORT_BUILD_DIR)/config.cache)
 BASH_BUILD = $(shell sh vendor/bash/src/support/config.guess)
-BASH_SYSROOT = $(abspath $(BUILD_ROOT)/sysroot)
+BASH_SYSROOT = $(abspath $(PLATFORM_BUILD_ROOT)/sysroot)
 BASH_CPPFLAGS = --sysroot=$(BASH_SYSROOT) -isystem $(BASH_SYSROOT)/usr/include -DNEED_EXTERN_PC
 BASH_CFLAGS = -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector $(ARCH_USER_CFLAGS)
 BASH_LDFLAGS = -nostdlib $(ARCH_USER_CFLAGS) $(BASH_SYSROOT)/usr/lib/crt0.o -L$(BASH_SYSROOT)/usr/lib \
@@ -85,10 +88,11 @@ BASH_LIBS = -Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group
 
 # Output files
 BUILD_ROOT = build/$(ARCH)
+PLATFORM_BUILD_ROOT ?= $(BUILD_ROOT)
 NEWLIB_VENDOR_DIR = $(abspath vendor/newlib/src)
 NEWLIB_TARGET = $(patsubst %-,%,$(CROSS_COMPILE))
-NEWLIB_BUILD_DIR = $(abspath $(BUILD_ROOT)/newlib/build)
-NEWLIB_INSTALL_DIR = $(abspath $(BUILD_ROOT)/newlib/install)
+NEWLIB_BUILD_DIR = $(abspath $(PLATFORM_BUILD_ROOT)/newlib/build)
+NEWLIB_INSTALL_DIR = $(abspath $(PLATFORM_BUILD_ROOT)/newlib/install)
 NEWLIB_INSTALL_PREFIX = $(NEWLIB_INSTALL_DIR)/usr/$(NEWLIB_TARGET)
 NEWLIB_INCLUDE_DIR = $(NEWLIB_INSTALL_PREFIX)/include
 NEWLIB_LIB_DIR = $(NEWLIB_INSTALL_PREFIX)/lib
@@ -96,7 +100,7 @@ NEWLIB_CONFIGURE_STAMP = $(NEWLIB_BUILD_DIR)/.configured
 NEWLIB_INSTALL_STAMP = $(NEWLIB_INSTALL_DIR)/.installed
 NEWLIB_CFLAGS = -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector $(ARCH_USER_CFLAGS)
 NEWLIB_LIBC_ARCHIVE = $(NEWLIB_LIB_DIR)/libc.a
-NEWLIB_LIBC_SELECTED_DIR = $(BUILD_ROOT)/newlib/libc-selected
+NEWLIB_LIBC_SELECTED_DIR = $(PLATFORM_BUILD_ROOT)/newlib/libc-selected
 NEWLIB_LIBC_SELECTED_STAMP = $(NEWLIB_LIBC_SELECTED_DIR)/.extracted
 NEWLIB_LIBC_VERIFY_OBJECT = $(NEWLIB_LIBC_SELECTED_DIR)/selected.o
 NEWLIB_LIBC_MEMBERS = \
@@ -150,8 +154,8 @@ NEWLIB_MATH_HEADERS = \
 	sys/reent.h
 TARGET_BUILD_DIR = $(BUILD_ROOT)/$(BOOT_PLATFORM)
 KERNEL_BUILD_DIR = $(TARGET_BUILD_DIR)/kernel
-USER_BUILD_DIR = $(BUILD_ROOT)/user
-IMAGE_BUILD_DIR = $(BUILD_ROOT)/images
+USER_BUILD_DIR = $(PLATFORM_BUILD_ROOT)/user
+IMAGE_BUILD_DIR = $(PLATFORM_BUILD_ROOT)/images
 ELF = $(TARGET_BUILD_DIR)/kernel.elf
 BIN = $(TARGET_BUILD_DIR)/kernel.img
 HVF_TRACE_KERNEL_BUILD_DIR = $(BUILD_ROOT)/qemu_virt_trace/kernel
@@ -175,21 +179,74 @@ RISCV64_BRINGUP_ELF = $(BUILD_ROOT)/qemu_virt/bringup.elf
 RISCV64_BRINGUP_LOG = $(BUILD_ROOT)/qemu_virt/bringup.log
 RISCV64_BRINGUP_C_SOURCES = \
 	arch/riscv64/cpu_identity.c \
-	arch/riscv64/boot/qemu_virt/boot.c \
-	arch/riscv64/boot/qemu_virt/device_tree.c \
-	arch/riscv64/boot/qemu_virt/mmu.c \
+	arch/riscv64/boot/common/boot.c \
+	arch/riscv64/boot/common/device_tree.c \
+	arch/riscv64/boot/common/mmu.c \
+	arch/riscv64/boot/qemu_virt/platform.c \
 	arch/riscv64/boot/qemu_virt/runtime.c \
-	arch/riscv64/boot/qemu_virt/system_info.c \
-	arch/riscv64/boot/qemu_virt/trap.c \
+	arch/riscv64/boot/common/system_info.c \
+	arch/riscv64/boot/common/trap.c \
 	common/memory.c \
 	kernel/early_boot.c \
 	kernel/system_info.c
 RISCV64_BRINGUP_ASM_SOURCES = \
 	arch/riscv64/boot/qemu_virt/start.s \
-	arch/riscv64/boot/qemu_virt/trap_entry.s
+	arch/riscv64/boot/common/trap_entry.s
 RISCV64_BRINGUP_OBJECTS = \
 	$(patsubst %.c,$(RISCV64_BRINGUP_BUILD_DIR)/%.o,$(RISCV64_BRINGUP_C_SOURCES)) \
 	$(patsubst %.s,$(RISCV64_BRINGUP_BUILD_DIR)/%.o,$(RISCV64_BRINGUP_ASM_SOURCES))
+MILKV_DUO_BUILD_DIR = $(BUILD_ROOT)/milkv_duo
+MILKV_DUO_BRINGUP_BUILD_DIR = $(MILKV_DUO_BUILD_DIR)/bringup
+MILKV_DUO_BRINGUP_ELF = $(MILKV_DUO_BUILD_DIR)/bringup.elf
+MILKV_DUO_BRINGUP_BIN = $(MILKV_DUO_BUILD_DIR)/bringup.bin
+MILKV_DUO_BRINGUP_LZMA = $(MILKV_DUO_BUILD_DIR)/bringup.bin.lzma
+MILKV_DUO_DTB = $(MILKV_DUO_BUILD_DIR)/milkv_duo.dtb
+MILKV_DUO_BOOT_IMAGE = $(MILKV_DUO_BUILD_DIR)/boot.sd
+MILKV_DUO_BRINGUP_BOOT_IMAGE = $(MILKV_DUO_BUILD_DIR)/bringup.sd
+MILKV_DUO_KERNEL_LZMA = $(MILKV_DUO_BUILD_DIR)/kernel.img.lzma
+MILKV_DUO_FIRMWARE_VERSION = v1.1.4
+MILKV_DUO_FIRMWARE_URL = https://github.com/milkv-duo/duo-buildroot-sdk/releases/download/$(MILKV_DUO_FIRMWARE_VERSION)/milkv-duo-sd-$(MILKV_DUO_FIRMWARE_VERSION).img.zip
+MILKV_DUO_FIRMWARE_SHA256 = 271a24958e637f7101ca93f10a57a3a8f1afa9f100710462cd689c795bc01e4a
+MILKV_DUO_FIRMWARE_ARCHIVE = $(MILKV_DUO_BUILD_DIR)/firmware/milkv-duo-sd-$(MILKV_DUO_FIRMWARE_VERSION).img.zip
+MILKV_DUO_FIRMWARE_TEMPLATE = $(MILKV_DUO_BUILD_DIR)/firmware/boot-prefix.img
+MILKV_DUO_BOOT_PARTITION = $(MILKV_DUO_BUILD_DIR)/boot.fat
+MILKV_DUO_SD_IMAGE = $(MILKV_DUO_BUILD_DIR)/hundeos-milkv-duo.img
+MILKV_DUO_BOOT_PARTITION_SECTORS = 262144
+MILKV_DUO_BRINGUP_SOURCES = arch/riscv64/boot/milkv_duo/bringup.c
+MILKV_DUO_BRINGUP_ASM_SOURCES = arch/riscv64/boot/milkv_duo/bringup_start.s
+MILKV_DUO_ARCH_FLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64 -mno-relax -msmall-data-limit=0
+MILKV_DUO_BRINGUP_OBJECTS = \
+	$(patsubst %.c,$(MILKV_DUO_BRINGUP_BUILD_DIR)/%.o,$(MILKV_DUO_BRINGUP_SOURCES)) \
+	$(patsubst %.s,$(MILKV_DUO_BRINGUP_BUILD_DIR)/%.o,$(MILKV_DUO_BRINGUP_ASM_SOURCES))
+MILKV_DUO_QEMU_PLATFORM_BUILD_ROOT = build/riscv64/milkv_duo_qemu
+MILKV_DUO_QEMU_KERNEL = $(MILKV_DUO_QEMU_PLATFORM_BUILD_ROOT)/milkv_duo/kernel.elf
+MILKV_DUO_QEMU_EXT2_IMG = $(MILKV_DUO_QEMU_PLATFORM_BUILD_ROOT)/images/ext2.img
+MILKV_DUO_QEMU_DTB = $(MILKV_DUO_QEMU_PLATFORM_BUILD_ROOT)/milkv_duo/milkv_duo.dtb
+QEMU_MILKV_DUO ?= $(HOME)/src/qemu-milkv-duo/build/qemu-system-riscv64
+QEMU_MILKV_DUO_BIOS ?= $(HOME)/src/qemu-milkv-duo/pc-bios/opensbi-riscv64-generic-fw_dynamic.bin
+MILKV_DUO_S_BUILD_DIR = $(BUILD_ROOT)/milkv_duo_s
+MILKV_DUO_S_DTS ?= arch/riscv64/boot/milkv_duo_s/milkv_duo_s.dts
+MILKV_DUO_S_DTB = $(MILKV_DUO_S_BUILD_DIR)/milkv_duo_s.dtb
+MILKV_DUO_S_BOOT_IMAGE = $(MILKV_DUO_S_BUILD_DIR)/boot.sd
+MILKV_DUO_S_KERNEL_LZMA = $(MILKV_DUO_S_BUILD_DIR)/kernel.img.lzma
+MILKV_DUO_S_HANDOFF_OBJECT = $(MILKV_DUO_S_BUILD_DIR)/handoff.o
+MILKV_DUO_S_HANDOFF_ELF = $(MILKV_DUO_S_BUILD_DIR)/handoff.elf
+MILKV_DUO_S_HANDOFF_BIN = $(MILKV_DUO_S_BUILD_DIR)/handoff.bin
+MILKV_DUO_S_FIRMWARE_VERSION = v1.1.4
+MILKV_DUO_S_FIRMWARE_URL = https://github.com/milkv-duo/duo-buildroot-sdk/releases/download/$(MILKV_DUO_S_FIRMWARE_VERSION)/milkv-duos-sd-$(MILKV_DUO_S_FIRMWARE_VERSION).img.zip
+MILKV_DUO_S_FIRMWARE_SHA256 = ff7cd27320573103c49f4365ed261aec664446535e329835bbc2364683711c8f
+MILKV_DUO_S_FIRMWARE_ARCHIVE = $(MILKV_DUO_S_BUILD_DIR)/firmware/milkv-duos-sd-$(MILKV_DUO_S_FIRMWARE_VERSION).img.zip
+MILKV_DUO_S_FIRMWARE_TEMPLATE = $(MILKV_DUO_S_BUILD_DIR)/firmware/boot-prefix.img
+MILKV_DUO_S_BOOT_PARTITION = $(MILKV_DUO_S_BUILD_DIR)/boot.fat
+MILKV_DUO_S_SD_IMAGE = $(MILKV_DUO_S_BUILD_DIR)/hundeos-milkv-duo-s.img
+MILKV_DUO_S_BOOT_PARTITION_SECTORS = 262144
+MILKV_DUO_S_ROOT_START_SECTOR = 266241
+MILKV_DUO_S_ARCH_FLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64 -mno-relax -msmall-data-limit=0
+MILKV_DUO_S_QEMU_PLATFORM_BUILD_ROOT = build/riscv64/milkv_duo_s_qemu
+MILKV_DUO_S_QEMU_KERNEL = $(MILKV_DUO_S_QEMU_PLATFORM_BUILD_ROOT)/milkv_duo_s/kernel.elf
+MILKV_DUO_S_QEMU_DTB = $(MILKV_DUO_S_QEMU_PLATFORM_BUILD_ROOT)/milkv_duo_s/milkv_duo_s.dtb
+MILKV_DUO_S_HARDWARE_SD_IMAGE = build/riscv64/milkv_duo_s/hundeos-milkv-duo-s.img
+MILKV_DUO_S_QEMU_SD_IMAGE = $(MILKV_DUO_S_QEMU_PLATFORM_BUILD_ROOT)/images/hundeos-milkv-duo-s.img
 EFI_ESP_SIZE_MB ?= 512
 DISK_IMG = $(IMAGE_BUILD_DIR)/disk.img
 DISK_SIZE_MB = 64
@@ -216,7 +273,7 @@ EXT2_IMG = $(IMAGE_BUILD_DIR)/ext2.img
 EXT2_SIZE_MB = 64
 EXT2_LABEL = EXT2FS
 EXT2_ROOT_DIR = tools/ext2_root
-ROOTFS_DIR = $(BUILD_ROOT)/rootfs
+ROOTFS_DIR = $(PLATFORM_BUILD_ROOT)/rootfs
 ROOTFS_STAMP = $(ROOTFS_DIR)/.built
 BOOT_CONFIG ?= qemu_virt
 BOOT_CONFIG_EXT2_IMG = $(BUILD_ROOT)/boot_config/$(BOOT_CONFIG).img
@@ -246,12 +303,15 @@ COMMON_SOURCES := $(shell find ./common -path "./common/arch" -prune -o -name "*
 COMMON_ARCH_SOURCES := $(shell find ./common/arch/$(ARCH) -name "*.c" -print 2>/dev/null)
 
 ARCH_COMMON_SOURCES := $(shell find ./arch/$(ARCH) -path "./arch/$(ARCH)/boot/*/*" -prune -o -name "*.c" -print 2>/dev/null)
+ARCH_BOOT_COMMON_SOURCES := $(shell find ./arch/$(ARCH)/boot/common -name "*.c" -print 2>/dev/null)
 ARCH_PLATFORM_SOURCES := $(shell find ./arch/$(ARCH)/boot/$(BOOT_PLATFORM) -name "*.c" \
-	! -name "loader.c" ! -name "runtime.c" -print 2>/dev/null)
-ARCH_SOURCES := $(ARCH_COMMON_SOURCES) $(ARCH_PLATFORM_SOURCES)
+	! -name "loader.c" ! -name "runtime.c" ! -name "bringup.c" -print 2>/dev/null)
+ARCH_SOURCES := $(ARCH_COMMON_SOURCES) $(ARCH_BOOT_COMMON_SOURCES) $(ARCH_PLATFORM_SOURCES)
 ARCH_COMMON_ASM_SOURCES := $(shell find ./arch/$(ARCH) -path "./arch/$(ARCH)/boot/*/*" -prune -o -name "*.s" -print 2>/dev/null)
-ARCH_PLATFORM_ASM_SOURCES := $(shell find ./arch/$(ARCH)/boot/$(BOOT_PLATFORM) -name "*.s" -print 2>/dev/null)
-ARCH_ASM_SOURCES := $(ARCH_COMMON_ASM_SOURCES) $(ARCH_PLATFORM_ASM_SOURCES)
+ARCH_BOOT_COMMON_ASM_SOURCES := $(shell find ./arch/$(ARCH)/boot/common -name "*.s" -print 2>/dev/null)
+ARCH_PLATFORM_ASM_SOURCES := $(shell find ./arch/$(ARCH)/boot/$(BOOT_PLATFORM) -name "*.s" \
+	! -name "bringup_start.s" ! -name "handoff.s" -print 2>/dev/null)
+ARCH_ASM_SOURCES := $(ARCH_COMMON_ASM_SOURCES) $(ARCH_BOOT_COMMON_ASM_SOURCES) $(ARCH_PLATFORM_ASM_SOURCES)
 ARCH_COMMON_CPP_ASM_SOURCES := $(shell find ./arch/$(ARCH) -path "./arch/$(ARCH)/boot/*/*" -prune -o -name "*.S" -print 2>/dev/null)
 ARCH_PLATFORM_CPP_ASM_SOURCES := $(shell find ./arch/$(ARCH)/boot/$(BOOT_PLATFORM) -name "*.S" -print 2>/dev/null)
 ARCH_CPP_ASM_SOURCES := $(ARCH_COMMON_CPP_ASM_SOURCES) $(ARCH_PLATFORM_CPP_ASM_SOURCES)
@@ -291,7 +351,7 @@ USER_HUNDE_OBJECTS := $(COMMON_USER_OBJECTS) \
 	$(filter-out $(USER_CRT_OBJECT) $(USER_LIBC_C_OBJECTS),$(USER_LIB_OBJECTS)) \
 	$(filter-out $(USER_LIBC_ASM_OBJECTS),$(USER_LIB_ASM_OBJECTS))
 
-SYSROOT_DIR := $(BUILD_ROOT)/sysroot
+SYSROOT_DIR := $(PLATFORM_BUILD_ROOT)/sysroot
 SYSROOT_INCLUDE_DIR := $(SYSROOT_DIR)/usr/include
 SYSROOT_LIB_DIR := $(SYSROOT_DIR)/usr/lib
 SYSROOT_INCLUDE_STAMP := $(SYSROOT_INCLUDE_DIR)/.staged
@@ -363,6 +423,7 @@ USER_VIDEO_TERM_EMOJI_PNGS := $(wildcard vendor/noto_emoji/png/128/emoji_u*.png)
 USER_VIDEO_TERM_EMOJI_HEADER := user/drivers/video_term/emoji_atlas.h
 USER_VIDEO_TERM_EMOJI_ATLAS := $(USER_BUILD_DIR)/drivers/video_term/emoji_atlas.rgba
 USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT := $(USER_BUILD_DIR)/drivers/video_term/emoji_atlas.o
+USER_VIDEO_TERM_EMOJI_ATLAS_BINARY_SYMBOL := $(subst .,_,$(subst /,_,$(USER_VIDEO_TERM_EMOJI_ATLAS)))
 video_term_EXTRA_OBJS := $(USER_VIDEO_TERM_FONT_OBJECT) $(USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT)
 hund-unterbrict_EXTRA_OBJS := \
 	$(USER_BUILD_DIR)/drivers/virtio_blk_channelio/device.o \
@@ -372,7 +433,7 @@ EMBEDDED_FS_INPUTS := \
 	$(foreach dir,$(EMBEDDED_USER_NON_DRIVER_DIRS),$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
 	$(foreach dir,$(USER_DRIVER_DIRS),drivers/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
 	$(foreach dir,$(USER_SERVICE_DIRS),services/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin)
-EMBEDDED_FS := $(BUILD_ROOT)/kernel/embedded.fs
+EMBEDDED_FS := $(TARGET_BUILD_DIR)/kernel/embedded.fs
 
 .PRECIOUS: $(USER_BUILD_DIR)/lib/arch/%.o
 
@@ -541,8 +602,21 @@ compile-commands:
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --overwrite --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 elf
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 riscv64-bringup-elf
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+		BOOT_PLATFORM=milkv_duo BSP_DEFINES=-DBSP_MILKV_DUO ARCH_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo \
+		build/riscv64/milkv_duo/kernel.elf
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+		BOOT_PLATFORM=milkv_duo_s BSP_DEFINES=-DBSP_MILKV_DUO_S ARCH_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
+		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo_s \
+		build/riscv64/milkv_duo_s/kernel.elf build/riscv64/milkv_duo_s/handoff.elf
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
 		build/riscv64/qemu_virt/kernel/arch/riscv64/page_table.o \
 		build/riscv64/qemu_virt/kernel/arch/riscv64/mmu.o
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+		BOOT_PLATFORM=riscv_virt_embedded \
+		build/riscv64/riscv_virt_embedded/kernel/arch/riscv64/boot/riscv_virt_embedded/platform.o
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
 		build/riscv64/user/hello_world.bin
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 \
@@ -675,6 +749,14 @@ $(RISCV64_BRINGUP_BUILD_DIR)/%.o: %.s
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
+$(MILKV_DUO_BRINGUP_BUILD_DIR)/%.o: %.c
+	mkdir -p `dirname $@`
+	$(CC) $(CFLAGS) $< -o $@
+
+$(MILKV_DUO_BRINGUP_BUILD_DIR)/%.o: %.s
+	mkdir -p `dirname $@`
+	$(AS) $(ASFLAGS) $< -o $@
+
 $(EMBEDDED_FS): $(PYTHON_ENV_STAMP) $(USER_BINARIES) tools/build_embedded_fs.py
 	$(PYTHON) tools/build_embedded_fs.py $@ $(EMBEDDED_FS_INPUTS)
 
@@ -731,9 +813,9 @@ $(USER_VIDEO_TERM_EMOJI_ATLAS): $(PYTHON_ENV_STAMP) tools/build_video_term_emoji
 $(USER_VIDEO_TERM_EMOJI_ATLAS_OBJECT): $(USER_VIDEO_TERM_EMOJI_ATLAS)
 	mkdir -p `dirname $@`
 	$(OBJCOPY) -I binary -O $(OBJCOPY_BINARY_FORMAT) -B $(OBJCOPY_BINARY_ARCH) \
-		--redefine-sym _binary_build_$(ARCH)_user_drivers_video_term_emoji_atlas_rgba_start=_binary_build_user_drivers_video_term_emoji_atlas_rgba_start \
-		--redefine-sym _binary_build_$(ARCH)_user_drivers_video_term_emoji_atlas_rgba_end=_binary_build_user_drivers_video_term_emoji_atlas_rgba_end \
-		--redefine-sym _binary_build_$(ARCH)_user_drivers_video_term_emoji_atlas_rgba_size=_binary_build_user_drivers_video_term_emoji_atlas_rgba_size \
+		--redefine-sym _binary_$(USER_VIDEO_TERM_EMOJI_ATLAS_BINARY_SYMBOL)_start=_binary_build_user_drivers_video_term_emoji_atlas_rgba_start \
+		--redefine-sym _binary_$(USER_VIDEO_TERM_EMOJI_ATLAS_BINARY_SYMBOL)_end=_binary_build_user_drivers_video_term_emoji_atlas_rgba_end \
+		--redefine-sym _binary_$(USER_VIDEO_TERM_EMOJI_ATLAS_BINARY_SYMBOL)_size=_binary_build_user_drivers_video_term_emoji_atlas_rgba_size \
 		$< $@
 
 $(KERNEL_BUILD_DIR)/./common/types/dyn_string.o: common/types/dyn_string.c
@@ -779,6 +861,175 @@ riscv64-bringup:
 
 riscv64-bringup-elf: $(RISCV64_BRINGUP_ELF)
 
+$(MILKV_DUO_BRINGUP_ELF): $(MILKV_DUO_BRINGUP_OBJECTS) arch/riscv64/boot/milkv_duo/bringup_linker.ld
+	$(LD) -nostdlib -Wl,--build-id=none -Wl,--no-relax -T arch/riscv64/boot/milkv_duo/bringup_linker.ld \
+		$(MILKV_DUO_BRINGUP_OBJECTS) -o $@
+
+$(MILKV_DUO_BRINGUP_BIN): $(MILKV_DUO_BRINGUP_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+$(MILKV_DUO_BRINGUP_LZMA): $(MILKV_DUO_BRINGUP_BIN)
+	$(LZMA) --format=lzma --check=none --lzma1=preset=6 -c $< > $@
+
+$(MILKV_DUO_DTB): arch/riscv64/boot/milkv_duo/milkv_duo.dts
+	mkdir -p `dirname $@`
+	$(DTC) -I dts -O dtb -o $@ $<
+
+$(MILKV_DUO_BRINGUP_BOOT_IMAGE): $(MILKV_DUO_BRINGUP_LZMA) $(MILKV_DUO_DTB) arch/riscv64/boot/milkv_duo/bringup.its
+	cd $(MILKV_DUO_BUILD_DIR) && $(DTC) -I dts -O dtb -i $(abspath $(MILKV_DUO_BUILD_DIR)) \
+		-o $(abspath $@) $(abspath arch/riscv64/boot/milkv_duo/bringup.its)
+	test `wc -c < $@` -le 15728640
+
+$(MILKV_DUO_KERNEL_LZMA): $(BIN)
+	$(LZMA) --format=lzma --check=none --lzma1=preset=6 -c $< > $@
+
+$(MILKV_DUO_BOOT_IMAGE): $(MILKV_DUO_KERNEL_LZMA) $(MILKV_DUO_DTB) arch/riscv64/boot/milkv_duo/boot.its
+	cd $(MILKV_DUO_BUILD_DIR) && $(DTC) -I dts -O dtb -i $(abspath $(MILKV_DUO_BUILD_DIR)) \
+		-o $(abspath $@) $(abspath arch/riscv64/boot/milkv_duo/boot.its)
+	test `wc -c < $@` -le 15728640
+
+$(MILKV_DUO_FIRMWARE_ARCHIVE): $(PYTHON_ENV_STAMP) tools/download_verified.py
+	$(PYTHON) tools/download_verified.py "$(MILKV_DUO_FIRMWARE_URL)" $(MILKV_DUO_FIRMWARE_SHA256) $@
+
+$(MILKV_DUO_FIRMWARE_TEMPLATE): $(MILKV_DUO_FIRMWARE_ARCHIVE)
+	mkdir -p `dirname $@`
+	unzip -p $< '*.img' | dd of=$@.tmp bs=512 count=$$(( $(MILKV_DUO_BOOT_PARTITION_SECTORS) + 1 ))
+	test `wc -c < $@.tmp` -eq $$(( ($(MILKV_DUO_BOOT_PARTITION_SECTORS) + 1) * 512 ))
+	mv $@.tmp $@
+
+$(MILKV_DUO_BOOT_PARTITION): $(MILKV_DUO_FIRMWARE_TEMPLATE) $(MILKV_DUO_BOOT_IMAGE) tools/populate_fat32_image.py
+	dd if=$< of=$@.tmp bs=512 skip=1 count=$(MILKV_DUO_BOOT_PARTITION_SECTORS)
+	$(PYTHON) tools/populate_fat32_image.py $@.tmp BOOT.SD $(MILKV_DUO_BOOT_IMAGE)
+	mv $@.tmp $@
+
+$(MILKV_DUO_SD_IMAGE): $(MILKV_DUO_FIRMWARE_TEMPLATE) $(MILKV_DUO_BOOT_PARTITION) $(EXT2_IMG) tools/build_milkv_duo_sd_image.py
+	$(PYTHON) tools/build_milkv_duo_sd_image.py $< $(MILKV_DUO_BOOT_PARTITION) $(EXT2_IMG) $@
+
+milkv-duo:
+	$(MAKE) ARCH=riscv64 BSP_DEFINES=-DBSP_MILKV_DUO ARCH_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		BOOT_PLATFORM=milkv_duo \
+		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo milkv-duo-build
+
+milkv-duo-sd-image:
+	$(MAKE) ARCH=riscv64 BSP_DEFINES=-DBSP_MILKV_DUO ARCH_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		BOOT_PLATFORM=milkv_duo \
+		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo milkv-duo-sd-image-build
+
+milkv-duo-bringup:
+	$(MAKE) ARCH=riscv64 BSP_DEFINES=-DBSP_MILKV_DUO ARCH_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		BOOT_PLATFORM=milkv_duo \
+		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo milkv-duo-bringup-build
+
+milkv-duo-build: $(MILKV_DUO_BOOT_IMAGE)
+
+milkv-duo-sd-image-build: $(MILKV_DUO_SD_IMAGE)
+
+milkv-duo-qemu-build:
+	$(MAKE) ARCH=riscv64 BSP_DEFINES="-DBSP_MILKV_DUO -DRISCV_MILKV_DUO_QEMU" ARCH_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		BOOT_PLATFORM=milkv_duo BUILD_ROOT=$(MILKV_DUO_QEMU_PLATFORM_BUILD_ROOT) \
+		PLATFORM_BUILD_ROOT=$(MILKV_DUO_QEMU_PLATFORM_BUILD_ROOT) \
+		$(MILKV_DUO_QEMU_KERNEL) $(MILKV_DUO_QEMU_EXT2_IMG) $(MILKV_DUO_QEMU_DTB)
+
+qemu-milkv-duo: milkv-duo-qemu-build
+	$(QEMU_MILKV_DUO) -M milkv-duo -smp 1 -m 64M -nographic -no-reboot \
+		-bios $(QEMU_MILKV_DUO_BIOS) -dtb $(MILKV_DUO_QEMU_DTB) -kernel $(MILKV_DUO_QEMU_KERNEL) \
+		-drive if=none,file=$(MILKV_DUO_QEMU_EXT2_IMG),format=raw,id=sd-card \
+		-device sd-card,drive=sd-card
+
+milkv-duo-bringup-build: $(MILKV_DUO_BRINGUP_BOOT_IMAGE)
+
+milkv-duo-bringup-elf:
+	$(MAKE) ARCH=riscv64 BSP_DEFINES=-DBSP_MILKV_DUO ARCH_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
+		BOOT_PLATFORM=milkv_duo \
+		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo milkv-duo-bringup-elf-build
+
+milkv-duo-bringup-elf-build: $(MILKV_DUO_BRINGUP_ELF)
+
+$(MILKV_DUO_S_DTB): $(MILKV_DUO_S_DTS)
+	mkdir -p `dirname $@`
+	$(DTC) -I dts -O dtb -o $@ $<
+
+$(MILKV_DUO_S_KERNEL_LZMA): $(BIN)
+	$(LZMA) --format=lzma --check=none --lzma1=preset=6 -c $< > $@
+
+$(MILKV_DUO_S_HANDOFF_OBJECT): arch/riscv64/boot/milkv_duo_s/handoff.s
+	mkdir -p `dirname $@`
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(MILKV_DUO_S_HANDOFF_ELF): $(MILKV_DUO_S_HANDOFF_OBJECT) $(BIN) arch/riscv64/boot/milkv_duo_s/handoff_linker.ld
+	$(RAW_LD) --build-id=none --no-relax -T arch/riscv64/boot/milkv_duo_s/handoff_linker.ld \
+		--defsym HUNDEOS_KERNEL_SIZE=`wc -c < $(BIN) | tr -d ' '` $(MILKV_DUO_S_HANDOFF_OBJECT) -o $@
+
+$(MILKV_DUO_S_HANDOFF_BIN): $(MILKV_DUO_S_HANDOFF_ELF)
+	$(OBJCOPY) -O binary $< $@
+	test `wc -c < $@` -lt 8388608
+
+$(MILKV_DUO_S_BOOT_IMAGE): $(MILKV_DUO_S_HANDOFF_BIN) $(MILKV_DUO_S_KERNEL_LZMA) $(MILKV_DUO_S_DTB) arch/riscv64/boot/milkv_duo_s/boot.its
+	test `wc -c < $(BIN)` -lt $$(( 0x84000000 - 0x80200000 ))
+	test `wc -c < $(BIN)` -le $$(( `wc -c < $(MILKV_DUO_S_KERNEL_LZMA)` * 20 ))
+	test $$(( 0x84000000 + `wc -c < $(MILKV_DUO_S_KERNEL_LZMA)` * 20 )) -lt $$(( 0x8c000000 ))
+	cd $(MILKV_DUO_S_BUILD_DIR) && $(DTC) -I dts -O dtb -i $(abspath $(MILKV_DUO_S_BUILD_DIR)) \
+		-o $(abspath $@) $(abspath arch/riscv64/boot/milkv_duo_s/boot.its)
+	test `wc -c < $@` -le 15728640
+
+$(MILKV_DUO_S_FIRMWARE_ARCHIVE): $(PYTHON_ENV_STAMP) tools/download_verified.py
+	$(PYTHON) tools/download_verified.py "$(MILKV_DUO_S_FIRMWARE_URL)" $(MILKV_DUO_S_FIRMWARE_SHA256) $@
+
+$(MILKV_DUO_S_FIRMWARE_TEMPLATE): $(MILKV_DUO_S_FIRMWARE_ARCHIVE)
+	mkdir -p `dirname $@`
+	unzip -p $< '*.img' | dd of=$@.tmp bs=512 count=$(MILKV_DUO_S_ROOT_START_SECTOR)
+	test `wc -c < $@.tmp` -eq $$(( $(MILKV_DUO_S_ROOT_START_SECTOR) * 512 ))
+	mv $@.tmp $@
+
+$(MILKV_DUO_S_BOOT_PARTITION): $(MILKV_DUO_S_FIRMWARE_TEMPLATE) $(MILKV_DUO_S_BOOT_IMAGE) tools/populate_fat32_image.py
+	dd if=$< of=$@.tmp bs=512 skip=1 count=$(MILKV_DUO_S_BOOT_PARTITION_SECTORS)
+	$(PYTHON) tools/populate_fat32_image.py $@.tmp BOOT.SD $(MILKV_DUO_S_BOOT_IMAGE)
+	mv $@.tmp $@
+
+$(MILKV_DUO_S_SD_IMAGE): $(MILKV_DUO_S_FIRMWARE_TEMPLATE) $(MILKV_DUO_S_BOOT_PARTITION) $(BOOT_CONFIG_EXT2_IMG) $(EXT2_IMG) tools/build_milkv_duo_sd_image.py
+	$(PYTHON) tools/build_milkv_duo_sd_image.py $< $(MILKV_DUO_S_BOOT_PARTITION) $(EXT2_IMG) $@ \
+		--boot-config $(BOOT_CONFIG_EXT2_IMG)
+
+milkv-duo-s:
+	$(MAKE) ARCH=riscv64 BSP_DEFINES=-DBSP_MILKV_DUO_S ARCH_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
+		BOOT_PLATFORM=milkv_duo_s \
+		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo_s milkv-duo-s-build
+
+milkv-duo-s-sd-image:
+	$(MAKE) ARCH=riscv64 BSP_DEFINES=-DBSP_MILKV_DUO_S ARCH_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
+		BOOT_PLATFORM=milkv_duo_s BOOT_CONFIG=milkv_duo_s \
+		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo_s milkv-duo-s-sd-image-build
+
+milkv-duo-s-build: $(MILKV_DUO_S_BOOT_IMAGE)
+
+milkv-duo-s-sd-image-build: $(MILKV_DUO_S_SD_IMAGE)
+
+milkv-duo-s-qemu-build:
+	$(MAKE) ARCH=riscv64 BSP_DEFINES="-DBSP_MILKV_DUO_S -DRISCV_MILKV_DUO_S_QEMU" ARCH_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
+		ARCH_USER_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
+		BOOT_PLATFORM=milkv_duo_s BUILD_ROOT=$(MILKV_DUO_S_QEMU_PLATFORM_BUILD_ROOT) \
+		PLATFORM_BUILD_ROOT=$(MILKV_DUO_S_QEMU_PLATFORM_BUILD_ROOT) \
+		MILKV_DUO_S_DTS=arch/riscv64/boot/milkv_duo_s/milkv_duo_s_qemu.dts \
+		$(MILKV_DUO_S_QEMU_KERNEL) $(MILKV_DUO_S_QEMU_DTB)
+
+milkv-duo-s-qemu-disk: milkv-duo-s-sd-image
+	mkdir -p `dirname $(MILKV_DUO_S_QEMU_SD_IMAGE)`
+	cp $(MILKV_DUO_S_HARDWARE_SD_IMAGE) $(MILKV_DUO_S_QEMU_SD_IMAGE)
+	truncate -s 256M $(MILKV_DUO_S_QEMU_SD_IMAGE)
+
+qemu-milkv-duo-s: milkv-duo-s-qemu-build milkv-duo-s-qemu-disk
+	$(QEMU_MILKV_DUO) -M milkv-duo -smp 1 -m 510M -nographic -no-reboot \
+		-bios $(QEMU_MILKV_DUO_BIOS) -dtb $(MILKV_DUO_S_QEMU_DTB) -kernel $(MILKV_DUO_S_QEMU_KERNEL) \
+		-drive if=none,file=$(MILKV_DUO_S_QEMU_SD_IMAGE),format=raw,id=sd-card \
+		-device sd-card,drive=sd-card
+
 qemu-riscv64:
 	$(MAKE) ARCH=riscv64 BOOT_CONFIG=qemu_riscv64 qemu-riscv64-run
 
@@ -805,7 +1056,7 @@ qemu-riscv64-trace:
 qemu-riscv64-trace-build:
 	$(MAKE) KERNEL_BUILD_DIR="$(RISCV64_TRACE_KERNEL_BUILD_DIR)" \
 		ELF="$(RISCV64_TRACE_ELF)" \
-		EXTRA_KERNEL_CFLAGS="-DKERNEL_SEMIHOSTING_TRACE -DKERNEL_LOW_VOLUME_TRACE" $(RISCV64_TRACE_ELF)
+		EXTRA_KERNEL_CFLAGS="-DKERNEL_SEMIHOSTING_TRACE" $(RISCV64_TRACE_ELF)
 	$(MAKE) KERNEL_BUILD_DIR="$(RISCV64_TRACE_KERNEL_BUILD_DIR)" \
 		ELF="$(RISCV64_TRACE_ELF)" qemu-riscv64-trace-run
 
@@ -829,6 +1080,26 @@ qemu-riscv64-trace-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $
 		-display none -monitor none -no-reboot \
 		-chardev stdio,id=console,signal=off -serial chardev:console \
 		-semihosting-config enable=on,target=native
+
+riscv-virt-embedded:
+	$(MAKE) ARCH=riscv64 BOOT_PLATFORM=riscv_virt_embedded BOOT_CONFIG=qemu_riscv64 riscv-virt-embedded-run
+
+riscv-virt-embedded-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
+	qemu-system-riscv64 -machine virt -cpu rv64,zawrs=true -smp 1 -m 510M -bios default \
+		-kernel $(ELF) \
+		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
+		-device virtio-blk-device,drive=hd0 \
+		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
+		-device virtio-blk-device,drive=hd1 \
+		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
+		-device virtio-blk-device,drive=hd2 \
+		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
+		-device virtio-blk-device,drive=sd0 \
+		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
+		-device virtio-blk-device,drive=channelio0 \
+		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
+		-device virtio-blk-device,drive=channelio1 \
+		-nographic -monitor none -no-reboot
 
 # Clean build artifacts
 clean:
@@ -1071,7 +1342,7 @@ qemu-virt-hvf-trace:
 	$(MAKE) $(CHANNELIO_DISK_IMG)
 	$(MAKE) $(CHANNELIO_EXT2_IMG)
 	$(MAKE) KERNEL_BUILD_DIR="$(HVF_TRACE_KERNEL_BUILD_DIR)" ELF="$(HVF_TRACE_ELF)" \
-		EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE -DKERNEL_LOW_VOLUME_TRACE" \
+		EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE" \
 		$(HVF_TRACE_ELF)
 	mkdir -p $(BUILD_ROOT)
 	: > $(KERNEL_TRACE_LOG)
@@ -1108,7 +1379,7 @@ qemu-virt-tcg-icount-trace:
 	$(MAKE) $(CHANNELIO_DISK_IMG)
 	$(MAKE) $(CHANNELIO_EXT2_IMG)
 	$(MAKE) KERNEL_BUILD_DIR="$(TCG_ICOUNT_TRACE_KERNEL_BUILD_DIR)" ELF="$(TCG_ICOUNT_TRACE_ELF)" \
-		EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DBSP_WFE_WAIT -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE -DKERNEL_LOW_VOLUME_TRACE" \
+		EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DBSP_WFE_WAIT -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE" \
 		$(TCG_ICOUNT_TRACE_ELF)
 	mkdir -p $(BUILD_ROOT)
 	: > $(KERNEL_TRACE_LOG)
@@ -1258,4 +1529,4 @@ qemu-virt-gdb: clean $(ELF)
 		-S \
 		-gdb tcp::1234
 
-.PHONY: all clean setup python-venv disk sd-fat32-disk ext2-disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-hvf qemu-virt-hvf-trace qemu-virt-tcg-icount-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace riscv64-bringup riscv64-bringup-elf qemu-riscv64 qemu-riscv64-run qemu-riscv64-trace qemu-riscv64-trace-build qemu-riscv64-trace-run test smoke-test hundelint hundelint-strict hundelint-test test_clean
+.PHONY: all clean setup python-venv disk sd-fat32-disk ext2-disk qemu pi-uefi pi-uefi-efi pi-uefi-esp qemu-pi-uefi qemu-pi-uefi-firmware qemu-pi-uefi-firmware-trace qemu-virt-hvf qemu-virt-hvf-trace qemu-virt-tcg-icount-trace qemu-virt-1cpu-trace qemu-virt-2cpus-trace riscv64-bringup riscv64-bringup-elf riscv-virt-embedded riscv-virt-embedded-run milkv-duo milkv-duo-build milkv-duo-sd-image milkv-duo-sd-image-build milkv-duo-qemu-build qemu-milkv-duo milkv-duo-bringup milkv-duo-bringup-build milkv-duo-bringup-elf milkv-duo-bringup-elf-build milkv-duo-s milkv-duo-s-build milkv-duo-s-sd-image milkv-duo-s-sd-image-build milkv-duo-s-qemu-build milkv-duo-s-qemu-disk qemu-milkv-duo-s qemu-riscv64 qemu-riscv64-run qemu-riscv64-trace qemu-riscv64-trace-build qemu-riscv64-trace-run test smoke-test hundelint hundelint-strict hundelint-test test_clean

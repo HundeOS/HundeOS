@@ -147,6 +147,7 @@ void setUp(void)
     next_read_result = 0;
     next_result = 0;
     next_path_reply = IOReply__new(IO_OK, 0);
+    IO__set_startup_stdio(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
 }
 
 void tearDown(void)
@@ -271,7 +272,9 @@ void test_sd_host_config_parse_reads_present_host(void)
                                              "sd_host.present=1\n"
                                              "sd_host.physical_base=0xfe340000\n"
                                              "sd_host.mmio_size=0x100\n"
-                                             "sd_host.irq=126\n");
+                                             "sd_host.irq=126\n"
+                                             "sd_host.kind=2\n"
+                                             "sd_host.source_clock_hz=375000000\n");
 
     match_optional(
         SdHostConfig__parse(&sysinfo),
@@ -280,6 +283,8 @@ void test_sd_host_config_parse_reads_present_host(void)
             TEST_ASSERT_EQUAL_HEX64(0xfe340000, config.physical_base);
             TEST_ASSERT_EQUAL_HEX64(0x100, config.mmio_size);
             TEST_ASSERT_EQUAL_UINT64(126, config.irq);
+            TEST_ASSERT_EQUAL(SD_HOST_KIND_CV181X, config.kind);
+            TEST_ASSERT_EQUAL_UINT64(375000000, config.source_clock_hz);
         },
         none_test_fail()
     );
@@ -292,7 +297,9 @@ void test_sd_host_config_parse_returns_none_when_host_absent(void)
     DynString sysinfo = dyn_string_from_cstr("sd_host.present=0\n"
                                              "sd_host.physical_base=0xfe340000\n"
                                              "sd_host.mmio_size=0x100\n"
-                                             "sd_host.irq=126\n");
+                                             "sd_host.irq=126\n"
+                                             "sd_host.kind=2\n"
+                                             "sd_host.source_clock_hz=375000000\n");
 
     match_optional(SdHostConfig__parse(&sysinfo),
         some_test_fail(),
@@ -307,7 +314,9 @@ void test_sd_host_config_parse_rejects_partial_numeric_values(void)
     DynString sysinfo = dyn_string_from_cstr("sd_host.present=1\n"
                                              "sd_host.physical_base=0xfe340000tail\n"
                                              "sd_host.mmio_size=0x100\n"
-                                             "sd_host.irq=126\n");
+                                             "sd_host.irq=126\n"
+                                             "sd_host.kind=2\n"
+                                             "sd_host.source_clock_hz=375000000\n");
 
     match_optional(SdHostConfig__parse(&sysinfo),
         some_test_fail(),

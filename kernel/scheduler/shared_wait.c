@@ -90,14 +90,6 @@ Result(Address) Process__queue_wait_control(ProcessPtr self)
 void Process__wake_shared_wait(ProcessPtr self)
 {
     Process__ring_doorbell(self);
-    match_optional(
-        self->queue_wait_control,
-        some(mapping)
-        {
-            QueueWaitControl__wake(k_v_ptr(mapping, QueueWaitControl));
-        },
-        none_do_nothing()
-    );
 }
 
 void Process__publish_dispatch_trace(ProcessPtr self, ConstRequestTicketPtr ticket, uint64_t eligible_at_usec,
@@ -135,8 +127,54 @@ bool Process__has_pending_messages(ProcessPtr self)
            Queues__has_unread_messages(&self->kernel->scheduler->queues, self);
 }
 
-static bool Process__shared_observations_ready(ProcessPtr self, ConstQueueWaitControlPtr control,
-                                               ConstQueueWaitPublicationPtr publication)
+bool Process__has_pending_queue_wait(ProcessPtr self)
+{
+    return Process__has_pending_notifications(self) ||
+           Queues__has_waitable_state(&self->kernel->scheduler->queues, self);
+}
+
+bool Process__doorbell_changed(ProcessPtr self, IpcEventGeneration observed)
+{
+    match_optional(
+        self->ipc_doorbell,
+        some(mapping)
+        {
+            return IpcEvent__changed(IpcDoorbell__event(k_v_ptr(mapping, IpcDoorbell)), observed);
+        },
+        none_do_nothing()
+    );
+    return true;
+}
+
+void Process__arm_kernel_queue_wait(ProcessPtr self, IpcEventGeneration observed)
+{
+    self->queue_wait_doorbell = Some(IpcEventGeneration, observed);
+}
+
+void Process__clear_kernel_queue_wait(ProcessPtr self)
+{
+    self->queue_wait_doorbell = None(IpcEventGeneration);
+}
+
+bool Process__kernel_queue_wait_ready(ProcessPtr self)
+{
+    if (Process__has_pending_signal(self) || Process__has_pending_queue_wait(self))
+    {
+        return true;
+    }
+    match_optional(
+        self->queue_wait_doorbell,
+        some(observed)
+        {
+            return Process__doorbell_changed(self, observed);
+        },
+        none_do_nothing()
+    );
+    return true;
+}
+
+static bool Process__shared_wait_state_ready(ProcessPtr self, ConstQueueWaitControlPtr control,
+                                             ConstQueueWaitPublicationPtr publication)
 {
     uint64_t now = CPU__time_usec();
     if (publication->deadline != QUEUE_WAIT_NO_DEADLINE &&
@@ -145,27 +183,10 @@ static bool Process__shared_observations_ready(ProcessPtr self, ConstQueueWaitCo
         return true;
     }
 
-    if (QueueWaitControl__woken(control, publication->observed_wake_generation))
+    if (Process__doorbell_changed(self, publication->observed_doorbell_generation) ||
+        Process__has_pending_queue_wait(self))
     {
         return true;
-    }
-    SchedulerPtr scheduler = self->kernel->scheduler;
-    for (uint64_t index = 0; index < publication->count; index++)
-    {
-        match_result(
-            QueueWaitObservations__at(&control->observations, index),
-            success(observed)
-            {
-                if (Queues__observation_changed(&scheduler->queues, self, &observed))
-                {
-                    return true;
-                }
-            },
-            error(code, message)
-            {
-                return true;
-            }
-        );
     }
     return !QueueWaitControl__unchanged(control, publication);
 }
@@ -186,7 +207,7 @@ Optional(QueueWaitPublication) Process__shared_wait(ProcessPtr self)
                 QueueWaitControl__publication(control),
                 some(publication)
                 {
-                    if (!Process__shared_observations_ready(self, control, &publication))
+                    if (!Process__shared_wait_state_ready(self, control, &publication))
                     {
                         return Some(QueueWaitPublication, publication);
                     }
@@ -201,6 +222,10 @@ Optional(QueueWaitPublication) Process__shared_wait(ProcessPtr self)
 
 bool Process__shared_wait_ready(ProcessPtr self)
 {
+    if (Process__has_ready_parked_operation(self, PARK_WAIT_QUEUE, &None(OperationKey)))
+    {
+        return true;
+    }
     match_optional(Process__shared_wait(self),
         some(publication)
         {
@@ -222,7 +247,8 @@ bool Process__shared_wait_armed(ProcessPtr self)
                 QueueWaitControl__publication(control),
                 some(publication)
                 {
-                    return !QueueWaitControl__woken(control, publication.observed_wake_generation);
+                    return !Process__doorbell_changed(self, publication.observed_doorbell_generation) &&
+                           QueueWaitControl__unchanged(control, &publication);
                 },
                 none_do_nothing()
             );

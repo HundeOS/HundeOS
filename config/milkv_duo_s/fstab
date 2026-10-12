@@ -1,0 +1,2 @@
+# device <path> <filesystem> <mountpoint>
+device /dev/mmc0p3 ext2 /

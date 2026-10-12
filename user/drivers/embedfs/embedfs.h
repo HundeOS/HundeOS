@@ -26,7 +26,7 @@ typedef struct Embedfs
 } Embedfs;
 
 typedef Embedfs * EmbedfsPtr;
-Embedfs Embedfs__new(EmbeddedFsPtr archive);
+void Embedfs__init(EmbedfsPtr self, EmbeddedFsPtr archive);
 IOReply Embedfs__execute(EmbedfsPtr self, IORequestPtr request);
 Optional(IOReply)
     Embedfs__serve(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request);

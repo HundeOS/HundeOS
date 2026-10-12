@@ -48,6 +48,7 @@ void Queue__ignore_data_available(QueueConnectionID connection);
 QueueCode Queue__status(QueuePtr self);
 // Observes shared cursors without consuming messages or changing endpoint state.
 bool Queue__has_unread_messages(QueuePtr self);
+bool Queue__has_write_capacity(QueuePtr self);
 QueueConnectionID Queue__connection(QueuePtr self);
 QueueParticipantID Queue__peer_pid(QueuePtr self);
 QueueParticipantID Queue__local_pid(QueuePtr self);

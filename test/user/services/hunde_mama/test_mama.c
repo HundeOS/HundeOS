@@ -12,7 +12,8 @@ static bool school_started;
 static bool handed_off;
 static bool fail_handoff;
 static bool disk_ready_waited;
-static BString started[8];
+static bool use_sd_host;
+static BString started[12];
 static BString mounted[3];
 static BootVirtioMmioInfo virtio_mmio;
 
@@ -23,6 +24,7 @@ void setUp(void)
     school_started = false;
     handed_off = fail_handoff = false;
     disk_ready_waited = false;
+    use_sd_host = false;
     registers[31 * 0x200 / 4] = 0x74726976;
     registers[31 * 0x200 / 4 + 1] = 1;
     registers[31 * 0x200 / 4 + 2] = 2;
@@ -46,7 +48,7 @@ ServiceCode service_publish_ready(ConstBStringPtr name)
 
 ServiceCode service_wait_ready(ConstBStringPtr name)
 {
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/virtio1"), *name);
+    TEST_ASSERT_EQUAL_BSTRING(use_sd_host ? bstr("/dev/mmc0p2") : bstr("/dev/virtio1"), *name);
     disk_ready_waited = true;
     return SERVICE_OK;
 }
@@ -62,7 +64,15 @@ ServiceCode service_map_mmio(uint64_t physical, size_t size, ServiceMappedMemory
 Result(BootHardwareInfo) BootHardwareInfo__load(void)
 {
     BootHardwareInfo info = BootHardwareInfo__new();
-    info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
+    if (use_sd_host)
+    {
+        BootDeviceInfo device = BootDeviceInfo__new(0x04310000, 0x1000, 36);
+        info.sd_host = Some(BootSdHostInfo, BootSdHostInfo__new(&device, SD_HOST_KIND_CV181X, 375000000));
+    }
+    else
+    {
+        info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
+    }
     return Success(BootHardwareInfo, info);
 }
 
@@ -74,7 +84,7 @@ void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
 Result(ServiceCode)
     BootService__bootstrap(ConstBStringPtr path, ConstBStringPtr arg0, ConstBStringPtr arg1, ConstBStringPtr ready)
 {
-    TEST_ASSERT_LESS_THAN(8, starts);
+    TEST_ASSERT_LESS_THAN(12, starts);
     started[starts++] = *ready;
     return starts == fail_start ? Error(ServiceCode, bstr("failed"), SERVICE_SCHEDULER_ERROR)
                                 : Success(ServiceCode, SERVICE_OK);
@@ -161,6 +171,21 @@ void test_mama_does_not_start_school_when_a_boot_service_fails(void)
     TEST_ASSERT_EQUAL(1, mama_main());
     TEST_ASSERT_FALSE(school_started);
     TEST_ASSERT_EQUAL(2, mounts);
+}
+
+void test_mama_bootstraps_sd_host_and_partition_services(void)
+{
+    use_sd_host = true;
+
+    TEST_ASSERT_EQUAL(1, mama_main());
+
+    TEST_ASSERT_TRUE(school_started);
+    TEST_ASSERT_TRUE(disk_ready_waited);
+    TEST_ASSERT_EQUAL(11, starts);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0"), started[7]);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p2"), started[8]);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p3"), started[9]);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/config"), started[10]);
 }
 
 void test_mama_rejects_missing_or_ambiguous_boot_disk(void)

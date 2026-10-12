@@ -14,12 +14,19 @@ typedef struct RiscVPlatformInfo
     uint64_t uart_base;
     uint64_t uart_size;
     uint64_t uart_irq;
+    uint64_t uart_register_shift;
+    uint64_t uart_register_width;
     uint64_t rtc_base;
     uint64_t rtc_size;
     uint64_t rtc_irq;
     uint64_t plic_base;
     uint64_t plic_size;
     uint64_t plic_source_count;
+    uint64_t sd_host_base;
+    uint64_t sd_host_size;
+    uint64_t sd_host_irq;
+    SdHostKind sd_host_kind;
+    uint64_t sd_host_source_clock_hz;
     uint64_t virtio_mmio_base;
     uint64_t virtio_mmio_size;
     uint64_t virtio_mmio_count;
@@ -54,8 +61,6 @@ typedef enum RiscVDeviceTreeStatus
     RISCV_DEVICE_TREE_MISSING_TIMEBASE,
     RISCV_DEVICE_TREE_MISSING_UART,
     RISCV_DEVICE_TREE_MISSING_PLIC,
-    RISCV_DEVICE_TREE_MISSING_VIRTIO,
-    RISCV_DEVICE_TREE_MISSING_PCI,
     RISCV_DEVICE_TREE_TOO_MANY_RESERVED_REGIONS,
 } RiscVDeviceTreeStatus;
 

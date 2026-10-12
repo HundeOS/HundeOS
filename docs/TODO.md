@@ -516,16 +516,16 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 
 #### Userspace Polling and Kernel Parking
 
-- [x] Run ready fibres, briefly poll queue state in userspace, then park the process
-  with authenticated queue observations. Return to userspace after N ticks even
-  without a state change, and always recheck predicates.
+- [x] Run ready fibres, poll queue state in userspace, then park the process with
+  its observed process-doorbell generation. Under the scheduler lock, recheck the
+  live doorbell and kernel-owned readiness state before committing the park.
 - [x] Replace comparison-mode busy polling with userspace `WFE`/`SEV` waits.
   Complete publication before signalling; signal after device IRQ dispatch and
-  set a local event on context restoration. Timer preemption remains enabled,
-  and normal wait helpers do not invoke kernel parking.
-- Retained kernel parking syscall: 10-tick default timeout, with predicate checks
-  on each owning CPU tick. The former 20-microsecond userspace polling phase has
-  been removed. See [queue waits](architecture/queues.md#bounded-waits).
+  set a local event on context restoration. Timer preemption remains enabled.
+- Kernel queue waits now use the process doorbell generation and authoritative
+  kernel readiness checks. Normal waits use an indefinite park; the diagnostic
+  probe retains bounded 1-to-100-tick timeouts. See
+  [queue waits](architecture/queues.md#bounded-waits).
 - User comparison on the SDHCI trace target reports substantially better
   responsiveness with kernel parking disabled and tracing unchanged. This
   implicates the parking path, but does not isolate its expensive stage.
@@ -553,18 +553,19 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 #### Proposed Shared Scheduling Hint
 
 - [x] Introduce a per-process shared userspace scheduling record: idle queue waits
-  publish observations; the kernel consults them during normal preemption and
-  process selection instead of requiring a per-wait syscall. Existing fibre
-  dispatchers run ready work before entering this path. See the implemented
-  queue-observation foundation below; dependency-token propagation is separate.
+  publish the observed process-doorbell generation for scheduling diagnostics and
+  dependency hints. Kernel parking remains a syscall and uses kernel-owned live
+  readiness state. Existing fibre dispatchers run ready work before entering this
+  path; dependency-token propagation is separate.
 - Proposed constraints: aggregate readiness across the process, retain timer
   preemption, and avoid per-wait allocation and deferred-syscall completion.
-- [x] Keep a publication armed across spurious or unrelated `WFE` returns and
-  add a kernel-written wake generation for authenticated notifications. Ordinary
-  waits have no periodic retry; validated preferred ancestors use the bounded
-  warm-residency policy. Treat userspace fields as untrusted hints; never follow
-  arbitrary pointers, override genuine kernel blocking, or prevent pending
-  termination from running. See [queue waits](architecture/queues.md#bounded-waits).
+- [x] Replace per-queue userspace snapshots and the separate kernel-written wake
+  generation with one process doorbell generation. Kernel queue waits record the
+  submitted generation only after checking all owned queues and kernel
+  notifications under the scheduler lock. Timer and voluntary-yield scheduling
+  paths compare that generation and current kernel state. Treat the shared
+  userspace publication as an untrusted hint only. See
+  [queue waits](architecture/queues.md#bounded-waits).
 - [x] Add a four-CPU, single-threaded TCG icount trace target using
   `-icount shift=auto,sleep=on`. Boot hardware information selects `WFE` for
   hardware and that target, while HVF and ordinary MTTCG use active rechecks.
@@ -581,12 +582,11 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   eligible again, across CPUs. Consider a shared wake generation rather than
   rewriting every process record in interrupt context; exclude reschedule IPIs
   from triggering a recursive broadcast. Mechanism and policy remain open.
-- Wakeup cascades must remain live: a downstream service can run and become idle
-  before its upstream producer publishes a Channel message. Later userspace
-  publication need not generate a kernel interrupt. An IRQ broadcast alone is
-  therefore insufficient; retain bounded timer-driven retries or authoritative
-  readiness checks. Treat fibre-idle as an advisory scheduling hint, not an
-  indefinite kernel-blocked state.
+- [x] Keep wakeup cascades live when downstream work arrives after a service has
+  parked. Successful pushes authenticate the receiver and trigger an immediate
+  kernel readiness check; consumption-only progress is detected through the
+  process doorbell and authoritative state checks on timer or voluntary-yield
+  scheduler entry. Fibre-idle publications remain advisory.
 
 #### Proposed Dependency-Ordered Waiters
 
@@ -596,11 +596,11 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   class/last-run ordering breaks ties; consuming messages removes the priority.
   Implemented using existing kernel mappings, with no per-message syscall. See
   [receiver scheduling priority](architecture/queues.md#receiver-scheduling-priority).
-- [x] Respect an active shared wait before granting receiver priority or retaining
-  the running receiver. Unread messages on another Channel cannot override the
-  wait: the process may need a peer to run before it can consume those messages.
-  Regression tests cover both initial selection and timer retention, then
-  restoring receiver priority when the watched Channel progresses. See
+- [x] Make live unread transport on any connection owned by a process override
+  an unchanged userspace wait publication. The scheduler checks authoritative
+  queue state rather than trusting a user-selected wait set. Regression tests
+  cover both initial selection and timer retention when the unread connection
+  was absent from the preceding userspace scan. See
   [receiver scheduling priority](architecture/queues.md#receiver-scheduling-priority).
 - [x] Add outstanding-request identity and parent propagation independently of
   unread-message state. See [Channel tickets and preferred scheduling](architecture/dependency-scheduling.md).
@@ -611,6 +611,11 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   [Channel latency tracing](architecture/driver-tracing.md#channel-latency-tracing).
 - [x] Add ticket-correlated kernel timestamps for publication-to-eligibility and
   eligibility-to-selection/dispatch to the Channel latency trace.
+- [ ] Re-enable Channel latency tracing through `SystemSettings` when latency
+  measurement is needed again. The setting is disabled by default, so
+  `hundeschule` does not start `hund-verfolgen` and participants do not register
+  trace rings. Ordinary driver diagnostics now use the kernel syslog syscall and
+  remain independent of this setting.
 - [ ] Tune scheduler residency using the measured Channel latency breakdown.
 - [x] Retain the final trace records of short-lived processes by synchronously
   draining a bounded snapshot of every registered source before acknowledging
@@ -686,12 +691,11 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 - Open scope: exclusive cluster budgets/arbitration and context integration for
   custom asynchronous dispatchers outside the common I/O/block wrappers.
 
-- [x] Add shared queue-observation wait controls and scheduler eligibility checks.
-  Registration allocates once; normal waits publish without syscalls. The kernel
-  validates connection ownership, observes durable cursors and notification
-  readiness, and leaves incomplete or invalid publications runnable. Stable
-  publications survive unrelated event returns; kernel notification producers
-  advance a wake generation to return the process to its dispatcher.
+- [x] Retire shared per-queue observation arrays. The shared wait control now
+  publishes only the process doorbell generation and timing diagnostics; it is
+  advisory. Kernel queue waits use a syscall that records the generation and
+  checks kernel-owned queues and notifications before parking and again on timer
+  or voluntary-yield scheduler entry.
 - This foundation gates existing channel hops on actual transport progress.
   It does not yet implement the IRQ token/hop protocol below, stage acknowledgements,
   or operation-failure timeout reporting. See [queue waits](architecture/queues.md#bounded-waits).
@@ -976,9 +980,86 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
 
 Status: in progress. The agreed first target is RV64IMAC on QEMU `virt`, using
 the LP64 soft-float ABI, OpenSBI firmware, supervisor mode, four harts, and Sv39.
-Physical-board support is not yet selected. QEMU provides a generated device
-tree and a suitable virtual platform for initial bring-up. See the
+The first physical-board target is the original 64 MiB Milk-V Duo using the
+CV1800B RISC-V application core and the vendor FSBL/OpenSBI/U-Boot SD boot
+chain. QEMU provides a generated device tree and a suitable virtual platform
+for architecture bring-up. See the
 [QEMU RISC-V virt documentation](https://www.qemu.org/docs/master/system/riscv/virt.html).
+
+#### Milk-V Duo CV1800B
+
+- [x] Produce a reproducible `boot.sd` payload for the vendor SD boot chain.
+  The initial bring-up FIT enters supervisor mode at `0x80200000`, writes to the
+  DW APB UART at `0x04140000`, and validates the firmware-provided DTB handoff.
+  See [Milk-V Duo bring-up](architecture/milkv-duo.md).
+- [x] Add the full `milkv_duo` boot platform with a one-hart, 64 MiB Sv39 layout,
+  CV1800B PLIC metadata, UART register stride, reserved firmware memory, and
+  board DTB parsing without requiring QEMU VirtIO or PCI nodes. `make milkv-duo`
+  now links the full kernel and userspace and packages a stock-firmware
+  compatible FIT; see [Milk-V Duo](architecture/milkv-duo.md).
+- [x] Automate a complete flashable SD-card image with the checksum-pinned
+  official `fip.bin` boot chain, the HundeOS `boot.sd`, and an
+  architecture-qualified ext2 root filesystem. `make milkv-duo-sd-image`
+  produces the two-partition image described in
+  [Milk-V Duo](architecture/milkv-duo.md).
+- [ ] Reduce the board's embedded filesystem to the services required before
+  the SD root is mounted. The full image now fits with two 1 MiB boot stacks,
+  but it still embeds all userspace binaries rather than handing most of them
+  off to the SD root filesystem.
+- [ ] Bring up the CVITEK SDHCI controller at `0x04310000` through the existing
+  userspace block protocol, identify partitions explicitly, and mount boot
+  configuration and root filesystems from the same SD card.
+- [ ] Verify on hardware through the 115200 baud UART: early output, kernel
+  handoff, timer and interrupts, userspace bootstrap, SD I/O, login, and Bash.
+  Hardware serial capture remains required evidence for completion.
+
+#### Milk-V Duo S SG2000
+
+- [x] Add a CV1800B-QEMU approximation with the Duo S kernel, DTB, 510 MiB RAM,
+  and complete SD image for rapid integration testing. The isolated build uses
+  QEMU-compatible PTE attributes and UART0 as its console because this model
+  does not emulate SG2000 UART1. It remains explicitly outside CV181x hardware
+  validation. See [Milk-V Duo S](architecture/milkv-duo-s.md).
+- [ ] Diagnose the CV1800B QEMU fork's repeated invalid-CSR diagnostics and the
+  root `ext2fs` startup stall. The approximation currently validates generic
+  SDHCI initialization, partition discovery, and boot-config mounting but does
+  not reach login.
+- [x] Add a separate `milkv_duo_s` boot platform using the stock
+  `config-cv1813h_milkv_duos_sd` FIT contract, one RISC-V hart, the 510 MiB
+  firmware-exposed memory range, the initial firmware reservation, and the
+  Duo S UART, PLIC, RTC, and CV181x SD host description. See
+  [Milk-V Duo S](architecture/milkv-duo-s.md).
+- [x] Automate a complete Duo S SD image from the checksum-pinned official
+  v1.1.4 image. `make milkv-duo-s-sd-image` preserves the vendor boot chain
+  and raw logo region, replaces `boot.sd`, installs the 8 MiB boot configuration
+  filesystem in partition two, and relocates the HundeOS ext2 root to partition
+  three.
+- [x] Work around the stock U-Boot 8 MiB kernel decompression limit without
+  replacing `fip.bin`. The FIT now asks U-Boot to decompress the full kernel as
+  a staged loadable and enters it through a small board-specific handoff. See
+  [Milk-V Duo S](architecture/milkv-duo-s.md).
+- [x] Bootstrap the userspace CV181x SDHCI service before boot configuration,
+  expose MBR partitions through the common block protocol, mount
+  `/dev/mmc0p2` as `/boot/config`, and configure `/dev/mmc0p3` as root. The
+  controller, partition discovery, and `/boot/config` mount are verified on
+  hardware; root-mount completion remains to be validated. See
+  [Milk-V Duo S](architecture/milkv-duo-s.md).
+- [x] Split the physical Duo S UART configuration after console bring-up. UART0
+  carries early bootstrap output and the userspace console; after kernel handoff,
+  kernel and driver syscall traces use UART1. The QEMU approximation continues
+  to share UART0 because it does not emulate SG2000 UART1. See
+  [Milk-V Duo S](architecture/milkv-duo-s.md).
+- [ ] Implement and validate the CVITEK RTC register interface without treating
+  it as the incompatible QEMU Goldfish RTC.
+- [ ] Validate login and Bash through the Duo S UART0 userspace console while
+  kernel and driver syscall traces use UART1 independently. Synchronous shell
+  startup now returns structured child-abort details for login to render on
+  UART0; hardware validation of the shell fault and successful startup paths
+  remains. See [Milk-V Duo S](architecture/milkv-duo-s.md).
+- [ ] Decide whether HundeOS should replace or reconfigure the stock firmware
+  path to reclaim the C906L coprocessor. The current stock boot runs its RTOS
+  before OpenSBI and exposes only the C906 application core as a hart; a future
+  change needs an explicit memory, interrupt, and device-ownership contract.
 
 #### Build and Architecture Boundaries
 

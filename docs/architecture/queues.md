@@ -34,37 +34,41 @@ or token authorization.
 
 ## Bounded Waits
 
-Userspace helpers publish authoritative queue snapshots and enter
-`SERVICE_QUEUE_WAIT` without a deadline. The kernel authenticates and copies the
-snapshots, rechecks them while holding the scheduler lock, and parks the process
-only while they remain unchanged. Normal queue waits therefore do not wake merely
-to retry or apply a timeout backoff. A timed form remains available to explicit
-diagnostic callers such as `queue_wait_probe`.
+Userspace captures its process doorbell generation before polling queue and
+notification state, then enters `SERVICE_QUEUE_WAIT` with that generation and an
+optional deadline. Under the scheduler lock, the kernel compares the live
+doorbell, scans its own queue backing for unread messages, pending listener
+arrivals, and peer closure, and checks live service, IRQ, buffer, and signal state
+before parking. No connection handles, cursor values, listener epochs, or wait-set
+snapshots cross the syscall boundary.
 
 Every voluntary wait reschedule and timer-driven scheduler entry checks queue
 waiters owned by every CPU before selecting the next process. In addition, each
 successful queue push issues an authenticated data-available notification after
 publishing the shared cursor and ringing the receiver's doorbell. A pop publishes
-consumption and rings the sender's shared-memory doorbell, but does not announce
-new schedulable work. The kernel derives the receiver from the live connection
-rather than accepting a userspace PID. If that receiver is parked on an
-authoritative queue wait which has changed, the kernel makes it runnable
+consumption and rings the sender's shared-memory doorbell, but does not make a
+syscall. The kernel derives the receiver from the live connection rather than
+accepting a userspace PID. If that receiver is parked on a kernel queue wait whose
+doorbell or live state has changed, the kernel makes it runnable
 immediately and sends its CPU a reschedule IPI. A ready or interrupted receiver
 with an armed userspace wait publication is also poked, forcing an immediate
 scheduling decision instead of waiting for the next timer tick. A running receiver
 is not interrupted: the queue publication's architecture event already releases
-its event wait. Further notifications coalesce after the shared wake generation
-changes. If the peer has not published or parked yet, the park-time cursor recheck
-observes the progress and refuses to sleep. Timer and device interrupts remain
-fallback scheduler entries for externally initiated progress.
-After an unrelated return, userspace performs a bounded 100-microsecond warm
-recheck before parking again.
+its event wait. The notification decision uses the kernel's live unread-queue
+state, not the userspace wait publication.
+If the peer has not parked yet, the park-time generation and live-state recheck
+observes the progress and refuses to sleep. Timer and voluntary-yield scheduler
+entries rescan parked processes against current kernel state, covering consumption
+notifications that deliberately avoid a syscall. A `QUEUE_WAIT_CHANGED` return is
+itself sufficient for userspace to re-poll live queue state; it does not require a
+second doorbell-generation change.
 
 Queue listen/connect allocates the private doorbell page. The first wait
 registration obtains the private shared wait-control allocation through
-`SERVICE_QUEUE_WAIT_CONTROL`. The control publication remains available to the
-dependency scheduler and diagnostics while the kernel-owned parked operation
-controls whether the process is runnable.
+`SERVICE_QUEUE_WAIT_CONTROL`. The control publication contains the observed
+process doorbell generation and remains available to the dependency scheduler and
+diagnostics. A kernel-parked operation separately records its observed generation
+in kernel process state; the userspace control page is not authoritative for it.
 
 Each connection maps the peer process's doorbell at the connection's fixed alias
 address. `Queue__push` publishes the produced cursor before incrementing the
@@ -74,17 +78,14 @@ Kernel-side acceptance, closure, listener arrival, service event, and signal
 publication ring the affected process's owned doorbell. A generation is only a
 wake predicate: increments may be coalesced and are not an event count.
 
-The data-available syscall does not carry message data or decide readiness;
-it authenticates a connection and prompts the kernel to recheck the existing
-shared state. The control allocation persists until process exit and cannot be explicitly freed
-or shared with another process. Observations contain handles, not kernel-followed
-user pointers. The kernel authenticates each handle, reads atomic records, and
-rechecks the publication generation. Invalid, incomplete, or changing records
-leave the process runnable. No allocation or deferred syscall occurs on each wait.
-Ordinary shared waits have no periodic retry deadline. Kernel notification
-producers increment the control's wake generation and the process doorbell before
-issuing the architecture wake, so both a resident waiter and the scheduler can
-distinguish real kernel work from an unrelated return.
+The data-available syscall does not carry message data or decide readiness; it
+authenticates a connection and prompts the kernel to recheck existing shared state.
+The control allocation persists until process exit and cannot be explicitly freed
+or shared with another process. An incomplete or changing control publication
+leaves a userspace-idle process runnable. Normal waits allocate a deferred kernel
+operation when they actually park. Kernel notification producers ring the process
+doorbell before issuing the architecture wake, so both a resident waiter and the
+scheduler observe the same generation transition.
 
 This gates each transport hop on its actual queue progress. Explicit propagated
 IRQ tokens, hop numbers, stage acknowledgements, and operation-timeout results
@@ -109,13 +110,12 @@ published cursor with the receiver's acknowledgement on the opposite page.
 Only live, accepted connections with a pending count within queue capacity count.
 The check applies symmetrically to requests, replies, and warden relay messages,
 without interpreting message kinds. Pending service events and the IRQ/buffer
-manager notification queues also qualify. An unchanged shared-wait publication
-takes precedence over unread transport messages: a process synchronously waiting
-on one Channel may be unable to handle messages on another. Only progress in its
-published observations or pending kernel notifications/signals makes it eligible
-again, except for a validated ticket's bounded warm dispatch. Consuming the last
-message removes unread-message eligibility but does not end an already dispatched
-process's preferred processing budget.
+manager notification queues also qualify. Unread transport on any connection
+owned by the process overrides an unchanged userspace wait publication. The
+publication describes process-wide idleness, not a userspace-selected subset of
+connections. This prevents a newly attached or otherwise omitted connection from
+leaving runnable work asleep. Consuming the last message removes unread-message
+eligibility but does not end an already dispatched process's preferred budget.
 
 This is strict receiver priority: sustained unread traffic can starve processes
 without messages. Shared cursor values remain untrusted scheduling hints, not
@@ -123,19 +123,17 @@ proof of useful work. Queue progress can introduce a reschedule interrupt when i
 makes a parked peer runnable. Preferred selection now supports cross-CPU
 migration. Tests cover receiver direction, consumption, cursor bounds/wraparound,
 shared waits, timer retention, yielding, and blocked-process eligibility,
-including an unrelated unread message while waiting on a second Channel.
-The wait-precedence correction passed two four-core traced QEMU boots to login;
-an interactive run also completed login, `ls /boot`, and `ps`. This verifies
-startup progress, not a throughput improvement.
+including unread work arriving on a connection absent from the preceding
+userspace scan.
 
 On AArch64, publication completes with `DSB ISHST` before `SEV`; a waiter compares
 the armed generation and uses `WFE`. An event arriving between the check and
 `WFE` remains pending. On RISC-V, the waiter establishes an `LR` reservation on
 the generation and uses `WRS.NTO`; the peer's atomic generation update invalidates
 that reservation. The RISC-V QEMU targets enable the `Zawrs` extension explicitly.
-Event and arrival waits return only when an authoritative observation changes or
-the kernel advances the wake generation. Synchronous queue waits use the process
-doorbell. `ChannelSignal` waits directly on its data or space epoch because each
+Event and arrival waits return when the process doorbell changes, then recheck
+their authoritative local predicates. Synchronous queue waits use the same
+process doorbell. `ChannelSignal` waits directly on its data or space epoch because each
 such wait has a single authoritative address. All waits recheck until ready or
 closed. Wakeups may be coalesced or spurious: they are never a message count and
 do not by themselves cause another dispatch scan.
@@ -159,20 +157,21 @@ event-wait behavior does not provide the required sleep semantics. RISC-V uses
 on one host TCG thread, so it is suitable for wait behavior and scheduler traces,
 not parallel-throughput measurements.
 
-The stable publication includes a userspace `CNTVCT_EL0` timestamp taken when
-the wait is committed. Process snapshots report `USER_WAIT` and its elapsed
-monotonic duration only while the kernel also validates that the publication is
-stable and its authoritative observations remain unchanged. The timestamp is
+The stable publication includes a userspace monotonic timestamp taken when the
+wait is committed. Process snapshots report `USER_WAIT` and its elapsed duration
+only while the publication is stable and its observed doorbell generation still
+matches live kernel-visible state. The timestamp is
 diagnostic-only and does not influence selection or CPU accounting.
 
-The former hybrid design and retained kernel parking syscall are described below.
+The retired snapshot design is described below.
 
 ### Isolated Timeout Probe
 
 Run `queue_wait_probe 1` and `queue_wait_probe 10` to exercise only the calling
 process's kernel wait, leaving all services in userspace event-wait mode. The optional argument
 is a timeout in scheduler ticks (1 through 100; default 10). Each run makes 16
-wait syscalls with an empty observation list and prints one summary afterward.
+wait syscalls with the process's observed doorbell generation and prints one
+summary afterward.
 Timeout samples are timed from userspace immediately before the syscall to
 userspace immediately after it returns; the minimum, average, and maximum are
 in microseconds. Activity returns and failures are counted separately and do not
@@ -211,27 +210,19 @@ and entry/completion paths warrant separate measurement; these results do not
 prove which dominates. Queue-publication-to-detection latency remains unmeasured.
 This is not an all-services-parking comparison or a claim about untraced hardware.
 
-### Former Hybrid Design
+### Retired Per-Queue Snapshot Design
 
-This records the comparison baseline, not the current userspace wait path.
-Only its kernel parking syscall remains implemented.
+This records the retired design, not the current wait path.
 
-Channels retain their existing transport. `Queue__prepare_wait` snapshots peer
-publication/consumption cursors, accepted/closed flags, and listener epochs before
-the dispatch scan. `Queue__wait_event` polls those values for up to 20 microseconds,
-then calls `SERVICE_QUEUE_WAIT` with the observed values. It refreshes the snapshot
-before returning, supporting event loops that prepare once before their first scan.
-Opening or closing a local endpoint invalidates the snapshot and forces another
-scan before parking. Synchronous readable/writable waits watch their own connection
-and retry the predicate in userspace after every timed park, preserving the blocking
-contract used by Channel setup. A timeout is not mistaken for an empty/full error.
+The former implementation registered each userspace queue, snapshotted cursors,
+accepted/closed flags, and listener epochs, then passed a selected snapshot array
+to `SERVICE_QUEUE_WAIT`. Correctness therefore depended on userspace registration
+remaining complete as connections changed.
 
-The syscall authenticates every full-generation handle against the calling process,
-copies observations from tracked readable allocations, and rechecks them under the
-scheduler lock before marking the process `PARK_WAIT_QUEUE`. It never retains a
-userspace pointer, maps arbitrary wait addresses, or switches context with that
-lock held. Peer publication during the handoff remains visible in the authoritative
-cursors; no `SEV` event latch is relied on for correctness.
+The snapshot array and all kernel per-connection/per-listener stored observations
+have been removed. The syscall now carries one process doorbell generation. The
+kernel records it only after checking current kernel-owned state under the
+scheduler lock and never retains a userspace pointer.
 
 Initially, the owning CPU's scheduler tick checks parked waits. A changed cursor,
 connection state, or listener epoch makes the process runnable. Pending service

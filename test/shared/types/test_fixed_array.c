@@ -71,6 +71,23 @@ void test_stack_fixed_array_body_supports_existing_storage(void)
     TEST_ASSERT_EQUAL_UINT64(42, total);
 }
 
+void test_fixed_array_init_resets_existing_storage(void)
+{
+    TestArray array = TestArray__new();
+    match_result(TestArray__push(&array, 42),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    TestArray__init(&array);
+
+    TEST_ASSERT_EQUAL(0, TestArray__len(&array));
+    match_optional(TestArray__at(&array, 0),
+        some_test_fail(),
+        none_do_nothing()
+    );
+}
+
 void test_fixed_array_push_all_and_negative_index(void)
 {
     TestArray array = TestArray__new();

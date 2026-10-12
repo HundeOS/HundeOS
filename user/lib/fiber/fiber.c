@@ -1,5 +1,6 @@
 #include "fiber.h"
 #include "../sys/mem.h"
+#include "../sys/boot_info.h"
 #include "ipc/request_ticket.h"
 
 static BString allocation_failed = bstr("Fiber allocation failed");
@@ -9,6 +10,25 @@ static BString no_scheduler_context = bstr("Fiber has no scheduler context");
 static BString no_wake_value = bstr("Fiber has no wake value");
 
 static void Fiber__start(FiberPtr self);
+
+size_t Fiber__default_stack_size(void)
+{
+    match_result(
+        BootHardwareInfo__load(),
+        success(info)
+        {
+            if (info.default_user_stack_size >= FIBER_STACK_ALIGNMENT)
+            {
+                return (size_t)info.default_user_stack_size;
+            }
+            return FIBER_DEFAULT_STACK_SIZE;
+        },
+        error(code, message)
+        {
+            return FIBER_DEFAULT_STACK_SIZE;
+        }
+    );
+}
 
 struct Fiber
 {
@@ -90,7 +110,7 @@ static Result(FiberCode) Fiber__invalid_state_error(FiberPtr self)
 
 Result(FiberPtr) Fiber__heap_new(FiberEntry entry, Anything argument)
 {
-    return Fiber__heap_new_with_stack_size(entry, argument, FIBER_DEFAULT_STACK_SIZE);
+    return Fiber__heap_new_with_stack_size(entry, argument, Fiber__default_stack_size());
 }
 
 Result(FiberPtr) Fiber__heap_new_with_stack_size(FiberEntry entry, Anything argument, size_t stack_size)

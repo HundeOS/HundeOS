@@ -15,7 +15,7 @@ int main(void)
     {
         return 1;
     }
-    filesystem = Embedfs__new(&archive);
+    Embedfs__init(&filesystem, &archive);
     if (IOService__listen_into(&service, &bstr("/sbin"), &filesystem, Embedfs__serve, Embedfs__disconnect) != IO_OK)
     {
         return 1;

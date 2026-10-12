@@ -37,11 +37,15 @@ typedef struct FakeSdhciHost
     uint32_t signal_enable;
     uint32_t capabilities;
     uint32_t host_version;
+    uint32_t vendor_mshc_control;
+    uint32_t vendor_phy_config;
+    uint32_t vendor_phy_tx_rx_delay;
     uint32_t response[4];
     uint64_t command_count;
     uint64_t read_words_remaining;
     uint64_t read_word_index;
     bool read_active;
+    bool suppress_read_ready;
 } FakeSdhciHost;
 
 static uint32_t fake_sdhci_read32(void * base, uint64_t offset);
@@ -52,6 +56,7 @@ static uint8_t fake_sdhci_read8(void * base, uint64_t offset);
 static void fake_sdhci_write8(void * base, uint64_t offset, uint8_t value);
 static Optional(SdHostConfig) fake_sdhci_load_config(void);
 static bool fake_sdhci_load_pci_config(PciConfigPtr config);
+static ProcessSleepResult fake_sdhci_sleep_usec(uint64_t usec);
 
 #define SDHCI_ENTRYPOINT sdhci_main_under_test
 #define SDHCI_READ32 fake_sdhci_read32
@@ -62,6 +67,7 @@ static bool fake_sdhci_load_pci_config(PciConfigPtr config);
 #define SDHCI_WRITE8 fake_sdhci_write8
 #define SDHCI_LOAD_CONFIG fake_sdhci_load_config
 #define SDHCI_LOAD_PCI_CONFIG fake_sdhci_load_pci_config
+#define SDHCI_SLEEP_USEC fake_sdhci_sleep_usec
 #include "../../../../user/drivers/sdhci_channelio/main.c"
 
 #define FAKE_SD_HOST_PHYSICAL_BASE 0xfe340000ULL
@@ -89,15 +95,25 @@ static bool fake_block_request_fetched;
 static bool fake_block_completed;
 static bool fake_logged;
 static const char * fake_log_tag;
+static const char * fake_log_format;
 static char fake_registered_path[TEST_SERVICE_DEVICE_PATH_MAX];
 static BString fake_ready_name;
 static uint64_t fake_registered_block_size;
 static uint64_t fake_registered_block_count;
 static uint64_t fake_subscribed_irq;
 static uint64_t fake_service_wait_count;
+static uint64_t fake_sleep_usec;
 static uint8_t fake_request_buffer[512];
 static ServiceCode fake_completion_status;
 static uint64_t fake_completion_blocks;
+
+SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+{
+    fake_log_tag = tag;
+    fake_log_format = format;
+    fake_logged = format != 0;
+    return SYSLOG_OK;
+}
 
 static void fake_write_pci8(uint64_t offset, uint8_t value)
 {
@@ -152,8 +168,8 @@ static void fake_set_response_for_command(uint32_t command_index)
     }
     if (command_index == SD_CMD_SEND_CSD)
     {
-        fake_host.response[1] = 0x00010000U;
-        fake_host.response[3] = 0x40000000U;
+        fake_host.response[1] = 0x00000100U;
+        fake_host.response[3] = 0x00400000U;
     }
 }
 
@@ -183,6 +199,10 @@ static uint32_t fake_sdhci_read32(void * base, uint64_t offset)
     {
         return fake_host.host_version;
     }
+    if (offset == CV181X_VENDOR_MSHC_CTRL)
+    {
+        return fake_host.vendor_mshc_control;
+    }
     if (offset >= SDHCI_RESPONSE && offset < SDHCI_RESPONSE + 16)
     {
         return fake_host.response[(offset - SDHCI_RESPONSE) / sizeof(uint32_t)];
@@ -197,7 +217,10 @@ static uint32_t fake_sdhci_read32(void * base, uint64_t offset)
         if (fake_host.read_words_remaining == 0)
         {
             fake_host.read_active = false;
-            fake_host.int_status |= SDHCI_INT_TRANSFER_COMPLETE;
+            if (fake_host.block_count == 1 || (fake_host.transfer_mode & SDHCI_TRANSFER_AUTO_CMD12) != 0)
+            {
+                fake_host.int_status |= SDHCI_INT_TRANSFER_COMPLETE;
+            }
         }
         else if (fake_host.read_word_index % (SDHCI_BLOCK_SIZE / sizeof(uint32_t)) == 0)
         {
@@ -216,7 +239,7 @@ static void fake_sdhci_write32(void * base, uint64_t offset, uint32_t value)
     if (offset == SDHCI_INT_STATUS)
     {
         fake_host.int_status &= ~value;
-        if (fake_host.read_active && (value & SDHCI_INT_COMMAND_COMPLETE) != 0)
+        if (fake_host.read_active && !fake_host.suppress_read_ready && (value & SDHCI_INT_COMMAND_COMPLETE) != 0)
         {
             fake_host.int_status |= SDHCI_INT_BUFFER_READ_READY;
         }
@@ -235,6 +258,21 @@ static void fake_sdhci_write32(void * base, uint64_t offset, uint32_t value)
     if (offset == SDHCI_ARGUMENT)
     {
         fake_host.argument = value;
+        return;
+    }
+    if (offset == CV181X_VENDOR_MSHC_CTRL)
+    {
+        fake_host.vendor_mshc_control = value;
+        return;
+    }
+    if (offset == CV181X_VENDOR_PHY_CONFIG)
+    {
+        fake_host.vendor_phy_config = value;
+        return;
+    }
+    if (offset == CV181X_VENDOR_PHY_TX_RX_DLY)
+    {
+        fake_host.vendor_phy_tx_rx_delay = value;
         return;
     }
 
@@ -290,6 +328,10 @@ static void fake_sdhci_write16(void * base, uint64_t offset, uint16_t value)
         {
             fake_start_read_command();
         }
+        if (command_index == SD_CMD_SELECT_CARD)
+        {
+            fake_host.int_status |= SDHCI_INT_TRANSFER_COMPLETE;
+        }
         fake_host.int_status |= SDHCI_INT_COMMAND_COMPLETE;
         return;
     }
@@ -303,6 +345,12 @@ static uint8_t fake_sdhci_read8(void * base, uint64_t offset)
     if (offset == SDHCI_SOFTWARE_RESET)
     {
         return 0;
+    }
+    if (offset >= SDHCI_RESPONSE && offset < SDHCI_RESPONSE + 16)
+    {
+        uint64_t word = (offset - SDHCI_RESPONSE) / sizeof(uint32_t);
+        uint64_t byte = (offset - SDHCI_RESPONSE) % sizeof(uint32_t);
+        return (uint8_t)(fake_host.response[word] >> (byte * 8));
     }
 
     TEST_FAIL_MESSAGE("unexpected sdhci read8 offset");
@@ -338,6 +386,12 @@ static Optional(SdHostConfig) fake_sdhci_load_config(void)
                                   .mmio_size = FAKE_SD_HOST_MMIO_SIZE,
                                   .irq = FAKE_SD_HOST_IRQ,
                               }));
+}
+
+static ProcessSleepResult fake_sdhci_sleep_usec(uint64_t usec)
+{
+    fake_sleep_usec = usec;
+    return PROCESS_SLEEP_OK;
 }
 
 static bool fake_sdhci_load_pci_config(PciConfigPtr config)
@@ -390,11 +444,13 @@ void setUp(void)
     fake_block_completed = false;
     fake_logged = false;
     fake_log_tag = 0;
+    fake_log_format = 0;
     fake_registered_path[0] = '\0';
     fake_registered_block_size = 0;
     fake_registered_block_count = 0;
     fake_subscribed_irq = 0;
     fake_service_wait_count = 0;
+    fake_sleep_usec = 0;
     fake_completion_status = SERVICE_ABORT;
     fake_completion_blocks = 0;
     for (uint64_t index = 0; index < sizeof(fake_request_buffer); index++)
@@ -532,8 +588,6 @@ void test_sdhci_channel_main_publishes_mmc0_and_serves_shared_buffer_read(void)
     TEST_ASSERT_EQUAL_UINT8(2, fake_request_buffer[2]);
     TEST_ASSERT_EQUAL_UINT8(3, fake_request_buffer[3]);
     TEST_ASSERT_EQUAL_UINT32(3, fake_host.argument);
-    TEST_ASSERT_TRUE(fake_logged);
-    TEST_ASSERT_EQUAL_STRING("SDHCI", fake_log_tag);
 }
 
 void test_sdhci_main_prefers_pci_sdhci_host(void)
@@ -554,15 +608,71 @@ void test_sdhci_card_block_count_from_v2_csd(void)
 {
     SdhciCommandResult csd = {
         .ok = true,
-        .response = {0, 0x00030000U, 0, 0x40000000U},
+        .response = {0x40000000U, 0, 0x00030000U, 0},
     };
 
     TEST_ASSERT_EQUAL_UINT64(4096, Sdhci__card_block_count_from_csd(&csd));
 }
 
+void test_sdhci_command_encodes_sd_response_validation_rules(void)
+{
+    SdhciCommand r2 = SdhciCommand__new(SD_CMD_SEND_CSD, 0, SDHCI_RESPONSE_R2, 0, false);
+    SdhciCommand r3 = SdhciCommand__new(SD_ACMD_SD_SEND_OP_COND, 0, SDHCI_RESPONSE_R3, 0, false);
+    SdhciCommand r1b = SdhciCommand__new(SD_CMD_SELECT_CARD, 0, SDHCI_RESPONSE_R1B, 0, false);
+
+    TEST_ASSERT_EQUAL_HEX16((SD_CMD_SEND_CSD << 8) | SDHCI_CMD_RESP_136 | SDHCI_CMD_CRC_CHECK,
+                            SdhciCommand__value(&r2));
+    TEST_ASSERT_EQUAL_HEX16((SD_ACMD_SD_SEND_OP_COND << 8) | SDHCI_CMD_RESP_48, SdhciCommand__value(&r3));
+    TEST_ASSERT_EQUAL_HEX16((SD_CMD_SELECT_CARD << 8) | SDHCI_CMD_RESP_48_BUSY | SDHCI_CMD_CRC_CHECK |
+                                SDHCI_CMD_INDEX_CHECK,
+                            SdhciCommand__value(&r1b));
+}
+
+void test_sdhci_bootstrap_command_failure_uses_bootstrap_syslog(void)
+{
+    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, SD_HOST_KIND_GENERIC, 0,
+                                          &bstr(SDHCI_DEVICE_PATH));
+    SdhciCommand command = SdhciCommand__new(SD_CMD_SEND_IF_COND, 0x1aa, SDHCI_RESPONSE_R7, 0, false);
+    fake_host.present_state |= SDHCI_PRESENT_CMD_INHIBIT;
+
+    SdhciCommandResult result = Sdhci__send_bootstrap_command(&device, &command);
+
+    TEST_ASSERT_FALSE(result.ok);
+    TEST_ASSERT_EQUAL_INT(SDHCI_COMMAND_INHIBITED, result.failure);
+    TEST_ASSERT_TRUE(result.recovered);
+    TEST_ASSERT_EQUAL_HEX32(SDHCI_PRESENT_CARD_INSERTED | SDHCI_PRESENT_CMD_INHIBIT, result.failure_state);
+    TEST_ASSERT_EQUAL_HEX8(SDHCI_RESET_CMD, fake_host.software_reset);
+    TEST_ASSERT_EQUAL_STRING("SDHCI", fake_log_tag);
+    TEST_ASSERT_EQUAL_STRING(
+        "bootstrap command failed cmd=%u phase=%s arg=0x%x state=0x%x status=0x%x recovered=%i",
+        fake_log_format);
+}
+
+void test_sdhci_clock_divisor_uses_extended_sdhci_v3_encoding(void)
+{
+    TEST_ASSERT_EQUAL_HEX16(0xd540, Sdhci__clock_divisor(375000000, 400000));
+    TEST_ASSERT_EQUAL_HEX16(0x0800, Sdhci__clock_divisor(375000000, 25000000));
+}
+
+void test_sdhci_setup_host_initializes_cv181x_vendor_registers(void)
+{
+    SdhciDevice device =
+        SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, SD_HOST_KIND_CV181X, 375000000,
+                         &bstr(SDHCI_DEVICE_PATH));
+
+    TEST_ASSERT_TRUE(Sdhci__setup_host(&device));
+    TEST_ASSERT_EQUAL_HEX32(CV181X_MSHC_CTRL_DEFAULT, fake_host.vendor_mshc_control);
+    TEST_ASSERT_EQUAL_HEX32(CV181X_PHY_CONFIG_ENABLE, fake_host.vendor_phy_config);
+    TEST_ASSERT_EQUAL_HEX32(CV181X_PHY_TX_RX_DLY_DEFAULT, fake_host.vendor_phy_tx_rx_delay);
+    TEST_ASSERT_EQUAL_HEX16(0xd540 | SDHCI_CLOCK_INTERNAL_ENABLE | SDHCI_CLOCK_SD_ENABLE,
+                            fake_host.clock_control);
+    TEST_ASSERT_EQUAL_UINT64(5000, fake_sleep_usec);
+}
+
 void test_sdhci_executes_block_protocol_read_request(void)
 {
-    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, &bstr(SDHCI_DEVICE_PATH));
+    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, SD_HOST_KIND_GENERIC, 0,
+                                          &bstr(SDHCI_DEVICE_PATH));
     device.high_capacity = true;
     device.block_count = 2048;
     uint8_t first_bytes[SDHCI_BLOCK_SIZE];
@@ -576,7 +686,8 @@ void test_sdhci_executes_block_protocol_read_request(void)
 
 void test_sdhci_rejects_invalid_shared_buffer_ranges_before_submission(void)
 {
-    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, &bstr(SDHCI_DEVICE_PATH));
+    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, SD_HOST_KIND_GENERIC, 0,
+                                          &bstr(SDHCI_DEVICE_PATH));
     device.high_capacity = true;
     device.block_count = 2048;
     BufferDescriptor buffer = {.address = (Address)fake_request_buffer, .capacity = sizeof(fake_request_buffer)};
@@ -590,7 +701,8 @@ void test_sdhci_rejects_invalid_shared_buffer_ranges_before_submission(void)
 
 void test_sdhci_reads_multiple_sectors_directly_into_shared_buffer(void)
 {
-    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, &bstr(SDHCI_DEVICE_PATH));
+    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, SD_HOST_KIND_GENERIC, 0,
+                                          &bstr(SDHCI_DEVICE_PATH));
     device.high_capacity = true;
     device.block_count = 2048;
     uint8_t bytes[1025] = {0};
@@ -599,7 +711,29 @@ void test_sdhci_reads_multiple_sectors_directly_into_shared_buffer(void)
     TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK, Sdhci__transfer_channel(&device, BLOCK_PROTOCOL_READ, 7, 2, &buffer));
     TEST_ASSERT_EQUAL_UINT64(1, fake_host.command_count);
     TEST_ASSERT_EQUAL_UINT32(SD_CMD_READ_MULTIPLE_BLOCK, fake_host.command >> 8);
+    TEST_ASSERT_EQUAL_UINT16(SDHCI_TRANSFER_READ | SDHCI_TRANSFER_MULTI_BLOCK | SDHCI_TRANSFER_BLOCK_COUNT_ENABLE |
+                                 SDHCI_TRANSFER_AUTO_CMD12,
+                             fake_host.transfer_mode);
     TEST_ASSERT_EQUAL_UINT64(256, fake_host.read_word_index);
     TEST_ASSERT_EQUAL_UINT8(0xa5, bytes[1024]);
     TEST_ASSERT_EQUAL_UINT8(1, bytes[1]);
+}
+
+void test_sdhci_recovers_command_and_data_lines_after_read_timeout(void)
+{
+    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, SD_HOST_KIND_GENERIC, 0,
+                                          &bstr(SDHCI_DEVICE_PATH));
+    device.high_capacity = true;
+    device.block_count = 2048;
+    fake_host.suppress_read_ready = true;
+    uint8_t bytes[SDHCI_BLOCK_SIZE];
+    BufferDescriptor buffer = {.address = (Address)bytes, .capacity = sizeof(bytes)};
+
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_IO_ERROR, Sdhci__transfer_channel(&device, BLOCK_PROTOCOL_READ, 7, 1, &buffer));
+    TEST_ASSERT_EQUAL_UINT8(SDHCI_RESET_CMD | SDHCI_RESET_DATA, fake_host.software_reset);
+    TEST_ASSERT_TRUE(fake_logged);
+    TEST_ASSERT_EQUAL_STRING("SDHCI", fake_log_tag);
+    TEST_ASSERT_EQUAL_STRING(
+        "bootstrap read failed phase=%s block=%llu count=%llu state=0x%x status=0x%x recovered=%i",
+        fake_log_format);
 }

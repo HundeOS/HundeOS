@@ -1,0 +1,5 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - user/lib/sys/system_info.c

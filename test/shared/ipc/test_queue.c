@@ -6,12 +6,12 @@ static QueuePage client_page;
 static QueuePage server_page;
 static IpcDoorbell client_doorbell;
 static IpcDoorbell server_doorbell;
-static QueueConnectionID notified_connection;
+static QueueConnectionID recorded_connection;
 static uint64_t notification_count;
 
 static void record_data_available(QueueConnectionID connection)
 {
-    notified_connection = connection;
+    recorded_connection = connection;
     notification_count++;
 }
 
@@ -22,7 +22,7 @@ void setUp(void)
     server_page = (QueuePage){0};
     client_doorbell = (IpcDoorbell){0};
     server_doorbell = (IpcDoorbell){0};
-    notified_connection = 0;
+    recorded_connection = 0;
     notification_count = 0;
 }
 
@@ -37,7 +37,7 @@ void test_push_notifies_after_publication_and_pop_does_not_notify(void)
         success_do_nothing(),
         error_test_fail()
     );
-    TEST_ASSERT_EQUAL_UINT64(17, notified_connection);
+    TEST_ASSERT_EQUAL_UINT64(17, recorded_connection);
     TEST_ASSERT_EQUAL_UINT64(1, notification_count);
     match_result(Queue__pop(&server),
         success_do_nothing(),
@@ -179,6 +179,17 @@ void test_push_reports_pending_full_and_corrupt_cursors_as_errors(void)
             TEST_ASSERT_EQUAL(QUEUE_INVALID, code);
         }
     );
+}
+
+void test_write_capacity_requires_acceptance_and_releases_closed_waiters(void)
+{
+    Queue queue = client_queue();
+
+    TEST_ASSERT_TRUE(Queue__has_write_capacity(&queue));
+    identity.accepted = 0;
+    TEST_ASSERT_FALSE(Queue__has_write_capacity(&queue));
+    identity.closed = 1;
+    TEST_ASSERT_TRUE(Queue__has_write_capacity(&queue));
 }
 
 void test_layout_and_arrival_access_have_explicit_bounds(void)

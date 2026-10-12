@@ -133,10 +133,10 @@ __BOOT__(SystemInfoPtr) qemu_virt_system_info_init(void)
     qemu_virt_system_info.mmio.physical_end =
         qemu_virt_platform_info.uart_physical_base + ((uint64_t)&__mmio_end[0] - (uint64_t)&__mmio_start[0]);
 
-    qemu_virt_system_info.uart.physical_base = qemu_virt_platform_info.uart_physical_base;
-    qemu_virt_system_info.uart.virtual_base = qemu_virt_platform_info.uart_virtual_base;
-    qemu_virt_system_info.uart.irq = qemu_virt_platform_info.uart_irq;
-    qemu_virt_system_info.uart.kind = UART_KIND_PL011;
+    qemu_virt_system_info.trace_uart =
+        UartInfo__new(qemu_virt_platform_info.uart_physical_base, qemu_virt_platform_info.uart_virtual_base, 0x1000,
+                      qemu_virt_platform_info.uart_irq, UART_KIND_PL011, 0, 4);
+    qemu_virt_system_info.console_uart = qemu_virt_system_info.trace_uart;
     BootVirtioMmioInfo virtio_mmio =
         BootVirtioMmioInfo__new(QEMU_VIRT_VIRTIO_MMIO_PHYS_BASE, QEMU_VIRT_VIRTIO_MMIO_SLOT_SIZE,
                                 QEMU_VIRT_VIRTIO_MMIO_SLOT_COUNT, QEMU_VIRT_VIRTIO_MMIO_FIRST_IRQ);

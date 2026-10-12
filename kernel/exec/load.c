@@ -23,7 +23,8 @@ static BString ExecLoad__requested_path(ExecLoadPtr self)
 
 static ExecLoad ExecLoad__new(KernelChannel channel, ConstOriginatingContextPtr context, ConstBStringPtr path,
                               bool wait, OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
-                              ConstSpawnStdioPtr stdio, bool overlay, KernelAddress overlay_payload)
+                              ConstSpawnStdioPtr stdio, OptionalPtr(KernelAddress) abort_report, bool overlay,
+                              KernelAddress overlay_payload)
 {
     ExecLoad self = {.channel = channel,
                      .context = *context,
@@ -33,6 +34,7 @@ static ExecLoad ExecLoad__new(KernelChannel channel, ConstOriginatingContextPtr 
                      .overlay_payload = overlay_payload,
                      .overlay = overlay,
                      .stdio = *stdio,
+                     .abort_report = *abort_report,
                      .phase = EXEC_LOAD_OPEN};
     self.requested_path_length =
         BString__copy_to(path, (char *)self.requested_path_data, sizeof(self.requested_path_data));
@@ -42,7 +44,8 @@ static ExecLoad ExecLoad__new(KernelChannel channel, ConstOriginatingContextPtr 
 
 Result(ProcessPtr) ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,
                                    OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
-                                   ConstSpawnStdioPtr stdio, bool overlay, KernelAddress overlay_payload)
+                                   ConstSpawnStdioPtr stdio, OptionalPtr(KernelAddress) abort_report, bool overlay,
+                                   KernelAddress overlay_payload)
 {
     if (!Exec__can_execute(context, path) || !BString__starts_with(path, &bstr("/")) ||
         BString__length(path) >= IO_PROTOCOL_DATA_SIZE)
@@ -74,7 +77,7 @@ Result(ProcessPtr) ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStr
                             &bstr(IO_SYSTEM_SERVICE), process),
                         success(channel)
                         {
-                            *load = ExecLoad__new(channel, context, path, wait, user, arguments, stdio,
+                            *load = ExecLoad__new(channel, context, path, wait, user, arguments, stdio, abort_report,
                                                   overlay, overlay_payload);
                             process->exec_load = Some(ExecLoadPtr, load);
                         },
@@ -251,8 +254,6 @@ static Result(ChannelCode) ExecLoad__step(ExecLoadPtr self, SchedulerPtr schedul
     }
     if (reply.status != IO_OK)
     {
-        __d_printf(PROGRESS, "exec load I/O failed pid=%i phase=%i status=%i path=%s\n", pid, self->phase, reply.status,
-                   cstr(path));
         return Error(ChannelCode, load_failed, self->phase == EXEC_LOAD_OPEN ? SPAWN_NO_FILE : SPAWN_FAILED);
     }
     switch (self->phase)
@@ -260,14 +261,11 @@ static Result(ChannelCode) ExecLoad__step(ExecLoadPtr self, SchedulerPtr schedul
     case EXEC_LOAD_OPEN:
         if (reply.value < IO_SESSION_HANDLE_BASE)
         {
-            __d_printf(PROGRESS, "exec load returned invalid handle pid=%i handle=%i path=%s\n", pid, (int)reply.value,
-                       cstr(path));
             return Error(ChannelCode, load_failed, SPAWN_FAILED);
         }
         self->handle = (IOHandle)reply.value;
         if (!BufferDescriptor__valid(&reply.buffers.read, BUFFER_READ))
         {
-            __d_printf(PROGRESS, "exec load returned invalid read buffer pid=%i path=%s\n", pid, cstr(path));
             return Error(ChannelCode, load_failed, SPAWN_FAILED);
         }
         self->transfer = reply.buffers.read;
@@ -384,7 +382,7 @@ Result(ProcessPtr) ExecLoad__continue(ProcessPtr process)
             KernelAddress overlay_payload = load->overlay_payload;
             Result(ProcessPtr) result =
                 Exec__launch_loaded_elf(&load->context, &elf, load->wait, &load->user, &load->arguments, &load->stdio,
-                                        load->overlay, overlay_payload);
+                                        &load->abort_report, load->overlay, overlay_payload);
             if (overlay_payload.valid)
             {
                 Kernel__free(overlay_payload.virtual_addr);

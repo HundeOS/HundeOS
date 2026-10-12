@@ -24,6 +24,13 @@ typedef enum RtcKind
     RTC_KIND_GOLDFISH = 2,
 } RtcKind;
 
+typedef enum SdHostKind
+{
+    SD_HOST_KIND_GENERIC = 0,
+    SD_HOST_KIND_CV180X = 1,
+    SD_HOST_KIND_CV181X = 2,
+} SdHostKind;
+
 typedef enum InterruptControllerKind
 {
     INTERRUPT_CONTROLLER_NONE = 0,
@@ -121,17 +128,22 @@ typedef struct BootUartInfo
     uint64_t mmio_size;
     uint64_t irq;
     UartKind kind;
+    uint64_t register_shift;
+    uint64_t register_width;
 } BootUartInfo;
 
 typedef const BootUartInfo * ConstBootUartInfoPtr;
 
-static inline BootUartInfo BootUartInfo__new(Address physical_base, uint64_t mmio_size, uint64_t irq, UartKind kind)
+static inline BootUartInfo BootUartInfo__new(Address physical_base, uint64_t mmio_size, uint64_t irq, UartKind kind,
+                                             uint64_t register_shift, uint64_t register_width)
 {
     return (BootUartInfo){
         .physical_base = physical_base,
         .mmio_size = mmio_size,
         .irq = irq,
         .kind = kind,
+        .register_shift = register_shift,
+        .register_width = register_width,
     };
 }
 
@@ -177,6 +189,21 @@ static inline BootFramebufferInfo BootFramebufferInfo__new(Address physical_base
 }
 
 OptionalDef(BootDeviceInfo);
+
+typedef struct BootSdHostInfo
+{
+    BootDeviceInfo device;
+    SdHostKind kind;
+    uint64_t source_clock_hz;
+} BootSdHostInfo;
+
+OptionalDef(BootSdHostInfo);
+
+static inline BootSdHostInfo BootSdHostInfo__new(ConstBootDeviceInfoPtr device, SdHostKind kind,
+                                                 uint64_t source_clock_hz)
+{
+    return (BootSdHostInfo){.device = *device, .kind = kind, .source_clock_hz = source_clock_hz};
+}
 
 typedef struct BootRtcInfo
 {
@@ -224,12 +251,13 @@ typedef struct BootHardwareInfo
     uint64_t cpu_count;
     uint64_t online_cpu_count;
     uint64_t timer_frequency;
+    uint64_t default_user_stack_size;
     BootWaitMode wait_mode;
     BootUartInfo uart;
     Optional(BootVirtioMmioInfo) virtio_mmio;
     Optional(BootFramebufferInfo) framebuffer;
     Optional(BootPciInfo) pci;
-    Optional(BootDeviceInfo) sd_host;
+    Optional(BootSdHostInfo) sd_host;
     Optional(BootEthernetInfo) ethernet;
     Optional(BootRtcInfo) rtc;
     Address memory_start;
@@ -262,7 +290,7 @@ static inline BootHardwareInfo BootHardwareInfo__new(void)
                               .virtio_mmio = None(BootVirtioMmioInfo),
                               .framebuffer = None(BootFramebufferInfo),
                               .pci = None(BootPciInfo),
-                              .sd_host = None(BootDeviceInfo),
+                              .sd_host = None(BootSdHostInfo),
                               .ethernet = None(BootEthernetInfo),
                               .rtc = None(BootRtcInfo)};
 }

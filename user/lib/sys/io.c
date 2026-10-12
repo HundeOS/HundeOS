@@ -96,7 +96,7 @@ static IOHandle IOStandardStream__open(IOStandardStreamPtr self)
     BString path = self->endpoint == IO_ENDPOINT_TTY_INPUT        ? bstr(":tty:")
                    : self->endpoint == IO_ENDPOINT_KEYBOARD_INPUT ? bstr(":keyboard:")
                                                                   : bstr(":console:");
-    self->handle = IO__open(&path, self->endpoint == IO_ENDPOINT_CONSOLE_OUTPUT ? IO_OPEN_WRITE : IO_OPEN_READ);
+    self->handle = IOClient__open(&path, self->endpoint == IO_ENDPOINT_CONSOLE_OUTPUT ? IO_OPEN_WRITE : IO_OPEN_READ);
     return self->handle;
 }
 

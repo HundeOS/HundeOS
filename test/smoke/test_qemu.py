@@ -176,14 +176,9 @@ def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, arch
     sysinfo = session.run_command("/usr/local/bin/cat /boot/sysinfo")
     assert architecture_marker in sysinfo
 
-    driver_log = session.run_command("/usr/local/bin/cat /var/log/driver.log")
-    assert b"pid=" in driver_log
-
-    driver_log_tail = session.run_command("/usr/local/bin/tail -100 /var/log/driver.log")
-    assert b"pid=" in driver_log_tail
-
     processes = session.run_command("ps")
     assert b"/sbin/services/hund-unterbrict" in processes
+    assert b"/sbin/services/hund-verfolgen" not in processes
     assert b"/sbin/drivers/virtio_blk_channelio" not in processes
 
     numbered = session.run_command("/usr/local/bin/cat -n /hello.txt")
@@ -212,34 +207,6 @@ def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, arch
 
     tailed = session.run_command("/usr/local/bin/tail -n 1 /hello.txt")
     assert b"hello from ext2" in tailed
-
-    io_latency = session.run_command(
-        "/usr/local/bin/grep -a -m 1 "
-        "IO-LATENCY.*request_scheduler_observed=1.*return_scheduler_observed=1 /tmp/io-trace.log"
-    )
-    assert b"IO-LATENCY " in io_latency, session.run_command(
-        "/usr/local/bin/tail -n 20 /var/log/driver.log"
-    )
-    for timing in (
-        b"queue_usec=",
-        b"request_observe_usec=",
-        b"request_runnable_usec=",
-        b"request_dispatch_usec=",
-        b"request_userspace_usec=",
-        b"service_usec=",
-        b"return_usec=",
-        b"return_observe_usec=",
-        b"return_runnable_usec=",
-        b"return_dispatch_usec=",
-        b"return_userspace_usec=",
-        b"total_usec=",
-    ):
-        assert timing in io_latency
-
-    short_trace = session.run_command("/usr/local/bin/fs-latency /usr/local/bin/cp 1")
-    short_trace_pid = re.search(rb"fs-latency pid=(\d+)", short_trace)
-    assert short_trace_pid is not None, short_trace
-    assert b"io_hop client=" + short_trace_pid.group(1) + b" server=" in short_trace, short_trace
 
     follow_path = f"/tail-follow-{time.monotonic_ns()}"
     session.run_command(f"write {follow_path} seed")

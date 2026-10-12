@@ -134,6 +134,9 @@ Result(ProcessPtr)
     Scheduler__park_with_context_ownership(SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
                                            OptionalPtr(Continuation) kernel_continuation, ParkReason reason,
                                            bool owns_kernel_context);
+Result(ProcessPtr) Scheduler__park_wait_child(SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
+                                              OptionalPtr(Continuation) kernel_continuation,
+                                              OptionalPtr(KernelAddress) abort_report, bool owns_kernel_context);
 
 Result(ProcessID) Scheduler__park_by_pid(SchedulerPtr self, ProcessID pid, KernelContextPtr kernel_context,
                                          OptionalPtr(Continuation) kernel_continuation, ParkReason reason);
@@ -182,7 +185,7 @@ Result(SchedulerWake)
     Scheduler__queue_data_available(SchedulerPtr self, ProcessPtr process, QueueConnectionID connection);
 Result(SchedulerWake) Scheduler__wake_shared_wait(SchedulerPtr self, ProcessPtr process);
 Result(QueueWaitCode)
-    Scheduler__queue_wait(SchedulerPtr self, ProcessPtr process, Address snapshots, uint64_t count, Tick ticks);
+    Scheduler__queue_wait(SchedulerPtr self, ProcessPtr process, IpcEventGeneration observed, Tick ticks);
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
 ProcessTable Scheduler__all_processes_for_all_cpus(SchedulerPtr self);
 ProcessTable Scheduler__process_snapshot(SchedulerPtr self);
@@ -236,7 +239,7 @@ bool Scheduler__parked_operation_is_ready(SchedulerPtr self, ParkedOperationPtr 
         .kernel = None(KernelPtr), .interrupt_controller = None(InterruptControllerInfo),                              \
         .schedulers = EmptyHashtable(CPUSchedulers), .admission = EmptyArray(ProcessTable),                            \
         .service_event_dispatcher = NEW_SERVICE_EVENT_DISPATCHER, .shared_pages = EmptyArray(ManagedSharedPages),      \
-        .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT, .ready = false,                                           \
+        .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT, .ready = false,                                         \
     }
 
 #endif

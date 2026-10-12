@@ -88,6 +88,7 @@ typedef struct InterruptManager
 {
     KernelNotificationQueuePtr events;
     Address distributor;
+    Address registered_distributor;
     QueueArrivalsPtr arrivals;
     InterruptClients clients;
     InterruptRegistrations registrations;
@@ -103,11 +104,25 @@ static InterruptManager InterruptManager__new(ServiceInterruptManagerRegistratio
     return (InterruptManager){
         .events = (KernelNotificationQueuePtr)registration->event_queue,
         .distributor = registration->distributor,
+        .registered_distributor = registration->distributor,
         .arrivals = arrivals,
         .clients = InterruptClients__new(),
         .registrations = InterruptRegistrations__new(),
         .block_drivers = HostedBlockDrivers__new(),
     };
+}
+
+static ServiceCode InterruptManager__unmask(InterruptManagerPtr self, IRQNumber irq)
+{
+    if (self->distributor == 0 || self->distributor >= HUND_SERVICE_DIRECTORY_VADDR ||
+        self->distributor != self->registered_distributor)
+    {
+        kernel_syslog_tagf("hund-unterbrict", "refusing invalid interrupt distributor=0x%x registered=0x%x irq=%i",
+                           self->distributor, self->registered_distributor, irq);
+        return SERVICE_MAP_FAILED;
+    }
+    InterruptController__unmask(self->distributor, irq);
+    return SERVICE_OK;
 }
 
 static bool VirtioBlkRuntime__matches_irq(VirtioBlkRuntimePtr * self, void * context)
@@ -128,8 +143,7 @@ static ServiceCode InterruptManager__subscribe_hosted(Anything context, IRQNumbe
 static ServiceCode InterruptManager__rearm_hosted(Anything context, IRQNumber irq)
 {
     InterruptManagerPtr self = (InterruptManagerPtr)context;
-    InterruptController__unmask(self->distributor, irq);
-    return SERVICE_OK;
+    return InterruptManager__unmask(self, irq);
 }
 
 static uint32_t InterruptManager__virtio_read32(void * base, uint64_t offset)
@@ -326,12 +340,14 @@ static void InterruptManager__subscribe(InterruptManagerPtr self, InterruptClien
     if (InterruptRegistrations__contains_irq(&self->registrations, request->irq) ||
         InterruptRegistrations__contains_connection(&self->registrations, connection))
     {
+        kernel_syslog_tagf("hund-unterbrict", "subscribe rejected: already registered irq=%i\n", (int)request->irq);
         InterruptClient__send(client, InterruptProtocol__error(request->irq, INTERRUPT_PROTOCOL_ALREADY_REGISTERED));
         return;
     }
     ServiceCode route = service_route_managed_irq(ChannelServer__client_pid(&client->channel), request->irq);
     if (!service_ok(route))
     {
+        kernel_syslog_tagf("hund-unterbrict", "subscribe failed: irq=%i status=%i\n", (int)request->irq, (int)route);
         InterruptProtocolCode code =
             route == SERVICE_PERMISSION_DENIED ? INTERRUPT_PROTOCOL_DENIED : INTERRUPT_PROTOCOL_INVALID;
         InterruptClient__send(client, InterruptProtocol__error(request->irq, code));
@@ -388,8 +404,12 @@ static void InterruptManager__acknowledge(InterruptManagerPtr self, InterruptCli
                 registration->generation == request->generation && registration->outstanding == request->sequence &&
                 registration->outstanding != 0)
             {
+                if (!service_ok(InterruptManager__unmask(self, registration->irq)))
+                {
+                    InterruptClient__send(client, InterruptProtocol__error(request->irq, INTERRUPT_PROTOCOL_INVALID));
+                    return;
+                }
                 registration->outstanding = 0;
-                InterruptController__unmask(self->distributor, registration->irq);
                 InterruptClient__send(
                     client, InterruptProtocol__acknowledged(request->irq, request->generation, request->sequence));
                 return;
@@ -610,6 +630,12 @@ int main(void)
     if (!service_ok(service_register_interrupt_manager(&kernel_registration)))
     {
         kernel_syslog_tagf("hund-unterbrict", "cannot register interrupt manager");
+        return 1;
+    }
+    if (kernel_registration.distributor == 0 || kernel_registration.distributor >= HUND_SERVICE_DIRECTORY_VADDR)
+    {
+        kernel_syslog_tagf("hund-unterbrict", "invalid registered interrupt distributor=0x%x",
+                           kernel_registration.distributor);
         return 1;
     }
 

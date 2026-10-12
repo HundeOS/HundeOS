@@ -5,6 +5,7 @@
 #include "all_defs.h"
 #include "cpu.h"
 #include "platform.h"
+#include "platform_config.h"
 #include "system_info.h"
 #include "../../cpu.h"
 
@@ -29,9 +30,12 @@ extern const uint8_t __boot_stack_virtual_start[];
 extern const uint8_t __boot_stack_virtual_top[];
 extern const uint8_t __riscv_secondary_entry_virtual[];
 
-typedef volatile uint8_t * RiscVUartRegistersPtr;
+typedef volatile uint8_t * RiscVUartRegister8Ptr;
+typedef volatile uint32_t * RiscVUartRegister32Ptr;
 typedef volatile uint32_t * RiscVGoldfishRtcRegistersPtr;
 static uint64_t uart_virtual_base = RISCV_HIGHER_HALF_OFFSET + RISCV_BOOTSTRAP_UART_BASE;
+static uint64_t uart_register_shift = RISCV_BOOTSTRAP_UART_REGISTER_SHIFT;
+static uint64_t uart_register_width = RISCV_BOOTSTRAP_UART_REGISTER_WIDTH;
 static KernelEarlyBootInfo kernel_early_boot_info;
 CPUID RiscVBoot__stack_cpu_ids[MAX_CPUS];
 
@@ -63,23 +67,38 @@ static Optional(RealtimeClockSample) RiscVGoldfishRtc__sample(ConstRiscVPlatform
     return Some(RealtimeClockSample, RealtimeClockSample__new(unix_nanoseconds / 1000ULL, monotonic_usec));
 }
 
-static RiscVUartRegistersPtr RiscVUart__registers(void)
+static uint32_t RiscVUart__read(uint64_t index)
 {
-    return (RiscVUartRegistersPtr)uart_virtual_base;
+    uint64_t address = uart_virtual_base + (index << uart_register_shift);
+    return uart_register_width == 4 ? *(RiscVUartRegister32Ptr)address : *(RiscVUartRegister8Ptr)address;
 }
 
-void RiscVUart__use_base(uint64_t virtual_base)
+static void RiscVUart__write(uint64_t index, uint8_t value)
+{
+    uint64_t address = uart_virtual_base + (index << uart_register_shift);
+    if (uart_register_width == 4)
+    {
+        *(RiscVUartRegister32Ptr)address = value;
+    }
+    else
+    {
+        *(RiscVUartRegister8Ptr)address = value;
+    }
+}
+
+void RiscVUart__configure(uint64_t virtual_base, uint64_t register_shift, uint64_t register_width)
 {
     uart_virtual_base = virtual_base;
+    uart_register_shift = register_shift;
+    uart_register_width = register_width;
 }
 
 void RiscVUart__put_char(char character)
 {
-    RiscVUartRegistersPtr registers = RiscVUart__registers();
-    while ((registers[UART_LINE_STATUS] & UART_TRANSMIT_EMPTY) == 0)
+    while ((RiscVUart__read(UART_LINE_STATUS) & UART_TRANSMIT_EMPTY) == 0)
     {
     }
-    registers[UART_TRANSMIT] = (uint8_t)character;
+    RiscVUart__write(UART_TRANSMIT, (uint8_t)character);
 }
 
 void RiscVUart__puts(const char * text)
@@ -144,17 +163,18 @@ static uint64_t RiscVBoot__start_secondary_harts(uint64_t boot_hart_id, uint64_t
         uint64_t entry = (uint64_t)__riscv_secondary_entry_virtual - RISCV_HIGHER_HALF_OFFSET;
         RiscVBoot__stack_cpu_ids[next_stack_index - 1U] = hart_id;
         int64_t status = SBI__hart_start(hart_id, entry, next_stack_index);
-        RiscVUart__puts("SBI hart start physical=");
-        RiscVUart__put_hex(hart_id);
-        RiscVUart__puts(" stack=");
-        RiscVUart__put_hex(next_stack_index);
-        RiscVUart__puts(" status=");
-        RiscVUart__put_hex((uint64_t)status);
-        RiscVUart__puts("\n");
         if (status == SBI_SUCCESS)
         {
             started_cpu_count++;
             next_stack_index++;
+        }
+        else
+        {
+            RiscVUart__puts("SBI hart start failed hart=");
+            RiscVUart__put_hex(hart_id);
+            RiscVUart__puts(" status=");
+            RiscVUart__put_hex((uint64_t)status);
+            RiscVUart__puts("\n");
         }
     }
     return started_cpu_count;
@@ -169,16 +189,6 @@ void RiscVBoot__secondary(uint64_t hart_id, uint64_t stack_index)
 
 void RiscVBoot__main(uint64_t hart_id, uint64_t device_tree)
 {
-    RiscVUart__puts("hund RISC-V bring-up\n");
-    RiscVUart__puts("higher-half entry=");
-    RiscVUart__put_hex((uint64_t)RiscVBoot__main);
-    RiscVUart__puts("\n");
-    RiscVUart__puts("hart=");
-    RiscVUart__put_hex(hart_id);
-    RiscVUart__puts(" dtb=");
-    RiscVUart__put_hex(device_tree);
-    RiscVUart__puts("\nS-mode entry and UART are working\n");
-
     RiscVDeviceTreeResult device_tree_result = RiscVDeviceTree__parse(device_tree);
     if (device_tree_result.status != RISCV_DEVICE_TREE_OK)
     {
@@ -189,30 +199,8 @@ void RiscVBoot__main(uint64_t hart_id, uint64_t device_tree)
     }
 
     RiscVPlatformInfoPtr platform = &device_tree_result.platform;
-    RiscVUart__use_base(RISCV_HIGHER_HALF_OFFSET + platform->uart_base);
-    RiscVUart__puts("DTB memory=");
-    RiscVUart__put_hex(platform->memory_base);
-    RiscVUart__puts(" size=");
-    RiscVUart__put_hex(platform->memory_size);
-    RiscVUart__puts(" cpus=");
-    RiscVUart__put_hex(platform->cpu_count);
-    RiscVUart__puts(" timebase=");
-    RiscVUart__put_hex(platform->timebase_frequency);
-    RiscVUart__puts("\nDTB uart=");
-    RiscVUart__put_hex(platform->uart_base);
-    RiscVUart__puts(" irq=");
-    RiscVUart__put_hex(platform->uart_irq);
-    RiscVUart__puts(" plic=");
-    RiscVUart__put_hex(platform->plic_base);
-    RiscVUart__puts(" sources=");
-    RiscVUart__put_hex(platform->plic_source_count);
-    RiscVUart__puts(" virtio=");
-    RiscVUart__put_hex(platform->virtio_mmio_count);
-    RiscVUart__puts(" pci=");
-    RiscVUart__put_hex(platform->pci_ecam_base);
-    RiscVUart__puts(" reserved=");
-    RiscVUart__put_hex(PhysicalMemoryRegions__len(&platform->reserved_memory_regions));
-    RiscVUart__puts("\n");
+    RiscVUart__configure(RISCV_HIGHER_HALF_OFFSET + platform->uart_base, platform->uart_register_shift,
+                         platform->uart_register_width);
 
     RiscVMmuStatus mmu_status = RiscVMmu__validate(platform);
     if (mmu_status != RISCV_MMU_OK)
@@ -222,17 +210,7 @@ void RiscVBoot__main(uint64_t hart_id, uint64_t device_tree)
         RiscVUart__puts("\n");
         SBI__shutdown();
     }
-    RiscVUart__puts("Sv39 enabled satp=");
-    RiscVUart__put_hex(RiscVMmu__satp());
-    RiscVUart__puts("\n");
-
     RiscVTrap__install();
-    __asm__ volatile("ebreak");
-    RiscVUart__puts("S-mode trap returned cause=");
-    RiscVUart__put_hex(RiscVTrap__last_cause());
-    RiscVUart__puts(" stval=");
-    RiscVUart__put_hex(RiscVTrap__last_value());
-    RiscVUart__puts("\n");
 
     uint64_t image_virtual_start = (uint64_t)__image_virtual_start;
     uint64_t image_virtual_end = (uint64_t)__image_virtual_end;
@@ -251,10 +229,8 @@ void RiscVBoot__main(uint64_t hart_id, uint64_t device_tree)
                           (uint64_t)__boot_stack_virtual_start - RISCV_HIGHER_HALF_OFFSET,
                           (uint64_t)__boot_stack_virtual_top - RISCV_HIGHER_HALF_OFFSET));
     SystemInfo system_info = RiscVPlatformInfo__system_info(platform, &layout, hart_id);
+    RiscVBootPlatform__configure_system_info(&system_info);
     system_info.realtime_clock = RiscVGoldfishRtc__sample(platform);
-    RiscVUart__puts("SystemInfo free regions=");
-    RiscVUart__put_hex(PhysicalMemoryRegions__len(&system_info.physical_memory.free_regions));
-    RiscVUart__puts("\n");
     kernel_early_boot_info = KernelEarlyBootInfo__new(hart_id, system_info);
     KernelEarlyBootStatus handoff = KernelEarlyBoot__enter(&kernel_early_boot_info);
     if (handoff != KERNEL_EARLY_BOOT_READY)
@@ -264,8 +240,6 @@ void RiscVBoot__main(uint64_t hart_id, uint64_t device_tree)
         RiscVUart__puts("\n");
         SBI__shutdown();
     }
-
-    RiscVUart__puts("Architecture-neutral early kernel handoff accepted\n");
     CPU__set_boot_id(hart_id);
     RiscVBoot__stack_cpu_ids[0] = hart_id;
     kernel_early_boot_info.system_info.cpu_count =

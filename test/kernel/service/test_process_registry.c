@@ -74,15 +74,13 @@ void test_process_record_formats_user_wait_duration_without_changing_scheduler_s
 void test_process_record_includes_completed_userspace_wait_time_when_not_currently_waiting(void)
 {
     unwrap_result(Process__queue_wait_control(process), 0);
-    QueueWaitSnapshot observed = {.kind = QUEUE_WAIT_CONNECTION, .handle = 9};
     match_optional(
         process->queue_wait_control,
         some(mapping)
         {
             QueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
             QueueWaitControl__begin(control);
-            unwrap_result(QueueWaitControl__add(control, &observed), ATOMIC_RECORD_INVALID);
-            QueueWaitControl__commit(control, 1000, QUEUE_WAIT_NO_DEADLINE, QueueWaitControl__wake_generation(control));
+            QueueWaitControl__commit(control, 1000, QUEUE_WAIT_NO_DEADLINE, 7);
             QueueWaitControl__complete_wait(control, 6000);
 
             ProcessRecord record = ProcessRecord__new(process, 0);

@@ -15,6 +15,9 @@ SpawnResult spawn_as_argv(SpawnMode mode, UserID requested_user_id, ConstBString
                           ConstSpawnArgumentsPtr arguments);
 SpawnResult spawn_with_auth(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBStringPtr path,
                             OptionalPtr(BString) arg0, OptionalPtr(BString) arg1, OptionalPtr(BString) arg2);
+SpawnResult spawn_with_auth_report(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBStringPtr path,
+                                   SpawnAbortReportPtr abort_report, OptionalPtr(BString) arg0,
+                                   OptionalPtr(BString) arg1, OptionalPtr(BString) arg2);
 SpawnResult spawn_with_auth_argv(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBStringPtr path,
                                  ConstSpawnArgumentsPtr arguments);
 SpawnResult spawn_with_stdio(SpawnMode mode, ConstBStringPtr path, SpawnFileDescriptor stdin_fd,

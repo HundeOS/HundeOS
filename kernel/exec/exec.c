@@ -19,6 +19,7 @@ static const BString hundeschau_boot_program = bstr("services/hundeschau");
 static const BString hundekanal_warter_program = bstr("/sbin/services/hundekanal-warter");
 static const BString hundebus_program = bstr("/sbin/drivers/hundebus");
 static const BString sdhci_program = bstr("/sbin/drivers/sdhci_channelio");
+static const BString block_partition_program = bstr("/sbin/drivers/block_partition");
 static const BString uart_rx_program = bstr("/sbin/drivers/uart_rx");
 static const BString uart_tx_program = bstr("/sbin/drivers/uart_tx");
 
@@ -29,7 +30,8 @@ static bool Exec__is_hund_owned_program(ConstBStringPtr path)
            BString__equals(path, &hundeschule_program) || BString__equals(path, &hundeschule_boot_program) ||
            BString__equals(path, &hundeschau_boot_program) || BString__equals(path, &hundekanal_warter_program) ||
            BString__equals(path, &hundebus_program) || BString__equals(path, &sdhci_program) ||
-           BString__equals(path, &uart_rx_program) || BString__equals(path, &uart_tx_program);
+           BString__equals(path, &block_partition_program) || BString__equals(path, &uart_rx_program) ||
+           BString__equals(path, &uart_tx_program);
 }
 
 void Exec__apply_builtin_identity_policy(ProcessPtr self)
@@ -110,7 +112,8 @@ static void Exec__apply_requested_identity(ProcessPtr self, OptionalPtr(UserID) 
 
 Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, ElfPtr elf, bool wait,
                                            OptionalPtr(UserID) requested_user_id, ConstProcessArgumentsPtr arguments,
-                                           ConstSpawnStdioPtr stdio, bool overlay, KernelAddress overlay_payload)
+                                           ConstSpawnStdioPtr stdio, OptionalPtr(KernelAddress) abort_report,
+                                           bool overlay, KernelAddress overlay_payload)
 {
     match_result(
         Elf__validate(elf),
@@ -220,9 +223,8 @@ Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, E
                         // TODO we need a continuation to give the result of the proc back to the parent
                         KernelContextPtr kernel_context = KernelContext__from_originating_context_heap(context);
 
-                        Scheduler__park_with_context_ownership(kernel->scheduler, parent, kernel_context,
-                                                               &Some(Continuation, SystemCall__Complete),
-                                                               PARK_WAIT_CHILD, true);
+                        Scheduler__park_wait_child(kernel->scheduler, parent, kernel_context,
+                                                   &Some(Continuation, SystemCall__Complete), abort_report, true);
                         __d_printf(EXEC, "Parent parked pid=%i child_pid=%i\n", parent->pid, new_proc->pid);
                     }
                     __d_printf(EXEC, "Scheduling elf %s\n", cstr(elf->name));
@@ -299,8 +301,8 @@ static Result(ProcessPtr)
                 Address copy = Kernel__alloc_kernel(size);
                 Kernel__memcopy(embedded.start, copy, size);
                 Elf elf = Elf__new(copy, copy + size, path);
-                return Exec__launch_loaded_elf(context, &elf, wait, requested_user_id, arguments, stdio, false,
-                                               NULL_KERNEL_ADDRESS);
+                return Exec__launch_loaded_elf(context, &elf, wait, requested_user_id, arguments, stdio,
+                                               &None(KernelAddress), false, NULL_KERNEL_ADDRESS);
             },
             none()
             {

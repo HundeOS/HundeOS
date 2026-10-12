@@ -187,16 +187,6 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
     return Some(DynString, sysinfo);
 }
 
-Result(IOService) IOService__listen(ConstBStringPtr name, IOServiceContext context, IOServiceExecute execute,
-                                    IOServiceDisconnect disconnect)
-{
-    TEST_ASSERT_EQUAL_BSTRING(bstr(BUS_INFO_SERVICE), *name);
-    TEST_ASSERT_EQUAL_PTR(BusInfo__execute, execute);
-    TEST_ASSERT_EQUAL_PTR(BusInfo__disconnect, disconnect);
-    fake_listening = true;
-    return Success(IOService, ((IOService){.context = context, .execute = execute}));
-}
-
 IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServiceContext context,
                                 IOServiceExecute execute, IOServiceDisconnect disconnect)
 {

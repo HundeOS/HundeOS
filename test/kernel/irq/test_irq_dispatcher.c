@@ -311,7 +311,10 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
         error_test_fail()
     );
     match_result(
-        Scheduler__queue_wait(kernel->scheduler, manager, 0, 0, QUEUE_WAIT_INDEFINITE_TICKS),
+        Scheduler__queue_wait(kernel->scheduler, manager,
+                              IpcEvent__generation(IpcDoorbell__event(k_v_ptr(
+                                  unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
+                              QUEUE_WAIT_INDEFINITE_TICKS),
         success(status)
         {
             TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, status);
@@ -375,7 +378,10 @@ void test_irq_dispatcher_pokes_remote_cpu_for_parked_interrupt_manager(void)
                  error_test_fail()
     );
     match_result(
-        Scheduler__queue_wait(kernel->scheduler, manager, 0, 0, QUEUE_WAIT_INDEFINITE_TICKS),
+        Scheduler__queue_wait(kernel->scheduler, manager,
+                              IpcEvent__generation(IpcDoorbell__event(k_v_ptr(
+                                  unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
+                              QUEUE_WAIT_INDEFINITE_TICKS),
         success(status)
         {
             TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, status);

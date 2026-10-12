@@ -56,6 +56,39 @@ typedef int64_t SpawnResult;
 typedef int SpawnMode;
 typedef uint64_t SpawnFileDescriptor;
 
+typedef struct SpawnAbortReport
+{
+    uint8_t present;
+    uint64_t reason;
+    uint64_t exception_code;
+    uint64_t pc;
+    uint64_t fault_address;
+} SpawnAbortReport;
+
+typedef SpawnAbortReport * SpawnAbortReportPtr;
+
+static inline SpawnAbortReport SpawnAbortReport__none(void)
+{
+    return (SpawnAbortReport){0};
+}
+
+static inline SpawnAbortReport SpawnAbortReport__new(uint64_t reason, uint64_t exception_code, uint64_t pc,
+                                                     uint64_t fault_address)
+{
+    return (SpawnAbortReport){
+        .present = 1,
+        .reason = reason,
+        .exception_code = exception_code,
+        .pc = pc,
+        .fault_address = fault_address,
+    };
+}
+
+static inline bool SpawnAbortReport__is_present(SpawnAbortReport self)
+{
+    return self.present != 0;
+}
+
 typedef struct SpawnStdio
 {
     uint8_t present;
@@ -105,6 +138,7 @@ typedef struct SpawnRequest
     AuthTicketID auth_ticket_id;
     SpawnStdio stdio;
     SpawnArguments arguments;
+    uint64_t abort_report;
     uint64_t overlay_payload;
     uint64_t overlay_payload_size;
 } SpawnRequest;
@@ -133,9 +167,16 @@ static inline SpawnRequest SpawnRequest__new(SpawnMode mode, ConstBStringPtr pat
         .auth_ticket_id = auth_ticket_id,
         .stdio = stdio,
         .arguments = *arguments,
+        .abort_report = 0,
         .overlay_payload = 0,
         .overlay_payload_size = 0,
     };
+}
+
+static inline void SpawnRequest__set_abort_report(SpawnRequestPtr self, SpawnAbortReportPtr report)
+{
+    *report = SpawnAbortReport__none();
+    self->abort_report = (uint64_t)report;
 }
 
 static inline SpawnRequest SpawnRequest__overlay(ConstExecPayloadPtr payload)

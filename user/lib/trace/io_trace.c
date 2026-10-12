@@ -2,16 +2,13 @@
 
 #include "buffer/client.h"
 #include "channel/channel.h"
-#include "ipc/ipc_platform.h"
 #include "ipc/trace_protocol.h"
 #include "services/service_directory.h"
 #include "sys/queue_wait.h"
-
-#define IO_TRACE_RETRY_USEC 1000000ULL
+#include "sys/system_info.h"
 
 static bool enabled = true;
 static bool registering;
-static uint64_t retry_at_usec;
 static Optional(IOTraceRingPtr) ring = None(IOTraceRingPtr);
 
 static Optional(IOTraceRingPtr) IOTrace__open_ring(void)
@@ -53,7 +50,7 @@ static Optional(IOTraceRingPtr) IOTrace__open_ring(void)
     return None(IOTraceRingPtr);
 }
 
-static bool IOTrace__register(uint64_t now)
+static bool IOTrace__register(void)
 {
     registering = true;
     ring = IOTrace__open_ring();
@@ -66,7 +63,6 @@ static bool IOTrace__register(uint64_t now)
         },
         none()
         {
-            retry_at_usec = now + IO_TRACE_RETRY_USEC;
             return false;
         }
     );
@@ -125,7 +121,6 @@ void IOTrace__set_enabled(bool value)
 void IOTrace__reset_after_fork(void)
 {
     registering = false;
-    retry_at_usec = 0;
     ring = None(IOTraceRingPtr);
 }
 
@@ -139,7 +134,22 @@ TraceStatus IOTrace__prepare(void)
     {
         return TRACE_UNAVAILABLE;
     }
-    return IOTrace__register(IpcPlatform__monotonic_usec()) ? TRACE_OK : TRACE_UNAVAILABLE;
+    match_result(
+        SystemSettings__load(),
+        success(settings)
+        {
+            if (!settings.io_latency_tracing_enabled)
+            {
+                enabled = false;
+                return TRACE_OK;
+            }
+        },
+        error(code, message)
+        {
+            return TRACE_UNAVAILABLE;
+        }
+    );
+    return IOTrace__register() ? TRACE_OK : TRACE_UNAVAILABLE;
 }
 
 static void IOTrace__record_dispatch(IOTraceRingPtr target, IOTraceEventKind kind, ConstRequestTicketPtr ticket)
@@ -188,7 +198,6 @@ void IOTrace__record(IOTraceEventKind kind, ConstRequestTicketPtr ticket, uint64
     {
         return;
     }
-    uint64_t now = IpcPlatform__monotonic_usec();
     match_optional(
         ring,
         some(target)
@@ -197,13 +206,7 @@ void IOTrace__record(IOTraceEventKind kind, ConstRequestTicketPtr ticket, uint64
             IOTraceEvent event = IOTraceEvent__new(kind, ticket, timestamp_usec);
             IOTraceRing__publish(target, &event);
         },
-        none()
-        {
-            if (now >= retry_at_usec && IOTrace__register(now))
-            {
-                IOTrace__record(kind, ticket, timestamp_usec);
-            }
-        }
+        none_do_nothing()
     );
 }
 
@@ -214,7 +217,6 @@ void IOTrace__record_with_peer(IOTraceEventKind kind, ConstRequestTicketPtr tick
     {
         return;
     }
-    uint64_t now = IpcPlatform__monotonic_usec();
     match_optional(
         ring,
         some(target)
@@ -224,12 +226,6 @@ void IOTrace__record_with_peer(IOTraceEventKind kind, ConstRequestTicketPtr tick
                 IOTraceEvent__new_with_peer(kind, ticket, timestamp_usec, peer_pid, peer_timestamp_usec);
             IOTraceRing__publish(target, &event);
         },
-        none()
-        {
-            if (now >= retry_at_usec && IOTrace__register(now))
-            {
-                IOTrace__record_with_peer(kind, ticket, timestamp_usec, peer_pid, peer_timestamp_usec);
-            }
-        }
+        none_do_nothing()
     );
 }

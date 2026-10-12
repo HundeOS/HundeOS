@@ -11,10 +11,10 @@
 #include "sys/io.h"
 #include "sys/process.h"
 #include "sys/service.h"
+#include "sys/syslog.h"
 #include "trace/io_trace.h"
 #include "types/fixed_array.h"
 
-#define TRACE_LOG_PATH "/var/log/driver.log"
 #define IO_TRACE_DRAIN_BATCH 64U
 #define IO_TRACE_REAP_USEC 1000000ULL
 #define IO_TRACE_SOURCE_GRACE_USEC 5000000ULL
@@ -81,10 +81,8 @@ typedef struct TraceService
     QueueArrivalsPtr arrivals;
     TraceClients clients;
     TraceSources sources;
-    TraceBuffer records;
     TraceBuffer io_records;
     IOLatencyTracker io_latency;
-    IOHandle log;
     IOHandle io_log;
     uint64_t reap_at_usec;
     bool io_write_failure_reported;
@@ -101,10 +99,8 @@ static TraceService TraceService__new(QueueArrivalsPtr arrivals)
         .arrivals = arrivals,
         .clients = TraceClients__new(),
         .sources = TraceSources__new(),
-        .records = TraceBuffer__new(),
         .io_records = TraceBuffer__new(),
         .io_latency = IOLatencyTracker__new(),
-        .log = IO_NOT_OPEN,
         .io_log = IO_NOT_OPEN,
     };
 }
@@ -168,45 +164,6 @@ static bool TraceClient__flush_reply(TraceClientPtr self)
         }
     );
     return false;
-}
-
-static TraceStatus TraceService__record(TraceServicePtr self, TraceClientPtr client, ConstTraceRequestPtr request)
-{
-    if (!TraceRequest__valid_record(request))
-    {
-        return TRACE_INVALID_REQUEST;
-    }
-    BString tag = TraceRequest__tag(request);
-    BString message = TraceRequest__message(request);
-    BString line = BString__sprintf(&bstr("%B pid=%llu: %B"), &tag,
-                                    (uint64_t)ChannelServer__client_pid(&client->channel), &message);
-    return TraceBuffer__append(&self->records, &line) ? TRACE_OK : TRACE_BUFFER_FULL;
-}
-
-static TraceStatus TraceService__enable_storage(TraceServicePtr self)
-{
-    if (self->log < 0)
-    {
-        IOHandle log = IO__open(&bstr(TRACE_LOG_PATH), IO_OPEN_WRITE);
-        if (log < 0)
-        {
-            return TRACE_IO_FAILED;
-        }
-        self->log = log;
-    }
-    if (self->io_log < 0)
-    {
-        IOHandle io_log = IO__open(&bstr(IO_TRACE_LOG_PATH), IO_OPEN_WRITE);
-        if (io_log < 0)
-        {
-            BString notice =
-                BString__sprintf(&bstr("HUND-VERFOLGEN pid=0: io latency log open failed status=%lld"), io_log);
-            TraceBuffer__append(&self->records, &notice);
-            return TRACE_IO_FAILED;
-        }
-        self->io_log = io_log;
-    }
-    return TRACE_OK;
 }
 
 static Optional(TraceSource) TraceService__find_io_source(TraceServicePtr self, uint64_t pid)
@@ -322,15 +279,6 @@ static TraceReply TraceService__register_io(TraceServicePtr self, TraceClientPtr
 static TraceReply TraceService__handle_request(TraceServicePtr self, TraceClientPtr client,
                                                ConstTraceRequestPtr request)
 {
-    if (request->operation == TRACE_OPERATION_RECORD)
-    {
-        return TraceReply__new(TraceService__record(self, client, request));
-    }
-
-    if (request->operation == TRACE_OPERATION_STORAGE_READY)
-    {
-        return TraceReply__new(TraceService__enable_storage(self));
-    }
     if (request->operation == TRACE_OPERATION_REGISTER_IO)
     {
         return TraceService__register_io(self, client);
@@ -604,39 +552,20 @@ static bool TraceService__reap_io(TraceServicePtr self)
     return false;
 }
 
-static bool TraceService__flush(TraceServicePtr self)
-{
-    if (self->log < 0 || TraceBuffer__is_empty(&self->records))
-    {
-        return false;
-    }
-
-    size_t length = TraceBuffer__length(&self->records);
-    ByteCount written = IO__write_bytes(self->log, (const char *)TraceBuffer__data(&self->records), length);
-    if (written <= 0)
-    {
-        return false;
-    }
-
-    if ((size_t)written < length)
-    {
-        return TraceBuffer__consume(&self->records, (size_t)written);
-    }
-
-    uint64_t dropped = TraceBuffer__clear(&self->records);
-    if (dropped > 0)
-    {
-        BString notice = BString__sprintf(&bstr("HUND-VERFOLGEN pid=0: dropped %llu driver trace records"), dropped);
-        TraceBuffer__append(&self->records, &notice);
-    }
-    return true;
-}
-
 static bool TraceService__flush_io(TraceServicePtr self)
 {
-    if (self->io_log < 0 || TraceBuffer__is_empty(&self->io_records))
+    if (TraceBuffer__is_empty(&self->io_records))
     {
         return false;
+    }
+
+    if (self->io_log < 0)
+    {
+        self->io_log = IO__open(&bstr(IO_TRACE_LOG_PATH), IO_OPEN_WRITE);
+        if (self->io_log < 0)
+        {
+            return false;
+        }
     }
 
     size_t length = TraceBuffer__length(&self->io_records);
@@ -645,9 +574,8 @@ static bool TraceService__flush_io(TraceServicePtr self)
     {
         if (!self->io_write_failure_reported)
         {
-            BString notice = BString__sprintf(&bstr("IO-TRACE-WRITE-FAILED handle=%lld status=%lld length=%llu"),
-                                              self->io_log, written, (uint64_t)length);
-            TraceBuffer__append(&self->records, &notice);
+            kernel_syslog_tagf("hund-verfolgen", "io trace write failed handle=%lld status=%lld length=%llu\n",
+                               self->io_log, written, (uint64_t)length);
             self->io_write_failure_reported = true;
         }
         return false;
@@ -674,7 +602,6 @@ static bool TraceService__step(TraceServicePtr self)
     work |= TraceService__handle_clients(self);
     work |= TraceService__drain_io(self);
     work |= TraceService__reap_io(self);
-    work |= TraceService__flush(self);
     work |= TraceService__flush_io(self);
     return work;
 }

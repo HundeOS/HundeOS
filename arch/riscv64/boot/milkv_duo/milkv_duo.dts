@@ -1,0 +1,74 @@
+/dts-v1/;
+
+/ {
+    compatible = "milkv,duo", "sophgo,cv1800b";
+    model = "Milk-V Duo";
+    #address-cells = <2>;
+    #size-cells = <2>;
+
+    chosen {
+        stdout-path = "/soc/serial@4140000:115200n8";
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x0 0x80000000 0x0 0x03f40000>;
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <25000000>;
+
+        cpu@0 {
+            device_type = "cpu";
+            compatible = "riscv";
+            reg = <0>;
+            status = "okay";
+            riscv,isa = "rv64imafdc";
+            mmu-type = "riscv,sv39";
+
+            cpu0_intc: interrupt-controller {
+                compatible = "riscv,cpu-intc";
+                interrupt-controller;
+                #interrupt-cells = <1>;
+            };
+        };
+    };
+
+    soc {
+        compatible = "simple-bus";
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+
+        plic: interrupt-controller@70000000 {
+            compatible = "riscv,plic0";
+            reg = <0x0 0x70000000 0x0 0x04000000>;
+            interrupt-controller;
+            #interrupt-cells = <2>;
+            #address-cells = <0>;
+            riscv,ndev = <101>;
+            interrupts-extended = <&cpu0_intc 0xffffffff>, <&cpu0_intc 9>;
+        };
+
+        serial@4140000 {
+            compatible = "snps,dw-apb-uart";
+            reg = <0x0 0x04140000 0x0 0x1000>;
+            reg-shift = <2>;
+            reg-io-width = <4>;
+            clock-frequency = <25000000>;
+            current-speed = <115200>;
+            interrupt-parent = <&plic>;
+            interrupts = <44 4>;
+        };
+
+        mmc@4310000 {
+            compatible = "cvitek,cv180x-sd";
+            reg = <0x0 0x04310000 0x0 0x1000>;
+            bus-width = <4>;
+            interrupt-parent = <&plic>;
+            interrupts = <36 4>;
+        };
+    };
+};

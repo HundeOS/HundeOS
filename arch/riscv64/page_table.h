@@ -16,6 +16,7 @@
 #define RISCV_SV39_LEVEL_2_INDEX(virtual_address) (((uint64_t)(virtual_address) >> 30U) & 0x1ffU)
 #define RISCV_SV39_LEVEL_1_INDEX(virtual_address) (((uint64_t)(virtual_address) >> 21U) & 0x1ffU)
 #define RISCV_SV39_LEVEL_0_INDEX(virtual_address) (((uint64_t)(virtual_address) >> 12U) & 0x1ffU)
+#define RISCV_SV39_PTE_PPN_MASK ((1ULL << 44U) - 1U)
 
 typedef uint64_t RiscVPageTableEntry;
 
@@ -62,9 +63,11 @@ static inline RiscVPageTableEntry RiscVPageTableEntry__table(Address physical_ad
 }
 
 static inline RiscVPageTableEntry RiscVPageTableEntry__leaf(Address physical_address,
-                                                            ConstRiscVPagePermissionsPtr permissions)
+                                                            ConstRiscVPagePermissionsPtr permissions,
+                                                            uint64_t memory_attributes)
 {
-    RiscVPageTableEntry entry = (physical_address >> 2U) | RISCV_PTE_VALID | RISCV_PTE_ACCESSED;
+    RiscVPageTableEntry entry =
+        (physical_address >> 2U) | RISCV_PTE_VALID | RISCV_PTE_ACCESSED | memory_attributes;
     if (permissions->read || permissions->write)
     {
         entry |= RISCV_PTE_READ;
@@ -92,7 +95,7 @@ static inline bool RiscVPageTableEntry__is_table(RiscVPageTableEntry entry)
 
 static inline Address RiscVPageTableEntry__physical_address(RiscVPageTableEntry entry)
 {
-    return (entry >> 10U) << 12U;
+    return ((entry >> 10U) & RISCV_SV39_PTE_PPN_MASK) << 12U;
 }
 
 static inline bool RiscVVirtualAddress__is_user(Address virtual_address)

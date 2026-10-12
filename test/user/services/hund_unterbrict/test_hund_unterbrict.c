@@ -15,6 +15,7 @@ static ChannelPayload payload;
 static KernelNotificationQueue event_queue;
 static uint64_t routed_client_pid;
 static IRQNumber routed_irq;
+static Address unmasked_distributor;
 static IRQNumber unmasked_irq;
 static IRQNumber hosted_irq;
 static uint64_t hosted_irq_at_usec;
@@ -38,6 +39,7 @@ void setUp(void)
     event_queue = KernelNotificationQueue__new();
     routed_client_pid = 0;
     routed_irq = 0;
+    unmasked_distributor = 0;
     unmasked_irq = 0;
     hosted_irq = 0;
     hosted_irq_at_usec = 0;
@@ -126,7 +128,13 @@ ServiceCode fake_route_managed_irq(uint64_t client_pid, uint64_t irq)
 
 void fake_unmask_irq(Address distributor, IRQNumber irq)
 {
+    unmasked_distributor = distributor;
     unmasked_irq = irq;
+}
+
+SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+{
+    return SYSLOG_OK;
 }
 
 ServiceCode service_become_service(void)
@@ -236,7 +244,55 @@ void test_interrupt_manager_routes_channel_client_delivers_and_acknowledges(void
     );
     InterruptProtocolResponse acknowledged = take_response();
     TEST_ASSERT_EQUAL_UINT64(INTERRUPT_PROTOCOL_ACKNOWLEDGED, acknowledged.kind);
+    TEST_ASSERT_EQUAL_HEX64(0x1000, unmasked_distributor);
     TEST_ASSERT_EQUAL_UINT64(48, unmasked_irq);
+}
+
+void test_interrupt_manager_refuses_changed_distributor_without_rearming(void)
+{
+    InterruptClient client = test_client();
+    ServiceInterruptManagerRegistration kernel_registration = {
+        .event_queue = (Address)&event_queue,
+        .distributor = 0x1000,
+    };
+    InterruptManager manager = InterruptManager__new(&kernel_registration, 0);
+    InterruptProtocolRequest subscribe = InterruptProtocol__subscribe(48);
+    InterruptManager__subscribe(&manager, &client, &subscribe);
+    InterruptProtocolResponse subscribed = take_response();
+
+    match_result(InterruptClients__push(&manager.clients, client),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(KernelNotificationQueue__publish(&event_queue, 48, 9, 1234),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(InterruptManager__deliver(&manager));
+    match_find_result_ptr(
+        InterruptRegistrations__find(&manager.registrations, InterruptRegistration__matches_irq, &routed_irq),
+        some(registration)
+        {
+            registration->outstanding = 9;
+        },
+        none_test_fail()
+    );
+
+    manager.distributor = HUND_SERVICE_DIRECTORY_VADDR;
+    match_optional(
+        InterruptClients__ptr_at(&manager.clients, 0),
+        some(stored_client)
+        {
+            InterruptProtocolRequest acknowledgement = InterruptProtocol__acknowledgement(48, subscribed.generation, 9);
+            prepare_request(stored_client, &acknowledgement);
+            InterruptManager__acknowledge(&manager, stored_client, &acknowledgement);
+        },
+        none_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(INTERRUPT_PROTOCOL_ERROR, take_response().kind);
+    TEST_ASSERT_EQUAL_HEX64(0, unmasked_distributor);
+    TEST_ASSERT_EQUAL_UINT64(0, unmasked_irq);
 }
 
 void test_interrupt_manager_rejects_stale_channel_acknowledgement_without_rearming(void)

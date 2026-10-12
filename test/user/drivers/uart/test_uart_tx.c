@@ -32,7 +32,9 @@ static const char fake_sysinfo[] = "uart.physical_base=0x12345000\n"
                                    "uart.virtual_base=0xffff000000000000\n"
                                    "uart.irq=99\n"
                                    "uart.kind=1\n"
-                                   "uart.mmio_size=0x1000\n";
+                                   "uart.mmio_size=0x1000\n"
+                                   "uart.register_shift=0\n"
+                                   "uart.register_width=4\n";
 
 #include "../stream_runtime.h"
 #define main uart_tx_driver_main
@@ -44,17 +46,28 @@ static int uart_tx_main_under_test(void)
     return StreamDriverTest__run(uart_tx_driver_main);
 }
 
-UartDevice UartDevice__new(Address registers, UartKind kind)
+UartDevice UartDevice__new(Address registers, UartKind kind, uint64_t register_shift, uint64_t register_width)
 {
     TEST_ASSERT_EQUAL(UART_KIND_PL011, kind);
-    return (UartDevice){.registers = registers, .kind = kind};
+    TEST_ASSERT_EQUAL_UINT64(0, register_shift);
+    TEST_ASSERT_EQUAL_UINT64(4, register_width);
+    return (UartDevice){.registers = registers,
+                        .kind = kind,
+                        .register_shift = register_shift,
+                        .register_width = register_width};
 }
 
 bool UartDevice__can_transmit(ConstUartDevicePtr self)
 {
     TEST_ASSERT_NOT_EQUAL(0, self->registers);
     fake_uart_fr_read_count++;
-    return fake_uart_fr_read_count != 1;
+    return fake_uart_fr_read_count % 2 == 0;
+}
+
+UartTransmitStatus UartDevice__transmit_status(ConstUartDevicePtr self)
+{
+    bool ready = UartDevice__can_transmit(self);
+    return (UartTransmitStatus){.raw = ready ? (1U << 5) : 0, .ready = ready};
 }
 
 void UartDevice__write(UartDevicePtr self, uint8_t value)
@@ -211,10 +224,10 @@ void test_uart_tx_main_maps_registers_waits_for_write_request_and_consumes_data(
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     TEST_ASSERT_TRUE(fake_sysinfo_closed);
     TEST_ASSERT_TRUE(fake_data_consumed);
-    TEST_ASSERT_EQUAL_UINT64(3, fake_service_wait_count);
+    TEST_ASSERT_EQUAL_UINT64(2, fake_service_wait_count);
     TEST_ASSERT_EQUAL_UINT64(3, fake_uart_write_count);
     TEST_ASSERT_EQUAL_UINT32('x', fake_uart_writes[0]);
     TEST_ASSERT_EQUAL_UINT32('\n', fake_uart_writes[1]);
     TEST_ASSERT_EQUAL_UINT32('\r', fake_uart_writes[2]);
-    TEST_ASSERT_GREATER_THAN_UINT64(3, fake_uart_fr_read_count);
+    TEST_ASSERT_EQUAL_UINT64(6, fake_uart_fr_read_count);
 }

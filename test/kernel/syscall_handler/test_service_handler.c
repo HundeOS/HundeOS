@@ -567,6 +567,8 @@ void test_service_handler_registers_interrupt_manager_with_plic_mapping(void)
 
     TEST_ASSERT_NOT_EQUAL(0, registration.event_queue);
     TEST_ASSERT_NOT_EQUAL(0, registration.distributor);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT64(USER_ALLOC_BASE, registration.distributor);
+    TEST_ASSERT_LESS_THAN_UINT64(HUND_SERVICE_DIRECTORY_VADDR, registration.distributor);
     TEST_ASSERT_EQUAL(PROCESS_CLASS_REALTIME_SERVICE, process->process_class);
     match_result(
         Process__device_address(process, registration.distributor),
@@ -576,6 +578,37 @@ void test_service_handler_registers_interrupt_manager_with_plic_mapping(void)
         },
         error_test_fail()
     );
+}
+
+void test_service_handler_rejects_plic_target_outside_mapping(void)
+{
+    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
+    process->process_class = PROCESS_CLASS_SERVICE;
+    Process__set_hund_identity(process);
+    match_result(Scheduler__schedule_on_cpu(kernel->scheduler, process, cpu),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    SystemInfo system_info = SystemInfo__new();
+    PlicInterruptControllerInfo plic = PlicInterruptControllerInfo__new(0x70000000, 0, 101, 0x300000);
+    system_info.interrupt_controller = InterruptControllerInfo__new_plic(&plic);
+    kernel->system_info = Some(SystemInfo, system_info);
+    kernel->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller);
+
+    ServiceInterruptManagerRegistration registration = {0};
+    match_result(
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_INTERRUPT_MANAGER, (Anything)&registration,
+                         0, 0, 0),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_MAP_FAILED, code);
+        }
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(0, registration.event_queue);
+    TEST_ASSERT_EQUAL_UINT64(0, registration.distributor);
+    TEST_ASSERT_EQUAL(PROCESS_CLASS_SERVICE, process->process_class);
 }
 
 void test_service_handler_does_not_promote_failed_interrupt_manager_registration(void)

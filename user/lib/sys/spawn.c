@@ -204,6 +204,17 @@ SpawnResult spawn_with_auth(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBS
     return spawn_with_auth_argv(mode, auth_ticket_id, path, &arguments);
 }
 
+SpawnResult spawn_with_auth_report(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBStringPtr path,
+                                   SpawnAbortReportPtr abort_report, OptionalPtr(BString) arg0,
+                                   OptionalPtr(BString) arg1, OptionalPtr(BString) arg2)
+{
+    SpawnArguments arguments = SpawnArguments__from_optional_args(arg0, arg1, arg2);
+    SpawnRequest request =
+        SpawnRequest__new(mode, path, SPAWN_INHERIT_USER_ID, auth_ticket_id, SPAWN_STDIO_DEFAULT, &arguments);
+    SpawnRequest__set_abort_report(&request, abort_report);
+    return SpawnRequest__submit(&request, SYSCALL_EXEC_REQUEST);
+}
+
 SpawnResult spawn_with_auth_argv(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBStringPtr path,
                                  ConstSpawnArgumentsPtr arguments)
 {

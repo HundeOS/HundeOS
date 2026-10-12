@@ -1,6 +1,6 @@
 #include "../../kernel/arch/system.h"
 
-#include "boot/qemu_virt/platform.h"
+#include "boot/common/platform.h"
 
 void System__shutdown(void)
 {

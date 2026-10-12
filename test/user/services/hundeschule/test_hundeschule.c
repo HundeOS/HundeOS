@@ -8,6 +8,7 @@
 #include "../../../../common_includes/syscalls/service.h"
 #include "../../../../common_includes/syscalls/spawn.h"
 #include "../../../../common_includes/syscalls/syslog.h"
+#include "../../../../common_includes/syscalls/system_info.h"
 #include "../../../../common/hardware/boot_info.h"
 
 #define TEST_SERVICE_READY_NAME_MAX 256ULL
@@ -44,15 +45,24 @@ static bool fake_config_closed;
 static uint64_t fake_wait_ready_count;
 static char fake_wait_ready_paths[10][TEST_SERVICE_READY_NAME_MAX];
 static BootVirtioMmioInfo fake_virtio_mmio;
+static bool fake_has_virtio;
+static bool fake_io_latency_tracing_enabled;
+
+static int strings_equal(const char * left, const char * right);
 
 TraceStatus DriverTrace__writef(const char * tag, const char * format, ...)
 {
     return TRACE_OK;
 }
 
-TraceStatus DriverTrace__storage_ready(void)
+Result(SystemSettings) SystemSettings__load(void)
 {
-    return TRACE_OK;
+    return Success(SystemSettings, SystemSettings__new(fake_io_latency_tracing_enabled));
+}
+
+SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+{
+    return SYSLOG_OK;
 }
 
 #define ServiceDirectory__shared SchoolTest__directory
@@ -124,6 +134,8 @@ void setUp(void)
     fake_config_closed = false;
     fake_wait_ready_count = 0;
     fake_virtio_mmio = BootVirtioMmioInfo__new(0x0a000000ULL, 0x200, 32, 48);
+    fake_has_virtio = true;
+    fake_io_latency_tracing_enabled = true;
     for (uint64_t i = 0; i < 10; i++)
     {
         fake_wait_ready_paths[i][0] = '\0';
@@ -223,7 +235,7 @@ IOHandle IO__open(ConstBStringPtr path, Flags flags)
     if (strings_equal(BString__cstr(path), "/boot/config/hundeschule.conf"))
     {
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
-        if (fake_wait_ready_count < 5 || fake_config == NULL)
+        if (fake_wait_ready_count < 3 || fake_config == NULL)
         {
             return IO_INVALID_PATH;
         }
@@ -313,7 +325,10 @@ ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappe
 Result(BootHardwareInfo) BootHardwareInfo__load(void)
 {
     BootHardwareInfo info = BootHardwareInfo__new();
-    info.virtio_mmio = Some(BootVirtioMmioInfo, fake_virtio_mmio);
+    if (fake_has_virtio)
+    {
+        info.virtio_mmio = Some(BootVirtioMmioInfo, fake_virtio_mmio);
+    }
     return Success(BootHardwareInfo, info);
 }
 
@@ -369,6 +384,23 @@ void test_hundeschule_starts_bootstrap_drivers_then_hundeschau(void)
     TEST_ASSERT_TRUE(fake_sysinfo_closed);
 }
 
+void test_hundeschule_does_not_start_latency_collector_when_disabled(void)
+{
+    fake_has_virtio = false;
+    fake_io_latency_tracing_enabled = false;
+
+    HundeschuleRequiredProcesses processes = HundeschuleRequiredProcesses__new();
+    TEST_ASSERT_EQUAL(0, Hundeschule__initialise_required_processes(&processes));
+
+    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/socket_router", spawn_calls[0].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hundebus", spawn_calls[1].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[2].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hund-rohr", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[5].path);
+}
+
 void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
 {
     fake_sysinfo = "framebuffer.present=1\n"
@@ -414,6 +446,26 @@ void test_hundeschule_stops_before_disks_when_interrupt_manager_cannot_start(voi
     TEST_ASSERT_EQUAL(2, spawn_call_count);
     TEST_ASSERT_EQUAL(2, fake_wait_ready_count);
     TEST_ASSERT_FALSE(fake_config_opened);
+}
+
+void test_hundeschule_uses_boot_config_without_virtio_mmio(void)
+{
+    fake_has_virtio = false;
+    fake_config = "driver /sbin/drivers/uart_rx respawn\n"
+                  "driver /sbin/drivers/uart_tx respawn\n";
+
+    HundeschuleRequiredProcesses required_processes = HundeschuleRequiredProcesses__new();
+    TEST_ASSERT_EQUAL_INT(0, Hundeschule__initialise_required_processes(&required_processes));
+
+    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hund-verfolgen", spawn_calls[0].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/socket_router", spawn_calls[1].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_rx", spawn_calls[2].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/uart_tx", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hund-rohr", spawn_calls[4].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[5].path);
+    TEST_ASSERT_TRUE(fake_config_opened);
+    TEST_ASSERT_TRUE(fake_config_closed);
 }
 
 void test_hundeschule_rejects_legacy_block_driver_selection(void)

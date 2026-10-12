@@ -1,0 +1,18 @@
+/include/ "milkv_duo_s.dts"
+
+/ {
+    model = "Milk-V Duo S (CV1800B QEMU approximation)";
+
+    soc {
+        clint@74000000 {
+            compatible = "sifive,clint0", "riscv,clint0";
+            reg = <0x0 0x74000000 0x0 0x00010000>;
+            interrupts-extended = <&cpu0_intc 3>, <&cpu0_intc 7>;
+        };
+
+        mmc@4310000 {
+            compatible = "generic-sdhci";
+            src-frequency = <0>;
+        };
+    };
+};

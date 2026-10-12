@@ -1,0 +1,49 @@
+/dts-v1/;
+
+/ {
+    description = "HundeOS Milk-V Duo S";
+    #address-cells = <2>;
+
+    images {
+        kernel-handoff {
+            description = "HundeOS RISC-V kernel handoff";
+            data = /incbin/("handoff.bin");
+            type = "kernel";
+            arch = "riscv";
+            os = "linux";
+            compression = "none";
+            load = <0x0 0x8d000000>;
+            entry = <0x0 0x8d000000>;
+        };
+
+        kernel-payload {
+            description = "HundeOS RISC-V kernel payload";
+            data = /incbin/("kernel.img.lzma");
+            type = "loadable";
+            arch = "riscv";
+            os = "linux";
+            compression = "lzma";
+            load = <0x0 0x84000000>;
+        };
+
+        fdt-cv1813h_milkv_duos_sd {
+            description = "Milk-V Duo S SG2000";
+            data = /incbin/("milkv_duo_s.dtb");
+            type = "flat_dt";
+            arch = "riscv";
+            compression = "none";
+            load = <0x0 0x8c000000>;
+        };
+    };
+
+    configurations {
+        default = "config-cv1813h_milkv_duos_sd";
+
+        config-cv1813h_milkv_duos_sd {
+            description = "HundeOS on Milk-V Duo S";
+            kernel = "kernel-handoff";
+            loadables = "kernel-payload";
+            fdt = "fdt-cv1813h_milkv_duos_sd";
+        };
+    };
+};

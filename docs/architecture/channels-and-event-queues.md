@@ -342,22 +342,25 @@ handles, submissions and completions.
 
 The warden and block runtime run ready fibres before waiting. Their idle paths,
 and the non-fibre service loops, use [queue event waits](queues.md#bounded-waits):
-check shared state, publish the observations, then use `WFE` without a syscall.
-Spurious and unrelated event returns repeat `WFE` while leaving that publication
-armed. Queue progress or a kernel wake generation returns to dispatch. Sends
-complete publication before `SEV`; kernel notification producers advance the wake
-generation first. Timer preemption remains enabled and context restoration sets a
-local event so a resumed waiter rechecks state.
+capture the process doorbell generation, check shared state, then enter the queue
+wait syscall with that generation. Under the scheduler lock, the kernel compares
+the live doorbell and checks its own queue, service-event, IRQ, buffer, and signal
+state before it parks the process. Timer and voluntary-yield scheduling paths make
+the same live-state check. No per-queue userspace snapshot is authoritative.
 
-Idle waits now also publish authenticated queue observations through a per-process
-shared control area. Scheduler selection skips unchanged waits until a queue or
-kernel notification becomes ready. Ordinary waits have no periodic retry deadline.
-Setup uses one syscall, but arming and clearing waits do not. A validated dependency
-ancestor may remain warm for the scheduler's bounded residency window.
+Idle waits also publish the observed process doorbell generation through a
+per-process shared control area for dependency scheduling and diagnostics. This
+publication is a hint, not the state used to decide a kernel park. Unread data on
+any live connection owned by the process overrides an unchanged publication.
+Queue progress rings the peer doorbell after publishing its cursor; a successful
+push additionally asks the kernel to reconsider a parked receiver immediately.
+Consumption is detected from the doorbell and live state at the next timer or
+voluntary-yield scheduler entry.
 
 After an observed change the dispatcher rechecks arrival, message, closure and
-retry state. No shared aggregate wake word is used as an authority or queue cursor,
-and a process must not wait while its fibre scheduler has runnable work.
+retry state. The process doorbell is a coalescing generation, not an event count or
+queue cursor, and a process must not wait while its fibre scheduler has runnable
+work.
 
 ## Memory API and remaining work
 

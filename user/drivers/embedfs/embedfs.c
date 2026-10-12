@@ -17,12 +17,12 @@ static EmbedfsHandle EmbedfsHandle__new(IOHandle id, IORequestPtr request, Embed
         .id = id, .session = request->client_session, .pid = request->client_pid, .file = *file, .offset = 0};
 }
 
-Embedfs Embedfs__new(EmbeddedFsPtr archive)
+void Embedfs__init(EmbedfsPtr self, EmbeddedFsPtr archive)
 {
-    return (Embedfs){.archive = *archive,
-                     .handles = EmbedfsHandles__new(),
-                     .children = BStringArray__new(),
-                     .next_handle = IO_SESSION_HANDLE_BASE};
+    self->archive = *archive;
+    EmbedfsHandles__init(&self->handles);
+    BStringArray__init(&self->children);
+    self->next_handle = IO_SESSION_HANDLE_BASE;
 }
 
 static bool EmbedfsHandle__matches(EmbedfsHandlePtr self, void * context)

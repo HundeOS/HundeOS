@@ -20,15 +20,15 @@ static IOServiceConnection IOServiceConnection__new(ChannelServer channel)
     return (IOServiceConnection){.channel = channel, .phase = IO_SERVICE_RECEIVE};
 }
 
-static IOService IOService__new(ConstBStringPtr name, QueueArrivalsPtr arrivals, IOServiceContext context,
-                                IOServiceExecute execute, IOServiceDisconnect disconnect)
+static void IOService__init(IOServicePtr self, ConstBStringPtr name, QueueArrivalsPtr arrivals,
+                            IOServiceContext context, IOServiceExecute execute, IOServiceDisconnect disconnect)
 {
-    return (IOService){.name = *name,
-                       .arrivals = arrivals,
-                       .connections = IOServiceConnections__new(),
-                       .context = context,
-                       .execute = execute,
-                       .disconnect = disconnect};
+    self->name = *name;
+    self->arrivals = arrivals;
+    IOServiceConnections__init(&self->connections);
+    self->context = context;
+    self->execute = execute;
+    self->disconnect = disconnect;
 }
 
 IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServiceContext context,
@@ -38,28 +38,12 @@ IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServi
         Queue__listen(name),
         success(arrivals)
         {
-            *self = IOService__new(name, arrivals, context, execute, disconnect);
+            IOService__init(self, name, arrivals, context, execute, disconnect);
             return IO_OK;
         },
         error(code, message)
         {
             return IO_REGISTER_FAILED;
-        }
-    );
-}
-
-Result(IOService) IOService__listen(ConstBStringPtr name, IOServiceContext context, IOServiceExecute execute,
-                                    IOServiceDisconnect disconnect)
-{
-    match_result(
-        Queue__listen(name),
-        success(arrivals)
-        {
-            return Success(IOService, IOService__new(name, arrivals, context, execute, disconnect));
-        },
-        error(code, message)
-        {
-            return Error(IOService, message, code);
         }
     );
 }

@@ -132,10 +132,10 @@ static Result(Anything) ExecLoad__complete_syscall(ParkedOperationPtr parked_ope
 static Result(SystemCallResult)
     ExecLoad__start_syscall(ProcessPtr process, ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,
                             OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments, ConstSpawnStdioPtr stdio,
-                            bool overlay, KernelAddress overlay_payload)
+                            OptionalPtr(KernelAddress) abort_report, bool overlay, KernelAddress overlay_payload)
 {
     match_result(
-        ExecLoad__begin(context, path, wait, user, arguments, stdio, overlay, overlay_payload),
+        ExecLoad__begin(context, path, wait, user, arguments, stdio, abort_report, overlay, overlay_payload),
         success(child)
         {
             return Success(SystemCallResult, child->pid);
@@ -242,9 +242,6 @@ static Result(SystemCallResult)
         );
     }
 
-    __d_printf(EXEC, "exec request handler path=%s mode=%i requested_user=%i auth_ticket=%i\n", cstr(requested_path),
-               request.mode, (int)request.requested_user_id, (int)request.auth_ticket_id);
-
     ProcessArguments arguments = ProcessArguments__new();
     if (!overlay)
     {
@@ -272,6 +269,26 @@ static Result(SystemCallResult)
 
     SpawnMode mode = request.mode;
     bool wait = mode == P_WAIT;
+    Optional(KernelAddress) abort_report = None(KernelAddress);
+    if (request.abort_report != 0)
+    {
+        if (!wait)
+        {
+            return Error(SystemCallResult, bstr("Abort report requires a synchronous spawn"), SPAWN_FAILED);
+        }
+        match_optional(
+            Process__writable_user_kernel_mapping(process, request.abort_report, sizeof(SpawnAbortReport)),
+            some(address)
+            {
+                abort_report = Some(KernelAddress, address);
+                *(SpawnAbortReportPtr)address.virtual_addr = SpawnAbortReport__none();
+            },
+            none()
+            {
+                return Error(SystemCallResult, bstr("Invalid abort report mapping"), SPAWN_FAILED);
+            }
+        );
+    }
     Optional(UserID) requested_user_id = None(UserID);
     if (request.auth_ticket_id != SPAWN_INHERIT_AUTH_TICKET)
     {
@@ -302,7 +319,7 @@ static Result(SystemCallResult)
     if (!bootstrap)
     {
         return ExecLoad__start_syscall(process, &originating_context, &requested_path, wait, &requested_user_id,
-                                       &arguments, &request.stdio, overlay, overlay_payload);
+                                       &arguments, &request.stdio, &abort_report, overlay, overlay_payload);
     }
     Result(ProcessPtr) exec_res = Exec__exec_authorized_as_with_stdio(&originating_context, &requested_path, wait,
                                                                       &requested_user_id, &arguments, &request.stdio);
@@ -310,13 +327,10 @@ static Result(SystemCallResult)
         exec_res,
         success(spawned_proc)
         {
-            __d_printf(EXEC, "exec request handler success path=%s pid=%i\n", cstr(requested_path), spawned_proc->pid);
             return Success(SystemCallResult, spawned_proc->pid);
         },
         error(code, message)
         {
-            __d_printf(EXEC, "exec request handler error path=%s code=%i message=%s\n", cstr(requested_path), code,
-                       cstr(message));
             return Error(SystemCallResult, message, code);
         }
     );

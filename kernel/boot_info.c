@@ -6,9 +6,12 @@ BootHardwareInfo BootHardwareInfo__from_system(SystemInfoPtr info, uint64_t onli
     result.cpu_count = info->cpu_count;
     result.online_cpu_count = online_cpu_count;
     result.timer_frequency = info->timer_frequency;
+    result.default_user_stack_size = SystemInfo__user_stack_size(info);
     result.wait_mode = info->wait_mode;
     result.rtc = info->rtc;
-    result.uart = BootUartInfo__new(info->uart.physical_base, 0x1000, info->uart.irq, info->uart.kind);
+    result.uart = BootUartInfo__new(info->console_uart.physical_base, info->console_uart.mmio_size,
+                                    info->console_uart.irq, info->console_uart.kind,
+                                    info->console_uart.register_shift, info->console_uart.register_width);
     result.virtio_mmio = info->virtio_mmio;
     result.memory_start = info->physical_memory.physical_start;
     result.memory_end = info->physical_memory.physical_end;
@@ -52,7 +55,8 @@ BootHardwareInfo BootHardwareInfo__from_system(SystemInfoPtr info, uint64_t onli
         some(value)
         {
             BootDeviceInfo device = BootDeviceInfo__new(value.physical_base, value.mmio_size, value.irq);
-            result.sd_host = Some(BootDeviceInfo, device);
+            BootSdHostInfo sd_host = BootSdHostInfo__new(&device, value.kind, value.source_clock_hz);
+            result.sd_host = Some(BootSdHostInfo, sd_host);
         },
         none_do_nothing()
     );

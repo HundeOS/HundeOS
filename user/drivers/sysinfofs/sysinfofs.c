@@ -38,6 +38,8 @@ Result(FilesystemFileSize) Sysinfofs__render(BootHardwareInfoPtr info, Filesyste
     SysinfoWriter__line(&writer, &bstr("uart.mmio_size"), info->uart.mmio_size);
     SysinfoWriter__line(&writer, &bstr("uart.irq"), info->uart.irq);
     SysinfoWriter__line(&writer, &bstr("uart.kind"), info->uart.kind);
+    SysinfoWriter__line(&writer, &bstr("uart.register_shift"), info->uart.register_shift);
+    SysinfoWriter__line(&writer, &bstr("uart.register_width"), info->uart.register_width);
     match_optional(
         info->rtc,
         some(value)
@@ -94,9 +96,11 @@ Result(FilesystemFileSize) Sysinfofs__render(BootHardwareInfoPtr info, Filesyste
         some(value)
         {
             SysinfoWriter__line(&writer, &bstr("sd_host.present"), 1);
-            SysinfoWriter__line(&writer, &bstr("sd_host.physical_base"), value.physical_base);
-            SysinfoWriter__line(&writer, &bstr("sd_host.mmio_size"), value.mmio_size);
-            SysinfoWriter__line(&writer, &bstr("sd_host.irq"), value.irq);
+            SysinfoWriter__line(&writer, &bstr("sd_host.physical_base"), value.device.physical_base);
+            SysinfoWriter__line(&writer, &bstr("sd_host.mmio_size"), value.device.mmio_size);
+            SysinfoWriter__line(&writer, &bstr("sd_host.irq"), value.device.irq);
+            SysinfoWriter__line(&writer, &bstr("sd_host.kind"), value.kind);
+            SysinfoWriter__line(&writer, &bstr("sd_host.source_clock_hz"), value.source_clock_hz);
         },
         none()
         {

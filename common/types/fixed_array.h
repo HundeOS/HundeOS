@@ -32,15 +32,21 @@ OptionalDef(ArrayIndex);
 #define ArrayOptional(alias) _Optional(alias##__optional)
 
 #define ConstructorPreDefine(alias_name)                                                                               \
+    void alias_name##__init(alias_name * self);                                                                        \
     alias_name alias_name##__new();                                                                                    \
     alias_name * alias_name##__heap_new();
+
+#define InitDefine(alias_name)                                                                                         \
+    void alias_name##__init(alias_name * self)                                                                         \
+    {                                                                                                                  \
+        self->len = 0;                                                                                                 \
+    }
 
 #define StackConstructorDefine(alias_name)                                                                             \
     alias_name alias_name##__new()                                                                                     \
     {                                                                                                                  \
-        alias_name result = {                                                                                          \
-            .len = 0,                                                                                                  \
-        };                                                                                                             \
+        alias_name result;                                                                                             \
+        alias_name##__init(&result);                                                                                   \
         return result;                                                                                                 \
     }
 
@@ -52,11 +58,12 @@ OptionalDef(ArrayIndex);
         {                                                                                                              \
             return NULL;                                                                                               \
         }                                                                                                              \
-        array->len = 0;                                                                                                \
+        alias_name##__init(array);                                                                                     \
         return array;                                                                                                  \
     }
 
-#define ConstructorDefine(alias_name) StackConstructorDefine(alias_name) HeapConstructorDefine(alias_name)
+#define ConstructorDefine(alias_name)                                                                                  \
+    InitDefine(alias_name) StackConstructorDefine(alias_name) HeapConstructorDefine(alias_name)
 
 #define PushPreDefine(alias_name)                                                                                      \
     Result(CollectionCode) alias_name##__push(alias_name * self, alias_name##__type value);                            \
@@ -456,7 +463,8 @@ OptionalDef(ArrayIndex);
             SortDefine(alias_name) FilterDefine(alias_name)
 
 #define FixedArrayStackBodyDefine(alias_name)                                                                          \
-    StackConstructorDefine(alias_name) LenDefine(alias_name) AtDefine(alias_name) PushDefine(alias_name)               \
+    InitDefine(alias_name) StackConstructorDefine(alias_name) LenDefine(alias_name) AtDefine(alias_name)               \
+        PushDefine(alias_name)                                                                                         \
         PopDefine(alias_name) SetDefine(alias_name) FindDefine(alias_name) RemoveDefine(alias_name)                    \
             SortDefine(alias_name) FilterDefine(alias_name)
 

@@ -17,6 +17,7 @@ static BString permission_denied = bstr("Permission denied");
 
 #define SERVICE_GIC_DISTRIBUTOR_SIZE 0x10000ULL
 #define SERVICE_PLIC_ENABLE_SIZE 0x3000ULL
+#define SERVICE_PLIC_SUPERVISOR_ENABLE_OFFSET 0x2080ULL
 #define SERVICE_PLIC_ENABLE_HART_STRIDE 0x100ULL
 
 typedef struct ServiceMappedMemoryRequest
@@ -124,7 +125,7 @@ Result(SystemCallResult)
             if (service_operation == SERVICE_QUEUE_WAIT)
             {
                 match_result(
-                    Scheduler__queue_wait(kernel->scheduler, process, arg2, arg3, arg4),
+                    Scheduler__queue_wait(kernel->scheduler, process, arg2, arg3),
                     success(value)
                     {
                         if (value == QUEUE_WAIT_PARKED)
@@ -417,6 +418,7 @@ Result(SystemCallResult)
                             {
                                 Address physical_address = 0;
                                 size_t mapping_size = 0;
+                                uint64_t target_hart_id = 0;
                                 if (system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V2 ||
                                     system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V3)
                                 {
@@ -430,14 +432,31 @@ Result(SystemCallResult)
                                         &system_info.interrupt_controller.details.plic;
                                     physical_address = plic->physical_base;
                                     mapping_size = SERVICE_PLIC_ENABLE_SIZE;
+                                    target_hart_id = plic->target_hart_id;
+                                    uint64_t maximum_target_hart_id =
+                                        (mapping_size - SERVICE_PLIC_SUPERVISOR_ENABLE_OFFSET - sizeof(uint32_t)) /
+                                        SERVICE_PLIC_ENABLE_HART_STRIDE;
+                                    if (plic->target_hart_id > maximum_target_hart_id)
+                                    {
+                                        __d_printf(FAULT,
+                                                   "interrupt manager rejected PLIC physical=0x%x target_hart=%i "
+                                                   "maximum_target_hart=%i mapping_size=0x%x\n",
+                                                   physical_address, target_hart_id, maximum_target_hart_id, mapping_size);
+                                        IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, process);
+                                        return Error(SystemCallResult, unsupported_operation, SERVICE_MAP_FAILED);
+                                    }
                                 }
                                 if (mapping_size == 0)
                                 {
                                     IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, process);
                                     return Error(SystemCallResult, unsupported_operation, SERVICE_MAP_FAILED);
                                 }
+                                Result(UserAddress) distributor_mapping =
+                                    system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC
+                                        ? Process__map_trapped_mmio(process, physical_address, mapping_size)
+                                        : Process__map_mmio(process, physical_address, mapping_size);
                                 match_result(
-                                    Process__map_mmio(process, physical_address, mapping_size),
+                                    distributor_mapping,
                                     success(distributor)
                                     {
                                         request->event_queue = queue_address;
@@ -445,8 +464,7 @@ Result(SystemCallResult)
                                         if (system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC)
                                         {
                                             request->distributor +=
-                                                system_info.interrupt_controller.details.plic.target_hart_id *
-                                                SERVICE_PLIC_ENABLE_HART_STRIDE;
+                                                target_hart_id * SERVICE_PLIC_ENABLE_HART_STRIDE;
                                         }
                                         match_result(
                                             Scheduler__promote_realtime(kernel->scheduler, process),

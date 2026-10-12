@@ -4,6 +4,7 @@
 #include "page_table.h"
 
 #include "mmu.h"
+#include "platform_config.h"
 #include "../../kernel/debug.h"
 #include "../../kernel/kalloc.h"
 #include "../../kernel/kernel_core.h"
@@ -148,7 +149,8 @@ static KernelAddress PageTable__ensure_next_level_table(ProcessPageTablePtr proc
 }
 
 static int PageTable__map_page(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
-                               Address physical_address, ConstRiscVPagePermissionsPtr permissions)
+                               Address physical_address, ConstRiscVPagePermissionsPtr permissions,
+                               uint64_t memory_attributes)
 {
     if (!RiscVVirtualAddress__is_user(virtual_address))
     {
@@ -177,7 +179,7 @@ static int PageTable__map_page(ProcessPageTablePtr self, KernelPtr kernel, Addre
 
     PageTablePtr leaf_table = v_ptr(level_0, PageTable);
     leaf_table->entries[RISCV_SV39_LEVEL_0_INDEX(virtual_address)] =
-        RiscVPageTableEntry__leaf(physical_address, permissions);
+        RiscVPageTableEntry__leaf(physical_address, permissions, memory_attributes);
     PageTable__publish();
     PageTable__invalidate_page(virtual_address);
     return 0;
@@ -205,7 +207,8 @@ Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr ke
             physical_address = align_down_4k(paddr(backing));
         }
 
-        if (PageTable__map_page(self, kernel, user_address, physical_address, &permissions) != 0)
+        if (PageTable__map_page(self, kernel, user_address, physical_address, &permissions,
+                                RISCV_PLATFORM_RAM_PTE_ATTRIBUTES) != 0)
         {
             ArchPageTable__unmap(self, kernel, user_start, offset);
             return Error(KAllocCode, page_table_allocation_failed, KALLOC_ALLOCATION_FAILED);
@@ -225,7 +228,8 @@ void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAdd
     for (Address user_address = user_start; user_address < user_end; user_address += PAGE_SIZE)
     {
         Address offset = user_address - user_start;
-        PageTable__map_page(self, kernel, user_address, physical_start + offset, &permissions);
+        PageTable__map_page(self, kernel, user_address, physical_start + offset, &permissions,
+                            RISCV_PLATFORM_DEVICE_PTE_ATTRIBUTES);
     }
 }
 

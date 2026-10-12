@@ -5,6 +5,5 @@
 
 TraceStatus DriverTrace__write(ConstBStringPtr tag, ConstBStringPtr message);
 TraceStatus DriverTrace__writef(const char * tag, const char * format, ...);
-TraceStatus DriverTrace__storage_ready(void);
 
 #endif

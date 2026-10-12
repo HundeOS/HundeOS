@@ -4,7 +4,7 @@
 #include "../../newlib/posix_io.h"
 #include "../../newlib/runtime.h"
 
-extern int main(int argc, char ** argv);
+extern int main(int argc, char ** argv, char ** envp);
 
 void _start(int argc, char ** argv, char ** envp, uint64_t pid, IOHandle input, IOHandle output, IOHandle error,
             ConstExecPayloadPtr exec_payload)
@@ -22,7 +22,7 @@ void _start(int argc, char ** argv, char ** envp, uint64_t pid, IOHandle input, 
         }
     }
     LibC__set_program_name(argv[0]);
-    int code = main(argc, argv);
+    int code = main(argc, argv, envp);
     exit(code);
 
     for (;;)

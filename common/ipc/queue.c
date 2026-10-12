@@ -93,6 +93,21 @@ bool Queue__has_unread_messages(QueuePtr self)
     return pending != 0 && pending <= QUEUE_CAPACITY;
 }
 
+bool Queue__has_write_capacity(QueuePtr self)
+{
+    QueueCode status = Queue__status(self);
+    if (status == QUEUE_CLOSED)
+    {
+        return true;
+    }
+    if (status != QUEUE_OK)
+    {
+        return false;
+    }
+    QueueCursor consumed = __atomic_load_n(&self->incoming->consumed, __ATOMIC_ACQUIRE);
+    return self->written - consumed != QUEUE_CAPACITY;
+}
+
 QueueParticipantID Queue__peer_pid(QueuePtr self)
 {
     return self->peer_pid;

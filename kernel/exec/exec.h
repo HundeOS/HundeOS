@@ -15,7 +15,8 @@ typedef uint64_t ExecResult;
 bool Exec__can_execute(ConstOriginatingContextPtr context, ConstBStringPtr path);
 Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, ElfPtr elf, bool wait,
                                            OptionalPtr(UserID) requested_user_id, ConstProcessArgumentsPtr arguments,
-                                           ConstSpawnStdioPtr stdio, bool overlay, KernelAddress overlay_payload);
+                                           ConstSpawnStdioPtr stdio, OptionalPtr(KernelAddress) abort_report,
+                                           bool overlay, KernelAddress overlay_payload);
 
 Result(ProcessPtr) Exec__exec(ConstOriginatingContextPtr originating_context, ConstBStringPtr path, bool wait,
                               ConstProcessArgumentsPtr arguments);

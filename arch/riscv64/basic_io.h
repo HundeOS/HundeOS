@@ -3,6 +3,7 @@
 
 #include "../../kernel/system_info.h"
 
-void RiscVBasicIO__configure(ConstUartInfoPtr uart);
+void RiscVBasicIO__configure_console(ConstUartInfoPtr uart);
+void RiscVBasicIO__configure_trace(ConstUartInfoPtr uart);
 
 #endif

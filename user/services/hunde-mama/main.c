@@ -7,6 +7,12 @@
 
 typedef volatile uint32_t * MamaRegisterPtr;
 
+static BString mama_sd_device = bstr("/dev/mmc0");
+static BString mama_sd_boot_config = bstr("/dev/mmc0p2");
+static BString mama_sd_root = bstr("/dev/mmc0p3");
+static BString mama_partition_two = bstr("2");
+static BString mama_partition_three = bstr("3");
+
 typedef struct MamaBootDisk
 {
     uint64_t slot;
@@ -53,6 +59,58 @@ static Result(MamaBootDisk) MamaBootDisk__find(ConstBootVirtioMmioInfoPtr virtio
     return matches == 1 ? Success(MamaBootDisk, found)
                         : Error(MamaBootDisk, bstr("Expected one 8 MiB boot configuration disk"),
                                 SERVICE_DEVICE_REGISTRATION_FAILED);
+}
+
+static Result(MamaBootDisk) MamaBootDisk__start_sd(void)
+{
+    match_result(
+        BootService__bootstrap(&bstr("/sbin/drivers/sdhci_channelio"), &empty_bstr(), &empty_bstr(), &mama_sd_device),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(MamaBootDisk, message, code);
+        }
+    );
+    match_result(
+        BootService__bootstrap(&bstr("/sbin/drivers/block_partition"), &mama_sd_device, &mama_partition_two,
+                               &mama_sd_boot_config),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(MamaBootDisk, message, code);
+        }
+    );
+    match_result(
+        BootService__bootstrap(&bstr("/sbin/drivers/block_partition"), &mama_sd_device, &mama_partition_three,
+                               &mama_sd_root),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(MamaBootDisk, message, code);
+        }
+    );
+    return Success(MamaBootDisk, MamaBootDisk__new(0, &mama_sd_boot_config));
+}
+
+static Result(MamaBootDisk) MamaBootDisk__from_hardware(ConstBootHardwareInfoPtr info)
+{
+    match_optional(
+        info->virtio_mmio,
+        some(virtio_mmio)
+        {
+            return MamaBootDisk__find(&virtio_mmio);
+        },
+        none_do_nothing()
+    );
+    match_optional(
+        info->sd_host,
+        some(sd_host)
+        {
+            return MamaBootDisk__start_sd();
+        },
+        none_do_nothing()
+    );
+    return Error(MamaBootDisk, bstr("No boot block device available"), SERVICE_DEVICE_REGISTRATION_FAILED);
 }
 
 static Result(ServiceCode) Mama__start_services(void)
@@ -136,23 +194,12 @@ static Result(IOStatus) Mama__boot_mounts(ChannelPtr mounts)
             return Error(IOStatus, message, code);
         }
     );
-    BootVirtioMmioInfo virtio_mmio;
+    BootHardwareInfo hardware;
     match_result(
         BootHardwareInfo__load(),
         success(info)
         {
-            match_optional(
-                info.virtio_mmio,
-                some(value)
-                {
-                    virtio_mmio = value;
-                },
-                none()
-                {
-                    return Error(IOStatus, bstr("VirtIO MMIO information unavailable"),
-                                 SERVICE_DEVICE_REGISTRATION_FAILED);
-                }
-            );
+            hardware = info;
         },
         error(code, message)
         {
@@ -161,7 +208,7 @@ static Result(IOStatus) Mama__boot_mounts(ChannelPtr mounts)
     );
     MamaBootDisk disk;
     match_result(
-        MamaBootDisk__find(&virtio_mmio),
+        MamaBootDisk__from_hardware(&hardware),
         success(value)
         {
             disk = value;

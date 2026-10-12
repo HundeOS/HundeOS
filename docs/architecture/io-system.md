@@ -265,10 +265,10 @@ complete console buffers through kernel I/O syscalls.
 `hund-unterbrict`. It drains the FIFO and clears device status before sending
 the interrupt-protocol acknowledgement. When the input buffer fills, it retains
 the pending interrupt until reads make space. `uart_tx` handles FIFO backpressure
-and newline translation. The stream driver retains an empty read at its backend
-until input arrives, so the application request remains blocked without Channel
-request/reply churn. Blocked writes return `IO_WAIT_FOR_DATA`; empty reads remain
-pending at the final service without bouncing retries through routing services.
+by waiting for transmit readiness before each byte, including newline translation,
+and completes the accepted write before replying. The stream driver retains an
+empty read at its backend until input arrives, so the application request remains
+blocked without Channel request/reply churn or retries through routing services.
 
 The shell assigns its foreground child to the terminal through its authenticated
 input handle, then waits for that child explicitly. While a foreground process is

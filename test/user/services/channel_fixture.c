@@ -4,6 +4,7 @@
 #include <string.h>
 #include "unity.h"
 #include "sys/mem.h"
+#include "sys/syslog.h"
 
 #define HUNDEKANAL_WARTER_ENTRYPOINT warden_main_under_test
 #include "../../../user/services/hundekanal-warter/main.c"
@@ -47,6 +48,10 @@ static bool fixture_wait_interrupted;
 static char output[4096];
 static size_t output_length;
 static void ChannelFixture__pump(void);
+
+static void ChannelFixture__record_notification(QueueConnectionID connection)
+{
+}
 
 static void ChannelFixture__push(QueuePtr queue, ConstQueueMessagePtr message)
 {
@@ -179,9 +184,14 @@ Result(Queue) Queue__connect(QueueEndpointID endpoint)
         arrivals->epoch++;
         return Queue__attach(&transport->identity, &transport->client, &transport->server,
                              transport->identity.connection, client, &transport->server_doorbell,
-                             &Queue__ignore_data_available);
+                             &ChannelFixture__record_notification);
     }
     return Error(Queue, bstr("Full"), QUEUE_FULL);
+}
+
+SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
+{
+    return SYSLOG_OK;
 }
 
 Result(Queue) Queue__accept(QueueConnectionID id)
@@ -197,7 +207,7 @@ Result(Queue) Queue__accept(QueueConnectionID id)
     }
     transport->identity.accepted = 1;
     return Queue__attach(&transport->identity, &transport->client, &transport->server, id, current_pid,
-                         &transport->client_doorbell, &Queue__ignore_data_available);
+                         &transport->client_doorbell, &ChannelFixture__record_notification);
 }
 
 QueueCode QueueConnection__close(QueueConnectionID id)

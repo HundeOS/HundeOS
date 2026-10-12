@@ -22,23 +22,27 @@ int main(void)
     static PipeService pipes;
     static IOService service;
     pipes = PipeService__new();
-    if (!service_ok(service_become_service()))
+    ServiceCode become_status = service_become_service();
+    if (!service_ok(become_status))
     {
         return 1;
     }
-    if (IOService__listen_into(&service, &bstr(IO_PIPE_SERVICE), &pipes, PipeServer__execute, PipeServer__disconnect) !=
-        IO_OK)
+    IOStatus listen_status =
+        IOService__listen_into(&service, &bstr(IO_PIPE_SERVICE), &pipes, PipeServer__execute, PipeServer__disconnect);
+    if (listen_status != IO_OK)
     {
         return 1;
     }
-    if (!service_ok(service_publish_ready(&bstr(IO_PIPE_SERVICE))))
+    ServiceCode ready_status = service_publish_ready(&bstr(IO_PIPE_SERVICE));
+    if (!service_ok(ready_status))
     {
         return 1;
     }
     Channel__prepare_wait();
     while (true)
     {
-        if (!IOService__poll(&service))
+        bool progress = IOService__poll(&service);
+        if (!progress)
         {
             Channel__wait_event();
         }

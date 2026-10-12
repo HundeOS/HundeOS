@@ -257,7 +257,7 @@ static Result(ConstChannelSessionStatePtr) ChannelSessionState__open(ChannelSess
         success(request)
         {
             if (request.kind != CHANNEL_REQUEST_SUBMIT || request.arg2 != Queue__connection(&self->client) ||
-                request.arg1 >= CHANNEL_PAYLOAD_CAPACITY)
+                request.arg1 >= CHANNEL_PAYLOAD_CAPACITY || request.arg3 != 0)
             {
                 return ChannelSession__close_client_then(self, &CHANNEL_SESSION_CLOSING_SERVER);
             }

@@ -27,12 +27,13 @@ FiberScheduler FiberScheduler__new_with_max_fibers(size_t max_fibers)
         .current = None(FiberPtr),
         .live_count = 0,
         .max_fibers = max_fibers,
+        .default_stack_size = Fiber__default_stack_size(),
     };
 }
 
 Result(FiberPtr) FiberScheduler__spawn(FiberSchedulerPtr self, FiberEntry entry, Anything argument)
 {
-    return FiberScheduler__spawn_with_stack_size(self, entry, argument, FIBER_DEFAULT_STACK_SIZE);
+    return FiberScheduler__spawn_with_stack_size(self, entry, argument, self->default_stack_size);
 }
 
 Result(FiberPtr) FiberScheduler__spawn_with_stack_size(FiberSchedulerPtr self, FiberEntry entry, Anything argument,

@@ -1,0 +1,37 @@
+/dts-v1/;
+
+/ {
+    description = "HundeOS Milk-V Duo bring-up";
+    #address-cells = <2>;
+
+    images {
+        kernel {
+            description = "HundeOS RISC-V bring-up payload";
+            data = /incbin/("bringup.bin.lzma");
+            type = "kernel";
+            arch = "riscv";
+            os = "linux";
+            compression = "lzma";
+            load = <0x0 0x80200000>;
+            entry = <0x0 0x80200000>;
+        };
+
+        fdt {
+            description = "Milk-V Duo CV1800B";
+            data = /incbin/("milkv_duo.dtb");
+            type = "flat_dt";
+            arch = "riscv";
+            compression = "none";
+        };
+    };
+
+    configurations {
+        default = "config-cv1800b_milkv_duo_sd";
+
+        config-cv1800b_milkv_duo_sd {
+            description = "HundeOS on Milk-V Duo";
+            kernel = "kernel";
+            fdt = "fdt";
+        };
+    };
+};

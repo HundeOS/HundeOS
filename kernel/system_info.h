@@ -55,17 +55,24 @@ typedef struct UartInfo
 {
     Address physical_base;
     Address virtual_base;
+    uint64_t mmio_size;
     uint64_t irq;
     UartKind kind;
+    uint64_t register_shift;
+    uint64_t register_width;
 } UartInfo;
 
-static inline UartInfo UartInfo__new(Address physical_base, Address virtual_base, uint64_t irq, UartKind kind)
+static inline UartInfo UartInfo__new(Address physical_base, Address virtual_base, uint64_t mmio_size, uint64_t irq,
+                                     UartKind kind, uint64_t register_shift, uint64_t register_width)
 {
     return (UartInfo){
         .physical_base = physical_base,
         .virtual_base = virtual_base,
+        .mmio_size = mmio_size,
         .irq = irq,
         .kind = kind,
+        .register_shift = register_shift,
+        .register_width = register_width,
     };
 }
 
@@ -138,14 +145,19 @@ typedef struct SdHostInfo
     Address physical_base;
     uint64_t mmio_size;
     uint64_t irq;
+    SdHostKind kind;
+    uint64_t source_clock_hz;
 } SdHostInfo;
 
-static inline SdHostInfo SdHostInfo__new(Address physical_base, uint64_t mmio_size, uint64_t irq)
+static inline SdHostInfo SdHostInfo__new(Address physical_base, uint64_t mmio_size, uint64_t irq, SdHostKind kind,
+                                         uint64_t source_clock_hz)
 {
     return (SdHostInfo){
         .physical_base = physical_base,
         .mmio_size = mmio_size,
         .irq = irq,
+        .kind = kind,
+        .source_clock_hz = source_clock_hz,
     };
 }
 
@@ -270,13 +282,16 @@ typedef struct SystemInfo
     uint64_t timer_frequency;
     BootWaitMode wait_mode;
     size_t heap_coarse_block_size;
+    size_t default_user_stack_size;
+    bool io_latency_tracing_enabled;
     PhysicalMemoryInfo physical_memory;
     MemoryRegion kernel_image;
     MemoryRegion kernel_heap;
     MemoryRegion kernel_stack;
     MemoryRegion embedded_binaries;
     MemoryRegion mmio;
-    UartInfo uart;
+    UartInfo trace_uart;
+    UartInfo console_uart;
     Optional(BootVirtioMmioInfo) virtio_mmio;
     Optional(FramebufferInfo) framebuffer;
     Optional(PciInfo) pci;
@@ -308,10 +323,22 @@ static inline size_t SystemInfo__default_heap_coarse_block_size(void)
     return 4ULL * 1024ULL * 1024ULL;
 }
 
+static inline size_t SystemInfo__default_user_stack_size(void)
+{
+    return 10ULL * 1024ULL * 1024ULL;
+}
+
+static inline size_t SystemInfo__user_stack_size(SystemInfoPtr self)
+{
+    return self->default_user_stack_size == 0 ? SystemInfo__default_user_stack_size()
+                                              : self->default_user_stack_size;
+}
+
 static inline SystemInfo SystemInfo__new()
 {
     SystemInfo info = {};
     info.heap_coarse_block_size = SystemInfo__default_heap_coarse_block_size();
+    info.default_user_stack_size = SystemInfo__default_user_stack_size();
     info.rtc = None(BootRtcInfo);
     info.realtime_clock = None(RealtimeClockSample);
     return info;

@@ -5,11 +5,19 @@
 #include "unity.h"
 
 #include "../../../user/lib/async_io/async_io.h"
+#include "../../../user/lib/sys/boot_info.h"
 #include "../../../user/lib/sys/mem.h"
 
 static void * allocated_stack;
 static bool allocated_stack_present;
 static uint64_t freed_stack_count = 0;
+
+Result(BootHardwareInfo) BootHardwareInfo__load(void)
+{
+    BootHardwareInfo info = BootHardwareInfo__new();
+    info.default_user_stack_size = FIBER_DEFAULT_STACK_SIZE;
+    return Success(BootHardwareInfo, info);
+}
 
 void * mem_alloc_pages(size_t size)
 {

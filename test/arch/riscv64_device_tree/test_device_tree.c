@@ -4,9 +4,9 @@
 
 #include "unity.h"
 
-#include "../../../arch/riscv64/boot/qemu_virt/device_tree.h"
-#include "../../../arch/riscv64/boot/qemu_virt/platform.h"
-#include "../../../arch/riscv64/boot/qemu_virt/system_info.h"
+#include "../../../arch/riscv64/boot/common/device_tree.h"
+#include "../../../arch/riscv64/boot/common/platform.h"
+#include "../../../arch/riscv64/boot/common/system_info.h"
 
 #define FDT_MAGIC 0xd00dfeedU
 #define FDT_BEGIN_NODE 1U
@@ -243,6 +243,57 @@ static uintptr_t FdtFixture__qemu_virt(FdtFixturePtr self, bool include_plic, bo
     return FdtFixture__finish(self);
 }
 
+static uintptr_t FdtFixture__milkv_duo(FdtFixturePtr self, const char * sd_compatible)
+{
+    FdtFixture__begin_node(self, "");
+    FdtFixture__property_u32(self, "#address-cells", 2);
+    FdtFixture__property_u32(self, "#size-cells", 2);
+
+    FdtFixture__begin_node(self, "memory@80000000");
+    FdtFixture__property_string(self, "device_type", "memory");
+    FdtFixture__property_reg64(self, 0x80000000, 0x03f40000);
+    FdtFixture__end_node(self);
+
+    FdtFixture__begin_node(self, "cpus");
+    FdtFixture__property_u32(self, "#address-cells", 1);
+    FdtFixture__property_u32(self, "#size-cells", 0);
+    FdtFixture__property_u32(self, "timebase-frequency", 25000000);
+    FdtFixture__begin_node(self, "cpu@0");
+    FdtFixture__property_string(self, "device_type", "cpu");
+    FdtFixture__property_u32(self, "reg", 0);
+    FdtFixture__end_node(self);
+    FdtFixture__end_node(self);
+
+    FdtFixture__begin_node(self, "soc");
+    FdtFixture__property_u32(self, "#address-cells", 2);
+    FdtFixture__property_u32(self, "#size-cells", 2);
+
+    FdtFixture__begin_node(self, "plic@70000000");
+    FdtFixture__property_string(self, "compatible", "riscv,plic0");
+    FdtFixture__property_reg64(self, 0x70000000, 0x04000000);
+    FdtFixture__property_u32(self, "riscv,ndev", 101);
+    FdtFixture__end_node(self);
+
+    FdtFixture__begin_node(self, "serial@4140000");
+    FdtFixture__property_string(self, "compatible", "snps,dw-apb-uart");
+    FdtFixture__property_reg64(self, 0x04140000, 0x1000);
+    FdtFixture__property_u32(self, "reg-shift", 2);
+    FdtFixture__property_u32(self, "reg-io-width", 4);
+    FdtFixture__property_u32_pair(self, "interrupts", 44, 4);
+    FdtFixture__end_node(self);
+
+    FdtFixture__begin_node(self, "mmc@4310000");
+    FdtFixture__property_string(self, "compatible", sd_compatible);
+    FdtFixture__property_reg64(self, 0x04310000, 0x1000);
+    FdtFixture__property_u32(self, "src-frequency", 375000000);
+    FdtFixture__property_u32_pair(self, "interrupts", 36, 4);
+    FdtFixture__end_node(self);
+
+    FdtFixture__end_node(self);
+    FdtFixture__end_node(self);
+    return FdtFixture__finish(self);
+}
+
 void setUp(void)
 {
 }
@@ -263,6 +314,8 @@ void test_riscv_device_tree_discovers_qemu_virt_platform(void)
     TEST_ASSERT_EQUAL_UINT64(10000000, result.platform.timebase_frequency);
     TEST_ASSERT_EQUAL_UINT64(0x10000000, result.platform.uart_base);
     TEST_ASSERT_EQUAL_UINT64(10, result.platform.uart_irq);
+    TEST_ASSERT_EQUAL_UINT64(0, result.platform.uart_register_shift);
+    TEST_ASSERT_EQUAL_UINT64(1, result.platform.uart_register_width);
     TEST_ASSERT_EQUAL_HEX64(0x00101000, result.platform.rtc_base);
     TEST_ASSERT_EQUAL_UINT64(0x1000, result.platform.rtc_size);
     TEST_ASSERT_EQUAL_UINT64(11, result.platform.rtc_irq);
@@ -274,6 +327,81 @@ void test_riscv_device_tree_discovers_qemu_virt_platform(void)
     TEST_ASSERT_EQUAL_UINT64(1, result.platform.virtio_mmio_first_irq);
     TEST_ASSERT_EQUAL_UINT64(0x30000000, result.platform.pci_ecam_base);
     TEST_ASSERT_EQUAL_UINT64(255, result.platform.pci_bus_end);
+}
+
+void test_riscv_device_tree_discovers_milkv_duo_platform_without_qemu_devices(void)
+{
+    FdtFixture fixture = FdtFixture__new();
+    RiscVDeviceTreeResult result = RiscVDeviceTree__parse(FdtFixture__milkv_duo(&fixture, "cvitek,cv180x-sd"));
+
+    TEST_ASSERT_EQUAL(RISCV_DEVICE_TREE_OK, result.status);
+    TEST_ASSERT_EQUAL_HEX64(0x80000000, result.platform.memory_base);
+    TEST_ASSERT_EQUAL_HEX64(0x03f40000, result.platform.memory_size);
+    TEST_ASSERT_EQUAL_UINT64(1, result.platform.cpu_count);
+    TEST_ASSERT_EQUAL_UINT64(25000000, result.platform.timebase_frequency);
+    TEST_ASSERT_EQUAL_HEX64(0x04140000, result.platform.uart_base);
+    TEST_ASSERT_EQUAL_UINT64(44, result.platform.uart_irq);
+    TEST_ASSERT_EQUAL_UINT64(2, result.platform.uart_register_shift);
+    TEST_ASSERT_EQUAL_UINT64(4, result.platform.uart_register_width);
+    TEST_ASSERT_EQUAL_HEX64(0x70000000, result.platform.plic_base);
+    TEST_ASSERT_EQUAL_UINT64(101, result.platform.plic_source_count);
+    TEST_ASSERT_EQUAL_HEX64(0x04310000, result.platform.sd_host_base);
+    TEST_ASSERT_EQUAL_UINT64(0x1000, result.platform.sd_host_size);
+    TEST_ASSERT_EQUAL_UINT64(36, result.platform.sd_host_irq);
+    TEST_ASSERT_EQUAL(SD_HOST_KIND_CV180X, result.platform.sd_host_kind);
+    TEST_ASSERT_EQUAL_UINT64(375000000, result.platform.sd_host_source_clock_hz);
+    TEST_ASSERT_EQUAL_UINT64(0, result.platform.virtio_mmio_count);
+    TEST_ASSERT_EQUAL_UINT64(0, result.platform.pci_ecam_size);
+
+    RiscVKernelLayout layout = RiscVKernelLayout__new(MemoryRegion__new(0x80200000, 0x80200000, 0x80400000),
+                                                      MemoryRegion__new(0x80400000, 0x80400000, 0x80600000),
+                                                      MemoryRegion__new(0x80600000, 0x80600000, 0x83e00000),
+                                                      MemoryRegion__new(0x83e00000, 0x83e00000, 0x83f00000));
+    SystemInfo info = RiscVPlatformInfo__system_info(&result.platform, &layout, 0);
+    TEST_ASSERT_EQUAL_HEX64(0x04140000, info.trace_uart.physical_base);
+    TEST_ASSERT_EQUAL_UINT64(2, info.trace_uart.register_shift);
+    TEST_ASSERT_EQUAL_UINT64(4, info.trace_uart.register_width);
+    TEST_ASSERT_EQUAL_HEX64(info.trace_uart.physical_base, info.console_uart.physical_base);
+    match_optional(info.virtio_mmio, some_test_fail(), none_do_nothing());
+    match_optional(info.pci, some_test_fail(), none_do_nothing());
+    match_optional(
+        info.sd_host,
+        some(sd_host)
+        {
+            TEST_ASSERT_EQUAL_HEX64(0x04310000, sd_host.physical_base);
+            TEST_ASSERT_EQUAL_UINT64(0x1000, sd_host.mmio_size);
+            TEST_ASSERT_EQUAL_UINT64(36, sd_host.irq);
+            TEST_ASSERT_EQUAL(SD_HOST_KIND_CV180X, sd_host.kind);
+            TEST_ASSERT_EQUAL_UINT64(375000000, sd_host.source_clock_hz);
+        },
+        none_test_fail()
+    );
+}
+
+void test_riscv_device_tree_discovers_milkv_duo_s_sd_host(void)
+{
+    FdtFixture fixture = FdtFixture__new();
+    RiscVDeviceTreeResult result =
+        RiscVDeviceTree__parse(FdtFixture__milkv_duo(&fixture, "cvitek,cv181x-sd"));
+
+    TEST_ASSERT_EQUAL(RISCV_DEVICE_TREE_OK, result.status);
+    TEST_ASSERT_EQUAL_HEX64(0x04310000, result.platform.sd_host_base);
+    TEST_ASSERT_EQUAL_UINT64(0x1000, result.platform.sd_host_size);
+    TEST_ASSERT_EQUAL_UINT64(36, result.platform.sd_host_irq);
+    TEST_ASSERT_EQUAL(SD_HOST_KIND_CV181X, result.platform.sd_host_kind);
+    TEST_ASSERT_EQUAL_UINT64(375000000, result.platform.sd_host_source_clock_hz);
+}
+
+void test_riscv_device_tree_discovers_generic_sd_host(void)
+{
+    FdtFixture fixture = FdtFixture__new();
+    RiscVDeviceTreeResult result = RiscVDeviceTree__parse(FdtFixture__milkv_duo(&fixture, "generic-sdhci"));
+
+    TEST_ASSERT_EQUAL(RISCV_DEVICE_TREE_OK, result.status);
+    TEST_ASSERT_EQUAL_HEX64(0x04310000, result.platform.sd_host_base);
+    TEST_ASSERT_EQUAL_UINT64(0x1000, result.platform.sd_host_size);
+    TEST_ASSERT_EQUAL_UINT64(36, result.platform.sd_host_irq);
+    TEST_ASSERT_EQUAL(SD_HOST_KIND_GENERIC, result.platform.sd_host_kind);
 }
 
 void test_riscv_device_tree_rejects_invalid_and_truncated_headers(void)
@@ -332,8 +460,11 @@ void test_riscv_platform_populates_controller_neutral_system_info(void)
         },
         none_test_fail()
     );
-    TEST_ASSERT_EQUAL_HEX64(0x10000000, info.uart.physical_base);
-    TEST_ASSERT_EQUAL_HEX64(RISCV_HIGHER_HALF_OFFSET + 0x10000000, info.uart.virtual_base);
+    TEST_ASSERT_EQUAL_HEX64(0x10000000, info.trace_uart.physical_base);
+    TEST_ASSERT_EQUAL_HEX64(RISCV_HIGHER_HALF_OFFSET + 0x10000000, info.trace_uart.virtual_base);
+    TEST_ASSERT_EQUAL_UINT64(0, info.trace_uart.register_shift);
+    TEST_ASSERT_EQUAL_UINT64(1, info.trace_uart.register_width);
+    TEST_ASSERT_EQUAL_HEX64(info.trace_uart.physical_base, info.console_uart.physical_base);
     match_optional(
         info.rtc,
         some(rtc)

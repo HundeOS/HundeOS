@@ -95,51 +95,46 @@ void test_wait_publication_is_absent_until_committed_and_invalidated_before_upda
         some_test_fail(),
         none_do_nothing()
     );
-    QueueWaitSnapshot observed = {.kind = QUEUE_WAIT_CONNECTION, .handle = 12, .produced = 3};
     QueueWaitControl__begin(&control);
-    match_result(QueueWaitControl__add(&control, &observed),
-        success_do_nothing(),
-        error_test_fail()
-    );
     match_optional(QueueWaitControl__publication(&control),
         some_test_fail(),
         none_do_nothing()
     );
-    QueueWaitControl__commit(&control, 4321, 1234, QueueWaitControl__wake_generation(&control));
+    QueueWaitControl__commit(&control, 4321, 1234, 17);
     match_optional(
         QueueWaitControl__publication(&control),
         some(publication)
         {
-            TEST_ASSERT_EQUAL_UINT64(1, publication.count);
             TEST_ASSERT_EQUAL_UINT64(4321, publication.started_at_usec);
             TEST_ASSERT_EQUAL_UINT64(1234, publication.deadline);
-            TEST_ASSERT_EQUAL_UINT64(0, publication.observed_wake_generation);
+            TEST_ASSERT_EQUAL_UINT64(17, publication.observed_doorbell_generation);
             TEST_ASSERT_TRUE(QueueWaitControl__unchanged(&control, &publication));
             QueueWaitControl__clear(&control);
             TEST_ASSERT_FALSE(QueueWaitControl__unchanged(&control, &publication));
-            QueueWaitControl__commit(&control, 8765, 5678, QueueWaitControl__wake_generation(&control));
+            QueueWaitControl__commit(&control, 8765, 5678, 18);
             TEST_ASSERT_FALSE(QueueWaitControl__unchanged(&control, &publication));
         },
         none_test_fail()
     );
 }
 
-void test_empty_wait_never_suppresses_scheduling(void)
+void test_zero_doorbell_generation_is_a_valid_publication(void)
 {
     QueueWaitControl__begin(&control);
-    QueueWaitControl__commit(&control, 4321, 1234, QueueWaitControl__wake_generation(&control));
+    QueueWaitControl__commit(&control, 4321, 1234, 0);
     match_optional(QueueWaitControl__publication(&control),
-        some_test_fail(),
-        none_do_nothing()
+        some(publication)
+        {
+            TEST_ASSERT_EQUAL_UINT64(0, publication.observed_doorbell_generation);
+        },
+        none_test_fail()
     );
 }
 
 void test_completed_wait_time_accumulates_without_leaving_a_live_publication(void)
 {
-    QueueWaitSnapshot observed = {.kind = QUEUE_WAIT_CONNECTION, .handle = 12};
     QueueWaitControl__begin(&control);
-    unwrap_result(QueueWaitControl__add(&control, &observed), ATOMIC_RECORD_INVALID);
-    QueueWaitControl__commit(&control, 1000, QUEUE_WAIT_NO_DEADLINE, QueueWaitControl__wake_generation(&control));
+    QueueWaitControl__commit(&control, 1000, QUEUE_WAIT_NO_DEADLINE, 9);
 
     QueueWaitControl__complete_wait(&control, 4500);
 
@@ -150,8 +145,7 @@ void test_completed_wait_time_accumulates_without_leaving_a_live_publication(voi
     );
 
     QueueWaitControl__begin(&control);
-    unwrap_result(QueueWaitControl__add(&control, &observed), ATOMIC_RECORD_INVALID);
-    QueueWaitControl__commit(&control, 5000, QUEUE_WAIT_NO_DEADLINE, QueueWaitControl__wake_generation(&control));
+    QueueWaitControl__commit(&control, 5000, QUEUE_WAIT_NO_DEADLINE, 10);
     match_optional(
         QueueWaitControl__publication(&control),
         some(publication)
@@ -162,22 +156,16 @@ void test_completed_wait_time_accumulates_without_leaving_a_live_publication(voi
     );
 }
 
-void test_kernel_wake_generation_does_not_invalidate_publication(void)
+void test_publication_retains_the_observed_doorbell_generation(void)
 {
-    QueueWaitSnapshot observed = {.kind = QUEUE_WAIT_CONNECTION, .handle = 12};
     QueueWaitControl__begin(&control);
-    unwrap_result(QueueWaitControl__add(&control, &observed), ATOMIC_RECORD_INVALID);
-    QueueWaitWakeGeneration before = QueueWaitControl__wake_generation(&control);
-    QueueWaitControl__commit(&control, 4321, QUEUE_WAIT_NO_DEADLINE, before);
+    QueueWaitControl__commit(&control, 4321, QUEUE_WAIT_NO_DEADLINE, 23);
 
-    QueueWaitControl__wake(&control);
-
-    TEST_ASSERT_TRUE(QueueWaitControl__woken(&control, before));
     match_optional(
         QueueWaitControl__publication(&control),
         some(publication)
         {
-            TEST_ASSERT_EQUAL_UINT64(before, publication.observed_wake_generation);
+            TEST_ASSERT_EQUAL_UINT64(23, publication.observed_doorbell_generation);
             TEST_ASSERT_TRUE(QueueWaitControl__unchanged(&control, &publication));
         },
         none_test_fail()

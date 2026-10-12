@@ -24,6 +24,7 @@ struct ExecLoad
     bool overlay;
     Optional(UserID) user;
     SpawnStdio stdio;
+    Optional(KernelAddress) abort_report;
     bool wait;
     bool pending;
     bool route_final;
@@ -40,7 +41,8 @@ struct ExecLoad
 
 Result(ProcessPtr) ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,
                                    OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
-                                   ConstSpawnStdioPtr stdio, bool overlay, KernelAddress overlay_payload);
+                                   ConstSpawnStdioPtr stdio, OptionalPtr(KernelAddress) abort_report, bool overlay,
+                                   KernelAddress overlay_payload);
 Result(ProcessPtr) ExecLoad__continue(ProcessPtr process);
 bool ExecLoad__ready(ProcessPtr process);
 void ExecLoad__cancel(ProcessPtr process);

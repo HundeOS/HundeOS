@@ -11,7 +11,7 @@
 
 void Arch__init_bootstrap_system(SystemInfoPtr system_info)
 {
-    uart_use_info(&system_info->uart);
+    uart_use_info(&system_info->trace_uart);
 }
 
 Result(SubsystemInitStatus) Arch__init(KernelPtr kernel)

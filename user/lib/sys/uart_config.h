@@ -19,15 +19,36 @@ typedef struct UartDriverConfig
     uint64_t mmio_size;
     uint64_t irq;
     UartKind kind;
+    uint64_t register_shift;
+    uint64_t register_width;
 } UartDriverConfig;
 
 typedef UartDriverConfig * UartDriverConfigPtr;
+
+typedef struct UartDriverConfigFields
+{
+    bool physical_base;
+    bool mmio_size;
+    bool irq;
+    bool kind;
+    bool register_shift;
+    bool register_width;
+} UartDriverConfigFields;
+
+typedef UartDriverConfigFields * UartDriverConfigFieldsPtr;
+
+static UartDriverConfigFields UartDriverConfigFields__new(void)
+{
+    return (UartDriverConfigFields){0};
+}
 
 static const BString uart_config_delimiter = bstr("=");
 static const BString uart_config_physical_base_key = bstr("uart.physical_base");
 static const BString uart_config_mmio_size_key = bstr("uart.mmio_size");
 static const BString uart_config_irq_key = bstr("uart.irq");
 static const BString uart_config_kind_key = bstr("uart.kind");
+static const BString uart_config_register_shift_key = bstr("uart.register_shift");
+static const BString uart_config_register_width_key = bstr("uart.register_width");
 
 static bool UartDriverConfig__read_line_value(ConstBStringPtr line, ConstBStringPtr key, uint64_t * value)
 {
@@ -63,39 +84,45 @@ static bool UartDriverConfig__read_line_value(ConstBStringPtr line, ConstBString
 }
 
 static void UartDriverConfig__read_config_line(ConstBStringPtr line, UartDriverConfigPtr self,
-                                               bool * found_physical_base, bool * found_mmio_size, bool * found_irq,
-                                               bool * found_kind)
+                                               UartDriverConfigFieldsPtr fields)
 {
-    if (!*found_physical_base &&
+    if (!fields->physical_base &&
         UartDriverConfig__read_line_value(line, &uart_config_physical_base_key, &self->physical_base))
     {
-        *found_physical_base = true;
+        fields->physical_base = true;
     }
-    if (!*found_mmio_size && UartDriverConfig__read_line_value(line, &uart_config_mmio_size_key, &self->mmio_size))
+    if (!fields->mmio_size && UartDriverConfig__read_line_value(line, &uart_config_mmio_size_key, &self->mmio_size))
     {
-        *found_mmio_size = true;
+        fields->mmio_size = true;
     }
-    if (!*found_irq && UartDriverConfig__read_line_value(line, &uart_config_irq_key, &self->irq))
+    if (!fields->irq && UartDriverConfig__read_line_value(line, &uart_config_irq_key, &self->irq))
     {
-        *found_irq = true;
+        fields->irq = true;
     }
-    if (!*found_kind)
+    if (!fields->kind)
     {
         uint64_t kind;
         if (UartDriverConfig__read_line_value(line, &uart_config_kind_key, &kind))
         {
             self->kind = (UartKind)kind;
-            *found_kind = true;
+            fields->kind = true;
         }
+    }
+    if (!fields->register_shift &&
+        UartDriverConfig__read_line_value(line, &uart_config_register_shift_key, &self->register_shift))
+    {
+        fields->register_shift = true;
+    }
+    if (!fields->register_width &&
+        UartDriverConfig__read_line_value(line, &uart_config_register_width_key, &self->register_width))
+    {
+        fields->register_width = true;
     }
 }
 
 static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverConfigPtr self)
 {
-    bool found_physical_base = false;
-    bool found_mmio_size = false;
-    bool found_irq = false;
-    bool found_kind = false;
+    UartDriverConfigFields fields = UartDriverConfigFields__new();
 
     match_optional(
         DynString__lines(sysinfo),
@@ -110,8 +137,7 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
                         DynString__bstring(&line),
                         some(bstring_line)
                         {
-                            UartDriverConfig__read_config_line(&bstring_line, self, &found_physical_base,
-                                                               &found_mmio_size, &found_irq, &found_kind);
+                            UartDriverConfig__read_config_line(&bstring_line, self, &fields);
                         },
                         none_do_nothing()
                     );
@@ -122,7 +148,9 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
         none_do_nothing()
     );
 
-    return found_physical_base && found_mmio_size && found_irq && found_kind && self->kind != UART_KIND_UNKNOWN;
+    return fields.physical_base && fields.mmio_size && fields.irq && fields.kind && fields.register_shift &&
+           fields.register_width && self->kind != UART_KIND_UNKNOWN &&
+           (self->register_width == 1 || self->register_width == 4);
 }
 
 static bool UartDriverConfig__load(UartDriverConfigPtr self)

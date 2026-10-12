@@ -50,7 +50,8 @@ static void RiscVPlic__set_enabled(ConstPlicInterruptControllerInfoPtr plic, uin
 void Arch__init_bootstrap_system(SystemInfoPtr system_info)
 {
     RiscVCPU__configure_timebase(system_info->timer_frequency);
-    RiscVBasicIO__configure(&system_info->uart);
+    RiscVBasicIO__configure_console(&system_info->console_uart);
+    RiscVBasicIO__configure_trace(&system_info->trace_uart);
     Exception__install();
 }
 

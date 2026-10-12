@@ -7,12 +7,14 @@
 static uint64_t calls;
 static uint64_t expected_ticks;
 static SystemCallResult completion;
+static QueueWaitControl control;
 
 void setUp(void)
 {
     calls = 0;
     expected_ticks = QUEUE_WAIT_DEFAULT_TICKS;
     completion = QUEUE_WAIT_TIMEOUT;
+    control = (QueueWaitControl){0};
 }
 
 void tearDown(void)
@@ -23,10 +25,14 @@ SystemCallResult syscall(SystemCall number, Anything operation, Anything address
                          Anything unused)
 {
     TEST_ASSERT_EQUAL(SERVICE_CALL, number);
+    if (operation == SERVICE_QUEUE_WAIT_CONTROL)
+    {
+        return (SystemCallResult)&control;
+    }
     TEST_ASSERT_EQUAL(SERVICE_QUEUE_WAIT, operation);
-    TEST_ASSERT_EQUAL_UINT64(0, address);
-    TEST_ASSERT_EQUAL_UINT64(0, count);
-    TEST_ASSERT_EQUAL_UINT64(expected_ticks, ticks);
+    TEST_ASSERT_EQUAL_UINT64(expected_ticks, count);
+    TEST_ASSERT_EQUAL_UINT64(0, ticks);
+    TEST_ASSERT_EQUAL_UINT64(0, unused);
     calls++;
     return completion;
 }

@@ -39,13 +39,13 @@ running at the sample; `READY` and `INTERRUPTED` are runnable scheduler states;
 `WAITING` and `SLEEPING` identify parked processes, with the specific park reason
 reported separately. Context-switch and stopped states are preserved.
 
-An armed userspace queue wait does not change the scheduler state because `WFE`
-does not enter the kernel. Instead, the wait column reports `USER_WAIT` with its
-monotonic elapsed duration when the process's authenticated shared publication
-is stable and its queue observations remain unchanged. Userspace stamps the
-publication from `CNTVCT_EL0`; the kernel validates queue readiness and computes
-the duration in the same counter domain. The timestamp is an untrusted diagnostic
-hint and never affects scheduling or CPU accounting.
+The shared userspace queue-wait publication does not itself change scheduler
+state. The wait column reports `USER_WAIT` with its monotonic elapsed duration
+when that publication is stable, its observed process doorbell is unchanged, and
+the kernel finds no live queue or notification work. Userspace stamps the
+publication from the architecture monotonic clock; the kernel computes the
+duration in the same counter domain. The publication and timestamp are untrusted
+diagnostic hints and never decide whether a kernel queue wait may park.
 
 `USER SLEEP(s)` is cumulative time spent inside successfully armed userspace
 queue waits. It includes completed intervals and, while `USER_WAIT` is current,

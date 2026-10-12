@@ -18,14 +18,6 @@ Result(QueueArrivalsPtr) Queue__listen(ConstBStringPtr name)
         return Error(QueueArrivalsPtr, bstr("Queue listen failed"), value);
     }
     QueueArrivalsPtr arrivals = (QueueArrivalsPtr)value;
-    match_result(
-        QueueWait__remember_arrivals(arrivals),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(QueueArrivalsPtr, message, code);
-        }
-    );
     return Success(QueueArrivalsPtr, arrivals);
 }
 
@@ -38,18 +30,7 @@ static Result(Queue) queue_attach(QueueConnectionID connection)
                       (IpcDoorbellPtr)QueueLayout__peer_doorbell_address(connection), &Queue__notify_data_available),
         success(queue)
         {
-            match_result(
-                QueueWait__remember_queue(&queue),
-                success(code)
-                {
-                    return Success(Queue, queue);
-                },
-                error(code, message)
-                {
-                    QueueConnection__close(connection);
-                    return Error(Queue, message, code);
-                }
-            );
+            return Success(Queue, queue);
         },
         error(code, message)
         {
@@ -81,16 +62,5 @@ Result(Queue) Queue__accept(QueueConnectionID connection)
 
 QueueCode QueueConnection__close(QueueConnectionID connection)
 {
-    QueueCode result = (QueueCode)syscall(SERVICE_CALL, SERVICE_QUEUE_CLOSE, connection, 0, 0, 0);
-    if (result == QUEUE_OK)
-    {
-        match_result(QueueWait__forget(connection),
-            success_do_nothing(),
-            error(code, message)
-            {
-                return code;
-            }
-        );
-    }
-    return result;
+    return (QueueCode)syscall(SERVICE_CALL, SERVICE_QUEUE_CLOSE, connection, 0, 0, 0);
 }

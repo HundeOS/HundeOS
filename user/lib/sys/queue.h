@@ -10,8 +10,8 @@ Result(Queue) Queue__connect(QueueEndpointID endpoint);
 Result(Queue) Queue__accept(QueueConnectionID connection);
 QueueCode QueueConnection__close(QueueConnectionID connection);
 
-// Event waits publish shared scheduler observations then use WFE. Registration
-// allocates once; individual waits never invoke a parking syscall.
+// Event waits publish the observed process doorbell generation before parking.
+// The kernel checks live queue and notification state before committing the wait.
 // Events are hints: unrelated or spurious wakes remain inside the wait.
 // Readable/writable waits retain their synchronous contract and return only
 // when authoritative state is ready, closed, corrupt, or kernel-notified.

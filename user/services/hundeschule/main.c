@@ -8,6 +8,7 @@
 #include "sys/process.h"
 #include "sys/service.h"
 #include "sys/spawn.h"
+#include "sys/system_info.h"
 #include "trace/client.h"
 #include "types/fixed_array.h"
 #include "../../user.h"
@@ -156,9 +157,6 @@ static int Hundeschule__spawn_required_process(HundeschuleRequiredProcessesPtr p
         return 1;
     }
 
-    DRIVER_DEBUG("hundeschule: started path=%B pid=%i respawn=%i arg0=%B arg1=%B\n", path, (int)result, (int)respawn,
-                 arg0, arg1);
-
     HundeschuleRequiredProcess process = HundeschuleRequiredProcess__new((uint64_t)result, respawn, path, arg0, arg1);
     match_result(
         HundeschuleRequiredProcesses__push(processes, process),
@@ -260,23 +258,12 @@ static int Hundeschule__spawn_default_drivers(HundeschuleRequiredProcessesPtr pr
 
 static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesPtr processes, bool framebuffer_present)
 {
-    BootVirtioMmioInfo virtio_mmio;
+    BootHardwareInfo hardware;
     match_result(
         BootHardwareInfo__load(),
         success(info)
         {
-            match_optional(
-                info.virtio_mmio,
-                some(value)
-                {
-                    virtio_mmio = value;
-                },
-                none()
-                {
-                    IO__printf(&bstr("hundeschule: virtio mmio unavailable\n"));
-                    return 1;
-                }
-            );
+            hardware = info;
         },
         error(code, message)
         {
@@ -284,72 +271,80 @@ static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesP
             return 1;
         }
     );
-    ServiceMappedMemoryPtr mapping;
-    if (!service_ok(
-            service_map_mmio(virtio_mmio.physical_base, virtio_mmio.slot_size * virtio_mmio.slot_count, &mapping)))
-    {
-        IO__printf(&bstr("hundeschule: failed to probe virtio mmio\n"));
-        return 1;
-    }
 
     HundeschuleVirtioBlockDriverSelections selections = HundeschuleVirtioBlockDriverSelections__new();
-    Optional(DynString) config = None(DynString);
-    bool configured_services_started = false;
+    Optional(DynString) config = Hundeschule__load_config();
+    bool configured_services_started = is_something(config);
     int failures = 0;
-    uint64_t virtio_ordinal = 1;
-    for (uint64_t next_slot = virtio_mmio.slot_count; next_slot > 0; next_slot--)
-    {
-        uint64_t slot = next_slot - 1;
-        void * mmio = driver_ptr_offset(mapping, slot * virtio_mmio.slot_size);
-        uint32_t magic = Hundeschule__read32(mmio, VIRTIO_MMIO_MAGIC);
-        uint32_t version = Hundeschule__read32(mmio, VIRTIO_MMIO_VERSION);
-        uint32_t device_id = Hundeschule__read32(mmio, VIRTIO_MMIO_DEVICE_ID);
-
-        if (magic == VIRTIO_MMIO_MAGIC_VALUE && version >= 1 && device_id == VIRTIO_DEVICE_ID_BLOCK)
+    match_optional(
+        config,
+        some(loaded_config)
         {
-            BString slot_arg = Hundeschule__u64_bstring(slot);
-            BString path_arg = Hundeschule__virtio_path(virtio_ordinal);
-            ConstBStringPtr driver_path = Hundeschule__virtio_block_driver(&selections, &path_arg);
-            bool already_started = false;
-            match_optional(
-                ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &path_arg),
-                some(pid)
+            failures += Hundeschule__parse_virtio_block_driver_selections(&selections, &loaded_config);
+        },
+        none_do_nothing()
+    );
+
+    match_optional(
+        hardware.virtio_mmio,
+        some(virtio_mmio)
+        {
+            ServiceMappedMemoryPtr mapping;
+            if (!service_ok(service_map_mmio(virtio_mmio.physical_base,
+                                             virtio_mmio.slot_size * virtio_mmio.slot_count, &mapping)))
+            {
+                failures++;
+            }
+            else
+            {
+                uint64_t virtio_ordinal = 1;
+                for (uint64_t next_slot = virtio_mmio.slot_count; next_slot > 0; next_slot--)
                 {
-                    already_started = true;
-                },
-                none_do_nothing()
-            );
-            if (!already_started)
-            {
-                failures += Hundeschule__spawn_required_process(processes, driver_path, &slot_arg, &path_arg, true);
-            }
-            if (failures == 0)
-            {
-                failures += Hundeschule__wait_for_block_device(&path_arg);
-            }
-            virtio_ordinal++;
-
-            if (failures == 0 && !configured_services_started)
-            {
-                match_optional(
-                    Hundeschule__load_config(),
-                    some(loaded_config)
+                    uint64_t slot = next_slot - 1;
+                    void * mmio = driver_ptr_offset(mapping, slot * virtio_mmio.slot_size);
+                    uint32_t magic = Hundeschule__read32(mmio, VIRTIO_MMIO_MAGIC);
+                    uint32_t version = Hundeschule__read32(mmio, VIRTIO_MMIO_VERSION);
+                    uint32_t device_id = Hundeschule__read32(mmio, VIRTIO_MMIO_DEVICE_ID);
+                    if (magic != VIRTIO_MMIO_MAGIC_VALUE || version < 1 || device_id != VIRTIO_DEVICE_ID_BLOCK)
                     {
-                        config = Some(DynString, loaded_config);
-                        configured_services_started = true;
-                        failures += Hundeschule__parse_virtio_block_driver_selections(&selections, &loaded_config);
-                        failures +=
-                            Hundeschule__spawn_configured_drivers(processes, &loaded_config, framebuffer_present);
-                    },
-                    none_do_nothing()
-                );
-            }
+                        continue;
+                    }
 
-            if (failures != 0)
-            {
-                break;
+                    BString slot_arg = Hundeschule__u64_bstring(slot);
+                    BString path_arg = Hundeschule__virtio_path(virtio_ordinal);
+                    ConstBStringPtr driver_path = Hundeschule__virtio_block_driver(&selections, &path_arg);
+                    bool already_started =
+                        is_something(ServiceDirectory__find_service_pid(ServiceDirectory__shared(), &path_arg));
+                    if (!already_started)
+                    {
+                        failures +=
+                            Hundeschule__spawn_required_process(processes, driver_path, &slot_arg, &path_arg, true);
+                    }
+                    if (failures == 0)
+                    {
+                        failures += Hundeschule__wait_for_block_device(&path_arg);
+                    }
+                    virtio_ordinal++;
+                    if (failures != 0)
+                    {
+                        break;
+                    }
+                }
             }
-        }
+        },
+        none_do_nothing()
+    );
+
+    if (failures == 0 && configured_services_started)
+    {
+        match_optional(
+            config,
+            some(loaded_config)
+            {
+                failures += Hundeschule__spawn_configured_drivers(processes, &loaded_config, framebuffer_present);
+            },
+            none_do_nothing()
+        );
     }
 
     if (failures == 0 && !configured_services_started)
@@ -759,9 +754,23 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
         return 1;
     }
 
-    if (Hundeschule__spawn_required_process(processes, &hundeschule_trace_path, &hundeschule_empty, &hundeschule_empty,
-                                            true) != 0 ||
-        !service_ok(service_wait_ready(&bstr(HUND_VERFOLGEN_SERVICE))))
+    bool io_latency_tracing_enabled = false;
+    match_result(
+        SystemSettings__load(),
+        success(settings)
+        {
+            io_latency_tracing_enabled = settings.io_latency_tracing_enabled;
+        },
+        error(code, message)
+        {
+            DRIVER_DEBUG("hundeschule: system settings unavailable: %B (%i)\n", &message, (int)code);
+        }
+    );
+
+    if (io_latency_tracing_enabled &&
+        (Hundeschule__spawn_required_process(processes, &hundeschule_trace_path, &hundeschule_empty,
+                                             &hundeschule_empty, true) != 0 ||
+         !service_ok(service_wait_ready(&bstr(HUND_VERFOLGEN_SERVICE)))))
     {
         return 1;
     }
@@ -775,10 +784,18 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
 
     failures += Hundeschule__spawn_virtio_block_drivers(processes, framebuffer_present);
 
-    if (!framebuffer_present &&
-        (!service_ok(service_wait_ready(&bstr("uart_rx"))) || !service_ok(service_wait_ready(&bstr("uart_tx")))))
+    if (!framebuffer_present)
     {
-        return 1;
+        ServiceCode uart_rx_status = service_wait_ready(&bstr("uart_rx"));
+        if (!service_ok(uart_rx_status))
+        {
+            return 1;
+        }
+        ServiceCode uart_tx_status = service_wait_ready(&bstr("uart_tx"));
+        if (!service_ok(uart_tx_status))
+        {
+            return 1;
+        }
     }
 
     if (failures != 0)
@@ -796,18 +813,16 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
         }
     );
 
-    if (DriverTrace__storage_ready() != TRACE_OK)
-    {
-        IO__printf(&bstr("hundeschule: could not enable driver trace file\n"));
-    }
-
     if (Hundeschule__spawn_required_process(processes, &hundeschule_pipe_path, &hundeschule_empty, &hundeschule_empty,
-                                            false) != 0 ||
-        !service_ok(service_wait_ready(&bstr(IO_PIPE_SERVICE))))
+                                            false) != 0)
     {
         return 1;
     }
-
+    ServiceCode pipe_status = service_wait_ready(&bstr(IO_PIPE_SERVICE));
+    if (!service_ok(pipe_status))
+    {
+        return 1;
+    }
     failures += Hundeschule__spawn_required_process(processes, &hundeschule_hundeschau_path, &hundeschule_empty,
                                                     &hundeschule_empty, false);
 

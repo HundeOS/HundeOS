@@ -57,6 +57,8 @@ __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = { // hundelint: i
                                  .physical_base = PI4_EMMC2_PHYS_BASE,
                                  .mmio_size = PI4_EMMC2_MMIO_SIZE,
                                  .irq = PI4_EMMC2_IRQ_ID,
+                                 .kind = SD_HOST_KIND_GENERIC,
+                                 .source_clock_hz = 0,
                              })),
     .interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V2,
     .gic_distributor_physical_base = PI4_GICD_PHYS_BASE,
@@ -159,10 +161,10 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     pi_uefi_system_info.mmio.physical_end =
         pi_uefi_platform_info.uart_physical_base + ((uint64_t)&__mmio_end[0] - (uint64_t)&__mmio_start[0]);
 
-    pi_uefi_system_info.uart.physical_base = pi_uefi_platform_info.uart_physical_base;
-    pi_uefi_system_info.uart.virtual_base = pi_uefi_platform_info.uart_virtual_base;
-    pi_uefi_system_info.uart.irq = pi_uefi_platform_info.uart_irq;
-    pi_uefi_system_info.uart.kind = UART_KIND_PL011;
+    pi_uefi_system_info.trace_uart =
+        UartInfo__new(pi_uefi_platform_info.uart_physical_base, pi_uefi_platform_info.uart_virtual_base, 0x1000,
+                      pi_uefi_platform_info.uart_irq, UART_KIND_PL011, 0, 4);
+    pi_uefi_system_info.console_uart = pi_uefi_system_info.trace_uart;
     pi_uefi_system_info.rtc = None(BootRtcInfo);
     pi_uefi_system_info.realtime_clock = pi_uefi_realtime_clock;
     pi_uefi_system_info.virtio_mmio = None(BootVirtioMmioInfo);

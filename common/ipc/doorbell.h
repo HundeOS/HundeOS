@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "../types/address.h"
+#include "../types/optional.h"
 
 #define IPC_DOORBELL_ADDRESS ((Address)0x722ff000ULL)
 #define IPC_DOORBELL_PAGE_SIZE 4096ULL
@@ -13,6 +14,7 @@ typedef uint64_t IpcEvent;
 typedef IpcEvent * IpcEventPtr;
 typedef const IpcEvent * ConstIpcEventPtr;
 typedef uint64_t IpcEventGeneration;
+OptionalDef(IpcEventGeneration);
 
 typedef struct IpcDoorbell
 {

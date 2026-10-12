@@ -1,5 +1,5 @@
-#include "platform.h"
 #include "system_info.h"
+#include "platform.h"
 
 #define RISCV_PAGE_SIZE 4096ULL
 
@@ -128,19 +128,31 @@ SystemInfo RiscVPlatformInfo__system_info(ConstRiscVPlatformInfoPtr self, ConstR
     info.kernel_stack = layout->stack;
     Address uart_virtual_base = RISCV_HIGHER_HALF_OFFSET + self->uart_base;
     info.mmio = MemoryRegion__new(uart_virtual_base, self->uart_base, self->uart_base + self->uart_size);
-    info.uart = UartInfo__new(self->uart_base, uart_virtual_base, self->uart_irq, UART_KIND_NS16550);
+    info.trace_uart = UartInfo__new(self->uart_base, uart_virtual_base, self->uart_size, self->uart_irq,
+                                    UART_KIND_NS16550, self->uart_register_shift, self->uart_register_width);
+    info.console_uart = info.trace_uart;
     if (self->rtc_size != 0)
     {
         BootDeviceInfo device = BootDeviceInfo__new(self->rtc_base, self->rtc_size, self->rtc_irq);
         info.rtc = Some(BootRtcInfo, BootRtcInfo__new(&device, RTC_KIND_GOLDFISH));
     }
-    BootVirtioMmioInfo virtio_mmio = BootVirtioMmioInfo__new(self->virtio_mmio_base, self->virtio_mmio_size,
-                                                             self->virtio_mmio_count, self->virtio_mmio_first_irq);
-    info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
+    if (self->virtio_mmio_count != 0)
+    {
+        BootVirtioMmioInfo virtio_mmio = BootVirtioMmioInfo__new(
+            self->virtio_mmio_base, self->virtio_mmio_size, self->virtio_mmio_count, self->virtio_mmio_first_irq);
+        info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
+    }
     info.framebuffer = None(FramebufferInfo);
-    info.pci =
-        Some(PciInfo, PciInfo__new(self->pci_ecam_base, self->pci_ecam_size, self->pci_bus_start, self->pci_bus_end));
-    info.sd_host = None(SdHostInfo);
+    if (self->pci_ecam_size != 0)
+    {
+        info.pci = Some(PciInfo,
+                        PciInfo__new(self->pci_ecam_base, self->pci_ecam_size, self->pci_bus_start, self->pci_bus_end));
+    }
+    if (self->sd_host_size != 0)
+    {
+        info.sd_host = Some(SdHostInfo, SdHostInfo__new(self->sd_host_base, self->sd_host_size, self->sd_host_irq,
+                                                       self->sd_host_kind, self->sd_host_source_clock_hz));
+    }
     info.ethernet_mac = None(EthernetMacInfo);
     PlicInterruptControllerInfo plic = PlicInterruptControllerInfo__new(
         self->plic_base, RISCV_HIGHER_HALF_OFFSET + self->plic_base, self->plic_source_count, boot_hart_id);

@@ -13,7 +13,10 @@
 #include "../../kernel/syscall/syscall_dispatcher.h"
 #include "cpu_timer.h"
 #include "cpu.h"
+#include "boot/common/platform.h"
 #include "ipc/ipc_platform.h"
+#include "mmio_load.h"
+#include "mmio_store.h"
 
 #define RISCV_SSTATUS_SPP (1ULL << 8U)
 #define RISCV_INTERRUPT_FLAG (1ULL << 63U)
@@ -207,6 +210,87 @@ static void Exception__abort_user(ProcessContextPtr context, uint64_t cause)
     );
 }
 
+static uint32_t Exception__user_instruction(Address program_counter)
+{
+    volatile uint16_t * instruction = (volatile uint16_t *)program_counter;
+    uint32_t value = instruction[0];
+    if ((value & 0x3U) == 0x3U)
+    {
+        value |= (uint32_t)instruction[1] << 16U;
+    }
+    return value;
+}
+
+static bool Exception__emulate_mmio_store(ProcessContextPtr context)
+{
+    KernelPtr kernel = Kernel__instance();
+    match_optional(
+        Scheduler__current_process(kernel->scheduler, CPU__id()),
+        some(process)
+        {
+            match_optional(
+                RiscVMMIOStore__decode(Exception__user_instruction(context->sepc), context),
+                some(store)
+                {
+                    match_optional(
+                        Process__writable_mmio_mapping(process, store.address, store.width),
+                        some(mapping)
+                        {
+                            if (mapping.kernel_addr.phys_addr == context->stval || store.address == context->stval)
+                            {
+                                Address access_address = RISCV_HIGHER_HALF_OFFSET + mapping.kernel_addr.phys_addr;
+                                RiscVMMIOStore__perform(&store, access_address, context);
+                                __asm__ volatile("fence iorw, iorw" ::: "memory");
+                                RiscVMMIOStore__skip_following_fence(Exception__user_instruction(context->sepc),
+                                                                    context);
+                                return true;
+                            }
+                        },
+                        none_do_nothing()
+                    );
+                },
+                none_do_nothing()
+            );
+        },
+        none_do_nothing()
+    );
+    return false;
+}
+
+static bool Exception__emulate_mmio_load(ProcessContextPtr context)
+{
+    KernelPtr kernel = Kernel__instance();
+    match_optional(
+        Scheduler__current_process(kernel->scheduler, CPU__id()),
+        some(process)
+        {
+            match_optional(
+                RiscVMMIOLoad__decode(Exception__user_instruction(context->sepc), context),
+                some(load)
+                {
+                    match_optional(
+                        Process__readable_mmio_mapping(process, load.address, load.width),
+                        some(mapping)
+                        {
+                            if (mapping.kernel_addr.phys_addr == context->stval || load.address == context->stval)
+                            {
+                                Address access_address = RISCV_HIGHER_HALF_OFFSET + mapping.kernel_addr.phys_addr;
+                                RiscVMMIOLoad__perform(&load, access_address, context);
+                                __asm__ volatile("fence iorw, iorw" ::: "memory");
+                                return true;
+                            }
+                        },
+                        none_do_nothing()
+                    );
+                },
+                none_do_nothing()
+            );
+        },
+        none_do_nothing()
+    );
+    return false;
+}
+
 static void Exception__dispatch_external(ProcessContextPtr context, bool current_privilege, IRQNumber irq)
 {
     KernelPtr kernel = Kernel__instance();
@@ -323,6 +407,19 @@ void Exception__handle(ProcessContextPtr context)
         context->stval == RISCV_INSTRUCTION_WFI)
     {
         Exception__handle_user_wait(context);
+        return;
+    }
+    if (!interrupt && !current_privilege &&
+        (cause == RISCV_EXCEPTION_LOAD_ACCESS || cause == RISCV_EXCEPTION_LOAD_PAGE) &&
+        Exception__emulate_mmio_load(context))
+    {
+        return;
+    }
+    if (!interrupt && !current_privilege &&
+        (cause == RISCV_EXCEPTION_LOAD_ACCESS || cause == RISCV_EXCEPTION_STORE_ACCESS ||
+         cause == RISCV_EXCEPTION_LOAD_PAGE || cause == RISCV_EXCEPTION_STORE_PAGE) &&
+        Exception__emulate_mmio_store(context))
+    {
         return;
     }
     if (!interrupt && !current_privilege &&

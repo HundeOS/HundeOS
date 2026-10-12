@@ -1,0 +1,6 @@
+#ifndef __ARCH_RISCV64_BOOT_RISCV_VIRT_EMBEDDED_PLATFORM_CONFIG_H
+#define __ARCH_RISCV64_BOOT_RISCV_VIRT_EMBEDDED_PLATFORM_CONFIG_H
+
+#include "../qemu_virt/platform_config.h"
+
+#endif

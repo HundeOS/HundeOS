@@ -567,6 +567,7 @@ static Result(ProcessPtr)
     proc->cpu_usage = CPUUsage__new();
     proc->queue_wait_usage = QueueWaitUsage__new();
     proc->queue_wait_control = None(UserAddress);
+    proc->queue_wait_doorbell = None(IpcEventGeneration);
     proc->ipc_doorbell = None(UserAddress);
     proc->name = *name;
     proc->startup_argument_count = 0;
@@ -1021,6 +1022,33 @@ bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalP
                                 cs_return true;
                             }
                         );
+                    },
+                    none_do_nothing()
+                );
+            }
+        }
+    );
+
+    return false;
+}
+
+bool Process__write_child_abort_report(ProcessPtr self, SpawnAbortReport report)
+{
+    critical_section(
+        self->lock,
+        {
+            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+            {
+                match_optional(
+                    ParkedOperations__at(&self->parked_operations, index),
+                    some(parked_operation)
+                    {
+                        if (parked_operation->park_reason == PARK_WAIT_CHILD &&
+                            parked_operation->operation_context != 0)
+                        {
+                            *(SpawnAbortReportPtr)parked_operation->operation_context = report;
+                            cs_return true;
+                        }
                     },
                     none_do_nothing()
                 );
@@ -1919,8 +1947,17 @@ static Result(ProcessPtr)
     );
     __d_println(PROCESS, "Code mapped");
 
+    size_t stack_size = SystemInfo__default_user_stack_size();
+    match_optional(
+        kernel->system_info,
+        some(system_info)
+        {
+            stack_size = SystemInfo__user_stack_size(&system_info);
+        },
+        none_do_nothing()
+    );
     __d_printf(PROCESS, "Creating stack for %s\n", cstr(binary->name));
-    Stack stack = Stack__new();
+    Stack stack = Stack__new(stack_size);
     __d_printf(PROCESS, "Stack created for %s base=%p top=%p kbase=%p phys=%p\n", cstr(binary->name),
                stack.base.virtual_addr, stack.top.virtual_addr, stack.base.kernel_addr.virtual_addr,
                stack.base.kernel_addr.phys_addr);
@@ -1965,7 +2002,7 @@ static Result(ProcessPtr)
                                                             USER_ALLOCATION_ELF);
                         }
                     );
-                    Process__record_user_allocation(proc, stack.base, STACK_SIZE, USER_ALLOCATION_STACK);
+                    Process__record_user_allocation(proc, stack.base, stack.size, USER_ALLOCATION_STACK);
                     return Success(ProcessPtr, proc);
                 },
                 error(code, message)
@@ -2314,6 +2351,67 @@ Result(Address) Process__device_address(ProcessPtr self, Address virtual_address
     return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
 
+static Optional(UserAddress) Process__mmio_mapping(ProcessPtr self, Address virtual_address, size_t size,
+                                                    bool require_write)
+{
+    if (virtual_address == 0 || size == 0)
+    {
+        return None(UserAddress);
+    }
+
+    UserAllocationRangeMatch range = UserAllocationRangeMatch__new(virtual_address, size);
+    match_find_result_ptr(
+        UserAllocations__find(&self->user_allocations, allocation_contains_range, &range),
+        some(allocation)
+        {
+            bool permitted = require_write ? allocation->address.write : allocation->address.read;
+            if (allocation->type == USER_ALLOCATION_MMIO && permitted)
+            {
+                Offset offset = virtual_address - allocation->address.virtual_addr;
+                return Some(UserAddress, UserAddress__relative(&allocation->address, offset));
+            }
+        },
+        none_do_nothing()
+    );
+
+    return None(UserAddress);
+}
+
+Optional(UserAddress) Process__readable_mmio_mapping(ProcessPtr self, Address virtual_address, size_t size)
+{
+    return Process__mmio_mapping(self, virtual_address, size, false);
+}
+
+Optional(UserAddress) Process__writable_mmio_mapping(ProcessPtr self, Address virtual_address, size_t size)
+{
+    return Process__mmio_mapping(self, virtual_address, size, true);
+}
+
+Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, Address virtual_address, size_t size)
+{
+    if (virtual_address == 0 || size == 0)
+    {
+        return None(KernelAddress);
+    }
+
+    UserAllocationRangeMatch range = UserAllocationRangeMatch__new(virtual_address, size);
+    match_find_result_ptr(
+        UserAllocations__find(&self->user_allocations, allocation_contains_range, &range),
+        some(allocation)
+        {
+            if (allocation->address.write && allocation->address.kernel_addr.valid)
+            {
+                Offset offset = virtual_address - allocation->address.virtual_addr;
+                return Some(KernelAddress, KERNEL_ADDR(allocation->address.kernel_addr.virtual_addr + offset,
+                                                       allocation->address.kernel_addr.phys_addr + offset));
+            }
+        },
+        none_do_nothing()
+    );
+
+    return None(KernelAddress);
+}
+
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
 {
     if (size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1))
@@ -2494,7 +2592,8 @@ Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self)
     return Success(UserAddress, allocation);
 }
 
-Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size)
+static Result(UserAddress)
+    Process__map_mmio_internal(ProcessPtr self, Address physical, size_t size, bool install_page_mapping)
 {
     Address physical_base = Process__page_base(physical);
     Address physical_offset = physical - physical_base;
@@ -2523,7 +2622,10 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
     UserAddress allocation =
         UserAddress__new(virtual_base, KERNEL_ADDR(physical_base, physical_base), true, true, false, true);
 
-    PageTable__map_mmio(&self->page_table, self->kernel, mapping, size);
+    if (install_page_mapping)
+    {
+        PageTable__map_mmio(&self->page_table, self->kernel, mapping, size);
+    }
     match_result(
         Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_MMIO),
         success(_)
@@ -2537,6 +2639,16 @@ Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t 
     );
 
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+}
+
+Result(UserAddress) Process__map_mmio(ProcessPtr self, Address physical, size_t size)
+{
+    return Process__map_mmio_internal(self, physical, size, true);
+}
+
+Result(UserAddress) Process__map_trapped_mmio(ProcessPtr self, Address physical, size_t size)
+{
+    return Process__map_mmio_internal(self, physical, size, false);
 }
 
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)

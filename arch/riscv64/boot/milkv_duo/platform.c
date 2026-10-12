@@ -1,0 +1,12 @@
+#include "../common/platform.h"
+
+#define RISCV_BOOT_TEXT __attribute__((section(".boot.text")))
+
+RISCV_BOOT_TEXT void RiscVBootPlatform__prepare_hardware(void)
+{
+}
+
+void RiscVBootPlatform__configure_system_info(SystemInfoPtr info)
+{
+    info->console_uart = info->trace_uart;
+}

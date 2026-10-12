@@ -10,6 +10,10 @@ static Queue server;
 static IpcDoorbell client_doorbell;
 static IpcDoorbell server_doorbell;
 
+static void record_data_available(QueueConnectionID connection)
+{
+}
+
 void setUp(void)
 {
     identity = (QueueIdentity){.connection = 17, .client_pid = 4, .server_pid = 5, .origin_pid = 4, .accepted = 1};
@@ -19,7 +23,7 @@ void setUp(void)
     client_doorbell = (IpcDoorbell){0};
     server_doorbell = (IpcDoorbell){0};
     Queue client =
-        Queue__new(&identity, &client_page, &server_page, 17, 5, &server_doorbell, &Queue__ignore_data_available);
+        Queue__new(&identity, &client_page, &server_page, 17, 5, &server_doorbell, &record_data_available);
     server = Queue__new(&identity, &server_page, &client_page, 17, 4, &client_doorbell, &Queue__ignore_data_available);
     channel = Channel__new(&client, &payload);
 }
@@ -62,6 +66,7 @@ void test_request_and_reply_share_the_existing_queue_transport(void)
             TEST_ASSERT_EQUAL(CHANNEL_REQUEST_SUBMIT, message.kind);
             TEST_ASSERT_EQUAL_UINT64(7, message.arg1);
             TEST_ASSERT_EQUAL_UINT64(17, message.arg2);
+            TEST_ASSERT_EQUAL_UINT64(0, message.arg3);
         },
         error_test_fail()
     );

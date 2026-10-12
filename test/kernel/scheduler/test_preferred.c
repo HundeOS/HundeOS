@@ -100,7 +100,7 @@ static void reply(TestRequest * request)
     push(&request->responder, &message);
 }
 
-static void wait_on(ProcessPtr process, QueuePtr queue)
+static void wait_on(ProcessPtr process)
 {
     match_result(Process__queue_wait_control(process),
         success_do_nothing(),
@@ -108,14 +108,11 @@ static void wait_on(ProcessPtr process, QueuePtr queue)
     );
     UserAddress mapping = unwrap_optional(process->queue_wait_control, (UserAddress){0});
     QueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
-    QueueWaitSnapshot observed = QueueWaitSnapshot__new_connection(queue);
+    IpcEventGeneration observed =
+        IpcEvent__generation(IpcDoorbell__event(k_v_ptr(unwrap_optional(process->ipc_doorbell, (UserAddress){0}),
+                                                       IpcDoorbell)));
     QueueWaitControl__begin(control);
-    match_result(QueueWaitControl__add(control, &observed),
-        success_do_nothing(),
-        error_test_fail()
-    );
-    QueueWaitControl__commit(control, test_cpu_time_usec, QUEUE_WAIT_NO_DEADLINE,
-                             QueueWaitControl__wake_generation(control));
+    QueueWaitControl__commit(control, test_cpu_time_usec, QUEUE_WAIT_NO_DEADLINE, observed);
 }
 
 static CPUSchedulerPtr cpu(CPUID id)
@@ -211,9 +208,9 @@ void test_idle_fallback_selects_the_waiter_with_the_largest_dependency_impact(vo
 {
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
     TestRequest child = request(p2, p3, &bstr("a"), &bstr("d"), &Some(RequestTicket, root.ticket));
-    wait_on(p1, &root.caller);
-    wait_on(p2, &child.caller);
-    wait_on(p3, &child.responder);
+    wait_on(p1);
+    wait_on(p2);
+    wait_on(p3);
     relay->state = PROC_STATE_WAITING;
     cpu(0)->idle_process->state = PROC_STATE_RUNNING;
 
@@ -233,8 +230,8 @@ void test_idle_fallback_uses_recent_activity_then_longest_waiting(void)
     test_cpu_time_usec = PROCESS_CPU_TICK_USEC;
     CPUUsage__stop(&p1->cpu_usage, test_cpu_time_usec, 0);
     test_cpu_time_usec = PROCESS_CPU_TICK_USEC * 2;
-    wait_on(p1, &first);
-    wait_on(p2, &second);
+    wait_on(p1);
+    wait_on(p2);
     p1->last_tick = 10;
     p2->last_tick = 0;
     p3->state = PROC_STATE_WAITING;
@@ -250,7 +247,7 @@ void test_idle_fallback_uses_recent_activity_then_longest_waiting(void)
     p3->state = PROC_STATE_READY;
     QueueConnectionID other_id = connect(p2, p3, &bstr("fairness"));
     Queue third = attach(other_id, p3);
-    wait_on(p3, &third);
+    wait_on(p3);
     p3->last_tick = 5;
     cpu(0)->idle_process->state = PROC_STATE_RUNNING;
     current_process_reset();
@@ -262,7 +259,7 @@ void test_idle_fallback_never_resumes_a_kernel_blocked_user_waiter(void)
 {
     QueueConnectionID id = connect(p1, p2, &bstr("blocked"));
     Queue queue = attach(id, p1);
-    wait_on(p1, &queue);
+    wait_on(p1);
     p1->state = PROC_STATE_WAITING;
     p2->state = PROC_STATE_WAITING;
     p3->state = PROC_STATE_WAITING;
@@ -281,8 +278,8 @@ void test_reply_queues_caller_and_warm_ancestor_without_preemption(void)
 {
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
     TestRequest child = request(p2, p3, &bstr("a"), &bstr("d"), &Some(RequestTicket, root.ticket));
-    wait_on(p1, &root.caller);
-    wait_on(p2, &child.caller);
+    wait_on(p1);
+    wait_on(p2);
     reply(&child);
     p3->state = PROC_STATE_RUNNING;
     Scheduler__refresh_preferred(scheduler);
@@ -303,7 +300,7 @@ void test_reply_queues_caller_and_warm_ancestor_without_preemption(void)
 void test_residency_starts_on_dispatch_and_does_not_reset_on_timer_checks(void)
 {
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
-    wait_on(p1, &root.caller);
+    wait_on(p1);
     reply(&root);
     test_cpu_time_usec = 1000;
     Scheduler__refresh_preferred(scheduler);
@@ -364,7 +361,7 @@ void test_retained_preferred_process_remains_owned_by_its_running_cpu(void)
 void test_preferred_selection_does_not_migrate_unfinished_switch_or_kernel_wait(void)
 {
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
-    wait_on(p1, &root.caller);
+    wait_on(p1);
     reply(&root);
     Scheduler__refresh_preferred(scheduler);
     Scheduler__forget_preferred(scheduler, relay);
@@ -413,7 +410,7 @@ void test_ready_exec_continuation_preempts_an_active_preferred_process(void)
 void test_acknowledged_ticket_withdraws_speculation_and_cannot_be_reused(void)
 {
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
-    wait_on(p1, &root.caller);
+    wait_on(p1);
     reply(&root);
     Scheduler__refresh_preferred(scheduler);
     QueueMessage ack = ChannelControlMessage__new(CHANNEL_REQUEST_ACKNOWLEDGE, 0, 0, root.ticket.connection);
@@ -483,7 +480,7 @@ void test_ancestry_cycles_are_bounded_and_rejected(void)
 void test_process_exit_removes_queued_work_before_disposal(void)
 {
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
-    wait_on(p1, &root.caller);
+    wait_on(p1);
     reply(&root);
     Scheduler__refresh_preferred(scheduler);
     match_result(Scheduler__exit(scheduler, p1, 0),
@@ -507,6 +504,6 @@ void test_preferred_processing_yields_on_shared_wait_before_budget(void)
     p2->dispatched_at = 0;
     test_cpu_time_usec = 100;
     TEST_ASSERT_TRUE(Process__retain_preferred(p2));
-    wait_on(p2, &root.responder);
+    wait_on(p2);
     TEST_ASSERT_FALSE(Process__retain_preferred(p2));
 }

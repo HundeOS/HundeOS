@@ -14,6 +14,7 @@ static SpawnMode last_mode;
 static AuthTicketID last_auth_ticket_id;
 static char last_path[64];
 static SpawnResult next_spawn_result;
+static SpawnAbortReport next_abort_report;
 static char last_auth_username[64];
 static char last_auth_password[64];
 static char output[512];
@@ -31,6 +32,7 @@ void setUp(void)
     last_auth_ticket_id = AUTH_NO_TICKET;
     last_path[0] = '\0';
     next_spawn_result = 1;
+    next_abort_report = SpawnAbortReport__none();
     last_auth_username[0] = '\0';
     last_auth_password[0] = '\0';
     output_position = 0;
@@ -106,8 +108,9 @@ AuthResult auth(ConstBStringPtr username, ConstBStringPtr password)
     return AUTH_INVALID_CREDENTIALS;
 }
 
-SpawnResult spawn_with_auth(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBStringPtr path,
-                            OptionalPtr(BString) arg0, OptionalPtr(BString) arg1, OptionalPtr(BString) arg2)
+SpawnResult spawn_with_auth_report(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBStringPtr path,
+                                   SpawnAbortReportPtr abort_report, OptionalPtr(BString) arg0,
+                                   OptionalPtr(BString) arg1, OptionalPtr(BString) arg2)
 {
     last_mode = mode;
     last_auth_ticket_id = auth_ticket_id;
@@ -124,6 +127,7 @@ SpawnResult spawn_with_auth(SpawnMode mode, AuthTicketID auth_ticket_id, ConstBS
         some_test_fail(),
         none_do_nothing()
     );
+    *abort_report = next_abort_report;
     return next_spawn_result;
 }
 
@@ -184,4 +188,17 @@ void test_login_retries_after_invalid_credentials(void)
     TEST_ASSERT_EQUAL_UINT64(42, last_auth_ticket_id);
     TEST_ASSERT_TRUE(contains_text(output, "login: invalid credentials\n"));
     TEST_ASSERT_TRUE(contains_text(output, "login: failed to start bash: -1\n"));
+}
+
+void test_login_prints_synchronous_shell_fault_details(void)
+{
+    queue_console_input("user");
+    queue_console_input("user");
+    next_spawn_result = -1001;
+    next_abort_report = SpawnAbortReport__new(1, 0xd, 0x401234, 0x400008);
+
+    TEST_ASSERT_EQUAL_INT(1, login_main_under_test());
+    TEST_ASSERT_TRUE(contains_text(output, "login: failed to start bash: -1001\n"));
+    TEST_ASSERT_TRUE(
+        contains_text(output, "login: bash fault reason=1 cause=0xd pc=0x401234 address=0x400008\n"));
 }

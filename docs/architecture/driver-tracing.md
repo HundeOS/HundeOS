@@ -1,39 +1,44 @@
 # Userspace driver tracing
 
-Driver diagnostics use the `hund-verfolgen` userspace service. `DRIVER_DEBUG`
-formats a bounded record in the calling process and sends it over the existing
-Channel transport. The service uses the authenticated Channel origin as the
-record PID; callers cannot select another process identity.
+`DRIVER_DEBUG` formats a bounded record in the calling process and submits it
+through `SYSCALL_SYSLOG`. The kernel stamps the authenticated process ID and
+name, then writes the record to the architecture kernel-trace sink. Driver
+diagnostics do not open a Channel, wait for a userspace acknowledgement, or
+depend on a mounted filesystem. `/var/log/driver.log` and its former
+`hund-verfolgen` record transport have been retired.
 
-`hundeschule` starts `hund-verfolgen` before device drivers. The service accepts
-and acknowledges records into a bounded 64 KiB memory buffer while the root
-filesystem is being established. Once `/` is mounted, `hundeschule` sends the
-storage-ready operation. The service opens `/var/log/driver.log`, drains all
-currently available client records, and writes each drained burst as one I/O
-operation. A full buffer drops complete records rather than blocking the boot
-dependency chain, and the next successful flush records the drop count.
+The syscall returns after the architecture trace sink accepts the output. It
+cannot wait on another process, although a synchronous architecture sink such
+as a UART can still delay the caller while transmitting the record. Kernel
+boot, panic, and userspace driver diagnostics therefore share the configured
+kernel-trace destination.
 
-This path is separate from kernel tracing. Kernel boot, panic, and bootstrap
-mount diagnostics must remain observable when userspace IPC or the root
-filesystem is unavailable, so the kernel syslog syscall remains available to
-the small set of early bootstrap services that require it. Ordinary drivers
-must use `DRIVER_DEBUG` and must not write diagnostic traffic through that
-syscall.
-
-The Channel payload remains the control and record transport for formatted
-driver messages. Driver messages are bounded below the existing one-page Channel
-payload capacity.
+Fatal userspace process records remain in the kernel trace and are also copied
+to the console sink before the process is terminated. This keeps the exception
+cause, program counter, and fault address visible when the separate kernel-trace
+UART is not connected. Ordinary kernel and driver trace records are not copied
+to the console.
 
 ## Channel latency tracing
 
-`hund-verfolgen` also collects generic Channel lifecycle timestamps in the
+`hund-verfolgen` collects generic Channel lifecycle timestamps in the
 memfs-backed `/tmp/io-trace.log`. Keeping the high-volume diagnostic output off
 the measured disk filesystem prevents trace persistence from competing with the
 filesystem requests under observation. Each participating process registers a fixed-size
 shared trace ring with the service. The process has write access and
 `hund-verfolgen` has read access, preserving the directional shared-buffer
-permission model. Recording an event does not make a Channel call and therefore
-does not add another synchronous hop to the path being measured.
+permission model. Participating processes explicitly prepare tracing before
+entering the work being measured. Recording an event only writes an already
+registered ring; if no ring is available, the event is dropped without making a
+Channel call. It therefore does not add another synchronous hop or tracing-service
+dependency to the path being measured.
+
+Latency tracing is controlled by the kernel `SystemSettings` returned from
+`SYSCALL_SYSTEM_INFO`. Only processes running as the built-in `hund` user may
+read these settings. The setting is currently disabled, so `hundeschule` does
+not start `hund-verfolgen` and `IOTrace__prepare` succeeds without registering a
+ring. The collector and ring implementation remain available for a later
+enabled configuration.
 
 The Channel library records four points for each request ticket:
 

@@ -36,14 +36,14 @@ void test_bootstrap_stores_system_info_and_configures_architecture(void)
     SystemInfo system_info = {0};
     system_info.cpu_count = 4;
     system_info.timer_frequency = 10000000;
-    system_info.uart.virtual_base = 0x10000000;
+    system_info.trace_uart.virtual_base = 0x10000000;
 
     Boot__init_bootstrap_system(&system_info);
 
     TEST_ASSERT_EQUAL_UINT(1, architecture_init_calls);
     TEST_ASSERT_EQUAL_UINT64(4, architecture_system_info.cpu_count);
     TEST_ASSERT_EQUAL_UINT64(10000000, architecture_system_info.timer_frequency);
-    TEST_ASSERT_EQUAL_HEX64(0x10000000, architecture_system_info.uart.virtual_base);
+    TEST_ASSERT_EQUAL_HEX64(0x10000000, architecture_system_info.trace_uart.virtual_base);
 
     system_info.cpu_count = 1;
     match_optional(
@@ -52,7 +52,7 @@ void test_bootstrap_stores_system_info_and_configures_architecture(void)
         {
             TEST_ASSERT_EQUAL_UINT64(4, installed.cpu_count);
             TEST_ASSERT_EQUAL_UINT64(10000000, installed.timer_frequency);
-            TEST_ASSERT_EQUAL_HEX64(0x10000000, installed.uart.virtual_base);
+            TEST_ASSERT_EQUAL_HEX64(0x10000000, installed.trace_uart.virtual_base);
         },
         none()
         {

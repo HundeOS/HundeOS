@@ -10,6 +10,8 @@
 #define RISCV_SIE_SEIE (1ULL << 9U)
 #define RISCV_SIE_SSIE (1ULL << 1U)
 #define RISCV_SSTATUS_SIE (1ULL << 1U)
+#define PLIC_SUPERVISOR_ENABLE_OFFSET 0x2080ULL
+#define PLIC_ENABLE_HART_STRIDE 0x100ULL
 #define PLIC_SUPERVISOR_CONTEXT_OFFSET 0x201000ULL
 #define PLIC_CONTEXT_HART_STRIDE 0x2000ULL
 
@@ -20,6 +22,18 @@ static uint64_t RiscVCPU__time(void)
     uint64_t ticks;
     __asm__ volatile("rdtime %0" : "=r"(ticks));
     return ticks;
+}
+
+static void RiscVCPU__clear_plic_enables(ConstPlicInterruptControllerInfoPtr plic, uint64_t hart_id)
+{
+    Address enable_address =
+        plic->virtual_base + PLIC_SUPERVISOR_ENABLE_OFFSET + hart_id * PLIC_ENABLE_HART_STRIDE;
+    volatile uint32_t * enables = (volatile uint32_t *)enable_address;
+    uint64_t enable_word_count = plic->source_count / 32U + 1U;
+    for (uint64_t index = 0; index < enable_word_count; index++)
+    {
+        enables[index] = 0;
+    }
 }
 
 void RiscVCPU__configure_timebase(uint64_t frequency)
@@ -91,8 +105,11 @@ Result(InitCode) CPU__init(SystemInfoPtr system_info)
     if (system_info->interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC)
     {
         ConstPlicInterruptControllerInfoPtr plic = &system_info->interrupt_controller.details.plic;
+        uint64_t hart_id = RiscVCPU__physical_hart_id();
+        __asm__ volatile("csrc sie, %0" : : "r"(RISCV_SIE_SEIE) : "memory");
+        RiscVCPU__clear_plic_enables(plic, hart_id);
         Address threshold = plic->virtual_base + PLIC_SUPERVISOR_CONTEXT_OFFSET +
-                            RiscVCPU__physical_hart_id() * PLIC_CONTEXT_HART_STRIDE;
+                            hart_id * PLIC_CONTEXT_HART_STRIDE;
         *(volatile uint32_t *)threshold = 0;
         __asm__ volatile("fence iorw, iorw\n"
                          "csrs sie, %0\n"

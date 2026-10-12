@@ -48,6 +48,6 @@ void IpcPlatform__wait_event(ConstIpcEventPtr event, IpcEventGeneration observed
 {
     if (!IpcEvent__changed(event, observed))
     {
-        __asm__ __volatile__("wrs.nto" ::: "memory");
+        IpcPlatform__relax();
     }
 }

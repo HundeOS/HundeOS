@@ -57,6 +57,15 @@ static bool Queues__belongs_to(OptionalPtr(ProcessPtr) owner, ProcessPtr process
     return false;
 }
 
+static Queue QueueConnection__queue_for_endpoint(QueueConnectionPtr self, bool client)
+{
+    Address base = self->memory.kernel_addr.virtual_addr;
+    UserAddress peer_doorbell = client ? self->server_doorbell : self->client_doorbell;
+    return Queue__new((QueueIdentityPtr)base, (QueuePagePtr)(base + (client ? 1 : 2) * QUEUE_PAGE_SIZE),
+                      (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), self->connection, 0,
+                      k_v_ptr(peer_doorbell, IpcDoorbell), &Queue__ignore_data_available);
+}
+
 static bool QueueConnection__has_unread_messages(QueueConnectionPtr self, void * context)
 {
     ProcessPtr process = context;
@@ -65,11 +74,7 @@ static bool QueueConnection__has_unread_messages(QueueConnectionPtr self, void *
     {
         return false;
     }
-    Address base = self->memory.kernel_addr.virtual_addr;
-    UserAddress peer_doorbell = client ? self->server_doorbell : self->client_doorbell;
-    Queue queue = Queue__new((QueueIdentityPtr)base, (QueuePagePtr)(base + (client ? 1 : 2) * QUEUE_PAGE_SIZE),
-                             (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), self->connection, 0,
-                             k_v_ptr(peer_doorbell, IpcDoorbell), &Queue__ignore_data_available);
+    Queue queue = QueueConnection__queue_for_endpoint(self, client);
     return Queue__has_unread_messages(&queue);
 }
 
@@ -86,47 +91,39 @@ bool Queues__has_unread_messages(QueuesPtr self, ProcessPtr process)
     return false;
 }
 
-Result(QueueCode) Queues__watch(QueuesPtr self, ProcessPtr process, ConstQueueWaitSnapshotPtr snapshot)
+static bool QueueConnection__has_waitable_state(QueueConnectionPtr self, void * context)
 {
-    if (snapshot->kind == QUEUE_WAIT_ARRIVALS)
+    ProcessPtr process = context;
+    bool client = Queues__belongs_to(&self->client, process);
+    bool server = Queues__belongs_to(&self->server, process);
+    if (!self->memory.valid || (!client && !server))
     {
-        match_optional(
-            QueueListeners__ptr_at(&self->listeners, snapshot->handle % QUEUE_LISTENER_LIMIT),
-            some(listener)
-            {
-                if (listener->endpoint == snapshot->handle && Queues__belongs_to(&listener->process, process))
-                {
-                    listener->wait = Some(QueueWaitSnapshot, *snapshot);
-                    return Success(QueueCode, QUEUE_OK);
-                }
-            },
-            none_do_nothing()
-        );
+        return false;
     }
-    if (snapshot->kind == QUEUE_WAIT_CONNECTION)
+
+    QueueIdentityPtr identity = k_v_ptr(self->memory, QueueIdentity);
+    if (__atomic_load_n(&identity->closed, __ATOMIC_ACQUIRE) != 0)
     {
-        match_optional(
-            QueueConnections__ptr_at(&self->connections, snapshot->handle % QUEUE_LIMIT),
-            some(connection)
-            {
-                if (connection->connection == snapshot->handle)
-                {
-                    if (Queues__belongs_to(&connection->client, process))
-                    {
-                        connection->client_wait = Some(QueueWaitSnapshot, *snapshot);
-                        return Success(QueueCode, QUEUE_OK);
-                    }
-                    if (Queues__belongs_to(&connection->server, process))
-                    {
-                        connection->server_wait = Some(QueueWaitSnapshot, *snapshot);
-                        return Success(QueueCode, QUEUE_OK);
-                    }
-                }
-            },
-            none_do_nothing()
-        );
+        return true;
     }
-    return Error(QueueCode, queue_error, QUEUE_INVALID);
+    if (__atomic_load_n(&identity->accepted, __ATOMIC_ACQUIRE) == 0)
+    {
+        return server;
+    }
+    return QueueConnection__has_unread_messages(self, context);
+}
+
+bool Queues__has_waitable_state(QueuesPtr self, ProcessPtr process)
+{
+    match_find_result(
+        QueueConnections__find(&self->connections, QueueConnection__has_waitable_state, process),
+        some(connection)
+        {
+            return true;
+        },
+        none_do_nothing()
+    );
+    return false;
 }
 
 Result(ProcessPtr) Queues__peer_process(QueuesPtr self, ProcessPtr process, QueueConnectionID connection)
@@ -148,6 +145,7 @@ Result(ProcessPtr) Queues__peer_process(QueuesPtr self, ProcessPtr process, Queu
                     },
                     none_do_nothing()
                 );
+                return Error(ProcessPtr, queue_error, QUEUE_CLOSED);
             }
             if (Queues__belongs_to(&stored->server, process))
             {
@@ -158,164 +156,12 @@ Result(ProcessPtr) Queues__peer_process(QueuesPtr self, ProcessPtr process, Queu
                     },
                     none_do_nothing()
                 );
+                return Error(ProcessPtr, queue_error, QUEUE_CLOSED);
             }
         },
         none_do_nothing()
     );
     return Error(ProcessPtr, queue_error, QUEUE_DENIED);
-}
-
-static bool QueueConnection__wait_changed(QueueConnectionPtr self, bool client)
-{
-    match_optional(
-        client ? self->client_wait : self->server_wait,
-        some(observed)
-        {
-            Address base = self->memory.kernel_addr.virtual_addr;
-            UserAddress peer_doorbell = client ? self->server_doorbell : self->client_doorbell;
-            Queue queue = Queue__new((QueueIdentityPtr)base, (QueuePagePtr)(base + (client ? 1 : 2) * QUEUE_PAGE_SIZE),
-                                     (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), self->connection, 0,
-                                     k_v_ptr(peer_doorbell, IpcDoorbell), &Queue__ignore_data_available);
-            QueueWaitSnapshot current = QueueWaitSnapshot__new_connection(&queue);
-            return !QueueWaitSnapshot__equals(&observed, &current);
-        },
-        none_do_nothing()
-    );
-    return false;
-}
-
-bool Queues__observation_changed(QueuesPtr self, ProcessPtr process, ConstQueueWaitSnapshotPtr observed)
-{
-    if (observed->kind == QUEUE_WAIT_ARRIVALS)
-    {
-        match_optional(
-            QueueListeners__ptr_at(&self->listeners, observed->handle % QUEUE_LISTENER_LIMIT),
-            some(listener)
-            {
-                if (listener->arrivals.valid && listener->endpoint == observed->handle &&
-                    Queues__belongs_to(&listener->process, process))
-                {
-                    QueueWaitSnapshot current =
-                        QueueWaitSnapshot__new_arrivals(k_v_ptr(listener->arrivals, QueueArrivals));
-                    return !QueueWaitSnapshot__equals(observed, &current);
-                }
-            },
-            none_do_nothing()
-        );
-    }
-    if (observed->kind == QUEUE_WAIT_CONNECTION)
-    {
-        match_optional(
-            QueueConnections__ptr_at(&self->connections, observed->handle % QUEUE_LIMIT),
-            some(connection)
-            {
-                bool client = Queues__belongs_to(&connection->client, process);
-                if (connection->memory.valid && connection->connection == observed->handle &&
-                    (client || Queues__belongs_to(&connection->server, process)))
-                {
-                    Address base = connection->memory.kernel_addr.virtual_addr;
-                    UserAddress peer_doorbell = client ? connection->server_doorbell : connection->client_doorbell;
-                    Queue queue =
-                        Queue__new((QueueIdentityPtr)base, (QueuePagePtr)(base + (client ? 1 : 2) * QUEUE_PAGE_SIZE),
-                                   (QueuePagePtr)(base + (client ? 2 : 1) * QUEUE_PAGE_SIZE), connection->connection, 0,
-                                   k_v_ptr(peer_doorbell, IpcDoorbell), &Queue__ignore_data_available);
-                    QueueWaitSnapshot current = QueueWaitSnapshot__new_connection(&queue);
-                    return !QueueWaitSnapshot__equals(observed, &current);
-                }
-            },
-            none_do_nothing()
-        );
-    }
-    // Invalid, detached, or foreign observations must never suppress scheduling.
-    return true;
-}
-
-bool Queues__wait_changed(QueuesPtr self, ProcessPtr process)
-{
-    for_each_fa(
-        QueueListeners,
-        self->listeners,
-        index,
-        listener,
-        {
-            if (Queues__belongs_to(&listener.process, process))
-            {
-                match_optional(
-                    listener.wait,
-                    some(observed)
-                    {
-                        QueueWaitSnapshot current =
-                            QueueWaitSnapshot__new_arrivals(k_v_ptr(listener.arrivals, QueueArrivals));
-                        if (!QueueWaitSnapshot__equals(&observed, &current))
-                        {
-                            return true;
-                        }
-                    },
-                    none_do_nothing()
-                );
-            }
-        }
-    );
-    for_each_fa(
-        QueueConnections,
-        self->connections,
-        index,
-        connection,
-        {
-            if ((Queues__belongs_to(&connection.client, process) && QueueConnection__wait_changed(&connection, true)) ||
-                (Queues__belongs_to(&connection.server, process) && QueueConnection__wait_changed(&connection, false)))
-            {
-                return true;
-            }
-        }
-    );
-    return false;
-}
-
-void Queues__clear_wait(QueuesPtr self, ProcessPtr process)
-{
-    for_each_fa(
-        QueueListeners,
-        self->listeners,
-        index,
-        listener,
-        {
-            if (Queues__belongs_to(&listener.process, process))
-            {
-                match_optional(
-                    QueueListeners__ptr_at(&self->listeners, index),
-                    some(stored)
-                    {
-                        stored->wait = None(QueueWaitSnapshot);
-                    },
-                    none_do_nothing()
-                );
-            }
-        }
-    );
-    for_each_fa(
-        QueueConnections,
-        self->connections,
-        index,
-        connection,
-        {
-            match_optional(
-                QueueConnections__ptr_at(&self->connections, index),
-                some(stored)
-                {
-                    if (Queues__belongs_to(&stored->client, process))
-                    {
-                        stored->client_wait = None(QueueWaitSnapshot);
-                    }
-                    if (Queues__belongs_to(&stored->server, process))
-                    {
-                        stored->server_wait = None(QueueWaitSnapshot);
-                    }
-                },
-                none_do_nothing()
-            );
-        }
-    );
 }
 
 static bool Queues__range_available(ProcessPtr process, Address address, size_t size)

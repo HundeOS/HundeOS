@@ -88,14 +88,13 @@ inline const char * level_to_string(Level level)
 
 #define LOG_LEVEL_MASK(level) (1ULL << (level))
 
-#ifdef KERNEL_LOW_VOLUME_TRACE
+#ifdef KERNEL_VERBOSE_TRACE
 #define ENABLED_LOG_LEVELS                                                                                             \
     (LOG_LEVEL_MASK(PROGRESS) | LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(EXEC) | LOG_LEVEL_MASK(FAULT) |                \
-     LOG_LEVEL_MASK(PANIC))
+     LOG_LEVEL_MASK(PANIC) | LOG_LEVEL_MASK(SYSCALL) | LOG_LEVEL_MASK(MEMORY))
 #else
 #define ENABLED_LOG_LEVELS                                                                                             \
-    (LOG_LEVEL_MASK(PROGRESS) | LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(FAULT) | LOG_LEVEL_MASK(PANIC) |               \
-     LOG_LEVEL_MASK(SYSCALL) | LOG_LEVEL_MASK(MEMORY))
+    (LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(FAULT) | LOG_LEVEL_MASK(PANIC))
 #endif
 
 inline bool __d_should_log(Level level)

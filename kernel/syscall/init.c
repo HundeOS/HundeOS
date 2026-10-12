@@ -14,6 +14,7 @@
 #include "shutdown_handler.h"
 #include "auth.h"
 #include "panic_handler.h"
+#include "system_info_handler.h"
 #include "../debug.h"
 #include "../print.h"
 
@@ -60,6 +61,7 @@ Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
                 REGISTER(self, SYSCALL_PROCESS_IDENTITY, &ProcessIdentity__handler);
                 REGISTER(self, SYSCALL_PROCESS_FORK, &ProcessFork__handler);
                 REGISTER(self, SYSCALL_PROCESS_GROUP, &ProcessGroup__handler);
+                REGISTER(self, SYSCALL_SYSTEM_INFO, &SystemInfo__handler);
                 self->init_done = true;
                 __d_println(SYSCALL, "Init__syscalls() - done ok");
             }

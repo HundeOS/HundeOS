@@ -118,6 +118,20 @@ normal Channel wait. Other work can use the CPU while the manager is parked.
 5. The service validates the consumer and delivery identity, retires the
    outstanding acknowledgement, and unmasks the IRQ through GIC MMIO.
 
+On RISC-V systems where the interconnect rejects a U-mode access to otherwise
+permitted MMIO, the architecture exception handler transparently repeats the
+faulting integer load or store through the physical device's supervisor mapping.
+The existing readable or writable userspace MMIO mapping is the authorization;
+the handler does not add interrupt-controller policy. It resumes the process
+only when the decoded access range is contained by that mapping and its
+translated physical address matches the hardware fault address. Keeping the
+transaction off the user PTE is required on the CV181x, where an S-mode store
+through a user mapping can retire but fail to complete at the following I/O
+fence. This also covers the load half of compiler-generated read-modify-write
+sequences. The CV181x may report a rejected store as load-access cause 5 rather
+than store-access cause 7, so a load-access fault is decoded as a load first and
+then as the platform's store quirk.
+
 For a hosted driver, steps 2, 4, and 5 are local calls: the manager records the
 kernel and manager timestamps, wakes the matching driver fibre, and the driver
 requests rearm directly after acknowledging its device. No interrupt-protocol

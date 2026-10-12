@@ -827,6 +827,8 @@ void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
     child->parent = Some(ProcessPtr, parent);
 
     KernelContext kernel_context = test_scheduler_kernel_context();
+    SpawnAbortReport abort_report = SpawnAbortReport__none();
+    KernelAddress abort_report_address = KERNEL_ADDR((Address)&abort_report, 0);
 
     ProcessContextPtr context = test_saved_context();
     Scheduler__schedule(scheduler, parent);
@@ -834,7 +836,8 @@ void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
     Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
     Scheduler__schedule(scheduler, child);
     match_result(
-        Scheduler__park(scheduler, parent, &kernel_context, &Some(Continuation, continuation), PARK_WAIT_CHILD),
+        Scheduler__park_wait_child(scheduler, parent, &kernel_context, &Some(Continuation, continuation),
+                                   &Some(KernelAddress, abort_report_address), false),
         success_do_nothing(),
         error_test_fail()
     );
@@ -864,6 +867,11 @@ void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), BString__cstr(&fault_prefix)));
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "reason=data abort"));
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "pc=0x400100"));
+    TEST_ASSERT_TRUE(SpawnAbortReport__is_present(abort_report));
+    TEST_ASSERT_EQUAL_UINT64(PROCESS_ABORT_DATA_ABORT, abort_report.reason);
+    TEST_ASSERT_EQUAL_HEX64(0x24, abort_report.exception_code);
+    TEST_ASSERT_EQUAL_HEX64(0x400100, abort_report.pc);
+    TEST_ASSERT_EQUAL_HEX64(0x0, abort_report.fault_address);
 }
 
 void test_scheduler_exit_removes_process_when_its_not_current(void)
@@ -1372,7 +1380,10 @@ void test_realtime_promotion_keeps_process_on_cpu_and_allows_other_work(void)
     );
 
     match_result(
-        Scheduler__queue_wait(scheduler, realtime_proc, 0, 0, QUEUE_WAIT_INDEFINITE_TICKS),
+        Scheduler__queue_wait(scheduler, realtime_proc,
+                              IpcEvent__generation(IpcDoorbell__event(k_v_ptr(
+                                  unwrap_result(Process__doorbell(realtime_proc), NULL_USER_ADDRESS), IpcDoorbell))),
+                              QUEUE_WAIT_INDEFINITE_TICKS),
         success(status)
         {
             TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, status);

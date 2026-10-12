@@ -8,8 +8,10 @@
 #include "../../../common/types/bstring.h"
 #include "sys/debug.h"
 #include "sys/pci_config.h"
+#include "sys/process_sleep.h"
 #include "sys/sd_host_config.h"
 #include "sys/service.h"
+#include "sys/syslog.h"
 #include "sys/sync.h"
 #include "channel/signal.h"
 
@@ -23,6 +25,10 @@
 
 #ifndef SDHCI_LOAD_PCI_CONFIG
 #define SDHCI_LOAD_PCI_CONFIG PciConfig__load
+#endif
+
+#ifndef SDHCI_SLEEP_USEC
+#define SDHCI_SLEEP_USEC sleep_usec
 #endif
 
 #define SDHCI_DEVICE_PATH "/dev/mmc0"
@@ -75,6 +81,12 @@
 #define SDHCI_SIGNAL_ENABLE 0x38
 #define SDHCI_CAPABILITIES 0x40
 #define SDHCI_HOST_VERSION 0xfc
+#define CV181X_VENDOR_MSHC_CTRL 0x200
+#define CV181X_VENDOR_PHY_TX_RX_DLY 0x240
+#define CV181X_VENDOR_PHY_CONFIG 0x24c
+#define CV181X_MSHC_CTRL_DEFAULT 0x00000302U
+#define CV181X_PHY_TX_RX_DLY_DEFAULT 0x01000100U
+#define CV181X_PHY_CONFIG_ENABLE 0x00000001U
 
 #define SDHCI_PRESENT_CMD_INHIBIT 0x00000001U
 #define SDHCI_PRESENT_DAT_INHIBIT 0x00000002U
@@ -106,6 +118,7 @@
 #define SDHCI_CMD_DATA_PRESENT 0x0020U
 
 #define SDHCI_TRANSFER_BLOCK_COUNT_ENABLE 0x0002U
+#define SDHCI_TRANSFER_AUTO_CMD12 0x0004U
 #define SDHCI_TRANSFER_READ 0x0010U
 #define SDHCI_TRANSFER_MULTI_BLOCK 0x0020U
 
@@ -134,11 +147,30 @@ typedef volatile uint8_t * SdhciPciConfig8Ptr;
 typedef volatile uint16_t * SdhciPciConfig16Ptr;
 typedef volatile uint32_t * SdhciPciConfig32Ptr;
 
+typedef enum SdhciResponseKind
+{
+    SDHCI_RESPONSE_NONE,
+    SDHCI_RESPONSE_R1,
+    SDHCI_RESPONSE_R1B,
+    SDHCI_RESPONSE_R2,
+    SDHCI_RESPONSE_R3,
+    SDHCI_RESPONSE_R6,
+    SDHCI_RESPONSE_R7,
+} SdhciResponseKind;
+
+typedef enum SdhciCommandFailure
+{
+    SDHCI_COMMAND_OK,
+    SDHCI_COMMAND_INHIBITED,
+    SDHCI_COMMAND_RESPONSE_TIMEOUT,
+    SDHCI_COMMAND_BUSY_TIMEOUT,
+} SdhciCommandFailure;
+
 typedef struct SdhciCommand
 {
     uint32_t index;
     uint32_t argument;
-    uint16_t response_type;
+    SdhciResponseKind response_kind;
     uint16_t transfer_mode;
     bool data_present;
 } SdhciCommand;
@@ -148,6 +180,10 @@ typedef const SdhciCommand * ConstSdhciCommandPtr;
 typedef struct SdhciCommandResult
 {
     bool ok;
+    SdhciCommandFailure failure;
+    bool recovered;
+    uint32_t failure_state;
+    uint32_t failure_status;
     uint32_t response[4];
 } SdhciCommandResult;
 
@@ -158,6 +194,8 @@ typedef struct SdhciDevice
     ServiceMappedMemoryPtr mapping;
     SdhciMmioPtr mmio;
     uint64_t irq;
+    SdHostKind kind;
+    uint64_t source_clock_hz;
     uint16_t rca;
     bool high_capacity;
     uint64_t block_count;
@@ -179,13 +217,13 @@ typedef const SdhciPciFunction * ConstSdhciPciFunctionPtr;
 
 OptionalDef(SdhciPciFunction);
 
-static SdhciCommand SdhciCommand__new(uint32_t index, uint32_t argument, uint16_t response_type, uint16_t transfer_mode,
-                                      bool data_present)
+static SdhciCommand SdhciCommand__new(uint32_t index, uint32_t argument, SdhciResponseKind response_kind,
+                                      uint16_t transfer_mode, bool data_present)
 {
     return (SdhciCommand){
         .index = index,
         .argument = argument,
-        .response_type = response_type,
+        .response_kind = response_kind,
         .transfer_mode = transfer_mode,
         .data_present = data_present,
     };
@@ -196,24 +234,30 @@ static SdhciCommandResult SdhciCommandResult__new(bool ok, uint32_t response0, u
 {
     return (SdhciCommandResult){
         .ok = ok,
+        .failure = SDHCI_COMMAND_OK,
+        .recovered = false,
+        .failure_state = 0,
+        .failure_status = 0,
         .response = {response0, response1, response2, response3},
     };
 }
 
-static SdhciDevice SdhciDevice__new(ServiceMappedMemoryPtr mapping, SdhciMmioPtr mmio, uint64_t irq,
-                                    ConstBStringPtr path)
+static SdhciDevice SdhciDevice__new(ServiceMappedMemoryPtr mapping, SdhciMmioPtr mmio, uint64_t irq, SdHostKind kind,
+                                    uint64_t source_clock_hz, ConstBStringPtr path)
 {
     return (SdhciDevice){
         .mapping = mapping,
         .mmio = mmio,
         .irq = irq,
+        .kind = kind,
+        .source_clock_hz = source_clock_hz,
         .path = *path,
     };
 }
 
 static SdhciDevice SdhciDevice__new_empty(void)
 {
-    return SdhciDevice__new(0, 0, 0, &bstr(""));
+    return SdhciDevice__new(0, 0, 0, SD_HOST_KIND_GENERIC, 0, &bstr(""));
 }
 
 static SdhciPciFunction SdhciPciFunction__new(uint64_t bus, uint64_t device, uint64_t function)
@@ -419,7 +463,8 @@ static Optional(SdHostConfig) Sdhci__load_pci_host_config(void)
 
             return Some(SdHostConfig,
                         SdHostConfig__new(physical_base, SDHCI_PCI_MMIO_SIZE,
-                                          SDHCI_PCI_READ8(function_base, SDHCI_PCI_CONFIG_INTERRUPT_LINE)));
+                                          SDHCI_PCI_READ8(function_base, SDHCI_PCI_CONFIG_INTERRUPT_LINE),
+                                          SD_HOST_KIND_GENERIC, 0));
         },
         none_do_nothing()
     );
@@ -509,15 +554,8 @@ static bool Sdhci__reset(SdhciMmioPtr mmio, uint8_t mask)
     return Sdhci__wait8_clear(mmio, SDHCI_SOFTWARE_RESET, mask);
 }
 
-static uint16_t Sdhci__clock_divisor(uint32_t capabilities, uint64_t target_hz)
+static uint16_t Sdhci__clock_divisor(uint64_t base_hz, uint64_t target_hz)
 {
-    uint64_t base_clock_mhz = (capabilities >> 8) & 0xffU;
-    if (base_clock_mhz == 0)
-    {
-        base_clock_mhz = 100;
-    }
-
-    uint64_t base_hz = base_clock_mhz * 1000000ULL;
     uint64_t divisor = (base_hz + target_hz - 1) / target_hz;
     if (divisor <= 1)
     {
@@ -527,61 +565,94 @@ static uint16_t Sdhci__clock_divisor(uint32_t capabilities, uint64_t target_hz)
     {
         divisor++;
     }
-    if (divisor > 256)
+    if (divisor > 2046)
     {
-        divisor = 256;
+        divisor = 2046;
     }
 
-    return (uint16_t)((divisor / 2) << 8);
+    uint16_t encoded = (uint16_t)(divisor / 2);
+    return (uint16_t)(((encoded & 0xffU) << 8) | ((encoded & 0x300U) >> 2));
 }
 
-static bool Sdhci__set_clock(SdhciMmioPtr mmio, uint64_t target_hz)
+static bool Sdhci__set_clock(SdhciDevicePtr self, uint64_t target_hz)
 {
-    uint32_t capabilities = SDHCI_READ32(mmio, SDHCI_CAPABILITIES);
-    uint16_t clock = Sdhci__clock_divisor(capabilities, target_hz) | SDHCI_CLOCK_INTERNAL_ENABLE;
+    uint64_t base_hz = self->source_clock_hz;
+    if (base_hz == 0)
+    {
+        uint32_t capabilities = SDHCI_READ32(self->mmio, SDHCI_CAPABILITIES);
+        uint64_t base_clock_mhz = (capabilities >> 8) & 0xffU;
+        base_hz = (base_clock_mhz == 0 ? 100 : base_clock_mhz) * 1000000ULL;
+    }
+    uint16_t clock = Sdhci__clock_divisor(base_hz, target_hz) | SDHCI_CLOCK_INTERNAL_ENABLE;
 
-    SDHCI_WRITE16(mmio, SDHCI_CLOCK_CONTROL, 0);
-    SDHCI_WRITE16(mmio, SDHCI_CLOCK_CONTROL, clock);
-    if (!Sdhci__wait16_set(mmio, SDHCI_CLOCK_CONTROL, SDHCI_CLOCK_INTERNAL_STABLE))
+    SDHCI_WRITE16(self->mmio, SDHCI_CLOCK_CONTROL, 0);
+    SDHCI_WRITE16(self->mmio, SDHCI_CLOCK_CONTROL, clock);
+    if (!Sdhci__wait16_set(self->mmio, SDHCI_CLOCK_CONTROL, SDHCI_CLOCK_INTERNAL_STABLE))
     {
         DRIVER_DEBUG("sdhci: clock did not stabilize\n");
         return false;
     }
 
-    SDHCI_WRITE16(mmio, SDHCI_CLOCK_CONTROL, clock | SDHCI_CLOCK_SD_ENABLE);
+    SDHCI_WRITE16(self->mmio, SDHCI_CLOCK_CONTROL, clock | SDHCI_CLOCK_SD_ENABLE);
     return true;
 }
 
-static bool Sdhci__setup_host(SdhciMmioPtr mmio)
+static bool Sdhci__setup_host(SdhciDevicePtr self)
 {
-    if (!Sdhci__reset(mmio, SDHCI_RESET_ALL))
+    if (!Sdhci__reset(self->mmio, SDHCI_RESET_ALL))
     {
         DRIVER_DEBUG("sdhci: reset failed\n");
         return false;
     }
 
-    SDHCI_WRITE32(mmio, SDHCI_INT_STATUS, SDHCI_INT_ALL);
-    SDHCI_WRITE32(mmio, SDHCI_INT_ENABLE, SDHCI_INT_ALL);
-    SDHCI_WRITE32(mmio, SDHCI_SIGNAL_ENABLE, 0);
-    SDHCI_WRITE8(mmio, SDHCI_TIMEOUT_CONTROL, 0x0e);
-    SDHCI_WRITE8(mmio, SDHCI_POWER_CONTROL, SDHCI_POWER_330 | SDHCI_POWER_ON);
+    if (self->kind == SD_HOST_KIND_CV180X || self->kind == SD_HOST_KIND_CV181X)
+    {
+        uint32_t mshc_control = SDHCI_READ32(self->mmio, CV181X_VENDOR_MSHC_CTRL);
+        SDHCI_WRITE32(self->mmio, CV181X_VENDOR_MSHC_CTRL, mshc_control | CV181X_MSHC_CTRL_DEFAULT);
+        SDHCI_WRITE32(self->mmio, CV181X_VENDOR_PHY_TX_RX_DLY, CV181X_PHY_TX_RX_DLY_DEFAULT);
+        SDHCI_WRITE32(self->mmio, CV181X_VENDOR_PHY_CONFIG, CV181X_PHY_CONFIG_ENABLE);
+    }
 
-    if ((SDHCI_READ32(mmio, SDHCI_PRESENT_STATE) & SDHCI_PRESENT_CARD_INSERTED) == 0)
+    SDHCI_WRITE32(self->mmio, SDHCI_INT_STATUS, SDHCI_INT_ALL);
+    SDHCI_WRITE32(self->mmio, SDHCI_INT_ENABLE, SDHCI_INT_ALL);
+    SDHCI_WRITE32(self->mmio, SDHCI_SIGNAL_ENABLE, 0);
+    SDHCI_WRITE8(self->mmio, SDHCI_TIMEOUT_CONTROL, 0x0e);
+    SDHCI_WRITE8(self->mmio, SDHCI_POWER_CONTROL, SDHCI_POWER_330 | SDHCI_POWER_ON);
+
+    if ((SDHCI_READ32(self->mmio, SDHCI_PRESENT_STATE) & SDHCI_PRESENT_CARD_INSERTED) == 0)
     {
         DRIVER_DEBUG("sdhci: no card inserted\n");
         return false;
     }
 
-    return Sdhci__set_clock(mmio, 400000);
+    if (!Sdhci__set_clock(self, 400000))
+    {
+        return false;
+    }
+
+    return SDHCI_SLEEP_USEC(5000) == PROCESS_SLEEP_OK;
 }
 
 static uint16_t SdhciCommand__value(ConstSdhciCommandPtr command)
 {
-    uint16_t value = (uint16_t)((command->index << 8) | command->response_type);
-    if (command->response_type != SDHCI_CMD_RESP_NONE)
+    uint16_t response_flags = SDHCI_CMD_RESP_NONE;
+    if (command->response_kind == SDHCI_RESPONSE_R2)
     {
-        value |= SDHCI_CMD_CRC_CHECK | SDHCI_CMD_INDEX_CHECK;
+        response_flags = SDHCI_CMD_RESP_136 | SDHCI_CMD_CRC_CHECK;
     }
+    else if (command->response_kind == SDHCI_RESPONSE_R3)
+    {
+        response_flags = SDHCI_CMD_RESP_48;
+    }
+    else if (command->response_kind == SDHCI_RESPONSE_R1B)
+    {
+        response_flags = SDHCI_CMD_RESP_48_BUSY | SDHCI_CMD_CRC_CHECK | SDHCI_CMD_INDEX_CHECK;
+    }
+    else if (command->response_kind != SDHCI_RESPONSE_NONE)
+    {
+        response_flags = SDHCI_CMD_RESP_48 | SDHCI_CMD_CRC_CHECK | SDHCI_CMD_INDEX_CHECK;
+    }
+    uint16_t value = (uint16_t)((command->index << 8) | response_flags);
     if (command->data_present)
     {
         value |= SDHCI_CMD_DATA_PRESENT;
@@ -594,7 +665,7 @@ static SdhciCommandResult Sdhci__send_command(SdhciDevicePtr self, ConstSdhciCom
 {
     SdhciCommandResult result = SdhciCommandResult__new(false, 0, 0, 0, 0);
     uint32_t inhibit = SDHCI_PRESENT_CMD_INHIBIT;
-    if (command->data_present)
+    if (command->data_present || command->response_kind == SDHCI_RESPONSE_R1B)
     {
         inhibit |= SDHCI_PRESENT_DAT_INHIBIT;
     }
@@ -602,6 +673,11 @@ static SdhciCommandResult Sdhci__send_command(SdhciDevicePtr self, ConstSdhciCom
     if (!Sdhci__wait32_clear(self->mmio, SDHCI_PRESENT_STATE, inhibit))
     {
         DRIVER_DEBUG("sdhci: command inhibit stuck cmd=%i\n", (int)command->index);
+        result.failure = SDHCI_COMMAND_INHIBITED;
+        result.failure_state = SDHCI_READ32(self->mmio, SDHCI_PRESENT_STATE);
+        result.failure_status = SDHCI_READ32(self->mmio, SDHCI_INT_STATUS);
+        result.recovered = Sdhci__reset(self->mmio, SDHCI_RESET_CMD);
+        SDHCI_WRITE32(self->mmio, SDHCI_INT_STATUS, SDHCI_INT_ALL);
         return result;
     }
 
@@ -614,41 +690,91 @@ static SdhciCommandResult Sdhci__send_command(SdhciDevicePtr self, ConstSdhciCom
     if (!Sdhci__wait_interrupt(self->mmio, SDHCI_INT_COMMAND_COMPLETE))
     {
         DRIVER_DEBUG("sdhci: command failed cmd=%i\n", (int)command->index);
+        result.failure = SDHCI_COMMAND_RESPONSE_TIMEOUT;
+        result.failure_state = SDHCI_READ32(self->mmio, SDHCI_PRESENT_STATE);
+        result.failure_status = SDHCI_READ32(self->mmio, SDHCI_INT_STATUS);
+        result.recovered = Sdhci__reset(self->mmio, SDHCI_RESET_CMD);
+        SDHCI_WRITE32(self->mmio, SDHCI_INT_STATUS, SDHCI_INT_ALL);
         return result;
     }
 
     result.ok = true;
-    if (command->response_type != SDHCI_CMD_RESP_NONE)
+    if (command->response_kind == SDHCI_RESPONSE_R2)
+    {
+        for (uint64_t index = 0; index < 4; index++)
+        {
+            uint64_t register_offset = SDHCI_RESPONSE + ((3 - index) * sizeof(uint32_t));
+            uint32_t extra = index == 3 ? 0 : SDHCI_READ8(self->mmio, register_offset - 1);
+            result.response[index] = (SDHCI_READ32(self->mmio, register_offset) << 8) | extra;
+        }
+    }
+    else if (command->response_kind != SDHCI_RESPONSE_NONE)
     {
         result.response[0] = SDHCI_READ32(self->mmio, SDHCI_RESPONSE);
-        result.response[1] = SDHCI_READ32(self->mmio, SDHCI_RESPONSE + 4);
-        result.response[2] = SDHCI_READ32(self->mmio, SDHCI_RESPONSE + 8);
-        result.response[3] = SDHCI_READ32(self->mmio, SDHCI_RESPONSE + 12);
+    }
+    if (command->response_kind == SDHCI_RESPONSE_R1B &&
+        !Sdhci__wait_interrupt(self->mmio, SDHCI_INT_TRANSFER_COMPLETE))
+    {
+        result.ok = false;
+        result.failure = SDHCI_COMMAND_BUSY_TIMEOUT;
+        result.failure_state = SDHCI_READ32(self->mmio, SDHCI_PRESENT_STATE);
+        result.failure_status = SDHCI_READ32(self->mmio, SDHCI_INT_STATUS);
+        result.recovered = Sdhci__reset(self->mmio, SDHCI_RESET_CMD | SDHCI_RESET_DATA);
+        SDHCI_WRITE32(self->mmio, SDHCI_INT_STATUS, SDHCI_INT_ALL);
     }
 
     return result;
 }
 
+static const char * SdhciCommandFailure__name(SdhciCommandFailure self)
+{
+    switch (self)
+    {
+    case SDHCI_COMMAND_INHIBITED:
+        return "inhibit";
+    case SDHCI_COMMAND_RESPONSE_TIMEOUT:
+        return "response";
+    case SDHCI_COMMAND_BUSY_TIMEOUT:
+        return "busy";
+    case SDHCI_COMMAND_OK:
+        return "none";
+    }
+    return "unknown";
+}
+
+static SdhciCommandResult Sdhci__send_bootstrap_command(SdhciDevicePtr self, ConstSdhciCommandPtr command)
+{
+    SdhciCommandResult result = Sdhci__send_command(self, command);
+    if (!result.ok)
+    {
+        kernel_syslog_tagf("SDHCI",
+                           "bootstrap command failed cmd=%u phase=%s arg=0x%x state=0x%x status=0x%x recovered=%i",
+                           command->index, SdhciCommandFailure__name(result.failure), command->argument,
+                           result.failure_state, result.failure_status, result.recovered ? 1 : 0);
+    }
+    return result;
+}
+
 static bool Sdhci__send_app_command(SdhciDevicePtr self, uint32_t argument)
 {
-    SdhciCommand command = SdhciCommand__new(SD_CMD_APP_CMD, argument, SDHCI_CMD_RESP_48, 0, false);
-    SdhciCommandResult result = Sdhci__send_command(self, &command);
+    SdhciCommand command = SdhciCommand__new(SD_CMD_APP_CMD, argument, SDHCI_RESPONSE_R1, 0, false);
+    SdhciCommandResult result = Sdhci__send_bootstrap_command(self, &command);
 
     return result.ok;
 }
 
 static uint64_t Sdhci__card_block_count_from_csd(ConstSdhciCommandResultPtr csd)
 {
-    uint32_t csd_structure = (csd->response[3] >> 30) & 0x3U;
+    uint32_t csd_structure = (csd->response[0] >> 30) & 0x3U;
     if (csd_structure == 1)
     {
-        uint64_t c_size = ((uint64_t)(csd->response[2] & 0x3fU) << 16) | ((uint64_t)csd->response[1] >> 16);
+        uint64_t c_size = ((uint64_t)(csd->response[1] & 0x3fU) << 16) | ((uint64_t)csd->response[2] >> 16);
         return (c_size + 1ULL) * 1024ULL;
     }
 
-    uint64_t read_bl_len = (csd->response[2] >> 16) & 0x0fU;
-    uint64_t c_size = ((uint64_t)(csd->response[2] & 0x03ffU) << 2) | ((uint64_t)(csd->response[1] >> 30) & 0x03U);
-    uint64_t c_size_mult = (csd->response[1] >> 15) & 0x07U;
+    uint64_t read_bl_len = (csd->response[1] >> 16) & 0x0fU;
+    uint64_t c_size = ((uint64_t)(csd->response[1] & 0x03ffU) << 2) | ((uint64_t)(csd->response[2] >> 30) & 0x03U);
+    uint64_t c_size_mult = (csd->response[2] >> 15) & 0x07U;
     uint64_t block_len = 1ULL << read_bl_len;
     uint64_t mult = 1ULL << (c_size_mult + 2ULL);
     uint64_t bytes = (c_size + 1ULL) * mult * block_len;
@@ -658,11 +784,11 @@ static uint64_t Sdhci__card_block_count_from_csd(ConstSdhciCommandResultPtr csd)
 
 static bool Sdhci__init_card(SdhciDevicePtr self)
 {
-    SdhciCommand idle = SdhciCommand__new(SD_CMD_GO_IDLE_STATE, 0, SDHCI_CMD_RESP_NONE, 0, false);
-    Sdhci__send_command(self, &idle);
+    SdhciCommand idle = SdhciCommand__new(SD_CMD_GO_IDLE_STATE, 0, SDHCI_RESPONSE_NONE, 0, false);
+    Sdhci__send_bootstrap_command(self, &idle);
 
-    SdhciCommand interface_condition = SdhciCommand__new(SD_CMD_SEND_IF_COND, 0x1aa, SDHCI_CMD_RESP_48, 0, false);
-    Sdhci__send_command(self, &interface_condition);
+    SdhciCommand interface_condition = SdhciCommand__new(SD_CMD_SEND_IF_COND, 0x1aa, SDHCI_RESPONSE_R7, 0, false);
+    Sdhci__send_bootstrap_command(self, &interface_condition);
 
     SdhciCommandResult op_cond = SdhciCommandResult__new(false, 0, 0, 0, 0);
     for (uint64_t retry = 0; retry < SDHCI_APP_CMD_RETRIES; retry++)
@@ -672,8 +798,8 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
             return false;
         }
         SdhciCommand send_op_cond =
-            SdhciCommand__new(SD_ACMD_SD_SEND_OP_COND, SD_ACMD41_ARGUMENT, SDHCI_CMD_RESP_48, 0, false);
-        op_cond = Sdhci__send_command(self, &send_op_cond);
+            SdhciCommand__new(SD_ACMD_SD_SEND_OP_COND, SD_ACMD41_ARGUMENT, SDHCI_RESPONSE_R3, 0, false);
+        op_cond = Sdhci__send_bootstrap_command(self, &send_op_cond);
         if (op_cond.ok && (op_cond.response[0] & SD_OCR_READY) != 0)
         {
             self->high_capacity = (op_cond.response[0] & SD_OCR_HIGH_CAPACITY) != 0;
@@ -687,15 +813,15 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
         return false;
     }
 
-    SdhciCommand send_cid = SdhciCommand__new(SD_CMD_ALL_SEND_CID, 0, SDHCI_CMD_RESP_136, 0, false);
-    SdhciCommandResult cid = Sdhci__send_command(self, &send_cid);
+    SdhciCommand send_cid = SdhciCommand__new(SD_CMD_ALL_SEND_CID, 0, SDHCI_RESPONSE_R2, 0, false);
+    SdhciCommandResult cid = Sdhci__send_bootstrap_command(self, &send_cid);
     if (!cid.ok)
     {
         return false;
     }
 
-    SdhciCommand send_rca = SdhciCommand__new(SD_CMD_SEND_RELATIVE_ADDR, 0, SDHCI_CMD_RESP_48, 0, false);
-    SdhciCommandResult rca = Sdhci__send_command(self, &send_rca);
+    SdhciCommand send_rca = SdhciCommand__new(SD_CMD_SEND_RELATIVE_ADDR, 0, SDHCI_RESPONSE_R6, 0, false);
+    SdhciCommandResult rca = Sdhci__send_bootstrap_command(self, &send_rca);
     if (!rca.ok)
     {
         return false;
@@ -703,8 +829,8 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
     self->rca = (uint16_t)(rca.response[0] >> 16);
 
     SdhciCommand send_csd =
-        SdhciCommand__new(SD_CMD_SEND_CSD, ((uint32_t)self->rca) << 16, SDHCI_CMD_RESP_136, 0, false);
-    SdhciCommandResult csd = Sdhci__send_command(self, &send_csd);
+        SdhciCommand__new(SD_CMD_SEND_CSD, ((uint32_t)self->rca) << 16, SDHCI_RESPONSE_R2, 0, false);
+    SdhciCommandResult csd = Sdhci__send_bootstrap_command(self, &send_csd);
     if (!csd.ok)
     {
         return false;
@@ -717,20 +843,20 @@ static bool Sdhci__init_card(SdhciDevicePtr self)
     }
 
     SdhciCommand select_card =
-        SdhciCommand__new(SD_CMD_SELECT_CARD, ((uint32_t)self->rca) << 16, SDHCI_CMD_RESP_48_BUSY, 0, false);
-    SdhciCommandResult select = Sdhci__send_command(self, &select_card);
+        SdhciCommand__new(SD_CMD_SELECT_CARD, ((uint32_t)self->rca) << 16, SDHCI_RESPONSE_R1B, 0, false);
+    SdhciCommandResult select = Sdhci__send_bootstrap_command(self, &select_card);
     if (!select.ok)
     {
         return false;
     }
 
-    if (!Sdhci__set_clock(self->mmio, 25000000))
+    if (!Sdhci__set_clock(self, 25000000))
     {
         return false;
     }
 
-    SdhciCommand set_block_len = SdhciCommand__new(SD_CMD_SET_BLOCKLEN, SDHCI_BLOCK_SIZE, SDHCI_CMD_RESP_48, 0, false);
-    SdhciCommandResult block_len = Sdhci__send_command(self, &set_block_len);
+    SdhciCommand set_block_len = SdhciCommand__new(SD_CMD_SET_BLOCKLEN, SDHCI_BLOCK_SIZE, SDHCI_RESPONSE_R1, 0, false);
+    SdhciCommandResult block_len = Sdhci__send_bootstrap_command(self, &set_block_len);
 
     return block_len.ok;
 }
@@ -745,13 +871,21 @@ static bool Sdhci__bind(SdhciDevicePtr self, SdHostConfig config)
     }
 
     BString device_path = bstr(SDHCI_DEVICE_PATH);
-    *self = SdhciDevice__new(mapping, driver_ptr(mapping), config.irq, &device_path);
+    *self = SdhciDevice__new(mapping, driver_ptr(mapping), config.irq, config.kind, config.source_clock_hz, &device_path);
 
-    uint32_t host_version = SDHCI_READ32(self->mmio, SDHCI_HOST_VERSION);
-    DRIVER_DEBUG("sdhci: host physical_base=0x%x mmio_size=0x%x irq=%i version=0x%x\n",
-                 (unsigned int)config.physical_base, (unsigned int)config.mmio_size, (int)config.irq, host_version);
-
-    return Sdhci__setup_host(self->mmio) && Sdhci__init_card(self);
+    if (!Sdhci__setup_host(self))
+    {
+        kernel_syslog_tagf("SDHCI", "bootstrap host setup failed state=0x%x status=0x%x",
+                           SDHCI_READ32(self->mmio, SDHCI_PRESENT_STATE), SDHCI_READ32(self->mmio, SDHCI_INT_STATUS));
+        return false;
+    }
+    if (!Sdhci__init_card(self))
+    {
+        kernel_syslog_tagf("SDHCI", "bootstrap card init failed state=0x%x status=0x%x",
+                           SDHCI_READ32(self->mmio, SDHCI_PRESENT_STATE), SDHCI_READ32(self->mmio, SDHCI_INT_STATUS));
+        return false;
+    }
+    return true;
 }
 
 static uint32_t Sdhci__block_argument(ConstSdhciDevicePtr self, uint64_t block)
@@ -762,6 +896,19 @@ static uint32_t Sdhci__block_argument(ConstSdhciDevicePtr self, uint64_t block)
     }
 
     return (uint32_t)(block * SDHCI_BLOCK_SIZE);
+}
+
+static ServiceCode Sdhci__transfer_failure(SdhciDevicePtr self, const char * phase,
+                                           BlockProtocolBlockNumber first_block, BlockProtocolBlockCount count)
+{
+    uint32_t state = SDHCI_READ32(self->mmio, SDHCI_PRESENT_STATE);
+    uint32_t status = SDHCI_READ32(self->mmio, SDHCI_INT_STATUS);
+    bool recovered = Sdhci__reset(self->mmio, SDHCI_RESET_CMD | SDHCI_RESET_DATA);
+    SDHCI_WRITE32(self->mmio, SDHCI_INT_STATUS, SDHCI_INT_ALL);
+    kernel_syslog_tagf("SDHCI",
+                       "bootstrap read failed phase=%s block=%llu count=%llu state=0x%x status=0x%x recovered=%i",
+                       phase, first_block, count, state, status, recovered ? 1 : 0);
+    return SERVICE_BLOCK_REQUEST_FAILED;
 }
 
 static ServiceCode Sdhci__read_blocks(SdhciDevicePtr self, BlockProtocolBlockNumber first_block,
@@ -779,11 +926,18 @@ static ServiceCode Sdhci__read_blocks(SdhciDevicePtr self, BlockProtocolBlockNum
     bool multi_block = count > 1;
     SdhciCommand read_command = SdhciCommand__new(
         multi_block ? SD_CMD_READ_MULTIPLE_BLOCK : SD_CMD_READ_SINGLE_BLOCK, Sdhci__block_argument(self, first_block),
-        SDHCI_CMD_RESP_48,
-        SDHCI_TRANSFER_READ | (multi_block ? SDHCI_TRANSFER_MULTI_BLOCK | SDHCI_TRANSFER_BLOCK_COUNT_ENABLE : 0), true);
+        SDHCI_RESPONSE_R1,
+        SDHCI_TRANSFER_READ |
+            (multi_block ? SDHCI_TRANSFER_MULTI_BLOCK | SDHCI_TRANSFER_BLOCK_COUNT_ENABLE |
+                               SDHCI_TRANSFER_AUTO_CMD12
+                         : 0),
+        true);
     SdhciCommandResult read = Sdhci__send_command(self, &read_command);
     if (!read.ok)
     {
+        kernel_syslog_tagf(
+            "SDHCI", "bootstrap read failed phase=command block=%llu count=%llu state=0x%x status=0x%x recovered=%i",
+            first_block, count, read.failure_state, read.failure_status, read.recovered ? 1 : 0);
         return SERVICE_BLOCK_REQUEST_FAILED;
     }
 
@@ -792,7 +946,7 @@ static ServiceCode Sdhci__read_blocks(SdhciDevicePtr self, BlockProtocolBlockNum
     {
         if (!Sdhci__wait_interrupt(self->mmio, SDHCI_INT_BUFFER_READ_READY))
         {
-            return SERVICE_BLOCK_REQUEST_FAILED;
+            return Sdhci__transfer_failure(self, "data", first_block, count);
         }
 
         for (uint64_t word = 0; word < SDHCI_BLOCK_SIZE / sizeof(uint32_t); word++)
@@ -808,14 +962,7 @@ static ServiceCode Sdhci__read_blocks(SdhciDevicePtr self, BlockProtocolBlockNum
 
     if (!Sdhci__wait_interrupt(self->mmio, SDHCI_INT_TRANSFER_COMPLETE))
     {
-        return SERVICE_BLOCK_REQUEST_FAILED;
-    }
-
-    if (buffer->capacity >= 8)
-    {
-        DRIVER_DEBUG("sdhci: read block=%i count=%i driver_buffer_first_bytes=%i,%i,%i,%i,%i,%i,%i,%i\n",
-                     (int)first_block, (int)count, (int)target[0], (int)target[1], (int)target[2], (int)target[3],
-                     (int)target[4], (int)target[5], (int)target[6], (int)target[7]);
+        return Sdhci__transfer_failure(self, "complete", first_block, count);
     }
 
     return SERVICE_OK;

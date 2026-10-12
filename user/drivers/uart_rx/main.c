@@ -2,6 +2,7 @@
 #include "ipc/io_diagnostics.h"
 #include "interrupt/client.h"
 #include "sys/process.h"
+#include "sys/syslog.h"
 #include "sys/uart_config.h"
 #include "devices/uart.h"
 
@@ -111,20 +112,24 @@ int main(void)
 {
     if (!service_ok(service_become_service()))
     {
+        kernel_syslog_tagf("uart_rx", "startup failed: become service\n");
         return 1;
     }
     UartDriverConfig config;
     if (!UartDriverConfig__load(&config))
     {
+        kernel_syslog_tagf("uart_rx", "startup failed: load UART config\n");
         return 1;
     }
     ServiceMappedMemoryPtr mapping;
     if (!service_ok(service_map_mmio(config.physical_base, config.mmio_size, &mapping)))
     {
+        kernel_syslog_tagf("uart_rx", "startup failed: map MMIO\n");
         return 1;
     }
     static UartReceiver receiver;
-    UartDevice uart = UartDevice__new((Address)driver_ptr(mapping), config.kind);
+    UartDevice uart =
+        UartDevice__new((Address)driver_ptr(mapping), config.kind, config.register_shift, config.register_width);
     receiver = UartReceiver__new(&uart);
     UartDevice__configure_receiver(&receiver.uart);
     static IOStreamDriver driver;
@@ -133,15 +138,21 @@ int main(void)
     if (IOService__listen_into(&service, &bstr(IO_UART_RX_SERVICE), &driver, IOStreamDriver__execute,
                                IOStreamDriver__disconnect) != IO_OK)
     {
+        kernel_syslog_tagf("uart_rx", "startup failed: listen\n");
         return 1;
     }
-    if (!service_ok(InterruptClient__subscribe(config.irq)))
+    ServiceCode subscribe_status = InterruptClient__subscribe(config.irq);
+    if (!service_ok(subscribe_status))
     {
+        kernel_syslog_tagf("uart_rx", "startup failed: subscribe irq=%i status=%i\n", (int)config.irq,
+                           (int)subscribe_status);
         return 1;
     }
     UartDevice__enable_receiver_interrupt(&receiver.uart);
-    if (!service_ok(service_publish_ready(&bstr(IO_UART_RX_SERVICE))))
+    ServiceCode ready_status = service_publish_ready(&bstr(IO_UART_RX_SERVICE));
+    if (!service_ok(ready_status))
     {
+        kernel_syslog_tagf("uart_rx", "startup failed: publish ready status=%i\n", (int)ready_status);
         return 1;
     }
     bool pending_irq = false;

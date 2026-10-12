@@ -478,6 +478,15 @@ void test_process_child_event_selection_preserves_unrequested_state_changes(void
 
 void test_setup_from_elf(void)
 {
+    match_optional(
+        kernel->system_info,
+        some(system_info)
+        {
+            system_info.default_user_stack_size = 2 * 1024 * 1024;
+            kernel->system_info = Some(SystemInfo, system_info);
+        },
+        none_test_fail()
+    );
     Elf elf = load_hello_world_elf();
     match_result(
         Process__setup(kernel, &elf, &None(ProcessPtr)),
@@ -487,7 +496,8 @@ void test_setup_from_elf(void)
             TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table), 0x400000, true, false,
                                              true, PAGE_SIZE));
             TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table), BASE_STACK, true, true,
-                                             false, STACK_SIZE));
+                                             false, 2 * 1024 * 1024));
+            TEST_ASSERT_EQUAL_UINT64(2 * 1024 * 1024, process->stack.size);
         },
         error_test_fail()
     );
@@ -1261,6 +1271,174 @@ void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
         },
         error_test_fail()
     );
+}
+
+void test_process_map_trapped_mmio_records_authorized_range_without_page_mapping(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    match_result(
+        Process__map_trapped_mmio(process, 0x70000000, PAGE_SIZE),
+        success(mmio)
+        {
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
+                                                   mmio.virtual_addr, true, true, false, PAGE_SIZE));
+            match_optional(
+                Process__readable_mmio_mapping(process, mmio.virtual_addr + 0x84, sizeof(uint32_t)),
+                some(mapping)
+                {
+                    TEST_ASSERT_EQUAL_UINT64(mmio.virtual_addr + 0x84, mapping.virtual_addr);
+                    TEST_ASSERT_EQUAL_UINT64(0x70000084, mapping.kernel_addr.phys_addr);
+                },
+                none_test_fail()
+            );
+            match_optional(
+                Process__writable_mmio_mapping(process, mmio.virtual_addr + 0x84, sizeof(uint32_t)),
+                some(mapping)
+                {
+                    TEST_ASSERT_EQUAL_UINT64(mmio.virtual_addr + 0x84, mapping.virtual_addr);
+                    TEST_ASSERT_EQUAL_UINT64(0x70000084, mapping.kernel_addr.phys_addr);
+                },
+                none_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_writable_mmio_mapping_resolves_contained_range(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    match_result(
+        Process__map_mmio(process, 0x70000000, PAGE_SIZE),
+        success(mmio)
+        {
+            match_optional(
+                Process__writable_mmio_mapping(process, mmio.virtual_addr + 0x84, sizeof(uint32_t)),
+                some(mapping)
+                {
+                    TEST_ASSERT_EQUAL_UINT64(mmio.virtual_addr + 0x84, mapping.virtual_addr);
+                    TEST_ASSERT_EQUAL_UINT64(0x70000084, mapping.kernel_addr.phys_addr);
+                    TEST_ASSERT_TRUE(mapping.write);
+                },
+                none_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_readable_mmio_mapping_resolves_contained_range(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    match_result(
+        Process__map_mmio(process, 0x70000000, PAGE_SIZE),
+        success(mmio)
+        {
+            match_optional(
+                Process__readable_mmio_mapping(process, mmio.virtual_addr + 0x84, sizeof(uint32_t)),
+                some(mapping)
+                {
+                    TEST_ASSERT_EQUAL_UINT64(mmio.virtual_addr + 0x84, mapping.virtual_addr);
+                    TEST_ASSERT_EQUAL_UINT64(0x70000084, mapping.kernel_addr.phys_addr);
+                    TEST_ASSERT_TRUE(mapping.read);
+                },
+                none_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_readable_mmio_mapping_rejects_write_only_mmio(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    UserAddress address = UserAddress__new(0x50000000, KERNEL_ADDR(0x70000000, 0x70000000), false, true, false, true);
+    match_result(
+        Process__record_user_allocation(process, address, PAGE_SIZE, USER_ALLOCATION_MMIO),
+        success(_)
+        {
+            TEST_ASSERT_TRUE(
+                is_nothing(Process__readable_mmio_mapping(process, address.virtual_addr, sizeof(uint32_t))));
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_writable_mmio_mapping_rejects_range_past_allocation(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    match_result(
+        Process__map_mmio(process, 0x70000000, PAGE_SIZE),
+        success(mmio)
+        {
+            TEST_ASSERT_TRUE(is_nothing(
+                Process__writable_mmio_mapping(process, mmio.virtual_addr + PAGE_SIZE - 1, sizeof(uint32_t))));
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_writable_mmio_mapping_rejects_read_only_mmio(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    UserAddress address = UserAddress__new(0x40000000, KERNEL_ADDR(0x70000000, 0x70000000), true, false, false, true);
+    match_result(
+        Process__record_user_allocation(process, address, PAGE_SIZE, USER_ALLOCATION_MMIO),
+        success(_)
+        {
+            TEST_ASSERT_TRUE(
+                is_nothing(Process__writable_mmio_mapping(process, address.virtual_addr, sizeof(uint32_t))));
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_writable_user_kernel_mapping_resolves_writable_range(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    UserAddress address = alloc_user_pages_for_test(process, PAGE_SIZE);
+
+    match_optional(
+        Process__writable_user_kernel_mapping(process, address.virtual_addr + 64, sizeof(SpawnAbortReport)),
+        some(mapping)
+        {
+            TEST_ASSERT_EQUAL_HEX64(address.kernel_addr.virtual_addr + 64, mapping.virtual_addr);
+            TEST_ASSERT_EQUAL_HEX64(address.kernel_addr.phys_addr + 64, mapping.phys_addr);
+        },
+        none_test_fail()
+    );
+}
+
+void test_process_writable_user_kernel_mapping_rejects_read_only_and_uncontained_ranges(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    UserAddress address = UserAddress__new(0x30000000, KERNEL_ADDR(0x70000000, 0x80000000), true, false, false, true);
+    match_result(
+        Process__record_user_allocation(process, address, PAGE_SIZE, USER_ALLOCATION_STACK),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    TEST_ASSERT_TRUE(is_nothing(
+        Process__writable_user_kernel_mapping(process, address.virtual_addr, sizeof(SpawnAbortReport))));
+    UserAddress writable =
+        UserAddress__new(0x30002000, KERNEL_ADDR(0x70002000, 0x80002000), true, true, false, true);
+    match_result(
+        Process__record_user_allocation(process, writable, PAGE_SIZE, USER_ALLOCATION_STACK),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(is_nothing(Process__writable_user_kernel_mapping(
+        process, writable.virtual_addr + PAGE_SIZE - 1, sizeof(SpawnAbortReport))));
+
+    UserAddress missing_kernel_alias = UserAddress__new(0x30004000, NULL_KERNEL_ADDRESS, true, true, false, true);
+    match_result(
+        Process__record_user_allocation(process, missing_kernel_alias, PAGE_SIZE, USER_ALLOCATION_STACK),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(is_nothing(Process__writable_user_kernel_mapping(
+        process, missing_kernel_alias.virtual_addr, sizeof(SpawnAbortReport))));
 }
 
 void test_process_sbrk_maps_pages_at_heap_break(void)

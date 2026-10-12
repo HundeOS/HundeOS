@@ -41,6 +41,8 @@ typedef struct FdtNode
     bool uart;
     bool rtc;
     bool plic;
+    bool sd_host;
+    SdHostKind sd_host_kind;
     bool virtio_mmio;
     bool pci_ecam;
     bool reserved_memory_container;
@@ -51,7 +53,13 @@ typedef struct FdtNode
     uint64_t plic_source_count;
     bool has_timebase_frequency;
     uint64_t timebase_frequency;
+    bool has_uart_register_shift;
+    uint64_t uart_register_shift;
+    bool has_uart_register_width;
+    uint64_t uart_register_width;
     bool has_bus_range;
+    bool has_sd_host_source_clock;
+    uint64_t sd_host_source_clock_hz;
     uint64_t bus_start;
     uint64_t bus_end;
 } FdtNode;
@@ -268,10 +276,26 @@ static RiscVDeviceTreeStatus FdtNode__read_property(FdtNodePtr self, ConstFdtByt
 
     if (FdtProperty__name_equals(name, name_available, "compatible", 10))
     {
-        self->uart = FdtStringList__contains(value, length, "ns16550a", 8);
+        self->uart = FdtStringList__contains(value, length, "ns16550a", 8) ||
+                     FdtStringList__contains(value, length, "snps,dw-apb-uart", 16);
         self->rtc = FdtStringList__contains(value, length, "google,goldfish-rtc", 19);
         self->plic = FdtStringList__contains(value, length, "sifive,plic-1.0.0", 17) ||
                      FdtStringList__contains(value, length, "riscv,plic0", 11);
+        if (FdtStringList__contains(value, length, "generic-sdhci", 13))
+        {
+            self->sd_host = true;
+            self->sd_host_kind = SD_HOST_KIND_GENERIC;
+        }
+        if (FdtStringList__contains(value, length, "cvitek,cv180x-sd", 16))
+        {
+            self->sd_host = true;
+            self->sd_host_kind = SD_HOST_KIND_CV180X;
+        }
+        if (FdtStringList__contains(value, length, "cvitek,cv181x-sd", 16))
+        {
+            self->sd_host = true;
+            self->sd_host_kind = SD_HOST_KIND_CV181X;
+        }
         self->virtio_mmio = FdtStringList__contains(value, length, "virtio,mmio", 11);
         self->pci_ecam = FdtStringList__contains(value, length, "pci-host-ecam-generic", 21);
         return RISCV_DEVICE_TREE_OK;
@@ -301,6 +325,27 @@ static RiscVDeviceTreeStatus FdtNode__read_property(FdtNodePtr self, ConstFdtByt
     {
         self->has_timebase_frequency = true;
         self->timebase_frequency = Fdt__read_u32(value);
+        return RISCV_DEVICE_TREE_OK;
+    }
+
+    if (FdtProperty__name_equals(name, name_available, "src-frequency", 13) && length == sizeof(uint32_t))
+    {
+        self->has_sd_host_source_clock = true;
+        self->sd_host_source_clock_hz = Fdt__read_u32(value);
+        return RISCV_DEVICE_TREE_OK;
+    }
+
+    if (FdtProperty__name_equals(name, name_available, "reg-shift", 9) && length == sizeof(uint32_t))
+    {
+        self->has_uart_register_shift = true;
+        self->uart_register_shift = Fdt__read_u32(value);
+        return RISCV_DEVICE_TREE_OK;
+    }
+
+    if (FdtProperty__name_equals(name, name_available, "reg-io-width", 12) && length == sizeof(uint32_t))
+    {
+        self->has_uart_register_width = true;
+        self->uart_register_width = Fdt__read_u32(value);
         return RISCV_DEVICE_TREE_OK;
     }
 
@@ -338,6 +383,8 @@ static RiscVDeviceTreeStatus FdtNode__finish(FdtNodePtr self, RiscVPlatformInfoP
         platform->uart_base = self->reg.base;
         platform->uart_size = self->reg.size;
         platform->uart_irq = self->interrupt;
+        platform->uart_register_shift = self->has_uart_register_shift ? self->uart_register_shift : 0;
+        platform->uart_register_width = self->has_uart_register_width ? self->uart_register_width : 1;
     }
     if (self->rtc && self->reg.present && self->has_interrupt)
     {
@@ -350,6 +397,14 @@ static RiscVDeviceTreeStatus FdtNode__finish(FdtNodePtr self, RiscVPlatformInfoP
         platform->plic_base = self->reg.base;
         platform->plic_size = self->reg.size;
         platform->plic_source_count = self->plic_source_count;
+    }
+    if (self->sd_host && self->reg.present && self->has_interrupt)
+    {
+        platform->sd_host_base = self->reg.base;
+        platform->sd_host_size = self->reg.size;
+        platform->sd_host_irq = self->interrupt;
+        platform->sd_host_kind = self->sd_host_kind;
+        platform->sd_host_source_clock_hz = self->has_sd_host_source_clock ? self->sd_host_source_clock_hz : 0;
     }
     if (self->virtio_mmio && self->reg.present && self->has_interrupt)
     {
@@ -400,14 +455,6 @@ static RiscVDeviceTreeStatus RiscVPlatformInfo__validate(ConstRiscVPlatformInfoP
     if (self->plic_size == 0 || self->plic_source_count == 0)
     {
         return RISCV_DEVICE_TREE_MISSING_PLIC;
-    }
-    if (self->virtio_mmio_count == 0)
-    {
-        return RISCV_DEVICE_TREE_MISSING_VIRTIO;
-    }
-    if (self->pci_ecam_size == 0)
-    {
-        return RISCV_DEVICE_TREE_MISSING_PCI;
     }
     return RISCV_DEVICE_TREE_OK;
 }
