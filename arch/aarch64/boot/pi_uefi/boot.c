@@ -52,6 +52,9 @@ __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = { // hundelint: i
     .uart_physical_base = BOOT_UART0_PHYS_BASE,
     .uart_virtual_base = BOOT_MMIO_VIRT_BASE,
     .uart_irq = PI4_UART_IRQ_ID,
+    .uart_kind = UART_KIND_PL011,
+    .uart_register_shift = 0,
+    .uart_register_width = 4,
     .framebuffer = None(FramebufferInfo),
     .sd_host = Some(SdHostInfo, ((SdHostInfo){ // hundelint: ignore-constructor-required
                                  .physical_base = PI4_EMMC2_PHYS_BASE,
@@ -83,8 +86,8 @@ static __BOOT__(void) PiUefiPlatformInfo__set_fixed_devices(BootPlatformInfoPtr 
 
 __BOOT__(void)
 
-pi_uefi_set_entry_args(uint64_t image_handle, uint64_t system_table, uint64_t physical_memory_end,
-                       uint64_t handoff_magic, uint64_t handoff_address)
+BootPlatform__set_entry_args(uint64_t image_handle, uint64_t system_table, uint64_t physical_memory_end,
+                            uint64_t handoff_magic, uint64_t handoff_address)
 {
     pi_uefi_image_handle = image_handle;
     pi_uefi_system_table = system_table;
@@ -207,7 +210,7 @@ __BOOT__(void) primary_booted(void)
 {
     CPUID cpu = rd_mpidr() & 0xff;
     pi_uefi_system_info_init();
-    BootUart__set_physical_base(pi_uefi_platform_info.uart_physical_base);
+    BootUart__configure(&pi_uefi_system_info.trace_uart);
     BootUart__init();
 
     boot_debug_print(current_el);

@@ -99,7 +99,7 @@ static bool BlockServer__accept(BlockServerPtr self)
                 continue;
             }
             match_result(
-                ChannelServer__accept(connection_id, warden),
+                ChannelServer__accept(connection_id),
                 success(channel)
                 {
                     match_result(

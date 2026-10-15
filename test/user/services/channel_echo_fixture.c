@@ -63,7 +63,7 @@ static bool EchoConnections__step(EchoConnectionsPtr self, QueueArrivalsPtr arri
                 Queue__accept(id),
                 success(queue)
                 {
-                    if (warden_pid == 0 || Queue__peer_pid(&queue) != warden_pid)
+                    if (!Queue__is_channel(&queue))
                     {
                         QueueConnection__close(id);
                     }
@@ -128,13 +128,12 @@ static bool EchoConnections__step(EchoConnectionsPtr self, QueueArrivalsPtr arri
                                 connection->reply =
                                     ChannelControlMessage__new(CHANNEL_RESPONSE_FAILED, 0, 0, request.arg2);
                                 connection->reply.request = request.request;
-                                if (request.kind == CHANNEL_REQUEST_SERVE && request.arg0 != 0 &&
+                                if (request.kind == CHANNEL_REQUEST_SUBMIT && request.arg0 == 0 &&
                                     request.arg1 < CHANNEL_PAYLOAD_CAPACITY)
                                 {
-                                    ChannelPayloadPtr payload = (ChannelPayloadPtr)request.arg0;
                                     uint8_t request_data[CHANNEL_PAYLOAD_CAPACITY];
-                                    if (!ChannelPayload__read_request(payload, request_data, request.arg1) ||
-                                        !ChannelPayload__write_reply(payload, request_data, request.arg1))
+                                    if (!Queue__read_data(&connection->queue, request_data, request.arg1) ||
+                                        !Queue__write_data(&connection->queue, request_data, request.arg1, 0))
                                     {
                                         connection->pending = true;
                                         work = true;

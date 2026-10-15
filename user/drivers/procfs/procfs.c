@@ -110,6 +110,21 @@ static Result(ProcessRecord) Procfs__find(ConstProcessRegistryPtr registry, uint
 static Result(FilesystemFileSize)
     Procfs__load(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data)
 {
+    ProcfsContextPtr procfs = context;
+    if (BString__equals(path, &bstr("/ktrace")))
+    {
+        match_result(
+            procfs->load_kernel_trace(data, FILESYSTEM_FILE_CAPACITY),
+            success(size)
+            {
+                return Success(FilesystemFileSize, size);
+            },
+            error(code, message)
+            {
+                return Error(FilesystemFileSize, message, IO_NO_DEVICE_FOUND);
+            }
+        );
+    }
     ProcPath parsed;
     match_result(
         ProcPath__parse(path),
@@ -124,7 +139,7 @@ static Result(FilesystemFileSize)
     );
     ProcessRecord record;
     match_result(
-        Procfs__find(context, parsed.pid),
+        Procfs__find(procfs->registry, parsed.pid),
         success(value)
         {
             record = value;
@@ -186,7 +201,6 @@ static Result(FilesystemFileSize)
                 ProcfsWriter__line(&writer, &bstr("uart_empty"), usage.uart_empty);
                 ProcfsWriter__line(&writer, &bstr("backend_reads"), usage.backend_reads);
                 ProcfsWriter__line(&writer, &bstr("backend_empty"), usage.backend_empty);
-                ProcfsWriter__line(&writer, &bstr("warden_relays"), usage.warden_relays);
                 ProcfsWriter__line(&writer, &bstr("block_submissions"), usage.block_submissions);
                 ProcfsWriter__line(&writer, &bstr("block_blocks"), usage.block_blocks);
                 ProcfsWriter__line(&writer, &bstr("block_failures"), usage.block_failures);
@@ -247,13 +261,19 @@ static Result(FilesystemFileSize)
 static Result(DirectoryEntryCount) Procfs__list(IOServiceContext context, ConstBStringPtr path,
                                                 DirectoryEntryPtr entries, size_t capacity, uint64_t offset)
 {
+    ProcfsContextPtr procfs = context;
     DirectoryEntryCount count = 0;
     if (BString__is_empty(path) || BString__equals(path, &bstr("/")))
     {
-        while ((size_t)count < capacity && offset < PROCESS_REGISTRY_CAPACITY)
+        if ((size_t)count < capacity && offset == 0)
+        {
+            entries[count++] = DirectoryEntry__new(0, 0, 0, IO_MODE_TYPE_FILE | 0444, &bstr("ktrace"));
+            offset++;
+        }
+        while ((size_t)count < capacity && offset <= PROCESS_REGISTRY_CAPACITY)
         {
             match_result(
-                ProcessRegistry__at(context, offset++),
+                ProcessRegistry__at(procfs->registry, offset++ - 1U),
                 success(found)
                 {
                     match_optional(
@@ -297,7 +317,7 @@ static Result(DirectoryEntryCount) Procfs__list(IOServiceContext context, ConstB
         return Error(DirectoryEntryCount, bstr("Not a process directory"), IO_INVALID_PATH);
     }
     match_result(
-        Procfs__find(context, parsed.pid),
+        Procfs__find(procfs->registry, parsed.pid),
         success(record)
         {
             while ((size_t)count < capacity && offset < 5)

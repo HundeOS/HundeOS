@@ -236,6 +236,7 @@ typedef struct Process
     ProcessGroupID process_group_id;
     ProcessSessionID session_id;
     bool execed_since_fork;
+    bool process_registry_mapped;
     ProcessState state;
     UserAddress entry_point;
     Tick last_tick;
@@ -243,6 +244,7 @@ typedef struct Process
     bool migration_safe;
     bool preferred_active;
     bool preferred_warm;
+    uint64_t preferred_dependency_weight;
     Optional(RequestTicket) preferred_ticket;
     uint64_t preferred_eligible_at_usec;
     uint64_t preferred_selected_at_usec;

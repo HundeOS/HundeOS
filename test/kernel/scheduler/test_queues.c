@@ -6,6 +6,7 @@
 #include "../stubs/page_table.h"
 #include "../stubs/kalloc.h"
 #include "../stubs/panic.h"
+#include "../stubs/process.h"
 #include "../stubs/process_context_layout.h"
 #include "../stubs/cpu.h"
 #include "../../../kernel/scheduler/shared_wait.h"
@@ -22,7 +23,9 @@ extern uint64_t test_cpu_time_usec;
 void setUp(void)
 {
     test_cpu_time_usec = 0;
+    reset_cpu_count();
     reset_cpu_reschedule();
+    current_process_reset();
     KAllocStub__set_free_failure(false);
     clear_panic_state();
     KAllocStub__reset_allocation_tracking();
@@ -255,6 +258,61 @@ static QueueConnectionID accepted_connection(void)
         error_test_fail()
     );
     return id;
+}
+
+void test_privileged_service_delegates_authenticated_client_to_direct_channel(void)
+{
+    QueueEndpointID control_endpoint = listen_queue();
+    QueueConnectionID control = connect_queue(control_endpoint, client);
+    match_result(Queues__accept(queues, server, control),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(
+        Queues__listen(queues, server, &bstr("direct-channel")),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    QueueEndpointID target = find_endpoint(&bstr("direct-channel"));
+
+    match_result(
+        Queues__delegate(queues, server, control, target),
+        success(connection)
+        {
+            Queue direct = attach_queue(connection, client);
+            TEST_ASSERT_TRUE(Queue__is_channel(&direct));
+            TEST_ASSERT_EQUAL_UINT64(client->pid, Queue__local_pid(&direct));
+            TEST_ASSERT_EQUAL_UINT64(server->pid, Queue__peer_pid(&direct));
+            match_result(Queues__cancel_delegation(queues, server, control, connection),
+                success(code)
+                {
+                    TEST_ASSERT_EQUAL(QUEUE_OK, code);
+                    TEST_ASSERT_EQUAL(QUEUE_CLOSED, Queue__status(&direct));
+                },
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+}
+
+void test_unprivileged_process_cannot_delegate_channel(void)
+{
+    QueueEndpointID endpoint = listen_queue();
+    QueueConnectionID control = connect_queue(endpoint, client);
+    match_result(Queues__accept(queues, server, control),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    match_result(
+        Queues__delegate(queues, other, control, endpoint),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_DENIED, code);
+        }
+    );
 }
 
 void test_unread_messages_track_both_receivers_and_consumption(void)
@@ -702,6 +760,80 @@ void test_queue_wait_on_another_cpu_detects_peer_publication_when_process_yields
     TEST_ASSERT_EQUAL_UINT64(7000, usage.parked_usec);
 }
 
+void test_service_queue_notification_yields_to_local_receiver_on_single_cpu(void)
+{
+    set_cpu_count(1);
+    QueueConnectionID id = accepted_connection();
+    Queue sender = attach_queue(id, client);
+    TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_current(server, QUEUE_WAIT_INDEFINITE_TICKS));
+
+    Optional(ProcessPtr) current = Scheduler__current_process(kernel->scheduler, 0);
+    ContextSwitch to_client = ContextSwitch__new(client, &current);
+    ContextSwitch__switch(&to_client);
+    TEST_ASSERT_EQUAL_PTR(client, current_running_process());
+
+    QueueMessage message = {0};
+    assert_push_success(&sender, &message);
+    Optional(ProcessPtr) process = Some(ProcessPtr, client);
+    match_result(
+        Service__handler(kernel, &process, SERVICE_QUEUE_DATA_AVAILABLE, id, 0, 0, 0),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, status);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_PTR(server, current_running_process());
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, client->state);
+    ProcessContextPtr client_context = unwrap_optional(client->context, (ProcessContextPtr){});
+    TEST_ASSERT_EQUAL(SERVICE_OK, client_context->x[0]);
+    TEST_ASSERT_EQUAL_UINT64(0, CPUStub__reschedule_count());
+    TEST_ASSERT_FALSE(context_switched_with_scheduler_lock());
+}
+
+void test_service_queue_notification_yields_to_local_receiver_with_completed_wait_on_single_cpu(void)
+{
+    set_cpu_count(1);
+    QueueConnectionID id = accepted_connection();
+    Queue sender = attach_queue(id, client);
+    TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_current(server, QUEUE_WAIT_INDEFINITE_TICKS));
+
+    Optional(ProcessPtr) current = Scheduler__current_process(kernel->scheduler, 0);
+    ContextSwitch to_client = ContextSwitch__new(client, &current);
+    ContextSwitch__switch(&to_client);
+    TEST_ASSERT_EQUAL_PTR(client, current_running_process());
+
+    QueueMessage message = {0};
+    assert_push_success(&sender, &message);
+    match_result(
+        Scheduler__queue_data_available(kernel->scheduler, client, id),
+        success(notification)
+        {
+            TEST_ASSERT_TRUE(notification.reschedule);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, server->state);
+    TEST_ASSERT_TRUE(Process__has_ready_parked_operation(server, PARK_WAIT_QUEUE, &None(OperationKey)));
+
+    Optional(ProcessPtr) process = Some(ProcessPtr, client);
+    match_result(
+        Service__handler(kernel, &process, SERVICE_QUEUE_DATA_AVAILABLE, id, 0, 0, 0),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_OK, status);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_PTR(server, current_running_process());
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    TEST_ASSERT_EQUAL_UINT64(0, CPUStub__reschedule_count());
+    TEST_ASSERT_FALSE(context_switched_with_scheduler_lock());
+}
+
 void test_queue_notification_wakes_remote_waiter_and_coalesces_reschedule(void)
 {
     ProcessPtr remote_server = dummy_process(40, 1, PROC_STATE_READY);
@@ -726,16 +858,18 @@ void test_queue_notification_wakes_remote_waiter_and_coalesces_reschedule(void)
     QueueMessage message = {0};
     assert_push_success(&sender, &message);
     test_cpu_time_usec = 7000;
+    Optional(ProcessPtr) process = Some(ProcessPtr, client);
     match_result(
-        Scheduler__queue_data_available(kernel->scheduler, client, id),
-        success(notification)
+        Service__handler(kernel, &process, SERVICE_QUEUE_DATA_AVAILABLE, id, 0, 0, 0),
+        success(status)
         {
-            TEST_ASSERT_TRUE(notification.reschedule);
-            TEST_ASSERT_EQUAL_UINT64(1, notification.cpu);
+            TEST_ASSERT_EQUAL(SERVICE_OK, status);
         },
         error_test_fail()
     );
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, remote_server->state);
+    TEST_ASSERT_EQUAL_UINT64(1, CPUStub__reschedule_count());
+    TEST_ASSERT_EQUAL_UINT64(1, CPUStub__rescheduled_cpu());
     ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&remote_server->queue_wait_usage);
     TEST_ASSERT_EQUAL_UINT64(1, usage.activity_wakes);
     TEST_ASSERT_EQUAL_UINT64(7000, usage.parked_usec);

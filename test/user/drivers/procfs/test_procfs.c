@@ -5,7 +5,17 @@
 #include "../../../../user/drivers/procfs/procfs.h"
 
 static ProcessRegistry registry;
+static ProcfsContext procfs_context;
 static FilesystemDriver driver;
+static const uint8_t kernel_trace[] = "kernel trace snapshot\n";
+
+static Result(KernelTraceSize) load_kernel_trace(uint8_t * destination, size_t capacity)
+{
+    size_t size = sizeof(kernel_trace) - 1U;
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT64(size, capacity);
+    memcpy(destination, kernel_trace, size);
+    return Success(KernelTraceSize, size);
+}
 
 Result(Anything) mem_alloc_bytes(size_t size)
 {
@@ -45,7 +55,8 @@ void setUp(void)
     ProcessRegistry__set(&registry, 3, 0, &record);
     ProcessRegistry__set_count(&registry, 3, 1);
     FilesystemOperations operations = Procfs__operations();
-    driver = FilesystemDriver__new(&registry, &operations);
+    procfs_context = ProcfsContext__new(&registry, load_kernel_trace);
+    driver = FilesystemDriver__new(&procfs_context, &operations);
 }
 
 void tearDown(void)
@@ -126,9 +137,11 @@ void test_procfs_lists_processes_and_read_only_files_with_real_ownership(void)
 {
     IORequest request = request_for(IO_REQUEST_LIST_DIR, &bstr("/"));
     IOReply reply = FilesystemDriver__execute(&driver, &request);
-    TEST_ASSERT_EQUAL_STRING("42", reply.directory.entries[0].name);
-    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0555, reply.directory.entries[0].mode);
-    TEST_ASSERT_EQUAL(2, reply.directory.entries[0].user_id);
+    TEST_ASSERT_EQUAL_STRING("ktrace", reply.directory.entries[0].name);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.directory.entries[0].mode);
+    TEST_ASSERT_EQUAL_STRING("42", reply.directory.entries[1].name);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0555, reply.directory.entries[1].mode);
+    TEST_ASSERT_EQUAL(2, reply.directory.entries[1].user_id);
     request = request_for(IO_REQUEST_LIST_DIR, &bstr("/42"));
     const char * names[] = {"status", "cpu", "memory", "queue-wait", "ipc"};
     for (uint64_t index = 0; index < 5; index++)
@@ -143,6 +156,13 @@ void test_procfs_lists_processes_and_read_only_files_with_real_ownership(void)
     TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).directory.count);
 }
 
+void test_procfs_exposes_kernel_trace_snapshot(void)
+{
+    ProcfsFileContents contents = read_file_contents(&bstr("/ktrace"));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(kernel_trace) - 1U, contents.length);
+    TEST_ASSERT_EQUAL_MEMORY(kernel_trace, contents.data, contents.length);
+}
+
 void test_procfs_reports_ipc_counters_and_unavailable_mapping(void)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("diagnostics=unavailable\n"), read_file(&bstr("/42/ipc")));
@@ -154,7 +174,6 @@ void test_procfs_reports_ipc_counters_and_unavailable_mapping(void)
     IODiagnostics__record(IO_DIAGNOSTIC_UART_EMPTY, 99);
     IODiagnostics__record(IO_DIAGNOSTIC_BACKEND_READS, 101);
     IODiagnostics__record(IO_DIAGNOSTIC_BACKEND_EMPTY, 98);
-    IODiagnostics__record(IO_DIAGNOSTIC_WARDEN_RELAYS, 202);
     IODiagnostics__record(IO_DIAGNOSTIC_WAIT_ENTRIES, 300);
     IODiagnostics__record(IO_DIAGNOSTIC_UNCHANGED_WAKES, 250);
     IODiagnostics__record(IO_DIAGNOSTIC_BLOCK_CACHE_HITS, 77);
@@ -176,7 +195,7 @@ void test_procfs_reports_ipc_counters_and_unavailable_mapping(void)
     ProcessRegistry__set(&registry, 3, 1, &record);
     ProcessRegistry__set_count(&registry, 3, 2);
     static const char expected[] = "uart_bytes=7\nuart_irqs=2\nuart_reads=100\nuart_empty=99\n"
-                                   "backend_reads=101\nbackend_empty=98\nwarden_relays=202\n"
+                                   "backend_reads=101\nbackend_empty=98\n"
                                    "block_submissions=4\nblock_blocks=32\nblock_failures=1\n"
                                    "block_cache_hits=77\nblock_cache_misses=11\nblock_cache_evictions=3\n"
                                    "inode_cache_hits=55\ninode_cache_misses=9\ninode_cache_evictions=2\n"

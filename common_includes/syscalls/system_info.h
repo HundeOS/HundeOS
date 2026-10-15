@@ -2,8 +2,20 @@
 #define HUND_SYSCALLS_SYSTEM_INFO_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "types/result.h"
+
+#define KERNEL_TRACE_CAPACITY (12U * 1024U)
+
+typedef size_t KernelTraceSize;
+ResultDef(KernelTraceSize);
+
+typedef enum SystemInfoOperation
+{
+    SYSTEM_INFO_READ_SETTINGS = 1,
+    SYSTEM_INFO_READ_KERNEL_TRACE = 2,
+} SystemInfoOperation;
 
 typedef struct SystemSettings
 {

@@ -7,7 +7,6 @@
 typedef enum KernelChannelPhase
 {
     KERNEL_CHANNEL_CONNECTING,
-    KERNEL_CHANNEL_OPENING,
     KERNEL_CHANNEL_OPEN,
     KERNEL_CHANNEL_CLOSED,
 } KernelChannelPhase;
@@ -16,11 +15,8 @@ typedef struct KernelChannel
 {
     Channel channel;
     KernelChannelPhase phase;
-    QueueEndpointID target;
     ProcessID server_pid;
     ProcessID origin_pid;
-    Address payload_address;
-    uint64_t payload_generation;
 } KernelChannel;
 
 typedef KernelChannel * KernelChannelPtr;

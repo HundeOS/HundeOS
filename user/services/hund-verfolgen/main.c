@@ -78,6 +78,7 @@ FixedArrayBodyDefine(TraceSources);
 
 typedef struct TraceService
 {
+    ConstProcessRegistryPtr process_registry;
     QueueArrivalsPtr arrivals;
     TraceClients clients;
     TraceSources sources;
@@ -93,9 +94,10 @@ typedef TraceService * TraceServicePtr;
 static bool TraceSource__drain(TraceServicePtr self, TraceSourcePtr source);
 static bool TraceService__flush_io(TraceServicePtr self);
 
-static TraceService TraceService__new(QueueArrivalsPtr arrivals)
+static TraceService TraceService__new(ConstProcessRegistryPtr process_registry, QueueArrivalsPtr arrivals)
 {
     return (TraceService){
+        .process_registry = process_registry,
         .arrivals = arrivals,
         .clients = TraceClients__new(),
         .sources = TraceSources__new(),
@@ -341,7 +343,7 @@ static bool TraceService__accept_clients(TraceServicePtr self, QueueParticipantI
                 continue;
             }
             match_result(
-                ChannelServer__accept(connection, warden_pid),
+                ChannelServer__accept(connection),
                 success(channel)
                 {
                     TraceClient client = TraceClient__new(&channel);
@@ -498,7 +500,7 @@ static bool TraceService__reap_io(TraceServicePtr self)
         {
             bool live = true;
             match_result(
-                ProcessRegistry__find(ProcessRegistry__shared(), source.pid),
+                ProcessRegistry__find(self->process_registry, source.pid),
                 success(record)
                 {
                     match_optional(
@@ -613,6 +615,18 @@ int main(void)
     {
         return 1;
     }
+    ConstProcessRegistryPtr process_registry;
+    match_result(
+        process_registry_map(),
+        success(mapped)
+        {
+            process_registry = mapped;
+        },
+        error(code, message)
+        {
+            return 1;
+        }
+    );
 
     match_result(
         Queue__listen(&bstr(HUND_VERFOLGEN_SERVICE)),
@@ -623,7 +637,7 @@ int main(void)
                 return 1;
             }
             static TraceService service;
-            service = TraceService__new(arrivals);
+            service = TraceService__new(process_registry, arrivals);
             Channel__prepare_wait();
             while (true)
             {

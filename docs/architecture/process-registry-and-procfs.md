@@ -16,7 +16,10 @@ Hardware information stays at `/boot/sysinfo`.
 
 ## Published Files
 
-- `/proc` lists published PIDs.
+- `/proc` lists the kernel trace snapshot and published PIDs.
+- `/proc/ktrace`: newest bytes retained by the optional kernel memory-trace
+  ring. Opening the file takes a non-destructive snapshot through the
+  hund-only system-information syscall.
 - `/proc/<pid>/status`: PID, UID/GID, name, scheduler state, wait reason,
   process class, assigned CPU, and sample timestamp.
 - `/proc/<pid>/cpu`: cumulative active and scheduled microseconds plus CPU
@@ -25,8 +28,9 @@ Hardware information stays at `/boot/sysinfo`.
 - `/proc/<pid>/queue-wait`: cumulative queue-park diagnostics (see below).
 - `/proc/<pid>/ipc`: userspace UART, backend-read, relay, and event-wait counters.
 
-Directories are read-only `0555`; files are read-only `0444`. Entries carry
-the process's numeric credentials. There is no write or execute interface.
+Directories are read-only `0555`; files are read-only `0444`. Per-process
+entries carry the process's numeric credentials; `ktrace` is owned by root.
+There is no write or execute interface.
 Open files retain a snapshot; exit removes subsequent lookups, not the bytes
 already held by an open file. Existing filesystem handle/session authentication
 applies. Handle enumeration is deferred.
@@ -120,8 +124,6 @@ inputs. A process without that mapping reports `diagnostics=unavailable`.
 - `backend_empty`: completed backend reads returning `IO_WAIT_FOR_DATA`.
   Repeated submissions and empty completions expose retry traffic; these are
   aggregated across the process's backends, not only UART.
-- `warden_relays`: successful request forwards to Channel servers, not failed
-  enqueue attempts or replies.
 - `block_submissions`: virtio block requests notified to the device. A logical
   Channel transfer can produce multiple submissions when its shared buffer is
   not physically contiguous.
@@ -202,7 +204,17 @@ Accounting does not change buffer ownership or add reference-counted lifetimes.
 `0x78000000`. Its size is derived from the layout and rounded to pages, rather
 than constrained to one page. Capacity matches all 16 scheduler slots, each with
 2048 processes plus its idle process. Per-CPU counts avoid scanning empty slots.
-Every process maps the same kernel-owned backing read-only and non-executable.
+
+The registry is not part of every process address space. A reader calls
+`SYSCALL_PROCESS_REGISTRY_MAP`; the kernel maps the shared backing read-only and
+non-executable and returns the userspace address. Repeating the syscall in the
+same address space returns the existing address. A forked child must request its
+own mapping, so a cached parent pointer is not implicitly valid in the child.
+The backing allocation and fixed virtual address are 2 MiB aligned. AArch64 and
+Sv39 therefore use 2 MiB block leaves for the aligned body and 4 KiB leaves only
+for the final partial block, avoiding thousands of leaf PTEs for processes that
+actually consume the registry. Processes that do not call the syscall pay no
+registry page-table cost.
 
 Names use `BString`; state, wait reason, class, credentials and usage are typed
 fields. `AtomicRecordArray` provides individually consistent records using atomic

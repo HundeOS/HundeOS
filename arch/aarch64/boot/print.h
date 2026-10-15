@@ -8,6 +8,7 @@ __BOOT__(void) _print(const char * str);
 __BOOT__(void) _print_base(uint64_t value, const int base);
 __BOOT__(void) _print_unsigned(uint64_t value);
 __BOOT__(void) _print_binary(uint64_t value);
+void _send(unsigned int c);
 
 #ifdef __BOOT_DEBUG
 #define boot_debug_print(str) _print(str)

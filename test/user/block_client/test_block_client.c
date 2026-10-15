@@ -100,13 +100,13 @@ void test_block_client_reuses_channel_for_describe_write_and_multisector_read(vo
                              unwrap_result(BlockClient__write(&client, 3, 8, (Address)expected, sizeof(expected)), 0));
     TEST_ASSERT_EQUAL_UINT64(8, unwrap_result(BlockClient__read(&client, 3, 8, (Address)actual, sizeof(actual)), 0));
     TEST_ASSERT_EQUAL_MEMORY(expected, actual, sizeof(expected));
-    TEST_ASSERT_EQUAL_UINT64(1, allocated_pages);
+    TEST_ASSERT_EQUAL_UINT64(0, allocated_pages);
     TEST_ASSERT_EQUAL_UINT(1, authorizations);
     TEST_ASSERT_EQUAL_UINT(2, transfers);
     TEST_ASSERT_EQUAL(CHANNEL_OK, BlockClient__close(&client));
     TEST_ASSERT_EQUAL(CHANNEL_OK, BlockClient__close(&client));
     ChannelFixture__drain();
-    TEST_ASSERT_EQUAL_UINT64(1, released_pages);
+    TEST_ASSERT_EQUAL_UINT64(0, released_pages);
     TEST_ASSERT_EQUAL_UINT64(0, BlockServerConnections__len(&block_server.connections));
 }
 
@@ -171,7 +171,7 @@ void test_block_server_rejects_stale_lease_and_buffer_overflow_before_hardware_a
 {
     BlockClient client = open_client();
     TEST_ASSERT_EQUAL_UINT64(8, Channel__server_pid(&client.channel));
-    TEST_ASSERT_NOT_EQUAL(Channel__server_pid(&client.channel), Queue__peer_pid(&client.channel.control));
+    TEST_ASSERT_EQUAL(Channel__server_pid(&client.channel), Queue__peer_pid(&client.channel.control));
     BlockChannelRequest request = BlockChannelRequest__new(BLOCK_PROTOCOL_READ, 0);
     request.buffer = client.buffers.read.id + BUFFER_LIMIT;
     request.count = 1;

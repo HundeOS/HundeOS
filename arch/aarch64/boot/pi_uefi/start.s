@@ -100,7 +100,7 @@ el1_entry:
     mov     x2, x21
     mov     x3, x22
     mov     x4, x23
-    bl      pi_uefi_set_entry_args
+    bl      BootPlatform__set_entry_args
     bl primary_booted
 
 hang:

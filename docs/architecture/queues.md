@@ -4,9 +4,9 @@ Kernel executable-loader clients use the same protected connection transport.
 `QUEUE_KERNEL_PID` is reserved for connections created by `Queues__connect_kernel`;
 userspace cannot request that identity. The kernel retains backing addresses while
 the server receives its usual protected mappings. Kernel-held backing is released
-only after both endpoints detach. The warden may allocate a shared payload with
-this reserved peer only while it has a live kernel connection. Allocation
-generations distinguish reused shared-page slots. See
+only after both endpoints detach. Kernel Channels use the directional data areas
+inside these same Queue pages; they do not allocate a warden-owned payload.
+Connection generations distinguish reused slots. See
 [kernel Channel clients](channels-and-event-queues.md) for access checks.
 
 `Queue` is an internal transport primitive used to implement `Channel`. It is
@@ -24,9 +24,8 @@ records the lower-level transport implementation and its security invariants.
 The kernel-mediated queue API is described alongside channel lifecycle in
 [Channels and event queues](channels-and-event-queues.md). Its API and limits
 are described below. The remaining architectural sections describe the target
-design. The warden and channel echo demo now use these connections and private
-control records. A protected general kernel-event stream remains unimplemented;
-the warden currently uses a bounded multi-connection scan around fibre/event waits.
+design. The warden uses a protected temporary connection only to authorize and
+delegate each direct client-to-service Channel.
 
 This foundation is a prerequisite for authenticated services such as
 [`hund-unterbrict`](interrupt-service.md), not an implementation of IRQ routing
@@ -50,12 +49,14 @@ consumption and rings the sender's shared-memory doorbell, but does not make a
 syscall. The kernel derives the receiver from the live connection rather than
 accepting a userspace PID. If that receiver is parked on a kernel queue wait whose
 doorbell or live state has changed, the kernel makes it runnable
-immediately and sends its CPU a reschedule IPI. A ready or interrupted receiver
-with an armed userspace wait publication is also poked, forcing an immediate
-scheduling decision instead of waiting for the next timer tick. A running receiver
-is not interrupted: the queue publication's architecture event already releases
-its event wait. The notification decision uses the kernel's live unread-queue
-state, not the userspace wait publication.
+immediately. A receiver on another CPU gets a reschedule IPI. On a single-CPU
+system, a notification that wakes the local receiver makes the notifying process
+yield through normal scheduler selection instead of waiting for the next timer
+tick. A ready or interrupted receiver with an armed userspace wait publication is
+handled the same way. A running receiver is not interrupted: the queue
+publication's architecture event already releases its event wait. The notification
+decision uses the kernel's live unread-queue state, not the userspace wait
+publication.
 If the peer has not parked yet, the park-time generation and live-state recheck
 observes the progress and refuses to sleep. Timer and voluntary-yield scheduler
 entries rescan parked processes against current kernel state, covering consumption
@@ -99,7 +100,7 @@ The readiness checks below also support fallback selection.
 
 At process selection, runnable processes with unread incoming messages rank above
 all runnable processes without messages, including realtime-class processes.
-The preferred FIFO is selected first; class and longest-waiting ordering applies
+The refreshed preferred queue is selected first; class and longest-waiting ordering applies
 to fallback selection. Preferred processing can continue after dequeue, up to
 its budget or next shared wait. A ticketed predecessor may retain its CPU through
 a short warm wait. Kernel-blocked processes do not become runnable merely because
@@ -108,7 +109,7 @@ a message exists.
 The kernel checks its existing queue backing mappings, comparing the sender's
 published cursor with the receiver's acknowledgement on the opposite page.
 Only live, accepted connections with a pending count within queue capacity count.
-The check applies symmetrically to requests, replies, and warden relay messages,
+The check applies symmetrically to direct requests and replies,
 without interpreting message kinds. Pending service events and the IRQ/buffer
 manager notification queues also qualify. Unread transport on any connection
 owned by the process overrides an unchanged userspace wait publication. The
@@ -323,7 +324,7 @@ MMIO mapping powers is also outside this page-isolation guarantee.
 
 Run `queue_test server &` from the root shell, then `queue_test` for 128 echo
 round trips on one connection. No boot configuration is changed automatically.
-The program is a transport test, not the warden-managed channel echo service.
+The program is a transport test, not the warden-authorized Channel echo service.
 `queue_test probe-identity` and `queue_test probe-peer` deliberately attempt
 writes to protected pages and should terminate with process permission faults.
 Run a normal client afterwards to verify the server continues after cleanup.
@@ -379,9 +380,8 @@ those references alive until that CPU has stopped using them.
 Owner-CPU teardown removes listeners, marks protected connections closed and
 unmaps the exiting endpoint. A surviving endpoint retains its queue pages until
 it closes its handle, so it can observe the closed flag without accessing freed
-storage. Only then can the backing be freed or its slot reused. These are the
-protected transport queue rules; warden-managed channel buffers have their own
-lifecycle described in [channels and event queues](channels-and-event-queues.md).
+storage. Only then can the backing be freed or its slot reused. Channel inline
+data follows this same kernel-owned Queue lifecycle.
 
 Scheduler tests cover queued remote requests, timer-only delivery, blocked and
 sleeping targets, a signal arriving during context selection, pending IRQ
@@ -430,10 +430,12 @@ The target connection flow is:
    queues and accepts or rejects it. Rejection or failure during setup releases
    partial mappings and reservations; connection attempts must not grow memory
    without bound.
-6. Channel internals exchange control messages through their mapped queues with
-   userspace atomics and event notification. Service protocols exchange requests
-   and replies through `Channel`, not through this transport API. Reusing a
-   channel does not require a syscall for each message.
+6. The warden may delegate an authenticated client from its accepted temporary
+   control Queue to a service endpoint. The kernel marks that new connection as
+   Channel-authorized; raw client connections do not receive this mark.
+7. Channel internals exchange bounded directional data and control messages
+   directly between client and service. Reusing a Channel does not involve the
+   warden or require a kernel copy for each message.
 
 The server-side collection is where all client queues land logically; it is
 not another shared ring into which all clients can write. A client may corrupt
@@ -451,16 +453,12 @@ a kernel-looking message in a client queue is still an untrusted client message.
 
 Normal clients dispose of buffers and other resources through the operations
 defined by their service protocol. A generic protocol close is not required.
-They separately close the channel session when it is no longer needed.
+They separately close the direct channel session when it is no longer needed.
 Protocol resource release does not require session closure; session closure
 must also clean up resources omitted by the client. A kernel-originated
-process-exit queue additionally informs the channel manager of every normal or
-abnormal process termination, including exits that omit resource cleanup.
-The manager reconciles remaining PID-owned resources and notifies affected
-services through channels. Queue saturation must not silently discard exits;
-pending records must remain recoverable. Close and exit processing must be
-idempotent. This required delivery is not yet provided by the current warden's
-transport-closure scan.
+process exit closes its Queue endpoints authoritatively. Surviving services
+observe closure and reconcile their PID-owned protocol resources. Close and exit
+processing must be idempotent.
 
 Logical channels identify clients by PID and services by `BString` service
 identifier. Transport peer PIDs identify current mappings; they do not replace
@@ -481,12 +479,12 @@ that the current scheduler already supports this arrangement.
 ## Ownership and authorization
 
 Kernel mediation is for establishing identity, access rights, and mappings,
-not for copying or routing every message. `hundekanal-warter` remains responsible
-for higher-level channel lifecycle, reuse policy, and close housekeeping. Its
-own control connection must use the protected establishment path too; securing
-only payload queues would leave channel allocation requests spoofable.
+not for copying or routing every message. `hundekanal-warter` authorizes setup
+and asks the kernel to delegate the authenticated client directly to the target.
+It owns no established-Channel data path or close state. Its temporary control
+connection uses the same protected establishment path.
 
-The split between kernel-created bootstrap queues and warden-managed channels
+The split between kernel-created bootstrap queues and warden-authorized channels
 must be made explicit in the implementation. Connection establishment must not
 depend on first sending an unauthenticated request through the old global queue.
 Any manager access to connection memory must be explicit, not a mapping granted
@@ -499,8 +497,8 @@ and caches, binding the result to the authenticated connection and process
 incarnation. Tokens must not be exposed through the old global queue.
 
 On exit or disconnect, revoke mappings before recycling backing pages for new
-participants. Keep pending exit/arrival records recoverable under backpressure,
-and use generations to reject stale descriptors and acknowledgements. Resource
+participants. Keep pending arrival records recoverable under backpressure,
+and use generations to reject stale descriptors and cursor acknowledgements. Resource
 limits and fair servicing are still required: isolated queues prevent one
 client from overwriting another's messages, not all forms of denial of service.
 

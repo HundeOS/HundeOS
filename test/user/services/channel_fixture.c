@@ -21,11 +21,10 @@ typedef struct TestTransport
     IpcDoorbell server_doorbell;
     bool client_closed;
     bool server_closed;
+    QueueConnectionID delegated_from;
 } TestTransport;
 
 static TestTransport transports[QUEUE_LIMIT];
-static ChannelPayload payloads[QUEUE_LIMIT];
-static bool pages_live[QUEUE_LIMIT];
 static QueueArrivals warden_arrivals;
 static QueueArrivals echo_arrivals;
 static ChannelSessions exchanges;
@@ -35,6 +34,7 @@ static QueueParticipantID current_pid;
 static QueueHandleGeneration next_generation;
 static uint64_t allocated_pages;
 static uint64_t released_pages;
+static uint64_t cancelled_delegations;
 static uint64_t last_allocated_client;
 static uint64_t waits;
 static bool fail_allocation;
@@ -68,8 +68,6 @@ static void ChannelFixture__push(QueuePtr queue, ConstQueueMessagePtr message)
 static void ChannelFixture__reset(void)
 {
     memset(transports, 0, sizeof(transports));
-    memset(payloads, 0, sizeof(payloads));
-    memset(pages_live, 0, sizeof(pages_live));
     warden_arrivals = (QueueArrivals){.endpoint = 16};
     echo_arrivals = (QueueArrivals){.endpoint = 33};
     exchanges = ChannelSessions__new();
@@ -87,6 +85,7 @@ static void ChannelFixture__reset(void)
     next_generation = 4;
     allocated_pages = 0;
     released_pages = 0;
+    cancelled_delegations = 0;
     last_allocated_client = 0;
     waits = 0;
     fail_allocation = false;
@@ -210,6 +209,69 @@ Result(Queue) Queue__accept(QueueConnectionID id)
                          &transport->client_doorbell, &ChannelFixture__record_notification);
 }
 
+Result(Queue) Queue__attach_existing(QueueConnectionID id)
+{
+    TestTransport * transport = &transports[id % QUEUE_LIMIT];
+    if (transport->identity.connection != id)
+    {
+        return Error(Queue, bstr("Invalid connection"), QUEUE_INVALID);
+    }
+    IpcDoorbellPtr peer = current_pid == transport->identity.client_pid ? &transport->server_doorbell
+                                                                        : &transport->client_doorbell;
+    return Queue__attach(&transport->identity, &transport->client, &transport->server, id, current_pid, peer,
+                         &ChannelFixture__record_notification);
+}
+
+Result(QueueConnectionID) Queue__delegate(QueueConnectionID client_connection, QueueEndpointID endpoint)
+{
+    TEST_ASSERT_EQUAL_UINT64(7, current_pid);
+    TestTransport * control = &transports[client_connection % QUEUE_LIMIT];
+    if (control->identity.connection != client_connection || control->identity.server_pid != current_pid ||
+        !control->identity.accepted)
+    {
+        return Error(QueueConnectionID, bstr("Denied"), QUEUE_DENIED);
+    }
+    QueueParticipantID caller = current_pid;
+    current_pid = control->identity.client_pid;
+    connect_as_kernel = current_pid == QUEUE_KERNEL_PID;
+    kernel_origin_pid = control->identity.origin_pid;
+    Result(Queue) direct = Queue__connect(endpoint);
+    connect_as_kernel = false;
+    current_pid = caller;
+    match_result(
+        direct,
+        success(queue)
+        {
+            TestTransport * delegated = &transports[Queue__connection(&queue) % QUEUE_LIMIT];
+            delegated->identity.channel = 1;
+            delegated->delegated_from = client_connection;
+            return Success(QueueConnectionID, Queue__connection(&queue));
+        },
+        error(code, message)
+        {
+            return Error(QueueConnectionID, message, code);
+        }
+    );
+    return Error(QueueConnectionID, bstr("Delegation failed"), QUEUE_INVALID);
+}
+
+QueueCode Queue__cancel_delegation(QueueConnectionID client_connection, QueueConnectionID delegated_connection)
+{
+    TEST_ASSERT_EQUAL_UINT64(7, current_pid);
+    TestTransport * control = &transports[client_connection % QUEUE_LIMIT];
+    TestTransport * delegated = &transports[delegated_connection % QUEUE_LIMIT];
+    if (control->identity.connection != client_connection || control->identity.server_pid != current_pid ||
+        delegated->identity.connection != delegated_connection || delegated->delegated_from != client_connection)
+    {
+        return QUEUE_DENIED;
+    }
+    delegated->identity.closed = 1;
+    delegated->client_closed = true;
+    delegated->server_closed = true;
+    cancelled_delegations++;
+    return QUEUE_OK;
+}
+
 QueueCode QueueConnection__close(QueueConnectionID id)
 {
     TestTransport * transport = &transports[id % QUEUE_LIMIT];
@@ -230,52 +292,6 @@ QueueCode QueueConnection__close(QueueConnectionID id)
         );
     }
     return QUEUE_OK;
-}
-
-Result(Anything) mem_alloc_shared_page(uint64_t first_peer, uint64_t second_peer)
-{
-    TEST_ASSERT_EQUAL_UINT64(7, current_pid);
-    TEST_ASSERT_EQUAL_UINT64(8, second_peer);
-    last_allocated_client = first_peer;
-    if (fail_allocation)
-    {
-        return Error(Anything, bstr("Allocation failed"), MEM_ALLOCATION_FAILED);
-    }
-    for (uint64_t index = 0; index < QUEUE_LIMIT; index++)
-    {
-        if (pages_live[index])
-        {
-            continue;
-        }
-        pages_live[index] = true;
-        payloads[index] = (ChannelPayload){0};
-        allocated_pages++;
-        return Success(Anything, (Anything)&payloads[index]);
-    }
-    return Error(Anything, bstr("Full"), MEM_ALLOCATION_FAILED);
-}
-
-MemStatus mem_release_shared_page(uint64_t address)
-{
-    TEST_ASSERT_EQUAL_UINT64(7, current_pid);
-    if (fail_release)
-    {
-        return MEM_FREE_FAILED;
-    }
-    for (uint64_t index = 0; index < QUEUE_LIMIT; index++)
-    {
-        if (address != (uint64_t)&payloads[index])
-        {
-            continue;
-        }
-        TEST_ASSERT_TRUE(pages_live[index]);
-        pages_live[index] = false;
-        released_pages++;
-        memset(&payloads[index], 0xdd, sizeof(ChannelPayload));
-        return MEM_OK;
-    }
-    TEST_FAIL_MESSAGE("Unknown managed page");
-    return MEM_FREE_FAILED;
 }
 
 static void ChannelFixture__pump(void)

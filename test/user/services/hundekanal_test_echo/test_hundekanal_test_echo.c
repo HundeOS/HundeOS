@@ -11,82 +11,64 @@ void tearDown(void)
 
 void test_echo_copies_binary_payload_without_writing_past_length(void)
 {
-    Queue client = ChannelFixture__client();
-    QueueMessage opened = ChannelFixture__open(&client);
-    TEST_ASSERT_EQUAL(CHANNEL_RESPONSE_OPEN, opened.kind);
-    ChannelPayloadPtr payload = (ChannelPayloadPtr)opened.arg0;
-    payload->request[0] = 'a';
-    payload->request[1] = 0;
-    payload->request[2] = 'z';
-    payload->reply[3] = 0x7f;
-    QueueMessage submit = ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, 3, client.connection);
-    submit.request = (RequestMetadata){.generation = 1, .origin_pid = 42};
-    ChannelFixture__push(&client, &submit);
-    QueueMessage reply = ChannelFixture__receive(&client);
-    TEST_ASSERT_EQUAL(CHANNEL_RESPONSE_REPLIED, reply.kind);
-    TEST_ASSERT_EQUAL_UINT64(3, reply.arg1);
-    TEST_ASSERT_EQUAL_MEMORY(payload->request, payload->reply, 3);
-    TEST_ASSERT_EQUAL_HEX8(0x7f, payload->reply[3]);
-    TEST_ASSERT_EQUAL(QUEUE_OK, QueueConnection__close(client.connection));
-    ChannelFixture__drain();
+    Channel channel = unwrap_result(Channel__open(&directory, &bstr("hundekanal-test-echo")), ((Channel){0}));
+    uint8_t request[] = {'a', 0, 'z'};
+    uint8_t reply[] = {0, 0, 0, 0x7f};
+
+    match_result(
+        Channel__submit(&channel, request, sizeof(request), reply, sizeof(reply)),
+        success(size)
+        {
+            TEST_ASSERT_EQUAL_UINT64(sizeof(request), size);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_MEMORY(request, reply, sizeof(request));
+    TEST_ASSERT_EQUAL_HEX8(0x7f, reply[3]);
 }
 
 void test_echo_connection_lookup_keeps_distinct_handles_after_removal(void)
 {
-    TEST_ASSERT_FALSE(EchoConnections__contains(&echoes, 1));
-    current_pid = 7;
-    Result(Queue) first_result = Queue__connect(echo_arrivals.endpoint);
-    Queue first = unwrap_result(first_result, (Queue){0});
-    Result(Queue) second_result = Queue__connect(echo_arrivals.endpoint);
-    Queue second = unwrap_result(second_result, (Queue){0});
+    Channel first = unwrap_result(Channel__open(&directory, &bstr("hundekanal-test-echo")), ((Channel){0}));
+    Channel second = unwrap_result(Channel__open(&directory, &bstr("hundekanal-test-echo")), ((Channel){0}));
     ChannelFixture__drain();
+
     TEST_ASSERT_EQUAL_UINT64(2, EchoConnections__len(&echoes));
-    TEST_ASSERT_TRUE(EchoConnections__contains(&echoes, first.connection));
-    TEST_ASSERT_TRUE(EchoConnections__contains(&echoes, second.connection));
-    TEST_ASSERT_FALSE(EchoConnections__contains(&echoes, UINT64_MAX));
-    TEST_ASSERT_EQUAL(QUEUE_OK, QueueConnection__close(first.connection));
+    TEST_ASSERT_TRUE(EchoConnections__contains(&echoes, Queue__connection(&first.control)));
+    TEST_ASSERT_TRUE(EchoConnections__contains(&echoes, Queue__connection(&second.control)));
+    TEST_ASSERT_EQUAL(CHANNEL_OK, Channel__close(&first));
     ChannelFixture__drain();
-    TEST_ASSERT_FALSE(EchoConnections__contains(&echoes, first.connection));
-    TEST_ASSERT_TRUE(EchoConnections__contains(&echoes, second.connection));
     TEST_ASSERT_EQUAL_UINT64(1, EchoConnections__len(&echoes));
-    TEST_ASSERT_EQUAL(QUEUE_OK, QueueConnection__close(second.connection));
+    TEST_ASSERT_EQUAL(CHANNEL_OK, Channel__close(&second));
     ChannelFixture__drain();
     TEST_ASSERT_EQUAL_UINT64(0, EchoConnections__len(&echoes));
 }
 
-void test_echo_rejects_direct_non_warden_connection(void)
+void test_echo_rejects_connection_not_authorized_by_warden(void)
 {
-    Result(Queue) connected = Queue__connect(echo_arrivals.endpoint);
-    Queue rogue = unwrap_result(connected, (Queue){0});
+    Queue rogue = unwrap_result(Queue__connect(echo_arrivals.endpoint), ((Queue){0}));
     ChannelFixture__pump();
     TEST_ASSERT_EQUAL(QUEUE_CLOSED, Queue__status(&rogue));
     TEST_ASSERT_EQUAL_UINT64(0, EchoConnections__len(&echoes));
 }
 
-void test_echo_rejects_oversized_request_without_touching_payload(void)
+void test_echo_rejects_oversized_direct_request(void)
 {
-    current_pid = 7;
-    Result(Queue) connected = Queue__connect(echo_arrivals.endpoint);
-    Queue warden = unwrap_result(connected, (Queue){0});
-    ChannelFixture__pump();
-    QueueMessage request = ChannelControlMessage__new(CHANNEL_REQUEST_SERVE, 1, CHANNEL_PAYLOAD_CAPACITY, 123);
-    ChannelFixture__push(&warden, &request);
-    QueueMessage reply = ChannelFixture__receive(&warden);
+    Queue control = ChannelFixture__client();
+    QueueMessage opened = ChannelFixture__open(&control);
+    Queue direct = unwrap_result(Queue__attach_existing(opened.arg0), ((Queue){0}));
+    TEST_ASSERT_EQUAL(QUEUE_OK, QueueConnection__close(Queue__connection(&control)));
+    Queue__wait_writable(&direct);
+
+    QueueMessage request =
+        ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, CHANNEL_PAYLOAD_CAPACITY,
+                                   Queue__connection(&direct));
+    ChannelFixture__push(&direct, &request);
+    QueueMessage reply = ChannelFixture__receive(&direct);
     TEST_ASSERT_EQUAL(CHANNEL_RESPONSE_FAILED, reply.kind);
-    TEST_ASSERT_EQUAL_UINT64(123, reply.arg2);
 }
 
 void test_echo_idle_scan_reports_no_work(void)
 {
     TEST_ASSERT_FALSE(EchoConnections__step(&echoes, &echo_arrivals, 7));
-}
-
-void test_echo_rejects_connection_when_warden_is_not_registered(void)
-{
-    current_pid = 7;
-    Result(Queue) connected = Queue__connect(echo_arrivals.endpoint);
-    Queue warden = unwrap_result(connected, (Queue){0});
-    current_pid = 8;
-    TEST_ASSERT_TRUE(EchoConnections__step(&echoes, &echo_arrivals, 0));
-    TEST_ASSERT_EQUAL(QUEUE_CLOSED, Queue__status(&warden));
 }

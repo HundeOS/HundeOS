@@ -5,10 +5,14 @@
 #include <stdbool.h>
 #include "arch/basic_io.h"
 #include "arch/varargs.h"
+#include "trace_buffer.h"
 #include "../common/types/bstring.h"
 
 static void trace_puts(const char * str)
 {
+#ifdef KERNEL_MEMORY_TRACE
+    KernelTrace__append(str);
+#endif
     DebugTrace__puts(str);
 }
 

@@ -16,15 +16,23 @@ void BasicIO__put_int(int num)
 }
 
 #ifdef KERNEL_SERIAL_TRACE
+static volatile uint32_t trace_write_lock = 0;
+
+static bool TraceUart__try_lock(void)
+{
+    return __atomic_exchange_n(&trace_write_lock, 1u, __ATOMIC_ACQUIRE) == 0u;
+}
+
+static void TraceUart__unlock(void)
+{
+    __atomic_store_n(&trace_write_lock, 0u, __ATOMIC_RELEASE);
+}
+
 #ifdef BSP_VIRT
 #define QEMU_VIRT_TRACE_UART_OFFSET 0x40000ULL
-#else
-#error "KERNEL_SERIAL_TRACE only has a trace UART configured for BSP_VIRT"
-#endif
 
 extern const uint64_t __mmio_start[];
 static bool trace_uart_initialized = false;
-static volatile uint32_t trace_write_lock = 0;
 
 static volatile uint32_t * TraceUart__reg(uint64_t offset)
 {
@@ -52,16 +60,6 @@ static void TraceUart__init(void)
     trace_uart_initialized = true;
 }
 
-static bool TraceUart__try_lock(void)
-{
-    return __atomic_exchange_n(&trace_write_lock, 1u, __ATOMIC_ACQUIRE) == 0u;
-}
-
-static void TraceUart__unlock(void)
-{
-    __atomic_store_n(&trace_write_lock, 0u, __ATOMIC_RELEASE);
-}
-
 static void TraceUart__put_char(char c)
 {
     const uint64_t max_wait = 100000;
@@ -77,6 +75,7 @@ static void TraceUart__put_char(char c)
     }
     __asm__ volatile("dsb sy");
 }
+#endif
 
 void DebugTrace__puts(const char * str)
 {
@@ -85,6 +84,7 @@ void DebugTrace__puts(const char * str)
         return;
     }
 
+#ifdef BSP_VIRT
     TraceUart__init();
     while (*str)
     {
@@ -95,6 +95,11 @@ void DebugTrace__puts(const char * str)
         }
         str++;
     }
+#elif defined(BSP_MILKV_DUO_S)
+    puts(str);
+#else
+#error "KERNEL_SERIAL_TRACE has no trace UART implementation for this BSP"
+#endif
     TraceUart__unlock();
 }
 #elif defined(KERNEL_SEMIHOSTING_TRACE)

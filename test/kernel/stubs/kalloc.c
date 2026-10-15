@@ -198,6 +198,12 @@ Result(UserAddress) Kernel__try_alloc_user(Address virtual_address, size_t size,
     return Success(UserAddress, Kernel__alloc_user(virtual_address, size, read, write, execute));
 }
 
+Result(UserAddress) Kernel__try_alloc_user_aligned(Address virtual_address, size_t size, size_t alignment, bool read,
+                                                   bool write, bool execute)
+{
+    return Kernel__try_alloc_user(virtual_address, size, read, write, execute);
+}
+
 Result(KAllocCode) Kernel__free(Address virtual_address)
 {
     if (free_failure_enabled)

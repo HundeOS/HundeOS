@@ -127,9 +127,6 @@ void IODiagnostics__record(IODiagnosticEvent event, uint64_t amount)
             case IO_DIAGNOSTIC_BACKEND_EMPTY:
                 __atomic_fetch_add(&target->backend_empty, amount, __ATOMIC_RELAXED);
                 break;
-            case IO_DIAGNOSTIC_WARDEN_RELAYS:
-                __atomic_fetch_add(&target->warden_relays, amount, __ATOMIC_RELAXED);
-                break;
             case IO_DIAGNOSTIC_WAIT_ENTRIES:
                 __atomic_fetch_add(&target->wait_entries, amount, __ATOMIC_RELAXED);
                 break;
@@ -209,7 +206,6 @@ static IODiagnosticsSnapshot IODiagnosticsSnapshot__new(ConstIODiagnosticsPtr se
         .uart_empty = __atomic_load_n(&self->uart_empty, __ATOMIC_RELAXED),
         .backend_reads = __atomic_load_n(&self->backend_reads, __ATOMIC_RELAXED),
         .backend_empty = __atomic_load_n(&self->backend_empty, __ATOMIC_RELAXED),
-        .warden_relays = __atomic_load_n(&self->warden_relays, __ATOMIC_RELAXED),
         .wait_entries = __atomic_load_n(&self->wait_entries, __ATOMIC_RELAXED),
         .unchanged_wakes = __atomic_load_n(&self->unchanged_wakes, __ATOMIC_RELAXED),
         .block_cache_hits = __atomic_load_n(&self->block_cache_hits, __ATOMIC_RELAXED),

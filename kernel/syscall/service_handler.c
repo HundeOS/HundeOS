@@ -10,6 +10,7 @@
 #include "../service/device_registry.h"
 #include "../boot_info.h"
 #include "../arch/cpu.h"
+#include "../arch/process.h"
 
 static BString no_process = bstr("No process for service syscall");
 static BString unsupported_operation = bstr("Unsupported service operation");
@@ -146,9 +147,14 @@ Result(SystemCallResult)
                     Scheduler__queue_data_available(kernel->scheduler, process, arg2),
                     success(notification)
                     {
-                        if (notification.reschedule)
+                        if (notification.reschedule && notification.cpu != CPU__id())
                         {
                             CPU__request_reschedule(notification.cpu);
+                        }
+                        else if (notification.reschedule && CPU__count() == 1)
+                        {
+                            Process__set_syscall_result(process, SERVICE_OK);
+                            Scheduler__yield_runnable(kernel->scheduler, process, notification.cpu);
                         }
                         return Success(SystemCallResult, SERVICE_OK);
                     },
@@ -177,6 +183,34 @@ Result(SystemCallResult)
             {
                 match_result(
                     Scheduler__queue_operation(kernel->scheduler, process, service_operation, arg2),
+                    success(value)
+                    {
+                        return Success(SystemCallResult, value);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
+                );
+            }
+            if (service_operation == SERVICE_QUEUE_DELEGATE)
+            {
+                match_result(
+                    Scheduler__queue_delegate(kernel->scheduler, process, arg2, arg3),
+                    success(value)
+                    {
+                        return Success(SystemCallResult, value);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
+                );
+            }
+            if (service_operation == SERVICE_QUEUE_CANCEL_DELEGATION)
+            {
+                match_result(
+                    Scheduler__queue_cancel_delegation(kernel->scheduler, process, arg2, arg3),
                     success(value)
                     {
                         return Success(SystemCallResult, value);

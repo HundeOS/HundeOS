@@ -38,61 +38,82 @@ static inline volatile uint8_t * CPUTimer__gicr_base_this_cpu(InterruptControlle
                                 (uint64_t)CPUTimer__cpu_affinity() * GICR_STRIDE);
 }
 
-/* Configure GICv3 CPU interface + enable PPI for CNTV (27) */
+static void CPUTimer__gicv2_enable_ppi(InterruptControllerInfoPtr interrupt_controller, unsigned ppi)
+{
+    Address distributor = interrupt_controller->details.gic.distributor_virtual_base;
+    volatile uint32_t * group = (uint32_t *)(distributor + 0x080u);
+    volatile uint32_t * enable = (uint32_t *)(distributor + 0x100u);
+    volatile uint32_t * configuration = (uint32_t *)(distributor + 0x0c04u);
+    volatile uint8_t * priority = (uint8_t *)(distributor + 0x400u + ppi);
+    unsigned configuration_bit = ((ppi - 16u) * 2u) + 1u;
+
+    *group |= (1u << ppi);
+    *configuration &= ~(1u << configuration_bit);
+    *priority = 0x80u;
+    *enable = (1u << ppi);
+    dsb_ish();
+    isb();
+}
+
+/* Configure the GIC CPU interface and enable the selected timer PPI. */
 __attribute__((noinline)) // keeps return addresses clean for debugging
 static void CPUTimer__enable(SystemInfoPtr system_info, bool use_virtual_timer, uint64_t hz)
 {
     InterruptControllerInfoPtr interrupt_controller = &system_info->interrupt_controller;
+    unsigned ppi = use_virtual_timer ? PPI_CNTV : PPI_CNTP;
 
-    if (interrupt_controller->kind != INTERRUPT_CONTROLLER_GIC_V3)
+    if (interrupt_controller->kind == INTERRUPT_CONTROLLER_GIC_V2)
+    {
+        CPUTimer__gicv2_enable_ppi(interrupt_controller, ppi);
+    }
+    else if (interrupt_controller->kind == INTERRUPT_CONTROLLER_GIC_V3)
+    {
+        CPUTimer__gicv3_dist_enable_grp1ns(interrupt_controller);
+        volatile uint8_t * gicr = CPUTimer__gicr_base_this_cpu(interrupt_controller);
+
+        // --- Wake up this redistributor ---
+        uint32_t waker = mmio_read32(gicr + GICR_WAKER_OFFSET);
+
+        if (waker & (1u << 1))
+        {
+            mmio_write32(waker & ~(1u << 1), gicr + GICR_WAKER_OFFSET);
+            do
+            {
+                waker = mmio_read32(gicr + GICR_WAKER_OFFSET);
+            } while (waker & (1u << 2));
+        }
+
+        // All non-secure interrupts to Group1
+        mmio_write32(0xFFFFFFFFu, gicr + GICR_IGROUPR0_OFFSET);
+
+        unsigned bit1 = ((ppi - 16u) * 2u) + 1u;
+
+        uint32_t icfgr1 = mmio_read32(gicr + GICR_ICFGR1_OFFSET);
+
+        icfgr1 &= ~(1u << bit1);
+        mmio_write32(icfgr1, gicr + GICR_ICFGR1_OFFSET);
+
+        volatile uint8_t * priority_reg = (gicr + GICR_IPRIORITYR_OFFSET(ppi));
+        *(volatile uint8_t *)(priority_reg) = 0x80;
+        *(volatile uint8_t *)(gicr + GICR_IPRIORITYR_OFFSET(CPU_RESCHEDULE_INTERRUPT)) = 0x40;
+
+        // Enable the timer PPI and the scheduler SGI.
+        mmio_write32((1u << ppi) | (1u << CPU_RESCHEDULE_INTERRUPT), gicr + GICR_ISENABLER0_OFFSET);
+
+        // Ensure GICR writes land before we enable the CPU interface
+        dsb_ish();
+        isb();
+
+        // --- CPU interface: enable system registers & Group1Ns, unmask priority ---
+        wr_icc_sre(1);
+        isb();
+        wr_icc_pmr(0xFF);
+        wr_icc_igrpen1(1);
+    }
+    else
     {
         return;
     }
-
-    CPUTimer__gicv3_dist_enable_grp1ns(interrupt_controller);
-    volatile uint8_t * gicr = CPUTimer__gicr_base_this_cpu(interrupt_controller);
-
-    // --- Wake up this redistributor ---
-    uint32_t waker = mmio_read32(gicr + GICR_WAKER_OFFSET);
-
-    if (waker & (1u << 1))
-    { // ProcessorSleep
-        mmio_write32(waker & ~(1u << 1), gicr + GICR_WAKER_OFFSET);
-        do
-        {
-            waker = mmio_read32(gicr + GICR_WAKER_OFFSET);
-        } while (waker & (1u << 2)); // wait ChildrenAsleep==0
-    }
-
-    // All non-secure interrupts to Group1
-    mmio_write32(0xFFFFFFFFu, gicr + GICR_IGROUPR0_OFFSET);
-
-    // --- Configure timer PPI as edge-triggered ---
-    unsigned ppi = use_virtual_timer ? PPI_CNTV : PPI_CNTP;
-    unsigned bit1 = ((ppi - 16u) * 2u) + 1u; // ICFGR1: bit[1]=1 => edge
-
-    uint32_t icfgr1 = mmio_read32(gicr + GICR_ICFGR1_OFFSET);
-
-    icfgr1 &= ~(1u << bit1);
-    mmio_write32(icfgr1, gicr + GICR_ICFGR1_OFFSET);
-
-    uint8_t * priority_reg = (gicr + GICR_IPRIORITYR_OFFSET(ppi));
-    // Priority (byte-per-interrupt). Lower = higher prio; 0x80 is mid.
-    *(volatile uint8_t *)(priority_reg) = 0x80;
-    *(volatile uint8_t *)(gicr + GICR_IPRIORITYR_OFFSET(CPU_RESCHEDULE_INTERRUPT)) = 0x40;
-
-    // Enable the timer PPI and the scheduler SGI.
-    mmio_write32((1u << ppi) | (1u << CPU_RESCHEDULE_INTERRUPT), gicr + GICR_ISENABLER0_OFFSET);
-
-    // Ensure GICR writes land before we enable the CPU interface
-    dsb_ish();
-    isb();
-
-    // --- CPU interface: enable system registers & Group1Ns, unmask priority ---
-    wr_icc_sre(1); // enable ICC_* system register interface
-    isb();
-    wr_icc_pmr(0xFF);
-    wr_icc_igrpen1(1);
 
     // --- Arm the generic timer (per-CPU) ---
     uint64_t frq = rd_cntfrq();

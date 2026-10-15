@@ -27,8 +27,9 @@ service-specific channel types or parallel request/reply rings in those buffers.
   lease changes caused by process exits through a `KernelNotificationQueue` mapped
   only to the manager. The manager can consume this queue but cannot alter the
   kernel's authoritative attachment records.
-- `hundekanal-warter` retains Channel establishment and session lifecycle.
-  It coordinates closure with buffer cleanup, but does not become the bulk allocator.
+- `hundekanal-warter` authorizes Channel establishment, then leaves the direct
+  client-to-service path. Kernel Queue closure is authoritative; services
+  coordinate their own buffer cleanup and the warden is not the bulk allocator.
 - I/O and device services own protocol resources and in-flight work. They acquire
   buffers from `hunde-puffer`, advertise them to clients, and complete or cancel
   outstanding access before releasing leases.

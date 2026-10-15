@@ -1,10 +1,5 @@
 #include "process_registry.h"
 
-ConstProcessRegistryPtr ProcessRegistry__shared(void)
-{
-    return (ConstProcessRegistryPtr)PROCESS_REGISTRY_VADDR;
-}
-
 Result(OptionalProcessRecord) ProcessRegistry__at(ConstProcessRegistryPtr self, uint64_t index)
 {
     if (self->version != PROCESS_REGISTRY_VERSION)

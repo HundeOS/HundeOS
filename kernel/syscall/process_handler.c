@@ -13,6 +13,31 @@ static BString sleep_pending = bstr("Sleep pending");
 static BString invalid_fork_request = bstr("Invalid fork request");
 static BString invalid_process_group_request = bstr("Invalid process group request");
 
+Result(SystemCallResult) ProcessRegistryMap__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                                     Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+{
+    match_optional(
+        *proc,
+        some(process)
+        {
+            match_result(
+                KernelProcessRegistry__map_process(&kernel->process_registry, process),
+                success(_)
+                {
+                    return Success(SystemCallResult, PROCESS_REGISTRY_VADDR);
+                },
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, PROCESS_REGISTRY_MAP_FAILED);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+
+    return Error(SystemCallResult, bstr("Invalid process registry caller"), PROCESS_REGISTRY_MAP_INVALID_CALLER);
+}
+
 Result(SystemCallResult) ProcessFork__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
                                               Anything arg2, Anything arg3, Anything arg4, Anything arg5)
 {

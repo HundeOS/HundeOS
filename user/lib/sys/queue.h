@@ -8,6 +8,9 @@ ResultDef(QueueArrivalsPtr);
 Result(QueueArrivalsPtr) Queue__listen(ConstBStringPtr name);
 Result(Queue) Queue__connect(QueueEndpointID endpoint);
 Result(Queue) Queue__accept(QueueConnectionID connection);
+Result(Queue) Queue__attach_existing(QueueConnectionID connection);
+Result(QueueConnectionID) Queue__delegate(QueueConnectionID client_connection, QueueEndpointID endpoint);
+QueueCode Queue__cancel_delegation(QueueConnectionID client_connection, QueueConnectionID delegated);
 QueueCode QueueConnection__close(QueueConnectionID connection);
 
 // Event waits publish the observed process doorbell generation before parking.

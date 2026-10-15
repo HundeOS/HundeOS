@@ -17,7 +17,6 @@ ResultDef(OptionalChannelServerRequest);
 typedef struct ChannelServer
 {
     Queue control;
-    ChannelPayloadPtr payload;
     QueueConnectionID token;
     QueueParticipantID client_pid;
     QueueParticipantID transport_pid;
@@ -30,7 +29,7 @@ typedef struct ChannelServer
 typedef ChannelServer * ChannelServerPtr;
 ResultDef(ChannelServer);
 
-Result(ChannelServer) ChannelServer__accept(QueueConnectionID connection, QueueParticipantID warden_pid);
+Result(ChannelServer) ChannelServer__accept(QueueConnectionID connection);
 QueueConnectionID ChannelServer__connection(ChannelServerPtr self);
 QueueParticipantID ChannelServer__client_pid(ChannelServerPtr self);
 QueueParticipantID ChannelServer__transport_pid(ChannelServerPtr self);

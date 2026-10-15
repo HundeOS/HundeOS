@@ -233,6 +233,77 @@ void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAdd
     }
 }
 
+static bool PageTable__prepare_block_mapping(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
+                                             Address physical_address, size_t size)
+{
+    Address end = virtual_address + size;
+    KernelAddress root = ProcessPageTable__root(self);
+    for (Address current = virtual_address; current < end;)
+    {
+        Address offset = current - virtual_address;
+        bool block = current % _2MB == 0 && (physical_address + offset) % _2MB == 0 && end - current >= _2MB;
+        KernelAddress level_1 =
+            PageTable__ensure_next_level_table(self, root, kernel, RISCV_SV39_LEVEL_2_INDEX(current));
+        if (!level_1.valid)
+        {
+            return false;
+        }
+        if (!block &&
+            !PageTable__ensure_next_level_table(self, level_1, kernel, RISCV_SV39_LEVEL_1_INDEX(current)).valid)
+        {
+            return false;
+        }
+        current += block ? _2MB : PAGE_SIZE;
+    }
+    return true;
+}
+
+static void PageTable__map_2m_block(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
+                                    Address physical_address, ConstRiscVPagePermissionsPtr permissions)
+{
+    KernelAddress root = ProcessPageTable__root(self);
+    KernelAddress level_1 =
+        PageTable__ensure_next_level_table(self, root, kernel, RISCV_SV39_LEVEL_2_INDEX(virtual_address));
+    v_ptr(level_1, PageTable)->entries[RISCV_SV39_LEVEL_1_INDEX(virtual_address)] =
+        RiscVPageTableEntry__leaf(physical_address, permissions, RISCV_PLATFORM_RAM_PTE_ATTRIBUTES);
+    PageTable__publish();
+    PageTable__invalidate_page(virtual_address);
+}
+
+Result(KAllocCode)
+    ArchPageTable__try_map_blocks(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    Address user_start = align_down_4k(vaddr(address));
+    Address user_end = align_up_4k(vaddr(address) + size);
+    Address physical_start = align_down_4k(u_kpaddr(address));
+    size_t mapping_size = user_end - user_start;
+    RiscVPagePermissions permissions = RiscVPagePermissions__new(address.read, address.write, address.execute, true);
+
+    if (!RiscVVirtualAddress__is_user(user_start) || user_end > RISCV_SV39_USER_ADDRESS_LIMIT ||
+        !PageTable__prepare_block_mapping(self, kernel, user_start, physical_start, mapping_size))
+    {
+        return Error(KAllocCode, page_table_allocation_failed, KALLOC_ALLOCATION_FAILED);
+    }
+
+    for (Address current = user_start; current < user_end;)
+    {
+        Address offset = current - user_start;
+        Address physical = physical_start + offset;
+        bool block = current % _2MB == 0 && physical % _2MB == 0 && user_end - current >= _2MB;
+        if (block)
+        {
+            PageTable__map_2m_block(self, kernel, current, physical, &permissions);
+            current += _2MB;
+        }
+        else
+        {
+            PageTable__map_page(self, kernel, current, physical, &permissions, RISCV_PLATFORM_RAM_PTE_ATTRIBUTES);
+            current += PAGE_SIZE;
+        }
+    }
+    return Success(KAllocCode, KALLOC_OK);
+}
+
 void ArchPageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size)
 {
     Address user_start = align_down_4k(virtual_address);

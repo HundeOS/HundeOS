@@ -124,6 +124,7 @@ SchedulerPtr Scheduler__heap_new(void);
 Result(SchedulerInitStatus) Scheduler__init(KernelPtr kernel, SchedulerPtr self, Elf idle_process);
 Result(SchedulerInitStatus) Scheduler__register_cpu(SchedulerPtr self, CPUID cpu);
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessContextPtr) context);
+void Scheduler__yield_runnable(SchedulerPtr self, ProcessPtr yielding_proc, CPUID cpu);
 void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID cpu);
 Result(ProcessID) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc, ReturnCode return_code);
 Result(ProcessID) Scheduler__abort_process(SchedulerPtr scheduler, ProcessPtr proc, ProcessAbort abort);
@@ -181,6 +182,11 @@ Result(Address)
 Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr owner, Address address);
 Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name, size_t length);
 Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id);
+Result(Address) Scheduler__queue_delegate(SchedulerPtr self, ProcessPtr process,
+                                          QueueConnectionID client_connection, QueueEndpointID endpoint);
+Result(Address) Scheduler__queue_cancel_delegation(SchedulerPtr self, ProcessPtr process,
+                                                   QueueConnectionID client_connection,
+                                                   QueueConnectionID delegated);
 Result(SchedulerWake)
     Scheduler__queue_data_available(SchedulerPtr self, ProcessPtr process, QueueConnectionID connection);
 Result(SchedulerWake) Scheduler__wake_shared_wait(SchedulerPtr self, ProcessPtr process);

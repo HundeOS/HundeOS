@@ -21,7 +21,11 @@ enter_kernel:
     adr     x3, .Lpool            // PC-relative address of pool
     ldr     x0, [x3]              // x0 = &enter_high_kernel2 (high VA)
 
-    //bl      print_crumb
+    mov     w0, #'2'
+    bl      _send
+
+    adr     x3, .Lpool
+    ldr     x0, [x3]
 
     br      x0                    // tail-jump; no return
 

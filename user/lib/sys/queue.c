@@ -60,6 +60,26 @@ Result(Queue) Queue__accept(QueueConnectionID connection)
     return queue_attach(connection);
 }
 
+Result(Queue) Queue__attach_existing(QueueConnectionID connection)
+{
+    return queue_attach(connection);
+}
+
+Result(QueueConnectionID) Queue__delegate(QueueConnectionID client_connection, QueueEndpointID endpoint)
+{
+    SystemCallResult value = syscall(SERVICE_CALL, SERVICE_QUEUE_DELEGATE, client_connection, endpoint, 0, 0);
+    if ((int64_t)value < 0)
+    {
+        return Error(QueueConnectionID, bstr("Queue delegation failed"), value);
+    }
+    return Success(QueueConnectionID, value);
+}
+
+QueueCode Queue__cancel_delegation(QueueConnectionID client_connection, QueueConnectionID delegated)
+{
+    return (QueueCode)syscall(SERVICE_CALL, SERVICE_QUEUE_CANCEL_DELEGATION, client_connection, delegated, 0, 0);
+}
+
 QueueCode QueueConnection__close(QueueConnectionID connection)
 {
     return (QueueCode)syscall(SERVICE_CALL, SERVICE_QUEUE_CLOSE, connection, 0, 0, 0);

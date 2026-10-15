@@ -4,7 +4,6 @@
 static QueueIdentity identity;
 static QueuePage client_page;
 static QueuePage server_page;
-static ChannelPayload payload;
 static Channel channel;
 static Queue server;
 static IpcDoorbell client_doorbell;
@@ -19,13 +18,12 @@ void setUp(void)
     identity = (QueueIdentity){.connection = 17, .client_pid = 4, .server_pid = 5, .origin_pid = 4, .accepted = 1};
     client_page = (QueuePage){0};
     server_page = (QueuePage){0};
-    payload = (ChannelPayload){0};
     client_doorbell = (IpcDoorbell){0};
     server_doorbell = (IpcDoorbell){0};
     Queue client =
         Queue__new(&identity, &client_page, &server_page, 17, 5, &server_doorbell, &record_data_available);
     server = Queue__new(&identity, &server_page, &client_page, 17, 4, &client_doorbell, &Queue__ignore_data_available);
-    channel = Channel__new(&client, &payload);
+    channel = Channel__new(&client);
 }
 
 void tearDown(void)
@@ -42,12 +40,12 @@ static void request(void)
         },
         error_test_fail()
     );
-    TEST_ASSERT_GREATER_THAN_UINT64(0, ChannelPayload__request_published_at(&payload));
+    TEST_ASSERT_GREATER_THAN_UINT64(0, Queue__written_data_published_at(&channel.control));
 }
 
 static void respond(QueueConnectionID token)
 {
-    TEST_ASSERT_TRUE(ChannelPayload__write_reply(&payload, (ConstChannelDataPtr) "reply", 5));
+    TEST_ASSERT_TRUE(Queue__write_data(&server, (ConstChannelDataPtr) "reply", 5, 0));
     QueueMessage response = ChannelControlMessage__new(CHANNEL_RESPONSE_REPLIED, 0, 5, token);
     response.request = channel.ticket.metadata;
     match_result(Queue__push(&server, &response),
@@ -87,20 +85,12 @@ void test_request_and_reply_share_the_existing_queue_transport(void)
         error_test_fail()
     );
     TEST_ASSERT_EQUAL_MEMORY("reply", reply, 5);
-    match_result(
-        Queue__pop(&server),
-        success(message)
-        {
-            TEST_ASSERT_EQUAL(CHANNEL_REQUEST_ACKNOWLEDGE, message.kind);
-        },
-        error_test_fail()
-    );
     request();
 }
 
 void test_explicit_origin_is_stored_in_request_ticket(void)
 {
-    channel = Channel__new_with_origin(&channel.control, &payload, 41);
+    channel = Channel__new_with_origin(&channel.control, 41);
 
     request();
 
@@ -139,7 +129,7 @@ void test_full_request_queue_returns_pending_without_starting_request(void)
     request();
 }
 
-void test_ack_backpressure_retains_reply_and_prevents_a_second_request(void)
+void test_reply_completion_does_not_require_outgoing_ack_capacity(void)
 {
     request();
     QueueMessage filler = QueueMessage__new(0, 99);
@@ -152,32 +142,6 @@ void test_ack_backpressure_retains_reply_and_prevents_a_second_request(void)
     }
     respond(17);
     uint8_t reply[8];
-    for (size_t attempt = 0; attempt < 2; attempt++)
-    {
-        match_result(
-            Channel__try_poll_reply(&channel, reply, sizeof(reply)),
-            success(size)
-            {
-                match_optional(size,
-                some_test_fail(),
-                none_do_nothing()
-            );
-            },
-            error_test_fail()
-        );
-    }
-    match_result(
-        Channel__try_request(&channel, (ConstChannelDataPtr) "next", 4),
-        success_test_fail(),
-        error(code, message)
-        {
-            TEST_ASSERT_EQUAL(CHANNEL_BUSY, code);
-        }
-    );
-    match_result(Queue__pop(&server),
-        success_do_nothing(),
-        error_test_fail()
-    );
     match_result(
         Channel__try_poll_reply(&channel, reply, sizeof(reply)),
         success(size)
@@ -193,6 +157,7 @@ void test_ack_backpressure_retains_reply_and_prevents_a_second_request(void)
         error_test_fail()
     );
     TEST_ASSERT_EQUAL_MEMORY("reply", reply, 5);
+    TEST_ASSERT_FALSE(channel.request_pending);
 }
 
 void test_empty_poll_is_pending_and_closed_transport_fails(void)

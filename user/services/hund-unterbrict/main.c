@@ -486,7 +486,7 @@ static bool InterruptManager__accept_clients(InterruptManagerPtr self, QueuePart
                 continue;
             }
             match_result(
-                ChannelServer__accept(connection, warden_pid),
+                ChannelServer__accept(connection),
                 success(channel)
                 {
                     InterruptClient client = InterruptClient__new(&channel);

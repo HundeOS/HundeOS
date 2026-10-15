@@ -77,7 +77,7 @@ static bool IOService__accept(IOServicePtr self)
                 continue;
             }
             match_result(
-                ChannelServer__accept(id, warden),
+                ChannelServer__accept(id),
                 success(channel)
                 {
                     match_result(

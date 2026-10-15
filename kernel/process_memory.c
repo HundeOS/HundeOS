@@ -85,6 +85,23 @@ Result(KAllocCode)
     );
 }
 
+Result(KAllocCode)
+    PageTable__try_map_shared_blocks(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    match_result(
+        ArchPageTable__try_map_blocks(self, kernel, address, size),
+        success(code)
+        {
+            PageTable__account(self, kernel, address, size, MEMORY_SHARED);
+            return Success(KAllocCode, code);
+        },
+        error(code, message)
+        {
+            return Error(KAllocCode, message, code);
+        }
+    );
+}
+
 void PageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     ArchPageTable__map_mmio(self, kernel, address, size);

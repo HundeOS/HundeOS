@@ -611,10 +611,11 @@ static bool FSLatency__sample(FSLatencySummaryPtr self, ConstBStringPtr path)
     return true;
 }
 
-static Optional(ProcessRecord) FSLatency__process_snapshot(uint64_t sampled_after_usec)
+static Optional(ProcessRecord) FSLatency__process_snapshot(ConstProcessRegistryPtr registry,
+                                                           uint64_t sampled_after_usec)
 {
     match_result(
-        ProcessMetrics__snapshot_after(ProcessRegistry__shared(), process_current_pid(), sampled_after_usec),
+        ProcessMetrics__snapshot_after(registry, process_current_pid(), sampled_after_usec),
         success(record)
         {
             return Some(ProcessRecord, record);
@@ -658,6 +659,19 @@ int main(int argc, char ** argv)
     }
 
     uint64_t pid = process_current_pid();
+    ConstProcessRegistryPtr registry;
+    match_result(
+        process_registry_map(),
+        success(mapped)
+        {
+            registry = mapped;
+        },
+        error(code, message)
+        {
+            IO__printf(&bstr("cannot map process registry: %B\n"), &message);
+            return 1;
+        }
+    );
     uint64_t trace_start_offset = 0;
     match_result(
         IO__file_info(&bstr(IO_TRACE_LOG_PATH)),
@@ -671,7 +685,7 @@ int main(int argc, char ** argv)
         }
     );
     Result(ProcessInfo) before_info = ProcessMetrics__info(pid);
-    Optional(ProcessRecord) before = FSLatency__process_snapshot(0);
+    Optional(ProcessRecord) before = FSLatency__process_snapshot(registry, 0);
     uint64_t started = IpcPlatform__monotonic_usec();
     FSLatencySummary summary = FSLatencySummary__new();
     for (uint64_t sample = 0; sample < sample_count; sample++)
@@ -680,7 +694,7 @@ int main(int argc, char ** argv)
     }
     uint64_t completed = IpcPlatform__monotonic_usec();
     Result(ProcessInfo) after_info = ProcessMetrics__info(pid);
-    Optional(ProcessRecord) after = FSLatency__process_snapshot(completed);
+    Optional(ProcessRecord) after = FSLatency__process_snapshot(registry, completed);
     TraceStatus trace_drain = IOTrace__drain();
     uint64_t trace_end_offset = trace_start_offset;
     match_result(

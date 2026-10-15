@@ -216,7 +216,7 @@ __BOOT__(void) __dump_table(PageTablePtr table, int entries, const char * level)
     boot_debug_print(new_line);
 
     int non_zero = 0;
-    for (int i = 0; i < TABLE_SIZE && non_zero < entries; i++)
+    for (size_t i = 0; i < TABLE_SIZE && non_zero < entries; i++)
     {
         PageTableEntry entry = table->entries[i];
         if (entry)

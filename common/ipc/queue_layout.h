@@ -16,6 +16,7 @@
 #define QUEUE_CONNECTION_SIZE (3 * QUEUE_PAGE_SIZE)
 #define QUEUE_PEER_DOORBELL_BASE ((Address)0x73000000ULL)
 #define QUEUE_CAPACITY 32U
+#define QUEUE_DATA_CAPACITY 1024U
 
 typedef enum QueueCode
 {
@@ -39,6 +40,14 @@ typedef struct QueuePublication
 ResultDef(QueuePublication);
 AtomicRecordArrayDefine(QueuePublication, 1, QueuePublications);
 
+typedef struct QueueData
+{
+    uint64_t published_at_usec;
+    uint8_t bytes[QUEUE_DATA_CAPACITY];
+} QueueData;
+
+typedef QueueData * QueueDataPtr;
+
 // Each page has one writer. consumed acknowledges the opposite page's messages.
 typedef struct QueuePage
 {
@@ -46,6 +55,7 @@ typedef struct QueuePage
     QueueCursor consumed;
     QueueMessage messages[QUEUE_CAPACITY];
     QueuePublications publication;
+    QueueData data;
 } QueuePage;
 
 typedef QueuePage * QueuePagePtr;
@@ -59,6 +69,7 @@ typedef struct QueueIdentity
     QueueParticipantID origin_pid;
     QueueStateFlag accepted;
     QueueStateFlag closed;
+    QueueStateFlag channel;
 } QueueIdentity;
 
 typedef QueueIdentity * QueueIdentityPtr;

@@ -213,6 +213,47 @@ static Optional(MemoryBlock) Heap__take_free_block(HeapPtr self, uint64_t pages)
     return None(MemoryBlock);
 }
 
+static Optional(MemoryBlock) Heap__take_aligned_free_block(HeapPtr self, uint64_t pages, size_t alignment)
+{
+    for (uint64_t table_index = 0; table_index < (uint64_t)self->free_blocks.table.len; table_index++)
+    {
+        AllocatedBlocksBucketPtr bucket = &self->free_blocks.table.entries[table_index].value;
+
+        for (uint64_t bucket_index = 0; bucket_index < bucket->len; bucket_index++)
+        {
+            MemoryBlock block = bucket->data[bucket_index].value;
+            Address remainder = block.start.phys_addr % alignment;
+            Address adjustment = remainder == 0 ? 0 : alignment - remainder;
+            uint64_t prefix_pages = adjustment / PAGE_SIZE;
+            if (prefix_pages + pages > block.pages_allocated)
+            {
+                continue;
+            }
+
+            AllocatedBlocks__remove_entry(&self->free_blocks, table_index, bucket_index);
+            if (prefix_pages > 0)
+            {
+                MemoryBlock prefix = MemoryBlock__new(block.start, prefix_pages);
+                AllocatedBlocks__set(&self->free_blocks, prefix.start.virtual_addr, prefix);
+            }
+
+            KernelAddress aligned_start =
+                KERNEL_ADDR(block.start.virtual_addr + adjustment, block.start.phys_addr + adjustment);
+            uint64_t suffix_pages = block.pages_allocated - prefix_pages - pages;
+            if (suffix_pages > 0)
+            {
+                KernelAddress suffix_start = KERNEL_ADDR(aligned_start.virtual_addr + (pages * PAGE_SIZE),
+                                                         aligned_start.phys_addr + (pages * PAGE_SIZE));
+                MemoryBlock suffix = MemoryBlock__new(suffix_start, suffix_pages);
+                AllocatedBlocks__set(&self->free_blocks, suffix.start.virtual_addr, suffix);
+            }
+            return Some(MemoryBlock, MemoryBlock__new(aligned_start, pages));
+        }
+    }
+
+    return None(MemoryBlock);
+}
+
 static Result(HeapCode) Heap__record_allocated(HeapPtr self, KernelAddress start, uint64_t pages)
 {
     MemoryBlock block = MemoryBlock__new(start, pages);
@@ -345,6 +386,46 @@ KernelAddress Heap__try_alloc_size(HeapPtr self, size_t size)
                 __d_printf(MEMORY, "heap alloc failed size=%i pages=%i\n", size, pages);
             }
             cs_return allocation;
+        }
+    );
+
+    return INVALID_KERNEL_ADDR;
+}
+
+KernelAddress Heap__try_alloc_size_aligned(HeapPtr self, size_t size, size_t alignment)
+{
+    if (alignment < PAGE_SIZE || alignment % PAGE_SIZE != 0)
+    {
+        return INVALID_KERNEL_ADDR;
+    }
+
+    critical_section(
+        self->lock,
+        {
+            uint64_t pages = Heap__pages_for_size(size);
+            match_optional(
+                Heap__take_aligned_free_block(self, pages, alignment),
+                some(block)
+                {
+                    Heap__zero_pages(block.start, block.pages_allocated);
+                    match_result(
+                        Heap__record_allocated(self, block.start, block.pages_allocated),
+                        success(_)
+                        {
+                            cs_return block.start;
+                        },
+                        error(code, message)
+                        {
+                            MemoryBlock free_block = Heap__coalesce_free_block(self, block);
+                            AllocatedBlocks__set(&self->free_blocks, free_block.start.virtual_addr, free_block);
+                            __d_printf(MEMORY, "aligned heap allocation tracking failed code=%i message=%s\n", code,
+                                       BString__cstr(&message));
+                        }
+                    );
+                },
+                none_do_nothing()
+            );
+            cs_return INVALID_KERNEL_ADDR;
         }
     );
 

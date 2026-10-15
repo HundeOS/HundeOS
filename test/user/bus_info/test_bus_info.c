@@ -103,7 +103,7 @@ void test_bus_queries_page_complete_inventory_over_one_channel(void)
             error_test_fail()
         );
     }
-    TEST_ASSERT_EQUAL(1, allocated_pages);
+    TEST_ASSERT_EQUAL(0, allocated_pages);
     BusTest__close(&channel);
     TEST_ASSERT_EQUAL(1, disconnects);
 }
@@ -208,28 +208,13 @@ void test_bus_reply_backpressure_retains_reply_without_reexecuting_query(void)
         },
         none_test_fail()
     );
-    match_optional(
-        ChannelSessions__ptr_at(&exchanges, 0),
-        some(exchange)
-        {
-            match_optional(
-                exchange->server,
-                some(server)
-                {
-                    for (unsigned i = 0; i < QUEUE_CAPACITY; i++)
-                    {
-                        match_result(Queue__pop(&server),
-                            success_do_nothing(),
-                            error_test_fail()
-                        );
-                    }
-                    exchange->server = Some(Queue, server);
-                },
-                none_test_fail()
-            );
-        },
-        none_test_fail()
-    );
+    for (unsigned i = 0; i < QUEUE_CAPACITY; i++)
+    {
+        match_result(Queue__pop(&channel.control),
+            success_do_nothing(),
+            error_test_fail()
+        );
+    }
     current_pid = 42;
     ChannelFixture__drain();
     IOReply reply;

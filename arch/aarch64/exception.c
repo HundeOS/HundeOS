@@ -9,6 +9,7 @@
 
 #include "asm_helpers.h"
 #include "exception_decode.h"
+#include "io/gicd.h"
 #include "process.h"
 #include "../../kernel/debug.h"
 #include "../../kernel/kernel_core.h"
@@ -65,7 +66,8 @@ static void Exception__prepare_user_return(KernelPtr kernel, ProcessContextPtr c
     );
 }
 
-static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
+static void Exception__handle_irq_with_controller(ProcessContextPtr context, bool current_el,
+                                                  InterruptControllerInfoPtr interrupt_controller)
 {
     KernelPtr kernel = Kernel__instance();
     if (!current_el)
@@ -73,7 +75,8 @@ static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
         Exception__account_current_process(kernel, CPU_USAGE_PAUSED);
     }
 
-    uint32_t id = icc_iar1();
+    GicInterrupt interrupt = gic_acknowledge_interrupt(interrupt_controller);
+    uint32_t id = interrupt.irq;
     __d_printf(IRQ, "irq: %i\n", id);
     if (id >= 32)
     {
@@ -102,8 +105,7 @@ static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
         );
     }
 
-    icc_eoir1(id);
-    icc_dir(id);
+    gic_complete_interrupt(interrupt_controller, &interrupt);
 
     if (id == CPU_RESCHEDULE_INTERRUPT)
     {
@@ -151,6 +153,22 @@ static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
         Exception__account_current_process(kernel, CPU_USAGE_USER);
         Exception__prepare_user_return(kernel, context);
     }
+}
+
+static void Exception__handle_irq(ProcessContextPtr context, bool current_el)
+{
+    KernelPtr kernel = Kernel__instance();
+    match_optional(
+        kernel->irq_dispatcher->interrupt_controller,
+        some(interrupt_controller)
+        {
+            Exception__handle_irq_with_controller(context, current_el, &interrupt_controller);
+        },
+        none()
+        {
+            Kernel__panic("AArch64 interrupt without interrupt controller information", context);
+        }
+    );
 }
 
 static uint64_t Exception__abort_user(KernelPtr kernel, OptionalPtr(ProcessPtr) current_process,

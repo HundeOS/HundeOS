@@ -28,12 +28,11 @@ typedef struct QueueConnection
     Optional(ProcessPtr) server;
     Optional(ProcessPtr) kernel_origin;
     QueueConnectionID connection;
+    QueueConnectionID delegated_from;
     QueueSlotIndex listener_index;
     bool kernel_client;
     bool client_peer_doorbell_mapped;
     bool server_peer_doorbell_mapped;
-    uint64_t scheduled_generation;
-    bool scheduled_reply;
 } QueueConnection;
 
 typedef QueueConnection * QueueConnectionPtr;
@@ -61,6 +60,10 @@ typedef Queues * QueuesPtr;
 // Callers hold the scheduler lock to serialize mappings with process exit.
 Result(Address) Queues__listen(QueuesPtr self, ProcessPtr process, ConstBStringPtr name);
 Result(QueueConnectionID) Queues__connect(QueuesPtr self, ProcessPtr process, QueueEndpointID endpoint);
+Result(QueueConnectionID) Queues__delegate(QueuesPtr self, ProcessPtr manager,
+                                           QueueConnectionID client_connection, QueueEndpointID endpoint);
+Result(QueueCode) Queues__cancel_delegation(QueuesPtr self, ProcessPtr manager,
+                                            QueueConnectionID client_connection, QueueConnectionID delegated);
 Result(QueueCode) Queues__accept(QueuesPtr self, ProcessPtr process, QueueConnectionID connection);
 Result(QueueCode) Queues__close(QueuesPtr self, ProcessPtr process, QueueConnectionID connection);
 Result(ProcessPtr) Queues__client_process(QueuesPtr self, ProcessPtr server, QueueConnectionID connection);

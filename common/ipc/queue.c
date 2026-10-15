@@ -123,6 +123,11 @@ QueueParticipantID Queue__origin_pid(QueuePtr self)
     return self->identity->origin_pid;
 }
 
+bool Queue__is_channel(QueuePtr self)
+{
+    return __atomic_load_n(&self->identity->channel, __ATOMIC_ACQUIRE) != 0;
+}
+
 QueueProgress Queue__progress(QueuePtr self)
 {
     return QueueProgress__new(__atomic_load_n(&self->incoming->produced, __ATOMIC_ACQUIRE),
@@ -205,4 +210,42 @@ Result(QueueMessage) Queue__pop(QueuePtr self)
     IpcEvent__ring(IpcDoorbell__mutable_event(self->peer_doorbell));
     IpcPlatform__signal_event();
     return Success(QueueMessage, message);
+}
+
+static bool QueueData__copy(uint8_t * target, const uint8_t * source, size_t size)
+{
+    if (size > QUEUE_DATA_CAPACITY)
+    {
+        return false;
+    }
+    for (size_t index = 0; index < size; index++)
+    {
+        target[index] = source[index];
+    }
+    return true;
+}
+
+bool Queue__write_data(QueuePtr self, const uint8_t * data, size_t size, uint64_t published_at_usec)
+{
+    if (!QueueData__copy(self->outgoing->data.bytes, data, size))
+    {
+        return false;
+    }
+    self->outgoing->data.published_at_usec = published_at_usec;
+    return true;
+}
+
+bool Queue__read_data(QueuePtr self, uint8_t * data, size_t size)
+{
+    return QueueData__copy(data, self->incoming->data.bytes, size);
+}
+
+uint64_t Queue__data_published_at(QueuePtr self)
+{
+    return self->incoming->data.published_at_usec;
+}
+
+uint64_t Queue__written_data_published_at(QueuePtr self)
+{
+    return self->outgoing->data.published_at_usec;
 }

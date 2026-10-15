@@ -21,5 +21,7 @@ Result(SystemCallResult) ProcessFork__handler(KernelPtr kernel, OptionalPtr(Proc
                                               Anything arg2, Anything arg3, Anything arg4, Anything arg5);
 Result(SystemCallResult) ProcessGroup__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
                                                Anything arg2, Anything arg3, Anything arg4, Anything arg5);
+Result(SystemCallResult) ProcessRegistryMap__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                                     Anything arg2, Anything arg3, Anything arg4, Anything arg5);
 
 #endif

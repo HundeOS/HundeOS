@@ -5,19 +5,32 @@
 #include "../../../kernel/system_info.h"
 #include "../asm_helpers.h"
 
+#define GICD_CTLR_ENABLE_GRP1 (1u << 0)
 #define GICD_CTLR_ENABLE_GRP1NS (1u << 1)
 #define GICD_CTLR_ARE_NS (1u << 4)
 #define GIC_SPI_START 32u
+
+#define GICC_CTLR_OFFSET 0x0000u
+#define GICC_PMR_OFFSET 0x0004u
+#define GICC_IAR_OFFSET 0x000cu
+#define GICC_EOIR_OFFSET 0x0010u
 
 static Address gicd_base(InterruptControllerInfoPtr info)
 {
     return info->details.gic.distributor_virtual_base;
 }
 
-static void gicd_enable_group1ns(InterruptControllerInfoPtr info)
+static Address gicc_base(InterruptControllerInfoPtr info)
+{
+    return info->details.gic.cpu_interface_virtual_base;
+}
+
+static void gicd_enable_group1(InterruptControllerInfoPtr info)
 {
     volatile uint32_t * ctlr = (uint32_t *)(gicd_base(info) + 0x000);
-    *ctlr |= GICD_CTLR_ENABLE_GRP1NS;
+    uint32_t enable =
+        info->kind == INTERRUPT_CONTROLLER_GIC_V2 ? GICD_CTLR_ENABLE_GRP1 : GICD_CTLR_ENABLE_GRP1NS;
+    *ctlr |= enable;
     __asm__ volatile("dsb sy; isb" ::: "memory");
 }
 
@@ -28,8 +41,16 @@ static void gicd_route_spi_to_cpu0(InterruptControllerInfoPtr info, uint32_t irq
         return;
     }
 
-    volatile uint64_t * router = (uint64_t *)(gicd_base(info) + 0x6000 + (8 * irq));
-    *router = 0;
+    if (info->kind == INTERRUPT_CONTROLLER_GIC_V2)
+    {
+        volatile uint8_t * target = (uint8_t *)(gicd_base(info) + 0x800 + irq);
+        *target = 1;
+    }
+    else
+    {
+        volatile uint64_t * router = (uint64_t *)(gicd_base(info) + 0x6000 + (8 * irq));
+        *router = 0;
+    }
     __asm__ volatile("dsb sy; isb" ::: "memory");
 }
 
@@ -41,15 +62,13 @@ Result(InitCode) gic_enable_interrupt(InterruptControllerInfoPtr info, uint32_t 
 
     volatile unsigned int * GICD_ISENABLER = (unsigned int *)(base + 0x100 + (reg * 4));
     volatile uint8_t * GICD_IPRIORITYR = (uint8_t *)(base + 0x400 + irq);
-    volatile uint8_t * GICD_ITARGETSR = (uint8_t *)(base + 0x800 + irq);
     volatile uint32_t * GICD_IGROUPR = (uint32_t *)(base + 0x080 + (reg * 4));
 
-    gicd_enable_group1ns(info);
+    gicd_enable_group1(info);
     *GICD_IPRIORITYR = 0xA0; // medium priority
-    *GICD_ITARGETSR = 1;     // legacy route to CPU0
     gicd_route_spi_to_cpu0(info, irq);
-    *GICD_ISENABLER = (1 << bit);
-    *GICD_IGROUPR |= (1 << bit);
+    *GICD_IGROUPR |= (1u << bit);
+    *GICD_ISENABLER = (1u << bit);
 
     __d_printf(IRQ, "gic enable irq=%i reg=%i bit=%i isenabler=0x%x igroupr=0x%x ctlr=0x%x\n", irq, reg, bit,
                *GICD_ISENABLER, *GICD_IGROUPR, *(volatile uint32_t *)(base + 0x000));
@@ -58,7 +77,14 @@ Result(InitCode) gic_enable_interrupt(InterruptControllerInfoPtr info, uint32_t 
     __d_printf(IRQ2, "GICD_CTLR=%x\n", *(volatile uint32_t *)(base + 0x000));
     __d_printf(IRQ2, "daif=%x\n", read_daifclr());
     __d_printf(IRQ2, "GICD_IGROUPR=%x\n", *GICD_IGROUPR);
-    __d_printf(IRQ2, "icc_igrpen1=%x\n", read_icc_igrpen1());
+    if (info->kind == INTERRUPT_CONTROLLER_GIC_V2)
+    {
+        __d_printf(IRQ2, "GICC_CTLR=%x\n", *(volatile uint32_t *)(gicc_base(info) + GICC_CTLR_OFFSET));
+    }
+    else
+    {
+        __d_printf(IRQ2, "icc_igrpen1=%x\n", read_icc_igrpen1());
+    }
 
     return Success(InitCode, ARCH_INIT_OK);
 }
@@ -86,8 +112,17 @@ void gic_unmask_interrupt(InterruptControllerInfoPtr info, uint32_t irq)
 Result(InitCode) gic_init(InterruptControllerInfoPtr info)
 {
     // Enable Distributor
-    gicd_enable_group1ns(info);
+    gicd_enable_group1(info);
 
+    if (info->kind == INTERRUPT_CONTROLLER_GIC_V2)
+    {
+        volatile uint32_t * priority_mask = (uint32_t *)(gicc_base(info) + GICC_PMR_OFFSET);
+        volatile uint32_t * control = (uint32_t *)(gicc_base(info) + GICC_CTLR_OFFSET);
+        *priority_mask = 0xffu;
+        *control |= GICD_CTLR_ENABLE_GRP1;
+        __asm__ volatile("dsb sy; isb" ::: "memory");
+        return Success(InitCode, ARCH_INIT_OK);
+    }
     if (info->kind != INTERRUPT_CONTROLLER_GIC_V3)
     {
         return Success(InitCode, ARCH_INIT_OK);
@@ -104,4 +139,29 @@ Result(InitCode) gic_init(InterruptControllerInfoPtr info)
     // __d_printf(IRQ2, "hcr_el2=%x\n", read_hcr_el2());
 
     return Success(InitCode, ARCH_INIT_OK);
+}
+
+GicInterrupt gic_acknowledge_interrupt(InterruptControllerInfoPtr info)
+{
+    if (info->kind == INTERRUPT_CONTROLLER_GIC_V2)
+    {
+        uint32_t acknowledgement = *(volatile uint32_t *)(gicc_base(info) + GICC_IAR_OFFSET);
+        return GicInterrupt__new(acknowledgement & 0x3ffu, acknowledgement);
+    }
+
+    uint32_t irq = icc_iar1();
+    return GicInterrupt__new(irq, irq);
+}
+
+void gic_complete_interrupt(InterruptControllerInfoPtr info, ConstGicInterruptPtr interrupt)
+{
+    if (info->kind == INTERRUPT_CONTROLLER_GIC_V2)
+    {
+        *(volatile uint32_t *)(gicc_base(info) + GICC_EOIR_OFFSET) = interrupt->acknowledgement;
+        __asm__ volatile("dsb sy; isb" ::: "memory");
+        return;
+    }
+
+    icc_eoir1(interrupt->acknowledgement);
+    icc_dir(interrupt->acknowledgement);
 }

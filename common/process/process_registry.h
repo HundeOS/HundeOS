@@ -83,10 +83,10 @@ typedef struct ProcessRegistry
 
 typedef ProcessRegistry * ProcessRegistryPtr;
 typedef const ProcessRegistry * ConstProcessRegistryPtr;
+ResultDef(ConstProcessRegistryPtr);
 #define PROCESS_REGISTRY_SIZE (((sizeof(ProcessRegistry) + 4095ULL) / 4096ULL) * 4096ULL)
 _Static_assert(PROCESS_REGISTRY_VADDR + PROCESS_REGISTRY_SIZE <= 0x80000000ULL, "Process registry region overflow");
 
-ConstProcessRegistryPtr ProcessRegistry__shared(void);
 Result(OptionalProcessRecord) ProcessRegistry__at(ConstProcessRegistryPtr self, uint64_t index);
 Result(OptionalProcessRecord) ProcessRegistry__find(ConstProcessRegistryPtr self, uint64_t pid);
 Result(CollectionCode)

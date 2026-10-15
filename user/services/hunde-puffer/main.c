@@ -143,7 +143,7 @@ int main(void)
                     none_do_nothing()
                 );
                 match_result(
-                    ChannelServer__accept(id, warden),
+                    ChannelServer__accept(id),
                     success(channel)
                     {
                         match_result(

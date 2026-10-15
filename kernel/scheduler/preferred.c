@@ -12,6 +12,45 @@ static bool Process__has_ready_exec_continuation(ProcessPtr self)
     return Process__has_ready_parked_operation(self, PARK_WAIT_EXEC_LOAD, &None(OperationKey));
 }
 
+static int Process__preferred_priority(ProcessPtr * first, ProcessPtr * second)
+{
+    bool first_exec = Process__has_ready_exec_continuation(*first);
+    bool second_exec = Process__has_ready_exec_continuation(*second);
+    if (first_exec != second_exec)
+    {
+        return first_exec ? 1 : -1;
+    }
+
+    bool first_pending = Process__has_pending_messages(*first);
+    bool second_pending = Process__has_pending_messages(*second);
+    if (first_pending != second_pending)
+    {
+        return first_pending ? 1 : -1;
+    }
+
+    if ((*first)->preferred_dependency_weight != (*second)->preferred_dependency_weight)
+    {
+        return (*first)->preferred_dependency_weight > (*second)->preferred_dependency_weight ? 1 : -1;
+    }
+
+    uint64_t first_priority = ProcessClass__priority((*first)->process_class);
+    uint64_t second_priority = ProcessClass__priority((*second)->process_class);
+    if (first_priority != second_priority)
+    {
+        return first_priority > second_priority ? 1 : -1;
+    }
+
+    if ((*first)->last_tick != (*second)->last_tick)
+    {
+        return (*first)->last_tick < (*second)->last_tick ? 1 : -1;
+    }
+    if ((*first)->pid == (*second)->pid)
+    {
+        return 0;
+    }
+    return (*first)->pid < (*second)->pid ? 1 : -1;
+}
+
 static void Process__observe_preferred_ticket(ProcessPtr self, ConstRequestTicketPtr ticket)
 {
     bool already_observed = false;
@@ -121,6 +160,7 @@ void Scheduler__forget_preferred(SchedulerPtr self, ProcessPtr process)
     );
     process->preferred_active = false;
     process->preferred_warm = false;
+    process->preferred_dependency_weight = 0;
     process->preferred_ticket = None(RequestTicket);
     process->preferred_eligible_at_usec = 0;
     process->preferred_selected_at_usec = 0;
@@ -196,57 +236,34 @@ void Scheduler__refresh_preferred(SchedulerPtr self)
             {
                 continue;
             }
-            match_optional(
-                QueueConnections__ptr_at(&self->queues.connections, link.route % QUEUE_LIMIT),
-                some(route)
+            if (!link.replied)
+            {
+                Scheduler__enqueue_preferred(self, link.responder, false, &Some(RequestTicket, link.ticket));
+            }
+            else
+            {
+                RequestLink stage = link;
+                for (uint64_t depth = 0; depth < RequestLinks__len(&self->request_graph.links); depth++)
                 {
-                    if (route->scheduled_generation == link.ticket.metadata.generation &&
-                        route->scheduled_reply == link.replied)
+                    Scheduler__enqueue_preferred(self, stage.caller, true, &Some(RequestTicket, stage.ticket));
+                    if (stage.ticket.metadata.parent_connection == 0)
                     {
-                        continue;
+                        break;
                     }
-                    bool queued = true;
-                    if (!link.replied)
-                    {
-                        queued = Scheduler__enqueue_preferred(self, link.responder, false,
-                                                              &Some(RequestTicket, link.ticket));
-                    }
-                    else
-                    {
-                        queued =
-                            Scheduler__enqueue_preferred(self, link.relay, false, &Some(RequestTicket, link.ticket));
-                        RequestLink stage = link;
-                        for (uint64_t depth = 0; depth < RequestLinks__len(&self->request_graph.links); depth++)
+                    match_optional(
+                        RequestGraph__find(&self->request_graph, stage.ticket.metadata.parent_connection,
+                                           stage.ticket.metadata.parent_generation),
+                        some(parent)
                         {
-                            queued = Scheduler__enqueue_preferred(self, stage.caller, true,
-                                                                  &Some(RequestTicket, stage.ticket)) &&
-                                     queued;
-                            if (stage.ticket.metadata.parent_connection == 0)
-                            {
-                                break;
-                            }
-                            match_optional(
-                                RequestGraph__find(&self->request_graph, stage.ticket.metadata.parent_connection,
-                                                   stage.ticket.metadata.parent_generation),
-                                some(parent)
-                                {
-                                    stage = parent;
-                                },
-                                none()
-                                {
-                                    break;
-                                }
-                            );
+                            stage = parent;
+                        },
+                        none()
+                        {
+                            break;
                         }
-                    }
-                    if (queued)
-                    {
-                        route->scheduled_generation = link.ticket.metadata.generation;
-                        route->scheduled_reply = link.replied;
-                    }
-                },
-                none_do_nothing()
-            );
+                    );
+                }
+            }
         }
     );
     for_each_hashtable(
@@ -276,6 +293,17 @@ void Scheduler__refresh_preferred(SchedulerPtr self)
             );
         }
     );
+    for_each_fa(
+        ProcessTable,
+        self->preferred,
+        index,
+        process,
+        {
+            process->preferred_dependency_weight =
+                RequestGraph__dependency_weight(&self->request_graph, process);
+        }
+    );
+    self->preferred = ProcessTable__sort_desc(&self->preferred, Process__preferred_priority);
 }
 
 static bool CPUScheduler__owns_process(CPUSchedulerPtr * self, void * context)

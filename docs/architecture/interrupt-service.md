@@ -64,8 +64,9 @@ The service must not alter kernel-owned IRQs. Kernel masking and userspace
 rearming must have a defined ordering; neither side should perform conflicting
 read-modify-write operations on shared controller state.
 
-`hundekanal-warter` continues to own channel allocation and lifetime. It does
-not become responsible for interrupt routing or device acknowledgements.
+`hundekanal-warter` authorizes setup, then delegates a direct Channel between the
+driver and interrupt service. The kernel owns that connection's lifetime. The
+warden does not route interrupt messages or device acknowledgements.
 
 ## Registration and authentication
 
@@ -76,7 +77,7 @@ subscribe. A claimed PID, process name, or service-directory entry is not proof
 of eligibility.
 
 Connection-bound validation replaces a separate bearer token in the initial
-implementation. The kernel-authenticated warden connection supplies the
+implementation. The kernel-authenticated direct connection supplies the
 driver's PID as server-side channel metadata; it is not taken from the driver
 payload. The manager passes that PID to the kernel, which resolves the live
 process and checks its IRQ capability. Invalid or dead clients receive an
@@ -90,10 +91,10 @@ and unsupported IRQs also receive explicit errors. Registration and reply
 delivery must preserve consistent ownership when a queue is full.
 
 Legacy globally writable service queues and client-claimed identities are not
-an authenticated transport. Registration therefore uses warden-managed
-channels backed by kernel-mediated, participant-only queue mappings. Connection
+an authenticated transport. Registration therefore uses warden-authorized,
+kernel-delegated Channels backed by participant-only Queue mappings. Connection
 setup and initial route authorization incur syscalls; subsequent IRQ deliveries
-and acknowledgements remain channel exchanges in userspace.
+and acknowledgements travel directly between the driver and interrupt service.
 
 ## Interrupt and acknowledgement flow
 
@@ -156,7 +157,7 @@ to guarantee this without overflow recovery.
 The timestamps carried with the existing delivery are advisory diagnostics;
 they do not add another message or acknowledgement. VirtIO block uses them,
 together with timestamps at fibre resumption and used-ring observation, to
-separate emulator/device latency from manager wakeup, userspace relay, and
+separate emulator/device latency from manager wakeup, userspace delivery, and
 driver scheduling latency. A completion observed without an IRQ still counts
 in overall block latency but cannot produce a segmented sample.
 
@@ -184,8 +185,8 @@ initialize or quiesce the device before delivery is enabled again. Cleanup must
 not blindly unmask an unowned IRQ or pretend to clear device-specific status.
 Late acknowledgements from the old registration cannot affect its replacement.
 
-Channel release remains subject to the warden's endpoint cleanup rules. Ending
-an IRQ registration does not itself free channel memory still in use.
+Channel release follows the kernel's endpoint detachment rules. Ending an IRQ
+registration does not itself free Queue memory still mapped by a participant.
 
 ## Future acknowledgement timeouts
 

@@ -7,8 +7,8 @@ request generation, origin PID, and parent connection/generation (zero for a
 root). The connection uses the existing control token field; the other four words
 fit the existing 32-byte control payload. I/O payloads and bulk buffers are
 unchanged. A backpressured submission does not advance the generation. Exhaustion
-requires a new Channel. Replies, acknowledgements, and cancellations echo the
-ticket; mismatches and reused request generations are rejected.
+requires a new Channel. Direct replies echo the ticket; mismatches and reused
+request generations are rejected.
 
 The userspace Channel wrapper inherits the current request context. I/O-service
 and block-service execution establish this context around downstream calls.
@@ -58,14 +58,16 @@ distribution and lets CPUs pull work when they are actually ready for it.
 
 ## Preferred Queue
 
-One shared FIFO holds preferred processes, deduplicated by process. Ordering is
-by kernel observation, not exact publication time. Eligible receivers and live
-request responders enter it. A reply enqueues the relay, caller, and callers of
-live ancestor requests. Ancestors may be dispatched despite unchanged shared
-observations, entering userspace `WFE` before their replies arrive. Real kernel
-waits, sleep, stop, and exit are never overridden.
+One shared queue holds preferred processes, deduplicated by process. Every
+scheduler refresh rebuilds its priority from authoritative kernel state. Ready
+exec continuations precede unread-message receivers, followed by validated
+request dependency weight, process class, and longest waiting time. Eligible
+receivers and live request responders enter it. A reply enqueues the direct
+caller and callers of live ancestor requests. Ancestors may be dispatched
+despite unchanged shared observations, entering userspace `WFE` before their
+replies arrive. Real kernel waits, sleep, stop, and exit are never overridden.
 
-Enqueueing normally does not force preemption. At a scheduling decision the FIFO
+Enqueueing normally does not force preemption. At a scheduling decision the preferred queue
 precedes ordinary class/longest-waiting selection and idle. A ready kernel exec
 continuation is the exception: it ends retention of the current preferred process
 at that scheduler entry so the blocked spawn can advance immediately. A started
@@ -118,8 +120,8 @@ a throughput improvement.
 
 Coverage includes sparse architecture CPU registration, shared process admission,
 request generations, stale replies, nested and kernel-originated tickets, fibre
-context isolation, relay/parent authentication, cycles, acknowledgement and exit
-cleanup, FIFO preference, exec-continuation preemption, migration eligibility,
-and dispatch-relative residency. Existing tests retain real-blocking and
+context isolation, parent authentication, cycles, reply and exit
+cleanup, refreshed preferred ordering, exec-continuation preemption, migration
+eligibility, and dispatch-relative residency. Existing tests retain real-blocking and
 shared-wait precedence checks; processing budget tests replace the old
 dequeue-ends-priority policy.

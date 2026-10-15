@@ -62,6 +62,7 @@ Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
                 REGISTER(self, SYSCALL_PROCESS_FORK, &ProcessFork__handler);
                 REGISTER(self, SYSCALL_PROCESS_GROUP, &ProcessGroup__handler);
                 REGISTER(self, SYSCALL_SYSTEM_INFO, &SystemInfo__handler);
+                REGISTER(self, SYSCALL_PROCESS_REGISTRY_MAP, &ProcessRegistryMap__handler);
                 self->init_done = true;
                 __d_println(SYSCALL, "Init__syscalls() - done ok");
             }

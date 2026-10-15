@@ -18,11 +18,9 @@ void test_diagnostics_accumulate_without_changing_wait_publication(void)
     IODiagnostics__record(IO_DIAGNOSTIC_UART_BYTES, 3);
     IODiagnostics__record(IO_DIAGNOSTIC_UART_BYTES, 2);
     IODiagnostics__record(IO_DIAGNOSTIC_BACKEND_EMPTY, 1);
-    IODiagnostics__record(IO_DIAGNOSTIC_WARDEN_RELAYS, 4);
     IODiagnosticsSnapshot totals = IODiagnostics__snapshot(&control.diagnostics);
     TEST_ASSERT_EQUAL_UINT64(5, totals.uart_bytes);
     TEST_ASSERT_EQUAL_UINT64(1, totals.backend_empty);
-    TEST_ASSERT_EQUAL_UINT64(4, totals.warden_relays);
     TEST_ASSERT_EQUAL_UINT64(0, totals.wait_entries);
     QueueWaitControl__clear(&control);
     totals = IODiagnostics__snapshot(&control.diagnostics);

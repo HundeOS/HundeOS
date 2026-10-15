@@ -1,6 +1,7 @@
 #include "scheduler.h"
 #include "../arch/process.h"
 #include "../arch/page_table.h"
+#include "../cpu.h"
 #include "../types/result.h"
 #include "../types/optional.h"
 #include "../mutex.h"
@@ -73,6 +74,15 @@ static Optional(ProcessPtr) Scheduler__current_process_locked(SchedulerPtr self,
 static ProcessTable Scheduler__all_processes_for_all_cpus_locked(SchedulerPtr self);
 static ProcessTable Scheduler__process_snapshot_locked(SchedulerPtr self);
 static bool Scheduler__queue_wait_changed(ProcessPtr process);
+
+#ifdef KERNEL_COMMAND_TRACE
+static bool Scheduler__command_flow_process(ProcessPtr process)
+{
+    return BString__equals(&process->name, &bstr("/usr/local/bin/bash")) ||
+           BString__equals(&process->name, &bstr("/sbin/drivers/uart_rx")) ||
+           BString__equals(&process->name, &bstr("/sbin/drivers/uart_tx"));
+}
+#endif
 
 static bool CPUScheduler__owns_process(CPUSchedulerPtr self, ProcessPtr process)
 {
@@ -478,6 +488,51 @@ Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process
     return Error(Address, bstr("Invalid queue operation"), QUEUE_INVALID);
 }
 
+Result(Address) Scheduler__queue_delegate(SchedulerPtr self, ProcessPtr process,
+                                          QueueConnectionID client_connection, QueueEndpointID endpoint)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_result(
+                Queues__delegate(&self->queues, process, client_connection, endpoint),
+                success(connection)
+                {
+                    cs_return Success(Address, connection);
+                },
+                error(code, message)
+                {
+                    cs_return Error(Address, message, code);
+                }
+            );
+        }
+    );
+    return Error(Address, bstr("Queue delegation failed"), QUEUE_INVALID);
+}
+
+Result(Address) Scheduler__queue_cancel_delegation(SchedulerPtr self, ProcessPtr process,
+                                                   QueueConnectionID client_connection,
+                                                   QueueConnectionID delegated)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_result(
+                Queues__cancel_delegation(&self->queues, process, client_connection, delegated),
+                success(code)
+                {
+                    cs_return Success(Address, code);
+                },
+                error(code, message)
+                {
+                    cs_return Error(Address, message, code);
+                }
+            );
+        }
+    );
+    return Error(Address, bstr("Queue delegation cancellation failed"), QUEUE_INVALID);
+}
+
 static Result(SchedulerWake) Scheduler__wake_shared_wait_locked(SchedulerPtr self, ProcessPtr process)
 {
     bool userspace_waiting = Process__shared_wait_armed(process);
@@ -524,7 +579,8 @@ static Result(SchedulerWake) Scheduler__wake_queue_wait_locked(SchedulerPtr self
     }
     else if (!Process__has_pending_messages(process) ||
              (process->state != PROC_STATE_READY &&
-              (process->state != PROC_STATE_INTERRUPTED || completed_queue_wait)))
+              process->state != PROC_STATE_INTERRUPTED) ||
+             (completed_queue_wait && CPU__count() != 1))
     {
         return Success(SchedulerWake, SchedulerWake__new(false, 0));
     }
@@ -565,6 +621,16 @@ Result(SchedulerWake)
                         Scheduler__wake_queue_wait_locked(self, peer),
                         success(wake)
                         {
+#ifdef KERNEL_COMMAND_TRACE
+                            if (Scheduler__command_flow_process(process) || Scheduler__command_flow_process(peer))
+                            {
+                                __d_printf(
+                                    COMMAND_FLOW,
+                                    "t=%i queue sender=%i:%s receiver=%i:%s receiver_state=%s wake=%i cpu=%i connection=%i\n",
+                                    CPU__time_usec(), process->pid, cstr(process->name), peer->pid, cstr(peer->name),
+                                    ProcessState__to_string(peer->state), wake.reschedule, wake.cpu, connection);
+                            }
+#endif
                             cs_return Success(SchedulerWake, wake);
                         },
                         error(code, message)
@@ -1415,6 +1481,37 @@ static Optional(ContextSwitch) CPUScheduler__yield_waiting(CPUSchedulerPtr self,
     return None(ContextSwitch);
 }
 
+static Optional(ContextSwitch) CPUScheduler__yield_runnable(CPUSchedulerPtr self, ProcessPtr yielding_proc)
+{
+    if (yielding_proc->state != PROC_STATE_RUNNING)
+    {
+        return None(ContextSwitch);
+    }
+
+    yielding_proc->state = PROC_STATE_INTERRUPTED;
+    self->switching_out = Some(ProcessPtr, yielding_proc);
+    match_optional(
+        CPUScheduler__select_ready(self),
+        some(new_proc)
+        {
+            if (new_proc == yielding_proc)
+            {
+                CPUScheduler__continue_current(self, yielding_proc);
+                return None(ContextSwitch);
+            }
+            new_proc->state = PROC_STATE_SWITCHING_CONTEXT;
+            return Some(ContextSwitch, ContextSwitch__new(new_proc, &Some(ProcessPtr, yielding_proc)));
+        },
+        none()
+        {
+            CPUScheduler__continue_current(self, yielding_proc);
+            return None(ContextSwitch);
+        }
+    );
+
+    return None(ContextSwitch);
+}
+
 // __attribute__((noreturn))
 void CPUScheduler__start(CPUSchedulerPtr self)
 {
@@ -1786,6 +1883,15 @@ static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(SchedulerP
     ProcessSignalAction action = Process__signal_action(parent, PROCESS_SIGNAL_CHILD);
     bool retains_child_event =
         (action.flags & PROCESS_SIGNAL_ACTION_NOCLDWAIT) == 0 && action.handler != PROCESS_SIGNAL_IGNORE_HANDLER;
+#ifdef KERNEL_COMMAND_TRACE
+    if (Scheduler__command_flow_process(parent))
+    {
+        __d_printf(COMMAND_FLOW,
+                   "t=%i child-exit child=%i:%s parent=%i:%s parent_state=%s status=%i retained=%i\n",
+                   CPU__time_usec(), child->pid, cstr(child->name), parent->pid, cstr(parent->name),
+                   ProcessState__to_string(parent->state), event.status, retains_child_event);
+    }
+#endif
     if (retains_child_event)
     {
         match_result(
@@ -3521,10 +3627,19 @@ static Result(ServiceCode)
                                           ProcessGroupID child_process_group_id, uint64_t event_type)
 {
     Process__wake_shared_wait(process);
-    if (Process__mark_child_wait_ready(process, child_pid, child_process_group_id, event_type))
+    bool wait_ready = Process__mark_child_wait_ready(process, child_pid, child_process_group_id, event_type);
+    if (wait_ready)
     {
         process->state = PROC_STATE_INTERRUPTED;
     }
+#ifdef KERNEL_COMMAND_TRACE
+    if (Scheduler__command_flow_process(process))
+    {
+        __d_printf(COMMAND_FLOW, "t=%i child-wake parent=%i:%s child=%i event=%i wait_ready=%i state=%s\n",
+                   CPU__time_usec(), process->pid, cstr(process->name), child_pid, event_type, wait_ready,
+                   ProcessState__to_string(process->state));
+    }
+#endif
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -3574,6 +3689,34 @@ Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, const
 void Scheduler__preempt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessContextPtr) context)
 {
     Optional(ContextSwitch) context_switch = Scheduler__interrupt(self, cpu, context);
+    match_optional(context_switch,
+        some(next)
+        {
+            ContextSwitch__switch(&next);
+        },
+        none_do_nothing()
+    );
+}
+
+void Scheduler__yield_runnable(SchedulerPtr self, ProcessPtr yielding_proc, CPUID cpu)
+{
+    Optional(ContextSwitch) context_switch = None(ContextSwitch);
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_optional(
+                CPUSchedulers__get(&self->schedulers, cpu),
+                some(scheduler)
+                {
+                    Scheduler__poll_queue_waiters(self);
+                    Scheduler__refresh_preferred(self);
+                    Scheduler__forget_preferred(self, yielding_proc);
+                    context_switch = CPUScheduler__yield_runnable(scheduler, yielding_proc);
+                },
+                none_do_nothing()
+            );
+        }
+    );
     match_optional(context_switch,
         some(next)
         {

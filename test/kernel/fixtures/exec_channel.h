@@ -8,13 +8,10 @@ OptionalDef(Queue);
 
 typedef struct FakeExecService
 {
-    ProcessPtr warden;
     ProcessPtr io;
     ProcessPtr puffer;
     BufferID buffer;
     Optional(Queue) control;
-    Address payload_address;
-    ChannelPayloadPtr payload;
     Address image;
     size_t image_size;
     size_t offset;
@@ -27,7 +24,6 @@ typedef FakeExecService * FakeExecServicePtr;
 
 static FakeExecService FakeExecService__new(KernelPtr kernel)
 {
-    ProcessPtr warden = dummy_process(100, 0, PROC_STATE_NEW);
     ProcessPtr io = dummy_process(101, 0, PROC_STATE_NEW);
     ProcessPtr puffer = dummy_process(102, 0, PROC_STATE_NEW);
     puffer->name = bstr("/sbin/services/hunde-puffer");
@@ -39,21 +35,14 @@ static FakeExecService FakeExecService__new(KernelPtr kernel)
         success_do_nothing(),
         error_test_fail()
     );
-    warden->process_class = PROCESS_CLASS_SERVICE;
     io->process_class = PROCESS_CLASS_SERVICE;
-    Process__set_hund_identity(warden);
     Process__set_hund_identity(io);
-    Scheduler__schedule(kernel->scheduler, warden);
     Scheduler__schedule(kernel->scheduler, io);
-    match_result(Queues__listen(&kernel->scheduler->queues, warden, &bstr(CHANNEL_WARDEN_SERVICE_NAME)),
-                 success_do_nothing(),
-        error_test_fail()
-    );
     match_result(Queues__listen(&kernel->scheduler->queues, io, &bstr(IO_SYSTEM_SERVICE)),
         success_do_nothing(),
                  error_test_fail()
     );
-    return (FakeExecService){.warden = warden, .io = io, .puffer = puffer, .control = None(Queue)};
+    return (FakeExecService){.io = io, .puffer = puffer, .control = None(Queue)};
 }
 
 static void FakeExecService__drain(FakeExecServicePtr self, KernelPtr kernel)
@@ -64,12 +53,7 @@ static void FakeExecService__drain(FakeExecServicePtr self, KernelPtr kernel)
         {
             if (Queue__status(&control) == QUEUE_CLOSED)
             {
-                Queues__close(&kernel->scheduler->queues, self->warden, Queue__connection(&control));
-                if (self->payload_address != 0)
-                {
-                    Scheduler__release_shared_page(kernel->scheduler, self->warden, self->payload_address);
-                }
-                self->payload_address = 0;
+                Queues__close(&kernel->scheduler->queues, self->io, Queue__connection(&control));
                 if (self->buffer != 0)
                 {
                     Buffers__drop(&kernel->scheduler->buffers, kernel->scheduler, self->buffer, self->io->pid);
@@ -96,7 +80,7 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
     if (is_nothing(self->control))
     {
         QueueConnectionID id = Queue__connection(&load->channel.channel.control);
-        match_result(Queues__accept(&kernel->scheduler->queues, self->warden, id),
+        match_result(Queues__accept(&kernel->scheduler->queues, self->io, id),
             success_do_nothing(),
                      error_test_fail()
         );
@@ -107,7 +91,7 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
                 Address base = connection.memory.kernel_addr.virtual_addr;
                 match_result(
                     Queue__attach((QueueIdentityPtr)base, (QueuePagePtr)(base + QUEUE_PAGE_SIZE),
-                                  (QueuePagePtr)(base + 2 * QUEUE_PAGE_SIZE), id, self->warden->pid,
+                                  (QueuePagePtr)(base + 2 * QUEUE_PAGE_SIZE), id, self->io->pid,
                                   k_v_ptr(connection.client_doorbell, IpcDoorbell), &Queue__ignore_data_available),
                     success(control)
                     {
@@ -128,112 +112,78 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
                 success(message)
                 {
                     TEST_ASSERT_EQUAL_UINT64(QUEUE_KERNEL_PID, message.sender_pid);
+                    TEST_ASSERT_EQUAL(CHANNEL_REQUEST_SUBMIT, message.kind);
                     QueueMessage response = ChannelControlMessage__new(CHANNEL_RESPONSE_REPLIED, 0, sizeof(IOReply),
                                                                        Queue__connection(&control));
                     response.request = message.request;
-                    if (message.kind == CHANNEL_REQUEST_OPEN)
+                    TEST_ASSERT_EQUAL_UINT64(parent->pid, message.request.origin_pid);
+                    IORequest request;
+                    TEST_ASSERT_TRUE(Queue__read_data(&control, (ChannelDataPtr)&request, sizeof(request)));
+                    TEST_ASSERT_EQUAL_UINT64(parent->pid, request.client_pid);
+                    IOReply reply = IOReply__new(IO_OK, 0);
+                    if (request.operation == IO_REQUEST_OPEN)
                     {
+                        BString path = IORequest__path(&request);
+                        if (self->redirect_open && !self->redirected)
+                        {
+                            reply = IOReply__redirect(&bstr(IO_SYSTEM_SERVICE), &bstr("/hello_world"),
+                                                      &empty_bstr(), true);
+                            self->redirected = true;
+                            TEST_ASSERT_TRUE(
+                                Queue__write_data(&control, (ConstChannelDataPtr)&reply, sizeof(reply), 0));
+                            match_result(Queue__push(&control, &response),
+                                success_do_nothing(),
+                                error_test_fail()
+                            );
+                            self->control = Some(Queue, control);
+                            return;
+                        }
+                        StringPos name_start = BString__starts_with(&path, &bstr("/sbin/")) ? 6 : 1;
+                        BString name = BString__slice(&path, name_start, BString__length(&path));
+                        match_optional(
+                            EmbeddedElf__load(&name),
+                            some(elf)
+                            {
+                                self->image = elf.start;
+                                self->image_size = elf.end - elf.start;
+                                self->offset = 0;
+                                reply.value = IO_FILESYSTEM_HANDLE_BASE;
+                                match_result(
+                                    Buffers__operation(&kernel->scheduler->buffers, kernel->scheduler, self->puffer,
+                                                       MEM_BUFFER_CREATE, self->io->pid, QUEUE_KERNEL_PID,
+                                                       BUFFER_READ, 0),
+                                    success(id)
+                                    {
+                                        self->buffer = id;
+                                        reply.buffers.read = BufferDescriptor__new(id, BUFFER_READ);
+                                    },
+                                    error_test_fail()
+                                );
+                            },
+                            none()
+                            {
+                                reply.status = IO_INVALID_PATH;
+                            }
+                        );
+                    }
+                    else if (request.operation == IO_REQUEST_READ)
+                    {
+                        size_t remaining = self->image_size - self->offset;
+                        size_t size = remaining < BUFFER_SIZE ? remaining : BUFFER_SIZE;
+                        TEST_ASSERT_EQUAL_UINT64(self->buffer, request.buffer);
                         match_result(
-                            Scheduler__alloc_shared_page(kernel->scheduler, self->warden, QUEUE_KERNEL_PID,
-                                                         self->io->pid),
+                            Buffers__kernel_read(&kernel->scheduler->buffers, self->buffer, self->io->pid, size),
                             success(address)
                             {
-                                self->payload_address = address;
+                                Kernel__memcopy(self->image + self->offset, address, size);
                             },
                             error_test_fail()
                         );
-                        match_optional(
-                            ManagedSharedPages__at(&kernel->scheduler->shared_pages,
-                                                   (self->payload_address - MEM_SHARED_PAGE_BASE) /
-                                                       MEM_SHARED_PAGE_SIZE),
-                            some(page)
-                            {
-                                self->payload = k_v_ptr(page.address, ChannelPayload);
-                            },
-                            none_test_fail()
-                        );
-                        response = ChannelControlMessage__new(CHANNEL_RESPONSE_OPEN, self->payload_address, 0,
-                                                              Queue__connection(&control));
+                        self->offset += size;
+                        reply.value = size;
+                        self->reads++;
                     }
-                    else if (message.kind == CHANNEL_REQUEST_SUBMIT)
-                    {
-                        TEST_ASSERT_EQUAL_UINT64(parent->pid, message.request.origin_pid);
-                        IORequest request;
-                        TEST_ASSERT_TRUE(
-                            ChannelPayload__read_request(self->payload, (ChannelDataPtr)&request, sizeof(request)));
-                        TEST_ASSERT_EQUAL_UINT64(parent->pid, request.client_pid);
-                        IOReply reply = IOReply__new(IO_OK, 0);
-                        if (request.operation == IO_REQUEST_OPEN)
-                        {
-                            BString path = IORequest__path(&request);
-                            if (self->redirect_open && !self->redirected)
-                            {
-                                reply = IOReply__redirect(&bstr(IO_SYSTEM_SERVICE), &bstr("/hello_world"),
-                                                          &empty_bstr(), true);
-                                self->redirected = true;
-                                TEST_ASSERT_TRUE(ChannelPayload__write_reply(self->payload, (ConstChannelDataPtr)&reply,
-                                                                             sizeof(reply)));
-                                match_result(Queue__push(&control, &response),
-                                    success_do_nothing(),
-                                    error_test_fail()
-                                );
-                                self->control = Some(Queue, control);
-                                return;
-                            }
-                            StringPos name_start = BString__starts_with(&path, &bstr("/sbin/")) ? 6 : 1;
-                            BString name = BString__slice(&path, name_start, BString__length(&path));
-                            match_optional(
-                                EmbeddedElf__load(&name),
-                                some(elf)
-                                {
-                                    self->image = elf.start;
-                                    self->image_size = elf.end - elf.start;
-                                    self->offset = 0;
-                                    reply.value = IO_FILESYSTEM_HANDLE_BASE;
-                                    match_result(
-                                        Buffers__operation(&kernel->scheduler->buffers, kernel->scheduler, self->puffer,
-                                                           MEM_BUFFER_CREATE, self->io->pid, QUEUE_KERNEL_PID,
-                                                           BUFFER_READ, 0),
-                                        success(id)
-                                        {
-                                            self->buffer = id;
-                                            reply.buffers.read = BufferDescriptor__new(id, BUFFER_READ);
-                                        },
-                                        error_test_fail()
-                                    );
-                                },
-                                none()
-                                {
-                                    reply.status = IO_INVALID_PATH;
-                                }
-                            );
-                        }
-                        else if (request.operation == IO_REQUEST_READ)
-                        {
-                            size_t remaining = self->image_size - self->offset;
-                            size_t size = remaining < BUFFER_SIZE ? remaining : BUFFER_SIZE;
-                            TEST_ASSERT_EQUAL_UINT64(self->buffer, request.buffer);
-                            match_result(
-                                Buffers__kernel_read(&kernel->scheduler->buffers, self->buffer, self->io->pid, size),
-                                success(address)
-                                {
-                                    Kernel__memcopy(self->image + self->offset, address, size);
-                                },
-                                error_test_fail()
-                            );
-                            self->offset += size;
-                            reply.value = size;
-                            self->reads++;
-                        }
-                        TEST_ASSERT_TRUE(
-                            ChannelPayload__write_reply(self->payload, (ConstChannelDataPtr)&reply, sizeof(reply)));
-                    }
-                    else
-                    {
-                        TEST_ASSERT_EQUAL(CHANNEL_REQUEST_ACKNOWLEDGE, message.kind);
-                        self->control = Some(Queue, control);
-                        return;
-                    }
+                    TEST_ASSERT_TRUE(Queue__write_data(&control, (ConstChannelDataPtr)&reply, sizeof(reply), 0));
                     match_result(Queue__push(&control, &response),
                         success_do_nothing(),
                         error_test_fail()

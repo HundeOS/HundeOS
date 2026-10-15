@@ -52,6 +52,17 @@ uint64_t process_current_pid(void)
     return current_pid;
 }
 
+Result(ConstProcessRegistryPtr) process_registry_map(void)
+{
+    ProcessRegistryMapResult result =
+        (ProcessRegistryMapResult)syscall(SYSCALL_PROCESS_REGISTRY_MAP, 0, 0, 0, 0, 0);
+    if (result < 0)
+    {
+        return Error(ConstProcessRegistryPtr, bstr("Cannot map process registry"), result);
+    }
+    return Success(ConstProcessRegistryPtr, (ConstProcessRegistryPtr)(uintptr_t)result);
+}
+
 ProcessListResult process_list(ProcessInfoPtr entries, size_t max_entries)
 {
     ProcessListRequest request = ProcessListRequest__new(entries, max_entries);

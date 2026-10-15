@@ -448,9 +448,10 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumb
                                         {
                                             return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);
                                         }
-                                        if (wake.cpu == context->cpu && !context->current_el)
+                                        if (wake.cpu == context->cpu)
                                         {
-                                            return Success(IRQDispatchStatus, IRQ_DISPATCH_RESCHEDULE);
+                                            return Success(IRQDispatchStatus, context->current_el ? IRQ_DISPATCH_HANDLED
+                                                                                                  : IRQ_DISPATCH_RESCHEDULE);
                                         }
                                         CPU__request_reschedule(wake.cpu);
                                         return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);

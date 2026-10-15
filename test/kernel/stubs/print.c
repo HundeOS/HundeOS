@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../../../kernel/arch/basic_io.h"
+#include "../../../kernel/trace_buffer.h"
 
 static char basic_io_output[4096];
 
@@ -22,6 +23,15 @@ void BasicIO__puts(const char * buffer)
 void DebugTrace__puts(const char * buffer)
 {
     BasicIO__puts(buffer);
+}
+
+__attribute__((weak)) void KernelTrace__append(const char * text)
+{
+}
+
+__attribute__((weak)) Result(KernelTraceSize) KernelTrace__snapshot(uint8_t * destination, size_t capacity)
+{
+    return Success(KernelTraceSize, 0);
 }
 
 void BasicIO__put_int(int num)

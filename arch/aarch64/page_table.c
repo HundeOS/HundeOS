@@ -366,3 +366,68 @@ int PageTable__map_4k_page(ProcessPageTablePtr self, KernelPtr kernel, Address v
         phys_addr, perms->memory_type, perms->shareability, perms->access, perms->uxn, perms->pxn);
     return 0;
 }
+
+static bool PageTable__prepare_block_mapping(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
+                                             Address physical_address, size_t size)
+{
+    Address end = virtual_address + size;
+    KernelAddress root = ProcessPageTable__root(self);
+    for (Address current = virtual_address; current < end;)
+    {
+        Address offset = current - virtual_address;
+        bool block = current % _2MB == 0 && (physical_address + offset) % _2MB == 0 && end - current >= _2MB;
+        KernelAddress level_1 = PageTable__ensure_next_level_table(self, root, kernel, L0_IDX(current));
+        if (!level_1.valid)
+        {
+            return false;
+        }
+        KernelAddress level_2 = PageTable__ensure_next_level_table(self, level_1, kernel, L1_IDX(current));
+        if (!level_2.valid)
+        {
+            return false;
+        }
+        if (!block &&
+            !PageTable__ensure_next_level_table(self, level_2, kernel, L2_IDX(current)).valid)
+        {
+            return false;
+        }
+        current += block ? _2MB : PAGE_SIZE;
+    }
+    return true;
+}
+
+Result(KAllocCode)
+    ArchPageTable__try_map_blocks(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    Address user_start = align_down_4k(vaddr(address));
+    Address user_end = align_up_4k(vaddr(address) + size);
+    Address physical_start = align_down_4k(u_kpaddr(address));
+    size_t mapping_size = user_end - user_start;
+    AccessAttribute access = address.write ? ACCESS_EL1_RW_EL0_RW : ACCESS_EL1_RO_EL0_RO;
+    MappingPermissions permissions =
+        MappingPermissions__new(ATTR_INDEX_NORMAL, SHARE_INNER, access, !address.execute, 0);
+
+    if (!PageTable__prepare_block_mapping(self, kernel, user_start, physical_start, mapping_size))
+    {
+        return Error(KAllocCode, page_table_allocation_failed, KALLOC_ALLOCATION_FAILED);
+    }
+
+    for (Address current = user_start; current < user_end;)
+    {
+        Address offset = current - user_start;
+        Address physical = physical_start + offset;
+        bool block = current % _2MB == 0 && physical % _2MB == 0 && user_end - current >= _2MB;
+        if (block)
+        {
+            PageTable__map_2M_block(self, kernel, current, physical, &permissions);
+            current += _2MB;
+        }
+        else
+        {
+            PageTable__map_4k_page(self, kernel, current, physical, &permissions);
+            current += PAGE_SIZE;
+        }
+    }
+    __asm__ __volatile__("dsb ishst; isb" ::: "memory");
+    return Success(KAllocCode, KALLOC_OK);
+}

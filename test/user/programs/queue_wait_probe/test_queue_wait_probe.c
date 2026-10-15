@@ -42,6 +42,11 @@ uint64_t process_current_pid(void)
     return 42;
 }
 
+Result(ConstProcessRegistryPtr) process_registry_map(void)
+{
+    return Success(ConstProcessRegistryPtr, (ConstProcessRegistryPtr)PROCESS_REGISTRY_VADDR);
+}
+
 int IO__printf(ConstBStringPtr format, ...)
 {
     return 0;

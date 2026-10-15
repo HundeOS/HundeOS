@@ -105,6 +105,12 @@ Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr ke
     );
 }
 
+Result(KAllocCode)
+    ArchPageTable__try_map_blocks(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    return ArchPageTable__try_map(self, kernel, address, size);
+}
+
 void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     ArchPageTable__map(self, kernel, address, size);

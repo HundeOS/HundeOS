@@ -11,6 +11,7 @@ manifest:
     - kernel/irq/*.c
     - kernel/spin.c
     - kernel/print.c
+    - kernel/trace_buffer.c
     - kernel/system_info.c
     - kernel/boot_info.c
     - kernel/types/*.c

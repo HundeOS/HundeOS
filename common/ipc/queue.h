@@ -53,9 +53,14 @@ QueueConnectionID Queue__connection(QueuePtr self);
 QueueParticipantID Queue__peer_pid(QueuePtr self);
 QueueParticipantID Queue__local_pid(QueuePtr self);
 QueueParticipantID Queue__origin_pid(QueuePtr self);
+bool Queue__is_channel(QueuePtr self);
 QueueProgress Queue__progress(QueuePtr self);
 bool QueueProgress__equals(ConstQueueProgressPtr self, ConstQueueProgressPtr other);
 Result(QueueCode) Queue__push(QueuePtr self, ConstQueueMessagePtr message);
 Result(QueueMessage) Queue__pop(QueuePtr self);
+bool Queue__write_data(QueuePtr self, const uint8_t * data, size_t size, uint64_t published_at_usec);
+bool Queue__read_data(QueuePtr self, uint8_t * data, size_t size);
+uint64_t Queue__data_published_at(QueuePtr self);
+uint64_t Queue__written_data_published_at(QueuePtr self);
 
 #endif

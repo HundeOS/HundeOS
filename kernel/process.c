@@ -495,14 +495,6 @@ static Result(ProcessSetupStatus) Process__map_service_directory(ProcessPtr self
         }
     );
     match_result(
-        KernelProcessRegistry__map_process(&self->kernel->process_registry, self),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
-        }
-    );
-    match_result(
         KernelDeviceRegistry__map_process(&self->kernel->device_registry, self),
         success_do_nothing(),
         error(code, message)
@@ -553,12 +545,14 @@ static Result(ProcessPtr)
     proc->process_group_id = pid;
     proc->session_id = pid;
     proc->execed_since_fork = true;
+    proc->process_registry_mapped = false;
     proc->stack = *stack;
     proc->last_tick = 0;
     proc->dispatched_at = 0;
     proc->migration_safe = true;
     proc->preferred_active = false;
     proc->preferred_warm = false;
+    proc->preferred_dependency_weight = 0;
     proc->preferred_ticket = None(RequestTicket);
     proc->preferred_eligible_at_usec = 0;
     proc->preferred_selected_at_usec = 0;
@@ -785,7 +779,6 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
     {
         return Error(ProcessPtr, fork_unsupported_state, PROCESS_FORK_UNSUPPORTED_STATE);
     }
-
     ProcessPageTable page_table;
     match_result(
         ProcessPageTable__new(self->kernel),
@@ -798,7 +791,6 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
             return Error(ProcessPtr, message, PROCESS_FORK_NO_MEMORY);
         }
     );
-
     ProcessID pid;
     critical_section(
         pid_lock,
@@ -818,7 +810,6 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
             return Error(ProcessPtr, message, PROCESS_FORK_NO_MEMORY);
         }
     );
-
     child->startup_argument_count = self->startup_argument_count;
     child->execed_since_fork = false;
     child->heap_break = self->heap_break;

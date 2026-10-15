@@ -3,16 +3,15 @@
     .p2align 4
     .global enter_high_kernel
 enter_high_kernel:
-    //bl      print_crumb
+    mov     w0, #'3'
+    bl      _send
 
     mov     sp, x23        // stack setup
 
     //bl      print_crumb
 
-    msr     vbar_el1, x24   // kernel vectors setup
-    isb
-
-    //bl      print_crumb
+    mov     w0, #'4'
+    bl      _send
 
     mov     x0, x26
     br      x25              // branch to high VA entrypoint

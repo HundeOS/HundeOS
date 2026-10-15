@@ -3,7 +3,7 @@
 #include "../debug.h"
 
 FixedArrayBodyDefine(RequestLinks);
-OptionalDef(QueueMessage);
+OptionalDef(QueuePublication);
 
 bool RequestLink__equals(void * first, void * second)
 {
@@ -17,25 +17,25 @@ RequestGraph RequestGraph__new(void)
     return (RequestGraph){.links = RequestLinks__new()};
 }
 
-static RequestLink RequestLink__new(RequestTicket ticket, ProcessPtr caller, ProcessPtr responder, ProcessPtr relay,
+static RequestLink RequestLink__new(RequestTicket ticket, ProcessPtr caller, ProcessPtr responder,
                                     QueueConnectionID route, bool replied)
 {
     return (RequestLink){
-        .ticket = ticket, .caller = caller, .responder = responder, .relay = relay, .route = route, .replied = replied};
+        .ticket = ticket, .caller = caller, .responder = responder, .route = route, .replied = replied};
 }
 
-static Optional(QueueMessage) QueueConnection__publication(QueueConnectionPtr self, bool client)
+static Optional(QueuePublication) QueueConnection__publication(QueueConnectionPtr self, bool client)
 {
     if (!self->memory.valid)
     {
-        return None(QueueMessage);
+        return None(QueuePublication);
     }
     Address base = self->memory.kernel_addr.virtual_addr;
     QueueIdentityPtr identity = (QueueIdentityPtr)base;
     if (__atomic_load_n(&identity->closed, __ATOMIC_ACQUIRE) != 0 ||
         __atomic_load_n(&identity->accepted, __ATOMIC_ACQUIRE) == 0)
     {
-        return None(QueueMessage);
+        return None(QueuePublication);
     }
     QueuePagePtr page = (QueuePagePtr)(base + (client ? 1 : 2) * QUEUE_PAGE_SIZE);
     match_result(
@@ -44,57 +44,41 @@ static Optional(QueueMessage) QueueConnection__publication(QueueConnectionPtr se
         {
             if (publication.cursor != 0 && publication.cursor == __atomic_load_n(&page->produced, __ATOMIC_ACQUIRE))
             {
-                return Some(QueueMessage, publication.message);
+                return Some(QueuePublication, publication);
             }
         },
         error(code, message)
         {
-            return None(QueueMessage);
+            return None(QueuePublication);
         }
     );
-    return None(QueueMessage);
+    return None(QueuePublication);
 }
 
-static Optional(RequestLink) QueueConnection__request_link(QueueConnectionPtr self, QueuesPtr queues)
+static Optional(RequestLink) QueueConnection__request_link(QueueConnectionPtr self)
 {
-    QueueMessage forwarded;
+    QueueMessage submitted;
     match_optional(
         QueueConnection__publication(self, true),
-        some(message)
+        some(publication)
         {
-            forwarded = message;
+            submitted = publication.message;
         },
         none()
         {
             return None(RequestLink);
         }
     );
-    RequestTicket ticket = ChannelControlMessage__ticket(&forwarded);
-    if (forwarded.kind != CHANNEL_REQUEST_SERVE || !RequestTicket__valid(&ticket))
-    {
-        return None(RequestLink);
-    }
-    QueueConnectionPtr source;
-    match_optional(
-        QueueConnections__ptr_at(&queues->connections, ticket.connection % QUEUE_LIMIT),
-        some(connection)
-        {
-            source = connection;
-        },
-        none()
-        {
-            return None(RequestLink);
-        }
-    );
-    if (source->connection != ticket.connection || source->connection == self->connection)
+    RequestTicket ticket = ChannelControlMessage__ticket(&submitted);
+    if (submitted.kind != CHANNEL_REQUEST_SUBMIT || ticket.connection != self->connection ||
+        !RequestTicket__valid(&ticket))
     {
         return None(RequestLink);
     }
     ProcessPtr caller;
-    ProcessPtr relay;
     ProcessPtr responder;
     match_optional(
-        source->client,
+        self->client,
         some(value)
         {
             caller = value;
@@ -102,7 +86,7 @@ static Optional(RequestLink) QueueConnection__request_link(QueueConnectionPtr se
         none()
         {
             match_optional(
-                source->kernel_origin,
+                self->kernel_origin,
                 some(value)
                 {
                     caller = value;
@@ -112,16 +96,6 @@ static Optional(RequestLink) QueueConnection__request_link(QueueConnectionPtr se
                     return None(RequestLink);
                 }
             );
-        }
-    );
-    match_optional(source->server,
-        some(value)
-        {
-            relay = value;
-        },
-        none()
-        {
-            return None(RequestLink);
         }
     );
     match_optional(self->server,
@@ -134,51 +108,23 @@ static Optional(RequestLink) QueueConnection__request_link(QueueConnectionPtr se
             return None(RequestLink);
         }
     );
-    match_optional(
-        self->client,
-        some(value)
-        {
-            if (value != relay)
-            {
-                return None(RequestLink);
-            }
-        },
-        none()
-        {
-            return None(RequestLink);
-        }
-    );
-    QueueParticipantID routed_client = source->kernel_client ? QUEUE_KERNEL_PID : caller->pid;
-    if (forwarded.arg3 != routed_client)
-    {
-        return None(RequestLink);
-    }
-    match_optional(
-        QueueConnection__publication(source, true),
-        some(message)
-        {
-            RequestTicket submitted = ChannelControlMessage__ticket(&message);
-            if (message.kind != CHANNEL_REQUEST_SUBMIT || !RequestTicket__equals(&ticket, &submitted))
-            {
-                return None(RequestLink);
-            }
-        },
-        none()
-        {
-            return None(RequestLink);
-        }
-    );
     bool replied = false;
     match_optional(
         QueueConnection__publication(self, false),
-        some(message)
+        some(publication)
         {
-            RequestTicket completed = ChannelControlMessage__ticket(&message);
-            replied = message.kind == CHANNEL_RESPONSE_REPLIED && RequestTicket__equals(&ticket, &completed);
+            RequestTicket completed = ChannelControlMessage__ticket(&publication.message);
+            replied = publication.message.kind == CHANNEL_RESPONSE_REPLIED &&
+                      RequestTicket__equals(&ticket, &completed);
+            QueuePagePtr client_page = (QueuePagePtr)(self->memory.kernel_addr.virtual_addr + QUEUE_PAGE_SIZE);
+            if (replied && publication.cursor == __atomic_load_n(&client_page->consumed, __ATOMIC_ACQUIRE))
+            {
+                return None(RequestLink);
+            }
         },
         none_do_nothing()
     );
-    return Some(RequestLink, RequestLink__new(ticket, caller, responder, relay, self->connection, replied));
+    return Some(RequestLink, RequestLink__new(ticket, caller, responder, self->connection, replied));
 }
 
 void RequestGraph__refresh(RequestGraphPtr self, QueuesPtr queues)
@@ -197,7 +143,7 @@ void RequestGraph__refresh(RequestGraphPtr self, QueuesPtr queues)
         connection,
         {
             match_optional(
-                QueueConnection__request_link(&connection, queues),
+                QueueConnection__request_link(&connection),
                 some(link)
                 {
                     match_result(

@@ -78,6 +78,18 @@ int main(int argc, char ** argv)
     {
         return 1;
     }
+    ConstProcessRegistryPtr registry;
+    match_result(
+        process_registry_map(),
+        success(mapped)
+        {
+            registry = mapped;
+        },
+        error(code, message)
+        {
+            return 1;
+        }
+    );
     IO__printf(&bstr("queue_wait_probe: pid=%llu ticks=%llu samples=%llu\n"), process_current_pid(), ticks,
                WAIT_PROBE_SAMPLES);
     SystemCallResult control_address = syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT_CONTROL, 0, 0, 0, 0);
@@ -103,7 +115,7 @@ int main(int argc, char ** argv)
                summary.timeouts, summary.activity, summary.failures, summary.min_timeout_usec,
                summary.timeouts == 0 ? 0 : summary.timeout_usec / summary.timeouts, summary.max_timeout_usec);
     match_result(
-        ProcessMetrics__snapshot_after(ProcessRegistry__shared(), process_current_pid(), IpcPlatform__monotonic_usec()),
+        ProcessMetrics__snapshot_after(registry, process_current_pid(), IpcPlatform__monotonic_usec()),
         success(record)
         {
             ProcessQueueWaitUsage usage = record.queue_wait_usage;

@@ -23,10 +23,10 @@ After `boot_complete()`, that entry point is unavailable. Normal spawn uses
 Channels even for embedded executables. [Mama](bootstrap-services.md) establishes
 the EXT2 `/boot/config` mount and `/boot/sysinfo` in userspace before configured startup.
 
-The Channel payload and nonblocking request/reply implementation now live in
-`common/ipc`, linked separately into kernel and userspace. The existing
-userspace client uses that implementation. `kernel/ipc/kernel_channel` establishes
-kernel sessions through the same warden, without a filesystem-specific transport.
+The Channel and nonblocking request/reply implementation lives in `common/ipc`,
+linked separately into kernel and userspace. Bounded bytes use each direct
+Queue's directional data area. `kernel/ipc/kernel_channel` connects directly to
+the target service, without the warden or a filesystem-specific transport.
 
 ## Executable Loading
 
@@ -49,10 +49,10 @@ OPEN, READ, and CLOSE without resubmitting caller pointers or credentials. A
 background spawn completes only after the child is scheduled and returns its PID;
 a waiting spawn transfers into the existing child wait. Each continuation performs
 bounded, nonblocking protocol work, and no scheduler mutex spans a wait or context
-switch. Shared payload addresses are resolved through ownership, peer, bounds, and
-generation checks under the scheduler lock. Disconnect, requester cleanup, and
-malformed replies cancel the job and close its Channel. Service-side handles are
-released through normal session cleanup.
+switch. Request and reply bytes use the direct Channel's directional Queue data;
+the kernel validates connection identity and mappings under the scheduler lock.
+Disconnect, requester cleanup, and malformed replies cancel the job and close
+its Channel. Service-side handles are released through normal session cleanup.
 
 The transport endpoint uses the reserved `QUEUE_KERNEL_PID`, not process PID zero.
 Its Channel ticket separately records the spawning process as the authenticated
@@ -92,7 +92,7 @@ reopen them. Restart/remapping recovery remains separate work.
 ## Verification Gates
 
 Tests cover permission and authentication handling, malformed ELF rejection,
-incremental Channel loading, revoked/recycled payloads, requester cleanup, and
+incremental direct-Channel loading, connection closure, requester cleanup, and
 one-way bootstrap handoff. Continue verifying boot dependencies and mounts across
 configured targets when changing the remaining kernel I/O compatibility paths.
 Mutable-provider snapshot consistency and service-restart recovery remain

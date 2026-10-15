@@ -152,78 +152,6 @@ void test_normal_spawn_does_not_fall_back_to_embedded_files_when_service_is_abse
     TEST_ASSERT_TRUE(is_nothing(parent->exec_load));
 }
 
-void test_loading_cancels_when_its_payload_mapping_is_revoked(void)
-{
-    SpawnRequest request =
-        test_spawn_request("/sbin/hello_world", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
-    Optional(ProcessPtr) caller = Some(ProcessPtr, parent);
-    match_result((ExecRequest__handler)(kernel, &caller, (Anything)&request, 0, 0, 0, 0),
-        success_test_fail(),
-                 error(code, message)
-        {
-            TEST_ASSERT_EQUAL(SYSCALL_IO_BLOCK, code);
-        }
-    );
-    for (unsigned step = 0; step < 5 && filesystem.payload_address == 0; step++)
-    {
-        FakeExecService__poll(&filesystem, kernel, parent);
-        ExecLoad__continue(parent);
-    }
-    TEST_ASSERT_NOT_EQUAL(0, filesystem.payload_address);
-    match_result(Scheduler__release_shared_page(kernel->scheduler, filesystem.warden, filesystem.payload_address),
-                 success_do_nothing(),
-        error_test_fail()
-    );
-    filesystem.payload_address = 0;
-    match_result(
-        ExecLoad__continue(parent),
-        success_test_fail(),
-        error(code, message)
-        {
-            TEST_ASSERT_EQUAL(SPAWN_FAILED, code);
-        }
-    );
-    TEST_ASSERT_TRUE(is_nothing(parent->exec_load));
-    FakeExecService__drain(&filesystem, kernel);
-}
-
-void test_loading_rejects_recycled_payload_at_the_same_address(void)
-{
-    SpawnRequest request =
-        test_spawn_request("/sbin/hello_world", P_NOWAIT, SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT);
-    Optional(ProcessPtr) caller = Some(ProcessPtr, parent);
-    (ExecRequest__handler)(kernel, &caller, (Anything)&request, 0, 0, 0, 0);
-    for (unsigned step = 0; step < 5 && filesystem.payload_address == 0; step++)
-    {
-        FakeExecService__poll(&filesystem, kernel, parent);
-        ExecLoad__continue(parent);
-    }
-    Address address = filesystem.payload_address;
-    TEST_ASSERT_NOT_EQUAL(0, address);
-    match_result(Scheduler__release_shared_page(kernel->scheduler, filesystem.warden, address),
-        success_do_nothing(),
-                 error_test_fail()
-    );
-    match_result(
-        Scheduler__alloc_shared_page(kernel->scheduler, filesystem.warden, QUEUE_KERNEL_PID, filesystem.io->pid),
-        success(reused)
-        {
-            TEST_ASSERT_EQUAL_UINT64(address, reused);
-        },
-        error_test_fail()
-    );
-    match_result(
-        ExecLoad__continue(parent),
-        success_test_fail(),
-        error(code, message)
-        {
-            TEST_ASSERT_EQUAL(SPAWN_FAILED, code);
-        }
-    );
-    TEST_ASSERT_TRUE(is_nothing(parent->exec_load));
-    FakeExecService__drain(&filesystem, kernel);
-}
-
 void test_process_cleanup_cancels_pending_executable_load(void)
 {
     SpawnRequest request =
@@ -245,7 +173,7 @@ void test_process_cleanup_cancels_pending_executable_load(void)
         none_test_fail()
     );
     FakeExecService__drain(&filesystem, kernel);
-    TEST_ASSERT_FALSE(Queues__has_kernel_client(&kernel->scheduler->queues, filesystem.warden));
+    TEST_ASSERT_FALSE(Queues__has_kernel_client(&kernel->scheduler->queues, filesystem.io));
 }
 
 void test_exec_is_called_triggering_new_process()

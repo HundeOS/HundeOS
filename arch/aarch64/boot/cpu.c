@@ -11,9 +11,14 @@
 
 #include "boot_debug.h"
 
+#ifndef AARCH64_BOOT_MAX_CPUS
+#define AARCH64_BOOT_MAX_CPUS MAX_CPUS
+#endif
+
 extern void (*secondary_boot_entry)(void);
 
-__BOOT_ALLOCATION__(static uint8_t) __attribute__((aligned(16))) boot_cpu_stacks[MAX_CPUS][STACK_SIZE];
+__BOOT_ALLOCATION__(static uint8_t)
+__attribute__((aligned(16))) boot_cpu_stacks[AARCH64_BOOT_MAX_CPUS][STACK_SIZE];
 
 __BOOT_DATA__(static uint64_t) messaged = 1;
 
@@ -27,9 +32,9 @@ __BOOT__(void) boot_secondary_cpus(uint64_t cpu_count)
     // we count this cpu already online
     uint64_t entry_pa = (uint64_t)&secondary_boot_entry;
 
-    if (cpu_count > MAX_CPUS)
+    if (cpu_count > AARCH64_BOOT_MAX_CPUS)
     {
-        cpu_count = MAX_CPUS;
+        cpu_count = AARCH64_BOOT_MAX_CPUS;
     }
 
     for (uint64_t cpu = 1; cpu < cpu_count; ++cpu)

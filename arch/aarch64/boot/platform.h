@@ -15,6 +15,9 @@ typedef struct BootPlatformInfo
     uint64_t uart_physical_base;
     uint64_t uart_virtual_base;
     uint64_t uart_irq;
+    UartKind uart_kind;
+    uint64_t uart_register_shift;
+    uint64_t uart_register_width;
     Optional(FramebufferInfo) framebuffer;
     Optional(PciInfo) pci;
     Optional(SdHostInfo) sd_host;

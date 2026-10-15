@@ -21,6 +21,7 @@ static ProcessForkOperation fork_operation;
 static uint64_t fork_child_pid;
 static ProcessGroupResult process_group_status;
 static ProcessGroupRequest process_group_reply;
+static ProcessRegistryMapResult process_registry_map_result;
 
 SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
 {
@@ -77,6 +78,10 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
         request->result_id = 71;
         return process_group_status;
     }
+    if (num == SYSCALL_PROCESS_REGISTRY_MAP)
+    {
+        return process_registry_map_result;
+    }
     TEST_ASSERT_EQUAL(SYSCALL_PROCESS_CREDENTIALS, num);
     requested_pid = arg1;
     if (credential_status == PROCESS_CREDENTIALS_OK)
@@ -118,6 +123,32 @@ void setUp(void)
     fork_child_pid = 0;
     process_group_status = PROCESS_GROUP_OK;
     process_group_reply = (ProcessGroupRequest){0};
+    process_registry_map_result = PROCESS_REGISTRY_VADDR;
+}
+
+void test_process_registry_map_returns_kernel_selected_address(void)
+{
+    match_result(
+        process_registry_map(),
+        success(registry)
+        {
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_REGISTRY_VADDR, (uintptr_t)registry);
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_registry_map_propagates_syscall_error(void)
+{
+    process_registry_map_result = PROCESS_REGISTRY_MAP_FAILED;
+    match_result(
+        process_registry_map(),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_REGISTRY_MAP_FAILED, code);
+        }
+    );
 }
 
 void test_process_fork_returns_typed_syscall_result(void)

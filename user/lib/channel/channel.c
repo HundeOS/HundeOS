@@ -76,7 +76,21 @@ static Result(Channel) Channel__connect(ServiceDirectoryPtr directory, QueueEndp
                                 QueueConnection__close(Queue__connection(&control));
                                 return Error(Channel, channel_invalid_reply, CHANNEL_INVALID_REPLY);
                             }
-                            return Success(Channel, Channel__new(&control, (ChannelPayloadPtr)reply.arg0));
+                            QueueConnectionID direct_connection = reply.arg0;
+                            match_result(
+                                Queue__attach_existing(direct_connection),
+                                success(direct)
+                                {
+                                    QueueConnection__close(Queue__connection(&control));
+                                    return Success(Channel, Channel__new(&direct));
+                                },
+                                error(code, message)
+                                {
+                                    QueueConnection__close(direct_connection);
+                                    QueueConnection__close(Queue__connection(&control));
+                                    return Error(Channel, message, code);
+                                }
+                            );
                         },
                         error(code, message)
                         {
@@ -140,7 +154,7 @@ Result(ChannelCode) Channel__request_once(ChannelPtr self, ConstChannelDataPtr r
             if (code == CHANNEL_OK)
             {
                 IOTrace__record(IO_TRACE_CLIENT_PUBLISH, &self->ticket,
-                                ChannelPayload__request_published_at(self->payload));
+                                Queue__written_data_published_at(&self->control));
             }
             return Success(ChannelCode, code);
         },
@@ -183,24 +197,14 @@ Result(OptionalChannelReplySize) Channel__poll_reply_once(ChannelPtr self, Chann
         success(size)
         {
             match_optional(
-                self->received_reply,
-                some(pending_size)
+                size,
+                some(completed_size)
                 {
-                    return Success(OptionalChannelReplySize, None(ChannelReplySize));
+                    IOTrace__record(IO_TRACE_CLIENT_COMPLETE, &self->ticket, IpcPlatform__monotonic_usec());
                 },
-                none()
-                {
-                    match_optional(
-                        size,
-                        some(completed_size)
-                        {
-                            IOTrace__record(IO_TRACE_CLIENT_COMPLETE, &self->ticket, IpcPlatform__monotonic_usec());
-                        },
-                        none_do_nothing()
-                    );
-                    return Success(OptionalChannelReplySize, size);
-                }
+                none_do_nothing()
             );
+            return Success(OptionalChannelReplySize, size);
         },
         error(code, message)
         {
@@ -217,20 +221,7 @@ Result(OptionalChannelReplySize) Channel__poll_reply(ChannelPtr self, ChannelDat
             Channel__poll_reply_once(self, reply, reply_capacity),
             success(size)
             {
-                match_optional(
-                    self->received_reply,
-                    some(pending_size)
-                    {
-                        if (!Queue__wait_writable_interruptible(&self->control))
-                        {
-                            return Error(OptionalChannelReplySize, channel_transport_failed, CHANNEL_INTERRUPTED);
-                        }
-                    },
-                    none()
-                    {
-                        return Success(OptionalChannelReplySize, size);
-                    }
-                );
+                return Success(OptionalChannelReplySize, size);
             },
             error(code, message)
             {

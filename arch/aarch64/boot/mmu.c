@@ -2,6 +2,7 @@
 #include <stddef.h>
 
 #include "mmu.h"
+#include "memory.h"
 
 #include "boot.h"
 #include "boot_debug.h"
@@ -20,6 +21,8 @@ extern const uint64_t __text_phys;
 #ifdef __BOOT_DEBUG
 extern const uint64_t vector_table;
 extern void CPU__enter_kernel(SystemInfoPtr system_info);
+extern void * memset(void * destination, int value, size_t size);
+extern char init_mutex;
 #endif
 
 extern const uint64_t __k_stack_high[];
@@ -34,6 +37,7 @@ extern const uint64_t __embedded_binaries_phys_end[];
 extern const uint64_t __framebuffer_start[];
 
 extern char __boot_end[];
+extern char __kernel_start[];
 static __BOOT_PAGE_TABLE__(PageTable) low_mem_l0_table;
 static __BOOT_PAGE_TABLE__(PageTable) high_mem_l0_table;
 static __BOOT_PAGE_TABLE__(PageTable) table_pool[PAGE_POOL_SIZE];
@@ -97,7 +101,7 @@ __BOOT__(PageTablePtr) ensure_next_level_table(PageTablePtr parent_level_table, 
 
     PageTablePtr next_level_table = &table_pool[table_cursor++];
 
-    for (int i = 0; i < TABLE_SIZE; i++)
+    for (size_t i = 0; i < TABLE_SIZE; i++)
     {
         next_level_table->entries[i] = 0;
     }
@@ -216,9 +220,9 @@ __BOOT__(void) map_framebuffer(PageTablePtr table, BootPlatformInfoPtr platform)
 
 __BOOT__(void) map_kernel(SystemInfoPtr system_info)
 {
-    uint64_t k_low_phys = KERNEL_LOW_PHYS_BASE;
+    uint64_t k_low_phys = (uintptr_t)&__kernel_start[0];
     uint64_t k_low_phys_max = (uintptr_t)&__boot_end[0];
-    uint64_t k_low_virt_base = KERNEL_LOW_VIRT_BASE;
+    uint64_t k_low_virt_base = k_low_phys;
 
     map_kernel_all_normal_rwx(k_low_phys, k_low_phys_max, k_low_virt_base,
                               &low_mem_l0_table); // unity map
@@ -277,11 +281,39 @@ __BOOT__(void) debug_boot_mappings(SystemInfoPtr system_info)
     debug_boot_mapping(mapping_vectors, (uint64_t)&vector_table);
     debug_boot_mapping(mapping_stack, system_info->kernel_stack.virtual_start);
 }
+
+static __BOOT__(void) debug_boot_hardware_mapping(const char * label, uint64_t va)
+{
+    uint64_t pa = va_to_pa_hw(va);
+
+    boot_debug_print(hardware_mapping_check);
+    boot_debug_print(label);
+    if (pa == UINT64_MAX)
+    {
+        boot_debug_print(mapping_missing);
+    }
+    else
+    {
+        boot_debug_print(mapping_ok);
+        boot_debug_print(mapping_pa);
+        boot_debug_print_unsigned(pa);
+    }
+    boot_debug_print(new_line);
+}
+
+__BOOT__(void) debug_boot_hardware_mappings(SystemInfoPtr system_info)
+{
+    debug_boot_hardware_mapping(mapping_cpu_enter, (uint64_t)&CPU__enter_kernel);
+    debug_boot_hardware_mapping(mapping_kernel_bss, (uint64_t)&init_mutex);
+    debug_boot_hardware_mapping(mapping_vectors, (uint64_t)&vector_table);
+    debug_boot_hardware_mapping(mapping_stack, system_info->kernel_stack.virtual_start + STACK_SIZE - 16);
+    debug_boot_hardware_mapping(mapping_uart, system_info->trace_uart.virtual_base);
+}
 #endif
 
 __BOOT__(void) zero_table(PageTablePtr table)
 {
-    for (int i = 0; i < TABLE_SIZE; i++)
+    for (size_t i = 0; i < TABLE_SIZE; i++)
     {
         table->entries[i] = 0;
     }

@@ -15,7 +15,6 @@ typedef enum IODiagnosticEvent
     IO_DIAGNOSTIC_UART_EMPTY,
     IO_DIAGNOSTIC_BACKEND_READS,
     IO_DIAGNOSTIC_BACKEND_EMPTY,
-    IO_DIAGNOSTIC_WARDEN_RELAYS,
     IO_DIAGNOSTIC_WAIT_ENTRIES,
     IO_DIAGNOSTIC_UNCHANGED_WAKES,
     IO_DIAGNOSTIC_BLOCK_CACHE_HITS,
@@ -63,7 +62,6 @@ typedef struct IODiagnostics
     uint64_t uart_empty;
     uint64_t backend_reads;
     uint64_t backend_empty;
-    uint64_t warden_relays;
     uint64_t wait_entries;
     uint64_t unchanged_wakes;
     uint64_t block_cache_hits;
@@ -96,7 +94,6 @@ typedef struct IODiagnosticsSnapshot
     uint64_t uart_empty;
     uint64_t backend_reads;
     uint64_t backend_empty;
-    uint64_t warden_relays;
     uint64_t wait_entries;
     uint64_t unchanged_wakes;
     uint64_t block_cache_hits;

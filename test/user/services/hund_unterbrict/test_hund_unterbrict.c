@@ -11,7 +11,6 @@ static QueuePage server_page;
 static IpcDoorbell client_doorbell;
 static IpcDoorbell server_doorbell;
 static Queue client_queue;
-static ChannelPayload payload;
 static KernelNotificationQueue event_queue;
 static uint64_t routed_client_pid;
 static IRQNumber routed_irq;
@@ -35,7 +34,6 @@ void setUp(void)
     identity = (QueueIdentity){.connection = 17, .client_pid = 4, .server_pid = 5, .accepted = 1};
     client_page = (QueuePage){0};
     server_page = (QueuePage){0};
-    payload = (ChannelPayload){0};
     event_queue = KernelNotificationQueue__new();
     routed_client_pid = 0;
     routed_irq = 0;
@@ -87,7 +85,6 @@ static InterruptClient test_client(void)
         (Queue){0});
     ChannelServer channel = {
         .control = server_queue,
-        .payload = &payload,
         .token = 29,
         .client_pid = 4,
         .request_size = sizeof(InterruptProtocolRequest),
@@ -98,7 +95,7 @@ static InterruptClient test_client(void)
 
 static void prepare_request(InterruptClientPtr client, ConstInterruptProtocolRequestPtr request)
 {
-    TEST_ASSERT_TRUE(ChannelPayload__write_request(&payload, (ConstChannelDataPtr)request, sizeof(*request)));
+    TEST_ASSERT_TRUE(Queue__write_data(&client_queue, (ConstChannelDataPtr)request, sizeof(*request), 0));
     client->channel.request_size = sizeof(*request);
     client->channel.handling_request = true;
 }
@@ -111,7 +108,7 @@ static InterruptProtocolResponse take_response(void)
         {
             TEST_ASSERT_EQUAL_UINT64(CHANNEL_RESPONSE_REPLIED, completion.kind);
             InterruptProtocolResponse response;
-            TEST_ASSERT_TRUE(ChannelPayload__read_reply(&payload, (ChannelDataPtr)&response, sizeof(response)));
+            TEST_ASSERT_TRUE(Queue__read_data(&client_queue, (ChannelDataPtr)&response, sizeof(response)));
             return response;
         },
         error_test_fail()

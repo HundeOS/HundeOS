@@ -29,6 +29,7 @@ typedef enum
     PANIC,
     FOCUS,
     MEMORY,
+    COMMAND_FLOW,
     LEVEL_COUNT
 } Level;
 
@@ -62,6 +63,8 @@ inline const char * level_to_string(Level level)
         return "FOCUS";
     case MEMORY:
         return "MEMORY";
+    case COMMAND_FLOW:
+        return "COMMAND_FLOW";
     case PANIC:
         return "PANIC";
     case UNHANDLED:
@@ -88,13 +91,20 @@ inline const char * level_to_string(Level level)
 
 #define LOG_LEVEL_MASK(level) (1ULL << (level))
 
+#ifdef KERNEL_COMMAND_TRACE
+#define COMMAND_FLOW_LOG_LEVEL LOG_LEVEL_MASK(COMMAND_FLOW)
+#else
+#define COMMAND_FLOW_LOG_LEVEL 0
+#endif
+
 #ifdef KERNEL_VERBOSE_TRACE
 #define ENABLED_LOG_LEVELS                                                                                             \
     (LOG_LEVEL_MASK(PROGRESS) | LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(EXEC) | LOG_LEVEL_MASK(FAULT) |                \
-     LOG_LEVEL_MASK(PANIC) | LOG_LEVEL_MASK(SYSCALL) | LOG_LEVEL_MASK(MEMORY))
+     LOG_LEVEL_MASK(PANIC) | LOG_LEVEL_MASK(SYSCALL) | LOG_LEVEL_MASK(SCHEDULER) | LOG_LEVEL_MASK(PROCESS_SWITCH) |     \
+     LOG_LEVEL_MASK(MEMORY) | COMMAND_FLOW_LOG_LEVEL)
 #else
 #define ENABLED_LOG_LEVELS                                                                                             \
-    (LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(FAULT) | LOG_LEVEL_MASK(PANIC))
+    (LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(FAULT) | LOG_LEVEL_MASK(PANIC) | COMMAND_FLOW_LOG_LEVEL)
 #endif
 
 inline bool __d_should_log(Level level)

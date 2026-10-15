@@ -12,6 +12,8 @@ static PageTable null_table;
 
 mutex_t init_mutex = MUTEX_INIT;
 
+extern const uint64_t vector_table;
+
 PageTablePtr MMU__init_null()
 {
     mutex_lock(&init_mutex);
@@ -45,6 +47,7 @@ void MMU__install_null_low_mem_table(KernelPtr kernel)
     PageTablePtr table = MMU__init_null();
     KernelAddress address = PageTable__from_virtual_address(kernel, addr(table));
 
-    MMU__park_ttbr0(address.phys_addr, (GUARD_ASID << 48), false);
+    __asm__ volatile("msr vbar_el1, %0\nisb" : : "r"((uint64_t)&vector_table) : "memory");
+    MMU__park_ttbr0(address.phys_addr, GUARD_ASID, false);
     __asm__ volatile("tlbi vmalle1"); // invalidate all EL1 stage-1 TLBs
 }

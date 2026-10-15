@@ -94,10 +94,13 @@ __BOOT_STRING__(mapping_missing) = " missing";
 __BOOT_STRING__(mapping_pa) = " pa=0x";
 __BOOT_STRING__(mapping_level) = " level=";
 __BOOT_STRING__(mapping_desc) = " desc=0x";
+__BOOT_STRING__(hardware_mapping_check) = "Hardware mapping check ";
 __BOOT_STRING__(mapping_cpu_enter) = "CPU__enter_kernel";
+__BOOT_STRING__(mapping_kernel_bss) = "kernel_bss";
 __BOOT_STRING__(mapping_memset) = "memset";
 __BOOT_STRING__(mapping_vectors) = "vector_table";
 __BOOT_STRING__(mapping_stack) = "kernel_stack";
+__BOOT_STRING__(mapping_uart) = "trace_uart";
 
 __BOOT_STRING__(mmu_enable) = "Switching on MMU\n";
 __BOOT_STRING__(entering_hi_mem) = "Entering high memory kernel\n";

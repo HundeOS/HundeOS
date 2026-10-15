@@ -8,7 +8,6 @@ typedef struct RequestLink
     RequestTicket ticket;
     ProcessPtr caller;
     ProcessPtr responder;
-    ProcessPtr relay;
     QueueConnectionID route;
     bool replied;
 } RequestLink;

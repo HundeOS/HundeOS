@@ -125,9 +125,10 @@ the file's current size and performs the write in the same service operation.
 Seeking an append descriptor therefore does not change the next write position,
 and independent append handles cannot select the same stale end offset.
 
-`hundekanal-warter` remains responsible for channel establishment and session
-lifecycle. It does not interpret I/O operations. The kernel retains scheduling,
-memory protection, authenticated IPC primitives, and process-exit notification.
+`hundekanal-warter` authorizes Channel establishment and delegates a direct Queue
+between the authenticated client and service. It does not retain established
+session state or interpret, relay, or acknowledge I/O operations. The kernel
+owns mappings, connection close, and process-exit cleanup.
 
 ## Identity and handles
 
@@ -346,11 +347,10 @@ Socket handles are not currently inherited by spawned processes.
 Service-restart recovery is deferred.
 
 Each client disconnect releases the socket resources owned by that authenticated
-session. The warden sends a channel cancellation notification if a request is in
-progress, retaining the payload until the server replies or disconnects. Backend
-loss fails requests without replay or reconnection. This uses current channel closure
-detection; the reliable process-exit notification work described above remains
-outstanding. A live client that never closes can still retain bounded resources.
+session. Direct Queue closure wakes the service, which cancels or completes any
+in-progress protocol work and releases the session resources. Backend loss fails
+requests without replay or reconnection. A live client that never closes can
+still retain bounded resources.
 
 Mama starts the Channel, interrupt, filesystem, and I/O services. Hundeschule
 starts the socket service later; the I/O service connects to it on demand.

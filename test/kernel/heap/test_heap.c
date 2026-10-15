@@ -300,3 +300,23 @@ void test_heap_clips_system_info_regions_to_mapped_heap(void)
     TEST_ASSERT_EQUAL_UINT64(test_heap_physical_base, paddr(allocation));
     TEST_ASSERT_FALSE(Heap__try_alloc_size(&heap, PAGE_SIZE).valid);
 }
+
+void test_aligned_allocation_splits_prefix_and_preserves_physical_alignment(void)
+{
+    KernelAddress prefix = Heap__alloc(&heap);
+    KernelAddress aligned = Heap__try_alloc_size_aligned(&heap, _2MB + PAGE_SIZE, _2MB);
+
+    TEST_ASSERT_TRUE(aligned.valid);
+    TEST_ASSERT_EQUAL_UINT64(0, paddr(aligned) % _2MB);
+    TEST_ASSERT_EQUAL_UINT64(test_heap_physical_base + _2MB, paddr(aligned));
+
+    assert_free_success(prefix);
+    assert_free_success(aligned);
+    KernelAddress coalesced = Heap__try_alloc_size(&heap, sizeof(test_heap_memory));
+    TEST_ASSERT_TRUE(coalesced.valid);
+}
+
+void test_aligned_allocation_rejects_non_page_alignment(void)
+{
+    TEST_ASSERT_FALSE(Heap__try_alloc_size_aligned(&heap, PAGE_SIZE, PAGE_SIZE / 2).valid);
+}

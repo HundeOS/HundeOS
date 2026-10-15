@@ -334,6 +334,7 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__masked_irq());
     TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->state);
+    TEST_ASSERT_EQUAL_UINT64(0, CPUStub__reschedule_count());
     TEST_ASSERT_TRUE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, manager));
     ProcessPtr other = dummy_process(2, 0, PROC_STATE_READY);
     TEST_ASSERT_FALSE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, other));
@@ -357,6 +358,48 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
         },
         none_test_fail()
     );
+}
+
+void test_irq_dispatcher_does_not_poke_current_cpu_from_kernel_el(void)
+{
+    ProcessPtr manager = dummy_process(1, 0, PROC_STATE_READY);
+    manager->process_class = PROCESS_CLASS_SERVICE;
+    match_result(Scheduler__schedule_on_cpu(kernel->scheduler, manager, 0),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(IRQDispatcher__register_manager(kernel->irq_dispatcher, manager),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(IRQDispatcher__register_managed_irq(kernel->irq_dispatcher, 48, manager),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(
+        Scheduler__queue_wait(kernel->scheduler, manager,
+                              IpcEvent__generation(IpcDoorbell__event(k_v_ptr(
+                                  unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
+                              QUEUE_WAIT_INDEFINITE_TICKS),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, status);
+        },
+        error_test_fail()
+    );
+
+    IRQDispatchContext context = IRQDispatchContext__new(48, 0, true, NULL);
+    match_result(
+        IRQDispatcher__dispatch(kernel->irq_dispatcher, 48, &context),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IRQ_DISPATCH_HANDLED, status);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->state);
+    TEST_ASSERT_EQUAL_UINT64(0, CPUStub__reschedule_count());
 }
 
 void test_irq_dispatcher_pokes_remote_cpu_for_parked_interrupt_manager(void)

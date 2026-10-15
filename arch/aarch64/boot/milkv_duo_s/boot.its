@@ -1,0 +1,49 @@
+/dts-v1/;
+
+/ {
+    description = "HundeOS Milk-V Duo S ARM64";
+    #address-cells = <2>;
+
+    images {
+        kernel-1 {
+            description = "HundeOS AArch64 kernel handoff";
+            data = /incbin/("handoff.bin");
+            type = "kernel";
+            arch = "arm64";
+            os = "linux";
+            compression = "none";
+            load = <0x0 0x8d000000>;
+            entry = <0x0 0x8d000000>;
+        };
+
+        kernel-payload {
+            description = "HundeOS AArch64 kernel payload";
+            data = /incbin/("kernel.img.lzma");
+            type = "loadable";
+            arch = "arm64";
+            os = "linux";
+            compression = "lzma";
+            load = <0x0 0x84000000>;
+        };
+
+        fdt-sg2000_milkv_duos_glibc_arm64_sd {
+            description = "Milk-V Duo S SG2000 ARM64";
+            data = /incbin/("milkv_duo_s.dtb");
+            type = "flat_dt";
+            arch = "arm64";
+            compression = "none";
+            load = <0x0 0x8c000000>;
+        };
+    };
+
+    configurations {
+        default = "config-sg2000_milkv_duos_glibc_arm64_sd";
+
+        config-sg2000_milkv_duos_glibc_arm64_sd {
+            description = "HundeOS ARM64 on Milk-V Duo S";
+            kernel = "kernel-1";
+            loadables = "kernel-payload";
+            fdt = "fdt-sg2000_milkv_duos_glibc_arm64_sd";
+        };
+    };
+};

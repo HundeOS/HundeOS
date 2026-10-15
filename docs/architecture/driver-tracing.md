@@ -13,6 +13,23 @@ as a UART can still delay the caller while transmitting the record. Kernel
 boot, panic, and userspace driver diagnostics therefore share the configured
 kernel-trace destination.
 
+## Kernel trace snapshots
+
+Targets built with `KERNEL_MEMORY_TRACE` retain the newest 12 KiB written
+through the architecture-neutral kernel trace path. The ring overwrites its
+oldest bytes and uses a nonblocking guard: trace output may be lost under
+contention, but a diagnostic write never waits for a reader or for free space.
+Architecture trace sinks remain independent, so a target may tee the same
+post-handoff trace to both memory and a UART.
+
+The `SYSTEM_INFO_READ_KERNEL_TRACE` operation copies a non-destructive snapshot
+into a validated writable mapping owned by a `hund` process. The userspace
+`procfs` driver uses that operation to expose `/proc/ktrace` as a read-only
+snapshot file. Opening the file captures the newest retained bytes; it neither
+drains nor acknowledges the kernel ring. Bootstrap output emitted before the
+architecture-neutral kernel trace path is active remains available only through
+the platform bootstrap sink.
+
 Fatal userspace process records remain in the kernel trace and are also copied
 to the console sink before the process is terminated. This keeps the exception
 cause, program counter, and fault address visible when the separate kernel-trace

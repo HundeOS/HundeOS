@@ -7,6 +7,8 @@ FixedArrayBodyDefine(QueueConnections);
 
 static BString queue_error = bstr("Atomic message queue operation failed");
 
+static Result(QueueCode) Queues__close_connection(QueuesPtr self, QueueConnectionPtr connection, ProcessPtr process);
+
 bool QueueListener__equals(void * first, void * second)
 {
     QueueListenerPtr a = first;
@@ -39,6 +41,7 @@ static QueueConnection QueueConnection__new(UserAddress memory, OptionalPtr(Proc
         .server = *server,
         .kernel_origin = None(ProcessPtr),
         .connection = connection,
+        .delegated_from = 0,
         .listener_index = listener_index,
         .client_peer_doorbell_mapped = false,
         .server_peer_doorbell_mapped = false,
@@ -632,6 +635,118 @@ Result(QueueConnectionID) Queues__connect(QueuesPtr self, ProcessPtr process, Qu
     return Error(QueueConnectionID, queue_error, QUEUE_INVALID);
 }
 
+Result(QueueConnectionID) Queues__delegate(QueuesPtr self, ProcessPtr manager,
+                                           QueueConnectionID client_connection, QueueEndpointID endpoint)
+{
+    if (!Process__has_capability(manager, PROCESS_CAP_MANAGE_SHARED_PAGES))
+    {
+        return Error(QueueConnectionID, queue_error, QUEUE_DENIED);
+    }
+    match_result(
+        Queues__client_process(self, manager, client_connection),
+        success(client)
+        {
+            match_result(
+                Queues__connect(self, client, endpoint),
+                success(connection)
+                {
+                    match_optional(
+                        QueueConnections__ptr_at(&self->connections, connection % QUEUE_LIMIT),
+                        some(stored)
+                        {
+                            k_v_ptr(stored->memory, QueueIdentity)->channel = 1;
+                            stored->delegated_from = client_connection;
+                            return Success(QueueConnectionID, connection);
+                        },
+                        none_do_nothing()
+                    );
+                    return Error(QueueConnectionID, queue_error, QUEUE_INVALID);
+                },
+                error(code, message)
+                {
+                    return Error(QueueConnectionID, message, code);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(QueueConnectionID, message, code);
+        }
+    );
+    return Error(QueueConnectionID, queue_error, QUEUE_DENIED);
+}
+
+Result(QueueCode) Queues__cancel_delegation(QueuesPtr self, ProcessPtr manager,
+                                            QueueConnectionID client_connection, QueueConnectionID delegated)
+{
+    if (!Process__has_capability(manager, PROCESS_CAP_MANAGE_SHARED_PAGES))
+    {
+        return Error(QueueCode, queue_error, QUEUE_DENIED);
+    }
+    QueueConnectionPtr delegated_connection;
+    match_optional(
+        QueueConnections__ptr_at(&self->connections, delegated % QUEUE_LIMIT),
+        some(connection)
+        {
+            delegated_connection = connection;
+        },
+        none()
+        {
+            return Error(QueueCode, queue_error, QUEUE_INVALID);
+        }
+    );
+    bool authorized = delegated_connection->connection == delegated && delegated_connection->memory.valid &&
+                      delegated_connection->delegated_from == client_connection &&
+                      __atomic_load_n(&k_v_ptr(delegated_connection->memory, QueueIdentity)->channel,
+                                      __ATOMIC_ACQUIRE) != 0;
+    match_optional(
+        QueueConnections__ptr_at(&self->connections, client_connection % QUEUE_LIMIT),
+        some(control)
+        {
+            authorized = authorized && control->connection == client_connection && control->memory.valid &&
+                         Queues__belongs_to(&control->server, manager);
+        },
+        none()
+        {
+            authorized = false;
+        }
+    );
+    if (!authorized)
+    {
+        return Error(QueueCode, queue_error, QUEUE_DENIED);
+    }
+    match_optional(
+        delegated_connection->client,
+        some(client)
+        {
+            match_result(Queues__close_connection(self, delegated_connection, client),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(QueueCode, message, code);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+    match_optional(
+        QueueConnections__ptr_at(&self->connections, delegated % QUEUE_LIMIT),
+        some(connection)
+        {
+            match_optional(
+                connection->server,
+                some(server)
+                {
+                    return Queues__close_connection(self, connection, server);
+                },
+                none_do_nothing()
+            );
+        },
+        none_do_nothing()
+    );
+    return Success(QueueCode, QUEUE_OK);
+}
+
 Result(QueueCode) Queues__accept(QueuesPtr self, ProcessPtr process, QueueConnectionID id)
 {
     match_optional(
@@ -853,6 +968,7 @@ Result(Queue) Queues__connect_kernel(QueuesPtr self, QueueEndpointID endpoint, O
                                 QueueConnections__ptr_at(&self->connections, id % QUEUE_LIMIT),
                                 some(connection)
                                 {
+                                    k_v_ptr(connection->memory, QueueIdentity)->channel = 1;
                                     connection->kernel_origin = *origin;
                                     match_optional(
                                         *origin,

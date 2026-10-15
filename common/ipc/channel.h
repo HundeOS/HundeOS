@@ -28,7 +28,6 @@ ResultDef(OptionalChannelReplySize);
 typedef struct Channel
 {
     Queue control;
-    ChannelPayloadPtr payload;
     QueueConnectionID token;
     QueueParticipantID server_pid;
     QueueParticipantID origin_pid;
@@ -40,9 +39,9 @@ typedef struct Channel
 typedef Channel * ChannelPtr;
 ResultDef(Channel);
 
-// Queue and payload mappings must remain valid throughout every call.
-Channel Channel__new(QueuePtr control, ChannelPayloadPtr payload);
-Channel Channel__new_with_origin(QueuePtr control, ChannelPayloadPtr payload, QueueParticipantID origin_pid);
+// Queue mappings must remain valid throughout every call.
+Channel Channel__new(QueuePtr control);
+Channel Channel__new_with_origin(QueuePtr control, QueueParticipantID origin_pid);
 QueueParticipantID Channel__server_pid(ChannelPtr self);
 Result(ChannelCode) Channel__try_request(ChannelPtr self, ConstChannelDataPtr request, size_t request_size);
 Result(ChannelCode) Channel__try_request_with_parent(ChannelPtr self, ConstChannelDataPtr request, size_t request_size,

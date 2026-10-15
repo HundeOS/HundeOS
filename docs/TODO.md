@@ -545,8 +545,11 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 - [x] Expose aggregated wake reasons, parked durations, and wake-to-selection
   delays through [procfs queue-wait diagnostics](architecture/process-registry-and-procfs.md#queue-wait-diagnostics).
 - [x] Expose userspace UART bytes/IRQs, empty reads, backend read traffic,
-  warden forwards, and unchanged event-wait returns through
+  Channel publications, and unchanged event-wait returns through
   [IPC activity diagnostics](architecture/process-registry-and-procfs.md#ipc-activity-diagnostics).
+- [x] Retain a bounded, lossy kernel trace in memory and expose a validated,
+  non-destructive snapshot through `/proc/ktrace` for hardware with no second
+  UART adapter. See [kernel trace snapshots](architecture/driver-tracing.md#kernel-trace-snapshots).
 - [ ] Measure idle-console deltas versus typing after the stable-publication
   change, separating real queue/kernel wakes from spurious `WFE` returns.
 
@@ -592,7 +595,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 
 - [x] Prioritise every runnable process with unread incoming queue/Channel messages
   above processes without messages, regardless of process class. This includes
-  requests, replies, relay messages, and kernel service notifications. Existing
+  direct requests, replies, and kernel service notifications. Existing
   class/last-run ordering breaks ties; consuming messages removes the priority.
   Implemented using existing kernel mappings, with no per-message syscall. See
   [receiver scheduling priority](architecture/queues.md#receiver-scheduling-priority).
@@ -620,7 +623,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 - [x] Retain the final trace records of short-lived processes by synchronously
   draining a bounded snapshot of every registered source before acknowledging
   the exiting process's drain request.
-- [x] Record the exact monotonic publication timestamp in each Channel payload
+- [x] Record the exact monotonic publication timestamp in each directional Queue data area
   and emit an `IO-HOP` record at consumption, allowing `fs-latency` to report
   publish-to-consume percentiles for each immediate client/server pair.
 - [x] Preserve absolute Channel lifecycle timestamps in completed trace records
@@ -632,9 +635,8 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   rings are deliberately lossy, so fan-out-heavy filesystem workloads can
   retain different sample counts at successive hops.
 - Keep unread transport work distinct from an outstanding request: a server may
-  consume a request and then wait on another service. Account for the warden's
-  existing relay stages and cross-CPU
-  observation latency. Queue inspection must not require kernel parsing of I/O
+  consume a request and then wait on another service. Account for direct
+  client/service stages and cross-CPU observation latency. Queue inspection must not require kernel parsing of I/O
   payloads or treating a userspace event as immediate scheduler entry.
 - Agreed policy is strict highest priority for message receivers. Fairness between
   receivers and processes without messages is not imposed; sustained unread
@@ -646,7 +648,9 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   arrives, rather than merely reserving capacity for a later dispatch. Retain
   each active stage until it waits on a Channel/queue, with the warm-wait
   exception below. Implemented as opportunistic FIFO scheduling, not exclusive
-  gang scheduling; overlapping chains may interleave. See
+  gang scheduling; overlapping chains may interleave. The preferred queue is
+  resorted on every scheduler refresh so actionable receivers and deeper
+  validated dependency chains displace older, less important entries. See
   [Channel tickets and preferred scheduling](architecture/dependency-scheduling.md).
 - User requirement: use a preferred scheduler run queue, distinct from IPC
   message queues. Enqueueing a chain member does not by itself force immediate
@@ -662,12 +666,18 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   10 ms warm residency and 10 ms preferred processing, without renewal on timer
   checks. Blocking and termination override retention; tuning remains open.
 - [x] Carry generation-tagged tickets, origin PID, and parent identity through
-  Channel control metadata and the warden. Publish durable atomic records in
+  direct Channel control metadata. Publish durable atomic records in
   write-owned queue pages; validate endpoint ownership, ancestry, and live
   generations. Kernel Channel transports use `QUEUE_KERNEL_PID` while retaining
   the real originating process for dependency roots. Preserve request context
   across fibre switches. Reject cycles, discard stale/acknowledged links, and
   remove queued processes on exit.
+- [x] Remove `hundekanal-warter` from established Channel traffic. The warden
+  authenticates an `OPEN`, asks the kernel to delegate the client directly to
+  the service, returns that connection, and discards the temporary control
+  state. Requests and replies use directional Queue data and peer doorbells;
+  the kernel owns connection close and process-exit cleanup. See
+  [Channels and event queues](architecture/channels-and-event-queues.md).
 - [x] Allow preferred selection on another started core after the outgoing
   context-switch tail is safe. Do not steal running or kernel-blocked processes.
 - [x] Treat the idle process as the final scheduling choice. When a CPU has no
@@ -682,11 +692,13 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   dependency-aware preferred path has a priority reason to migrate it. CPU
   scheduler lookup is keyed by the architecture CPU ID rather than indexing a
   dense array, and process-registry publication uses a separate compact slot.
-- [x] Add event-triggered cross-core queue notification. A successful push
+- [x] Add event-triggered queue notification. A successful push
   publishes shared progress first, authenticates the live connection in the
-  kernel, wakes a changed parked receiver, and sends one coalesced reschedule IPI
-  to its owning CPU. Pop only publishes consumption and does not announce new
-  schedulable work. A park-time recheck closes the notify-before-park race.
+  kernel, and wakes a changed parked receiver. A remote receiver gets one
+  coalesced reschedule IPI; on a single-CPU system, the notifying process yields
+  through normal scheduler selection. Pop only publishes consumption and does
+  not announce new schedulable work. A park-time recheck closes the
+  notify-before-park race. See [queue waits](architecture/queues.md#bounded-waits).
 - [ ] Evaluate adaptive residency using the resulting latency measurements.
 - Open scope: exclusive cluster budgets/arbitration and context integration for
   custom asynchronous dispatchers outside the common I/O/block wrappers.
@@ -1015,6 +1027,21 @@ for architecture bring-up. See the
 
 #### Milk-V Duo S SG2000
 
+- [x] Keep synchronous `COMMAND_FLOW` UART records out of the normal AArch64
+  image. Live hardware measurements showed a roughly 13 ms queue-to-dispatch
+  delay per approximately 150-byte record at 115200 baud. The isolated
+  `milkv-duo-s-sd-image-aarch64-command-trace` target remains available for
+  scheduler diagnosis and must not be used for performance comparisons. See
+  [Milk-V Duo S](architecture/milkv-duo-s.md).
+- [ ] Bring up the SG2000 Cortex-A53 path with the official ARM64 firmware.
+  `make milkv-duo-s-aarch64` now builds the board-specific AArch64 kernel,
+  staged FIT, and vendor-compatible DTB, while
+  `make milkv-duo-s-sd-image-aarch64` produces the complete image from the
+  checksum-pinned v2.0.1 firmware. Hardware entry and MMU validation remain,
+  followed by GICv2 CPU-interface support in the common AArch64 interrupt path,
+  timer/device interrupts, userspace bootstrap, and login. See
+  [Milk-V Duo S](architecture/milkv-duo-s.md).
+
 - [x] Add a CV1800B-QEMU approximation with the Duo S kernel, DTB, 510 MiB RAM,
   and complete SD image for rapid integration testing. The isolated build uses
   QEMU-compatible PTE attributes and UART0 as its console because this model
@@ -1030,7 +1057,7 @@ for architecture bring-up. See the
   Duo S UART, PLIC, RTC, and CV181x SD host description. See
   [Milk-V Duo S](architecture/milkv-duo-s.md).
 - [x] Automate a complete Duo S SD image from the checksum-pinned official
-  v1.1.4 image. `make milkv-duo-s-sd-image` preserves the vendor boot chain
+  v1.1.4 image. `make milkv-duo-s-sd-image-riscv` preserves the vendor boot chain
   and raw logo region, replaces `boot.sd`, installs the 8 MiB boot configuration
   filesystem in partition two, and relocates the HundeOS ext2 root to partition
   three.

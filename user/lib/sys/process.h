@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "syscalls/process.h"
+#include "process/process_registry.h"
 
 ProcessListResult process_list(ProcessInfoPtr entries, size_t max_entries);
 Result(ProcessCredentials) process_credentials(uint64_t pid);
@@ -20,5 +21,6 @@ ProcessChildEventResult wait_for_child_event(ProcessChildEventPtr event);
 ProcessChildEventResult wait_for_child_event_for(int64_t child_selection, uint64_t options, ProcessChildEventPtr event);
 ProcessTimesResult process_times(ProcessTimesPtr times);
 ProcessGroupResult process_group_control(ProcessGroupRequestPtr request);
+Result(ConstProcessRegistryPtr) process_registry_map(void);
 
 #endif

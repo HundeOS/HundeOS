@@ -24,6 +24,7 @@ KERNEL_HEAP_BASE = 0xFFFFF00000000000;
 KERNEL_BASE = DEFINED(KERNEL_BASE) ? KERNEL_BASE : 0x40200000;
 /*KERNEL_BASE = 0x00;*/
 BOOT_ALLOCATION_BASE = DEFINED(BOOT_ALLOCATION_BASE) ? BOOT_ALLOCATION_BASE : 0x50000000;
+KERNEL_STACK_SIZE = DEFINED(KERNEL_STACK_SIZE) ? KERNEL_STACK_SIZE : 200M;
 
 HEAP_END = 2 * 1024 * 1024 * 1024; /* 2 GB */
 
@@ -210,7 +211,7 @@ SECTIONS
   . = KERNEL_STACK_BASE;
   .kstack :AT(ALIGN(__lma_cursor, BLOCK_2MB)) ALIGN(BLOCK_2MB) {
       __k_stack_start = .;
-      . += 200M;                 /* pick a size */
+      . += KERNEL_STACK_SIZE;
       __k_stack_end   = .;
       __k_stack_high  = __k_stack_end;  /* top of stack grows down */
   } :kstack

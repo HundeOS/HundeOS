@@ -13,6 +13,7 @@
 #include "../stubs/system.h"
 #include "../stubs/process_context_layout.h"
 #include "../stubs/kalloc.h"
+#include "../stubs/page_table.h"
 
 #define ProcessList__handler(kernel, proc, ...) ProcessList__handler((kernel), &(proc), __VA_ARGS__)
 #define Signal__handler(kernel, proc, ...) Signal__handler((kernel), &(proc), __VA_ARGS__)
@@ -23,6 +24,7 @@
 #define ProcessIdentity__handler(kernel, proc, ...) ProcessIdentity__handler((kernel), &(proc), __VA_ARGS__)
 #define ProcessGroup__handler(kernel, proc, ...) ProcessGroup__handler((kernel), &(proc), __VA_ARGS__)
 #define ProcessFork__handler(kernel, proc, ...) ProcessFork__handler((kernel), &(proc), __VA_ARGS__)
+#define ProcessRegistryMap__handler(kernel, proc, ...) ProcessRegistryMap__handler((kernel), &(proc), __VA_ARGS__)
 #define Shutdown__handler(kernel, proc, ...) Shutdown__handler((kernel), &(proc), __VA_ARGS__)
 
 static KernelPtr kernel = NULL;
@@ -55,6 +57,44 @@ void setUp(void)
 void tearDown(void)
 {
     TEST_ASSERT_FALSE(panic_occurred());
+}
+
+void test_process_registry_map_handler_maps_once_and_returns_userspace_address(void)
+{
+    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_RUNNING);
+
+    match_result(
+        ProcessRegistryMap__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        success(result)
+        {
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_REGISTRY_VADDR, result);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(process->process_registry_mapped);
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), PROCESS_REGISTRY_VADDR,
+                                          true, false, false, PROCESS_REGISTRY_SIZE));
+
+    match_result(
+        ProcessRegistryMap__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        success(result)
+        {
+            TEST_ASSERT_EQUAL_UINT64(PROCESS_REGISTRY_VADDR, result);
+        },
+        error_test_fail()
+    );
+}
+
+void test_process_registry_map_handler_rejects_missing_caller(void)
+{
+    match_result(
+        ProcessRegistryMap__handler(kernel, None(ProcessPtr), 0, 0, 0, 0, 0),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_REGISTRY_MAP_INVALID_CALLER, code);
+        }
+    );
 }
 
 void test_process_list_handler_returns_scheduled_processes(void)

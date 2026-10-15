@@ -12,10 +12,15 @@ Result(ServiceCode) KernelProcessRegistry__map_process(KernelProcessRegistryPtr 
     critical_section(
         self->lock,
         {
+            if (process->process_registry_mapped)
+            {
+                cs_return Success(ServiceCode, SERVICE_OK);
+            }
             if (!self->mapping.valid)
             {
                 match_result(
-                    Kernel__try_alloc_user(PROCESS_REGISTRY_VADDR, PROCESS_REGISTRY_SIZE, true, false, false),
+                    Kernel__try_alloc_user_aligned(PROCESS_REGISTRY_VADDR, PROCESS_REGISTRY_SIZE, _2MB, true, false,
+                                                   false),
                     success(mapping)
                     {
                         Kernel__memset(mapping.kernel_addr.virtual_addr, 0, PROCESS_REGISTRY_SIZE);
@@ -28,7 +33,16 @@ Result(ServiceCode) KernelProcessRegistry__map_process(KernelProcessRegistryPtr 
                     }
                 );
             }
-            PageTable__map_shared(&process->page_table, process->kernel, self->mapping, PROCESS_REGISTRY_SIZE);
+            match_result(
+                PageTable__try_map_shared_blocks(&process->page_table, process->kernel, self->mapping,
+                                                 PROCESS_REGISTRY_SIZE),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    cs_return Error(ServiceCode, message, SERVICE_MAP_FAILED);
+                }
+            );
+            process->process_registry_mapped = true;
             cs_return Success(ServiceCode, SERVICE_OK);
         }
     );

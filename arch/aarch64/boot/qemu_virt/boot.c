@@ -73,6 +73,9 @@ __BOOT_DATA__(static BootPlatformInfo) qemu_virt_platform_info = { // hundelint:
     .uart_physical_base = BOOT_UART0_PHYS_BASE,
     .uart_virtual_base = BOOT_MMIO_VIRT_BASE,
     .uart_irq = BOOT_UART_IRQ_ID,
+    .uart_kind = UART_KIND_PL011,
+    .uart_register_shift = 0,
+    .uart_register_width = 4,
     .pci = Some(PciInfo, ((PciInfo){ // hundelint: ignore-constructor-required
                           .ecam_physical_base = QEMU_VIRT_PCI_ECAM_PHYS_BASE,
                           .ecam_size = QEMU_VIRT_PCI_ECAM_SIZE,
@@ -181,9 +184,9 @@ __BOOT__(void) primary_booted(void)
     asm volatile("mrs %0, ICC_PMR_EL1" : "=r"(pmr));
     asm volatile("mrs %0, ICC_IGRPEN1_EL1" : "=r"(igrp));
 
-    BootUart__set_physical_base(qemu_virt_platform_info.uart_physical_base);
-    BootUart__init();
     qemu_virt_system_info_init();
+    BootUart__configure(&qemu_virt_system_info.trace_uart);
+    BootUart__init();
 
     boot_debug_print(daif_);
     boot_debug_print_base(daif, 16);

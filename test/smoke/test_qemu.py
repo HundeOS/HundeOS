@@ -144,6 +144,22 @@ def qemu_session():
         session.close()
 
 
+def test_qemu_single_cpu_external_command_returns_prompt(qemu_session):
+    session = qemu_session("qemu-virt-1cpu", "build/aarch64/qemu-virt-1cpu-unused.log")
+
+    session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+
+    processes = session.run_command("ps")
+    assert b"/usr/local/bin/ps" in processes
+
+    session.send_line("shutdown")
+    session.wait_for_exit(SHUTDOWN_TIMEOUT_SECONDS)
+
+
 @pytest.mark.parametrize(
     ("target", "trace_path", "architecture_marker", "shell_timeout"),
     [

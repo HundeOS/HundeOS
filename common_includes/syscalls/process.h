@@ -18,6 +18,7 @@ typedef int64_t ProcessTimesResult;
 typedef int64_t ProcessIdentityResult;
 typedef int64_t ProcessForkResult;
 typedef int64_t ProcessGroupResult;
+typedef int64_t ProcessRegistryMapResult;
 
 typedef uint64_t ProcessSignal;
 typedef ProcessSignal * ProcessSignalPtr;
@@ -97,6 +98,12 @@ typedef enum ProcessGroupResults
     PROCESS_GROUP_PROCESS_NOT_FOUND = -2,
     PROCESS_GROUP_PERMISSION_DENIED = -3,
 } ProcessGroupResults;
+
+typedef enum ProcessRegistryMapResults
+{
+    PROCESS_REGISTRY_MAP_INVALID_CALLER = -1,
+    PROCESS_REGISTRY_MAP_FAILED = -2,
+} ProcessRegistryMapResults;
 
 typedef struct ProcessCredentials
 {

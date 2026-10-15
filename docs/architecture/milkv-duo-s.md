@@ -1,8 +1,9 @@
 # Milk-V Duo S
 
 The Milk-V Duo S target uses the SG2000 SoC, 512 MiB of DRAM, and the vendor
-FSBL, OpenSBI, and U-Boot SD boot chain. It is a separate platform from the
-original 64 MiB Milk-V Duo CV1800B target.
+FSBL and U-Boot SD boot chain. Separate RISC-V and AArch64 targets select the
+C906 or Cortex-A53 application core through the matching vendor firmware. It
+is a separate platform from the original 64 MiB Milk-V Duo CV1800B target.
 
 ## Boot Contract
 
@@ -54,10 +55,44 @@ The firmware passes the hart ID in `a0` and the selected DTB address in `a1`.
 Build only the replacement FIT payload with:
 
 ```sh
-make milkv-duo-s
+make milkv-duo-s-riscv
 ```
 
 The resulting payload is `build/riscv64/milkv_duo_s/boot.sd`.
+
+## AArch64 Target
+
+The AArch64 target uses the official v2.0.1 ARM64 firmware contract. Its FIT
+keeps the vendor names `kernel-1`,
+`fdt-sg2000_milkv_duos_glibc_arm64_sd`, and
+`config-sg2000_milkv_duos_glibc_arm64_sd`. A small AArch64 handoff at
+`0x8d000000` copies the staged kernel from `0x84000000` to the vendor kernel
+entry address `0x80108000`, preserving the firmware arguments.
+
+Build the ARM64 FIT payload with:
+
+```sh
+make milkv-duo-s-aarch64
+```
+
+The output is `build/aarch64/milkv_duo_s/boot.sd`. Build a complete SD image
+based on the checksum-pinned official ARM64 image with:
+
+```sh
+make milkv-duo-s-sd-image-aarch64
+```
+
+The AArch64 platform describes the Cortex-A53, 510 MiB firmware-visible RAM,
+DW APB UART0 and UART1, GICv2 distributor and CPU interface, and CV181x SDHCI
+controller. Early output and the kernel UART implementation understand the
+board's 32-bit, register-shift-two NS16550 layout. Kernel trace, including early
+boot output before the kernel handoff, starts on UART0. After the handoff, the
+userspace console remains on UART0 and kernel diagnostics move to UART1.
+
+The build target is the first AArch64 bring-up milestone, not a hardware boot
+claim. The common AArch64 interrupt entry still acknowledges interrupts through
+GICv3 system registers; it must select the GICv2 memory-mapped CPU interface
+before timer and device interrupts can work on this target.
 
 ## QEMU Approximation
 
@@ -65,7 +100,7 @@ The local CV1800B QEMU fork can provide a fast Duo S-shaped test loop without
 writing an SD card:
 
 ```sh
-make qemu-milkv-duo-s
+make qemu-milkv-duo-s-riscv
 ```
 
 This target boots the Duo S kernel and DTB with 510 MiB of RAM and attaches a
@@ -101,7 +136,7 @@ panic is reported. Reaching login in this approximation remains unverified.
 Build a complete flashable image with:
 
 ```sh
-make milkv-duo-s-sd-image
+make milkv-duo-s-sd-image-riscv
 ```
 
 The build downloads the official `milkv-duos-sd-v1.1.4.img.zip`, verifies its
@@ -134,6 +169,74 @@ diskutil eject /dev/diskN
 
 Verify `diskN` carefully before writing; `dd` overwrites the selected device.
 
+## Hardware Serial Debugging
+
+Use two 3.3 V USB UART adapters to observe the console and kernel trace at the
+same time. Connect UART0 using J3 pins 8 (board TX), 10 (board RX), and 6
+(ground). Connect UART1 using J3 pins 18 (board TX), 22 (board RX), and 20
+(ground). Cross each board TX to adapter RX and board RX to adapter TX. Do not
+connect an adapter voltage pin to the board.
+
+On macOS, list the serial adapters after connecting them:
+
+```sh
+ls -1 /dev/cu.usbserial-* /dev/cu.usbmodem-* 2>/dev/null
+```
+
+If the adapters have indistinguishable names, unplug one and run the command
+again to identify it. Record which device is connected to UART0 and UART1.
+
+Open one terminal for the UART0 console:
+
+```sh
+picocom --baud 115200 --flow n --parity n --databits 8 /dev/cu.usbserial-UART0
+```
+
+Open a second terminal for the UART1 kernel trace:
+
+```sh
+picocom --baud 115200 --flow n --parity n --databits 8 /dev/cu.usbserial-UART1
+```
+
+Start both sessions before inserting the flashed SD card and powering or
+resetting the board. UART0 first shows firmware and early bootstrap output,
+then becomes the interactive userspace console. UART1 begins receiving kernel
+diagnostics after the architecture-neutral handoff. Exit `picocom` with
+Ctrl-A followed by Ctrl-X.
+
+The AArch64 Milk-V Duo S image also enables `KERNEL_MEMORY_TRACE`. Post-handoff
+kernel trace continues to the trace UART and is simultaneously retained in a
+bounded memory ring. With only the UART0 console adapter connected, inspect the
+newest 12 KiB after login with:
+
+```sh
+cat /proc/ktrace
+```
+
+Opening `/proc/ktrace` takes a non-destructive snapshot; repeated reads do not
+drain the kernel ring. Early bootstrap output before the architecture-neutral
+kernel takes over is UART-only.
+
+The normal AArch64 image deliberately leaves `KERNEL_COMMAND_TRACE` disabled.
+Command-flow records are written synchronously to UART1 from scheduler and
+syscall paths. At 115200 baud, a roughly 150-byte record stalls that path for
+about 13 ms and materially changes single-core IPC latency.
+
+For scheduler and IPC latency investigation, build the isolated diagnostic
+image instead:
+
+```sh
+make milkv-duo-s-sd-image-aarch64-command-trace
+```
+
+It writes
+`build/aarch64/milkv_duo_s_command_trace/hundeos-milkv-duo-s.img` and does not
+share kernel objects with the normal image. Reproduce one delayed external
+command and preserve the UART1 `COMMAND_FLOW` records from before the command
+through the Enter-key event. Their microsecond timestamps distinguish a missing
+notification from a process that became runnable but was dispatched late. Do
+not use the diagnostic image for performance comparisons.
+
 ## Current Boundary
 
 Hardware has verified the stock FSBL, OpenSBI, U-Boot, FIT selection, FIT data
@@ -151,3 +254,7 @@ partition discovery, and the `/boot/config` mount. Completion of the root mount
 and login through the split UART configuration remain hardware validation work.
 The CVITEK RTC is described accurately but is not published as a Goldfish RTC
 because its register interface requires a separate userspace driver.
+
+The AArch64 FIT and complete SD image are buildable, but hardware entry, MMU
+handoff, GICv2 interrupt delivery, userspace bootstrap, and login remain to be
+validated independently from the completed RISC-V path.

@@ -98,6 +98,8 @@ void test_process_record_includes_completed_userspace_wait_time_when_not_current
 void test_process_registry_is_shared_read_only_non_executable_memory(void)
 {
     ProcessPtr peer = dummy_process(21, 0, PROC_STATE_READY);
+    unwrap_result(KernelProcessRegistry__map_process(&kernel->process_registry, process), SERVICE_MAP_FAILED);
+    unwrap_result(KernelProcessRegistry__map_process(&kernel->process_registry, peer), SERVICE_MAP_FAILED);
     TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), PROCESS_REGISTRY_VADDR,
                                           true, false, false, PROCESS_REGISTRY_SIZE));
     TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&peer->page_table), PROCESS_REGISTRY_VADDR, true,
@@ -132,6 +134,7 @@ void test_process_registry_allocation_failure_does_not_publish_mapping(void)
 
 void test_scheduler_publishes_new_process_with_assigned_cpu_and_typed_state(void)
 {
+    unwrap_result(KernelProcessRegistry__map_process(&kernel->process_registry, process), SERVICE_MAP_FAILED);
     process->name = bstr("published");
     process->user_id = 2;
     process->group_id = 2;

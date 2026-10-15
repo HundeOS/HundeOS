@@ -7,6 +7,15 @@
 #include "../kernel_core.h"
 #include "shared_wait.h"
 
+#ifdef KERNEL_COMMAND_TRACE
+static bool ContextSwitch__command_flow_process(ProcessPtr process)
+{
+    return BString__equals(&process->name, &bstr("/usr/local/bin/bash")) ||
+           BString__equals(&process->name, &bstr("/sbin/drivers/uart_rx")) ||
+           BString__equals(&process->name, &bstr("/sbin/drivers/uart_tx"));
+}
+#endif
+
 ContextSwitch ContextSwitch__new(ProcessPtr new_proc, OptionalPtr(ProcessPtr) old_proc)
 {
     return (ContextSwitch){.new_proc = new_proc, .old_proc = *old_proc};
@@ -94,6 +103,13 @@ void ContextSwitch__switch(ConstContextSwitchPtr self)
     QueueWaitUsage__select(&new_proc->queue_wait_usage);
     CPUTime now = CPU__time_usec();
     CPUUsage__start_mode(&new_proc->cpu_usage, now, Process__user_wait_usec(new_proc, now), CPU_USAGE_PAUSED);
+#ifdef KERNEL_COMMAND_TRACE
+    if (ContextSwitch__command_flow_process(new_proc))
+    {
+        __d_printf(COMMAND_FLOW, "t=%i dispatch pid=%i name=%s state=%s\n", now, new_proc->pid,
+                   cstr(new_proc->name), ProcessState__to_string(new_proc->state));
+    }
+#endif
     __d_printf(PROCESS_SWITCH, "ContextSwitch__switch target pid=%i name=%s state=%s context=%p page_table=%p\n",
                new_proc->pid, cstr(new_proc->name), ProcessState__to_string(new_proc->state),
                Process__required_context(new_proc), paddr(ProcessPageTable__root(&new_proc->page_table)));

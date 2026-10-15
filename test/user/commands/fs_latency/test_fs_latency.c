@@ -66,6 +66,11 @@ uint64_t process_current_pid(void)
     return 42;
 }
 
+Result(ConstProcessRegistryPtr) process_registry_map(void)
+{
+    return Success(ConstProcessRegistryPtr, (ConstProcessRegistryPtr)PROCESS_REGISTRY_VADDR);
+}
+
 Result(ProcessRecord)
     ProcessMetrics__snapshot_after(ConstProcessRegistryPtr source, uint64_t pid, uint64_t sampled_after_usec)
 {
