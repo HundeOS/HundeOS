@@ -30,7 +30,6 @@
 #define RISCV_EXCEPTION_INSTRUCTION_PAGE 12ULL
 #define RISCV_EXCEPTION_LOAD_PAGE 13ULL
 #define RISCV_EXCEPTION_STORE_PAGE 15ULL
-#define RISCV_INSTRUCTION_WFI 0x10500073ULL
 #define PLIC_SUPERVISOR_CONTEXT_OFFSET 0x201000ULL
 #define PLIC_CONTEXT_CLAIM_OFFSET 4ULL
 #define PLIC_CONTEXT_HART_STRIDE 0x2000ULL
@@ -162,16 +161,6 @@ static ProcessAbortReason Exception__abort_reason(uint64_t cause)
         return PROCESS_ABORT_UNDEFINED_INSTRUCTION;
     }
     return PROCESS_ABORT_DATA_ABORT;
-}
-
-static void Exception__handle_user_wait(ProcessContextPtr context)
-{
-    KernelPtr kernel = Kernel__instance();
-    CPUID cpu = CPU__id();
-    context->sepc += 4U;
-    Scheduler__save_context(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
-    Scheduler__preempt(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
-    CPU__wait_for_interrupt();
 }
 
 static void Exception__abort_user(ProcessContextPtr context, uint64_t cause)
@@ -401,12 +390,6 @@ void Exception__handle(ProcessContextPtr context)
     if (!interrupt && !current_privilege && cause == RISCV_EXCEPTION_USER_ECALL)
     {
         Exception__handle_syscall(context);
-        return;
-    }
-    if (!interrupt && !current_privilege && cause == RISCV_EXCEPTION_ILLEGAL_INSTRUCTION &&
-        context->stval == RISCV_INSTRUCTION_WFI)
-    {
-        Exception__handle_user_wait(context);
         return;
     }
     if (!interrupt && !current_privilege &&

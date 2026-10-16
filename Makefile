@@ -186,6 +186,7 @@ RISCV64_BRINGUP_C_SOURCES = \
 	arch/riscv64/boot/qemu_virt/runtime.c \
 	arch/riscv64/boot/common/system_info.c \
 	arch/riscv64/boot/common/trap.c \
+	common/arch/riscv64/memory.c \
 	common/memory.c \
 	kernel/early_boot.c \
 	kernel/system_info.c

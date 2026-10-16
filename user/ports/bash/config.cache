@@ -1,5 +1,6 @@
 # Reviewed answers for runtime probes that cannot execute while cross-compiling.
 ac_cv_func_isblank=yes
+ac_cv_func_sysconf=yes
 bash_cv_getcwd_malloc=yes
 bash_cv_func_sigsetjmp=missing
 bash_cv_wexitstatus_offset=8

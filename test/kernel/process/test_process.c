@@ -543,6 +543,7 @@ void test_setup_tracks_static_user_allocations(void)
 
 void test_fork_eagerly_copies_private_memory_and_resets_process_state(void)
 {
+    PageTableStub__reset_publish_tracking();
     ProcessPtr parent = dummy_process(80, 0, PROC_STATE_RUNNING);
     Process__set_identity(parent, PROCESS_USER_USER, PROCESS_GROUP_USER, PROCESS_CAP_NONE);
     ProcessSignalMask blocked = 1ULL << (PROCESS_SIGNAL_USER_1 - 1);
@@ -591,6 +592,9 @@ void test_fork_eagerly_copies_private_memory_and_resets_process_state(void)
             TEST_ASSERT_TRUE(is_nothing(child->queue_wait_control));
             TEST_ASSERT_TRUE(is_nothing(child->ipc_doorbell));
             TEST_ASSERT_EQUAL_UINT64(0, Process__required_context(child)->x[0]);
+            TEST_ASSERT_EQUAL_UINT64(UserAllocations__len(&child->user_allocations),
+                                     PageTableStub__unpublished_map_count());
+            TEST_ASSERT_EQUAL_UINT64(1, PageTableStub__publish_count());
 
             ListIndex parent_dynamic_index = (ListIndex)UserAllocations__len(&parent->user_allocations) - 1;
             ListIndex child_dynamic_index = (ListIndex)UserAllocations__len(&child->user_allocations) - 1;

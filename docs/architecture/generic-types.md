@@ -132,7 +132,8 @@ stable connection slots while the kernel publishes and clears handles.
   `__ptr_at`, `__find`, `__find_item`, `__remove`, `__remove_at`, and `__dispose`
   operations. Use `for_each_ll` or `for_each_ll_ptr` for traversal that is not
   already covered by an operation. Check node and value ownership before
-  removal or disposal.
+  removal or disposal. Kernel linked-list nodes use the thread-safe sub-page
+  kernel allocator; callers still own synchronization for list operations.
 - [Map](../../common/types/map.h) provides `MapDefine(K, V, size, alias, equals)`
   and `MapBodyDefine(alias)`. Use `__get` or `__get_ptr` for lookup, `__set` for
   insertion or replacement, `__delete` for removal, and `__len`/`__key` for
@@ -140,7 +141,10 @@ stable connection slots while the kernel publishes and clears handles.
   implementation uses fixed-capacity storage and linear key lookup; do not
   assume hash-table complexity or scan entries manually for a key.
 - [Hashtable](../../common/types/hashtable.h) provides fixed-capacity hashed lookup
-  with bounded collision buckets. Use `__new` to construct a value or `__init`
+  with stable, directly indexed, bounded collision buckets. Deleting an entry
+  does not relocate other hash buckets. A pointer returned by `__get_ptr` remains
+  valid when a different hash bucket changes, but mutation of the same collision
+  bucket may relocate its entries. Use `__new` to construct a value or `__init`
   to initialize existing storage without creating a large temporary. Use `__get` or `__get_ptr` for lookup,
   `__set` for insertion or replacement, `__delete` for removal, and `__len`
   for the number of stored entries. Traverse entries with `for_each_hashtable` or

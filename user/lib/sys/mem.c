@@ -56,6 +56,21 @@ Result(Anything) mem_alloc_pages_result(size_t size)
     return Success(Anything, (Anything)allocation);
 }
 
+Result(Anything) mem_alloc_reclaimable_pages_result(size_t size)
+{
+    if (size == 0)
+    {
+        return Error(Anything, mem_invalid_size, MEM_INVALID_SIZE);
+    }
+
+    MemAddress allocation = syscall(MEM_CALL, MEM_ALLOC_RECLAIMABLE_PAGES, size, 0, 0, 0);
+    if ((int64_t)allocation <= 0)
+    {
+        return Error(Anything, mem_allocation_failed, MEM_ALLOCATION_FAILED);
+    }
+    return Success(Anything, (Anything)allocation);
+}
+
 MemStatus mem_free_pages(void * address)
 {
     return (MemStatus)syscall(MEM_CALL, MEM_FREE_PAGES, (MemAddress)address, 0, 0, 0);

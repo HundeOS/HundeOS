@@ -95,6 +95,56 @@ void test_simple_heap_alloc_and_free(void)
     TEST_ASSERT_EQUAL(physical, physical_second_alloc);
 }
 
+void test_heap_memory_state_tracks_allocated_and_freed_pages(void)
+{
+    HeapMemoryState initial = Heap__memory_state(&heap);
+    KernelAddress allocation = Heap__alloc_size(&heap, PAGE_SIZE * 3U);
+    HeapMemoryState allocated = Heap__memory_state(&heap);
+
+    TEST_ASSERT_EQUAL_UINT64(TEST_HEAP_PAGES, initial.total_pages);
+    TEST_ASSERT_EQUAL_UINT64(TEST_HEAP_PAGES, initial.free_pages);
+    TEST_ASSERT_EQUAL_UINT64(initial.free_pages - 3U, allocated.free_pages);
+
+    assert_free_success(allocation);
+    HeapMemoryState released = Heap__memory_state(&heap);
+    TEST_ASSERT_EQUAL_UINT64(initial.free_pages, released.free_pages);
+}
+
+void test_reclaimable_allocation_preserves_half_of_heap(void)
+{
+    KernelAddress reclaimable = Heap__try_alloc_reclaimable_size(&heap, PAGE_SIZE * (TEST_HEAP_PAGES / 2U));
+    TEST_ASSERT_TRUE(reclaimable.valid);
+
+    KernelAddress refused = Heap__try_alloc_reclaimable_size(&heap, PAGE_SIZE);
+    TEST_ASSERT_FALSE(refused.valid);
+    TEST_ASSERT_EQUAL_UINT64(TEST_HEAP_PAGES / 2U, Heap__memory_state(&heap).free_pages);
+}
+
+void test_heap_pressure_generation_changes_only_at_watermarks(void)
+{
+    HeapMemoryState initial = Heap__memory_state(&heap);
+    KernelAddress normal = Heap__alloc_size(&heap, PAGE_SIZE * (TEST_HEAP_PAGES * 3U / 4U));
+    HeapMemoryState after_normal = Heap__memory_state(&heap);
+    TEST_ASSERT_EQUAL(HEAP_PRESSURE_NORMAL, after_normal.pressure_level);
+    TEST_ASSERT_EQUAL_UINT64(initial.pressure_generation, after_normal.pressure_generation);
+
+    KernelAddress low = Heap__alloc_size(&heap, PAGE_SIZE * (TEST_HEAP_PAGES / 10U));
+    HeapMemoryState after_low = Heap__memory_state(&heap);
+    TEST_ASSERT_EQUAL(HEAP_PRESSURE_LOW, after_low.pressure_level);
+    TEST_ASSERT_EQUAL_UINT64(initial.pressure_generation + 1U, after_low.pressure_generation);
+
+    KernelAddress critical = Heap__alloc_size(&heap, PAGE_SIZE * (TEST_HEAP_PAGES / 20U));
+    HeapMemoryState after_critical = Heap__memory_state(&heap);
+    TEST_ASSERT_EQUAL(HEAP_PRESSURE_CRITICAL, after_critical.pressure_level);
+    TEST_ASSERT_EQUAL_UINT64(initial.pressure_generation + 2U, after_critical.pressure_generation);
+
+    assert_free_success(critical);
+    assert_free_success(low);
+    assert_free_success(normal);
+    HeapMemoryState released = Heap__memory_state(&heap);
+    TEST_ASSERT_EQUAL(HEAP_PRESSURE_NORMAL, released.pressure_level);
+}
+
 void test_heap_init_uses_system_info_physical_base(void)
 {
     KernelAddress addr = Heap__alloc(&heap);

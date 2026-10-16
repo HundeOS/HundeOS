@@ -1,6 +1,7 @@
 #include "sys/interrupt.h"
+#include "sys/syscall.h"
 
 void wait_for_interrupt(void)
 {
-    __asm__ __volatile__("wfi" ::: "memory");
+    syscall(SYSCALL_PROCESS_IDLE_WAIT, 0, 0, 0, 0, 0);
 }

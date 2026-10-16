@@ -34,6 +34,8 @@ extern PageTablePtr ProcessPageTable__root_table(ProcessPageTablePtr self);
 extern size_t ProcessPageTable__page_count(ProcessPageTablePtr self);
 extern Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self, KernelPtr kernel);
 extern void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
+extern void ArchPageTable__map_unpublished(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
+extern void ArchPageTable__publish(ProcessPageTablePtr self);
 Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
 Result(KAllocCode)
     ArchPageTable__try_map_blocks(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
@@ -45,6 +47,7 @@ extern void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, 
 extern void ArchPageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size);
 extern void PageTable__map_shared(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
 extern void PageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
+extern void PageTable__map_unpublished(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
 extern void PageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size);
 extern void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address, size_t size);
 

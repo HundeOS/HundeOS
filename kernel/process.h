@@ -266,6 +266,7 @@ typedef struct Process
     ProcessClass process_class;
     Optional(ExecLoadPtr) exec_load;
     ServiceState service;
+    bool memory_reclaimer;
     Optional(UserAddress) idle_debug_address;
     UserID user_id;
     GroupID group_id;
@@ -358,6 +359,7 @@ Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, A
 Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address mapping);
 void Process__quiesce_device(ProcessPtr self);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
+Result(UserAddress) Process__alloc_reclaimable_user_pages(ProcessPtr self, size_t size);
 Result(Address) Process__queue_wait_control(ProcessPtr self);
 Result(UserAddress) Process__doorbell(ProcessPtr self);
 void Process__ring_doorbell(ProcessPtr self);

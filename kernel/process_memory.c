@@ -62,6 +62,12 @@ void PageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress addr
     PageTable__account(self, kernel, address, size, MEMORY_PRIVATE);
 }
 
+void PageTable__map_unpublished(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    ArchPageTable__map_unpublished(self, kernel, address, size);
+    PageTable__account(self, kernel, address, size, MEMORY_PRIVATE);
+}
+
 void PageTable__map_shared(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
     ArchPageTable__map(self, kernel, address, size);

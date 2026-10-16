@@ -9,6 +9,7 @@
 #include "../../../common_includes/syscalls/calls.h"
 #include "../fixtures/kernel.h"
 #include "../fixtures/process.h"
+#include "../stubs/cpu.h"
 #include "../stubs/panic.h"
 #include "../stubs/system.h"
 #include "../stubs/process_context_layout.h"
@@ -20,6 +21,7 @@
 #define SignalControl__handler(kernel, proc, ...) SignalControl__handler((kernel), &(proc), __VA_ARGS__)
 #define SignalReturn__handler(kernel, proc, ...) SignalReturn__handler((kernel), &(proc), __VA_ARGS__)
 #define ProcessWaitChildEvent__handler(kernel, proc, ...) ProcessWaitChildEvent__handler((kernel), &(proc), __VA_ARGS__)
+#define ProcessIdleWait__handler(kernel, proc, ...) ProcessIdleWait__handler((kernel), &(proc), __VA_ARGS__)
 #define ProcessTimes__handler(kernel, proc, ...) ProcessTimes__handler((kernel), &(proc), __VA_ARGS__)
 #define ProcessIdentity__handler(kernel, proc, ...) ProcessIdentity__handler((kernel), &(proc), __VA_ARGS__)
 #define ProcessGroup__handler(kernel, proc, ...) ProcessGroup__handler((kernel), &(proc), __VA_ARGS__)
@@ -50,6 +52,7 @@ void setUp(void)
     test_cpu_time_usec = 0;
     clear_panic_state();
     reset_system_state();
+    CPUStub__reset_wait_count();
     kernel = init_test_kernel();
     Init__syscalls(&kernel->syscall_dispatcher);
 }
@@ -95,6 +98,39 @@ void test_process_registry_map_handler_rejects_missing_caller(void)
             TEST_ASSERT_EQUAL(PROCESS_REGISTRY_MAP_INVALID_CALLER, code);
         }
     );
+}
+
+void test_process_idle_wait_handler_yields_and_waits_for_idle_process(void)
+{
+    ProcessPtr idle_process = unwrap_optional(Scheduler__idle_process(kernel->scheduler, cpu), (ProcessPtr){});
+
+    match_result(
+        ProcessIdleWait__handler(kernel, Some(ProcessPtr, idle_process), 0, 0, 0, 0, 0),
+        success(result)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_IDLE_WAIT_OK, result);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(1, CPUStub__wait_count());
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, idle_process->state);
+}
+
+void test_process_idle_wait_handler_rejects_non_idle_process(void)
+{
+    ProcessPtr process = dummy_process(71, cpu, PROC_STATE_RUNNING);
+
+    match_result(
+        ProcessIdleWait__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_IDLE_WAIT_INVALID_CALLER, code);
+        }
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(0, CPUStub__wait_count());
 }
 
 void test_process_list_handler_returns_scheduled_processes(void)

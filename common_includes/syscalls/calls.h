@@ -32,6 +32,7 @@ typedef enum SystemCall
     SYSCALL_PROCESS_GROUP = 0x96,
     SYSCALL_SYSTEM_INFO = 0x97,
     SYSCALL_PROCESS_REGISTRY_MAP = 0x98,
+    SYSCALL_PROCESS_IDLE_WAIT = 0x99,
     PING = 0xFF,
 } SystemCall;
 

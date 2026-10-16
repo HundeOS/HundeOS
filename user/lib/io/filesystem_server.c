@@ -24,6 +24,26 @@ static bool FilesystemDriver__disconnect(IOServiceContext context, QueueConnecti
     return FilesystemDriver__release(self, session, pid);
 }
 
+static void FilesystemDriver__handle_service_events(FilesystemDriverPtr self)
+{
+    ServiceEvent event;
+    for (ServiceCode status = service_poll(&event); status == SERVICE_OK; status = service_poll(&event))
+    {
+        if (event.type != SERVICE_EVENT_MEMORY_PRESSURE)
+        {
+            continue;
+        }
+        match_optional(
+            self->memory_pressure_handler,
+            some(handler)
+            {
+                handler(self->volume, (MemPressureLevel)event.source);
+            },
+            none_do_nothing()
+        );
+    }
+}
+
 int FilesystemDriver__run(FilesystemDriverPtr self, ConstBStringPtr mountpoint)
 {
     static IOService service;
@@ -40,6 +60,7 @@ int FilesystemDriver__run(FilesystemDriverPtr self, ConstBStringPtr mountpoint)
     Channel__prepare_wait();
     while (true)
     {
+        FilesystemDriver__handle_service_events(self);
         if (!IOService__poll(&service))
         {
             Channel__wait_event();

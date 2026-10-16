@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 #include "fixed_array.h"
-#include "map.h"
 
 #ifndef __COMMON_TYPES_HASH_CODE_DEFINED
 #define __COMMON_TYPES_HASH_CODE_DEFINED
@@ -15,11 +14,6 @@ typedef uint64_t HashCode;
 OptionalDef(HashCode);
 ResultDef(HashCode);
 #endif
-
-static inline bool HashCode__equals(void * first, void * second)
-{
-    return *(HashCode *)first == *(HashCode *)second;
-}
 
 #define HashtableOptional(alias) _Optional(alias##__V)
 #define _HashtableNone(alias) _None(alias##__V)
@@ -55,18 +49,18 @@ static inline bool HashCode__equals(void * first, void * second)
 #define HashtableConstructorBodyDefine(alias)                                                                          \
     alias alias##__new(void)                                                                                           \
     {                                                                                                                  \
-        return (alias){                                                                                                \
-            .table = EmptyMap(alias##__table),                                                                         \
-            .len = 0,                                                                                                  \
-        };                                                                                                             \
+        alias result;                                                                                                  \
+        alias##__init(&result);                                                                                        \
+        return result;                                                                                                 \
     }                                                                                                                  \
                                                                                                                        \
     void alias##__init(alias * self)                                                                                   \
     {                                                                                                                  \
-        *self = (alias){                                                                                               \
-            .table = EmptyMap(alias##__table),                                                                         \
-            .len = 0,                                                                                                  \
-        };                                                                                                             \
+        self->len = 0;                                                                                                 \
+        for (uint64_t bucket_index = 0; bucket_index < alias##__table_size; bucket_index++)                            \
+        {                                                                                                              \
+            alias##__bucket__init(&self->buckets[bucket_index]);                                                       \
+        }                                                                                                              \
     }
 
 #define HashtableSetPreDefine(alias)                                                                                   \
@@ -81,41 +75,23 @@ static inline bool HashCode__equals(void * first, void * second)
     Result(CollectionCode) alias##__set(alias * self, alias##__K key, alias##__V value)                                \
     {                                                                                                                  \
         HashCode hash = alias##__hash(&key) % alias##__table_size;                                                     \
+        alias##BucketPtr bucket = &self->buckets[hash];                                                                \
         match_optional(                                                                                                \
-            alias##__table__get_ptr(&self->table, hash),                                                               \
-            some(bucket) {                                                                                             \
-                match_optional(                                                                                        \
-                    alias##__bucket__find(bucket, alias##__entry_match, &key),                                         \
-                    some(find_result) {                                                                                \
-                        ArrayIndex index = find_result.index;                                                          \
-                        return alias##__bucket__set(bucket, index, BucketEntry(alias, key, value));                    \
-                    },                                                                                                 \
-                    none() {                                                                                           \
-                        match_result(                                                                                  \
-                            alias##__bucket__push(bucket, BucketEntry(alias, key, value)),                             \
-                            success(index) {                                                                           \
-                                self->len++;                                                                           \
-                                return Success(CollectionCode, index);                                                 \
-                            },                                                                                         \
-                            error(code, message) { return Error(CollectionCode, message, code); });                    \
-                    });                                                                                                \
+            alias##__bucket__find(bucket, alias##__entry_match, &key),                                                 \
+            some(find_result) {                                                                                        \
+                ArrayIndex index = find_result.index;                                                                  \
+                return alias##__bucket__set(bucket, index, BucketEntry(alias, key, value));                            \
             },                                                                                                         \
             none() {                                                                                                   \
-                alias##__bucket bucket = alias##__bucket__new();                                                       \
                 match_result(                                                                                          \
-                    alias##__bucket__push(&bucket, BucketEntry(alias, key, value)),                                    \
+                    alias##__bucket__push(bucket, BucketEntry(alias, key, value)),                                     \
                     success(index) {                                                                                   \
-                        match_result(                                                                                  \
-                            alias##__table__set(&self->table, hash, bucket),                                           \
-                            success(code) {                                                                            \
-                                self->len++;                                                                           \
-                                return Success(CollectionCode, index);                                                 \
-                            },                                                                                         \
-                            error(code, message) { return Error(CollectionCode, message, code); });                    \
+                        self->len++;                                                                                   \
+                        return Success(CollectionCode, index);                                                         \
                     },                                                                                                 \
                     error(code, message) { return Error(CollectionCode, message, code); });                            \
             });                                                                                                        \
-        return Error(CollectionCode, BString__new("Hashtable insertion failed"), MAP_FULL);                            \
+        return Error(CollectionCode, BString__new("Hashtable insertion failed"), ARRAY_FULL);                          \
     }
 
 #define HashtableGetPreDefine(alias)                                                                                   \
@@ -126,14 +102,10 @@ static inline bool HashCode__equals(void * first, void * second)
     HashtableOptional(alias) alias##__get(alias * self, alias##__K key)                                                \
     {                                                                                                                  \
         HashCode hash = alias##__hash(&key) % alias##__table_size;                                                     \
+        alias##BucketPtr bucket = &self->buckets[hash];                                                                \
         match_optional(                                                                                                \
-            alias##__table__get_ptr(&self->table, hash),                                                               \
-            some(bucket) {                                                                                             \
-                match_optional(                                                                                        \
-                    alias##__bucket__find(bucket, alias##__entry_match, &key),                                         \
-                    some(find_result) { return HashtableSome(alias, find_result.value->value); },                      \
-                    none() { return HashtableNone(alias); });                                                          \
-            },                                                                                                         \
+            alias##__bucket__find(bucket, alias##__entry_match, &key),                                                 \
+            some(find_result) { return HashtableSome(alias, find_result.value->value); },                              \
             none() { return HashtableNone(alias); });                                                                  \
         return HashtableNone(alias);                                                                                   \
     }                                                                                                                  \
@@ -141,14 +113,10 @@ static inline bool HashCode__equals(void * first, void * second)
     HashtablePtrOptional(alias) alias##__get_ptr(alias * self, alias##__K key)                                         \
     {                                                                                                                  \
         HashCode hash = alias##__hash(&key) % alias##__table_size;                                                     \
+        alias##BucketPtr bucket = &self->buckets[hash];                                                                \
         match_optional(                                                                                                \
-            alias##__table__get_ptr(&self->table, hash),                                                               \
-            some(bucket) {                                                                                             \
-                match_optional(                                                                                        \
-                    alias##__bucket__find(bucket, alias##__entry_match, &key),                                         \
-                    some(find_result) { return HashtablePtrSome(alias, &find_result.value->value); },                  \
-                    none() { return HashtablePtrNone(alias); });                                                       \
-            },                                                                                                         \
+            alias##__bucket__find(bucket, alias##__entry_match, &key),                                                 \
+            some(find_result) { return HashtablePtrSome(alias, &find_result.value->value); },                          \
             none() { return HashtablePtrNone(alias); });                                                               \
         return HashtablePtrNone(alias);                                                                                \
     }
@@ -167,25 +135,17 @@ static inline bool HashCode__equals(void * first, void * second)
     Result(CollectionCode) alias##__delete(alias * self, alias##__K key)                                               \
     {                                                                                                                  \
         HashCode hash = alias##__hash(&key) % alias##__table_size;                                                     \
+        alias##BucketPtr bucket = &self->buckets[hash];                                                                \
         match_optional(                                                                                                \
-            alias##__table__get_ptr(&self->table, hash),                                                               \
-            some(bucket) {                                                                                             \
-                match_optional(                                                                                        \
-                    alias##__bucket__find(bucket, alias##__entry_match, &key),                                         \
-                    some(find_result) {                                                                                \
-                        uint64_t index = (uint64_t)find_result.index;                                                  \
-                        for (uint64_t next = index + 1; next < bucket->len; next++)                                    \
-                        {                                                                                              \
-                            bucket->data[next - 1] = bucket->data[next];                                               \
-                        }                                                                                              \
-                        bucket->len--;                                                                                 \
-                        self->len--;                                                                                   \
-                        if (bucket->len == 0)                                                                          \
-                        {                                                                                              \
-                            alias##__table__delete(&self->table, hash);                                                \
-                        }                                                                                              \
-                    },                                                                                                 \
-                    none_do_nothing());                                                                                \
+            alias##__bucket__find(bucket, alias##__entry_match, &key),                                                 \
+            some(find_result) {                                                                                        \
+                uint64_t index = (uint64_t)find_result.index;                                                          \
+                for (uint64_t next = index + 1; next < bucket->len; next++)                                            \
+                {                                                                                                      \
+                    bucket->data[next - 1] = bucket->data[next];                                                       \
+                }                                                                                                      \
+                bucket->len--;                                                                                         \
+                self->len--;                                                                                           \
             },                                                                                                         \
             none_do_nothing());                                                                                        \
         return Success(CollectionCode, self->len);                                                                     \
@@ -210,13 +170,11 @@ static inline bool HashCode__equals(void * first, void * second)
                                                                                                                        \
     BucketEntryDefine(alias) OptionalDef(alias##__bucket_entry) ResultDef(alias##__bucket_entry)                       \
         FixedArrayDefine(alias##__bucket_entry, bucket_size, alias##__bucket, value_equals)                            \
-            OptionalDef(alias##__bucket) ResultDef(alias##__bucket) typedef alias##__bucket * alias##BucketPtr;        \
-                                                                                                                       \
-    MapDefine(HashCode, alias##__bucket, table_size, alias##__table, &HashCode__equals)                                \
+            typedef alias##__bucket * alias##BucketPtr;                                                               \
                                                                                                                        \
         typedef struct alias                                                                                           \
     {                                                                                                                  \
-        alias##__table table;                                                                                          \
+        alias##__bucket buckets[table_size];                                                                           \
         uint64_t len;                                                                                                  \
     } alias;                                                                                                           \
                                                                                                                        \
@@ -226,20 +184,19 @@ static inline bool HashCode__equals(void * first, void * second)
         HashtableDeletePreDefine(alias) HashtableLenPreDefine(alias)
 
 #define HashtableBodyDefine(alias)                                                                                     \
-    FixedArrayBodyDefine(alias##__bucket) MapBodyDefine(alias##__table) HashtableConstructorBodyDefine(alias)          \
-        HashtableSetBodyDefine(alias) HashtableGetBodyDefine(alias) HashtableDeleteBodyDefine(alias)                   \
-            HashtableLenBodyDefine(alias)
+    FixedArrayBodyDefine(alias##__bucket) HashtableConstructorBodyDefine(alias) HashtableSetBodyDefine(alias)          \
+        HashtableGetBodyDefine(alias) HashtableDeleteBodyDefine(alias) HashtableLenBodyDefine(alias)
 
 #define EmptyHashtable(alias)                                                                                          \
     (alias)                                                                                                            \
     {                                                                                                                  \
-        .table = EmptyMap(alias##__table), .len = 0,                                                                   \
+        0                                                                                                              \
     }
 
 #define for_each_hashtable(alias, hashtable, bucket_index, entry_index, iter_key, iter_value, ...)                     \
-    for (uint64_t bucket_index = 0; bucket_index < (uint64_t)(hashtable).table.len; bucket_index++)                    \
+    for (uint64_t bucket_index = 0; bucket_index < alias##__table_size; bucket_index++)                                \
     {                                                                                                                  \
-        alias##BucketPtr alias##__current_bucket = &(hashtable).table.entries[bucket_index].value;                     \
+        alias##BucketPtr alias##__current_bucket = &(hashtable).buckets[bucket_index];                                 \
         for (uint64_t entry_index = 0; entry_index < alias##__current_bucket->len; entry_index++)                      \
         {                                                                                                              \
             alias##__K iter_key = alias##__current_bucket->data[entry_index].key;                                      \
@@ -249,9 +206,9 @@ static inline bool HashCode__equals(void * first, void * second)
     }
 
 #define for_each_hashtable_ptr(alias, hashtable, bucket_index, entry_index, iter_key, iter_value, ...)                 \
-    for (uint64_t bucket_index = 0; bucket_index < (uint64_t)(hashtable)->table.len; bucket_index++)                   \
+    for (uint64_t bucket_index = 0; bucket_index < alias##__table_size; bucket_index++)                                \
     {                                                                                                                  \
-        alias##BucketPtr alias##__current_bucket = &(hashtable)->table.entries[bucket_index].value;                    \
+        alias##BucketPtr alias##__current_bucket = &(hashtable)->buckets[bucket_index];                                \
         for (uint64_t entry_index = 0; entry_index < alias##__current_bucket->len; entry_index++)                      \
         {                                                                                                              \
             alias##__K_ptr iter_key = &alias##__current_bucket->data[entry_index].key;                                 \

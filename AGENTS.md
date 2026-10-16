@@ -222,6 +222,13 @@ abstractions that are not needed for the current requirement. Avoid preserving
 unused future flexibility. If a branch or field has no current caller or state
 where it is required, leave it out until that requirement exists.
 
+## Vendored source
+Do not modify vendored source or add downstream patches that change vendored
+source. Supply the platform interfaces that upstream software expects through
+HundeOS-owned libc, headers, compatibility code, or build configuration. If an
+upstream source change appears unavoidable, stop and discuss it with the user
+instead of carrying a local patch.
+
 ## Write tests
 Add unit tests for any new code in kernel. Some architecture specific code
 may not have unit tests as it is difficult to test..

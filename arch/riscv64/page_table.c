@@ -11,6 +11,26 @@
 
 static BString page_table_allocation_failed = bstr("Page table allocation failed");
 
+typedef struct PageTableMapCursor
+{
+    uint64_t level_2_index;
+    uint64_t level_1_index;
+    KernelAddress level_1;
+    KernelAddress level_0;
+} PageTableMapCursor;
+
+typedef PageTableMapCursor * PageTableMapCursorPtr;
+
+static PageTableMapCursor PageTableMapCursor__new(void)
+{
+    return (PageTableMapCursor){
+        .level_2_index = 0,
+        .level_1_index = 0,
+        .level_1 = NULL_KERNEL_ADDRESS,
+        .level_0 = NULL_KERNEL_ADDRESS,
+    };
+}
+
 #define RISCV_SATP_PPN_MASK ((1ULL << 44U) - 1U)
 
 static bool PageTable__copy_supervisor_mappings(PageTablePtr target, KernelPtr kernel)
@@ -106,7 +126,7 @@ static KernelAddress PageTable__next_level_table(KernelAddress parent, KernelPtr
 }
 
 static KernelAddress PageTable__ensure_next_level_table(ProcessPageTablePtr process_page_table, KernelAddress parent,
-                                                        KernelPtr kernel, uint64_t child_index)
+                                                        KernelPtr kernel, uint64_t child_index, bool publish)
 {
     PageTablePtr parent_table = v_ptr(parent, PageTable);
     RiscVPageTableEntry entry = parent_table->entries[child_index];
@@ -144,13 +164,16 @@ static KernelAddress PageTable__ensure_next_level_table(ProcessPageTablePtr proc
     );
 
     parent_table->entries[child_index] = RiscVPageTableEntry__table(child.phys_addr);
-    PageTable__publish();
+    if (publish)
+    {
+        PageTable__publish();
+    }
     return child;
 }
 
-static int PageTable__map_page(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
-                               Address physical_address, ConstRiscVPagePermissionsPtr permissions,
-                               uint64_t memory_attributes)
+static int PageTable__map_page_with_cursor(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
+                                           Address physical_address, ConstRiscVPagePermissionsPtr permissions,
+                                           uint64_t memory_attributes, bool publish, PageTableMapCursorPtr cursor)
 {
     if (!RiscVVirtualAddress__is_user(virtual_address))
     {
@@ -163,27 +186,52 @@ static int PageTable__map_page(ProcessPageTablePtr self, KernelPtr kernel, Addre
         return -1;
     }
 
-    KernelAddress level_1 =
-        PageTable__ensure_next_level_table(self, root, kernel, RISCV_SV39_LEVEL_2_INDEX(virtual_address));
-    if (!level_1.valid)
+    uint64_t level_2_index = RISCV_SV39_LEVEL_2_INDEX(virtual_address);
+    if (!cursor->level_1.valid || cursor->level_2_index != level_2_index)
     {
-        return -1;
+        cursor->level_1 = PageTable__ensure_next_level_table(self, root, kernel, level_2_index, publish);
+        cursor->level_2_index = level_2_index;
+        cursor->level_0 = NULL_KERNEL_ADDRESS;
+        if (!cursor->level_1.valid)
+        {
+            return -1;
+        }
     }
 
-    KernelAddress level_0 =
-        PageTable__ensure_next_level_table(self, level_1, kernel, RISCV_SV39_LEVEL_1_INDEX(virtual_address));
-    if (!level_0.valid)
+    uint64_t level_1_index = RISCV_SV39_LEVEL_1_INDEX(virtual_address);
+    if (!cursor->level_0.valid || cursor->level_1_index != level_1_index)
     {
-        return -1;
+        cursor->level_0 =
+            PageTable__ensure_next_level_table(self, cursor->level_1, kernel, level_1_index, publish);
+        cursor->level_1_index = level_1_index;
+        if (!cursor->level_0.valid)
+        {
+            return -1;
+        }
     }
 
-    PageTablePtr leaf_table = v_ptr(level_0, PageTable);
+    PageTablePtr leaf_table = v_ptr(cursor->level_0, PageTable);
     leaf_table->entries[RISCV_SV39_LEVEL_0_INDEX(virtual_address)] =
         RiscVPageTableEntry__leaf(physical_address, permissions, memory_attributes);
-    PageTable__publish();
-    PageTable__invalidate_page(virtual_address);
+    if (publish)
+    {
+        PageTable__publish();
+        PageTable__invalidate_page(virtual_address);
+    }
     return 0;
 }
+
+static int PageTable__map_page(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
+                               Address physical_address, ConstRiscVPagePermissionsPtr permissions,
+                               uint64_t memory_attributes, bool publish)
+{
+    PageTableMapCursor cursor = PageTableMapCursor__new();
+    return PageTable__map_page_with_cursor(self, kernel, virtual_address, physical_address, permissions,
+                                           memory_attributes, publish, &cursor);
+}
+
+static Result(KAllocCode) ArchPageTable__try_map_with_publish(ProcessPageTablePtr self, KernelPtr kernel,
+                                                             UserAddress address, size_t size, bool publish);
 
 void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
@@ -192,10 +240,17 @@ void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress 
 
 Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
+    return ArchPageTable__try_map_with_publish(self, kernel, address, size, true);
+}
+
+static Result(KAllocCode) ArchPageTable__try_map_with_publish(ProcessPageTablePtr self, KernelPtr kernel,
+                                                             UserAddress address, size_t size, bool publish)
+{
     Address user_start = align_down_4k(vaddr(address));
     Address user_end = align_up_4k(vaddr(address) + size);
     Address kernel_start = align_down_4k(u_kvaddr(address) - (vaddr(address) - user_start));
     RiscVPagePermissions permissions = RiscVPagePermissions__new(address.read, address.write, address.execute, true);
+    PageTableMapCursor cursor = PageTableMapCursor__new();
 
     for (Address user_address = user_start; user_address < user_end; user_address += PAGE_SIZE)
     {
@@ -207,8 +262,8 @@ Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr ke
             physical_address = align_down_4k(paddr(backing));
         }
 
-        if (PageTable__map_page(self, kernel, user_address, physical_address, &permissions,
-                                RISCV_PLATFORM_RAM_PTE_ATTRIBUTES) != 0)
+        if (PageTable__map_page_with_cursor(self, kernel, user_address, physical_address, &permissions,
+                                            RISCV_PLATFORM_RAM_PTE_ATTRIBUTES, publish, &cursor) != 0)
         {
             ArchPageTable__unmap(self, kernel, user_start, offset);
             return Error(KAllocCode, page_table_allocation_failed, KALLOC_ALLOCATION_FAILED);
@@ -216,6 +271,16 @@ Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr ke
     }
 
     return Success(KAllocCode, KALLOC_OK);
+}
+
+void ArchPageTable__map_unpublished(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    ArchPageTable__try_map_with_publish(self, kernel, address, size, false);
+}
+
+void ArchPageTable__publish(ProcessPageTablePtr self)
+{
+    PageTable__publish();
 }
 
 void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
@@ -229,7 +294,7 @@ void ArchPageTable__map_mmio(ProcessPageTablePtr self, KernelPtr kernel, UserAdd
     {
         Address offset = user_address - user_start;
         PageTable__map_page(self, kernel, user_address, physical_start + offset, &permissions,
-                            RISCV_PLATFORM_DEVICE_PTE_ATTRIBUTES);
+                            RISCV_PLATFORM_DEVICE_PTE_ATTRIBUTES, true);
     }
 }
 
@@ -243,13 +308,13 @@ static bool PageTable__prepare_block_mapping(ProcessPageTablePtr self, KernelPtr
         Address offset = current - virtual_address;
         bool block = current % _2MB == 0 && (physical_address + offset) % _2MB == 0 && end - current >= _2MB;
         KernelAddress level_1 =
-            PageTable__ensure_next_level_table(self, root, kernel, RISCV_SV39_LEVEL_2_INDEX(current));
+            PageTable__ensure_next_level_table(self, root, kernel, RISCV_SV39_LEVEL_2_INDEX(current), true);
         if (!level_1.valid)
         {
             return false;
         }
         if (!block &&
-            !PageTable__ensure_next_level_table(self, level_1, kernel, RISCV_SV39_LEVEL_1_INDEX(current)).valid)
+            !PageTable__ensure_next_level_table(self, level_1, kernel, RISCV_SV39_LEVEL_1_INDEX(current), true).valid)
         {
             return false;
         }
@@ -263,7 +328,7 @@ static void PageTable__map_2m_block(ProcessPageTablePtr self, KernelPtr kernel, 
 {
     KernelAddress root = ProcessPageTable__root(self);
     KernelAddress level_1 =
-        PageTable__ensure_next_level_table(self, root, kernel, RISCV_SV39_LEVEL_2_INDEX(virtual_address));
+        PageTable__ensure_next_level_table(self, root, kernel, RISCV_SV39_LEVEL_2_INDEX(virtual_address), true);
     v_ptr(level_1, PageTable)->entries[RISCV_SV39_LEVEL_1_INDEX(virtual_address)] =
         RiscVPageTableEntry__leaf(physical_address, permissions, RISCV_PLATFORM_RAM_PTE_ATTRIBUTES);
     PageTable__publish();
@@ -297,7 +362,7 @@ Result(KAllocCode)
         }
         else
         {
-            PageTable__map_page(self, kernel, current, physical, &permissions, RISCV_PLATFORM_RAM_PTE_ATTRIBUTES);
+            PageTable__map_page(self, kernel, current, physical, &permissions, RISCV_PLATFORM_RAM_PTE_ATTRIBUTES, true);
             current += PAGE_SIZE;
         }
     }

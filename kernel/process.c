@@ -596,6 +596,7 @@ static Result(ProcessPtr)
     proc->process_class = PROCESS_CLASS_NORMAL;
     proc->exec_load = None(ExecLoadPtr);
     proc->service = ServiceState__new();
+    proc->memory_reclaimer = false;
     proc->idle_debug_address = None(UserAddress);
     proc->user_id = PROCESS_USER_ROOT;
     proc->group_id = PROCESS_GROUP_ROOT;
@@ -739,7 +740,7 @@ static Result(ProcessMemoryCode) Process__copy_fork_allocation(ProcessPtr self, 
         success(copy)
         {
             Kernel__memcopy(source->address.kernel_addr.virtual_addr, copy.kernel_addr.virtual_addr, source->size);
-            PageTable__map(&self->page_table, self->kernel, copy, source->size);
+            PageTable__map_unpublished(&self->page_table, self->kernel, copy, source->size);
             match_result(
                 Process__record_user_allocation(self, copy, source->size, source->type),
                 success(_)
@@ -841,6 +842,7 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
     ProcessContextPtr context = ProcessContext__clone(self->kernel, Process__required_context(self));
     child->context = Some(ProcessContextPtr, context);
     Process__set_syscall_result(child, 0);
+    ArchPageTable__publish(&child->page_table);
     return Success(ProcessPtr, child);
 }
 
@@ -2403,7 +2405,11 @@ Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, A
     return None(KernelAddress);
 }
 
-Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
+typedef Result(UserAddress) (*ProcessUserAllocator)(Address virtual_address, size_t size, bool read, bool write,
+                                                    bool execute);
+
+static Result(UserAddress)
+    Process__alloc_user_pages_with(ProcessPtr self, size_t size, ProcessUserAllocator allocator)
 {
     if (size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1))
     {
@@ -2424,7 +2430,7 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     );
 
     match_result(
-        Kernel__try_alloc_user(virtual_address, allocation_size, true, true, false),
+        allocator(virtual_address, allocation_size, true, true, false),
         success(allocation)
         {
             PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
@@ -2450,6 +2456,16 @@ Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
     );
 
     return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+}
+
+Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
+{
+    return Process__alloc_user_pages_with(self, size, Kernel__try_alloc_user);
+}
+
+Result(UserAddress) Process__alloc_reclaimable_user_pages(ProcessPtr self, size_t size)
+{
+    return Process__alloc_user_pages_with(self, size, Kernel__try_alloc_reclaimable_user);
 }
 
 Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPtr self, ProcessPtr source,

@@ -44,6 +44,8 @@ static inline KAllocSource KAllocSource__new(const char * file, const char * fun
 Address Kernel__alloc_kernel(size_t size);
 UserAddress Kernel__alloc_user(Address virtual_address, size_t size, bool read, bool write, bool execute);
 Result(UserAddress) Kernel__try_alloc_user(Address virtual_address, size_t size, bool read, bool write, bool execute);
+Result(UserAddress)
+    Kernel__try_alloc_reclaimable_user(Address virtual_address, size_t size, bool read, bool write, bool execute);
 Result(UserAddress) Kernel__try_alloc_user_aligned(Address virtual_address, size_t size, size_t alignment, bool read,
                                                    bool write, bool execute);
 KernelAddress Kernel__alloc(size_t size);

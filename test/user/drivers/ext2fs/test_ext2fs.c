@@ -236,6 +236,16 @@ Result(Anything) mem_alloc_bytes(size_t size)
     return Success(Anything, (Anything)malloc(size));
 }
 
+Result(Anything) mem_alloc_reclaimable_pages_result(size_t size)
+{
+    return Error(Anything, bstr("reclaimable allocation unavailable in test"), MEM_ALLOCATION_FAILED);
+}
+
+MemStatus mem_free_pages(void * address)
+{
+    return MEM_OK;
+}
+
 int FilesystemDriver__run(FilesystemDriverPtr self, ConstBStringPtr mountpoint)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/"), *mountpoint);

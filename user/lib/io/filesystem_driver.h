@@ -1,6 +1,7 @@
 #ifndef HUND_FILESYSTEM_DRIVER_H
 #define HUND_FILESYSTEM_DRIVER_H
 #include "server.h"
+#include "syscalls/mem.h"
 
 #define FILESYSTEM_FILE_CAPACITY (12U * 1024U)
 typedef uint64_t FilesystemFileSize;
@@ -40,6 +41,8 @@ typedef Result(DirectoryEntryCount) (*FilesystemList)(IOServiceContext context, 
 typedef IOStatus (*FilesystemMkdir)(IOServiceContext context, ConstBStringPtr path);
 typedef IOStatus (*FilesystemRemove)(IOServiceContext context, ConstBStringPtr path, Flags flags);
 typedef IOStatus (*FilesystemLink)(IOServiceContext context, ConstBStringPtr source_path, ConstBStringPtr target_path);
+typedef void (*FilesystemMemoryPressureHandler)(IOServiceContext context, MemPressureLevel pressure);
+OptionalDef(FilesystemMemoryPressureHandler);
 
 typedef enum FilesystemSourceMode
 {
@@ -136,10 +139,13 @@ typedef struct FilesystemDriver
     IOInheritanceRegistry inheritance;
     IOHandle next_handle;
     uint64_t next_file_identity;
+    Optional(FilesystemMemoryPressureHandler) memory_pressure_handler;
 } FilesystemDriver;
 
 typedef FilesystemDriver * FilesystemDriverPtr;
 FilesystemDriver FilesystemDriver__new(IOServiceContext volume, ConstFilesystemOperationsPtr operations);
+void FilesystemDriver__set_memory_pressure_handler(FilesystemDriverPtr self,
+                                                   FilesystemMemoryPressureHandler handler);
 IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request);
 bool FilesystemDriver__release(FilesystemDriverPtr self, QueueConnectionID session, uint64_t pid);
 int FilesystemDriver__run(FilesystemDriverPtr self, ConstBStringPtr mountpoint);

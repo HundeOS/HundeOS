@@ -97,6 +97,11 @@ the authenticated cross-process descriptor inheritance work in
 `docs/TODO.md`; the compatibility layer does not claim that copied handle
 numbers grant a child access.
 
+HundeOS libc exposes `sysconf(_SC_CLK_TCK)` with the same microsecond tick rate
+used by `times()`. Bash detects that interface during configuration, so its
+`time` keyword reports elapsed and CPU seconds without a platform-specific
+source change or a 60 Hz fallback.
+
 Configure or build the selected `ARCH` with:
 
 ```sh

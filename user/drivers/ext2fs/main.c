@@ -2657,6 +2657,16 @@ static FilesystemOperations Ext2fs__operations(void)
                                             Ext2fs__remove, Ext2fs__link);
 }
 
+static void Ext2fs__memory_pressure(IOServiceContext context, MemPressureLevel pressure)
+{
+    if (pressure == MEM_PRESSURE_NORMAL)
+    {
+        return;
+    }
+    Ext2fsVolumePtr volume = context;
+    BlockCache__reclaim(&volume->block_cache);
+}
+
 int EXT2FS_ENTRYPOINT(int argc, char ** argv)
 {
     if (argc != EXT2FS_ARG_COUNT || !service_ok(service_become_service()))
@@ -2684,6 +2694,7 @@ int EXT2FS_ENTRYPOINT(int argc, char ** argv)
     static FilesystemDriver driver;
     FilesystemOperations operations = Ext2fs__operations();
     driver = FilesystemDriver__new(&volume, &operations);
+    FilesystemDriver__set_memory_pressure_handler(&driver, Ext2fs__memory_pressure);
     int result = FilesystemDriver__run(&driver, &mountpoint);
     BlockClient__close(&ext2fs_block_protocol);
     return result;

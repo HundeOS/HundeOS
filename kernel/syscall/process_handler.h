@@ -13,6 +13,8 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(KernelPtr kernel, Option
                                                         Anything arg2, Anything arg3, Anything arg4, Anything arg5);
 Result(SystemCallResult) ProcessSleep__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
                                                Anything arg2, Anything arg3, Anything arg4, Anything arg5);
+Result(SystemCallResult) ProcessIdleWait__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                                  Anything arg2, Anything arg3, Anything arg4, Anything arg5);
 Result(SystemCallResult) ProcessTimes__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
                                                Anything arg2, Anything arg3, Anything arg4, Anything arg5);
 Result(SystemCallResult) ProcessIdentity__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,

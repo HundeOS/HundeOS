@@ -60,7 +60,10 @@ authenticated PID.
 2. Add a fork constructor that creates an unpublished child. Copy identity and
    inheritable process metadata, allocate a fresh page table, reproduce private
    mappings at the same virtual addresses, and copy their bytes. Recreate
-   kernel-provided read-only mappings rather than copying their backing.
+   kernel-provided read-only mappings rather than copying their backing. Because
+   the child page table is not visible to hardware during construction, install
+   its mappings without per-mapping publication barriers, then publish the
+   completed table once before making the child visible.
 3. Do not inherit Channel queues, directional buffers, queue-wait pages, device
    mappings, IRQ state, parked syscalls, or in-flight service work. Fork must
    reject a currently unsupported allocation or process state before publishing

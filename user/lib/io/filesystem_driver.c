@@ -60,7 +60,14 @@ FilesystemDriver FilesystemDriver__new(IOServiceContext volume, ConstFilesystemO
                               .file_states = FilesystemFileStates__new(),
                               .inheritance = IOInheritanceRegistry__new(),
                               .next_handle = IO_SESSION_HANDLE_BASE,
-                              .next_file_identity = 1ULL << 63};
+                              .next_file_identity = 1ULL << 63,
+                              .memory_pressure_handler = None(FilesystemMemoryPressureHandler)};
+}
+
+void FilesystemDriver__set_memory_pressure_handler(FilesystemDriverPtr self,
+                                                   FilesystemMemoryPressureHandler handler)
+{
+    self->memory_pressure_handler = Some(FilesystemMemoryPressureHandler, handler);
 }
 
 bool FilesystemFileState__equals(void * first, void * second)

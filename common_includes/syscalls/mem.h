@@ -22,7 +22,15 @@ typedef enum MemOperation
     MEM_BUFFER_AT,
     MEM_BUFFER_VALIDATE,
     MEM_BUFFER_DEVICE_ADDRESS,
+    MEM_ALLOC_RECLAIMABLE_PAGES,
 } MemOperation;
+
+typedef enum MemPressureLevel
+{
+    MEM_PRESSURE_NORMAL = 0,
+    MEM_PRESSURE_LOW = 1,
+    MEM_PRESSURE_CRITICAL = 2,
+} MemPressureLevel;
 
 typedef enum MemStatus
 {

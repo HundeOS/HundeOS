@@ -337,6 +337,12 @@ typedef enum ProcessSleepResults
     PROCESS_SLEEP_FAILED = -2,
 } ProcessSleepResults;
 
+typedef enum ProcessIdleWaitResults
+{
+    PROCESS_IDLE_WAIT_OK = 0,
+    PROCESS_IDLE_WAIT_INVALID_CALLER = -1,
+} ProcessIdleWaitResults;
+
 typedef enum ProcessTimesResults
 {
     PROCESS_TIMES_OK = 0,

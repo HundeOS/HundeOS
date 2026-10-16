@@ -1,19 +1,42 @@
 #include <string.h>
+#include <stdlib.h>
 
 #include "unity.h"
 #include "ipc/io_diagnostics.h"
 
 #include "../../../user/lib/channel/block_cache.c"
 
-#define TEST_BLOCK_COUNT (BLOCK_CACHE_CAPACITY + 8U)
+#define TEST_BLOCK_COUNT (BLOCK_CACHE_CAPACITY * 2U + 8U)
 
 static uint8_t disk[TEST_BLOCK_COUNT][BLOCK_CHANNEL_SECTOR_SIZE];
 static uint64_t read_calls;
 static uint64_t write_calls;
 static bool fail_reads;
 static bool fail_writes;
+static bool allow_reclaimable_allocations;
+static uint64_t reclaimable_allocations;
+static uint64_t reclaimable_frees;
 static IODiagnostics diagnostics;
 static BString io_error = bstr("fake block IO error");
+
+Result(Anything) mem_alloc_reclaimable_pages_result(size_t size)
+{
+    if (!allow_reclaimable_allocations)
+    {
+        return Error(Anything, bstr("reclaimable allocation refused"), MEM_ALLOCATION_FAILED);
+    }
+    void * allocation = calloc(1, size);
+    TEST_ASSERT_NOT_NULL(allocation);
+    reclaimable_allocations++;
+    return Success(Anything, (Anything)allocation);
+}
+
+MemStatus mem_free_pages(void * address)
+{
+    free(address);
+    reclaimable_frees++;
+    return MEM_OK;
+}
 
 Result(BlockProtocolBlockCount)
     BlockClient__read(BlockClientPtr self, BlockProtocolBlockNumber block, BlockProtocolBlockCount block_count,
@@ -55,8 +78,57 @@ void setUp(void)
     write_calls = 0;
     fail_reads = false;
     fail_writes = false;
+    allow_reclaimable_allocations = false;
+    reclaimable_allocations = 0;
+    reclaimable_frees = 0;
     diagnostics = (IODiagnostics){0};
     IODiagnostics__attach(&diagnostics);
+}
+
+void test_block_cache_grows_with_reclaimable_page_backed_chunk(void)
+{
+    BlockCache cache = BlockCache__new();
+    BlockClient client = {0};
+    uint8_t data[BLOCK_CHANNEL_SECTOR_SIZE];
+    allow_reclaimable_allocations = true;
+
+    for (uint64_t block = 0; block <= BLOCK_CACHE_CAPACITY; block++)
+    {
+        TEST_ASSERT_EQUAL(1,
+                          unwrap_result(BlockCache__read(&cache, &client, block, 1, (Address)data, sizeof(data)), 0));
+    }
+
+    TEST_ASSERT_EQUAL_UINT64(BLOCK_CACHE_CAPACITY * 2U, BlockCache__capacity(&cache));
+    TEST_ASSERT_EQUAL_UINT64(1, reclaimable_allocations);
+    uint64_t reads_before_lookup = read_calls;
+    TEST_ASSERT_EQUAL(1, unwrap_result(BlockCache__read(&cache, &client, 1, 1, (Address)data, sizeof(data)), 0));
+    TEST_ASSERT_EQUAL_UINT64(reads_before_lookup, read_calls);
+    BlockCache__reclaim(&cache);
+}
+
+void test_block_cache_reclaim_releases_dynamic_chunks_and_keeps_base(void)
+{
+    BlockCache cache = BlockCache__new();
+    BlockClient client = {0};
+    uint8_t data[BLOCK_CHANNEL_SECTOR_SIZE];
+    allow_reclaimable_allocations = true;
+
+    for (uint64_t block = 0; block <= BLOCK_CACHE_CAPACITY; block++)
+    {
+        TEST_ASSERT_EQUAL(1,
+                          unwrap_result(BlockCache__read(&cache, &client, block, 1, (Address)data, sizeof(data)), 0));
+    }
+    BlockCache__reclaim(&cache);
+
+    TEST_ASSERT_EQUAL_UINT64(BLOCK_CACHE_CAPACITY, BlockCache__capacity(&cache));
+    TEST_ASSERT_EQUAL_UINT64(1, reclaimable_frees);
+    uint64_t reads_before_base_lookup = read_calls;
+    TEST_ASSERT_EQUAL(1, unwrap_result(BlockCache__read(&cache, &client, 0, 1, (Address)data, sizeof(data)), 0));
+    TEST_ASSERT_EQUAL_UINT64(reads_before_base_lookup, read_calls);
+    TEST_ASSERT_EQUAL(1,
+                      unwrap_result(BlockCache__read(&cache, &client, BLOCK_CACHE_CAPACITY, 1,
+                                                     (Address)data, sizeof(data)), 0));
+    TEST_ASSERT_EQUAL_UINT64(reads_before_base_lookup + 1U, read_calls);
 }
 
 void tearDown(void)

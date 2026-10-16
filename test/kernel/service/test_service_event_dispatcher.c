@@ -2,6 +2,7 @@
 
 #include "../../../kernel/process.h"
 #include "../../../kernel/service/event_dispatcher.h"
+#include "syscalls/mem.h"
 #include "../fixtures/process.h"
 #include "../stubs/panic.h"
 
@@ -80,4 +81,30 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__unmasked_irq());
     TEST_ASSERT_EQUAL_UINT64(1, Arch__unmask_count());
+}
+
+void test_service_event_dispatcher_coalesces_memory_pressure_to_latest_level(void)
+{
+    ServiceEventDispatcher dispatcher = ServiceEventDispatcher__new();
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_READY);
+    process->process_class = PROCESS_CLASS_SERVICE;
+    ServiceEvent low = ServiceEvent__new(SERVICE_EVENT_MEMORY_PRESSURE, MEM_PRESSURE_LOW, 100);
+    ServiceEvent critical = ServiceEvent__new(SERVICE_EVENT_MEMORY_PRESSURE, MEM_PRESSURE_CRITICAL, 50);
+
+    TEST_ASSERT_EQUAL(SERVICE_OK,
+                      unwrap_result(ServiceEventDispatcher__enqueue(&dispatcher, process, low), SERVICE_ABORT));
+    TEST_ASSERT_EQUAL(SERVICE_OK,
+                      unwrap_result(ServiceEventDispatcher__enqueue(&dispatcher, process, critical), SERVICE_ABORT));
+    TEST_ASSERT_EQUAL(1, ServiceEvents__len(&process->service.events));
+
+    match_result(
+        ServiceEventDispatcher__take_next(&dispatcher, process),
+        success(event)
+        {
+            TEST_ASSERT_EQUAL(SERVICE_EVENT_MEMORY_PRESSURE, event.type);
+            TEST_ASSERT_EQUAL(MEM_PRESSURE_CRITICAL, event.source);
+            TEST_ASSERT_EQUAL_UINT64(50, event.data);
+        },
+        error_test_fail()
+    );
 }

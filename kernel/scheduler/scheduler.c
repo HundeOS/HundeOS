@@ -3483,6 +3483,78 @@ Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr pro
 }
 
 static Result(ServiceCode)
+    Scheduler__enqueue_memory_pressure_locked(SchedulerPtr self, ProcessPtr process, MemPressureLevel pressure,
+                                              uint64_t free_pages)
+{
+    ServiceEvent event = ServiceEvent__new(SERVICE_EVENT_MEMORY_PRESSURE, pressure, free_pages);
+    match_result(
+        ServiceEventDispatcher__enqueue(&self->service_event_dispatcher, process, event),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ServiceCode, message, code);
+        }
+    );
+    return Scheduler__service_mark_runnable_locked(self, process);
+}
+
+Result(ServiceCode)
+    Scheduler__register_memory_reclaimer(SchedulerPtr self, ProcessPtr process, MemPressureLevel pressure,
+                                         uint64_t free_pages)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            bool was_registered = process->memory_reclaimer;
+            process->memory_reclaimer = true;
+            if (!was_registered && pressure != MEM_PRESSURE_NORMAL)
+            {
+                cs_return Scheduler__enqueue_memory_pressure_locked(self, process, pressure, free_pages);
+            }
+        }
+    );
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+Result(ServiceCode)
+    Scheduler__notify_memory_pressure(SchedulerPtr self, uint64_t generation, MemPressureLevel pressure,
+                                      uint64_t free_pages)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            if (generation == self->memory_pressure_generation)
+            {
+                cs_return Success(ServiceCode, SERVICE_OK);
+            }
+            self->memory_pressure_generation = generation;
+            ProcessTable processes = Scheduler__all_processes_for_all_cpus_locked(self);
+            for_each_fa_ptr(
+                ProcessTable,
+                &processes,
+                index,
+                process,
+                {
+                    if (process->memory_reclaimer)
+                    {
+                        match_result(
+                            Scheduler__enqueue_memory_pressure_locked(self, process, pressure, free_pages),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                __d_printf(SCHEDULER, "memory pressure notification failed pid=%i code=%i message=%s\n",
+                                           process->pid, code, BString__cstr(&message));
+                            }
+                        );
+                    }
+                }
+            );
+        }
+    );
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+static Result(ServiceCode)
     Scheduler__service_ready_mark_runnable_locked(SchedulerPtr self, ProcessPtr process, ServiceCode result)
 {
     if (Scheduler__is_parked_for(process, PARK_WAIT_SERVICE_READY))

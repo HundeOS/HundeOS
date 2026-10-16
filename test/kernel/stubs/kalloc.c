@@ -198,6 +198,12 @@ Result(UserAddress) Kernel__try_alloc_user(Address virtual_address, size_t size,
     return Success(UserAddress, Kernel__alloc_user(virtual_address, size, read, write, execute));
 }
 
+Result(UserAddress)
+    Kernel__try_alloc_reclaimable_user(Address virtual_address, size_t size, bool read, bool write, bool execute)
+{
+    return Kernel__try_alloc_user(virtual_address, size, read, write, execute);
+}
+
 Result(UserAddress) Kernel__try_alloc_user_aligned(Address virtual_address, size_t size, size_t alignment, bool read,
                                                    bool write, bool execute)
 {
@@ -214,6 +220,16 @@ Result(KAllocCode) Kernel__free(Address virtual_address)
     KAllocStub__track_free(virtual_address);
     free(void_ptr(virtual_address));
     return Success(KAllocCode, KALLOC_OK);
+}
+
+__attribute__((weak)) KernelAddress Kernel__malloc(size_t size)
+{
+    return Kernel__alloc(size);
+}
+
+__attribute__((weak)) Result(KAllocCode) Kernel__free_malloc(Address allocation)
+{
+    return Kernel__free(allocation);
 }
 
 void KAllocStub__set_free_failure(bool enabled)

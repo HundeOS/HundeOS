@@ -12,6 +12,8 @@
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
+#define _SC_CLK_TCK 1
+
 extern char * optarg;
 extern int opterr;
 extern int optind;
@@ -26,6 +28,7 @@ ssize_t read(int descriptor, void * buffer, size_t size);
 ssize_t write(int descriptor, const void * buffer, size_t size);
 unsigned int sleep(unsigned int seconds);
 unsigned int alarm(unsigned int seconds);
+long sysconf(int name);
 int getopt(int argc, char * const argv[], const char * options);
 int pledge(const char * promises, const char * paths);
 int access(const char * path, int mode);

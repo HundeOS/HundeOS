@@ -35,6 +35,35 @@ static void Mem__terminate_on_allocation_failure(ProcessPtr process, ProcessMemo
     }
 }
 
+static MemPressureLevel Mem__pressure_level(HeapPressureLevel pressure)
+{
+    switch (pressure)
+    {
+    case HEAP_PRESSURE_NORMAL:
+        return MEM_PRESSURE_NORMAL;
+    case HEAP_PRESSURE_LOW:
+        return MEM_PRESSURE_LOW;
+    case HEAP_PRESSURE_CRITICAL:
+        return MEM_PRESSURE_CRITICAL;
+    }
+    return MEM_PRESSURE_CRITICAL;
+}
+
+static void Mem__notify_pressure(KernelPtr kernel)
+{
+    HeapMemoryState state = Heap__memory_state(&kernel->heap);
+    match_result(
+        Scheduler__notify_memory_pressure(kernel->scheduler, state.pressure_generation,
+                                          Mem__pressure_level(state.pressure_level), state.free_pages),
+        success_do_nothing(),
+        error(code, message)
+        {
+            __d_printf(MEMORY, "memory pressure notification failed code=%i message=%s\n", code,
+                       BString__cstr(&message));
+        }
+    );
+}
+
 Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything mem_operation,
                                       Anything arg2, Anything arg3, Anything arg4, Anything arg5)
 {
@@ -103,11 +132,49 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
                     Process__alloc_user_pages(process, size),
                     success(address)
                     {
+                        Mem__notify_pressure(kernel);
                         return Success(SystemCallResult, address.virtual_addr);
                     },
                     error(code, message)
                     {
                         Mem__terminate_on_allocation_failure(process, code);
+                        return Error(SystemCallResult, message, Mem__status_from_process_code(code));
+                    }
+                );
+            }
+
+            if (mem_operation == MEM_ALLOC_RECLAIMABLE_PAGES)
+            {
+                size_t size = (size_t)arg2;
+                if (size == 0)
+                {
+                    return Error(SystemCallResult, invalid_size, MEM_INVALID_SIZE);
+                }
+                if (!ProcessClass__is_service(process->process_class))
+                {
+                    return Error(SystemCallResult, bstr("Reclaimable allocations require a service process"),
+                                 MEM_PERMISSION_DENIED);
+                }
+                HeapMemoryState state = Heap__memory_state(&kernel->heap);
+                match_result(
+                    Scheduler__register_memory_reclaimer(kernel->scheduler, process,
+                                                         Mem__pressure_level(state.pressure_level), state.free_pages),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
+                );
+                match_result(
+                    Process__alloc_reclaimable_user_pages(process, size),
+                    success(address)
+                    {
+                        Mem__notify_pressure(kernel);
+                        return Success(SystemCallResult, address.virtual_addr);
+                    },
+                    error(code, message)
+                    {
+                        Mem__notify_pressure(kernel);
                         return Error(SystemCallResult, message, Mem__status_from_process_code(code));
                     }
                 );
@@ -119,6 +186,7 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
                     Process__free_user_pages(process, (Address)arg2),
                     success(_)
                     {
+                        Mem__notify_pressure(kernel);
                         return Success(SystemCallResult, MEM_OK);
                     },
                     error(code, message)
@@ -134,6 +202,7 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
                     Process__sbrk(process, (int64_t)arg2),
                     success(old_break)
                     {
+                        Mem__notify_pressure(kernel);
                         return Success(SystemCallResult, old_break);
                     },
                     error(code, message)

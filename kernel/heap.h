@@ -40,7 +40,26 @@ typedef struct Heap
     size_t coarse_block_size;
     AllocatedBlocks allocated_blocks;
     AllocatedBlocks free_blocks;
+    uint64_t total_pages;
+    uint64_t free_pages;
+    uint64_t pressure_generation;
+    uint64_t pressure_level;
 } Heap;
+
+typedef enum HeapPressureLevel
+{
+    HEAP_PRESSURE_NORMAL = 0,
+    HEAP_PRESSURE_LOW = 1,
+    HEAP_PRESSURE_CRITICAL = 2,
+} HeapPressureLevel;
+
+typedef struct HeapMemoryState
+{
+    uint64_t total_pages;
+    uint64_t free_pages;
+    uint64_t pressure_generation;
+    HeapPressureLevel pressure_level;
+} HeapMemoryState;
 
 typedef enum HeapCodes
 {
@@ -59,6 +78,8 @@ KernelAddress Heap__alloc(HeapPtr self);
 KernelAddress Heap__alloc_size(HeapPtr self, size_t size);
 KernelAddress Heap__try_alloc_size(HeapPtr self, size_t size);
 KernelAddress Heap__try_alloc_size_aligned(HeapPtr self, size_t size, size_t alignment);
+KernelAddress Heap__try_alloc_reclaimable_size(HeapPtr self, size_t size);
+HeapMemoryState Heap__memory_state(HeapPtr self);
 
 Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr);
 
@@ -78,6 +99,7 @@ KernelAddress Heap__try_from_virtual_address(HeapPtr self, Address virtual);
     {                                                                                                                  \
         .lock = MUTEX_INIT, .start = 0, .end = 0, .phys_start = 0, .coarse_block_size = 0,                             \
         .allocated_blocks = EmptyHashtable(AllocatedBlocks), .free_blocks = EmptyHashtable(AllocatedBlocks),           \
+        .total_pages = 0, .free_pages = 0, .pressure_generation = 0, .pressure_level = HEAP_PRESSURE_NORMAL,           \
     }
 
 #endif

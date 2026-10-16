@@ -76,10 +76,39 @@ void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress 
 }
 
 static int maps_before_failure = -1;
+static size_t unpublished_map_count = 0;
+static size_t publish_count = 0;
 
 void PageTableStub__fail_mapping_after(int successful_maps)
 {
     maps_before_failure = successful_maps;
+}
+
+void PageTableStub__reset_publish_tracking(void)
+{
+    unpublished_map_count = 0;
+    publish_count = 0;
+}
+
+size_t PageTableStub__unpublished_map_count(void)
+{
+    return unpublished_map_count;
+}
+
+size_t PageTableStub__publish_count(void)
+{
+    return publish_count;
+}
+
+void ArchPageTable__map_unpublished(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    unpublished_map_count++;
+    ArchPageTable__map(self, kernel, address, size);
+}
+
+void ArchPageTable__publish(ProcessPageTablePtr self)
+{
+    publish_count++;
 }
 
 Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)

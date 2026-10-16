@@ -50,6 +50,30 @@ Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent ev
         return Error(ServiceCode, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
     }
 
+    if (event.type == SERVICE_EVENT_MEMORY_PRESSURE)
+    {
+        for_each_fa_ptr(
+            ServiceEvents,
+            &process->service.events,
+            index,
+            queued,
+            {
+                if (queued.type == SERVICE_EVENT_MEMORY_PRESSURE)
+                {
+                    match_optional(
+                        ServiceEvents__ptr_at(&process->service.events, index),
+                        some(stored)
+                        {
+                            *stored = event;
+                            return Success(ServiceCode, SERVICE_OK);
+                        },
+                        none_do_nothing()
+                    );
+                }
+            }
+        );
+    }
+
     match_result(
         ServiceEvents__push(&process->service.events, event),
         success_do_nothing(),

@@ -1,12 +1,14 @@
 #include "process_handler.h"
 
 #include "syscalls/process.h"
+#include "../arch/cpu.h"
 #include "../scheduler/kernel_context.h"
 #include "../scheduler/scheduler.h"
 
 static BString invalid_process_list_request = bstr("Invalid process list request");
 static BString invalid_child_event_request = bstr("Invalid child event request");
 static BString invalid_sleep_request = bstr("Invalid sleep request");
+static BString invalid_idle_wait_request = bstr("Invalid idle wait request");
 static BString invalid_process_times_request = bstr("Invalid process times request");
 static BString invalid_process_identity_request = bstr("Invalid process identity request");
 static BString sleep_pending = bstr("Sleep pending");
@@ -316,6 +318,34 @@ Result(SystemCallResult) ProcessSleep__handler(KernelPtr kernel, OptionalPtr(Pro
     );
 
     return Error(SystemCallResult, invalid_sleep_request, PROCESS_SLEEP_INVALID_ARGUMENT);
+}
+
+Result(SystemCallResult) ProcessIdleWait__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
+                                                  Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+{
+    CPUID cpu = CPU__id();
+    match_optional(
+        *proc,
+        some(process)
+        {
+            match_optional(
+                Scheduler__idle_process(kernel->scheduler, cpu),
+                some(idle_process)
+                {
+                    if (process == idle_process)
+                    {
+                        Scheduler__yield_runnable(kernel->scheduler, process, cpu);
+                        CPU__wait_for_interrupt();
+                        return Success(SystemCallResult, PROCESS_IDLE_WAIT_OK);
+                    }
+                },
+                none_do_nothing()
+            );
+        },
+        none_do_nothing()
+    );
+
+    return Error(SystemCallResult, invalid_idle_wait_request, PROCESS_IDLE_WAIT_INVALID_CALLER);
 }
 
 Result(SystemCallResult) ProcessTimes__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,

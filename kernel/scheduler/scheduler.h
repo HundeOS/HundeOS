@@ -117,6 +117,7 @@ typedef struct Scheduler
     RequestGraph request_graph;
     mutex_t scheduler_lock;
     bool ready;
+    uint64_t memory_pressure_generation;
 } Scheduler;
 
 SchedulerPtr Scheduler__heap_new(void);
@@ -226,6 +227,12 @@ Result(ProcessChildEvent)
 Result(ProcessChildEvent)
     Scheduler__child_take_event(SchedulerPtr self, ProcessPtr process, int64_t child_selection, uint64_t options);
 Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr process, ConstServiceEventPtr event);
+Result(ServiceCode)
+    Scheduler__register_memory_reclaimer(SchedulerPtr self, ProcessPtr process, MemPressureLevel pressure,
+                                         uint64_t free_pages);
+Result(ServiceCode)
+    Scheduler__notify_memory_pressure(SchedulerPtr self, uint64_t generation, MemPressureLevel pressure,
+                                      uint64_t free_pages);
 Result(ServiceCode) Scheduler__service_publish_ready(SchedulerPtr self, ProcessPtr process, ConstBStringPtr name);
 Optional(ProcessPtr) Scheduler__service_ready_process(SchedulerPtr self, ConstBStringPtr name);
 Result(ServiceCode)
@@ -245,7 +252,7 @@ bool Scheduler__parked_operation_is_ready(SchedulerPtr self, ParkedOperationPtr 
         .kernel = None(KernelPtr), .interrupt_controller = None(InterruptControllerInfo),                              \
         .schedulers = EmptyHashtable(CPUSchedulers), .admission = EmptyArray(ProcessTable),                            \
         .service_event_dispatcher = NEW_SERVICE_EVENT_DISPATCHER, .shared_pages = EmptyArray(ManagedSharedPages),      \
-        .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT, .ready = false,                                         \
+        .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT, .ready = false, .memory_pressure_generation = 0,         \
     }
 
 #endif

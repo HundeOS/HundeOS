@@ -825,9 +825,11 @@ measurement remain below. See [Shared buffers](architecture/shared-buffers.md).
 
 ### Filesystem Read Latency
 
-Status: bounded userspace block and inode caches are implemented and EXT2 uses
-them. Service consolidation remains staged work so its effect can be measured
-independently.
+Status: the userspace block cache has a fixed 1024-sector base and grows with
+reclaimable page-backed chunks while at least half of kernel-managed memory is
+free. EXT2 returns those chunks when low-memory service events arrive. The inode
+cache remains bounded, and service consolidation remains staged work so its
+effect can be measured independently.
 
 - [x] Add a reusable 1024-sector (512 KiB) scan-resistant LRU cache above
   `BlockClient`. Preserve contiguous miss batching, protect blocks after a
@@ -837,6 +839,12 @@ independently.
 - [x] Route EXT2 block reads and writes through the cache. Repeated pathname
   traversal can reuse cached inode-table and directory blocks without another
   block-service request.
+- [x] Track total/free heap pages, reserve half of managed memory from
+  reclaimable growth, and publish low/critical pressure transitions at 20% and
+  10% free memory. Reclaimable allocations register their process for
+  asynchronous service events; event delivery occurs after allocator locks are
+  released. EXT2 drops dynamic block-cache chunks on pressure while retaining
+  the base cache.
 - [x] Add a bounded 256-entry EXT2 inode cache using the shared scan-resistant
   cache type. Update it after successful inode writes, invalidate freed inodes,
   and export separate hit, miss, and eviction counters through procfs.

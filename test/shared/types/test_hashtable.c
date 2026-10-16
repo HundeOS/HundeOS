@@ -175,3 +175,26 @@ void test_hashtable_delete_updates_len_and_removes_empty_bucket(void)
     );
     TEST_ASSERT_EQUAL_UINT64(0, TestHashtable__len(&table));
 }
+
+void test_hashtable_delete_does_not_relocate_another_hash_bucket(void)
+{
+    TestHashtable table = TestHashtable__new();
+    match_result(TestHashtable__set(&table, 1, 10),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(TestHashtable__set(&table, 2, 20),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    TestValue * value_before = unwrap_optional(TestHashtable__get_ptr(&table, 2), (TestValue *){});
+    match_result(TestHashtable__delete(&table, 1),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TestValue * value_after = unwrap_optional(TestHashtable__get_ptr(&table, 2), (TestValue *){});
+
+    TEST_ASSERT_EQUAL_PTR(value_before, value_after);
+    TEST_ASSERT_EQUAL_UINT64(20, *value_after);
+}

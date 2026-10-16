@@ -57,6 +57,7 @@ Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
                 REGISTER(self, SYSCALL_AUTH, &Auth__handler);
                 REGISTER(self, SYSCALL_PANIC, &Panic__handler);
                 REGISTER(self, SYSCALL_SLEEP, &ProcessSleep__handler);
+                REGISTER(self, SYSCALL_PROCESS_IDLE_WAIT, &ProcessIdleWait__handler);
                 REGISTER(self, SYSCALL_PROCESS_TIMES, &ProcessTimes__handler);
                 REGISTER(self, SYSCALL_PROCESS_IDENTITY, &ProcessIdentity__handler);
                 REGISTER(self, SYSCALL_PROCESS_FORK, &ProcessFork__handler);

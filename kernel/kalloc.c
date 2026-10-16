@@ -123,6 +123,18 @@ Result(UserAddress) Kernel__try_alloc_user(Address virtual_address, size_t size,
     return Success(UserAddress, UserAddress__new(virtual_address, address, read, write, execute, true));
 }
 
+Result(UserAddress)
+    Kernel__try_alloc_reclaimable_user(Address virtual_address, size_t size, bool read, bool write, bool execute)
+{
+    KernelAddress address = Heap__try_alloc_reclaimable_size(heap_ptr(), size);
+    if (!address.valid)
+    {
+        return Error(UserAddress, allocation_failed, KALLOC_ALLOCATION_FAILED);
+    }
+
+    return Success(UserAddress, UserAddress__new(virtual_address, address, read, write, execute, true));
+}
+
 Result(UserAddress) Kernel__try_alloc_user_aligned(Address virtual_address, size_t size, size_t alignment, bool read,
                                                    bool write, bool execute)
 {

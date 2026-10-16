@@ -79,6 +79,8 @@ static Result(HeapCode) Heap__add_free_region(HeapPtr self, ConstPhysicalMemoryR
         Heap__block_for_region(self, region),
         some(block)
         {
+            self->total_pages += block.pages_allocated;
+            self->free_pages += block.pages_allocated;
             MemoryBlock free_block = Heap__coalesce_free_block(self, block);
             match_result(
                 AllocatedBlocks__set(&self->free_blocks, free_block.start.virtual_addr, free_block),
@@ -111,12 +113,26 @@ Result(HeapCode) Heap__init(HeapPtr self, SystemInfoPtr system_info)
     self->coarse_block_size = Heap__coarse_block_size(system_info);
     AllocatedBlocks__init(&self->allocated_blocks);
     AllocatedBlocks__init(&self->free_blocks);
+    self->total_pages = 0;
+    self->free_pages = 0;
+    self->pressure_generation = 1;
+    self->pressure_level = HEAP_PRESSURE_NORMAL;
 
     if (PhysicalMemoryRegions__len(&system_info->physical_memory.free_regions) == 0)
     {
         PhysicalMemoryRegion fallback =
             PhysicalMemoryRegion__new(system_info->kernel_heap.physical_start, system_info->kernel_heap.physical_end);
-        return Heap__add_free_region(self, &fallback);
+        match_result(
+            Heap__add_free_region(self, &fallback),
+            success(_)
+            {
+                return Success(HeapCode, HEAP_OK);
+            },
+            error(code, message)
+            {
+                return Error(HeapCode, message, code);
+            }
+        );
     }
 
     for_each_fa_ptr(
@@ -146,30 +162,50 @@ static uint64_t Heap__pages_for_size(size_t size)
     return pages > 0 ? pages : 1;
 }
 
+static HeapMemoryState HeapMemoryState__new(uint64_t total_pages, uint64_t free_pages,
+                                            uint64_t pressure_generation, HeapPressureLevel pressure_level)
+{
+    return (HeapMemoryState){
+        .total_pages = total_pages,
+        .free_pages = free_pages,
+        .pressure_generation = pressure_generation,
+        .pressure_level = pressure_level,
+    };
+}
+
+static HeapPressureLevel Heap__calculate_pressure(HeapPtr self)
+{
+    if (self->total_pages == 0)
+    {
+        return HEAP_PRESSURE_CRITICAL;
+    }
+    if (self->free_pages <= self->total_pages / 10U)
+    {
+        return HEAP_PRESSURE_CRITICAL;
+    }
+    if (self->free_pages <= self->total_pages / 5U)
+    {
+        return HEAP_PRESSURE_LOW;
+    }
+    return HEAP_PRESSURE_NORMAL;
+}
+
+static void Heap__update_pressure(HeapPtr self)
+{
+    HeapPressureLevel pressure = Heap__calculate_pressure(self);
+    if (pressure != self->pressure_level)
+    {
+        self->pressure_level = pressure;
+        self->pressure_generation++;
+    }
+}
+
 static void Heap__zero_pages(KernelAddress start, uint64_t pages)
 {
     for (uint64_t i = 0; i < pages; i++)
     {
         MemoryPagePtr page = (MemoryPagePtr)(start.virtual_addr + (i * PAGE_SIZE));
         MemoryPage__zero(page);
-    }
-}
-
-static void AllocatedBlocks__remove_entry(AllocatedBlocksPtr blocks, uint64_t table_index, uint64_t bucket_index)
-{
-    AllocatedBlocksBucketPtr bucket = &blocks->table.entries[table_index].value;
-
-    for (uint64_t i = bucket_index; i + 1 < bucket->len; i++)
-    {
-        bucket->data[i] = bucket->data[i + 1];
-    }
-
-    bucket->len--;
-    blocks->len--;
-
-    if (bucket->len == 0)
-    {
-        AllocatedBlocks__table__delete(&blocks->table, blocks->table.entries[table_index].key);
     }
 }
 
@@ -186,42 +222,70 @@ static bool AllocatedBlocks__remove_key(AllocatedBlocksPtr blocks, Address key)
 
 static Optional(MemoryBlock) Heap__take_free_block(HeapPtr self, uint64_t pages)
 {
-    for (uint64_t table_index = 0; table_index < (uint64_t)self->free_blocks.table.len; table_index++)
-    {
-        AllocatedBlocksBucketPtr bucket = &self->free_blocks.table.entries[table_index].value;
-
-        for (uint64_t bucket_index = 0; bucket_index < bucket->len; bucket_index++)
+    Optional(MemoryBlock) best = None(MemoryBlock);
+    for_each_hashtable_ptr(
+        AllocatedBlocks,
+        &self->free_blocks,
+        table_index,
+        bucket_index,
+        key,
+        candidate,
         {
-            MemoryBlock block = bucket->data[bucket_index].value;
-
-            if (block.pages_allocated >= pages)
+            if (candidate->pages_allocated >= pages)
             {
-                AllocatedBlocks__remove_entry(&self->free_blocks, table_index, bucket_index);
-                if (block.pages_allocated > pages)
-                {
-                    KernelAddress remainder_start = KERNEL_ADDR(block.start.virtual_addr + (pages * PAGE_SIZE),
-                                                                block.start.phys_addr + (pages * PAGE_SIZE));
-                    MemoryBlock remainder = MemoryBlock__new(remainder_start, block.pages_allocated - pages);
-                    AllocatedBlocks__set(&self->free_blocks, remainder.start.virtual_addr, remainder);
-                    block.pages_allocated = pages;
-                }
-                return Some(MemoryBlock, block);
+                match_optional(
+                    best,
+                    some(current)
+                    {
+                        if (candidate->pages_allocated < current.pages_allocated)
+                        {
+                            best = Some(MemoryBlock, *candidate);
+                        }
+                    },
+                    none()
+                    {
+                        best = Some(MemoryBlock, *candidate);
+                    }
+                );
             }
         }
-    }
+    );
+
+    match_optional(
+        best,
+        some(block)
+        {
+            AllocatedBlocks__delete(&self->free_blocks, block.start.virtual_addr);
+            if (block.pages_allocated > pages)
+            {
+                KernelAddress remainder_start = KERNEL_ADDR(block.start.virtual_addr + (pages * PAGE_SIZE),
+                                                            block.start.phys_addr + (pages * PAGE_SIZE));
+                MemoryBlock remainder = MemoryBlock__new(remainder_start, block.pages_allocated - pages);
+                AllocatedBlocks__set(&self->free_blocks, remainder.start.virtual_addr, remainder);
+                block.pages_allocated = pages;
+            }
+            return Some(MemoryBlock, block);
+        },
+        none()
+        {
+            return None(MemoryBlock);
+        }
+    );
 
     return None(MemoryBlock);
 }
 
 static Optional(MemoryBlock) Heap__take_aligned_free_block(HeapPtr self, uint64_t pages, size_t alignment)
 {
-    for (uint64_t table_index = 0; table_index < (uint64_t)self->free_blocks.table.len; table_index++)
-    {
-        AllocatedBlocksBucketPtr bucket = &self->free_blocks.table.entries[table_index].value;
-
-        for (uint64_t bucket_index = 0; bucket_index < bucket->len; bucket_index++)
+    for_each_hashtable_ptr(
+        AllocatedBlocks,
+        &self->free_blocks,
+        table_index,
+        bucket_index,
+        key,
+        candidate,
         {
-            MemoryBlock block = bucket->data[bucket_index].value;
+            MemoryBlock block = *candidate;
             Address remainder = block.start.phys_addr % alignment;
             Address adjustment = remainder == 0 ? 0 : alignment - remainder;
             uint64_t prefix_pages = adjustment / PAGE_SIZE;
@@ -230,7 +294,7 @@ static Optional(MemoryBlock) Heap__take_aligned_free_block(HeapPtr self, uint64_
                 continue;
             }
 
-            AllocatedBlocks__remove_entry(&self->free_blocks, table_index, bucket_index);
+            AllocatedBlocks__delete(&self->free_blocks, *key);
             if (prefix_pages > 0)
             {
                 MemoryBlock prefix = MemoryBlock__new(block.start, prefix_pages);
@@ -249,7 +313,7 @@ static Optional(MemoryBlock) Heap__take_aligned_free_block(HeapPtr self, uint64_
             }
             return Some(MemoryBlock, MemoryBlock__new(aligned_start, pages));
         }
-    }
+    );
 
     return None(MemoryBlock);
 }
@@ -280,13 +344,15 @@ static bool Heap__coalesce_one_free_block(HeapPtr self, MemoryBlockPtr block)
     Address block_start = block->start.virtual_addr;
     Address block_end = block_start + (block->pages_allocated * PAGE_SIZE);
 
-    for (uint64_t table_index = 0; table_index < (uint64_t)self->free_blocks.table.len; table_index++)
-    {
-        AllocatedBlocksBucketPtr bucket = &self->free_blocks.table.entries[table_index].value;
-
-        for (uint64_t bucket_index = 0; bucket_index < bucket->len; bucket_index++)
+    for_each_hashtable_ptr(
+        AllocatedBlocks,
+        &self->free_blocks,
+        table_index,
+        bucket_index,
+        key,
+        candidate,
         {
-            MemoryBlock other = bucket->data[bucket_index].value;
+            MemoryBlock other = *candidate;
             Address other_start = other.start.virtual_addr;
             Address other_end = other_start + (other.pages_allocated * PAGE_SIZE);
 
@@ -294,18 +360,18 @@ static bool Heap__coalesce_one_free_block(HeapPtr self, MemoryBlockPtr block)
             {
                 block->start = other.start;
                 block->pages_allocated += other.pages_allocated;
-                AllocatedBlocks__remove_entry(&self->free_blocks, table_index, bucket_index);
+                AllocatedBlocks__delete(&self->free_blocks, *key);
                 return true;
             }
 
             if (block_end == other_start)
             {
                 block->pages_allocated += other.pages_allocated;
-                AllocatedBlocks__remove_entry(&self->free_blocks, table_index, bucket_index);
+                AllocatedBlocks__delete(&self->free_blocks, *key);
                 return true;
             }
         }
-    }
+    );
 
     return false;
 }
@@ -335,12 +401,16 @@ static KernelAddress Heap__allocate_available(HeapPtr self, uint64_t pages, size
                 Heap__record_allocated(self, block.start, block.pages_allocated),
                 success(_)
                 {
+                    self->free_pages -= block.pages_allocated;
+                    Heap__update_pressure(self);
                     __d_printf(MEMORY, "heap alloc addr=%p phys=%p pages=%i size=%i\n", block.start.virtual_addr,
                                block.start.phys_addr, block.pages_allocated, size);
                     return block.start;
                 },
                 error(code, message)
                 {
+                    MemoryBlock free_block = Heap__coalesce_free_block(self, block);
+                    AllocatedBlocks__set(&self->free_blocks, free_block.start.virtual_addr, free_block);
                     __d_printf(SYSLOG, "heap allocation untracked addr=%p message=%s\n", block.start.virtual_addr,
                                BString__cstr(&message));
                     return INVALID_KERNEL_ADDR;
@@ -392,6 +462,39 @@ KernelAddress Heap__try_alloc_size(HeapPtr self, size_t size)
     return INVALID_KERNEL_ADDR;
 }
 
+KernelAddress Heap__try_alloc_reclaimable_size(HeapPtr self, size_t size)
+{
+    critical_section(
+        self->lock,
+        {
+            uint64_t pages = Heap__pages_for_size(size);
+            uint64_t growth_floor = self->total_pages / 2U;
+            if (pages > self->free_pages || self->free_pages - pages < growth_floor)
+            {
+                cs_return INVALID_KERNEL_ADDR;
+            }
+            cs_return Heap__allocate_available(self, pages, size);
+        }
+    );
+
+    return INVALID_KERNEL_ADDR;
+}
+
+HeapMemoryState Heap__memory_state(HeapPtr self)
+{
+    critical_section(
+        self->lock,
+        {
+            HeapMemoryState state = HeapMemoryState__new(self->total_pages, self->free_pages,
+                                                         self->pressure_generation,
+                                                         (HeapPressureLevel)self->pressure_level);
+            cs_return state;
+        }
+    );
+
+    return HeapMemoryState__new(0, 0, 0, HEAP_PRESSURE_CRITICAL);
+}
+
 KernelAddress Heap__try_alloc_size_aligned(HeapPtr self, size_t size, size_t alignment)
 {
     if (alignment < PAGE_SIZE || alignment % PAGE_SIZE != 0)
@@ -412,6 +515,8 @@ KernelAddress Heap__try_alloc_size_aligned(HeapPtr self, size_t size, size_t ali
                         Heap__record_allocated(self, block.start, block.pages_allocated),
                         success(_)
                         {
+                            self->free_pages -= block.pages_allocated;
+                            Heap__update_pressure(self);
                             cs_return block.start;
                         },
                         error(code, message)
@@ -446,6 +551,8 @@ Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr)
                     AllocatedBlocks__remove_key(&self->allocated_blocks, addr.virtual_addr);
                     MemoryBlock free_block = Heap__coalesce_free_block(self, allocated);
                     AllocatedBlocks__set(&self->free_blocks, free_block.start.virtual_addr, free_block);
+                    self->free_pages += allocated.pages_allocated;
+                    Heap__update_pressure(self);
                     __d_printf(MEMORY, "heap free addr=%p phys=%p pages=%i coalesced_addr=%p coalesced_pages=%i\n",
                                allocated.start.virtual_addr, allocated.start.phys_addr, allocated.pages_allocated,
                                free_block.start.virtual_addr, free_block.pages_allocated);
