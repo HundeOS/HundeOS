@@ -25,6 +25,13 @@ userspace. Hardware interrupt entry still runs in the kernel. Registration,
 authentication, and memory setup may require syscalls; routine driver
 notification and acknowledgement should not.
 
+The agreed next architecture evolves this service into
+`hunde-treiber-host`, which hosts all hardware-facing drivers while preserving
+the interrupt masking, device acknowledgement, rearming, and external Channel
+rules in this document. High-level filesystem, socket, stream, and cache policy
+belongs in `hunde-io-host`. See
+[I/O and driver hosts](io-driver-hosts.md).
+
 ## Responsibilities
 
 The kernel owns exception entry, privileged GIC CPU-interface operations,

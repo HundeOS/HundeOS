@@ -16,6 +16,12 @@ Console streams now use the same I/O protocol and Channels. The kernel retains
 boot-level-0 embedded executable loading and independent boot/panic output, not
 bootstrap filesystem mounts or console/keyboard data buffering.
 
+The agreed next architecture consolidates this routing, namespace, and the
+high-level filesystem, socket, stream, pipe, terminal, and information
+components into `hunde-io-host`. Until that migration occurs, the ownership and
+protocols in this document describe the running system. See
+[I/O and driver hosts](io-driver-hosts.md).
+
 ## Common application interface
 
 `hund-io-system` is the common userspace I/O front end for files, sockets,

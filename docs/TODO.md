@@ -361,19 +361,87 @@ only to advance the Bash build.
 - [ ] Move post-root services and drivers to the disk rootfs, then mount the
   embedded archive at a dedicated bootstrap path containing only bootstrap code.
 
+## Userspace Service Hosts
+
+### Consolidated I/O And Driver Hosts
+
+Status: architecture agreed and documented in
+[I/O and driver hosts](architecture/io-driver-hosts.md). `hund-unterbrict`
+already hosts VirtIO block instances and dispatches their IRQs locally. The
+remaining I/O components still use the current multi-process service graph.
+
+#### Baseline And Host Interfaces
+
+- [x] Define the `hunde-io-host` and `hunde-treiber-host` responsibility,
+  trust, cache, IPC, shared-buffer, and failure-domain boundaries.
+- [ ] Measure representative open, cache-hit, cache-miss, block, console, and
+  network paths before consolidation. Record latency, Channel publications, and
+  scheduling transitions rather than assuming every path loses a process hop.
+- [ ] Define static, versioned C component interfaces with authenticated host
+  request contexts, explicit ownership, asynchronous completion, and cleanup.
+- [ ] Preserve external service protocols during migration, but remove internal
+  Channel paths after both components reside in the same host.
+
+#### `hunde-treiber-host`
+
+- [x] Extract VirtIO block into an instance runtime with per-device DMA state,
+  permit one process to claim multiple devices, and dispatch hosted block IRQs
+  without an interrupt-client Channel relay.
+- [ ] Evolve `hund-unterbrict` into `hunde-treiber-host`, retaining delegated IRQ
+  receipt, device-clear-before-rearm ordering, MMIO and DMA ownership, and
+  fail-closed handling of unserviced interrupt sources.
+- [ ] Move block, network-interface, UART, display, input, and other
+  hardware-facing drivers into the host as required by current hardware targets.
+- [ ] Remove standalone driver compatibility executables after full-system
+  parity and measurements pass on AArch64 and RISC-V.
+- [ ] Define host crash cleanup for device claims, IRQ routes, DMA, and requests
+  before relying on automatic driver-host restart.
+
+#### `hunde-io-host`
+
+- [ ] Move the common application endpoint, namespace, mounts, handle ownership,
+  filesystems, sockets, streams, pipes, terminals, and information filesystems
+  into one host with local dispatch between its components.
+- [ ] Keep filesystem metadata, filesystem data, network policy, and any shared
+  raw-block cache in the I/O host. Keep only hardware queue state and
+  device-specific metadata in the driver host.
+- [ ] Preserve authenticated sessions, stale-handle rejection, blocked-request
+  progress, process-exit cleanup, and the existing native and POSIX I/O APIs.
+- [ ] Extend existing `hunde-puffer` leases and permissions across the required
+  application, I/O-host, and driver-host participants without adding another
+  bulk-data transport or assuming universal zero-copy operation.
+- [ ] Compare the consolidated implementation against the baseline measurements
+  on AArch64 and RISC-V before removing the old service processes.
+
+#### Open Design Questions
+
+- [ ] Define how boot-critical modules are supplied without depending on the
+  filesystem or device stack that they initialize.
+- [ ] Decide which current service endpoint names remain temporarily available
+  during migration and the evidence required to remove each alias.
+- [ ] Define recovery of sessions, buffers, caches, devices, and outstanding
+  operations after either host exits; current service restart recovery remains
+  deferred.
+
 ## Shared Libraries
 
 ### Dynamic ELF Loading
 
 #### Loader Boundary And Format
 
-- [ ] Define the userspace dynamic-loader boundary and its authenticated mapping
-  operations without making filesystem or library policy a kernel concern.
+- [x] Define the userspace dynamic-loader and host-module boundary without
+  making filesystem, dependency, or module policy a kernel concern. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+- [ ] Add page-aligned fixed or suitably aligned userspace mappings, permission
+  finalization, unmapping, executable-memory authorization, and architecture
+  instruction synchronization required by the userspace loader.
 - [ ] Produce shared objects and dynamically linked executables with the project
   toolchains, and define the supported ELF interpreter, dynamic tags, symbol
   visibility, and library search rules.
-- [ ] Implement dependency loading, symbol resolution, and the relocation sets
-  required by AArch64 and RISC-V. Extend the contract when AMD64 support begins.
+- [ ] Implement one reusable userspace `ET_DYN` loader for shared libraries,
+  dynamically linked programs, and host components, including dependency
+  loading, symbol resolution, and reviewed AArch64 and RISC-V relocations.
+  Extend the contract when AMD64 support begins.
 
 #### Mapping And Runtime Lifecycle
 
@@ -385,6 +453,34 @@ only to advance the Bash build.
 - [ ] Add unit coverage for parsing, symbol lookup, relocation, and failure
   rollback, plus full-system tests running two programs against one shared
   library.
+
+### Loadable Host Components
+
+#### Component ABI And Lifecycle
+
+- [ ] Define the single-entry, versioned C ABI and typed host-operation tables
+  used by both I/O and hardware components. Do not expose language-specific
+  objects, unwinding, or private collection layouts across the boundary.
+- [ ] Load trusted components during host startup, validate ABI size and version,
+  establish final segment permissions, initialize only after the complete object
+  graph succeeds, and roll back partial loads.
+- [ ] Keep initially loaded components resident until host exit. Decide whether
+  runtime unloading is required only after defining callback, fibre, request,
+  IRQ, shared-buffer, and DMA quiescence.
+
+#### Minimal Rust Components
+
+- [ ] Pin a Rust toolchain and build `#![no_std]` components with the built-in
+  AArch64 and RV64IMAC bare-metal targets, the C component ABI, and aborting panic
+  behavior. A HundeOS `std` port and custom Rust target are not prerequisites.
+- [ ] Provide the minimal runtime boundary: host-backed allocation when `alloc`
+  is used, fatal panic handling, required memory/integer/atomic symbols, and ABI
+  adapters around unsafe MMIO, DMA, and shared-buffer access.
+- [ ] Keep unwinding, TLS, operating-system threads, and Rust-language ABI values
+  outside the initial contract.
+- [ ] Add a separate cross-language smoke test for C-to-Rust calls, Rust-to-host
+  callbacks, ABI layout, optional allocation, supported atomics, ELF relocation,
+  final permissions, and loaded execution on AArch64 and RISC-V.
 
 ## Process Management
 
@@ -408,25 +504,6 @@ using an IPI for remote wakeup. Scheduler ticks remain enabled on every CPU.
   budget if measurements show harmful timer preemption during IRQ processing.
 - [ ] Define failure cleanup for a crashed interrupt manager while keeping its
   delegated IRQ sources masked.
-
-### Userspace Driver Host
-
-Status: VirtIO block is hosted in `hund-unterbricht`. The host probes all VirtIO
-block slots during bootstrap, publishes the existing `/dev/virtioN` Channel
-services, dispatches their IRQs directly to per-device fibres, and owns all
-claimed devices as one process. Filesystems and block clients retain their
-existing protocols.
-
-- [x] Extract the VirtIO block implementation into an instance runtime with
-  per-device DMA queue state.
-- [x] Permit one process to claim and safely quiesce multiple VirtIO devices.
-- [x] Dispatch hosted block IRQs without the interrupt client Channel relay.
-- [ ] Remove the standalone `virtio_blk_channelio` compatibility executable
-  after full-system parity and latency measurements pass on AArch64 and RISC-V.
-- [ ] Decide whether UART, input, and bus drivers belong in the same host or in
-  separate failure domains using the block-driver measurements as evidence.
-- [ ] Define host crash recovery and atomic cleanup of all device claims and IRQ
-  routes before relying on automatic host restart.
 
 ### Fork Support
 
