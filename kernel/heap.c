@@ -162,8 +162,8 @@ static uint64_t Heap__pages_for_size(size_t size)
     return pages > 0 ? pages : 1;
 }
 
-static HeapMemoryState HeapMemoryState__new(uint64_t total_pages, uint64_t free_pages,
-                                            uint64_t pressure_generation, HeapPressureLevel pressure_level)
+static HeapMemoryState HeapMemoryState__new(uint64_t total_pages, uint64_t free_pages, uint64_t pressure_generation,
+                                            HeapPressureLevel pressure_level)
 {
     return (HeapMemoryState){
         .total_pages = total_pages,
@@ -179,6 +179,7 @@ static HeapPressureLevel Heap__calculate_pressure(HeapPtr self)
     {
         return HEAP_PRESSURE_CRITICAL;
     }
+
     if (self->free_pages <= self->total_pages / 10U)
     {
         return HEAP_PRESSURE_CRITICAL;
@@ -301,13 +302,14 @@ static Optional(MemoryBlock) Heap__take_aligned_free_block(HeapPtr self, uint64_
                 AllocatedBlocks__set(&self->free_blocks, prefix.start.virtual_addr, prefix);
             }
 
-            KernelAddress aligned_start =
-                KERNEL_ADDR(block.start.virtual_addr + adjustment, block.start.phys_addr + adjustment);
+            KernelAddress aligned_start = KERNEL_ADDR(block.start.virtual_addr + adjustment,
+                                                      block.start.phys_addr + adjustment);
             uint64_t suffix_pages = block.pages_allocated - prefix_pages - pages;
             if (suffix_pages > 0)
             {
-                KernelAddress suffix_start = KERNEL_ADDR(aligned_start.virtual_addr + (pages * PAGE_SIZE),
-                                                         aligned_start.phys_addr + (pages * PAGE_SIZE));
+                KernelAddress suffix_start =
+                    KERNEL_ADDR(aligned_start.virtual_addr + (pages * PAGE_SIZE),
+                                aligned_start.phys_addr + (pages * PAGE_SIZE));
                 MemoryBlock suffix = MemoryBlock__new(suffix_start, suffix_pages);
                 AllocatedBlocks__set(&self->free_blocks, suffix.start.virtual_addr, suffix);
             }
@@ -485,9 +487,9 @@ HeapMemoryState Heap__memory_state(HeapPtr self)
     critical_section(
         self->lock,
         {
-            HeapMemoryState state = HeapMemoryState__new(self->total_pages, self->free_pages,
-                                                         self->pressure_generation,
-                                                         (HeapPressureLevel)self->pressure_level);
+            HeapMemoryState state =
+                HeapMemoryState__new(self->total_pages, self->free_pages, self->pressure_generation,
+                                     (HeapPressureLevel)self->pressure_level);
             cs_return state;
         }
     );

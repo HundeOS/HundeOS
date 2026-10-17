@@ -110,9 +110,7 @@ Result(ServiceEventDispatch)
                 IRQServiceMap__get_ptr(&self->irq_services, irq),
                 some(service)
                 {
-                    ServiceEventDispatch dispatch = no_dispatch;
-                    dispatch.process.present = true;
-                    dispatch.process.some.val = service->process;
+                    ServiceEventDispatch dispatch = ServiceEventDispatch__new(&Some(ProcessPtr, service->process));
 
                     __d_printf(
                         IRQ,

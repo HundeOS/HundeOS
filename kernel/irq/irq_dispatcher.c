@@ -79,12 +79,18 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr s
     {
         return Error(IRQRegistrationStatus, missing_scheduler, IRQ_REGISTRATION_ERROR);
     }
-    if (is_nothing(self->interrupt_controller))
-    {
-        return Error(IRQRegistrationStatus, missing_interrupt_controller, IRQ_REGISTRATION_ERROR);
-    }
-
-    InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
+    InterruptControllerInfo interrupt_controller;
+    match_optional(
+        self->interrupt_controller,
+        some(controller)
+        {
+            interrupt_controller = controller;
+        },
+        none()
+        {
+            return Error(IRQRegistrationStatus, missing_interrupt_controller, IRQ_REGISTRATION_ERROR);
+        }
+    );
 
     IRQConsumer irq_consumer = IRQConsumer__new(IRQ_CONSUMER_SERVICE,
                                                 NULL, // hundelint: ignore-no-null
@@ -116,7 +122,7 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr s
     );
 
     match_result(
-        Arch__enable_irq(interrupt_controller, irq),
+        Arch__enable_irq(&interrupt_controller, irq),
         success_do_nothing(),
         error(code, message)
         {
@@ -272,12 +278,18 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispat
     {
         return Error(IRQRegistrationStatus, missing_service_process, IRQ_INVALID_CONSUMER);
     }
-    if (is_nothing(self->interrupt_controller))
-    {
-        return Error(IRQRegistrationStatus, missing_interrupt_controller, IRQ_REGISTRATION_ERROR);
-    }
-
-    InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
+    InterruptControllerInfo interrupt_controller;
+    match_optional(
+        self->interrupt_controller,
+        some(controller)
+        {
+            interrupt_controller = controller;
+        },
+        none()
+        {
+            return Error(IRQRegistrationStatus, missing_interrupt_controller, IRQ_REGISTRATION_ERROR);
+        }
+    );
 
     IRQNumbers stale_irqs = IRQNumbers__new();
 
@@ -312,7 +324,7 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispat
                 irq,
                 {
                     IRQConsumerMap__delete(&self->consumers, irq);
-                    Arch__mask_irq(interrupt_controller, irq);
+                    Arch__mask_irq(&interrupt_controller, irq);
                 }
             );
         }
@@ -415,8 +427,17 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumb
 
             if (consumer->type == IRQ_CONSUMER_MANAGER)
             {
-                InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
-                Arch__mask_irq(interrupt_controller, irq);
+                match_optional(
+                    self->interrupt_controller,
+                    some(interrupt_controller)
+                    {
+                        Arch__mask_irq(&interrupt_controller, irq);
+                    },
+                    none()
+                    {
+                        return Error(IRQDispatchStatus, missing_interrupt_controller, IRQ_DISPATCH_ERROR);
+                    }
+                );
                 consumer->delivery_sequence++;
                 if (consumer->delivery_sequence == 0)
                 {
@@ -450,8 +471,9 @@ Result(IRQDispatchStatus) IRQDispatcher__dispatch(IRQDispatcherPtr self, IRQNumb
                                         }
                                         if (wake.cpu == context->cpu)
                                         {
-                                            return Success(IRQDispatchStatus, context->current_el ? IRQ_DISPATCH_HANDLED
-                                                                                                  : IRQ_DISPATCH_RESCHEDULE);
+                                            return Success(IRQDispatchStatus, context->current_el
+                                                                                  ? IRQ_DISPATCH_HANDLED
+                                                                                  : IRQ_DISPATCH_RESCHEDULE);
                                         }
                                         CPU__request_reschedule(wake.cpu);
                                         return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);

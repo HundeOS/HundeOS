@@ -23,7 +23,18 @@ typedef enum MemOperation
     MEM_BUFFER_VALIDATE,
     MEM_BUFFER_DEVICE_ADDRESS,
     MEM_ALLOC_RECLAIMABLE_PAGES,
+    MEM_ALLOC_ALIGNED_PAGES,
+    MEM_ALLOC_PAGES_AT,
+    MEM_PROTECT_PAGES,
 } MemOperation;
+
+typedef enum MemPagePermissions
+{
+    MEM_PAGE_NONE = 0,
+    MEM_PAGE_READ_ONLY = 1,
+    MEM_PAGE_READ_WRITE = 2,
+    MEM_PAGE_READ_EXECUTE = 3,
+} MemPagePermissions;
 
 typedef enum MemPressureLevel
 {

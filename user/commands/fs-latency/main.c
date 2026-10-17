@@ -611,8 +611,8 @@ static bool FSLatency__sample(FSLatencySummaryPtr self, ConstBStringPtr path)
     return true;
 }
 
-static Optional(ProcessRecord) FSLatency__process_snapshot(ConstProcessRegistryPtr registry,
-                                                           uint64_t sampled_after_usec)
+static Optional(ProcessRecord)
+    FSLatency__process_snapshot(ConstProcessRegistryPtr registry, uint64_t sampled_after_usec)
 {
     match_result(
         ProcessMetrics__snapshot_after(registry, process_current_pid(), sampled_after_usec),

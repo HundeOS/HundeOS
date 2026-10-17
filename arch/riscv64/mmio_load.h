@@ -24,7 +24,7 @@ typedef const RiscVMMIOLoad * ConstRiscVMMIOLoadPtr;
 OptionalDef(RiscVMMIOLoad);
 
 static inline RiscVMMIOLoad RiscVMMIOLoad__new(Address address, uint32_t destination_register, size_t width,
-                                                bool sign_extend, size_t instruction_size)
+                                               bool sign_extend, size_t instruction_size)
 {
     return (RiscVMMIOLoad){
         .address = address,

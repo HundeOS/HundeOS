@@ -72,6 +72,11 @@ RULES = (
         pattern=re.compile(r"\bgoto\b"),
     ),
     Rule(
+        name="no-conditional-compilation-in-function",
+        message="move conditional compilation to a complete function or macro definition and call it unconditionally",
+        pattern=re.compile(r"(?!)"),
+    ),
+    Rule(
         name="no-raw-char-buffer",
         message="use BString/DynString instead of raw char buffers",
         pattern=re.compile(
@@ -278,6 +283,7 @@ AST_RULE_NAMES = {
     "raw-struct-pointer",
     "no-collection-internals",
     "no-optional-result-internals",
+    "no-conditional-compilation-in-function",
 }
 TEXT_RULES = tuple(rule for rule in RULES if rule.name not in AST_RULE_NAMES)
 NO_NULL_RULE = next(rule for rule in RULES if rule.name == "no-null")
@@ -288,6 +294,9 @@ MEMBER_FIRST_ARG_RULE = next(rule for rule in RULES if rule.name == "member-firs
 STRUCT_PARAM_BY_VALUE_RULE = next(rule for rule in RULES if rule.name == "no-struct-param-by-value")
 OPTIONAL_RESULT_POINTER_PARAM_RULE = next(rule for rule in RULES if rule.name == "optional-result-pointer-param-macro")
 RAW_STRUCT_POINTER_RULE = next(rule for rule in RULES if rule.name == "raw-struct-pointer")
+CONDITIONAL_COMPILATION_RULE = next(
+    rule for rule in RULES if rule.name == "no-conditional-compilation-in-function"
+)
 MATCH_BRANCH_RULE = next(rule for rule in RULES if rule.name == "match-branch-macros")
 MATCH_BRANCH_FORMAT_RULE = next(rule for rule in RULES if rule.name == "match-branch-format")
 MATCH_BRANCH_BLOCK_FORMAT_RULE = next(rule for rule in RULES if rule.name == "match-branch-block-format")
@@ -705,6 +714,18 @@ def _field_name(source: bytes, node) -> str | None:
     return _node_text(source, field)
 
 
+def _is_payload_internal_access(source: bytes, node, field_name: str, nested_field_name: str | None) -> bool:
+    if nested_field_name in {"some", "success"} and field_name == "val":
+        return True
+
+    parent = node.parent
+    if field_name not in {"some", "success"} or parent is None or parent.type != "field_expression":
+        return False
+
+    parent_base, parent_field = _field_expression_parts(source, parent)
+    return parent_base == node and parent_field is not None and _node_text(source, parent_field) == "val"
+
+
 def _function_definition_is_static(node) -> bool:
     return any(
         child.type == "storage_class_specifier" and any(grandchild.type == "static" for grandchild in child.children)
@@ -823,6 +844,38 @@ def _lint_member_first_arg_self(path: Path, source_text: str, tree) -> list[Find
                 column=column,
                 rule=MEMBER_FIRST_ARG_RULE.name,
                 message=MEMBER_FIRST_ARG_RULE.message,
+            )
+        )
+
+    return findings
+
+
+def _lint_conditional_compilation_in_function(path: Path, source_text: str, tree) -> list[Finding]:
+    if _is_allowed(CONDITIONAL_COMPILATION_RULE, path):
+        return []
+
+    raw_lines = source_text.splitlines()
+    line_starts = _line_starts(source_text)
+    findings = []
+
+    for node in _walk(tree.root_node):
+        if node.type not in {"preproc_if", "preproc_ifdef", "preproc_ifndef"}:
+            continue
+        if _enclosing_function(node) is None:
+            continue
+
+        line_number, column = _line_column_for_offset(line_starts, node.start_byte)
+        raw_line = raw_lines[line_number - 1] if line_number <= len(raw_lines) else ""
+        if CONDITIONAL_COMPILATION_RULE.name in _line_ignores(raw_line):
+            continue
+
+        findings.append(
+            Finding(
+                path=path,
+                line=line_number,
+                column=column,
+                rule=CONDITIONAL_COMPILATION_RULE.name,
+                message=CONDITIONAL_COMPILATION_RULE.message,
             )
         )
 
@@ -1340,11 +1393,11 @@ def _lint_optional_result_internals(path: Path, source_text: str, tree) -> list[
             base_name = _base_symbol_name(source, nested_base)
             nested_field_name = _field_name(source, base)
 
-        if base_name is None or base_name not in symbols:
-            continue
-
         direct_internal = field_name in {"present", "some", "none", "ok", "success", "error"}
         nested_internal = nested_field_name in {"some", "success", "error"} and field_name in {"val", "code", "error"}
+        payload_internal = _is_payload_internal_access(source, node, field_name, nested_field_name)
+        if not payload_internal and (base_name is None or base_name not in symbols):
+            continue
         if not direct_internal and not nested_internal:
             continue
 
@@ -1983,6 +2036,7 @@ def lint_source(path: Path, source: str, tree=None) -> list[Finding]:
     if tree is not None:
         findings.extend(_lint_constructor_required(path, source, tree))
         findings.extend(_lint_member_first_arg_self(path, source, tree))
+        findings.extend(_lint_conditional_compilation_in_function(path, source, tree))
         findings.extend(_lint_optional_result_pointer_params(path, source, tree))
         findings.extend(_lint_raw_struct_pointers(path, source, tree))
         findings.extend(_lint_struct_params_by_value(path, source, tree))

@@ -125,9 +125,8 @@ void test_block_cache_reclaim_releases_dynamic_chunks_and_keeps_base(void)
     uint64_t reads_before_base_lookup = read_calls;
     TEST_ASSERT_EQUAL(1, unwrap_result(BlockCache__read(&cache, &client, 0, 1, (Address)data, sizeof(data)), 0));
     TEST_ASSERT_EQUAL_UINT64(reads_before_base_lookup, read_calls);
-    TEST_ASSERT_EQUAL(1,
-                      unwrap_result(BlockCache__read(&cache, &client, BLOCK_CACHE_CAPACITY, 1,
-                                                     (Address)data, sizeof(data)), 0));
+    TEST_ASSERT_EQUAL(
+        1, unwrap_result(BlockCache__read(&cache, &client, BLOCK_CACHE_CAPACITY, 1, (Address)data, sizeof(data)), 0));
     TEST_ASSERT_EQUAL_UINT64(reads_before_base_lookup + 1U, read_calls);
 }
 

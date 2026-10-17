@@ -8,11 +8,20 @@
 #include "shared_wait.h"
 
 #ifdef KERNEL_COMMAND_TRACE
-static bool ContextSwitch__command_flow_process(ProcessPtr process)
+static void ContextSwitch__trace_command_dispatch(ProcessPtr process, CPUTime now)
 {
-    return BString__equals(&process->name, &bstr("/usr/local/bin/bash")) ||
-           BString__equals(&process->name, &bstr("/sbin/drivers/uart_rx")) ||
-           BString__equals(&process->name, &bstr("/sbin/drivers/uart_tx"));
+    bool command_flow_process = BString__equals(&process->name, &bstr("/usr/local/bin/bash")) ||
+                                BString__equals(&process->name, &bstr("/sbin/drivers/uart_rx")) ||
+                                BString__equals(&process->name, &bstr("/sbin/drivers/uart_tx"));
+    if (command_flow_process)
+    {
+        __d_printf(COMMAND_FLOW, "t=%i dispatch pid=%i name=%s state=%s\n", now, process->pid, cstr(process->name),
+                   ProcessState__to_string(process->state));
+    }
+}
+#else
+static void ContextSwitch__trace_command_dispatch(ProcessPtr process, CPUTime now)
+{
 }
 #endif
 
@@ -103,13 +112,7 @@ void ContextSwitch__switch(ConstContextSwitchPtr self)
     QueueWaitUsage__select(&new_proc->queue_wait_usage);
     CPUTime now = CPU__time_usec();
     CPUUsage__start_mode(&new_proc->cpu_usage, now, Process__user_wait_usec(new_proc, now), CPU_USAGE_PAUSED);
-#ifdef KERNEL_COMMAND_TRACE
-    if (ContextSwitch__command_flow_process(new_proc))
-    {
-        __d_printf(COMMAND_FLOW, "t=%i dispatch pid=%i name=%s state=%s\n", now, new_proc->pid,
-                   cstr(new_proc->name), ProcessState__to_string(new_proc->state));
-    }
-#endif
+    ContextSwitch__trace_command_dispatch(new_proc, now);
     __d_printf(PROCESS_SWITCH, "ContextSwitch__switch target pid=%i name=%s state=%s context=%p page_table=%p\n",
                new_proc->pid, cstr(new_proc->name), ProcessState__to_string(new_proc->state),
                Process__required_context(new_proc), paddr(ProcessPageTable__root(&new_proc->page_table)));

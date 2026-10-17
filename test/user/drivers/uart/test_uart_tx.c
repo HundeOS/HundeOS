@@ -51,10 +51,8 @@ UartDevice UartDevice__new(Address registers, UartKind kind, uint64_t register_s
     TEST_ASSERT_EQUAL(UART_KIND_PL011, kind);
     TEST_ASSERT_EQUAL_UINT64(0, register_shift);
     TEST_ASSERT_EQUAL_UINT64(4, register_width);
-    return (UartDevice){.registers = registers,
-                        .kind = kind,
-                        .register_shift = register_shift,
-                        .register_width = register_width};
+    return (UartDevice){
+        .registers = registers, .kind = kind, .register_shift = register_shift, .register_width = register_width};
 }
 
 bool UartDevice__can_transmit(ConstUartDevicePtr self)

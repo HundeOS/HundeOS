@@ -10,8 +10,8 @@ BootHardwareInfo BootHardwareInfo__from_system(SystemInfoPtr info, uint64_t onli
     result.wait_mode = info->wait_mode;
     result.rtc = info->rtc;
     result.uart = BootUartInfo__new(info->console_uart.physical_base, info->console_uart.mmio_size,
-                                    info->console_uart.irq, info->console_uart.kind,
-                                    info->console_uart.register_shift, info->console_uart.register_width);
+                                    info->console_uart.irq, info->console_uart.kind, info->console_uart.register_shift,
+                                    info->console_uart.register_width);
     result.virtio_mmio = info->virtio_mmio;
     result.memory_start = info->physical_memory.physical_start;
     result.memory_end = info->physical_memory.physical_end;

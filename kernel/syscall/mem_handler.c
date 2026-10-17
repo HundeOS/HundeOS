@@ -22,6 +22,8 @@ static MemStatus Mem__status_from_process_code(ProcessMemoryCode code)
         return MEM_FREE_FAILED;
     case PROCESS_MEMORY_INVALID_SIZE:
         return MEM_INVALID_SIZE;
+    case PROCESS_MEMORY_INVALID_PERMISSIONS:
+        return MEM_PERMISSION_DENIED;
     }
 
     return MEM_OPERATION_NOT_SUPPORTED;
@@ -138,6 +140,55 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
                     error(code, message)
                     {
                         Mem__terminate_on_allocation_failure(process, code);
+                        return Error(SystemCallResult, message, Mem__status_from_process_code(code));
+                    }
+                );
+            }
+
+            if (mem_operation == MEM_ALLOC_ALIGNED_PAGES)
+            {
+                match_result(
+                    Process__alloc_aligned_user_pages(process, (size_t)arg2, (size_t)arg3),
+                    success(address)
+                    {
+                        Mem__notify_pressure(kernel);
+                        return Success(SystemCallResult, address.virtual_addr);
+                    },
+                    error(code, message)
+                    {
+                        Mem__terminate_on_allocation_failure(process, code);
+                        return Error(SystemCallResult, message, Mem__status_from_process_code(code));
+                    }
+                );
+            }
+
+            if (mem_operation == MEM_ALLOC_PAGES_AT)
+            {
+                match_result(
+                    Process__alloc_user_pages_at(process, (Address)arg2, (size_t)arg3),
+                    success(address)
+                    {
+                        Mem__notify_pressure(kernel);
+                        return Success(SystemCallResult, address.virtual_addr);
+                    },
+                    error(code, message)
+                    {
+                        Mem__terminate_on_allocation_failure(process, code);
+                        return Error(SystemCallResult, message, Mem__status_from_process_code(code));
+                    }
+                );
+            }
+
+            if (mem_operation == MEM_PROTECT_PAGES)
+            {
+                match_result(
+                    Process__protect_user_pages(process, (Address)arg2, (size_t)arg3, (MemPagePermissions)arg4),
+                    success(status)
+                    {
+                        return Success(SystemCallResult, status);
+                    },
+                    error(code, message)
+                    {
                         return Error(SystemCallResult, message, Mem__status_from_process_code(code));
                     }
                 );

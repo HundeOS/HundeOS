@@ -29,6 +29,87 @@ static Elf load_test_elf()
     return unwrap_optional(EmbeddedElf__load(&bstr("hello_world")), (Elf){});
 }
 
+static Elf dynamic_test_elf(uint8_t * image, size_t size, const char * interpreter, size_t interpreter_size)
+{
+    Elf source = load_test_elf();
+    ConstElf64HeaderPtr source_header = Elf__read_header(&source);
+    Elf64HeaderPtr header = ptr(image, Elf64Header);
+    ProgramHeaderPtr program_headers = ptr(image + sizeof(Elf64Header), ProgramHeader);
+    size_t interpreter_offset = sizeof(Elf64Header) + 2 * sizeof(ProgramHeader);
+
+    *header = (Elf64Header){
+        .magic = {0x7f, 'E', 'L', 'F'},
+        .klass = 2,
+        .endianness = LittleEndian,
+        .ei_version = 1,
+        .type = Shared,
+        .machine = source_header->machine,
+        .elf_version = 1,
+        .header_size = sizeof(Elf64Header),
+        .program_header_offset = sizeof(Elf64Header),
+        .program_header_entry_size = sizeof(ProgramHeader),
+        .program_header_entries = 2,
+    };
+    program_headers[0] = (ProgramHeader){
+        .type = Interpreter,
+        .segment_offset = interpreter_offset,
+        .file_size = interpreter_size,
+        .memory_size = interpreter_size,
+    };
+    program_headers[1] = (ProgramHeader){.type = Dynamic};
+    Kernel__memcopy((Address)interpreter, (Address)(image + interpreter_offset), interpreter_size);
+    return Elf__new((Address)image, (Address)(image + size), &bstr("dynamic_test"));
+}
+
+void test_image_kind_accepts_static_and_supported_dynamic_images(void)
+{
+    Elf static_elf = load_test_elf();
+    match_result(
+        Elf__image_kind(&static_elf),
+        success(kind)
+        {
+            TEST_ASSERT_EQUAL(ELF_IMAGE_STATIC, kind);
+        },
+        error_test_fail()
+    );
+
+    uint8_t image[256] = {0};
+    Elf dynamic_elf = dynamic_test_elf(image, sizeof(image), WUFF_INTERPRETER_PATH, sizeof(WUFF_INTERPRETER_PATH));
+    match_result(
+        Elf__image_kind(&dynamic_elf),
+        success(kind)
+        {
+            TEST_ASSERT_EQUAL(ELF_IMAGE_DYNAMIC, kind);
+        },
+        error_test_fail()
+    );
+}
+
+void test_image_kind_rejects_dynamic_images_without_the_supported_interpreter_and_dynamic_segment(void)
+{
+    uint8_t image[256] = {0};
+    Elf wrong_interpreter = dynamic_test_elf(image, sizeof(image), "/sbin/other", sizeof("/sbin/other"));
+    match_result(Elf__image_kind(&wrong_interpreter),
+        success_test_fail(),
+        error_test_ok()
+    );
+
+    Elf missing_dynamic = dynamic_test_elf(image, sizeof(image), WUFF_INTERPRETER_PATH, sizeof(WUFF_INTERPRETER_PATH));
+    ProgramHeaderPtr program_headers = ptr(image + sizeof(Elf64Header), ProgramHeader);
+    program_headers[1].type = TypeNull;
+    match_result(Elf__image_kind(&missing_dynamic),
+        success_test_fail(),
+        error_test_ok()
+    );
+
+    Elf invalid_range = dynamic_test_elf(image, sizeof(image), WUFF_INTERPRETER_PATH, sizeof(WUFF_INTERPRETER_PATH));
+    program_headers[0].file_size = UINT64_MAX;
+    match_result(Elf__image_kind(&invalid_range),
+        success_test_fail(),
+        error_test_ok()
+    );
+}
+
 void test_validate_rejects_truncated_header_and_program_table(void)
 {
     Elf source = load_test_elf();

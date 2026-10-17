@@ -116,8 +116,8 @@ void UartDevice__acknowledge_receiver(UartDevicePtr self)
     {
         UartDevice__write32(self, PL011_INTERRUPT_CLEAR, PL011_RECEIVE_INTERRUPTS | PL011_ERRORS);
     }
-    else if ((UartDevice__read_ns16550(self, NS16550_INTERRUPT_IDENTIFICATION) &
-              NS16550_INTERRUPT_ID_MASK) == NS16550_DESIGNWARE_BUSY_INTERRUPT)
+    else if ((UartDevice__read_ns16550(self, NS16550_INTERRUPT_IDENTIFICATION) & NS16550_INTERRUPT_ID_MASK) ==
+             NS16550_DESIGNWARE_BUSY_INTERRUPT)
     {
         UartDevice__read_ns16550(self, NS16550_DESIGNWARE_UART_STATUS);
     }

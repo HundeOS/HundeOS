@@ -33,7 +33,7 @@ void test_channel_requests_bypass_the_warden_after_open(void)
 
     uint8_t reply[8] = {0};
     match_result(
-        Channel__submit(&channel, (ConstChannelDataPtr)"direct", 6, reply, sizeof(reply)),
+        Channel__submit(&channel, (ConstChannelDataPtr) "direct", 6, reply, sizeof(reply)),
         success(size)
         {
             TEST_ASSERT_EQUAL_UINT64(6, size);
@@ -67,8 +67,8 @@ void test_client_close_releases_the_temporary_control_session(void)
 void test_unconsumed_open_reply_rolls_back_the_delegated_connection(void)
 {
     Queue control = ChannelFixture__client();
-    QueueMessage open = ChannelControlMessage__new(CHANNEL_REQUEST_OPEN, echo_arrivals.endpoint, 0,
-                                                   Queue__connection(&control));
+    QueueMessage open =
+        ChannelControlMessage__new(CHANNEL_REQUEST_OPEN, echo_arrivals.endpoint, 0, Queue__connection(&control));
     ChannelFixture__push(&control, &open);
     ChannelFixture__pump();
     ChannelFixture__pump();

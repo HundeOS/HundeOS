@@ -461,10 +461,9 @@ static Optional(SdHostConfig) Sdhci__load_pci_host_config(void)
             SDHCI_PCI_WRITE16(function_base, SDHCI_PCI_CONFIG_COMMAND,
                               command | SDHCI_PCI_COMMAND_MEMORY_SPACE | SDHCI_PCI_COMMAND_BUS_MASTER);
 
-            return Some(SdHostConfig,
-                        SdHostConfig__new(physical_base, SDHCI_PCI_MMIO_SIZE,
-                                          SDHCI_PCI_READ8(function_base, SDHCI_PCI_CONFIG_INTERRUPT_LINE),
-                                          SD_HOST_KIND_GENERIC, 0));
+            return Some(SdHostConfig, SdHostConfig__new(physical_base, SDHCI_PCI_MMIO_SIZE,
+                                                        SDHCI_PCI_READ8(function_base, SDHCI_PCI_CONFIG_INTERRUPT_LINE),
+                                                        SD_HOST_KIND_GENERIC, 0));
         },
         none_do_nothing()
     );
@@ -712,8 +711,7 @@ static SdhciCommandResult Sdhci__send_command(SdhciDevicePtr self, ConstSdhciCom
     {
         result.response[0] = SDHCI_READ32(self->mmio, SDHCI_RESPONSE);
     }
-    if (command->response_kind == SDHCI_RESPONSE_R1B &&
-        !Sdhci__wait_interrupt(self->mmio, SDHCI_INT_TRANSFER_COMPLETE))
+    if (command->response_kind == SDHCI_RESPONSE_R1B && !Sdhci__wait_interrupt(self->mmio, SDHCI_INT_TRANSFER_COMPLETE))
     {
         result.ok = false;
         result.failure = SDHCI_COMMAND_BUSY_TIMEOUT;
@@ -871,7 +869,8 @@ static bool Sdhci__bind(SdhciDevicePtr self, SdHostConfig config)
     }
 
     BString device_path = bstr(SDHCI_DEVICE_PATH);
-    *self = SdhciDevice__new(mapping, driver_ptr(mapping), config.irq, config.kind, config.source_clock_hz, &device_path);
+    *self =
+        SdhciDevice__new(mapping, driver_ptr(mapping), config.irq, config.kind, config.source_clock_hz, &device_path);
 
     if (!Sdhci__setup_host(self))
     {
@@ -928,8 +927,7 @@ static ServiceCode Sdhci__read_blocks(SdhciDevicePtr self, BlockProtocolBlockNum
         multi_block ? SD_CMD_READ_MULTIPLE_BLOCK : SD_CMD_READ_SINGLE_BLOCK, Sdhci__block_argument(self, first_block),
         SDHCI_RESPONSE_R1,
         SDHCI_TRANSFER_READ |
-            (multi_block ? SDHCI_TRANSFER_MULTI_BLOCK | SDHCI_TRANSFER_BLOCK_COUNT_ENABLE |
-                               SDHCI_TRANSFER_AUTO_CMD12
+            (multi_block ? SDHCI_TRANSFER_MULTI_BLOCK | SDHCI_TRANSFER_BLOCK_COUNT_ENABLE | SDHCI_TRANSFER_AUTO_CMD12
                          : 0),
         true);
     SdhciCommandResult read = Sdhci__send_command(self, &read_command);

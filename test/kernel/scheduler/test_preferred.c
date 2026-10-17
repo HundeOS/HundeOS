@@ -101,9 +101,8 @@ static void wait_on(ProcessPtr process)
     );
     UserAddress mapping = unwrap_optional(process->queue_wait_control, (UserAddress){0});
     QueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
-    IpcEventGeneration observed =
-        IpcEvent__generation(IpcDoorbell__event(k_v_ptr(unwrap_optional(process->ipc_doorbell, (UserAddress){0}),
-                                                       IpcDoorbell)));
+    IpcEventGeneration observed = IpcEvent__generation(
+        IpcDoorbell__event(k_v_ptr(unwrap_optional(process->ipc_doorbell, (UserAddress){0}), IpcDoorbell)));
     QueueWaitControl__begin(control);
     QueueWaitControl__commit(control, test_cpu_time_usec, QUEUE_WAIT_NO_DEADLINE, observed);
 }

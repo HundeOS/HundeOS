@@ -56,6 +56,36 @@ Result(Anything) mem_alloc_pages_result(size_t size)
     return Success(Anything, (Anything)allocation);
 }
 
+Result(Anything) mem_alloc_aligned_pages_result(size_t size, size_t alignment)
+{
+    if (size == 0 || alignment == 0)
+    {
+        return Error(Anything, mem_invalid_size, MEM_INVALID_SIZE);
+    }
+
+    MemAddress allocation = syscall(MEM_CALL, MEM_ALLOC_ALIGNED_PAGES, size, alignment, 0, 0);
+    if ((int64_t)allocation <= 0)
+    {
+        return Error(Anything, mem_allocation_failed, (int64_t)allocation);
+    }
+    return Success(Anything, (Anything)allocation);
+}
+
+Result(Anything) mem_alloc_pages_at_result(void * address, size_t size)
+{
+    if (address == 0 || size == 0) // hundelint: ignore-no-null
+    {
+        return Error(Anything, mem_invalid_size, MEM_INVALID_SIZE);
+    }
+
+    MemAddress allocation = syscall(MEM_CALL, MEM_ALLOC_PAGES_AT, (MemAddress)address, size, 0, 0);
+    if ((int64_t)allocation <= 0)
+    {
+        return Error(Anything, mem_allocation_failed, (int64_t)allocation);
+    }
+    return Success(Anything, (Anything)allocation);
+}
+
 Result(Anything) mem_alloc_reclaimable_pages_result(size_t size)
 {
     if (size == 0)
@@ -74,6 +104,11 @@ Result(Anything) mem_alloc_reclaimable_pages_result(size_t size)
 MemStatus mem_free_pages(void * address)
 {
     return (MemStatus)syscall(MEM_CALL, MEM_FREE_PAGES, (MemAddress)address, 0, 0, 0);
+}
+
+MemStatus mem_protect_pages(void * address, size_t size, MemPagePermissions permissions)
+{
+    return (MemStatus)syscall(MEM_CALL, MEM_PROTECT_PAGES, (MemAddress)address, size, permissions, 0);
 }
 
 Result(Anything) mem_alloc_shared_page(uint64_t first_peer, uint64_t second_peer)

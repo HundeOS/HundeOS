@@ -835,10 +835,9 @@ void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
     Scheduler__start(scheduler, cpu_id);
     Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));
     Scheduler__schedule(scheduler, child);
-    match_result(
-        Scheduler__park_wait_child(scheduler, parent, &kernel_context, &Some(Continuation, continuation),
-                                   &Some(KernelAddress, abort_report_address), false),
-        success_do_nothing(),
+    match_result(Scheduler__park_wait_child(scheduler, parent, &kernel_context, &Some(Continuation, continuation),
+                                            &Some(KernelAddress, abort_report_address), false),
+                 success_do_nothing(),
         error_test_fail()
     );
     Scheduler__preempt(scheduler, cpu_id, &Some(ProcessContextPtr, context));

@@ -8,6 +8,7 @@
 #include "arch/cpu.h"
 #include "arch/process.h"
 #include "arch/process_context.h"
+#include "arch/cache.h"
 #include "types/bstring.h"
 #include "types/result.h"
 #include "types/optional.h"
@@ -28,6 +29,7 @@ FixedArrayBodyDefine(ProcessArguments);
 FixedArrayBodyDefine(SpawnArguments);
 FixedArrayBodyDefine(ProcessChildEvents);
 LinkedListBodyDefine(UserAllocations);
+LinkedListBodyDefine(UserMappings);
 LinkedListBodyDefine(ParkedOperations);
 MapBodyDefine(ProcessSignalActions);
 LinkedListBodyDefine(ProcessSignalFrames);
@@ -39,6 +41,8 @@ static BString no_entry_point_message = bstr("No entry point found in ELF");
 static BString user_allocation_not_found = bstr("User allocation not found");
 static BString static_user_allocation = bstr("Cannot free static user allocation");
 static BString user_allocation_full = bstr("Too many user allocations");
+static BString invalid_user_allocation = bstr("Invalid user allocation");
+static BString invalid_user_permissions = bstr("Invalid user page permissions");
 static BString invalid_heap_break = bstr("Invalid heap break");
 static BString argument_too_long = bstr("Argument too long");
 static BString fork_no_memory = bstr("Unable to allocate fork child");
@@ -261,6 +265,29 @@ static UserAllocation UserAllocation__new(UserAddress address, size_t size, User
     };
 }
 
+static UserMapping UserMapping__new(UserAddress address, size_t size)
+{
+    return (UserMapping){
+        .address = address,
+        .size = size,
+    };
+}
+
+bool UserMapping__equals(UserMappingPtr self, UserMappingPtr other)
+{
+    return self->address.virtual_addr == other->address.virtual_addr && self->size == other->size;
+}
+
+static bool mapping_contains_range(UserMappingPtr mapping, void * context)
+{
+    UserAllocationRangeMatchPtr range = (UserAllocationRangeMatchPtr)context;
+    Address mapping_start = mapping->address.virtual_addr;
+    Address mapping_end = mapping_start + mapping->size;
+    Address range_end = range->virtual_address + range->size;
+
+    return range->virtual_address >= mapping_start && range_end <= mapping_end && range_end >= range->virtual_address;
+}
+
 static bool allocation_contains_range(UserAllocationPtr allocation, void * context)
 {
     UserAllocationRangeMatchPtr range = (UserAllocationRangeMatchPtr)context;
@@ -272,9 +299,60 @@ static bool allocation_contains_range(UserAllocationPtr allocation, void * conte
            range_end >= range->virtual_address;
 }
 
-static Optional(Address) Process__find_free_user_range(ProcessPtr self, size_t size)
+static bool Process__alignment_is_valid(size_t alignment)
 {
-    Address candidate = USER_ALLOC_BASE;
+    return alignment >= PAGE_SIZE && (alignment & (alignment - 1)) == 0;
+}
+
+static Optional(Address) Process__align_user_address(Address address, size_t alignment)
+{
+    Address mask = alignment - 1;
+    if (address > UINT64_MAX - mask)
+    {
+        return None(Address);
+    }
+    return Some(Address, (address + mask) & ~mask);
+}
+
+static bool Process__user_range_is_free(ProcessPtr self, Address virtual_address, size_t size)
+{
+    if (virtual_address < USER_ALLOC_BASE || virtual_address % PAGE_SIZE != 0 || size == 0 ||
+        virtual_address >= HUND_SERVICE_DIRECTORY_VADDR || size > HUND_SERVICE_DIRECTORY_VADDR - virtual_address)
+    {
+        return false;
+    }
+
+    Address range_end = virtual_address + size;
+    for_each_ll(
+        UserAllocations,
+        self->user_allocations,
+        allocation,
+        {
+            Address allocation_start = allocation.address.virtual_addr;
+            Address allocation_end = allocation_start + allocation.size;
+            if (allocation_start < range_end && virtual_address < allocation_end)
+            {
+                return false;
+            }
+        }
+    );
+    return true;
+}
+
+static Optional(Address) Process__find_free_user_range(ProcessPtr self, size_t size, size_t alignment)
+{
+    Address candidate;
+    match_optional(
+        Process__align_user_address(USER_ALLOC_BASE, alignment),
+        some(aligned)
+        {
+            candidate = aligned;
+        },
+        none()
+        {
+            return None(Address);
+        }
+    );
     while (candidate < HUND_SERVICE_DIRECTORY_VADDR && size <= HUND_SERVICE_DIRECTORY_VADDR - candidate)
     {
         Address candidate_end = candidate + size;
@@ -297,7 +375,17 @@ static Optional(Address) Process__find_free_user_range(ProcessPtr self, size_t s
         {
             return Some(Address, candidate);
         }
-        candidate = next_candidate;
+        match_optional(
+            Process__align_user_address(next_candidate, alignment),
+            some(aligned)
+            {
+                candidate = aligned;
+            },
+            none()
+            {
+                return None(Address);
+            }
+        );
     }
     return None(Address);
 }
@@ -582,6 +670,7 @@ static Result(ProcessPtr)
     proc->heap_break = USER_HEAP_BASE;
     proc->heap_mapped_end = USER_HEAP_BASE;
     proc->user_allocations = UserAllocations__new();
+    proc->user_mappings = UserMappings__new();
     proc->virtio_devices = ProcessVirtioDevices__new();
     proc->startup_stdio = SPAWN_STDIO_DEFAULT;
     match_optional(
@@ -732,7 +821,51 @@ static void Process__dispose_unpublished_fork_child(ProcessPtr self)
     Process__dispose(self);
 }
 
-static Result(ProcessMemoryCode) Process__copy_fork_allocation(ProcessPtr self, ConstUserAllocationPtr source)
+static Result(ProcessMemoryCode)
+    Process__copy_fork_permissions(ProcessPtr self, ProcessPtr source_process, ConstUserAllocationPtr source)
+{
+    Address allocation_start = source->address.virtual_addr;
+    Address allocation_end = allocation_start + source->size;
+    for_each_ll(
+        UserMappings,
+        source_process->user_mappings,
+        mapping,
+        {
+            Address mapping_start = mapping.address.virtual_addr;
+            Address mapping_end = mapping_start + mapping.size;
+            if (mapping_start < allocation_start || mapping_end > allocation_end)
+            {
+                continue;
+            }
+            MemPagePermissions permissions = MEM_PAGE_NONE;
+            if (mapping.address.execute)
+            {
+                permissions = MEM_PAGE_READ_EXECUTE;
+            }
+            else if (mapping.address.write)
+            {
+                permissions = MEM_PAGE_READ_WRITE;
+            }
+            else if (mapping.address.read)
+            {
+                permissions = MEM_PAGE_READ_ONLY;
+            }
+            match_result(
+                Process__protect_user_pages(self, mapping_start, mapping.size, permissions),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(ProcessMemoryCode, message, code);
+                }
+            );
+        }
+    );
+
+    return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+}
+
+static Result(ProcessMemoryCode)
+    Process__copy_fork_allocation(ProcessPtr self, ProcessPtr source_process, ConstUserAllocationPtr source)
 {
     match_result(
         Kernel__try_alloc_user(source->address.virtual_addr, source->size, source->address.read, source->address.write,
@@ -740,11 +873,25 @@ static Result(ProcessMemoryCode) Process__copy_fork_allocation(ProcessPtr self, 
         success(copy)
         {
             Kernel__memcopy(source->address.kernel_addr.virtual_addr, copy.kernel_addr.virtual_addr, source->size);
-            PageTable__map_unpublished(&self->page_table, self->kernel, copy, source->size);
+            if (copy.read || copy.write || copy.execute)
+            {
+                PageTable__map_unpublished(&self->page_table, self->kernel, copy, source->size);
+            }
             match_result(
                 Process__record_user_allocation(self, copy, source->size, source->type),
                 success(_)
                 {
+                    if (source->type == USER_ALLOCATION_DYNAMIC)
+                    {
+                        match_result(
+                            Process__copy_fork_permissions(self, source_process, source),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                return Error(ProcessMemoryCode, message, code);
+                            }
+                        );
+                    }
                     if (source->type == USER_ALLOCATION_STACK)
                     {
                         self->stack.base = copy;
@@ -828,7 +975,7 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
                 continue;
             }
             match_result(
-                Process__copy_fork_allocation(child, &allocation),
+                Process__copy_fork_allocation(child, self, &allocation),
                 success_do_nothing(),
                 error(code, message)
                 {
@@ -1030,7 +1177,8 @@ bool Process__write_child_abort_report(ProcessPtr self, SpawnAbortReport report)
     critical_section(
         self->lock,
         {
-            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0;
+                 index--)
             {
                 match_optional(
                     ParkedOperations__at(&self->parked_operations, index),
@@ -1340,6 +1488,7 @@ void Process__queue_signal(ProcessPtr self, ProcessSignal signal)
     {
         __atomic_fetch_and(&self->pending_signals, ~ProcessSignal__mask(PROCESS_SIGNAL_CONTINUE), __ATOMIC_ACQ_REL);
     }
+
     __atomic_fetch_or(&self->pending_signals, ProcessSignal__mask(signal), __ATOMIC_RELEASE);
 }
 
@@ -1634,6 +1783,7 @@ Result(ProcessSignalDelivery) Process__deliver_pending_signal(ProcessPtr self, P
                 );
             }
         );
+
         if (is_nothing(selected))
         {
             selected = Process__take_pending_signal(self);
@@ -1778,6 +1928,7 @@ static Result(ProcessSignalResult) Process__reset_signal_state_for_exec(ProcessP
             none_do_nothing()
         );
     }
+
     self->signal_actions = retained_actions;
     return Success(ProcessSignalResult, PROCESS_SIGNAL_OK);
 }
@@ -1845,10 +1996,12 @@ static bool ProcessChildEvent__matches_selection(ProcessChildEventPtr self, void
     {
         return false;
     }
+
     if (self->type == PROCESS_CHILD_EVENT_STOPPED)
     {
         return (selection->options & PROCESS_CHILD_WAIT_UNTRACED) != 0;
     }
+
     if (self->type == PROCESS_CHILD_EVENT_CONTINUED)
     {
         return (selection->options & PROCESS_CHILD_WAIT_CONTINUED) != 0;
@@ -2057,6 +2210,7 @@ typedef struct ProcessImage
     Address heap_break;
     Address heap_mapped_end;
     UserAllocations user_allocations;
+    UserMappings user_mappings;
     ProcessVirtioDevices virtio_devices;
     SpawnStdio startup_stdio;
     Optional(ProcessAbort) abort;
@@ -2079,6 +2233,7 @@ static ProcessImage ProcessImage__new(ProcessPtr self)
         .heap_break = self->heap_break,
         .heap_mapped_end = self->heap_mapped_end,
         .user_allocations = self->user_allocations,
+        .user_mappings = self->user_mappings,
         .virtio_devices = self->virtio_devices,
         .startup_stdio = self->startup_stdio,
         .abort = self->abort,
@@ -2099,6 +2254,7 @@ static void ProcessImage__install(ProcessPtr self, ConstProcessImagePtr image)
     self->heap_break = image->heap_break;
     self->heap_mapped_end = image->heap_mapped_end;
     self->user_allocations = image->user_allocations;
+    self->user_mappings = image->user_mappings;
     self->virtio_devices = image->virtio_devices;
     self->startup_stdio = image->startup_stdio;
     self->abort = image->abort;
@@ -2207,6 +2363,15 @@ Result(ProcessSetupStatus) Process__dispose(ProcessPtr self)
         }
     );
 
+    match_result(
+        UserMappings__dispose(&self->user_mappings),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
+    );
+
     match_optional(self->context,
         some(context)
         {
@@ -2230,6 +2395,16 @@ Result(ProcessMemoryCode)
     Process__record_user_allocation(ProcessPtr self, UserAddress address, size_t size, UserAllocationType type)
 {
     UserAllocation allocation = UserAllocation__new(address, Process__page_aligned_size(size), type);
+    UserMapping mapping = UserMapping__new(address, allocation.size);
+
+    match_result(
+        UserMappings__push(&self->user_mappings, mapping),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
+        }
+    );
 
     match_result(
         UserAllocations__push(&self->user_allocations, allocation),
@@ -2243,6 +2418,7 @@ Result(ProcessMemoryCode)
         },
         error(code, message)
         {
+            UserMappings__remove_at(&self->user_mappings, -1);
             __d_printf(MEMORY,
                        "process alloc tracking failed pid=%i name=%s type=%s user=%p kernel=%p size=%i code=%i\n",
                        self->pid, cstr(self->name), UserAllocationType__name(type), address.virtual_addr,
@@ -2344,8 +2520,8 @@ Result(Address) Process__device_address(ProcessPtr self, Address virtual_address
     return Error(Address, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
 
-static Optional(UserAddress) Process__mmio_mapping(ProcessPtr self, Address virtual_address, size_t size,
-                                                    bool require_write)
+static Optional(UserAddress)
+    Process__mmio_mapping(ProcessPtr self, Address virtual_address, size_t size, bool require_write)
 {
     if (virtual_address == 0 || size == 0)
     {
@@ -2389,15 +2565,26 @@ Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, A
 
     UserAllocationRangeMatch range = UserAllocationRangeMatch__new(virtual_address, size);
     match_find_result_ptr(
-        UserAllocations__find(&self->user_allocations, allocation_contains_range, &range),
-        some(allocation)
+        UserMappings__find(&self->user_mappings, mapping_contains_range, &range),
+        some(mapping)
         {
-            if (allocation->address.write && allocation->address.kernel_addr.valid)
+            if (!mapping->address.write)
             {
-                Offset offset = virtual_address - allocation->address.virtual_addr;
-                return Some(KernelAddress, KERNEL_ADDR(allocation->address.kernel_addr.virtual_addr + offset,
-                                                       allocation->address.kernel_addr.phys_addr + offset));
+                return None(KernelAddress);
             }
+            match_find_result_ptr(
+                UserAllocations__find(&self->user_allocations, allocation_contains_range, &range),
+                some(allocation)
+                {
+                    if (allocation->address.kernel_addr.valid)
+                    {
+                        Offset offset = virtual_address - allocation->address.virtual_addr;
+                        return Some(KernelAddress, KERNEL_ADDR(allocation->address.kernel_addr.virtual_addr + offset,
+                                                               allocation->address.kernel_addr.phys_addr + offset));
+                    }
+                },
+                none_do_nothing()
+            );
         },
         none_do_nothing()
     );
@@ -2409,7 +2596,28 @@ typedef Result(UserAddress) (*ProcessUserAllocator)(Address virtual_address, siz
                                                     bool execute);
 
 static Result(UserAddress)
-    Process__alloc_user_pages_with(ProcessPtr self, size_t size, ProcessUserAllocator allocator)
+    Process__install_dynamic_allocation(ProcessPtr self, UserAddress allocation, size_t allocation_size)
+{
+    PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
+
+    match_result(
+        Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC),
+        success(_)
+        {
+            return Success(UserAddress, allocation);
+        },
+        error(code, message)
+        {
+            PageTable__unmap(&self->page_table, self->kernel, allocation.virtual_addr, allocation_size);
+            Kernel__free(allocation.kernel_addr.virtual_addr);
+            return Error(UserAddress, message, code);
+        }
+    );
+
+    return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+}
+
+static Result(UserAddress) Process__alloc_user_pages_with(ProcessPtr self, size_t size, ProcessUserAllocator allocator)
 {
     if (size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1))
     {
@@ -2418,7 +2626,7 @@ static Result(UserAddress)
     size_t allocation_size = Process__page_aligned_size(size);
     Address virtual_address;
     match_optional(
-        Process__find_free_user_range(self, allocation_size),
+        Process__find_free_user_range(self, allocation_size, PAGE_SIZE),
         some(found)
         {
             virtual_address = found;
@@ -2433,21 +2641,7 @@ static Result(UserAddress)
         allocator(virtual_address, allocation_size, true, true, false),
         success(allocation)
         {
-            PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
-
-            match_result(
-                Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC),
-                success(_)
-                {
-                    return Success(UserAddress, allocation);
-                },
-                error(code, message)
-                {
-                    PageTable__unmap(&self->page_table, self->kernel, allocation.virtual_addr, allocation_size);
-                    Kernel__free(allocation.kernel_addr.virtual_addr);
-                    return Error(UserAddress, message, code);
-                }
-            );
+            return Process__install_dynamic_allocation(self, allocation, allocation_size);
         },
         error(code, message)
         {
@@ -2461,6 +2655,211 @@ static Result(UserAddress)
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size)
 {
     return Process__alloc_user_pages_with(self, size, Kernel__try_alloc_user);
+}
+
+Result(UserAddress) Process__alloc_aligned_user_pages(ProcessPtr self, size_t size, size_t alignment)
+{
+    if (size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1) || !Process__alignment_is_valid(alignment))
+    {
+        return Error(UserAddress, invalid_user_allocation, PROCESS_MEMORY_INVALID_SIZE);
+    }
+
+    size_t allocation_size = Process__page_aligned_size(size);
+    Address virtual_address;
+    match_optional(
+        Process__find_free_user_range(self, allocation_size, alignment),
+        some(found)
+        {
+            virtual_address = found;
+        },
+        none()
+        {
+            return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+        }
+    );
+
+    match_result(
+        Kernel__try_alloc_user_aligned(virtual_address, allocation_size, alignment, true, true, false),
+        success(allocation)
+        {
+            return Process__install_dynamic_allocation(self, allocation, allocation_size);
+        },
+        error(code, message)
+        {
+            return Error(UserAddress, message, PROCESS_MEMORY_FULL);
+        }
+    );
+
+    return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+}
+
+Result(UserAddress) Process__alloc_user_pages_at(ProcessPtr self, Address virtual_address, size_t size)
+{
+    if (size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1))
+    {
+        return Error(UserAddress, invalid_user_allocation, PROCESS_MEMORY_INVALID_SIZE);
+    }
+
+    size_t allocation_size = Process__page_aligned_size(size);
+    if (!Process__user_range_is_free(self, virtual_address, allocation_size))
+    {
+        return Error(UserAddress, invalid_user_allocation, PROCESS_MEMORY_NOT_FOUND);
+    }
+
+    match_result(
+        Kernel__try_alloc_user(virtual_address, allocation_size, true, true, false),
+        success(allocation)
+        {
+            return Process__install_dynamic_allocation(self, allocation, allocation_size);
+        },
+        error(code, message)
+        {
+            return Error(UserAddress, message, PROCESS_MEMORY_FULL);
+        }
+    );
+
+    return Error(UserAddress, user_allocation_full, PROCESS_MEMORY_FULL);
+}
+
+static Optional(UserAddress) Process__protected_address(UserAddress address, MemPagePermissions permissions)
+{
+    switch (permissions)
+    {
+    case MEM_PAGE_NONE:
+        return Some(UserAddress,
+                    UserAddress__new(address.virtual_addr, address.kernel_addr, false, false, false, true));
+    case MEM_PAGE_READ_ONLY:
+        return Some(UserAddress, UserAddress__new(address.virtual_addr, address.kernel_addr, true, false, false, true));
+    case MEM_PAGE_READ_WRITE:
+        return Some(UserAddress, UserAddress__new(address.virtual_addr, address.kernel_addr, true, true, false, true));
+    case MEM_PAGE_READ_EXECUTE:
+        return Some(UserAddress, UserAddress__new(address.virtual_addr, address.kernel_addr, true, false, true, true));
+    }
+    return None(UserAddress);
+}
+
+Result(ProcessMemoryCode)
+    Process__protect_user_pages(ProcessPtr self, Address virtual_address, size_t size, MemPagePermissions permissions)
+{
+    if (virtual_address % PAGE_SIZE != 0 || size == 0 || size % PAGE_SIZE != 0)
+    {
+        return Error(ProcessMemoryCode, invalid_user_allocation, PROCESS_MEMORY_NOT_FOUND);
+    }
+    UserAllocationRangeMatch range = UserAllocationRangeMatch__new(virtual_address, size);
+    match_find_result_ptr(
+        UserAllocations__find(&self->user_allocations, allocation_contains_range, &range),
+        some(allocation)
+        {
+            if (allocation->type != USER_ALLOCATION_DYNAMIC)
+            {
+                return Error(ProcessMemoryCode, invalid_user_allocation, PROCESS_MEMORY_NOT_FOUND);
+            }
+            UserAddress range_address =
+                UserAddress__relative(&allocation->address, virtual_address - allocation->address.virtual_addr);
+            match_optional(
+                Process__protected_address(range_address, permissions),
+                some(address)
+                {
+                    UserMappings replacement = UserMappings__new();
+                    Address protected_end = virtual_address + size;
+                    size_t protected_size = 0;
+                    for_each_ll(
+                        UserMappings,
+                        self->user_mappings,
+                        mapping,
+                        {
+                            Address mapping_start = mapping.address.virtual_addr;
+                            Address mapping_end = mapping_start + mapping.size;
+                            if (mapping_end <= virtual_address || mapping_start >= protected_end)
+                            {
+                                match_result(
+                                    UserMappings__push(&replacement, mapping),
+                                    success_do_nothing(),
+                                    error(code, message)
+                                    {
+                                        UserMappings__dispose(&replacement);
+                                        return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
+                                    }
+                                );
+                                continue;
+                            }
+                            Address overlap_start = mapping_start > virtual_address ? mapping_start : virtual_address;
+                            Address overlap_end = mapping_end < protected_end ? mapping_end : protected_end;
+                            if (mapping_start < overlap_start)
+                            {
+                                UserMapping before = UserMapping__new(mapping.address, overlap_start - mapping_start);
+                                match_result(
+                                    UserMappings__push(&replacement, before),
+                                    success_do_nothing(),
+                                    error(code, message)
+                                    {
+                                        UserMappings__dispose(&replacement);
+                                        return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
+                                    }
+                                );
+                            }
+                            UserAddress overlap_address =
+                                UserAddress__relative(&address, overlap_start - virtual_address);
+                            UserMapping overlap = UserMapping__new(overlap_address, overlap_end - overlap_start);
+                            match_result(
+                                UserMappings__push(&replacement, overlap),
+                                success_do_nothing(),
+                                error(code, message)
+                                {
+                                    UserMappings__dispose(&replacement);
+                                    return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
+                                }
+                            );
+                            protected_size += overlap.size;
+                            if (overlap_end < mapping_end)
+                            {
+                                UserAddress after_address =
+                                    UserAddress__relative(&mapping.address, overlap_end - mapping_start);
+                                UserMapping after = UserMapping__new(after_address, mapping_end - overlap_end);
+                                match_result(
+                                    UserMappings__push(&replacement, after),
+                                    success_do_nothing(),
+                                    error(code, message)
+                                    {
+                                        UserMappings__dispose(&replacement);
+                                        return Error(ProcessMemoryCode, user_allocation_full, PROCESS_MEMORY_FULL);
+                                    }
+                                );
+                            }
+                        }
+                    );
+                    if (protected_size != size)
+                    {
+                        UserMappings__dispose(&replacement);
+                        return Error(ProcessMemoryCode, invalid_user_allocation, PROCESS_MEMORY_NOT_FOUND);
+                    }
+                    if (address.execute)
+                    {
+                        Arch__sync_instruction_memory(address.kernel_addr.virtual_addr, size);
+                    }
+                    PageTable__protect(&self->page_table, self->kernel, address, size);
+                    UserMappings previous = self->user_mappings;
+                    self->user_mappings = replacement;
+                    UserMappings__dispose(&previous);
+                    if (virtual_address == allocation->address.virtual_addr && size == allocation->size)
+                    {
+                        allocation->address = address;
+                    }
+                    return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+                },
+                none()
+                {
+                    return Error(ProcessMemoryCode, invalid_user_permissions, PROCESS_MEMORY_INVALID_PERMISSIONS);
+                }
+            );
+        },
+        none()
+        {
+            return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+        }
+    );
+
+    return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
 }
 
 Result(UserAddress) Process__alloc_reclaimable_user_pages(ProcessPtr self, size_t size)
@@ -2486,7 +2885,7 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
     size_t allocation_size = Process__page_aligned_size(source_offset + size);
     Address target_base;
     match_optional(
-        Process__find_free_user_range(self, allocation_size),
+        Process__find_free_user_range(self, allocation_size, PAGE_SIZE),
         some(found)
         {
             target_base = found;
@@ -2613,7 +3012,7 @@ static Result(UserAddress)
 
     Address virtual_base;
     match_optional(
-        Process__find_free_user_range(self, allocation_size),
+        Process__find_free_user_range(self, allocation_size, PAGE_SIZE),
         some(found)
         {
             virtual_base = found;
@@ -2633,6 +3032,7 @@ static Result(UserAddress)
     {
         PageTable__map_mmio(&self->page_table, self->kernel, mapping, size);
     }
+
     match_result(
         Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_MMIO),
         success(_)
@@ -2749,6 +3149,23 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
                        UserAllocations__len(&self->user_allocations));
             PageTable__unmap(&self->page_table, self->kernel, allocation.address.virtual_addr, allocation.size);
             Address kernel_virtual = allocation.address.kernel_addr.virtual_addr;
+
+            ListIndex mapping_index = 0;
+            Address allocation_end = allocation.address.virtual_addr + allocation.size;
+            while ((size_t)mapping_index < UserMappings__len(&self->user_mappings))
+            {
+                UserMapping mapping = unwrap_optional(UserMappings__at(&self->user_mappings, mapping_index),
+                                                      UserMapping__new(NULL_USER_ADDRESS, 0));
+                if (mapping.address.virtual_addr >= allocation.address.virtual_addr &&
+                    mapping.address.virtual_addr < allocation_end)
+                {
+                    UserMappings__remove_at(&self->user_mappings, mapping_index);
+                }
+                else
+                {
+                    mapping_index++;
+                }
+            }
 
             UserAllocations__remove_at(&self->user_allocations, index);
 

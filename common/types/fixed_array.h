@@ -464,9 +464,8 @@ OptionalDef(ArrayIndex);
 
 #define FixedArrayStackBodyDefine(alias_name)                                                                          \
     InitDefine(alias_name) StackConstructorDefine(alias_name) LenDefine(alias_name) AtDefine(alias_name)               \
-        PushDefine(alias_name)                                                                                         \
-        PopDefine(alias_name) SetDefine(alias_name) FindDefine(alias_name) RemoveDefine(alias_name)                    \
-            SortDefine(alias_name) FilterDefine(alias_name)
+        PushDefine(alias_name) PopDefine(alias_name) SetDefine(alias_name) FindDefine(alias_name)                      \
+            RemoveDefine(alias_name) SortDefine(alias_name) FilterDefine(alias_name)
 
 #define EmptyArray(alias_name)                                                                                         \
     (alias_name)                                                                                                       \

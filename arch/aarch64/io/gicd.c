@@ -28,8 +28,7 @@ static Address gicc_base(InterruptControllerInfoPtr info)
 static void gicd_enable_group1(InterruptControllerInfoPtr info)
 {
     volatile uint32_t * ctlr = (uint32_t *)(gicd_base(info) + 0x000);
-    uint32_t enable =
-        info->kind == INTERRUPT_CONTROLLER_GIC_V2 ? GICD_CTLR_ENABLE_GRP1 : GICD_CTLR_ENABLE_GRP1NS;
+    uint32_t enable = info->kind == INTERRUPT_CONTROLLER_GIC_V2 ? GICD_CTLR_ENABLE_GRP1 : GICD_CTLR_ENABLE_GRP1NS;
     *ctlr |= enable;
     __asm__ volatile("dsb sy; isb" ::: "memory");
 }

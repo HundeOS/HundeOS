@@ -116,11 +116,11 @@ int BlockServer__run(BlockServerPtr self)
 
 void test_block_partition_rejects_invalid_mbr_and_out_of_bounds_entry(void)
 {
-    TEST_ASSERT_FALSE(is_something(BlockPartition__entry(parent_storage, BLOCK_PARTITION_MBR_SIZE, 1,
-                                                         TEST_BLOCK_COUNT)));
+    TEST_ASSERT_FALSE(
+        is_something(BlockPartition__entry(parent_storage, BLOCK_PARTITION_MBR_SIZE, 1, TEST_BLOCK_COUNT)));
     set_partition(0, 0x83, 30, 4);
-    TEST_ASSERT_FALSE(is_something(BlockPartition__entry(parent_storage, BLOCK_PARTITION_MBR_SIZE, 1,
-                                                         TEST_BLOCK_COUNT)));
+    TEST_ASSERT_FALSE(
+        is_something(BlockPartition__entry(parent_storage, BLOCK_PARTITION_MBR_SIZE, 1, TEST_BLOCK_COUNT)));
 }
 
 void test_block_partition_translates_reads_and_writes_to_parent_blocks(void)
@@ -134,11 +134,9 @@ void test_block_partition_translates_reads_and_writes_to_parent_blocks(void)
     memset(data, 0xa5, sizeof(data));
     BufferDescriptor buffer = {.address = (Address)data, .capacity = sizeof(data)};
 
-    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK,
-                      BlockPartition__transfer(&partition, BLOCK_PROTOCOL_WRITE, 2, 1, &buffer));
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK, BlockPartition__transfer(&partition, BLOCK_PROTOCOL_WRITE, 2, 1, &buffer));
     memset(data, 0, sizeof(data));
-    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK,
-                      BlockPartition__transfer(&partition, BLOCK_PROTOCOL_READ, 2, 1, &buffer));
+    TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_OK, BlockPartition__transfer(&partition, BLOCK_PROTOCOL_READ, 2, 1, &buffer));
     TEST_ASSERT_EACH_EQUAL_UINT8(0xa5, data, sizeof(data));
     TEST_ASSERT_EQUAL(BLOCK_PROTOCOL_INVALID_ARGUMENT,
                       BlockPartition__transfer(&partition, BLOCK_PROTOCOL_READ, 4, 1, &buffer));

@@ -16,6 +16,12 @@ typedef struct FakeExecService
     size_t image_size;
     size_t offset;
     unsigned reads;
+    unsigned opens;
+    BString first_path;
+    BString second_path;
+    BString override_path;
+    Address override_image;
+    size_t override_image_size;
     bool redirect_open;
     bool redirected;
 } FakeExecService;
@@ -66,6 +72,19 @@ static void FakeExecService__drain(FakeExecServicePtr self, KernelPtr kernel)
     );
 }
 
+static Optional(Elf) FakeExecService__image(FakeExecServicePtr self, ConstBStringPtr path, ConstBStringPtr name)
+{
+    if (self->override_image != 0 && BString__equals(path, &self->override_path))
+    {
+        return Some(Elf, Elf__new(self->override_image, self->override_image + self->override_image_size, path));
+    }
+    if (BString__equals(path, &bstr(WUFF_INTERPRETER_PATH)))
+    {
+        return EmbeddedElf__load(&bstr("hello_world"));
+    }
+    return EmbeddedElf__load(name);
+}
+
 static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, ProcessPtr parent)
 {
     FakeExecService__drain(self, kernel);
@@ -82,7 +101,7 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
         QueueConnectionID id = Queue__connection(&load->channel.channel.control);
         match_result(Queues__accept(&kernel->scheduler->queues, self->io, id),
             success_do_nothing(),
-                     error_test_fail()
+            error_test_fail()
         );
         match_optional(
             QueueConnections__at(&kernel->scheduler->queues.connections, id % QUEUE_LIMIT),
@@ -124,10 +143,19 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
                     if (request.operation == IO_REQUEST_OPEN)
                     {
                         BString path = IORequest__path(&request);
+                        self->opens++;
+                        if (self->opens == 1)
+                        {
+                            self->first_path = path;
+                        }
+                        else if (self->opens == 2)
+                        {
+                            self->second_path = path;
+                        }
                         if (self->redirect_open && !self->redirected)
                         {
-                            reply = IOReply__redirect(&bstr(IO_SYSTEM_SERVICE), &bstr("/hello_world"),
-                                                      &empty_bstr(), true);
+                            reply =
+                                IOReply__redirect(&bstr(IO_SYSTEM_SERVICE), &bstr("/hello_world"), &empty_bstr(), true);
                             self->redirected = true;
                             TEST_ASSERT_TRUE(
                                 Queue__write_data(&control, (ConstChannelDataPtr)&reply, sizeof(reply), 0));
@@ -141,7 +169,7 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
                         StringPos name_start = BString__starts_with(&path, &bstr("/sbin/")) ? 6 : 1;
                         BString name = BString__slice(&path, name_start, BString__length(&path));
                         match_optional(
-                            EmbeddedElf__load(&name),
+                            FakeExecService__image(self, &path, &name),
                             some(elf)
                             {
                                 self->image = elf.start;
@@ -150,8 +178,8 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
                                 reply.value = IO_FILESYSTEM_HANDLE_BASE;
                                 match_result(
                                     Buffers__operation(&kernel->scheduler->buffers, kernel->scheduler, self->puffer,
-                                                       MEM_BUFFER_CREATE, self->io->pid, QUEUE_KERNEL_PID,
-                                                       BUFFER_READ, 0),
+                                                       MEM_BUFFER_CREATE, self->io->pid, QUEUE_KERNEL_PID, BUFFER_READ,
+                                                       0),
                                     success(id)
                                     {
                                         self->buffer = id;

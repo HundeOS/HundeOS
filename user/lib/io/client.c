@@ -172,8 +172,8 @@ static IOReply IOClient__submit_to(IOClientSessionPtr session, IORequestPtr requ
     }
     IOReply reply;
     match_result(
-        Channel__submit(&session->channel, (ConstChannelDataPtr)request, sizeof(*request),
-                        (ChannelDataPtr)&reply, sizeof(reply)),
+        Channel__submit(&session->channel, (ConstChannelDataPtr)request, sizeof(*request), (ChannelDataPtr)&reply,
+                        sizeof(reply)),
         success(size)
         {
             if (size == sizeof(reply))

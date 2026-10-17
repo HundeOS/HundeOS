@@ -29,14 +29,12 @@ static Optional(RiscVMMIOStore) RiscVMMIOStore__standard(uint32_t instruction, P
     uint32_t base_register = (instruction >> 15U) & 0x1fU;
     uint32_t immediate = ((instruction >> 25U) << 5U) | ((instruction >> 7U) & 0x1fU);
     int64_t offset = (int64_t)(immediate | ((immediate & 0x800U) != 0 ? 0xfffffffffffff000ULL : 0ULL));
-    RiscVMMIOStore store =
-        RiscVMMIOStore__new(RiscVMMIOStore__address(context, base_register, offset), context->x[source_register],
-                            1ULL << width_code, sizeof(uint32_t));
+    RiscVMMIOStore store = RiscVMMIOStore__new(RiscVMMIOStore__address(context, base_register, offset),
+                                               context->x[source_register], 1ULL << width_code, sizeof(uint32_t));
     return Some(RiscVMMIOStore, store);
 }
 
-static Optional(RiscVMMIOStore) RiscVMMIOStore__compressed_register(uint16_t instruction,
-                                                                    ProcessContextPtr context)
+static Optional(RiscVMMIOStore) RiscVMMIOStore__compressed_register(uint16_t instruction, ProcessContextPtr context)
 {
     uint32_t operation = instruction >> 13U;
     uint32_t source_register = 8U + ((instruction >> 2U) & 0x7U);
@@ -62,9 +60,8 @@ static Optional(RiscVMMIOStore) RiscVMMIOStore__compressed_register(uint16_t ins
         return None(RiscVMMIOStore);
     }
 
-    RiscVMMIOStore store =
-        RiscVMMIOStore__new(RiscVMMIOStore__address(context, base_register, offset), context->x[source_register],
-                            width, sizeof(uint16_t));
+    RiscVMMIOStore store = RiscVMMIOStore__new(RiscVMMIOStore__address(context, base_register, offset),
+                                               context->x[source_register], width, sizeof(uint16_t));
     return Some(RiscVMMIOStore, store);
 }
 

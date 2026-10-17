@@ -20,8 +20,7 @@ void setUp(void)
     server_page = (QueuePage){0};
     client_doorbell = (IpcDoorbell){0};
     server_doorbell = (IpcDoorbell){0};
-    Queue client =
-        Queue__new(&identity, &client_page, &server_page, 17, 5, &server_doorbell, &record_data_available);
+    Queue client = Queue__new(&identity, &client_page, &server_page, 17, 5, &server_doorbell, &record_data_available);
     server = Queue__new(&identity, &server_page, &client_page, 17, 4, &client_doorbell, &Queue__ignore_data_available);
     channel = Channel__new(&client);
 }

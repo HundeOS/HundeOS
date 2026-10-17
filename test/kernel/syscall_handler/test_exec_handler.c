@@ -47,6 +47,46 @@ static UserAllocation allocation_at(ProcessPtr process, uint64_t index)
     return (UserAllocation){0};
 }
 
+static Elf dynamic_exec_image(uint8_t * image, size_t size)
+{
+    Elf source = unwrap_optional(EmbeddedElf__load(&bstr("hello_world")), (Elf){});
+    Elf64HeaderPtr header = ptr(image, Elf64Header);
+    ProgramHeaderPtr program_headers = ptr(image + sizeof(Elf64Header), ProgramHeader);
+    size_t interpreter_offset = sizeof(Elf64Header) + 2 * sizeof(ProgramHeader);
+
+    *header = (Elf64Header){
+        .magic = {0x7f, 'E', 'L', 'F'},
+        .klass = 2,
+        .endianness = LittleEndian,
+        .ei_version = 1,
+        .type = Shared,
+        .machine = Elf__read_header(&source)->machine,
+        .elf_version = 1,
+        .header_size = sizeof(Elf64Header),
+        .program_header_offset = sizeof(Elf64Header),
+        .program_header_entry_size = sizeof(ProgramHeader),
+        .program_header_entries = 2,
+    };
+    program_headers[0] = (ProgramHeader){
+        .type = Interpreter,
+        .segment_offset = interpreter_offset,
+        .file_size = sizeof(WUFF_INTERPRETER_PATH),
+        .memory_size = sizeof(WUFF_INTERPRETER_PATH),
+    };
+    program_headers[1] = (ProgramHeader){.type = Dynamic};
+    Kernel__memcopy((Address)WUFF_INTERPRETER_PATH, (Address)(image + interpreter_offset),
+                    sizeof(WUFF_INTERPRETER_PATH));
+    return Elf__new((Address)image, (Address)(image + size), &bstr("/dynamic"));
+}
+
+static void use_dynamic_exec_image(uint8_t * image, size_t size)
+{
+    Elf elf = dynamic_exec_image(image, size);
+    filesystem.override_path = elf.name;
+    filesystem.override_image = elf.start;
+    filesystem.override_image_size = elf.end - elf.start;
+}
+
 void setUp(void)
 {
     clear_deferred_syscall_result();
@@ -281,6 +321,79 @@ void test_exec_request_handler_passes_spawn_arguments_to_process_argv(void)
         },
         error_test_fail()
     );
+}
+
+void test_dynamic_spawn_loads_static_interpreter_and_preserves_requested_startup(void)
+{
+    uint8_t image[256] = {0};
+    use_dynamic_exec_image(image, sizeof(image));
+    SpawnArguments arguments = SpawnArguments__new();
+    match_result(SpawnArguments__push(&arguments, bstr("argument")),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    SpawnRequest request = SpawnRequest__new(P_NOWAIT, &bstr("/dynamic"), SPAWN_INHERIT_USER_ID,
+                                             SPAWN_INHERIT_AUTH_TICKET, SPAWN_STDIO_DEFAULT, &arguments);
+
+    match_result(
+        ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
+        success(pid)
+        {
+            match_optional(
+                Scheduler__find_process_by_pid(kernel->scheduler, pid),
+                some(child)
+                {
+                    TEST_ASSERT_EQUAL_BSTRING(bstr("/dynamic"), child->name);
+                    UserAllocation startup = allocation_at(child, 0);
+                    AddressPtr argv = ptr(startup.address.kernel_addr.virtual_addr, Address);
+                    Address user_base = startup.address.virtual_addr;
+                    Address kernel_base = startup.address.kernel_addr.virtual_addr;
+                    TEST_ASSERT_EQUAL_STRING("/dynamic", ptr(kernel_base + (argv[0] - user_base), char));
+                    TEST_ASSERT_EQUAL_STRING("argument", ptr(kernel_base + (argv[1] - user_base), char));
+                    TEST_ASSERT_EQUAL_UINT64(0, Process__required_context(child)->x[7]);
+                },
+                none_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT(2, filesystem.opens);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dynamic"), filesystem.first_path);
+    TEST_ASSERT_EQUAL_BSTRING(bstr(WUFF_INTERPRETER_PATH), filesystem.second_path);
+}
+
+void test_dynamic_overlay_loads_static_interpreter_and_preserves_exec_payload(void)
+{
+    uint8_t image[256] = {0};
+    use_dynamic_exec_image(image, sizeof(image));
+    ProcessID pid = parent->pid;
+    char * arguments[] = {"dynamic", NULL};
+    char * environment[] = {"PATH=/usr/bin", NULL};
+    ExecPayloadPtr payload = PosixExecPayload__new("/dynamic", "/work", arguments, environment, NULL, 0, NULL, 0);
+    TEST_ASSERT_NOT_NULL(payload);
+    SpawnRequest request = SpawnRequest__overlay(payload);
+
+    match_result(
+        ExecRequest__handler(kernel, Some(ProcessPtr, parent), (Anything)&request, 0, 0, 0, 0),
+        success(result)
+        {
+            TEST_ASSERT_EQUAL_UINT64(1, result);
+        },
+        error_test_fail()
+    );
+    PosixExecPayload__dispose(payload);
+
+    TEST_ASSERT_EQUAL_UINT64(pid, parent->pid);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dynamic"), parent->name);
+    ProcessContextPtr context = Process__required_context(parent);
+    UserAllocation startup = allocation_at(parent, 0);
+    Address user_base = startup.address.virtual_addr;
+    Address kernel_base = startup.address.kernel_addr.virtual_addr;
+    ConstExecPayloadPtr startup_payload = ptr(kernel_base + (context->x[7] - user_base), ExecPayload);
+    TEST_ASSERT_EQUAL_STRING("/dynamic", ExecPayload__path(startup_payload));
+    TEST_ASSERT_EQUAL_STRING("/work", ExecPayload__current_directory(startup_payload));
+    TEST_ASSERT_EQUAL_UINT(2, filesystem.opens);
+    TEST_ASSERT_EQUAL_BSTRING(bstr(WUFF_INTERPRETER_PATH), filesystem.second_path);
 }
 
 void test_exec_overlay_replaces_the_calling_image_and_preserves_process_identity(void)

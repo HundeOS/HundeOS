@@ -21,8 +21,7 @@ typedef const RiscVMMIOStore * ConstRiscVMMIOStorePtr;
 
 OptionalDef(RiscVMMIOStore);
 
-static inline RiscVMMIOStore RiscVMMIOStore__new(Address address, uint64_t value, size_t width,
-                                                  size_t instruction_size)
+static inline RiscVMMIOStore RiscVMMIOStore__new(Address address, uint64_t value, size_t width, size_t instruction_size)
 {
     return (RiscVMMIOStore){
         .address = address,

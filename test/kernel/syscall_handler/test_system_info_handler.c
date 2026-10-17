@@ -148,8 +148,8 @@ void test_system_info_copies_kernel_trace_to_valid_hund_memory(void)
     KernelTrace__append("system-info-trace-marker");
 
     match_result(
-        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_KERNEL_TRACE, output.user,
-                            PAGE_SIZE, 0, 0),
+        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_KERNEL_TRACE, output.user, PAGE_SIZE,
+                            0, 0),
         success(size)
         {
             static const char marker[] = "system-info-trace-marker";

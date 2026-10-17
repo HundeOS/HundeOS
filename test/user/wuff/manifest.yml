@@ -1,0 +1,8 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - common/types/bstring.c
+    - user/lib/wuff/filesystem.c
+    - user/lib/wuff/loader.c
+    - user/lib/arch/hosted/wuff.c

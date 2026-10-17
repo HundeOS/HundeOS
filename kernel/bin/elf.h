@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdint.h>
 
+#include "../../common_includes/wuff.h"
 #include "../address.h"
 #include "../types/fixed_array.h"
 
@@ -93,6 +94,12 @@ typedef enum ElfProgramHeaderTypeVals
     ProcessorReservedLow = 0x70000000,
     ProcessorReservedHigh = 0x7FFFFFFF,
 } ProgramHeaderTypeVals;
+
+typedef enum ElfImageKind
+{
+    ELF_IMAGE_STATIC,
+    ELF_IMAGE_DYNAMIC,
+} ElfImageKind;
 
 typedef enum SectionFlagsVals
 {
@@ -199,6 +206,8 @@ typedef const Elf * ConstElfPtr;
 
 ResultDef(Elf);
 Result(Elf) Elf__validate(ConstElfPtr self);
+ResultDef(ElfImageKind);
+Result(ElfImageKind) Elf__image_kind(ConstElfPtr self);
 ResultDef(ElfPtr);
 OptionalDef(Elf);
 OptionalDef(ElfPtr);

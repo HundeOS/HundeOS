@@ -67,6 +67,56 @@ void test_mem_handler_maps_user_allocation_failure(void)
     );
 }
 
+void test_mem_handler_allocates_aligned_pages(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+
+    match_result(
+        Mem__handler(&kernel, Some(ProcessPtr, process), MEM_ALLOC_ALIGNED_PAGES, PAGE_SIZE, PAGE_SIZE * 16, 0, 0),
+        success(address)
+        {
+            TEST_ASSERT_EQUAL(0, address % (PAGE_SIZE * 16));
+        },
+        error_test_fail()
+    );
+}
+
+void test_mem_handler_protects_exact_dynamic_allocation(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    UserAddress address = unwrap_result(Process__alloc_user_pages(process, PAGE_SIZE), NULL_USER_ADDRESS);
+
+    match_result(
+        Mem__handler(&kernel, Some(ProcessPtr, process), MEM_PROTECT_PAGES, address.virtual_addr, PAGE_SIZE,
+                     MEM_PAGE_READ_EXECUTE, 0),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(MEM_OK, status);
+        },
+        error_test_fail()
+    );
+}
+
+void test_mem_handler_protects_partial_dynamic_allocation(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    UserAddress address = unwrap_result(Process__alloc_user_pages(process, PAGE_SIZE * 2), NULL_USER_ADDRESS);
+
+    match_result(
+        Mem__handler(&kernel, Some(ProcessPtr, process), MEM_PROTECT_PAGES, address.virtual_addr, PAGE_SIZE,
+                     MEM_PAGE_READ_ONLY, 0),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(MEM_OK, status);
+            TEST_ASSERT_TRUE(
+                is_nothing(Process__writable_user_kernel_mapping(process, address.virtual_addr, PAGE_SIZE)));
+            TEST_ASSERT_TRUE(is_something(
+                Process__writable_user_kernel_mapping(process, address.virtual_addr + PAGE_SIZE, PAGE_SIZE)));
+        },
+        error_test_fail()
+    );
+}
+
 void test_mem_handler_rejects_unsupported_operations(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);

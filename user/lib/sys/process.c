@@ -54,8 +54,7 @@ uint64_t process_current_pid(void)
 
 Result(ConstProcessRegistryPtr) process_registry_map(void)
 {
-    ProcessRegistryMapResult result =
-        (ProcessRegistryMapResult)syscall(SYSCALL_PROCESS_REGISTRY_MAP, 0, 0, 0, 0, 0);
+    ProcessRegistryMapResult result = (ProcessRegistryMapResult)syscall(SYSCALL_PROCESS_REGISTRY_MAP, 0, 0, 0, 0, 0);
     if (result < 0)
     {
         return Error(ConstProcessRegistryPtr, bstr("Cannot map process registry"), result);

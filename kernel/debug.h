@@ -100,7 +100,7 @@ inline const char * level_to_string(Level level)
 #ifdef KERNEL_VERBOSE_TRACE
 #define ENABLED_LOG_LEVELS                                                                                             \
     (LOG_LEVEL_MASK(PROGRESS) | LOG_LEVEL_MASK(SYSLOG) | LOG_LEVEL_MASK(EXEC) | LOG_LEVEL_MASK(FAULT) |                \
-     LOG_LEVEL_MASK(PANIC) | LOG_LEVEL_MASK(SYSCALL) | LOG_LEVEL_MASK(SCHEDULER) | LOG_LEVEL_MASK(PROCESS_SWITCH) |     \
+     LOG_LEVEL_MASK(PANIC) | LOG_LEVEL_MASK(SYSCALL) | LOG_LEVEL_MASK(SCHEDULER) | LOG_LEVEL_MASK(PROCESS_SWITCH) |    \
      LOG_LEVEL_MASK(MEMORY) | COMMAND_FLOW_LOG_LEVEL)
 #else
 #define ENABLED_LOG_LEVELS                                                                                             \

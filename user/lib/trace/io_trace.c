@@ -55,8 +55,7 @@ static bool IOTrace__register(void)
     registering = true;
     ring = IOTrace__open_ring();
     registering = false;
-    match_optional(
-        ring,
+    match_optional(ring,
         some(target)
         {
             return true;

@@ -13,6 +13,7 @@
 #include "types/map.h"
 #include "mutex.h"
 #include "syscalls/io.h"
+#include "syscalls/mem.h"
 #include "../common_includes/syscalls/process.h"
 #include "syscalls/spawn.h"
 #include "process_class.h"
@@ -161,6 +162,7 @@ typedef enum ProcessMemoryCode
     PROCESS_MEMORY_STATIC_ALLOCATION = -3,
     PROCESS_MEMORY_FREE_FAILED = -4,
     PROCESS_MEMORY_INVALID_SIZE = -5,
+    PROCESS_MEMORY_INVALID_PERMISSIONS = -6,
 } ProcessMemoryCode;
 
 ResultDef(ProcessMemoryCode);
@@ -205,6 +207,18 @@ static inline SharedUserPages SharedUserPages__new(UserAddress allocation, UserA
 }
 
 LinkedListDefine(UserAllocation, UserAllocations, (EqualFunction)UserAllocation__equals);
+
+typedef struct UserMapping
+{
+    UserAddress address;
+    size_t size;
+} UserMapping;
+
+typedef UserMapping * UserMappingPtr;
+
+OptionalDef(UserMapping);
+bool UserMapping__equals(UserMappingPtr self, UserMappingPtr other);
+LinkedListDefine(UserMapping, UserMappings, (EqualFunction)UserMapping__equals);
 
 #define PROCESS_VIRTIO_DEVICE_LIMIT 16
 OptionalDef(Address);
@@ -260,6 +274,7 @@ typedef struct Process
     Address heap_break;
     Address heap_mapped_end;
     UserAllocations user_allocations;
+    UserMappings user_mappings;
     ProcessVirtioDevices virtio_devices;
     SpawnStdio startup_stdio;
     Optional(ProcessAbort) abort;
@@ -359,7 +374,11 @@ Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, A
 Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address mapping);
 void Process__quiesce_device(ProcessPtr self);
 Result(UserAddress) Process__alloc_user_pages(ProcessPtr self, size_t size);
+Result(UserAddress) Process__alloc_aligned_user_pages(ProcessPtr self, size_t size, size_t alignment);
+Result(UserAddress) Process__alloc_user_pages_at(ProcessPtr self, Address virtual_address, size_t size);
 Result(UserAddress) Process__alloc_reclaimable_user_pages(ProcessPtr self, size_t size);
+Result(ProcessMemoryCode)
+    Process__protect_user_pages(ProcessPtr self, Address virtual_address, size_t size, MemPagePermissions permissions);
 Result(Address) Process__queue_wait_control(ProcessPtr self);
 Result(UserAddress) Process__doorbell(ProcessPtr self);
 void Process__ring_doorbell(ProcessPtr self);

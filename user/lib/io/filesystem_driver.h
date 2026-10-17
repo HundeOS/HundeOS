@@ -144,8 +144,7 @@ typedef struct FilesystemDriver
 
 typedef FilesystemDriver * FilesystemDriverPtr;
 FilesystemDriver FilesystemDriver__new(IOServiceContext volume, ConstFilesystemOperationsPtr operations);
-void FilesystemDriver__set_memory_pressure_handler(FilesystemDriverPtr self,
-                                                   FilesystemMemoryPressureHandler handler);
+void FilesystemDriver__set_memory_pressure_handler(FilesystemDriverPtr self, FilesystemMemoryPressureHandler handler);
 IOReply FilesystemDriver__execute(FilesystemDriverPtr self, IORequestPtr request);
 bool FilesystemDriver__release(FilesystemDriverPtr self, QueueConnectionID session, uint64_t pid);
 int FilesystemDriver__run(FilesystemDriverPtr self, ConstBStringPtr mountpoint);

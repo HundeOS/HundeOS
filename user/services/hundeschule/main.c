@@ -290,8 +290,8 @@ static int Hundeschule__spawn_virtio_block_drivers(HundeschuleRequiredProcessesP
         some(virtio_mmio)
         {
             ServiceMappedMemoryPtr mapping;
-            if (!service_ok(service_map_mmio(virtio_mmio.physical_base,
-                                             virtio_mmio.slot_size * virtio_mmio.slot_count, &mapping)))
+            if (!service_ok(service_map_mmio(virtio_mmio.physical_base, virtio_mmio.slot_size * virtio_mmio.slot_count,
+                                             &mapping)))
             {
                 failures++;
             }
@@ -768,8 +768,8 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
     );
 
     if (io_latency_tracing_enabled &&
-        (Hundeschule__spawn_required_process(processes, &hundeschule_trace_path, &hundeschule_empty,
-                                             &hundeschule_empty, true) != 0 ||
+        (Hundeschule__spawn_required_process(processes, &hundeschule_trace_path, &hundeschule_empty, &hundeschule_empty,
+                                             true) != 0 ||
          !service_ok(service_wait_ready(&bstr(HUND_VERFOLGEN_SERVICE)))))
     {
         return 1;

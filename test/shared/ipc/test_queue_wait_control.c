@@ -120,7 +120,8 @@ void test_zero_doorbell_generation_is_a_valid_publication(void)
 {
     QueueWaitControl__begin(&control);
     QueueWaitControl__commit(&control, 4321, 1234, 0);
-    match_optional(QueueWaitControl__publication(&control),
+    match_optional(
+        QueueWaitControl__publication(&control),
         some(publication)
         {
             TEST_ASSERT_EQUAL_UINT64(0, publication.observed_doorbell_generation);

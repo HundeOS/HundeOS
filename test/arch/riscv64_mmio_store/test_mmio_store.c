@@ -25,8 +25,8 @@ void test_mmio_store_decodes_standard_word_store(void)
     context.x[15] = 0x40003000;
     context.x[14] = 0x12345678abcdef01ULL;
     uint32_t immediate = 0x84U;
-    uint32_t instruction = ((immediate >> 5U) << 25U) | (14U << 20U) | (15U << 15U) | (2U << 12U) |
-                           ((immediate & 0x1fU) << 7U) | 0x23U;
+    uint32_t instruction =
+        ((immediate >> 5U) << 25U) | (14U << 20U) | (15U << 15U) | (2U << 12U) | ((immediate & 0x1fU) << 7U) | 0x23U;
 
     RiscVMMIOStore store = decode(instruction);
 
@@ -41,8 +41,8 @@ void test_mmio_store_decodes_negative_standard_offset(void)
     context.x[8] = 0x40001000;
     context.x[9] = 0x55;
     uint32_t immediate = 0xff8U;
-    uint32_t instruction = ((immediate >> 5U) << 25U) | (9U << 20U) | (8U << 15U) | (3U << 12U) |
-                           ((immediate & 0x1fU) << 7U) | 0x23U;
+    uint32_t instruction =
+        ((immediate >> 5U) << 25U) | (9U << 20U) | (8U << 15U) | (3U << 12U) | ((immediate & 0x1fU) << 7U) | 0x23U;
 
     RiscVMMIOStore store = decode(instruction);
 
@@ -81,8 +81,7 @@ void test_mmio_store_performs_word_store_at_access_address_and_advances_pc(void)
 {
     volatile uint32_t register_value = 0;
     context.sepc = 0x1000;
-    RiscVMMIOStore store = RiscVMMIOStore__new(0x40003084, 0x1234567887654321ULL, sizeof(uint32_t),
-                                               sizeof(uint16_t));
+    RiscVMMIOStore store = RiscVMMIOStore__new(0x40003084, 0x1234567887654321ULL, sizeof(uint32_t), sizeof(uint16_t));
 
     RiscVMMIOStore__perform(&store, (Address)&register_value, &context);
 

@@ -138,8 +138,8 @@ SystemInfo RiscVPlatformInfo__system_info(ConstRiscVPlatformInfoPtr self, ConstR
     }
     if (self->virtio_mmio_count != 0)
     {
-        BootVirtioMmioInfo virtio_mmio = BootVirtioMmioInfo__new(
-            self->virtio_mmio_base, self->virtio_mmio_size, self->virtio_mmio_count, self->virtio_mmio_first_irq);
+        BootVirtioMmioInfo virtio_mmio = BootVirtioMmioInfo__new(self->virtio_mmio_base, self->virtio_mmio_size,
+                                                                 self->virtio_mmio_count, self->virtio_mmio_first_irq);
         info.virtio_mmio = Some(BootVirtioMmioInfo, virtio_mmio);
     }
     info.framebuffer = None(FramebufferInfo);
@@ -151,7 +151,7 @@ SystemInfo RiscVPlatformInfo__system_info(ConstRiscVPlatformInfoPtr self, ConstR
     if (self->sd_host_size != 0)
     {
         info.sd_host = Some(SdHostInfo, SdHostInfo__new(self->sd_host_base, self->sd_host_size, self->sd_host_irq,
-                                                       self->sd_host_kind, self->sd_host_source_clock_hz));
+                                                        self->sd_host_kind, self->sd_host_source_clock_hz));
     }
     info.ethernet_mac = None(EthernetMacInfo);
     PlicInterruptControllerInfo plic = PlicInterruptControllerInfo__new(

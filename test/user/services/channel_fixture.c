@@ -216,8 +216,8 @@ Result(Queue) Queue__attach_existing(QueueConnectionID id)
     {
         return Error(Queue, bstr("Invalid connection"), QUEUE_INVALID);
     }
-    IpcDoorbellPtr peer = current_pid == transport->identity.client_pid ? &transport->server_doorbell
-                                                                        : &transport->client_doorbell;
+    IpcDoorbellPtr peer =
+        current_pid == transport->identity.client_pid ? &transport->server_doorbell : &transport->client_doorbell;
     return Queue__attach(&transport->identity, &transport->client, &transport->server, id, current_pid, peer,
                          &ChannelFixture__record_notification);
 }

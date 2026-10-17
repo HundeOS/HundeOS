@@ -46,8 +46,7 @@ void test_sysinfo_renders_configuration_readable_by_existing_drivers(void)
     BootDeviceInfo rtc_device = BootDeviceInfo__new(0x9010000, 4096, 34);
     hardware.rtc = Some(BootRtcInfo, BootRtcInfo__new(&rtc_device, RTC_KIND_PL031));
     BootDeviceInfo sd_device = BootDeviceInfo__new(0x4310000, 0x1000, 36);
-    hardware.sd_host =
-        Some(BootSdHostInfo, BootSdHostInfo__new(&sd_device, SD_HOST_KIND_CV181X, 375000000));
+    hardware.sd_host = Some(BootSdHostInfo, BootSdHostInfo__new(&sd_device, SD_HOST_KIND_CV181X, 375000000));
     uint8_t data[FILESYSTEM_FILE_CAPACITY + 1] = {0};
     match_result(
         Sysinfofs__render(&hardware, data),

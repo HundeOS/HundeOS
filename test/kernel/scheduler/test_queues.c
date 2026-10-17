@@ -268,8 +268,7 @@ void test_privileged_service_delegates_authenticated_client_to_direct_channel(vo
         success_do_nothing(),
         error_test_fail()
     );
-    match_result(
-        Queues__listen(queues, server, &bstr("direct-channel")),
+    match_result(Queues__listen(queues, server, &bstr("direct-channel")),
         success_do_nothing(),
         error_test_fail()
     );
@@ -283,7 +282,8 @@ void test_privileged_service_delegates_authenticated_client_to_direct_channel(vo
             TEST_ASSERT_TRUE(Queue__is_channel(&direct));
             TEST_ASSERT_EQUAL_UINT64(client->pid, Queue__local_pid(&direct));
             TEST_ASSERT_EQUAL_UINT64(server->pid, Queue__peer_pid(&direct));
-            match_result(Queues__cancel_delegation(queues, server, control, connection),
+            match_result(
+                Queues__cancel_delegation(queues, server, control, connection),
                 success(code)
                 {
                     TEST_ASSERT_EQUAL(QUEUE_OK, code);
@@ -937,7 +937,6 @@ static void assert_notification_pokes_runnable_receiver(ProcessState state)
         error_test_fail()
     );
     TEST_ASSERT_EQUAL(state, remote_server->state);
-
 }
 
 void test_queue_notification_pokes_interrupted_receiver_with_live_unread_data(void)

@@ -475,7 +475,8 @@ Result(SystemCallResult)
                                         __d_printf(FAULT,
                                                    "interrupt manager rejected PLIC physical=0x%x target_hart=%i "
                                                    "maximum_target_hart=%i mapping_size=0x%x\n",
-                                                   physical_address, target_hart_id, maximum_target_hart_id, mapping_size);
+                                                   physical_address, target_hart_id, maximum_target_hart_id,
+                                                   mapping_size);
                                         IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, process);
                                         return Error(SystemCallResult, unsupported_operation, SERVICE_MAP_FAILED);
                                     }
@@ -497,8 +498,7 @@ Result(SystemCallResult)
                                         request->distributor = distributor.virtual_addr;
                                         if (system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC)
                                         {
-                                            request->distributor +=
-                                                target_hart_id * SERVICE_PLIC_ENABLE_HART_STRIDE;
+                                            request->distributor += target_hart_id * SERVICE_PLIC_ENABLE_HART_STRIDE;
                                         }
                                         match_result(
                                             Scheduler__promote_realtime(kernel->scheduler, process),

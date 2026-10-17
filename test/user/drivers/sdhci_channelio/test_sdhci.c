@@ -643,9 +643,8 @@ void test_sdhci_bootstrap_command_failure_uses_bootstrap_syslog(void)
     TEST_ASSERT_EQUAL_HEX32(SDHCI_PRESENT_CARD_INSERTED | SDHCI_PRESENT_CMD_INHIBIT, result.failure_state);
     TEST_ASSERT_EQUAL_HEX8(SDHCI_RESET_CMD, fake_host.software_reset);
     TEST_ASSERT_EQUAL_STRING("SDHCI", fake_log_tag);
-    TEST_ASSERT_EQUAL_STRING(
-        "bootstrap command failed cmd=%u phase=%s arg=0x%x state=0x%x status=0x%x recovered=%i",
-        fake_log_format);
+    TEST_ASSERT_EQUAL_STRING("bootstrap command failed cmd=%u phase=%s arg=0x%x state=0x%x status=0x%x recovered=%i",
+                             fake_log_format);
 }
 
 void test_sdhci_clock_divisor_uses_extended_sdhci_v3_encoding(void)
@@ -656,16 +655,14 @@ void test_sdhci_clock_divisor_uses_extended_sdhci_v3_encoding(void)
 
 void test_sdhci_setup_host_initializes_cv181x_vendor_registers(void)
 {
-    SdhciDevice device =
-        SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, SD_HOST_KIND_CV181X, 375000000,
-                         &bstr(SDHCI_DEVICE_PATH));
+    SdhciDevice device = SdhciDevice__new(&fake_mapping, &fake_host, FAKE_SD_HOST_IRQ, SD_HOST_KIND_CV181X, 375000000,
+                                          &bstr(SDHCI_DEVICE_PATH));
 
     TEST_ASSERT_TRUE(Sdhci__setup_host(&device));
     TEST_ASSERT_EQUAL_HEX32(CV181X_MSHC_CTRL_DEFAULT, fake_host.vendor_mshc_control);
     TEST_ASSERT_EQUAL_HEX32(CV181X_PHY_CONFIG_ENABLE, fake_host.vendor_phy_config);
     TEST_ASSERT_EQUAL_HEX32(CV181X_PHY_TX_RX_DLY_DEFAULT, fake_host.vendor_phy_tx_rx_delay);
-    TEST_ASSERT_EQUAL_HEX16(0xd540 | SDHCI_CLOCK_INTERNAL_ENABLE | SDHCI_CLOCK_SD_ENABLE,
-                            fake_host.clock_control);
+    TEST_ASSERT_EQUAL_HEX16(0xd540 | SDHCI_CLOCK_INTERNAL_ENABLE | SDHCI_CLOCK_SD_ENABLE, fake_host.clock_control);
     TEST_ASSERT_EQUAL_UINT64(5000, fake_sleep_usec);
 }
 
@@ -733,7 +730,6 @@ void test_sdhci_recovers_command_and_data_lines_after_read_timeout(void)
     TEST_ASSERT_EQUAL_UINT8(SDHCI_RESET_CMD | SDHCI_RESET_DATA, fake_host.software_reset);
     TEST_ASSERT_TRUE(fake_logged);
     TEST_ASSERT_EQUAL_STRING("SDHCI", fake_log_tag);
-    TEST_ASSERT_EQUAL_STRING(
-        "bootstrap read failed phase=%s block=%llu count=%llu state=0x%x status=0x%x recovered=%i",
-        fake_log_format);
+    TEST_ASSERT_EQUAL_STRING("bootstrap read failed phase=%s block=%llu count=%llu state=0x%x status=0x%x recovered=%i",
+                             fake_log_format);
 }

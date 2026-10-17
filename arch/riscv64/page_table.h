@@ -66,8 +66,7 @@ static inline RiscVPageTableEntry RiscVPageTableEntry__leaf(Address physical_add
                                                             ConstRiscVPagePermissionsPtr permissions,
                                                             uint64_t memory_attributes)
 {
-    RiscVPageTableEntry entry =
-        (physical_address >> 2U) | RISCV_PTE_VALID | RISCV_PTE_ACCESSED | memory_attributes;
+    RiscVPageTableEntry entry = (physical_address >> 2U) | RISCV_PTE_VALID | RISCV_PTE_ACCESSED | memory_attributes;
     if (permissions->read || permissions->write)
     {
         entry |= RISCV_PTE_READ;

@@ -28,6 +28,7 @@ struct ExecLoad
     bool wait;
     bool pending;
     bool route_final;
+    bool loading_interpreter;
     uint64_t redirects;
     ExecLoadPhase phase;
     IOHandle handle;
@@ -39,10 +40,10 @@ struct ExecLoad
     size_t size;
 };
 
-Result(ProcessPtr) ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,
-                                   OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
-                                   ConstSpawnStdioPtr stdio, OptionalPtr(KernelAddress) abort_report, bool overlay,
-                                   KernelAddress overlay_payload);
+Result(ProcessPtr)
+    ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait, OptionalPtr(UserID) user,
+                    ConstProcessArgumentsPtr arguments, ConstSpawnStdioPtr stdio,
+                    OptionalPtr(KernelAddress) abort_report, bool overlay, KernelAddress overlay_payload);
 Result(ProcessPtr) ExecLoad__continue(ProcessPtr process);
 bool ExecLoad__ready(ProcessPtr process);
 void ExecLoad__cancel(ProcessPtr process);

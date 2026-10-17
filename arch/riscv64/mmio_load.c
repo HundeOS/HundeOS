@@ -40,14 +40,12 @@ static Optional(RiscVMMIOLoad) RiscVMMIOLoad__standard(uint32_t instruction, Pro
     uint32_t base_register = (instruction >> 15U) & 0x1fU;
     uint32_t immediate = instruction >> 20U;
     int64_t offset = (int64_t)(immediate | ((immediate & 0x800U) != 0 ? 0xfffffffffffff000ULL : 0ULL));
-    RiscVMMIOLoad load =
-        RiscVMMIOLoad__new(RiscVMMIOLoad__address(context, base_register, offset), destination_register, width,
-                           sign_extend, sizeof(uint32_t));
+    RiscVMMIOLoad load = RiscVMMIOLoad__new(RiscVMMIOLoad__address(context, base_register, offset),
+                                            destination_register, width, sign_extend, sizeof(uint32_t));
     return Some(RiscVMMIOLoad, load);
 }
 
-static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_register(uint16_t instruction,
-                                                                  ProcessContextPtr context)
+static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_register(uint16_t instruction, ProcessContextPtr context)
 {
     uint32_t operation = instruction >> 13U;
     uint32_t destination_register = 8U + ((instruction >> 2U) & 0x7U);
@@ -74,8 +72,7 @@ static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_register(uint16_t instr
     }
 
     RiscVMMIOLoad load = RiscVMMIOLoad__new(RiscVMMIOLoad__address(context, base_register, offset),
-                                             destination_register, width, width == sizeof(uint32_t),
-                                             sizeof(uint16_t));
+                                            destination_register, width, width == sizeof(uint32_t), sizeof(uint16_t));
     return Some(RiscVMMIOLoad, load);
 }
 
@@ -110,8 +107,8 @@ static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_stack(uint16_t instruct
         return None(RiscVMMIOLoad);
     }
 
-    RiscVMMIOLoad load = RiscVMMIOLoad__new(RiscVMMIOLoad__address(context, 2U, offset), destination_register,
-                                             width, width == sizeof(uint32_t), sizeof(uint16_t));
+    RiscVMMIOLoad load = RiscVMMIOLoad__new(RiscVMMIOLoad__address(context, 2U, offset), destination_register, width,
+                                            width == sizeof(uint32_t), sizeof(uint16_t));
     return Some(RiscVMMIOLoad, load);
 }
 

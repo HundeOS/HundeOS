@@ -7,15 +7,122 @@ dynamically linked programs, and components loaded by `hunde-io-host` and
 `hunde-treiber-host`. Host modules use standard ELF `ET_DYN` objects; they are
 not a project-specific binary format.
 
-The implementation does not exist yet. The current kernel executable loader
-accepts static `ET_EXEC` images and rejects `PT_INTERP` and `PT_DYNAMIC`.
-Ordinary userspace page allocation produces read/write, non-executable memory
-and does not provide the fixed mapping and permission-finalization operations a
-secure userspace loader requires.
+HundeOS shared libraries use the `.wuff` suffix. ABI-major versions follow the
+suffix: libc's first runtime `SONAME` is `libc.wuff.1`, with `libc.wuff` as its
+native link-time name. The development sysroot may expose `libc.so` as a
+linker-only alias so conventional `-lc` and upstream configure tests continue to
+work; runtime dependencies record `libc.wuff.1`. The suffix does not change ELF
+format or dynamic-section semantics.
+
+The build can produce PIC `libc.wuff.1` objects for AArch64 and RISC-V with
+`make sysroot-wuff-all`; the normal sysroot remains statically linked. RISC-V
+uses LLVM LLD for `.wuff` output because the bare-metal GNU linker does not
+support shared objects. `make wuff-smoke-all` produces dependency-free test
+objects for both architectures. `make wuff-dynamic-smoke-all` produces a PIE
+executable for each architecture with `/sbin/wuff-ld` as its interpreter and
+`libc.wuff.1` as its runtime dependency.
+
+`/usr/local/bin/cat` is the first ordinary dynamically linked command. The disk
+root stages `libc.wuff.1` in `/usr/lib`, and the command records only that
+runtime dependency. `/sbin/wuff-ld` and early bootstrap services remain
+statically linked: the interpreter, filesystem path to `/usr/lib`, and the I/O
+services needed to read it must exist before dynamic loading can begin. Other
+commands remain static while migration proceeds command by command. Existing
+full-system coverage exercises the pilot's raw and formatted reads on both
+architectures.
+
+The reusable userspace loader validates and maps ELF64 `ET_DYN` objects, reads
+SysV hash-backed symbol and string tables, resolves dependency graphs and
+imports, and applies the AArch64 and RISC-V relocations emitted by the current
+libc build. It supports `RELATIVE`, absolute 64-bit, AArch64 `GLOB_DAT`, and both
+architectures' `JUMP_SLOT` relocations, including RELA PLT tables. It finalizes
+each load region as RX, RO, or RW, then makes `PT_GNU_RELRO` pages read-only and
+rolls back the complete graph on failure. It has injected memory and dependency
+operations for hosted tests and syscall-backed memory operations for HundeOS.
+The initial filesystem dependency provider accepts only plain `DT_NEEDED` names,
+loads them from `/usr/lib`, limits each image to 16 MiB, and releases its file
+buffer as soon as the ELF loader has copied the loadable content. The loader
+also validates a nonzero ELF entry against an executable mapping and exposes the
+root entry to an interpreter. A graph root may contain exactly one bounded
+`PT_INTERP` naming `/sbin/wuff-ld`; dependencies and the single-object loader
+reject interpreters. Constructors and TLS remain unsupported.
+
+The current PIE smoke executables use SysV hash, string and symbol tables,
+`DT_NEEDED`, PLT metadata, immediate binding flags, and AArch64 or RISC-V
+`JUMP_SLOT` relocations. The `cat` pilot additionally emits `RELATIVE` and
+AArch64 `GLOB_DAT` or RISC-V absolute 64-bit relocations. Their load contract
+includes `PT_DYNAMIC` and GNU RELRO. Build checks reject text relocations, TLS
+segments, initialization and finalization tags, a different interpreter or
+dependency, and any relocation outside each executable's reviewed architecture
+set. The reusable loader ignores non-operational linker metadata but validates
+and uses the tables that affect loading. New emitted metadata is reviewed before
+the contract expands.
+
+The kernel executable loader maps static `ET_EXEC` images directly. It also
+recognizes the constrained dynamic executable contract described below and
+redirects accepted images through the static interpreter. Ordinary userspace
+page allocation produces read/write, non-executable memory. The memory syscall
+interface also provides aligned allocation, exact-address allocation, and
+page-aligned permission replacement within dynamic-loader mappings.
 
 Filesystem and library search policy remains in userspace. The kernel provides
 validated address-space operations and enforces mapping permissions; it does not
 resolve libraries, symbols, dependencies, or driver names.
+
+`WuffLoader__load_graph` receives a named root image and an injected dependency
+provider. The provider owns path construction, filesystem access, and library
+search policy; the reusable ELF layer requests exact `DT_NEEDED` names and
+requires the returned image name to match. A successful provider load transfers
+ownership of the image to the graph loader. The loader invokes the provider's
+release operation after preparation on both success and failure; mapped objects
+never retain pointers into provider buffers. Objects are appended in
+breadth-first dependency order and repeated names are loaded once, so cycles
+terminate without special-case graph edges. The root object is first in the
+global lookup scope, followed by its breadth-first dependencies. The first
+visible global or weak definition wins. Hidden and internal symbols are not
+exported, protected and hidden definitions bind locally, and an unresolved weak
+import binds to zero. Any missing strong import, provider failure, malformed
+object, relocation error, or permission failure disposes every mapping
+accumulated by the graph.
+
+## Initial library search
+
+The interpreter and hosts use the filesystem provider for the initial runtime
+policy. A dependency name must be nonempty and contain no `/`; the provider
+constructs `/usr/lib/<name>` and reads exactly the size reported by
+`hund-io-system`. Direct paths, relative paths, the current directory, RPATH,
+RUNPATH, and `LD_LIBRARY_PATH` are not searched. `LD_LIBRARY_PATH` may be added
+later in the userspace interpreter, but it is not part of bootstrap linking and
+will require rules for privileged or capability-bearing programs.
+
+## Interpreter integration
+
+The initial interpreter is a statically linked `/sbin/wuff-ld`. The kernel only
+parses enough `PT_INTERP` metadata to select it: a dynamically linked executable
+must contain exactly one bounded NUL-terminated interpreter path equal to
+`/sbin/wuff-ld` and a `PT_DYNAMIC` segment. The interpreter itself must not have
+`PT_INTERP`. The kernel does not load dependencies or apply dynamic relocations.
+
+For an accepted dynamic executable, exec replaces the requested image with the
+static interpreter while preserving the original executable path, argv, envp,
+working directory, inherited I/O description payload, and process identity. The
+interpreter reopens the original executable through `hund-io-system`, loads its
+graph, and transfers control to the validated root entry using HundeOS's
+existing register startup ABI. Constructors remain deferred. Its private startup
+path must not claim inherited POSIX I/O descriptions; the target program's
+ordinary `_start` does that exactly once after control is transferred.
+
+The interpreter binary is present in the embedded `/sbin` filesystem. Its
+private startup initializes libc process state without claiming inherited I/O,
+resolves the preserved executable path against the preserved working directory,
+reopens the root image through `hund-io-system`, loads the dependency graph, and
+transfers the original startup ABI values to the validated root entry. Kernel
+exec classifies the requested image before mapping it. An accepted dynamic image
+is discarded, `/sbin/wuff-ld` is fetched through a fresh `hund-io-system`
+channel, and that static image is launched under the requested program's name.
+Overlay exec retains its existing payload for the interpreter and target;
+ordinary spawn retains the requested path in `argv[0]` and has the existing
+empty environment and root working directory.
 
 ## Loader boundary
 
@@ -36,12 +143,22 @@ The reusable userspace loader must:
   final permissions are installed; and
 - roll back mappings, references, and partially initialized objects on failure.
 
-The kernel memory interface therefore needs page-aligned fixed or suitably
-aligned allocation, permission reduction or replacement, unmapping, and the
-architecture-required instruction synchronization boundary. Authorization must
-prevent ordinary writable memory from becoming executable contrary to process
-policy. These mechanisms are address-space primitives, not filesystem or module
-selection policy.
+The loader allocates each ELF load region separately. It obtains
+the load base with `MEM_ALLOC_ALIGNED_PAGES`, places later regions with
+`MEM_ALLOC_PAGES_AT`, and finalizes each complete allocation with
+`MEM_PROTECT_PAGES`. Regions begin RW/NX and may become inaccessible, RO, RW, or
+RX; no RWX permission exists. Exact-address mappings fail on any collision, and
+protection may split a dynamic allocation's mapping metadata without splitting
+ownership of its backing allocation. Executable transitions synchronize
+instruction memory through the architecture implementation before publishing
+the executable mapping. Whole-object `MEM_FREE_PAGES` supports rollback.
+
+Separate per-process mapping ranges track page permissions while one allocation
+record retains ownership of each backing allocation. Partial protection splits
+only the mapping ranges; free and process-exit cleanup still release the backing
+allocation once, and fork reproduces the split permissions in the child. These
+mechanisms are address-space primitives, not filesystem or module-selection
+policy.
 
 The loader is a userspace library shared by the program interpreter and both
 hosts. Hosts add component policy and ABI validation around it rather than

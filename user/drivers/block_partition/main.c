@@ -47,13 +47,11 @@ static BlockPartitionEntry BlockPartitionEntry__new(uint8_t type, BlockProtocolB
 
 static uint32_t BlockPartition__read_u32(const uint8_t * bytes)
 {
-    return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8U) | ((uint32_t)bytes[2] << 16U) |
-           ((uint32_t)bytes[3] << 24U);
+    return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8U) | ((uint32_t)bytes[2] << 16U) | ((uint32_t)bytes[3] << 24U);
 }
 
-static Optional(BlockPartitionEntry)
-    BlockPartition__entry(const uint8_t * mbr, size_t size, uint64_t partition_index,
-                          BlockProtocolBlockCount parent_block_count)
+static Optional(BlockPartitionEntry) BlockPartition__entry(const uint8_t * mbr, size_t size, uint64_t partition_index,
+                                                           BlockProtocolBlockCount parent_block_count)
 {
     if (size != BLOCK_PARTITION_MBR_SIZE || partition_index == 0 || partition_index > BLOCK_PARTITION_COUNT ||
         mbr[510] != 0x55 || mbr[511] != 0xaa)
@@ -62,8 +60,7 @@ static Optional(BlockPartitionEntry)
     }
 
     size_t offset = BLOCK_PARTITION_TABLE_OFFSET + (partition_index - 1U) * BLOCK_PARTITION_ENTRY_SIZE;
-    BlockPartitionEntry entry = BlockPartitionEntry__new(mbr[offset + 4U],
-                                                         BlockPartition__read_u32(mbr + offset + 8U),
+    BlockPartitionEntry entry = BlockPartitionEntry__new(mbr[offset + 4U], BlockPartition__read_u32(mbr + offset + 8U),
                                                          BlockPartition__read_u32(mbr + offset + 12U));
     if (entry.type == 0 || entry.block_count == 0 || entry.first_block >= parent_block_count ||
         entry.block_count > parent_block_count - entry.first_block)
@@ -85,13 +82,11 @@ static BlockProtocolStatus BlockPartition__transfer(BlockServerContext context, 
         return BLOCK_PROTOCOL_INVALID_ARGUMENT;
     }
 
-    Result(BlockProtocolBlockCount) transferred = operation == BLOCK_PROTOCOL_READ
-                                                       ? BlockClient__read(&self->parent, self->first_block + block,
-                                                                           count, buffer->address,
-                                                                           count * BLOCK_CHANNEL_SECTOR_SIZE)
-                                                       : BlockClient__write(&self->parent, self->first_block + block,
-                                                                            count, buffer->address,
-                                                                            count * BLOCK_CHANNEL_SECTOR_SIZE);
+    Result(BlockProtocolBlockCount) transferred =
+        operation == BLOCK_PROTOCOL_READ ? BlockClient__read(&self->parent, self->first_block + block, count,
+                                                             buffer->address, count * BLOCK_CHANNEL_SECTOR_SIZE)
+                                         : BlockClient__write(&self->parent, self->first_block + block, count,
+                                                              buffer->address, count * BLOCK_CHANNEL_SECTOR_SIZE);
     match_result(
         transferred,
         success(blocks)

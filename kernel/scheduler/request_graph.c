@@ -85,8 +85,7 @@ static Optional(RequestLink) QueueConnection__request_link(QueueConnectionPtr se
         },
         none()
         {
-            match_optional(
-                self->kernel_origin,
+            match_optional(self->kernel_origin,
                 some(value)
                 {
                     caller = value;
@@ -114,8 +113,8 @@ static Optional(RequestLink) QueueConnection__request_link(QueueConnectionPtr se
         some(publication)
         {
             RequestTicket completed = ChannelControlMessage__ticket(&publication.message);
-            replied = publication.message.kind == CHANNEL_RESPONSE_REPLIED &&
-                      RequestTicket__equals(&ticket, &completed);
+            replied =
+                publication.message.kind == CHANNEL_RESPONSE_REPLIED && RequestTicket__equals(&ticket, &completed);
             QueuePagePtr client_page = (QueuePagePtr)(self->memory.kernel_addr.virtual_addr + QUEUE_PAGE_SIZE);
             if (replied && publication.cursor == __atomic_load_n(&client_page->consumed, __ATOMIC_ACQUIRE))
             {

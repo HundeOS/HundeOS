@@ -36,9 +36,8 @@ void test_kernel_trace_buffer_overwrites_oldest_bytes(void)
     KernelTraceBuffer__append(&buffer, initial);
     KernelTraceBuffer__append(&buffer, "bc");
 
-    TEST_ASSERT_EQUAL_UINT64(
-        KERNEL_TRACE_CAPACITY,
-        unwrap_result(KernelTraceBuffer__snapshot(&buffer, snapshot, sizeof(snapshot)), 0));
+    TEST_ASSERT_EQUAL_UINT64(KERNEL_TRACE_CAPACITY,
+                             unwrap_result(KernelTraceBuffer__snapshot(&buffer, snapshot, sizeof(snapshot)), 0));
     TEST_ASSERT_EQUAL_UINT8('a', snapshot[0]);
     TEST_ASSERT_EQUAL_UINT8('a', snapshot[KERNEL_TRACE_CAPACITY - 3U]);
     TEST_ASSERT_EQUAL_UINT8('b', snapshot[KERNEL_TRACE_CAPACITY - 2U]);

@@ -353,17 +353,22 @@ void test_riscv_device_tree_discovers_milkv_duo_platform_without_qemu_devices(vo
     TEST_ASSERT_EQUAL_UINT64(0, result.platform.virtio_mmio_count);
     TEST_ASSERT_EQUAL_UINT64(0, result.platform.pci_ecam_size);
 
-    RiscVKernelLayout layout = RiscVKernelLayout__new(MemoryRegion__new(0x80200000, 0x80200000, 0x80400000),
-                                                      MemoryRegion__new(0x80400000, 0x80400000, 0x80600000),
-                                                      MemoryRegion__new(0x80600000, 0x80600000, 0x83e00000),
-                                                      MemoryRegion__new(0x83e00000, 0x83e00000, 0x83f00000));
+    RiscVKernelLayout layout = RiscVKernelLayout__new(
+        MemoryRegion__new(0x80200000, 0x80200000, 0x80400000), MemoryRegion__new(0x80400000, 0x80400000, 0x80600000),
+        MemoryRegion__new(0x80600000, 0x80600000, 0x83e00000), MemoryRegion__new(0x83e00000, 0x83e00000, 0x83f00000));
     SystemInfo info = RiscVPlatformInfo__system_info(&result.platform, &layout, 0);
     TEST_ASSERT_EQUAL_HEX64(0x04140000, info.trace_uart.physical_base);
     TEST_ASSERT_EQUAL_UINT64(2, info.trace_uart.register_shift);
     TEST_ASSERT_EQUAL_UINT64(4, info.trace_uart.register_width);
     TEST_ASSERT_EQUAL_HEX64(info.trace_uart.physical_base, info.console_uart.physical_base);
-    match_optional(info.virtio_mmio, some_test_fail(), none_do_nothing());
-    match_optional(info.pci, some_test_fail(), none_do_nothing());
+    match_optional(info.virtio_mmio,
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_optional(info.pci,
+        some_test_fail(),
+        none_do_nothing()
+    );
     match_optional(
         info.sd_host,
         some(sd_host)
@@ -381,8 +386,7 @@ void test_riscv_device_tree_discovers_milkv_duo_platform_without_qemu_devices(vo
 void test_riscv_device_tree_discovers_milkv_duo_s_sd_host(void)
 {
     FdtFixture fixture = FdtFixture__new();
-    RiscVDeviceTreeResult result =
-        RiscVDeviceTree__parse(FdtFixture__milkv_duo(&fixture, "cvitek,cv181x-sd"));
+    RiscVDeviceTreeResult result = RiscVDeviceTree__parse(FdtFixture__milkv_duo(&fixture, "cvitek,cv181x-sd"));
 
     TEST_ASSERT_EQUAL(RISCV_DEVICE_TREE_OK, result.status);
     TEST_ASSERT_EQUAL_HEX64(0x04310000, result.platform.sd_host_base);

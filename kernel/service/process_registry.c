@@ -19,8 +19,8 @@ Result(ServiceCode) KernelProcessRegistry__map_process(KernelProcessRegistryPtr 
             if (!self->mapping.valid)
             {
                 match_result(
-                    Kernel__try_alloc_user_aligned(PROCESS_REGISTRY_VADDR, PROCESS_REGISTRY_SIZE, _2MB, true, false,
-                                                   false),
+                    Kernel__try_alloc_user_aligned(PROCESS_REGISTRY_VADDR, PROCESS_REGISTRY_SIZE, _2MB,
+                                                   true, false, false),
                     success(mapping)
                     {
                         Kernel__memset(mapping.kernel_addr.virtual_addr, 0, PROCESS_REGISTRY_SIZE);

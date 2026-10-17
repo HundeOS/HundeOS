@@ -312,8 +312,8 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
     );
     match_result(
         Scheduler__queue_wait(kernel->scheduler, manager,
-                              IpcEvent__generation(IpcDoorbell__event(k_v_ptr(
-                                  unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
+                              IpcEvent__generation(IpcDoorbell__event(
+                                  k_v_ptr(unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
                               QUEUE_WAIT_INDEFINITE_TICKS),
         success(status)
         {
@@ -370,16 +370,16 @@ void test_irq_dispatcher_does_not_poke_current_cpu_from_kernel_el(void)
     );
     match_result(IRQDispatcher__register_manager(kernel->irq_dispatcher, manager),
         success_do_nothing(),
-        error_test_fail()
+                 error_test_fail()
     );
     match_result(IRQDispatcher__register_managed_irq(kernel->irq_dispatcher, 48, manager),
         success_do_nothing(),
-        error_test_fail()
+                 error_test_fail()
     );
     match_result(
         Scheduler__queue_wait(kernel->scheduler, manager,
-                              IpcEvent__generation(IpcDoorbell__event(k_v_ptr(
-                                  unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
+                              IpcEvent__generation(IpcDoorbell__event(
+                                  k_v_ptr(unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
                               QUEUE_WAIT_INDEFINITE_TICKS),
         success(status)
         {
@@ -422,8 +422,8 @@ void test_irq_dispatcher_pokes_remote_cpu_for_parked_interrupt_manager(void)
     );
     match_result(
         Scheduler__queue_wait(kernel->scheduler, manager,
-                              IpcEvent__generation(IpcDoorbell__event(k_v_ptr(
-                                  unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
+                              IpcEvent__generation(IpcDoorbell__event(
+                                  k_v_ptr(unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
                               QUEUE_WAIT_INDEFINITE_TICKS),
         success(status)
         {

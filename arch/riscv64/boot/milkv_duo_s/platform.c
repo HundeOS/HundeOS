@@ -84,10 +84,8 @@ RISCV_BOOT_TEXT void RiscVBootPlatform__prepare_hardware(void)
         return;
     }
 
-    RiscVBootPlatform__write32(DUO_S_PINMUX_BASE + DUO_S_PINMUX_UART1_TX_OFFSET,
-                               DUO_S_PINMUX_UART1_FUNCTION);
-    RiscVBootPlatform__write32(DUO_S_PINMUX_BASE + DUO_S_PINMUX_UART1_RX_OFFSET,
-                               DUO_S_PINMUX_UART1_FUNCTION);
+    RiscVBootPlatform__write32(DUO_S_PINMUX_BASE + DUO_S_PINMUX_UART1_TX_OFFSET, DUO_S_PINMUX_UART1_FUNCTION);
+    RiscVBootPlatform__write32(DUO_S_PINMUX_BASE + DUO_S_PINMUX_UART1_RX_OFFSET, DUO_S_PINMUX_UART1_FUNCTION);
     RiscVBootPlatform__configure_uart1();
     __asm__ volatile("fence iorw, iorw" ::: "memory");
 }
@@ -102,10 +100,9 @@ void RiscVBootPlatform__configure_system_info(SystemInfoPtr info)
     else if (RISCV_PLATFORM_CONFIGURE_UART1)
     {
         info->trace_uart = UartInfo__new(DUO_S_UART1_BASE, RISCV_HIGHER_HALF_OFFSET + DUO_S_UART1_BASE,
-                                        DUO_S_UART1_SIZE, DUO_S_UART1_IRQ, UART_KIND_NS16550, 2, 4);
+                                         DUO_S_UART1_SIZE, DUO_S_UART1_IRQ, UART_KIND_NS16550, 2, 4);
     }
-    info->console_uart = UartInfo__new(RISCV_PLATFORM_CONSOLE_UART_BASE,
-                                      RISCV_HIGHER_HALF_OFFSET + RISCV_PLATFORM_CONSOLE_UART_BASE,
-                                      DUO_S_UART1_SIZE, RISCV_PLATFORM_CONSOLE_UART_IRQ,
-                                      UART_KIND_NS16550, 2, 4);
+    info->console_uart =
+        UartInfo__new(RISCV_PLATFORM_CONSOLE_UART_BASE, RISCV_HIGHER_HALF_OFFSET + RISCV_PLATFORM_CONSOLE_UART_BASE,
+                      DUO_S_UART1_SIZE, RISCV_PLATFORM_CONSOLE_UART_IRQ, UART_KIND_NS16550, 2, 4);
 }

@@ -330,8 +330,7 @@ static inline size_t SystemInfo__default_user_stack_size(void)
 
 static inline size_t SystemInfo__user_stack_size(SystemInfoPtr self)
 {
-    return self->default_user_stack_size == 0 ? SystemInfo__default_user_stack_size()
-                                              : self->default_user_stack_size;
+    return self->default_user_stack_size == 0 ? SystemInfo__default_user_stack_size() : self->default_user_stack_size;
 }
 
 static inline SystemInfo SystemInfo__new()

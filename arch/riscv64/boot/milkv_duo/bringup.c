@@ -48,8 +48,7 @@ static void MilkVDuoUart__put_hex(uint64_t value)
 static uint32_t MilkVDuoBringup__read_big_endian_u32(uint64_t address)
 {
     const volatile uint8_t * bytes = (const volatile uint8_t *)address;
-    return ((uint32_t)bytes[0] << 24U) | ((uint32_t)bytes[1] << 16U) | ((uint32_t)bytes[2] << 8U) |
-           (uint32_t)bytes[3];
+    return ((uint32_t)bytes[0] << 24U) | ((uint32_t)bytes[1] << 16U) | ((uint32_t)bytes[2] << 8U) | (uint32_t)bytes[3];
 }
 
 void MilkVDuoBringup__main(uint64_t hart_id, uint64_t device_tree)

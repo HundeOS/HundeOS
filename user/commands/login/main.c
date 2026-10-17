@@ -34,9 +34,8 @@ int LOGIN_ENTRYPOINT(void)
             if (SpawnAbortReport__is_present(abort_report))
             {
                 IO__printf(&bstr("login: bash fault reason=%llu cause=0x%llx pc=0x%llx address=0x%llx\n"),
-                           (unsigned long long)abort_report.reason,
-                           (unsigned long long)abort_report.exception_code, (unsigned long long)abort_report.pc,
-                           (unsigned long long)abort_report.fault_address);
+                           (unsigned long long)abort_report.reason, (unsigned long long)abort_report.exception_code,
+                           (unsigned long long)abort_report.pc, (unsigned long long)abort_report.fault_address);
             }
             return 1;
         }

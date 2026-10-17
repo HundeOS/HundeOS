@@ -126,6 +126,11 @@ void PageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address virtua
     MemoryAccounting__unmap(&kernel->memory_accounting, ProcessPageTable__root(self).virtual_addr, start, end - start);
 }
 
+void PageTable__protect(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    ArchPageTable__protect(self, kernel, address, size);
+}
+
 Result(KAllocCode) ProcessPageTable__dispose(ProcessPageTablePtr self, KernelPtr kernel)
 {
     Address space = ProcessPageTable__root(self).virtual_addr;

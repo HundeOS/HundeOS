@@ -13,25 +13,99 @@ FixedArrayBodyDefine(SectionHeaderArray);
 FixedArrayBodyDefine(ProgramHeaderArray);
 FixedArrayBodyDefine(ExpandedSegmentArray);
 
-Result(Elf) Elf__validate(ConstElfPtr self)
+static bool Elf__valid_header(ConstElfPtr self)
 {
-    BString invalid = bstr("Invalid executable image");
     if (self->end < self->start || self->end - self->start < sizeof(Elf64Header))
     {
-        return Error(Elf, invalid, -1);
+        return false;
     }
     uint64_t size = self->end - self->start;
     ConstElf64HeaderPtr header = Elf__read_header(self);
     if (header->magic[0] != 0x7f || header->magic[1] != 'E' || header->magic[2] != 'L' || header->magic[3] != 'F' ||
         header->klass != 2 || header->endianness != LittleEndian || header->ei_version != 1 ||
-        header->elf_version != 1 || header->type != Executable || header->machine != Arch__elf_machine() ||
+        header->elf_version != 1 || header->machine != Arch__elf_machine() ||
         header->header_size != sizeof(Elf64Header) || header->program_header_entry_size != sizeof(ProgramHeader) ||
         header->program_header_entries == 0 || header->program_header_entries > ProgramHeaderArray__max_size ||
         header->program_header_offset % _Alignof(ProgramHeader) != 0 || header->program_header_offset > size ||
         header->program_header_entries > (size - header->program_header_offset) / sizeof(ProgramHeader))
     {
+        return false;
+    }
+    return true;
+}
+
+Result(ElfImageKind) Elf__image_kind(ConstElfPtr self)
+{
+    BString invalid = bstr("Invalid executable image");
+    if (!Elf__valid_header(self))
+    {
+        return Error(ElfImageKind, invalid, -1);
+    }
+    ConstElf64HeaderPtr header = Elf__read_header(self);
+    if (header->type == Executable)
+    {
+        match_result(
+            Elf__validate(self),
+            success_do_nothing(),
+            error(code, message)
+            {
+                return Error(ElfImageKind, message, code);
+            }
+        );
+        return Success(ElfImageKind, ELF_IMAGE_STATIC);
+    }
+    if (header->type != Shared)
+    {
+        return Error(ElfImageKind, invalid, -1);
+    }
+    uint64_t size = self->end - self->start;
+    unsigned interpreter_count = 0;
+    unsigned dynamic_count = 0;
+    ProgramHeaderArray headers = Elf__read_program_headers(self);
+    for_each_fa(
+        ProgramHeaderArray,
+        headers,
+        index,
+        segment,
+        {
+            if (segment->type == Dynamic)
+            {
+                dynamic_count++;
+            }
+            if (segment->type != Interpreter)
+            {
+                continue;
+            }
+            interpreter_count++;
+            if (segment->segment_offset > size || segment->file_size > size - segment->segment_offset ||
+                segment->file_size != sizeof(WUFF_INTERPRETER_PATH) || segment->memory_size < segment->file_size)
+            {
+                return Error(ElfImageKind, invalid, -1);
+            }
+            const char * path_chars = ptr(self->start + segment->segment_offset, char);
+            BString path = BString__from_chars(path_chars, segment->file_size - 1);
+            if (path_chars[segment->file_size - 1] != '\0' || !BString__equals(&path, &bstr(WUFF_INTERPRETER_PATH)))
+            {
+                return Error(ElfImageKind, invalid, -1);
+            }
+        }
+    );
+    if (interpreter_count != 1 || dynamic_count == 0)
+    {
+        return Error(ElfImageKind, invalid, -1);
+    }
+    return Success(ElfImageKind, ELF_IMAGE_DYNAMIC);
+}
+
+Result(Elf) Elf__validate(ConstElfPtr self)
+{
+    BString invalid = bstr("Invalid executable image");
+    if (!Elf__valid_header(self) || Elf__read_header(self)->type != Executable)
+    {
         return Error(Elf, invalid, -1);
     }
+    uint64_t size = self->end - self->start;
+    ConstElf64HeaderPtr header = Elf__read_header(self);
     ProgramHeaderArray headers = Elf__read_program_headers(self);
     bool entry_found = false;
     uint64_t memory = 0;
@@ -205,6 +279,7 @@ static UserAddress Elf__explode(ConstElfPtr self, ProgramHeaderPtr header)
     {
         Arch__sync_instruction_memory(address.kernel_addr.virtual_addr, header->file_size);
     }
+
     return page_address;
 }
 

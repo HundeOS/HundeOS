@@ -120,10 +120,10 @@ KernelAddress PageTable__from_virtual_address(KernelPtr kernel, Address virtual_
 }
 
 static int PageTable__map_4k_page_with_publish(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
-                                              Address phys_addr, ConstMappingPermissionsPtr perms, bool publish);
+                                               Address phys_addr, ConstMappingPermissionsPtr perms, bool publish);
 static int PageTable__map_4k_page_with_cursor(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
-                                             Address phys_addr, ConstMappingPermissionsPtr perms, bool publish,
-                                             PageTableMapCursorPtr cursor);
+                                              Address phys_addr, ConstMappingPermissionsPtr perms, bool publish,
+                                              PageTableMapCursorPtr cursor);
 
 void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
@@ -131,7 +131,7 @@ void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress 
 }
 
 static Result(KAllocCode) ArchPageTable__try_map_with_publish(ProcessPageTablePtr self, KernelPtr kernel,
-                                                             UserAddress address, size_t size, bool publish)
+                                                              UserAddress address, size_t size, bool publish)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address user_end = align_up_4k(vaddr(address) + size);
@@ -273,6 +273,15 @@ void ArchPageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address vi
     }
 }
 
+void ArchPageTable__protect(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    ArchPageTable__unmap(self, kernel, address.virtual_addr, size);
+    if (address.read || address.write || address.execute)
+    {
+        ArchPageTable__map(self, kernel, address, size);
+    }
+}
+
 /**
  * ensure_next_level_table - Get (or create) the next-level page table for a slot.
  *
@@ -391,8 +400,8 @@ int PageTable__map_2M_block(ProcessPageTablePtr self, KernelPtr kernel, uint64_t
 }
 
 static int PageTable__map_4k_page_with_cursor(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
-                                             Address phys_addr, ConstMappingPermissionsPtr perms, bool publish,
-                                             PageTableMapCursorPtr cursor)
+                                              Address phys_addr, ConstMappingPermissionsPtr perms, bool publish,
+                                              PageTableMapCursorPtr cursor)
 {
     KernelAddress table = ProcessPageTable__root(self);
     if (!table.valid)
@@ -403,8 +412,7 @@ static int PageTable__map_4k_page_with_cursor(ProcessPageTablePtr self, KernelPt
     uint64_t level_0_index = L0_IDX(virtual_address);
     if (!cursor->level_1.valid || cursor->level_0_index != level_0_index)
     {
-        cursor->level_1 =
-            PageTable__ensure_next_level_table(self, table, kernel, level_0_index, publish);
+        cursor->level_1 = PageTable__ensure_next_level_table(self, table, kernel, level_0_index, publish);
         cursor->level_0_index = level_0_index;
         cursor->level_2 = NULL_KERNEL_ADDRESS;
         cursor->level_3 = NULL_KERNEL_ADDRESS;
@@ -417,8 +425,7 @@ static int PageTable__map_4k_page_with_cursor(ProcessPageTablePtr self, KernelPt
     uint64_t level_1_index = L1_IDX(virtual_address);
     if (!cursor->level_2.valid || cursor->level_1_index != level_1_index)
     {
-        cursor->level_2 =
-            PageTable__ensure_next_level_table(self, cursor->level_1, kernel, level_1_index, publish);
+        cursor->level_2 = PageTable__ensure_next_level_table(self, cursor->level_1, kernel, level_1_index, publish);
         cursor->level_1_index = level_1_index;
         cursor->level_3 = NULL_KERNEL_ADDRESS;
         if (!cursor->level_2.valid)
@@ -430,8 +437,7 @@ static int PageTable__map_4k_page_with_cursor(ProcessPageTablePtr self, KernelPt
     uint64_t level_2_index = L2_IDX(virtual_address);
     if (!cursor->level_3.valid || cursor->level_2_index != level_2_index)
     {
-        cursor->level_3 =
-            PageTable__ensure_next_level_table(self, cursor->level_2, kernel, level_2_index, publish);
+        cursor->level_3 = PageTable__ensure_next_level_table(self, cursor->level_2, kernel, level_2_index, publish);
         cursor->level_2_index = level_2_index;
         if (!cursor->level_3.valid)
         {
@@ -445,7 +451,7 @@ static int PageTable__map_4k_page_with_cursor(ProcessPageTablePtr self, KernelPt
 }
 
 static int PageTable__map_4k_page_with_publish(ProcessPageTablePtr self, KernelPtr kernel, Address virtual_address,
-                                              Address phys_addr, ConstMappingPermissionsPtr perms, bool publish)
+                                               Address phys_addr, ConstMappingPermissionsPtr perms, bool publish)
 {
     PageTableMapCursor cursor = PageTableMapCursor__new();
     return PageTable__map_4k_page_with_cursor(self, kernel, virtual_address, phys_addr, perms, publish, &cursor);
@@ -476,8 +482,7 @@ static bool PageTable__prepare_block_mapping(ProcessPageTablePtr self, KernelPtr
         {
             return false;
         }
-        if (!block &&
-            !PageTable__ensure_next_level_table(self, level_2, kernel, L2_IDX(current), true).valid)
+        if (!block && !PageTable__ensure_next_level_table(self, level_2, kernel, L2_IDX(current), true).valid)
         {
             return false;
         }

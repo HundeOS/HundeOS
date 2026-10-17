@@ -61,8 +61,7 @@ void test_echo_rejects_oversized_direct_request(void)
     Queue__wait_writable(&direct);
 
     QueueMessage request =
-        ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, CHANNEL_PAYLOAD_CAPACITY,
-                                   Queue__connection(&direct));
+        ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, CHANNEL_PAYLOAD_CAPACITY, Queue__connection(&direct));
     ChannelFixture__push(&direct, &request);
     QueueMessage reply = ChannelFixture__receive(&direct);
     TEST_ASSERT_EQUAL(CHANNEL_RESPONSE_FAILED, reply.kind);

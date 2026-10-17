@@ -170,8 +170,7 @@ void setUp(void)
     directory.entries[2].name = bstr(TEST_BACKEND_SERVICE);
     fixture_listener_available = true;
     current_pid = 8;
-    TEST_ASSERT_EQUAL(IO_OK,
-                      IOService__listen_into(&service, &bstr(IO_SYSTEM_SERVICE), 0, execute, disconnect));
+    TEST_ASSERT_EQUAL(IO_OK, IOService__listen_into(&service, &bstr(IO_SYSTEM_SERVICE), 0, execute, disconnect));
     fixture_server_step = serve;
     current_pid = 42;
     sessions = IOClientSessions__new();

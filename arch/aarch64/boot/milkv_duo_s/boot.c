@@ -71,8 +71,9 @@ __BOOT_DATA__(static BootPlatformInfo) milkv_duo_s_platform_info;
 __BOOT_DATA__(static SystemInfo) milkv_duo_s_system_info;
 
 __BOOT__(void)
+
 BootPlatform__set_entry_args(uint64_t dtb, uint64_t argument1, uint64_t argument2, uint64_t argument3,
-                            uint64_t argument4)
+                             uint64_t argument4)
 {
 }
 
@@ -101,8 +102,7 @@ static __BOOT__(void) MilkVDuoS__configure_uart1(void)
     MilkVDuoS__write32(DUO_S_PINMUX_BASE + DUO_S_PINMUX_UART1_RX_OFFSET, DUO_S_PINMUX_UART1_FUNCTION);
     MilkVDuoS__write32(MilkVDuoS__uart1_register(DUO_S_UART_INTERRUPT_ENABLE), 0);
     MilkVDuoS__write32(DUO_S_UART1_PHYSICAL_BASE + DUO_S_UART_DIVISOR_FRACTION_OFFSET, UINT32_MAX);
-    uint32_t fraction_mask =
-        MilkVDuoS__read32(DUO_S_UART1_PHYSICAL_BASE + DUO_S_UART_DIVISOR_FRACTION_OFFSET);
+    uint32_t fraction_mask = MilkVDuoS__read32(DUO_S_UART1_PHYSICAL_BASE + DUO_S_UART_DIVISOR_FRACTION_OFFSET);
     MilkVDuoS__write32(DUO_S_UART1_PHYSICAL_BASE + DUO_S_UART_DIVISOR_FRACTION_OFFSET, 0);
 
     uint32_t fraction = 0;
@@ -119,8 +119,7 @@ static __BOOT__(void) MilkVDuoS__configure_uart1(void)
 
     MilkVDuoS__write32(MilkVDuoS__uart1_register(DUO_S_UART_LINE_CONTROL), DUO_S_UART_LINE_CONTROL_DLAB);
     MilkVDuoS__write32(MilkVDuoS__uart1_register(DUO_S_UART_RECEIVE_BUFFER), integer_divisor & 0xffU);
-    MilkVDuoS__write32(MilkVDuoS__uart1_register(DUO_S_UART_INTERRUPT_ENABLE),
-                       (integer_divisor >> 8U) & 0xffU);
+    MilkVDuoS__write32(MilkVDuoS__uart1_register(DUO_S_UART_INTERRUPT_ENABLE), (integer_divisor >> 8U) & 0xffU);
     MilkVDuoS__write32(DUO_S_UART1_PHYSICAL_BASE + DUO_S_UART_DIVISOR_FRACTION_OFFSET, fraction);
     MilkVDuoS__write32(MilkVDuoS__uart1_register(DUO_S_UART_LINE_CONTROL), DUO_S_UART_LINE_CONTROL_8N1);
     MilkVDuoS__write32(MilkVDuoS__uart1_register(DUO_S_UART_FIFO_CONTROL), DUO_S_UART_FIFO_ENABLE_AND_CLEAR);
@@ -142,8 +141,8 @@ static __BOOT__(void) MilkVDuoS__init_system_info(void)
     milkv_duo_s_platform_info.framebuffer = None(FramebufferInfo);
     milkv_duo_s_platform_info.pci = None(PciInfo);
     milkv_duo_s_platform_info.sd_host =
-        Some(SdHostInfo, SdHostInfo__new(DUO_S_SDHCI_PHYSICAL_BASE, 0x1000, DUO_S_SDHCI_IRQ,
-                                         SD_HOST_KIND_CV181X, 375000000));
+        Some(SdHostInfo,
+             SdHostInfo__new(DUO_S_SDHCI_PHYSICAL_BASE, 0x1000, DUO_S_SDHCI_IRQ, SD_HOST_KIND_CV181X, 375000000));
     milkv_duo_s_platform_info.ethernet_mac = None(EthernetMacInfo);
     milkv_duo_s_platform_info.interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V2;
     milkv_duo_s_platform_info.gic_distributor_physical_base = DUO_S_GICD_PHYSICAL_BASE;
@@ -168,9 +167,8 @@ static __BOOT__(void) MilkVDuoS__init_system_info(void)
         MemoryRegion__new((uint64_t)&__text_virt, (uint64_t)&__text_phys, (uint64_t)&__lma_end);
     milkv_duo_s_system_info.kernel_heap =
         MemoryRegion__new((uint64_t)&__heap_start[0], (uint64_t)&__heap_start_phys[0], DUO_S_MEMORY_END);
-    milkv_duo_s_system_info.kernel_stack =
-        MemoryRegion__new((uint64_t)&__k_stack_start[0], (uint64_t)&__k_stack_phys_start[0],
-                          (uint64_t)&__k_stack_phys_end[0]);
+    milkv_duo_s_system_info.kernel_stack = MemoryRegion__new(
+        (uint64_t)&__k_stack_start[0], (uint64_t)&__k_stack_phys_start[0], (uint64_t)&__k_stack_phys_end[0]);
     milkv_duo_s_system_info.embedded_binaries =
         MemoryRegion__new((uint64_t)&__embedded_binaries_start[0], (uint64_t)&__embedded_binaries_phys_start[0],
                           (uint64_t)&__embedded_binaries_phys_end[0]);
@@ -178,12 +176,10 @@ static __BOOT__(void) MilkVDuoS__init_system_info(void)
         MemoryRegion__new((uint64_t)&__mmio_start[0], DUO_S_MMIO_PHYSICAL_BASE,
                           DUO_S_MMIO_PHYSICAL_BASE + ((uint64_t)&__mmio_end[0] - (uint64_t)&__mmio_start[0]));
 
-    milkv_duo_s_system_info.trace_uart =
-        UartInfo__new(DUO_S_UART1_PHYSICAL_BASE, DUO_S_UART1_VIRTUAL_BASE, 0x1000, DUO_S_UART1_IRQ,
-                      UART_KIND_NS16550, 2, 4);
-    milkv_duo_s_system_info.console_uart =
-        UartInfo__new(DUO_S_UART0_PHYSICAL_BASE, DUO_S_UART0_VIRTUAL_BASE, 0x1000, DUO_S_UART0_IRQ,
-                      UART_KIND_NS16550, 2, 4);
+    milkv_duo_s_system_info.trace_uart = UartInfo__new(DUO_S_UART1_PHYSICAL_BASE, DUO_S_UART1_VIRTUAL_BASE, 0x1000,
+                                                       DUO_S_UART1_IRQ, UART_KIND_NS16550, 2, 4);
+    milkv_duo_s_system_info.console_uart = UartInfo__new(DUO_S_UART0_PHYSICAL_BASE, DUO_S_UART0_VIRTUAL_BASE, 0x1000,
+                                                         DUO_S_UART0_IRQ, UART_KIND_NS16550, 2, 4);
     milkv_duo_s_system_info.virtio_mmio = None(BootVirtioMmioInfo);
     milkv_duo_s_system_info.framebuffer = None(FramebufferInfo);
     milkv_duo_s_system_info.pci = None(PciInfo);
@@ -193,10 +189,8 @@ static __BOOT__(void) MilkVDuoS__init_system_info(void)
     milkv_duo_s_system_info.realtime_clock = None(RealtimeClockSample);
 
     GicInterruptControllerInfo gic = GicInterruptControllerInfo__new(
-        DUO_S_GICD_PHYSICAL_BASE, DUO_S_GICD_VIRTUAL_BASE, 0, 0, DUO_S_GICC_PHYSICAL_BASE,
-        DUO_S_GICC_VIRTUAL_BASE);
-    milkv_duo_s_system_info.interrupt_controller =
-        InterruptControllerInfo__new_gic(INTERRUPT_CONTROLLER_GIC_V2, &gic);
+        DUO_S_GICD_PHYSICAL_BASE, DUO_S_GICD_VIRTUAL_BASE, 0, 0, DUO_S_GICC_PHYSICAL_BASE, DUO_S_GICC_VIRTUAL_BASE);
+    milkv_duo_s_system_info.interrupt_controller = InterruptControllerInfo__new_gic(INTERRUPT_CONTROLLER_GIC_V2, &gic);
 }
 
 static __BOOT__(void) MilkVDuoS__enter_kernel(uint64_t cpu)
@@ -225,9 +219,7 @@ __BOOT__(void) primary_booted(void)
     enable_fp_simd();
     enable_tbi_for_kernel();
     enable_mmu();
-#ifdef __BOOT_DEBUG
     debug_boot_hardware_mappings(&milkv_duo_s_system_info);
-#endif
     CPU__set_boot_id(cpu);
     _send('1');
     MilkVDuoS__enter_kernel(cpu);

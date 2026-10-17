@@ -231,7 +231,7 @@ static bool Exception__emulate_mmio_store(ProcessContextPtr context)
                                 RiscVMMIOStore__perform(&store, access_address, context);
                                 __asm__ volatile("fence iorw, iorw" ::: "memory");
                                 RiscVMMIOStore__skip_following_fence(Exception__user_instruction(context->sepc),
-                                                                    context);
+                                                                     context);
                                 return true;
                             }
                         },

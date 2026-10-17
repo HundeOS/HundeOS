@@ -84,8 +84,7 @@ Result(OptionalChannelServerRequest) ChannelServer__poll(ChannelServerPtr self)
             RequestTicket ticket = ChannelControlMessage__ticket(&message);
             if (message.kind != CHANNEL_REQUEST_SUBMIT || message.arg0 != 0 ||
                 message.arg1 >= CHANNEL_PAYLOAD_CAPACITY || message.arg2 != Queue__connection(&self->control) ||
-                message.arg3 != 0 ||
-                !RequestTicket__valid(&ticket) ||
+                message.arg3 != 0 || !RequestTicket__valid(&ticket) ||
                 (self->ticket.connection == ticket.connection &&
                  self->ticket.metadata.generation >= ticket.metadata.generation))
             {

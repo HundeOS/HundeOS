@@ -106,8 +106,7 @@ static bool QueueWait__wait(IpcEventGeneration observed)
 {
     QueueWait__arm_control(observed);
     IODiagnostics__record(IO_DIAGNOSTIC_WAIT_ENTRIES, 1);
-    SystemCallResult result =
-        syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, observed, QUEUE_WAIT_INDEFINITE_TICKS, 0, 0);
+    SystemCallResult result = syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, observed, QUEUE_WAIT_INDEFINITE_TICKS, 0, 0);
     QueueWait__complete_control();
     return (int64_t)result != SYSCALL_INTERRUPTED;
 }
@@ -116,8 +115,7 @@ void Queue__prepare_wait(void)
 {
     QueueWait__register_control();
     QueueWait__clear_control();
-    prepared_doorbell_generation =
-        IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
+    prepared_doorbell_generation = IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
     prepared = true;
 }
 
@@ -134,8 +132,7 @@ bool Queue__wait_readable_interruptible(QueuePtr self)
 {
     while (true)
     {
-        IpcEventGeneration observed =
-            IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
+        IpcEventGeneration observed = IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
         QueueCode status = Queue__status(self);
         if (status == QUEUE_CLOSED || Queue__has_unread_messages(self))
         {
@@ -152,8 +149,7 @@ bool Queue__wait_writable_interruptible(QueuePtr self)
 {
     while (true)
     {
-        IpcEventGeneration observed =
-            IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
+        IpcEventGeneration observed = IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
         if (Queue__has_write_capacity(self))
         {
             return true;
@@ -179,8 +175,7 @@ void QueueArrivals__wait(QueueArrivalsPtr self, QueueEpoch observed_epoch)
 {
     while (QueueArrivals__epoch(self) == observed_epoch)
     {
-        IpcEventGeneration observed =
-            IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
+        IpcEventGeneration observed = IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
         if (QueueArrivals__epoch(self) != observed_epoch || !QueueWait__wait(observed))
         {
             return;

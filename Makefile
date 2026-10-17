@@ -9,6 +9,9 @@ ARCH_USER_CFLAGS = -mcmodel=small -march=armv8-a -mno-outline-atomics
 ARCH_ASFLAGS = -mcmodel=small
 OBJCOPY_BINARY_FORMAT = elf64-littleaarch64
 OBJCOPY_BINARY_ARCH = aarch64
+WUFF_JUMP_SLOT_RELOCATION = R_AARCH64_JUMP_SLOT
+WUFF_CAT_RELOCATIONS = R_AARCH64_RELATIVE R_AARCH64_GLOB_DAT R_AARCH64_JUMP_SLOT
+WUFF_PROGRAM_LINK_FLAGS = --version-script=$(WUFF_PROGRAM_VERSION_SCRIPT)
 else ifeq ($(ARCH),riscv64)
 CROSS_COMPILE ?= riscv64-elf-
 BASH_HOST = riscv64-unknown-hunde
@@ -17,6 +20,9 @@ ARCH_USER_CFLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei_zawrs -mabi=lp
 ARCH_ASFLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei_zawrs -mabi=lp64 -mno-relax -msmall-data-limit=0
 OBJCOPY_BINARY_FORMAT = elf64-littleriscv
 OBJCOPY_BINARY_ARCH = riscv
+WUFF_JUMP_SLOT_RELOCATION = R_RISCV_JUMP_SLOT
+WUFF_CAT_RELOCATIONS = R_RISCV_RELATIVE R_RISCV_64 R_RISCV_JUMP_SLOT
+WUFF_PROGRAM_LINK_FLAGS =
 else
 $(error Unsupported ARCH '$(ARCH)')
 endif
@@ -27,10 +33,18 @@ LD = $(CROSS_COMPILE)gcc
 AR = $(CROSS_COMPILE)ar
 RANLIB = $(CROSS_COMPILE)ranlib
 NM = $(CROSS_COMPILE)nm
+READELF = $(CROSS_COMPILE)readelf
 RAW_LD = $(CROSS_COMPILE)ld
 OBJCOPY = $(CROSS_COMPILE)objcopy
 DTC ?= dtc
 LZMA ?= xz
+
+ifeq ($(ARCH),riscv64)
+WUFF_LD ?= ld.lld
+else
+WUFF_LD ?= $(RAW_LD)
+endif
+WUFF_LIBGCC = $(shell $(CC) -print-libgcc-file-name)
 
 UNITY_PATH=vendor/Unity
 BOOT_PLATFORM ?= qemu_virt
@@ -103,6 +117,18 @@ NEWLIB_LIBC_ARCHIVE = $(NEWLIB_LIB_DIR)/libc.a
 NEWLIB_LIBC_SELECTED_DIR = $(PLATFORM_BUILD_ROOT)/newlib/libc-selected
 NEWLIB_LIBC_SELECTED_STAMP = $(NEWLIB_LIBC_SELECTED_DIR)/.extracted
 NEWLIB_LIBC_VERIFY_OBJECT = $(NEWLIB_LIBC_SELECTED_DIR)/selected.o
+NEWLIB_PIC_BUILD_DIR = $(abspath $(PLATFORM_BUILD_ROOT)/newlib-pic/build)
+NEWLIB_PIC_INSTALL_DIR = $(abspath $(PLATFORM_BUILD_ROOT)/newlib-pic/install)
+NEWLIB_PIC_INSTALL_PREFIX = $(NEWLIB_PIC_INSTALL_DIR)/usr/$(NEWLIB_TARGET)
+NEWLIB_PIC_INCLUDE_DIR = $(NEWLIB_PIC_INSTALL_PREFIX)/include
+NEWLIB_PIC_LIB_DIR = $(NEWLIB_PIC_INSTALL_PREFIX)/lib
+NEWLIB_PIC_CONFIGURE_STAMP = $(NEWLIB_PIC_BUILD_DIR)/.configured
+NEWLIB_PIC_INSTALL_STAMP = $(NEWLIB_PIC_INSTALL_DIR)/.installed
+NEWLIB_PIC_CFLAGS = -O2 -ffreestanding -fPIC -fno-stack-protector $(ARCH_USER_CFLAGS)
+NEWLIB_PIC_LIBC_ARCHIVE = $(NEWLIB_PIC_LIB_DIR)/libc.a
+NEWLIB_PIC_LIBC_SELECTED_DIR = $(PLATFORM_BUILD_ROOT)/newlib-pic/libc-selected
+NEWLIB_PIC_LIBC_SELECTED_STAMP = $(NEWLIB_PIC_LIBC_SELECTED_DIR)/.extracted
+NEWLIB_PIC_LIBC_VERIFY_OBJECT = $(NEWLIB_PIC_LIBC_SELECTED_DIR)/selected.o
 NEWLIB_LIBC_MEMBERS = \
 	libc_a-bcopy.o \
 	libc_a-ctype_.o \
@@ -132,6 +158,7 @@ NEWLIB_LIBC_MEMBERS = \
 	libc_a-strtoul.o \
 	libc_a-strtoull.o
 NEWLIB_LIBC_OBJECTS = $(addprefix $(NEWLIB_LIBC_SELECTED_DIR)/,$(NEWLIB_LIBC_MEMBERS))
+NEWLIB_PIC_LIBC_OBJECTS = $(addprefix $(NEWLIB_PIC_LIBC_SELECTED_DIR)/,$(NEWLIB_LIBC_MEMBERS))
 NEWLIB_LIBC_ALLOWED_UNDEFINED = __errno _impure_ptr
 ifeq ($(COMPILE_COMMANDS),1)
 NEWLIB_INSTALL_PREREQUISITE =
@@ -366,6 +393,20 @@ USER_HUNDE_OBJECTS := $(COMMON_USER_OBJECTS) \
 	$(filter-out $(USER_CRT_OBJECT) $(USER_LIBC_C_OBJECTS),$(USER_LIB_OBJECTS)) \
 	$(filter-out $(USER_LIBC_ASM_OBJECTS),$(USER_LIB_ASM_OBJECTS))
 
+USER_PIC_BUILD_DIR := $(PLATFORM_BUILD_ROOT)/user-pic
+USER_PIC_CFLAGS := $(filter-out -fno-pic -fno-pie,$(USER_CFLAGS)) -fPIC
+USER_PIC_ASFLAGS := $(filter-out -fno-pic -fno-pie,$(USER_ASFLAGS)) -fPIC
+USER_LIB_PIC_OBJECTS := $(patsubst ./user/%,$(USER_PIC_BUILD_DIR)/%,$(USER_LIB_SOURCES:.c=.o))
+USER_LIB_PIC_ASM_OBJECTS := $(patsubst ./user/%,$(USER_PIC_BUILD_DIR)/%,$(USER_LIB_ASM_SOURCES:.s=.o))
+COMMON_USER_PIC_OBJECTS := $(patsubst ./common/%.c,$(USER_PIC_BUILD_DIR)/common/%.o,$(COMMON_SOURCES) $(COMMON_ARCH_SOURCES))
+USER_CRT_PIC_OBJECT := $(USER_PIC_BUILD_DIR)/lib/arch/$(ARCH)/start.o
+USER_LIBC_PIC_C_OBJECTS := $(patsubst ./user/%,$(USER_PIC_BUILD_DIR)/%,$(USER_LIBC_SOURCES:.c=.o))
+USER_LIBC_PIC_ASM_OBJECTS := $(USER_PIC_BUILD_DIR)/lib/arch/$(ARCH)/setjmp.o
+USER_LIBC_PIC_OBJECTS := $(USER_LIBC_PIC_C_OBJECTS) $(USER_LIBC_PIC_ASM_OBJECTS)
+USER_HUNDE_PIC_OBJECTS := $(COMMON_USER_PIC_OBJECTS) \
+	$(filter-out $(USER_CRT_PIC_OBJECT) $(USER_LIBC_PIC_C_OBJECTS),$(USER_LIB_PIC_OBJECTS)) \
+	$(filter-out $(USER_LIBC_PIC_ASM_OBJECTS),$(USER_LIB_PIC_ASM_OBJECTS))
+
 SYSROOT_DIR := $(PLATFORM_BUILD_ROOT)/sysroot
 SYSROOT_INCLUDE_DIR := $(SYSROOT_DIR)/usr/include
 SYSROOT_LIB_DIR := $(SYSROOT_DIR)/usr/lib
@@ -375,23 +416,41 @@ SYSROOT_LIBC := $(SYSROOT_LIB_DIR)/libc.a
 SYSROOT_LIBHUNDE := $(SYSROOT_LIB_DIR)/libhunde.a
 SYSROOT_LIBM := $(SYSROOT_LIB_DIR)/libm.a
 SYSROOT_FILES := $(SYSROOT_INCLUDE_STAMP) $(SYSROOT_CRT) $(SYSROOT_LIBC) $(SYSROOT_LIBHUNDE) $(SYSROOT_LIBM)
+SYSROOT_WUFF_LIBC := $(SYSROOT_LIB_DIR)/libc.wuff.1
+SYSROOT_WUFF_LIBC_LINK := $(SYSROOT_LIB_DIR)/libc.wuff
+SYSROOT_WUFF_LINK_DIR := $(SYSROOT_LIB_DIR)/wuff
+SYSROOT_WUFF_LIBC_COMPAT := $(SYSROOT_WUFF_LINK_DIR)/libc.so
+SYSROOT_WUFF_FILES := $(SYSROOT_WUFF_LIBC) $(SYSROOT_WUFF_LIBC_LINK) $(SYSROOT_WUFF_LIBC_COMPAT)
 SYSROOT_SMOKE_SOURCE := user/ports/bash/sysroot_smoke.c
 SYSROOT_SMOKE_OBJECT := $(BUILD_ROOT)/sysroot-smoke/sysroot_smoke.o
 SYSROOT_SMOKE_BINARY := $(BUILD_ROOT)/sysroot-smoke/sysroot_smoke.bin
+WUFF_SMOKE_SOURCE := user/ports/wuff_smoke.c
+WUFF_SMOKE_OBJECT := $(PLATFORM_BUILD_ROOT)/wuff-smoke/wuff_smoke.o
+WUFF_SMOKE_BINARY := $(PLATFORM_BUILD_ROOT)/wuff-smoke/wuff-smoke.wuff
+WUFF_DYNAMIC_SMOKE_SOURCE := user/ports/wuff_dynamic_smoke.c
+WUFF_DYNAMIC_SMOKE_OBJECT := $(PLATFORM_BUILD_ROOT)/wuff-dynamic-smoke/wuff_dynamic_smoke.o
+WUFF_DYNAMIC_SMOKE_BINARY := $(PLATFORM_BUILD_ROOT)/wuff-dynamic-smoke/wuff-dynamic-smoke.bin
+WUFF_PROGRAM_VERSION_SCRIPT := user/ports/wuff_program.map
 
 USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
 USER_RETIRED_BINARY_DIRS := user/commands/shell
 USER_BINARY_DIRS := $(filter-out $(USER_RETIRED_BINARY_DIRS),$(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)))
+WUFF_INTERPRETER_DIR := user/programs/wuff-ld
+WUFF_DYNAMIC_COMMAND_DIRS := user/commands/cat
+USER_STANDARD_BINARY_DIRS := $(filter-out $(WUFF_INTERPRETER_DIR) $(WUFF_DYNAMIC_COMMAND_DIRS),$(USER_BINARY_DIRS))
 USER_DRIVER_DIRS := $(filter user/drivers/%,$(USER_BINARY_DIRS))
 USER_SERVICE_DIRS := $(filter user/services/%,$(USER_BINARY_DIRS))
 USER_NON_DRIVER_DIRS := $(filter-out $(USER_DRIVER_DIRS) $(USER_SERVICE_DIRS),$(USER_BINARY_DIRS))
 USER_BINARIES := $(patsubst %,$(USER_BUILD_DIR)/%.bin,$(notdir $(USER_BINARY_DIRS)))
+WUFF_INTERPRETER_SOURCES := $(wildcard $(WUFF_INTERPRETER_DIR)/*.c)
+WUFF_INTERPRETER_OBJECTS := $(patsubst user/%.c,$(USER_BUILD_DIR)/%.o,$(WUFF_INTERPRETER_SOURCES))
+WUFF_INTERPRETER_BINARY := $(USER_BUILD_DIR)/wuff-ld.bin
 ROOTFS_COMMAND_NAMES := cat cp env fs-latency grep kill ln ls mkdir mv ps rm shutdown tail write
 ROOTFS_COMMAND_DIRS := $(wildcard $(addprefix user/commands/,$(ROOTFS_COMMAND_NAMES)))
 ROOTFS_COMMAND_BINARIES := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
 OPENBSD_CAT_SOURCE := vendor/openbsd/src/bin/cat/cat.c
-OPENBSD_CAT_OBJECT := $(USER_BUILD_DIR)/vendor/openbsd/bin/cat/cat.o
-cat_EXTRA_OBJS := $(OPENBSD_CAT_OBJECT)
+OPENBSD_CAT_OBJECT := $(USER_PIC_BUILD_DIR)/vendor/openbsd/bin/cat/cat.o
+OPENBSD_CAT_BINARY := $(USER_BUILD_DIR)/cat.bin
 OPENBSD_CP_SOURCES := $(wildcard vendor/openbsd/src/bin/cp/*.c)
 OPENBSD_CP_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_CP_SOURCES))
 OPENBSD_CP_BINARY := $(USER_BUILD_DIR)/cp.bin
@@ -454,7 +513,14 @@ EMBEDDED_FS := $(TARGET_BUILD_DIR)/kernel/embedded.fs
 
 all: $(BIN)
 
-.PHONY: sysroot sysroot-all sysroot-smoke sysroot-smoke-all
+.PHONY: check-wuff-linker sysroot sysroot-all sysroot-wuff sysroot-wuff-all sysroot-smoke sysroot-smoke-all \
+	wuff-smoke wuff-smoke-all wuff-dynamic-smoke wuff-dynamic-smoke-all
+
+check-wuff-linker:
+	@command -v $(WUFF_LD) >/dev/null 2>&1 || { \
+		echo "Missing .wuff linker: $(WUFF_LD)" >&2; \
+		exit 1; \
+	}
 
 sysroot: $(SYSROOT_FILES)
 
@@ -462,11 +528,29 @@ sysroot-all:
 	$(MAKE) ARCH=aarch64 sysroot
 	$(MAKE) ARCH=riscv64 sysroot
 
+sysroot-wuff: $(SYSROOT_FILES) $(SYSROOT_WUFF_FILES)
+
+sysroot-wuff-all:
+	$(MAKE) ARCH=aarch64 sysroot-wuff
+	$(MAKE) ARCH=riscv64 sysroot-wuff
+
 sysroot-smoke: $(SYSROOT_SMOKE_BINARY)
 
 sysroot-smoke-all:
 	$(MAKE) ARCH=aarch64 sysroot-smoke
 	$(MAKE) ARCH=riscv64 sysroot-smoke
+
+wuff-smoke: $(WUFF_SMOKE_BINARY)
+
+wuff-smoke-all:
+	$(MAKE) ARCH=aarch64 wuff-smoke
+	$(MAKE) ARCH=riscv64 wuff-smoke
+
+wuff-dynamic-smoke: $(WUFF_DYNAMIC_SMOKE_BINARY)
+
+wuff-dynamic-smoke-all:
+	$(MAKE) ARCH=aarch64 wuff-dynamic-smoke
+	$(MAKE) ARCH=riscv64 wuff-dynamic-smoke
 
 $(NEWLIB_CONFIGURE_STAMP): user/lib/newlib/configure.sh vendor/newlib/README.md vendor/newlib/src/configure
 	mkdir -p $(NEWLIB_BUILD_DIR)
@@ -477,6 +561,18 @@ $(NEWLIB_CONFIGURE_STAMP): user/lib/newlib/configure.sh vendor/newlib/README.md 
 $(NEWLIB_INSTALL_STAMP): $(NEWLIB_CONFIGURE_STAMP)
 	$(MAKE) -C $(NEWLIB_BUILD_DIR) all-target-newlib
 	$(MAKE) -C $(NEWLIB_BUILD_DIR) install-target-newlib DESTDIR=$(NEWLIB_INSTALL_DIR)
+	touch $@
+
+$(NEWLIB_PIC_CONFIGURE_STAMP): user/lib/newlib/configure.sh vendor/newlib/README.md vendor/newlib/src/configure Makefile
+	rm -rf $(NEWLIB_PIC_BUILD_DIR) $(NEWLIB_PIC_INSTALL_DIR)
+	mkdir -p $(NEWLIB_PIC_BUILD_DIR)
+	cd $(NEWLIB_PIC_BUILD_DIR) && sh $(abspath user/lib/newlib/configure.sh) \
+		$(NEWLIB_VENDOR_DIR) $(NEWLIB_TARGET) "$(NEWLIB_PIC_CFLAGS)"
+	touch $@
+
+$(NEWLIB_PIC_INSTALL_STAMP): $(NEWLIB_PIC_CONFIGURE_STAMP)
+	$(MAKE) -C $(NEWLIB_PIC_BUILD_DIR) all-target-newlib
+	$(MAKE) -C $(NEWLIB_PIC_BUILD_DIR) install-target-newlib DESTDIR=$(NEWLIB_PIC_INSTALL_DIR)
 	touch $@
 
 $(NEWLIB_LIBC_SELECTED_STAMP): $(NEWLIB_INSTALL_PREREQUISITE) Makefile
@@ -500,6 +596,31 @@ $(NEWLIB_LIBC_VERIFY_OBJECT): $(NEWLIB_LIBC_OBJECTS) Makefile
 		case " $(NEWLIB_LIBC_ALLOWED_UNDEFINED) " in \
 			*" $$symbol "*) ;; \
 			*) echo "Newlib libc selection has unapproved dependency $$symbol" >&2; exit 1 ;; \
+		esac; \
+	done
+
+$(NEWLIB_PIC_LIBC_SELECTED_STAMP): $(NEWLIB_PIC_INSTALL_STAMP) Makefile
+	rm -rf $(NEWLIB_PIC_LIBC_SELECTED_DIR)
+	mkdir -p $(NEWLIB_PIC_LIBC_SELECTED_DIR)
+	for member in $(NEWLIB_LIBC_MEMBERS); do \
+		count=`$(AR) t $(NEWLIB_PIC_LIBC_ARCHIVE) | awk -v expected=$$member '$$0 == expected { count++ } END { print count + 0 }'`; \
+		if [ "$$count" -ne 1 ]; then \
+			echo "Newlib PIC libc member $$member occurs $$count times; expected exactly once" >&2; \
+			exit 1; \
+		fi; \
+	done
+	cd $(NEWLIB_PIC_LIBC_SELECTED_DIR) && $(AR) x $(NEWLIB_PIC_LIBC_ARCHIVE) $(NEWLIB_LIBC_MEMBERS)
+	touch $@
+
+$(NEWLIB_PIC_LIBC_OBJECTS): $(NEWLIB_PIC_LIBC_SELECTED_STAMP)
+	test -f $@
+
+$(NEWLIB_PIC_LIBC_VERIFY_OBJECT): $(NEWLIB_PIC_LIBC_OBJECTS) Makefile
+	$(RAW_LD) -r -o $@ $(NEWLIB_PIC_LIBC_OBJECTS)
+	for symbol in `$(NM) -u $@ | awk '{ print $$2 }'`; do \
+		case " $(NEWLIB_LIBC_ALLOWED_UNDEFINED) " in \
+		*" $$symbol "*) ;; \
+		*) echo "Newlib PIC libc selection has unapproved dependency $$symbol" >&2; exit 1 ;; \
 		esac; \
 	done
 
@@ -539,6 +660,26 @@ $(SYSROOT_LIBM): $(NEWLIB_INSTALL_PREREQUISITE)
 	mkdir -p `dirname $@`
 	cp $(NEWLIB_LIB_DIR)/libm.a $@
 
+$(SYSROOT_WUFF_LIBC): $(USER_LIBC_PIC_OBJECTS) $(USER_HUNDE_PIC_OBJECTS) $(NEWLIB_PIC_LIBC_OBJECTS) \
+		$(NEWLIB_PIC_LIBC_VERIFY_OBJECT) | check-wuff-linker
+	mkdir -p `dirname $@`
+	$(WUFF_LD) -shared -soname libc.wuff.1 --hash-style=sysv -z defs -z now -z relro --gc-sections \
+		--start-group $(USER_LIBC_PIC_OBJECTS) $(NEWLIB_PIC_LIBC_OBJECTS) \
+		$(USER_HUNDE_PIC_OBJECTS) $(WUFF_LIBGCC) --end-group -o $@
+	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
+	$(READELF) -d $@ | awk '/SONAME/ { if ($$0 !~ /\[libc\.wuff\.1\]/) exit 1; found = 1 } END { exit !found }'
+	if $(READELF) -d $@ | grep -q '(TEXTREL)'; then echo "libc.wuff.1 contains text relocations" >&2; exit 1; fi
+	if $(READELF) -lW $@ | grep -Eq '^[[:space:]]*TLS[[:space:]]'; then echo "libc.wuff.1 contains TLS" >&2; exit 1; fi
+	if $(READELF) -dW $@ | grep -Eq '\((PREINIT_ARRAY|INIT|INIT_ARRAY|FINI|FINI_ARRAY)\)'; then echo "libc.wuff.1 contains initialization metadata" >&2; exit 1; fi
+	if $(NM) -u $@ | grep -q .; then $(NM) -u $@ >&2; exit 1; fi
+
+$(SYSROOT_WUFF_LIBC_LINK): $(SYSROOT_WUFF_LIBC)
+	ln -sf libc.wuff.1 $@
+
+$(SYSROOT_WUFF_LIBC_COMPAT): $(SYSROOT_WUFF_LIBC)
+	mkdir -p $(SYSROOT_WUFF_LINK_DIR)
+	ln -sf ../libc.wuff.1 $@
+
 $(SYSROOT_SMOKE_OBJECT): $(SYSROOT_SMOKE_SOURCE) $(SYSROOT_INCLUDE_STAMP)
 	mkdir -p `dirname $@`
 	$(CC) $(BASH_CFLAGS) --sysroot=$(abspath $(SYSROOT_DIR)) \
@@ -547,6 +688,40 @@ $(SYSROOT_SMOKE_OBJECT): $(SYSROOT_SMOKE_SOURCE) $(SYSROOT_INCLUDE_STAMP)
 $(SYSROOT_SMOKE_BINARY): $(SYSROOT_SMOKE_OBJECT) $(SYSROOT_CRT) $(SYSROOT_LIBC) $(SYSROOT_LIBHUNDE) $(SYSROOT_LIBM)
 	$(LD) -nostdlib $(ARCH_USER_CFLAGS) $(SYSROOT_CRT) $< -L$(SYSROOT_LIB_DIR) -Wl,-e,_start -Wl,--gc-sections \
 		-Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
+
+$(WUFF_SMOKE_OBJECT): $(WUFF_SMOKE_SOURCE) Makefile
+	mkdir -p `dirname $@`
+	$(CC) $(USER_PIC_CFLAGS) -fvisibility=hidden -c $< -o $@
+
+$(WUFF_SMOKE_BINARY): $(WUFF_SMOKE_OBJECT) Makefile | check-wuff-linker
+	$(WUFF_LD) -shared -soname wuff-smoke.wuff.1 --hash-style=sysv -z defs -z now -z norelro $< -o $@
+	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
+	$(READELF) -d $@ | awk '/SONAME/ { if ($$0 !~ /\[wuff-smoke\.wuff\.1\]/) exit 1; found = 1 } END { exit !found }'
+	if $(READELF) -d $@ | grep -q '(NEEDED)'; then $(READELF) -d $@ >&2; exit 1; fi
+	if $(READELF) -d $@ | grep -q '(TEXTREL)'; then echo "wuff-smoke.wuff contains text relocations" >&2; exit 1; fi
+	if $(READELF) -lW $@ | grep -q 'GNU_RELRO'; then $(READELF) -lW $@ >&2; exit 1; fi
+	$(READELF) -Ws $@ | awk '$$8 == "wuff_add" && $$5 == "GLOBAL" && $$7 != "UND" { found = 1 } END { exit !found }'
+
+$(WUFF_DYNAMIC_SMOKE_OBJECT): $(WUFF_DYNAMIC_SMOKE_SOURCE) $(SYSROOT_INCLUDE_STAMP) Makefile
+	mkdir -p `dirname $@`
+	$(CC) $(USER_PIC_CFLAGS) --sysroot=$(abspath $(SYSROOT_DIR)) \
+		-isystem $(abspath $(SYSROOT_INCLUDE_DIR)) -c $< -o $@
+
+$(WUFF_DYNAMIC_SMOKE_BINARY): $(WUFF_DYNAMIC_SMOKE_OBJECT) $(USER_CRT_PIC_OBJECT) $(SYSROOT_WUFF_FILES) \
+        $(WUFF_PROGRAM_VERSION_SCRIPT) Makefile | check-wuff-linker
+	$(WUFF_LD) -pie --dynamic-linker /sbin/wuff-ld -e _start --hash-style=sysv -z now -z relro --gc-sections \
+		$(WUFF_PROGRAM_LINK_FLAGS) $(USER_CRT_PIC_OBJECT) $(WUFF_DYNAMIC_SMOKE_OBJECT) \
+		-L$(SYSROOT_LIB_DIR) -l:libc.wuff.1 -o $@
+	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
+	$(READELF) -h $@ | awk '/Entry point address:/ { if ($$4 == "0x0") exit 1; found = 1 } END { exit !found }'
+	$(READELF) -lW $@ | awk '/Requesting program interpreter:/ { if ($$0 !~ /\/sbin\/wuff-ld\]/) exit 1; found = 1 } END { exit !found }'
+	$(READELF) -dW $@ | awk '/\(NEEDED\)/ { if ($$0 !~ /\[libc\.wuff\.1\]/) exit 1; found = 1 } END { exit !found }'
+	if $(READELF) -dW $@ | grep -q '(TEXTREL)'; then echo "wuff-dynamic-smoke contains text relocations" >&2; exit 1; fi
+	$(READELF) -lW $@ | grep -q 'GNU_RELRO'
+	if $(READELF) -lW $@ | grep -Eq '^[[:space:]]*TLS[[:space:]]'; then echo "wuff-dynamic-smoke contains TLS" >&2; exit 1; fi
+	if $(READELF) -dW $@ | grep -Eq '\((PREINIT_ARRAY|INIT|INIT_ARRAY|FINI|FINI_ARRAY)\)'; then echo "wuff-dynamic-smoke contains initialization metadata" >&2; exit 1; fi
+	if $(READELF) --dyn-syms -W $@ | awk '$$8 == "_stack" { found = 1 } END { exit !found }'; then echo "wuff-dynamic-smoke exports synthetic _stack" >&2; exit 1; fi
+	$(READELF) -rW $@ | awk '$$3 ~ /^R_/ { found = 1; if ($$3 != "$(WUFF_JUMP_SLOT_RELOCATION)") { print; bad = 1 } } END { exit bad || !found }'
 
 .PHONY: bash bash-configure bash-build bash-configure-all bash-build-all
 
@@ -644,6 +819,10 @@ compile-commands:
 		build/riscv64/user/setjmp_probe.bin
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 sysroot-smoke
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 sysroot-smoke
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 wuff-smoke
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 wuff-smoke
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 wuff-dynamic-smoke
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 wuff-dynamic-smoke
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 bash-build
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 bash-build
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 \
@@ -694,11 +873,13 @@ $(SD_CARD_FAT32_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(SD_CAR
 	$(PYTHON) tools/populate_fat32_image.py $@ CONFIG.TXT $(SD_CARD_FAT32_CONFIG_FILE)
 	$(PYTHON) tools/populate_fat32_image.py $@ DOCS/NOTE.TXT $(SD_CARD_FAT32_NOTE_FILE)
 
-$(ROOTFS_STAMP): Makefile $(shell find $(EXT2_ROOT_DIR) -type f -print) $(ROOTFS_COMMAND_BINARIES) $(BASH_PORT_BINARY)
+$(ROOTFS_STAMP): Makefile $(shell find $(EXT2_ROOT_DIR) -type f -print) $(ROOTFS_COMMAND_BINARIES) \
+        $(BASH_PORT_BINARY) $(SYSROOT_WUFF_LIBC)
 	rm -rf $(ROOTFS_DIR)
-	mkdir -p $(ROOTFS_DIR)/usr/local/bin $(ROOTFS_DIR)/var/log
+	mkdir -p $(ROOTFS_DIR)/usr/lib $(ROOTFS_DIR)/usr/local/bin $(ROOTFS_DIR)/var/log
 	cp -R $(EXT2_ROOT_DIR)/. $(ROOTFS_DIR)/
 	$(foreach binary,$(ROOTFS_COMMAND_BINARIES),cp $(binary) $(ROOTFS_DIR)/usr/local/bin/$(basename $(notdir $(binary)));)
+	cp $(SYSROOT_WUFF_LIBC) $(ROOTFS_DIR)/usr/lib/libc.wuff.1
 	cp $(BASH_PORT_BINARY) $(ROOTFS_DIR)/usr/local/bin/bash
 	touch $@
 
@@ -795,9 +976,21 @@ $(USER_BUILD_DIR)/common/%.o: common/%.c
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+$(USER_PIC_BUILD_DIR)/%.o: user/%.c $(NEWLIB_PIC_INSTALL_STAMP)
+	mkdir -p `dirname $@`
+	$(CC) $(USER_PIC_CFLAGS) -idirafter $(NEWLIB_PIC_INCLUDE_DIR) -c $< -o $@
+
+$(USER_PIC_BUILD_DIR)/%.o: user/%.s
+	mkdir -p `dirname $@`
+	$(AS) $(USER_PIC_ASFLAGS) $< -o $@
+
+$(USER_PIC_BUILD_DIR)/common/%.o: common/%.c
+	mkdir -p `dirname $@`
+	$(CC) $(USER_PIC_CFLAGS) -c $< -o $@
+
 $(OPENBSD_CAT_OBJECT): $(OPENBSD_CAT_SOURCE)
 	mkdir -p `dirname $@`
-	$(CC) $(USER_CFLAGS) -c $< -o $@
+	$(CC) $(USER_PIC_CFLAGS) -c $< -o $@
 
 $(OPENBSD_RM_OBJECT): $(OPENBSD_RM_SOURCE) user/ports/openbsd/rm/unsupported_random.h
 	mkdir -p `dirname $@`
@@ -1236,7 +1429,30 @@ $$(USER_BUILD_DIR)/$(notdir $(1)).bin: $$($(notdir $(1))_OBJS) $$($(notdir $(1))
 		-Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $$@
 endef
 
-$(foreach dir,$(USER_BINARY_DIRS),$(eval $(call make-user-bin,$(dir))))
+$(foreach dir,$(USER_STANDARD_BINARY_DIRS),$(eval $(call make-user-bin,$(dir))))
+
+$(OPENBSD_CAT_BINARY): $(OPENBSD_CAT_OBJECT) $(USER_CRT_PIC_OBJECT) $(SYSROOT_WUFF_FILES) \
+        $(WUFF_PROGRAM_VERSION_SCRIPT) Makefile | check-wuff-linker
+	$(WUFF_LD) -pie --dynamic-linker /sbin/wuff-ld -e _start --hash-style=sysv -z now -z relro \
+		--gc-sections $(WUFF_PROGRAM_LINK_FLAGS) $(USER_CRT_PIC_OBJECT) $(OPENBSD_CAT_OBJECT) \
+		-L$(SYSROOT_LIB_DIR) -l:libc.wuff.1 -o $@
+	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
+	$(READELF) -h $@ | awk '/Entry point address:/ { if ($$4 == "0x0") exit 1; found = 1 } END { exit !found }'
+	$(READELF) -lW $@ | awk '/Requesting program interpreter:/ { if ($$0 !~ /\/sbin\/wuff-ld\]/) exit 1; found = 1 } END { exit !found }'
+	$(READELF) -dW $@ | awk '/\(NEEDED\)/ { if ($$0 !~ /\[libc\.wuff\.1\]/ || found) exit 1; found = 1 } END { exit !found }'
+	if $(READELF) -dW $@ | grep -q '(TEXTREL)'; then echo "$@ contains text relocations" >&2; exit 1; fi
+	$(READELF) -lW $@ | grep -q 'GNU_RELRO'
+	if $(READELF) -lW $@ | grep -Eq '^[[:space:]]*TLS[[:space:]]'; then echo "$@ contains TLS" >&2; exit 1; fi
+	if $(READELF) -dW $@ | grep -Eq '\((PREINIT_ARRAY|INIT|INIT_ARRAY|FINI|FINI_ARRAY)\)'; then echo "$@ contains initialization metadata" >&2; exit 1; fi
+	if $(READELF) --dyn-syms -W $@ | awk '$$8 == "_stack" { found = 1 } END { exit !found }'; then echo "$@ exports synthetic _stack" >&2; exit 1; fi
+	$(READELF) -rW $@ | awk -v allowed="$(WUFF_CAT_RELOCATIONS)" '$$3 ~ /^R_/ { found = 1; if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad || !found }'
+
+$(WUFF_INTERPRETER_BINARY): $(WUFF_INTERPRETER_OBJECTS) $(SYSROOT_FILES)
+	$(LD) $(USER_LDFLAGS) $(WUFF_INTERPRETER_OBJECTS) -L$(SYSROOT_LIB_DIR) \
+		-Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
+	@$(READELF) -h $@ | grep -Eq 'Type:[[:space:]]+EXEC' || { echo "$@ must be ET_EXEC" >&2; exit 1; }
+	@! $(READELF) -l $@ | grep -q ' INTERP ' || { echo "$@ must not contain PT_INTERP" >&2; exit 1; }
+	@! $(READELF) -d $@ 2>/dev/null | grep -q 'NEEDED' || { echo "$@ must not have dynamic dependencies" >&2; exit 1; }
 
 $(OPENBSD_CP_BINARY): $(OPENBSD_CP_OBJECTS) $(SYSROOT_FILES)
 	$(LD) $(USER_LDFLAGS) $(SYSROOT_CRT) $(OPENBSD_CP_OBJECTS) -L$(SYSROOT_LIB_DIR) \

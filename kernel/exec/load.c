@@ -21,6 +21,54 @@ static BString ExecLoad__requested_path(ExecLoadPtr self)
                                self->requested_path_length < IO_PROTOCOL_DATA_SIZE ? self->requested_path_length : 0);
 }
 
+static void ExecLoad__dispose_finished(ProcessPtr process, ExecLoadPtr load)
+{
+    process->exec_load = None(ExecLoadPtr);
+    if (load->buffer.valid)
+    {
+        Kernel__free(load->buffer.virtual_addr);
+    }
+    if (load->overlay_payload.valid)
+    {
+        Kernel__free(load->overlay_payload.virtual_addr);
+    }
+    Kernel__free((Address)load);
+}
+
+static Result(ChannelCode) ExecLoad__begin_interpreter(ExecLoadPtr self, SchedulerPtr scheduler, ProcessPtr process)
+{
+    if (self->buffer.valid)
+    {
+        Kernel__free(self->buffer.virtual_addr);
+    }
+    self->buffer = KernelAddress__new(0, 0, false);
+    self->capacity = 0;
+    self->size = 0;
+    self->pending = false;
+    self->route_final = false;
+    self->redirects = 0;
+    self->phase = EXEC_LOAD_OPEN;
+    self->handle = 0;
+    self->transfer = BufferDescriptor__new(0, BUFFER_READ);
+    self->observation_valid = false;
+    self->loading_interpreter = true;
+    ExecLoad__set_path(self, &bstr(WUFF_INTERPRETER_PATH));
+    match_result(
+        KernelChannel__open(scheduler,
+                            KernelServiceDirectory__kernel_directory(&self->context.kernel->service_directory),
+                            &bstr(IO_SYSTEM_SERVICE), process),
+        success(channel)
+        {
+            self->channel = channel;
+            return Success(ChannelCode, CHANNEL_PENDING);
+        },
+        error(code, message)
+        {
+            return Error(ChannelCode, message, SPAWN_NO_FILE);
+        }
+    );
+}
+
 static ExecLoad ExecLoad__new(KernelChannel channel, ConstOriginatingContextPtr context, ConstBStringPtr path,
                               bool wait, OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
                               ConstSpawnStdioPtr stdio, OptionalPtr(KernelAddress) abort_report, bool overlay,
@@ -42,10 +90,10 @@ static ExecLoad ExecLoad__new(KernelChannel channel, ConstOriginatingContextPtr 
     return self;
 }
 
-Result(ProcessPtr) ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait,
-                                   OptionalPtr(UserID) user, ConstProcessArgumentsPtr arguments,
-                                   ConstSpawnStdioPtr stdio, OptionalPtr(KernelAddress) abort_report, bool overlay,
-                                   KernelAddress overlay_payload)
+Result(ProcessPtr)
+    ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStringPtr path, bool wait, OptionalPtr(UserID) user,
+                    ConstProcessArgumentsPtr arguments, ConstSpawnStdioPtr stdio,
+                    OptionalPtr(KernelAddress) abort_report, bool overlay, KernelAddress overlay_payload)
 {
     if (!Exec__can_execute(context, path) || !BString__starts_with(path, &bstr("/")) ||
         BString__length(path) >= IO_PROTOCOL_DATA_SIZE)
@@ -77,8 +125,8 @@ Result(ProcessPtr) ExecLoad__begin(ConstOriginatingContextPtr context, ConstBStr
                             &bstr(IO_SYSTEM_SERVICE), process),
                         success(channel)
                         {
-                            *load = ExecLoad__new(channel, context, path, wait, user, arguments, stdio, abort_report,
-                                                  overlay, overlay_payload);
+                            *load = ExecLoad__new(channel, context, path, wait, user, arguments, stdio,
+                                                  abort_report, overlay, overlay_payload);
                             process->exec_load = Some(ExecLoadPtr, load);
                         },
                         error(code, message)
@@ -371,14 +419,50 @@ Result(ProcessPtr) ExecLoad__continue(ProcessPtr process)
                     KernelChannel__close(&load->channel, scheduler);
                 }
             );
-            process->exec_load = None(ExecLoadPtr);
             if (!load->buffer.valid)
             {
-                Kernel__free((Address)load);
+                ExecLoad__dispose_finished(process, load);
                 return Error(ProcessPtr, load_failed, SPAWN_FAILED);
             }
             BString path = ExecLoad__requested_path(load);
             Elf elf = Elf__new(load->buffer.virtual_addr, load->buffer.virtual_addr + load->size, &path);
+            if (!load->loading_interpreter)
+            {
+                match_result(
+                    Elf__image_kind(&elf),
+                    success(kind)
+                    {
+                        if (kind == ELF_IMAGE_DYNAMIC)
+                        {
+                            Result(ChannelCode) interpreter;
+                            critical_section(
+                                scheduler->scheduler_lock,
+                                {
+                                    interpreter = ExecLoad__begin_interpreter(load, scheduler, process);
+                                }
+                            );
+                            match_result(
+                                interpreter,
+                                success(code)
+                                {
+                                    return Error(ProcessPtr, bstr("Executable load pending"), SPAWN_PENDING);
+                                },
+                                error(code, message)
+                                {
+                                    ExecLoad__dispose_finished(process, load);
+                                    return Error(ProcessPtr, message, code);
+                                }
+                            );
+                        }
+                    },
+                    error(code, message)
+                    {
+                        ExecLoad__dispose_finished(process, load);
+                        return Error(ProcessPtr, message, SPAWN_FAILED);
+                    }
+                );
+            }
+            process->exec_load = None(ExecLoadPtr);
             KernelAddress overlay_payload = load->overlay_payload;
             Result(ProcessPtr) result =
                 Exec__launch_loaded_elf(&load->context, &elf, load->wait, &load->user, &load->arguments, &load->stdio,

@@ -64,8 +64,7 @@ FilesystemDriver FilesystemDriver__new(IOServiceContext volume, ConstFilesystemO
                               .memory_pressure_handler = None(FilesystemMemoryPressureHandler)};
 }
 
-void FilesystemDriver__set_memory_pressure_handler(FilesystemDriverPtr self,
-                                                   FilesystemMemoryPressureHandler handler)
+void FilesystemDriver__set_memory_pressure_handler(FilesystemDriverPtr self, FilesystemMemoryPressureHandler handler)
 {
     self->memory_pressure_handler = Some(FilesystemMemoryPressureHandler, handler);
 }

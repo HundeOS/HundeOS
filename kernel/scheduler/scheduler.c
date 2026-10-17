@@ -82,6 +82,54 @@ static bool Scheduler__command_flow_process(ProcessPtr process)
            BString__equals(&process->name, &bstr("/sbin/drivers/uart_rx")) ||
            BString__equals(&process->name, &bstr("/sbin/drivers/uart_tx"));
 }
+
+static void Scheduler__trace_queue_data_available(ProcessPtr process, ProcessPtr peer, bool reschedule, CPUID cpu,
+                                                  QueueConnectionID connection)
+{
+    if (Scheduler__command_flow_process(process) || Scheduler__command_flow_process(peer))
+    {
+        __d_printf(
+            COMMAND_FLOW,
+            "t=%i queue sender=%i:%s receiver=%i:%s receiver_state=%s wake=%i cpu=%i connection=%i\n",
+            CPU__time_usec(), process->pid, cstr(process->name), peer->pid, cstr(peer->name),
+            ProcessState__to_string(peer->state), reschedule, cpu, connection);
+    }
+}
+
+static void Scheduler__trace_child_exit(ProcessPtr parent, ProcessPtr child, ConstProcessChildEventPtr event,
+                                        bool retains_child_event)
+{
+    if (Scheduler__command_flow_process(parent))
+    {
+        __d_printf(COMMAND_FLOW, "t=%i child-exit child=%i:%s parent=%i:%s parent_state=%s status=%i retained=%i\n",
+                   CPU__time_usec(), child->pid, cstr(child->name), parent->pid, cstr(parent->name),
+                   ProcessState__to_string(parent->state), event->status, retains_child_event);
+    }
+}
+
+static void Scheduler__trace_child_wake(ProcessPtr process, ProcessID child_pid, uint64_t event_type, bool wait_ready)
+{
+    if (Scheduler__command_flow_process(process))
+    {
+        __d_printf(COMMAND_FLOW, "t=%i child-wake parent=%i:%s child=%i event=%i wait_ready=%i state=%s\n",
+                   CPU__time_usec(), process->pid, cstr(process->name), child_pid, event_type, wait_ready,
+                   ProcessState__to_string(process->state));
+    }
+}
+#else
+static void Scheduler__trace_queue_data_available(ProcessPtr process, ProcessPtr peer, bool reschedule, CPUID cpu,
+                                                  QueueConnectionID connection)
+{
+}
+
+static void Scheduler__trace_child_exit(ProcessPtr parent, ProcessPtr child, ConstProcessChildEventPtr event,
+                                        bool retains_child_event)
+{
+}
+
+static void Scheduler__trace_child_wake(ProcessPtr process, ProcessID child_pid, uint64_t event_type, bool wait_ready)
+{
+}
 #endif
 
 static bool CPUScheduler__owns_process(CPUSchedulerPtr self, ProcessPtr process)
@@ -488,8 +536,8 @@ Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process
     return Error(Address, bstr("Invalid queue operation"), QUEUE_INVALID);
 }
 
-Result(Address) Scheduler__queue_delegate(SchedulerPtr self, ProcessPtr process,
-                                          QueueConnectionID client_connection, QueueEndpointID endpoint)
+Result(Address) Scheduler__queue_delegate(SchedulerPtr self, ProcessPtr process, QueueConnectionID client_connection,
+                                          QueueEndpointID endpoint)
 {
     critical_section(
         self->scheduler_lock,
@@ -511,8 +559,7 @@ Result(Address) Scheduler__queue_delegate(SchedulerPtr self, ProcessPtr process,
 }
 
 Result(Address) Scheduler__queue_cancel_delegation(SchedulerPtr self, ProcessPtr process,
-                                                   QueueConnectionID client_connection,
-                                                   QueueConnectionID delegated)
+                                                   QueueConnectionID client_connection, QueueConnectionID delegated)
 {
     critical_section(
         self->scheduler_lock,
@@ -578,8 +625,7 @@ static Result(SchedulerWake) Scheduler__wake_queue_wait_locked(SchedulerPtr self
         Process__clear_kernel_queue_wait(process);
     }
     else if (!Process__has_pending_messages(process) ||
-             (process->state != PROC_STATE_READY &&
-              process->state != PROC_STATE_INTERRUPTED) ||
+             (process->state != PROC_STATE_READY && process->state != PROC_STATE_INTERRUPTED) ||
              (completed_queue_wait && CPU__count() != 1))
     {
         return Success(SchedulerWake, SchedulerWake__new(false, 0));
@@ -621,16 +667,7 @@ Result(SchedulerWake)
                         Scheduler__wake_queue_wait_locked(self, peer),
                         success(wake)
                         {
-#ifdef KERNEL_COMMAND_TRACE
-                            if (Scheduler__command_flow_process(process) || Scheduler__command_flow_process(peer))
-                            {
-                                __d_printf(
-                                    COMMAND_FLOW,
-                                    "t=%i queue sender=%i:%s receiver=%i:%s receiver_state=%s wake=%i cpu=%i connection=%i\n",
-                                    CPU__time_usec(), process->pid, cstr(process->name), peer->pid, cstr(peer->name),
-                                    ProcessState__to_string(peer->state), wake.reschedule, wake.cpu, connection);
-                            }
-#endif
+                            Scheduler__trace_queue_data_available(process, peer, wake.reschedule, wake.cpu, connection);
                             cs_return Success(SchedulerWake, wake);
                         },
                         error(code, message)
@@ -820,6 +857,7 @@ int service_priority_then_longest_waiting(ProcessPtr * proc1, ProcessPtr * proc2
     {
         return 1;
     }
+
     if (proc1_priority < proc2_priority)
     {
         return -1;
@@ -1169,17 +1207,16 @@ Result(QueueWaitCode)
                         {
                             KernelContextPtr context = KernelContext__heap_new(
                                 &Some(ProcessID, process->pid), &Some(SchedulerPtr, self));
-                            Optional(Continuation) continuation =
-                                Some(Continuation, SystemCall__Complete);
+                            Optional(Continuation) continuation = Some(Continuation, SystemCall__Complete);
                             Optional(OperationKey) deadline = None(OperationKey);
                             if (ticks != QUEUE_WAIT_INDEFINITE_TICKS)
                             {
                                 deadline = Some(OperationKey, sched->last_tick + ticks);
                             }
-                            // Mark parked only; the syscall dispatcher switches after lock release.
+                                         // Mark parked only; the syscall dispatcher switches after lock release.
                             match_result(
-                                CPUScheduler__park(sched, process, context, &continuation,
-                                                   PARK_WAIT_QUEUE, true, &deadline, observed),
+                                CPUScheduler__park(sched, process, context, &continuation, PARK_WAIT_QUEUE,
+                                                   true, &deadline, observed),
                                 success(value)
                                 {
                                     QueueWaitUsage__park(&process->queue_wait_usage);
@@ -1554,6 +1591,7 @@ static ProcessTable Scheduler__all_processes_for_all_cpus_locked(SchedulerPtr se
             ProcessTable__push_all(&processes, &sched->processes);
         }
     );
+
     return processes;
 }
 
@@ -1778,8 +1816,8 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
                                     some(abort)
                                     {
                                         Process__write_child_abort_report(
-                                            parent, SpawnAbortReport__new(abort.reason, abort.exception_code,
-                                                                         abort.pc, abort.fault_address));
+                                            parent, SpawnAbortReport__new(abort.reason, abort.exception_code, abort.pc,
+                                                                          abort.fault_address));
                                     },
                                     none_do_nothing()
                                 );
@@ -1883,15 +1921,7 @@ static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(SchedulerP
     ProcessSignalAction action = Process__signal_action(parent, PROCESS_SIGNAL_CHILD);
     bool retains_child_event =
         (action.flags & PROCESS_SIGNAL_ACTION_NOCLDWAIT) == 0 && action.handler != PROCESS_SIGNAL_IGNORE_HANDLER;
-#ifdef KERNEL_COMMAND_TRACE
-    if (Scheduler__command_flow_process(parent))
-    {
-        __d_printf(COMMAND_FLOW,
-                   "t=%i child-exit child=%i:%s parent=%i:%s parent_state=%s status=%i retained=%i\n",
-                   CPU__time_usec(), child->pid, cstr(child->name), parent->pid, cstr(parent->name),
-                   ProcessState__to_string(parent->state), event.status, retains_child_event);
-    }
-#endif
+    Scheduler__trace_child_exit(parent, child, &event, retains_child_event);
     if (retains_child_event)
     {
         match_result(
@@ -1951,6 +1981,7 @@ static Result(ServiceCode)
     {
         Process__queue_signal(parent, PROCESS_SIGNAL_CHILD);
     }
+
     return Success(ServiceCode, SERVICE_OK);
 }
 
@@ -2266,10 +2297,12 @@ static bool Scheduler__signal_target_matches(ProcessPtr sender, ProcessPtr candi
     {
         return candidate->pid == (ProcessID)target;
     }
+
     if (target == 0)
     {
         return candidate->process_group_id == sender->process_group_id;
     }
+
     if (target == -1)
     {
         return candidate != sender;
@@ -2481,8 +2514,8 @@ Result(ProcessPtr)
                                            bool owns_kernel_context)
 {
     Optional(OperationKey) operation_key = None(OperationKey);
-    return Scheduler__park_with_context_ownership_and_operation_key(self, proc, kernel_context, kernel_continuation,
-                                                                    reason, owns_kernel_context, &None(OperationKey), 0);
+    return Scheduler__park_with_context_ownership_and_operation_key(
+        self, proc, kernel_context, kernel_continuation, reason, owns_kernel_context, &None(OperationKey), 0);
 }
 
 Result(ProcessPtr) Scheduler__park_wait_child(SchedulerPtr self, ProcessPtr proc, KernelContextPtr kernel_context,
@@ -2490,17 +2523,16 @@ Result(ProcessPtr) Scheduler__park_wait_child(SchedulerPtr self, ProcessPtr proc
                                               OptionalPtr(KernelAddress) abort_report, bool owns_kernel_context)
 {
     Anything operation_context = 0;
-    match_optional(
-        *abort_report,
+    match_optional(*abort_report,
         some(address)
         {
             operation_context = address.virtual_addr;
         },
         none_do_nothing()
     );
-    return Scheduler__park_with_context_ownership_and_operation_key(
-        self, proc, kernel_context, kernel_continuation, PARK_WAIT_CHILD, owns_kernel_context, &None(OperationKey),
-        operation_context);
+    return Scheduler__park_with_context_ownership_and_operation_key(self, proc, kernel_context, kernel_continuation,
+                                                                    PARK_WAIT_CHILD, owns_kernel_context,
+                                                                    &None(OperationKey), operation_context);
 }
 
 static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_key(
@@ -2515,8 +2547,9 @@ static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_k
         cpu,
         sched,
         {
-            Result(ProcessPtr) res = CPUScheduler__park(sched, proc, kernel_context, kernel_continuation,
-                                                        reason, owns_kernel_context, operation_key, operation_context);
+            Result(ProcessPtr) res =
+                CPUScheduler__park(sched, proc, kernel_context, kernel_continuation, reason,
+                                   owns_kernel_context, operation_key, operation_context);
             match_result(
                 res,
                 success(exited)
@@ -2610,7 +2643,8 @@ Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, 
                     Optional(Continuation) continuation = Some(Continuation, SystemCall__Complete);
                     Optional(OperationKey) operation_key = Some(OperationKey, deadline);
                     return Scheduler__park_with_context_ownership_and_operation_key(
-                        self, process, kernel_context, &continuation, PARK_SLEEP, true, &operation_key, 0);
+                        self, process, kernel_context, &continuation, PARK_SLEEP, true, &operation_key,
+                        0);
                 },
                 none_do_nothing()
             );
@@ -3128,44 +3162,48 @@ Result(ServiceCode) Scheduler__subscribe_irq(SchedulerPtr self, ProcessPtr proce
 Result(ServiceCode) Scheduler__send_irq_event(SchedulerPtr self, IRQNumber irq)
 {
     __d_printf(IRQ, "scheduler send irq event irq=%i\n", irq);
-    if (is_nothing(self->interrupt_controller))
-    {
-        return Error(ServiceCode, missing_interrupt_controller, SERVICE_SCHEDULER_ERROR);
-    }
-
-    InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
-    critical_section(
-        self->scheduler_lock,
+    match_optional(
+        self->interrupt_controller,
+        some(interrupt_controller)
         {
-            match_result(
-                ServiceEventDispatcher__dispatch_irq(&self->service_event_dispatcher, interrupt_controller, irq),
-                success(dispatch)
+            critical_section(
+                self->scheduler_lock,
                 {
-                    match_optional(
-                        dispatch.process,
-                        some(process)
+                    match_result(
+                        ServiceEventDispatcher__dispatch_irq(&self->service_event_dispatcher, &interrupt_controller,
+                                                             irq),
+                        success(dispatch)
                         {
-                            match_result(
-                                Scheduler__service_mark_runnable_locked(self, process),
-                                success_do_nothing(),
-                                error(code, message)
+                            match_optional(
+                                dispatch.process,
+                                some(process)
                                 {
-                                    cs_return Error(ServiceCode, message, code);
-                                }
+                                    match_result(
+                                        Scheduler__service_mark_runnable_locked(self, process),
+                                        success_do_nothing(),
+                                        error(code, message)
+                                        {
+                                            cs_return Error(ServiceCode, message, code);
+                                        }
+                                    );
+                                },
+                                none_do_nothing()
                             );
                         },
-                        none_do_nothing()
+                        error(code, message)
+                        {
+                            cs_return Error(ServiceCode, message, code);
+                        }
                     );
-                },
-                error(code, message)
-                {
-                    cs_return Error(ServiceCode, message, code);
                 }
             );
+            return Success(ServiceCode, SERVICE_OK);
+        },
+        none()
+        {
+            return Error(ServiceCode, missing_interrupt_controller, SERVICE_SCHEDULER_ERROR);
         }
     );
-
-    return Success(ServiceCode, SERVICE_OK);
 }
 
 Result(ServiceEvent) Scheduler__service_take_next_event(SchedulerPtr self, ProcessPtr process)
@@ -3204,70 +3242,76 @@ Result(ServiceEvent)
                                                    KernelContextPtr kernel_context,
                                                    OptionalPtr(Continuation) continuation, bool owns_kernel_context)
 {
-    if (is_nothing(self->interrupt_controller))
-    {
-        return Error(ServiceEvent, missing_interrupt_controller, SERVICE_SCHEDULER_ERROR);
-    }
-
-    InterruptControllerInfoPtr interrupt_controller = &self->interrupt_controller.some.val;
-    critical_section(
-        self->scheduler_lock,
+    match_optional(
+        self->interrupt_controller,
+        some(interrupt_controller)
         {
-            match_result(
-                ServiceEventDispatcher__complete_active_irq(&self->service_event_dispatcher, interrupt_controller,
-                                                            process),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    cs_return Error(ServiceEvent, message, code);
-                }
-            );
-
-            match_result(
-                ServiceEventDispatcher__take_next(&self->service_event_dispatcher, process),
-                success(event)
-                {
-                    cs_return Success(ServiceEvent, event);
-                },
-                error(code, message)
-                {
-                    if (code != SERVICE_EVENT_QUEUE_EMPTY)
-                    {
-                        cs_return Error(ServiceEvent, message, code);
-                    }
-                }
-            );
-
-            for_each_hashtable(
-                CPUSchedulers,
-                self->schedulers,
-                bucket_index,
-                entry_index,
-                cpu,
-                sched,
+            critical_section(
+                self->scheduler_lock,
                 {
                     match_result(
-                        CPUScheduler__park(sched, process, kernel_context, continuation, PARK_WAIT_SERVICE_EVENT,
-                                           owns_kernel_context, &None(OperationKey), 0),
-                        success(parked)
+                        ServiceEventDispatcher__complete_active_irq(&self->service_event_dispatcher,
+                                                                    &interrupt_controller, process),
+                        success_do_nothing(),
+                        error(code, message)
                         {
-                            cs_return Error(ServiceEvent, service_event_queue_empty, SERVICE_EVENT_QUEUE_EMPTY);
+                            cs_return Error(ServiceEvent, message, code);
+                        }
+                    );
+
+                    match_result(
+                        ServiceEventDispatcher__take_next(&self->service_event_dispatcher, process),
+                        success(event)
+                        {
+                            cs_return Success(ServiceEvent, event);
                         },
                         error(code, message)
                         {
-                            if (code != SCHEDULER_PROCESS_NOT_FOUND)
+                            if (code != SERVICE_EVENT_QUEUE_EMPTY)
                             {
                                 cs_return Error(ServiceEvent, message, code);
                             }
                         }
                     );
+
+                    for_each_hashtable(
+                        CPUSchedulers,
+                        self->schedulers,
+                        bucket_index,
+                        entry_index,
+                        cpu,
+                        sched,
+                        {
+                            match_result(
+                                CPUScheduler__park(sched, process, kernel_context, continuation,
+                                                   PARK_WAIT_SERVICE_EVENT, owns_kernel_context, &None(OperationKey),
+                                                   0),
+                                success(parked)
+                                {
+                                    cs_return Error(ServiceEvent, service_event_queue_empty,
+                                                    SERVICE_EVENT_QUEUE_EMPTY);
+                                },
+                                error(code, message)
+                                {
+                                    if (code != SCHEDULER_PROCESS_NOT_FOUND)
+                                    {
+                                        cs_return Error(ServiceEvent, message, code);
+                                    }
+                                }
+                            );
+                        }
+                    );
                 }
             );
+
+            BString no_scheduler = BString__sprintf(&bstr("No scheduler found for process: %i\n"), process->pid);
+            return Error(ServiceEvent, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
+        },
+        none()
+        {
+            return Error(ServiceEvent, missing_interrupt_controller, SERVICE_SCHEDULER_ERROR);
         }
     );
-
-    BString no_scheduler = BString__sprintf(&bstr("No scheduler found for process: %i\n"), process->pid);
-    return Error(ServiceEvent, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
 typedef struct ChildSelection
@@ -3482,9 +3526,8 @@ Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr pro
     return Success(ServiceCode, SERVICE_OK);
 }
 
-static Result(ServiceCode)
-    Scheduler__enqueue_memory_pressure_locked(SchedulerPtr self, ProcessPtr process, MemPressureLevel pressure,
-                                              uint64_t free_pages)
+static Result(ServiceCode) Scheduler__enqueue_memory_pressure_locked(SchedulerPtr self, ProcessPtr process,
+                                                                     MemPressureLevel pressure, uint64_t free_pages)
 {
     ServiceEvent event = ServiceEvent__new(SERVICE_EVENT_MEMORY_PRESSURE, pressure, free_pages);
     match_result(
@@ -3498,9 +3541,8 @@ static Result(ServiceCode)
     return Scheduler__service_mark_runnable_locked(self, process);
 }
 
-Result(ServiceCode)
-    Scheduler__register_memory_reclaimer(SchedulerPtr self, ProcessPtr process, MemPressureLevel pressure,
-                                         uint64_t free_pages)
+Result(ServiceCode) Scheduler__register_memory_reclaimer(SchedulerPtr self, ProcessPtr process,
+                                                         MemPressureLevel pressure, uint64_t free_pages)
 {
     critical_section(
         self->scheduler_lock,
@@ -3516,9 +3558,8 @@ Result(ServiceCode)
     return Success(ServiceCode, SERVICE_OK);
 }
 
-Result(ServiceCode)
-    Scheduler__notify_memory_pressure(SchedulerPtr self, uint64_t generation, MemPressureLevel pressure,
-                                      uint64_t free_pages)
+Result(ServiceCode) Scheduler__notify_memory_pressure(SchedulerPtr self, uint64_t generation, MemPressureLevel pressure,
+                                                      uint64_t free_pages)
 {
     critical_section(
         self->scheduler_lock,
@@ -3704,14 +3745,7 @@ static Result(ServiceCode)
     {
         process->state = PROC_STATE_INTERRUPTED;
     }
-#ifdef KERNEL_COMMAND_TRACE
-    if (Scheduler__command_flow_process(process))
-    {
-        __d_printf(COMMAND_FLOW, "t=%i child-wake parent=%i:%s child=%i event=%i wait_ready=%i state=%s\n",
-                   CPU__time_usec(), process->pid, cstr(process->name), child_pid, event_type, wait_ready,
-                   ProcessState__to_string(process->state));
-    }
-#endif
+    Scheduler__trace_child_wake(process, child_pid, event_type, wait_ready);
 
     return Success(ServiceCode, SERVICE_OK);
 }
@@ -3742,7 +3776,7 @@ Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, const
                     Scheduler__poll_queue_waiters(self);
                     Scheduler__poll_exec_load_waiters(scheduler);
                     Scheduler__refresh_preferred(self);
-                    // cs_return unlocks before evaluating its return expression.
+                                 // cs_return unlocks before evaluating its return expression.
                     Optional(ContextSwitch) next = CPUScheduler__interrupt(scheduler, context);
                     cs_return next;
                 },

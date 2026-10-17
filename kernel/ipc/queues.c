@@ -181,6 +181,7 @@ return false;
 }
         }
     );
+
     return true;
 }
 
@@ -371,6 +372,7 @@ Result(Address) Queues__listen(QueuesPtr self, ProcessPtr process, ConstBStringP
             }
         }
     );
+
     Address address = QUEUE_LISTENER_BASE + selected * QUEUE_ARRIVALS_SIZE;
     if (selected >= QUEUE_LISTENER_LIMIT || !Queues__range_available(process, address, QUEUE_ARRIVALS_SIZE))
     {
@@ -635,8 +637,8 @@ Result(QueueConnectionID) Queues__connect(QueuesPtr self, ProcessPtr process, Qu
     return Error(QueueConnectionID, queue_error, QUEUE_INVALID);
 }
 
-Result(QueueConnectionID) Queues__delegate(QueuesPtr self, ProcessPtr manager,
-                                           QueueConnectionID client_connection, QueueEndpointID endpoint)
+Result(QueueConnectionID)
+    Queues__delegate(QueuesPtr self, ProcessPtr manager, QueueConnectionID client_connection, QueueEndpointID endpoint)
 {
     if (!Process__has_capability(manager, PROCESS_CAP_MANAGE_SHARED_PAGES))
     {
@@ -676,8 +678,8 @@ Result(QueueConnectionID) Queues__delegate(QueuesPtr self, ProcessPtr manager,
     return Error(QueueConnectionID, queue_error, QUEUE_DENIED);
 }
 
-Result(QueueCode) Queues__cancel_delegation(QueuesPtr self, ProcessPtr manager,
-                                            QueueConnectionID client_connection, QueueConnectionID delegated)
+Result(QueueCode) Queues__cancel_delegation(QueuesPtr self, ProcessPtr manager, QueueConnectionID client_connection,
+                                            QueueConnectionID delegated)
 {
     if (!Process__has_capability(manager, PROCESS_CAP_MANAGE_SHARED_PAGES))
     {
@@ -695,10 +697,10 @@ Result(QueueCode) Queues__cancel_delegation(QueuesPtr self, ProcessPtr manager,
             return Error(QueueCode, queue_error, QUEUE_INVALID);
         }
     );
-    bool authorized = delegated_connection->connection == delegated && delegated_connection->memory.valid &&
-                      delegated_connection->delegated_from == client_connection &&
-                      __atomic_load_n(&k_v_ptr(delegated_connection->memory, QueueIdentity)->channel,
-                                      __ATOMIC_ACQUIRE) != 0;
+    bool authorized =
+        delegated_connection->connection == delegated && delegated_connection->memory.valid &&
+        delegated_connection->delegated_from == client_connection &&
+        __atomic_load_n(&k_v_ptr(delegated_connection->memory, QueueIdentity)->channel, __ATOMIC_ACQUIRE) != 0;
     match_optional(
         QueueConnections__ptr_at(&self->connections, client_connection % QUEUE_LIMIT),
         some(control)
@@ -719,7 +721,8 @@ Result(QueueCode) Queues__cancel_delegation(QueuesPtr self, ProcessPtr manager,
         delegated_connection->client,
         some(client)
         {
-            match_result(Queues__close_connection(self, delegated_connection, client),
+            match_result(
+                Queues__close_connection(self, delegated_connection, client),
                 success_do_nothing(),
                 error(code, message)
                 {

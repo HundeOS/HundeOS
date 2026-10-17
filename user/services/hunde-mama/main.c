@@ -102,8 +102,7 @@ static Result(MamaBootDisk) MamaBootDisk__from_hardware(ConstBootHardwareInfoPtr
         },
         none_do_nothing()
     );
-    match_optional(
-        info->sd_host,
+    match_optional(info->sd_host,
         some(sd_host)
         {
             return MamaBootDisk__start_sd();

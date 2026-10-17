@@ -86,22 +86,25 @@ Result(SubsystemInitStatus) Kernel__init_syscall_handlers(KernelPtr self)
 
 Result(SubsystemInitStatus) Kernel__init_heap(KernelPtr self)
 {
-    if (is_nothing(self->system_info))
-    {
-        return Error(SubsystemInitStatus, missing_system_info, SUBSYSTEM_INIT_FAILED);
-    }
-
-    SystemInfoPtr system_info = &self->system_info.some.val;
-    match_result(
-        Heap__init(&self->heap, system_info),
-        success_do_nothing(),
-        error(code, message)
+    match_optional(
+        self->system_info,
+        some(system_info)
         {
-            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+            match_result(
+                Heap__init(&self->heap, &system_info),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+                }
+            );
+            return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
+        },
+        none()
+        {
+            return Error(SubsystemInitStatus, missing_system_info, SUBSYSTEM_INIT_FAILED);
         }
     );
-
-    return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
 Result(SubsystemInitStatus) Kernel__init_service_directory(KernelPtr self)
@@ -143,36 +146,39 @@ Result(SubsystemInitStatus) Kernel__init_clock(KernelPtr self)
 
 Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
 {
-    if (is_nothing(self->system_info))
-    {
-        return Error(SubsystemInitStatus, missing_system_info, SUBSYSTEM_INIT_FAILED);
-    }
-
-    SystemInfoPtr system_info = &self->system_info.some.val;
-    self->scheduler->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
-    self->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info->interrupt_controller);
-
-    Optional(Elf) idle_opt = EmbeddedElf__load(&bstr("services/idle"));
     match_optional(
-        idle_opt,
-        some(idle)
+        self->system_info,
+        some(system_info)
         {
-            match_result(
-                Scheduler__init(self, self->scheduler, idle),
-                success_do_nothing(),
-                error(code, message)
+            self->scheduler->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller);
+            self->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller);
+
+            Optional(Elf) idle_opt = EmbeddedElf__load(&bstr("services/idle"));
+            match_optional(
+                idle_opt,
+                some(idle)
                 {
-                    return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+                    match_result(
+                        Scheduler__init(self, self->scheduler, idle),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+                        }
+                    );
+                },
+                none()
+                {
+                    return Error(SubsystemInitStatus, failed_to_find_idle_process, SUBSYSTEM_INIT_FAILED);
                 }
             );
+            return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
         },
         none()
         {
-            return Error(SubsystemInitStatus, failed_to_find_idle_process, SUBSYSTEM_INIT_FAILED);
+            return Error(SubsystemInitStatus, missing_system_info, SUBSYSTEM_INIT_FAILED);
         }
     );
-
-    return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
 void Kernel__init(KernelPtr self)

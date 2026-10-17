@@ -194,6 +194,11 @@ Do not use `goto` in new or changed code. When modifying code near an existing
 `goto`, refactor that control flow to use structured returns or helper
 functions instead.
 
+Do not use conditional compilation directives such as `#if`, `#ifdef`, or
+`#ifndef` inside function bodies. Function control flow must remain visible in
+every build. It is acceptable to define a complete function or macro
+conditionally at file scope and call it unconditionally from the function.
+
 ## Test code
 Use `TEST_ASSERT_EQUAL_BSTRING(expected, actual)` from `test/hundetest.h` for
 BString equality assertions. Both arguments are BString values, for example

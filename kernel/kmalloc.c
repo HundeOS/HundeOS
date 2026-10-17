@@ -131,8 +131,7 @@ static Optional(KernelMallocSlabPtr) KernelMalloc__available_slab(size_t class_i
     while (is_something(current))
     {
         KernelMallocSlabPtr slab;
-        match_optional(
-            current,
+        match_optional(current,
             some(value)
             {
                 slab = value;
@@ -235,6 +234,7 @@ static KernelAddress KernelMalloc__allocate_large(size_t size)
     {
         return INVALID_KERNEL_ADDR;
     }
+
     KernelMallocAllocationPtr allocation = v_ptr(backing, KernelMallocAllocation);
     *allocation = KernelMallocAllocation__new_large();
     return KERNEL_ADDR(backing.virtual_addr + KERNEL_MALLOC_ALLOCATION_HEADER_SIZE,
@@ -267,8 +267,7 @@ static bool KernelMalloc__unlink_slab(size_t class_index, KernelMallocSlabPtr ta
     while (is_something(current))
     {
         KernelMallocSlabPtr slab;
-        match_optional(
-            current,
+        match_optional(current,
             some(value)
             {
                 slab = value;
@@ -293,6 +292,7 @@ static bool KernelMalloc__unlink_slab(size_t class_index, KernelMallocSlabPtr ta
             );
             return true;
         }
+
         previous = current;
         current = slab->next;
     }
@@ -305,8 +305,7 @@ static bool KernelMalloc__has_other_slab(size_t class_index, KernelMallocSlabPtr
     while (is_something(current))
     {
         KernelMallocSlabPtr slab;
-        match_optional(
-            current,
+        match_optional(current,
             some(value)
             {
                 slab = value;
@@ -320,6 +319,7 @@ static bool KernelMalloc__has_other_slab(size_t class_index, KernelMallocSlabPtr
         {
             return true;
         }
+
         current = slab->next;
     }
     return false;
@@ -382,8 +382,7 @@ Result(KAllocCode) Kernel__free_malloc(Address payload)
     {
         return Error(KAllocCode, invalid_malloc_address, KALLOC_INVALID_ADDRESS);
     }
-    KernelMallocAllocationPtr allocation =
-        ptr(payload - KERNEL_MALLOC_ALLOCATION_HEADER_SIZE, KernelMallocAllocation);
+    KernelMallocAllocationPtr allocation = ptr(payload - KERNEL_MALLOC_ALLOCATION_HEADER_SIZE, KernelMallocAllocation);
     if (allocation->magic != KERNEL_MALLOC_MAGIC)
     {
         return Error(KAllocCode, invalid_malloc_address, KALLOC_INVALID_ADDRESS);

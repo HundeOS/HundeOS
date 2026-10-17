@@ -10,6 +10,7 @@ typedef struct BlockCacheSector
 {
     uint8_t data[BLOCK_CHANNEL_SECTOR_SIZE];
 } BlockCacheSector;
+
 OptionalDef(BlockCacheSector);
 
 CacheDefine(BlockProtocolBlockNumber, BlockCacheSector, BLOCK_CACHE_CAPACITY, BlockCacheSectors);

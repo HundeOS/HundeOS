@@ -26,8 +26,7 @@ bool ChannelSession__equals(void * first, void * second)
 
 static void ChannelSession__prepare_reply(ChannelSessionPtr self, uint64_t kind, QueueConnectionID connection)
 {
-    self->reply = Some(QueueMessage,
-                       ChannelControlMessage__new(kind, connection, 0, Queue__connection(&self->client)));
+    self->reply = Some(QueueMessage, ChannelControlMessage__new(kind, connection, 0, Queue__connection(&self->client)));
     self->state = CHANNEL_SESSION_DELIVERING_OPEN;
 }
 

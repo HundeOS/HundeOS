@@ -429,19 +429,64 @@ remaining I/O components still use the current multi-process service graph.
 
 #### Loader Boundary And Format
 
+- [x] Use standard ELF `ET_DYN` objects with the `.wuff` suffix, an ABI-major
+  runtime `SONAME` such as `libc.wuff.1`, and linker-only `.so` compatibility
+  aliases where conventional toolchains require them.
 - [x] Define the userspace dynamic-loader and host-module boundary without
   making filesystem, dependency, or module policy a kernel concern. See
   [Dynamic linking and host modules](architecture/dynamic-linking.md).
-- [ ] Add page-aligned fixed or suitably aligned userspace mappings, permission
-  finalization, unmapping, executable-memory authorization, and architecture
-  instruction synchronization required by the userspace loader.
-- [ ] Produce shared objects and dynamically linked executables with the project
-  toolchains, and define the supported ELF interpreter, dynamic tags, symbol
-  visibility, and library search rules.
-- [ ] Implement one reusable userspace `ET_DYN` loader for shared libraries,
-  dynamically linked programs, and host components, including dependency
-  loading, symbol resolution, and reviewed AArch64 and RISC-V relocations.
-  Extend the contract when AMD64 support begins.
+- [x] Produce PIC `libc.wuff.1` sysroot artifacts for AArch64 and RISC-V while
+  retaining static linking as the default. RISC-V `.wuff` links use LLVM LLD
+  because its bare-metal GNU linker does not support shared output.
+- [x] Add aligned and exact-address userspace mappings, page-aligned permission
+  finalization without RWX, rollback unmapping, and architecture instruction
+  synchronization required by the userspace loader. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+- [x] Introduce separate virtual-mapping metadata for page-aligned permission
+  changes within dynamic allocations while retaining one ownership record per
+  backing allocation. Fork preserves split permissions and cleanup frees the
+  backing allocation once. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+- [x] Produce shared objects and an AArch64/RISC-V dynamically linked PIE smoke
+  executable with the project toolchains. The executable records
+  `/sbin/wuff-ld`, depends on `libc.wuff.1`, and build-time checks constrain its
+  relocations and unsupported TLS or initialization metadata. The initial
+  dynamic tags, symbol visibility, and `/usr/lib` search rules are documented in
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+- [ ] Complete the reusable userspace `ET_DYN` loader for dynamically linked
+  programs and host components, including interpreter startup, constructors,
+  and any additional reviewed AArch64 and RISC-V relocations they emit. Extend
+  the contract when AMD64 support begins.
+- [x] Implement the dependency-free loader slice: validated ELF64 load regions,
+  injected and syscall-backed mappings, SysV export lookup, the AArch64 and
+  RISC-V relocations emitted by libc, RELA PLT processing, final RX/RO/RW and
+  GNU RELRO permissions, and complete mapping rollback. Unsupported
+  dependencies, imported symbols, TLS, and single-object interpreters are
+  rejected.
+  See [Dynamic linking and host modules](architecture/dynamic-linking.md).
+- [x] Add bounded breadth-first `DT_NEEDED` graph loading with injected image
+  lookup, cycle deduplication, root-first global symbol scope, strong and weak
+  import binding, visibility handling, and graph-wide rollback. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+- [x] Add the initial filesystem library search policy: accept plain dependency
+  names, search only `/usr/lib`, bound file images, release provider-owned image
+  buffers after preparation, and expose a validated root executable entry. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+- [x] Implement the static `/sbin/wuff-ld` program with private startup that
+  reopens the preserved root path, loads its dependency graph, and transfers the
+  original startup ABI without claiming inherited I/O. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+- [x] Redirect accepted dynamic exec requests through `/sbin/wuff-ld` while
+  preserving the original executable path, argv, envp, working directory,
+  inherited I/O payload, and process identity. The kernel validates the fixed
+  interpreter contract, asynchronously reloads the static interpreter through
+  `hund-io-system`, and leaves dependency loading and relocation in userspace.
+  Add initialization metadata or further relocations only when reviewed program
+  inputs emit them. `LD_LIBRARY_PATH`, RPATH, and RUNPATH remain deferred.
+- [x] Dynamically link the first ordinary command, `/usr/local/bin/cat`, against
+  `/usr/lib/libc.wuff.1` on AArch64 and RISC-V. Keep `/sbin/wuff-ld` and early
+  bootstrap services statically linked so dynamic loading does not introduce a
+  dependency cycle during service and filesystem startup.
 
 #### Mapping And Runtime Lifecycle
 
@@ -453,6 +498,9 @@ remaining I/O components still use the current multi-process service graph.
 - [ ] Add unit coverage for parsing, symbol lookup, relocation, and failure
   rollback, plus full-system tests running two programs against one shared
   library.
+- [x] Add hosted unit coverage for the dependency-free parser, export lookup,
+  relative relocation, permission finalization, unsupported metadata, and
+  rollback, plus cross-linked AArch64 and RISC-V `.wuff` smoke objects.
 
 ### Loadable Host Components
 

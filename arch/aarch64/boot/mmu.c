@@ -309,6 +309,14 @@ __BOOT__(void) debug_boot_hardware_mappings(SystemInfoPtr system_info)
     debug_boot_hardware_mapping(mapping_stack, system_info->kernel_stack.virtual_start + STACK_SIZE - 16);
     debug_boot_hardware_mapping(mapping_uart, system_info->trace_uart.virtual_base);
 }
+#else
+static __BOOT__(void) debug_boot_mappings(SystemInfoPtr system_info)
+{
+}
+
+__BOOT__(void) debug_boot_hardware_mappings(SystemInfoPtr system_info)
+{
+}
 #endif
 
 __BOOT__(void) zero_table(PageTablePtr table)
@@ -404,7 +412,5 @@ __BOOT__(void) setup_boot_mappings(BootPlatformInfoPtr platform, SystemInfoPtr s
     map_gicd_gicr(&high_mem_l0_table, platform);
     map_framebuffer(&high_mem_l0_table, platform);
     boot_debug_print(mapping_kernel_complete);
-#ifdef __BOOT_DEBUG
     debug_boot_mappings(system_info);
-#endif
 }

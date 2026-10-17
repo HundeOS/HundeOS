@@ -18,8 +18,7 @@ typedef AllocationThread * AllocationThreadPtr;
 
 static void assert_free_success(KernelAddress allocation)
 {
-    match_result(
-        Kernel__free_malloc(allocation.virtual_addr),
+    match_result(Kernel__free_malloc(allocation.virtual_addr),
         success_do_nothing(),
         error_test_fail()
     );

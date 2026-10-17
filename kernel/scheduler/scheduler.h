@@ -183,11 +183,10 @@ Result(Address)
 Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr owner, Address address);
 Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name, size_t length);
 Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id);
-Result(Address) Scheduler__queue_delegate(SchedulerPtr self, ProcessPtr process,
-                                          QueueConnectionID client_connection, QueueEndpointID endpoint);
+Result(Address) Scheduler__queue_delegate(SchedulerPtr self, ProcessPtr process, QueueConnectionID client_connection,
+                                          QueueEndpointID endpoint);
 Result(Address) Scheduler__queue_cancel_delegation(SchedulerPtr self, ProcessPtr process,
-                                                   QueueConnectionID client_connection,
-                                                   QueueConnectionID delegated);
+                                                   QueueConnectionID client_connection, QueueConnectionID delegated);
 Result(SchedulerWake)
     Scheduler__queue_data_available(SchedulerPtr self, ProcessPtr process, QueueConnectionID connection);
 Result(SchedulerWake) Scheduler__wake_shared_wait(SchedulerPtr self, ProcessPtr process);
@@ -227,12 +226,10 @@ Result(ProcessChildEvent)
 Result(ProcessChildEvent)
     Scheduler__child_take_event(SchedulerPtr self, ProcessPtr process, int64_t child_selection, uint64_t options);
 Result(ServiceCode) Scheduler__service_enqueue(SchedulerPtr self, ProcessPtr process, ConstServiceEventPtr event);
-Result(ServiceCode)
-    Scheduler__register_memory_reclaimer(SchedulerPtr self, ProcessPtr process, MemPressureLevel pressure,
-                                         uint64_t free_pages);
-Result(ServiceCode)
-    Scheduler__notify_memory_pressure(SchedulerPtr self, uint64_t generation, MemPressureLevel pressure,
-                                      uint64_t free_pages);
+Result(ServiceCode) Scheduler__register_memory_reclaimer(SchedulerPtr self, ProcessPtr process,
+                                                         MemPressureLevel pressure, uint64_t free_pages);
+Result(ServiceCode) Scheduler__notify_memory_pressure(SchedulerPtr self, uint64_t generation, MemPressureLevel pressure,
+                                                      uint64_t free_pages);
 Result(ServiceCode) Scheduler__service_publish_ready(SchedulerPtr self, ProcessPtr process, ConstBStringPtr name);
 Optional(ProcessPtr) Scheduler__service_ready_process(SchedulerPtr self, ConstBStringPtr name);
 Result(ServiceCode)
@@ -252,7 +249,7 @@ bool Scheduler__parked_operation_is_ready(SchedulerPtr self, ParkedOperationPtr 
         .kernel = None(KernelPtr), .interrupt_controller = None(InterruptControllerInfo),                              \
         .schedulers = EmptyHashtable(CPUSchedulers), .admission = EmptyArray(ProcessTable),                            \
         .service_event_dispatcher = NEW_SERVICE_EVENT_DISPATCHER, .shared_pages = EmptyArray(ManagedSharedPages),      \
-        .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT, .ready = false, .memory_pressure_generation = 0,         \
+        .queues = QUEUES_INIT, .scheduler_lock = MUTEX_INIT, .ready = false, .memory_pressure_generation = 0,          \
     }
 
 #endif

@@ -168,11 +168,10 @@ ResultDef(HashCode);
     typedef _None(alias##__V_ptr) _HashtablePtrNone(alias);                                                            \
     typedef _Some(alias##__V_ptr) _HashtablePtrSome(alias);                                                            \
                                                                                                                        \
-    BucketEntryDefine(alias) OptionalDef(alias##__bucket_entry) ResultDef(alias##__bucket_entry)                       \
-        FixedArrayDefine(alias##__bucket_entry, bucket_size, alias##__bucket, value_equals)                            \
-            typedef alias##__bucket * alias##BucketPtr;                                                               \
+    BucketEntryDefine(alias) OptionalDef(alias##__bucket_entry) ResultDef(alias##__bucket_entry) FixedArrayDefine(     \
+        alias##__bucket_entry, bucket_size, alias##__bucket, value_equals) typedef alias##__bucket * alias##BucketPtr; \
                                                                                                                        \
-        typedef struct alias                                                                                           \
+    typedef struct alias                                                                                               \
     {                                                                                                                  \
         alias##__bucket buckets[table_size];                                                                           \
         uint64_t len;                                                                                                  \
@@ -187,11 +186,7 @@ ResultDef(HashCode);
     FixedArrayBodyDefine(alias##__bucket) HashtableConstructorBodyDefine(alias) HashtableSetBodyDefine(alias)          \
         HashtableGetBodyDefine(alias) HashtableDeleteBodyDefine(alias) HashtableLenBodyDefine(alias)
 
-#define EmptyHashtable(alias)                                                                                          \
-    (alias)                                                                                                            \
-    {                                                                                                                  \
-        0                                                                                                              \
-    }
+#define EmptyHashtable(alias) (alias){0}
 
 #define for_each_hashtable(alias, hashtable, bucket_index, entry_index, iter_key, iter_value, ...)                     \
     for (uint64_t bucket_index = 0; bucket_index < alias##__table_size; bucket_index++)                                \

@@ -101,6 +101,28 @@ def test_reports_goto(rules_for):
     assert "no-goto" in rules_for("goto done;\n")
 
 
+def test_reports_conditional_compilation_inside_function(ast_rules_for):
+    source = "void example(void) {\n#ifdef ENABLE_TRACE\ntrace();\n#endif\n}\n"
+    assert "no-conditional-compilation-in-function" in ast_rules_for(source)
+
+
+def test_allows_conditionally_defined_function_called_unconditionally(ast_rules_for):
+    source = (
+        "#ifdef ENABLE_TRACE\n"
+        "static void trace(void) { emit(); }\n"
+        "#else\n"
+        "#define trace()\n"
+        "#endif\n"
+        "void example(void) { trace(); }\n"
+    )
+    assert "no-conditional-compilation-in-function" not in ast_rules_for(source)
+
+
+def test_allows_header_guard(ast_rules_for):
+    source = "#ifndef EXAMPLE_H\n#define EXAMPLE_H\nvoid example(void);\n#endif\n"
+    assert "no-conditional-compilation-in-function" not in ast_rules_for(source, "kernel/example.h")
+
+
 def test_reports_raw_char_pointer_and_array_buffers(rules_for):
     rules = rules_for("char *name;\nchar buffer[16];\n")
     assert 2 == rules.count("no-raw-char-buffer")
@@ -128,6 +150,15 @@ def test_reports_optional_result_internals(ast_rules_for):
     )
     rules = ast_rules_for(source)
     assert 6 == rules.count("no-optional-result-internals")
+
+
+def test_reports_optional_payload_internals_on_nested_struct_field(ast_rules_for):
+    source = (
+        "void example(IRQDispatcherPtr self) { "
+        "self->interrupt_controller.some.val; self->dispatch_result.success.val; }\n"
+    )
+    rules = ast_rules_for(source)
+    assert 4 == rules.count("no-optional-result-internals")
 
 
 def test_allows_optional_result_internals_in_macro_headers(ast_rules_for):

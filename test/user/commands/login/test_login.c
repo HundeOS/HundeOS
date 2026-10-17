@@ -199,6 +199,5 @@ void test_login_prints_synchronous_shell_fault_details(void)
 
     TEST_ASSERT_EQUAL_INT(1, login_main_under_test());
     TEST_ASSERT_TRUE(contains_text(output, "login: failed to start bash: -1001\n"));
-    TEST_ASSERT_TRUE(
-        contains_text(output, "login: bash fault reason=1 cause=0xd pc=0x401234 address=0x400008\n"));
+    TEST_ASSERT_TRUE(contains_text(output, "login: bash fault reason=1 cause=0xd pc=0x401234 address=0x400008\n"));
 }

@@ -16,37 +16,45 @@ void Arch__init_bootstrap_system(SystemInfoPtr system_info)
 
 Result(SubsystemInitStatus) Arch__init(KernelPtr kernel)
 {
-    SystemInfoPtr system_info = &kernel->system_info.some.val;
-
-    match_result(
-        gic_init(&system_info->interrupt_controller),
-        success_do_nothing(),
-        error(code, message)
+    match_optional(
+        kernel->system_info,
+        some(system_info)
         {
-            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+            match_result(
+                gic_init(&system_info.interrupt_controller),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+                }
+            );
+
+            match_result(
+                IRQDispatcher__register_kernel(kernel->irq_dispatcher, PPI_CNTV, CPUTimer__handle_irq, kernel),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+                }
+            );
+            match_result(
+                IRQDispatcher__register_kernel(kernel->irq_dispatcher, PPI_CNTP, CPUTimer__handle_irq, kernel),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
+                }
+            );
+
+            enable_irq();
+
+            return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
+        },
+        none()
+        {
+            return Error(SubsystemInitStatus, bstr("Missing system info"), SUBSYSTEM_INIT_FAILED);
         }
     );
-
-    match_result(
-        IRQDispatcher__register_kernel(kernel->irq_dispatcher, PPI_CNTV, CPUTimer__handle_irq, kernel),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-        }
-    );
-    match_result(
-        IRQDispatcher__register_kernel(kernel->irq_dispatcher, PPI_CNTP, CPUTimer__handle_irq, kernel),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(SubsystemInitStatus, message, SUBSYSTEM_INIT_FAILED);
-        }
-    );
-
-    enable_irq();
-
-    return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
 Result(SubsystemInitStatus) Arch__enable_irq(InterruptControllerInfoPtr interrupt_controller, uint64_t irq)

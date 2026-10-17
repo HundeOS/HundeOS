@@ -58,7 +58,7 @@ static int LibcProbe__check_memory_and_strings(void)
         failed = 1;
     }
 
-    if (strchr(destination, 't') != (char *)destination + 4 || strrchr(destination, 'e') != (char *)destination + 11 ||
+    if (strchr(destination, 't') != (char *)destination + 4 || strrchr(destination, 'e') != (char *)destination + 12 ||
         strstr(destination, "two") != (char *)destination + 4 || strspn("abc123", "abc") != 3 ||
         strcspn("abc123", "0123456789") != 3 || *strpbrk("shell", "aeiou") != 'e')
     {

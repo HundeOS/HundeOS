@@ -75,16 +75,9 @@ static void TraceUart__put_char(char c)
     }
     __asm__ volatile("dsb sy");
 }
-#endif
 
-void DebugTrace__puts(const char * str)
+static void TraceUart__puts(const char * str)
 {
-    if (!TraceUart__try_lock())
-    {
-        return;
-    }
-
-#ifdef BSP_VIRT
     TraceUart__init();
     while (*str)
     {
@@ -95,11 +88,24 @@ void DebugTrace__puts(const char * str)
         }
         str++;
     }
+}
 #elif defined(BSP_MILKV_DUO_S)
+static void TraceUart__puts(const char * str)
+{
     puts(str);
+}
 #else
 #error "KERNEL_SERIAL_TRACE has no trace UART implementation for this BSP"
 #endif
+
+void DebugTrace__puts(const char * str)
+{
+    if (!TraceUart__try_lock())
+    {
+        return;
+    }
+
+    TraceUart__puts(str);
     TraceUart__unlock();
 }
 #elif defined(KERNEL_SEMIHOSTING_TRACE)

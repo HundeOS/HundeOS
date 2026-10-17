@@ -201,8 +201,7 @@ static int PageTable__map_page_with_cursor(ProcessPageTablePtr self, KernelPtr k
     uint64_t level_1_index = RISCV_SV39_LEVEL_1_INDEX(virtual_address);
     if (!cursor->level_0.valid || cursor->level_1_index != level_1_index)
     {
-        cursor->level_0 =
-            PageTable__ensure_next_level_table(self, cursor->level_1, kernel, level_1_index, publish);
+        cursor->level_0 = PageTable__ensure_next_level_table(self, cursor->level_1, kernel, level_1_index, publish);
         cursor->level_1_index = level_1_index;
         if (!cursor->level_0.valid)
         {
@@ -231,7 +230,7 @@ static int PageTable__map_page(ProcessPageTablePtr self, KernelPtr kernel, Addre
 }
 
 static Result(KAllocCode) ArchPageTable__try_map_with_publish(ProcessPageTablePtr self, KernelPtr kernel,
-                                                             UserAddress address, size_t size, bool publish);
+                                                              UserAddress address, size_t size, bool publish);
 
 void ArchPageTable__map(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
 {
@@ -244,7 +243,7 @@ Result(KAllocCode) ArchPageTable__try_map(ProcessPageTablePtr self, KernelPtr ke
 }
 
 static Result(KAllocCode) ArchPageTable__try_map_with_publish(ProcessPageTablePtr self, KernelPtr kernel,
-                                                             UserAddress address, size_t size, bool publish)
+                                                              UserAddress address, size_t size, bool publish)
 {
     Address user_start = align_down_4k(vaddr(address));
     Address user_end = align_up_4k(vaddr(address) + size);
@@ -400,5 +399,14 @@ void ArchPageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address vi
 
         v_ptr(level_0, PageTable)->entries[RISCV_SV39_LEVEL_0_INDEX(user_address)] = 0;
         PageTable__invalidate_page(user_address);
+    }
+}
+
+void ArchPageTable__protect(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    ArchPageTable__unmap(self, kernel, address.virtual_addr, size);
+    if (address.read || address.write || address.execute)
+    {
+        ArchPageTable__map(self, kernel, address, size);
     }
 }

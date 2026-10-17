@@ -79,8 +79,7 @@ int main(int argc, char ** argv)
         return 1;
     }
     ConstProcessRegistryPtr registry;
-    match_result(
-        process_registry_map(),
+    match_result(process_registry_map(),
         success(mapped)
         {
             registry = mapped;
@@ -101,8 +100,7 @@ int main(int argc, char ** argv)
     WaitProbeSummary summary = WaitProbeSummary__new();
     for (uint64_t sample = 0; sample < WAIT_PROBE_SAMPLES; sample++)
     {
-        IpcEventGeneration observed =
-            IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
+        IpcEventGeneration observed = IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
         uint64_t start = IpcPlatform__monotonic_usec();
         QueueWaitControl__begin(control);
         QueueWaitControl__commit(control, start, QUEUE_WAIT_NO_DEADLINE, observed);

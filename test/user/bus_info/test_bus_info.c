@@ -63,9 +63,8 @@ void setUp(void)
     disconnects = 0;
     hold_request = false;
     current_pid = 8;
-    TEST_ASSERT_EQUAL(
-        IO_OK,
-        IOService__listen_into(&service, &bstr(BUS_INFO_SERVICE), &devices, BusTest__execute, BusTest__disconnect));
+    TEST_ASSERT_EQUAL(IO_OK, IOService__listen_into(&service, &bstr(BUS_INFO_SERVICE), &devices, BusTest__execute,
+                                                    BusTest__disconnect));
     fixture_server_step = BusTest__serve;
     current_pid = 42;
 }

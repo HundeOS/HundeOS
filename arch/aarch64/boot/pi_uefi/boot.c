@@ -87,7 +87,7 @@ static __BOOT__(void) PiUefiPlatformInfo__set_fixed_devices(BootPlatformInfoPtr 
 __BOOT__(void)
 
 BootPlatform__set_entry_args(uint64_t image_handle, uint64_t system_table, uint64_t physical_memory_end,
-                            uint64_t handoff_magic, uint64_t handoff_address)
+                             uint64_t handoff_magic, uint64_t handoff_address)
 {
     pi_uefi_image_handle = image_handle;
     pi_uefi_system_table = system_table;

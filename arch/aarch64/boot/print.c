@@ -66,10 +66,10 @@ inline void _send(unsigned int c)
     for (int j = 0; j < 1000; j++)
     {
         __asm__ __volatile__("nop");
-        uint32_t status = boot_uart_kind == UART_KIND_NS16550 ? BootUart__read(NS16550_LINE_STATUS)
-                                                              : BootUart__read(UART0_FR_OFFSET);
-        bool ready = boot_uart_kind == UART_KIND_NS16550 ? (status & NS16550_TRANSMIT_EMPTY) != 0
-                                                         : (status & FR_TXFF) == 0;
+        uint32_t status =
+            boot_uart_kind == UART_KIND_NS16550 ? BootUart__read(NS16550_LINE_STATUS) : BootUart__read(UART0_FR_OFFSET);
+        bool ready =
+            boot_uart_kind == UART_KIND_NS16550 ? (status & NS16550_TRANSMIT_EMPTY) != 0 : (status & FR_TXFF) == 0;
         if (ready)
         {
             break;

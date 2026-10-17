@@ -285,6 +285,7 @@ static TraceReply TraceService__handle_request(TraceServicePtr self, TraceClient
     {
         return TraceService__register_io(self, client);
     }
+
     if (request->operation == TRACE_OPERATION_DRAIN_IO)
     {
         return TraceReply__new(TraceService__drain_sources(self, ChannelServer__transport_pid(&client->channel)));

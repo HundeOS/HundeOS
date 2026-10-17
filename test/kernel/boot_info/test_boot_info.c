@@ -25,8 +25,7 @@ void test_boot_info_copies_hardware_without_kernel_virtual_addresses(void)
              FramebufferInfo__new(0x30000000, 8192, 64, 32, 64, FRAMEBUFFER_PIXEL_FORMAT_RGB_RESERVED_8BIT_PER_COLOR,
                                   255, 65280, 16711680, 0));
     system.pci = Some(PciInfo, PciInfo__new(0x40000000, 0x100000, 0, 7));
-    system.sd_host =
-        Some(SdHostInfo, SdHostInfo__new(0x50000000, 4096, 60, SD_HOST_KIND_CV181X, 375000000));
+    system.sd_host = Some(SdHostInfo, SdHostInfo__new(0x50000000, 4096, 60, SD_HOST_KIND_CV181X, 375000000));
     BootDeviceInfo rtc_device = BootDeviceInfo__new(0x9010000, 4096, 34);
     system.rtc = Some(BootRtcInfo, BootRtcInfo__new(&rtc_device, RTC_KIND_PL031));
     GicInterruptControllerInfo gic =
@@ -73,7 +72,8 @@ void test_boot_info_copies_hardware_without_kernel_virtual_addresses(void)
         },
         none_test_fail()
     );
-    match_optional(result.sd_host,
+    match_optional(
+        result.sd_host,
         some(value)
         {
             TEST_ASSERT_EQUAL_UINT64(60, value.device.irq);

@@ -162,6 +162,7 @@ bool Process__kernel_queue_wait_ready(ProcessPtr self)
     {
         return true;
     }
+
     match_optional(
         self->queue_wait_doorbell,
         some(observed)
@@ -226,6 +227,7 @@ bool Process__shared_wait_ready(ProcessPtr self)
     {
         return true;
     }
+
     match_optional(Process__shared_wait(self),
         some(publication)
         {

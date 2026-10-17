@@ -30,9 +30,7 @@ void test_memory_copy_handles_alignment_and_tail_lengths(void)
             {
                 Mem__memset(destination, 0xa5, sizeof(destination));
                 TEST_ASSERT_EQUAL_PTR(destination + destination_offset,
-                                      Mem__memcpy(destination + destination_offset,
-                                                  source + source_offset,
-                                                  length));
+                                      Mem__memcpy(destination + destination_offset, source + source_offset, length));
                 for (size_t index = 0; index < sizeof(destination); index++)
                 {
                     uint8_t expected = 0xa5;

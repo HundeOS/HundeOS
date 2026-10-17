@@ -163,6 +163,44 @@ void ArchPageTable__unmap(ProcessPageTablePtr self, KernelPtr kernel, Address vi
     );
 }
 
+void ArchPageTable__protect(ProcessPageTablePtr self, KernelPtr kernel, UserAddress address, size_t size)
+{
+    PageTablePtr root = ProcessPageTable__root_table(self);
+    MapRequestArray replacement = MapRequestArray__new();
+    Address protected_end = address.virtual_addr + size;
+    for_each_fa(
+        MapRequestArray,
+        root->mapped_addresses,
+        i,
+        mapped_address,
+        {
+            Address mapped_start = mapped_address.address.virtual_addr;
+            Address mapped_end = mapped_start + mapped_address.size;
+            if (mapped_end <= address.virtual_addr || mapped_start >= protected_end)
+            {
+                MapRequestArray__push(&replacement, mapped_address);
+                continue;
+            }
+            Address overlap_start = mapped_start > address.virtual_addr ? mapped_start : address.virtual_addr;
+            Address overlap_end = mapped_end < protected_end ? mapped_end : protected_end;
+            if (mapped_start < overlap_start)
+            {
+                MapRequestArray__push(&replacement,
+                                      MapRequest__new(mapped_address.address, overlap_start - mapped_start));
+            }
+            UserAddress overlap_address = UserAddress__relative(&address, overlap_start - address.virtual_addr);
+            MapRequestArray__push(&replacement, MapRequest__new(overlap_address, overlap_end - overlap_start));
+            if (overlap_end < mapped_end)
+            {
+                UserAddress after_address =
+                    UserAddress__relative(&mapped_address.address, overlap_end - mapped_start);
+                MapRequestArray__push(&replacement, MapRequest__new(after_address, mapped_end - overlap_end));
+            }
+        }
+    );
+    root->mapped_addresses = replacement;
+}
+
 bool check_address_mapped(PageTablePtr page_table, Address virtual_address, bool read, bool write, bool execute,
                           size_t size)
 {
