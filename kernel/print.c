@@ -8,20 +8,9 @@
 #include "trace_buffer.h"
 #include "../common/types/bstring.h"
 
-#ifdef KERNEL_MEMORY_TRACE
-static void KernelTrace__append_if_enabled(const char * str)
-{
-    KernelTrace__append(str);
-}
-#else
-static void KernelTrace__append_if_enabled(const char * str)
-{
-}
-#endif
-
 static void trace_puts(const char * str)
 {
-    KernelTrace__append_if_enabled(str);
+    KernelTrace__append(str);
     DebugTrace__puts(str);
 }
 

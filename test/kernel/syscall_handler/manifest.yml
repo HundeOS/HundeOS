@@ -1,4 +1,6 @@
 manifest:
+  defines:
+    - KERNEL_MEMORY_TRACE
   source_files:
     - kernel/syscall/*.c
     - kernel/process.c

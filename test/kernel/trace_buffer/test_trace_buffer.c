@@ -43,3 +43,13 @@ void test_kernel_trace_buffer_overwrites_oldest_bytes(void)
     TEST_ASSERT_EQUAL_UINT8('b', snapshot[KERNEL_TRACE_CAPACITY - 2U]);
     TEST_ASSERT_EQUAL_UINT8('c', snapshot[KERNEL_TRACE_CAPACITY - 1U]);
 }
+
+void test_kernel_trace_appends_to_global_buffer_when_enabled(void)
+{
+    uint8_t snapshot[5] = {0};
+
+    KernelTrace__append("global");
+
+    TEST_ASSERT_EQUAL_UINT64(sizeof(snapshot), unwrap_result(KernelTrace__snapshot(snapshot, sizeof(snapshot)), 0));
+    TEST_ASSERT_EQUAL_MEMORY("lobal", snapshot, sizeof(snapshot));
+}

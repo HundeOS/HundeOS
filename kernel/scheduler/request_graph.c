@@ -30,7 +30,7 @@ static Optional(QueuePublication) QueueConnection__publication(QueueConnectionPt
     {
         return None(QueuePublication);
     }
-    Address base = self->memory.kernel_addr.virtual_addr;
+    Address base = u_kvaddr(self->memory);
     QueueIdentityPtr identity = (QueueIdentityPtr)base;
     if (__atomic_load_n(&identity->closed, __ATOMIC_ACQUIRE) != 0 ||
         __atomic_load_n(&identity->accepted, __ATOMIC_ACQUIRE) == 0)
@@ -115,7 +115,7 @@ static Optional(RequestLink) QueueConnection__request_link(QueueConnectionPtr se
             RequestTicket completed = ChannelControlMessage__ticket(&publication.message);
             replied =
                 publication.message.kind == CHANNEL_RESPONSE_REPLIED && RequestTicket__equals(&ticket, &completed);
-            QueuePagePtr client_page = (QueuePagePtr)(self->memory.kernel_addr.virtual_addr + QUEUE_PAGE_SIZE);
+            QueuePagePtr client_page = (QueuePagePtr)(u_kvaddr(self->memory) + QUEUE_PAGE_SIZE);
             if (replied && publication.cursor == __atomic_load_n(&client_page->consumed, __ATOMIC_ACQUIRE))
             {
                 return None(RequestLink);

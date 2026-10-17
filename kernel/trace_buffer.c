@@ -72,10 +72,16 @@ Result(KernelTraceSize) KernelTraceBuffer__snapshot(KernelTraceBufferPtr self, u
     return Success(KernelTraceSize, size);
 }
 
+#ifdef KERNEL_MEMORY_TRACE
 void KernelTrace__append(const char * text)
 {
     KernelTraceBuffer__append(&kernel_trace, text);
 }
+#else
+void KernelTrace__append(const char * text)
+{
+}
+#endif
 
 Result(KernelTraceSize) KernelTrace__snapshot(uint8_t * destination, size_t capacity)
 {

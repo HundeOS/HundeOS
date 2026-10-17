@@ -21,7 +21,7 @@ UNITY = {unity_dir}
 UNITY_SOURCE = $(UNITY)/src/unity.c
 UNITY_OBJECT = {unity_object}
 # Compiler flags
-CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -mno-outline-atomics -D_XOPEN_SOURCE=700 -D_DARWIN_C_SOURCE -include {hundetest_header} -I{fiber_arch_include} -I$(USER_LIB_INCLUDE) -I{kernel_dir} -I{common_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
+CFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -mno-outline-atomics -D_XOPEN_SOURCE=700 -D_DARWIN_C_SOURCE {defines} -include {hundetest_header} -I{fiber_arch_include} -I$(USER_LIB_INCLUDE) -I{kernel_dir} -I{common_dir} -I$(UNITY)/src -I$(PLATFORM_INCLUDE) -I$(COMMON_INCLUDE)
 
 # Assembler flags
 ASFLAGS = -c -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -nostdlib -latomic -I{stubs_dir} -I{fixtures_dir}
@@ -144,6 +144,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
     with open(manifest, "r") as manifest_file:
         manifest = yaml.load(manifest_file, Loader=yaml.FullLoader)
         source_files = manifest["manifest"]["source_files"]
+        defines = [f"-D{define}" for define in manifest["manifest"].get("defines", [])]
         stubs_dir_fs = os.path.join(BASE_DIR, "kernel", "stubs")
         fixtures_dir_fs = os.path.join(BASE_DIR, "kernel", "fixtures")
         stubs_dir = os.path.join("test", "kernel", "stubs")
@@ -270,6 +271,7 @@ def generate_makefile(manifest: str, test_dir: str | bytes | LiteralString | Any
                                            user_lib=user_lib,
                                            fiber_arch_include=fiber_arch_include,
                                            hundetest_header=os.path.join(project_dir, "test", "hundetest.h"),
+                                           defines=join(defines),
                                            unity_object=unity_object,
                                            runner_bins=join(runner_bins),
                                            runner_tasks="\n".join(runner_tasks)))
