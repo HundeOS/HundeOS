@@ -194,6 +194,15 @@ containing either a component descriptor or an error. Descriptors contain size
 and version fields so a host can reject incompatible modules before invoking
 component operations.
 
+The common lifecycle ABI is declared in `common_includes/hunde/host_component.h`.
+Version 1 exports `hunde_component_entry_v1`. The entry receives
+`HundeHostOperationsV1` and returns `HundeComponentLoadResult`; initialization,
+disposal, logging, and fatal-error calls use explicitly tagged Result records.
+Byte spans are borrowed only for the duration of a call. The common descriptor
+does not expose Channels, Queues, fibres, Wuff loader state, or language-owned
+collections. I/O and hardware hosts add separately versioned operation tables
+for their component types rather than extending the common lifecycle structure.
+
 The ABI uses fixed-width integers, `extern "C"` calling conventions, and
 explicitly laid-out structures. It does not expose C macro-generated collection
 layouts, Rust enums, Rust trait objects, C++ objects, allocator-private objects,
@@ -217,6 +226,13 @@ IRQ deliveries, shared-buffer leases, and DMA.
 Initial Rust components use `#![no_std]` and the built-in bare-metal AArch64 and
 RV64IMAC targets. The project pins the Rust toolchain used to build them. A
 HundeOS-specific Rust target and a full `std` port are not prerequisites.
+
+The first compatibility object uses Rust 1.99.1, the
+`aarch64-unknown-none-softfloat` and `riscv64imac-unknown-none-elf` targets, PIC,
+and aborting panic behavior. Its C and Rust definitions both assert every common
+ABI size and offset. The linked module has one exported symbol, no interpreter,
+runtime dependency, TLS, constructor, finalizer, or text relocation, and uses
+only relocations already accepted by the Wuff loader.
 
 The supported initial contract is:
 

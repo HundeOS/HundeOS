@@ -24,6 +24,14 @@ Userspace code. It includes commands and drivers
 Unit tests. Running tests is done with make test. A python script is used to
 run the tests and generate the runners.
 
+### assets
+Project-owned visual and media assets, including official HundeOS logos, panic
+artwork, and source material intended for documentation, boot visuals, release
+artifacts, and future product integration. These files are not generated build
+outputs. Do not delete, replace, optimise, rename, or otherwise modify anything
+under `assets/` unless the user explicitly requests that exact asset change.
+Build cleanup must never remove this directory.
+
 # Instructions for making changes
 ## Check first
 Plan and then tell the user what you plan to do before making changes.

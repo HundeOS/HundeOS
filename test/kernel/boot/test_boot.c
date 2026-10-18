@@ -1,6 +1,7 @@
 #include "unity.h"
 
 #include "arch/init.h"
+#include "artwork.h"
 #include "boot.h"
 #include "kernel_core.h"
 #include "kernel_init.h"
@@ -8,12 +9,14 @@
 static Kernel kernel;
 static SystemInfo architecture_system_info;
 static unsigned architecture_init_calls;
+static unsigned launch_artwork_calls;
 
 void setUp(void)
 {
     kernel.system_info = None(SystemInfo);
     architecture_system_info = (SystemInfo){0};
     architecture_init_calls = 0;
+    launch_artwork_calls = 0;
 }
 
 void tearDown(void)
@@ -31,6 +34,11 @@ void Arch__init_bootstrap_system(SystemInfoPtr system_info)
     architecture_init_calls++;
 }
 
+void SystemArtwork__show_launch(SystemInfoPtr system_info)
+{
+    launch_artwork_calls++;
+}
+
 void test_bootstrap_stores_system_info_and_configures_architecture(void)
 {
     SystemInfo system_info = {0};
@@ -41,6 +49,7 @@ void test_bootstrap_stores_system_info_and_configures_architecture(void)
     Boot__init_bootstrap_system(&system_info);
 
     TEST_ASSERT_EQUAL_UINT(1, architecture_init_calls);
+    TEST_ASSERT_EQUAL_UINT(1, launch_artwork_calls);
     TEST_ASSERT_EQUAL_UINT64(4, architecture_system_info.cpu_count);
     TEST_ASSERT_EQUAL_UINT64(10000000, architecture_system_info.timer_frequency);
     TEST_ASSERT_EQUAL_HEX64(0x10000000, architecture_system_info.trace_uart.virtual_base);

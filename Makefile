@@ -66,6 +66,7 @@ BOOT_PLATFORM ?= qemu_virt
 BSP_DEFINES ?= -DBSP_VIRT
 UV ?= uv
 CLANG_FORMAT = clang-format
+MAGICK ?= magick
 PYTHON = $(UV) run python
 PYTHON_ENV_STAMP = .venv/.uv-sync
 # Compiler flags
@@ -381,6 +382,14 @@ ARCH_CPP_ASM_SOURCES := $(ARCH_COMMON_CPP_ASM_SOURCES) $(ARCH_PLATFORM_CPP_ASM_S
 OBJECTS := $(patsubst %.c,$(KERNEL_BUILD_DIR)/%.o,$(SOURCES))
 ASM_OBJECTS := $(patsubst %.s,$(KERNEL_BUILD_DIR)/%.o,$(ASM_SOURCES))
 CPP_ASM_OBJECTS := $(patsubst %.S,$(KERNEL_BUILD_DIR)/%.o,$(CPP_ASM_SOURCES))
+KERNEL_ARTWORK_BUILD_DIR := $(KERNEL_BUILD_DIR)/assets
+KERNEL_LOGO_RGB := $(KERNEL_ARTWORK_BUILD_DIR)/logo.rgb
+KERNEL_PANIC_RGB := $(KERNEL_ARTWORK_BUILD_DIR)/panic.rgb
+KERNEL_LOGO_RGB_OBJECT := $(KERNEL_ARTWORK_BUILD_DIR)/logo.o
+KERNEL_PANIC_RGB_OBJECT := $(KERNEL_ARTWORK_BUILD_DIR)/panic.o
+KERNEL_ARTWORK_OBJECTS := $(KERNEL_LOGO_RGB_OBJECT) $(KERNEL_PANIC_RGB_OBJECT)
+KERNEL_LOGO_RGB_BINARY_SYMBOL := $(subst /,_,$(subst .,_,$(KERNEL_LOGO_RGB)))
+KERNEL_PANIC_RGB_BINARY_SYMBOL := $(subst /,_,$(subst .,_,$(KERNEL_PANIC_RGB)))
 COMMON_KERNEL_OBJECTS := $(patsubst %.c,$(KERNEL_BUILD_DIR)/%.o,$(COMMON_SOURCES) $(COMMON_ARCH_SOURCES))
 
 ARCH_OBJECTS := $(patsubst %.c,$(KERNEL_BUILD_DIR)/%.o,$(ARCH_SOURCES))
@@ -453,6 +462,15 @@ WUFF_DYNAMIC_SMOKE_SOURCE := user/ports/wuff_dynamic_smoke.c
 WUFF_DYNAMIC_SMOKE_OBJECT := $(PLATFORM_BUILD_ROOT)/wuff-dynamic-smoke/wuff_dynamic_smoke.o
 WUFF_DYNAMIC_SMOKE_BINARY := $(PLATFORM_BUILD_ROOT)/wuff-dynamic-smoke/wuff-dynamic-smoke.bin
 WUFF_PROGRAM_VERSION_SCRIPT := user/ports/wuff_program.map
+RUST_TOOLCHAIN := 1.99.1
+RUSTC ?= rustc +$(RUST_TOOLCHAIN)
+RUST_COMPONENT_TARGET_aarch64 := aarch64-unknown-none-softfloat
+RUST_COMPONENT_TARGET_riscv64 := riscv64imac-unknown-none-elf
+RUST_COMPONENT_TARGET := $(RUST_COMPONENT_TARGET_$(ARCH))
+RUST_COMPONENT_SMOKE_SOURCE := user/components/rust_smoke/component.rs
+RUST_COMPONENT_SMOKE_MAP := user/components/rust_smoke/exports.map
+RUST_COMPONENT_SMOKE_OBJECT := $(PLATFORM_BUILD_ROOT)/rust-component-smoke/component.o
+RUST_COMPONENT_SMOKE_BINARY := $(PLATFORM_BUILD_ROOT)/rust-component-smoke/hunde-rust-smoke.wuff
 
 USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
 USER_RETIRED_BINARY_DIRS := user/commands/shell
@@ -538,7 +556,8 @@ EMBEDDED_FS := $(TARGET_BUILD_DIR)/kernel/embedded.fs
 all: $(BIN)
 
 .PHONY: check-wuff-linker sysroot sysroot-all sysroot-wuff sysroot-wuff-all sysroot-smoke sysroot-smoke-all \
-	wuff-smoke wuff-smoke-all wuff-dynamic-smoke wuff-dynamic-smoke-all
+	wuff-smoke wuff-smoke-all wuff-dynamic-smoke wuff-dynamic-smoke-all rust-component-smoke \
+	rust-component-smoke-all
 
 check-wuff-linker:
 	@command -v $(WUFF_LD) >/dev/null 2>&1 || { \
@@ -575,6 +594,12 @@ wuff-dynamic-smoke: $(WUFF_DYNAMIC_SMOKE_BINARY)
 wuff-dynamic-smoke-all:
 	$(MAKE) ARCH=aarch64 wuff-dynamic-smoke
 	$(MAKE) ARCH=riscv64 wuff-dynamic-smoke
+
+rust-component-smoke: $(RUST_COMPONENT_SMOKE_BINARY)
+
+rust-component-smoke-all:
+	$(MAKE) ARCH=aarch64 rust-component-smoke
+	$(MAKE) ARCH=riscv64 rust-component-smoke
 
 $(NEWLIB_CONFIGURE_STAMP): user/lib/newlib/configure.sh vendor/newlib/README.md vendor/newlib/src/configure
 	mkdir -p $(NEWLIB_BUILD_DIR)
@@ -732,6 +757,25 @@ $(WUFF_SMOKE_BINARY): $(WUFF_SMOKE_OBJECT) Makefile | check-wuff-linker
 	if $(READELF) -lW $@ | grep -q 'GNU_RELRO'; then $(READELF) -lW $@ >&2; exit 1; fi
 	$(READELF) -Ws $@ | awk '$$8 == "wuff_add" && $$5 == "GLOBAL" && $$7 != "UND" { found = 1 } END { exit !found }'
 
+$(RUST_COMPONENT_SMOKE_OBJECT): $(RUST_COMPONENT_SMOKE_SOURCE) rust-toolchain.toml Makefile
+	mkdir -p `dirname $@`
+	$(RUSTC) --edition=2024 --crate-name hunde_rust_smoke --crate-type=lib --emit=obj \
+		--target=$(RUST_COMPONENT_TARGET) -C panic=abort -C relocation-model=pic -C code-model=small \
+		-C opt-level=2 -C strip=debuginfo $< -o $@
+
+$(RUST_COMPONENT_SMOKE_BINARY): $(RUST_COMPONENT_SMOKE_OBJECT) $(RUST_COMPONENT_SMOKE_MAP) Makefile | check-wuff-linker
+	$(WUFF_LD) -shared -soname hunde-rust-smoke.wuff.1 --hash-style=sysv -z defs -z now -z relro \
+		--gc-sections --version-script=$(RUST_COMPONENT_SMOKE_MAP) $< -o $@
+	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
+	$(READELF) -dW $@ | awk '/SONAME/ { if ($$0 !~ /\[hunde-rust-smoke\.wuff\.1\]/) exit 1; found = 1 } END { exit !found }'
+	if $(READELF) -dW $@ | grep -q '(NEEDED)'; then $(READELF) -dW $@ >&2; exit 1; fi
+	if $(READELF) -dW $@ | grep -q '(TEXTREL)'; then echo "$@ contains text relocations" >&2; exit 1; fi
+	$(READELF) -lW $@ | grep -q 'GNU_RELRO'
+	if $(READELF) -lW $@ | grep -Eq '^[[:space:]]*(INTERP|TLS)[[:space:]]'; then $(READELF) -lW $@ >&2; exit 1; fi
+	if $(READELF) -dW $@ | grep -Eq '\((PREINIT_ARRAY|INIT|INIT_ARRAY|FINI|FINI_ARRAY)\)'; then $(READELF) -dW $@ >&2; exit 1; fi
+	$(READELF) --dyn-syms -W $@ | awk '$$7 != "UND" && $$5 == "GLOBAL" { count++; if ($$8 != "hunde_component_entry_v1") bad = 1 } END { exit bad || count != 1 }'
+	$(READELF) -rW $@ | awk -v allowed="$(WUFF_PROGRAM_RELOCATIONS)" '$$3 ~ /^R_/ { if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad }'
+
 $(WUFF_DYNAMIC_SMOKE_OBJECT): $(WUFF_DYNAMIC_SMOKE_SOURCE) $(SYSROOT_INCLUDE_STAMP) Makefile
 	mkdir -p `dirname $@`
 	$(CC) $(USER_PIC_CFLAGS) --sysroot=$(abspath $(SYSROOT_DIR)) \
@@ -868,6 +912,8 @@ compile-commands:
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 wuff-smoke
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 wuff-dynamic-smoke
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 wuff-dynamic-smoke
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 rust-component-smoke
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 rust-component-smoke
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
 		build/riscv64/sysroot/usr/lib/libcompiler_rt_pic.a
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 bash-build
@@ -987,6 +1033,26 @@ $(KERNEL_BUILD_DIR)/%.o: %.s
 $(KERNEL_BUILD_DIR)/%.o: %.S
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
+
+$(KERNEL_BUILD_DIR)/./kernel/artwork_assets.o $(KERNEL_BUILD_DIR)/kernel/artwork_assets.o: kernel/artwork_assets.S assets/logo.ascii assets/panic.ascii
+
+$(KERNEL_ARTWORK_BUILD_DIR)/%.rgb: assets/%.png
+	mkdir -p `dirname $@`
+	$(MAGICK) $< -resize 768x512 -background black -gravity center -extent 768x512 -alpha remove -alpha off -depth 8 rgb:$@
+
+$(KERNEL_LOGO_RGB_OBJECT): $(KERNEL_LOGO_RGB)
+	$(OBJCOPY) -I binary -O $(OBJCOPY_BINARY_FORMAT) -B $(OBJCOPY_BINARY_ARCH) \
+		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
+		--redefine-sym _binary_$(KERNEL_LOGO_RGB_BINARY_SYMBOL)_start=__hunde_logo_rgb_start \
+		--redefine-sym _binary_$(KERNEL_LOGO_RGB_BINARY_SYMBOL)_end=__hunde_logo_rgb_end \
+		--redefine-sym _binary_$(KERNEL_LOGO_RGB_BINARY_SYMBOL)_size=__hunde_logo_rgb_size $< $@
+
+$(KERNEL_PANIC_RGB_OBJECT): $(KERNEL_PANIC_RGB)
+	$(OBJCOPY) -I binary -O $(OBJCOPY_BINARY_FORMAT) -B $(OBJCOPY_BINARY_ARCH) \
+		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
+		--redefine-sym _binary_$(KERNEL_PANIC_RGB_BINARY_SYMBOL)_start=__hunde_panic_rgb_start \
+		--redefine-sym _binary_$(KERNEL_PANIC_RGB_BINARY_SYMBOL)_end=__hunde_panic_rgb_end \
+		--redefine-sym _binary_$(KERNEL_PANIC_RGB_BINARY_SYMBOL)_size=__hunde_panic_rgb_size $< $@
 
 $(RISCV64_BRINGUP_BUILD_DIR)/%.o: %.c
 	mkdir -p `dirname $@`
@@ -1135,7 +1201,7 @@ $(QEMU_EFI_VARS): $(QEMU_EFI_VARS_TEMPLATE)
 	cp $(QEMU_EFI_VARS_TEMPLATE) $@
 
 # Link object files to create ELF
-$(ELF): $(ASM_OBJECTS) $(CPP_ASM_OBJECTS) $(OBJECTS) $(COMMON_KERNEL_OBJECTS) $(ARCH_ASM_OBJECTS) $(ARCH_CPP_ASM_OBJECTS) $(ARCH_OBJECTS)
+$(ELF): $(ASM_OBJECTS) $(CPP_ASM_OBJECTS) $(OBJECTS) $(COMMON_KERNEL_OBJECTS) $(ARCH_ASM_OBJECTS) $(ARCH_CPP_ASM_OBJECTS) $(ARCH_OBJECTS) $(KERNEL_ARTWORK_OBJECTS)
 	$(LD) $(LDFLAGS) $^ -o $@
 
 $(RISCV64_BRINGUP_ELF): $(RISCV64_BRINGUP_OBJECTS) arch/riscv64/boot/qemu_virt/linker.ld

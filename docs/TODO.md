@@ -531,8 +531,11 @@ remaining I/O components still use the current multi-process service graph.
   `Result(WuffSymbol)`. See
   [Dynamic linking and host modules](architecture/dynamic-linking.md).
 - [ ] Define the single-entry, versioned C ABI and typed host-operation tables
-  used by both I/O and hardware components. Do not expose language-specific
-  objects, unwinding, or private collection layouts across the boundary.
+  used by both I/O and hardware components. The common lifecycle entry, tagged
+  Result records, logging/fatal host operations, descriptor, and C/Rust layout
+  assertions are implemented; the I/O and hardware-specific operation tables
+  remain. Do not expose language-specific objects, unwinding, or private
+  collection layouts across the boundary.
 - [ ] Load trusted components during host startup, validate ABI size and version,
   establish final segment permissions, initialize only after the complete object
   graph succeeds, and roll back partial loads.
@@ -542,9 +545,11 @@ remaining I/O components still use the current multi-process service graph.
 
 #### Minimal Rust Components
 
-- [ ] Pin a Rust toolchain and build `#![no_std]` components with the built-in
-  AArch64 and RV64IMAC bare-metal targets, the C component ABI, and aborting panic
-  behavior. A HundeOS `std` port and custom Rust target are not prerequisites.
+- [x] Pin Rust 1.99.1 and build the first dependency-free `#![no_std]` component
+  with the built-in AArch64 and RV64IMAC bare-metal targets, the C component ABI,
+  PIC, and aborting panic behavior. A HundeOS `std` port and custom Rust target
+  are not prerequisites. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
 - [ ] Provide the minimal runtime boundary: host-backed allocation when `alloc`
   is used, fatal panic handling, required memory/integer/atomic symbols, and ABI
   adapters around unsafe MMIO, DMA, and shared-buffer access.

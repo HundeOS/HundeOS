@@ -55,6 +55,12 @@ Process memory and CPU accounting remain available through `/proc`.
 Boot file operations no longer bypass Channels. Kernel root construction no
 longer installs `/boot` or `/boot/config`; the old bootfs and EXT2 implementations
 have been deleted. Independent boot/panic output remains a kernel responsibility.
+Before userspace starts, the kernel renders the embedded `assets/logo.png` source
+when a mapped framebuffer is available and otherwise writes `assets/logo.ascii`
+through architecture basic I/O. Panic handling similarly replaces the display
+with the embedded `assets/panic.png` source or writes `assets/panic.ascii` when a
+framebuffer is unavailable. PNG conversion happens at build time, so neither path
+depends on image decoding, filesystem access, allocation, or userspace services.
 
 The kernel records Mama's PID when it creates the initial process. Only that
 process may call `boot_spawn()` while boot level 0 is active; it loads embedded

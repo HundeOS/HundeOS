@@ -17,6 +17,15 @@ See [Goals](docs/GOALS.md) for project direction, [TODO](docs/TODO.md) for
 granular work and open design questions, and the
 [architecture documents](docs/architecture/) for the current system design.
 
+## Project Assets
+
+The [`assets`](assets/) directory contains project-owned artwork and other
+non-generated media. At system launch the kernel displays the HundeOS logo as a
+PNG-derived framebuffer image, or uses its ASCII counterpart when no framebuffer
+is available. Kernel panic follows the same policy with the panic artwork. These
+files are source assets rather than build output and must be preserved by cleanup
+commands. See the [asset inventory](assets/README.md) for each file's purpose.
+
 ## Supported Architectures
 
 AArch64 and RV64 both run the complete userspace service graph on four virtual
@@ -94,18 +103,20 @@ socket_test connect
 
 ## Developer Setup
 
-Install the cross compiler, QEMU, uv, and FAT filesystem tools.
+Install the cross compiler, QEMU, uv, Rustup, ImageMagick, and FAT filesystem tools. The
+repository's `rust-toolchain.toml` installs the pinned minimal Rust toolchain and
+built-in bare-metal targets used by loadable components.
 
 On macOS with Homebrew:
 
 ```sh
-brew install aarch64-elf-gcc riscv64-elf-gcc riscv64-elf-binutils llvm lld qemu dosfstools uv
+brew install aarch64-elf-gcc riscv64-elf-gcc riscv64-elf-binutils llvm lld qemu dosfstools uv imagemagick
 ```
 
 On Linux:
 
 ```sh
-sudo apt install gcc-aarch64-none-elf gcc-riscv64-unknown-elf clang lld qemu-system-arm qemu-system-misc dosfstools
+sudo apt install gcc-aarch64-none-elf gcc-riscv64-unknown-elf clang lld qemu-system-arm qemu-system-misc dosfstools imagemagick
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
