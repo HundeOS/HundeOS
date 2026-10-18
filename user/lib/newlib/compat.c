@@ -40,14 +40,20 @@ DIR * opendir(const char * path)
         free(directory);
         return NULL;
     }
-    directory->count = IO__list_dir(&absolute, directory->entries, POSIX_DIRECTORY_ENTRY_CAPACITY);
+    match_result(
+        IO__list_dir(&absolute, directory->entries, POSIX_DIRECTORY_ENTRY_CAPACITY),
+        success(count)
+        {
+            directory->count = count;
+        },
+        error(code, message)
+        {
+            free(directory);
+            errno = ENOENT;
+            return NULL;
+        }
+    );
     directory->index = 0;
-    if (directory->count < 0)
-    {
-        free(directory);
-        errno = ENOENT;
-        return NULL;
-    }
     return directory;
 }
 

@@ -269,6 +269,11 @@ RULES = (
         pattern=re.compile(r"(?!)"),
     ),
     Rule(
+        name="no-result-success-value-escape",
+        message="use the success payload directly instead of copying it to a redundant outer local",
+        pattern=re.compile(r"(?!)"),
+    ),
+    Rule(
         name="block-macro-semicolon",
         message="put a semicolon after block-style macro calls",
         pattern=re.compile(r"(?!)"),
@@ -303,6 +308,9 @@ MATCH_BRANCH_BLOCK_FORMAT_RULE = next(rule for rule in RULES if rule.name == "ma
 TYPED_MATCH_ARGUMENT_RULE = next(rule for rule in RULES if rule.name == "typed-match-argument")
 TYPED_UNWRAP_ARGUMENT_RULE = next(rule for rule in RULES if rule.name == "typed-unwrap-argument")
 TRIVIAL_ERROR_BRANCH_RULE = next(rule for rule in RULES if rule.name == "trivial-error-branch")
+RESULT_SUCCESS_VALUE_ESCAPE_RULE = next(
+    rule for rule in RULES if rule.name == "no-result-success-value-escape"
+)
 CRITICAL_SECTION_CONTROL_FLOW_RULE = next(rule for rule in RULES if rule.name == "critical-section-control-flow")
 BLOCK_MACRO_SEMICOLON_RULE = next(rule for rule in RULES if rule.name == "block-macro-semicolon")
 
@@ -1811,12 +1819,70 @@ def _lint_critical_section_control_flow(path: Path, source: str) -> list[Finding
     return findings
 
 
-def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
+def _function_at_offset_returns_result(source: str, tree, offset: int) -> bool:
+    if tree is None:
+        return False
+
+    source_bytes = source.encode("utf-8")
+    node = tree.root_node.descendant_for_byte_range(offset, offset + 1)
+    while node is not None and node.type != "function_definition":
+        node = node.parent
+    if node is None:
+        return False
+
+    declarator = node.child_by_field_name("declarator")
+    if declarator is None:
+        return False
+    function_prefix = source_bytes[node.start_byte:declarator.start_byte].decode("utf-8")
+    return re.search(r"\bResult\s*\(", function_prefix) is not None
+
+
+def _result_success_copy_is_redundant(source: str, tree, offset: int, macro_end: int, target: str) -> bool:
+    if tree is None:
+        return False
+
+    node = tree.root_node.descendant_for_byte_range(offset, offset + 1)
+    while node is not None and node.type != "function_definition":
+        node = node.parent
+    if node is None:
+        return False
+
+    function_node = node
+    function_prefix = source[function_node.start_byte:offset]
+    local_declaration = re.search(
+        rf"(?m)^[ \t]*(?:const\s+)?[A-Za-z_][A-Za-z0-9_]*"
+        rf"(?:\s*\([^;\n]*\))?(?:\s*\*)?\s+{re.escape(target)}\b"
+        rf"(?:\s*=\s*[^;]+)?\s*;[ \t]*$",
+        function_prefix,
+    )
+    if local_declaration is None:
+        return False
+
+    node = tree.root_node.descendant_for_byte_range(offset, offset + 1)
+    while node is not None and node != function_node:
+        if node.type in {"for_statement", "while_statement", "do_statement"}:
+            loop_prefix = source[node.start_byte:offset]
+            if re.search(rf"\b{re.escape(target)}\b", loop_prefix) is not None:
+                return False
+        node = node.parent
+
+    function_remainder = source[macro_end:function_node.end_byte]
+    return re.search(rf"\b{re.escape(target)}\b", function_remainder) is None
+
+
+def _lint_match_branch_macros(path: Path, source: str, tree=None) -> list[Finding]:
     branch_allowed = _is_allowed(MATCH_BRANCH_RULE, path)
     format_allowed = _is_allowed(MATCH_BRANCH_FORMAT_RULE, path)
     block_format_allowed = _is_allowed(MATCH_BRANCH_BLOCK_FORMAT_RULE, path)
     trivial_error_allowed = _is_allowed(TRIVIAL_ERROR_BRANCH_RULE, path)
-    if branch_allowed and format_allowed and block_format_allowed and trivial_error_allowed:
+    success_value_escape_allowed = _is_allowed(RESULT_SUCCESS_VALUE_ESCAPE_RULE, path)
+    if (
+        branch_allowed
+        and format_allowed
+        and block_format_allowed
+        and trivial_error_allowed
+        and success_value_escape_allowed
+    ):
         return []
 
     clean_source = "\n".join(_sanitise_source(source))
@@ -1930,6 +1996,43 @@ def _lint_match_branch_macros(path: Path, source: str) -> list[Finding]:
                         )
                     )
 
+            if (
+                valid
+                and macro_name == "match_result"
+                and not success_value_escape_allowed
+                and RESULT_SUCCESS_VALUE_ESCAPE_RULE.name not in _line_ignores(raw_line)
+                and _function_at_offset_returns_result(source, tree, offset)
+            ):
+                success_arg = args[branch_index].strip()
+                escaped_value = re.match(
+                    r"success\s*\(\s*(?P<value>[A-Za-z_][A-Za-z0-9_]*)\s*\)\s*"
+                    r"\{\s*(?P<target>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+                    r"(?:\([^;]+\)\s*)?(?P=value)\s*;",
+                    success_arg,
+                    re.DOTALL,
+                )
+                macro_end = offset + len(macro_name) + len(args_text) + 2
+                entire_branch_is_copy = escaped_value is not None and re.fullmatch(
+                    r"success\s*\(\s*(?P<value>[A-Za-z_][A-Za-z0-9_]*)\s*\)\s*"
+                    r"\{\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
+                    r"(?:\([^;]+\)\s*)?(?P=value)\s*;\s*\}",
+                    success_arg,
+                    re.DOTALL,
+                )
+                redundant_copy = escaped_value is not None and _result_success_copy_is_redundant(
+                    source, tree, offset, macro_end, escaped_value.group("target")
+                )
+                if redundant_copy or (entire_branch_is_copy and _function_at_offset_returns_result(source, tree, offset)):
+                    findings.append(
+                        Finding(
+                            path=path,
+                            line=line_number,
+                            column=column,
+                            rule=RESULT_SUCCESS_VALUE_ESCAPE_RULE.name,
+                            message=RESULT_SUCCESS_VALUE_ESCAPE_RULE.message,
+                        )
+                    )
+
     return findings
 
 
@@ -2028,7 +2131,7 @@ def lint_source(path: Path, source: str, tree=None) -> list[Finding]:
                     )
                 )
 
-    findings.extend(_lint_match_branch_macros(path, source))
+    findings.extend(_lint_match_branch_macros(path, source, tree))
     findings.extend(_lint_unwrap_macros(path, source))
     findings.extend(_lint_critical_section_control_flow(path, source))
     findings.extend(_lint_block_macro_semicolons(path, source))

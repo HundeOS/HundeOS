@@ -94,6 +94,31 @@ int fstat(int descriptor, struct stat * status)
     return -1;
 }
 
+int ftruncate(int descriptor, off_t length)
+{
+    if (length < 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    struct stat status;
+    if (fstat(descriptor, &status) != 0)
+    {
+        return -1;
+    }
+    if (!S_ISREG(status.st_mode))
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    if (status.st_size == length)
+    {
+        return 0;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
 int mkdir(const char * path, mode_t mode)
 {
     BString absolute;
@@ -101,13 +126,20 @@ int mkdir(const char * path, mode_t mode)
     {
         return -1;
     }
-    IOStatus result = IO__make_dir(&absolute);
-    if (result != IO_OK)
-    {
-        errno = result == IO_PERMISSION_DENIED ? EACCES : result == IO_ALREADY_EXISTS ? EEXIST : EIO;
-        return -1;
-    }
-    return 0;
+    match_result(
+        IO__make_dir(&absolute),
+        success(status)
+        {
+            return status == IO_OK ? 0 : -1;
+        },
+        error(code, message)
+        {
+            errno = code == IO_PERMISSION_DENIED ? EACCES : code == IO_ALREADY_EXISTS ? EEXIST : EIO;
+            return -1;
+        }
+    );
+    errno = EIO;
+    return -1;
 }
 
 mode_t umask(mode_t mask)

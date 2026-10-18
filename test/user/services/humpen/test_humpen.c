@@ -43,14 +43,14 @@ void tearDown(void)
 {
 }
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr(HUMPEN_FSTAB_PATH), *path);
     TEST_ASSERT_EQUAL(IO_OPEN_READ, flags);
-    return 3;
+    return Success(IOHandle, 3);
 }
 
-Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
+Result(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 {
     TEST_ASSERT_EQUAL(3, handle);
 
@@ -60,7 +60,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
         success_do_nothing(),
         error(code, message)
         {
-            return None(DynString);
+            return Error(DynString, message, code);
         }
     );
 
@@ -72,20 +72,20 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
             error(code, message)
             {
                 DynString__dispose(&text);
-                return None(DynString);
+                return Error(DynString, message, code);
             }
         );
 
         next_fstab_position++;
     }
 
-    return Some(DynString, text);
+    return Success(DynString, text);
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL(3, handle);
-    return IO_OK;
+    return Success(IOStatus, IO_OK);
 }
 
 SpawnResult spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0, OptionalPtr(BString) arg1,

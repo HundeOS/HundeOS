@@ -43,21 +43,19 @@ static AsyncIORequestContext AsyncIORequestContext__new(AsyncIOPtr async_io, Any
 static Result(AsyncIORequestContextPtr)
     AsyncIORequestContext__heap_new(AsyncIOPtr async_io, Anything service_context, ServiceEvent request)
 {
-    AsyncIORequestContextPtr context;
     match_result(
         mem_alloc_bytes(sizeof(AsyncIORequestContext)),
-        success(allocation)
+        success(context_address)
         {
-            context = (AsyncIORequestContextPtr)allocation;
+            *(AsyncIORequestContextPtr)context_address = AsyncIORequestContext__new(async_io, service_context, request);
+            return Success(AsyncIORequestContextPtr, (AsyncIORequestContextPtr)context_address);
         },
         error(code, message)
         {
             return Error(AsyncIORequestContextPtr, fiber_failed, code);
         }
     );
-
-    *context = AsyncIORequestContext__new(async_io, service_context, request);
-    return Success(AsyncIORequestContextPtr, context);
+    return Error(AsyncIORequestContextPtr, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static void AsyncIORequestContext__dispose(AsyncIORequestContextPtr self)
@@ -261,30 +259,28 @@ Result(AsyncIOCode) AsyncIO__spawn_request(AsyncIOPtr self, ServiceEventPtr even
 {
     current_async_io = Some(AsyncIOPtr, self);
 
-    AsyncIORequestContextPtr context;
     match_result(
         AsyncIORequestContext__heap_new(self, self->service_context, *event),
-        success(created_context)
+        success(context)
         {
-            context = created_context;
+            match_result(
+                FiberScheduler__spawn(&self->scheduler, AsyncIO__request_fiber_entry, (Anything)context),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    AsyncIORequestContext__dispose(context);
+                    return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED);
+                }
+            );
+
+            return Success(AsyncIOCode, ASYNC_IO_OK);
         },
         error(code, message)
         {
             return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED);
         }
     );
-
-    match_result(
-        FiberScheduler__spawn(&self->scheduler, AsyncIO__request_fiber_entry, (Anything)context),
-        success_do_nothing(),
-        error(code, message)
-        {
-            AsyncIORequestContext__dispose(context);
-            return Error(AsyncIOCode, message, ASYNC_IO_FIBER_FAILED);
-        }
-    );
-
-    return Success(AsyncIOCode, ASYNC_IO_OK);
+    return Error(AsyncIOCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 Result(AsyncIOCode) AsyncIO__deliver_response(AsyncIOPtr self, ServiceEventPtr event)
@@ -351,44 +347,42 @@ Result(ServiceEvent) AsyncIO__take_response(AsyncIOPtr self, uint64_t request_id
 
 Result(ServiceEvent) AsyncIO__yield_for_response(uint64_t request_id)
 {
-    AsyncIOPtr async_io;
     match_result(
         AsyncIO__current(),
-        success(current)
+        success(async_io)
         {
-            async_io = current;
+            match_result(
+                AsyncIO__take_response(async_io, request_id),
+                success(response)
+                {
+                    return Success(ServiceEvent, response);
+                },
+                error(code, message)
+                {
+                    if (code != ASYNC_IO_RESPONSE_NOT_FOUND)
+                    {
+                        return Error(ServiceEvent, message, code);
+                    }
+                }
+            );
+
+            match_result(
+                FiberScheduler__await_current(&async_io->scheduler, FiberWaitKey__request(request_id)),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(ServiceEvent, message, code);
+                }
+            );
+
+            return AsyncIO__take_response(async_io, request_id);
         },
         error(code, message)
         {
             return Error(ServiceEvent, message, code);
         }
     );
-
-    match_result(
-        AsyncIO__take_response(async_io, request_id),
-        success(response)
-        {
-            return Success(ServiceEvent, response);
-        },
-        error(code, message)
-        {
-            if (code != ASYNC_IO_RESPONSE_NOT_FOUND)
-            {
-                return Error(ServiceEvent, message, code);
-            }
-        }
-    );
-
-    match_result(
-        FiberScheduler__await_current(&async_io->scheduler, FiberWaitKey__request(request_id)),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(ServiceEvent, message, code);
-        }
-    );
-
-    return AsyncIO__take_response(async_io, request_id);
+    return Error(ServiceEvent, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 size_t AsyncIO__pending_response_count(AsyncIOPtr self)

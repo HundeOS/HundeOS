@@ -54,30 +54,35 @@ static HumpenMountCommand HumpenMountCommand__new(ConstBStringPtr device_path, C
 
 static Optional(DynString) Humpen__load_fstab(void)
 {
-    IOHandle handle = IO__open(&bstr(HUMPEN_FSTAB_PATH), IO_OPEN_READ);
-    if (handle < 0)
-    {
-        return None(DynString);
-    }
-
-    Optional(DynString) read_result = IO__read_dyn_string(handle, HUMPEN_FSTAB_MAX);
-
-    IO__close(handle);
-    match_optional(
-        read_result,
-        some(fstab)
+    match_result(
+        IO__open(&bstr(HUMPEN_FSTAB_PATH), IO_OPEN_READ),
+        success(handle)
         {
-            if (DynString__length(&fstab) <= 0)
-            {
-                DynString__dispose(&fstab);
-                return None(DynString);
-            }
-
-            return Some(DynString, fstab);
+            match_result(
+                IO__read_dyn_string(handle, HUMPEN_FSTAB_MAX),
+                success(fstab)
+                {
+                    IO__close(handle);
+                    if (DynString__length(&fstab) <= 0)
+                    {
+                        DynString__dispose(&fstab);
+                        return None(DynString);
+                    }
+                    return Some(DynString, fstab);
+                },
+                error(code, message)
+                {
+                    IO__close(handle);
+                    return None(DynString);
+                }
+            );
+            return None(DynString);
         },
-        none_do_nothing()
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
-
     return None(DynString);
 }
 

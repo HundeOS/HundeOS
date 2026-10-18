@@ -10,8 +10,14 @@ ARCH_ASFLAGS = -mcmodel=small
 OBJCOPY_BINARY_FORMAT = elf64-littleaarch64
 OBJCOPY_BINARY_ARCH = aarch64
 WUFF_JUMP_SLOT_RELOCATION = R_AARCH64_JUMP_SLOT
-WUFF_CAT_RELOCATIONS = R_AARCH64_RELATIVE R_AARCH64_GLOB_DAT R_AARCH64_JUMP_SLOT
+WUFF_PROGRAM_RELOCATIONS = R_AARCH64_RELATIVE R_AARCH64_GLOB_DAT R_AARCH64_JUMP_SLOT
 WUFF_PROGRAM_LINK_FLAGS = --version-script=$(WUFF_PROGRAM_VERSION_SCRIPT)
+BASH_CC = $(CC)
+BASH_COMPAT_CFLAGS =
+BASH_LINKER_FLAGS =
+BASH_SYMBOL_FLAGS = -Wl,--version-script,$(abspath $(WUFF_PROGRAM_VERSION_SCRIPT))
+BASH_RUNTIME_LIBS = $(WUFF_LIBGCC)
+BASH_RUNTIME_PREREQUISITES =
 else ifeq ($(ARCH),riscv64)
 CROSS_COMPILE ?= riscv64-elf-
 BASH_HOST = riscv64-unknown-hunde
@@ -21,8 +27,15 @@ ARCH_ASFLAGS = -mcmodel=medany -march=rv64imac_zicsr_zifencei_zawrs -mabi=lp64 -
 OBJCOPY_BINARY_FORMAT = elf64-littleriscv
 OBJCOPY_BINARY_ARCH = riscv
 WUFF_JUMP_SLOT_RELOCATION = R_RISCV_JUMP_SLOT
-WUFF_CAT_RELOCATIONS = R_RISCV_RELATIVE R_RISCV_64 R_RISCV_JUMP_SLOT
+WUFF_PROGRAM_RELOCATIONS = R_RISCV_RELATIVE R_RISCV_64 R_RISCV_JUMP_SLOT
 WUFF_PROGRAM_LINK_FLAGS =
+BASH_CC = $(LLVM_CLANG) --target=$(NEWLIB_TARGET)
+BASH_COMPAT_CFLAGS = -idirafter $(shell $(CC) -print-file-name=include) \
+	-U__WINT_TYPE__ -D__WINT_TYPE__=unsigned
+BASH_LINKER_FLAGS = -fuse-ld=lld
+BASH_SYMBOL_FLAGS =
+BASH_RUNTIME_LIBS = $(abspath $(SYSROOT_COMPILER_RUNTIME))
+BASH_RUNTIME_PREREQUISITES = $(SYSROOT_COMPILER_RUNTIME)
 else
 $(error Unsupported ARCH '$(ARCH)')
 endif
@@ -44,7 +57,9 @@ WUFF_LD ?= ld.lld
 else
 WUFF_LD ?= $(RAW_LD)
 endif
-WUFF_LIBGCC = $(shell $(CC) -print-libgcc-file-name)
+WUFF_LIBGCC = $(shell $(CC) $(ARCH_USER_CFLAGS) -print-libgcc-file-name)
+LLVM_CLANG ?= $(shell if command -v brew >/dev/null 2>&1; then \
+	printf '%s/bin/clang' "$$(brew --prefix llvm)"; else command -v clang; fi)
 
 UNITY_PATH=vendor/Unity
 BOOT_PLATFORM ?= qemu_virt
@@ -95,10 +110,14 @@ BASH_BUILD_CONFIG_CACHE = $(abspath $(BASH_PORT_BUILD_DIR)/config.cache)
 BASH_BUILD = $(shell sh vendor/bash/src/support/config.guess)
 BASH_SYSROOT = $(abspath $(PLATFORM_BUILD_ROOT)/sysroot)
 BASH_CPPFLAGS = --sysroot=$(BASH_SYSROOT) -isystem $(BASH_SYSROOT)/usr/include -DNEED_EXTERN_PC
-BASH_CFLAGS = -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector $(ARCH_USER_CFLAGS)
-BASH_LDFLAGS = -nostdlib $(ARCH_USER_CFLAGS) $(BASH_SYSROOT)/usr/lib/crt0.o -L$(BASH_SYSROOT)/usr/lib \
-	-Wl,-e,_start -Wl,--gc-sections
-BASH_LIBS = -Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group
+BASH_CFLAGS = -O2 -ffreestanding -fPIC -fno-stack-protector $(ARCH_USER_CFLAGS) $(BASH_COMPAT_CFLAGS)
+BASH_LDFLAGS = -nostdlib $(ARCH_USER_CFLAGS) $(BASH_LINKER_FLAGS) -Wl,-Bdynamic -Wl,-pie \
+	-Wl,--dynamic-linker,/sbin/wuff-ld -Wl,--hash-style=sysv -Wl,-z,max-page-size=0x1000 \
+	-Wl,-z,now -Wl,-z,relro \
+	-Wl,-e,_start -Wl,--gc-sections $(BASH_SYMBOL_FLAGS) \
+	$(abspath $(USER_CRT_PIC_OBJECT))
+BASH_LIBS = -Wl,--start-group $(abspath $(SYSROOT_WUFF_LIBC)) \
+	$(abspath $(NEWLIB_PIC_LIB_DIR)/libm.a) $(BASH_RUNTIME_LIBS) -Wl,--end-group
 
 # Output files
 BUILD_ROOT = build/$(ARCH)
@@ -385,12 +404,13 @@ USER_LIB_OBJECTS := $(patsubst ./user/%,$(USER_BUILD_DIR)/%,$(USER_LIB_SOURCES:.
 USER_LIB_ASM_OBJECTS := $(patsubst ./user/%,$(USER_BUILD_DIR)/%,$(USER_LIB_ASM_SOURCES:.s=.o))
 COMMON_USER_OBJECTS := $(patsubst ./common/%.c,$(USER_BUILD_DIR)/common/%.o,$(COMMON_SOURCES) $(COMMON_ARCH_SOURCES))
 USER_CRT_OBJECT := $(USER_BUILD_DIR)/lib/arch/$(ARCH)/start.o
+COMPILER_RUNTIME_OBJECT := $(USER_BUILD_DIR)/lib/arch/riscv64/compiler_runtime.o
 USER_LIBC_SOURCES := $(filter ./user/lib/newlib/%,$(USER_LIB_SOURCES))
 USER_LIBC_C_OBJECTS := $(patsubst ./user/%,$(USER_BUILD_DIR)/%,$(USER_LIBC_SOURCES:.c=.o))
 USER_LIBC_ASM_OBJECTS := $(USER_BUILD_DIR)/lib/arch/$(ARCH)/setjmp.o
 USER_LIBC_OBJECTS := $(USER_LIBC_C_OBJECTS) $(USER_LIBC_ASM_OBJECTS)
 USER_HUNDE_OBJECTS := $(COMMON_USER_OBJECTS) \
-	$(filter-out $(USER_CRT_OBJECT) $(USER_LIBC_C_OBJECTS),$(USER_LIB_OBJECTS)) \
+	$(filter-out $(USER_CRT_OBJECT) $(USER_LIBC_C_OBJECTS) $(COMPILER_RUNTIME_OBJECT),$(USER_LIB_OBJECTS)) \
 	$(filter-out $(USER_LIBC_ASM_OBJECTS),$(USER_LIB_ASM_OBJECTS))
 
 USER_PIC_BUILD_DIR := $(PLATFORM_BUILD_ROOT)/user-pic
@@ -400,11 +420,12 @@ USER_LIB_PIC_OBJECTS := $(patsubst ./user/%,$(USER_PIC_BUILD_DIR)/%,$(USER_LIB_S
 USER_LIB_PIC_ASM_OBJECTS := $(patsubst ./user/%,$(USER_PIC_BUILD_DIR)/%,$(USER_LIB_ASM_SOURCES:.s=.o))
 COMMON_USER_PIC_OBJECTS := $(patsubst ./common/%.c,$(USER_PIC_BUILD_DIR)/common/%.o,$(COMMON_SOURCES) $(COMMON_ARCH_SOURCES))
 USER_CRT_PIC_OBJECT := $(USER_PIC_BUILD_DIR)/lib/arch/$(ARCH)/start.o
+COMPILER_RUNTIME_PIC_OBJECT := $(USER_PIC_BUILD_DIR)/lib/arch/riscv64/compiler_runtime.o
 USER_LIBC_PIC_C_OBJECTS := $(patsubst ./user/%,$(USER_PIC_BUILD_DIR)/%,$(USER_LIBC_SOURCES:.c=.o))
 USER_LIBC_PIC_ASM_OBJECTS := $(USER_PIC_BUILD_DIR)/lib/arch/$(ARCH)/setjmp.o
 USER_LIBC_PIC_OBJECTS := $(USER_LIBC_PIC_C_OBJECTS) $(USER_LIBC_PIC_ASM_OBJECTS)
 USER_HUNDE_PIC_OBJECTS := $(COMMON_USER_PIC_OBJECTS) \
-	$(filter-out $(USER_CRT_PIC_OBJECT) $(USER_LIBC_PIC_C_OBJECTS),$(USER_LIB_PIC_OBJECTS)) \
+	$(filter-out $(USER_CRT_PIC_OBJECT) $(USER_LIBC_PIC_C_OBJECTS) $(COMPILER_RUNTIME_PIC_OBJECT),$(USER_LIB_PIC_OBJECTS)) \
 	$(filter-out $(USER_LIBC_PIC_ASM_OBJECTS),$(USER_LIB_PIC_ASM_OBJECTS))
 
 SYSROOT_DIR := $(PLATFORM_BUILD_ROOT)/sysroot
@@ -415,6 +436,7 @@ SYSROOT_CRT := $(SYSROOT_LIB_DIR)/crt0.o
 SYSROOT_LIBC := $(SYSROOT_LIB_DIR)/libc.a
 SYSROOT_LIBHUNDE := $(SYSROOT_LIB_DIR)/libhunde.a
 SYSROOT_LIBM := $(SYSROOT_LIB_DIR)/libm.a
+SYSROOT_COMPILER_RUNTIME := $(SYSROOT_LIB_DIR)/libcompiler_rt_pic.a
 SYSROOT_FILES := $(SYSROOT_INCLUDE_STAMP) $(SYSROOT_CRT) $(SYSROOT_LIBC) $(SYSROOT_LIBHUNDE) $(SYSROOT_LIBM)
 SYSROOT_WUFF_LIBC := $(SYSROOT_LIB_DIR)/libc.wuff.1
 SYSROOT_WUFF_LIBC_LINK := $(SYSROOT_LIB_DIR)/libc.wuff
@@ -436,59 +458,61 @@ USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
 USER_RETIRED_BINARY_DIRS := user/commands/shell
 USER_BINARY_DIRS := $(filter-out $(USER_RETIRED_BINARY_DIRS),$(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)))
 WUFF_INTERPRETER_DIR := user/programs/wuff-ld
-WUFF_DYNAMIC_COMMAND_DIRS := user/commands/cat
+ROOTFS_COMMAND_NAMES := cat cp env fs-latency grep kill ln ls mkdir mv ps rm shutdown tail write
+ROOTFS_COMMAND_DIRS := $(wildcard $(addprefix user/commands/,$(ROOTFS_COMMAND_NAMES)))
+ROOTFS_COMMAND_BINARIES := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
+WUFF_DYNAMIC_COMMAND_DIRS := $(ROOTFS_COMMAND_DIRS)
 USER_STANDARD_BINARY_DIRS := $(filter-out $(WUFF_INTERPRETER_DIR) $(WUFF_DYNAMIC_COMMAND_DIRS),$(USER_BINARY_DIRS))
 USER_DRIVER_DIRS := $(filter user/drivers/%,$(USER_BINARY_DIRS))
 USER_SERVICE_DIRS := $(filter user/services/%,$(USER_BINARY_DIRS))
 USER_NON_DRIVER_DIRS := $(filter-out $(USER_DRIVER_DIRS) $(USER_SERVICE_DIRS),$(USER_BINARY_DIRS))
 USER_BINARIES := $(patsubst %,$(USER_BUILD_DIR)/%.bin,$(notdir $(USER_BINARY_DIRS)))
+USER_BINARIES += $(filter-out $(USER_BINARIES),$(ROOTFS_COMMAND_BINARIES))
 WUFF_INTERPRETER_SOURCES := $(wildcard $(WUFF_INTERPRETER_DIR)/*.c)
 WUFF_INTERPRETER_OBJECTS := $(patsubst user/%.c,$(USER_BUILD_DIR)/%.o,$(WUFF_INTERPRETER_SOURCES))
 WUFF_INTERPRETER_BINARY := $(USER_BUILD_DIR)/wuff-ld.bin
-ROOTFS_COMMAND_NAMES := cat cp env fs-latency grep kill ln ls mkdir mv ps rm shutdown tail write
-ROOTFS_COMMAND_DIRS := $(wildcard $(addprefix user/commands/,$(ROOTFS_COMMAND_NAMES)))
-ROOTFS_COMMAND_BINARIES := $(addprefix $(USER_BUILD_DIR)/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
 OPENBSD_CAT_SOURCE := vendor/openbsd/src/bin/cat/cat.c
 OPENBSD_CAT_OBJECT := $(USER_PIC_BUILD_DIR)/vendor/openbsd/bin/cat/cat.o
-OPENBSD_CAT_BINARY := $(USER_BUILD_DIR)/cat.bin
 OPENBSD_CP_SOURCES := $(wildcard vendor/openbsd/src/bin/cp/*.c)
-OPENBSD_CP_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_CP_SOURCES))
-OPENBSD_CP_BINARY := $(USER_BUILD_DIR)/cp.bin
-USER_BINARIES += $(OPENBSD_CP_BINARY)
+OPENBSD_CP_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_CP_SOURCES))
 OPENBSD_ENV_SOURCES := vendor/openbsd/src/usr.bin/env/env.c
-OPENBSD_ENV_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_ENV_SOURCES))
-env_EXTRA_OBJS := $(OPENBSD_ENV_OBJECTS)
+OPENBSD_ENV_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_ENV_SOURCES))
 OPENBSD_LN_SOURCES := vendor/openbsd/src/bin/ln/ln.c
-OPENBSD_LN_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_LN_SOURCES))
-ln_EXTRA_OBJS := $(OPENBSD_LN_OBJECTS)
+OPENBSD_LN_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_LN_SOURCES))
 OPENBSD_LS_SOURCES := $(wildcard vendor/openbsd/src/bin/ls/*.c)
-OPENBSD_LS_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_LS_SOURCES))
-ls_EXTRA_OBJS := $(OPENBSD_LS_OBJECTS)
+OPENBSD_LS_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_LS_SOURCES))
 OPENBSD_MKDIR_SOURCES := vendor/openbsd/src/bin/mkdir/mkdir.c
-OPENBSD_MKDIR_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_MKDIR_SOURCES))
-mkdir_EXTRA_OBJS := $(OPENBSD_MKDIR_OBJECTS)
+OPENBSD_MKDIR_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_MKDIR_SOURCES))
 OPENBSD_MV_SOURCES := $(wildcard vendor/openbsd/src/bin/mv/*.c)
-OPENBSD_MV_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_MV_SOURCES))
-mv_EXTRA_OBJS := $(OPENBSD_MV_OBJECTS)
+OPENBSD_MV_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_MV_SOURCES))
 OPENBSD_RM_SOURCE := vendor/openbsd/src/bin/rm/rm.c
-OPENBSD_RM_OBJECT := $(USER_BUILD_DIR)/vendor/openbsd/bin/rm/rm.o
-OPENBSD_RM_PLATFORM_OBJECT := $(USER_BUILD_DIR)/ports/openbsd/rm/unsupported_random.o
-OPENBSD_RM_BINARY := $(USER_BUILD_DIR)/rm.bin
-USER_BINARIES += $(OPENBSD_RM_BINARY)
+OPENBSD_RM_OBJECT := $(USER_PIC_BUILD_DIR)/vendor/openbsd/bin/rm/rm.o
+OPENBSD_RM_PLATFORM_OBJECT := $(USER_PIC_BUILD_DIR)/ports/openbsd/rm/unsupported_random.o
 OPENBSD_TAIL_SOURCES := $(wildcard vendor/openbsd/src/usr.bin/tail/*.c)
-OPENBSD_TAIL_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_TAIL_SOURCES))
-tail_EXTRA_OBJS := $(OPENBSD_TAIL_OBJECTS)
+OPENBSD_TAIL_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_TAIL_SOURCES))
 OPENBSD_GREP_SOURCES := $(wildcard vendor/openbsd/src/usr.bin/grep/*.c)
-OPENBSD_GREP_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_GREP_SOURCES))
+OPENBSD_GREP_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_GREP_SOURCES))
 OPENBSD_REGEX_SOURCES := vendor/openbsd/src/lib/libc/regex/regcomp.c vendor/openbsd/src/lib/libc/regex/regexec.c \
 	vendor/openbsd/src/lib/libc/regex/regerror.c vendor/openbsd/src/lib/libc/regex/regfree.c
-OPENBSD_REGEX_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_REGEX_SOURCES))
-OPENBSD_GREP_BINARY := $(USER_BUILD_DIR)/grep.bin
-USER_BINARIES += $(OPENBSD_GREP_BINARY)
+OPENBSD_REGEX_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_REGEX_SOURCES))
 OPENBSD_KILL_SOURCE := vendor/openbsd/src/bin/kill/kill.c
 OPENBSD_KILL_SOURCES := $(OPENBSD_KILL_SOURCE) vendor/openbsd/src/lib/libc/gen/signame.c
-OPENBSD_KILL_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_KILL_SOURCES))
-kill_EXTRA_OBJS := $(OPENBSD_KILL_OBJECTS)
+OPENBSD_KILL_OBJECTS := $(patsubst vendor/openbsd/src/%.c,$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o,$(OPENBSD_KILL_SOURCES))
+cat_WUFF_OBJECTS := $(OPENBSD_CAT_OBJECT)
+cp_WUFF_OBJECTS := $(OPENBSD_CP_OBJECTS)
+env_WUFF_OBJECTS := $(OPENBSD_ENV_OBJECTS)
+fs-latency_WUFF_OBJECTS := $(USER_PIC_BUILD_DIR)/commands/fs-latency/main.o
+grep_WUFF_OBJECTS := $(OPENBSD_GREP_OBJECTS) $(OPENBSD_REGEX_OBJECTS)
+kill_WUFF_OBJECTS := $(OPENBSD_KILL_OBJECTS)
+ln_WUFF_OBJECTS := $(OPENBSD_LN_OBJECTS)
+ls_WUFF_OBJECTS := $(OPENBSD_LS_OBJECTS)
+mkdir_WUFF_OBJECTS := $(OPENBSD_MKDIR_OBJECTS)
+mv_WUFF_OBJECTS := $(OPENBSD_MV_OBJECTS)
+ps_WUFF_OBJECTS := $(USER_PIC_BUILD_DIR)/commands/ps/main.o
+rm_WUFF_OBJECTS := $(OPENBSD_RM_OBJECT) $(OPENBSD_RM_PLATFORM_OBJECT)
+shutdown_WUFF_OBJECTS := $(USER_PIC_BUILD_DIR)/commands/shutdown/main.o
+tail_WUFF_OBJECTS := $(OPENBSD_TAIL_OBJECTS)
+write_WUFF_OBJECTS := $(USER_PIC_BUILD_DIR)/commands/write/main.o
 setjmp_probe_EXTRA_OBJS := $(USER_BUILD_DIR)/programs/setjmp_probe/arch/$(ARCH)/registers.o
 EMBEDDED_USER_NON_DRIVER_DIRS := $(filter-out $(ROOTFS_COMMAND_DIRS),$(USER_NON_DRIVER_DIRS))
 USER_VIDEO_TERM_FONT := vendor/unifont/unifont_all-17.0.05.hex
@@ -660,6 +684,12 @@ $(SYSROOT_LIBM): $(NEWLIB_INSTALL_PREREQUISITE)
 	mkdir -p `dirname $@`
 	cp $(NEWLIB_LIB_DIR)/libm.a $@
 
+$(SYSROOT_COMPILER_RUNTIME): $(COMPILER_RUNTIME_PIC_OBJECT) Makefile
+	mkdir -p `dirname $@`
+	$(AR) rcs $@ $<
+	$(RANLIB) $@
+	if $(NM) -u $@ | awk '$$1 == "U" { found = 1 } END { exit !found }'; then $(NM) -u $@ >&2; exit 1; fi
+
 $(SYSROOT_WUFF_LIBC): $(USER_LIBC_PIC_OBJECTS) $(USER_HUNDE_PIC_OBJECTS) $(NEWLIB_PIC_LIBC_OBJECTS) \
 		$(NEWLIB_PIC_LIBC_VERIFY_OBJECT) | check-wuff-linker
 	mkdir -p `dirname $@`
@@ -731,8 +761,20 @@ bash-configure: $(BASH_PORT_CONFIGURE_STAMP)
 
 bash-build: $(BASH_PORT_BINARY)
 
-$(BASH_PORT_BINARY): $(BASH_PORT_CONFIGURE_STAMP)
+$(BASH_PORT_BINARY): $(BASH_PORT_CONFIGURE_STAMP) $(SYSROOT_WUFF_FILES) $(USER_CRT_PIC_OBJECT) \
+		$(NEWLIB_PIC_INSTALL_STAMP) $(WUFF_PROGRAM_VERSION_SCRIPT) $(BASH_RUNTIME_PREREQUISITES)
 	$(MAKE) -C $(BASH_PORT_BUILD_DIR) bash
+	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
+	$(READELF) -h $@ | awk '/Entry point address:/ { if ($$4 == "0x0") exit 1; found = 1 } END { exit !found }'
+	$(READELF) -lW $@ | awk '/Requesting program interpreter:/ { if ($$0 !~ /\/sbin\/wuff-ld\]/) exit 1; found = 1 } END { exit !found }'
+	$(READELF) -dW $@ | awk '/\(NEEDED\)/ { if ($$0 !~ /\[libc\.wuff\.1\]/ || found) exit 1; found = 1 } END { exit !found }'
+	$(READELF) -dW $@ | awk '/\(HASH\)/ { found = 1 } END { exit !found }'
+	if $(READELF) -dW $@ | grep -q '(TEXTREL)'; then echo "$@ contains text relocations" >&2; exit 1; fi
+	$(READELF) -lW $@ | grep -q 'GNU_RELRO'
+	if $(READELF) -lW $@ | grep -Eq '^[[:space:]]*TLS[[:space:]]'; then echo "$@ contains TLS" >&2; exit 1; fi
+	if $(READELF) -dW $@ | grep -Eq '\((PREINIT_ARRAY|INIT|INIT_ARRAY|FINI|FINI_ARRAY)\)'; then echo "$@ contains initialization metadata" >&2; exit 1; fi
+	if $(READELF) --dyn-syms -W $@ | awk '$$8 == "_stack" { found = 1 } END { exit !found }'; then echo "$@ exports synthetic _stack" >&2; exit 1; fi
+	$(READELF) -rW $@ | awk -v allowed="$(WUFF_PROGRAM_RELOCATIONS)" '$$3 ~ /^R_/ { found = 1; if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad || !found }'
 
 bash-configure-all:
 	$(MAKE) ARCH=aarch64 bash-configure
@@ -755,12 +797,15 @@ $(BASH_PORT_SOURCE_STAMP): vendor/bash/README.md vendor/bash/SHA256SUMS \
 		$(BASH_PORT_SOURCE_DIR)/parser-built
 	touch $@
 
-$(BASH_PORT_CONFIGURE_STAMP): $(BASH_PORT_SOURCE_STAMP) $(BASH_PORT_CONFIG_CACHE) Makefile $(SYSROOT_FILES)
+$(BASH_PORT_CONFIGURE_STAMP): $(BASH_PORT_SOURCE_STAMP) $(BASH_PORT_CONFIG_CACHE) Makefile \
+		$(SYSROOT_INCLUDE_STAMP) $(SYSROOT_WUFF_FILES) $(USER_CRT_PIC_OBJECT) $(NEWLIB_PIC_INSTALL_STAMP) \
+		$(WUFF_PROGRAM_VERSION_SCRIPT) $(BASH_RUNTIME_PREREQUISITES)
+	rm -rf $(BASH_PORT_BUILD_DIR)
 	mkdir -p $(BASH_PORT_BUILD_DIR)
 	cp $(BASH_PORT_CONFIG_CACHE) $(BASH_BUILD_CONFIG_CACHE)
 	cd $(BASH_PORT_BUILD_DIR) && \
 		CONFIG_SITE=/dev/null \
-		CC=$(CC) \
+		CC="$(BASH_CC)" \
 		CC_FOR_BUILD=cc \
 		AR=$(CROSS_COMPILE)ar \
 		RANLIB=$(CROSS_COMPILE)ranlib \
@@ -823,6 +868,8 @@ compile-commands:
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 wuff-smoke
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 wuff-dynamic-smoke
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 wuff-dynamic-smoke
+	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+		build/riscv64/sysroot/usr/lib/libcompiler_rt_pic.a
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 bash-build
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 bash-build
 	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 \
@@ -976,6 +1023,12 @@ $(USER_BUILD_DIR)/common/%.o: common/%.c
 	mkdir -p `dirname $@`
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+ifeq ($(ARCH),riscv64)
+$(COMPILER_RUNTIME_PIC_OBJECT): user/lib/arch/riscv64/compiler_runtime.c
+	mkdir -p `dirname $@`
+	$(CC) $(USER_PIC_CFLAGS) -c $< -o $@
+endif
+
 $(USER_PIC_BUILD_DIR)/%.o: user/%.c $(NEWLIB_PIC_INSTALL_STAMP)
 	mkdir -p `dirname $@`
 	$(CC) $(USER_PIC_CFLAGS) -idirafter $(NEWLIB_PIC_INCLUDE_DIR) -c $< -o $@
@@ -992,9 +1045,30 @@ $(OPENBSD_CAT_OBJECT): $(OPENBSD_CAT_SOURCE)
 	mkdir -p `dirname $@`
 	$(CC) $(USER_PIC_CFLAGS) -c $< -o $@
 
+$(USER_PIC_BUILD_DIR)/vendor/openbsd/bin/rm/%.o: vendor/openbsd/src/bin/rm/%.c user/ports/openbsd/rm/unsupported_random.h
+	mkdir -p `dirname $@`
+	$(CC) $(USER_PIC_CFLAGS) -include user/ports/openbsd/rm/unsupported_random.h -c $< -o $@
+
+$(USER_PIC_BUILD_DIR)/vendor/openbsd/bin/ls/%.o: vendor/openbsd/src/bin/ls/%.c
+	mkdir -p `dirname $@`
+	$(CC) $(USER_PIC_CFLAGS) -DSMALL -c $< -o $@
+
+$(USER_PIC_BUILD_DIR)/vendor/openbsd/usr.bin/grep/%.o: vendor/openbsd/src/usr.bin/grep/%.c user/ports/openbsd/grep/namespace_compat.h
+	mkdir -p `dirname $@`
+	$(CC) -I./vendor/openbsd/src/sys $(USER_PIC_CFLAGS) -DSMALL -DNOZ \
+		-include user/ports/openbsd/grep/namespace_compat.h -c $< -o $@
+
+$(USER_PIC_BUILD_DIR)/vendor/openbsd/lib/libc/regex/%.o: vendor/openbsd/src/lib/libc/regex/%.c user/ports/openbsd/grep/namespace_compat.h
+	mkdir -p `dirname $@`
+	$(CC) $(USER_PIC_CFLAGS) -include user/ports/openbsd/grep/namespace_compat.h -c $< -o $@
+
+$(USER_PIC_BUILD_DIR)/vendor/openbsd/%.o: vendor/openbsd/src/%.c
+	mkdir -p `dirname $@`
+	$(CC) $(USER_PIC_CFLAGS) -c $< -o $@
+
 $(OPENBSD_RM_OBJECT): $(OPENBSD_RM_SOURCE) user/ports/openbsd/rm/unsupported_random.h
 	mkdir -p `dirname $@`
-	$(CC) $(USER_CFLAGS) -include user/ports/openbsd/rm/unsupported_random.h -c $< -o $@
+	$(CC) $(USER_PIC_CFLAGS) -include user/ports/openbsd/rm/unsupported_random.h -c $< -o $@
 
 $(USER_BUILD_DIR)/vendor/openbsd/bin/ls/%.o: vendor/openbsd/src/bin/ls/%.c
 	mkdir -p `dirname $@`
@@ -1431,10 +1505,15 @@ endef
 
 $(foreach dir,$(USER_STANDARD_BINARY_DIRS),$(eval $(call make-user-bin,$(dir))))
 
-$(OPENBSD_CAT_BINARY): $(OPENBSD_CAT_OBJECT) $(USER_CRT_PIC_OBJECT) $(SYSROOT_WUFF_FILES) \
-        $(WUFF_PROGRAM_VERSION_SCRIPT) Makefile | check-wuff-linker
+define register-wuff-command-objects
+$(USER_BUILD_DIR)/$(1).bin: $$($(1)_WUFF_OBJECTS)
+endef
+
+$(foreach command,$(ROOTFS_COMMAND_NAMES),$(eval $(call register-wuff-command-objects,$(command))))
+
+$(ROOTFS_COMMAND_BINARIES): $(USER_CRT_PIC_OBJECT) $(SYSROOT_WUFF_FILES) $(WUFF_PROGRAM_VERSION_SCRIPT) Makefile | check-wuff-linker
 	$(WUFF_LD) -pie --dynamic-linker /sbin/wuff-ld -e _start --hash-style=sysv -z now -z relro \
-		--gc-sections $(WUFF_PROGRAM_LINK_FLAGS) $(USER_CRT_PIC_OBJECT) $(OPENBSD_CAT_OBJECT) \
+		--gc-sections $(WUFF_PROGRAM_LINK_FLAGS) $(filter %.o,$^) \
 		-L$(SYSROOT_LIB_DIR) -l:libc.wuff.1 -o $@
 	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
 	$(READELF) -h $@ | awk '/Entry point address:/ { if ($$4 == "0x0") exit 1; found = 1 } END { exit !found }'
@@ -1445,7 +1524,7 @@ $(OPENBSD_CAT_BINARY): $(OPENBSD_CAT_OBJECT) $(USER_CRT_PIC_OBJECT) $(SYSROOT_WU
 	if $(READELF) -lW $@ | grep -Eq '^[[:space:]]*TLS[[:space:]]'; then echo "$@ contains TLS" >&2; exit 1; fi
 	if $(READELF) -dW $@ | grep -Eq '\((PREINIT_ARRAY|INIT|INIT_ARRAY|FINI|FINI_ARRAY)\)'; then echo "$@ contains initialization metadata" >&2; exit 1; fi
 	if $(READELF) --dyn-syms -W $@ | awk '$$8 == "_stack" { found = 1 } END { exit !found }'; then echo "$@ exports synthetic _stack" >&2; exit 1; fi
-	$(READELF) -rW $@ | awk -v allowed="$(WUFF_CAT_RELOCATIONS)" '$$3 ~ /^R_/ { found = 1; if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad || !found }'
+	$(READELF) -rW $@ | awk -v allowed="$(WUFF_PROGRAM_RELOCATIONS)" '$$3 ~ /^R_/ { found = 1; if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad || !found }'
 
 $(WUFF_INTERPRETER_BINARY): $(WUFF_INTERPRETER_OBJECTS) $(SYSROOT_FILES)
 	$(LD) $(USER_LDFLAGS) $(WUFF_INTERPRETER_OBJECTS) -L$(SYSROOT_LIB_DIR) \
@@ -1453,18 +1532,6 @@ $(WUFF_INTERPRETER_BINARY): $(WUFF_INTERPRETER_OBJECTS) $(SYSROOT_FILES)
 	@$(READELF) -h $@ | grep -Eq 'Type:[[:space:]]+EXEC' || { echo "$@ must be ET_EXEC" >&2; exit 1; }
 	@! $(READELF) -l $@ | grep -q ' INTERP ' || { echo "$@ must not contain PT_INTERP" >&2; exit 1; }
 	@! $(READELF) -d $@ 2>/dev/null | grep -q 'NEEDED' || { echo "$@ must not have dynamic dependencies" >&2; exit 1; }
-
-$(OPENBSD_CP_BINARY): $(OPENBSD_CP_OBJECTS) $(SYSROOT_FILES)
-	$(LD) $(USER_LDFLAGS) $(SYSROOT_CRT) $(OPENBSD_CP_OBJECTS) -L$(SYSROOT_LIB_DIR) \
-		-Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
-
-$(OPENBSD_RM_BINARY): $(OPENBSD_RM_OBJECT) $(OPENBSD_RM_PLATFORM_OBJECT) $(SYSROOT_FILES)
-	$(LD) $(USER_LDFLAGS) $(SYSROOT_CRT) $(OPENBSD_RM_OBJECT) $(OPENBSD_RM_PLATFORM_OBJECT) \
-		-L$(SYSROOT_LIB_DIR) -Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
-
-$(OPENBSD_GREP_BINARY): $(OPENBSD_GREP_OBJECTS) $(OPENBSD_REGEX_OBJECTS) $(SYSROOT_FILES)
-	$(LD) $(USER_LDFLAGS) $(SYSROOT_CRT) $(OPENBSD_GREP_OBJECTS) $(OPENBSD_REGEX_OBJECTS) \
-		-L$(SYSROOT_LIB_DIR) -Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
 
 -include $(shell find $(BUILD_ROOT) -type f -name "*.d" -print 2>/dev/null)
 

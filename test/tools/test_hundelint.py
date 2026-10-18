@@ -759,6 +759,150 @@ def test_allows_trivial_error_branch_with_explicit_ignore(rules_for):
     assert "trivial-error-branch" not in rules
 
 
+def test_reports_result_success_value_copied_to_outer_variable(ast_rules_for):
+    source = (
+        "Result(Output) example(Result(Input) input) {\n"
+        "    Input saved;\n"
+        "    match_result(input,\n"
+        "        success(value)\n"
+        "        {\n"
+        "            saved = value;\n"
+        "        },\n"
+        "        error(code, message)\n"
+        "        {\n"
+        "            return Error(Output, message, code);\n"
+        "        }\n"
+        "    );\n"
+        "    return use(saved);\n"
+        "}\n"
+    )
+    assert "no-result-success-value-escape" in ast_rules_for(source)
+
+
+def test_reports_cast_result_success_value_copied_to_outer_variable(ast_rules_for):
+    source = (
+        "Result(Output) example(Result(Address) input) {\n"
+        "    ValuePtr saved;\n"
+        "    match_result(input,\n"
+        "        success(value)\n"
+        "        {\n"
+        "            saved = (ValuePtr)value;\n"
+        "        },\n"
+        "        error(code, message)\n"
+        "        {\n"
+        "            return Error(Output, message, code);\n"
+        "        }\n"
+        "    );\n"
+        "    return use(saved);\n"
+        "}\n"
+    )
+    assert "no-result-success-value-escape" in ast_rules_for(source)
+
+
+def test_reports_redundant_result_success_alias_used_inside_branch(ast_rules_for):
+    source = (
+        "Result(Output) example(Result(Input) input) {\n"
+        "    Input saved;\n"
+        "    match_result(input,\n"
+        "        success(value)\n"
+        "        {\n"
+        "            saved = value;\n"
+        "            return use(saved);\n"
+        "        },\n"
+        "        error(code, message)\n"
+        "        {\n"
+        "            return Error(Output, message, code);\n"
+        "        }\n"
+        "    );\n"
+        "    return Error(Output, unknown_error, OUTPUT_ERROR);\n"
+        "}\n"
+    )
+    assert "no-result-success-value-escape" in ast_rules_for(source)
+
+
+def test_allows_result_success_value_carried_across_loop_back_edge(ast_rules_for):
+    source = (
+        "Result(Output) example(Result(Input) input) {\n"
+        "    Input current = initial();\n"
+        "    while (should_continue(current)) {\n"
+        "        match_result(input,\n"
+        "            success(value)\n"
+        "            {\n"
+        "                current = value;\n"
+        "                continue;\n"
+        "            },\n"
+        "            error(code, message)\n"
+        "            {\n"
+        "                return Error(Output, message, code);\n"
+        "            }\n"
+        "        );\n"
+        "    }\n"
+        "    return Success(Output, OUTPUT_OK);\n"
+        "}\n"
+    )
+    assert "no-result-success-value-escape" not in ast_rules_for(source)
+
+
+def test_allows_result_success_branch_that_does_work_and_returns(ast_rules_for):
+    source = (
+        "Result(Output) example(Result(Input) input) {\n"
+        "    match_result(input,\n"
+        "        success(value)\n"
+        "        {\n"
+        "            return use(value);\n"
+        "        },\n"
+        "        error(code, message)\n"
+        "        {\n"
+        "            return Error(Output, message, code);\n"
+        "        }\n"
+        "    );\n"
+        "    return Error(Output, unknown_error, OUTPUT_ERROR);\n"
+        "}\n"
+    )
+    assert "no-result-success-value-escape" not in ast_rules_for(source)
+
+
+def test_allows_result_success_value_stored_on_object(ast_rules_for):
+    source = (
+        "Result(Output) example(StatePtr self, Result(Input) input) {\n"
+        "    match_result(input,\n"
+        "        success(value)\n"
+        "        {\n"
+        "            self->input = value;\n"
+        "            return Success(Output, OUTPUT_OK);\n"
+        "        },\n"
+        "        error(code, message)\n"
+        "        {\n"
+        "            return Error(Output, message, code);\n"
+        "        }\n"
+        "    );\n"
+        "    return Error(Output, unknown_error, OUTPUT_ERROR);\n"
+        "}\n"
+    )
+    assert "no-result-success-value-escape" not in ast_rules_for(source)
+
+
+def test_allows_result_success_value_in_non_result_function(ast_rules_for):
+    source = (
+        "void example(Result(Input) input) {\n"
+        "    Input saved;\n"
+        "    match_result(input,\n"
+        "        success(value)\n"
+        "        {\n"
+        "            saved = value;\n"
+        "        },\n"
+        "        error(code, message)\n"
+        "        {\n"
+        "            report(code, &message);\n"
+        "            return;\n"
+        "        }\n"
+        "    );\n"
+        "    use(saved);\n"
+        "}\n"
+    )
+    assert "no-result-success-value-escape" not in ast_rules_for(source)
+
+
 def test_reports_inline_match_branch_macros(rules_for):
     source = (
         "void example(Optional(BString) value, Result(ByteCount) result) {\n"

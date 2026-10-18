@@ -34,19 +34,19 @@ static unsigned sbin_spawns;
 static bool sbin_ready;
 static bool sbin_spawn_fails;
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/config/fstab"), *path);
-    return 7;
+    return Success(IOHandle, 7);
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL(7, handle);
-    return IO_OK;
+    return Success(IOStatus, IO_OK);
 }
 
-Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos capacity)
+Result(DynString) IO__read_dyn_string(IOHandle handle, StringPos capacity)
 {
     DynString text;
     match_result(DynString__init(&text, capacity),
@@ -57,7 +57,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos capacity)
         success_do_nothing(),
         error_test_fail()
     );
-    return Some(DynString, text);
+    return Success(DynString, text);
 }
 
 Result(SpawnResult) OS__spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0,

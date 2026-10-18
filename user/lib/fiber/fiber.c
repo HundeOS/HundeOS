@@ -120,47 +120,45 @@ Result(FiberPtr) Fiber__heap_new_with_stack_size(FiberEntry entry, Anything argu
         return Error(FiberPtr, invalid_stack_size, FIBER_INVALID_STACK_SIZE);
     }
 
-    FiberPtr fiber;
     match_result(
         mem_alloc_bytes(sizeof(Fiber)),
-        success(allocation)
+        success(fiber_address)
         {
-            fiber = (FiberPtr)allocation;
+            match_result(
+                mem_alloc_pages_result(stack_size),
+                success(stack_address)
+                {
+                    *(FiberPtr)fiber_address = Fiber__new(entry, argument, stack_address, stack_size);
+
+                    match_result(
+                        FiberContext__init(
+                            &((FiberPtr)fiber_address)->context, Fiber__stack_base((FiberPtr)fiber_address),
+                            Fiber__stack_size((FiberPtr)fiber_address), Fiber__start, (FiberPtr)fiber_address),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            mem_free_pages((void *)stack_address);
+                            free((FiberPtr)fiber_address);
+                            return Error(FiberPtr, message, code);
+                        }
+                    );
+
+                    return Success(FiberPtr, (FiberPtr)fiber_address);
+                },
+                error(code, message)
+                {
+                    free((FiberPtr)fiber_address);
+                    return Error(FiberPtr, allocation_failed, code);
+                }
+            );
+            return Error(FiberPtr, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         error(code, message)
         {
             return Error(FiberPtr, allocation_failed, code);
         }
     );
-
-    void * stack;
-    match_result(
-        mem_alloc_pages_result(stack_size),
-        success(allocation)
-        {
-            stack = (void *)allocation;
-        },
-        error(code, message)
-        {
-            free(fiber);
-            return Error(FiberPtr, allocation_failed, code);
-        }
-    );
-
-    *fiber = Fiber__new(entry, argument, (Address)stack, stack_size);
-
-    match_result(
-        FiberContext__init(&fiber->context, Fiber__stack_base(fiber), Fiber__stack_size(fiber), Fiber__start, fiber),
-        success_do_nothing(),
-        error(code, message)
-        {
-            mem_free_pages(stack);
-            free(fiber);
-            return Error(FiberPtr, message, code);
-        }
-    );
-
-    return Success(FiberPtr, fiber);
+    return Error(FiberPtr, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 FiberState Fiber__state(FiberPtr self)

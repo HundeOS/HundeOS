@@ -379,53 +379,70 @@ Result(Address) Queues__listen(QueuesPtr self, ProcessPtr process, ConstBStringP
         return Error(Address, queue_error, QUEUE_FULL);
     }
 
-    QueueEndpointID endpoint;
     match_result(
         Queues__next_id(self, selected),
-        success(value)
+        success(endpoint)
         {
-            endpoint = value;
+            match_result(
+                Kernel__try_alloc_user(address, QUEUE_ARRIVALS_SIZE, true, false, false),
+                success(memory)
+                {
+                    Kernel__memset(memory.kernel_addr.virtual_addr, 0, QUEUE_ARRIVALS_SIZE);
+                    QueueArrivalsPtr arrivals = k_v_ptr(memory, QueueArrivals);
+                    arrivals->endpoint = endpoint;
+                    QueueListeners__set(&self->listeners, selected,
+                                        QueueListener__new(memory, &None(ProcessPtr), endpoint));
+                    match_result(
+                        KernelServiceDirectory__publish_endpoint(&process->kernel->service_directory, process, name,
+                                                                 endpoint),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            match_optional(
+                                QueueListeners__ptr_at(&self->listeners, selected),
+                                some(slot)
+                                {
+                                    QueueListener__release(slot);
+                                },
+                                none_do_nothing()
+                            );
+                            return Error(Address, message, code);
+                        }
+                    );
+                    QueueListeners__set(&self->listeners, selected,
+                                        QueueListener__new(memory, &Some(ProcessPtr, process), endpoint));
+                    PageTable__map_shared(&process->page_table, process->kernel, memory, QUEUE_ARRIVALS_SIZE);
+                    return Success(Address, address);
+                },
+                error(code, message)
+                {
+                    return Error(Address, message, QUEUE_NO_MEMORY);
+                }
+            );
+            return Error(Address, queue_error, QUEUE_NO_MEMORY);
         },
         error(code, message)
         {
             return Error(Address, message, code);
         }
     );
-    match_result(
-        Kernel__try_alloc_user(address, QUEUE_ARRIVALS_SIZE, true, false, false),
-        success(memory)
+    return Error(Address, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
+static Result(UserAddress) Queues__client_doorbell(QueuesPtr self, ProcessPtr server, OptionalPtr(ProcessPtr) client)
+{
+    match_optional(
+        *client,
+        some(process)
         {
-            Kernel__memset(memory.kernel_addr.virtual_addr, 0, QUEUE_ARRIVALS_SIZE);
-            QueueArrivalsPtr arrivals = k_v_ptr(memory, QueueArrivals);
-            arrivals->endpoint = endpoint;
-            QueueListeners__set(&self->listeners, selected, QueueListener__new(memory, &None(ProcessPtr), endpoint));
-            match_result(
-                KernelServiceDirectory__publish_endpoint(&process->kernel->service_directory, process, name, endpoint),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    match_optional(
-                        QueueListeners__ptr_at(&self->listeners, selected),
-                        some(slot)
-                        {
-                            QueueListener__release(slot);
-                        },
-                        none_do_nothing()
-                    );
-                    return Error(Address, message, code);
-                }
-            );
-            QueueListeners__set(&self->listeners, selected,
-                                QueueListener__new(memory, &Some(ProcessPtr, process), endpoint));
-            PageTable__map_shared(&process->page_table, process->kernel, memory, QUEUE_ARRIVALS_SIZE);
-            return Success(Address, address);
+            return Process__doorbell(process);
         },
-        error(code, message)
+        none()
         {
-            return Error(Address, message, QUEUE_NO_MEMORY);
+            return Queues__kernel_doorbell(self, server->kernel);
         }
     );
-    return Error(Address, queue_error, QUEUE_NO_MEMORY);
+    return Error(UserAddress, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(QueueConnectionID) Queues__connect_to(QueuesPtr self, QueueListenerPtr listener, ProcessPtr server,
@@ -449,150 +466,128 @@ static Result(QueueConnectionID) Queues__connect_to(QueuesPtr self, QueueListene
         },
         none_do_nothing()
     );
-    UserAddress server_doorbell;
     match_result(
         Process__doorbell(server),
-        success(mapping)
-        {
-            server_doorbell = mapping;
-        },
-        error(code, message)
-        {
-            return Error(QueueConnectionID, message, QUEUE_NO_MEMORY);
-        }
-    );
-    UserAddress client_doorbell;
-    match_optional(
-        *client,
-        some(process)
+        success(server_doorbell)
         {
             match_result(
-                Process__doorbell(process),
-                success(mapping)
+                Queues__client_doorbell(self, server, client),
+                success(client_doorbell)
                 {
-                    client_doorbell = mapping;
-                },
-                error(code, message)
-                {
-                    return Error(QueueConnectionID, message, QUEUE_NO_MEMORY);
-                }
-            );
-        },
-        none()
-        {
-            match_result(
-                Queues__kernel_doorbell(self, server->kernel),
-                success(mapping)
-                {
-                    client_doorbell = mapping;
-                },
-                error(code, message)
-                {
-                    return Error(QueueConnectionID, message, QUEUE_NO_MEMORY);
-                }
-            );
-        }
-    );
-    uint64_t selected = QueueConnections__len(&self->connections);
-    uint64_t client_count = 0;
-    for_each_fa(
-        QueueConnections,
-        self->connections,
-        index,
-        connection,
-        {
-            match_optional(
-                *client,
-                some(process)
-                {
-                    if (Queues__belongs_to(&connection.client, process))
+                    uint64_t selected = QueueConnections__len(&self->connections);
+                    uint64_t client_count = 0;
+                    for_each_fa(
+                        QueueConnections,
+                        self->connections,
+                        index,
+                        connection,
+                        {
+                            match_optional(
+                                *client,
+                                some(process)
+                                {
+                                    if (Queues__belongs_to(&connection.client, process))
+                                    {
+                                        client_count++;
+                                    }
+                                },
+                                none_do_nothing()
+                            );
+                            if (!connection.memory.valid)
+                            {
+                                selected = index;
+                            }
+                        }
+                    );
+                    if (selected >= QUEUE_LIMIT || client_count >= client_limit)
                     {
-                        client_count++;
+                        return Error(QueueConnectionID, queue_error, QUEUE_FULL);
                     }
-                },
-                none_do_nothing()
-            );
-            if (!connection.memory.valid)
-            {
-                selected = index;
-            }
-        }
-    );
-    if (selected >= QUEUE_LIMIT || client_count >= client_limit)
-    {
-        return Error(QueueConnectionID, queue_error, QUEUE_FULL);
-    }
 
-    Address address = QueueLayout__address(selected);
-    match_optional(
-        *client,
-        some(process)
-        {
-            if (!Queues__range_available(process, address, QUEUE_CONNECTION_SIZE))
-            {
-                return Error(QueueConnectionID, queue_error, QUEUE_INVALID);
-            }
-        },
-        none_do_nothing()
-    );
-    if (!Queues__range_available(server, address, QUEUE_CONNECTION_SIZE))
-    {
-        return Error(QueueConnectionID, queue_error, QUEUE_INVALID);
-    }
-    QueueConnectionID id;
-    match_result(
-        Queues__next_id(self, selected),
-        success(value)
-        {
-            id = value;
-        },
-        error(code, message)
-        {
-            return Error(QueueConnectionID, message, code);
-        }
-    );
-    match_result(
-        Kernel__try_alloc_user(address, QUEUE_CONNECTION_SIZE, true, false, false),
-        success(memory)
-        {
-            Kernel__memset(memory.kernel_addr.virtual_addr, 0, QUEUE_CONNECTION_SIZE);
-            QueueIdentityPtr identity = k_v_ptr(memory, QueueIdentity);
-            identity->connection = id;
-            identity->endpoint = listener->endpoint;
-            identity->client_pid = client_pid;
-            identity->server_pid = server->pid;
-            identity->origin_pid = client_pid;
-            QueueConnection connection = QueueConnection__new(memory, client, &Some(ProcessPtr, server), id,
-                                                              listener_index, client_doorbell, server_doorbell);
-            connection.kernel_client = is_nothing((*client));
-            match_optional(
-                *client,
-                some(process)
-                {
-                    QueueConnection__map(&connection, process, true);
+                    Address address = QueueLayout__address(selected);
+                    match_optional(
+                        *client,
+                        some(process)
+                        {
+                            if (!Queues__range_available(process, address, QUEUE_CONNECTION_SIZE))
+                            {
+                                return Error(QueueConnectionID, queue_error, QUEUE_INVALID);
+                            }
+                        },
+                        none_do_nothing()
+                    );
+                    if (!Queues__range_available(server, address, QUEUE_CONNECTION_SIZE))
+                    {
+                        return Error(QueueConnectionID, queue_error, QUEUE_INVALID);
+                    }
+                    match_result(
+                        Queues__next_id(self, selected),
+                        success(id)
+                        {
+                            match_result(
+                                Kernel__try_alloc_user(address, QUEUE_CONNECTION_SIZE, true, false, false),
+                                success(memory)
+                                {
+                                    Kernel__memset(memory.kernel_addr.virtual_addr, 0, QUEUE_CONNECTION_SIZE);
+                                    QueueIdentityPtr identity = k_v_ptr(memory, QueueIdentity);
+                                    identity->connection = id;
+                                    identity->endpoint = listener->endpoint;
+                                    identity->client_pid = client_pid;
+                                    identity->server_pid = server->pid;
+                                    identity->origin_pid = client_pid;
+                                    QueueConnection connection =
+                                        QueueConnection__new(memory, client, &Some(ProcessPtr, server), id,
+                                                             listener_index, client_doorbell, server_doorbell);
+                                    connection.kernel_client = is_nothing((*client));
+                                    match_optional(
+                                        *client,
+                                        some(process)
+                                        {
+                                            QueueConnection__map(&connection, process, true);
+                                        },
+                                        none_do_nothing()
+                                    );
+                                    QueueConnection__map(&connection, server, false);
+                                    QueueConnections__set(&self->connections, selected, connection);
+                                    QueueArrivalsPtr arrivals = k_v_ptr(listener->arrivals, QueueArrivals);
+                                    match_result(
+                                        QueueConnectionSlots__set(&arrivals->connections, selected, id),
+                                        success_do_nothing(),
+                                        error(code, message)
+                                        {
+                                            __builtin_trap();
+                                        }
+                                    );
+                                    QueueListener__notify(listener);
+                                    return Success(QueueConnectionID, id);
+                                },
+                                error(code, message)
+                                {
+                                    return Error(QueueConnectionID, message, QUEUE_NO_MEMORY);
+                                }
+                            );
+                            return Error(QueueConnectionID, queue_error, QUEUE_NO_MEMORY);
+                        },
+                        error(code, message)
+                        {
+                            return Error(QueueConnectionID, message, code);
+                        }
+                    );
+                    return Error(QueueConnectionID, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
                 },
-                none_do_nothing()
-            );
-            QueueConnection__map(&connection, server, false);
-            QueueConnections__set(&self->connections, selected, connection);
-            QueueArrivalsPtr arrivals = k_v_ptr(listener->arrivals, QueueArrivals);
-            match_result(
-                QueueConnectionSlots__set(&arrivals->connections, selected, id),
-                success_do_nothing(),
                 error(code, message)
                 {
-                    __builtin_trap();
+                    return Error(QueueConnectionID, message, QUEUE_NO_MEMORY);
                 }
             );
-            QueueListener__notify(listener);
-            return Success(QueueConnectionID, id);
+            return Error(QueueConnectionID, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         error(code, message)
         {
             return Error(QueueConnectionID, message, QUEUE_NO_MEMORY);
         }
     );
-    return Error(QueueConnectionID, queue_error, QUEUE_NO_MEMORY);
+    return Error(QueueConnectionID, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 Result(QueueConnectionID) Queues__connect(QueuesPtr self, ProcessPtr process, QueueEndpointID endpoint)
@@ -644,6 +639,7 @@ Result(QueueConnectionID)
     {
         return Error(QueueConnectionID, queue_error, QUEUE_DENIED);
     }
+
     match_result(
         Queues__client_process(self, manager, client_connection),
         success(client)
@@ -685,6 +681,7 @@ Result(QueueCode) Queues__cancel_delegation(QueuesPtr self, ProcessPtr manager, 
     {
         return Error(QueueCode, queue_error, QUEUE_DENIED);
     }
+
     QueueConnectionPtr delegated_connection;
     match_optional(
         QueueConnections__ptr_at(&self->connections, delegated % QUEUE_LIMIT),
@@ -717,6 +714,7 @@ Result(QueueCode) Queues__cancel_delegation(QueuesPtr self, ProcessPtr manager, 
     {
         return Error(QueueCode, queue_error, QUEUE_DENIED);
     }
+
     match_optional(
         delegated_connection->client,
         some(client)

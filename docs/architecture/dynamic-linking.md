@@ -22,14 +22,24 @@ objects for both architectures. `make wuff-dynamic-smoke-all` produces a PIE
 executable for each architecture with `/sbin/wuff-ld` as its interpreter and
 `libc.wuff.1` as its runtime dependency.
 
-`/usr/local/bin/cat` is the first ordinary dynamically linked command. The disk
-root stages `libc.wuff.1` in `/usr/lib`, and the command records only that
-runtime dependency. `/sbin/wuff-ld` and early bootstrap services remain
-statically linked: the interpreter, filesystem path to `/usr/lib`, and the I/O
-services needed to read it must exist before dynamic loading can begin. Other
-commands remain static while migration proceeds command by command. Existing
-full-system coverage exercises the pilot's raw and formatted reads on both
-architectures.
+The disk-root commands `cat`, `cp`, `env`, `fs-latency`, `grep`, `kill`, `ln`,
+`ls`, `mkdir`, `mv`, `ps`, `rm`, `shutdown`, `tail`, and `write`, plus Bash, are
+dynamically linked on AArch64 and RISC-V. The disk root stages `libc.wuff.1` in
+`/usr/lib`, and each command records only that runtime dependency. A common build rule
+compiles their HundeOS and imported OpenBSD objects as PIC, links them as PIEs,
+and validates the interpreter, dependency, metadata, and architecture-specific
+relocation contract. Bash uses the same contract while retaining its bundled
+static support libraries and PIC `libm`; only libc is a runtime dependency.
+RISC-V Bash also statically links a dedicated PIC compiler-runtime archive for
+the soft-float binary64 arithmetic, comparison, and integer-conversion helpers
+required by Bash and `libm`. This avoids text relocations from the bare-metal
+toolchain's non-PIC `libgcc.a`; host differential tests cover the implemented
+IEEE-754 operations against hardware binary64 results.
+`/sbin/wuff-ld`, embedded programs, early bootstrap services, and drivers remain
+statically linked: the interpreter, filesystem
+path to `/usr/lib`, and the I/O services needed to read it must exist before
+dynamic loading can begin. Existing full-system coverage exercises Bash and the
+commands on both architectures.
 
 The reusable userspace loader validates and maps ELF64 `ET_DYN` objects, reads
 SysV hash-backed symbol and string tables, resolves dependency graphs and
@@ -47,11 +57,13 @@ root entry to an interpreter. A graph root may contain exactly one bounded
 `PT_INTERP` naming `/sbin/wuff-ld`; dependencies and the single-object loader
 reject interpreters. Constructors and TLS remain unsupported.
 
-The current PIE smoke executables use SysV hash, string and symbol tables,
-`DT_NEEDED`, PLT metadata, immediate binding flags, and AArch64 or RISC-V
-`JUMP_SLOT` relocations. The `cat` pilot additionally emits `RELATIVE` and
-AArch64 `GLOB_DAT` or RISC-V absolute 64-bit relocations. Their load contract
-includes `PT_DYNAMIC` and GNU RELRO. Build checks reject text relocations, TLS
+The current PIE smoke executables and disk-root commands use SysV hash, string
+and symbol tables, `DT_NEEDED`, PLT metadata, immediate binding flags, and
+AArch64 or RISC-V `JUMP_SLOT` relocations. The commands may additionally emit
+`RELATIVE` and AArch64 `GLOB_DAT` or RISC-V absolute 64-bit relocations. Their
+load contract includes `PT_DYNAMIC` and GNU RELRO. PLT-only objects do not need
+`DT_RELAENT`; that entry-size tag is required only when a regular `DT_RELA`
+table is present. Build checks reject text relocations, TLS
 segments, initialization and finalization tags, a different interpreter or
 dependency, and any relocation outside each executable's reviewed architecture
 set. The reusable loader ignores non-operational linker metadata but validates
@@ -163,6 +175,16 @@ policy.
 The loader is a userspace library shared by the program interpreter and both
 hosts. Hosts add component policy and ABI validation around it rather than
 implementing separate ELF loaders.
+
+Host module callers use `WuffLoader__load_module_graph` or the filesystem-backed
+`WuffFilesystem__load_module`. Module roots reject `PT_INTERP`, while their
+dependencies retain the ordinary shared-library rules. The filesystem helper
+releases the temporary root image after the loader has copied its loadable
+content, on both success and failure. `WuffGraph__find_root_export` returns a
+`Result(WuffSymbol)` for a required export and searches only the root module, so
+a dependency cannot accidentally satisfy the component entry-point contract.
+The returned graph owns its mappings and supports rollback through
+`WuffGraph__dispose`.
 
 ## Host module ABI
 

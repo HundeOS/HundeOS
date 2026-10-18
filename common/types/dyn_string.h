@@ -56,6 +56,7 @@ typedef DynString * DynStringPtr;
 typedef const DynString * ConstDynStringPtr;
 
 OptionalDef(DynString);
+ResultDef(DynString);
 OptionalDef(DynStringPtr);
 
 bool dyn_string_equals(void * a, void * b);

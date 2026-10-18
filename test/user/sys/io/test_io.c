@@ -159,12 +159,17 @@ void test_io_open_uses_bstring_path(void)
     BString path = bstring("/mnt/fs1/test.txt");
     next_result = 42;
 
-    IOHandle handle = IO__open(&path, IO_OPEN_READ);
-
-    TEST_ASSERT_EQUAL_INT64(42, handle);
-    TEST_ASSERT_EQUAL(IO_REQUEST_OPEN, last_operation);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1/test.txt"), last_path_request.path);
-    TEST_ASSERT_EQUAL(IO_OPEN_READ, last_path_request.flags);
+    match_result(
+        IO__open(&path, IO_OPEN_READ),
+        success(handle)
+        {
+            TEST_ASSERT_EQUAL_INT64(42, handle);
+            TEST_ASSERT_EQUAL(IO_REQUEST_OPEN, last_operation);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1/test.txt"), last_path_request.path);
+            TEST_ASSERT_EQUAL(IO_OPEN_READ, last_path_request.flags);
+        },
+        error_test_fail()
+    );
 }
 
 void test_io_path_from_arg_normalizes_root_relative_components(void)
@@ -180,12 +185,17 @@ void test_io_read_populates_bstring_and_sets_length(void)
     next_read_data = "abc";
     next_read_result = 3;
 
-    ByteCount read_count = IO__read(IO_SESSION_HANDLE_BASE + 9, &buffer);
-
-    TEST_ASSERT_EQUAL_INT64(3, read_count);
-    TEST_ASSERT_EQUAL(IO_REQUEST_READ, last_operation);
-    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 9, last_handle);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), buffer);
+    match_result(
+        IO__read(IO_SESSION_HANDLE_BASE + 9, &buffer),
+        success(read_count)
+        {
+            TEST_ASSERT_EQUAL_INT64(3, read_count);
+            TEST_ASSERT_EQUAL(IO_REQUEST_READ, last_operation);
+            TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 9, last_handle);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("abc"), buffer);
+        },
+        error_test_fail()
+    );
 }
 
 void test_io_read_dyn_string_returns_file_contents(void)
@@ -193,9 +203,9 @@ void test_io_read_dyn_string_returns_file_contents(void)
     next_read_data = "abc";
     next_read_result = 3;
 
-    match_optional(
+    match_result(
         IO__read_dyn_string(IO_SESSION_HANDLE_BASE + 9, 16),
-        some(text)
+        success(text)
         {
             TEST_ASSERT_EQUAL(IO_REQUEST_READ, last_operation);
             TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 9, last_handle);
@@ -203,7 +213,7 @@ void test_io_read_dyn_string_returns_file_contents(void)
             TEST_ASSERT_EQUAL_INT64(3, DynString__length(&text));
             DynString__dispose(&text);
         },
-        none_test_fail()
+        error_test_fail()
     );
 }
 
@@ -211,13 +221,18 @@ void test_io_write_uses_bstring_length(void)
 {
     next_result = 5;
 
-    ByteCount written = IO__write(IO_SESSION_HANDLE_BASE + 7, &bstr("hello"));
-
-    TEST_ASSERT_EQUAL_INT64(5, written);
-    TEST_ASSERT_EQUAL(IO_REQUEST_WRITE, last_operation);
-    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 7, last_handle);
-    TEST_ASSERT_EQUAL_STRING("hello", (const char *)last_write_data);
-    TEST_ASSERT_EQUAL_INT64(5, last_write_size);
+    match_result(
+        IO__write(IO_SESSION_HANDLE_BASE + 7, &bstr("hello")),
+        success(written)
+        {
+            TEST_ASSERT_EQUAL_INT64(5, written);
+            TEST_ASSERT_EQUAL(IO_REQUEST_WRITE, last_operation);
+            TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 7, last_handle);
+            TEST_ASSERT_EQUAL_STRING("hello", (const char *)last_write_data);
+            TEST_ASSERT_EQUAL_INT64(5, last_write_size);
+        },
+        error_test_fail()
+    );
 }
 
 void test_io_make_dir_uses_bstring_path(void)
@@ -225,11 +240,16 @@ void test_io_make_dir_uses_bstring_path(void)
     BString path = bstring("/mnt/fs1/newdir");
     next_result = IO_OK;
 
-    IOStatus status = IO__make_dir(&path);
-
-    TEST_ASSERT_EQUAL(IO_OK, status);
-    TEST_ASSERT_EQUAL(IO_REQUEST_MKDIR, last_operation);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1/newdir"), last_path_request.path);
+    match_result(
+        IO__make_dir(&path),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IO_OK, status);
+            TEST_ASSERT_EQUAL(IO_REQUEST_MKDIR, last_operation);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/fs1/newdir"), last_path_request.path);
+        },
+        error_test_fail()
+    );
 }
 
 void test_io_link_uses_bstring_paths(void)
@@ -238,12 +258,17 @@ void test_io_link_uses_bstring_paths(void)
     BString target_path = bstring("/mnt/ext2fs/copy.txt");
     next_result = IO_OK;
 
-    IOStatus status = IO__link_file(&source_path, &target_path);
-
-    TEST_ASSERT_EQUAL(IO_OK, status);
-    TEST_ASSERT_EQUAL(IO_REQUEST_LINK, last_operation);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/hello.txt"), last_link_request.source_path);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/copy.txt"), last_link_request.target_path);
+    match_result(
+        IO__link_file(&source_path, &target_path),
+        success(status)
+        {
+            TEST_ASSERT_EQUAL(IO_OK, status);
+            TEST_ASSERT_EQUAL(IO_REQUEST_LINK, last_operation);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/hello.txt"), last_link_request.source_path);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext2fs/copy.txt"), last_link_request.target_path);
+        },
+        error_test_fail()
+    );
 }
 
 void test_io_file_info_uses_one_path_request(void)

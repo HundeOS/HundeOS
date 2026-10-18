@@ -29,7 +29,7 @@ FixedArrayBodyDefine(ManagedSharedPages);
         .cpu = cpu, .registry_slot = 0, .started = false,                                                              \
     }
 
-BString unreachable_code = bstr("Unreachable code reached\n");
+BString unknown_error = bstr("Unknown error\n");
 BString process_not_found = bstr("Process not found\n");
 static BString process_permission_denied = bstr("Process permission denied\n");
 BString reason_mismatch_format = bstr("Process was parked for reason %i, not %i\n");
@@ -88,11 +88,10 @@ static void Scheduler__trace_queue_data_available(ProcessPtr process, ProcessPtr
 {
     if (Scheduler__command_flow_process(process) || Scheduler__command_flow_process(peer))
     {
-        __d_printf(
-            COMMAND_FLOW,
-            "t=%i queue sender=%i:%s receiver=%i:%s receiver_state=%s wake=%i cpu=%i connection=%i\n",
-            CPU__time_usec(), process->pid, cstr(process->name), peer->pid, cstr(peer->name),
-            ProcessState__to_string(peer->state), reschedule, cpu, connection);
+        __d_printf(COMMAND_FLOW,
+                   "t=%i queue sender=%i:%s receiver=%i:%s receiver_state=%s wake=%i cpu=%i connection=%i\n",
+                   CPU__time_usec(), process->pid, cstr(process->name), peer->pid, cstr(peer->name),
+                   ProcessState__to_string(peer->state), reschedule, cpu, connection);
     }
 }
 
@@ -667,7 +666,8 @@ Result(SchedulerWake)
                         Scheduler__wake_queue_wait_locked(self, peer),
                         success(wake)
                         {
-                            Scheduler__trace_queue_data_available(process, peer, wake.reschedule, wake.cpu, connection);
+                            Scheduler__trace_queue_data_available(process, peer, wake.reschedule, wake.cpu,
+                                                                  connection);
                             cs_return Success(SchedulerWake, wake);
                         },
                         error(code, message)
@@ -1941,11 +1941,13 @@ static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(SchedulerP
             }
         );
     }
+
     Process__queue_signal(parent, PROCESS_SIGNAL_CHILD);
     if (!retains_child_event)
     {
         Process__wake_shared_wait(parent);
     }
+
     return Success(ServiceCode, SERVICE_OK);
 }
 
@@ -2888,7 +2890,7 @@ Result(SchedulerInitStatus) Scheduler__register_cpu(SchedulerPtr self, CPUID cpu
             );
         }
     );
-    return Error(SchedulerInitStatus, unreachable_code, SCHEDULER_INIT_ERROR);
+    return Error(SchedulerInitStatus, unknown_error, SCHEDULER_INIT_ERROR);
 }
 
 void Scheduler__mark_ready(SchedulerPtr self)
@@ -3061,7 +3063,7 @@ Result(SchedulerScheduleStatus) Scheduler__schedule(SchedulerPtr self, ProcessPt
         }
     );
 
-    return Error(SchedulerScheduleStatus, unreachable_code, SCHEDULER_GENERAL_ERROR);
+    return Error(SchedulerScheduleStatus, unknown_error, SCHEDULER_GENERAL_ERROR);
 }
 
 Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc, CPUID cpu)
@@ -3086,7 +3088,7 @@ Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc,
         }
     );
 
-    return Error(CPUID, unreachable_code, SCHEDULER_GENERAL_ERROR);
+    return Error(CPUID, unknown_error, SCHEDULER_GENERAL_ERROR);
 }
 
 Result(SchedulerScheduleStatus) Scheduler__promote_realtime(SchedulerPtr self, ProcessPtr process)
@@ -3115,7 +3117,7 @@ Result(SchedulerScheduleStatus) Scheduler__promote_realtime(SchedulerPtr self, P
         }
     );
 
-    return Error(SchedulerScheduleStatus, unreachable_code, SCHEDULER_GENERAL_ERROR);
+    return Error(SchedulerScheduleStatus, unknown_error, SCHEDULER_GENERAL_ERROR);
 }
 
 Result(CPUID) Scheduler__cpu_for_process(SchedulerPtr self, ProcessPtr process)
@@ -3284,8 +3286,8 @@ Result(ServiceEvent)
                         {
                             match_result(
                                 CPUScheduler__park(sched, process, kernel_context, continuation,
-                                                   PARK_WAIT_SERVICE_EVENT, owns_kernel_context, &None(OperationKey),
-                                                   0),
+                                                   PARK_WAIT_SERVICE_EVENT, owns_kernel_context,
+                                                   &None(OperationKey), 0),
                                 success(parked)
                                 {
                                     cs_return Error(ServiceEvent, service_event_queue_empty,
@@ -3555,6 +3557,7 @@ Result(ServiceCode) Scheduler__register_memory_reclaimer(SchedulerPtr self, Proc
             }
         }
     );
+
     return Success(ServiceCode, SERVICE_OK);
 }
 
@@ -3592,6 +3595,7 @@ Result(ServiceCode) Scheduler__notify_memory_pressure(SchedulerPtr self, uint64_
             );
         }
     );
+
     return Success(ServiceCode, SERVICE_OK);
 }
 
@@ -3745,6 +3749,7 @@ static Result(ServiceCode)
     {
         process->state = PROC_STATE_INTERRUPTED;
     }
+
     Scheduler__trace_child_wake(process, child_pid, event_type, wait_ready);
 
     return Success(ServiceCode, SERVICE_OK);
@@ -3890,7 +3895,7 @@ Result(SchedulerInitStatus) Scheduler__start(SchedulerPtr self, CPUID cpu)
                     BString invalid_cpu = BString__sprintf(&bstr("Invalid CPU %i\n"), cpu);
 
                     cs_return Error(SchedulerInitStatus, invalid_cpu, SCHEDULER_INVALID_CPU);
-                    __d_println(MUTEX, "Unreachable code reached");
+                    __d_println(MUTEX, "Unknown error");
                 }
             );
         }

@@ -9,6 +9,8 @@ static unsigned file_info_requests;
 static IOStatus file_info_status;
 static IOFileInfo file_info;
 static IOStatus make_dir_status;
+static IOHandle native_handle;
+static Optional(BString) descriptor_path;
 
 Result(IOFileInfo) IO__file_info(ConstBStringPtr path)
 {
@@ -24,19 +26,24 @@ int PosixPath__absolute(const char * path, BStringPtr result)
     return 0;
 }
 
-IOStatus IO__make_dir(ConstBStringPtr path)
+Result(IOStatus) IO__make_dir(ConstBStringPtr path)
 {
-    return make_dir_status;
+    return make_dir_status == IO_OK ? Success(IOStatus, IO_OK)
+                                    : Error(IOStatus, bstr("make directory failed"), make_dir_status);
 }
 
 IOHandle PosixIO__native_handle(int descriptor)
 {
-    return IO_UNKNOWN_HANDLE;
+    if (native_handle < 0)
+    {
+        errno = EBADF;
+    }
+    return native_handle;
 }
 
 Optional(BString) PosixIO__path(int descriptor)
 {
-    return None(BString);
+    return descriptor_path;
 }
 
 #define fchflags HundTest__fchflags
@@ -50,6 +57,9 @@ void setUp(void)
     file_info = (IOFileInfo){
         .mode = IO_MODE_TYPE_FILE | 0755, .user_id = PROCESS_USER_HUND, .group_id = PROCESS_GROUP_HUND, .size = 1234};
     make_dir_status = IO_OPERATION_NOT_SUPPORTED;
+    native_handle = 42;
+    descriptor_path = Some(BString, bstr("/usr/local/bin/tool"));
+    errno = 0;
 }
 
 void tearDown(void)
@@ -89,4 +99,26 @@ void test_mkdir_reports_an_existing_path_as_eexist(void)
 
     TEST_ASSERT_EQUAL_INT(-1, mkdir("/tmp/existing", 0700));
     TEST_ASSERT_EQUAL_INT(EEXIST, errno);
+}
+
+void test_ftruncate_accepts_an_unchanged_regular_file_size(void)
+{
+    TEST_ASSERT_EQUAL_INT(0, ftruncate(7, 1234));
+    TEST_ASSERT_EQUAL_UINT(1, file_info_requests);
+}
+
+void test_ftruncate_rejects_a_real_resize_until_the_io_protocol_supports_it(void)
+{
+    TEST_ASSERT_EQUAL_INT(-1, ftruncate(7, 1000));
+    TEST_ASSERT_EQUAL_INT(ENOSYS, errno);
+}
+
+void test_ftruncate_rejects_negative_lengths_and_invalid_descriptors(void)
+{
+    TEST_ASSERT_EQUAL_INT(-1, ftruncate(7, -1));
+    TEST_ASSERT_EQUAL_INT(EINVAL, errno);
+
+    native_handle = IO_UNKNOWN_HANDLE;
+    TEST_ASSERT_EQUAL_INT(-1, ftruncate(7, 0));
+    TEST_ASSERT_EQUAL_INT(EBADF, errno);
 }

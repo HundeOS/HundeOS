@@ -12,25 +12,12 @@ WuffInterpreterProgram WuffInterpreterProgram__new(WuffGraph graph, Address entr
     };
 }
 
-Result(WuffInterpreterProgram) WuffInterpreter__load(ConstBStringPtr path)
+static Result(WuffInterpreterProgram) WuffInterpreter__load_root(ConstWuffImagePtr root)
 {
-    WuffImage root;
-    match_result(
-        WuffFilesystem__load_image(path),
-        success(image)
-        {
-            root = image;
-        },
-        error(code, message)
-        {
-            return Error(WuffInterpreterProgram, message, code);
-        }
-    );
-
     WuffMemoryOperations memory = WuffMemoryOperations__system();
     WuffDependencyOperations dependencies = WuffFilesystem__dependencies();
-    Result(WuffGraph) loaded = WuffLoader__load_graph(&root, &memory, &dependencies);
-    WuffFilesystem__release_image(&root);
+    Result(WuffGraph) loaded = WuffLoader__load_graph(root, &memory, &dependencies);
+    WuffFilesystem__release_image(root);
 
     match_result(
         loaded,
@@ -62,6 +49,23 @@ Result(WuffInterpreterProgram) WuffInterpreter__load(ConstBStringPtr path)
             return Error(WuffInterpreterProgram, message, code);
         }
     );
+    return Error(WuffInterpreterProgram, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
+Result(WuffInterpreterProgram) WuffInterpreter__load(ConstBStringPtr path)
+{
+    match_result(
+        WuffFilesystem__load_image(path),
+        success(image)
+        {
+            return WuffInterpreter__load_root(&image);
+        },
+        error(code, message)
+        {
+            return Error(WuffInterpreterProgram, message, code);
+        }
+    );
+    return Error(WuffInterpreterProgram, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 Address WuffInterpreterProgram__entry(ConstWuffInterpreterProgramPtr self)

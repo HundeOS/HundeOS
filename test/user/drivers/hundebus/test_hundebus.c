@@ -132,15 +132,15 @@ size_t mapped_size(ServiceMappedMemoryPtr memory)
     return memory->size;
 }
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), *path);
     TEST_ASSERT_EQUAL_INT(IO_OPEN_READ, flags);
     fake_sysinfo_opened = true;
-    return 1;
+    return Success(IOHandle, 1);
 }
 
-ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
+Result(ByteCount) IO__read_bytes(IOHandle handle, char * buf, size_t size)
 {
     TEST_ASSERT_EQUAL_INT(1, handle);
     uint64_t index = 0;
@@ -149,17 +149,17 @@ ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
         buf[index] = fake_sysinfo[index];
         index++;
     }
-    return (ByteCount)index;
+    return Success(ByteCount, (ByteCount)index);
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL_INT(1, handle);
     fake_sysinfo_closed = true;
-    return IO_OK;
+    return Success(IOStatus, IO_OK);
 }
 
-Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
+Result(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 {
     TEST_ASSERT_EQUAL_INT(1, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
@@ -169,7 +169,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
         success_do_nothing(),
         error(code, message)
         {
-            return None(DynString);
+            return Error(DynString, message, code);
         }
     );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
@@ -180,11 +180,11 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
             error(code, message)
             {
                 DynString__dispose(&sysinfo);
-                return None(DynString);
+                return Error(DynString, message, code);
             }
         );
     }
-    return Some(DynString, sysinfo);
+    return Success(DynString, sysinfo);
 }
 
 IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServiceContext context,

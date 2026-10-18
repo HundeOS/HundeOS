@@ -19,27 +19,27 @@ void tearDown(void)
 {
 }
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     opens++;
-    return 10;
+    return Success(IOHandle, 10);
 }
 
-ByteCount IO__read_bytes(IOHandle handle, char * data, size_t size)
+Result(ByteCount) IO__read_bytes(IOHandle handle, char * data, size_t size)
 {
     reads++;
-    return (ByteCount)size;
+    return Success(ByteCount, (ByteCount)size);
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     closes++;
-    return IO_OK;
+    return Success(IOStatus, IO_OK);
 }
 
-IOSeekResult IO__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
+Result(IOPosition) IO__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
 {
-    return IOSeekResult__new(IO_OK, (uint64_t)offset);
+    return Success(IOPosition, (IOPosition)offset);
 }
 
 Result(IOFileInfo) IO__file_info(ConstBStringPtr path)

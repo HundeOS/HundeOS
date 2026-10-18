@@ -10,7 +10,7 @@
 static char output[256];
 static size_t output_position;
 
-ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
+Result(ByteCount) IO__write(IOHandle handle, ConstBStringPtr text)
 {
     const char * buf = BString__cstr(text);
     size_t size = (size_t)BString__length(text);
@@ -19,7 +19,7 @@ ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
         output[output_position++] = buf[i];
     }
     output[output_position] = '\0';
-    return (ByteCount)size;
+    return Success(ByteCount, (ByteCount)size);
 }
 
 #include "../../../../user/lib/sys/print.c"

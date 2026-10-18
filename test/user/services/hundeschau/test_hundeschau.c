@@ -41,22 +41,22 @@ SpawnResult spawn_with_stdio(SpawnMode mode, ConstBStringPtr path, SpawnFileDesc
     return SPAWN_FAILED;
 }
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_FAIL_MESSAGE("Unexpected file open");
-    return IO_INVALID_PATH;
+    return Error(IOHandle, bstr("unexpected open"), IO_INVALID_PATH);
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     TEST_FAIL_MESSAGE("Unexpected file close");
-    return IO_OK;
+    return Success(IOStatus, IO_OK);
 }
 
-Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
+Result(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 {
     TEST_FAIL_MESSAGE("Unexpected file read");
-    return None(DynString);
+    return Error(DynString, bstr("unexpected read"), IO_PANIC);
 }
 
 ProcessChildEventResult wait_for_child_event(ProcessChildEventPtr event)

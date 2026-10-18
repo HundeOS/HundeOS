@@ -44,7 +44,13 @@ new kinds of channel. Follow [Channels and event queues](channels-and-event-queu
 Target programs may use either the native `IO__*` interface or the userspace
 C/POSIX compatibility layer. Native I/O handles begin above `1 << 32`; the
 compatibility layer therefore maps them to process-local `int` descriptors and
-converts native EOF and error statuses to POSIX return values and `errno`.
+converts native EOF and errors to POSIX return values and `errno`. Fallible
+native `IO__*` operations return `Result(payload)`: success values contain only
+the requested handle, count, position, change, attributes, or status, while the
+error branch carries a named message and the corresponding `IOStatus` as its
+code. `IOStatus` remains the bounded protocol status on Channel replies; callers
+must not infer failure from a negative payload or inspect a reply status outside
+the I/O client boundary.
 Descriptors `0`, `1`, and `2` retain their standard stream meanings. This map
 and the stdio implementation are entirely userspace concerns.
 
@@ -535,6 +541,11 @@ target, after root and `/tmp` and before publishing readiness. Devfs uses the
 existing filesystem driver, Channel, and I/O protocol. It owns directory
 representation, metadata text, open handles, read offsets, and session cleanup.
 There is no kernel devfs mount or blanket `/dev` syscall bypass.
+
+Devfs provides `/dev/null` as a writable character-like file using the existing
+stream filesystem operations. Reads immediately return end-of-file and writes
+discard all supplied bytes while reporting them consumed. Device-registry
+metadata entries remain read-only.
 
 The kernel publishes authoritative device records in a read-only, non-executable
 mapping at `0x70800000`, available to every process independently of devfs startup.

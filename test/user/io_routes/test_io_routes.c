@@ -3,6 +3,18 @@
 #include "syscalls/calls.h"
 #include "sys/syscall.h"
 
+#define TEST_ASSERT_RESULT_SUCCESS(expected, expression)                                                               \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        match_result(expression, success(value) { TEST_ASSERT_EQUAL(expected, value); }, error_test_fail());           \
+    } while (0)
+
+#define TEST_ASSERT_RESULT_ERROR(expected, expression)                                                                 \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        match_result(expression, success_test_fail(), error(code, message) { TEST_ASSERT_EQUAL(expected, code); });    \
+    } while (0)
+
 static unsigned kernel_calls;
 static unsigned channel_calls;
 static IOReply replies[3];
@@ -139,7 +151,7 @@ void test_terminal_foreground_control_uses_open_standard_input(void)
     IO__set_startup_stdio(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
     opened = IO_STREAM_HANDLE_BASE;
 
-    TEST_ASSERT_EQUAL(IO_OK, IO__set_terminal_foreground(42));
+    TEST_ASSERT_RESULT_SUCCESS(IO_OK, IO__set_terminal_foreground(42));
 
     TEST_ASSERT_EQUAL_UINT64(42, foreground_pid);
     TEST_ASSERT_EQUAL_UINT(2, channel_calls);
@@ -153,7 +165,7 @@ void test_terminal_paths_reflect_startup_endpoints_and_closed_streams(void)
     TEST_ASSERT_EQUAL_BSTRING(bstr(":console:"), unwrap_optional(IO__terminal_path(STDOUT_FILENO), empty_bstr()));
     TEST_ASSERT_FALSE(is_something(IO__terminal_path(4)));
 
-    TEST_ASSERT_EQUAL(IO_OK, IO__close(STDIN_FILENO));
+    TEST_ASSERT_RESULT_SUCCESS(IO_OK, IO__close(STDIN_FILENO));
     TEST_ASSERT_FALSE(is_something(IO__terminal_path(STDIN_FILENO)));
 }
 
@@ -170,12 +182,12 @@ void tearDown(void)
 
 void test_filesystem_handles_use_channel_for_read_write_close(void)
 {
-    IOHandle handle = IO__open(&bstr("/mnt/ext/file"), IO_OPEN_READ | IO_OPEN_WRITE);
-    TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, handle);
+    IOHandle handle = IO_FILESYSTEM_HANDLE_BASE;
+    TEST_ASSERT_RESULT_SUCCESS(handle, IO__open(&bstr("/mnt/ext/file"), IO_OPEN_READ | IO_OPEN_WRITE));
     char data[2] = "x";
-    TEST_ASSERT_EQUAL(0, IO__read_bytes(handle, data, 1));
-    TEST_ASSERT_EQUAL(1, IO__write_bytes(handle, data, 1));
-    TEST_ASSERT_EQUAL(IO_OK, IO__close(handle));
+    TEST_ASSERT_RESULT_SUCCESS(0, IO__read_bytes(handle, data, 1));
+    TEST_ASSERT_RESULT_SUCCESS(1, IO__write_bytes(handle, data, 1));
+    TEST_ASSERT_RESULT_SUCCESS(IO_OK, IO__close(handle));
     TEST_ASSERT_EQUAL(4, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
@@ -183,27 +195,27 @@ void test_filesystem_handles_use_channel_for_read_write_close(void)
 void test_backend_failure_never_falls_back_to_kernel(void)
 {
     opened = IO_NO_DEVICE_FOUND;
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, IO__open(&bstr("/mnt/ext/file"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_ERROR(IO_NO_DEVICE_FOUND, IO__open(&bstr("/mnt/ext/file"), IO_OPEN_READ));
     replies[0] = IOReply__new(IO_NO_DEVICE_FOUND, 0);
     DirectoryEntry entry;
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, list_dir(&bstr("/mnt/ext"), &entry, 1));
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, make_dir(&bstr("/mnt/ext/new")));
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, remove_file(&bstr("/mnt/ext/file")));
+    TEST_ASSERT_RESULT_ERROR(IO_NO_DEVICE_FOUND, list_dir(&bstr("/mnt/ext"), &entry, 1));
+    TEST_ASSERT_RESULT_ERROR(IO_NO_DEVICE_FOUND, make_dir(&bstr("/mnt/ext/new")));
+    TEST_ASSERT_RESULT_ERROR(IO_NO_DEVICE_FOUND, remove_file(&bstr("/mnt/ext/file")));
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
 void test_unmanaged_reply_never_uses_kernel_file_path(void)
 {
     opened = IO_PATH_UNMANAGED;
-    TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, IO__open(&bstr("/root-file"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_ERROR(IO_PATH_UNMANAGED, IO__open(&bstr("/root-file"), IO_OPEN_READ));
     TEST_ASSERT_EQUAL(0, kernel_calls);
     TEST_ASSERT_EQUAL(1, channel_calls);
 }
 
 void test_boot_files_use_channels_without_kernel_syscalls(void)
 {
-    TEST_ASSERT_EQUAL(opened, IO__open(&bstr("/boot/config/fstab"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(opened, IO__open(&bstr("/boot/sysinfo"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(opened, IO__open(&bstr("/boot/config/fstab"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(opened, IO__open(&bstr("/boot/sysinfo"), IO_OPEN_READ));
     TEST_ASSERT_EQUAL(2, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
@@ -211,10 +223,10 @@ void test_boot_files_use_channels_without_kernel_syscalls(void)
 void test_terminal_paths_use_channels_without_kernel_fallback(void)
 {
     opened = IO_STREAM_HANDLE_BASE;
-    TEST_ASSERT_EQUAL(opened, IO__open(&bstr(":tty:"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(opened, IO__open(&bstr(":console:"), IO_OPEN_WRITE));
+    TEST_ASSERT_RESULT_SUCCESS(opened, IO__open(&bstr(":tty:"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(opened, IO__open(&bstr(":console:"), IO_OPEN_WRITE));
     opened = IO_NO_DEVICE_FOUND;
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, IO__open(&bstr(":console:"), IO_OPEN_WRITE));
+    TEST_ASSERT_RESULT_ERROR(IO_NO_DEVICE_FOUND, IO__open(&bstr(":console:"), IO_OPEN_WRITE));
     TEST_ASSERT_EQUAL(3, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
@@ -222,9 +234,9 @@ void test_terminal_paths_use_channels_without_kernel_fallback(void)
 void test_link_uses_channel_and_preserves_errors(void)
 {
     replies[0] = IOReply__new(IO_OK, 0);
-    TEST_ASSERT_EQUAL(IO_OK, link_file(&bstr("/source"), &bstr("/target")));
+    TEST_ASSERT_RESULT_SUCCESS(IO_OK, link_file(&bstr("/source"), &bstr("/target")));
     replies[0].status = IO_OPERATION_NOT_SUPPORTED;
-    TEST_ASSERT_EQUAL(IO_OPERATION_NOT_SUPPORTED, link_file(&bstr("/source"), &bstr("/target")));
+    TEST_ASSERT_RESULT_ERROR(IO_OPERATION_NOT_SUPPORTED, link_file(&bstr("/source"), &bstr("/target")));
     TEST_ASSERT_EQUAL(2, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
@@ -232,10 +244,10 @@ void test_link_uses_channel_and_preserves_errors(void)
 void test_legacy_handles_never_fall_back_to_syscalls(void)
 {
     char data[8] = {0};
-    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, IO__read_bytes(7, data, sizeof(data)));
-    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, IO__write_bytes(7, data, sizeof(data)));
-    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, IO__close(7));
-    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, accept(7));
+    TEST_ASSERT_RESULT_ERROR(IO_UNKNOWN_HANDLE, IO__read_bytes(7, data, sizeof(data)));
+    TEST_ASSERT_RESULT_ERROR(IO_UNKNOWN_HANDLE, IO__write_bytes(7, data, sizeof(data)));
+    TEST_ASSERT_RESULT_ERROR(IO_UNKNOWN_HANDLE, IO__close(7));
+    TEST_ASSERT_RESULT_ERROR(IO_UNKNOWN_HANDLE, accept(7));
     TEST_ASSERT_EQUAL(0, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
@@ -243,7 +255,7 @@ void test_legacy_handles_never_fall_back_to_syscalls(void)
 void test_zero_capacity_listing_does_not_send_a_request(void)
 {
     DirectoryEntry entry;
-    TEST_ASSERT_EQUAL(0, list_dir(&bstr("/"), &entry, 0));
+    TEST_ASSERT_RESULT_SUCCESS(0, list_dir(&bstr("/"), &entry, 0));
     TEST_ASSERT_EQUAL(0, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
@@ -253,11 +265,11 @@ void test_terminal_stdio_opens_once_and_close_does_not_reopen(void)
     IO__set_startup_stdio(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
     opened = IO_STREAM_HANDLE_BASE;
     char data = 'x';
-    TEST_ASSERT_EQUAL(1, IO__write_bytes(1, &data, 1));
-    TEST_ASSERT_EQUAL(1, IO__write_bytes(1, &data, 1));
+    TEST_ASSERT_RESULT_SUCCESS(1, IO__write_bytes(1, &data, 1));
+    TEST_ASSERT_RESULT_SUCCESS(1, IO__write_bytes(1, &data, 1));
     TEST_ASSERT_EQUAL(3, channel_calls);
-    TEST_ASSERT_EQUAL(IO_OK, IO__close(1));
-    TEST_ASSERT_EQUAL(IO_NOT_OPEN, IO__write_bytes(1, &data, 1));
+    TEST_ASSERT_RESULT_SUCCESS(IO_OK, IO__close(1));
+    TEST_ASSERT_RESULT_ERROR(IO_NOT_OPEN, IO__write_bytes(1, &data, 1));
     TEST_ASSERT_EQUAL(4, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
@@ -265,14 +277,14 @@ void test_terminal_stdio_opens_once_and_close_does_not_reopen(void)
 void test_keyboard_input_uses_channels_without_kernel_fallback(void)
 {
     opened = IO_STREAM_HANDLE_BASE;
-    TEST_ASSERT_EQUAL(opened, IO__open(&bstr(":keyboard:"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(opened, IO__open(&bstr(":keyboard:"), IO_OPEN_READ));
     IO__set_startup_stdio(IO_ENDPOINT_KEYBOARD_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
     char byte;
-    TEST_ASSERT_EQUAL(0, IO__read_bytes(0, &byte, 1));
+    TEST_ASSERT_RESULT_SUCCESS(0, IO__read_bytes(0, &byte, 1));
     TEST_ASSERT_EQUAL(3, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
     opened = IO_NO_DEVICE_FOUND;
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, IO__open(&bstr(":keyboard:"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_ERROR(IO_NO_DEVICE_FOUND, IO__open(&bstr(":keyboard:"), IO_OPEN_READ));
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
@@ -281,48 +293,48 @@ void test_stdio_open_failure_can_retry_without_using_kernel_console(void)
     IO__set_startup_stdio(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
     opened = IO_NO_DEVICE_FOUND;
     char data = 'x';
-    TEST_ASSERT_EQUAL(IO_NO_DEVICE_FOUND, IO__write_bytes(1, &data, 1));
+    TEST_ASSERT_RESULT_ERROR(IO_NO_DEVICE_FOUND, IO__write_bytes(1, &data, 1));
     opened = IO_STREAM_HANDLE_BASE;
-    TEST_ASSERT_EQUAL(1, IO__write_bytes(1, &data, 1));
+    TEST_ASSERT_RESULT_SUCCESS(1, IO__write_bytes(1, &data, 1));
     TEST_ASSERT_EQUAL(3, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
 void test_embedded_files_use_userspace_channels(void)
 {
-    TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/sbin/login"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/sbin/login"), IO_OPEN_READ));
     TEST_ASSERT_EQUAL(1, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
 void test_retired_proc_and_other_boot_paths_do_not_bypass_userspace(void)
 {
-    TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/proc/sysinfo"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/boot/other"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/boot/sysinfo/child"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/proc/sysinfo"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/boot/other"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/boot/sysinfo/child"), IO_OPEN_READ));
     TEST_ASSERT_EQUAL(3, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
 void test_tmp_and_former_memfs_paths_use_channels(void)
 {
-    TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/tmp/test"), IO_OPEN_READ));
-    TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/tmp/memfs/test"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/tmp/test"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/tmp/memfs/test"), IO_OPEN_READ));
     TEST_ASSERT_EQUAL(2, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
 void test_devfs_uses_channels_without_kernel_stream_fallback(void)
 {
-    TEST_ASSERT_EQUAL(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/dev/hd0"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_SUCCESS(IO_FILESYSTEM_HANDLE_BASE, IO__open(&bstr("/dev/hd0"), IO_OPEN_READ));
     DirectoryEntry entry;
-    TEST_ASSERT_EQUAL(0, list_dir(&bstr("/dev"), &entry, 1));
+    TEST_ASSERT_RESULT_SUCCESS(0, list_dir(&bstr("/dev"), &entry, 1));
     TEST_ASSERT_EQUAL(0, kernel_calls);
     opened = IO_INVALID_PATH;
-    TEST_ASSERT_EQUAL(IO_INVALID_PATH, IO__open(&bstr("/dev/missing"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_ERROR(IO_INVALID_PATH, IO__open(&bstr("/dev/missing"), IO_OPEN_READ));
     TEST_ASSERT_EQUAL(0, kernel_calls);
     opened = IO_PATH_UNMANAGED;
-    TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, IO__open(&bstr("/dev/test-stream"), IO_OPEN_READ));
+    TEST_ASSERT_RESULT_ERROR(IO_PATH_UNMANAGED, IO__open(&bstr("/dev/test-stream"), IO_OPEN_READ));
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
@@ -332,7 +344,7 @@ void test_unmanaged_directory_reply_is_not_merged_with_kernel_entries(void)
     replies[0].directory.entries[0] = DirectoryEntry__new(0, 0, 0, IO_MODE_TYPE_DIR | 0755, &bstr("mnt"));
     replies[1] = IOReply__new(IO_PATH_UNMANAGED, 0);
     DirectoryEntry entries[3];
-    TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, list_dir(&bstr("/"), entries, 3));
+    TEST_ASSERT_RESULT_ERROR(IO_PATH_UNMANAGED, list_dir(&bstr("/"), entries, 3));
     TEST_ASSERT_EQUAL(0, kernel_calls);
 }
 
@@ -344,7 +356,7 @@ void test_directory_entries_are_paged_over_channel(void)
     replies[0].directory.count = 2;
     replies[2] = IOReply__new(IO_OK, 0);
     DirectoryEntry entries[3];
-    TEST_ASSERT_EQUAL(2, list_dir(&bstr("/mnt/ext"), entries, 3));
+    TEST_ASSERT_RESULT_SUCCESS(2, list_dir(&bstr("/mnt/ext"), entries, 3));
     TEST_ASSERT_EQUAL_STRING("first", entries[0].name);
     TEST_ASSERT_EQUAL_STRING("second", entries[1].name);
     TEST_ASSERT_EQUAL(2, channel_calls);
@@ -359,7 +371,7 @@ void test_root_overlay_wins_over_disk_entry_without_repeating_a_page(void)
     replies[0].directory.count = 2;
     replies[2] = IOReply__new(IO_OK, 0);
     DirectoryEntry entries[3];
-    TEST_ASSERT_EQUAL(1, list_dir(&bstr("/"), entries, 3));
+    TEST_ASSERT_RESULT_SUCCESS(1, list_dir(&bstr("/"), entries, 3));
     TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, entries[0].mode);
     TEST_ASSERT_EQUAL(2, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);
@@ -372,7 +384,7 @@ void test_synthetic_directory_entries_survive_a_missing_backing_directory(void)
     replies[0].directory.count = 1;
     replies[1] = IOReply__new(IO_INVALID_PATH, 0);
     DirectoryEntry entries[3];
-    TEST_ASSERT_EQUAL(1, list_dir(&bstr("/mnt"), entries, 3));
+    TEST_ASSERT_RESULT_SUCCESS(1, list_dir(&bstr("/mnt"), entries, 3));
     TEST_ASSERT_EQUAL_STRING("sd", entries[0].name);
     TEST_ASSERT_EQUAL(2, channel_calls);
     TEST_ASSERT_EQUAL(0, kernel_calls);

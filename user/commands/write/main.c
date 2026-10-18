@@ -62,23 +62,32 @@ int main(int argc, char ** argv)
         value,
         some(text)
         {
-            IOHandle handle = IO__open(&path, IO_OPEN_WRITE);
-            if (handle < 0)
-            {
-                IO__printf(&bstr("write: open error %i\n"), (int)handle);
-                return 1;
-            }
-
-            ByteCount bytes = IO__write(handle, &text);
-            if (bytes < 0)
-            {
-                IO__printf(&bstr("write: write error %i\n"), (int)bytes);
-                IO__close(handle);
-                return 1;
-            }
-
-            IO__close(handle);
-            return 0;
+            match_result(
+                IO__open(&path, IO_OPEN_WRITE),
+                success(handle)
+                {
+                    match_result(
+                        IO__write(handle, &text),
+                        success(bytes)
+                        {
+                            IO__close(handle);
+                            return 0;
+                        },
+                        error(code, message)
+                        {
+                            IO__printf(&bstr("write: write error %i\n"), code);
+                            IO__close(handle);
+                            return 1;
+                        }
+                    );
+                },
+                error(code, message)
+                {
+                    IO__printf(&bstr("write: open error %i\n"), code);
+                    return 1;
+                }
+            );
+            return 1;
         },
         none_do_nothing()
     );

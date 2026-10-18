@@ -25,13 +25,20 @@ int unlink(const char * path)
     {
         return -1;
     }
-    IOStatus status = IO__remove_file(&absolute);
-    if (status != IO_OK)
-    {
-        errno = status == IO_INVALID_PATH ? ENOENT : EIO;
-        return -1;
-    }
-    return 0;
+    match_result(
+        IO__remove_file(&absolute),
+        success(status)
+        {
+            return status == IO_OK ? 0 : -1;
+        },
+        error(code, message)
+        {
+            errno = code == IO_INVALID_PATH ? ENOENT : EIO;
+            return -1;
+        }
+    );
+    errno = EIO;
+    return -1;
 }
 
 int rmdir(const char * path)
@@ -47,16 +54,23 @@ int link(const char * source, const char * target)
     {
         return -1;
     }
-    IOStatus status = IO__link_file(&absolute_source, &absolute_target);
-    if (status != IO_OK)
-    {
-        errno = status == IO_INVALID_PATH     ? ENOENT
-                : status == IO_ALREADY_EXISTS ? EEXIST
-                : status == IO_PERMISSION_DENIED ? EACCES
-                                                 : EOPNOTSUPP;
-        return -1;
-    }
-    return 0;
+    match_result(
+        IO__link_file(&absolute_source, &absolute_target),
+        success(status)
+        {
+            return status == IO_OK ? 0 : -1;
+        },
+        error(code, message)
+        {
+            errno = code == IO_INVALID_PATH     ? ENOENT
+                    : code == IO_ALREADY_EXISTS ? EEXIST
+                    : code == IO_PERMISSION_DENIED ? EACCES
+                                                   : EOPNOTSUPP;
+            return -1;
+        }
+    );
+    errno = EIO;
+    return -1;
 }
 
 int linkat(int source_descriptor, const char * source, int target_descriptor, const char * target, int flags)
@@ -148,18 +162,19 @@ off_t lseek(int descriptor, off_t offset, int whence)
         errno = EINVAL;
         return -1;
     }
-    IOSeekResult reply = IO__seek(handle, offset, io_whence);
-    if (reply.status != IO_OK)
-    {
-        errno = reply.status == IO_UNKNOWN_HANDLE ? EBADF : EINVAL;
-        return -1;
-    }
-    return (off_t)reply.position;
-}
-
-int ftruncate(int descriptor, off_t length)
-{
-    errno = ENOSYS;
+    match_result(
+        IO__seek(handle, offset, io_whence),
+        success(position)
+        {
+            return (off_t)position;
+        },
+        error(code, message)
+        {
+            errno = code == IO_UNKNOWN_HANDLE ? EBADF : EINVAL;
+            return -1;
+        }
+    );
+    errno = EIO;
     return -1;
 }
 

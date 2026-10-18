@@ -735,44 +735,43 @@ static Result(ProcessPtr)
                               ConstProcessPageTablePtr page_table, ConstUserAddressPtr entry, ConstStackPtr stack,
                               OptionalPtr(ProcessPtr) parent, ConstProcessStartupInputPtr startup_input)
 {
-    ProcessPtr proc;
     match_result(
         Process__new_base(kernel, pid, name, page_table, entry, stack, parent),
-        success(created)
+        success(proc)
         {
-            proc = created;
+            match_result(
+                Process__setup_startup(proc, startup_input),
+                success(startup)
+                {
+                    proc->startup_argument_count = startup.argument_count;
+                    __d_printf(
+                        PROCESS,
+                        "Process__new before context init pid=%i proc=%p stack_ptr=%p stack_base=%p stack_top=%p argc=%i argv=%p entry=%p page_table=%p\n",
+                        proc->pid, proc, &proc->stack, proc->stack.base.virtual_addr, proc->stack.top.virtual_addr,
+                        startup.argument_count, startup.arguments, entry->virtual_addr,
+                        ProcessPageTable__root(&proc->page_table).phys_addr);
+                    KernelAddress root = ProcessPageTable__root(&proc->page_table);
+                    ProcessContextPtr context =
+                        ProcessContext__init(kernel, proc->pid, &proc->stack, *entry, root, &startup);
+                    proc->context = Some(ProcessContextPtr, context);
+                    __d_printf(PROCESS, "Process__new after context init pid=%i proc=%p context=%p\n", proc->pid, proc,
+                               context);
+                    return Success(ProcessPtr, proc);
+                },
+                error(code, message)
+                {
+                    return Error(ProcessPtr, message, code);
+                }
+            );
+
+            return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG);
         },
         error(code, message)
         {
             return Error(ProcessPtr, message, code);
         }
     );
-
-    match_result(
-        Process__setup_startup(proc, startup_input),
-        success(startup)
-        {
-            proc->startup_argument_count = startup.argument_count;
-            __d_printf(
-                PROCESS,
-                "Process__new before context init pid=%i proc=%p stack_ptr=%p stack_base=%p stack_top=%p argc=%i argv=%p entry=%p page_table=%p\n",
-                proc->pid, proc, &proc->stack, proc->stack.base.virtual_addr, proc->stack.top.virtual_addr,
-                startup.argument_count, startup.arguments, entry->virtual_addr,
-                ProcessPageTable__root(&proc->page_table).phys_addr);
-            KernelAddress root = ProcessPageTable__root(&proc->page_table);
-            ProcessContextPtr context = ProcessContext__init(kernel, proc->pid, &proc->stack, *entry, root, &startup);
-            proc->context = Some(ProcessContextPtr, context);
-            __d_printf(PROCESS, "Process__new after context init pid=%i proc=%p context=%p\n", proc->pid, proc,
-                       context);
-            return Success(ProcessPtr, proc);
-        },
-        error(code, message)
-        {
-            return Error(ProcessPtr, message, code);
-        }
-    );
-
-    return Error(ProcessPtr, argument_too_long, SPAWN_ARG_TOO_LONG);
+    return Error(ProcessPtr, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 Result(ProcessPtr)
@@ -927,70 +926,68 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
     {
         return Error(ProcessPtr, fork_unsupported_state, PROCESS_FORK_UNSUPPORTED_STATE);
     }
-    ProcessPageTable page_table;
     match_result(
         ProcessPageTable__new(self->kernel),
-        success(created)
+        success(page_table)
         {
-            page_table = created;
-        },
-        error(code, message)
-        {
-            return Error(ProcessPtr, message, PROCESS_FORK_NO_MEMORY);
-        }
-    );
-    ProcessID pid;
-    critical_section(
-        pid_lock,
-        pid = ++pid_counter
-    );
-    ProcessPtr child;
-    Stack stack = NULL_STACK;
-    Optional(ProcessPtr) parent = Some(ProcessPtr, self);
-    match_result(
-        Process__new_base(self->kernel, pid, &self->name, &page_table, &self->entry_point, &stack, &parent),
-        success(created)
-        {
-            child = created;
-        },
-        error(code, message)
-        {
-            return Error(ProcessPtr, message, PROCESS_FORK_NO_MEMORY);
-        }
-    );
-    child->startup_argument_count = self->startup_argument_count;
-    child->execed_since_fork = false;
-    child->heap_break = self->heap_break;
-    child->heap_mapped_end = self->heap_mapped_end;
-    child->signal_actions = self->signal_actions;
-    child->signal_mask = self->signal_mask;
-
-    for_each_ll(
-        UserAllocations,
-        self->user_allocations,
-        allocation,
-        {
-            if (allocation.type == USER_ALLOCATION_SHARED)
-            {
-                continue;
-            }
+            ProcessID pid;
+            critical_section(
+                pid_lock,
+                pid = ++pid_counter
+            );
+            Stack stack = NULL_STACK;
+            Optional(ProcessPtr) parent = Some(ProcessPtr, self);
             match_result(
-                Process__copy_fork_allocation(child, self, &allocation),
-                success_do_nothing(),
+                Process__new_base(self->kernel, pid, &self->name, &page_table, &self->entry_point, &stack, &parent),
+                success(child)
+                {
+                    child->startup_argument_count = self->startup_argument_count;
+                    child->execed_since_fork = false;
+                    child->heap_break = self->heap_break;
+                    child->heap_mapped_end = self->heap_mapped_end;
+                    child->signal_actions = self->signal_actions;
+                    child->signal_mask = self->signal_mask;
+
+                    for_each_ll(
+                        UserAllocations,
+                        self->user_allocations,
+                        allocation,
+                        {
+                            if (allocation.type == USER_ALLOCATION_SHARED)
+                            {
+                                continue;
+                            }
+                            match_result(
+                                Process__copy_fork_allocation(child, self, &allocation),
+                                success_do_nothing(),
+                                error(code, message)
+                                {
+                                    Process__dispose_unpublished_fork_child(child);
+                                    return Error(ProcessPtr, message, PROCESS_FORK_NO_MEMORY);
+                                }
+                            );
+                        }
+                    );
+
+                    ProcessContextPtr context = ProcessContext__clone(self->kernel, Process__required_context(self));
+                    child->context = Some(ProcessContextPtr, context);
+                    Process__set_syscall_result(child, 0);
+                    ArchPageTable__publish(&child->page_table);
+                    return Success(ProcessPtr, child);
+                },
                 error(code, message)
                 {
-                    Process__dispose_unpublished_fork_child(child);
                     return Error(ProcessPtr, message, PROCESS_FORK_NO_MEMORY);
                 }
             );
+            return Error(ProcessPtr, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+        },
+        error(code, message)
+        {
+            return Error(ProcessPtr, message, PROCESS_FORK_NO_MEMORY);
         }
     );
-
-    ProcessContextPtr context = ProcessContext__clone(self->kernel, Process__required_context(self));
-    child->context = Some(ProcessContextPtr, context);
-    Process__set_syscall_result(child, 0);
-    ArchPageTable__publish(&child->page_table);
-    return Success(ProcessPtr, child);
+    return Error(ProcessPtr, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 void Process__abort_pending_fork(ProcessPtr self)
@@ -2064,107 +2061,105 @@ static Result(ProcessPtr)
     __d_printf(PROCESS, "ELF mapped %i\n", ExpandedSegmentArray__len(&expanded_elf));
 
     __d_println(PROCESS, "Creating page table");
-    ProcessPageTable page_table;
     match_result(
         ProcessPageTable__new(kernel),
-        success(created_page_table)
+        success(page_table)
         {
-            page_table = created_page_table;
+            __d_println(PROCESS, "Page table created");
+
+            for_each_fa(
+                ExpandedSegmentArray,
+                expanded_elf,
+                i,
+                segment,
+                {
+                    UserAddress addr = segment.address;
+                    __d_printf(MMU, "Mapping segment %i phys=%p, virt=%p\n", i, addr.kernel_addr.phys_addr,
+                               addr.virtual_addr);
+                    PageTable__map(&page_table, kernel, segment.address, segment.size);
+                }
+            );
+            __d_println(PROCESS, "Code mapped");
+
+            size_t stack_size = SystemInfo__default_user_stack_size();
+            match_optional(
+                kernel->system_info,
+                some(system_info)
+                {
+                    stack_size = SystemInfo__user_stack_size(&system_info);
+                },
+                none_do_nothing()
+            );
+            __d_printf(PROCESS, "Creating stack for %s\n", cstr(binary->name));
+            Stack stack = Stack__new(stack_size);
+            __d_printf(PROCESS, "Stack created for %s base=%p top=%p kbase=%p phys=%p\n", cstr(binary->name),
+                       stack.base.virtual_addr, stack.top.virtual_addr, stack.base.kernel_addr.virtual_addr,
+                       stack.base.kernel_addr.phys_addr);
+            __d_printf(PROCESS, "Mapping stack for %s page_table=%p\n", cstr(binary->name),
+                       ProcessPageTable__root(&page_table).phys_addr);
+            Stack__map(kernel, &stack, &page_table);
+            __d_println(PROCESS, "Stack mapped");
+
+            match_optional(
+                Elf__entry_segment(binary, &expanded_elf),
+                some(entry_point)
+                {
+                    Offset entry_offset = Elf__read_header(binary)->entry - entry_point.address.virtual_addr;
+                    UserAddress entry_address = UserAddress__relative(&entry_point.address, entry_offset);
+                    ProcessID process_id;
+                    match_optional(
+                        *pid,
+                        some(requested_pid)
+                        {
+                            process_id = requested_pid;
+                        },
+                        none()
+                        {
+                            critical_section(
+                                pid_lock,
+                                process_id = ++pid_counter
+                            );
+                        }
+                    );
+                    match_result(
+                        Process__new_with_startup(kernel, process_id, &binary->name, &page_table, &entry_address,
+                                                  &stack, parent, startup),
+                        success(proc)
+                        {
+                            for_each_fa(
+                                ExpandedSegmentArray,
+                                expanded_elf,
+                                segment_index,
+                                segment,
+                                {
+                                    Process__record_user_allocation(proc, segment.address, segment.size,
+                                                                    USER_ALLOCATION_ELF);
+                                }
+                            );
+                            Process__record_user_allocation(proc, stack.base, stack.size, USER_ALLOCATION_STACK);
+                            return Success(ProcessPtr, proc);
+                        },
+                        error(code, message)
+                        {
+                            return Error(ProcessPtr, message, code);
+                        }
+                    );
+                },
+                none()
+                {
+                    __d_println(PANIC, cstr(no_entry_point_message));
+                    return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
+                }
+            );
+
+            return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
         },
         error(code, message)
         {
             return Error(ProcessPtr, message, code);
         }
     );
-
-    __d_println(PROCESS, "Page table created");
-
-    for_each_fa(
-        ExpandedSegmentArray,
-        expanded_elf,
-        i,
-        segment,
-        {
-            UserAddress addr = segment.address;
-            __d_printf(MMU, "Mapping segment %i phys=%p, virt=%p\n", i, addr.kernel_addr.phys_addr,
-                       addr.virtual_addr);
-            PageTable__map(&page_table, kernel, segment.address, segment.size);
-        }
-    );
-    __d_println(PROCESS, "Code mapped");
-
-    size_t stack_size = SystemInfo__default_user_stack_size();
-    match_optional(
-        kernel->system_info,
-        some(system_info)
-        {
-            stack_size = SystemInfo__user_stack_size(&system_info);
-        },
-        none_do_nothing()
-    );
-    __d_printf(PROCESS, "Creating stack for %s\n", cstr(binary->name));
-    Stack stack = Stack__new(stack_size);
-    __d_printf(PROCESS, "Stack created for %s base=%p top=%p kbase=%p phys=%p\n", cstr(binary->name),
-               stack.base.virtual_addr, stack.top.virtual_addr, stack.base.kernel_addr.virtual_addr,
-               stack.base.kernel_addr.phys_addr);
-    __d_printf(PROCESS, "Mapping stack for %s page_table=%p\n", cstr(binary->name),
-               ProcessPageTable__root(&page_table).phys_addr);
-    Stack__map(kernel, &stack, &page_table);
-    __d_println(PROCESS, "Stack mapped");
-
-    match_optional(
-        Elf__entry_segment(binary, &expanded_elf),
-        some(entry_point)
-        {
-            Offset entry_offset = Elf__read_header(binary)->entry - entry_point.address.virtual_addr;
-            UserAddress entry_address = UserAddress__relative(&entry_point.address, entry_offset);
-            ProcessID process_id;
-            match_optional(
-                *pid,
-                some(requested_pid)
-                {
-                    process_id = requested_pid;
-                },
-                none()
-                {
-                    critical_section(
-                        pid_lock,
-                        process_id = ++pid_counter
-                    );
-                }
-            );
-            match_result(
-                Process__new_with_startup(kernel, process_id, &binary->name, &page_table, &entry_address, &stack,
-                                          parent, startup),
-                success(proc)
-                {
-                    for_each_fa(
-                        ExpandedSegmentArray,
-                        expanded_elf,
-                        segment_index,
-                        segment,
-                        {
-                            Process__record_user_allocation(proc, segment.address, segment.size,
-                                                            USER_ALLOCATION_ELF);
-                        }
-                    );
-                    Process__record_user_allocation(proc, stack.base, stack.size, USER_ALLOCATION_STACK);
-                    return Success(ProcessPtr, proc);
-                },
-                error(code, message)
-                {
-                    return Error(ProcessPtr, message, code);
-                }
-            );
-        },
-        none()
-        {
-            __d_println(PANIC, cstr(no_entry_point_message));
-            return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
-        }
-    );
-
-    return Error(ProcessPtr, no_entry_point_message, PROCESS_FAILED_TO_SETUP);
+    return Error(ProcessPtr, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent,
@@ -3282,43 +3277,41 @@ Result(SpawnStdio) Process__stdio_for_spawn(ProcessPtr self, ConstSpawnStdioPtr 
     {
         return Success(SpawnStdio, self->startup_stdio);
     }
-    SpawnFileDescriptor input;
-    SpawnFileDescriptor output;
-    SpawnFileDescriptor error_output;
+
     match_result(
         Process__startup_endpoint(self, SpawnStdio__stdin_fd(*requested)),
-        success(value)
+        success(input)
         {
-            input = value;
+            match_result(
+                Process__startup_endpoint(self, SpawnStdio__stdout_fd(*requested)),
+                success(output)
+                {
+                    match_result(
+                        Process__startup_endpoint(self, SpawnStdio__stderr_fd(*requested)),
+                        success(error_output)
+                        {
+                            return Success(SpawnStdio, SpawnStdio__new(input, output, error_output));
+                        },
+                        error(code, message)
+                        {
+                            return Error(SpawnStdio, message, code);
+                        }
+                    );
+                    return Error(SpawnStdio, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                },
+                error(code, message)
+                {
+                    return Error(SpawnStdio, message, code);
+                }
+            );
+            return Error(SpawnStdio, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         error(code, message)
         {
             return Error(SpawnStdio, message, code);
         }
     );
-    match_result(
-        Process__startup_endpoint(self, SpawnStdio__stdout_fd(*requested)),
-        success(value)
-        {
-            output = value;
-        },
-        error(code, message)
-        {
-            return Error(SpawnStdio, message, code);
-        }
-    );
-    match_result(
-        Process__startup_endpoint(self, SpawnStdio__stderr_fd(*requested)),
-        success(value)
-        {
-            error_output = value;
-        },
-        error(code, message)
-        {
-            return Error(SpawnStdio, message, code);
-        }
-    );
-    return Success(SpawnStdio, SpawnStdio__new(input, output, error_output));
+    return Error(SpawnStdio, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 void Process__prepare_startup_stdio(ProcessPtr self)

@@ -193,43 +193,43 @@ static Result(IOStatus) Mama__boot_mounts(ChannelPtr mounts)
             return Error(IOStatus, message, code);
         }
     );
-    BootHardwareInfo hardware;
     match_result(
         BootHardwareInfo__load(),
-        success(info)
+        success(hardware)
         {
-            hardware = info;
+            match_result(
+                MamaBootDisk__from_hardware(&hardware),
+                success(disk)
+                {
+                    if (!service_ok(service_wait_ready(&disk.path)))
+                    {
+                        return Error(IOStatus, bstr("Hosted boot block device unavailable"),
+                                     SERVICE_DEVICE_REGISTRATION_FAILED);
+                    }
+                    match_result(
+                        BootService__bootstrap(&bstr("/sbin/drivers/ext2fs"), &disk.path, &bstr("/boot/config"),
+                                               &bstr("/boot/config")),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return Error(IOStatus, message, code);
+                        }
+                    );
+                    return MountClient__add(mounts, MountConfig__new(&disk.path, &bstr("ext2"), &bstr("/boot/config")));
+                },
+                error(code, message)
+                {
+                    return Error(IOStatus, message, code);
+                }
+            );
+            return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         error(code, message)
         {
             return Error(IOStatus, message, code);
         }
     );
-    MamaBootDisk disk;
-    match_result(
-        MamaBootDisk__from_hardware(&hardware),
-        success(value)
-        {
-            disk = value;
-        },
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    if (!service_ok(service_wait_ready(&disk.path)))
-    {
-        return Error(IOStatus, bstr("Hosted boot block device unavailable"), SERVICE_DEVICE_REGISTRATION_FAILED);
-    }
-    match_result(
-        BootService__bootstrap(&bstr("/sbin/drivers/ext2fs"), &disk.path, &bstr("/boot/config"), &bstr("/boot/config")),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    return MountClient__add(mounts, MountConfig__new(&disk.path, &bstr("ext2"), &bstr("/boot/config")));
+    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 int main(void)

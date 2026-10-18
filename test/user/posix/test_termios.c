@@ -27,17 +27,19 @@ IOHandle PosixIO__native_handle(int descriptor)
     return descriptor == 7 ? IO_SESSION_HANDLE_BASE + 4 : IO_UNKNOWN_HANDLE;
 }
 
-IOTerminalAttributesResult IO__get_terminal_attributes(IOHandle handle)
+Result(IOTerminalAttributes) IO__get_terminal_attributes(IOHandle handle)
 {
     TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 4, handle);
-    return IOTerminalAttributesResult__new(next_status, attributes);
+    return next_status == IO_OK ? Success(IOTerminalAttributes, attributes)
+                                : Error(IOTerminalAttributes, bstr("terminal read failed"), next_status);
 }
 
-IOStatus IO__set_terminal_attributes(IOHandle handle, IOTerminalAttributes value)
+Result(IOStatus) IO__set_terminal_attributes(IOHandle handle, IOTerminalAttributes value)
 {
     TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 4, handle);
     written_attributes = value;
-    return next_status;
+    return next_status == IO_OK ? Success(IOStatus, IO_OK)
+                                : Error(IOStatus, bstr("terminal write failed"), next_status);
 }
 
 #include "../../../user/lib/newlib/termios.c"

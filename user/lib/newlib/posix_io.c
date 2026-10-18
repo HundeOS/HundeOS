@@ -975,19 +975,32 @@ int open(const char * path, int flags, ...)
     }
     if ((flags & O_TRUNC) != 0 && (io_flags & IO_OPEN_WRITE) != 0)
     {
-        IOStatus remove_status = IO__remove_file(&absolute_path);
-        if (remove_status != IO_OK && remove_status != IO_INVALID_PATH)
+        match_result(
+            IO__remove_file(&absolute_path),
+            success_do_nothing(),
+            error(code, message)
+            {
+                if (code != IO_INVALID_PATH)
+                {
+                    errno = PosixIO__errno((IOStatus)code);
+                    return -1;
+                }
+            }
+        );
+    }
+    IOHandle handle;
+    match_result(
+        IO__open(&absolute_path, io_flags),
+        success(opened)
         {
-            errno = PosixIO__errno(remove_status);
+            handle = opened;
+        },
+        error(code, message)
+        {
+            errno = PosixIO__errno((IOStatus)code);
             return -1;
         }
-    }
-    IOHandle handle = IO__open(&absolute_path, io_flags);
-    if (handle < 0)
-    {
-        errno = PosixIO__errno((IOStatus)handle);
-        return -1;
-    }
+    );
 
     int status_flags = flags & (O_ACCMODE | O_NONBLOCK | O_APPEND);
     int descriptor = PosixIO__allocate_descriptor(handle, &absolute_path, status_flags);
@@ -1061,17 +1074,24 @@ ssize_t read(int descriptor, void * buffer, size_t size)
         return -1;
     }
 
-    ByteCount result = IO__read_bytes_with_flags(handle, buffer, size, PosixIO__transfer_flags(descriptor, false));
-    if (result == IO_EOF)
-    {
-        return 0;
-    }
-    if (result < 0)
-    {
-        errno = PosixIO__errno((IOStatus)result);
-        return -1;
-    }
-    return result;
+    match_result(
+        IO__read_bytes_with_flags(handle, buffer, size, PosixIO__transfer_flags(descriptor, false)),
+        success(count)
+        {
+            return count;
+        },
+        error(code, message)
+        {
+            if (code == IO_EOF)
+            {
+                return 0;
+            }
+            errno = PosixIO__errno((IOStatus)code);
+            return -1;
+        }
+    );
+    errno = EIO;
+    return -1;
 }
 
 ssize_t write(int descriptor, const void * buffer, size_t size)
@@ -1088,13 +1108,20 @@ ssize_t write(int descriptor, const void * buffer, size_t size)
         return -1;
     }
 
-    ByteCount result = IO__write_bytes_with_flags(handle, buffer, size, PosixIO__transfer_flags(descriptor, true));
-    if (result < 0)
-    {
-        errno = PosixIO__errno((IOStatus)result);
-        return -1;
-    }
-    return result;
+    match_result(
+        IO__write_bytes_with_flags(handle, buffer, size, PosixIO__transfer_flags(descriptor, true)),
+        success(count)
+        {
+            return count;
+        },
+        error(code, message)
+        {
+            errno = PosixIO__errno((IOStatus)code);
+            return -1;
+        }
+    );
+    errno = EIO;
+    return -1;
 }
 
 int close(int descriptor)
@@ -1124,12 +1151,15 @@ int close(int descriptor)
             );
             if (description->references == 1)
             {
-                IOStatus status = IO__close(handle);
-                if (status != IO_OK)
-                {
-                    errno = PosixIO__errno(status);
-                    return -1;
-                }
+                match_result(
+                    IO__close(handle),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        errno = PosixIO__errno((IOStatus)code);
+                        return -1;
+                    }
+                );
                 PosixOpenDescriptions__delete(&open_descriptions, file.description);
             }
             else
@@ -1154,12 +1184,15 @@ int close(int descriptor)
         none_do_nothing()
     );
 
-    IOStatus status = IO__close(handle);
-    if (status != IO_OK)
-    {
-        errno = PosixIO__errno(status);
-        return -1;
-    }
+    match_result(
+        IO__close(handle),
+        success_do_nothing(),
+        error(code, message)
+        {
+            errno = PosixIO__errno((IOStatus)code);
+            return -1;
+        }
+    );
     standard_descriptor_open[descriptor] = false;
     return 0;
 }

@@ -21,48 +21,71 @@ static BString SocketTest__uri_from_arg(int argc, char ** argv)
     return default_socket_uri;
 }
 
+static int SocketTest__serve(IOHandle listener)
+{
+    match_result(
+        IO__accept(listener),
+        success(peer)
+        {
+            BString received = empty_bstr();
+            match_result(
+                IO__read(peer, &received),
+                success(bytes)
+                {
+                    IO__printf(&bstr("socket_test: received %B\n"), &received);
+                    match_result(
+                        IO__write(peer, &reply_message),
+                        success(written)
+                        {
+                            IO__close(peer);
+                            IO__close(listener);
+                            return 0;
+                        },
+                        error(code, message)
+                        {
+                            IO__printf(&bstr("socket_test: write error %i\n"), code);
+                            IO__close(peer);
+                            IO__close(listener);
+                            return 1;
+                        }
+                    );
+                },
+                error(code, message)
+                {
+                    IO__printf(&bstr("socket_test: read error %i\n"), code);
+                    IO__close(peer);
+                    IO__close(listener);
+                    return 1;
+                }
+            );
+        },
+        error(code, message)
+        {
+            IO__printf(&bstr("socket_test: accept error %i\n"), code);
+            IO__close(listener);
+            return 1;
+        }
+    );
+    return 1;
+}
+
 static int SocketTest__listen(int argc, char ** argv)
 {
     BString uri = SocketTest__uri_from_arg(argc, argv);
-    IOHandle listener = IO__open(&uri, IO_OPEN_BIND | IO_OPEN_LISTEN);
-    if (listener < 0)
-    {
-        IO__printf(&bstr("socket_test: listen error %i\n"), (int)listener);
-        return 1;
-    }
-
-    IO__printf(&bstr("socket_test: listening %B\n"), &uri);
-    IOHandle peer = IO__accept(listener);
-    if (peer < 0)
-    {
-        IO__printf(&bstr("socket_test: accept error %i\n"), (int)peer);
-        IO__close(listener);
-        return 1;
-    }
-
-    BString received = empty_bstr();
-    ByteCount bytes = IO__read(peer, &received);
-    if (bytes < 0)
-    {
-        IO__printf(&bstr("socket_test: read error %i\n"), (int)bytes);
-        IO__close(peer);
-        IO__close(listener);
-        return 1;
-    }
-
-    IO__printf(&bstr("socket_test: received %B\n"), &received);
-    bytes = IO__write(peer, &reply_message);
-    if (bytes < 0)
-    {
-        IO__printf(&bstr("socket_test: write error %i\n"), (int)bytes);
-        IO__close(peer);
-        IO__close(listener);
-        return 1;
-    }
-
-    IO__close(peer);
-    IO__close(listener);
-    return 0;
+    match_result(
+        IO__open(&uri, IO_OPEN_BIND | IO_OPEN_LISTEN),
+        success(listener)
+        {
+            IO__printf(&bstr("socket_test: listening %B\n"), &uri);
+            return SocketTest__serve(listener);
+        },
+        error(code, message)
+        {
+            IO__printf(&bstr("socket_test: listen error %i\n"), code);
+            return 1;
+        }
+    );
+    return 1;
 }
 
 static BString SocketTest__message_from_arg(int argc, char ** argv)
@@ -75,37 +98,56 @@ static BString SocketTest__message_from_arg(int argc, char ** argv)
     return default_message;
 }
 
+static int SocketTest__exchange(IOHandle socket, ConstBStringPtr message)
+{
+    match_result(
+        IO__write(socket, message),
+        success(written)
+        {
+            BString received = empty_bstr();
+            match_result(
+                IO__read(socket, &received),
+                success(bytes)
+                {
+                    IO__printf(&bstr("socket_test: reply %B\n"), &received);
+                    IO__close(socket);
+                    return 0;
+                },
+                error(code, message)
+                {
+                    IO__printf(&bstr("socket_test: read error %i\n"), code);
+                    IO__close(socket);
+                    return 1;
+                }
+            );
+        },
+        error(code, message)
+        {
+            IO__printf(&bstr("socket_test: write error %i\n"), code);
+            IO__close(socket);
+            return 1;
+        }
+    );
+    return 1;
+}
+
 static int SocketTest__connect(int argc, char ** argv)
 {
     BString uri = SocketTest__uri_from_arg(argc, argv);
     BString message = SocketTest__message_from_arg(argc, argv);
-    IOHandle socket = IO__open(&uri, IO_OPEN_READ | IO_OPEN_WRITE);
-    if (socket < 0)
-    {
-        IO__printf(&bstr("socket_test: connect error %i\n"), (int)socket);
-        return 1;
-    }
-
-    ByteCount bytes = IO__write(socket, &message);
-    if (bytes < 0)
-    {
-        IO__printf(&bstr("socket_test: write error %i\n"), (int)bytes);
-        IO__close(socket);
-        return 1;
-    }
-
-    BString received = empty_bstr();
-    bytes = IO__read(socket, &received);
-    if (bytes < 0)
-    {
-        IO__printf(&bstr("socket_test: read error %i\n"), (int)bytes);
-        IO__close(socket);
-        return 1;
-    }
-
-    IO__printf(&bstr("socket_test: reply %B\n"), &received);
-    IO__close(socket);
-    return 0;
+    match_result(
+        IO__open(&uri, IO_OPEN_READ | IO_OPEN_WRITE),
+        success(socket)
+        {
+            return SocketTest__exchange(socket, &message);
+        },
+        error(code, error_message)
+        {
+            IO__printf(&bstr("socket_test: connect error %i\n"), code);
+            return 1;
+        }
+    );
+    return 1;
 }
 
 int main(int argc, char ** argv)

@@ -7,6 +7,7 @@
 #define WUFF_MAX_IMAGE_SIZE (16ULL * 1024ULL * 1024ULL)
 
 Result(WuffImage) WuffFilesystem__load_image(ConstBStringPtr path);
+Result(WuffGraph) WuffFilesystem__load_module(ConstBStringPtr path, ConstWuffMemoryOperationsPtr memory);
 void WuffFilesystem__release_image(ConstWuffImagePtr image);
 WuffDependencyOperations WuffFilesystem__dependencies(void);
 

@@ -161,26 +161,32 @@ static Optional(SdHostConfig) SdHostConfig__parse(ConstDynStringPtr sysinfo)
 
 static Optional(SdHostConfig) SdHostConfig__load(void)
 {
-    IOHandle handle = IO__open(&bstr(SD_HOST_CONFIG_PATH), IO_OPEN_READ);
-    if (handle < 0)
-    {
-        return None(SdHostConfig);
-    }
-
-    Optional(DynString) sysinfo = IO__read_dyn_string(handle, SD_HOST_CONFIG_MAX);
-    IO__close(handle);
-
-    match_optional(
-        sysinfo,
-        some(data)
+    match_result(
+        IO__open(&bstr(SD_HOST_CONFIG_PATH), IO_OPEN_READ),
+        success(handle)
         {
-            Optional(SdHostConfig) config = SdHostConfig__parse(&data);
-            DynString__dispose(&data);
-            return config;
+            match_result(
+                IO__read_dyn_string(handle, SD_HOST_CONFIG_MAX),
+                success(data)
+                {
+                    IO__close(handle);
+                    Optional(SdHostConfig) config = SdHostConfig__parse(&data);
+                    DynString__dispose(&data);
+                    return config;
+                },
+                error(code, message)
+                {
+                    IO__close(handle);
+                    return None(SdHostConfig);
+                }
+            );
+            return None(SdHostConfig);
         },
-        none_do_nothing()
+        error(code, message)
+        {
+            return None(SdHostConfig);
+        }
     );
-
     return None(SdHostConfig);
 }
 

@@ -54,20 +54,27 @@ static PosixKqueueWatch * PosixKqueue__add(int descriptor)
     {
         return NULL;
     }
-    IOWatchResult reply = IO__watch_file(handle);
-    if (reply.status != IO_OK)
-    {
-        errno = EIO;
-        return NULL;
-    }
-    if (watch == NULL)
-    {
-        watch = &watches[watch_count++];
-        *watch = (PosixKqueueWatch){.descriptor = descriptor};
-    }
-    watch->handle = handle;
-    watch->generation = reply.change.generation;
-    return watch;
+    match_result(
+        IO__watch_file(handle),
+        success(change)
+        {
+            if (watch == NULL)
+            {
+                watch = &watches[watch_count++];
+                *watch = (PosixKqueueWatch){.descriptor = descriptor};
+            }
+            watch->handle = handle;
+            watch->generation = change.generation;
+            return watch;
+        },
+        error(code, message)
+        {
+            errno = EIO;
+            return NULL;
+        }
+    );
+    errno = EIO;
+    return NULL;
 }
 
 int kqueue(void)
@@ -120,16 +127,23 @@ static int PosixKqueue__wait(struct kevent * event)
         {
             pending[index] = (IOFileWatch){.handle = watches[index].handle, .generation = watches[index].generation};
         }
-        IOWatchResult reply = IO__wait_file_change(pending, watch_count);
-        if (reply.status != IO_OK)
-        {
-            errno = reply.status == IO_INTERRUPTED ? EINTR : EIO;
-            return -1;
-        }
+        IOFileChange change;
+        match_result(
+            IO__wait_file_change(pending, watch_count),
+            success(received)
+            {
+                change = received;
+            },
+            error(code, message)
+            {
+                errno = code == IO_INTERRUPTED ? EINTR : EIO;
+                return -1;
+            }
+        );
         PosixKqueueWatch * watch = NULL;
         for (size_t index = 0; index < watch_count; index++)
         {
-            if (watches[index].handle == reply.change.handle)
+            if (watches[index].handle == change.handle)
             {
                 watch = &watches[index];
                 break;
@@ -140,9 +154,8 @@ static int PosixKqueue__wait(struct kevent * event)
             errno = EIO;
             return -1;
         }
-        watch->generation = reply.change.generation;
-        Flags vnode_events = reply.change.events &
-                             (IO_FILE_CHANGE_DELETE | IO_FILE_CHANGE_RENAME | IO_FILE_CHANGE_TRUNCATE);
+        watch->generation = change.generation;
+        Flags vnode_events = change.events & (IO_FILE_CHANGE_DELETE | IO_FILE_CHANGE_RENAME | IO_FILE_CHANGE_TRUNCATE);
         if (vnode_events != 0 && watch->vnode)
         {
             unsigned int flags = 0;

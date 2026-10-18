@@ -325,6 +325,53 @@ static void FSLatencySpans__record_line(FSLatencySpansPtr self, ConstBStringPtr 
     );
 }
 
+static void FSLatency__read_trace_data(FSLatencyHopsPtr hops, FSLatencySpansPtr spans, IOHandle trace,
+                                       uint64_t origin_pid, uint64_t started_at_usec, uint64_t completed_at_usec,
+                                       uint64_t remaining)
+{
+    BString line = empty_bstr();
+    uint8_t data[FS_LATENCY_READ_SIZE];
+    while (remaining > 0)
+    {
+        size_t capacity = remaining < sizeof(data) ? (size_t)remaining : sizeof(data);
+        match_result(
+            IO__read_bytes(trace, (char *)data, capacity),
+            success(count)
+            {
+                if (count <= 0)
+                {
+                    return;
+                }
+                for (ByteCount index = 0; index < count; index++)
+                {
+                    if (data[index] == '\n')
+                    {
+                        FSLatencyHops__record_line(hops, &line, origin_pid, started_at_usec, completed_at_usec);
+                        FSLatencySpans__record_line(spans, &line, origin_pid, started_at_usec, completed_at_usec);
+                        BString__clear(&line);
+                    }
+                    else
+                    {
+                        BString__push_char(&line, data[index]);
+                    }
+                }
+                remaining -= (uint64_t)count;
+            },
+            error(code, message)
+            {
+                IO__printf(&bstr("fs-latency: trace read failed: %B (%i)\n"), &message, code);
+                return;
+            }
+        );
+    }
+
+    if (!BString__is_empty(&line))
+    {
+        FSLatencyHops__record_line(hops, &line, origin_pid, started_at_usec, completed_at_usec);
+        FSLatencySpans__record_line(spans, &line, origin_pid, started_at_usec, completed_at_usec);
+    }
+}
+
 static void FSLatency__read_trace(FSLatencyHopsPtr hops, FSLatencySpansPtr spans, uint64_t origin_pid,
                                   uint64_t started_at_usec, uint64_t completed_at_usec, uint64_t start_offset,
                                   uint64_t end_offset)
@@ -333,52 +380,36 @@ static void FSLatency__read_trace(FSLatencyHopsPtr hops, FSLatencySpansPtr spans
     {
         return;
     }
-
-    IOHandle trace = IO__open(&bstr(IO_TRACE_LOG_PATH), IO_OPEN_READ);
-    if (trace < 0)
-    {
-        return;
-    }
-    IOSeekResult seek = IO__seek(trace, (int64_t)start_offset, IO_SEEK_SET);
-    if (seek.status != IO_OK || seek.position != start_offset)
-    {
-        IO__close(trace);
-        return;
-    }
-
-    BString line = empty_bstr();
-    uint64_t remaining = end_offset - start_offset;
-    uint8_t data[FS_LATENCY_READ_SIZE];
-    while (remaining > 0)
-    {
-        size_t capacity = remaining < sizeof(data) ? (size_t)remaining : sizeof(data);
-        ByteCount count = IO__read_bytes(trace, (char *)data, capacity);
-        if (count <= 0)
+    match_result(
+        IO__open(&bstr(IO_TRACE_LOG_PATH), IO_OPEN_READ),
+        success(trace)
         {
-            break;
-        }
-        for (ByteCount index = 0; index < count; index++)
+            match_result(
+                IO__seek(trace, (int64_t)start_offset, IO_SEEK_SET),
+                success(position)
+                {
+                    if (position == start_offset)
+                    {
+                        FSLatency__read_trace_data(hops, spans, trace, origin_pid, started_at_usec, completed_at_usec,
+                                                   end_offset - start_offset);
+                    }
+                    IO__close(trace);
+                    return;
+                },
+                error(code, message)
+                {
+                    IO__printf(&bstr("fs-latency: trace seek failed: %B (%i)\n"), &message, code);
+                    IO__close(trace);
+                    return;
+                }
+            );
+        },
+        error(code, message)
         {
-            if (data[index] == '\n')
-            {
-                FSLatencyHops__record_line(hops, &line, origin_pid, started_at_usec, completed_at_usec);
-                FSLatencySpans__record_line(spans, &line, origin_pid, started_at_usec, completed_at_usec);
-                BString__clear(&line);
-            }
-            else
-            {
-                BString__push_char(&line, data[index]);
-            }
+            IO__printf(&bstr("fs-latency: trace open failed: %B (%i)\n"), &message, code);
+            return;
         }
-        remaining -= (uint64_t)count;
-    }
-
-    if (!BString__is_empty(&line))
-    {
-        FSLatencyHops__record_line(hops, &line, origin_pid, started_at_usec, completed_at_usec);
-        FSLatencySpans__record_line(spans, &line, origin_pid, started_at_usec, completed_at_usec);
-    }
-    IO__close(trace);
+    );
 }
 
 static void FSLatencyHops__print(FSLatencyHopsPtr self)
@@ -579,36 +610,67 @@ static void FSLatencyChains__print(FSLatencyChainsPtr self)
     );
 }
 
-static bool FSLatency__sample(FSLatencySummaryPtr self, ConstBStringPtr path)
+static bool FSLatency__sample_opened(FSLatencySummaryPtr self, IOHandle handle, uint64_t total_started)
 {
     uint8_t data[FS_LATENCY_READ_SIZE];
+    uint64_t started = IpcPlatform__monotonic_usec();
+    match_result(
+        IO__read_bytes(handle, (char *)data, sizeof(data)),
+        success(bytes)
+        {
+            IODiagnosticLatency__record(&self->read, IpcPlatform__monotonic_usec() - started);
+            started = IpcPlatform__monotonic_usec();
+            match_result(
+                IO__close(handle),
+                success(status)
+                {
+                    IODiagnosticLatency__record(&self->close, IpcPlatform__monotonic_usec() - started);
+                    IODiagnosticLatency__record(&self->total, IpcPlatform__monotonic_usec() - total_started);
+                    self->samples++;
+                    self->bytes += (uint64_t)bytes;
+                    return true;
+                },
+                error(code, message)
+                {
+                    IODiagnosticLatency__record(&self->close, IpcPlatform__monotonic_usec() - started);
+                    IODiagnosticLatency__record(&self->total, IpcPlatform__monotonic_usec() - total_started);
+                    self->failures++;
+                    return false;
+                }
+            );
+        },
+        error(code, message)
+        {
+            IODiagnosticLatency__record(&self->read, IpcPlatform__monotonic_usec() - started);
+            IO__close(handle);
+            IODiagnosticLatency__record(&self->total, IpcPlatform__monotonic_usec() - total_started);
+            self->failures++;
+            return false;
+        }
+    );
+    self->failures++;
+    return false;
+}
+
+static bool FSLatency__sample(FSLatencySummaryPtr self, ConstBStringPtr path)
+{
     uint64_t total_started = IpcPlatform__monotonic_usec();
-    uint64_t started = total_started;
-    IOHandle handle = IO__open(path, IO_OPEN_READ);
-    IODiagnosticLatency__record(&self->open, IpcPlatform__monotonic_usec() - started);
-    if (handle < 0)
-    {
-        self->failures++;
-        return false;
-    }
-
-    started = IpcPlatform__monotonic_usec();
-    ByteCount bytes = IO__read_bytes(handle, (char *)data, sizeof(data));
-    IODiagnosticLatency__record(&self->read, IpcPlatform__monotonic_usec() - started);
-
-    started = IpcPlatform__monotonic_usec();
-    IOStatus close_status = IO__close(handle);
-    IODiagnosticLatency__record(&self->close, IpcPlatform__monotonic_usec() - started);
-    IODiagnosticLatency__record(&self->total, IpcPlatform__monotonic_usec() - total_started);
-    if (bytes < 0 || close_status != IO_OK)
-    {
-        self->failures++;
-        return false;
-    }
-
-    self->samples++;
-    self->bytes += (uint64_t)bytes;
-    return true;
+    match_result(
+        IO__open(path, IO_OPEN_READ),
+        success(handle)
+        {
+            IODiagnosticLatency__record(&self->open, IpcPlatform__monotonic_usec() - total_started);
+            return FSLatency__sample_opened(self, handle, total_started);
+        },
+        error(code, message)
+        {
+            IODiagnosticLatency__record(&self->open, IpcPlatform__monotonic_usec() - total_started);
+            self->failures++;
+            return false;
+        }
+    );
+    self->failures++;
+    return false;
 }
 
 static Optional(ProcessRecord)

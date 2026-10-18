@@ -8,7 +8,7 @@
 #include "../kalloc.h"
 #include "../syscall/deferred.h"
 
-static BString unreachable_code = bstr("unreachable code");
+static BString unknown_error = bstr("Unknown error");
 static BString permission_denied_message = bstr("Permission denied");
 static const BString drivers_prefix = bstr("/sbin/drivers/");
 static const BString services_prefix = bstr("/sbin/services/");
@@ -110,6 +110,64 @@ static void Exec__apply_requested_identity(ProcessPtr self, OptionalPtr(UserID) 
     );
 }
 
+static Result(ProcessPtr)
+    Exec__launch_process(ConstOriginatingContextPtr context, ElfPtr elf, bool wait,
+                         OptionalPtr(UserID) requested_user_id, ConstProcessArgumentsPtr arguments,
+                         OptionalPtr(KernelAddress) abort_report, ConstSpawnStdioPtr startup)
+{
+    __d_printf(EXEC, "Launching elf %s\n", cstr(elf->name));
+    KernelPtr kernel = context->kernel;
+    Optional(ProcessPtr) parent = context->process;
+    Result(ProcessPtr) proc = Process__setup_with_args(kernel, elf, &parent, arguments);
+    Kernel__free(elf->start);
+    match_result(
+        proc,
+        success(process)
+        {
+            ProcessPtr new_proc = process;
+            Exec__apply_requested_identity(new_proc, requested_user_id);
+            Exec__apply_builtin_identity_policy(new_proc);
+            new_proc->startup_stdio = *startup;
+            match_optional(
+                context->process,
+                some(parent)
+                {
+                    __d_printf(EXEC, "Parent %p\n", parent);
+                    Process__prepare_startup_stdio(new_proc);
+                    match_result(
+                        Scheduler__schedule(kernel->scheduler, new_proc),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return Error(ProcessPtr, message, SPAWN_FAILED);
+                        }
+                    );
+
+                    if (wait)
+                    {
+                        __d_printf(EXEC, "Parking parent pid=%i name=%s waiting_for_pid=%i name=%s\n", parent->pid,
+                                   cstr(parent->name), new_proc->pid, cstr(new_proc->name));
+                        KernelContextPtr kernel_context = KernelContext__from_originating_context_heap(context);
+
+                        Scheduler__park_wait_child(kernel->scheduler, parent, kernel_context,
+                                                   &Some(Continuation, SystemCall__Complete), abort_report, true);
+                        __d_printf(EXEC, "Parent parked pid=%i child_pid=%i\n", parent->pid, new_proc->pid);
+                    }
+                    __d_printf(EXEC, "Scheduling elf %s\n", cstr(elf->name));
+
+                    return Success(ProcessPtr, new_proc);
+                },
+                none_do_nothing()
+            );
+        },
+        error(code, message)
+        {
+            return Error(ProcessPtr, message, SPAWN_FAILED);
+        }
+    );
+    return Error(ProcessPtr, unknown_error, SPAWN_FAILED);
+}
+
 Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, ElfPtr elf, bool wait,
                                            OptionalPtr(UserID) requested_user_id, ConstProcessArgumentsPtr arguments,
                                            ConstSpawnStdioPtr stdio, OptionalPtr(KernelAddress) abort_report,
@@ -161,7 +219,6 @@ Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, E
             }
         );
     }
-    SpawnStdio startup = SPAWN_STDIO_DEFAULT;
     match_optional(
         context->process,
         some(parent)
@@ -170,7 +227,7 @@ Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, E
                 Process__stdio_for_spawn(parent, stdio),
                 success(value)
                 {
-                    startup = value;
+                    return Exec__launch_process(context, elf, wait, requested_user_id, arguments, abort_report, &value);
                 },
                 error(code, message)
                 {
@@ -186,60 +243,11 @@ Result(ProcessPtr) Exec__launch_loaded_elf(ConstOriginatingContextPtr context, E
                 Kernel__free(elf->start);
                 return Error(ProcessPtr, bstr("No parent process for stdio"), SPAWN_FAILED);
             }
+            SpawnStdio startup = SPAWN_STDIO_DEFAULT;
+            return Exec__launch_process(context, elf, wait, requested_user_id, arguments, abort_report, &startup);
         }
     );
-    __d_printf(EXEC, "Launching elf %s\n", cstr(elf->name));
-    KernelPtr kernel = context->kernel;
-    Optional(ProcessPtr) parent = context->process;
-    Result(ProcessPtr) proc = Process__setup_with_args(kernel, elf, &parent, arguments);
-    Kernel__free(elf->start);
-    match_result(
-        proc,
-        success(process)
-        {
-            ProcessPtr new_proc = process;
-            Exec__apply_requested_identity(new_proc, requested_user_id);
-            Exec__apply_builtin_identity_policy(new_proc);
-            new_proc->startup_stdio = startup;
-            match_optional(
-                context->process,
-                some(parent)
-                {
-                    __d_printf(EXEC, "Parent %p\n", parent);
-                    Process__prepare_startup_stdio(new_proc);
-                    match_result(
-                        Scheduler__schedule(kernel->scheduler, new_proc),
-                        success_do_nothing(),
-                        error(code, message)
-                        {
-                            return Error(ProcessPtr, message, SPAWN_FAILED);
-                        }
-                    );
-
-                    if (wait)
-                    {
-                        __d_printf(EXEC, "Parking parent pid=%i name=%s waiting_for_pid=%i name=%s\n", parent->pid,
-                                   cstr(parent->name), new_proc->pid, cstr(new_proc->name));
-                        // TODO we need a continuation to give the result of the proc back to the parent
-                        KernelContextPtr kernel_context = KernelContext__from_originating_context_heap(context);
-
-                        Scheduler__park_wait_child(kernel->scheduler, parent, kernel_context,
-                                                   &Some(Continuation, SystemCall__Complete), abort_report, true);
-                        __d_printf(EXEC, "Parent parked pid=%i child_pid=%i\n", parent->pid, new_proc->pid);
-                    }
-                    __d_printf(EXEC, "Scheduling elf %s\n", cstr(elf->name));
-
-                    return Success(ProcessPtr, new_proc);
-                },
-                none_do_nothing()
-            );
-        },
-        error(code, message)
-        {
-            return Error(ProcessPtr, message, SPAWN_FAILED);
-        }
-    );
-    return Error(ProcessPtr, unreachable_code, SPAWN_FAILED);
+    return Error(ProcessPtr, unknown_error, SPAWN_FAILED);
 }
 
 Result(ProcessPtr)

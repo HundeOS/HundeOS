@@ -99,13 +99,13 @@ Install the cross compiler, QEMU, uv, and FAT filesystem tools.
 On macOS with Homebrew:
 
 ```sh
-brew install aarch64-elf-gcc riscv64-elf-gcc riscv64-elf-binutils lld qemu dosfstools uv
+brew install aarch64-elf-gcc riscv64-elf-gcc riscv64-elf-binutils llvm lld qemu dosfstools uv
 ```
 
 On Linux:
 
 ```sh
-sudo apt install gcc-aarch64-none-elf gcc-riscv64-unknown-elf lld qemu-system-arm qemu-system-misc dosfstools
+sudo apt install gcc-aarch64-none-elf gcc-riscv64-unknown-elf clang lld qemu-system-arm qemu-system-misc dosfstools
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 

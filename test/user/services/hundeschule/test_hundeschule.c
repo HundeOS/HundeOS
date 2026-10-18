@@ -223,13 +223,13 @@ SpawnResult spawn_as(SpawnMode mode, UserID requested_user_id, ConstBStringPtr p
     return SPAWN_FAILED;
 }
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     if (strings_equal(BString__cstr(path), "/boot/sysinfo"))
     {
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
         fake_sysinfo_opened = true;
-        return 1;
+        return Success(IOHandle, 1);
     }
 
     if (strings_equal(BString__cstr(path), "/boot/config/hundeschule.conf"))
@@ -237,17 +237,17 @@ IOHandle IO__open(ConstBStringPtr path, Flags flags)
         TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
         if (fake_wait_ready_count < 3 || fake_config == NULL)
         {
-            return IO_INVALID_PATH;
+            return Error(IOHandle, bstr("invalid path"), IO_INVALID_PATH);
         }
         fake_config_opened = true;
-        return 2;
+        return Success(IOHandle, 2);
     }
 
     TEST_FAIL();
-    return IO_INVALID_PATH;
+    return Error(IOHandle, bstr("invalid path"), IO_INVALID_PATH);
 }
 
-Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
+Result(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 {
     const char * source = fake_sysinfo;
     if (handle == 1)
@@ -262,7 +262,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     else
     {
         TEST_FAIL();
-        return None(DynString);
+        return Error(DynString, bstr("invalid handle"), IO_UNKNOWN_HANDLE);
     }
 
     DynString config;
@@ -271,7 +271,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
         success_do_nothing(),
         error(code, message)
         {
-            return None(DynString);
+            return Error(DynString, message, code);
         }
     );
 
@@ -283,21 +283,21 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
             error(code, message)
             {
                 DynString__dispose(&config);
-                return None(DynString);
+                return Error(DynString, message, code);
             }
         );
     }
 
-    return Some(DynString, config);
+    return Success(DynString, config);
 }
 
-ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
+Result(ByteCount) IO__read_bytes(IOHandle handle, char * buf, size_t size)
 {
     TEST_FAIL();
-    return IO_PANIC;
+    return Error(ByteCount, bstr("unexpected read"), IO_PANIC);
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     if (handle == 1)
     {
@@ -311,7 +311,7 @@ IOStatus IO__close(IOHandle handle)
     {
         TEST_FAIL();
     }
-    return IO_OK;
+    return Success(IOStatus, IO_OK);
 }
 
 ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappedMemoryPtr * memory)

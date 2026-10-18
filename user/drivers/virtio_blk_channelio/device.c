@@ -511,36 +511,36 @@ ChannelCode VirtioBlk__listen(VirtioBlkDevicePtr self, BlockServerPtr server)
 
 Result(VirtioBlkDevice) VirtioBlk__start(uint64_t slot, ConstBStringPtr path)
 {
-    VirtioBlkDevice device;
     match_result(
         VirtioBlk__bind_device(slot, path),
-        success(value)
+        success(device)
         {
-            device = value;
+            if (!service_ok(service_claim_virtio_device((Address)device.mmio)))
+            {
+                DRIVER_DEBUG("virtio_blk: claim failed path=%s\n", BString__cstr(&device.path));
+                return Error(VirtioBlkDevice, bstr("Cannot claim VirtIO block device"), SERVICE_BLOCK_REQUEST_FAILED);
+            }
+            VirtioBlk__acknowledge_driver(device.mmio);
+            if (!VirtioBlk__setup_queue(&device))
+            {
+                DRIVER_DEBUG("virtio_blk: queue setup failed path=%s\n", BString__cstr(&device.path));
+                return Error(VirtioBlkDevice, bstr("Cannot initialize VirtIO block queue"),
+                             SERVICE_BLOCK_REQUEST_FAILED);
+            }
+
+            if (!service_ok(service_register_block_device(&device.path, 512, device.block_count)))
+            {
+                DRIVER_DEBUG("virtio_blk: block device registration failed path=%s\n", BString__cstr(&device.path));
+                return Error(VirtioBlkDevice, bstr("Cannot register VirtIO block device"),
+                             SERVICE_BLOCK_REQUEST_FAILED);
+            }
+
+            return Success(VirtioBlkDevice, device);
         },
         error(code, message)
         {
             return Error(VirtioBlkDevice, message, code);
         }
     );
-
-    if (!service_ok(service_claim_virtio_device((Address)device.mmio)))
-    {
-        DRIVER_DEBUG("virtio_blk: claim failed path=%s\n", BString__cstr(&device.path));
-        return Error(VirtioBlkDevice, bstr("Cannot claim VirtIO block device"), SERVICE_BLOCK_REQUEST_FAILED);
-    }
-    VirtioBlk__acknowledge_driver(device.mmio);
-    if (!VirtioBlk__setup_queue(&device))
-    {
-        DRIVER_DEBUG("virtio_blk: queue setup failed path=%s\n", BString__cstr(&device.path));
-        return Error(VirtioBlkDevice, bstr("Cannot initialize VirtIO block queue"), SERVICE_BLOCK_REQUEST_FAILED);
-    }
-
-    if (!service_ok(service_register_block_device(&device.path, 512, device.block_count)))
-    {
-        DRIVER_DEBUG("virtio_blk: block device registration failed path=%s\n", BString__cstr(&device.path));
-        return Error(VirtioBlkDevice, bstr("Cannot register VirtIO block device"), SERVICE_BLOCK_REQUEST_FAILED);
-    }
-
-    return Success(VirtioBlkDevice, device);
+    return Error(VirtioBlkDevice, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }

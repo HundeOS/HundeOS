@@ -61,6 +61,8 @@ typedef enum IOStatus
     IO_PANIC = -255,
 } IOStatus;
 
+ResultDef(IOStatus);
+
 typedef enum IOFlags
 {
     IO_OPEN_READ = 0x1,
@@ -91,6 +93,7 @@ typedef struct IOTerminalAttributes
 } IOTerminalAttributes;
 
 typedef IOTerminalAttributes * IOTerminalAttributesPtr;
+ResultDef(IOTerminalAttributes);
 
 typedef struct IOTerminalAttributesResult
 {
@@ -129,6 +132,7 @@ static inline IOTerminalAttributesResult IOTerminalAttributesResult__new(IOStatu
 
 typedef int64_t IOHandle;
 typedef IOHandle * IOHandlePtr;
+ResultDef(IOHandle);
 
 typedef struct IOPipe
 {
@@ -154,8 +158,11 @@ static inline bool IOEndpoint__is_terminal(IOHandle handle)
 }
 
 typedef int64_t ByteCount;
+ResultDef(ByteCount);
 typedef int64_t DirectoryEntryCount;
 ResultDef(DirectoryEntryCount);
+typedef uint64_t IOPosition;
+ResultDef(IOPosition);
 typedef uint64_t Flags;
 typedef uint16_t FileMode;
 typedef uint64_t DirectoryEntryAttributes;
@@ -182,6 +189,8 @@ typedef struct IOFileChange
     Flags events;
 } IOFileChange;
 
+ResultDef(IOFileChange);
+
 typedef struct IOFileWatch
 {
     IOHandle handle;
@@ -191,28 +200,6 @@ typedef struct IOFileWatch
 static inline IOFileWatch IOFileWatch__new(IOHandle handle, uint64_t generation)
 {
     return (IOFileWatch){.handle = handle, .generation = generation};
-}
-
-typedef struct IOSeekResult
-{
-    IOStatus status;
-    uint64_t position;
-} IOSeekResult;
-
-typedef struct IOWatchResult
-{
-    IOStatus status;
-    IOFileChange change;
-} IOWatchResult;
-
-static inline IOSeekResult IOSeekResult__new(IOStatus status, uint64_t position)
-{
-    return (IOSeekResult){.status = status, .position = position};
-}
-
-static inline IOWatchResult IOWatchResult__new(IOStatus status, IOFileChange change)
-{
-    return (IOWatchResult){.status = status, .change = change};
 }
 
 typedef struct IOFileInfo

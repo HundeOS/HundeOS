@@ -42,8 +42,10 @@ only to advance the Bash build.
     interfaces are implemented and tested.
 - [ ] Keep Bash host generators such as `mksignames` and `mkbuiltins` on the host
   compiler and headers while all target objects use only the HundeOS sysroot.
-- [x] Install the resulting static executable into the architecture-qualified
-  disk rootfs and include both Bash builds in `make compile-commands`.
+- [x] Install the resulting executable into the architecture-qualified disk
+  rootfs and include both Bash builds in `make compile-commands`. Bash is now a
+  PIE using `/sbin/wuff-ld` with `libc.wuff.1` as its only runtime dependency;
+  its bundled support libraries and PIC `libm` remain statically linked.
 
 #### 2. Non-Local Control Flow
 
@@ -191,8 +193,8 @@ only to advance the Bash build.
     ioctls for source compatibility, but the ioctls and libc's `tcgetwinsize`
     and `tcsetwinsize` entry points validate the terminal and report
     `EOPNOTSUPP`; Readline uses its environment or fixed-size fallback. Both
-    target builds now compile all Bash and Readline objects and statically link
-    Bash ELFs with no unresolved symbols. The build uses bundled termcap as the
+    target builds now compile all Bash and Readline objects and link Bash ELFs
+    with no unresolved symbols. The build uses bundled termcap as the
     owner of its globals, libc supports allocating `getcwd`, and weak POSIX
     environment entry points allow Bash's definitions to override libc without
     losing scoped HundeOS implementations.
@@ -217,7 +219,8 @@ only to advance the Bash build.
     display widths, and `C`/`C.UTF-8` locale selection, then enable Bash's
     multibyte paths.
 - [x] Iterate configure, compile, and link failures into this inventory until an
-  unmodified Bash source tree produces a static HundeOS ELF on both architectures.
+  unmodified Bash source tree produces a HundeOS ELF on both architectures. The
+  initial static closure is now superseded by the dynamic Bash build above.
 
 #### 5. Fork, Exec, And Wait
 
@@ -301,8 +304,14 @@ only to advance the Bash build.
   temporary-file creation, unlink-while-open, and cleanup of here-documents.
 - [ ] Complete `access`, effective-identity permission checks, timestamps, link
   counts, ownership, `umask`, filesystem metadata, and precise errno mappings.
-- [ ] Provide usable `/dev/tty`, `/dev/null`, and `/dev/fd` behavior, or configure
-  Bash explicitly for an agreed equivalent where it does not change semantics.
+- [ ] Add a filesystem resize operation and use it for shrinking or extending
+  `ftruncate`; libc currently succeeds only when the requested size is already
+  the file's size, which supports dense-copy finalization without hiding a real
+  resize request.
+- [x] Provide `/dev/null` through devfs with EOF-on-read and discard-on-write
+  semantics. See [Userspace I/O system](architecture/io-system.md#device-filesystem).
+- [ ] Provide usable `/dev/tty` and `/dev/fd` behavior, or configure Bash
+  explicitly for an agreed equivalent where it does not change semantics.
 - [ ] Replace the sixteen-argument spawn limit with defined argv and environment
   byte limits, report `E2BIG`, and test large command invocations.
   - [x] Define `ARG_MAX` as 64 KiB and enforce it in the exec payload builder.
@@ -487,6 +496,16 @@ remaining I/O components still use the current multi-process service graph.
   `/usr/lib/libc.wuff.1` on AArch64 and RISC-V. Keep `/sbin/wuff-ld` and early
   bootstrap services statically linked so dynamic loading does not introduce a
   dependency cycle during service and filesystem startup.
+- [x] Migrate every disk-root command to the shared PIC/PIE build and runtime
+  dependency on `/usr/lib/libc.wuff.1`: `cat`, `cp`, `env`, `fs-latency`,
+  `grep`, `kill`, `ln`, `ls`, `mkdir`, `mv`, `ps`, `rm`, `shutdown`, `tail`, and
+  `write`. Keep embedded programs, drivers, bootstrap services, the static
+  interpreter, and Bash outside this slice. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+- [x] Dynamically link Bash against `/usr/lib/libc.wuff.1` on both architectures,
+  with build-time validation of the interpreter, sole dependency, unsupported
+  metadata, and reviewed relocation set. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
 
 #### Mapping And Runtime Lifecycle
 
@@ -506,6 +525,11 @@ remaining I/O components still use the current multi-process service graph.
 
 #### Component ABI And Lifecycle
 
+- [x] Add the host-module loader entry points: load a dependency graph while
+  rejecting `PT_INTERP`, load a module from the filesystem while releasing its
+  temporary image, and resolve required exports from the root object only as a
+  `Result(WuffSymbol)`. See
+  [Dynamic linking and host modules](architecture/dynamic-linking.md).
 - [ ] Define the single-entry, versioned C ABI and typed host-operation tables
   used by both I/O and hardware components. Do not expose language-specific
   objects, unwinding, or private collection layouts across the boundary.

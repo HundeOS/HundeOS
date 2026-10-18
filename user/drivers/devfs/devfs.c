@@ -1,9 +1,53 @@
 #include "devfs.h"
 #include "memory.h"
 
-static Result(FilesystemFileSize)
-    Devfs__load(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data)
+static Result(FilesystemFileInfo) Devfs__describe(IOServiceContext context, ConstBStringPtr path)
 {
+    if (BString__equals(path, &bstr("/null")))
+    {
+        return Success(FilesystemFileInfo, FilesystemFileInfo__new(0, IO_MODE_TYPE_FILE | 0666));
+    }
+    ConstDeviceRegistryPtr registry = context;
+    BString absolute = BString__sprintf(&bstr("/dev%B"), path);
+    match_result(
+        DeviceRegistry__find(registry, &absolute),
+        success(found)
+        {
+            match_optional(
+                found,
+                some(record)
+                {
+                    if (record.kind == DEVICE_KERNEL_STREAM)
+                    {
+                        return Error(FilesystemFileInfo, bstr("Kernel stream"), IO_PATH_UNMANAGED);
+                    }
+                    BString text =
+                        BString__sprintf(&bstr("path=%B\nblock_size=%llu\nblock_count=%llu\nuserspace_service=1\n"),
+                                         &record.path, record.block_size, record.block_count);
+                    return Success(FilesystemFileInfo,
+                                   FilesystemFileInfo__new(BString__length(&text), IO_MODE_TYPE_FILE | 0444));
+                },
+                none()
+                {
+                    return Error(FilesystemFileInfo, bstr("No device"), IO_INVALID_PATH);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(FilesystemFileInfo, message,
+                         code == DEVICE_REGISTRY_BUSY ? IO_WAIT_FOR_DATA : IO_NO_DEVICE_FOUND);
+        }
+    );
+}
+
+static Result(FilesystemFileSize) Devfs__read(IOServiceContext context, ConstBStringPtr path, FilesystemFileSize offset,
+                                              FilesystemFileDataPtr data, FilesystemFileSize capacity)
+{
+    if (BString__equals(path, &bstr("/null")))
+    {
+        return Success(FilesystemFileSize, 0);
+    }
     ConstDeviceRegistryPtr registry = context;
     BString absolute = BString__sprintf(&bstr("/dev%B"), path);
     match_result(
@@ -21,8 +65,18 @@ static Result(FilesystemFileSize)
                     BString text =
                         BString__sprintf(&bstr("path=%B\nblock_size=%llu\nblock_count=%llu\nuserspace_service=1\n"),
                                          &record.path, record.block_size, record.block_count);
-                    Mem__memcpy(data, BString__cstr(&text), BString__length(&text));
-                    return Success(FilesystemFileSize, BString__length(&text));
+                    FilesystemFileSize length = BString__length(&text);
+                    if (offset >= length)
+                    {
+                        return Success(FilesystemFileSize, 0);
+                    }
+                    FilesystemFileSize size = length - offset;
+                    if (size > capacity)
+                    {
+                        size = capacity;
+                    }
+                    Mem__memcpy(data, BString__cstr(&text) + offset, size);
+                    return Success(FilesystemFileSize, size);
                 },
                 none()
                 {
@@ -34,6 +88,27 @@ static Result(FilesystemFileSize)
         {
             return Error(FilesystemFileSize, message,
                          code == DEVICE_REGISTRY_BUSY ? IO_WAIT_FOR_DATA : IO_NO_DEVICE_FOUND);
+        }
+    );
+}
+
+static Result(FilesystemFileSize)
+    Devfs__write(IOServiceContext context, ConstBStringPtr path, FilesystemFileSize offset,
+                 ConstFilesystemFileDataPtr data, FilesystemFileSize size)
+{
+    if (BString__equals(path, &bstr("/null")))
+    {
+        return Success(FilesystemFileSize, size);
+    }
+    match_result(
+        Devfs__describe(context, path),
+        success(info)
+        {
+            return Error(FilesystemFileSize, bstr("Read-only device metadata"), IO_PERMISSION_DENIED);
+        },
+        error(code, message)
+        {
+            return Error(FilesystemFileSize, message, code);
         }
     );
 }
@@ -50,6 +125,19 @@ static Result(DirectoryEntryCount) Devfs__list(IOServiceContext context, ConstBS
     if (capacity == 0)
     {
         return Success(DirectoryEntryCount, count);
+    }
+    if (skip > 0)
+    {
+        skip--;
+    }
+    else
+    {
+        entries[count++] =
+            DirectoryEntry__new(0, PROCESS_USER_ROOT, PROCESS_GROUP_ROOT, IO_MODE_TYPE_FILE | 0666, &bstr("null"));
+        if ((size_t)count == capacity)
+        {
+            return Success(DirectoryEntryCount, count);
+        }
     }
     for (uint64_t index = 0; index < DEVICE_REGISTRY_CAPACITY; index++)
     {
@@ -94,12 +182,6 @@ static Result(DirectoryEntryCount) Devfs__list(IOServiceContext context, ConstBS
     return Success(DirectoryEntryCount, count);
 }
 
-static IOStatus Devfs__store(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data,
-                             FilesystemFileSize size)
-{
-    return IO_PERMISSION_DENIED;
-}
-
 static IOStatus Devfs__mkdir(IOServiceContext context, ConstBStringPtr path)
 {
     return IO_PERMISSION_DENIED;
@@ -112,6 +194,6 @@ static IOStatus Devfs__remove(IOServiceContext context, ConstBStringPtr path, Fl
 
 FilesystemOperations Devfs__operations(void)
 {
-    return FilesystemOperations__new_snapshot(Devfs__load, Devfs__store, Devfs__list, Devfs__mkdir, Devfs__remove,
-                                              FilesystemOperations__unsupported_link, 0);
+    return FilesystemOperations__new_stream(Devfs__describe, Devfs__read, Devfs__write, Devfs__list, Devfs__mkdir,
+                                            Devfs__remove, FilesystemOperations__unsupported_link);
 }

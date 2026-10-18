@@ -151,7 +151,8 @@ Result(SubsystemInitStatus) Kernel__init_scheduler(KernelPtr self)
         some(system_info)
         {
             self->scheduler->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller);
-            self->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller);
+            self->irq_dispatcher->interrupt_controller =
+                Some(InterruptControllerInfo, system_info.interrupt_controller);
 
             Optional(Elf) idle_opt = EmbeddedElf__load(&bstr("services/idle"));
             match_optional(

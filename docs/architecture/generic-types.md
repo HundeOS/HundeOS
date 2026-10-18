@@ -56,6 +56,9 @@ declaration and body macros to avoid duplicate definitions.
   can fail. Return a named struct wrapped in one of these types when several
   values belong to one result; do not use scalar out-parameters and a boolean
   status to recreate a result type.
+- Use `RESULT_UNKNOWN_ERROR_CODE` with the `Unknown error` message only for the
+  explicit `Error(...)` returned after a match whose success and error branches
+  both leave the function.
 
 ## Fixed Arrays
 

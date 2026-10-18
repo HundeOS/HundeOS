@@ -12,49 +12,49 @@ Result(ProcessInfo) ProcessMetrics__info(uint64_t pid)
     uint64_t capacity = PROCESS_METRICS_INITIAL_CAPACITY;
     while (capacity <= PROCESS_REGISTRY_CAPACITY + 1)
     {
-        ProcessInfoPtr entries;
         match_result(
             mem_alloc_bytes(capacity * sizeof(ProcessInfo)),
-            success(address)
+            success(entries_address)
             {
-                entries = (ProcessInfoPtr)address;
+                ProcessListResult count = process_list((ProcessInfoPtr)entries_address, capacity);
+                if (count < 0)
+                {
+                    free((ProcessInfoPtr)entries_address);
+                    return Error(ProcessInfo, bstr("Cannot snapshot processes"), count);
+                }
+                for (ProcessListResult index = 0; index < count; index++)
+                {
+                    if (((ProcessInfoPtr)entries_address)[index].pid == pid)
+                    {
+                        ProcessInfo found = ((ProcessInfoPtr)entries_address)[index];
+                        free((ProcessInfoPtr)entries_address);
+                        return Success(ProcessInfo, found);
+                    }
+                }
+
+                free((ProcessInfoPtr)entries_address);
+                if ((uint64_t)count < capacity)
+                {
+                    return Error(ProcessInfo, bstr("Process missing from snapshot"), -1);
+                }
+                if (capacity == PROCESS_REGISTRY_CAPACITY + 1)
+                {
+                    return Error(ProcessInfo, bstr("Process snapshot exceeds registry capacity"), -1);
+                }
+                capacity *= 2;
+                if (capacity > PROCESS_REGISTRY_CAPACITY + 1)
+                {
+                    capacity = PROCESS_REGISTRY_CAPACITY + 1;
+                }
+
+                continue;
             },
             error(code, message)
             {
                 return Error(ProcessInfo, message, code);
             }
         );
-
-        ProcessListResult count = process_list(entries, capacity);
-        if (count < 0)
-        {
-            free(entries);
-            return Error(ProcessInfo, bstr("Cannot snapshot processes"), count);
-        }
-        for (ProcessListResult index = 0; index < count; index++)
-        {
-            if (entries[index].pid == pid)
-            {
-                ProcessInfo found = entries[index];
-                free(entries);
-                return Success(ProcessInfo, found);
-            }
-        }
-
-        free(entries);
-        if ((uint64_t)count < capacity)
-        {
-            return Error(ProcessInfo, bstr("Process missing from snapshot"), -1);
-        }
-        if (capacity == PROCESS_REGISTRY_CAPACITY + 1)
-        {
-            return Error(ProcessInfo, bstr("Process snapshot exceeds registry capacity"), -1);
-        }
-        capacity *= 2;
-        if (capacity > PROCESS_REGISTRY_CAPACITY + 1)
-        {
-            capacity = PROCESS_REGISTRY_CAPACITY + 1;
-        }
+        return Error(ProcessInfo, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
     }
     return Error(ProcessInfo, bstr("Invalid process snapshot capacity"), -1);
 }

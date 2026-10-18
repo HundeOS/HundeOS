@@ -57,10 +57,26 @@ static SpawnResult Interpreter__spawn_in(ConstBStringPtr directory, ConstBString
     return spawn_argv(mode, &path, arguments);
 }
 
+static bool Interpreter__set_foreground(uint64_t pid)
+{
+    match_result(
+        IO__set_terminal_foreground(pid),
+        success(status)
+        {
+            return status == IO_OK;
+        },
+        error(code, message)
+        {
+            return false;
+        }
+    );
+    return false;
+}
+
 static ShellResult Interpreter__wait_for_foreground(SpawnResult child_pid)
 {
-    IOStatus foreground_result = IO__set_terminal_foreground((uint64_t)child_pid);
-    if (foreground_result != IO_OK)
+    bool foreground_set = Interpreter__set_foreground((uint64_t)child_pid);
+    if (!foreground_set)
     {
         kill_process((uint64_t)child_pid, PROCESS_SIGNAL_KILL);
     }
@@ -72,10 +88,9 @@ static ShellResult Interpreter__wait_for_foreground(SpawnResult child_pid)
         wait_result = wait_for_child_event(&event);
     } while (wait_result == PROCESS_CHILD_EVENT_OK && event.pid != (uint64_t)child_pid);
 
-    IOStatus reset_result = IO__set_terminal_foreground(0);
-    return foreground_result == IO_OK && wait_result == PROCESS_CHILD_EVENT_OK && reset_result == IO_OK
-               ? COMMAND_SUCCESS
-               : COMMAND_FAILED;
+    bool foreground_reset = Interpreter__set_foreground(0);
+    return foreground_set && wait_result == PROCESS_CHILD_EVENT_OK && foreground_reset ? COMMAND_SUCCESS
+                                                                                       : COMMAND_FAILED;
 }
 
 Interpreter Interpreter__new(void)

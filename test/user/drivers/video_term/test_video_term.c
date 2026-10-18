@@ -170,15 +170,15 @@ ServiceCode service_map_mmio(Address physical_address, size_t size, ServiceMappe
     return SERVICE_OK;
 }
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     TEST_ASSERT_EQUAL_BSTRING(bstr("/boot/sysinfo"), *path);
     TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, flags);
     fake_sysinfo_opened = true;
-    return 7;
+    return Success(IOHandle, 7);
 }
 
-ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
+Result(ByteCount) IO__read_bytes(IOHandle handle, char * buf, size_t size)
 {
     TEST_ASSERT_EQUAL_INT64(7, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
@@ -188,17 +188,17 @@ ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
         buf[index] = fake_sysinfo[index];
         index++;
     }
-    return (ByteCount)index;
+    return Success(ByteCount, (ByteCount)index);
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL_INT64(7, handle);
     fake_sysinfo_closed = true;
-    return IO_OK;
+    return Success(IOStatus, IO_OK);
 }
 
-Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
+Result(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 {
     TEST_ASSERT_EQUAL_INT64(7, handle);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
@@ -208,7 +208,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
         success_do_nothing(),
         error(code, message)
         {
-            return None(DynString);
+            return Error(DynString, message, code);
         }
     );
     for (ByteCount index = 0; fake_sysinfo[index] != '\0' && index < max_bytes; index++)
@@ -219,11 +219,11 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, ByteCount max_bytes)
             error(code, message)
             {
                 DynString__dispose(&sysinfo);
-                return None(DynString);
+                return Error(DynString, message, code);
             }
         );
     }
-    return Some(DynString, sysinfo);
+    return Success(DynString, sysinfo);
 }
 
 void * driver_ptr(ServiceMappedMemoryPtr memory)

@@ -30,11 +30,11 @@ static unsigned trace_resets;
 static uint64_t inheritance_commit_pid;
 static uint64_t current_pid;
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     opened_path = *path;
     opened_flags = flags;
-    return opened_handle;
+    return opened_handle < 0 ? Error(IOHandle, bstr("open failed"), opened_handle) : Success(IOHandle, opened_handle);
 }
 
 int PosixPath__absolute(const char * path, BStringPtr result)
@@ -49,36 +49,38 @@ int PosixPath__absolute(const char * path, BStringPtr result)
     return 0;
 }
 
-ByteCount IO__read_bytes(IOHandle handle, char * buffer, size_t size)
+Result(ByteCount) IO__read_bytes(IOHandle handle, char * buffer, size_t size)
 {
     if (next_read_result > 0)
     {
         memcpy(buffer, "data", (size_t)next_read_result);
     }
-    return next_read_result;
+    return next_read_result < 0 ? Error(ByteCount, bstr("read failed"), next_read_result)
+                                : Success(ByteCount, next_read_result);
 }
 
-ByteCount IO__read_bytes_with_flags(IOHandle handle, char * buffer, size_t size, Flags flags)
+Result(ByteCount) IO__read_bytes_with_flags(IOHandle handle, char * buffer, size_t size, Flags flags)
 {
     last_read_flags = flags;
     return IO__read_bytes(handle, buffer, size);
 }
 
-ByteCount IO__write_bytes(IOHandle handle, const char * buffer, size_t size)
+Result(ByteCount) IO__write_bytes(IOHandle handle, const char * buffer, size_t size)
 {
-    return next_write_result;
+    return next_write_result < 0 ? Error(ByteCount, bstr("write failed"), next_write_result)
+                                 : Success(ByteCount, next_write_result);
 }
 
-ByteCount IO__write_bytes_with_flags(IOHandle handle, const char * buffer, size_t size, Flags flags)
+Result(ByteCount) IO__write_bytes_with_flags(IOHandle handle, const char * buffer, size_t size, Flags flags)
 {
     last_write_flags = flags;
     return IO__write_bytes(handle, buffer, size);
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     closed_handle = handle;
-    return IO_OK;
+    return Success(IOStatus, IO_OK);
 }
 
 Result(IOPipe) IO__pipe(void)
@@ -86,9 +88,9 @@ Result(IOPipe) IO__pipe(void)
     return next_pipe.read < 0 ? Error(IOPipe, bstr("pipe failed"), next_pipe.read) : Success(IOPipe, next_pipe);
 }
 
-IOStatus IO__remove_file(ConstBStringPtr path)
+Result(IOStatus) IO__remove_file(ConstBStringPtr path)
 {
-    return IO_INVALID_PATH;
+    return Error(IOStatus, bstr("invalid path"), IO_INVALID_PATH);
 }
 
 Optional(BString) IO__terminal_path(int descriptor)

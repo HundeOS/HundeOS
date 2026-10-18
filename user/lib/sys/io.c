@@ -83,72 +83,109 @@ Optional(BString) IO__terminal_path(int descriptor)
     );
 }
 
-static IOHandle IOStandardStream__open(IOStandardStreamPtr self)
+static BString IO__error_message(IOStatus status)
+{
+    return BString__new(io_status_string(status));
+}
+
+static Result(IOStatus) IO__status_result(IOStatus status)
+{
+    return status == IO_OK ? Success(IOStatus, IO_OK) : Error(IOStatus, IO__error_message(status), status);
+}
+
+static Result(IOHandle) IOStandardStream__open(IOStandardStreamPtr self)
 {
     if (self->closed)
     {
-        return IO_NOT_OPEN;
+        return Error(IOHandle, IO__error_message(IO_NOT_OPEN), IO_NOT_OPEN);
     }
     if (self->handle >= 0)
     {
-        return self->handle;
+        return Success(IOHandle, self->handle);
     }
     BString path = self->endpoint == IO_ENDPOINT_TTY_INPUT        ? bstr(":tty:")
                    : self->endpoint == IO_ENDPOINT_KEYBOARD_INPUT ? bstr(":keyboard:")
                                                                   : bstr(":console:");
     self->handle = IOClient__open(&path, self->endpoint == IO_ENDPOINT_CONSOLE_OUTPUT ? IO_OPEN_WRITE : IO_OPEN_READ);
-    return self->handle;
+    return self->handle >= 0 ? Success(IOHandle, self->handle)
+                             : Error(IOHandle, IO__error_message((IOStatus)self->handle), self->handle);
 }
 
-IOStatus IO__set_terminal_foreground(uint64_t pid)
+Result(IOStatus) IO__set_terminal_foreground(uint64_t pid)
 {
-    IOHandle input = IOStandardStream__open(&standard_input);
-    if (input < 0)
-    {
-        return (IOStatus)input;
-    }
-    return IOClient__set_foreground_process(input, pid);
+    match_result(
+        IOStandardStream__open(&standard_input),
+        success(input)
+        {
+            return IO__status_result(IOClient__set_foreground_process(input, pid));
+        },
+        error(code, message)
+        {
+            return Error(IOStatus, message, code);
+        }
+    );
+    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
-IOTerminalAttributesResult IO__get_terminal_attributes(IOHandle handle)
+Result(IOTerminalAttributes) IO__get_terminal_attributes(IOHandle handle)
 {
     match_optional(
         IO__standard_stream(handle),
         some(stream)
         {
-            IOHandle opened = IOStandardStream__open(stream);
-            if (opened < 0)
-            {
-                return IOTerminalAttributesResult__new((IOStatus)opened, IOTerminalAttributes__default());
-            }
-            return IO__get_terminal_attributes(opened);
+            match_result(
+                IOStandardStream__open(stream),
+                success(opened)
+                {
+                    return IO__get_terminal_attributes(opened);
+                },
+                error(code, message)
+                {
+                    return Error(IOTerminalAttributes, message, code);
+                }
+            );
+            return Error(IOTerminalAttributes, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         none_do_nothing()
     );
     if (handle < IO_SESSION_HANDLE_BASE)
     {
-        return IOTerminalAttributesResult__new(IO_UNKNOWN_HANDLE, IOTerminalAttributes__default());
+        return Error(IOTerminalAttributes, IO__error_message(IO_UNKNOWN_HANDLE), IO_UNKNOWN_HANDLE);
     }
-    return IOClient__get_terminal_attributes(handle);
+    IOTerminalAttributesResult result = IOClient__get_terminal_attributes(handle);
+    return result.status == IO_OK ? Success(IOTerminalAttributes, result.attributes)
+                                  : Error(IOTerminalAttributes, IO__error_message(result.status), result.status);
 }
 
-IOStatus IO__set_terminal_attributes(IOHandle handle, IOTerminalAttributes attributes)
+Result(IOStatus) IO__set_terminal_attributes(IOHandle handle, IOTerminalAttributes attributes)
 {
     match_optional(
         IO__standard_stream(handle),
         some(stream)
         {
-            IOHandle opened = IOStandardStream__open(stream);
-            return opened < 0 ? (IOStatus)opened : IO__set_terminal_attributes(opened, attributes);
+            match_result(
+                IOStandardStream__open(stream),
+                success(opened)
+                {
+                    return IO__set_terminal_attributes(opened, attributes);
+                },
+                error(code, message)
+                {
+                    return Error(IOStatus, message, code);
+                }
+            );
+            return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         none_do_nothing()
     );
-    return handle < IO_SESSION_HANDLE_BASE ? IO_UNKNOWN_HANDLE : IOClient__set_terminal_attributes(handle, attributes);
+    return handle < IO_SESSION_HANDLE_BASE ? Error(IOStatus, IO__error_message(IO_UNKNOWN_HANDLE), IO_UNKNOWN_HANDLE)
+                                           : IO__status_result(IOClient__set_terminal_attributes(handle, attributes));
 }
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
-    return IOClient__open(path, flags);
+    IOHandle handle = IOClient__open(path, flags);
+    return handle >= 0 ? Success(IOHandle, handle) : Error(IOHandle, IO__error_message((IOStatus)handle), handle);
 }
 
 Result(IOPipe) IO__pipe(void)
@@ -156,88 +193,115 @@ Result(IOPipe) IO__pipe(void)
     return IOClient__pipe();
 }
 
-ByteCount IO__read_bytes_with_flags(IOHandle handle, char * buf, size_t size, Flags flags)
+Result(ByteCount) IO__read_bytes_with_flags(IOHandle handle, char * buf, size_t size, Flags flags)
 {
     match_optional(
         IO__standard_stream(handle),
         some(stream)
         {
-            IOHandle opened = IOStandardStream__open(stream);
-            return opened < 0 ? opened : IO__read_bytes_with_flags(opened, buf, size, flags);
+            match_result(
+                IOStandardStream__open(stream),
+                success(opened)
+                {
+                    return IO__read_bytes_with_flags(opened, buf, size, flags);
+                },
+                error(code, message)
+                {
+                    return Error(ByteCount, message, code);
+                }
+            );
+            return Error(ByteCount, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         none_do_nothing()
     );
     if (handle >= IO_SESSION_HANDLE_BASE)
     {
-        return IOClient__read_with_flags(handle, (ChannelDataPtr)buf, size, flags);
+        ByteCount count = IOClient__read_with_flags(handle, (ChannelDataPtr)buf, size, flags);
+        return count >= 0 ? Success(ByteCount, count) : Error(ByteCount, IO__error_message((IOStatus)count), count);
     }
-    return IO_UNKNOWN_HANDLE;
+    return Error(ByteCount, IO__error_message(IO_UNKNOWN_HANDLE), IO_UNKNOWN_HANDLE);
 }
 
-ByteCount IO__read_bytes(IOHandle handle, char * buf, size_t size)
+Result(ByteCount) IO__read_bytes(IOHandle handle, char * buf, size_t size)
 {
     return IO__read_bytes_with_flags(handle, buf, size, 0);
 }
 
-ByteCount IO__write_bytes_with_flags(IOHandle handle, const char * buf, size_t size, Flags flags)
+Result(ByteCount) IO__write_bytes_with_flags(IOHandle handle, const char * buf, size_t size, Flags flags)
 {
     match_optional(
         IO__standard_stream(handle),
         some(stream)
         {
-            IOHandle opened = IOStandardStream__open(stream);
-            return opened < 0 ? opened : IO__write_bytes_with_flags(opened, buf, size, flags);
+            match_result(
+                IOStandardStream__open(stream),
+                success(opened)
+                {
+                    return IO__write_bytes_with_flags(opened, buf, size, flags);
+                },
+                error(code, message)
+                {
+                    return Error(ByteCount, message, code);
+                }
+            );
+            return Error(ByteCount, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         none_do_nothing()
     );
     if (handle >= IO_SESSION_HANDLE_BASE)
     {
-        return IOClient__write_with_flags(handle, (ConstChannelDataPtr)buf, size, flags);
+        ByteCount count = IOClient__write_with_flags(handle, (ConstChannelDataPtr)buf, size, flags);
+        return count >= 0 ? Success(ByteCount, count) : Error(ByteCount, IO__error_message((IOStatus)count), count);
     }
-    return IO_UNKNOWN_HANDLE;
+    return Error(ByteCount, IO__error_message(IO_UNKNOWN_HANDLE), IO_UNKNOWN_HANDLE);
 }
 
-ByteCount IO__write_bytes(IOHandle handle, const char * buf, size_t size)
+Result(ByteCount) IO__write_bytes(IOHandle handle, const char * buf, size_t size)
 {
     return IO__write_bytes_with_flags(handle, buf, size, 0);
 }
 
-IOSeekResult IO__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
+Result(IOPosition) IO__seek(IOHandle handle, int64_t offset, IOSeekWhence whence)
 {
     if (handle < IO_SESSION_HANDLE_BASE)
     {
-        return IOSeekResult__new(IO_OPERATION_NOT_SUPPORTED, 0);
+        return Error(IOPosition, IO__error_message(IO_OPERATION_NOT_SUPPORTED), IO_OPERATION_NOT_SUPPORTED);
     }
     IOReply reply = IOClient__seek(handle, offset, whence);
-    return IOSeekResult__new(reply.status, reply.value);
+    return reply.status == IO_OK ? Success(IOPosition, reply.value)
+                                 : Error(IOPosition, IO__error_message(reply.status), reply.status);
 }
 
-IOWatchResult IO__watch_file(IOHandle handle)
+Result(IOFileChange) IO__watch_file(IOHandle handle)
 {
     if (handle < IO_SESSION_HANDLE_BASE)
     {
-        return IOWatchResult__new(IO_OPERATION_NOT_SUPPORTED, IOFileChange__new(0, 0, 0));
+        return Error(IOFileChange, IO__error_message(IO_OPERATION_NOT_SUPPORTED), IO_OPERATION_NOT_SUPPORTED);
     }
     IOReply reply = IOClient__watch_file(handle);
-    return IOWatchResult__new(reply.status, reply.file_change);
+    return reply.status == IO_OK ? Success(IOFileChange, reply.file_change)
+                                 : Error(IOFileChange, IO__error_message(reply.status), reply.status);
 }
 
-IOWatchResult IO__wait_file_change(IOFileWatch * watches, size_t count)
+Result(IOFileChange) IO__wait_file_change(IOFileWatch * watches, size_t count)
 {
     IOReply reply = IOClient__wait_file_change(watches, count);
-    return IOWatchResult__new(reply.status, reply.file_change);
+    return reply.status == IO_OK ? Success(IOFileChange, reply.file_change)
+                                 : Error(IOFileChange, IO__error_message(reply.status), reply.status);
 }
 
-IOHandle accept(IOHandle handle)
+Result(IOHandle) accept(IOHandle handle)
 {
     if (handle >= IO_SESSION_HANDLE_BASE)
     {
-        return IOClient__accept(handle);
+        IOHandle accepted = IOClient__accept(handle);
+        return accepted >= 0 ? Success(IOHandle, accepted)
+                             : Error(IOHandle, IO__error_message((IOStatus)accepted), accepted);
     }
-    return IO_UNKNOWN_HANDLE;
+    return Error(IOHandle, IO__error_message(IO_UNKNOWN_HANDLE), IO_UNKNOWN_HANDLE);
 }
 
-IOHandle IO__accept(IOHandle handle)
+Result(IOHandle) IO__accept(IOHandle handle)
 {
     return accept(handle);
 }
@@ -300,38 +364,39 @@ BString IO__path_join(ConstBStringPtr base, ConstBStringPtr child)
     return BString__append(&with_slash, child);
 }
 
-static ByteCount IO__read_bstring_with_limit(IOHandle handle, BStringPtr buffer, StringPos max_bytes)
+static Result(ByteCount) IO__read_bstring_with_limit(IOHandle handle, BStringPtr buffer, StringPos max_bytes)
 {
     BString__clear(buffer);
     if (max_bytes <= 0)
     {
-        return 0;
+        return Success(ByteCount, 0);
     }
 
     StringPos buffer_max = BSTRING_MAX_SIZE - 1;
     StringPos read_max = max_bytes < buffer_max ? max_bytes : buffer_max;
 
-    ByteCount bytes = IO__read_bytes(handle, (char *)BString__cstr(buffer), (size_t)read_max);
-    if (bytes <= 0)
-    {
-        return bytes;
-    }
-
-    if (bytes > read_max)
-    {
-        bytes = read_max;
-    }
-
-    *buffer = BString__from_chars(BString__cstr(buffer), bytes);
-    return bytes;
+    match_result(
+        IO__read_bytes(handle, (char *)BString__cstr(buffer), (size_t)read_max),
+        success(bytes)
+        {
+            ByteCount bounded_bytes = bytes > read_max ? read_max : bytes;
+            *buffer = BString__from_chars(BString__cstr(buffer), bounded_bytes);
+            return Success(ByteCount, bounded_bytes);
+        },
+        error(code, message)
+        {
+            return Error(ByteCount, message, code);
+        }
+    );
+    return Error(ByteCount, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
-ByteCount IO__read(IOHandle handle, BStringPtr buffer)
+Result(ByteCount) IO__read(IOHandle handle, BStringPtr buffer)
 {
     return IO__read_bstring_with_limit(handle, buffer, BSTRING_MAX_SIZE - 1);
 }
 
-Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
+Result(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
 {
     DynString text;
     match_result(
@@ -339,7 +404,7 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
         success_do_nothing(),
         error(code, message)
         {
-            return None(DynString);
+            return Error(DynString, message, code);
         }
     );
 
@@ -348,43 +413,51 @@ Optional(DynString) IO__read_dyn_string(IOHandle handle, StringPos max_bytes)
     {
         BString chunk = empty_bstr();
         ByteCount remaining_capacity = max_bytes - total_read;
-        ByteCount bytes = IO__read_bstring_with_limit(handle, &chunk, remaining_capacity);
-        if (bytes <= 0)
-        {
-            break;
-        }
-
         match_result(
-            DynString__append_bstring(&text, &chunk),
-            success_do_nothing(),
+            IO__read_bstring_with_limit(handle, &chunk, remaining_capacity),
+            success(bytes)
+            {
+                if (bytes == 0)
+                {
+                    return Success(DynString, text);
+                }
+                match_result(
+                    DynString__append_bstring(&text, &chunk),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        DynString__dispose(&text);
+                        return Error(DynString, message, code);
+                    }
+                );
+
+                total_read += bytes;
+                if (total_read >= max_bytes || bytes < BSTRING_MAX_SIZE - 1)
+                {
+                    return Success(DynString, text);
+                }
+            },
             error(code, message)
             {
+                if (code == IO_EOF)
+                {
+                    return Success(DynString, text);
+                }
                 DynString__dispose(&text);
-                return None(DynString);
+                return Error(DynString, message, code);
             }
         );
-
-        total_read += bytes;
-        if (total_read >= max_bytes)
-        {
-            break;
-        }
-
-        if (bytes < BSTRING_MAX_SIZE - 1)
-        {
-            break;
-        }
     }
 
-    return Some(DynString, text);
+    return Success(DynString, text);
 }
 
-ByteCount IO__write(IOHandle handle, ConstBStringPtr text)
+Result(ByteCount) IO__write(IOHandle handle, ConstBStringPtr text)
 {
     return IO__write_bytes(handle, BString__cstr(text), (size_t)BString__length(text));
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     match_optional(
         IO__standard_stream(handle),
@@ -392,22 +465,34 @@ IOStatus IO__close(IOHandle handle)
         {
             if (stream->closed)
             {
-                return IO_NOT_OPEN;
+                return Error(IOStatus, IO__error_message(IO_NOT_OPEN), IO_NOT_OPEN);
             }
-            IOStatus status = stream->handle >= 0 ? IO__close(stream->handle) : IO_OK;
-            if (status == IO_OK)
+            if (stream->handle < 0)
             {
                 stream->closed = true;
+                return Success(IOStatus, IO_OK);
             }
-            return status;
+            match_result(
+                IO__close(stream->handle),
+                success(status)
+                {
+                    stream->closed = true;
+                    return Success(IOStatus, status);
+                },
+                error(code, message)
+                {
+                    return Error(IOStatus, message, code);
+                }
+            );
+            return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         none_do_nothing()
     );
     if (handle >= IO_SESSION_HANDLE_BASE)
     {
-        return IOClient__close(handle);
+        return IO__status_result(IOClient__close(handle));
     }
-    return IO_UNKNOWN_HANDLE;
+    return Error(IOStatus, IO__error_message(IO_UNKNOWN_HANDLE), IO_UNKNOWN_HANDLE);
 }
 
 static bool IO__directory_contains(DirectoryEntryPtr entries, size_t count, ConstBStringPtr name)
@@ -424,11 +509,11 @@ static bool IO__directory_contains(DirectoryEntryPtr entries, size_t count, Cons
     return false;
 }
 
-DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
+Result(DirectoryEntryCount) list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
 {
     if (max_entries == 0)
     {
-        return 0;
+        return Success(DirectoryEntryCount, 0);
     }
     size_t count = 0;
     uint64_t offset = 0;
@@ -439,24 +524,24 @@ DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, si
         {
             if (reply.status == IO_INVALID_PATH && count > 0)
             {
-                return (DirectoryEntryCount)count;
+                return Success(DirectoryEntryCount, (DirectoryEntryCount)count);
             }
-            return reply.status;
+            return Error(DirectoryEntryCount, IO__error_message(reply.status), reply.status);
         }
         if (reply.directory.count > IO_DIRECTORY_BATCH_CAPACITY)
         {
-            return IO_UNKNOWN_BUFFER;
+            return Error(DirectoryEntryCount, IO__error_message(IO_UNKNOWN_BUFFER), IO_UNKNOWN_BUFFER);
         }
         if (reply.directory.count == 0)
         {
-            return (DirectoryEntryCount)count;
+            return Success(DirectoryEntryCount, (DirectoryEntryCount)count);
         }
         for (uint64_t index = 0; index < reply.directory.count && count < max_entries; index++)
         {
             DirectoryEntry entry = reply.directory.entries[index];
             if (entry.name_len >= IO_DIRENT_NAME_MAX)
             {
-                return IO_UNKNOWN_BUFFER;
+                return Error(DirectoryEntryCount, IO__error_message(IO_UNKNOWN_BUFFER), IO_UNKNOWN_BUFFER);
             }
             BString name = BString__from_chars(entry.name, entry.name_len);
             // Namespace overlays arrive first and take precedence over disk entries.
@@ -467,10 +552,10 @@ DirectoryEntryCount list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, si
         }
         offset += reply.directory.count;
     }
-    return (DirectoryEntryCount)count;
+    return Success(DirectoryEntryCount, (DirectoryEntryCount)count);
 }
 
-DirectoryEntryCount IO__list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
+Result(DirectoryEntryCount) IO__list_dir(ConstBStringPtr path, DirectoryEntryPtr entries, size_t max_entries)
 {
     return list_dir(path, entries, max_entries);
 }
@@ -479,7 +564,7 @@ Result(IOFileInfo) IO__file_info(ConstBStringPtr path)
 {
     IOReply reply = IOClient__path_request(IO_REQUEST_FILE_INFO, path, 0, 0);
     return reply.status == IO_OK ? Success(IOFileInfo, reply.file_info)
-                                 : Error(IOFileInfo, bstr("File information unavailable"), reply.status);
+                                 : Error(IOFileInfo, IO__error_message(reply.status), reply.status);
 }
 
 const char * io_status_string(IOStatus status)
@@ -533,42 +618,42 @@ const char * io_status_string(IOStatus status)
     return "IO_UNKNOWN_ERROR";
 }
 
-IOStatus make_dir(ConstBStringPtr path)
+Result(IOStatus) make_dir(ConstBStringPtr path)
 {
-    return IOClient__path_request(IO_REQUEST_MKDIR, path, 0, 0).status;
+    return IO__status_result(IOClient__path_request(IO_REQUEST_MKDIR, path, 0, 0).status);
 }
 
-IOStatus IO__make_dir(ConstBStringPtr path)
+Result(IOStatus) IO__make_dir(ConstBStringPtr path)
 {
     return make_dir(path);
 }
 
-IOStatus remove_file(ConstBStringPtr path)
+Result(IOStatus) remove_file(ConstBStringPtr path)
 {
     return remove_file_with_flags(path, 0);
 }
 
-IOStatus IO__remove_file(ConstBStringPtr path)
+Result(IOStatus) IO__remove_file(ConstBStringPtr path)
 {
     return remove_file(path);
 }
 
-IOStatus remove_file_with_flags(ConstBStringPtr path, Flags flags)
+Result(IOStatus) remove_file_with_flags(ConstBStringPtr path, Flags flags)
 {
-    return IOClient__path_request(IO_REQUEST_REMOVE, path, flags, 0).status;
+    return IO__status_result(IOClient__path_request(IO_REQUEST_REMOVE, path, flags, 0).status);
 }
 
-IOStatus IO__remove_file_with_flags(ConstBStringPtr path, Flags flags)
+Result(IOStatus) IO__remove_file_with_flags(ConstBStringPtr path, Flags flags)
 {
     return remove_file_with_flags(path, flags);
 }
 
-IOStatus link_file(ConstBStringPtr source_path, ConstBStringPtr target_path)
+Result(IOStatus) link_file(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
-    return IOClient__link(source_path, target_path);
+    return IO__status_result(IOClient__link(source_path, target_path));
 }
 
-IOStatus IO__link_file(ConstBStringPtr source_path, ConstBStringPtr target_path)
+Result(IOStatus) IO__link_file(ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
     return link_file(source_path, target_path);
 }

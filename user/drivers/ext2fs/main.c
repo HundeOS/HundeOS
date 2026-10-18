@@ -320,12 +320,62 @@ static size_t Ext2fsVolume__inode_offset(Ext2fsVolumePtr self, uint32_t inode_nu
 
 static Result(Ext2fsCode) Ext2fsVolume__mount(Ext2fsVolumePtr self)
 {
-    Ext2fsBlockData block;
     match_result(
         Ext2fs__read_block(self, EXT2FS_SUPERBLOCK_BLOCK),
-        success(data)
+        success(block)
         {
-            block = data;
+            if (Ext2fs__read_u16(block.data, 56) != EXT2FS_SUPER_MAGIC)
+            {
+                DRIVER_DEBUG("ext2fs: invalid magic\n");
+                return Error(Ext2fsCode, ext2fs_unsupported, EXT2FS_UNSUPPORTED);
+            }
+
+            uint32_t log_block_size = Ext2fs__read_u32(block.data, 24);
+            if (log_block_size != 0)
+            {
+                DRIVER_DEBUG("ext2fs: only 1024 byte blocks are supported\n");
+                return Error(Ext2fsCode, ext2fs_unsupported, EXT2FS_UNSUPPORTED);
+            }
+
+            self->blocks_count = Ext2fs__read_u32(block.data, 4);
+            self->first_data_block = Ext2fs__read_u32(block.data, 20);
+            self->blocks_per_group = Ext2fs__read_u32(block.data, 32);
+            self->inodes_per_group = Ext2fs__read_u32(block.data, 40);
+            self->inode_size = Ext2fs__read_u16(block.data, 88);
+            if (self->inode_size == 0)
+            {
+                self->inode_size = 128;
+            }
+
+            self->group_count = (self->blocks_count + self->blocks_per_group - 1) / self->blocks_per_group;
+            if (self->group_count > EXT2FS_MAX_GROUPS)
+            {
+                DRIVER_DEBUG("ext2fs: too many groups\n");
+                return Error(Ext2fsCode, ext2fs_unsupported, EXT2FS_UNSUPPORTED);
+            }
+
+            match_result(
+                Ext2fs__read_block(self, 2),
+                success(block)
+                {
+                    for (uint32_t group = 0; group < self->group_count; group++)
+                    {
+                        self->group_block_bitmap_block[group] = Ext2fs__read_u32(block.data, group * 32U);
+                        self->group_inode_bitmap_block[group] = Ext2fs__read_u32(block.data, group * 32U + 4U);
+                        self->inode_table_block[group] = Ext2fs__read_u32(block.data, group * 32U + 8U);
+                    }
+
+                    self->block_bitmap_block = self->group_block_bitmap_block[0];
+                    self->inode_bitmap_block = self->group_inode_bitmap_block[0];
+                    return Success(Ext2fsCode, EXT2FS_OK);
+                },
+                error(code, message)
+                {
+                    DRIVER_DEBUG("ext2fs: failed to read group descriptors\n");
+                    return Error(Ext2fsCode, message, code);
+                }
+            );
+            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         error(code, message)
         {
@@ -333,60 +383,7 @@ static Result(Ext2fsCode) Ext2fsVolume__mount(Ext2fsVolumePtr self)
             return Error(Ext2fsCode, message, code);
         }
     );
-
-    if (Ext2fs__read_u16(block.data, 56) != EXT2FS_SUPER_MAGIC)
-    {
-        DRIVER_DEBUG("ext2fs: invalid magic\n");
-        return Error(Ext2fsCode, ext2fs_unsupported, EXT2FS_UNSUPPORTED);
-    }
-
-    uint32_t log_block_size = Ext2fs__read_u32(block.data, 24);
-    if (log_block_size != 0)
-    {
-        DRIVER_DEBUG("ext2fs: only 1024 byte blocks are supported\n");
-        return Error(Ext2fsCode, ext2fs_unsupported, EXT2FS_UNSUPPORTED);
-    }
-
-    self->blocks_count = Ext2fs__read_u32(block.data, 4);
-    self->first_data_block = Ext2fs__read_u32(block.data, 20);
-    self->blocks_per_group = Ext2fs__read_u32(block.data, 32);
-    self->inodes_per_group = Ext2fs__read_u32(block.data, 40);
-    self->inode_size = Ext2fs__read_u16(block.data, 88);
-    if (self->inode_size == 0)
-    {
-        self->inode_size = 128;
-    }
-
-    self->group_count = (self->blocks_count + self->blocks_per_group - 1) / self->blocks_per_group;
-    if (self->group_count > EXT2FS_MAX_GROUPS)
-    {
-        DRIVER_DEBUG("ext2fs: too many groups\n");
-        return Error(Ext2fsCode, ext2fs_unsupported, EXT2FS_UNSUPPORTED);
-    }
-
-    match_result(
-        Ext2fs__read_block(self, 2),
-        success(data)
-        {
-            block = data;
-        },
-        error(code, message)
-        {
-            DRIVER_DEBUG("ext2fs: failed to read group descriptors\n");
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    for (uint32_t group = 0; group < self->group_count; group++)
-    {
-        self->group_block_bitmap_block[group] = Ext2fs__read_u32(block.data, group * 32U);
-        self->group_inode_bitmap_block[group] = Ext2fs__read_u32(block.data, group * 32U + 4U);
-        self->inode_table_block[group] = Ext2fs__read_u32(block.data, group * 32U + 8U);
-    }
-
-    self->block_bitmap_block = self->group_block_bitmap_block[0];
-    self->inode_bitmap_block = self->group_inode_bitmap_block[0];
-    return Success(Ext2fsCode, EXT2FS_OK);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsInode) Ext2fsVolume__read_inode(Ext2fsVolumePtr self, uint32_t inode_number)
@@ -414,39 +411,37 @@ static Result(Ext2fsInode) Ext2fsVolume__read_inode(Ext2fsVolumePtr self, uint32
         return Error(Ext2fsInode, ext2fs_invalid_path, EXT2FS_INVALID_PATH);
     }
 
-    Ext2fsBlockData data;
     match_result(
         Ext2fs__read_block(self, block),
-        success(block_data)
+        success(data)
         {
-            data = block_data;
+            Ext2fsInode target;
+            target.mode = Ext2fs__read_u16(data.data, offset);
+            target.size = Ext2fs__read_u32(data.data, offset + 4);
+            target.links_count = Ext2fs__read_u16(data.data, offset + 26);
+            target.sectors = Ext2fs__read_u32(data.data, offset + 28);
+            if (target.links_count == 0)
+            {
+                target.links_count = 1;
+            }
+            for (uint32_t i = 0; i < 15; i++)
+            {
+                target.block[i] = Ext2fs__read_u32(data.data, offset + 40 + (i * 4));
+            }
+
+            if (Ext2fsInodeCache__put(&self->inode_cache, inode_number, target) == CACHE_EVICTED)
+            {
+                IODiagnostics__record(IO_DIAGNOSTIC_INODE_CACHE_EVICTIONS, 1);
+            }
+
+            return Success(Ext2fsInode, target);
         },
         error(code, message)
         {
             return Error(Ext2fsInode, message, code);
         }
     );
-
-    Ext2fsInode target;
-    target.mode = Ext2fs__read_u16(data.data, offset);
-    target.size = Ext2fs__read_u32(data.data, offset + 4);
-    target.links_count = Ext2fs__read_u16(data.data, offset + 26);
-    target.sectors = Ext2fs__read_u32(data.data, offset + 28);
-    if (target.links_count == 0)
-    {
-        target.links_count = 1;
-    }
-    for (uint32_t i = 0; i < 15; i++)
-    {
-        target.block[i] = Ext2fs__read_u32(data.data, offset + 40 + (i * 4));
-    }
-
-    if (Ext2fsInodeCache__put(&self->inode_cache, inode_number, target) == CACHE_EVICTED)
-    {
-        IODiagnostics__record(IO_DIAGNOSTIC_INODE_CACHE_EVICTIONS, 1);
-    }
-
-    return Success(Ext2fsInode, target);
+    return Error(Ext2fsInode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static DirectoryEntry Ext2fs__directory_entry(ConstBStringPtr name, uint8_t file_type, Ext2fsInodePtr inode)
@@ -469,42 +464,42 @@ static Result(uint32_t) Ext2fs__find_child_inode(Ext2fsVolumePtr self, Ext2fsIno
             continue;
         }
 
-        Ext2fsBlockData block;
         match_result(
             Ext2fs__read_block(self, directory->block[i]),
-            success(block_data)
+            success(block)
             {
-                block = block_data;
+                size_t offset = 0;
+                while (offset + 8 <= EXT2FS_BLOCK_SIZE)
+                {
+                    uint32_t candidate_inode = Ext2fs__read_u32(block.data, offset);
+                    uint16_t rec_len = Ext2fs__read_u16(block.data, offset + 4);
+                    uint8_t name_len = block.data[offset + 6];
+
+                    if (rec_len == 0)
+                    {
+                        break;
+                    }
+
+                    if (candidate_inode != 0 && name_len > 0)
+                    {
+                        BString candidate = BString__from_chars((const char *)&block.data[offset + 8], name_len);
+                        if (BString__equals(&candidate, name))
+                        {
+                            return Success(uint32_t, candidate_inode);
+                        }
+                    }
+
+                    offset += rec_len;
+                }
+
+                continue;
             },
             error(code, message)
             {
                 return Error(uint32_t, message, code);
             }
         );
-
-        size_t offset = 0;
-        while (offset + 8 <= EXT2FS_BLOCK_SIZE)
-        {
-            uint32_t candidate_inode = Ext2fs__read_u32(block.data, offset);
-            uint16_t rec_len = Ext2fs__read_u16(block.data, offset + 4);
-            uint8_t name_len = block.data[offset + 6];
-
-            if (rec_len == 0)
-            {
-                break;
-            }
-
-            if (candidate_inode != 0 && name_len > 0)
-            {
-                BString candidate = BString__from_chars((const char *)&block.data[offset + 8], name_len);
-                if (BString__equals(&candidate, name))
-                {
-                    return Success(uint32_t, candidate_inode);
-                }
-            }
-
-            offset += rec_len;
-        }
+        return Error(uint32_t, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
     }
 
     return Error(uint32_t, ext2fs_not_found, EXT2FS_NOT_FOUND);
@@ -512,58 +507,59 @@ static Result(uint32_t) Ext2fs__find_child_inode(Ext2fsVolumePtr self, Ext2fsIno
 
 static Result(Ext2fsInode) Ext2fsVolume__inode_for_path(Ext2fsVolumePtr self, ConstBStringPtr path)
 {
-    Ext2fsInode current;
     match_result(
         Ext2fsVolume__read_inode(self, EXT2FS_ROOT_INODE),
-        success(inode)
+        success(current)
         {
-            current = inode;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsInode, message, code);
-        }
-    );
-
-    BStringArray segments = BString__split(path, '/');
-    for (uint64_t i = 0; i < BStringArray__len(&segments); i++)
-    {
-        match_optional(
-            BStringArray__at(&segments, i),
-            some(segment)
+            BStringArray segments = BString__split(path, '/');
+            for (uint64_t i = 0; i < BStringArray__len(&segments); i++)
             {
-                if (BString__is_empty(&segment))
-                {
-                    continue;
-                }
-
-                match_result(
-                    Ext2fs__find_child_inode(self, &current, &segment),
-                    success(child_inode)
+                match_optional(
+                    BStringArray__at(&segments, i),
+                    some(segment)
                     {
+                        if (BString__is_empty(&segment))
+                        {
+                            continue;
+                        }
+
                         match_result(
-                            Ext2fsVolume__read_inode(self, child_inode),
-                            success(inode)
+                            Ext2fs__find_child_inode(self, &current, &segment),
+                            success(child_inode)
                             {
-                                current = inode;
+                                match_result(
+                                    Ext2fsVolume__read_inode(self, child_inode),
+                                    success(inode)
+                                    {
+                                        current = inode;
+                                        continue;
+                                    },
+                                    error(code, message)
+                                    {
+                                        return Error(Ext2fsInode, message, code);
+                                    }
+                                );
+                                return Error(Ext2fsInode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
                             },
                             error(code, message)
                             {
                                 return Error(Ext2fsInode, message, code);
                             }
                         );
+                        return Error(Ext2fsInode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
                     },
-                    error(code, message)
-                    {
-                        return Error(Ext2fsInode, message, code);
-                    }
+                    none_do_nothing()
                 );
-            },
-            none_do_nothing()
-        );
-    }
+            }
 
-    return Success(Ext2fsInode, current);
+            return Success(Ext2fsInode, current);
+        },
+        error(code, message)
+        {
+            return Error(Ext2fsInode, message, code);
+        }
+    );
+    return Error(Ext2fsInode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static DirectoryEntryCount Ext2fsVolume__list_dir_from(Ext2fsVolumePtr self, ConstBStringPtr path,
@@ -696,60 +692,60 @@ static Result(Ext2fsResolvedParent) Ext2fsVolume__resolve_parent(Ext2fsVolumePtr
         return Error(Ext2fsResolvedParent, ext2fs_invalid_path, EXT2FS_INVALID_PATH);
     }
 
-    Ext2fsInode current;
     match_result(
         Ext2fsVolume__read_inode(self, EXT2FS_ROOT_INODE),
-        success(inode)
+        success(current)
         {
-            current = inode;
+            uint32_t current_inode = EXT2FS_ROOT_INODE;
+            for (uint64_t i = 0; i + 1 < BStringArray__len(&segments); i++)
+            {
+                BString segment = Ext2fs__segment_at(&segments, i);
+                match_result(
+                    Ext2fs__find_child_inode(self, &current, &segment),
+                    success(inode_number)
+                    {
+                        current_inode = inode_number;
+
+                        match_result(
+                            Ext2fsVolume__read_inode(self, current_inode),
+                            success(inode)
+                            {
+                                current = inode;
+                                if (!Ext2fsInode__is_dir(&current))
+                                {
+                                    return Error(Ext2fsResolvedParent, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
+                                }
+                                continue;
+                            },
+                            error(code, message)
+                            {
+                                return Error(Ext2fsResolvedParent, message, code);
+                            }
+                        );
+                        return Error(Ext2fsResolvedParent, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                    },
+                    error(code, message)
+                    {
+                        return Error(Ext2fsResolvedParent, message, code);
+                    }
+                );
+                return Error(Ext2fsResolvedParent, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+            }
+
+            BString leaf_name = Ext2fs__segment_at(&segments, BStringArray__len(&segments) - 1);
+            if (BString__is_empty(&leaf_name))
+            {
+                return Error(Ext2fsResolvedParent, ext2fs_invalid_path, EXT2FS_INVALID_PATH);
+            }
+
+            return Success(Ext2fsResolvedParent, Ext2fsResolvedParent__new(current_inode, &leaf_name));
         },
         error(code, message)
         {
             return Error(Ext2fsResolvedParent, message, code);
         }
     );
-
-    uint32_t current_inode = EXT2FS_ROOT_INODE;
-    for (uint64_t i = 0; i + 1 < BStringArray__len(&segments); i++)
-    {
-        BString segment = Ext2fs__segment_at(&segments, i);
-        match_result(
-            Ext2fs__find_child_inode(self, &current, &segment),
-            success(inode_number)
-            {
-                current_inode = inode_number;
-            },
-            error(code, message)
-            {
-                return Error(Ext2fsResolvedParent, message, code);
-            }
-        );
-
-        match_result(
-            Ext2fsVolume__read_inode(self, current_inode),
-            success(inode)
-            {
-                current = inode;
-            },
-            error(code, message)
-            {
-                return Error(Ext2fsResolvedParent, message, code);
-            }
-        );
-
-        if (!Ext2fsInode__is_dir(&current))
-        {
-            return Error(Ext2fsResolvedParent, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
-        }
-    }
-
-    BString leaf_name = Ext2fs__segment_at(&segments, BStringArray__len(&segments) - 1);
-    if (BString__is_empty(&leaf_name))
-    {
-        return Error(Ext2fsResolvedParent, ext2fs_invalid_path, EXT2FS_INVALID_PATH);
-    }
-
-    return Success(Ext2fsResolvedParent, Ext2fsResolvedParent__new(current_inode, &leaf_name));
+    return Error(Ext2fsResolvedParent, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsCode) Ext2fsVolume__write_inode(Ext2fsVolumePtr self, uint32_t inode_number, Ext2fsInodePtr source)
@@ -761,41 +757,39 @@ static Result(Ext2fsCode) Ext2fsVolume__write_inode(Ext2fsVolumePtr self, uint32
         return Error(Ext2fsCode, ext2fs_invalid_path, EXT2FS_INVALID_PATH);
     }
 
-    Ext2fsBlockData block;
     match_result(
         Ext2fs__read_block(self, inode_block),
-        success(block_data)
+        success(block)
         {
-            block = block_data;
+            Ext2fs__write_u16(block.data, inode_offset, source->mode);
+            Ext2fs__write_u32(block.data, inode_offset + 4, source->size);
+            Ext2fs__write_u16(block.data, inode_offset + 26, source->links_count);
+            Ext2fs__write_u32(block.data, inode_offset + 28, source->sectors);
+            for (uint32_t i = 0; i < 15; i++)
+            {
+                Ext2fs__write_u32(block.data, inode_offset + 40 + (i * 4), source->block[i]);
+            }
+
+            match_result(
+                Ext2fs__write_block(self, inode_block, &block.data),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(Ext2fsCode, message, code);
+                }
+            );
+            if (Ext2fsInodeCache__put(&self->inode_cache, inode_number, *source) == CACHE_EVICTED)
+            {
+                IODiagnostics__record(IO_DIAGNOSTIC_INODE_CACHE_EVICTIONS, 1);
+            }
+            return Success(Ext2fsCode, EXT2FS_OK);
         },
         error(code, message)
         {
             return Error(Ext2fsCode, message, code);
         }
     );
-
-    Ext2fs__write_u16(block.data, inode_offset, source->mode);
-    Ext2fs__write_u32(block.data, inode_offset + 4, source->size);
-    Ext2fs__write_u16(block.data, inode_offset + 26, source->links_count);
-    Ext2fs__write_u32(block.data, inode_offset + 28, source->sectors);
-    for (uint32_t i = 0; i < 15; i++)
-    {
-        Ext2fs__write_u32(block.data, inode_offset + 40 + (i * 4), source->block[i]);
-    }
-
-    match_result(
-        Ext2fs__write_block(self, inode_block, &block.data),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    if (Ext2fsInodeCache__put(&self->inode_cache, inode_number, *source) == CACHE_EVICTED)
-    {
-        IODiagnostics__record(IO_DIAGNOSTIC_INODE_CACHE_EVICTIONS, 1);
-    }
-    return Success(Ext2fsCode, EXT2FS_OK);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static bool Ext2fs__bitmap_bit_is_set(uint8_t * bitmap, uint32_t index)
@@ -850,223 +844,217 @@ static uint16_t Ext2fs__dirent_record_size(size_t name_len)
 static Result(Ext2fsCode) Ext2fsVolume__update_allocation_counts(Ext2fsVolumePtr self, int32_t block_delta,
                                                                  int32_t inode_delta, int32_t used_dirs_delta)
 {
-    Ext2fsBlockData superblock;
-    Ext2fsBlockData group_desc;
     match_result(
         Ext2fs__read_block(self, EXT2FS_SUPERBLOCK_BLOCK),
-        success(block_data)
+        success(superblock)
         {
-            superblock = block_data;
+            match_result(
+                Ext2fs__read_block(self, 2),
+                success(group_desc)
+                {
+                    uint32_t free_blocks = Ext2fs__read_u32(superblock.data, 12);
+                    uint32_t free_inodes = Ext2fs__read_u32(superblock.data, 16);
+                    uint16_t group_free_blocks = Ext2fs__read_u16(group_desc.data, 12);
+                    uint16_t group_free_inodes = Ext2fs__read_u16(group_desc.data, 14);
+                    uint16_t used_dirs = Ext2fs__read_u16(group_desc.data, 16);
+
+                    Ext2fs__write_u32(superblock.data, 12, (uint32_t)((int32_t)free_blocks + block_delta));
+                    Ext2fs__write_u32(superblock.data, 16, (uint32_t)((int32_t)free_inodes + inode_delta));
+                    Ext2fs__write_u16(group_desc.data, 12, (uint16_t)((int32_t)group_free_blocks + block_delta));
+                    Ext2fs__write_u16(group_desc.data, 14, (uint16_t)((int32_t)group_free_inodes + inode_delta));
+                    Ext2fs__write_u16(group_desc.data, 16, (uint16_t)((int32_t)used_dirs + used_dirs_delta));
+
+                    match_result(
+                        Ext2fs__write_block(self, EXT2FS_SUPERBLOCK_BLOCK, &superblock.data),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return Error(Ext2fsCode, message, code);
+                        }
+                    );
+                    return Ext2fs__write_block(self, 2, &group_desc.data);
+                },
+                error(code, message)
+                {
+                    return Error(Ext2fsCode, message, code);
+                }
+            );
+            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         error(code, message)
         {
             return Error(Ext2fsCode, message, code);
         }
     );
-    match_result(
-        Ext2fs__read_block(self, 2),
-        success(block_data)
-        {
-            group_desc = block_data;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    uint32_t free_blocks = Ext2fs__read_u32(superblock.data, 12);
-    uint32_t free_inodes = Ext2fs__read_u32(superblock.data, 16);
-    uint16_t group_free_blocks = Ext2fs__read_u16(group_desc.data, 12);
-    uint16_t group_free_inodes = Ext2fs__read_u16(group_desc.data, 14);
-    uint16_t used_dirs = Ext2fs__read_u16(group_desc.data, 16);
-
-    Ext2fs__write_u32(superblock.data, 12, (uint32_t)((int32_t)free_blocks + block_delta));
-    Ext2fs__write_u32(superblock.data, 16, (uint32_t)((int32_t)free_inodes + inode_delta));
-    Ext2fs__write_u16(group_desc.data, 12, (uint16_t)((int32_t)group_free_blocks + block_delta));
-    Ext2fs__write_u16(group_desc.data, 14, (uint16_t)((int32_t)group_free_inodes + inode_delta));
-    Ext2fs__write_u16(group_desc.data, 16, (uint16_t)((int32_t)used_dirs + used_dirs_delta));
-
-    match_result(
-        Ext2fs__write_block(self, EXT2FS_SUPERBLOCK_BLOCK, &superblock.data),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    return Ext2fs__write_block(self, 2, &group_desc.data);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsCode)
     Ext2fsVolume__insert_dirent(Ext2fsVolumePtr self, uint32_t directory_inode_number, ConstBStringPtr name,
                                 uint32_t child_inode_number, uint8_t child_type)
 {
-    Ext2fsInode directory_inode;
     match_result(
         Ext2fsVolume__read_inode(self, directory_inode_number),
-        success(inode)
+        success(directory_inode)
         {
-            directory_inode = inode;
+            if (!Ext2fsInode__is_dir(&directory_inode))
+            {
+                return Error(Ext2fsCode, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
+            }
+
+            uint16_t required_len = Ext2fs__dirent_record_size(BString__length(name));
+            for (uint32_t block_index = 0; block_index < EXT2FS_NDIR_BLOCKS; block_index++)
+            {
+                if (directory_inode.block[block_index] == 0)
+                {
+                    continue;
+                }
+
+                match_result(
+                    Ext2fs__read_block(self, directory_inode.block[block_index]),
+                    success(block)
+                    {
+                        size_t offset = 0;
+                        while (offset + 8 <= EXT2FS_BLOCK_SIZE)
+                        {
+                            uint32_t entry_inode = Ext2fs__read_u32(block.data, offset);
+                            uint16_t rec_len = Ext2fs__read_u16(block.data, offset + 4);
+                            uint8_t name_len = block.data[offset + 6];
+                            if (rec_len == 0)
+                            {
+                                break;
+                            }
+
+                            if (entry_inode != 0)
+                            {
+                                uint16_t actual_len = Ext2fs__dirent_record_size(name_len);
+                                if (rec_len >= actual_len + required_len)
+                                {
+                                    size_t new_offset = offset + actual_len;
+                                    Ext2fs__write_u16(block.data, offset + 4, actual_len);
+                                    Ext2fs__write_u32(block.data, new_offset, child_inode_number);
+                                    Ext2fs__write_u16(block.data, new_offset + 4, rec_len - actual_len);
+                                    block.data[new_offset + 6] = (uint8_t)BString__length(name);
+                                    block.data[new_offset + 7] = child_type;
+                                    for (StringPos i = 0; i < BString__length(name); i++)
+                                    {
+                                        block.data[new_offset + 8 + i] = (uint8_t)BString__char_at_or(name, i, '\0');
+                                    }
+                                    return Ext2fs__write_block(self, directory_inode.block[block_index], &block.data);
+                                }
+                            }
+
+                            offset += rec_len;
+                        }
+
+                        continue;
+                    },
+                    error(code, message)
+                    {
+                        return Error(Ext2fsCode, message, code);
+                    }
+                );
+                return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+            }
+
+            return Error(Ext2fsCode, ext2fs_no_space, EXT2FS_NO_SPACE);
         },
         error(code, message)
         {
             return Error(Ext2fsCode, message, code);
         }
     );
-
-    if (!Ext2fsInode__is_dir(&directory_inode))
-    {
-        return Error(Ext2fsCode, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
-    }
-
-    uint16_t required_len = Ext2fs__dirent_record_size(BString__length(name));
-    for (uint32_t block_index = 0; block_index < EXT2FS_NDIR_BLOCKS; block_index++)
-    {
-        if (directory_inode.block[block_index] == 0)
-        {
-            continue;
-        }
-
-        Ext2fsBlockData block;
-        match_result(
-            Ext2fs__read_block(self, directory_inode.block[block_index]),
-            success(block_data)
-            {
-                block = block_data;
-            },
-            error(code, message)
-            {
-                return Error(Ext2fsCode, message, code);
-            }
-        );
-
-        size_t offset = 0;
-        while (offset + 8 <= EXT2FS_BLOCK_SIZE)
-        {
-            uint32_t entry_inode = Ext2fs__read_u32(block.data, offset);
-            uint16_t rec_len = Ext2fs__read_u16(block.data, offset + 4);
-            uint8_t name_len = block.data[offset + 6];
-            if (rec_len == 0)
-            {
-                break;
-            }
-
-            if (entry_inode != 0)
-            {
-                uint16_t actual_len = Ext2fs__dirent_record_size(name_len);
-                if (rec_len >= actual_len + required_len)
-                {
-                    size_t new_offset = offset + actual_len;
-                    Ext2fs__write_u16(block.data, offset + 4, actual_len);
-                    Ext2fs__write_u32(block.data, new_offset, child_inode_number);
-                    Ext2fs__write_u16(block.data, new_offset + 4, rec_len - actual_len);
-                    block.data[new_offset + 6] = (uint8_t)BString__length(name);
-                    block.data[new_offset + 7] = child_type;
-                    for (StringPos i = 0; i < BString__length(name); i++)
-                    {
-                        block.data[new_offset + 8 + i] = (uint8_t)BString__char_at_or(name, i, '\0');
-                    }
-                    return Ext2fs__write_block(self, directory_inode.block[block_index], &block.data);
-                }
-            }
-
-            offset += rec_len;
-        }
-    }
-
-    return Error(Ext2fsCode, ext2fs_no_space, EXT2FS_NO_SPACE);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(uint32_t)
     Ext2fsVolume__remove_dirent(Ext2fsVolumePtr self, uint32_t directory_inode_number, ConstBStringPtr name)
 {
-    Ext2fsInode directory_inode;
     match_result(
         Ext2fsVolume__read_inode(self, directory_inode_number),
-        success(inode)
+        success(directory_inode)
         {
-            directory_inode = inode;
+            if (!Ext2fsInode__is_dir(&directory_inode))
+            {
+                return Error(uint32_t, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
+            }
+
+            for (uint32_t block_index = 0; block_index < EXT2FS_NDIR_BLOCKS; block_index++)
+            {
+                if (directory_inode.block[block_index] == 0)
+                {
+                    continue;
+                }
+
+                match_result(
+                    Ext2fs__read_block(self, directory_inode.block[block_index]),
+                    success(block)
+                    {
+                        size_t offset = 0;
+                        size_t previous_offset = 0;
+                        bool has_previous = false;
+                        while (offset + 8 <= EXT2FS_BLOCK_SIZE)
+                        {
+                            uint32_t entry_inode = Ext2fs__read_u32(block.data, offset);
+                            uint16_t rec_len = Ext2fs__read_u16(block.data, offset + 4);
+                            uint8_t name_len = block.data[offset + 6];
+                            if (rec_len == 0)
+                            {
+                                break;
+                            }
+
+                            if (entry_inode != 0 && name_len > 0)
+                            {
+                                BString entry_name =
+                                    BString__from_chars((const char *)&block.data[offset + 8], name_len);
+                                if (BString__equals(&entry_name, name))
+                                {
+                                    if (has_previous)
+                                    {
+                                        uint16_t previous_len = Ext2fs__read_u16(block.data, previous_offset + 4);
+                                        Ext2fs__write_u16(block.data, previous_offset + 4, previous_len + rec_len);
+                                    }
+                                    else
+                                    {
+                                        Ext2fs__write_u32(block.data, offset, 0);
+                                    }
+                                    match_result(
+                                        Ext2fs__write_block(self, directory_inode.block[block_index], &block.data),
+                                        success(code)
+                                        {
+                                            return Success(uint32_t, entry_inode);
+                                        },
+                                        error(code, message)
+                                        {
+                                            return Error(uint32_t, message, code);
+                                        }
+                                    );
+                                }
+                            }
+
+                            previous_offset = offset;
+                            has_previous = true;
+                            offset += rec_len;
+                        }
+
+                        continue;
+                    },
+                    error(code, message)
+                    {
+                        return Error(uint32_t, message, code);
+                    }
+                );
+                return Error(uint32_t, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+            }
+
+            return Error(uint32_t, ext2fs_not_found, EXT2FS_NOT_FOUND);
         },
         error(code, message)
         {
             return Error(uint32_t, message, code);
         }
     );
-
-    if (!Ext2fsInode__is_dir(&directory_inode))
-    {
-        return Error(uint32_t, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
-    }
-
-    for (uint32_t block_index = 0; block_index < EXT2FS_NDIR_BLOCKS; block_index++)
-    {
-        if (directory_inode.block[block_index] == 0)
-        {
-            continue;
-        }
-
-        Ext2fsBlockData block;
-        match_result(
-            Ext2fs__read_block(self, directory_inode.block[block_index]),
-            success(block_data)
-            {
-                block = block_data;
-            },
-            error(code, message)
-            {
-                return Error(uint32_t, message, code);
-            }
-        );
-
-        size_t offset = 0;
-        size_t previous_offset = 0;
-        bool has_previous = false;
-        while (offset + 8 <= EXT2FS_BLOCK_SIZE)
-        {
-            uint32_t entry_inode = Ext2fs__read_u32(block.data, offset);
-            uint16_t rec_len = Ext2fs__read_u16(block.data, offset + 4);
-            uint8_t name_len = block.data[offset + 6];
-            if (rec_len == 0)
-            {
-                break;
-            }
-
-            if (entry_inode != 0 && name_len > 0)
-            {
-                BString entry_name = BString__from_chars((const char *)&block.data[offset + 8], name_len);
-                if (BString__equals(&entry_name, name))
-                {
-                    if (has_previous)
-                    {
-                        uint16_t previous_len = Ext2fs__read_u16(block.data, previous_offset + 4);
-                        Ext2fs__write_u16(block.data, previous_offset + 4, previous_len + rec_len);
-                    }
-                    else
-                    {
-                        Ext2fs__write_u32(block.data, offset, 0);
-                    }
-                    match_result(
-                        Ext2fs__write_block(self, directory_inode.block[block_index], &block.data),
-                        success(code)
-                        {
-                            return Success(uint32_t, entry_inode);
-                        },
-                        error(code, message)
-                        {
-                            return Error(uint32_t, message, code);
-                        }
-                    );
-                }
-            }
-
-            previous_offset = offset;
-            has_previous = true;
-            offset += rec_len;
-        }
-    }
-
-    return Error(uint32_t, ext2fs_not_found, EXT2FS_NOT_FOUND);
+    return Error(uint32_t, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static void Ext2fsInode__reset_file(Ext2fsInodePtr inode, uint32_t size)
@@ -1115,30 +1103,29 @@ static void Ext2fs__initialise_dir_block(uint8_t * block, uint32_t self_inode, u
 static Result(uint32_t)
     Ext2fsVolume__allocate_zeroed_block(Ext2fsVolumePtr self, uint8_t * block_bitmap, int32_t * free_block_delta)
 {
-    uint32_t block_number;
     match_result(
         Ext2fsVolume__allocate_block_from_bitmap(self, block_bitmap),
-        success(value)
+        success(block_number)
         {
-            block_number = value;
+            Ext2fsBlockData empty = Ext2fsBlockData__new();
+            match_result(
+                Ext2fs__write_block(self, block_number, &empty.data),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    Ext2fs__bitmap_clear_bit(block_bitmap, block_number - self->first_data_block);
+                    return Error(uint32_t, message, code);
+                }
+            );
+            (*free_block_delta)--;
+            return Success(uint32_t, block_number);
         },
         error(code, message)
         {
             return Error(uint32_t, message, code);
         }
     );
-    Ext2fsBlockData empty = Ext2fsBlockData__new();
-    match_result(
-        Ext2fs__write_block(self, block_number, &empty.data),
-        success_do_nothing(),
-        error(code, message)
-        {
-            Ext2fs__bitmap_clear_bit(block_bitmap, block_number - self->first_data_block);
-            return Error(uint32_t, message, code);
-        }
-    );
-    (*free_block_delta)--;
-    return Success(uint32_t, block_number);
+    return Error(uint32_t, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(uint32_t)
@@ -1198,86 +1185,85 @@ static Result(uint32_t)
         );
     }
 
-    Ext2fsBlockData pointers;
     match_result(
         Ext2fs__read_block(self, inode->block[inode_slot]),
-        success(block)
+        success(pointers)
         {
-            pointers = block;
+            if (is_double)
+            {
+                uint32_t second_block = Ext2fs__read_u32(pointers.data, first_index * sizeof(uint32_t));
+                if (second_block == 0)
+                {
+                    match_result(
+                        Ext2fsVolume__allocate_zeroed_block(self, block_bitmap, free_block_delta),
+                        success(block_number)
+                        {
+                            second_block = block_number;
+                            inode->sectors += EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK;
+                        },
+                        error(code, message)
+                        {
+                            return Error(uint32_t, message, code);
+                        }
+                    );
+                    Ext2fs__write_u32(pointers.data, first_index * sizeof(uint32_t), second_block);
+                    match_result(
+                        Ext2fs__write_block(self, inode->block[inode_slot], &pointers.data),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return Error(uint32_t, message, code);
+                        }
+                    );
+                }
+                match_result(
+                    Ext2fs__read_block(self, second_block),
+                    success(block)
+                    {
+                        pointers = block;
+                        inode_slot = second_block;
+                    },
+                    error(code, message)
+                    {
+                        return Error(uint32_t, message, code);
+                    }
+                );
+            }
+
+            uint32_t data_block = Ext2fs__read_u32(pointers.data, second_index * sizeof(uint32_t));
+            if (data_block == 0)
+            {
+                match_result(
+                    Ext2fsVolume__allocate_zeroed_block(self, block_bitmap, free_block_delta),
+                    success(block_number)
+                    {
+                        data_block = block_number;
+                        inode->sectors += EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK;
+                    },
+                    error(code, message)
+                    {
+                        return Error(uint32_t, message, code);
+                    }
+                );
+                Ext2fs__write_u32(pointers.data, second_index * sizeof(uint32_t), data_block);
+                uint32_t pointer_block = is_double ? inode_slot : inode->block[EXT2FS_NDIR_BLOCKS];
+                match_result(
+                    Ext2fs__write_block(self, pointer_block, &pointers.data),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        return Error(uint32_t, message, code);
+                    }
+                );
+            }
+            return Success(uint32_t, data_block);
         },
         error(code, message)
         {
             return Error(uint32_t, message, code);
         }
     );
-    if (is_double)
-    {
-        uint32_t second_block = Ext2fs__read_u32(pointers.data, first_index * sizeof(uint32_t));
-        if (second_block == 0)
-        {
-            match_result(
-                Ext2fsVolume__allocate_zeroed_block(self, block_bitmap, free_block_delta),
-                success(block_number)
-                {
-                    second_block = block_number;
-                    inode->sectors += EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK;
-                },
-                error(code, message)
-                {
-                    return Error(uint32_t, message, code);
-                }
-            );
-            Ext2fs__write_u32(pointers.data, first_index * sizeof(uint32_t), second_block);
-            match_result(
-                Ext2fs__write_block(self, inode->block[inode_slot], &pointers.data),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(uint32_t, message, code);
-                }
-            );
-        }
-        match_result(
-            Ext2fs__read_block(self, second_block),
-            success(block)
-            {
-                pointers = block;
-            },
-            error(code, message)
-            {
-                return Error(uint32_t, message, code);
-            }
-        );
-        inode_slot = second_block;
-    }
-
-    uint32_t data_block = Ext2fs__read_u32(pointers.data, second_index * sizeof(uint32_t));
-    if (data_block == 0)
-    {
-        match_result(
-            Ext2fsVolume__allocate_zeroed_block(self, block_bitmap, free_block_delta),
-            success(block_number)
-            {
-                data_block = block_number;
-                inode->sectors += EXT2FS_DEVICE_BLOCKS_PER_EXT2_BLOCK;
-            },
-            error(code, message)
-            {
-                return Error(uint32_t, message, code);
-            }
-        );
-        Ext2fs__write_u32(pointers.data, second_index * sizeof(uint32_t), data_block);
-        uint32_t pointer_block = is_double ? inode_slot : inode->block[EXT2FS_NDIR_BLOCKS];
-        match_result(
-            Ext2fs__write_block(self, pointer_block, &pointers.data),
-            success_do_nothing(),
-            error(code, message)
-            {
-                return Error(uint32_t, message, code);
-            }
-        );
-    }
-    return Success(uint32_t, data_block);
+    return Error(uint32_t, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsCode)
@@ -1290,7 +1276,6 @@ static Result(Ext2fsCode)
     }
 
     Ext2fsBlockData inode_bitmap;
-    Ext2fsBlockData block_bitmap;
     int32_t free_block_delta = 0;
     int32_t free_inode_delta = 0;
 
@@ -1301,393 +1286,385 @@ static Result(Ext2fsCode)
             success(block_data)
             {
                 inode_bitmap = block_data;
+                Ext2fs__bitmap_set_bit(inode_bitmap.data, inode_number - 1);
+                free_inode_delta--;
             },
             error(code, message)
             {
                 return Error(Ext2fsCode, message, code);
             }
         );
-        Ext2fs__bitmap_set_bit(inode_bitmap.data, inode_number - 1);
-        free_inode_delta--;
     }
 
     match_result(
         Ext2fs__read_block(self, self->block_bitmap_block),
-        success(block_data)
+        success(block_bitmap)
         {
-            block_bitmap = block_data;
+            size_t written = 0;
+            while (written < size)
+            {
+                uint64_t file_offset = offset + written;
+                uint32_t block_offset = (uint32_t)(file_offset % EXT2FS_BLOCK_SIZE);
+                size_t copy_size = EXT2FS_BLOCK_SIZE - block_offset;
+                if (copy_size > size - written)
+                {
+                    copy_size = size - written;
+                }
+                match_result(
+                    Ext2fsVolume__ensure_data_block(self, inode, file_offset / EXT2FS_BLOCK_SIZE, block_bitmap.data,
+                                                    &free_block_delta),
+                    success(block_number)
+                    {
+                        match_result(
+                            Ext2fs__read_block(self, block_number),
+                            success(block)
+                            {
+                                Mem__memcpy(block.data + block_offset, data + written, copy_size);
+
+                                match_result(
+                                    Ext2fs__write_block(self, block_number, &block.data),
+                                    success_do_nothing(),
+                                    error(code, message)
+                                    {
+                                        return Error(Ext2fsCode, message, code);
+                                    }
+                                );
+                                written += copy_size;
+                                continue;
+                            },
+                            error(code, message)
+                            {
+                                return Error(Ext2fsCode, message, code);
+                            }
+                        );
+                        return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                    },
+                    error(code, message)
+                    {
+                        return Error(Ext2fsCode, message, code);
+                    }
+                );
+                return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+            }
+
+            if (offset + size > inode->size)
+            {
+                inode->size = (uint32_t)(offset + size);
+            }
+            match_result(
+                Ext2fsVolume__write_inode(self, inode_number, inode),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(Ext2fsCode, message, code);
+                }
+            );
+
+            if (creating)
+            {
+                match_result(
+                    Ext2fs__write_block(self, self->inode_bitmap_block, &inode_bitmap.data),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        return Error(Ext2fsCode, message, code);
+                    }
+                );
+            }
+
+            match_result(
+                Ext2fs__write_block(self, self->block_bitmap_block, &block_bitmap.data),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(Ext2fsCode, message, code);
+                }
+            );
+
+            if (free_block_delta != 0 || free_inode_delta != 0)
+            {
+                return Ext2fsVolume__update_allocation_counts(self, free_block_delta, free_inode_delta, 0);
+            }
+
+            return Success(Ext2fsCode, EXT2FS_OK);
         },
         error(code, message)
         {
             return Error(Ext2fsCode, message, code);
         }
     );
-
-    size_t written = 0;
-    while (written < size)
-    {
-        uint64_t file_offset = offset + written;
-        uint32_t block_offset = (uint32_t)(file_offset % EXT2FS_BLOCK_SIZE);
-        size_t copy_size = EXT2FS_BLOCK_SIZE - block_offset;
-        if (copy_size > size - written)
-        {
-            copy_size = size - written;
-        }
-        uint32_t block_number;
-        match_result(
-            Ext2fsVolume__ensure_data_block(self, inode, file_offset / EXT2FS_BLOCK_SIZE, block_bitmap.data,
-                                            &free_block_delta),
-            success(value)
-            {
-                block_number = value;
-            },
-            error(code, message)
-            {
-                return Error(Ext2fsCode, message, code);
-            }
-        );
-        Ext2fsBlockData block;
-        match_result(
-            Ext2fs__read_block(self, block_number),
-            success(value)
-            {
-                block = value;
-            },
-            error(code, message)
-            {
-                return Error(Ext2fsCode, message, code);
-            }
-        );
-        Mem__memcpy(block.data + block_offset, data + written, copy_size);
-
-        match_result(
-            Ext2fs__write_block(self, block_number, &block.data),
-            success_do_nothing(),
-            error(code, message)
-            {
-                return Error(Ext2fsCode, message, code);
-            }
-        );
-        written += copy_size;
-    }
-
-    if (offset + size > inode->size)
-    {
-        inode->size = (uint32_t)(offset + size);
-    }
-    match_result(
-        Ext2fsVolume__write_inode(self, inode_number, inode),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    if (creating)
-    {
-        match_result(
-            Ext2fs__write_block(self, self->inode_bitmap_block, &inode_bitmap.data),
-            success_do_nothing(),
-            error(code, message)
-            {
-                return Error(Ext2fsCode, message, code);
-            }
-        );
-    }
-
-    match_result(
-        Ext2fs__write_block(self, self->block_bitmap_block, &block_bitmap.data),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    if (free_block_delta != 0 || free_inode_delta != 0)
-    {
-        return Ext2fsVolume__update_allocation_counts(self, free_block_delta, free_inode_delta, 0);
-    }
-
-    return Success(Ext2fsCode, EXT2FS_OK);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsWriteFileResult)
     Ext2fsVolume__write_file_at_path(Ext2fsVolumePtr self, ConstBStringPtr path, uint64_t offset,
                                      ConstFilesystemFileDataPtr data, size_t size)
 {
-    Ext2fsResolvedParent parent;
     match_result(
         Ext2fsVolume__resolve_parent(self, path),
-        success(resolved)
+        success(parent)
         {
-            parent = resolved;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsWriteFileResult, message, code);
-        }
-    );
-
-    Ext2fsInode parent_inode;
-    match_result(
-        Ext2fsVolume__read_inode(self, parent.parent_inode_number),
-        success(inode)
-        {
-            parent_inode = inode;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsWriteFileResult, message, code);
-        }
-    );
-
-    if (!Ext2fsInode__is_dir(&parent_inode))
-    {
-        return Error(Ext2fsWriteFileResult, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
-    }
-
-    match_result(
-        Ext2fs__find_child_inode(self, &parent_inode, &parent.leaf_name),
-        success(existing_inode_number)
-        {
-            Ext2fsInode inode;
             match_result(
-                Ext2fsVolume__read_inode(self, existing_inode_number),
-                success(existing_inode)
+                Ext2fsVolume__read_inode(self, parent.parent_inode_number),
+                success(parent_inode)
                 {
-                    inode = existing_inode;
+                    if (!Ext2fsInode__is_dir(&parent_inode))
+                    {
+                        return Error(Ext2fsWriteFileResult, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
+                    }
+
+                    match_result(
+                        Ext2fs__find_child_inode(self, &parent_inode, &parent.leaf_name),
+                        success(existing_inode_number)
+                        {
+                            Ext2fsInode inode;
+                            match_result(
+                                Ext2fsVolume__read_inode(self, existing_inode_number),
+                                success(existing_inode)
+                                {
+                                    inode = existing_inode;
+
+                                    if (!Ext2fsInode__is_file(&inode))
+                                    {
+                                        return Error(Ext2fsWriteFileResult, ext2fs_not_a_file, EXT2FS_NOT_A_FILE);
+                                    }
+
+                                    match_result(
+                                        Ext2fsVolume__write_inode_data(self, existing_inode_number, &inode, offset,
+                                                                       data, size, false),
+                                        success_do_nothing(),
+                                        error(code, message)
+                                        {
+                                            return Error(Ext2fsWriteFileResult, message, code);
+                                        }
+                                    );
+
+                                    return Success(Ext2fsWriteFileResult,
+                                                   Ext2fsWriteFileResult__new(existing_inode_number, &inode));
+                                },
+                                error(code, message)
+                                {
+                                    return Error(Ext2fsWriteFileResult, message, code);
+                                }
+                            );
+                            return Error(Ext2fsWriteFileResult, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                        },
+                        error(code, message)
+                        {
+                            if (code != EXT2FS_NOT_FOUND)
+                            {
+                                return Error(Ext2fsWriteFileResult, message, code);
+                            }
+                        }
+                    );
+
+                    match_result(
+                        Ext2fs__read_block(self, self->inode_bitmap_block),
+                        success(inode_bitmap)
+                        {
+                            match_result(
+                                Ext2fsVolume__allocate_inode_from_bitmap(self, inode_bitmap.data),
+                                success(new_inode_number)
+                                {
+                                    Ext2fsInode inode;
+                                    Ext2fsInode__reset_file(&inode, 0);
+                                    match_result(
+                                        Ext2fsVolume__write_inode_data(self, new_inode_number, &inode, offset, data,
+                                                                       size, true),
+                                        success_do_nothing(),
+                                        error(code, message)
+                                        {
+                                            DRIVER_DEBUG("ext2fs: file data write failed path=%B: %B (%i)\n", path,
+                                                         &message, (int)code);
+                                            return Error(Ext2fsWriteFileResult, message, code);
+                                        }
+                                    );
+
+                                    match_result(
+                                        Ext2fsVolume__insert_dirent(self, parent.parent_inode_number, &parent.leaf_name,
+                                                                    new_inode_number, EXT2FS_DIRENT_TYPE_FILE),
+                                        success_do_nothing(),
+                                        error(code, message)
+                                        {
+                                            DRIVER_DEBUG("ext2fs: file dirent insert failed path=%B: %B (%i)\n", path,
+                                                         &message, (int)code);
+                                            return Error(Ext2fsWriteFileResult, message, code);
+                                        }
+                                    );
+
+                                    return Success(Ext2fsWriteFileResult,
+                                                   Ext2fsWriteFileResult__new(new_inode_number, &inode));
+                                },
+                                error(code, message)
+                                {
+                                    DRIVER_DEBUG("ext2fs: file inode allocation failed path=%B: %B (%i)\n", path,
+                                                 &message, (int)code);
+                                    return Error(Ext2fsWriteFileResult, message, code);
+                                }
+                            );
+                            return Error(Ext2fsWriteFileResult, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                        },
+                        error(code, message)
+                        {
+                            return Error(Ext2fsWriteFileResult, message, code);
+                        }
+                    );
+                    return Error(Ext2fsWriteFileResult, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
                 },
                 error(code, message)
                 {
                     return Error(Ext2fsWriteFileResult, message, code);
                 }
             );
-
-            if (!Ext2fsInode__is_file(&inode))
-            {
-                return Error(Ext2fsWriteFileResult, ext2fs_not_a_file, EXT2FS_NOT_A_FILE);
-            }
-
-            match_result(
-                Ext2fsVolume__write_inode_data(self, existing_inode_number, &inode, offset, data, size, false),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(Ext2fsWriteFileResult, message, code);
-                }
-            );
-
-            return Success(Ext2fsWriteFileResult, Ext2fsWriteFileResult__new(existing_inode_number, &inode));
-        },
-        error(code, message)
-        {
-            if (code != EXT2FS_NOT_FOUND)
-            {
-                return Error(Ext2fsWriteFileResult, message, code);
-            }
-        }
-    );
-
-    Ext2fsBlockData inode_bitmap;
-    match_result(
-        Ext2fs__read_block(self, self->inode_bitmap_block),
-        success(block_data)
-        {
-            inode_bitmap = block_data;
+            return Error(Ext2fsWriteFileResult, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         error(code, message)
         {
             return Error(Ext2fsWriteFileResult, message, code);
         }
     );
-
-    uint32_t new_inode_number = 0;
-    match_result(
-        Ext2fsVolume__allocate_inode_from_bitmap(self, inode_bitmap.data),
-        success(inode_number)
-        {
-            new_inode_number = inode_number;
-        },
-        error(code, message)
-        {
-            DRIVER_DEBUG("ext2fs: file inode allocation failed path=%B: %B (%i)\n", path, &message, (int)code);
-            return Error(Ext2fsWriteFileResult, message, code);
-        }
-    );
-
-    Ext2fsInode inode;
-    Ext2fsInode__reset_file(&inode, 0);
-    match_result(
-        Ext2fsVolume__write_inode_data(self, new_inode_number, &inode, offset, data, size, true),
-        success_do_nothing(),
-        error(code, message)
-        {
-            DRIVER_DEBUG("ext2fs: file data write failed path=%B: %B (%i)\n", path, &message, (int)code);
-            return Error(Ext2fsWriteFileResult, message, code);
-        }
-    );
-
-    match_result(
-        Ext2fsVolume__insert_dirent(self, parent.parent_inode_number, &parent.leaf_name, new_inode_number,
-                                    EXT2FS_DIRENT_TYPE_FILE),
-        success_do_nothing(),
-        error(code, message)
-        {
-            DRIVER_DEBUG("ext2fs: file dirent insert failed path=%B: %B (%i)\n", path, &message, (int)code);
-            return Error(Ext2fsWriteFileResult, message, code);
-        }
-    );
-
-    return Success(Ext2fsWriteFileResult, Ext2fsWriteFileResult__new(new_inode_number, &inode));
+    return Error(Ext2fsWriteFileResult, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsCode) Ext2fsVolume__mkdir_at_path(Ext2fsVolumePtr self, ConstBStringPtr path)
 {
-    Ext2fsResolvedParent parent;
     match_result(
         Ext2fsVolume__resolve_parent(self, path),
-        success(resolved)
+        success(parent)
         {
-            parent = resolved;
+            match_result(
+                Ext2fsVolume__read_inode(self, parent.parent_inode_number),
+                success(parent_inode)
+                {
+                    if (!Ext2fsInode__is_dir(&parent_inode))
+                    {
+                        return Error(Ext2fsCode, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
+                    }
+
+                    match_result(
+                        Ext2fs__find_child_inode(self, &parent_inode, &parent.leaf_name),
+                        success(existing_inode_number)
+                        {
+                            return Error(Ext2fsCode, ext2fs_already_exists, EXT2FS_ALREADY_EXISTS);
+                        },
+                        error(code, message)
+                        {
+                            if (code != EXT2FS_NOT_FOUND)
+                            {
+                                return Error(Ext2fsCode, message, code);
+                            }
+                        }
+                    );
+
+                    Ext2fsBlock dir_block;
+                    match_result(
+                        Ext2fs__read_block(self, self->inode_bitmap_block),
+                        success(inode_bitmap)
+                        {
+                            match_result(
+                                Ext2fs__read_block(self, self->block_bitmap_block),
+                                success(block_bitmap)
+                                {
+                                    match_result(
+                                        Ext2fsVolume__allocate_inode_from_bitmap(self, inode_bitmap.data),
+                                        success(new_inode_number)
+                                        {
+                                            match_result(
+                                                Ext2fsVolume__allocate_block_from_bitmap(self, block_bitmap.data),
+                                                success(new_dir_block)
+                                                {
+                                                    Ext2fsInode new_inode;
+                                                    Ext2fsInode__reset_dir(&new_inode, new_dir_block);
+                                                    Ext2fs__initialise_dir_block(dir_block, new_inode_number,
+                                                                                 parent.parent_inode_number);
+
+                                                    match_result(
+                                                        Ext2fs__write_block(self, new_dir_block, &dir_block),
+                                                        success_do_nothing(),
+                                                        error(code, message)
+                                                        {
+                                                            return Error(Ext2fsCode, message, code);
+                                                        }
+                                                    );
+                                                    match_result(
+                                                        Ext2fsVolume__write_inode(self, new_inode_number, &new_inode),
+                                                        success_do_nothing(),
+                                                        error(code, message)
+                                                        {
+                                                            return Error(Ext2fsCode, message, code);
+                                                        }
+                                                    );
+                                                    match_result(
+                                                        Ext2fs__write_block(self, self->inode_bitmap_block,
+                                                                            &inode_bitmap.data),
+                                                        success_do_nothing(),
+                                                        error(code, message)
+                                                        {
+                                                            return Error(Ext2fsCode, message, code);
+                                                        }
+                                                    );
+                                                    match_result(
+                                                        Ext2fs__write_block(self, self->block_bitmap_block,
+                                                                            &block_bitmap.data),
+                                                        success_do_nothing(),
+                                                        error(code, message)
+                                                        {
+                                                            return Error(Ext2fsCode, message, code);
+                                                        }
+                                                    );
+                                                    match_result(
+                                                        Ext2fsVolume__insert_dirent(self, parent.parent_inode_number,
+                                                                                    &parent.leaf_name, new_inode_number,
+                                                                                    EXT2FS_DIRENT_TYPE_DIR),
+                                                        success_do_nothing(),
+                                                        error(code, message)
+                                                        {
+                                                            return Error(Ext2fsCode, message, code);
+                                                        }
+                                                    );
+                                                    return Ext2fsVolume__update_allocation_counts(self, -1, -1, 1);
+                                                },
+                                                error(code, message)
+                                                {
+                                                    return Error(Ext2fsCode, message, code);
+                                                }
+                                            );
+                                            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                                        },
+                                        error(code, message)
+                                        {
+                                            return Error(Ext2fsCode, message, code);
+                                        }
+                                    );
+                                    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                                },
+                                error(code, message)
+                                {
+                                    return Error(Ext2fsCode, message, code);
+                                }
+                            );
+                            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                        },
+                        error(code, message)
+                        {
+                            return Error(Ext2fsCode, message, code);
+                        }
+                    );
+                    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                },
+                error(code, message)
+                {
+                    return Error(Ext2fsCode, message, code);
+                }
+            );
+            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         error(code, message)
         {
             return Error(Ext2fsCode, message, code);
         }
     );
-
-    Ext2fsInode parent_inode;
-    match_result(
-        Ext2fsVolume__read_inode(self, parent.parent_inode_number),
-        success(inode)
-        {
-            parent_inode = inode;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    if (!Ext2fsInode__is_dir(&parent_inode))
-    {
-        return Error(Ext2fsCode, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
-    }
-
-    match_result(
-        Ext2fs__find_child_inode(self, &parent_inode, &parent.leaf_name),
-        success(existing_inode_number)
-        {
-            return Error(Ext2fsCode, ext2fs_already_exists, EXT2FS_ALREADY_EXISTS);
-        },
-        error(code, message)
-        {
-            if (code != EXT2FS_NOT_FOUND)
-            {
-                return Error(Ext2fsCode, message, code);
-            }
-        }
-    );
-
-    Ext2fsBlockData inode_bitmap;
-    Ext2fsBlockData block_bitmap;
-    Ext2fsBlock dir_block;
-    match_result(
-        Ext2fs__read_block(self, self->inode_bitmap_block),
-        success(block_data)
-        {
-            inode_bitmap = block_data;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fs__read_block(self, self->block_bitmap_block),
-        success(block_data)
-        {
-            block_bitmap = block_data;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    uint32_t new_inode_number = 0;
-    uint32_t new_dir_block = 0;
-    match_result(
-        Ext2fsVolume__allocate_inode_from_bitmap(self, inode_bitmap.data),
-        success(inode_number)
-        {
-            new_inode_number = inode_number;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fsVolume__allocate_block_from_bitmap(self, block_bitmap.data),
-        success(block_number)
-        {
-            new_dir_block = block_number;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    Ext2fsInode new_inode;
-    Ext2fsInode__reset_dir(&new_inode, new_dir_block);
-    Ext2fs__initialise_dir_block(dir_block, new_inode_number, parent.parent_inode_number);
-
-    match_result(
-        Ext2fs__write_block(self, new_dir_block, &dir_block),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fsVolume__write_inode(self, new_inode_number, &new_inode),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fs__write_block(self, self->inode_bitmap_block, &inode_bitmap.data),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fs__write_block(self, self->block_bitmap_block, &block_bitmap.data),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fsVolume__insert_dirent(self, parent.parent_inode_number, &parent.leaf_name, new_inode_number,
-                                    EXT2FS_DIRENT_TYPE_DIR),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    return Ext2fsVolume__update_allocation_counts(self, -1, -1, 1);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsCode) Ext2fsVolume__free_inode(Ext2fsVolumePtr self, uint32_t inode_number)
@@ -1697,30 +1674,28 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode(Ext2fsVolumePtr self, uint32_
         return Error(Ext2fsCode, ext2fs_invalid_path, EXT2FS_INVALID_PATH);
     }
 
-    Ext2fsBlockData inode_bitmap;
     match_result(
         Ext2fs__read_block(self, self->inode_bitmap_block),
-        success(block_data)
+        success(inode_bitmap)
         {
-            inode_bitmap = block_data;
+            Ext2fs__bitmap_clear_bit(inode_bitmap.data, inode_number - 1);
+            match_result(
+                Ext2fs__write_block(self, self->inode_bitmap_block, &inode_bitmap.data),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(Ext2fsCode, message, code);
+                }
+            );
+            Ext2fsInodeCache__invalidate(&self->inode_cache, inode_number);
+            return Ext2fsVolume__update_allocation_counts(self, 0, 1, 0);
         },
         error(code, message)
         {
             return Error(Ext2fsCode, message, code);
         }
     );
-
-    Ext2fs__bitmap_clear_bit(inode_bitmap.data, inode_number - 1);
-    match_result(
-        Ext2fs__write_block(self, self->inode_bitmap_block, &inode_bitmap.data),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    Ext2fsInodeCache__invalidate(&self->inode_cache, inode_number);
-    return Ext2fsVolume__update_allocation_counts(self, 0, 1, 0);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsCode) Ext2fsVolume__free_block(Ext2fsVolumePtr self, uint32_t block_number)
@@ -1730,29 +1705,27 @@ static Result(Ext2fsCode) Ext2fsVolume__free_block(Ext2fsVolumePtr self, uint32_
         return Error(Ext2fsCode, ext2fs_invalid_path, EXT2FS_INVALID_PATH);
     }
 
-    Ext2fsBlockData block_bitmap;
     match_result(
         Ext2fs__read_block(self, self->block_bitmap_block),
-        success(block_data)
+        success(block_bitmap)
         {
-            block_bitmap = block_data;
+            Ext2fs__bitmap_clear_bit(block_bitmap.data, block_number - self->first_data_block);
+            match_result(
+                Ext2fs__write_block(self, self->block_bitmap_block, &block_bitmap.data),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(Ext2fsCode, message, code);
+                }
+            );
+            return Ext2fsVolume__update_allocation_counts(self, 1, 0, 0);
         },
         error(code, message)
         {
             return Error(Ext2fsCode, message, code);
         }
     );
-
-    Ext2fs__bitmap_clear_bit(block_bitmap.data, block_number - self->first_data_block);
-    match_result(
-        Ext2fs__write_block(self, self->block_bitmap_block, &block_bitmap.data),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    return Ext2fsVolume__update_allocation_counts(self, 1, 0, 0);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, ConstExt2fsInodePtr inode)
@@ -1780,30 +1753,31 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, 
             success(block)
             {
                 pointers = block;
-            },
-            error(code, message)
-            {
-                return Error(Ext2fsCode, message, code);
-            }
-        );
-        for (uint32_t index = 0; index < EXT2FS_POINTERS_PER_BLOCK; index++)
-        {
-            uint32_t data_block = Ext2fs__read_u32(pointers.data, index * sizeof(uint32_t));
-            if (data_block != 0)
-            {
+
+                for (uint32_t index = 0; index < EXT2FS_POINTERS_PER_BLOCK; index++)
+                {
+                    uint32_t data_block = Ext2fs__read_u32(pointers.data, index * sizeof(uint32_t));
+                    if (data_block != 0)
+                    {
+                        match_result(
+                            Ext2fsVolume__free_block(self, data_block),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                return Error(Ext2fsCode, message, code);
+                            }
+                        );
+                    }
+                }
                 match_result(
-                    Ext2fsVolume__free_block(self, data_block),
+                    Ext2fsVolume__free_block(self, inode->block[EXT2FS_NDIR_BLOCKS]),
                     success_do_nothing(),
                     error(code, message)
                     {
                         return Error(Ext2fsCode, message, code);
                     }
                 );
-            }
-        }
-        match_result(
-            Ext2fsVolume__free_block(self, inode->block[EXT2FS_NDIR_BLOCKS]),
-            success_do_nothing(),
+            },
             error(code, message)
             {
                 return Error(Ext2fsCode, message, code);
@@ -1813,64 +1787,63 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, 
 
     if (inode->block[EXT2FS_NDIR_BLOCKS + 1U] != 0)
     {
-        Ext2fsBlockData outer;
         match_result(
             Ext2fs__read_block(self, inode->block[EXT2FS_NDIR_BLOCKS + 1U]),
-            success(block)
+            success(outer)
             {
-                outer = block;
-            },
-            error(code, message)
-            {
-                return Error(Ext2fsCode, message, code);
-            }
-        );
-        for (uint32_t outer_index = 0; outer_index < EXT2FS_POINTERS_PER_BLOCK; outer_index++)
-        {
-            uint32_t pointer_block = Ext2fs__read_u32(outer.data, outer_index * sizeof(uint32_t));
-            if (pointer_block == 0)
-            {
-                continue;
-            }
-            Ext2fsBlockData pointers;
-            match_result(
-                Ext2fs__read_block(self, pointer_block),
-                success(block)
+                for (uint32_t outer_index = 0; outer_index < EXT2FS_POINTERS_PER_BLOCK; outer_index++)
                 {
-                    pointers = block;
-                },
-                error(code, message)
-                {
-                    return Error(Ext2fsCode, message, code);
-                }
-            );
-            for (uint32_t index = 0; index < EXT2FS_POINTERS_PER_BLOCK; index++)
-            {
-                uint32_t data_block = Ext2fs__read_u32(pointers.data, index * sizeof(uint32_t));
-                if (data_block != 0)
-                {
+                    uint32_t pointer_block = Ext2fs__read_u32(outer.data, outer_index * sizeof(uint32_t));
+                    if (pointer_block == 0)
+                    {
+                        continue;
+                    }
                     match_result(
-                        Ext2fsVolume__free_block(self, data_block),
-                        success_do_nothing(),
+                        Ext2fs__read_block(self, pointer_block),
+                        success(pointers)
+                        {
+                            for (uint32_t index = 0; index < EXT2FS_POINTERS_PER_BLOCK; index++)
+                            {
+                                uint32_t data_block = Ext2fs__read_u32(pointers.data, index * sizeof(uint32_t));
+                                if (data_block != 0)
+                                {
+                                    match_result(
+                                        Ext2fsVolume__free_block(self, data_block),
+                                        success_do_nothing(),
+                                        error(code, message)
+                                        {
+                                            return Error(Ext2fsCode, message, code);
+                                        }
+                                    );
+                                }
+                            }
+                            match_result(
+                                Ext2fsVolume__free_block(self, pointer_block),
+                                success_do_nothing(),
+                                error(code, message)
+                                {
+                                    return Error(Ext2fsCode, message, code);
+                                }
+                            );
+
+                            continue;
+                        },
                         error(code, message)
                         {
                             return Error(Ext2fsCode, message, code);
                         }
                     );
+                    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
                 }
-            }
-            match_result(
-                Ext2fsVolume__free_block(self, pointer_block),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(Ext2fsCode, message, code);
-                }
-            );
-        }
-        match_result(
-            Ext2fsVolume__free_block(self, inode->block[EXT2FS_NDIR_BLOCKS + 1U]),
-            success_do_nothing(),
+                match_result(
+                    Ext2fsVolume__free_block(self, inode->block[EXT2FS_NDIR_BLOCKS + 1U]),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        return Error(Ext2fsCode, message, code);
+                    }
+                );
+            },
             error(code, message)
             {
                 return Error(Ext2fsCode, message, code);
@@ -1883,80 +1856,81 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, 
 
 static Result(Ext2fsFirstChild) Ext2fsVolume__first_child(Ext2fsVolumePtr self, uint32_t directory_inode_number)
 {
-    Ext2fsInode directory_inode;
     match_result(
         Ext2fsVolume__read_inode(self, directory_inode_number),
-        success(inode)
+        success(directory_inode)
         {
-            directory_inode = inode;
+            if (!Ext2fsInode__is_dir(&directory_inode))
+            {
+                return Error(Ext2fsFirstChild, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
+            }
+
+            for (uint32_t block_index = 0; block_index < EXT2FS_NDIR_BLOCKS; block_index++)
+            {
+                if (directory_inode.block[block_index] == 0)
+                {
+                    continue;
+                }
+
+                match_result(
+                    Ext2fs__read_block(self, directory_inode.block[block_index]),
+                    success(block)
+                    {
+                        size_t offset = 0;
+                        while (offset + 8 <= EXT2FS_BLOCK_SIZE)
+                        {
+                            uint32_t entry_inode = Ext2fs__read_u32(block.data, offset);
+                            uint16_t rec_len = Ext2fs__read_u16(block.data, offset + 4);
+                            uint8_t name_len = block.data[offset + 6];
+                            if (rec_len == 0)
+                            {
+                                break;
+                            }
+
+                            if (entry_inode != 0 && name_len > 0)
+                            {
+                                BString entry_name =
+                                    BString__from_chars((const char *)&block.data[offset + 8], name_len);
+                                if (!BString__equals(&entry_name, &bstr(".")) &&
+                                    !BString__equals(&entry_name, &bstr("..")))
+                                {
+                                    match_result(
+                                        Ext2fsVolume__read_inode(self, entry_inode),
+                                        success(child_inode)
+                                        {
+                                            return Success(
+                                                Ext2fsFirstChild,
+                                                Ext2fsFirstChild__new(&entry_name, entry_inode, &child_inode));
+                                        },
+                                        error(code, message)
+                                        {
+                                            return Error(Ext2fsFirstChild, message, code);
+                                        }
+                                    );
+                                }
+                            }
+
+                            offset += rec_len;
+                        }
+
+                        continue;
+                    },
+                    error(code, message)
+                    {
+                        return Error(Ext2fsFirstChild, message, code);
+                    }
+                );
+                return Error(Ext2fsFirstChild, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+            }
+
+            return Error(Ext2fsFirstChild, ext2fs_not_found, EXT2FS_NOT_FOUND);
         },
         error(code, message)
         {
             return Error(Ext2fsFirstChild, message, code);
         }
     );
-
-    if (!Ext2fsInode__is_dir(&directory_inode))
-    {
-        return Error(Ext2fsFirstChild, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
-    }
-
-    for (uint32_t block_index = 0; block_index < EXT2FS_NDIR_BLOCKS; block_index++)
-    {
-        if (directory_inode.block[block_index] == 0)
-        {
-            continue;
-        }
-
-        Ext2fsBlockData block;
-        match_result(
-            Ext2fs__read_block(self, directory_inode.block[block_index]),
-            success(block_data)
-            {
-                block = block_data;
-            },
-            error(code, message)
-            {
-                return Error(Ext2fsFirstChild, message, code);
-            }
-        );
-
-        size_t offset = 0;
-        while (offset + 8 <= EXT2FS_BLOCK_SIZE)
-        {
-            uint32_t entry_inode = Ext2fs__read_u32(block.data, offset);
-            uint16_t rec_len = Ext2fs__read_u16(block.data, offset + 4);
-            uint8_t name_len = block.data[offset + 6];
-            if (rec_len == 0)
-            {
-                break;
-            }
-
-            if (entry_inode != 0 && name_len > 0)
-            {
-                BString entry_name = BString__from_chars((const char *)&block.data[offset + 8], name_len);
-                if (!BString__equals(&entry_name, &bstr(".")) && !BString__equals(&entry_name, &bstr("..")))
-                {
-                    match_result(
-                        Ext2fsVolume__read_inode(self, entry_inode),
-                        success(child_inode)
-                        {
-                            return Success(Ext2fsFirstChild,
-                                           Ext2fsFirstChild__new(&entry_name, entry_inode, &child_inode));
-                        },
-                        error(code, message)
-                        {
-                            return Error(Ext2fsFirstChild, message, code);
-                        }
-                    );
-                }
-            }
-
-            offset += rec_len;
-        }
-    }
-
-    return Error(Ext2fsFirstChild, ext2fs_not_found, EXT2FS_NOT_FOUND);
+    return Error(Ext2fsFirstChild, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsCode)
@@ -2131,213 +2105,208 @@ static Result(Ext2fsCode)
 
 static Result(Ext2fsCode) Ext2fsVolume__remove_at_path(Ext2fsVolumePtr self, ConstBStringPtr path, Flags flags)
 {
-    Ext2fsResolvedParent parent;
     match_result(
         Ext2fsVolume__resolve_parent(self, path),
-        success(resolved)
+        success(parent)
         {
-            parent = resolved;
+            match_result(
+                Ext2fsVolume__read_inode(self, parent.parent_inode_number),
+                success(parent_inode)
+                {
+                    match_result(
+                        Ext2fs__find_child_inode(self, &parent_inode, &parent.leaf_name),
+                        success(target_inode_number)
+                        {
+                            match_result(
+                                Ext2fsVolume__read_inode(self, target_inode_number),
+                                success(target_inode)
+                                {
+                                    return Ext2fsVolume__remove_inode(self, parent.parent_inode_number,
+                                                                      &parent.leaf_name, target_inode_number,
+                                                                      &target_inode, flags);
+                                },
+                                error(code, message)
+                                {
+                                    return Error(Ext2fsCode, message, code);
+                                }
+                            );
+                            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                        },
+                        error(code, message)
+                        {
+                            return Error(Ext2fsCode, message, code);
+                        }
+                    );
+                    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                },
+                error(code, message)
+                {
+                    return Error(Ext2fsCode, message, code);
+                }
+            );
+            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
         },
         error(code, message)
         {
             return Error(Ext2fsCode, message, code);
         }
     );
-
-    Ext2fsInode parent_inode;
-    Ext2fsInode target_inode;
-    match_result(
-        Ext2fsVolume__read_inode(self, parent.parent_inode_number),
-        success(inode)
-        {
-            parent_inode = inode;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    uint32_t target_inode_number = 0;
-    match_result(
-        Ext2fs__find_child_inode(self, &parent_inode, &parent.leaf_name),
-        success(inode_number)
-        {
-            target_inode_number = inode_number;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    match_result(
-        Ext2fsVolume__read_inode(self, target_inode_number),
-        success(inode)
-        {
-            target_inode = inode;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    return Ext2fsVolume__remove_inode(self, parent.parent_inode_number, &parent.leaf_name, target_inode_number,
-                                      &target_inode, flags);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(Ext2fsCode)
     Ext2fsVolume__link_at_paths(Ext2fsVolumePtr self, ConstBStringPtr source_path, ConstBStringPtr target_path)
 {
-    Ext2fsResolvedParent source_parent;
-    Ext2fsResolvedParent target_parent;
     match_result(
         Ext2fsVolume__resolve_parent(self, source_path),
-        success(resolved)
+        success(source_parent)
         {
-            source_parent = resolved;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fsVolume__resolve_parent(self, target_path),
-        success(resolved)
-        {
-            target_parent = resolved;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-
-    Ext2fsInode source_directory;
-    Ext2fsInode target_directory;
-    match_result(
-        Ext2fsVolume__read_inode(self, source_parent.parent_inode_number),
-        success(inode)
-        {
-            source_directory = inode;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fsVolume__read_inode(self, target_parent.parent_inode_number),
-        success(inode)
-        {
-            target_directory = inode;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    if (!Ext2fsInode__is_dir(&source_directory) || !Ext2fsInode__is_dir(&target_directory))
-    {
-        return Error(Ext2fsCode, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
-    }
-
-    uint32_t source_inode_number = 0;
-    match_result(
-        Ext2fs__find_child_inode(self, &source_directory, &source_parent.leaf_name),
-        success(inode_number)
-        {
-            source_inode_number = inode_number;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fs__find_child_inode(self, &target_directory, &target_parent.leaf_name),
-        success(inode_number)
-        {
-            return Error(Ext2fsCode, ext2fs_already_exists, EXT2FS_ALREADY_EXISTS);
-        },
-        error(code, message)
-        {
-            if (code != EXT2FS_NOT_FOUND)
-            {
-                return Error(Ext2fsCode, message, code);
-            }
-        }
-    );
-
-    Ext2fsInode source_inode;
-    match_result(
-        Ext2fsVolume__read_inode(self, source_inode_number),
-        success(inode)
-        {
-            source_inode = inode;
-        },
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    if (!Ext2fsInode__is_file(&source_inode) || source_inode.links_count == UINT16_MAX)
-    {
-        return Error(Ext2fsCode, ext2fs_unsupported, EXT2FS_UNSUPPORTED);
-    }
-
-    source_inode.links_count++;
-    match_result(
-        Ext2fsVolume__write_inode(self, source_inode_number, &source_inode),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(Ext2fsCode, message, code);
-        }
-    );
-    match_result(
-        Ext2fsVolume__insert_dirent(self, target_parent.parent_inode_number, &target_parent.leaf_name,
-                                    source_inode_number, EXT2FS_DIRENT_TYPE_FILE),
-        success_do_nothing(),
-        error(code, message)
-        {
-            source_inode.links_count--;
             match_result(
-                Ext2fsVolume__write_inode(self, source_inode_number, &source_inode),
-                success_do_nothing(),
-                error(rollback_code, rollback_message)
+                Ext2fsVolume__resolve_parent(self, target_path),
+                success(target_parent)
                 {
-                    return Error(Ext2fsCode, rollback_message, rollback_code);
+                    match_result(
+                        Ext2fsVolume__read_inode(self, source_parent.parent_inode_number),
+                        success(source_directory)
+                        {
+                            match_result(
+                                Ext2fsVolume__read_inode(self, target_parent.parent_inode_number),
+                                success(target_directory)
+                                {
+                                    if (!Ext2fsInode__is_dir(&source_directory) ||
+                                        !Ext2fsInode__is_dir(&target_directory))
+                                    {
+                                        return Error(Ext2fsCode, ext2fs_not_a_directory, EXT2FS_NOT_A_DIRECTORY);
+                                    }
+
+                                    match_result(
+                                        Ext2fs__find_child_inode(self, &source_directory, &source_parent.leaf_name),
+                                        success(source_inode_number)
+                                        {
+                                            match_result(
+                                                Ext2fs__find_child_inode(self, &target_directory,
+                                                                         &target_parent.leaf_name),
+                                                success(inode_number)
+                                                {
+                                                    return Error(Ext2fsCode, ext2fs_already_exists,
+                                                                 EXT2FS_ALREADY_EXISTS);
+                                                },
+                                                error(code, message)
+                                                {
+                                                    if (code != EXT2FS_NOT_FOUND)
+                                                    {
+                                                        return Error(Ext2fsCode, message, code);
+                                                    }
+                                                }
+                                            );
+
+                                            match_result(
+                                                Ext2fsVolume__read_inode(self, source_inode_number),
+                                                success(source_inode)
+                                                {
+                                                    if (!Ext2fsInode__is_file(&source_inode) ||
+                                                        source_inode.links_count == UINT16_MAX)
+                                                    {
+                                                        return Error(Ext2fsCode, ext2fs_unsupported,
+                                                                     EXT2FS_UNSUPPORTED);
+                                                    }
+
+                                                    source_inode.links_count++;
+                                                    match_result(
+                                                        Ext2fsVolume__write_inode(self, source_inode_number,
+                                                                                  &source_inode),
+                                                        success_do_nothing(),
+                                                        error(code, message)
+                                                        {
+                                                            return Error(Ext2fsCode, message, code);
+                                                        }
+                                                    );
+                                                    match_result(
+                                                        Ext2fsVolume__insert_dirent(
+                                                            self, target_parent.parent_inode_number,
+                                                            &target_parent.leaf_name, source_inode_number,
+                                                            EXT2FS_DIRENT_TYPE_FILE),
+                                                        success_do_nothing(),
+                                                        error(code, message)
+                                                        {
+                                                            source_inode.links_count--;
+                                                            match_result(
+                                                                Ext2fsVolume__write_inode(self, source_inode_number,
+                                                                                          &source_inode),
+                                                                success_do_nothing(),
+                                                                error(rollback_code, rollback_message)
+                                                                {
+                                                                    return Error(Ext2fsCode, rollback_message,
+                                                                                 rollback_code);
+                                                                }
+                                                            );
+                                                            return Error(Ext2fsCode, message, code);
+                                                        }
+                                                    );
+                                                    return Success(Ext2fsCode, EXT2FS_OK);
+                                                },
+                                                error(code, message)
+                                                {
+                                                    return Error(Ext2fsCode, message, code);
+                                                }
+                                            );
+                                            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                                        },
+                                        error(code, message)
+                                        {
+                                            return Error(Ext2fsCode, message, code);
+                                        }
+                                    );
+                                    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                                },
+                                error(code, message)
+                                {
+                                    return Error(Ext2fsCode, message, code);
+                                }
+                            );
+                            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                        },
+                        error(code, message)
+                        {
+                            return Error(Ext2fsCode, message, code);
+                        }
+                    );
+                    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                },
+                error(code, message)
+                {
+                    return Error(Ext2fsCode, message, code);
                 }
             );
+            return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+        },
+        error(code, message)
+        {
             return Error(Ext2fsCode, message, code);
         }
     );
-    return Success(Ext2fsCode, EXT2FS_OK);
+    return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(FilesystemFileInfo) Ext2fs__describe(IOServiceContext context, ConstBStringPtr path)
 {
     Ext2fsVolumePtr volume = context;
-    Ext2fsInode inode;
     match_result(
         Ext2fsVolume__inode_for_path(volume, path),
-        success(value)
+        success(inode)
         {
-            inode = value;
+            if (!Ext2fsInode__is_file(&inode) && !Ext2fsInode__is_dir(&inode))
+            {
+                return Error(FilesystemFileInfo, ext2fs_not_a_file, IO_INVALID_PATH);
+            }
+            return Success(FilesystemFileInfo, FilesystemFileInfo__new(inode.size, inode.mode));
         },
         error(code, message)
         {
             return Error(FilesystemFileInfo, message, IO_INVALID_PATH);
         }
     );
-    if (!Ext2fsInode__is_file(&inode) && !Ext2fsInode__is_dir(&inode))
-    {
-        return Error(FilesystemFileInfo, ext2fs_not_a_file, IO_INVALID_PATH);
-    }
-    return Success(FilesystemFileInfo, FilesystemFileInfo__new(inode.size, inode.mode));
+    return Error(FilesystemFileInfo, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 typedef struct Ext2fsBlockResolver
@@ -2467,109 +2436,110 @@ static Result(FilesystemFileSize)
                  FilesystemFileSize capacity)
 {
     Ext2fsVolumePtr volume = context;
-    Ext2fsInode inode;
     match_result(
         Ext2fsVolume__inode_for_path(volume, path),
-        success(value)
+        success(inode)
         {
-            inode = value;
-        },
-        error(code, message)
-        {
-            return Error(FilesystemFileSize, message, IO_INVALID_PATH);
-        }
-    );
-    if (!Ext2fsInode__is_file(&inode))
-    {
-        return Error(FilesystemFileSize, ext2fs_not_a_file, IO_INVALID_PATH);
-    }
-    if (offset >= inode.size || capacity == 0)
-    {
-        return Success(FilesystemFileSize, 0);
-    }
-
-    FilesystemFileSize remaining = inode.size - offset;
-    if (remaining > capacity)
-    {
-        remaining = capacity;
-    }
-    Ext2fsBlockResolver resolver = Ext2fsBlockResolver__new(volume, &inode);
-    FilesystemFileSize total = 0;
-    while (total < remaining)
-    {
-        uint64_t file_offset = offset + total;
-        uint64_t block_offset = file_offset % EXT2FS_BLOCK_SIZE;
-        FilesystemFileSize count = EXT2FS_BLOCK_SIZE - block_offset;
-        if (count > remaining - total)
-        {
-            count = remaining - total;
-        }
-        uint32_t block_number;
-        match_result(
-            Ext2fsBlockResolver__data_block(&resolver, file_offset / EXT2FS_BLOCK_SIZE),
-            success(number)
+            if (!Ext2fsInode__is_file(&inode))
             {
-                block_number = number;
-            },
-            error(code, message)
-            {
-                return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+                return Error(FilesystemFileSize, ext2fs_not_a_file, IO_INVALID_PATH);
             }
-        );
-        if (block_number == 0)
-        {
-            Mem__memset(data + total, 0, count);
-        }
-        else if (block_offset == 0 && count == EXT2FS_BLOCK_SIZE)
-        {
-            uint32_t run = 1;
-            while ((FilesystemFileSize)(run + 1U) * EXT2FS_BLOCK_SIZE <= remaining - total)
+            if (offset >= inode.size || capacity == 0)
             {
-                uint32_t next_block;
+                return Success(FilesystemFileSize, 0);
+            }
+
+            FilesystemFileSize remaining = inode.size - offset;
+            if (remaining > capacity)
+            {
+                remaining = capacity;
+            }
+            Ext2fsBlockResolver resolver = Ext2fsBlockResolver__new(volume, &inode);
+            FilesystemFileSize total = 0;
+            while (total < remaining)
+            {
+                uint64_t file_offset = offset + total;
+                uint64_t block_offset = file_offset % EXT2FS_BLOCK_SIZE;
+                FilesystemFileSize count = EXT2FS_BLOCK_SIZE - block_offset;
+                if (count > remaining - total)
+                {
+                    count = remaining - total;
+                }
                 match_result(
-                    Ext2fsBlockResolver__data_block(&resolver, file_offset / EXT2FS_BLOCK_SIZE + run),
-                    success(number)
+                    Ext2fsBlockResolver__data_block(&resolver, file_offset / EXT2FS_BLOCK_SIZE),
+                    success(block_number)
                     {
-                        next_block = number;
+                        if (block_number == 0)
+                        {
+                            Mem__memset(data + total, 0, count);
+                        }
+                        else if (block_offset == 0 && count == EXT2FS_BLOCK_SIZE)
+                        {
+                            uint32_t run = 1;
+                            while ((FilesystemFileSize)(run + 1U) * EXT2FS_BLOCK_SIZE <= remaining - total)
+                            {
+                                match_result(
+                                    Ext2fsBlockResolver__data_block(&resolver, file_offset / EXT2FS_BLOCK_SIZE + run),
+                                    success(next_block)
+                                    {
+                                        if (next_block != block_number + run)
+                                        {
+                                            break;
+                                        }
+                                        run++;
+
+                                        continue;
+                                    },
+                                    error(code, message)
+                                    {
+                                        return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+                                    }
+                                );
+                                return Error(FilesystemFileSize, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+                            }
+                            match_result(
+                                Ext2fs__read_blocks(volume, block_number, run, data + total),
+                                success_do_nothing(),
+                                error(code, message)
+                                {
+                                    return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+                                }
+                            );
+                            count = (FilesystemFileSize)run * EXT2FS_BLOCK_SIZE;
+                        }
+                        else
+                        {
+                            match_result(
+                                Ext2fs__read_block(volume, block_number),
+                                success(block)
+                                {
+                                    Mem__memcpy(data + total, block.data + block_offset, count);
+                                },
+                                error(code, message)
+                                {
+                                    return Error(FilesystemFileSize, message, IO_INVALID_PATH);
+                                }
+                            );
+                        }
+                        total += count;
+
+                        continue;
                     },
                     error(code, message)
                     {
                         return Error(FilesystemFileSize, message, IO_INVALID_PATH);
                     }
                 );
-                if (next_block != block_number + run)
-                {
-                    break;
-                }
-                run++;
+                return Error(FilesystemFileSize, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
             }
-            match_result(
-                Ext2fs__read_blocks(volume, block_number, run, data + total),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    return Error(FilesystemFileSize, message, IO_INVALID_PATH);
-                }
-            );
-            count = (FilesystemFileSize)run * EXT2FS_BLOCK_SIZE;
-        }
-        else
+            return Success(FilesystemFileSize, total);
+        },
+        error(code, message)
         {
-            match_result(
-                Ext2fs__read_block(volume, block_number),
-                success(block)
-                {
-                    Mem__memcpy(data + total, block.data + block_offset, count);
-                },
-                error(code, message)
-                {
-                    return Error(FilesystemFileSize, message, IO_INVALID_PATH);
-                }
-            );
+            return Error(FilesystemFileSize, message, IO_INVALID_PATH);
         }
-        total += count;
-    }
-    return Success(FilesystemFileSize, total);
+    );
+    return Error(FilesystemFileSize, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(FilesystemFileSize)

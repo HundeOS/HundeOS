@@ -27,7 +27,6 @@ typedef struct FilesystemNamespace
 } FilesystemNamespace;
 
 typedef FilesystemNamespace * FilesystemNamespacePtr;
-ResultDef(IOStatus);
 FilesystemNamespace FilesystemNamespace__new(void);
 Result(IOStatus) FilesystemNamespace__add(FilesystemNamespacePtr self, MountConfig config);
 Optional(IOReply) FilesystemNamespace__execute(IOServiceContext context, QueueConnectionID session, uint64_t pid,

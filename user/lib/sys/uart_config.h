@@ -155,26 +155,32 @@ static bool UartDriverConfig__read_config(ConstDynStringPtr sysinfo, UartDriverC
 
 static bool UartDriverConfig__load(UartDriverConfigPtr self)
 {
-    IOHandle handle = IO__open(&bstr(UART_CONFIG_PATH), IO_OPEN_READ);
-    if (handle < 0)
-    {
-        return false;
-    }
-
-    Optional(DynString) sysinfo = IO__read_dyn_string(handle, UART_CONFIG_MAX);
-    IO__close(handle);
-
-    match_optional(
-        sysinfo,
-        some(data)
+    match_result(
+        IO__open(&bstr(UART_CONFIG_PATH), IO_OPEN_READ),
+        success(handle)
         {
-            bool loaded = UartDriverConfig__read_config(&data, self);
-            DynString__dispose(&data);
-            return loaded;
+            match_result(
+                IO__read_dyn_string(handle, UART_CONFIG_MAX),
+                success(data)
+                {
+                    IO__close(handle);
+                    bool loaded = UartDriverConfig__read_config(&data, self);
+                    DynString__dispose(&data);
+                    return loaded;
+                },
+                error(code, message)
+                {
+                    IO__close(handle);
+                    return false;
+                }
+            );
+            return false;
         },
-        none_do_nothing()
+        error(code, message)
+        {
+            return false;
+        }
     );
-
     return false;
 }
 

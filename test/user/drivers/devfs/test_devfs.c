@@ -48,18 +48,43 @@ static IORequest request_for(IORequestOperation operation, ConstBStringPtr path)
 
 void test_devfs_lists_devices_and_aliases_read_only(void)
 {
-    const char * expected[] = {"virtio1", "hd0", "test-stream"};
+    const char * expected[] = {"null", "virtio1", "hd0", "test-stream"};
+    FileMode expected_modes[] = {IO_MODE_TYPE_FILE | 0666, IO_MODE_TYPE_FILE | 0444, IO_MODE_TYPE_FILE | 0444,
+                                 IO_MODE_TYPE_FILE | 0444};
     IORequest request = request_for(IO_REQUEST_LIST_DIR, &bstr("/"));
-    for (uint64_t index = 0; index < 3; index++)
+    for (uint64_t index = 0; index < 4; index++)
     {
         request.offset = index;
         IOReply reply = FilesystemDriver__execute(&driver, &request);
         TEST_ASSERT_EQUAL(IO_OK, reply.status);
         TEST_ASSERT_EQUAL_STRING(expected[index], reply.directory.entries[0].name);
-        TEST_ASSERT_EQUAL(IO_MODE_TYPE_FILE | 0444, reply.directory.entries[0].mode);
+        TEST_ASSERT_EQUAL(expected_modes[index], reply.directory.entries[0].mode);
     }
-    request.offset = 3;
+    request.offset = 4;
     TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).directory.count);
+}
+
+void test_devfs_null_reads_eof_and_discards_writes(void)
+{
+    IORequest request = request_for(IO_REQUEST_OPEN, &bstr("/null"));
+    request.flags = IO_OPEN_READ | IO_OPEN_WRITE;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+
+    request.operation = IO_REQUEST_READ;
+    request.handle = opened.value;
+    request.flags = 0;
+    request.count = 8;
+    IOReply read = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, read.status);
+    TEST_ASSERT_EQUAL(0, read.value);
+
+    request.operation = IO_REQUEST_WRITE;
+    request.count = 4;
+    memcpy(request.data, "data", request.count);
+    IOReply written = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, written.status);
+    TEST_ASSERT_EQUAL(4, written.value);
 }
 
 void test_devfs_reads_alias_metadata_with_independent_offsets_and_owner_checks(void)
@@ -84,7 +109,14 @@ void test_devfs_rejects_mutation_and_execute_but_preserves_kernel_stream_opens(v
 {
     IORequest request = request_for(IO_REQUEST_OPEN, &bstr("/virtio1"));
     request.flags = IO_OPEN_WRITE;
+    IOReply opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    request.operation = IO_REQUEST_WRITE;
+    request.handle = opened.value;
+    request.flags = 0;
+    request.count = 1;
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, FilesystemDriver__execute(&driver, &request).status);
+    request = request_for(IO_REQUEST_OPEN, &bstr("/virtio1"));
     request.flags = IO_OPEN_EXECUTE;
     TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, FilesystemDriver__execute(&driver, &request).status);
     request.operation = IO_REQUEST_REMOVE;
@@ -94,6 +126,12 @@ void test_devfs_rejects_mutation_and_execute_but_preserves_kernel_stream_opens(v
     request = request_for(IO_REQUEST_OPEN, &bstr("/test-stream"));
     TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, FilesystemDriver__execute(&driver, &request).status);
     request.flags = IO_OPEN_WRITE;
+    opened = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, opened.status);
+    request.operation = IO_REQUEST_WRITE;
+    request.handle = opened.value;
+    request.flags = 0;
+    request.count = 1;
     TEST_ASSERT_EQUAL(IO_PATH_UNMANAGED, FilesystemDriver__execute(&driver, &request).status);
 }
 

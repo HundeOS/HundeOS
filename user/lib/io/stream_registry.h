@@ -3,8 +3,6 @@
 #include "protocol.h"
 #include "types/linked_list.h"
 
-ResultDef(IOStatus);
-
 typedef struct StreamDevice
 {
     IORoute route;

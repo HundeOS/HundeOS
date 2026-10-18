@@ -94,6 +94,7 @@ static BString protection_failed = bstr("Unable to protect shared object");
 static BString cleanup_failed = bstr("Unable to release shared object mapping");
 static BString dependency_not_found = bstr("Unable to load shared object dependency");
 static BString missing_entry = bstr("Shared object has no executable entry point");
+static BString missing_export = bstr("Shared object does not export the required symbol");
 
 static WuffPageRange WuffPageRange__new(Address start, size_t size)
 {
@@ -911,7 +912,7 @@ static Result(WuffLoadCode) WuffLoader__apply_relocation_table(ConstWuffGraphPtr
 static Result(WuffLoadCode)
     WuffLoader__apply_relocations(ConstWuffGraphPtr graph, WuffObjectPtr object, ConstWuffDynamicInfoPtr dynamic)
 {
-    if ((dynamic->rela_size != 0 || dynamic->jump_rela_size != 0) && dynamic->rela_entry_size != sizeof(WuffRela))
+    if (dynamic->rela_size != 0 && dynamic->rela_entry_size != sizeof(WuffRela))
     {
         return Error(WuffLoadCode, relocation_failed, WUFF_LOAD_RELOCATION_FAILED);
     }
@@ -1290,6 +1291,16 @@ static Result(WuffPreparedObject)
                     success(info)
                     {
                         dynamic = info;
+                        match_result(
+                            WuffLoader__load_symbols(&object, &dynamic),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                return WuffLoader__prepare_fail(&object, &message, code);
+                            }
+                        );
+                        WuffObjectMetadata metadata = WuffObjectMetadata__new(&dynamic, &relro_header);
+                        return Success(WuffPreparedObject, WuffPreparedObject__new(&object, &metadata));
                     },
                     error(code, message)
                     {
@@ -1297,16 +1308,12 @@ static Result(WuffPreparedObject)
                     }
                 );
             },
-            none_do_nothing()
-        );
-        match_result(
-            WuffLoader__load_symbols(&object, &dynamic),
-            success_do_nothing(),
-            error(code, message)
+            none()
             {
-                return WuffLoader__prepare_fail(&object, &message, code);
+                return WuffLoader__prepare_fail(&object, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
             }
         );
+        return WuffLoader__prepare_fail(&object, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
     }
 
     WuffObjectMetadata metadata = WuffObjectMetadata__new(&dynamic, &relro_header);
@@ -1337,55 +1344,54 @@ static Result(WuffLoadCode)
 
 Result(WuffObject) WuffLoader__load(const uint8_t * image, size_t image_size, ConstWuffMemoryOperationsPtr memory)
 {
-    WuffPreparedObject prepared;
     match_result(
         WuffLoader__prepare(image, image_size, memory, false),
-        success(value)
+        success(prepared)
         {
-            prepared = value;
+            if (WuffDependencyOffsets__len(&prepared.metadata.dynamic.dependencies) != 0)
+            {
+                return WuffLoader__fail(&prepared.object, &unsupported_image, WUFF_LOAD_UNSUPPORTED);
+            }
+
+            WuffGraph graph = WuffGraph__new();
+            BString root_name = empty_bstr();
+            WuffLoadedObject loaded = WuffLoadedObject__new(&root_name, prepared.object);
+            match_result(
+                WuffLoadedObjects__push(&graph.objects, loaded),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return WuffLoader__fail(&prepared.object, &message, WUFF_LOAD_NO_MEMORY);
+                }
+            );
+            WuffLoadedObjectPtr root;
+            match_optional(
+                WuffLoadedObjects__ptr_at(&graph.objects, 0),
+                some(value)
+                {
+                    root = value;
+                },
+                none()
+                {
+                    return WuffLoader__fail(&prepared.object, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
+                }
+            );
+            match_result(
+                WuffLoader__finalize(&graph, &root->object, &prepared.metadata),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return WuffLoader__fail(&root->object, &message, code);
+                }
+            );
+            return Success(WuffObject, root->object);
         },
         error(code, message)
         {
             return Error(WuffObject, message, code);
         }
     );
-    if (WuffDependencyOffsets__len(&prepared.metadata.dynamic.dependencies) != 0)
-    {
-        return WuffLoader__fail(&prepared.object, &unsupported_image, WUFF_LOAD_UNSUPPORTED);
-    }
-
-    WuffGraph graph = WuffGraph__new();
-    BString root_name = empty_bstr();
-    WuffLoadedObject loaded = WuffLoadedObject__new(&root_name, prepared.object);
-    match_result(
-        WuffLoadedObjects__push(&graph.objects, loaded),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return WuffLoader__fail(&prepared.object, &message, WUFF_LOAD_NO_MEMORY);
-        }
-    );
-    WuffLoadedObjectPtr root;
-    match_optional(
-        WuffLoadedObjects__ptr_at(&graph.objects, 0),
-        some(value)
-        {
-            root = value;
-        },
-        none()
-        {
-            return WuffLoader__fail(&prepared.object, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
-        }
-    );
-    match_result(
-        WuffLoader__finalize(&graph, &root->object, &prepared.metadata),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return WuffLoader__fail(&root->object, &message, code);
-        }
-    );
-    return Success(WuffObject, root->object);
+    return Error(WuffObject, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static bool WuffObject__symbol_name_equals(ConstWuffObjectPtr self, uint32_t offset, ConstBStringPtr name)
@@ -1439,6 +1445,7 @@ Optional(WuffSymbol) WuffObject__find_symbol(ConstWuffObjectPtr self, ConstBStri
             return Some(WuffSymbol, WuffSymbol__new(address, symbol.size));
         }
     }
+
     return None(WuffSymbol);
 }
 
@@ -1461,6 +1468,34 @@ Optional(WuffSymbol) WuffGraph__find_symbol(ConstWuffGraphPtr self, ConstBString
         }
     );
     return None(WuffSymbol);
+}
+
+Result(WuffSymbol) WuffGraph__find_root_export(ConstWuffGraphPtr self, ConstBStringPtr name)
+{
+    for_each_fa(
+        WuffLoadedObjects,
+        self->objects,
+        index,
+        root,
+        {
+            if (index == 0)
+            {
+                match_optional(
+                    WuffObject__find_symbol(&root.object, name),
+                    some(symbol)
+                    {
+                        return Success(WuffSymbol, symbol);
+                    },
+                    none()
+                    {
+                        return Error(WuffSymbol, missing_export, WUFF_LOAD_SYMBOL_NOT_FOUND);
+                    }
+                );
+            }
+            break;
+        }
+    );
+    return Error(WuffSymbol, missing_export, WUFF_LOAD_SYMBOL_NOT_FOUND);
 }
 
 Result(Address) WuffGraph__entry(ConstWuffGraphPtr self)
@@ -1582,8 +1617,67 @@ static Result(WuffLoadCode) WuffLoader__add_prepared(WuffGraphPtr graph, WuffObj
     return Success(WuffLoadCode, WUFF_LOAD_OK);
 }
 
-Result(WuffGraph) WuffLoader__load_graph(ConstWuffImagePtr root, ConstWuffMemoryOperationsPtr memory,
-                                         ConstWuffDependencyOperationsPtr dependencies)
+static Result(WuffLoadCode)
+    WuffLoader__load_dependency(WuffGraphPtr graph, WuffObjectMetadataListPtr metadata, ConstBStringPtr name,
+                                ConstWuffMemoryOperationsPtr memory, ConstWuffDependencyOperationsPtr dependencies)
+{
+    match_result(
+        dependencies->load(dependencies->context, name),
+        success(image)
+        {
+            if (!BString__equals(&image.name, name) || image.data == 0)
+            {
+                dependencies->release(dependencies->context, &image);
+                return Error(WuffLoadCode, dependency_not_found, WUFF_LOAD_DEPENDENCY_NOT_FOUND);
+            }
+            match_result(
+                WuffLoader__prepare(image.data, image.size, memory, false),
+                success(dependency)
+                {
+                    dependencies->release(dependencies->context, &image);
+                    match_result(
+                        WuffLoader__add_prepared(graph, metadata, name, &dependency),
+                        success(code)
+                        {
+                            return Success(WuffLoadCode, code);
+                        },
+                        error(code, message)
+                        {
+                            match_result(
+                                WuffObject__dispose(&dependency.object),
+                                success(_)
+                                {
+                                    return Error(WuffLoadCode, message, code);
+                                },
+                                error(cleanup_code, cleanup_message)
+                                {
+                                    return Error(WuffLoadCode, cleanup_message, cleanup_code);
+                                }
+                            );
+                            return Error(WuffLoadCode, cleanup_failed, WUFF_LOAD_CLEANUP_FAILED);
+                        }
+                    );
+                    return Error(WuffLoadCode, invalid_image, RESULT_UNKNOWN_ERROR_CODE);
+                },
+                error(code, message)
+                {
+                    dependencies->release(dependencies->context, &image);
+                    return Error(WuffLoadCode, message, code);
+                }
+            );
+            return Error(WuffLoadCode, invalid_image, RESULT_UNKNOWN_ERROR_CODE);
+        },
+        error(code, message)
+        {
+            return Error(WuffLoadCode, message, code);
+        }
+    );
+    return Error(WuffLoadCode, invalid_image, RESULT_UNKNOWN_ERROR_CODE);
+}
+
+static Result(WuffGraph)
+    WuffLoader__load_graph_with_root_mode(ConstWuffImagePtr root, ConstWuffMemoryOperationsPtr memory,
+                                          ConstWuffDependencyOperationsPtr dependencies, bool executable_root)
 {
     if (BString__is_empty(&root->name) || root->data == 0 || dependencies->load == 0 || dependencies->release == 0)
     {
@@ -1591,176 +1685,146 @@ Result(WuffGraph) WuffLoader__load_graph(ConstWuffImagePtr root, ConstWuffMemory
     }
     WuffGraph graph = WuffGraph__new();
     WuffObjectMetadataList metadata = WuffObjectMetadataList__new();
-    WuffPreparedObject prepared;
     match_result(
-        WuffLoader__prepare(root->data, root->size, memory, true),
-        success(value)
-        {
-            prepared = value;
-        },
-        error(code, message)
-        {
-            return Error(WuffGraph, message, code);
-        }
-    );
-    match_result(
-        WuffLoader__add_prepared(&graph, &metadata, &root->name, &prepared),
-        success_do_nothing(),
-        error(code, message)
+        WuffLoader__prepare(root->data, root->size, memory, executable_root),
+        success(prepared)
         {
             match_result(
-                WuffObject__dispose(&prepared.object),
-                success(_)
+                WuffLoader__add_prepared(&graph, &metadata, &root->name, &prepared),
+                success_do_nothing(),
+                error(code, message)
                 {
-                    return Error(WuffGraph, message, code);
-                },
-                error(cleanup_code, cleanup_message)
-                {
-                    return Error(WuffGraph, cleanup_message, cleanup_code);
+                    match_result(
+                        WuffObject__dispose(&prepared.object),
+                        success(_)
+                        {
+                            return Error(WuffGraph, message, code);
+                        },
+                        error(cleanup_code, cleanup_message)
+                        {
+                            return Error(WuffGraph, cleanup_message, cleanup_code);
+                        }
+                    );
                 }
             );
-        }
-    );
 
-    size_t object_index = 0;
-    while (object_index < WuffLoadedObjects__len(&graph.objects))
-    {
-        WuffLoadedObjectPtr loaded;
-        WuffObjectMetadataPtr object_metadata;
-        match_optional(
-            WuffLoadedObjects__ptr_at(&graph.objects, (int64_t)object_index),
-            some(value)
+            size_t object_index = 0;
+            while (object_index < WuffLoadedObjects__len(&graph.objects))
             {
-                loaded = value;
-            },
-            none()
-            {
-                return WuffLoader__graph_fail(&graph, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
-            }
-        );
-        match_optional(
-            WuffObjectMetadataList__ptr_at(&metadata, (int64_t)object_index),
-            some(value)
-            {
-                object_metadata = value;
-            },
-            none()
-            {
-                return WuffLoader__graph_fail(&graph, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
-            }
-        );
-        for_each_fa_ptr(
-            WuffDependencyOffsets,
-            &object_metadata->dynamic.dependencies,
-            dependency_index,
-            dependency_offset,
-            {
-                BString dependency_name;
+                WuffLoadedObjectPtr loaded;
+                WuffObjectMetadataPtr object_metadata;
                 match_optional(
-                    WuffLoader__dependency_name(&loaded->object, dependency_offset),
-                    some(name)
+                    WuffLoadedObjects__ptr_at(&graph.objects, (int64_t)object_index),
+                    some(value)
                     {
-                        dependency_name = name;
+                        loaded = value;
                     },
                     none()
                     {
                         return WuffLoader__graph_fail(&graph, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
                     }
                 );
-                if (WuffGraph__contains(&graph, &dependency_name))
-                {
-                    continue;
-                }
-                WuffImage image;
-                match_result(
-                    dependencies->load(dependencies->context, &dependency_name),
-                    success(value)
+                match_optional(
+                    WuffObjectMetadataList__ptr_at(&metadata, (int64_t)object_index),
+                    some(value)
                     {
-                        image = value;
+                        object_metadata = value;
                     },
-                    error(code, message)
+                    none()
                     {
-                        return WuffLoader__graph_fail(&graph, &message, code);
+                        return WuffLoader__graph_fail(&graph, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
                     }
                 );
-                if (!BString__equals(&image.name, &dependency_name) || image.data == 0)
-                {
-                    dependencies->release(dependencies->context, &image);
-                    return WuffLoader__graph_fail(&graph, &dependency_not_found, WUFF_LOAD_DEPENDENCY_NOT_FOUND);
-                }
-                WuffPreparedObject dependency;
-                match_result(
-                    WuffLoader__prepare(image.data, image.size, memory, false),
-                    success(value)
+                for_each_fa_ptr(
+                    WuffDependencyOffsets,
+                    &object_metadata->dynamic.dependencies,
+                    dependency_index,
+                    dependency_offset,
                     {
-                        dependency = value;
-                    },
-                    error(code, message)
-                    {
-                        dependencies->release(dependencies->context, &image);
-                        return WuffLoader__graph_fail(&graph, &message, code);
-                    }
-                );
-                dependencies->release(dependencies->context, &image);
-                match_result(
-                    WuffLoader__add_prepared(&graph, &metadata, &dependency_name, &dependency),
-                    success_do_nothing(),
-                    error(code, message)
-                    {
+                        BString dependency_name;
+                        match_optional(
+                            WuffLoader__dependency_name(&loaded->object, dependency_offset),
+                            some(name)
+                            {
+                                dependency_name = name;
+                            },
+                            none()
+                            {
+                                return WuffLoader__graph_fail(&graph, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
+                            }
+                        );
+                        if (WuffGraph__contains(&graph, &dependency_name))
+                        {
+                            continue;
+                        }
                         match_result(
-                            WuffObject__dispose(&dependency.object),
-                            success(_)
+                            WuffLoader__load_dependency(&graph, &metadata, &dependency_name, memory, dependencies),
+                            success_do_nothing(),
+                            error(code, message)
                             {
                                 return WuffLoader__graph_fail(&graph, &message, code);
-                            },
-                            error(cleanup_code, cleanup_message)
-                            {
-                                return WuffLoader__graph_fail(&graph, &cleanup_message, cleanup_code);
                             }
                         );
                     }
                 );
-            }
-        );
 
-        object_index++;
-    }
+                object_index++;
+            }
 
-    for (size_t index = 0; index < WuffLoadedObjects__len(&graph.objects); index++)
-    {
-        WuffLoadedObjectPtr loaded;
-        WuffObjectMetadataPtr object_metadata;
-        match_optional(
-            WuffLoadedObjects__ptr_at(&graph.objects, (int64_t)index),
-            some(value)
+            for (size_t index = 0; index < WuffLoadedObjects__len(&graph.objects); index++)
             {
-                loaded = value;
-            },
-            none()
-            {
-                return WuffLoader__graph_fail(&graph, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
+                WuffLoadedObjectPtr loaded;
+                WuffObjectMetadataPtr object_metadata;
+                match_optional(
+                    WuffLoadedObjects__ptr_at(&graph.objects, (int64_t)index),
+                    some(value)
+                    {
+                        loaded = value;
+                    },
+                    none()
+                    {
+                        return WuffLoader__graph_fail(&graph, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
+                    }
+                );
+                match_optional(
+                    WuffObjectMetadataList__ptr_at(&metadata, (int64_t)index),
+                    some(value)
+                    {
+                        object_metadata = value;
+                    },
+                    none()
+                    {
+                        return WuffLoader__graph_fail(&graph, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
+                    }
+                );
+                match_result(
+                    WuffLoader__finalize(&graph, &loaded->object, object_metadata),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        return WuffLoader__graph_fail(&graph, &message, code);
+                    }
+                );
             }
-        );
-        match_optional(
-            WuffObjectMetadataList__ptr_at(&metadata, (int64_t)index),
-            some(value)
-            {
-                object_metadata = value;
-            },
-            none()
-            {
-                return WuffLoader__graph_fail(&graph, &invalid_image, WUFF_LOAD_INVALID_IMAGE);
-            }
-        );
-        match_result(
-            WuffLoader__finalize(&graph, &loaded->object, object_metadata),
-            success_do_nothing(),
-            error(code, message)
-            {
-                return WuffLoader__graph_fail(&graph, &message, code);
-            }
-        );
-    }
 
-    return Success(WuffGraph, graph);
+            return Success(WuffGraph, graph);
+        },
+        error(code, message)
+        {
+            return Error(WuffGraph, message, code);
+        }
+    );
+    return Error(WuffGraph, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
+Result(WuffGraph) WuffLoader__load_graph(ConstWuffImagePtr root, ConstWuffMemoryOperationsPtr memory,
+                                         ConstWuffDependencyOperationsPtr dependencies)
+{
+    return WuffLoader__load_graph_with_root_mode(root, memory, dependencies, true);
+}
+
+Result(WuffGraph) WuffLoader__load_module_graph(ConstWuffImagePtr root, ConstWuffMemoryOperationsPtr memory,
+                                                ConstWuffDependencyOperationsPtr dependencies)
+{
+    return WuffLoader__load_graph_with_root_mode(root, memory, dependencies, false);
 }

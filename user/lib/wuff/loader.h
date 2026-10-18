@@ -89,6 +89,7 @@ typedef struct WuffSymbol
 } WuffSymbol;
 
 OptionalDef(WuffSymbol);
+ResultDef(WuffSymbol);
 
 typedef struct WuffObject
 {
@@ -160,10 +161,13 @@ WuffMemoryOperations WuffMemoryOperations__system(void);
 Result(WuffObject) WuffLoader__load(const uint8_t * image, size_t image_size, ConstWuffMemoryOperationsPtr memory);
 Result(WuffGraph) WuffLoader__load_graph(ConstWuffImagePtr root, ConstWuffMemoryOperationsPtr memory,
                                          ConstWuffDependencyOperationsPtr dependencies);
+Result(WuffGraph) WuffLoader__load_module_graph(ConstWuffImagePtr root, ConstWuffMemoryOperationsPtr memory,
+                                                ConstWuffDependencyOperationsPtr dependencies);
 Result(WuffLoadCode) WuffObject__dispose(WuffObjectPtr self);
 Optional(WuffSymbol) WuffObject__find_symbol(ConstWuffObjectPtr self, ConstBStringPtr name);
 Result(WuffLoadCode) WuffGraph__dispose(WuffGraphPtr self);
 Optional(WuffSymbol) WuffGraph__find_symbol(ConstWuffGraphPtr self, ConstBStringPtr name);
+Result(WuffSymbol) WuffGraph__find_root_export(ConstWuffGraphPtr self, ConstBStringPtr name);
 Result(Address) WuffGraph__entry(ConstWuffGraphPtr self);
 
 #endif

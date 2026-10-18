@@ -73,10 +73,10 @@ void setUp(void)
     killed_pid = 0;
 }
 
-IOStatus IO__set_terminal_foreground(uint64_t pid)
+Result(IOStatus) IO__set_terminal_foreground(uint64_t pid)
 {
     foreground_calls[foreground_call_count++] = pid;
-    return IO_OK;
+    return Success(IOStatus, IO_OK);
 }
 
 ProcessSignalResult kill_process(int64_t pid, ProcessSignal signal)

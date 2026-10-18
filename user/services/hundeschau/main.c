@@ -203,30 +203,35 @@ static BString Hundeschau__line_without_comment(ConstBStringPtr line)
 
 static Optional(DynString) Hundeschau__load_config(void)
 {
-    IOHandle handle = IO__open(&bstr(HUNDESCHAU_CONFIG_PATH), IO_OPEN_READ);
-    if (handle < 0)
-    {
-        return None(DynString);
-    }
-
-    Optional(DynString) read_result = IO__read_dyn_string(handle, HUNDESCHAU_CONFIG_MAX);
-    IO__close(handle);
-
-    match_optional(
-        read_result,
-        some(config)
+    match_result(
+        IO__open(&bstr(HUNDESCHAU_CONFIG_PATH), IO_OPEN_READ),
+        success(handle)
         {
-            if (DynString__length(&config) <= 0)
-            {
-                DynString__dispose(&config);
-                return None(DynString);
-            }
-
-            return Some(DynString, config);
+            match_result(
+                IO__read_dyn_string(handle, HUNDESCHAU_CONFIG_MAX),
+                success(config)
+                {
+                    IO__close(handle);
+                    if (DynString__length(&config) <= 0)
+                    {
+                        DynString__dispose(&config);
+                        return None(DynString);
+                    }
+                    return Some(DynString, config);
+                },
+                error(code, message)
+                {
+                    IO__close(handle);
+                    return None(DynString);
+                }
+            );
+            return None(DynString);
         },
-        none_do_nothing()
+        error(code, message)
+        {
+            return None(DynString);
+        }
     );
-
     return None(DynString);
 }
 

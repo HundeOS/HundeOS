@@ -555,6 +555,23 @@ static bool TraceService__reap_io(TraceServicePtr self)
     return false;
 }
 
+static bool TraceService__open_io(TraceServicePtr self)
+{
+    match_result(
+        IO__open(&bstr(IO_TRACE_LOG_PATH), IO_OPEN_WRITE),
+        success(handle)
+        {
+            self->io_log = handle;
+            return true;
+        },
+        error(code, message)
+        {
+            return false;
+        }
+    );
+    return false;
+}
+
 static bool TraceService__flush_io(TraceServicePtr self)
 {
     if (TraceBuffer__is_empty(&self->io_records))
@@ -564,37 +581,46 @@ static bool TraceService__flush_io(TraceServicePtr self)
 
     if (self->io_log < 0)
     {
-        self->io_log = IO__open(&bstr(IO_TRACE_LOG_PATH), IO_OPEN_WRITE);
-        if (self->io_log < 0)
+        if (!TraceService__open_io(self))
         {
             return false;
         }
     }
 
     size_t length = TraceBuffer__length(&self->io_records);
-    ByteCount written = IO__write_bytes(self->io_log, (const char *)TraceBuffer__data(&self->io_records), length);
-    if (written <= 0)
-    {
-        if (!self->io_write_failure_reported)
+    match_result(
+        IO__write_bytes(self->io_log, (const char *)TraceBuffer__data(&self->io_records), length),
+        success(written)
         {
-            kernel_syslog_tagf("hund-verfolgen", "io trace write failed handle=%lld status=%lld length=%llu\n",
-                               self->io_log, written, (uint64_t)length);
-            self->io_write_failure_reported = true;
+            if (written <= 0)
+            {
+                return false;
+            }
+            if ((size_t)written < length)
+            {
+                return TraceBuffer__consume(&self->io_records, (size_t)written);
+            }
+            uint64_t dropped = TraceBuffer__clear(&self->io_records);
+            self->io_write_failure_reported = false;
+            if (dropped > 0)
+            {
+                BString notice = BString__sprintf(&bstr("IO-LATENCY-DROPPED output_records=%llu"), dropped);
+                TraceBuffer__append(&self->io_records, &notice);
+            }
+            return true;
+        },
+        error(code, message)
+        {
+            if (!self->io_write_failure_reported)
+            {
+                kernel_syslog_tagf("hund-verfolgen", "io trace write failed handle=%lld status=%i length=%llu\n",
+                                   self->io_log, code, (uint64_t)length);
+                self->io_write_failure_reported = true;
+            }
+            return false;
         }
-        return false;
-    }
-    if ((size_t)written < length)
-    {
-        return TraceBuffer__consume(&self->io_records, (size_t)written);
-    }
-    uint64_t dropped = TraceBuffer__clear(&self->io_records);
-    if (dropped > 0)
-    {
-        BString notice = BString__sprintf(&bstr("IO-LATENCY-DROPPED output_records=%llu"), dropped);
-        TraceBuffer__append(&self->io_records, &notice);
-    }
-
-    return true;
+    );
+    return false;
 }
 
 static bool TraceService__step(TraceServicePtr self)

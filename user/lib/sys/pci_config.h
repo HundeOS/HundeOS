@@ -191,26 +191,32 @@ static bool PciConfig__read_config(ConstDynStringPtr sysinfo, PciConfigPtr self)
 
 static bool PciConfig__load(PciConfigPtr self)
 {
-    IOHandle handle = IO__open(&bstr(PCI_CONFIG_PATH), IO_OPEN_READ);
-    if (handle < 0)
-    {
-        return false;
-    }
-
-    Optional(DynString) sysinfo = IO__read_dyn_string(handle, PCI_CONFIG_MAX);
-    IO__close(handle);
-
-    match_optional(
-        sysinfo,
-        some(data)
+    match_result(
+        IO__open(&bstr(PCI_CONFIG_PATH), IO_OPEN_READ),
+        success(handle)
         {
-            bool loaded = PciConfig__read_config(&data, self);
-            DynString__dispose(&data);
-            return loaded;
+            match_result(
+                IO__read_dyn_string(handle, PCI_CONFIG_MAX),
+                success(data)
+                {
+                    IO__close(handle);
+                    bool loaded = PciConfig__read_config(&data, self);
+                    DynString__dispose(&data);
+                    return loaded;
+                },
+                error(code, message)
+                {
+                    IO__close(handle);
+                    return false;
+                }
+            );
+            return false;
         },
-        none_do_nothing()
+        error(code, message)
+        {
+            return false;
+        }
     );
-
     return false;
 }
 

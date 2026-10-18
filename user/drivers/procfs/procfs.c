@@ -125,137 +125,142 @@ static Result(FilesystemFileSize)
             }
         );
     }
-    ProcPath parsed;
     match_result(
         ProcPath__parse(path),
-        success(value)
+        success(parsed)
         {
-            parsed = value;
-        },
-        error(code, message)
-        {
-            return Error(FilesystemFileSize, message, code);
-        }
-    );
-    ProcessRecord record;
-    match_result(
-        Procfs__find(procfs->registry, parsed.pid),
-        success(value)
-        {
-            record = value;
-        },
-        error(code, message)
-        {
-            return Error(FilesystemFileSize, message, code);
-        }
-    );
-    BString text;
-    if (BString__equals(&parsed.leaf, &bstr("status")))
-    {
-        ProcessInfo info = ProcessRecord__info(&record);
-        text = BString__sprintf(
-            &bstr("pid=%llu\nuid=%llu\ngid=%llu\nstate=%s\nwait=%s\nclass=%s\ncpu=%llu\nsampled_at_usec=%llu\nname="),
-            record.pid, record.credentials.user_id, record.credentials.group_id, info.state, info.wait_reason,
-            info.class_name, record.cpu, record.sampled_at_usec);
-        size_t prefix = BString__length(&text);
-        Mem__memcpy(data, BString__cstr(&text), prefix);
-        size_t length = BString__length(&record.name);
-        Mem__memcpy((char *)data + prefix, BString__cstr(&record.name), length);
-        ((char *)data)[prefix + length] = '\n';
-        return Success(FilesystemFileSize, prefix + length + 1);
-    }
-    if (BString__equals(&parsed.leaf, &bstr("cpu")))
-    {
-        ProcessCPUUsage usage = record.cpu_usage;
-        text = BString__sprintf(
-            &bstr("cpu=%llu\ntotal_usec=%llu\nCPU%% (1s)=%llu.%02llu\nCPU%% (100ms)=%llu.%02llu\n"
-                  "scheduled_usec=%llu\nSCHED CPU%% (1s)=%llu.%02llu\nSCHED CPU%% (100ms)=%llu.%02llu\n"
-                  "sampled_at_usec=%llu\n"),
-            record.cpu, usage.total_usec, usage.long_basis_points / 100, usage.long_basis_points % 100,
-            usage.short_basis_points / 100, usage.short_basis_points % 100, usage.scheduled_usec,
-            usage.scheduled_long_basis_points / 100, usage.scheduled_long_basis_points % 100,
-            usage.scheduled_short_basis_points / 100, usage.scheduled_short_basis_points % 100, record.sampled_at_usec);
-    }
-    else if (BString__equals(&parsed.leaf, &bstr("queue-wait")))
-    {
-        ProcessQueueWaitUsage usage = record.queue_wait_usage;
-        text = BString__sprintf(
-            &bstr("parks=%llu\nactivity_wakes=%llu\ntimeout_wakes=%llu\nselections=%llu\n"
-                  "speculative_selections=%llu\n"
-                  "parked_usec=%llu\nmax_parked_usec=%llu\nrunnable_usec=%llu\nmax_runnable_usec=%llu\n"
-                  "sampled_at_usec=%llu\n"),
-            usage.parks, usage.activity_wakes, usage.timeout_wakes, usage.selections, usage.speculative_selections,
-            usage.parked_usec, usage.max_parked_usec, usage.runnable_usec, usage.max_runnable_usec,
-            record.sampled_at_usec);
-    }
-    else if (BString__equals(&parsed.leaf, &bstr("ipc")))
-    {
-        match_optional(
-            record.io_diagnostics,
-            some(usage)
-            {
-                ProcfsWriter writer = ProcfsWriter__new(data);
-                ProcfsWriter__line(&writer, &bstr("uart_bytes"), usage.uart_bytes);
-                ProcfsWriter__line(&writer, &bstr("uart_irqs"), usage.uart_irqs);
-                ProcfsWriter__line(&writer, &bstr("uart_reads"), usage.uart_reads);
-                ProcfsWriter__line(&writer, &bstr("uart_empty"), usage.uart_empty);
-                ProcfsWriter__line(&writer, &bstr("backend_reads"), usage.backend_reads);
-                ProcfsWriter__line(&writer, &bstr("backend_empty"), usage.backend_empty);
-                ProcfsWriter__line(&writer, &bstr("block_submissions"), usage.block_submissions);
-                ProcfsWriter__line(&writer, &bstr("block_blocks"), usage.block_blocks);
-                ProcfsWriter__line(&writer, &bstr("block_failures"), usage.block_failures);
-                ProcfsWriter__line(&writer, &bstr("block_cache_hits"), usage.block_cache_hits);
-                ProcfsWriter__line(&writer, &bstr("block_cache_misses"), usage.block_cache_misses);
-                ProcfsWriter__line(&writer, &bstr("block_cache_evictions"), usage.block_cache_evictions);
-                ProcfsWriter__line(&writer, &bstr("inode_cache_hits"), usage.inode_cache_hits);
-                ProcfsWriter__line(&writer, &bstr("inode_cache_misses"), usage.inode_cache_misses);
-                ProcfsWriter__line(&writer, &bstr("inode_cache_evictions"), usage.inode_cache_evictions);
-                ProcfsWriter__latency(&writer, &bstr("device"), &usage.block_device);
-                ProcfsWriter__line(&writer, &bstr("block_segmented_submissions"), usage.block_segmented_submissions);
-                ProcfsWriter__latency(&writer, &bstr("device_irq"), &usage.block_device_irq);
-                ProcfsWriter__latency(&writer, &bstr("manager_wake"), &usage.block_manager_wake);
-                ProcfsWriter__latency(&writer, &bstr("irq_relay"), &usage.block_irq_relay);
-                ProcfsWriter__latency(&writer, &bstr("fiber_wake"), &usage.block_fiber_wake);
-                ProcfsWriter__latency(&writer, &bstr("completion"), &usage.block_completion);
-                ProcfsWriter__line(&writer, &bstr("wait_entries"), usage.wait_entries);
-                ProcfsWriter__line(&writer, &bstr("unchanged_wakes"), usage.unchanged_wakes);
-                ProcfsWriter__line(&writer, &bstr("user_wait_usec"), record.user_wait_usec);
-                ProcfsWriter__line(&writer, &bstr("sampled_at_usec"), record.sampled_at_usec);
-                if (writer.failed)
+            match_result(
+                Procfs__find(procfs->registry, parsed.pid),
+                success(record)
                 {
-                    return Error(FilesystemFileSize, bstr("Process diagnostics exceed file capacity"),
-                                 IO_REGISTER_FAILED);
+                    BString text;
+                    if (BString__equals(&parsed.leaf, &bstr("status")))
+                    {
+                        ProcessInfo info = ProcessRecord__info(&record);
+                        text = BString__sprintf(
+                            &bstr(
+                                "pid=%llu\nuid=%llu\ngid=%llu\nstate=%s\nwait=%s\nclass=%s\ncpu=%llu\nsampled_at_usec=%llu\nname="),
+                            record.pid, record.credentials.user_id, record.credentials.group_id, info.state,
+                            info.wait_reason, info.class_name, record.cpu, record.sampled_at_usec);
+                        size_t prefix = BString__length(&text);
+                        Mem__memcpy(data, BString__cstr(&text), prefix);
+                        size_t length = BString__length(&record.name);
+                        Mem__memcpy((char *)data + prefix, BString__cstr(&record.name), length);
+                        ((char *)data)[prefix + length] = '\n';
+                        return Success(FilesystemFileSize, prefix + length + 1);
+                    }
+                    if (BString__equals(&parsed.leaf, &bstr("cpu")))
+                    {
+                        ProcessCPUUsage usage = record.cpu_usage;
+                        text = BString__sprintf(
+                            &bstr("cpu=%llu\ntotal_usec=%llu\nCPU%% (1s)=%llu.%02llu\nCPU%% (100ms)=%llu.%02llu\n"
+                                  "scheduled_usec=%llu\nSCHED CPU%% (1s)=%llu.%02llu\nSCHED CPU%% (100ms)=%llu.%02llu\n"
+                                  "sampled_at_usec=%llu\n"),
+                            record.cpu, usage.total_usec, usage.long_basis_points / 100, usage.long_basis_points % 100,
+                            usage.short_basis_points / 100, usage.short_basis_points % 100, usage.scheduled_usec,
+                            usage.scheduled_long_basis_points / 100, usage.scheduled_long_basis_points % 100,
+                            usage.scheduled_short_basis_points / 100, usage.scheduled_short_basis_points % 100,
+                            record.sampled_at_usec);
+                    }
+                    else if (BString__equals(&parsed.leaf, &bstr("queue-wait")))
+                    {
+                        ProcessQueueWaitUsage usage = record.queue_wait_usage;
+                        text = BString__sprintf(
+                            &bstr("parks=%llu\nactivity_wakes=%llu\ntimeout_wakes=%llu\nselections=%llu\n"
+                                  "speculative_selections=%llu\n"
+                                  "parked_usec=%llu\nmax_parked_usec=%llu\nrunnable_usec=%llu\nmax_runnable_usec=%llu\n"
+                                  "sampled_at_usec=%llu\n"),
+                            usage.parks, usage.activity_wakes, usage.timeout_wakes, usage.selections,
+                            usage.speculative_selections, usage.parked_usec, usage.max_parked_usec, usage.runnable_usec,
+                            usage.max_runnable_usec, record.sampled_at_usec);
+                    }
+                    else if (BString__equals(&parsed.leaf, &bstr("ipc")))
+                    {
+                        match_optional(
+                            record.io_diagnostics,
+                            some(usage)
+                            {
+                                ProcfsWriter writer = ProcfsWriter__new(data);
+                                ProcfsWriter__line(&writer, &bstr("uart_bytes"), usage.uart_bytes);
+                                ProcfsWriter__line(&writer, &bstr("uart_irqs"), usage.uart_irqs);
+                                ProcfsWriter__line(&writer, &bstr("uart_reads"), usage.uart_reads);
+                                ProcfsWriter__line(&writer, &bstr("uart_empty"), usage.uart_empty);
+                                ProcfsWriter__line(&writer, &bstr("backend_reads"), usage.backend_reads);
+                                ProcfsWriter__line(&writer, &bstr("backend_empty"), usage.backend_empty);
+                                ProcfsWriter__line(&writer, &bstr("block_submissions"), usage.block_submissions);
+                                ProcfsWriter__line(&writer, &bstr("block_blocks"), usage.block_blocks);
+                                ProcfsWriter__line(&writer, &bstr("block_failures"), usage.block_failures);
+                                ProcfsWriter__line(&writer, &bstr("block_cache_hits"), usage.block_cache_hits);
+                                ProcfsWriter__line(&writer, &bstr("block_cache_misses"), usage.block_cache_misses);
+                                ProcfsWriter__line(&writer, &bstr("block_cache_evictions"),
+                                                   usage.block_cache_evictions);
+                                ProcfsWriter__line(&writer, &bstr("inode_cache_hits"), usage.inode_cache_hits);
+                                ProcfsWriter__line(&writer, &bstr("inode_cache_misses"), usage.inode_cache_misses);
+                                ProcfsWriter__line(&writer, &bstr("inode_cache_evictions"),
+                                                   usage.inode_cache_evictions);
+                                ProcfsWriter__latency(&writer, &bstr("device"), &usage.block_device);
+                                ProcfsWriter__line(&writer, &bstr("block_segmented_submissions"),
+                                                   usage.block_segmented_submissions);
+                                ProcfsWriter__latency(&writer, &bstr("device_irq"), &usage.block_device_irq);
+                                ProcfsWriter__latency(&writer, &bstr("manager_wake"), &usage.block_manager_wake);
+                                ProcfsWriter__latency(&writer, &bstr("irq_relay"), &usage.block_irq_relay);
+                                ProcfsWriter__latency(&writer, &bstr("fiber_wake"), &usage.block_fiber_wake);
+                                ProcfsWriter__latency(&writer, &bstr("completion"), &usage.block_completion);
+                                ProcfsWriter__line(&writer, &bstr("wait_entries"), usage.wait_entries);
+                                ProcfsWriter__line(&writer, &bstr("unchanged_wakes"), usage.unchanged_wakes);
+                                ProcfsWriter__line(&writer, &bstr("user_wait_usec"), record.user_wait_usec);
+                                ProcfsWriter__line(&writer, &bstr("sampled_at_usec"), record.sampled_at_usec);
+                                if (writer.failed)
+                                {
+                                    return Error(FilesystemFileSize, bstr("Process diagnostics exceed file capacity"),
+                                                 IO_REGISTER_FAILED);
+                                }
+                                return Success(FilesystemFileSize, writer.size);
+                            },
+                            none()
+                            {
+                                text = bstr("diagnostics=unavailable\n");
+                            }
+                        );
+                    }
+                    else if (BString__equals(&parsed.leaf, &bstr("memory")))
+                    {
+                        match_optional(
+                            record.memory,
+                            some(usage)
+                            {
+                                text = BString__sprintf(
+                                    &bstr(
+                                        "private_bytes=%llu\nshared_bytes=%llu\ndevice_bytes=%llu\nsampled_at_usec=%llu\n"),
+                                    usage.private_bytes, usage.shared_bytes, usage.device_bytes,
+                                    record.sampled_at_usec);
+                            },
+                            none()
+                            {
+                                text = bstr("accounting=unavailable\n");
+                            }
+                        );
+                    }
+                    else
+                    {
+                        return Error(FilesystemFileSize, bstr("Unknown process file"), IO_INVALID_PATH);
+                    }
+                    Mem__memcpy(data, BString__cstr(&text), BString__length(&text));
+                    return Success(FilesystemFileSize, BString__length(&text));
+                },
+                error(code, message)
+                {
+                    return Error(FilesystemFileSize, message, code);
                 }
-                return Success(FilesystemFileSize, writer.size);
-            },
-            none()
-            {
-                text = bstr("diagnostics=unavailable\n");
-            }
-        );
-    }
-    else if (BString__equals(&parsed.leaf, &bstr("memory")))
-    {
-        match_optional(
-            record.memory,
-            some(usage)
-            {
-                text = BString__sprintf(
-                    &bstr("private_bytes=%llu\nshared_bytes=%llu\ndevice_bytes=%llu\nsampled_at_usec=%llu\n"),
-                    usage.private_bytes, usage.shared_bytes, usage.device_bytes, record.sampled_at_usec);
-            },
-            none()
-            {
-                text = bstr("accounting=unavailable\n");
-            }
-        );
-    }
-    else
-    {
-        return Error(FilesystemFileSize, bstr("Unknown process file"), IO_INVALID_PATH);
-    }
-    Mem__memcpy(data, BString__cstr(&text), BString__length(&text));
-    return Success(FilesystemFileSize, BString__length(&text));
+            );
+            return Error(FilesystemFileSize, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+        },
+        error(code, message)
+        {
+            return Error(FilesystemFileSize, message, code);
+        }
+    );
+    return Error(FilesystemFileSize, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(DirectoryEntryCount) Procfs__list(IOServiceContext context, ConstBStringPtr path,
@@ -300,44 +305,44 @@ static Result(DirectoryEntryCount) Procfs__list(IOServiceContext context, ConstB
         }
         return Success(DirectoryEntryCount, count);
     }
-    ProcPath parsed;
     match_result(
         ProcPath__parse(path),
-        success(value)
+        success(parsed)
         {
-            parsed = value;
-        },
-        error(code, message)
-        {
-            return Error(DirectoryEntryCount, message, code);
-        }
-    );
-    if (!BString__is_empty(&parsed.leaf))
-    {
-        return Error(DirectoryEntryCount, bstr("Not a process directory"), IO_INVALID_PATH);
-    }
-    match_result(
-        Procfs__find(procfs->registry, parsed.pid),
-        success(record)
-        {
-            while ((size_t)count < capacity && offset < 5)
+            if (!BString__is_empty(&parsed.leaf))
             {
-                BString name = offset == 0   ? bstr("status")
-                               : offset == 1 ? bstr("cpu")
-                               : offset == 2 ? bstr("memory")
-                               : offset == 3 ? bstr("queue-wait")
-                                             : bstr("ipc");
-                entries[count++] = DirectoryEntry__new(0, record.credentials.user_id, record.credentials.group_id,
-                                                       IO_MODE_TYPE_FILE | 0444, &name);
-                offset++;
+                return Error(DirectoryEntryCount, bstr("Not a process directory"), IO_INVALID_PATH);
             }
-            return Success(DirectoryEntryCount, count);
+            match_result(
+                Procfs__find(procfs->registry, parsed.pid),
+                success(record)
+                {
+                    while ((size_t)count < capacity && offset < 5)
+                    {
+                        BString name = offset == 0   ? bstr("status")
+                                       : offset == 1 ? bstr("cpu")
+                                       : offset == 2 ? bstr("memory")
+                                       : offset == 3 ? bstr("queue-wait")
+                                                     : bstr("ipc");
+                        entries[count++] =
+                            DirectoryEntry__new(0, record.credentials.user_id, record.credentials.group_id,
+                                                IO_MODE_TYPE_FILE | 0444, &name);
+                        offset++;
+                    }
+                    return Success(DirectoryEntryCount, count);
+                },
+                error(code, message)
+                {
+                    return Error(DirectoryEntryCount, message, code);
+                }
+            );
         },
         error(code, message)
         {
             return Error(DirectoryEntryCount, message, code);
         }
     );
+    return Error(DirectoryEntryCount, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static IOStatus Procfs__store(IOServiceContext context, ConstBStringPtr path, FilesystemFileDataPtr data,

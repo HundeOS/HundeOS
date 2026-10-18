@@ -13,14 +13,22 @@ enum
 
 ByteCount console_read(char * buf, uint64_t size)
 {
-    ByteCount res = 0;
-    res = IO__read_bytes(STDIN_FILENO, buf, size);
-
-    if (res > 0 && res < (ByteCount)size)
-    {
-        buf[res] = '\0';
-    }
-    return res;
+    match_result(
+        IO__read_bytes(STDIN_FILENO, buf, size),
+        success(count)
+        {
+            if (count > 0 && count < (ByteCount)size)
+            {
+                buf[count] = '\0';
+            }
+            return count;
+        },
+        error(code, message)
+        {
+            return code;
+        }
+    );
+    return RESULT_UNKNOWN_ERROR_CODE;
 }
 
 ByteCount console_read_line(char * buf, bool echo, uint64_t size)

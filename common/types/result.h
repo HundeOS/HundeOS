@@ -9,6 +9,8 @@
 
 typedef int64_t Code;
 
+#define RESULT_UNKNOWN_ERROR_CODE ((Code) - 1)
+
 #define Result(T) Result_##T
 
 #define ResultPtr(T) Result_##T *

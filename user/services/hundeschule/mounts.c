@@ -33,21 +33,15 @@ static Result(IOStatus) Hundeschule__mount_config(ChannelPtr channel, MountConfi
     );
 }
 
-static Result(IOStatus) Hundeschule__mount_configured(ChannelPtr channel)
+static Result(IOStatus) Hundeschule__mount_configured_file(ChannelPtr channel, IOHandle file)
 {
-    IOHandle file = IO__open(&bstr("/boot/config/fstab"), IO_OPEN_READ);
-    if (file < 0)
-    {
-        return Error(IOStatus, bstr("Cannot open fstab"), file);
-    }
-    Optional(DynString) text = IO__read_dyn_string(file, 2048);
-    IO__close(file);
     IOStatus status = IO_OK;
     bool root = false;
-    match_optional(
-        text,
-        some(config)
+    match_result(
+        IO__read_dyn_string(file, 2048),
+        success(config)
         {
+            IO__close(file);
             match_optional(
                 DynString__lines(&config),
                 some(lines)
@@ -115,9 +109,10 @@ static Result(IOStatus) Hundeschule__mount_configured(ChannelPtr channel)
             );
             DynString__dispose(&config);
         },
-        none()
+        error(code, message)
         {
-            status = IO_INVALID_PATH;
+            IO__close(file);
+            return Error(IOStatus, message, code);
         }
     );
     if (status != IO_OK || !root)
@@ -126,6 +121,22 @@ static Result(IOStatus) Hundeschule__mount_configured(ChannelPtr channel)
                      status != IO_OK ? status : IO_INVALID_MOUNT_POINT);
     }
     return Success(IOStatus, IO_OK);
+}
+
+static Result(IOStatus) Hundeschule__mount_configured(ChannelPtr channel)
+{
+    match_result(
+        IO__open(&bstr("/boot/config/fstab"), IO_OPEN_READ),
+        success(file)
+        {
+            return Hundeschule__mount_configured_file(channel, file);
+        },
+        error(code, message)
+        {
+            return Error(IOStatus, bstr("Cannot open fstab"), code);
+        }
+    );
+    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 static Result(IOStatus) Hundeschule__mount_builtin(ChannelPtr channel, ConstBStringPtr type, ConstBStringPtr path)
@@ -173,19 +184,18 @@ static Result(IOStatus) Hundeschule__mount_all(ChannelPtr channel)
 
 Result(IOStatus) Hundeschule__mount_filesystems(void)
 {
-    Channel channel;
     match_result(
         Channel__open(ServiceDirectory__shared(), &bstr(IO_FILESYSTEM_SERVICE)),
-        success(created)
+        success(channel)
         {
-            channel = created;
+            Result(IOStatus) result = Hundeschule__mount_all(&channel);
+            Channel__close(&channel);
+            return result;
         },
         error(code, message)
         {
             return Error(IOStatus, message, code);
         }
     );
-    Result(IOStatus) result = Hundeschule__mount_all(&channel);
-    Channel__close(&channel);
-    return result;
+    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }

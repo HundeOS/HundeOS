@@ -60,19 +60,26 @@ int tcgetattr(int descriptor, struct termios * attributes)
     {
         return -1;
     }
-    IOTerminalAttributesResult result = IO__get_terminal_attributes(handle);
-    if (result.status != IO_OK)
-    {
-        return PosixTerminal__error(result.status);
-    }
-    attributes->c_iflag = result.attributes.input_flags;
-    attributes->c_oflag = result.attributes.output_flags;
-    attributes->c_cflag = result.attributes.control_flags;
-    attributes->c_lflag = result.attributes.local_flags;
-    attributes->c_ispeed = result.attributes.input_speed;
-    attributes->c_ospeed = result.attributes.output_speed;
-    memcpy(attributes->c_cc, result.attributes.control_characters, NCCS);
-    return 0;
+    match_result(
+        IO__get_terminal_attributes(handle),
+        success(native)
+        {
+            attributes->c_iflag = native.input_flags;
+            attributes->c_oflag = native.output_flags;
+            attributes->c_cflag = native.control_flags;
+            attributes->c_lflag = native.local_flags;
+            attributes->c_ispeed = native.input_speed;
+            attributes->c_ospeed = native.output_speed;
+            memcpy(attributes->c_cc, native.control_characters, NCCS);
+            return 0;
+        },
+        error(code, message)
+        {
+            return PosixTerminal__error((IOStatus)code);
+        }
+    );
+    errno = EIO;
+    return -1;
 }
 
 int tcgetwinsize(int descriptor, struct winsize * size)
@@ -111,8 +118,19 @@ int tcsetattr(int descriptor, int action, const struct termios * attributes)
         .output_speed = attributes->c_ospeed,
     };
     memcpy(native.control_characters, attributes->c_cc, NCCS);
-    IOStatus status = IO__set_terminal_attributes(handle, native);
-    return status == IO_OK ? 0 : PosixTerminal__error(status);
+    match_result(
+        IO__set_terminal_attributes(handle, native),
+        success(status)
+        {
+            return status == IO_OK ? 0 : -1;
+        },
+        error(code, message)
+        {
+            return PosixTerminal__error((IOStatus)code);
+        }
+    );
+    errno = EIO;
+    return -1;
 }
 
 int tcsetwinsize(int descriptor, const struct winsize * size)

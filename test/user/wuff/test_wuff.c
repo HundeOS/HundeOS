@@ -108,20 +108,21 @@ Result(IOFileInfo) IO__file_info(ConstBStringPtr path)
     return Success(IOFileInfo, IOFileInfo__new(filesystem_mode, 0, 0, filesystem_size));
 }
 
-IOHandle IO__open(ConstBStringPtr path, Flags flags)
+Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     filesystem_open_calls++;
     filesystem_last_path = *path;
     TEST_ASSERT_EQUAL(IO_OPEN_READ, flags);
-    return filesystem_handle;
+    return filesystem_handle < 0 ? Error(IOHandle, bstr("open failed"), filesystem_handle)
+                                 : Success(IOHandle, filesystem_handle);
 }
 
-ByteCount IO__read_bytes(IOHandle handle, char * buffer, size_t size)
+Result(ByteCount) IO__read_bytes(IOHandle handle, char * buffer, size_t size)
 {
     TEST_ASSERT_EQUAL(filesystem_handle, handle);
     if (filesystem_offset >= filesystem_size)
     {
-        return IO_EOF;
+        return Error(ByteCount, bstr("end of file"), IO_EOF);
     }
     size_t remaining = filesystem_size - filesystem_offset;
     size_t count = remaining < size ? remaining : size;
@@ -131,14 +132,15 @@ ByteCount IO__read_bytes(IOHandle handle, char * buffer, size_t size)
     }
     memcpy(buffer, filesystem_data + filesystem_offset, count);
     filesystem_offset += count;
-    return (ByteCount)count;
+    return Success(ByteCount, (ByteCount)count);
 }
 
-IOStatus IO__close(IOHandle handle)
+Result(IOStatus) IO__close(IOHandle handle)
 {
     TEST_ASSERT_EQUAL(filesystem_handle, handle);
     filesystem_close_calls++;
-    return filesystem_close_status;
+    return filesystem_close_status == IO_OK ? Success(IOStatus, IO_OK)
+                                            : Error(IOStatus, bstr("close failed"), filesystem_close_status);
 }
 
 static void TestFilesystem__reset(const uint8_t * data, size_t size)
@@ -717,8 +719,12 @@ void test_wuff_loader_applies_jump_slot_relocation(void)
 {
     uint8_t image[TEST_IMAGE_SIZE];
     TestImage__build(image);
-    TestImage__dynamic_entry(image, 8, WUFF_DYNAMIC_PLT_RELOCATION_SIZE, sizeof(WuffRela));
-    TestImage__dynamic_entry(image, 10, WUFF_DYNAMIC_JUMP_RELOCATION, 0x22e0);
+    TestImage__dynamic_entry(image, 3, WUFF_DYNAMIC_STRING_TABLE_SIZE, 10);
+    TestImage__dynamic_entry(image, 4, WUFF_DYNAMIC_SYMBOL_ENTRY_SIZE, sizeof(WuffSymbolEntry));
+    TestImage__dynamic_entry(image, 5, WUFF_DYNAMIC_PLT_RELOCATION_SIZE, sizeof(WuffRela));
+    TestImage__dynamic_entry(image, 6, WUFF_DYNAMIC_PLT_RELOCATION_TYPE, WUFF_DYNAMIC_RELA);
+    TestImage__dynamic_entry(image, 7, WUFF_DYNAMIC_JUMP_RELOCATION, 0x22e0);
+    TestImage__dynamic_entry(image, 8, WUFF_DYNAMIC_NULL, 0);
     WuffRela relocation = {
         .offset = 0x2380,
         .info = ((uint64_t)1 << 32) | TEST_JUMP_SLOT_RELOCATION,
@@ -841,6 +847,143 @@ void test_wuff_graph_loads_transitive_dependencies_resolves_imports_and_deduplic
     );
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
     TEST_ASSERT_EQUAL(6, memory.free_calls);
+}
+
+void test_wuff_module_graph_finds_required_root_export(void)
+{
+    uint8_t root_image[TEST_IMAGE_SIZE];
+    TestImage__build(root_image);
+    BString root_name = bstr("driver.wuff");
+    BString export_name = bstr("wuff_add");
+    TestProvider provider = {.dependencies = TestDependencies__new()};
+    WuffDependencyOperations dependency_operations =
+        WuffDependencyOperations__new(&provider, TestProvider__load, TestProvider__release);
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    WuffMemoryOperations memory_operations = TestMemory__operations(&memory);
+    WuffImage root = WuffImage__new(&root_name, root_image, sizeof(root_image));
+
+    match_result(
+        WuffLoader__load_module_graph(&root, &memory_operations, &dependency_operations),
+        success(graph)
+        {
+            match_result(
+                WuffGraph__find_root_export(&graph, &export_name),
+                success(symbol)
+                {
+                    TEST_ASSERT_EQUAL_HEX64(TEST_BASE_ADDRESS + 0x300, symbol.address);
+                    TEST_ASSERT_EQUAL(4, symbol.size);
+                },
+                error_test_fail()
+            );
+            match_result(WuffGraph__dispose(&graph),
+                success_do_nothing(),
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
+}
+
+void test_wuff_module_graph_reports_missing_required_root_export(void)
+{
+    uint8_t root_image[TEST_IMAGE_SIZE];
+    TestImage__build(root_image);
+    BString root_name = bstr("driver.wuff");
+    BString export_name = bstr("missing_export");
+    TestProvider provider = {.dependencies = TestDependencies__new()};
+    WuffDependencyOperations dependency_operations =
+        WuffDependencyOperations__new(&provider, TestProvider__load, TestProvider__release);
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    WuffMemoryOperations memory_operations = TestMemory__operations(&memory);
+    WuffImage root = WuffImage__new(&root_name, root_image, sizeof(root_image));
+
+    match_result(
+        WuffLoader__load_module_graph(&root, &memory_operations, &dependency_operations),
+        success(graph)
+        {
+            match_result(
+                WuffGraph__find_root_export(&graph, &export_name),
+                success_test_fail(),
+                error(code, message)
+                {
+                    TEST_ASSERT_EQUAL(WUFF_LOAD_SYMBOL_NOT_FOUND, code);
+                }
+            );
+            match_result(WuffGraph__dispose(&graph),
+                success_do_nothing(),
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
+}
+
+void test_wuff_module_graph_does_not_use_dependency_as_root_export(void)
+{
+    uint8_t root_image[TEST_IMAGE_SIZE];
+    uint8_t dependency_image[TEST_IMAGE_SIZE];
+    TestImage__build(root_image);
+    TestImage__build(dependency_image);
+    TestImage__import_symbol(root_image, WUFF_SYMBOL_GLOBAL, 0);
+    BString root_name = bstr("driver.wuff");
+    BString dependency_name = bstr("dependency.wuff.1");
+    BString export_name = bstr("wuff_add");
+    TestImage__add_dependency(root_image, &dependency_name);
+    TestProvider provider = {.dependencies = TestDependencies__new()};
+    TestProvider__add(&provider, &dependency_name, dependency_image);
+    WuffDependencyOperations dependency_operations =
+        WuffDependencyOperations__new(&provider, TestProvider__load, TestProvider__release);
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    WuffMemoryOperations memory_operations = TestMemory__operations(&memory);
+    WuffImage root = WuffImage__new(&root_name, root_image, sizeof(root_image));
+
+    match_result(
+        WuffLoader__load_module_graph(&root, &memory_operations, &dependency_operations),
+        success(graph)
+        {
+            match_result(
+                WuffGraph__find_root_export(&graph, &export_name),
+                success_test_fail(),
+                error(code, message)
+                {
+                    TEST_ASSERT_EQUAL(WUFF_LOAD_SYMBOL_NOT_FOUND, code);
+                }
+            );
+            match_result(WuffGraph__dispose(&graph),
+                success_do_nothing(),
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(1, provider.release_calls);
+    TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
+}
+
+void test_wuff_module_graph_rejects_program_interpreter(void)
+{
+    uint8_t root_image[TEST_IMAGE_SIZE];
+    TestImage__build(root_image);
+    TestImage__add_interpreter(root_image, WUFF_INTERPRETER_PATH);
+    BString root_name = bstr("driver.wuff");
+    TestProvider provider = {.dependencies = TestDependencies__new()};
+    WuffDependencyOperations dependency_operations =
+        WuffDependencyOperations__new(&provider, TestProvider__load, TestProvider__release);
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    WuffMemoryOperations memory_operations = TestMemory__operations(&memory);
+    WuffImage root = WuffImage__new(&root_name, root_image, sizeof(root_image));
+
+    match_result(
+        WuffLoader__load_module_graph(&root, &memory_operations, &dependency_operations),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(WUFF_LOAD_INVALID_IMAGE, code);
+        }
+    );
+    TEST_ASSERT_EQUAL(0, memory.allocation_calls);
 }
 
 void test_wuff_graph_binds_unresolved_weak_symbol_to_zero(void)
@@ -1131,6 +1274,67 @@ void test_wuff_filesystem_loads_root_image_from_absolute_path(void)
     TEST_ASSERT_EQUAL(1, filesystem_info_calls);
     TEST_ASSERT_EQUAL(1, filesystem_open_calls);
     TEST_ASSERT_EQUAL(1, filesystem_close_calls);
+}
+
+void test_wuff_filesystem_loads_module_and_releases_root_image(void)
+{
+    uint8_t contents[TEST_IMAGE_SIZE];
+    TestImage__build(contents);
+    TestFilesystem__reset(contents, sizeof(contents));
+    BString path = bstr("/usr/lib/hunde/drivers/block.wuff");
+    BString export_name = bstr("wuff_add");
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    WuffMemoryOperations memory_operations = TestMemory__operations(&memory);
+
+    match_result(
+        WuffFilesystem__load_module(&path, &memory_operations),
+        success(graph)
+        {
+            match_result(
+                WuffGraph__find_root_export(&graph, &export_name),
+                success(symbol)
+                {
+                    TEST_ASSERT_EQUAL_HEX64(TEST_BASE_ADDRESS + 0x300, symbol.address);
+                },
+                error_test_fail()
+            );
+            match_result(WuffGraph__dispose(&graph),
+                success_do_nothing(),
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_BSTRING(path, filesystem_last_path);
+    TEST_ASSERT_EQUAL(1, filesystem_info_calls);
+    TEST_ASSERT_EQUAL(1, filesystem_open_calls);
+    TEST_ASSERT_EQUAL(1, filesystem_close_calls);
+    TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
+}
+
+void test_wuff_filesystem_releases_rejected_module_image(void)
+{
+    uint8_t contents[TEST_IMAGE_SIZE];
+    TestImage__build(contents);
+    TestImage__add_interpreter(contents, WUFF_INTERPRETER_PATH);
+    TestFilesystem__reset(contents, sizeof(contents));
+    BString path = bstr("/usr/lib/hunde/drivers/program.wuff");
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    WuffMemoryOperations memory_operations = TestMemory__operations(&memory);
+
+    match_result(
+        WuffFilesystem__load_module(&path, &memory_operations),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(WUFF_LOAD_INVALID_IMAGE, code);
+        }
+    );
+    TEST_ASSERT_EQUAL_BSTRING(path, filesystem_last_path);
+    TEST_ASSERT_EQUAL(1, filesystem_info_calls);
+    TEST_ASSERT_EQUAL(1, filesystem_open_calls);
+    TEST_ASSERT_EQUAL(1, filesystem_close_calls);
+    TEST_ASSERT_EQUAL(0, memory.allocation_calls);
 }
 
 void test_wuff_filesystem_rejects_dependency_paths(void)
