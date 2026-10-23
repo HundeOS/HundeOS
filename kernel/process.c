@@ -192,6 +192,8 @@ static const char * UserAllocationType__name(UserAllocationType type)
         return "MMIO";
     case USER_ALLOCATION_SHARED:
         return "SHARED";
+    case USER_ALLOCATION_DOORBELL:
+        return "DOORBELL";
     }
 
     return "UNKNOWN";
@@ -920,12 +922,33 @@ static Result(ProcessMemoryCode)
     return Error(ProcessMemoryCode, fork_no_memory, PROCESS_MEMORY_FULL);
 }
 
+static bool Process__inherits_fork_allocation(ProcessPtr self, ConstUserAllocationPtr allocation)
+{
+    if (allocation->type == USER_ALLOCATION_SHARED || allocation->type == USER_ALLOCATION_DOORBELL)
+    {
+        return false;
+    }
+    match_optional(
+        self->queue_wait_control,
+        some(mapping)
+        {
+            if (allocation->address.virtual_addr == mapping.virtual_addr)
+            {
+                return false;
+            }
+        },
+        none_do_nothing()
+    );
+    return true;
+}
+
 Result(ProcessPtr) Process__fork(ProcessPtr self)
 {
     if (!Process__forkable(self))
     {
         return Error(ProcessPtr, fork_unsupported_state, PROCESS_FORK_UNSUPPORTED_STATE);
     }
+
     match_result(
         ProcessPageTable__new(self->kernel),
         success(page_table)
@@ -953,7 +976,7 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
                         self->user_allocations,
                         allocation,
                         {
-                            if (allocation.type == USER_ALLOCATION_SHARED)
+                            if (!Process__inherits_fork_allocation(self, &allocation))
                             {
                                 continue;
                             }
@@ -3170,7 +3193,8 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
             }
 
             match_result(
-                Kernel__free(kernel_virtual),
+                allocation.type == USER_ALLOCATION_DOORBELL ? DoorbellBacking__release(allocation.address)
+                                                            : Kernel__free(kernel_virtual),
                 success_do_nothing(),
                 error(code, message)
                 {

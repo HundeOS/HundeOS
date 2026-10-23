@@ -173,6 +173,11 @@ only to advance the Bash build.
   `vprintf`, `puts`, character and line I/O, `perror`, `setlinebuf`, and `dprintf`.
   - [x] Provide `sprintf`, `vsprintf`, `snprintf`, `vsnprintf`, and `putc` over
     the existing bounded formatter and descriptor-backed streams.
+  - [ ] Remove the observed wide-format output truncation: on AArch64,
+    Bash `printf '%070000d' 1` reports success but emits only 1,023 bytes,
+    including when sent directly to a file without a pipe. Investigate the
+    formatter/stdio boundary separately; pipe capacity tests must generate
+    data in smaller chunks until this is resolved.
   - [x] Provide and test `puts`, including its trailing newline and output-failure
     behavior. Bash compiles through `mailcheck.c` on AArch64 and RISC-V.
 - [ ] Add the time, identity, system, and resource interfaces needed to close the
@@ -227,6 +232,11 @@ only to advance the Bash build.
 - [ ] Complete the address-space and execution-state fork work described under
   [Fork Support](#fork-support), with defined copying semantics and rollback.
 - [ ] Implement `fork` and the supported `vfork` behavior required by Bash.
+- [x] Fix nested Bash fork failures caused by copying kernel-owned doorbell and
+  queue-wait-control allocations while resetting their references. Exclude the
+  backing and mappings from eager fork, then create fresh child IPC state.
+  Regressions cover three process generations and background external-command
+  loops alongside pipelines. See [process-local IPC allocations](architecture/fork.md#process-local-ipc-allocations).
 - [ ] Implement `execve` and the required `exec*` family over the native overlay
   operation, including argv, environment, credentials, errors, inherited
   descriptors, and close-on-exec processing.
@@ -262,7 +272,8 @@ only to advance the Bash build.
   paired endpoints, blocking reads, EOF after the final writer closes, 64 KiB
   bounded storage, atomic writes through 4096 bytes, backpressure, and `EPIPE`
   after the final reader closes. It uses the common I/O Channel and directional
-  `hunde-puffer` buffers and is started by `hundeschule`.
+  `hunde-puffer` buffers. Its Rust `pipe.wuff` now runs inside `hunde-io-host`;
+  `hundeschule` waits for the retained endpoint instead of starting a pipe process.
 - [x] Implement `pipe`, `dup`, `dup2`, and `F_DUPFD` over process-local
   descriptors and reference-counted open descriptions. Duplicates share the
   native endpoint, close it only after the final local descriptor closes, and
@@ -346,6 +357,13 @@ only to advance the Bash build.
   environment propagation, scripts, external commands, exit status, and cleanup.
 - [ ] Test redirection, pipelines, command substitution, here-documents, Ctrl-C,
   stopped and resumed jobs, foreground/background jobs, and clean shell exit.
+  - [ ] Fix the foreground `cat` Ctrl-C timeout reproduced by the full-system
+    command smoke test on both AArch64 and RISC-V with the C root provider.
+    Hosted-root validation must not attribute this control failure to Rust EXT2.
+  - [x] Extend memfs open-description inheritance for redirected external
+    commands. Hosted Rust memfs uses authenticated grants sharing open
+    descriptions and offsets across fork/exec. See
+    [temporary filesystem](architecture/io-system.md#temporary-filesystem).
 - [ ] Run representative upstream Bash tests that match the supported feature
   set and record deliberate unsupported optional facilities.
 
@@ -377,7 +395,10 @@ only to advance the Bash build.
 Status: architecture agreed and documented in
 [I/O and driver hosts](architecture/io-driver-hosts.md). `hund-unterbrict`
 already hosts VirtIO block instances and dispatches their IRQs locally. The
-remaining I/O components still use the current multi-process service graph.
+Rust socket, pipe, memfs, and procfs components now load inside `hunde-io-host`, preserving
+the `socket_router`, `hund-rohr`, `/tmp`, and `/proc` endpoints. Other I/O components still use the current
+multi-process service graph. See the
+[first Rust socket slice](architecture/io-driver-hosts.md#first-rust-socket-slice).
 
 #### Baseline And Host Interfaces
 
@@ -405,12 +426,364 @@ remaining I/O components still use the current multi-process service graph.
   parity and measurements pass on AArch64 and RISC-V.
 - [ ] Define host crash cleanup for device claims, IRQ routes, DMA, and requests
   before relying on automatic driver-host restart.
+- [ ] Investigate the RISC-V interrupt-manager instruction abort observed during
+  hosted sysinfo acceptance: `hund-unterbrict` reported PC zero during a root
+  filesystem copy, followed by failed UART IRQ subscriptions, repeated UART
+  restarts, and kernel heap exhaustion. Preserve the original trace and establish
+  the failing call path before changing IRQ handling or restart policy; the cause
+  and relationship to the sysinfo migration are not established. The fault
+  logger truncates addresses to 32 bits, so the full PC still needs capture.
+  The user explicitly approved continuing migration while monitoring the crash;
+  unchanged-image cold boots remain under debugger capture. This is unresolved,
+  not validated by passing retries.
 
 #### `hunde-io-host`
 
+- [x] Replace the C FAT32 provider with native safe Rust `fat32.wuff` in the
+  I/O host, rather than adding a Rust wrapper over the C engine.
+  - [x] Add a read-only `no_std` Rust engine over `hunde::block::Device`, with
+    checked FAT32 geometry, cycle/bounds validation, short-name path lookup,
+    paginated directories, fragmented offset reads, and sparse image fixtures.
+  - [x] Add engine writes, allocation, creation, zero-length truncation, and
+    file/empty-directory removal, with native parity tests, failure injection,
+    and disposable-image filesystem checks. Existing mounts remain unchanged.
+  - [x] Add the safe `IoComponent` adapter and native tests for authenticated
+    handles, shared inherited offsets, permissions, and lifecycle cleanup.
+  - [x] Add `fat32.wuff` packaging, approved filesystem loading, explicit
+    driver selection in mount control, and boot mount/namespace parsing.
+    Device reservations reject duplicate devices across filesystem formats.
+  - [x] Resolve integration acceptance blockers: the Wuff loader now allocates
+    the complete aligned image span before choosing a load bias, preventing
+    later segments from colliding with existing process allocations. Segment
+    permissions and RELRO remain separate; gaps are inaccessible and backing
+    memory is freed once. Regression tests cover fragmented holes, alignment,
+    permissions, and cleanup. `humpen` skips hosted FAT32 mounts, and trace
+    validation uses guaranteed I/O readiness rather than verbose-only logging.
+    FAT32 acceptance and root-filesystem smoke tests pass on both architectures;
+    disposable FAT32 images pass filesystem consistency checks. See
+    [Loader boundary](architecture/dynamic-linking.md#loader-boundary).
+  - [x] Preserve long-name lookup, executable opens, and recursive removal;
+    migrate configured FAT32 mounts and retire the C backend, launcher, and
+    obsolete C tests. Boot configuration accepts the old `fat32` spelling as a
+    hosted alias. Acceptance verifies existing SD/channel mounts, long-name
+    reads, execution from FAT32, recursive removal, and absence of the C driver.
+  Long-name creation and POSIX unlink-while-open remain unimplemented; neither
+  was supported by the C provider. Whether to add them is a separate follow-up
+  decision. Live or grant-retained files return busy rather than losing storage
+  underneath open handles.
+  See [FAT32 hosting preparation](architecture/io-system.md#fat32-hosting-preparation).
+
+- [x] Organize host, filesystem, socket, and streams into module directories.
+  Share typed subsystem dispatch through `IoComponent`, preserve existing
+  endpoint/readiness behavior, and keep FFI translations in `hunde`. Filesystem
+  instances own `/tmp` and `/proc`; namespace/rootfs migration and EXT2 mounting
+  remain separate work. See [host subsystems](architecture/rust-userspace.md#host-subsystems).
+- [x] Replace raw subsystem endpoint/message byte slices with distinct
+  `ServiceName` and `ReadinessMessage` types throughout the shared service
+  adapter and all host modules. Convert text to bytes at the library boundary;
+  reject accidental interchange at compile time. See
+  [host subsystems](architecture/rust-userspace.md#host-subsystems).
+- [x] Support multiple Rust fibres on one process-owned native scheduler, with
+  per-fibre callbacks, owned captures, joinable task results, spawn-failure
+  cleanup, and wake-all polling on Channel events/task completion. Keep the
+  existing endpoint poller intact; future mount/control work must share this
+  scheduler rather than introduce component schedulers. See
+  [scheduler ownership](architecture/rust-userspace.md#one-scheduler-multiple-fibres).
+- [x] Start the Rust I/O host, load a resident Rust socket Wuff, preserve existing
+  Channel/queue authentication and managed buffers, and bridge its polling
+  Future to the existing fibre scheduler. Keep standard source-local Rust unit
+  tests and per-crate `tests/` integration test conventions documented.
+- [x] Consolidate C ABI and runtime translations in `user/lib/hunde`, including
+  typed I/O requests, reusable component callbacks, service/Wuff/fibre adapters,
+  and core-only lifecycle smoke support. Host and component crates use thin
+  registration declarations; see the
+  [shared C boundary](architecture/rust-userspace.md#shared-c-boundary).
+- [x] Move host startup, Rust `main`, component ownership and dispatch, endpoint
+  registration/readiness, and scheduler execution policy into Rust. Remove the
+  host-specific C launcher/dispatcher; keep only reusable native-library and
+  protocol translations in `user/lib/hunde`. See the
+  [Rust host boundary](architecture/io-driver-hosts.md#first-rust-socket-slice).
+- [x] Colocate Cargo crates with their service, driver, library, or component in
+  the normal userspace tree, using `user/Cargo.toml` as the workspace. Forbid
+  unsafe Rust in consumers and tests; keep the approved bundled-component loader
+  and raw ABI operations in `hunde`. See
+  [Rust userspace](architecture/rust-userspace.md#unsafe-boundary).
+- [x] Generate Rust I/O operation, status, and flag constants from the existing
+  C enums during Cargo builds, replace duplicated protocol literals, and test
+  regeneration and C value parity. See
+  [protocol constants](architecture/rust-userspace.md#protocol-constants).
+- [x] Reserve restored local handle identities in the client allocator, including
+  overflow-safe exhaustion checks for open, accept, and paired pipe allocation.
+  Native regressions cover restored stdio collisions and allocation bounds.
+- [x] Move pipes into resident Rust `pipe.wuff` in `hunde-io-host`, retain
+  the `hund-rohr` endpoint, and retire its standalone executable. Add typed
+  paired-handle replies and authenticated fork/exec grants; poll sockets and
+  pipes together through the existing fibre and Channel adapters. See
+  [hosted Rust pipes](architecture/io-driver-hosts.md#hosted-rust-pipes).
+- [x] Initialize libc's cached child PID before inherited Channel attachment.
+  AArch64 debugger evidence showed children 38/39 attaching queues with cached
+  parent PID 33. The fork wrapper now refreshes identity before claiming I/O;
+  a native ordering regression covers this requirement. See
+  [fork inheritance](architecture/fork.md).
+- [x] Complete hosted pipe full-system acceptance on AArch64 and RISC-V.
+  Both boot both Wuffs without a standalone pipe process and pass external
+  multi-stage pipelines, inherited builtin reads, a 70,000-byte transfer, and
+  repeated socket exchanges while pipes are active. The smoke generates data
+  in 1,000-byte chunks and reads it with a builtin to isolate pipe behavior
+  from the separate formatter limitation above.
+- [x] Port memfs into a safe Rust `memfs.wuff` hosted with sockets and pipes;
+  preserve creator permissions, sticky-root removal, bounded descriptions,
+  directory pagination, seek/append, and dynamic contents. Add filesystem
+  request/reply translation and kernel credential snapshots to I/O ABI v3,
+  and share inheritance bookkeeping with pipes in `hunde`. Retire the C
+  executable and wait for hosted readiness during `/tmp` mount setup. See
+  [hosted Rust memfs](architecture/io-driver-hosts.md#hosted-rust-memfs).
+- [x] Add and run hosted memfs full-system acceptance on AArch64 and RISC-V,
+  including redirected external commands, fork/exec inheritance, directory
+  pagination, append, file copies, and socket/pipe coexistence. The full smoke
+  verifies the absence of standalone memfs and the resident Wuff readiness.
+- [x] Port procfs formatting, read-only metadata, snapshot descriptions, seek,
+  authenticated ownership, and inheritance into safe Rust `procfs.wuff`.
+  Add shared `hunde::process` accounting/trace callbacks in I/O ABI v4, retain
+  the `/proc` Channel and namespace mount, and leave `ps` on `process_list`.
+  See [hosted Rust procfs](architecture/io-driver-hosts.md#hosted-rust-procfs).
+- [x] Complete focused hosted procfs acceptance on AArch64 and RISC-V, including
+  process listing, directory enumeration, all accounting leaves, inherited
+  snapshots, kernel-trace reads, and absence of a standalone procfs process.
+  Remove the retired C implementation and replace its tests with source-local
+  Rust tests and native boundary regressions.
+  The native trace callback uses an ordinary page-backed temporary buffer:
+  Rust heap slices may cross mappings, while the syscall requires one mapping
+  containing its output. It checks bounds, copies the snapshot, and releases
+  the buffer on success and failure. Tests cover allocation/release failures,
+  invalid capacities, oversized results, and empty/full snapshots.
+  `test_qemu_rust_procfs_component` passes on both architectures. The combined
+  I/O smoke passes on both architectures after the exit-lifetime fix below.
+  See [process registry and procfs](architecture/process-registry-and-procfs.md).
+- [x] Fix the active-page-table lifetime bug exposed by intermittent RISC-V
+  full-system timeouts and repeat hosted-I/O acceptance. Before the fix, a repeated
+  run stops after echoing only `pri` from the next redirection command, before
+  the command is fully entered. An earlier run stalled in a builtin pipeline.
+  During procfs migration, another run completed every process-accounting leaf
+  and inherited snapshot read, then stalled in the first external multi-stage
+  pipeline. This is an observation, not proof of a shared root cause.
+  After fixing trace-buffer mappings, one run completed procfs and the small
+  pipelines but stalled in the 70,000-byte builtin transfer. A fresh retry
+  stopped after echoing only `exe` from the inheritance command, before it
+  executed. The focused procfs acceptance case passes on both architectures;
+  the combined smoke remains enabled with unchanged input and timeouts.
+  A debugger capture during a subsequent login stall found a CPU in exit
+  cleanup/preemption with `satp` still referencing a root lacking the kernel
+  mapping. That CPU repeatedly faulted fetching the trap vector while holding
+  the scheduler lock; the other three CPUs spun on that lock. Exit previously
+  freed the process page tables before switching away from them. Exit now
+  calls an architecture-specific active-root detach before freeing user memory
+  or tables, with hosted regression coverage for active and non-current exits.
+  See [address-space detachment](architecture/fork.md#address-space-detachment-on-exit).
+  The complete hosted-I/O smoke passes six consecutive RISC-V runs, including
+  the 70,000-byte pipe transfer, and passes on AArch64. Input and timeouts are
+  unchanged. Scheduler, process, and CPU suites pass 237 tests. This fixes the
+  captured exit-lifetime defect; any future stalls still need their own runtime
+  evidence rather than assuming the same cause or increasing timeouts.
+- [x] Start the safe Rust EXT2 migration with a checked volume reader and a
+  shared `hunde::block` native adapter. Cover disk geometry, paths, directory
+  records, direct/single/double-indirect and sparse reads, device failures,
+  native transfer bounds, and real generated images. Active mounts remain on C.
+  See [Rust EXT2 migration](architecture/io-driver-hosts.md#rust-ext2-migration-volume-reader-slice).
+- [x] Add Rust EXT2 existing-file overwrites and growth, block-bitmap allocation
+  across groups, direct/single/double-indirect pointer updates, sparse-gap
+  zeroing, and primary free-block/inode-sector accounting. Stage each write
+  before commit, restore attempted blocks after an I/O failure, and refuse
+  further volume I/O if rollback fails. This is not crash recovery or journaling.
+  Cover real-image write/remount, space exhaustion, metadata protection, every
+  staging-read/commit-write failure, partial writes, and failed rollback.
+  See [existing-file mutation](architecture/io-driver-hosts.md#existing-file-mutation).
+- [x] Add Rust EXT2 inode allocation, file creation, and `mkdir`, including
+  directory growth, `.`/`..`, link counts, and free-inode/used-directory
+  accounting. Reuse staged mutation and rollback; cover failure injection,
+  multi-group allocation, legacy directory records, and real-image remounts.
+  See [file and directory creation](architecture/io-driver-hosts.md#file-and-directory-creation).
+- [x] Add Rust EXT2 file unlinking, empty-directory removal, and reclamation
+  of inode and direct/single/double-indirect block allocations on final unlink.
+  Maintain existing hard-link counts and directory accounting; reuse staged
+  rollback and cover failures, corruption, multiple groups, and real-image
+  remounts. Parent directory blocks are retained for reuse.
+  See [removal and reclamation](architecture/io-driver-hosts.md#removal-and-reclamation).
+- [x] Add Rust EXT2 regular-file hard-link creation, reusing directory insertion
+  and staged rollback. Reject directory links, duplicate/invalid names, reserved
+  or unallocated targets, unsupported layouts, and link-count overflow. Cover
+  directory growth, failures, remounts, and final-link reclamation.
+  See [hard-link creation](architecture/io-driver-hosts.md#hard-link-creation).
+- [x] Add Rust EXT2 owner-checked regular-file handles with independent offsets,
+  access modes, explicit close/session cleanup, and deferred final-unlink
+  reclamation until the last open description closes. Keep failed cleanup
+  retryable; test stale/wrong-owner handles, failures, and real-image persistence.
+  See [open files and deferred reclamation](architecture/io-driver-hosts.md#open-files-and-deferred-reclamation).
+- [x] Add Rust EXT2 shared-description inheritance through the existing grant
+  registry: PID-bound commit, access-preserving single-use claim, shared offsets,
+  owner-isolated close/release, and committed-grant retention across source
+  cleanup. Keep final-grant abort cleanup retryable after I/O errors and test
+  limits, failed cleanup, and real-image handoff/final reclamation.
+  See [inherited open descriptions](architecture/io-driver-hosts.md#inherited-open-descriptions).
+- [x] Add the Rust EXT2 request adapter for an explicitly mounted volume,
+  reusing `IoComponent`, request/reply types, credential callbacks, and existing
+  handles/grants. Check ancestor search, owner/group/other permissions, sticky
+  removal, setgid directory creation, seeks, directory batches, and fallible
+  disconnect cleanup. This does not yet load an EXT2 Wuff or switch mounts.
+  See [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+- [x] Add versioned per-device block-host callbacks and fallible EXT2 Wuff
+  initialization, preserving ABI-v4 components. Build/install `ext2fs.wuff` for
+  both architectures and expose the approved filesystem loader. Keep block
+  capabilities alive through component disposal, and refuse disposal while
+  owners/grants remain. This does not yet configure a live EXT2 endpoint.
+  See [EXT2 Wuff mount boundary](architecture/io-driver-hosts.md#ext2-wuff-mount-boundary).
+- [x] Expose Rust EXT2 create/exclusive opens, write-only truncation, and append
+  through the request adapter. Preserve inode identity and shared offsets during
+  truncation, check permissions/ownership before mutation, and keep failed writes
+  retryable. Cover handle exhaustion, sparse-block reclamation, and rollback.
+  See [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+- [x] Support Rust EXT2 read/execute opens for the kernel executable loader.
+  Enforce directory search and selected owner/group/other read/execute permissions;
+  even root requires an executable mode bit. Preserve execute/read/write access
+  through inheritance and reject execute opens that would create a missing file.
+  Exercise an actual dynamically linked command loaded from the hosted volume.
+  See [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+- [x] Dispatch the existing hard-link request through the shared C/Rust/Wuff
+  adapters and Rust EXT2, preserving both bounded paths and namespace rejection
+  of cross-mount links. Add recursive removal with per-entry permissions, sticky
+  checks, bounded traversal/cycle detection, and normal open-file retention.
+  See [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+- [x] Reuse the existing write-through block cache in the native Rust block
+  client, including scan-resistant reads, resident updates/rollback, diagnostics,
+  and reclaimable growth cleanup. Initialize fresh cache storage in place rather
+  than returning a large aggregate on a host fibre stack. See
+  [hosted EXT2 caching](architecture/io-driver-hosts.md#hosted-ext2-caching).
+- [x] Admit the root mount and order bootstrap publication only after root
+  device readiness and hosted endpoint initialization. Preserve `/sbin`, `/boot`,
+  and `/boot/config`, and prevent simultaneous C/Rust ownership of the root disk.
+  Unit tests cover root-first ordering, failed initialization/publication, and
+  duplicate C/Rust configuration rejection. See
+  [configured hosted EXT2](architecture/io-driver-hosts.md#configured-hosted-ext2-volumes).
+- [x] Switch the standard QEMU root provider after filesystem parity and boot
+  regression coverage pass on AArch64 and RISC-V. Defaults now select `ext2.wuff`
+  for `/`; fresh-image boots reach Bash, load dynamically linked commands, and
+  pass filesystem/shutdown acceptance on both architectures. Bootstrap `/sbin`,
+  `/boot`, and `/boot/config` remain unchanged. See
+  [hosted root acceptance](architecture/io-driver-hosts.md#hosted-ext2-file-watches).
+  - [x] Expose existing `IO_REQUEST_WATCH_FILE` and `IO_REQUEST_WAIT_FILE_CHANGE`
+    through the shared Rust adapter and hosted EXT2. Preserve generation-based
+    changes, retained waits, disconnect cleanup, and cooperative host progress.
+    Shared ABI v5 preserves typed generations/events and bounded native batches.
+    Waits allow the owning process on its dedicated Channel, matching C, while
+    registration and data operations remain session-bound. See
+    [hosted EXT2 file watches](architecture/io-driver-hosts.md#hosted-ext2-file-watches).
+  - [x] Separate write access from explicit truncation throughout libc and the
+    native/Rust I/O interfaces. A plain write-only open must preserve contents;
+    `O_TRUNC` must truncate the existing inode rather than remove/recreate its
+    path. Preserve hard links, open descriptions, and file-watch continuity.
+    Both architectures pass the `rm -P` non-destructive check, in-place hard-link
+    and open-descriptor checks, and tail-follow through POSIX redirection. See
+    [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+- [ ] Investigate rejected directory entries in the previously reused QEMU
+  root images. The Rust decoder rejects full root enumeration while fresh
+  images boot successfully. Corruption versus an overly strict Rust decoder
+  has not been established; compare the rejected records with independent EXT2
+  tooling before choosing a fix. Do not silently replace user images.
+- [x] Mount a separately configured EXT2 Wuff volume through authenticated
+  mount control after secondary block-driver readiness. Use one shared host
+  scheduler, a fibre per volume, Channels and `hunde-puffer`, with duplicate
+  hosted device/endpoint checks. This secondary-volume slice preceded the
+  standard QEMU root switch above.
+  See [configured hosted EXT2](architecture/io-driver-hosts.md#configured-hosted-ext2-volumes).
+- [x] Complete live hosted EXT2 file/directory acceptance on AArch64 and RISC-V:
+  read the seeded file, list directories, and create/remove a directory through
+  the actual Wuff and block callbacks. Decode transfer flags only for read/write
+  requests; keep open modes, seek origins, remove flags, and inheritance flags
+  in their operation-specific fields. Boundary regressions cover the original
+  file-open failure and preserve unknown transfer bits for backend validation.
+- [x] Make native block/Channel waits cooperative with the host scheduler.
+  Serialize the cached buffer-manager connection/transaction and default-client
+  Wuff-loading I/O, wake local ownership contenders on release, and retain
+  process waits outside the scheduler. Delayed-queue/shared-client regressions
+  and concurrent EXT2/socket/pipe smoke coverage check progress, not bounded
+  latency. See [native wait ownership](architecture/rust-userspace.md#one-scheduler-multiple-fibres).
+- [x] Fix intermittent RISC-V disk-operation stalls from lost PLIC enable-word
+  updates during concurrent kernel masking and userspace rearming. Keep context
+  enables kernel-owned; mask/rearm through per-IRQ priorities. Supply the
+  unshifted priority-page base on every physical hart, without mapping enable
+  words into the manager. Register/registration regressions and 100-cycle live
+  mkdir/list/remove acceptance cover both architectures. See
+  [interrupt acknowledgement flow](architecture/interrupt-service.md#interrupt-and-acknowledgement-flow).
+- [x] Move bootstrap EXT2 `/boot/config` into the host only after early host
+  startup can load bootstrap components without depending on that mount.
+  Mama now initializes hosted `ext2.wuff` before namespace publication and boot
+  handoff, loading from `/sbin` without an application root or `/boot/config`.
+  Native tests cover ordering and failed device readiness, initialization, and
+  publication. Root/shutdown, hosted filesystem/procfs, and combined I/O smoke
+  tests pass on AArch64 and RISC-V with no standalone C EXT2 process. `/boot`
+  sysinfofs is also hosted by the Rust snapshot component; physical-platform acceptance
+  of the common hosted SD-partition bootstrap path is still needed.
+  See [bootstrap services](architecture/bootstrap-services.md).
+- [x] Complete acceptance of the standard QEMU `/mnt/channelio-ext2` migration
+  to the existing hosted `ext2.wuff` implementation on AArch64 and RISC-V.
+  All three standard QEMU configurations select the hosted driver. Root/shutdown,
+  hosted filesystem/procfs, and concurrent socket/pipe/memfs smoke tests pass on
+  AArch64 and RISC-V. Checks cover seeded reads, directory creation/removal,
+  truncate/write/read. That slice retained one C EXT2 process for
+  `/boot/config`; the subsequent bootstrap migration removes it.
+  See [direct hosted dispatch](architecture/io-driver-hosts.md#direct-hosted-dispatch).
+- [ ] Migrate the remaining Pi UEFI and Milk-V EXT2 fstab selections after
+  target-specific bootstrap and block-device-access validation. Keep those
+  root/data selections unchanged until then; the common Mama bootstrap mount
+  request now uses hosted EXT2, with physical-platform acceptance still needed.
+- [x] Move filesystem namespace ownership into the Rust I/O host with an explicit
+  root slot and mounted overlays, preserving bootstrap mounts, authenticated
+  registration, longest-component-prefix routing, directory pagination, and
+  cross-mount link rejection. Mama starts the namespace before `/sbin`; another
+  fibre loads components after the archive is mounted. Retire standalone C
+  namespace startup/build while retaining its endpoint for existing clients.
+  Process-local namespace routing is implemented for the native Wuff loader,
+  with scoped callback ownership, reentrancy checks, fork reset, and unchanged
+  external Channel routing. Root filesystem/shutdown and hosted-component
+  acceptance pass on AArch64 and RISC-V, including one I/O host and no standalone
+  namespace process. Kernel self-Channels remain forbidden.
+  See [root namespace ownership](architecture/io-driver-hosts.md#root-namespace-ownership).
 - [ ] Move the common application endpoint, namespace, mounts, handle ownership,
   filesystems, sockets, streams, pipes, terminals, and information filesystems
   into one host with local dispatch between its components.
+  Application routing, namespace, and mount selection now reside in the host;
+  hosted handle dispatch is implemented; terminal/device providers and remaining
+  external filesystems are still separate.
+  - [x] Complete application-router migration acceptance on AArch64 and RISC-V.
+    The Rust host now serves `hund-io-system`, selects streams/sockets/pipes,
+    and calls its filesystem namespace locally. Mama no longer starts the C
+    router; console output selection uses the shared boot hardware adapter.
+    Root/shutdown, hosted filesystem/procfs, and combined socket/pipe/memfs I/O
+    smoke tests pass on both architectures without a standalone C router.
+    See [application router ownership](architecture/io-driver-hosts.md#application-router-ownership).
+  - [x] Complete direct hosted-dispatch acceptance on both architectures.
+    Filesystems, sockets, and pipes use host-owned handles, local component jobs,
+    PID/session checks, opaque inheritance tokens, batched cross-component file
+    waits, and worker-side disconnect cleanup. Preserve existing directional
+    shared buffers with bounded owned staging across fibre waits. Retain
+    external-provider redirects only until authenticated adapters or provider
+    migration remove those boundaries; do not forward using host privileges.
+    Root/shutdown, hosted EXT2/procfs, and combined socket/pipe/memfs smoke tests
+    pass on AArch64 and RISC-V. The combined RISC-V smoke passes three consecutive
+    runs with background EXT2 reads and unchanged input/timeouts.
+    Host alias lifetime handling keeps
+    backend ownership until the owner's last alias closes, with real-pipe
+    regressions for independent owners, EOF, and grant cleanup.
+    See [direct hosted dispatch](architecture/io-driver-hosts.md#direct-hosted-dispatch).
+  - [x] Consume memory-pressure service events in the Rust host and reclaim
+    native block-cache growth on each volume's owning worker. LLDB captured an
+    unconsumed normal-pressure event in the spinning host while a Bash child
+    remained ready on the same CPU; queue wait correctly refused to park with
+    that event pending. Typed event polling drains normal notifications and
+    coalesces low/critical pressure without reclaiming across suspended I/O.
+    Regressions cover event decoding/draining, worker ownership, busy/failed
+    retries, and reclaiming cache growth without closing the device.
+    See [direct hosted dispatch](architecture/io-driver-hosts.md#direct-hosted-dispatch).
 - [ ] Keep filesystem metadata, filesystem data, network policy, and any shared
   raw-block cache in the I/O host. Keep only hardware queue state and
   device-specific metadata in the driver host.
@@ -553,6 +926,9 @@ remaining I/O components still use the current multi-process service graph.
 - [ ] Provide the minimal runtime boundary: host-backed allocation when `alloc`
   is used, fatal panic handling, required memory/integer/atomic symbols, and ABI
   adapters around unsafe MMIO, DMA, and shared-buffer access.
+  Allocation, fatal panic handling, PIC `core`/`alloc`, the socket Channel-service
+  adapter, and multi-fibre scheduling with joinable tasks are implemented. Hardware
+  MMIO/DMA wrappers and broader Rust Channel-client APIs remain.
 - [ ] Keep unwinding, TLS, operating-system threads, and Rust-language ABI values
   outside the initial contract.
 - [ ] Add a separate cross-language smoke test for C-to-Rust calls, Rust-to-host
@@ -593,7 +969,8 @@ I/O inheritance contract. The first implementation keeps the child unpublished
 until libc commits service-side descriptor grants, then the child opens fresh
 authenticated sessions and claims those grants before `fork()` returns.
 Ordinary filesystem and stream descriptors inherit by shared underlying
-resource rather than by reopening paths; pipes, sockets, close-on-exec, and
+resource rather than by reopening paths; hosted pipes now use the same grant
+protocol. Sockets, close-on-exec, and
 committed-grant cleanup for children that die before claiming remain open work.
 Architecture details are documented in
 [Fork and copy-on-write](architecture/fork.md).
@@ -644,7 +1021,9 @@ Architecture details are documented in
   child claim and still need orphan cleanup if the child exits first.
 - [x] Add prepare, child-PID-bound commit, single-use claim, and abort operations
   to final resource-owning services; keep `hund-io-system` as a router.
-- [ ] Extend descriptor inheritance to pipes and sockets.
+- [x] Extend descriptor inheritance to hosted Rust pipes using authenticated,
+  child-PID-bound, single-use grants. See [pipes](architecture/io-system.md).
+- [ ] Extend descriptor inheritance to sockets.
 - [ ] Release `FD_CLOEXEC` descriptors reliably after a successful exec overlay.
 
 #### IPC Sessions
@@ -670,6 +1049,13 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 
 #### Userspace Polling and Kernel Parking
 
+- [x] Fix premature peer-doorbell revocation observed in RISC-V
+  `hundekanal-warter` and `embedfs`: a push/pop could pass its open check before
+  remote close unmapped the alias. Keep the survivor's mappings until its own
+  detach and retain backing across process exit/exec using kernel-only reference
+  accounting. Cover multiple aliases, kernel clients, private metadata, and
+  failed final-free retry, without additional signalling syscalls. See
+  [queue mapping lifetime](architecture/queues.md#initial-queue-api).
 - [x] Run ready fibres, poll queue state in userspace, then park the process with
   its observed process-doorbell generation. Under the scheduler lock, recheck the
   live doorbell and kernel-owned readiness state before committing the park.
@@ -1076,6 +1462,15 @@ hardware snapshot. Bus presentation and the `/sys` layout remain deferred.
   bootstrap. `hund-io-system` uses it before `/boot` is mounted.
 - [x] Implement `sysinfofs` using the existing filesystem protocol over Channel
   for `/boot/sysinfo`.
+- [x] Move `/boot/sysinfo` to hosted Rust `sysinfofs.wuff`, replacing the
+  standalone bootstrap process. Load typed boot information once through the
+  shared `hunde` compatibility layer, cache the formatted read-only contents
+  at component initialization, and retain `/boot/config` as an EXT2 overlay.
+  Native/Rust tests and all three smoke tests pass on AArch64 and RISC-V
+  (RISC-V passed on unchanged retry after the interrupt-manager fault recorded
+  under `hunde-treiber-host`). All fields, including `cpu.online_count`, are
+  initialization-time snapshots. See
+  [cached boot information](architecture/bootstrap-services.md#cached-boot-information).
 - [ ] Query `hundebus` through its Channel interface for bus records.
 - [ ] Mount the filesystem at `/sys`; `/sys/info` and `/sys/bus/pci` are proposed
   paths, with final layout to be agreed during implementation.
@@ -1102,6 +1497,20 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
   OPEN, READ, and CLOSE; background spawn returns only after child scheduling,
   while waiting spawn transfers into the ordinary child wait.
 - [x] Keep the immutable archive mapped for embedfs after handoff.
+- [x] Reuse the C archive backend through a safe `hunde` Rust adapter and hand
+  `/sbin` to the I/O host after bootstrap mounts are ready. Drain bootstrap
+  handles and queued replies before Mama retires the old process; retain the
+  kernel-owned archive backing independently of either consumer. See
+  [bootstrap services](architecture/bootstrap-services.md).
+  The wrapper, internal worker, read-only archive mapping, authenticated
+  drain/retirement protocol, fibre-aware local completion, and local file
+  transfers are implemented with native/Rust tests. Root/shutdown, hosted
+  filesystem/procfs, and concurrent socket/pipe/memfs smoke tests pass on both
+  AArch64 and RISC-V, including absence of the retired embedfs process. Libc's
+  build-selected export policy keeps the synthetic `_stack` marker private on
+  AArch64; both architectures check its absence from runtime exports. Loader
+  range validation remains unchanged. See
+  [dynamic linking](architecture/dynamic-linking.md#interpreter-integration).
 - [ ] Migrate executable transfers to the
   [hunde-puffer shared-buffer design](architecture/shared-buffers.md) tracked above.
   The initial shared-buffer implementation replaces the 256-byte bulk replies.
@@ -1261,6 +1670,14 @@ for architecture bring-up. See the
   `make clean` before tests after changing shared structure layouts meanwhile.
 - [x] Add the RV64 cross-toolchain flags, early linker script, merged AArch64
   and RISC-V compilation-database generation, and a QEMU verification target.
+- [x] Make compilation-database capture side-effect-free and checked. Preserve
+  static/PIC and architecture variants, retain recursive Bash working
+  directories, keep normal Newlib build prerequisites, and publish atomically
+  only after successful capture. Do not evaluate recipe shell substitutions or
+  regenerate Newlib/Bash build preparation during capture. Regression tests
+  cover failure reporting, previous-database preservation, and clean-directory
+  capture; normal static/PIC sysroots build on both architectures. See
+  [CLion code indexing](architecture/clion.md).
 - [ ] Add RISC-V toolchain, assembler, linker scripts, kernel/userspace build
   targets, and embedded binaries. The early supervisor payload is complete;
   the architecture-matched userspace programs and services now compile and

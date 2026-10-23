@@ -2,8 +2,13 @@
 #define HUND_KERNEL_SHARED_WAIT_H
 
 #include "../process.h"
+#include "../kalloc.h"
 #include "ipc/doorbell.h"
 #include "ipc/queue_wait_control.h"
+
+Result(UserAddress) DoorbellBacking__new(void);
+void DoorbellBacking__retain(UserAddress self);
+Result(KAllocCode) DoorbellBacking__release(UserAddress self);
 
 // Caller holds the scheduler lock so queue mappings cannot disappear mid-read.
 bool Process__shared_wait_armed(ProcessPtr self);

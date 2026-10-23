@@ -19,6 +19,7 @@ typedef struct BootPlatformInfo
     uint64_t uart_register_shift;
     uint64_t uart_register_width;
     Optional(FramebufferInfo) framebuffer;
+    Optional(BootVirtioMmioInfo) virtio_mmio;
     Optional(PciInfo) pci;
     Optional(SdHostInfo) sd_host;
     Optional(EthernetMacInfo) ethernet_mac;

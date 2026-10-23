@@ -29,6 +29,7 @@ static void IOService__init(IOServicePtr self, ConstBStringPtr name, QueueArriva
     self->context = context;
     self->execute = execute;
     self->disconnect = disconnect;
+    self->serves_handles = false;
 }
 
 IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServiceContext context,
@@ -44,6 +45,33 @@ IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServi
         error(code, message)
         {
             return IO_REGISTER_FAILED;
+        }
+    );
+}
+
+void IOService__serve_handles(IOServicePtr self)
+{
+    self->serves_handles = true;
+}
+
+static bool IOServiceConnection__is_busy(IOServiceConnectionPtr self, void * context)
+{
+    QueueConnectionID session = *(QueueConnectionIDPtr)context;
+    return ChannelServer__connection(&self->channel) != session &&
+           (self->phase != IO_SERVICE_RECEIVE || !ChannelServer__is_idle(&self->channel));
+}
+
+bool IOService__is_idle_except(IOServicePtr self, QueueConnectionID session)
+{
+    match_find_result(
+        IOServiceConnections__find(&self->connections, IOServiceConnection__is_busy, &session),
+        some(connection)
+        {
+            return false;
+        },
+        none()
+        {
+            return true;
         }
     );
 }
@@ -100,11 +128,16 @@ static bool IOService__accept(IOServicePtr self)
     return progress;
 }
 
-static IOStatus IOServiceConnection__prepare(IOServiceConnectionPtr self, ConstBStringPtr service)
+static IOStatus IOServiceConnection__prepare(IOServiceConnectionPtr self, ConstBStringPtr service, bool serves_handles)
 {
     IORequestPtr request = &self->request;
     request->transfer_address = 0;
     uint64_t client = ChannelServer__transport_pid(&self->channel);
+    if (serves_handles && (request->operation == IO_REQUEST_OPEN || request->operation == IO_REQUEST_PIPE_CREATE ||
+                           request->operation == IO_REQUEST_INHERIT_CLAIM))
+    {
+        request->buffered = true;
+    }
     if ((request->operation == IO_REQUEST_OPEN || request->operation == IO_REQUEST_PIPE_CREATE ||
          request->operation == IO_REQUEST_INHERIT_CLAIM) &&
         request->buffered)
@@ -206,7 +239,8 @@ static bool IOService__serve(IOServicePtr self, IOServiceConnectionPtr connectio
                                 connection->request.client_session = ChannelServer__connection(&connection->channel);
                                 Optional(RequestTicket) previous =
                                     ChannelRequestContext__swap(&Some(RequestTicket, connection->channel.ticket));
-                                IOStatus status = IOServiceConnection__prepare(connection, &self->name);
+                                IOStatus status =
+                                    IOServiceConnection__prepare(connection, &self->name, self->serves_handles);
                                 ChannelRequestContext__swap(&previous);
                                 connection->phase = status == IO_OK ? IO_SERVICE_EXECUTE : IO_SERVICE_REPLY;
                                 connection->reply = IOReply__new(status, 0);

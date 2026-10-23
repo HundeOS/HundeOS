@@ -1201,7 +1201,7 @@ void test_queue_pages_have_isolated_asymmetric_permissions(void)
     }
 }
 
-void test_connection_maps_peer_doorbells_and_unmaps_aliases_when_an_endpoint_closes(void)
+void test_peer_close_keeps_survivor_doorbell_mapping_until_its_own_detach(void)
 {
     QueueEndpointID endpoint = listen_queue();
     QueueConnectionID id = connect_queue(endpoint, client);
@@ -1223,9 +1223,94 @@ void test_connection_maps_peer_doorbells_and_unmaps_aliases_when_an_endpoint_clo
     close_queue(id, client);
     TEST_ASSERT_TRUE(IpcEvent__changed(IpcDoorbell__event(server_event), closed_generation));
     TEST_ASSERT_FALSE(mapped(client, peer_alias, true));
-    TEST_ASSERT_FALSE(mapped(server, peer_alias, true));
+    TEST_ASSERT_TRUE(mapped(server, peer_alias, true));
     TEST_ASSERT_TRUE(mapped(server, QueueLayout__address(id), false));
 
+    close_queue(id, server);
+    TEST_ASSERT_FALSE(mapped(server, peer_alias, true));
+}
+
+void test_exiting_owner_keeps_doorbell_backing_until_all_peer_aliases_detach(void)
+{
+    QueueEndpointID endpoint = listen_queue();
+    QueueConnectionID first = connect_queue(endpoint, client);
+    QueueConnectionID second = connect_queue(endpoint, client);
+    IpcDoorbellPtr backing = process_doorbell(client);
+    TEST_ASSERT_TRUE(KAllocStub__is_allocated((Address)backing));
+    Queues__exit(queues, client);
+    match_result(Process__dispose_user_allocations(client),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(mapped(server, QueueLayout__peer_doorbell_address(first), true));
+    TEST_ASSERT_TRUE(mapped(server, QueueLayout__peer_doorbell_address(second), true));
+    TEST_ASSERT_TRUE(KAllocStub__is_allocated((Address)backing));
+    IpcEvent__ring(IpcDoorbell__mutable_event(backing));
+    close_queue(first, server);
+    TEST_ASSERT_TRUE(KAllocStub__is_allocated((Address)backing));
+    close_queue(second, server);
+    TEST_ASSERT_FALSE(KAllocStub__is_allocated((Address)backing));
+}
+
+void test_kernel_client_keeps_exited_server_doorbell_until_kernel_close(void)
+{
+    match_result(
+        Queues__connect_kernel(queues, listen_queue(), &None(ProcessPtr)),
+        success(queue)
+        {
+            QueueConnectionID id = Queue__connection(&queue);
+            IpcDoorbellPtr backing = process_doorbell(server);
+            Queues__exit(queues, server);
+            match_result(Process__dispose_user_allocations(server),
+                success_do_nothing(),
+                error_test_fail()
+            );
+            TEST_ASSERT_TRUE(KAllocStub__is_allocated((Address)backing));
+            IpcEvent__ring(IpcDoorbell__mutable_event(backing));
+            match_result(Queues__close_kernel(queues, id),
+                success_do_nothing(),
+                error_test_fail()
+            );
+            TEST_ASSERT_FALSE(KAllocStub__is_allocated((Address)backing));
+        },
+        error_test_fail()
+    );
+}
+
+void test_failed_final_doorbell_free_is_quarantined_and_retried_before_slot_reuse(void)
+{
+    QueueEndpointID endpoint = listen_queue();
+    QueueConnectionID id = connect_queue(endpoint, client);
+    IpcDoorbellPtr backing = process_doorbell(client);
+    Queues__exit(queues, client);
+    match_result(Process__dispose_user_allocations(client),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    KAllocStub__set_free_failure(true);
+    close_queue(id, server);
+    TEST_ASSERT_TRUE(KAllocStub__is_allocated((Address)backing));
+    TEST_ASSERT_FALSE(mapped(server, QueueLayout__peer_doorbell_address(id), true));
+    size_t freed_before_retry = KAllocStub__freed_allocation_count_for_size(2 * IPC_DOORBELL_PAGE_SIZE);
+    KAllocStub__set_free_failure(false);
+    QueueConnectionID next = connect_queue(endpoint, other);
+    TEST_ASSERT_NOT_EQUAL(id, next);
+    TEST_ASSERT_EQUAL_UINT64(freed_before_retry + 1,
+                             KAllocStub__freed_allocation_count_for_size(2 * IPC_DOORBELL_PAGE_SIZE));
+    close_queue(next, other);
+    close_queue(next, server);
+}
+
+void test_kernel_doorbell_metadata_is_not_exposed_in_process_or_peer_mappings(void)
+{
+    QueueConnectionID id = accepted_connection();
+    TEST_ASSERT_FALSE(mapped(client, IPC_DOORBELL_ADDRESS + IPC_DOORBELL_PAGE_SIZE, true));
+    TEST_ASSERT_FALSE(mapped(client, IPC_DOORBELL_ADDRESS + IPC_DOORBELL_PAGE_SIZE, false));
+    TEST_ASSERT_FALSE(mapped(server, IPC_DOORBELL_ADDRESS + IPC_DOORBELL_PAGE_SIZE, true));
+    TEST_ASSERT_FALSE(mapped(server, IPC_DOORBELL_ADDRESS + IPC_DOORBELL_PAGE_SIZE, false));
+    TEST_ASSERT_FALSE(mapped(server, QueueLayout__peer_doorbell_address(id) + QUEUE_PAGE_SIZE, true));
+    TEST_ASSERT_FALSE(mapped(server, QueueLayout__peer_doorbell_address(id) + QUEUE_PAGE_SIZE, false));
+    close_queue(id, client);
     close_queue(id, server);
 }
 

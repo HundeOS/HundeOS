@@ -3,8 +3,19 @@
 #include "unity.h"
 
 #include "hunde/host_component.h"
+#include "hunde/filesystem_component.h"
 
 static const uint8_t error_message[] = "component failed";
+
+void test_filesystem_block_host_has_the_versioned_rust_layout(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(1, HUNDE_BLOCK_HOST_VERSION);
+    TEST_ASSERT_EQUAL_UINT64(40, sizeof(HundeBlockHostOperationsV1));
+    TEST_ASSERT_EQUAL_UINT64(16, offsetof(HundeBlockHostOperationsV1, sectors));
+    TEST_ASSERT_EQUAL_UINT64(24, offsetof(HundeBlockHostOperationsV1, read));
+    TEST_ASSERT_EQUAL_UINT64(32, offsetof(HundeBlockHostOperationsV1, write));
+    TEST_ASSERT_EQUAL_STRING("hunde_filesystem_component_entry_v1", HUNDE_FILESYSTEM_COMPONENT_ENTRY);
+}
 
 void test_status_result_distinguishes_success_from_error(void)
 {

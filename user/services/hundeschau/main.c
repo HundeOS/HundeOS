@@ -411,6 +411,10 @@ static int Hundeschau__spawn_default_drivers(HundeschauRequiredProcessesPtr proc
 
 static int Hundeschau__initialise_required_processes(HundeschauRequiredProcessesPtr processes)
 {
+    if (!service_ok(service_become_service()))
+    {
+        return 1;
+    }
     int failures = 0;
     FramebufferConfig framebuffer_config = FramebufferConfig__new();
     bool framebuffer_present = FramebufferConfig__load(&framebuffer_config);

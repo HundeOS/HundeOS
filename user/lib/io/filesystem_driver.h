@@ -28,6 +28,7 @@ OptionalDef(FilesystemFileDataPtr);
 typedef Result(FilesystemFileSize) (*FilesystemLoad)(IOServiceContext context, ConstBStringPtr path,
                                                      FilesystemFileDataPtr data);
 typedef Result(FilesystemFileInfo) (*FilesystemDescribe)(IOServiceContext context, ConstBStringPtr path);
+typedef Result(IOStatus) (*FilesystemTruncate)(IOServiceContext context, ConstBStringPtr path);
 typedef Result(FilesystemFileSize) (*FilesystemRead)(IOServiceContext context, ConstBStringPtr path,
                                                      FilesystemFileSize offset, FilesystemFileDataPtr data,
                                                      FilesystemFileSize capacity);
@@ -62,6 +63,7 @@ typedef struct FilesystemStreamOperations
     FilesystemDescribe describe;
     FilesystemRead read;
     FilesystemWrite write;
+    FilesystemTruncate truncate;
 } FilesystemStreamOperations;
 
 typedef union FilesystemSourceOperations
@@ -85,10 +87,12 @@ FilesystemOperations FilesystemOperations__new_snapshot(FilesystemLoad load, Fil
                                                         FilesystemMkdir mkdir, FilesystemRemove remove,
                                                         FilesystemLink link, FilesystemFileSize write_capacity);
 FilesystemOperations FilesystemOperations__new_stream(FilesystemDescribe describe, FilesystemRead read,
-                                                      FilesystemWrite write, FilesystemList list, FilesystemMkdir mkdir,
+                                                      FilesystemWrite write, FilesystemTruncate truncate,
+                                                      FilesystemList list, FilesystemMkdir mkdir,
                                                       FilesystemRemove remove, FilesystemLink link);
 IOStatus FilesystemOperations__unsupported_link(IOServiceContext context, ConstBStringPtr source_path,
                                                 ConstBStringPtr target_path);
+Result(IOStatus) FilesystemOperations__unsupported_truncate(IOServiceContext context, ConstBStringPtr path);
 
 typedef struct FilesystemPath
 {

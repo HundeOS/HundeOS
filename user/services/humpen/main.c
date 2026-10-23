@@ -121,7 +121,10 @@ static Result(SpawnResult) Humpen__spawn_watchdog_line(ConstBStringPtr line)
         success(command)
         {
             // The filesystem service starts root before publishing readiness.
-            if (BString__equals(&command.mountpoint, &bstr("/")))
+            if (BString__equals(&command.mountpoint, &bstr("/")) ||
+                BString__equals(&command.filesystem_type, &bstr("ext2.wuff")) ||
+                BString__equals(&command.filesystem_type, &bstr("fat32")) ||
+                BString__equals(&command.filesystem_type, &bstr("fat32.wuff")))
             {
                 return Success(SpawnResult, 0);
             }

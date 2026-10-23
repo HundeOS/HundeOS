@@ -1,8 +1,31 @@
 # Process Registry And Procfs
 
-The kernel owns process accounting. Userspace `procfs` renders it through the
-normal filesystem Channel, mounted at `/proc` by `hund-dateisystem` before boot
-readiness is published. This startup path is common to all targets.
+The kernel owns process accounting. Safe Rust `procfs.wuff`, implemented in
+`user/drivers/procfs`, renders it inside `hunde-io-host` through the normal
+filesystem Channel. Hundeschule waits for the hosted `/proc` endpoint before
+registering the mount with `hund-dateisystem`. There is no standalone procfs
+process. This startup path is common to all targets.
+The retired C driver and its native filesystem fixture have been removed.
+
+The shared `hunde::process` API copies coherent records through host callbacks.
+The C adapter uses `process_registry_map` and `ProcessRegistry__at/find`; Rust
+never casts the shared registry layout or duplicates its state enums.
+State/wait/class names retain the authoritative C translations, and names remain
+byte strings rather than requiring UTF-8. ABI v4 adds pointer-free, size-checked
+accounting DTOs and a bounded kernel-trace callback; lifecycle ABI v1 is unchanged.
+Missing records are distinct from failures. Busy publications retain
+`IO_WAIT_FOR_DATA`; mapping/trace failures report `IO_NO_DEVICE_FOUND`.
+
+The native trace adapter allocates a private page-backed region
+for each snapshot. The syscall requires one writable mapping containing its
+entire output; an ordinary Rust heap slice can span adjacent mappings. The
+adapter checks the returned byte count, copies only those bytes into the Rust
+slice, and releases the region on success and failure. Invalid capacities and
+oversized results are rejected; allocation and release failures return errors.
+An empty trace is valid when kernel memory tracing is disabled. This temporary
+syscall buffer is not an IPC transport or a replacement for managed I/O buffers.
+It uses ordinary page allocation, not the cache-growth allocator: optional
+cache admission can refuse allocations even while substantial free RAM remains.
 
 `ps` uses `process_list`, which invokes `SYSCALL_PROCESS_LIST` to read the live
 process tables under the scheduler lock. It does not use the periodically
@@ -34,6 +57,15 @@ There is no write or execute interface.
 Open files retain a snapshot; exit removes subsequent lookups, not the bytes
 already held by an open file. Existing filesystem handle/session authentication
 applies. Handle enumeration is deferred.
+
+The Rust component owns up to 32 descriptions and 12 KiB per snapshot. Separate
+opens have independent offsets; seek and EOF apply to the retained bytes.
+The shared `hunde::inheritance` registry authenticates PID-bound, single-use
+fork/exec grants, sharing an open description and offset rather than reopening
+a path. Committed grants retain snapshots across source close/disconnect;
+uncommitted grants do not. Cleanup for children that die before claiming remains
+deferred, as for pipes and memfs. Source-local Rust tests inject registry/trace
+providers; native C tests cover the accounting boundary.
 
 ## Scheduler Semantics
 

@@ -18,6 +18,44 @@ static unsigned registrations;
 static QueueWaitControl control;
 static SystemCallResult wait_result;
 static bool make_readable_on_first_wait;
+static unsigned cooperative_parks;
+static unsigned cooperative_notifications;
+static bool fail_cooperative_park;
+static QueueWaitGate cooperative_gate = QUEUE_WAIT_GATE_INITIALIZER;
+
+static Result(QueueWaitCode) cooperative_park(Anything context)
+{
+    cooperative_parks++;
+    if (fail_cooperative_park)
+    {
+        return Error(QueueWaitCode, bstr("Cooperative wait interrupted"), QUEUE_DENIED);
+    }
+    if (context == 1)
+    {
+        if (cooperative_parks >= 2)
+        {
+            __atomic_store_n(&incoming.produced, 1, __ATOMIC_RELEASE);
+        }
+    }
+    else if (context == 2)
+    {
+        __atomic_store_n(&incoming.consumed, 1, __ATOMIC_RELEASE);
+    }
+    else if (context == 3)
+    {
+        arrivals.epoch++;
+    }
+    else
+    {
+        QueueWaitGate__release(&cooperative_gate);
+    }
+    return Success(QueueWaitCode, QUEUE_WAIT_CHANGED);
+}
+
+static void cooperative_notify(Anything context)
+{
+    cooperative_notifications++;
+}
 
 SystemCallResult syscall(SystemCall number, Anything operation, Anything observed, Anything wait_ticks,
                          Anything unused1, Anything unused2)
@@ -98,11 +136,15 @@ void setUp(void)
     control = (QueueWaitControl){0};
     wait_result = QUEUE_WAIT_TIMEOUT;
     make_readable_on_first_wait = false;
+    cooperative_parks = cooperative_notifications = 0;
+    fail_cooperative_park = false;
+    cooperative_gate = (QueueWaitGate)QUEUE_WAIT_GATE_INITIALIZER;
     QueueWait__reset_after_fork();
 }
 
 void tearDown(void)
 {
+    QueueWait__swap_adapter(&None(QueueWaitAdapter));
     match_optional(QueueWaitControl__publication(&control),
         some_test_fail(),
         none_do_nothing()
@@ -200,4 +242,92 @@ void test_arrival_wait_observes_callers_epoch(void)
     QueueArrivals__wait(&arrivals, 2);
     TEST_ASSERT_EQUAL(0, pthread_join(peer, NULL));
     TEST_ASSERT_GREATER_THAN(0, waits);
+}
+
+void test_cooperative_read_wait_rechecks_after_spurious_wakes_without_kernel_wait(void)
+{
+    QueueWaitAdapter adapter = QueueWaitAdapter__new(1, cooperative_park, cooperative_notify);
+    QueueWait__swap_adapter(&Some(QueueWaitAdapter, adapter));
+    TEST_ASSERT_TRUE(Queue__wait_readable_interruptible(&queue));
+    TEST_ASSERT_EQUAL_UINT(2, cooperative_parks);
+    TEST_ASSERT_EQUAL_UINT(0, waits);
+    TEST_ASSERT_EQUAL_UINT(0, registrations);
+}
+
+void test_cooperative_writable_and_arrival_waits_do_not_park_the_process(void)
+{
+    QueueWaitAdapter writable = QueueWaitAdapter__new(2, cooperative_park, cooperative_notify);
+    QueueWait__swap_adapter(&Some(QueueWaitAdapter, writable));
+    queue.written = QUEUE_CAPACITY;
+    TEST_ASSERT_TRUE(Queue__wait_writable_interruptible(&queue));
+    QueueWaitAdapter arrival = QueueWaitAdapter__new(3, cooperative_park, cooperative_notify);
+    QueueWait__swap_adapter(&Some(QueueWaitAdapter, arrival));
+    QueueArrivals__wait(&arrivals, 0);
+    TEST_ASSERT_EQUAL_UINT(2, cooperative_parks);
+    TEST_ASSERT_EQUAL_UINT(0, waits);
+}
+
+void test_cooperative_errors_propagate_and_fork_reset_restores_process_waits(void)
+{
+    QueueWaitAdapter adapter = QueueWaitAdapter__new(1, cooperative_park, cooperative_notify);
+    QueueWait__swap_adapter(&Some(QueueWaitAdapter, adapter));
+    fail_cooperative_park = true;
+    TEST_ASSERT_FALSE(Queue__wait_readable_interruptible(&queue));
+    TEST_ASSERT_EQUAL_UINT(0, waits);
+    QueueWait__reset_after_fork();
+    TEST_ASSERT_FALSE(QueueWait__has_adapter());
+    wait_result = SYSCALL_INTERRUPTED;
+    TEST_ASSERT_FALSE(Queue__wait_readable_interruptible(&queue));
+    TEST_ASSERT_EQUAL_UINT(1, waits);
+}
+
+void test_cooperative_gate_parks_until_release_and_notifies_local_waiters(void)
+{
+    QueueWaitAdapter adapter = QueueWaitAdapter__new(4, cooperative_park, cooperative_notify);
+    QueueWait__swap_adapter(&Some(QueueWaitAdapter, adapter));
+    match_result(QueueWaitGate__acquire(&cooperative_gate),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(QueueWaitGate__acquire(&cooperative_gate),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT(1, cooperative_parks);
+    TEST_ASSERT_EQUAL_UINT(1, cooperative_notifications);
+    QueueWaitGate__release(&cooperative_gate);
+    TEST_ASSERT_EQUAL_UINT(2, cooperative_notifications);
+}
+
+void test_gate_failure_keeps_ownership_and_unadapted_contention_is_an_error(void)
+{
+    match_result(QueueWaitGate__acquire(&cooperative_gate),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(
+        QueueWaitGate__acquire(&cooperative_gate),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_INVALID, code);
+        }
+    );
+    QueueWaitAdapter adapter = QueueWaitAdapter__new(4, cooperative_park, cooperative_notify);
+    QueueWait__swap_adapter(&Some(QueueWaitAdapter, adapter));
+    fail_cooperative_park = true;
+    match_result(
+        QueueWaitGate__acquire(&cooperative_gate),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_DENIED, code);
+        }
+    );
+    QueueWaitGate__release(&cooperative_gate);
+    match_result(QueueWaitGate__acquire(&cooperative_gate),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    QueueWaitGate__release(&cooperative_gate);
 }

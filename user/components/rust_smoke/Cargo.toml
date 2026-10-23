@@ -1,0 +1,21 @@
+[package]
+name = "hunde-rust-smoke"
+version = "0.1.0"
+edition = "2024"
+workspace = "../.."
+
+[[bin]]
+name = "rust-smoke-component"
+path = "component.rs"
+required-features = ["component"]
+test = false
+bench = false
+
+[features]
+component = []
+
+[dependencies]
+hunde = { path = "../../lib/hunde", default-features = false }
+
+[lints]
+workspace = true

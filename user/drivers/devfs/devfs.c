@@ -194,6 +194,7 @@ static IOStatus Devfs__remove(IOServiceContext context, ConstBStringPtr path, Fl
 
 FilesystemOperations Devfs__operations(void)
 {
-    return FilesystemOperations__new_stream(Devfs__describe, Devfs__read, Devfs__write, Devfs__list, Devfs__mkdir,
+    return FilesystemOperations__new_stream(Devfs__describe, Devfs__read, Devfs__write,
+                                            FilesystemOperations__unsupported_truncate, Devfs__list, Devfs__mkdir,
                                             Devfs__remove, FilesystemOperations__unsupported_link);
 }

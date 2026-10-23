@@ -5,6 +5,8 @@
 #include "../../../kernel/bin/elf.h"
 #include "../../../kernel/bin/embedded_binaries.h"
 #include "../../../common/services/service_directory.h"
+#include "../../../kernel/scheduler/shared_wait.h"
+#include "../../../common/ipc/doorbell.h"
 
 #include "../fixtures/process.h"
 #include "../fixtures/kernel.h"
@@ -649,6 +651,92 @@ void test_fork_rejects_service_process_without_creating_a_child(void)
         {
             TEST_ASSERT_EQUAL(PROCESS_FORK_UNSUPPORTED_STATE, code);
         }
+    );
+}
+
+static void dispose_fork_child(ProcessPtr child)
+{
+    match_result(Process__dispose_user_allocations(child),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Process__dispose_page_table(child),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Process__dispose(child),
+        success_do_nothing(),
+        error_test_fail()
+    );
+}
+
+void test_nested_fork_excludes_runtime_ipc_backing_and_recreates_it_once_per_child(void)
+{
+    ProcessPtr parent = dummy_process(82, 0, PROC_STATE_RUNNING);
+    Process__set_identity(parent, PROCESS_USER_USER, PROCESS_GROUP_USER, PROCESS_CAP_NONE);
+    alloc_user_pages_for_test(parent, PAGE_SIZE);
+    match_result(
+        Process__queue_wait_control(parent),
+        success(parent_control)
+        {
+            size_t inherited_count = UserAllocations__len(&parent->user_allocations) - 2;
+            UserAddress parent_doorbell = unwrap_optional(parent->ipc_doorbell, NULL_USER_ADDRESS);
+            match_result(
+                Process__fork(parent),
+                success(child)
+                {
+                    TEST_ASSERT_EQUAL_UINT64(inherited_count, UserAllocations__len(&child->user_allocations));
+                    TEST_ASSERT_TRUE(is_nothing(child->ipc_doorbell));
+                    TEST_ASSERT_TRUE(is_nothing(child->queue_wait_control));
+                    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&child->page_table),
+                                                           IPC_DOORBELL_ADDRESS, true, true, false, PAGE_SIZE));
+                    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&child->page_table),
+                                                           parent_control, true, true, false, PAGE_SIZE));
+                    child->state = PROC_STATE_RUNNING;
+                    match_result(
+                        Process__queue_wait_control(child),
+                        success(child_control)
+                        {
+                            UserAddress child_doorbell = unwrap_optional(child->ipc_doorbell, NULL_USER_ADDRESS);
+                            TEST_ASSERT_EQUAL_UINT64(inherited_count + 2,
+                                                     UserAllocations__len(&child->user_allocations));
+                            TEST_ASSERT_NOT_EQUAL(parent_doorbell.kernel_addr.virtual_addr,
+                                                  child_doorbell.kernel_addr.virtual_addr);
+                            match_result(
+                                Process__fork(child),
+                                success(grandchild)
+                                {
+                                    TEST_ASSERT_EQUAL_UINT64(inherited_count,
+                                                             UserAllocations__len(&grandchild->user_allocations));
+                                    TEST_ASSERT_TRUE(is_nothing(grandchild->ipc_doorbell));
+                                    TEST_ASSERT_TRUE(is_nothing(grandchild->queue_wait_control));
+                                    match_result(
+                                        Process__queue_wait_control(grandchild),
+                                        success(grandchild_control)
+                                        {
+                                            UserAddress grandchild_doorbell =
+                                                unwrap_optional(grandchild->ipc_doorbell, NULL_USER_ADDRESS);
+                                            TEST_ASSERT_NOT_EQUAL(child_doorbell.kernel_addr.virtual_addr,
+                                                                  grandchild_doorbell.kernel_addr.virtual_addr);
+                                            TEST_ASSERT_EQUAL_UINT64(
+                                                inherited_count + 2,
+                                                UserAllocations__len(&grandchild->user_allocations));
+                                        },
+                                        error_test_fail()
+                                    );
+                                    dispose_fork_child(grandchild);
+                                },
+                                error_test_fail()
+                            );
+                        },
+                        error_test_fail()
+                    );
+                    dispose_fork_child(child);
+                },
+                error_test_fail()
+            );
+        },
+        error_test_fail()
     );
 }
 

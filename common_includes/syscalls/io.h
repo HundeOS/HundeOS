@@ -73,6 +73,7 @@ typedef enum IOFlags
     IO_OPEN_LISTEN = 0x20,
     IO_OPEN_CREATE = 0x40,
     IO_OPEN_EXCLUSIVE = 0x80,
+    IO_OPEN_TRUNCATE = 0x100,
 } IOFlags;
 
 typedef enum IOTransferFlags

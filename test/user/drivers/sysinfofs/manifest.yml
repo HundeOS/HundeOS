@@ -2,4 +2,4 @@ manifest:
   include_default_stubs: false
   include_default_fixtures: false
   source_files:
-    - user/drivers/sysinfofs/sysinfofs.c
+    - user/lib/hunde/boot.c

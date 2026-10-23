@@ -1,5 +1,6 @@
 # device <path> <filesystem> <mountpoint>
-device /dev/virtio1 ext2 /
-device /dev/virtio4 fat32 /mnt/sd
-device /dev/virtio5 fat32 /mnt/channelio
-device /dev/virtio6 ext2 /mnt/channelio-ext2
+device /dev/virtio1 ext2.wuff /
+device /dev/virtio4 fat32.wuff /mnt/sd
+device /dev/virtio5 fat32.wuff /mnt/channelio
+device /dev/virtio6 ext2.wuff /mnt/channelio-ext2
+device /dev/virtio7 ext2.wuff /mnt/hosted-ext2

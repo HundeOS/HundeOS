@@ -286,6 +286,15 @@ static void add_root(void)
     );
 }
 
+void test_hosted_ext2_is_a_supported_configured_mount(void)
+{
+    MountConfig hosted = MountConfig__new(&bstr("/dev/virtio7"), &bstr("ext2.wuff"), &bstr("/mnt/hosted-ext2"));
+    match_result(FilesystemNamespace__add(&namespace, hosted),
+        success_do_nothing(),
+        error_test_fail()
+    );
+}
+
 void test_root_routes_absolute_paths_and_nested_mounts_win_regardless_of_order(void)
 {
     add_root();

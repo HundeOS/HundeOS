@@ -1,10 +1,81 @@
+#include "types/linked_list.h"
 #include "mounts.h"
 #include "boot/services.h"
 #include "sys/io.h"
 #include "sys/service.h"
 
+static bool MountConfig__conflicts(MountConfigPtr self, void * context)
+{
+    MountConfigPtr candidate = context;
+    return BString__equals(&self->device_path, &candidate->device_path) ||
+           BString__equals(&self->mountpoint, &candidate->mountpoint);
+}
+
+static bool MountConfig__same_destination(void * self, void * context)
+{
+    return MountConfig__conflicts(self, context);
+}
+
+OptionalDef(MountConfig);
+LinkedListDefine(MountConfig, ConfiguredMounts, MountConfig__same_destination);
+typedef ConfiguredMounts * ConfiguredMountsPtr;
+LinkedListBodyDefine(ConfiguredMounts);
+
+static bool MountConfig__is_root(MountConfigPtr self, void * context)
+{
+    return BString__equals(&self->mountpoint, &bstr("/"));
+}
+
+static Result(IOStatus) ConfiguredMounts__add(ConfiguredMountsPtr self, MountConfig config)
+{
+    match_find_result(
+        ConfiguredMounts__find(self, MountConfig__conflicts, &config),
+        some(conflict)
+        {
+            return Error(IOStatus, bstr("Duplicate mount device or mountpoint"), IO_INVALID_MOUNT_POINT);
+        },
+        none()
+        {
+            match_result(
+                ConfiguredMounts__push(self, config),
+                success(code)
+                {
+                    return Success(IOStatus, IO_OK);
+                },
+                error(code, message)
+                {
+                    return Error(IOStatus, message, IO_PANIC);
+                }
+            );
+        }
+    );
+    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
 static Result(IOStatus) Hundeschule__mount_config(ChannelPtr channel, MountConfig config)
 {
+    if (BString__equals(&config.filesystem_type, &bstr("fat32")))
+    {
+        config.filesystem_type = bstr("fat32.wuff");
+    }
+    if (BString__equals(&config.filesystem_type, &bstr("ext2.wuff")) ||
+        BString__equals(&config.filesystem_type, &bstr("fat32.wuff")))
+    {
+        ServiceCode device_ready = service_wait_ready(&config.device_path);
+        if (!service_ok(device_ready))
+        {
+            return Error(IOStatus, bstr("Block device is not ready"), device_ready);
+        }
+        match_result(
+            MountClient__start_hosted(config),
+            success_do_nothing(),
+            error(code, message)
+            {
+                return Error(IOStatus, message, code);
+            }
+        );
+        return MountClient__add(channel, config);
+    }
     match_result(
         MountClient__add(channel, config),
         success_do_nothing(),
@@ -33,10 +104,53 @@ static Result(IOStatus) Hundeschule__mount_config(ChannelPtr channel, MountConfi
     );
 }
 
+static Result(IOStatus) Hundeschule__mount_entries(ChannelPtr channel, ConfiguredMountsPtr mounts)
+{
+    match_find_result(
+        ConfiguredMounts__find(mounts, MountConfig__is_root, mounts),
+        some(config)
+        {
+            match_result(
+                Hundeschule__mount_config(channel, config),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(IOStatus, message, code);
+                }
+            );
+            for_each_ll(
+                ConfiguredMounts,
+                *mounts,
+                mount,
+                {
+                    if (MountConfig__is_root(&mount, mounts))
+                    {
+                        continue;
+                    }
+                    match_result(
+                        Hundeschule__mount_config(channel, mount),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return Error(IOStatus, message, code);
+                        }
+                    );
+                }
+            );
+            return Success(IOStatus, IO_OK);
+        },
+        none()
+        {
+            return Error(IOStatus, bstr("Missing root mount"), IO_INVALID_MOUNT_POINT);
+        }
+    );
+    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
 static Result(IOStatus) Hundeschule__mount_configured_file(ChannelPtr channel, IOHandle file)
 {
     IOStatus status = IO_OK;
-    bool root = false;
+    ConfiguredMounts mounts = ConfiguredMounts__new();
     match_result(
         IO__read_dyn_string(file, 2048),
         success(config)
@@ -66,17 +180,15 @@ static Result(IOStatus) Hundeschule__mount_configured_file(ChannelPtr channel, I
                                         success(mount)
                                         {
                                             if (!BString__equals(&mount.filesystem_type, &bstr("ext2")) &&
-                                                !BString__equals(&mount.filesystem_type, &bstr("fat32")))
+                                                !BString__equals(&mount.filesystem_type, &bstr("fat32")) &&
+                                                !BString__equals(&mount.filesystem_type, &bstr("ext2.wuff")) &&
+                                                !BString__equals(&mount.filesystem_type, &bstr("fat32.wuff")))
                                             {
                                                 continue;
                                             }
                                             match_result(
-                                                Hundeschule__mount_config(channel, mount),
-                                                success(code)
-                                                {
-                                                    root =
-                                                        root || BString__equals(&mount.mountpoint, &bstr("/"));
-                                                },
+                                                ConfiguredMounts__add(&mounts, mount),
+                                                success_do_nothing(),
                                                 error(code, message)
                                                 {
                                                     status = code;
@@ -115,12 +227,14 @@ static Result(IOStatus) Hundeschule__mount_configured_file(ChannelPtr channel, I
             return Error(IOStatus, message, code);
         }
     );
-    if (status != IO_OK || !root)
+    if (status != IO_OK)
     {
-        return Error(IOStatus, bstr("Cannot establish configured mounts"),
-                     status != IO_OK ? status : IO_INVALID_MOUNT_POINT);
+        ConfiguredMounts__dispose(&mounts);
+        return Error(IOStatus, bstr("Cannot establish configured mounts"), status);
     }
-    return Success(IOStatus, IO_OK);
+    Result(IOStatus) result = Hundeschule__mount_entries(channel, &mounts);
+    ConfiguredMounts__dispose(&mounts);
+    return result;
 }
 
 static Result(IOStatus) Hundeschule__mount_configured(ChannelPtr channel)
@@ -141,9 +255,18 @@ static Result(IOStatus) Hundeschule__mount_configured(ChannelPtr channel)
 
 static Result(IOStatus) Hundeschule__mount_builtin(ChannelPtr channel, ConstBStringPtr type, ConstBStringPtr path)
 {
+    if (BString__equals(type, &bstr("memfs")) || BString__equals(type, &bstr("procfs")))
+    {
+        ServiceCode status = service_wait_ready(path);
+        if (!service_ok(status))
+        {
+            return Error(IOStatus, bstr("Hosted filesystem is not ready"), status);
+        }
+        return MountClient__add(channel, MountConfig__new(&empty_bstr(), type, path));
+    }
     BString driver = BString__sprintf(&bstr("/sbin/drivers/%s"), cstr_p(type));
     match_result(
-        BootService__start(&driver, BString__equals(type, &bstr("memfs")) ? path : &empty_bstr(), &empty_bstr(), path),
+        BootService__start(&driver, &empty_bstr(), &empty_bstr(), path),
         success_do_nothing(),
         error(code, message)
         {

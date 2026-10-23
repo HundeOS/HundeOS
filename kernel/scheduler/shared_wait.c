@@ -3,6 +3,58 @@
 #include "ipc/doorbell.h"
 #include "ipc/queue_wait_control.h"
 
+typedef uint64_t DoorbellReferenceCount;
+typedef DoorbellReferenceCount * DoorbellReferenceCountPtr;
+
+static DoorbellReferenceCountPtr DoorbellBacking__references(UserAddress self)
+{
+    return (DoorbellReferenceCountPtr)(self.kernel_addr.virtual_addr + IPC_DOORBELL_PAGE_SIZE);
+}
+
+Result(UserAddress) DoorbellBacking__new(void)
+{
+    match_result(
+        Kernel__try_alloc_user(IPC_DOORBELL_ADDRESS, 2 * IPC_DOORBELL_PAGE_SIZE, true, true, false),
+        success(mapping)
+        {
+            Kernel__memset(mapping.kernel_addr.virtual_addr, 0, 2 * IPC_DOORBELL_PAGE_SIZE);
+            __atomic_store_n(DoorbellBacking__references(mapping), 1, __ATOMIC_RELAXED);
+            return Success(UserAddress, mapping);
+        },
+        error(code, message)
+        {
+            return Error(UserAddress, message, code);
+        }
+    );
+    return Error(UserAddress, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
+void DoorbellBacking__retain(UserAddress self)
+{
+    __atomic_fetch_add(DoorbellBacking__references(self), 1, __ATOMIC_RELAXED);
+}
+
+Result(KAllocCode) DoorbellBacking__release(UserAddress self)
+{
+    if (__atomic_fetch_sub(DoorbellBacking__references(self), 1, __ATOMIC_ACQ_REL) > 1)
+    {
+        return Success(KAllocCode, KALLOC_OK);
+    }
+    match_result(
+        Kernel__free(self.kernel_addr.virtual_addr),
+        success(code)
+        {
+            return Success(KAllocCode, code);
+        },
+        error(code, message)
+        {
+            __atomic_store_n(DoorbellBacking__references(self), 1, __ATOMIC_RELAXED);
+            return Error(KAllocCode, message, code);
+        }
+    );
+    return Error(KAllocCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
 Result(UserAddress) Process__doorbell(ProcessPtr self)
 {
     match_optional(self->ipc_doorbell,
@@ -13,13 +65,12 @@ Result(UserAddress) Process__doorbell(ProcessPtr self)
         none_do_nothing()
     );
     match_result(
-        Kernel__try_alloc_user(IPC_DOORBELL_ADDRESS, IPC_DOORBELL_PAGE_SIZE, true, true, false),
+        DoorbellBacking__new(),
         success(mapping)
         {
-            Kernel__memset(mapping.kernel_addr.virtual_addr, 0, IPC_DOORBELL_PAGE_SIZE);
             PageTable__map(&self->page_table, self->kernel, mapping, IPC_DOORBELL_PAGE_SIZE);
             match_result(
-                Process__record_user_allocation(self, mapping, IPC_DOORBELL_PAGE_SIZE, USER_ALLOCATION_DYNAMIC),
+                Process__record_user_allocation(self, mapping, IPC_DOORBELL_PAGE_SIZE, USER_ALLOCATION_DOORBELL),
                 success(_)
                 {
                     self->ipc_doorbell = Some(UserAddress, mapping);
@@ -28,7 +79,7 @@ Result(UserAddress) Process__doorbell(ProcessPtr self)
                 error(code, message)
                 {
                     PageTable__unmap(&self->page_table, self->kernel, mapping.virtual_addr, IPC_DOORBELL_PAGE_SIZE);
-                    Kernel__free(mapping.kernel_addr.virtual_addr);
+                    DoorbellBacking__release(mapping);
                     return Error(UserAddress, message, code);
                 }
             );

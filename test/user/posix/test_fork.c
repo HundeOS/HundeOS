@@ -10,6 +10,7 @@ static ProcessForkResult fork_result;
 static ProcessIdentityResult identity_result;
 static ProcessIdentity identity;
 static uint64_t recorded_pid;
+static uint64_t claim_pid;
 static unsigned sequence;
 static unsigned prepare_sequence;
 static unsigned commit_sequence;
@@ -36,6 +37,7 @@ void PosixIO__abort_fork(void)
 
 IOStatus PosixIO__claim_fork(void)
 {
+    claim_pid = recorded_pid;
     return IO_OK;
 }
 
@@ -82,6 +84,7 @@ void setUp(void)
     identity_result = PROCESS_IDENTITY_OK;
     identity = ProcessIdentity__new(84, 42);
     recorded_pid = 0;
+    claim_pid = 0;
     sequence = 0;
     prepare_sequence = 0;
     commit_sequence = 0;
@@ -120,6 +123,15 @@ void test_fork_refreshes_cached_pid_in_child(void)
 
     TEST_ASSERT_EQUAL_INT64(0, fork());
     TEST_ASSERT_EQUAL_UINT64(84, recorded_pid);
+}
+
+void test_fork_refreshes_child_identity_before_claiming_inherited_channels(void)
+{
+    fork_result = 0;
+    recorded_pid = 42;
+
+    TEST_ASSERT_EQUAL_INT64(0, fork());
+    TEST_ASSERT_EQUAL_UINT64(84, claim_pid);
 }
 
 void test_fork_maps_kernel_failures_to_errno(void)

@@ -1,0 +1,18 @@
+[package]
+name = "hunde-fat32fs"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "fat32fs-component"
+path = "src/entry.rs"
+required-features = ["component"]
+
+[features]
+component = []
+
+[dependencies]
+hunde = { path = "../../lib/hunde" }
+
+[lints]
+workspace = true

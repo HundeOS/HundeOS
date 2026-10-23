@@ -175,6 +175,7 @@ typedef enum UserAllocationType
     USER_ALLOCATION_DYNAMIC,
     USER_ALLOCATION_MMIO,
     USER_ALLOCATION_SHARED,
+    USER_ALLOCATION_DOORBELL,
 } UserAllocationType;
 
 typedef struct UserAllocation

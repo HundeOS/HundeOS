@@ -144,8 +144,13 @@ Timer preemption remains enabled, without a global broadcast on every tick.
 Context restoration sets the local event latch with `SEVL`, allowing resumed
 waiters to recheck even if another process consumed an earlier event on that CPU.
 Ready fibres run before queue waits. `WFE` is not a scheduler yield and does not
-make kernel-parked processes runnable. Normal queue waits now enter the kernel
-immediately and increment park counters; they carry no timeout. Architecture
+make kernel-parked processes runnable. Outside a cooperative scheduler, queue
+waits enter the kernel immediately and increment park counters; they carry no
+timeout. The Rust I/O host installs a scoped native wait adapter while running
+fibres: queue waits park only their current fibre and recheck after wakeup.
+Only its outer idle loop parks the process after runnable work is drained.
+Shared native clients need transaction ownership across these yields; see
+[native wait ownership](rust-userspace.md#one-scheduler-multiple-fibres). Architecture
 event waits remain available to lower-level signal primitives whose process is
 still resident.
 
@@ -272,10 +277,11 @@ No performance improvement is assumed without measurement.
   dispatch on any event. Ready fibres run before waiting. See [bounded waits](#bounded-waits).
 - `QueueConnection__close(connection)` is the calling endpoint's final acknowledgement:
   stop all local users of that handle before calling it. The kernel publishes
-  closed state and removes the caller's connection mappings. It also removes the
-  survivor's alias to the departing process's doorbell before that doorbell can
-  be freed. The surviving endpoint retains the three connection pages until it
-  closes too. Once both are detached, connection backing is freed after
+  closed state and removes only the caller's connection mappings. The surviving
+  endpoint retains its peer-doorbell alias and three connection pages until it
+  closes too. A push/pop may have passed its open-state check before the remote
+  close and still need to ring the peer doorbell; remote close must not revoke
+  that live alias. Once both are detached, connection backing is freed after
   unmapping/TLB invalidation. Process exit performs the same detachment. The
   legacy process-exit event queue has been removed.
   A backing-free failure after detachment does not turn close into a failed
@@ -293,6 +299,27 @@ Each process owns a private doorbell page at `0x722ff000`. Connection-specific
 aliases to peer doorbells occupy `0x73000000` through `0x73400000` (exclusive),
 one page per connection slot. The aliases are mapped only into the two
 participants and are removed as their corresponding endpoints detach.
+
+Doorbell backing has kernel-only atomic reference accounting: one owner reference
+for the process (or the kernel's permanent doorbell) and one reference per side
+of every connection. A connection releases its references only after both
+endpoints detach, including kernel-created Channels. Process exit and exec release
+the old image's owner reference rather than unconditionally freeing a page still
+referenced by a surviving connection. Doorbell allocations have the explicit
+`USER_ALLOCATION_DOORBELL` type and are not inherited by fork.
+
+Each backing allocation occupies two physical pages. Only the first, containing
+the doorbell, is mapped into userspace; the second holds the reference count and
+is never exposed through process or peer aliases. This costs one additional
+kernel-private page per doorbell, without adding signalling syscalls or changing
+queue publication. Final-release failures restore the held reference and leave
+the connection quarantined for the existing retry path; partially released
+connections do not release the same reference twice.
+
+Kernel regressions cover an in-flight survivor after remote close, multiple
+aliases across owner exit, kernel clients after server exit, private metadata,
+and failed final frees followed by slot reuse. Live filesystem and concurrent
+socket/pipe tests exercise the original fault paths on both architectures.
 
 | Page | Client | Server | Contents |
 | --- | --- | --- | --- |

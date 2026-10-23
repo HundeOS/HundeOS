@@ -63,6 +63,7 @@ LLVM_CLANG ?= $(shell if command -v brew >/dev/null 2>&1; then \
 
 UNITY_PATH=vendor/Unity
 BOOT_PLATFORM ?= qemu_virt
+UEFI_DEVICE_PLATFORM ?= pi_uefi
 BSP_DEFINES ?= -DBSP_VIRT
 UV ?= uv
 CLANG_FORMAT = clang-format
@@ -182,8 +183,12 @@ NEWLIB_PIC_LIBC_OBJECTS = $(addprefix $(NEWLIB_PIC_LIBC_SELECTED_DIR)/,$(NEWLIB_
 NEWLIB_LIBC_ALLOWED_UNDEFINED = __errno _impure_ptr
 ifeq ($(COMPILE_COMMANDS),1)
 NEWLIB_INSTALL_PREREQUISITE =
+NEWLIB_PIC_INSTALL_PREREQUISITE =
+BASH_CAPTURE_MAKEFLAGS = -o Makefile -o makefile -o config.status -o config.h -o stamp-h
+BASH_CAPTURE_ARGUMENTS = $(BASH_CAPTURE_MAKEFLAGS) BASH_MAKEFLAGS="$(BASH_CAPTURE_MAKEFLAGS)"
 else
 NEWLIB_INSTALL_PREREQUISITE = $(NEWLIB_INSTALL_STAMP)
+NEWLIB_PIC_INSTALL_PREREQUISITE = $(NEWLIB_PIC_INSTALL_STAMP)
 endif
 NEWLIB_MATH_HEADERS = \
 	_ansi.h \
@@ -325,6 +330,8 @@ CHANNELIO_DISK_LABEL = CHANNELIO
 CHANNELIO_DISK_TEST_NAME = CHANNEL.TXT
 CHANNELIO_EXT2_IMG = $(IMAGE_BUILD_DIR)/channelio-ext2.img
 CHANNELIO_EXT2_LABEL = CHANNELIO_EXT2
+HOSTED_EXT2_IMG = $(IMAGE_BUILD_DIR)/hosted-ext2.img
+HOSTED_EXT2_ROOT_DIR = $(IMAGE_BUILD_DIR)/hosted-ext2-root
 SD_CARD_FAT32_IMG = $(IMAGE_BUILD_DIR)/sdcard-fat32.img
 SD_CARD_FAT32_SIZE_MB = 64
 SD_CARD_FAT32_LABEL = TESTSD
@@ -367,7 +374,10 @@ COMMON_ARCH_SOURCES := $(shell find ./common/arch/$(ARCH) -name "*.c" -print 2>/
 ARCH_COMMON_SOURCES := $(shell find ./arch/$(ARCH) -path "./arch/$(ARCH)/boot/*/*" -prune -o -name "*.c" -print 2>/dev/null)
 ARCH_BOOT_COMMON_SOURCES := $(shell find ./arch/$(ARCH)/boot/common -name "*.c" -print 2>/dev/null)
 ARCH_PLATFORM_SOURCES := $(shell find ./arch/$(ARCH)/boot/$(BOOT_PLATFORM) -name "*.c" \
-	! -name "loader.c" ! -name "runtime.c" ! -name "bringup.c" -print 2>/dev/null)
+	! -name "loader.c" ! -name "runtime.c" ! -name "bringup.c" ! -name "uefi_devices.c" -print 2>/dev/null)
+ifeq ($(BOOT_PLATFORM),pi_uefi)
+ARCH_PLATFORM_SOURCES += ./arch/$(ARCH)/boot/$(UEFI_DEVICE_PLATFORM)/uefi_devices.c
+endif
 ARCH_SOURCES := $(ARCH_COMMON_SOURCES) $(ARCH_BOOT_COMMON_SOURCES) $(ARCH_PLATFORM_SOURCES)
 ARCH_COMMON_ASM_SOURCES := $(shell find ./arch/$(ARCH) -path "./arch/$(ARCH)/boot/*/*" -prune -o -name "*.s" -print 2>/dev/null)
 ARCH_BOOT_COMMON_ASM_SOURCES := $(shell find ./arch/$(ARCH)/boot/common -name "*.s" -print 2>/dev/null)
@@ -463,18 +473,32 @@ WUFF_DYNAMIC_SMOKE_OBJECT := $(PLATFORM_BUILD_ROOT)/wuff-dynamic-smoke/wuff_dyna
 WUFF_DYNAMIC_SMOKE_BINARY := $(PLATFORM_BUILD_ROOT)/wuff-dynamic-smoke/wuff-dynamic-smoke.bin
 WUFF_PROGRAM_VERSION_SCRIPT := user/ports/wuff_program.map
 RUST_TOOLCHAIN := 1.99.1
-RUSTC ?= rustc +$(RUST_TOOLCHAIN)
 RUST_COMPONENT_TARGET_aarch64 := aarch64-unknown-none-softfloat
 RUST_COMPONENT_TARGET_riscv64 := riscv64imac-unknown-none-elf
 RUST_COMPONENT_TARGET := $(RUST_COMPONENT_TARGET_$(ARCH))
 RUST_COMPONENT_SMOKE_SOURCE := user/components/rust_smoke/component.rs
 RUST_COMPONENT_SMOKE_MAP := user/components/rust_smoke/exports.map
-RUST_COMPONENT_SMOKE_OBJECT := $(PLATFORM_BUILD_ROOT)/rust-component-smoke/component.o
 RUST_COMPONENT_SMOKE_BINARY := $(PLATFORM_BUILD_ROOT)/rust-component-smoke/hunde-rust-smoke.wuff
+RUST_CARGO_DIR := $(PLATFORM_BUILD_ROOT)/rust
+RUST_RELEASE_DIR := $(RUST_CARGO_DIR)/$(RUST_COMPONENT_TARGET)/release
+RUST_IO_HOST_ARCHIVE := $(RUST_RELEASE_DIR)/libhunde_io_host.a
+RUST_MEMFS_BINARY := $(RUST_CARGO_DIR)/memfs.wuff
+RUST_PROCFS_BINARY := $(RUST_CARGO_DIR)/procfs.wuff
+RUST_SYSINFOFS_BINARY := $(RUST_CARGO_DIR)/sysinfofs.wuff
+RUST_EXT2_BINARY := $(RUST_CARGO_DIR)/ext2fs.wuff
+RUST_FAT32_BINARY := $(RUST_CARGO_DIR)/fat32.wuff
+RUST_IO_COMPONENT_ENTRY := hunde_io_component_entry_v6
+RUST_PIPE_BINARY := $(RUST_CARGO_DIR)/pipe.wuff
+RUST_SOCKET_BINARY := $(RUST_CARGO_DIR)/socket.wuff
+RUST_CRATE_DIRS := user/drivers/memfs user/services/hund-rohr user/lib/hunde user/services/hunde-io-host user/drivers/socket user/components/rust_smoke user/drivers/procfs user/drivers/sysinfofs user/drivers/ext2fs user/drivers/fat32fs
+RUST_PROTOCOL_INPUTS := common/ipc/io_protocol.h common_includes/hunde/io_component.h common_includes/hunde/boot_info.h common_includes/hunde/host_component.h common_includes/syscalls/io.h common_includes/syscalls/service.h common_includes/syscalls/mem.h tools/generate_rust_io_constants.py
+RUST_IO_SOURCES := $(shell find $(RUST_CRATE_DIRS) -name '*.rs' -print -o -name Cargo.toml -print) user/Cargo.toml user/Cargo.lock $(RUST_PROTOCOL_INPUTS)
+hunde-io-host_EXTRA_OBJS := $(RUST_IO_HOST_ARCHIVE)
 
 USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
-USER_RETIRED_BINARY_DIRS := user/commands/shell
-USER_BINARY_DIRS := $(filter-out $(USER_RETIRED_BINARY_DIRS),$(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)))
+USER_RETIRED_BINARY_DIRS := user/commands/shell user/services/hund-dateisystem user/services/hund-io-system
+USER_COMPONENT_DIRS := user/drivers/memfs user/drivers/socket user/services/hund-rohr user/drivers/procfs user/drivers/sysinfofs user/drivers/fat32fs
+USER_BINARY_DIRS := $(filter-out $(USER_RETIRED_BINARY_DIRS) $(USER_COMPONENT_DIRS),$(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)))
 WUFF_INTERPRETER_DIR := user/programs/wuff-ld
 ROOTFS_COMMAND_NAMES := cat cp env fs-latency grep kill ln ls mkdir mv ps rm shutdown tail write
 ROOTFS_COMMAND_DIRS := $(wildcard $(addprefix user/commands/,$(ROOTFS_COMMAND_NAMES)))
@@ -548,7 +572,14 @@ hund-unterbrict_EXTRA_OBJS := \
 EMBEDDED_FS_INPUTS := \
 	$(foreach dir,$(EMBEDDED_USER_NON_DRIVER_DIRS),$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
 	$(foreach dir,$(USER_DRIVER_DIRS),drivers/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
-	$(foreach dir,$(USER_SERVICE_DIRS),services/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin)
+	$(foreach dir,$(USER_SERVICE_DIRS),services/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
+	components/socket.wuff=$(RUST_SOCKET_BINARY) \
+	components/pipe.wuff=$(RUST_PIPE_BINARY) \
+	components/memfs.wuff=$(RUST_MEMFS_BINARY) \
+	components/procfs.wuff=$(RUST_PROCFS_BINARY) \
+	components/sysinfofs.wuff=$(RUST_SYSINFOFS_BINARY) \
+	components/ext2fs.wuff=$(RUST_EXT2_BINARY) \
+	components/fat32.wuff=$(RUST_FAT32_BINARY)
 EMBEDDED_FS := $(TARGET_BUILD_DIR)/kernel/embedded.fs
 
 .PRECIOUS: $(USER_BUILD_DIR)/lib/arch/%.o
@@ -648,7 +679,7 @@ $(NEWLIB_LIBC_VERIFY_OBJECT): $(NEWLIB_LIBC_OBJECTS) Makefile
 		esac; \
 	done
 
-$(NEWLIB_PIC_LIBC_SELECTED_STAMP): $(NEWLIB_PIC_INSTALL_STAMP) Makefile
+$(NEWLIB_PIC_LIBC_SELECTED_STAMP): $(NEWLIB_PIC_INSTALL_PREREQUISITE) Makefile
 	rm -rf $(NEWLIB_PIC_LIBC_SELECTED_DIR)
 	mkdir -p $(NEWLIB_PIC_LIBC_SELECTED_DIR)
 	for member in $(NEWLIB_LIBC_MEMBERS); do \
@@ -716,13 +747,15 @@ $(SYSROOT_COMPILER_RUNTIME): $(COMPILER_RUNTIME_PIC_OBJECT) Makefile
 	if $(NM) -u $@ | awk '$$1 == "U" { found = 1 } END { exit !found }'; then $(NM) -u $@ >&2; exit 1; fi
 
 $(SYSROOT_WUFF_LIBC): $(USER_LIBC_PIC_OBJECTS) $(USER_HUNDE_PIC_OBJECTS) $(NEWLIB_PIC_LIBC_OBJECTS) \
-		$(NEWLIB_PIC_LIBC_VERIFY_OBJECT) | check-wuff-linker
+		$(NEWLIB_PIC_LIBC_VERIFY_OBJECT) $(WUFF_PROGRAM_VERSION_SCRIPT) Makefile | check-wuff-linker
 	mkdir -p `dirname $@`
 	$(WUFF_LD) -shared -soname libc.wuff.1 --hash-style=sysv -z defs -z now -z relro --gc-sections \
+		$(WUFF_PROGRAM_LINK_FLAGS) \
 		--start-group $(USER_LIBC_PIC_OBJECTS) $(NEWLIB_PIC_LIBC_OBJECTS) \
 		$(USER_HUNDE_PIC_OBJECTS) $(WUFF_LIBGCC) --end-group -o $@
 	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
 	$(READELF) -d $@ | awk '/SONAME/ { if ($$0 !~ /\[libc\.wuff\.1\]/) exit 1; found = 1 } END { exit !found }'
+	if $(READELF) --dyn-syms -W $@ | awk '$$8 == "_stack" { found = 1 } END { exit !found }'; then echo "libc.wuff.1 exports synthetic _stack" >&2; exit 1; fi
 	if $(READELF) -d $@ | grep -q '(TEXTREL)'; then echo "libc.wuff.1 contains text relocations" >&2; exit 1; fi
 	if $(READELF) -lW $@ | grep -Eq '^[[:space:]]*TLS[[:space:]]'; then echo "libc.wuff.1 contains TLS" >&2; exit 1; fi
 	if $(READELF) -dW $@ | grep -Eq '\((PREINIT_ARRAY|INIT|INIT_ARRAY|FINI|FINI_ARRAY)\)'; then echo "libc.wuff.1 contains initialization metadata" >&2; exit 1; fi
@@ -757,15 +790,94 @@ $(WUFF_SMOKE_BINARY): $(WUFF_SMOKE_OBJECT) Makefile | check-wuff-linker
 	if $(READELF) -lW $@ | grep -q 'GNU_RELRO'; then $(READELF) -lW $@ >&2; exit 1; fi
 	$(READELF) -Ws $@ | awk '$$8 == "wuff_add" && $$5 == "GLOBAL" && $$7 != "UND" { found = 1 } END { exit !found }'
 
-$(RUST_COMPONENT_SMOKE_OBJECT): $(RUST_COMPONENT_SMOKE_SOURCE) rust-toolchain.toml Makefile
-	mkdir -p `dirname $@`
-	$(RUSTC) --edition=2024 --crate-name hunde_rust_smoke --crate-type=lib --emit=obj \
-		--target=$(RUST_COMPONENT_TARGET) -C panic=abort -C relocation-model=pic -C code-model=small \
-		-C opt-level=2 -C strip=debuginfo $< -o $@
+.PHONY: rust-test rust-io rust-format rust-format-check rust-lint rust-lint-host rust-lint-target
+rust-format:
+	cargo +$(RUST_TOOLCHAIN) fmt --manifest-path user/Cargo.toml --all
 
-$(RUST_COMPONENT_SMOKE_BINARY): $(RUST_COMPONENT_SMOKE_OBJECT) $(RUST_COMPONENT_SMOKE_MAP) Makefile | check-wuff-linker
-	$(WUFF_LD) -shared -soname hunde-rust-smoke.wuff.1 --hash-style=sysv -z defs -z now -z relro \
-		--gc-sections --version-script=$(RUST_COMPONENT_SMOKE_MAP) $< -o $@
+rust-format-check:
+	cargo +$(RUST_TOOLCHAIN) fmt --manifest-path user/Cargo.toml --all --check
+
+rust-lint: rust-lint-host rust-lint-target
+
+rust-lint-host:
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --workspace --all-targets \
+		--target-dir $(RUST_CARGO_DIR) -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml -p hunde --no-default-features \
+		--all-targets --target-dir $(RUST_CARGO_DIR) -- -D warnings
+
+rust-lint-target:
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-io-host --features service --lib -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-socket --features component --lib --bin socket-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-pipe --features component --lib --bin pipe-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-memfs --features component --lib --bin memfs-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-rust-smoke --features component --bin rust-smoke-component -- -D warnings
+
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-procfs --features component --lib --bin procfs-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-sysinfofs --features component --lib --bin sysinfofs-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-ext2fs --features component --lib --bin ext2fs-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-fat32fs --features component --lib --bin fat32fs-component -- -D warnings
+
+rust-test:
+	cargo +$(RUST_TOOLCHAIN) test --manifest-path user/Cargo.toml --workspace --target-dir $(RUST_CARGO_DIR)
+
+rust-io: $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) $(RUST_PIPE_BINARY) $(RUST_SOCKET_BINARY) $(USER_BUILD_DIR)/hunde-io-host.bin
+
+$(RUST_IO_HOST_ARCHIVE): $(RUST_IO_SOURCES) rust-toolchain.toml Makefile
+	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) build \
+		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-io-host --features service
+
+$(RUST_SOCKET_BINARY): RUST_IO_COMPONENT_NAME = socket
+$(RUST_SOCKET_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/socket
+$(RUST_SOCKET_BINARY): user/drivers/socket/exports.map
+$(RUST_PIPE_BINARY): RUST_IO_COMPONENT_NAME = pipe
+$(RUST_PIPE_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/services/hund-rohr
+$(RUST_PIPE_BINARY): user/services/hund-rohr/exports.map
+$(RUST_MEMFS_BINARY): RUST_IO_COMPONENT_NAME = memfs
+$(RUST_MEMFS_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/memfs
+$(RUST_MEMFS_BINARY): user/drivers/memfs/exports.map
+$(RUST_PROCFS_BINARY): RUST_IO_COMPONENT_NAME = procfs
+$(RUST_PROCFS_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/procfs
+$(RUST_PROCFS_BINARY): user/drivers/procfs/exports.map
+$(RUST_SYSINFOFS_BINARY): RUST_IO_COMPONENT_NAME = sysinfofs
+$(RUST_SYSINFOFS_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/sysinfofs
+$(RUST_SYSINFOFS_BINARY): user/drivers/sysinfofs/exports.map
+$(RUST_EXT2_BINARY): RUST_IO_COMPONENT_NAME = ext2fs
+$(RUST_EXT2_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/ext2fs
+$(RUST_EXT2_BINARY): RUST_IO_COMPONENT_ENTRY = hunde_filesystem_component_entry_v1
+$(RUST_EXT2_BINARY): user/drivers/ext2fs/exports.map
+$(RUST_FAT32_BINARY): RUST_IO_COMPONENT_NAME = fat32fs
+$(RUST_FAT32_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/fat32fs
+$(RUST_FAT32_BINARY): RUST_IO_COMPONENT_ENTRY = hunde_filesystem_component_entry_v1
+$(RUST_FAT32_BINARY): user/drivers/fat32fs/exports.map
+
+$(RUST_SOCKET_BINARY) $(RUST_PIPE_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY): $(RUST_IO_SOURCES) rust-toolchain.toml Makefile | check-wuff-linker
+	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) rustc \
+		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-$(RUST_IO_COMPONENT_NAME) --features component --bin $(RUST_IO_COMPONENT_NAME)-component -- \
+		-C linker=$(WUFF_LD) -C linker-flavor=ld \
+		-C link-args="-shared --soname $(RUST_IO_COMPONENT_NAME).wuff.1 --hash-style=sysv -z defs -z now -z relro -z text --version-script=$(abspath $(RUST_IO_COMPONENT_DIRECTORY)/exports.map) -u $(RUST_IO_COMPONENT_ENTRY)"
+	cp $(RUST_RELEASE_DIR)/$(RUST_IO_COMPONENT_NAME)-component $@
+	if $(READELF) -dW $@ | grep -Eq '\((NEEDED|TEXTREL|PREINIT_ARRAY|INIT|INIT_ARRAY|FINI|FINI_ARRAY)\)'; then $(READELF) -dW $@ >&2; exit 1; fi
+	if $(READELF) -lW $@ | grep -Eq '^[[:space:]]*(INTERP|TLS)[[:space:]]'; then $(READELF) -lW $@ >&2; exit 1; fi
+	$(READELF) -lW $@ | grep -q 'GNU_RELRO'
+	$(READELF) --dyn-syms -W $@ | awk '$$7 != "UND" && $$5 == "GLOBAL" { count++; if ($$8 != "$(RUST_IO_COMPONENT_ENTRY)") bad = 1 } END { exit bad || count != 1 }'
+	$(READELF) -rW $@ | awk -v allowed="$(WUFF_PROGRAM_RELOCATIONS)" '$$3 ~ /^R_/ { if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad }'
+
+$(RUST_COMPONENT_SMOKE_BINARY): $(RUST_COMPONENT_SMOKE_SOURCE) user/components/rust_smoke/Cargo.toml \
+        $(RUST_IO_SOURCES) $(RUST_COMPONENT_SMOKE_MAP) rust-toolchain.toml Makefile | check-wuff-linker
+	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) rustc \
+		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-rust-smoke --features component --bin rust-smoke-component -- \
+		-C linker=$(WUFF_LD) -C linker-flavor=ld \
+		-C link-args="-shared --soname hunde-rust-smoke.wuff.1 --hash-style=sysv -z defs -z now -z relro -z text --version-script=$(abspath $(RUST_COMPONENT_SMOKE_MAP)) -u hunde_component_entry_v1"
+	mkdir -p `dirname $@`
+	cp $(RUST_RELEASE_DIR)/rust-smoke-component $@
 	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
 	$(READELF) -dW $@ | awk '/SONAME/ { if ($$0 !~ /\[hunde-rust-smoke\.wuff\.1\]/) exit 1; found = 1 } END { exit !found }'
 	if $(READELF) -dW $@ | grep -q '(NEEDED)'; then $(READELF) -dW $@ >&2; exit 1; fi
@@ -806,8 +918,8 @@ bash-configure: $(BASH_PORT_CONFIGURE_STAMP)
 bash-build: $(BASH_PORT_BINARY)
 
 $(BASH_PORT_BINARY): $(BASH_PORT_CONFIGURE_STAMP) $(SYSROOT_WUFF_FILES) $(USER_CRT_PIC_OBJECT) \
-		$(NEWLIB_PIC_INSTALL_STAMP) $(WUFF_PROGRAM_VERSION_SCRIPT) $(BASH_RUNTIME_PREREQUISITES)
-	$(MAKE) -C $(BASH_PORT_BUILD_DIR) bash
+		$(NEWLIB_PIC_INSTALL_PREREQUISITE) $(WUFF_PROGRAM_VERSION_SCRIPT) $(BASH_RUNTIME_PREREQUISITES)
+	$(MAKE) -C $(BASH_PORT_BUILD_DIR) $(BASH_CAPTURE_ARGUMENTS) bash
 	$(READELF) -h $@ | awk '/Type:/ { if ($$2 != "DYN") exit 1; found = 1 } END { exit !found }'
 	$(READELF) -h $@ | awk '/Entry point address:/ { if ($$4 == "0x0") exit 1; found = 1 } END { exit !found }'
 	$(READELF) -lW $@ | awk '/Requesting program interpreter:/ { if ($$0 !~ /\/sbin\/wuff-ld\]/) exit 1; found = 1 } END { exit !found }'
@@ -842,7 +954,7 @@ $(BASH_PORT_SOURCE_STAMP): vendor/bash/README.md vendor/bash/SHA256SUMS \
 	touch $@
 
 $(BASH_PORT_CONFIGURE_STAMP): $(BASH_PORT_SOURCE_STAMP) $(BASH_PORT_CONFIG_CACHE) Makefile \
-		$(SYSROOT_INCLUDE_STAMP) $(SYSROOT_WUFF_FILES) $(USER_CRT_PIC_OBJECT) $(NEWLIB_PIC_INSTALL_STAMP) \
+		$(SYSROOT_INCLUDE_STAMP) $(SYSROOT_WUFF_FILES) $(USER_CRT_PIC_OBJECT) $(NEWLIB_PIC_INSTALL_PREREQUISITE) \
 		$(WUFF_PROGRAM_VERSION_SCRIPT) $(BASH_RUNTIME_PREREQUISITES)
 	rm -rf $(BASH_PORT_BUILD_DIR)
 	mkdir -p $(BASH_PORT_BUILD_DIR)
@@ -875,53 +987,63 @@ elf: $(ELF)
 kernel: hundelint user_binaries $(BIN)
 
 # Capture real kernel and userspace flags without compiling or launching QEMU.
-.PHONY: compile-commands
+.PHONY: compile-commands compile-commands-capture
 compile-commands:
-	rm -f compile_commands.json
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --overwrite --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 elf
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 riscv64-bringup-elf
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+	$(PYTHON) tools/compile_commands.py --make "$(MAKE)"
+
+compile-commands-capture:
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 elf
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 riscv64-bringup-elf
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 \
 		BOOT_PLATFORM=milkv_duo BSP_DEFINES=-DBSP_MILKV_DUO ARCH_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
 		ARCH_USER_CFLAGS="$(MILKV_DUO_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_ARCH_FLAGS)" \
 		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo \
 		build/riscv64/milkv_duo/kernel.elf
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 \
 		BOOT_PLATFORM=milkv_duo_s BSP_DEFINES=-DBSP_MILKV_DUO_S ARCH_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
 		ARCH_USER_CFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" ARCH_ASFLAGS="$(MILKV_DUO_S_ARCH_FLAGS)" \
 		PLATFORM_BUILD_ROOT=build/riscv64/milkv_duo_s \
 		build/riscv64/milkv_duo_s/kernel.elf build/riscv64/milkv_duo_s/handoff.elf
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 \
 		BOOT_PLATFORM=milkv_duo_s BSP_DEFINES="-DBSP_MILKV_DUO_S -DKERNEL_SERIAL_TRACE -DKERNEL_MEMORY_TRACE -DAARCH64_BOOT_MAX_CPUS=1" \
 		PLATFORM_BUILD_ROOT=build/aarch64/milkv_duo_s \
 		build/aarch64/milkv_duo_s/kernel.elf build/aarch64/milkv_duo_s/handoff.elf
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 \
 		build/riscv64/qemu_virt/kernel/arch/riscv64/page_table.o \
 		build/riscv64/qemu_virt/kernel/arch/riscv64/mmu.o
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 \
 		BOOT_PLATFORM=riscv_virt_embedded \
 		build/riscv64/riscv_virt_embedded/kernel/arch/riscv64/boot/riscv_virt_embedded/platform.o
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 \
 		build/riscv64/user/hello_world.bin
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 \
 		build/aarch64/user/setjmp_probe.bin
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 \
 		build/riscv64/user/setjmp_probe.bin
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 sysroot-smoke
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 sysroot-smoke
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 wuff-smoke
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 wuff-smoke
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 wuff-dynamic-smoke
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 wuff-dynamic-smoke
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 rust-component-smoke
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 rust-component-smoke
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 sysroot-smoke
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 sysroot-smoke
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 wuff-smoke
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 wuff-smoke
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 wuff-dynamic-smoke
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 wuff-dynamic-smoke
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 rust-component-smoke
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 rust-component-smoke
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 \
+		build/aarch64/user/lib/hunde/native.o build/aarch64/user/lib/hunde/request.o build/aarch64/user/lib/hunde/scheduler.o
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 \
+		build/riscv64/user/lib/hunde/native.o build/riscv64/user/lib/hunde/request.o build/riscv64/user/lib/hunde/scheduler.o
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 \
 		build/riscv64/sysroot/usr/lib/libcompiler_rt_pic.a
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 bash-build
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 bash-build
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=aarch64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 bash-build
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 bash-build
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 \
 		$(addprefix build/aarch64/user/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
-	$(UV) tool run --from compiledb==0.10.7 compiledb --no-build --full-path make -B COMPILE_COMMANDS=1 ARCH=riscv64 \
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=riscv64 \
 		$(addprefix build/riscv64/user/,$(addsuffix .bin,$(ROOTFS_COMMAND_NAMES)))
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 \
+		BOOT_PLATFORM=pi_uefi build/aarch64/pi_uefi/kernel/arch/aarch64/boot/pi_uefi/uefi_devices.o
+	$(MAKE) -Bnw COMPILE_COMMANDS=1 ARCH=aarch64 \
+		BOOT_PLATFORM=pi_uefi UEFI_DEVICE_PLATFORM=qemu_virt build/aarch64/pi_uefi/kernel/arch/aarch64/boot/qemu_virt/uefi_devices.o
 
 setup: python-venv
 	mkdir -p $(BUILD_ROOT)
@@ -955,6 +1077,22 @@ $(CHANNELIO_EXT2_IMG): $(shell find $(EXT2_ROOT_DIR) -type f -print)
 		$(EXT2_MKFS) -b $$(( $(EXT2_SIZE_MB) * 1024 )) -B $(EXT2_IMG_BLOCK_SIZE) -N $(EXT2_INODE_COUNT) -L $(CHANNELIO_EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
 	else \
 		$(EXT2_MKFS) -q -F -t ext2 -b $(EXT2_IMG_BLOCK_SIZE) -I $(EXT2_INODE_SIZE) -N $(EXT2_INODE_COUNT) -L $(CHANNELIO_EXT2_LABEL) -d $(EXT2_ROOT_DIR) $@.tmp; \
+	fi
+	mv $@.tmp $@
+
+$(HOSTED_EXT2_IMG): Makefile config/hosted-ext2/hello.txt $(USER_BUILD_DIR)/cat.bin
+	mkdir -p `dirname $@`
+	rm -rf $(HOSTED_EXT2_ROOT_DIR)
+	mkdir -p $(HOSTED_EXT2_ROOT_DIR)
+	cp -R config/hosted-ext2/. $(HOSTED_EXT2_ROOT_DIR)/
+	cp $(USER_BUILD_DIR)/cat.bin $(HOSTED_EXT2_ROOT_DIR)/cat
+	chmod 755 $(HOSTED_EXT2_ROOT_DIR)/cat
+	rm -f $@.tmp
+	dd if=/dev/zero of=$@.tmp bs=1048576 count=16
+	@if [ "$(EXT2_MKFS)" = "genext2fs" ]; then \
+		$(EXT2_MKFS) -b 16384 -B $(EXT2_IMG_BLOCK_SIZE) -N $(EXT2_INODE_COUNT) -L HOSTED_EXT2 -d $(HOSTED_EXT2_ROOT_DIR) $@.tmp; \
+	else \
+		$(EXT2_MKFS) -q -F -t ext2 -b $(EXT2_IMG_BLOCK_SIZE) -I $(EXT2_INODE_SIZE) -N $(EXT2_INODE_COUNT) -L HOSTED_EXT2 -d $(HOSTED_EXT2_ROOT_DIR) $@.tmp; \
 	fi
 	mv $@.tmp $@
 
@@ -1070,7 +1208,7 @@ $(MILKV_DUO_BRINGUP_BUILD_DIR)/%.o: %.s
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(EMBEDDED_FS): $(PYTHON_ENV_STAMP) $(USER_BINARIES) tools/build_embedded_fs.py
+$(EMBEDDED_FS): $(PYTHON_ENV_STAMP) $(USER_BINARIES) $(RUST_SOCKET_BINARY) $(RUST_PIPE_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) tools/build_embedded_fs.py
 	$(PYTHON) tools/build_embedded_fs.py $@ $(EMBEDDED_FS_INPUTS)
 
 $(KERNEL_BUILD_DIR)/./kernel/bin/embedded_fs.o: kernel/bin/embedded_fs.S $(EMBEDDED_FS)
@@ -1095,7 +1233,7 @@ $(COMPILER_RUNTIME_PIC_OBJECT): user/lib/arch/riscv64/compiler_runtime.c
 	$(CC) $(USER_PIC_CFLAGS) -c $< -o $@
 endif
 
-$(USER_PIC_BUILD_DIR)/%.o: user/%.c $(NEWLIB_PIC_INSTALL_STAMP)
+$(USER_PIC_BUILD_DIR)/%.o: user/%.c $(NEWLIB_PIC_INSTALL_PREREQUISITE)
 	mkdir -p `dirname $@`
 	$(CC) $(USER_PIC_CFLAGS) -idirafter $(NEWLIB_PIC_INCLUDE_DIR) -c $< -o $@
 
@@ -1456,7 +1594,7 @@ milkv-duo-s-sd-image-build-aarch64: $(MILKV_DUO_S_AARCH64_SD_IMAGE)
 qemu-riscv64:
 	$(MAKE) ARCH=riscv64 BOOT_CONFIG=qemu_riscv64 qemu-riscv64-run
 
-qemu-riscv64-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
+qemu-riscv64-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	qemu-system-riscv64 -machine virt -cpu rv64,zawrs=true -smp 4 -m 1G -bios default \
 		-kernel $(ELF) \
 		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
@@ -1471,6 +1609,8 @@ qemu-riscv64-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CA
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-nographic -monitor none -no-reboot
 
 qemu-riscv64-trace:
@@ -1483,7 +1623,7 @@ qemu-riscv64-trace-build:
 	$(MAKE) KERNEL_BUILD_DIR="$(RISCV64_TRACE_KERNEL_BUILD_DIR)" \
 		ELF="$(RISCV64_TRACE_ELF)" qemu-riscv64-trace-run
 
-qemu-riscv64-trace-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
+qemu-riscv64-trace-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	mkdir -p `dirname $(KERNEL_TRACE_LOG)`
 	: > $(KERNEL_TRACE_LOG)
 	qemu-system-riscv64 -machine virt -cpu rv64,zawrs=true -smp 4 -m 1G -bios default \
@@ -1500,6 +1640,8 @@ qemu-riscv64-trace-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-display none -monitor none -no-reboot \
 		-chardev stdio,id=console,signal=off -serial chardev:console \
 		-semihosting-config enable=on,target=native
@@ -1507,7 +1649,7 @@ qemu-riscv64-trace-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $
 riscv-virt-embedded:
 	$(MAKE) ARCH=riscv64 BOOT_PLATFORM=riscv_virt_embedded BOOT_CONFIG=qemu_riscv64 riscv-virt-embedded-run
 
-riscv-virt-embedded-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
+riscv-virt-embedded-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	qemu-system-riscv64 -machine virt -cpu rv64,zawrs=true -smp 1 -m 510M -bios default \
 		-kernel $(ELF) \
 		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
@@ -1522,6 +1664,8 @@ riscv-virt-embedded-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) 
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-nographic -monitor none -no-reboot
 
 # Clean build artifacts
@@ -1529,6 +1673,7 @@ clean:
 	rm -rf build
 
 test: $(PYTHON_ENV_STAMP)
+	$(MAKE) rust-test
 	$(PYTHON) -m pytest
 	make test -C test
 
@@ -1536,10 +1681,10 @@ smoke-test: $(PYTHON_ENV_STAMP)
 	$(PYTHON) -m pytest test/smoke
 
 .PHONY: format format-check format-test
-format: $(PYTHON_ENV_STAMP)
+format: $(PYTHON_ENV_STAMP) rust-format
 	$(PYTHON) tools/hundeformat.py -- $(CLANG_FORMAT)
 
-format-check: $(PYTHON_ENV_STAMP)
+format-check: $(PYTHON_ENV_STAMP) rust-format-check
 	$(PYTHON) tools/hundeformat.py --check -- $(CLANG_FORMAT)
 
 format-test: $(PYTHON_ENV_STAMP)
@@ -1547,9 +1692,11 @@ format-test: $(PYTHON_ENV_STAMP)
 
 hundelint: $(PYTHON_ENV_STAMP)
 	$(PYTHON) tools/hundelint.py --require-tree-sitter
+	$(MAKE) rust-lint
 
 hundelint-strict: $(PYTHON_ENV_STAMP)
 	$(PYTHON) tools/hundelint.py --require-tree-sitter --strict
+	$(MAKE) rust-lint
 
 hundelint-test: $(PYTHON_ENV_STAMP)
 	$(PYTHON) -m pytest test/tools/test_hundelint.py
@@ -1578,6 +1725,7 @@ endef
 $(foreach command,$(ROOTFS_COMMAND_NAMES),$(eval $(call register-wuff-command-objects,$(command))))
 
 $(ROOTFS_COMMAND_BINARIES): $(USER_CRT_PIC_OBJECT) $(SYSROOT_WUFF_FILES) $(WUFF_PROGRAM_VERSION_SCRIPT) Makefile | check-wuff-linker
+	mkdir -p `dirname $@`
 	$(WUFF_LD) -pie --dynamic-linker /sbin/wuff-ld -e _start --hash-style=sysv -z now -z relro \
 		--gc-sections $(WUFF_PROGRAM_LINK_FLAGS) $(filter %.o,$^) \
 		-L$(SYSROOT_LIB_DIR) -l:libc.wuff.1 -o $@
@@ -1636,7 +1784,7 @@ qemu-pi-uefi: $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 qemu-pi-uefi-firmware: BOOT_CONFIG = qemu_pi_uefi
 qemu-pi-uefi-firmware:
 	rm -rf $(PI_UEFI_BUILD_DIR)/kernel $(PI_UEFI_KERNEL_ELF) $(PI_UEFI_ESP_IMG)
-	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
+	$(MAKE) BOOT_PLATFORM=pi_uefi UEFI_DEVICE_PLATFORM=qemu_virt BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG)
 	@if [ -z "$(QEMU_EFI_CODE)" ]; then echo "Missing QEMU AArch64 EDK2 code firmware. Set QEMU_EFI_CODE=/path/to/code.fd"; exit 1; fi
 	@if [ -z "$(QEMU_EFI_VARS_TEMPLATE)" ]; then echo "Missing QEMU EDK2 vars template. Set QEMU_EFI_VARS_TEMPLATE=/path/to/vars.fd"; exit 1; fi
 	mkdir -p $(BUILD_ROOT)
@@ -1663,7 +1811,7 @@ qemu-pi-uefi-firmware:
 qemu-pi-uefi-firmware-trace: BOOT_CONFIG = qemu_pi_uefi_trace
 qemu-pi-uefi-firmware-trace:
 	rm -rf $(PI_UEFI_BUILD_DIR)/kernel $(PI_UEFI_KERNEL_ELF) $(PI_UEFI_ESP_IMG)
-	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG)
+	$(MAKE) BOOT_PLATFORM=pi_uefi UEFI_DEVICE_PLATFORM=qemu_virt BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG)
 	@if [ -z "$(QEMU_EFI_CODE)" ]; then echo "Missing QEMU AArch64 EDK2 code firmware. Set QEMU_EFI_CODE=/path/to/code.fd"; exit 1; fi
 	@if [ -z "$(QEMU_EFI_VARS_TEMPLATE)" ]; then echo "Missing QEMU EDK2 vars template. Set QEMU_EFI_VARS_TEMPLATE=/path/to/vars.fd"; exit 1; fi
 	mkdir -p $(BUILD_ROOT)
@@ -1695,7 +1843,7 @@ qemu-pi-uefi-firmware-trace:
 qemu-pi-uefi-firmware-framebuffer-trace: BOOT_CONFIG = qemu_pi_uefi_video
 qemu-pi-uefi-firmware-framebuffer-trace:
 	rm -rf $(PI_UEFI_BUILD_DIR)/kernel $(PI_UEFI_KERNEL_ELF) $(PI_UEFI_ESP_IMG)
-	$(MAKE) BOOT_PLATFORM=pi_uefi BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG)
+	$(MAKE) BOOT_PLATFORM=pi_uefi UEFI_DEVICE_PLATFORM=qemu_virt BSP_DEFINES="-DBSP_RPI4 -DKERNEL_SEMIHOSTING_TRACE" LINKER_SCRIPT=arch/aarch64/boot/pi_uefi/linker.ld $(PI_UEFI_ESP_IMG) $(PI_UEFI_EFI_VARS) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG)
 	@if [ -z "$(QEMU_EFI_CODE)" ]; then echo "Missing QEMU AArch64 EDK2 code firmware. Set QEMU_EFI_CODE=/path/to/code.fd"; exit 1; fi
 	@if [ -z "$(QEMU_EFI_VARS_TEMPLATE)" ]; then echo "Missing QEMU EDK2 vars template. Set QEMU_EFI_VARS_TEMPLATE=/path/to/vars.fd"; exit 1; fi
 	mkdir -p $(BUILD_ROOT)
@@ -1727,7 +1875,7 @@ qemu-pi-uefi-firmware-framebuffer-trace:
 		-monitor none
 
 qemu-virt: BOOT_CONFIG = qemu_virt
-qemu-virt: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
+qemu-virt: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
 		-smp cpus=4 -cpu max \
@@ -1744,12 +1892,14 @@ qemu-virt: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DI
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait
 
 qemu-virt-hvf: BOOT_CONFIG = qemu_virt_hvf
-qemu-virt-hvf: $(ELF) $(EXT2_IMG) $(HVF_BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
+qemu-virt-hvf: $(ELF) $(EXT2_IMG) $(HVF_BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_CARD_FAT32_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3,accel=hvf \
 		-smp cpus=4 \
@@ -1768,6 +1918,8 @@ qemu-virt-hvf: $(ELF) $(EXT2_IMG) $(HVF_BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(SD_C
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait
@@ -1779,7 +1931,7 @@ qemu-virt-hvf-trace:
 	$(MAKE) $(HVF_BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(SD_CARD_FAT32_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
-	$(MAKE) $(CHANNELIO_EXT2_IMG)
+	$(MAKE) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	$(MAKE) KERNEL_BUILD_DIR="$(HVF_TRACE_KERNEL_BUILD_DIR)" ELF="$(HVF_TRACE_ELF)" \
 		EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE" \
 		$(HVF_TRACE_ELF)
@@ -1805,6 +1957,8 @@ qemu-virt-hvf-trace:
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-kernel $(HVF_TRACE_ELF) \
 		-display none \
 		-monitor telnet::4444,server,nowait
@@ -1816,7 +1970,7 @@ qemu-virt-tcg-icount-trace:
 	$(MAKE) $(HVF_BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(SD_CARD_FAT32_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
-	$(MAKE) $(CHANNELIO_EXT2_IMG)
+	$(MAKE) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	$(MAKE) KERNEL_BUILD_DIR="$(TCG_ICOUNT_TRACE_KERNEL_BUILD_DIR)" ELF="$(TCG_ICOUNT_TRACE_ELF)" \
 		EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DBSP_WFE_WAIT -DHEAP_DEBUG -DKERNEL_SERIAL_TRACE" \
 		$(TCG_ICOUNT_TRACE_ELF)
@@ -1843,12 +1997,14 @@ qemu-virt-tcg-icount-trace:
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-kernel $(TCG_ICOUNT_TRACE_ELF) \
 		-nographic \
 		-monitor none
 
 qemu-virt-1cpu: BOOT_CONFIG = qemu_virt
-qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
+qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3,virtualization=off,secure=off \
 		-smp cpus=1 -cpu max \
@@ -1865,6 +2021,8 @@ qemu-virt-1cpu: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNEL
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
   		-kernel $(ELF) \
   		-nographic \
 		-monitor telnet::4444,server,nowait
@@ -1875,7 +2033,7 @@ qemu-virt-1cpu-trace:
 	$(MAKE) $(EXT2_IMG)
 	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
-	$(MAKE) $(CHANNELIO_EXT2_IMG)
+	$(MAKE) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	$(MAKE) EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p $(BUILD_ROOT)
 	: > $(KERNEL_TRACE_LOG)
@@ -1896,6 +2054,8 @@ qemu-virt-1cpu-trace:
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-kernel $(ELF) \
 		-nographic \
 		-semihosting-config enable=on,target=native \
@@ -1908,7 +2068,7 @@ qemu-virt-2cpus-trace:
 	$(MAKE) $(EXT2_IMG)
 	$(MAKE) $(BOOT_CONFIG_EXT2_IMG)
 	$(MAKE) $(CHANNELIO_DISK_IMG)
-	$(MAKE) $(CHANNELIO_EXT2_IMG)
+	$(MAKE) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	$(MAKE) EXTRA_KERNEL_CFLAGS="$(EXTRA_KERNEL_CFLAGS) -DKERNEL_SEMIHOSTING_TRACE" $(BIN)
 	mkdir -p $(BUILD_ROOT)
 	: > $(KERNEL_TRACE_LOG)
@@ -1929,6 +2089,8 @@ qemu-virt-2cpus-trace:
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-kernel $(ELF) \
 		-nographic \
 		-semihosting-config enable=on,target=native \
@@ -1936,7 +2098,7 @@ qemu-virt-2cpus-trace:
 		-D $(BUILD_ROOT)/qemu-2cpus.log
 
 qemu-virt-2cpus: BOOT_CONFIG = qemu_virt
-qemu-virt-2cpus: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG)
+qemu-virt-2cpus: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNELIO_DISK_IMG) $(CHANNELIO_EXT2_IMG) $(HOSTED_EXT2_IMG)
 	qemu-system-aarch64 \
 		-M virt,gic-version=3 \
 		-smp cpus=2 -cpu max \
@@ -1953,6 +2115,8 @@ qemu-virt-2cpus: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $(CHANNE
 		-device virtio-blk-device,drive=channelio0 \
 		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
 		-device virtio-blk-device,drive=channelio1 \
+		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
+		-device virtio-blk-device,drive=hostedext2 \
 		-kernel $(ELF) \
 		-nographic \
 		-monitor telnet::4444,server,nowait

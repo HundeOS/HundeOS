@@ -388,7 +388,6 @@ Result(SystemCallResult) BootComplete__handler(KernelPtr kernel, OptionalPtr(Pro
                 is_nothing(ServiceDirectory__find_endpoint(directory, &bstr(IO_FILESYSTEM_SERVICE))) ||
                 is_nothing(ServiceDirectory__find_endpoint(directory, &bstr(CHANNEL_WARDEN_SERVICE_NAME))) ||
                 is_nothing(ServiceDirectory__find_endpoint(directory, &bstr(BUFFER_SERVICE_NAME))) ||
-                is_nothing(ServiceDirectory__find_endpoint(directory, &bstr("/sbin"))) ||
                 is_nothing(ServiceDirectory__find_endpoint(directory, &bstr("/boot"))) ||
                 is_nothing(ServiceDirectory__find_endpoint(directory, &bstr("/boot/config"))))
             {

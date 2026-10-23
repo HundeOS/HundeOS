@@ -38,5 +38,6 @@ Result(OptionalChannelServerRequest) ChannelServer__poll(ChannelServerPtr self);
 bool ChannelServer__read_request(ChannelServerPtr self, ChannelDataPtr request, size_t size);
 Result(ChannelCode) ChannelServer__reply(ChannelServerPtr self, ConstChannelDataPtr reply, size_t size);
 ChannelCode ChannelServer__close(ChannelServerPtr self);
+bool ChannelServer__is_idle(ChannelServerPtr self);
 
 #endif

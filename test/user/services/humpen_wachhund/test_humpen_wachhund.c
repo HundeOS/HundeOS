@@ -121,12 +121,12 @@ SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
 
 void test_humpen_wachhund_exits_when_mount_succeeds_immediately(void)
 {
-    char * argv[] = {"humpen-wachhund", "/dev/mmc0", "fat32", "/mnt/sd"};
+    char * argv[] = {"humpen-wachhund", "/dev/mmc0", "ext2", "/mnt/sd"};
 
     TEST_ASSERT_EQUAL_INT(0, humpen_wachhund_main_under_test(4, argv));
     TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
     TEST_ASSERT_EQUAL(P_WAIT, spawned_modes[0]);
-    TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_FAT32FS_PATH, spawned_paths[0]);
+    TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_EXT2FS_PATH, spawned_paths[0]);
     TEST_ASSERT_EQUAL_STRING("/dev/mmc0", spawned_arg0[0]);
     TEST_ASSERT_EQUAL_STRING("/mnt/sd", spawned_arg1[0]);
     TEST_ASSERT_EQUAL_STRING("", spawned_arg2[0]);
@@ -146,7 +146,7 @@ void test_humpen_wachhund_rejects_unsupported_filesystem_without_retry(void)
 
 void test_humpen_wachhund_retries_with_exponential_backoff(void)
 {
-    char * argv[] = {"humpen-wachhund", "/dev/mmc0", "fat32", "/mnt/sd"};
+    char * argv[] = {"humpen-wachhund", "/dev/mmc0", "ext2", "/mnt/sd"};
     spawn_results[0] = 1;
     spawn_results[1] = 1;
     spawn_results[2] = 0;
@@ -162,7 +162,7 @@ void test_humpen_wachhund_retries_with_exponential_backoff(void)
 
 void test_humpen_wachhund_exits_when_sleep_fails(void)
 {
-    char * argv[] = {"humpen-wachhund", "/dev/mmc0", "fat32", "/mnt/sd"};
+    char * argv[] = {"humpen-wachhund", "/dev/mmc0", "ext2", "/mnt/sd"};
     spawn_results[0] = 1;
     spawn_result_count = 1;
     next_sleep_result = PROCESS_SLEEP_FAILED;

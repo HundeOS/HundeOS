@@ -52,6 +52,48 @@ handles are authenticated to the parent session. The child must not use those
 copied session objects. It needs fresh Channels and handles granted to its own
 authenticated PID.
 
+### Process-local IPC allocations
+
+The doorbell and queue-wait-control pages are kernel runtime state. Doorbells
+are tracked as `USER_ALLOCATION_DOORBELL` with kernel-private backing references;
+queue-wait-control pages remain private dynamic allocations. Eager fork excludes
+typed doorbell allocations, the allocation identified by the parent's
+`queue_wait_control`, and shared mappings. The child starts with neither
+the backing allocations nor their mappings or Optional references; its first
+IPC use allocates fresh state. Ordinary private allocations and their current
+permissions still inherit normally.
+
+Disposing an old image releases the doorbell owner's backing reference. Surviving
+connections retain their own references until both endpoints detach, so exiting
+or replacing the image cannot free a page still used by an in-flight peer ring.
+See [queue lifetimes](queues.md#initial-queue-api).
+
+Resetting only the Optional references is insufficient: a copied doorbell at
+the fixed virtual address collides with the child's newly created doorbell.
+A subsequent fork then sees overlapping allocation/mapping records and fails
+permission copying, previously reported as `ENOMEM`. Kernel regressions cover
+fresh IPC state across parent, child, and grandchild, with no accumulation of
+orphaned wait-control pages. QEMU acceptance exercises external commands from
+a background Bash subshell alongside a pipeline on both architectures.
+
+### Address-space detachment on exit
+
+Before freeing an exiting process's user allocations or page tables, the
+scheduler calls `MMU__dereference_user_mappings(kernel, table)`. This is a
+local-CPU operation: it compares the supplied root against the hardware's
+active root and leaves an unrelated active address space unchanged.
+
+On AArch64, detachment installs the empty guard table in `TTBR0_EL1`, leaving
+the kernel mappings in `TTBR1_EL1`. On RISC-V, it installs the permanent
+kernel-only root in `satp`; that root retains the shared supervisor mappings.
+Both paths complete the required translation invalidation and barriers before
+returning. Only then may exit cleanup release the old memory and tables.
+
+This does not stop a remote CPU using an address space. Any future teardown
+of a remotely running process must first establish that the other CPU has
+stopped using it; the local detach operation is not a remote reclamation
+protocol.
+
 ## Stage 1: Eager-Copy Fork
 
 1. Define a typed `SYSCALL_PROCESS_FORK` result and a libc `fork()` wrapper.
@@ -98,7 +140,11 @@ interpret file handles.
    that PID. Any failure revokes all prepared or committed grants and destroys
    the unpublished child.
 3. The child starts through a fork-return trampoline before `fork()` returns to
-   application code. It discards copied Channel/session state, creates fresh
+   application code. Libc obtains the child's kernel identity and refreshes its
+   cached PID before attempting any inherited I/O claims. Queue attachment
+   authenticates that PID against the kernel-created queue identity; using the
+   copied parent PID would reject the child's fresh Channels. It then discards
+   copied Channel/session state, creates fresh
    authenticated sessions, claims the committed grants, and replaces native
    handles in each copied open description. Duplicate descriptors continue to
    refer to one open description.

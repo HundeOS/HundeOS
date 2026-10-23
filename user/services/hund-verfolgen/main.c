@@ -558,7 +558,7 @@ static bool TraceService__reap_io(TraceServicePtr self)
 static bool TraceService__open_io(TraceServicePtr self)
 {
     match_result(
-        IO__open(&bstr(IO_TRACE_LOG_PATH), IO_OPEN_WRITE),
+        IO__open(&bstr(IO_TRACE_LOG_PATH), IO_OPEN_WRITE | IO_OPEN_CREATE | IO_OPEN_TRUNCATE),
         success(handle)
         {
             self->io_log = handle;

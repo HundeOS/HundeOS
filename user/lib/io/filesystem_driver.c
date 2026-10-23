@@ -35,21 +35,28 @@ FilesystemOperations FilesystemOperations__new_snapshot(FilesystemLoad load, Fil
 }
 
 FilesystemOperations FilesystemOperations__new_stream(FilesystemDescribe describe, FilesystemRead read,
-                                                      FilesystemWrite write, FilesystemList list, FilesystemMkdir mkdir,
+                                                      FilesystemWrite write, FilesystemTruncate truncate,
+                                                      FilesystemList list, FilesystemMkdir mkdir,
                                                       FilesystemRemove remove, FilesystemLink link)
 {
-    return (FilesystemOperations){.source_mode = FILESYSTEM_SOURCE_STREAM,
-                                  .source.stream = {.describe = describe, .read = read, .write = write},
-                                  .list = list,
-                                  .mkdir = mkdir,
-                                  .remove = remove,
-                                  .link = link};
+    return (FilesystemOperations){
+        .source_mode = FILESYSTEM_SOURCE_STREAM,
+        .source.stream = {.describe = describe, .read = read, .write = write, .truncate = truncate},
+        .list = list,
+        .mkdir = mkdir,
+        .remove = remove,
+        .link = link};
 }
 
 IOStatus FilesystemOperations__unsupported_link(IOServiceContext context, ConstBStringPtr source_path,
                                                 ConstBStringPtr target_path)
 {
     return IO_OPERATION_NOT_SUPPORTED;
+}
+
+Result(IOStatus) FilesystemOperations__unsupported_truncate(IOServiceContext context, ConstBStringPtr path)
+{
+    return Error(IOStatus, bstr("Truncation not supported"), IO_OPERATION_NOT_SUPPORTED);
 }
 
 FilesystemDriver FilesystemDriver__new(IOServiceContext volume, ConstFilesystemOperationsPtr operations)
@@ -202,9 +209,10 @@ static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr req
     Flags access_flags = request->flags & (IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_EXECUTE);
     Flags creation_flags = request->flags & (IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE);
     if (access_flags == 0 ||
-        (request->flags & ~(IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_EXECUTE | IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE)) !=
-            0 ||
-        (creation_flags != 0 && ((access_flags & IO_OPEN_WRITE) == 0 || (creation_flags & IO_OPEN_CREATE) == 0)))
+        (request->flags & ~(IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_EXECUTE | IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE |
+                            IO_OPEN_TRUNCATE)) != 0 ||
+        (creation_flags != 0 && ((access_flags & IO_OPEN_WRITE) == 0 || (creation_flags & IO_OPEN_CREATE) == 0)) ||
+        ((request->flags & IO_OPEN_TRUNCATE) != 0 && (access_flags & IO_OPEN_WRITE) == 0))
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
@@ -216,7 +224,8 @@ static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr req
     {
         return IOReply__new(IO_REGISTER_FAILED, 0);
     }
-    if (creation_flags != 0 && self->operations.source_mode != FILESYSTEM_SOURCE_STREAM)
+    if ((creation_flags != 0 || (request->flags & IO_OPEN_TRUNCATE) != 0) &&
+        self->operations.source_mode != FILESYSTEM_SOURCE_STREAM)
     {
         return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
     }
@@ -300,7 +309,7 @@ static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr req
         }
     }
     if (self->operations.source_mode == FILESYSTEM_SOURCE_STREAM &&
-        (request->flags & (IO_OPEN_READ | IO_OPEN_EXECUTE)) != 0)
+        (request->flags & (IO_OPEN_READ | IO_OPEN_EXECUTE | IO_OPEN_TRUNCATE)) != 0)
     {
         match_result(
             self->operations.source.stream.describe(self->volume, path),
@@ -333,6 +342,19 @@ static IOReply FilesystemDriver__open(FilesystemDriverPtr self, IORequestPtr req
             none_do_nothing()
         );
         return IOReply__new(IO_PERMISSION_DENIED, 0);
+    }
+    if ((request->flags & IO_OPEN_TRUNCATE) != 0)
+    {
+        match_result(
+            self->operations.source.stream.truncate(self->volume, path),
+            success_do_nothing(),
+            error(code, message)
+            {
+                return IOReply__new(code, 0);
+            }
+        );
+        file.size = 0;
+        FilesystemDriver__record_change(self, path, IO_FILE_CHANGE_TRUNCATE);
     }
     match_result(
         FilesystemFiles__push(&self->files, file),

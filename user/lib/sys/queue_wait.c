@@ -12,6 +12,7 @@ static bool registration_attempted;
 
 void QueueWait__reset_after_fork(void)
 {
+    QueueWait__swap_adapter(&None(QueueWaitAdapter));
     prepared = false;
     prepared_doorbell_generation = 0;
     wait_control = None(QueueWaitControlPtr);
@@ -104,6 +105,24 @@ static bool QueueWait__changed(IpcEventGeneration observed)
 
 static bool QueueWait__wait(IpcEventGeneration observed)
 {
+    if (QueueWait__has_adapter())
+    {
+        if (QueueWait__changed(observed))
+        {
+            return true;
+        }
+        match_result(QueueWait__cooperate(),
+            success(code)
+            {
+                return true;
+            },
+            error(code, message)
+            {
+                return false;
+            }
+        );
+        return false;
+    }
     QueueWait__arm_control(observed);
     IODiagnostics__record(IO_DIAGNOSTIC_WAIT_ENTRIES, 1);
     SystemCallResult result = syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, observed, QUEUE_WAIT_INDEFINITE_TICKS, 0, 0);

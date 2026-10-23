@@ -7,6 +7,8 @@ userspace I/O API; the kernel is not involved in normal file operations.
 The allocator source in `nano-mallocr.c` is vendored from newlib
 `4.6.0.20260123` with its upstream copyright notice intact. `malloc.c` is the
 local build wrapper selecting its entry points.
+The wrapper also enables upstream `memalign`; the Rust host allocation adapter
+uses it to honor Rust `Layout` alignment while retaining ordinary `free`.
 
 The complete pinned Newlib release is retained under `vendor/newlib/src` and
 built for each target architecture. The target sysroot takes Newlib's `math.h`

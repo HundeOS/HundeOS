@@ -9,6 +9,12 @@
 
 static uint64_t spawn_count;
 static BString spawned_path;
+static ServiceCode service_registration_result;
+
+ServiceCode service_become_service(void)
+{
+    return service_registration_result;
+}
 
 ServiceCode service_wait_ready(ConstBStringPtr name)
 {
@@ -19,10 +25,19 @@ void setUp(void)
 {
     spawn_count = 0;
     spawned_path = empty_bstr();
+    service_registration_result = SERVICE_OK;
 }
 
 void tearDown(void)
 {
+}
+
+void test_hundeschau_stops_initialization_when_service_registration_fails(void)
+{
+    service_registration_result = SERVICE_SCHEDULER_ERROR;
+    HundeschauRequiredProcesses processes = HundeschauRequiredProcesses__new();
+    TEST_ASSERT_EQUAL(1, Hundeschau__initialise_required_processes(&processes));
+    TEST_ASSERT_EQUAL_UINT64(0, spawn_count);
 }
 
 SpawnResult spawn(SpawnMode mode, ConstBStringPtr path, OptionalPtr(BString) arg0, OptionalPtr(BString) arg1,

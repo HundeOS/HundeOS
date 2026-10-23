@@ -39,9 +39,12 @@ static BString hundeschule_channel_manager_path = bstr("/sbin/services/hundekana
 static BString hundeschule_interrupt_manager_path = bstr("/sbin/services/hund-unterbrict");
 static BString hundeschule_virtio_blk_channelio_path = bstr("/sbin/drivers/virtio_blk_channelio");
 static BString hundeschule_socket_router_path = bstr("/sbin/drivers/socket_router");
+static BString hundeschule_io_host_path = bstr("/sbin/services/hunde-io-host");
 static BString hundeschule_filesystem_path = bstr("/sbin/services/hund-dateisystem");
 static BString hundeschule_io_system_path = bstr("/sbin/services/hund-io-system");
 static BString hundeschule_pipe_path = bstr("/sbin/services/hund-rohr");
+static BString hundeschule_memfs_path = bstr("/sbin/drivers/memfs");
+static BString hundeschule_procfs_path = bstr("/sbin/drivers/procfs");
 static BString hundeschule_space_delimiters = bstr(" \t\r");
 static BString hundeschule_comment_delimiter = bstr("#");
 static BString hundeschule_driver_command = bstr("driver");
@@ -672,7 +675,9 @@ static int Hundeschule__spawn_configured_driver_line(HundeschuleRequiredProcesse
     if (BString__equals(&path, &hundeschule_channel_manager_path) ||
         BString__equals(&path, &hundeschule_interrupt_manager_path) ||
         BString__equals(&path, &hundeschule_trace_path) || BString__equals(&path, &hundeschule_socket_router_path) ||
-        BString__equals(&path, &hundeschule_io_system_path) || BString__equals(&path, &hundeschule_filesystem_path))
+        BString__equals(&path, &hundeschule_io_host_path) || BString__equals(&path, &hundeschule_io_system_path) ||
+        BString__equals(&path, &hundeschule_filesystem_path) || BString__equals(&path, &hundeschule_pipe_path) ||
+        BString__equals(&path, &hundeschule_memfs_path) || BString__equals(&path, &hundeschule_procfs_path))
     {
         return 0;
     }
@@ -780,9 +785,7 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
         return 1;
     }
 
-    if (Hundeschule__spawn_required_process(processes, &hundeschule_socket_router_path, &hundeschule_empty,
-                                            &hundeschule_empty, false) != 0 ||
-        !service_ok(service_wait_ready(&bstr("socket_router"))))
+    if (!service_ok(service_wait_ready(&bstr("socket_router"))))
     {
         return 1;
     }
@@ -818,11 +821,6 @@ static int Hundeschule__initialise_required_processes(HundeschuleRequiredProcess
         }
     );
 
-    if (Hundeschule__spawn_required_process(processes, &hundeschule_pipe_path, &hundeschule_empty, &hundeschule_empty,
-                                            false) != 0)
-    {
-        return 1;
-    }
     ServiceCode pipe_status = service_wait_ready(&bstr(IO_PIPE_SERVICE));
     if (!service_ok(pipe_status))
     {

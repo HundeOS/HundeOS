@@ -6,6 +6,97 @@
 #define IO_CLIENT_SESSION_LIMIT 24U
 #define IO_CLIENT_HANDLE_LIMIT 128U
 
+typedef struct IOClientPathRouter
+{
+    uint64_t service_length;
+    uint8_t service_data[IO_PROTOCOL_DATA_SIZE];
+    IOPathRouterContext context;
+    IOPathRoute route;
+} IOClientPathRouter;
+
+OptionalDef(IOClientPathRouter);
+static Optional(IOClientPathRouter) local_router = None(IOClientPathRouter);
+
+static IOClientPathRouter IOClientPathRouter__new(ConstBStringPtr service, IOPathRouterContext context,
+                                                  IOPathRoute route)
+{
+    IOClientPathRouter self = {.context = context, .route = route};
+    self.service_length = BString__copy_to(service, (char *)self.service_data, sizeof(self.service_data));
+    return self;
+}
+
+Result(IOStatus) IOClient__register_path_router(ConstBStringPtr service, IOPathRouterContext context, IOPathRoute route)
+{
+    match_optional(
+        local_router,
+        some(router)
+        {
+            return Error(IOStatus, bstr("Local path router already registered"), IO_REGISTER_FAILED);
+        },
+        none_do_nothing()
+    );
+    if (BString__is_empty(service) || BString__length(service) >= IO_PROTOCOL_DATA_SIZE ||
+        BString__contains_char(service, '\0'))
+    {
+        return Error(IOStatus, bstr("Invalid or duplicate local path router"), IO_REGISTER_FAILED);
+    }
+    local_router = Some(IOClientPathRouter, IOClientPathRouter__new(service, context, route));
+    return Success(IOStatus, IO_OK);
+}
+
+void IOClient__unregister_path_router(IOPathRouterContext context)
+{
+    match_optional(
+        local_router,
+        some(router)
+        {
+            if (router.context == context)
+            {
+                local_router = None(IOClientPathRouter);
+            }
+        },
+        none_do_nothing()
+    );
+}
+
+static Optional(IOReply) IOClient__route_locally(ConstBStringPtr service, IORequestPtr request)
+{
+    match_optional(
+        local_router,
+        some(router)
+        {
+            BString registered = BString__from_chars((const char *)router.service_data, router.service_length);
+            if (BString__equals(service, &registered))
+            {
+                return Some(IOReply, router.route(router.context, request));
+            }
+            return None(IOReply);
+        },
+        none()
+        {
+            return None(IOReply);
+        }
+    );
+    return None(IOReply);
+}
+
+static bool IOClient__is_local(ConstBStringPtr service)
+{
+    match_optional(
+        local_router,
+        some(router)
+        {
+            BString registered = BString__from_chars((const char *)router.service_data, router.service_length);
+            return BString__equals(service, &registered);
+        },
+        none()
+        {
+            return false;
+        }
+    );
+    return false;
+}
+
 typedef struct IOClientSession
 {
     uint64_t service_length;
@@ -197,6 +288,32 @@ static IOReply IOClient__submit_to(IOClientSessionPtr session, IORequestPtr requ
     return IOReply__new(IO_NO_DEVICE_FOUND, 0);
 }
 
+static IOReply IOClient__submit_path(ConstBStringPtr service, IORequestPtr request)
+{
+    match_optional(
+        IOClient__route_locally(service, request),
+        some(reply)
+        {
+            return reply;
+        },
+        none()
+        {
+            match_optional(
+                IOClient__session(service),
+                some(session)
+                {
+                    return IOClient__submit_to(session, request);
+                },
+                none()
+                {
+                    return IOReply__new(IO_NO_DEVICE_FOUND, 0);
+                }
+            );
+        }
+    );
+    return IOReply__new(IO_PANIC, 0);
+}
+
 static IOClientExchange IOClient__path_exchange(IORequestPtr request)
 {
     IORoute route = IORoute__new(&bstr(IO_SYSTEM_SERVICE), &empty_bstr(), &empty_bstr(), false);
@@ -204,22 +321,8 @@ static IOClientExchange IOClient__path_exchange(IORequestPtr request)
     for (uint64_t redirects = 0; redirects <= IO_ROUTE_LIMIT; redirects++)
     {
         BString service = IORoute__service(&route);
-        Optional(IOClientSessionPtr) found = IOClient__session(&service);
-        IOClientSessionPtr session;
-        match_optional(
-            found,
-            some(value)
-            {
-                session = value;
-            },
-            none()
-            {
-                return IOClientExchange__error(IO_NO_DEVICE_FOUND);
-            }
-        );
-
         request->buffered = final;
-        IOReply reply = IOClient__submit_to(session, request);
+        IOReply reply = IOClient__submit_path(&service, request);
         if (reply.status != IO_REDIRECT)
         {
             return IOClientExchange__new(reply, route);
@@ -285,6 +388,11 @@ static IOReply IOClient__submit_handle(IOHandle handle, IORequestPtr request)
     );
     IOClientSessionPtr session;
     BString service = IOClientHandle__service(resource);
+    request->handle = resource->backend;
+    if (IOClient__is_local(&service))
+    {
+        return IOClient__submit_path(&service, request);
+    }
     match_optional(
         IOClient__find_session(&service),
         some(found)
@@ -296,7 +404,6 @@ static IOReply IOClient__submit_handle(IOHandle handle, IORequestPtr request)
             return IOReply__new(IO_NO_DEVICE_FOUND, 0);
         }
     );
-    request->handle = resource->backend;
     request->buffered = true;
     return IOClient__submit_to(session, request);
 }
@@ -369,6 +476,7 @@ IOStatus IOClient__abort_inheritance(IOClientInheritance * inheritance)
 
 void IOClient__reset_after_fork(void)
 {
+    local_router = None(IOClientPathRouter);
     sessions = EmptyArray(IOClientSessions);
     handles = EmptyArray(IOClientHandles);
     QueueWait__reset_after_fork();
@@ -376,6 +484,10 @@ void IOClient__reset_after_fork(void)
 
 IOStatus IOClient__claim_inheritance(IOClientInheritance * inheritance)
 {
+    if (inheritance->local < IO_SESSION_HANDLE_BASE)
+    {
+        return IO_UNKNOWN_HANDLE;
+    }
     BString service = IOClientInheritance__service(inheritance);
     IOClientSessionPtr session;
     match_optional(
@@ -412,6 +524,10 @@ IOStatus IOClient__claim_inheritance(IOClientInheritance * inheritance)
         success(code)
         {
             session->open_handles++;
+            if (inheritance->local >= next_handle)
+            {
+                next_handle = inheritance->local == INT64_MAX ? INT64_MAX : inheritance->local + 1;
+            }
             return IO_OK;
         },
         error(code, message)
@@ -455,6 +571,25 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
 
     IOClientSessionPtr session;
     BString service = IORoute__service(&exchange.route);
+    if (IOClient__is_local(&service))
+    {
+        IOClientHandle resource = IOClientHandle__new(next_handle++, (IOHandle)exchange.reply.value, &service,
+                                                      !BString__starts_with(path, &bstr("/")));
+        match_result(
+            IOClientHandles__push(&handles, resource),
+            success(code)
+            {
+                return resource.local;
+            },
+            error(code, message)
+            {
+                IORequest close = IORequest__new(IO_REQUEST_CLOSE, resource.backend);
+                IOClient__submit_path(&service, &close);
+                return IO_REGISTER_FAILED;
+            }
+        );
+        return IO_PANIC;
+    }
     match_optional(
         IOClient__find_session(&service),
         some(found)
@@ -507,7 +642,7 @@ static void IOClient__discard_pipe(IOClientSessionPtr session, IOPipe pipe)
 
 Result(IOPipe) IOClient__pipe(void)
 {
-    if (IOClientHandles__len(&handles) > IOClientHandles__max_size - 2 || next_handle > INT64_MAX - 1)
+    if (IOClientHandles__len(&handles) > IOClientHandles__max_size - 2 || next_handle > INT64_MAX - 2)
     {
         return Error(IOPipe, bstr("No client handles available for pipe"), IO_REGISTER_FAILED);
     }
@@ -585,6 +720,10 @@ IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path
 
 IOHandle IOClient__accept(IOHandle handle)
 {
+    if (next_handle == INT64_MAX)
+    {
+        return IO_REGISTER_FAILED;
+    }
     IOClientHandlePtr listener;
     match_optional(
         IOClient__find_handle(handle),
@@ -655,6 +794,10 @@ IOStatus IOClient__close(IOHandle handle)
         }
     );
     BString service = IOClientHandle__service(&resource);
+    if (IOClient__is_local(&service))
+    {
+        return IO_OK;
+    }
     match_optional(
         IOClient__find_session(&service),
         some(session)
@@ -880,6 +1023,19 @@ static ByteCount IOClient__read_chunk(IOClientHandlePtr resource, ChannelDataPtr
 {
     IOClientSessionPtr session;
     BString service = IOClientHandle__service(resource);
+    if (IOClient__is_local(&service))
+    {
+        IORequest request = IORequest__new(IO_REQUEST_READ, resource->backend);
+        request.transfer_address = (Address)data;
+        request.count = size < BUFFER_SIZE ? size : BUFFER_SIZE;
+        request.flags = flags;
+        IOReply reply = IOClient__submit_path(&service, &request);
+        if (reply.status != IO_OK)
+        {
+            return reply.status;
+        }
+        return reply.value >= 0 && (uint64_t)reply.value <= request.count ? reply.value : IO_UNKNOWN_BUFFER;
+    }
     match_optional(
         IOClient__find_session(&service),
         some(found)
@@ -920,6 +1076,19 @@ static ByteCount IOClient__write_chunk(IOClientHandlePtr resource, ConstChannelD
 {
     IOClientSessionPtr session;
     BString service = IOClientHandle__service(resource);
+    if (IOClient__is_local(&service))
+    {
+        IORequest request = IORequest__new(IO_REQUEST_WRITE, resource->backend);
+        request.transfer_address = (Address)data;
+        request.count = size < BUFFER_SIZE ? size : BUFFER_SIZE;
+        request.flags = flags;
+        IOReply reply = IOClient__submit_path(&service, &request);
+        if (reply.status != IO_OK)
+        {
+            return reply.status;
+        }
+        return reply.value >= 0 && (uint64_t)reply.value <= request.count ? reply.value : IO_UNKNOWN_BUFFER;
+    }
     match_optional(
         IOClient__find_session(&service),
         some(found)
@@ -954,12 +1123,12 @@ static ByteCount IOClient__write_chunk(IOClientHandlePtr resource, ConstChannelD
 
 ByteCount IOClient__read_with_flags(IOHandle handle, ChannelDataPtr data, size_t size, Flags flags)
 {
-    IOClientHandlePtr resource;
+    IOClientHandle resource;
     match_optional(
         IOClient__find_handle(handle),
         some(found)
         {
-            resource = found;
+            resource = *found;
         },
         none()
         {
@@ -969,13 +1138,13 @@ ByteCount IOClient__read_with_flags(IOHandle handle, ChannelDataPtr data, size_t
     size_t total = 0;
     do
     {
-        ByteCount count = IOClient__read_chunk(resource, data + total, size - total, flags);
+        ByteCount count = IOClient__read_chunk(&resource, data + total, size - total, flags);
         if (count <= 0)
         {
             return total == 0 ? count : (ByteCount)total;
         }
         total += count;
-        if (resource->single_transfer)
+        if (resource.single_transfer)
         {
             break;
         }
@@ -990,12 +1159,12 @@ ByteCount IOClient__read(IOHandle handle, ChannelDataPtr data, size_t size)
 
 ByteCount IOClient__write_with_flags(IOHandle handle, ConstChannelDataPtr data, size_t size, Flags flags)
 {
-    IOClientHandlePtr resource;
+    IOClientHandle resource;
     match_optional(
         IOClient__find_handle(handle),
         some(found)
         {
-            resource = found;
+            resource = *found;
         },
         none()
         {
@@ -1005,13 +1174,13 @@ ByteCount IOClient__write_with_flags(IOHandle handle, ConstChannelDataPtr data, 
     size_t total = 0;
     do
     {
-        ByteCount count = IOClient__write_chunk(resource, data + total, size - total, flags);
+        ByteCount count = IOClient__write_chunk(&resource, data + total, size - total, flags);
         if (count <= 0)
         {
             return total == 0 ? count : (ByteCount)total;
         }
         total += count;
-        if (resource->single_transfer)
+        if (resource.single_transfer)
         {
             break;
         }

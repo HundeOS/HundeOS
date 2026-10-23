@@ -163,25 +163,46 @@ void test_humpen_starts_mount_handlers_for_device_entries_from_fstab(void)
     next_fstab = "# device <path> <filesystem> <mountpoint>\n"
                  "device /dev/virtio1 ext2 /\n"
                  "\n"
-                 "device /dev/virtio3 fat32 /mnt/fs1 # data\n";
+                 "device /dev/virtio3 ext2 /mnt/fs1 # data\n";
 
     TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
 
     TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
     TEST_ASSERT_EQUAL_STRING(HUMPEN_WACHHUND_PATH, spawned_paths[0]);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio3", spawned_arg0[0]);
-    TEST_ASSERT_EQUAL_STRING("fat32", spawned_arg1[0]);
+    TEST_ASSERT_EQUAL_STRING("ext2", spawned_arg1[0]);
     TEST_ASSERT_EQUAL_STRING("/mnt/fs1", spawned_arg2[0]);
 }
 
 void test_humpen_returns_failure_when_watchdog_spawn_fails(void)
 {
-    next_fstab = "device /dev/virtio3 fat32 /mnt/fs1\n";
+    next_fstab = "device /dev/virtio3 ext2 /mnt/fs1\n";
     next_spawn_result = SPAWN_FAILED;
 
     TEST_ASSERT_EQUAL_INT(1, humpen_main_under_test());
     TEST_ASSERT_EQUAL_UINT64(1, spawn_count);
     TEST_ASSERT_NOT_NULL(strstr(output, "spawn failed"));
+}
+
+void test_humpen_does_not_spawn_a_second_driver_for_hosted_ext2(void)
+{
+    next_fstab = "device /dev/virtio7 ext2.wuff /mnt/hosted-ext2\n";
+    TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
+    TEST_ASSERT_EQUAL_UINT64(0, spawn_count);
+}
+
+void test_humpen_does_not_spawn_a_watchdog_for_hosted_fat32(void)
+{
+    next_fstab = "device /dev/virtio3 fat32.wuff /mnt/fat\n";
+    TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
+    TEST_ASSERT_EQUAL_UINT64(0, spawn_count);
+}
+
+void test_humpen_does_not_spawn_a_watchdog_for_legacy_fat32_spelling(void)
+{
+    next_fstab = "device /dev/virtio3 fat32 /mnt/fat\n";
+    TEST_ASSERT_EQUAL_INT(0, humpen_main_under_test());
+    TEST_ASSERT_EQUAL_UINT64(0, spawn_count);
 }
 
 void test_humpen_handles_comments_blank_lines_and_missing_final_newline(void)

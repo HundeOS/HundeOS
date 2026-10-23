@@ -142,6 +142,12 @@ protected identity, wakes the survivor, revokes the departing endpoint's
 mappings, and retains backing until the survivor detaches. Process exit follows
 the same kernel-owned connection cleanup path.
 
+The survivor's peer-doorbell alias also remains mapped until that endpoint
+detaches: a message operation may already have passed its open-state check when
+the other side closes. Kernel-private references retain doorbell backing beyond
+process exit or image replacement, including kernel-created connections. See
+[queue mapping lifetime](queues.md#initial-queue-api) for the backing rules.
+
 There is no warden cleanup protocol for an established Channel. Duplicating
 kernel lifecycle state in the warden would introduce races between observations
 and authoritative close or exit state. Services remain responsible for releasing
@@ -170,6 +176,14 @@ IPI to the current CPU.
 User wait snapshots are hints used to describe what the process chose to wait
 for. Authoritative Queue identity, cursors, close state, and doorbell generations
 remain kernel-visible and determine whether work is available.
+
+The Rust I/O host's scoped native wait adapter makes C Channel waits suspend
+the calling fibre on its one shared scheduler. The outer loop retains the
+generation-checked kernel wait after runnable work drains. A Channel still
+allows only one outstanding request: shared cached clients must serialize the
+whole connection/transaction, not just publication. Cooperative ownership gates
+wake parked contenders on release, including error cleanup. This changes wait
+policy, not transport authentication, mappings, or the direct request path.
 
 ## Source and tests
 

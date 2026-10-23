@@ -63,7 +63,7 @@ int main(int argc, char ** argv)
         some(text)
         {
             match_result(
-                IO__open(&path, IO_OPEN_WRITE),
+                IO__open(&path, IO_OPEN_WRITE | IO_OPEN_CREATE | IO_OPEN_TRUNCATE),
                 success(handle)
                 {
                     match_result(

@@ -574,13 +574,13 @@ void test_service_handler_registers_interrupt_manager_with_plic_mapping(void)
         Process__device_address(process, registration.distributor),
         success(device_address)
         {
-            TEST_ASSERT_EQUAL_UINT64(plic_physical_base + target_hart_id * 0x100, device_address);
+            TEST_ASSERT_EQUAL_UINT64(plic_physical_base, device_address);
         },
         error_test_fail()
     );
 }
 
-void test_service_handler_rejects_plic_target_outside_mapping(void)
+void test_service_handler_maps_only_plic_priorities_independently_of_target_hart(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
     process->process_class = PROCESS_CLASS_SERVICE;
@@ -590,7 +590,7 @@ void test_service_handler_rejects_plic_target_outside_mapping(void)
         error_test_fail()
     );
     SystemInfo system_info = SystemInfo__new();
-    PlicInterruptControllerInfo plic = PlicInterruptControllerInfo__new(0x70000000, 0, 101, 0x300000);
+    PlicInterruptControllerInfo plic = PlicInterruptControllerInfo__new(0x0c000000, 0, 101, 31);
     system_info.interrupt_controller = InterruptControllerInfo__new_plic(&plic);
     kernel->system_info = Some(SystemInfo, system_info);
     kernel->irq_dispatcher->interrupt_controller = Some(InterruptControllerInfo, system_info.interrupt_controller);
@@ -599,16 +599,28 @@ void test_service_handler_rejects_plic_target_outside_mapping(void)
     match_result(
         Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_INTERRUPT_MANAGER, (Anything)&registration,
                          0, 0, 0),
-        success_test_fail(),
-        error(code, message)
+        success(code)
         {
-            TEST_ASSERT_EQUAL(SERVICE_MAP_FAILED, code);
-        }
+            TEST_ASSERT_EQUAL(SERVICE_OK, code);
+        },
+        error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL_UINT64(0, registration.event_queue);
-    TEST_ASSERT_EQUAL_UINT64(0, registration.distributor);
-    TEST_ASSERT_EQUAL(PROCESS_CLASS_SERVICE, process->process_class);
+    TEST_ASSERT_NOT_EQUAL(0, registration.event_queue);
+    TEST_ASSERT_NOT_EQUAL(0, registration.distributor);
+    TEST_ASSERT_EQUAL(PROCESS_CLASS_REALTIME_SERVICE, process->process_class);
+    match_result(
+        Process__device_address(process, registration.distributor + 0xffc),
+        success(device_address)
+        {
+            TEST_ASSERT_EQUAL_UINT64(0x0c000ffc, device_address);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(
+        is_nothing(Process__readable_mmio_mapping(process, registration.distributor + 0x1000, sizeof(uint32_t))));
+    TEST_ASSERT_TRUE(
+        is_nothing(Process__writable_mmio_mapping(process, registration.distributor + 0x2080, sizeof(uint32_t))));
 }
 
 void test_service_handler_does_not_promote_failed_interrupt_manager_registration(void)

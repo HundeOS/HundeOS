@@ -9,6 +9,8 @@ typedef Kernel * KernelPtr;
 
 void MMU__install_null_low_mem_table(KernelPtr kernel);
 
+void MMU__dereference_user_mappings(KernelPtr kernel, KernelAddress table);
+
 void MMU__install_low_mem_table(KernelAddress table);
 
 #endif

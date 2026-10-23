@@ -1,6 +1,7 @@
 #include "queues.h"
 #include "../arch/page_table.h"
 #include "../kernel_core.h"
+#include "../scheduler/shared_wait.h"
 
 FixedArrayBodyDefine(QueueListeners);
 FixedArrayBodyDefine(QueueConnections);
@@ -33,6 +34,11 @@ static QueueConnection QueueConnection__new(UserAddress memory, OptionalPtr(Proc
                                             QueueSlotIndex listener_index, UserAddress client_doorbell,
                                             UserAddress server_doorbell)
 {
+    if (memory.valid)
+    {
+        DoorbellBacking__retain(client_doorbell);
+        DoorbellBacking__retain(server_doorbell);
+    }
     return (QueueConnection){
         .memory = memory,
         .client_doorbell = client_doorbell,
@@ -219,10 +225,9 @@ static Result(UserAddress) Queues__kernel_doorbell(QueuesPtr self, KernelPtr ker
         none_do_nothing()
     );
     match_result(
-        Kernel__try_alloc_user(IPC_DOORBELL_ADDRESS, IPC_DOORBELL_PAGE_SIZE, true, true, false),
+        DoorbellBacking__new(),
         success(mapping)
         {
-            Kernel__memset(mapping.kernel_addr.virtual_addr, 0, IPC_DOORBELL_PAGE_SIZE);
             self->kernel_doorbell = Some(UserAddress, mapping);
             return Success(UserAddress, mapping);
         },
@@ -290,6 +295,34 @@ static Result(Address) QueueConnection__release(QueueConnectionPtr self)
 {
     if (self->memory.valid && !self->kernel_client && is_nothing(self->client) && is_nothing(self->server))
     {
+        if (self->client_doorbell.valid)
+        {
+            match_result(
+                DoorbellBacking__release(self->client_doorbell),
+                success(code)
+                {
+                    self->client_doorbell = NULL_USER_ADDRESS;
+                },
+                error(code, message)
+                {
+                    return Error(Address, message, QUEUE_NO_MEMORY);
+                }
+            );
+        }
+        if (self->server_doorbell.valid)
+        {
+            match_result(
+                DoorbellBacking__release(self->server_doorbell),
+                success(code)
+                {
+                    self->server_doorbell = NULL_USER_ADDRESS;
+                },
+                error(code, message)
+                {
+                    return Error(Address, message, QUEUE_NO_MEMORY);
+                }
+            );
+        }
         match_result(
             Kernel__free(self->memory.kernel_addr.virtual_addr),
             success(_)
@@ -791,12 +824,10 @@ static Result(QueueCode) Queues__close_connection(QueuesPtr self, QueueConnectio
     QueueConnection__unmap(connection, process, client);
     if (client)
     {
-        match_optional(
-            connection->server,
+        match_optional(connection->server,
             some(peer)
             {
                 Process__ring_doorbell(peer);
-                QueueConnection__unmap_peer_doorbell(connection, peer, false);
             },
             none_do_nothing()
         );
@@ -804,12 +835,10 @@ static Result(QueueCode) Queues__close_connection(QueuesPtr self, QueueConnectio
     }
     if (server)
     {
-        match_optional(
-            connection->client,
+        match_optional(connection->client,
             some(peer)
             {
                 Process__ring_doorbell(peer);
-                QueueConnection__unmap_peer_doorbell(connection, peer, true);
             },
             none_do_nothing()
         );
@@ -1013,12 +1042,10 @@ Result(QueueCode) Queues__close_kernel(QueuesPtr self, QueueConnectionID id)
             {
                 QueueIdentityPtr identity = k_v_ptr(connection->memory, QueueIdentity);
                 __atomic_store_n(&identity->closed, 1, __ATOMIC_RELEASE);
-                match_optional(
-                    connection->server,
+                match_optional(connection->server,
                     some(server)
                     {
                         Process__ring_doorbell(server);
-                        QueueConnection__unmap_peer_doorbell(connection, server, false);
                     },
                     none_do_nothing()
                 );

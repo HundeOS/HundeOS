@@ -17,9 +17,7 @@ static BString unsupported_operation = bstr("Unsupported service operation");
 static BString permission_denied = bstr("Permission denied");
 
 #define SERVICE_GIC_DISTRIBUTOR_SIZE 0x10000ULL
-#define SERVICE_PLIC_ENABLE_SIZE 0x3000ULL
-#define SERVICE_PLIC_SUPERVISOR_ENABLE_OFFSET 0x2080ULL
-#define SERVICE_PLIC_ENABLE_HART_STRIDE 0x100ULL
+#define SERVICE_PLIC_PRIORITY_SIZE 0x1000ULL
 
 typedef struct ServiceMappedMemoryRequest
 {
@@ -452,7 +450,6 @@ Result(SystemCallResult)
                             {
                                 Address physical_address = 0;
                                 size_t mapping_size = 0;
-                                uint64_t target_hart_id = 0;
                                 if (system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V2 ||
                                     system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V3)
                                 {
@@ -465,21 +462,7 @@ Result(SystemCallResult)
                                     PlicInterruptControllerInfoPtr plic =
                                         &system_info.interrupt_controller.details.plic;
                                     physical_address = plic->physical_base;
-                                    mapping_size = SERVICE_PLIC_ENABLE_SIZE;
-                                    target_hart_id = plic->target_hart_id;
-                                    uint64_t maximum_target_hart_id =
-                                        (mapping_size - SERVICE_PLIC_SUPERVISOR_ENABLE_OFFSET - sizeof(uint32_t)) /
-                                        SERVICE_PLIC_ENABLE_HART_STRIDE;
-                                    if (plic->target_hart_id > maximum_target_hart_id)
-                                    {
-                                        __d_printf(FAULT,
-                                                   "interrupt manager rejected PLIC physical=0x%x target_hart=%i "
-                                                   "maximum_target_hart=%i mapping_size=0x%x\n",
-                                                   physical_address, target_hart_id, maximum_target_hart_id,
-                                                   mapping_size);
-                                        IRQDispatcher__dispose_process_resources(kernel->irq_dispatcher, process);
-                                        return Error(SystemCallResult, unsupported_operation, SERVICE_MAP_FAILED);
-                                    }
+                                    mapping_size = SERVICE_PLIC_PRIORITY_SIZE;
                                 }
                                 if (mapping_size == 0)
                                 {
@@ -496,10 +479,6 @@ Result(SystemCallResult)
                                     {
                                         request->event_queue = queue_address;
                                         request->distributor = distributor.virtual_addr;
-                                        if (system_info.interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC)
-                                        {
-                                            request->distributor += target_hart_id * SERVICE_PLIC_ENABLE_HART_STRIDE;
-                                        }
                                         match_result(
                                             Scheduler__promote_realtime(kernel->scheduler, process),
                                             success(_)

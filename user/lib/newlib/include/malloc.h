@@ -22,5 +22,6 @@ void free(void * ptr);
 void * calloc(size_t n, size_t elem);
 void * realloc(void * ptr, size_t size);
 size_t malloc_usable_size(void * ptr);
+void * memalign(size_t alignment, size_t size);
 
 #endif

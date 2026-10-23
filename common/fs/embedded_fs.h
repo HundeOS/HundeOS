@@ -12,6 +12,7 @@
 #define EMBEDDED_FS_VADDR 0xa0000000ULL
 #define EMBEDDED_FS_MAX_SIZE (128ULL * 1024 * 1024)
 #define EMBEDDED_FS_DRIVER "/sbin/drivers/embedfs"
+#define EMBEDDED_FS_HOST "/sbin/services/hunde-io-host"
 
 typedef struct EmbeddedFsHeader
 {

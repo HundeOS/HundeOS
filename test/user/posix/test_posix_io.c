@@ -29,6 +29,7 @@ static unsigned inheritance_claims;
 static unsigned trace_resets;
 static uint64_t inheritance_commit_pid;
 static uint64_t current_pid;
+static unsigned remove_calls;
 
 Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
@@ -90,6 +91,7 @@ Result(IOPipe) IO__pipe(void)
 
 Result(IOStatus) IO__remove_file(ConstBStringPtr path)
 {
+    remove_calls++;
     return Error(IOStatus, bstr("invalid path"), IO_INVALID_PATH);
 }
 
@@ -146,6 +148,7 @@ uint64_t process_current_pid(void)
 
 void setUp(void)
 {
+    remove_calls = 0;
     descriptors = EmptyMap(PosixFileDescriptors);
     open_descriptions = EmptyMap(PosixOpenDescriptions);
     next_description = 1;
@@ -203,6 +206,20 @@ void test_posix_open_maps_exclusive_create_and_existing_file_error(void)
     TEST_ASSERT_EQUAL_BSTRING(bstr("/new"), opened_path);
     TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE | IO_OPEN_CREATE | IO_OPEN_EXCLUSIVE, opened_flags);
     TEST_ASSERT_EQUAL_INT(EEXIST, errno);
+}
+
+void test_posix_truncation_is_an_open_flag_and_never_removes_the_path(void)
+{
+    int descriptor = open("file", O_WRONLY);
+    TEST_ASSERT_EQUAL_UINT64(IO_OPEN_WRITE, opened_flags);
+    TEST_ASSERT_EQUAL_INT(0, close(descriptor));
+    descriptor = open("file", O_RDWR | O_TRUNC);
+    TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_TRUNCATE, opened_flags);
+    TEST_ASSERT_EQUAL_UINT(0, remove_calls);
+    TEST_ASSERT_EQUAL_INT(0, close(descriptor));
+    TEST_ASSERT_EQUAL_INT(-1, open("file", O_RDONLY | O_TRUNC));
+    TEST_ASSERT_EQUAL_INT(EINVAL, errno);
+    TEST_ASSERT_EQUAL_UINT(0, remove_calls);
 }
 
 void test_posix_read_converts_native_eof_to_zero(void)

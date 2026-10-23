@@ -1,10 +1,9 @@
-#include "embedfs.h"
+#include "bootstrap.h"
 #include "sys/service.h"
 
 int main(void)
 {
-    static Embedfs filesystem;
-    static IOService service;
+    static BootstrapArchive archive_service;
     EmbeddedFsHeaderPtr header = (EmbeddedFsHeaderPtr)EMBEDDED_FS_VADDR;
     if (header->blob_size > EMBEDDED_FS_MAX_SIZE)
     {
@@ -15,8 +14,9 @@ int main(void)
     {
         return 1;
     }
-    Embedfs__init(&filesystem, &archive);
-    if (IOService__listen_into(&service, &bstr("/sbin"), &filesystem, Embedfs__serve, Embedfs__disconnect) != IO_OK)
+    Embedfs__init(&archive_service.filesystem, &archive);
+    if (IOService__listen_into(&archive_service.service, &bstr("/sbin"), &archive_service, BootstrapArchive__execute,
+                               BootstrapArchive__disconnect) != IO_OK)
     {
         return 1;
     }
@@ -27,7 +27,7 @@ int main(void)
     Channel__prepare_wait();
     while (true)
     {
-        if (!IOService__poll(&service))
+        if (!IOService__poll(&archive_service.service))
         {
             Channel__wait_event();
         }

@@ -1,0 +1,11 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - common/types/bstring.c
+    - user/lib/hunde/scheduler.c
+    - user/lib/hunde/request.c
+    - user/lib/sys/queue_wait_adapter.c
+    - user/lib/sys/queue_wait.c
+    - user/lib/buffer/client.c
+    - user/lib/fiber/arch/hosted/fiber_context.c

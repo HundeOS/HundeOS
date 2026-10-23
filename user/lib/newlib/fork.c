@@ -40,22 +40,23 @@ pid_t fork(void)
     }
     if (result == 0)
     {
-        if (PosixIO__claim_fork() != IO_OK)
-        {
-            _exit(127);
-        }
         match_result(
             process_identity(),
             success(identity)
             {
                 process_set_startup_pid(identity.pid);
+                if (PosixIO__claim_fork() != IO_OK)
+                {
+                    _exit(127);
+                }
+                return 0;
             },
             error(code, message)
             {
                 _exit(127);
             }
         );
-        return 0;
+        _exit(127);
     }
     if (PosixIO__commit_fork((uint64_t)result) != IO_OK)
     {

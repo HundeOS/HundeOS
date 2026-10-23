@@ -109,6 +109,16 @@ will require rules for privileged or capability-bearing programs.
 
 ## Interpreter integration
 
+On AArch64, libc and programs share the export policy in `user/ports/wuff_program.map`:
+normal symbols remain public, while the linker's synthetic `_stack` marker is
+private. The libc link has a post-link check rejecting that marker in its
+dynamic symbol table. On AArch64 its fixed value can fall into an unmapped
+segment gap as code layout changes; it is not a runtime stack allocation or a
+libc API. Hiding this toolchain artifact keeps valid images loadable without
+relaxing the runtime loader's symbol-range validation.
+RISC-V's linker does not define this marker, so its existing build-selected
+flags omit the version script; the post-link absence check still applies.
+
 The initial interpreter is a statically linked `/sbin/wuff-ld`. The kernel only
 parses enough `PT_INTERP` metadata to select it: a dynamically linked executable
 must contain exactly one bounded NUL-terminated interpreter path equal to
@@ -155,15 +165,22 @@ The reusable userspace loader must:
   final permissions are installed; and
 - roll back mappings, references, and partially initialized objects on failure.
 
-The loader allocates each ELF load region separately. It obtains
-the load base with `MEM_ALLOC_ALIGNED_PAGES`, places later regions with
-`MEM_ALLOC_PAGES_AT`, and finalizes each complete allocation with
-`MEM_PROTECT_PAGES`. Regions begin RW/NX and may become inaccessible, RO, RW, or
-RX; no RWX permission exists. Exact-address mappings fail on any collision, and
-protection may split a dynamic allocation's mapping metadata without splitting
-ownership of its backing allocation. Executable transitions synchronize
-instruction memory through the architecture implementation before publishing
-the executable mapping. Whole-object `MEM_FREE_PAGES` supports rollback.
+The loader computes the complete page-aligned `PT_LOAD` span, including gaps,
+and obtains one backing allocation with `MEM_ALLOC_ALIGNED_PAGES`. The span's
+start is rounded down to the maximum load-segment alignment so the chosen load
+bias satisfies every segment's alignment, including images with a nonzero first
+load page. Segment records are views within that allocation, not separately
+owned mappings. Selecting a base from only the first segment's size is unsafe:
+later fixed-address segments can otherwise collide with unrelated allocations.
+
+The allocation begins RW/NX for copying and relocation. Finalization first
+sets the whole span to `MEM_PAGE_NONE`, then applies each segment's RX, RO, or RW
+permissions and finally RELRO. Gaps and leading alignment padding remain
+inaccessible; no RWX permission exists. `MEM_PROTECT_PAGES` splits mapping metadata
+without splitting ownership. Executable transitions synchronize instruction
+memory through the architecture implementation before publishing the executable
+mapping. Rollback and unload release the backing allocation once, not once per
+segment; `WuffObject__dispose` retains ownership if a failed free must be retried.
 
 Separate per-process mapping ranges track page permissions while one allocation
 record retains ownership of each backing allocation. Partial protection splits
@@ -249,6 +266,17 @@ A Rust panic terminates the containing host through its fatal-error path. Rust
 does not make an in-process component an isolation boundary. Unsafe code remains
 necessary at the ABI, MMIO, DMA, and shared-buffer edges and must be kept in
 small reviewed adapters.
+
+The first allocating Rust service/component pair is `hunde-io-host` and
+`socket.wuff`, built from the Cargo workspace in `user`. Its versioned
+I/O table adds explicit host allocation/free operations and borrowed request
+buffers to the common tagged-result contract. Full LTO at the component link
+step regenerates bundled `core`/`alloc` as PIC instead of retaining non-PIC
+bare-metal archive metadata. See the
+[socket slice](io-driver-hosts.md#first-rust-socket-slice) for Channel, queue,
+fibre, lifecycle, and test boundaries. The shared `hunde` compatibility crate
+owns these C translations for the host, socket, and lifecycle smoke; the latter
+disables its `alloc` feature and retains the original non-allocating host ABI.
 
 The compatibility smoke test is separate from the C sysroot smoke. For both
 architectures it must cover C-to-Rust calls, Rust-to-host callbacks, ABI layout,

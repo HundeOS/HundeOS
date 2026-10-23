@@ -76,3 +76,11 @@ void MMU__install_low_mem_table(KernelAddress table)
 {
     MMU__install_root(table.phys_addr);
 }
+
+void MMU__dereference_user_mappings(KernelPtr kernel, KernelAddress table)
+{
+    if (table.valid && MMU__active_root_physical_address() == table.phys_addr)
+    {
+        MMU__install_null_low_mem_table(kernel);
+    }
+}

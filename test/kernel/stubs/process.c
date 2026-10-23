@@ -4,6 +4,7 @@
 #include "process_context_layout.h"
 #include "process.h"
 #include "../../../kernel/kernel_core.h"
+#include "../../../kernel/arch/mmu.h"
 static TestStartupStdio initial_stdio;
 static bool switched_with_scheduler_lock;
 
@@ -52,11 +53,13 @@ void Process__switch_context(ProcessPtr self, ProcessContextPtr context, KernelA
 {
     switched_with_scheduler_lock = scheduler_lock_held(self);
     current_process = self;
+    MMU__install_low_mem_table(page_table);
 }
 
 void Process__switch_address_space(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
 {
     active_process = self;
+    MMU__install_low_mem_table(page_table);
 }
 
 void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error)

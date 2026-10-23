@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["lib/hunde", "drivers/socket", "drivers/memfs", "drivers/procfs", "drivers/sysinfofs", "drivers/ext2fs", "drivers/fat32fs", "services/hund-rohr", "services/hunde-io-host", "components/rust_smoke"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+lto = true
+codegen-units = 1

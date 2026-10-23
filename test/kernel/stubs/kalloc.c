@@ -109,6 +109,18 @@ size_t KAllocStub__free_count(void)
     return free_count;
 }
 
+bool KAllocStub__is_allocated(Address address)
+{
+    for (size_t index = tracked_allocation_count; index > 0; index--)
+    {
+        if (tracked_allocations[index - 1].address == address)
+        {
+            return tracked_allocations[index - 1].active;
+        }
+    }
+    return false;
+}
+
 size_t KAllocStub__freed_allocation_count_for_size(size_t size)
 {
     size_t count = 0;

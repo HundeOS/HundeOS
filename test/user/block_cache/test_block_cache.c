@@ -85,6 +85,22 @@ void setUp(void)
     IODiagnostics__attach(&diagnostics);
 }
 
+void test_block_cache_initializes_in_place_without_retaining_old_storage(void)
+{
+    static BlockCache cache;
+    memset(&cache, 255, sizeof(cache));
+    BlockCache__init(&cache);
+    TEST_ASSERT_EQUAL_UINT64(BLOCK_CACHE_CAPACITY, BlockCache__capacity(&cache));
+    BlockClient client = {0};
+    uint8_t data[BLOCK_CHANNEL_SECTOR_SIZE];
+    TEST_ASSERT_EQUAL(1, unwrap_result(BlockCache__read(&cache, &client, 2, 1, (Address)data, sizeof(data)), 0));
+    TEST_ASSERT_EACH_EQUAL_UINT8(3, data, sizeof(data));
+    TEST_ASSERT_EQUAL_UINT64(1, read_calls);
+    TEST_ASSERT_EQUAL(1, unwrap_result(BlockCache__read(&cache, &client, 2, 1, (Address)data, sizeof(data)), 0));
+    TEST_ASSERT_EQUAL_UINT64(1, read_calls);
+    BlockCache__reclaim(&cache);
+}
+
 void test_block_cache_grows_with_reclaimable_page_backed_chunk(void)
 {
     BlockCache cache = BlockCache__new();

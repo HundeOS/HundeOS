@@ -126,6 +126,27 @@ normal Channel wait. Other work can use the CPU while the manager is parked.
 5. The service validates the consumer and delivery identity, retires the
    outstanding acknowledgement, and unmasks the IRQ through GIC MMIO.
 
+On RISC-V PLIC targets, context-enable bitmap words are kernel-owned routing
+configuration, updated when an IRQ is registered. Runtime masking writes zero
+to that IRQ's priority register; rearming writes priority one. Kernel and
+userspace use the same per-source register layout in
+`common/arch/riscv64/plic.h`, with I/O fences after writes. Mask-before-publish
+and device-acknowledge-before-rearm ordering still apply. Only the registered
+IRQ owner rearms its source, and the other source priorities remain unchanged.
+Interrupt-manager registration maps only the 4 KiB priority page and returns
+its unshifted base, regardless of the physical target hart. The old enable-word
+interface biased the returned address by hart ID; retaining that bias would
+write another IRQ's priority on nonzero bootstrap harts. Context-enable words
+are outside the manager's supplied PLIC mapping.
+
+Neither side may read-modify-write a shared context-enable word for runtime
+mask/rearm. Concurrent updates for different IRQs can restore stale bits and
+silently disable a source, leaving a completed disk request awaiting an
+interrupt forever. Per-source priority writes avoid that race without adding
+interrupt acknowledgement syscalls. Hosted register tests check neighboring
+IRQs and enable-word preservation; live acceptance repeatedly creates, lists,
+and removes directories while terminal IRQ traffic is active.
+
 On RISC-V systems where the interconnect rejects a U-mode access to otherwise
 permitted MMIO, the architecture exception handler transparently repeats the
 faulting integer load or store through the physical device's supervisor mapping.

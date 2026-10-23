@@ -17,6 +17,13 @@ Existing bidirectional Channels carry opens, buffer descriptors, transfer comman
 and completions. Bulk bytes move through separate buffers. Do not introduce
 service-specific channel types or parallel request/reply rings in those buffers.
 
+Calls from the I/O host to its own hosted components are process-local dispatch,
+not an IPC transfer. The local compatibility path borrows the caller's bounded
+read/write buffer until completion and parks the caller's fibre while pending.
+It neither creates a self-Channel nor leases memory to share with itself. This
+does not change the directional shared-buffer requirement for external clients.
+See [process-local host I/O](io-system.md#process-local-host-io).
+
 ## Responsibilities and Identity
 
 - `hunde-puffer` manages leases, authorized participants, common virtual

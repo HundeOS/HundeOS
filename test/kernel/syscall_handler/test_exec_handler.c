@@ -126,7 +126,6 @@ void test_boot_handoff_requires_mama_and_registered_services_and_cannot_be_rever
     QueueEndpointID endpoint = unwrap_optional(ServiceDirectory__find_endpoint(directory, &bstr(IO_SYSTEM_SERVICE)), 0);
     BootEndpointNames names = BootEndpointNames__new();
     BootEndpointNames__push(&names, bstr(IO_FILESYSTEM_SERVICE));
-    BootEndpointNames__push(&names, bstr("/sbin"));
     BootEndpointNames__push(&names, bstr("/boot"));
     BootEndpointNames__push(&names, bstr("/boot/config"));
     for_each_fa(
@@ -157,6 +156,7 @@ void test_boot_handoff_requires_mama_and_registered_services_and_cannot_be_rever
         error_test_fail()
     );
     TEST_ASSERT_TRUE(kernel->boot_complete);
+    TEST_ASSERT_TRUE(is_nothing(ServiceDirectory__find_endpoint(directory, &bstr("/sbin"))));
     match_result(BootComplete__handler(kernel, &caller, 0, 0, 0, 0, 0),
         success_test_fail(),
         error_test_ok()

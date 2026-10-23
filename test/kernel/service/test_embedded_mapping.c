@@ -40,7 +40,7 @@ void test_archive_mapping_does_not_overlap_shared_buffers(void)
     TEST_ASSERT_TRUE(buffer_end <= EMBEDDED_FS_VADDR);
 }
 
-void test_archive_is_only_mapped_into_embedfs_read_only_and_non_executable(void)
+void test_archive_is_only_mapped_into_bootstrap_consumers_read_only_and_non_executable(void)
 {
     process->name = bstr("/sbin/ls");
     match_result(EmbeddedArchive__map_process(process),
@@ -50,6 +50,17 @@ void test_archive_is_only_mapped_into_embedfs_read_only_and_non_executable(void)
     TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
                                            false, false, sizeof(archive)));
     process->name = bstr(EMBEDDED_FS_DRIVER);
+    match_result(EmbeddedArchive__map_process(process),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
+                                          false, false, sizeof(archive)));
+}
+
+void test_io_host_receives_the_same_read_only_non_executable_archive(void)
+{
+    process->name = bstr(EMBEDDED_FS_HOST);
     match_result(EmbeddedArchive__map_process(process),
         success_do_nothing(),
         error_test_fail()

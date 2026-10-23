@@ -1728,14 +1728,17 @@ static Result(Ext2fsCode) Ext2fsVolume__free_block(Ext2fsVolumePtr self, uint32_
     return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
-static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, ConstExt2fsInodePtr inode)
+typedef Result(Ext2fsCode) (*Ext2fsBlockVisitor)(Ext2fsVolumePtr self, uint32_t block_number);
+
+static Result(Ext2fsCode)
+    Ext2fsVolume__visit_inode_blocks(Ext2fsVolumePtr self, ConstExt2fsInodePtr inode, Ext2fsBlockVisitor visit)
 {
     for (uint32_t index = 0; index < EXT2FS_NDIR_BLOCKS; index++)
     {
         if (inode->block[index] != 0)
         {
             match_result(
-                Ext2fsVolume__free_block(self, inode->block[index]),
+                visit(self, inode->block[index]),
                 success_do_nothing(),
                 error(code, message)
                 {
@@ -1760,7 +1763,7 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, 
                     if (data_block != 0)
                     {
                         match_result(
-                            Ext2fsVolume__free_block(self, data_block),
+                            visit(self, data_block),
                             success_do_nothing(),
                             error(code, message)
                             {
@@ -1770,7 +1773,7 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, 
                     }
                 }
                 match_result(
-                    Ext2fsVolume__free_block(self, inode->block[EXT2FS_NDIR_BLOCKS]),
+                    visit(self, inode->block[EXT2FS_NDIR_BLOCKS]),
                     success_do_nothing(),
                     error(code, message)
                     {
@@ -1808,7 +1811,7 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, 
                                 if (data_block != 0)
                                 {
                                     match_result(
-                                        Ext2fsVolume__free_block(self, data_block),
+                                        visit(self, data_block),
                                         success_do_nothing(),
                                         error(code, message)
                                         {
@@ -1818,7 +1821,7 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, 
                                 }
                             }
                             match_result(
-                                Ext2fsVolume__free_block(self, pointer_block),
+                                visit(self, pointer_block),
                                 success_do_nothing(),
                                 error(code, message)
                                 {
@@ -1836,7 +1839,7 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, 
                     return Error(Ext2fsCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
                 }
                 match_result(
-                    Ext2fsVolume__free_block(self, inode->block[EXT2FS_NDIR_BLOCKS + 1U]),
+                    visit(self, inode->block[EXT2FS_NDIR_BLOCKS + 1U]),
                     success_do_nothing(),
                     error(code, message)
                     {
@@ -1851,6 +1854,22 @@ static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, 
         );
     }
 
+    return Success(Ext2fsCode, EXT2FS_OK);
+}
+
+static Result(Ext2fsCode) Ext2fsVolume__free_inode_blocks(Ext2fsVolumePtr self, ConstExt2fsInodePtr inode)
+{
+    return Ext2fsVolume__visit_inode_blocks(self, inode, Ext2fsVolume__free_block);
+}
+
+static Result(Ext2fsCode) Ext2fsVolume__validate_truncation_block(Ext2fsVolumePtr self, uint32_t block_number)
+{
+    if (block_number < self->first_data_block || block_number >= self->blocks_count ||
+        block_number - self->first_data_block >= self->blocks_per_group ||
+        block_number - self->first_data_block >= EXT2FS_BLOCK_SIZE * 8U)
+    {
+        return Error(Ext2fsCode, bstr("Truncation outside the supported allocation group"), EXT2FS_UNSUPPORTED);
+    }
     return Success(Ext2fsCode, EXT2FS_OK);
 }
 
@@ -2621,10 +2640,101 @@ static IOStatus Ext2fs__link(IOServiceContext context, ConstBStringPtr source_pa
     );
 }
 
+static Result(IOStatus) Ext2fs__truncate_inode(Ext2fsVolumePtr self, uint32_t number)
+{
+    match_result(
+        Ext2fsVolume__read_inode(self, number),
+        success(inode)
+        {
+            if (!Ext2fsInode__is_file(&inode))
+            {
+                return Error(IOStatus, bstr("Not a regular file"), IO_INVALID_PATH);
+            }
+            if (inode.block[14] != 0)
+            {
+                return Error(IOStatus, bstr("Triple indirect truncation not supported"), IO_OPERATION_NOT_SUPPORTED);
+            }
+            Ext2fsInode empty = inode;
+            match_result(
+                Ext2fsVolume__visit_inode_blocks(self, &inode, Ext2fsVolume__validate_truncation_block),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(IOStatus, message, IO_OPERATION_NOT_SUPPORTED);
+                }
+            );
+            empty.size = 0;
+            empty.sectors = 0;
+            Mem__memset(empty.block, 0, sizeof(empty.block));
+            match_result(
+                Ext2fsVolume__write_inode(self, number, &empty),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(IOStatus, message, IO_PANIC);
+                }
+            );
+            match_result(
+                Ext2fsVolume__free_inode_blocks(self, &inode),
+                success(code)
+                {
+                    return Success(IOStatus, IO_OK);
+                },
+                error(code, message)
+                {
+                    return Error(IOStatus, message, IO_PANIC);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(IOStatus, message, IO_INVALID_PATH);
+        }
+    );
+    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
+static Result(IOStatus) Ext2fs__truncate(IOServiceContext context, ConstBStringPtr path)
+{
+    Ext2fsVolumePtr self = context;
+    match_result(
+        Ext2fsVolume__resolve_parent(self, path),
+        success(parent)
+        {
+            match_result(
+                Ext2fsVolume__read_inode(self, parent.parent_inode_number),
+                success(inode)
+                {
+                    match_result(
+                        Ext2fs__find_child_inode(self, &inode, &parent.leaf_name),
+                        success(number)
+                        {
+                            return Ext2fs__truncate_inode(self, number);
+                        },
+                        error(code, message)
+                        {
+                            return Error(IOStatus, message, IO_INVALID_PATH);
+                        }
+                    );
+                },
+                error(code, message)
+                {
+                    return Error(IOStatus, message, IO_INVALID_PATH);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(IOStatus, message, IO_INVALID_PATH);
+        }
+    );
+    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
 static FilesystemOperations Ext2fs__operations(void)
 {
-    return FilesystemOperations__new_stream(Ext2fs__describe, Ext2fs__read, Ext2fs__write, Ext2fs__list, Ext2fs__mkdir,
-                                            Ext2fs__remove, Ext2fs__link);
+    return FilesystemOperations__new_stream(Ext2fs__describe, Ext2fs__read, Ext2fs__write, Ext2fs__truncate,
+                                            Ext2fs__list, Ext2fs__mkdir, Ext2fs__remove, Ext2fs__link);
 }
 
 static void Ext2fs__memory_pressure(IOServiceContext context, MemPressureLevel pressure)

@@ -2,6 +2,13 @@
 #define HUND_IO_CLIENT_H
 #include "protocol.h"
 
+typedef void * IOPathRouterContext;
+typedef IOReply (*IOPathRoute)(IOPathRouterContext context, IORequestPtr request);
+
+Result(IOStatus)
+    IOClient__register_path_router(ConstBStringPtr service, IOPathRouterContext context, IOPathRoute route);
+void IOClient__unregister_path_router(IOPathRouterContext context);
+
 typedef struct IOClientInheritance
 {
     IOHandle local;

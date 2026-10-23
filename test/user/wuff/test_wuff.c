@@ -39,7 +39,7 @@ static bool TestAllocation__equals(TestAllocation * self, TestAllocation * other
 }
 
 OptionalDef(TestAllocation);
-FixedArrayDefine(TestAllocation, 8, TestAllocations, (EqualFunction)TestAllocation__equals);
+FixedArrayDefine(TestAllocation, 64, TestAllocations, (EqualFunction)TestAllocation__equals);
 FixedArrayBodyDefine(TestAllocations);
 
 typedef struct TestDependency
@@ -66,6 +66,7 @@ typedef struct TestProvider
 typedef struct TestMemory
 {
     TestAllocations allocations;
+    TestAllocations protections;
     size_t allocation_calls;
     size_t aligned_allocation_calls;
     size_t protection_calls;
@@ -196,8 +197,20 @@ static void TestProvider__add(TestProvider * self, ConstBStringPtr name, const u
     );
 }
 
+static bool TestAllocation__overlaps(TestAllocation * self, void * context)
+{
+    TestAllocation * candidate = context;
+    return self->virtual_address < candidate->virtual_address + candidate->size &&
+           candidate->virtual_address < self->virtual_address + self->size;
+}
+
 static Result(WuffMemoryRegion) TestMemory__allocate(TestMemory * self, Address address, size_t size)
 {
+    TestAllocation candidate = {.virtual_address = address, .size = size};
+    if (is_something(TestAllocations__find(&self->allocations, TestAllocation__overlaps, &candidate)))
+    {
+        return Error(WuffMemoryRegion, bstr("Address already allocated"), MEM_INVALID_ADDRESS);
+    }
     uint8_t * writable_address = calloc(1, size);
     if (writable_address == 0)
     {
@@ -231,12 +244,22 @@ static Result(WuffMemoryRegion) TestMemory__allocate_aligned(void * context, siz
     Address object_base = TEST_BASE_ADDRESS + self->aligned_allocation_calls * TEST_OBJECT_STRIDE;
     self->aligned_allocation_calls++;
     Address address = (object_base + alignment - 1) & ~(alignment - 1);
-    return TestMemory__allocate(self, address, size);
-}
-
-static Result(WuffMemoryRegion) TestMemory__allocate_at(void * context, Address address, size_t size)
-{
-    return TestMemory__allocate(context, address, size);
+    TestAllocation candidate = {.virtual_address = address, .size = size};
+    for (;;)
+    {
+        match_find_result_ptr(
+            TestAllocations__find(&self->allocations, TestAllocation__overlaps, &candidate),
+            some(conflict)
+            {
+                candidate.virtual_address =
+                    (conflict->virtual_address + conflict->size + alignment - 1) & ~(alignment - 1);
+            },
+            none()
+            {
+                return TestMemory__allocate(self, candidate.virtual_address, size);
+            }
+        );
+    }
 }
 
 static MemStatus TestMemory__protect(void * context, Address address, size_t size, MemPagePermissions permissions)
@@ -256,15 +279,25 @@ static MemStatus TestMemory__protect(void * context, Address address, size_t siz
             TestAllocations__ptr_at(&self->allocations, index),
             some(allocation)
             {
-                if (allocation->virtual_address == address && allocation->size == size)
-                {
-                    allocation->permissions = permissions;
-                    return MEM_OK;
-                }
                 if (address >= allocation->virtual_address && size <= allocation->size &&
                     address - allocation->virtual_address <= allocation->size - size)
                 {
-                    return MEM_OK;
+                    TestAllocation protection = ((TestAllocation){
+                        .virtual_address = address,
+                        .size = size,
+                        .permissions = permissions,
+                    });
+                    match_result(
+                        TestAllocations__push(&self->protections, protection),
+                        success(value)
+                        {
+                            return MEM_OK;
+                        },
+                        error(code, message)
+                        {
+                            return MEM_ALLOCATION_FAILED;
+                        }
+                    );
                 }
             },
             none_do_nothing()
@@ -308,7 +341,6 @@ static WuffMemoryOperations TestMemory__operations(TestMemory * self)
     return (WuffMemoryOperations){
         .context = self,
         .allocate_aligned = TestMemory__allocate_aligned,
-        .allocate_at = TestMemory__allocate_at,
         .protect = TestMemory__protect,
         .free = TestMemory__free,
     };
@@ -322,8 +354,24 @@ static TestAllocation TestMemory__allocation(TestMemory * self, Address address)
             TestAllocations__at(&self->allocations, index),
             some(allocation)
             {
-                if (allocation.virtual_address == address)
+                if (address >= allocation.virtual_address && address - allocation.virtual_address < allocation.size)
                 {
+                    allocation.writable_address += address - allocation.virtual_address;
+                    allocation.size -= address - allocation.virtual_address;
+                    allocation.virtual_address = address;
+                    for_each_fa(
+                        TestAllocations,
+                        self->protections,
+                        protection_index,
+                        protection,
+                        {
+                            if (address >= protection.virtual_address &&
+                                address - protection.virtual_address < protection.size)
+                            {
+                                allocation.permissions = protection.permissions;
+                            }
+                        }
+                    );
                     return allocation;
                 }
             },
@@ -516,8 +564,8 @@ void test_wuff_loader_maps_relocates_protects_and_finds_export(void)
         WuffLoader__load(image, sizeof(image), &operations),
         success(object)
         {
-            TEST_ASSERT_EQUAL(2, TestAllocations__len(&memory.allocations));
-            TEST_ASSERT_EQUAL(2, memory.protection_calls);
+            TEST_ASSERT_EQUAL(1, TestAllocations__len(&memory.allocations));
+            TEST_ASSERT_EQUAL(3, memory.protection_calls);
             TestAllocation code = TestMemory__allocation(&memory, TEST_BASE_ADDRESS);
             TestAllocation data = TestMemory__allocation(&memory, TEST_BASE_ADDRESS + 0x2000);
             TEST_ASSERT_EQUAL(MEM_PAGE_READ_EXECUTE, code.permissions);
@@ -543,7 +591,125 @@ void test_wuff_loader_maps_relocates_protects_and_finds_export(void)
         error_test_fail()
     );
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
+}
+
+void test_wuff_loader_reserves_the_whole_span_before_selecting_a_fragmented_hole(void)
+{
+    uint8_t image[TEST_IMAGE_SIZE];
+    TestImage__build(image);
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    Address obstacle = TEST_BASE_ADDRESS + 0x2000;
+    match_result(TestMemory__allocate(&memory, obstacle, 0x2000),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TestAllocation original = TestMemory__allocation(&memory, obstacle);
+    memset(original.writable_address, 0xa5, original.size);
+    WuffMemoryOperations operations = TestMemory__operations(&memory);
+    match_result(
+        WuffLoader__load(image, sizeof(image), &operations),
+        success(object)
+        {
+            TEST_ASSERT_EQUAL_HEX64(TEST_BASE_ADDRESS + 0x4000, object.load_bias);
+            TEST_ASSERT_EQUAL(1, memory.aligned_allocation_calls);
+            TEST_ASSERT_EQUAL(2, memory.allocation_calls);
+            TestAllocation image_allocation = TestMemory__allocation(&memory, object.load_bias);
+            TEST_ASSERT_EQUAL_HEX64(0x4000, image_allocation.size);
+            TestAllocation gap = TestMemory__allocation(&memory, object.load_bias + 0x1000);
+            TEST_ASSERT_EQUAL(MEM_PAGE_NONE, gap.permissions);
+            TEST_ASSERT_EACH_EQUAL_HEX8(0xa5, original.writable_address, original.size);
+            match_result(WuffObject__dispose(&object),
+                success_do_nothing(),
+                error_test_fail()
+            );
+            match_result(WuffObject__dispose(&object),
+                success_do_nothing(),
+                error_test_fail()
+            );
+            TEST_ASSERT_EQUAL(1, memory.free_calls);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(1, TestAllocations__len(&memory.allocations));
+    TEST_ASSERT_EQUAL(MEM_OK, TestMemory__free(&memory, obstacle));
+}
+
+void test_wuff_loader_uses_maximum_segment_alignment_and_handles_nonzero_first_page(void)
+{
+    uint8_t image[TEST_IMAGE_SIZE];
+    TestImage__build(image);
+    WuffElfHeader header;
+    memcpy(&header, image, sizeof(header));
+    header.program_header_count = 2;
+    TestImage__write(image, 0, &header, sizeof(header));
+    WuffProgramHeader segment;
+    memcpy(&segment, image + sizeof(header), sizeof(segment));
+    segment.virtual_address = 0x1000;
+    segment.offset = 0x1000;
+    TestImage__write(image, sizeof(header), &segment, sizeof(segment));
+    memcpy(&segment, image + sizeof(header) + sizeof(segment), sizeof(segment));
+    segment.virtual_address = 0x10000;
+    segment.offset = 0;
+    segment.alignment = 0x10000;
+    TestImage__write(image, sizeof(header) + sizeof(segment), &segment, sizeof(segment));
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    match_result(TestMemory__allocate(&memory, TEST_BASE_ADDRESS, 0x1000),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    WuffMemoryOperations operations = TestMemory__operations(&memory);
+    match_result(
+        WuffLoader__load(image, sizeof(image), &operations),
+        success(object)
+        {
+            TEST_ASSERT_EQUAL_HEX64(TEST_BASE_ADDRESS + 0x10000, object.load_bias);
+            TestAllocation leading_gap = TestMemory__allocation(&memory, object.load_bias);
+            TEST_ASSERT_EQUAL_HEX64(0x12000, leading_gap.size);
+            TEST_ASSERT_EQUAL(MEM_PAGE_NONE, leading_gap.permissions);
+            TestAllocation code = TestMemory__allocation(&memory, object.load_bias + 0x1000);
+            TEST_ASSERT_EQUAL(MEM_PAGE_READ_EXECUTE, code.permissions);
+            TestAllocation data = TestMemory__allocation(&memory, object.load_bias + 0x10000);
+            TEST_ASSERT_EQUAL(MEM_PAGE_READ_WRITE, data.permissions);
+            match_result(WuffObject__dispose(&object),
+                success_do_nothing(),
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(MEM_OK, TestMemory__free(&memory, TEST_BASE_ADDRESS));
+}
+
+void test_wuff_loader_dispose_can_retry_after_failed_release(void)
+{
+    uint8_t image[TEST_IMAGE_SIZE];
+    TestImage__build(image);
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    WuffMemoryOperations operations = TestMemory__operations(&memory);
+    match_result(
+        WuffLoader__load(image, sizeof(image), &operations),
+        success(object)
+        {
+            memory.fail_free = true;
+            match_result(
+                WuffObject__dispose(&object),
+                success_test_fail(),
+                error(code, message)
+                {
+                    TEST_ASSERT_EQUAL(WUFF_LOAD_CLEANUP_FAILED, code);
+                }
+            );
+            TEST_ASSERT_EQUAL(1, TestAllocations__len(&memory.allocations));
+            memory.fail_free = false;
+            match_result(WuffObject__dispose(&object),
+                success_do_nothing(),
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
 }
 
 void test_wuff_loader_rejects_bad_magic_before_mapping(void)
@@ -585,7 +751,7 @@ void test_wuff_loader_rolls_back_unsupported_relocation(void)
         }
     );
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
 }
 
 void test_wuff_loader_rolls_back_protection_failure(void)
@@ -607,7 +773,7 @@ void test_wuff_loader_rolls_back_protection_failure(void)
         }
     );
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
 }
 
 void test_wuff_loader_reports_cleanup_failure(void)
@@ -632,11 +798,10 @@ void test_wuff_loader_reports_cleanup_failure(void)
             TEST_ASSERT_EQUAL(WUFF_LOAD_CLEANUP_FAILED, code);
         }
     );
-    TEST_ASSERT_EQUAL(2, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, TestAllocations__len(&memory.allocations));
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
     memory.fail_free = false;
     TEST_ASSERT_EQUAL(MEM_OK, TestMemory__free(&memory, TEST_BASE_ADDRESS));
-    TEST_ASSERT_EQUAL(MEM_OK, TestMemory__free(&memory, TEST_BASE_ADDRESS + 0x2000));
 }
 
 void test_wuff_loader_rejects_dependencies_until_dependency_loading_exists(void)
@@ -657,7 +822,7 @@ void test_wuff_loader_rejects_dependencies_until_dependency_loading_exists(void)
         }
     );
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
 }
 
 void test_wuff_loader_applies_defined_symbol_relocation(void)
@@ -768,7 +933,7 @@ void test_wuff_loader_protects_relro_after_segment_permissions(void)
         WuffLoader__load(image, sizeof(image), &operations),
         success(object)
         {
-            TEST_ASSERT_EQUAL(3, memory.protection_calls);
+            TEST_ASSERT_EQUAL(4, memory.protection_calls);
             TEST_ASSERT_EQUAL_HEX64(TEST_BASE_ADDRESS + 0x2000, memory.last_protection_address);
             TEST_ASSERT_EQUAL(WUFF_PAGE_SIZE, memory.last_protection_size);
             TEST_ASSERT_EQUAL(MEM_PAGE_READ_ONLY, memory.last_protection_permissions);
@@ -798,7 +963,7 @@ void test_wuff_loader_rejects_unterminated_symbol_name(void)
         }
     );
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
 }
 
 void test_wuff_graph_loads_transitive_dependencies_resolves_imports_and_deduplicates_cycle(void)
@@ -846,7 +1011,7 @@ void test_wuff_graph_loads_transitive_dependencies_resolves_imports_and_deduplic
         error_test_fail()
     );
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(6, memory.free_calls);
+    TEST_ASSERT_EQUAL(3, memory.free_calls);
 }
 
 void test_wuff_module_graph_finds_required_root_export(void)
@@ -1039,7 +1204,7 @@ void test_wuff_graph_rolls_back_all_objects_when_strong_import_is_missing(void)
         }
     );
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
 }
 
 void test_wuff_graph_rolls_back_root_when_dependency_provider_fails(void)
@@ -1067,7 +1232,7 @@ void test_wuff_graph_rolls_back_root_when_dependency_provider_fails(void)
     TEST_ASSERT_EQUAL(1, provider.calls);
     TEST_ASSERT_EQUAL(0, provider.release_calls);
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
 }
 
 void test_wuff_graph_releases_dependency_image_when_preparation_fails(void)
@@ -1205,7 +1370,7 @@ void test_wuff_graph_rejects_interpreter_in_dependency_and_releases_image(void)
     );
     TEST_ASSERT_EQUAL(1, provider.release_calls);
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
 }
 
 void test_wuff_loader_rejects_entry_outside_executable_mapping(void)
@@ -1225,7 +1390,7 @@ void test_wuff_loader_rejects_entry_outside_executable_mapping(void)
         }
     );
     TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
-    TEST_ASSERT_EQUAL(2, memory.free_calls);
+    TEST_ASSERT_EQUAL(1, memory.free_calls);
 }
 
 void test_wuff_filesystem_loads_from_usr_lib_and_releases_image(void)

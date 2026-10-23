@@ -8,7 +8,7 @@
 
 #include "page_table.h"
 
-static PageTable null_table;
+static PageTable null_table __attribute__((aligned(PAGE_SIZE)));
 
 mutex_t init_mutex = MUTEX_INIT;
 
@@ -48,6 +48,18 @@ void MMU__install_null_low_mem_table(KernelPtr kernel)
     KernelAddress address = PageTable__from_virtual_address(kernel, addr(table));
 
     __asm__ volatile("msr vbar_el1, %0\nisb" : : "r"((uint64_t)&vector_table) : "memory");
+    dsb_ish();
     MMU__park_ttbr0(address.phys_addr, GUARD_ASID, false);
     __asm__ volatile("tlbi vmalle1"); // invalidate all EL1 stage-1 TLBs
+    dsb_ish();
+    isb();
+}
+
+void MMU__dereference_user_mappings(KernelPtr kernel, KernelAddress table)
+{
+    Address active_root = read_ttbr0_el1() & 0x0000fffffffff000ULL;
+    if (table.valid && active_root == table.phys_addr)
+    {
+        MMU__install_null_low_mem_table(kernel);
+    }
 }

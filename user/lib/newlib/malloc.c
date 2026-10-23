@@ -3,6 +3,7 @@
 #define DEFINE_CALLOC
 #define DEFINE_REALLOC
 #define DEFINE_MALLOC_USABLE_SIZE
+#define DEFINE_MEMALIGN
 
 #include <stddef.h>
 

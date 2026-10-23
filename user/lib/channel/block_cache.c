@@ -148,6 +148,11 @@ BlockCache BlockCache__new(void)
     return (BlockCache){.sectors = BlockCacheSectors__new(), .chunks = None(BlockCacheChunkPtr)};
 }
 
+void BlockCache__init(BlockCachePtr self)
+{
+    Mem__memset(self, 0, sizeof(*self));
+}
+
 void BlockCache__reclaim(BlockCachePtr self)
 {
     Optional(BlockCacheChunkPtr) cursor = self->chunks;

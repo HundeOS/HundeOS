@@ -48,6 +48,7 @@ typedef enum IORequestOperation
     IO_REQUEST_INHERIT_COMMIT,
     IO_REQUEST_INHERIT_CLAIM,
     IO_REQUEST_INHERIT_ABORT,
+    IO_REQUEST_BOOTSTRAP_RETIRE,
 } IORequestOperation;
 
 static inline IOFileChange IOFileChange__new(IOHandle handle, uint64_t generation, Flags events)

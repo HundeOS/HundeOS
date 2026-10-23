@@ -1,0 +1,8 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - user/lib/hunde/block.c
+    - user/lib/channel/block_cache.c
+    - common/memory.c
+    - common/types/bstring.c

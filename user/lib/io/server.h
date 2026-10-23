@@ -40,10 +40,13 @@ typedef struct IOService
     IOServiceContext context;
     IOServiceExecute execute;
     IOServiceDisconnect disconnect;
+    bool serves_handles;
 } IOService;
 
 typedef IOService * IOServicePtr;
 IOStatus IOService__listen_into(IOServicePtr self, ConstBStringPtr name, IOServiceContext context,
                                 IOServiceExecute execute, IOServiceDisconnect disconnect);
 bool IOService__poll(IOServicePtr self);
+void IOService__serve_handles(IOServicePtr self);
+bool IOService__is_idle_except(IOServicePtr self, QueueConnectionID session);
 #endif

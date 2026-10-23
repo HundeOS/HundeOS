@@ -1,0 +1,19 @@
+[package]
+name = "hunde-io-host"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[features]
+service = []
+
+[dependencies]
+hunde = { path = "../../lib/hunde" }
+
+[dev-dependencies]
+hunde-pipe = { path = "../hund-rohr" }
+
+[lints]
+workspace = true

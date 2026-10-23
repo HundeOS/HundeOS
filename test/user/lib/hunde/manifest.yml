@@ -1,0 +1,6 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - user/lib/hunde/request.c
+    - user/lib/sys/queue_wait_adapter.c

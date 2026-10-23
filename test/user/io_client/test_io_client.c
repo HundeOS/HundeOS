@@ -70,6 +70,7 @@ static Optional(IOReply)
     {
     case IO_REQUEST_OPEN:
     case IO_REQUEST_ACCEPT:
+    case IO_REQUEST_INHERIT_CLAIM:
         reply.value = next_backend_handle++;
         break;
     case IO_REQUEST_PIPE_CREATE:
@@ -176,6 +177,7 @@ void setUp(void)
     sessions = IOClientSessions__new();
     handles = IOClientHandles__new();
     next_handle = IO_SESSION_HANDLE_BASE;
+    local_router = None(IOClientPathRouter);
     route_calls = 0;
     backend_calls = 0;
     disconnects = 0;
@@ -192,6 +194,214 @@ void tearDown(void)
     close_client_channels();
 }
 
+static IOReply local_path_route(IOPathRouterContext context, IORequestPtr request)
+{
+    unsigned * calls = context;
+    (*calls)++;
+    BString path = IORequest__path(request);
+    BString target = IORequest__target_path(request);
+    if (route_without_service)
+    {
+        return IOReply__new(IO_PERMISSION_DENIED, 0);
+    }
+    return IOReply__redirect(route_forever ? &bstr(IO_SYSTEM_SERVICE) : &bstr(TEST_BACKEND_SERVICE), &path, &target,
+                             true);
+}
+
+typedef struct LocalFile
+{
+    uint64_t remaining;
+    unsigned opens;
+    unsigned reads;
+    unsigned writes;
+    unsigned closes;
+    bool invalid_count;
+    bool fail_close;
+} LocalFile;
+
+typedef LocalFile * LocalFilePtr;
+
+static LocalFile LocalFile__new(uint64_t size)
+{
+    return (LocalFile){.remaining = size};
+}
+
+static IOReply LocalFile__execute(IOPathRouterContext context, IORequestPtr request)
+{
+    LocalFilePtr self = context;
+    TEST_ASSERT_FALSE(request->buffered);
+    switch (request->operation)
+    {
+    case IO_REQUEST_OPEN:
+        self->opens++;
+        return IOReply__new(IO_OK, IO_FILESYSTEM_HANDLE_BASE + self->opens);
+    case IO_REQUEST_READ:
+    {
+        self->reads++;
+        uint64_t count = request->count < self->remaining ? request->count : self->remaining;
+        self->remaining -= count;
+        memset((void *)request->transfer_address, 0xa5, count);
+        return IOReply__new(IO_OK, self->invalid_count ? request->count + 1 : count);
+    }
+    case IO_REQUEST_WRITE:
+        self->writes++;
+        if (request->count > 0)
+        {
+            TEST_ASSERT_EQUAL_UINT8(0xa5, IORequest__write_source(request)[0]);
+        }
+        return IOReply__new(IO_OK, self->invalid_count ? request->count + 1 : request->count);
+    case IO_REQUEST_CLOSE:
+        self->closes++;
+        return IOReply__new(self->fail_close ? IO_PERMISSION_DENIED : IO_OK, 0);
+    default:
+        return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+    }
+}
+
+void test_local_handles_read_write_and_close_without_channels_or_buffer_leases(void)
+{
+    LocalFile file = LocalFile__new(BUFFER_SIZE + 17);
+    static uint8_t bytes[BUFFER_SIZE + 17];
+    match_result(IOClient__register_path_router(&bstr(IO_SYSTEM_SERVICE), &file, LocalFile__execute),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    IOHandle handle = IOClient__open(&bstr("/sbin/component"), IO_OPEN_READ | IO_OPEN_WRITE);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT64(IO_SESSION_HANDLE_BASE, handle);
+    TEST_ASSERT_EQUAL_UINT64(sizeof(bytes), IOClient__read(handle, bytes, sizeof(bytes)));
+    TEST_ASSERT_EQUAL_UINT8(0xa5, bytes[sizeof(bytes) - 1]);
+    TEST_ASSERT_EQUAL_UINT(2, file.reads);
+    TEST_ASSERT_EQUAL_INT64(0, IOClient__read(handle, bytes, 1));
+    TEST_ASSERT_EQUAL_UINT64(sizeof(bytes), IOClient__write(handle, bytes, sizeof(bytes)));
+    TEST_ASSERT_EQUAL_UINT(2, file.writes);
+    file.fail_close = true;
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, IOClient__close(handle));
+    TEST_ASSERT_EQUAL_UINT64(1, IOClientHandles__len(&handles));
+    file.fail_close = false;
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__close(handle));
+    TEST_ASSERT_EQUAL_UINT64(0, IOClientHandles__len(&handles));
+    TEST_ASSERT_EQUAL_UINT64(0, IOClientSessions__len(&sessions));
+    TEST_ASSERT_EQUAL_UINT(0, backend_calls);
+    TEST_ASSERT_EQUAL_UINT(0, route_calls);
+    IOClient__unregister_path_router(&file);
+}
+
+void test_local_transfers_reject_oversized_completions_and_close_untracked_opens(void)
+{
+    LocalFile file = LocalFile__new(10);
+    file.invalid_count = true;
+    match_result(IOClient__register_path_router(&bstr(IO_SYSTEM_SERVICE), &file, LocalFile__execute),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    IOHandle handle = IOClient__open(&bstr("/sbin/component"), IO_OPEN_READ | IO_OPEN_WRITE);
+    uint8_t byte = 0xa5;
+    TEST_ASSERT_EQUAL_INT64(IO_UNKNOWN_BUFFER, IOClient__read(handle, &byte, 1));
+    TEST_ASSERT_EQUAL_INT64(IO_UNKNOWN_BUFFER, IOClient__write(handle, &byte, 1));
+    while (IOClientHandles__len(&handles) < IO_CLIENT_HANDLE_LIMIT)
+    {
+        TEST_ASSERT_GREATER_OR_EQUAL_INT64(IO_SESSION_HANDLE_BASE,
+                                           IOClient__open(&bstr("/sbin/component"), IO_OPEN_READ));
+    }
+    TEST_ASSERT_EQUAL_INT64(IO_REGISTER_FAILED, IOClient__open(&bstr("/sbin/component"), IO_OPEN_READ));
+    TEST_ASSERT_EQUAL_UINT(1, file.closes);
+    IOClient__unregister_path_router(&file);
+    IOClientHandles__init(&handles);
+}
+
+void test_local_path_router_redirects_to_external_backend_without_a_router_channel(void)
+{
+    unsigned calls = 0;
+    match_result(IOClient__register_path_router(&bstr(IO_SYSTEM_SERVICE), &calls, local_path_route),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    IOHandle handle = IOClient__open(&bstr("/file"), IO_OPEN_READ);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT64(IO_SESSION_HANDLE_BASE, handle);
+    TEST_ASSERT_EQUAL_UINT(1, calls);
+    TEST_ASSERT_EQUAL_UINT(0, route_calls);
+    TEST_ASSERT_EQUAL_UINT(1, backend_calls);
+    TEST_ASSERT_EQUAL_UINT64(1, IOClientSessions__len(&sessions));
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__close(handle));
+    IOClient__unregister_path_router(&calls);
+}
+
+void test_local_path_router_preserves_registration_until_its_owner_unregisters(void)
+{
+    unsigned calls = 0;
+    unsigned other = 0;
+    char name[] = IO_SYSTEM_SERVICE;
+    BString service_name = BString__from_chars(name, sizeof(name) - 1);
+    match_result(IOClient__register_path_router(&service_name, &calls, local_path_route),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    name[0] = 'x';
+    match_result(
+        IOClient__register_path_router(&bstr("other"), &other, local_path_route),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(IO_REGISTER_FAILED, code);
+        }
+    );
+    IOClient__unregister_path_router(&other);
+    route_without_service = true;
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, IOClient__path_request(IO_REQUEST_FILE_INFO, &bstr("/file"), 0, 0).status);
+    TEST_ASSERT_EQUAL_UINT(1, calls);
+    TEST_ASSERT_EQUAL_UINT64(0, IOClientSessions__len(&sessions));
+    IOClient__unregister_path_router(&calls);
+    route_without_service = false;
+    IOHandle handle = IOClient__open(&bstr("/file"), IO_OPEN_READ);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT64(IO_SESSION_HANDLE_BASE, handle);
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__close(handle));
+    TEST_ASSERT_EQUAL_UINT(1, calls);
+    TEST_ASSERT_EQUAL_UINT(1, route_calls);
+}
+
+void test_local_path_router_obeys_redirect_limit_and_is_cleared_after_fork(void)
+{
+    unsigned calls = 0;
+    match_result(IOClient__register_path_router(&bstr(IO_SYSTEM_SERVICE), &calls, local_path_route),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    route_forever = true;
+    TEST_ASSERT_EQUAL(IO_OPERATION_NOT_SUPPORTED,
+                      IOClient__path_request(IO_REQUEST_FILE_INFO, &bstr("/file"), 0, 0).status);
+    TEST_ASSERT_EQUAL_UINT(IO_ROUTE_LIMIT + 1, calls);
+    TEST_ASSERT_EQUAL_UINT64(0, IOClientSessions__len(&sessions));
+    IOClient__reset_after_fork();
+    route_forever = false;
+    IOHandle handle = IOClient__open(&bstr("/file"), IO_OPEN_READ);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT64(IO_SESSION_HANDLE_BASE, handle);
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__close(handle));
+    TEST_ASSERT_EQUAL_UINT(IO_ROUTE_LIMIT + 1, calls);
+    TEST_ASSERT_EQUAL_UINT(1, route_calls);
+}
+
+void test_local_path_router_rejects_invalid_names(void)
+{
+    unsigned calls = 0;
+    match_result(
+        IOClient__register_path_router(&empty_bstr(), &calls, local_path_route),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(IO_REGISTER_FAILED, code);
+        }
+    );
+    BString embedded_nul = BString__from_chars("bad\0name", 8);
+    match_result(
+        IOClient__register_path_router(&embedded_nul, &calls, local_path_route),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(IO_REGISTER_FAILED, code);
+        }
+    );
+}
+
 void test_open_redirects_to_final_service_and_uses_its_buffers(void)
 {
     IOHandle handle = IOClient__open(&bstr("/mnt/ext/file"), IO_OPEN_READ | IO_OPEN_WRITE);
@@ -204,6 +414,21 @@ void test_open_redirects_to_final_service_and_uses_its_buffers(void)
     TEST_ASSERT_EQUAL_BSTRING(bstr("/mnt/ext/file"), IORequest__path(&last_request));
     TEST_ASSERT_NOT_EQUAL(0, backend_session()->buffers.read.id);
     TEST_ASSERT_NOT_EQUAL(0, backend_session()->buffers.write.id);
+}
+
+void test_resource_endpoint_prepares_buffers_on_the_initial_open_without_a_redirect(void)
+{
+    IOService__serve_handles(&service);
+    IOHandle handle = IOClient__open(&bstr("/file"), IO_OPEN_READ | IO_OPEN_WRITE);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT64(IO_SESSION_HANDLE_BASE, handle);
+    TEST_ASSERT_EQUAL_UINT(0, route_calls);
+    TEST_ASSERT_EQUAL_UINT(1, backend_calls);
+    TEST_ASSERT_EQUAL_UINT64(1, IOClientSessions__len(&sessions));
+    TEST_ASSERT_TRUE(last_request.buffered);
+    uint8_t data[2];
+    TEST_ASSERT_EQUAL_INT64(2, IOClient__read(handle, data, sizeof(data)));
+    TEST_ASSERT_EQUAL_MEMORY("ok", data, sizeof(data));
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__close(handle));
 }
 
 void test_file_client_combines_buffer_chunks_and_stops_at_eof(void)
@@ -240,6 +465,21 @@ void test_client_translates_local_handles_for_direct_backend_operations(void)
     TEST_ASSERT_EQUAL_UINT(1, route_calls);
 }
 
+void test_new_socket_handles_do_not_collide_with_restored_stdio(void)
+{
+    IOHandle inherited = IO_SESSION_HANDLE_BASE + 2;
+    IOClientInheritance inheritance =
+        IOClientInheritance__new(inherited, 1, IO_OPEN_READ | IO_OPEN_WRITE, true, &bstr(TEST_BACKEND_SERVICE));
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__claim_inheritance(&inheritance));
+
+    IOHandle listener = IOClient__open(&bstr("socket://one"), IO_OPEN_LISTEN);
+    IOHandle accepted = IOClient__accept(listener);
+    IOHandle connected = IOClient__open(&bstr("socket://one"), IO_OPEN_READ | IO_OPEN_WRITE);
+    TEST_ASSERT_NOT_EQUAL(inherited, listener);
+    TEST_ASSERT_NOT_EQUAL(inherited, accepted);
+    TEST_ASSERT_NOT_EQUAL(inherited, connected);
+}
+
 void test_pipe_registers_two_local_handles_with_shared_buffers(void)
 {
     IOPipe pipe = unwrap_result(IOClient__pipe(), ((IOPipe){0}));
@@ -260,6 +500,47 @@ void test_pipe_registers_two_local_handles_with_shared_buffers(void)
     TEST_ASSERT_EQUAL(IO_OK, IOClient__close(pipe.write));
     TEST_ASSERT_EQUAL_UINT64(0, backend_session()->buffers.read.id);
     TEST_ASSERT_EQUAL_UINT64(0, backend_session()->buffers.write.id);
+}
+
+void test_restored_lower_handle_does_not_move_allocator_backwards(void)
+{
+    next_handle = IO_SESSION_HANDLE_BASE + 100;
+    IOClientInheritance inheritance =
+        IOClientInheritance__new(IO_SESSION_HANDLE_BASE + 2, 1, IO_OPEN_READ, true, &bstr(TEST_BACKEND_SERVICE));
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__claim_inheritance(&inheritance));
+    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 100, IOClient__open(&bstr("socket://one"), IO_OPEN_READ));
+}
+
+void test_restored_maximum_handle_exhausts_allocator_without_overflow(void)
+{
+    IOClientInheritance inheritance =
+        IOClientInheritance__new(INT64_MAX, 1, IO_OPEN_READ, true, &bstr(TEST_BACKEND_SERVICE));
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__claim_inheritance(&inheritance));
+    TEST_ASSERT_EQUAL_INT64(INT64_MAX, next_handle);
+    TEST_ASSERT_LESS_THAN_INT64(0, IOClient__open(&bstr("socket://one"), IO_OPEN_READ));
+    TEST_ASSERT_EQUAL(IO_REGISTER_FAILED, IOClient__accept(INT64_MAX));
+    match_result(
+        IOClient__pipe(),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(IO_REGISTER_FAILED, code);
+        }
+    );
+}
+
+void test_pipe_requires_two_allocatable_handles_without_overflow(void)
+{
+    next_handle = INT64_MAX - 1;
+    match_result(
+        IOClient__pipe(),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(IO_REGISTER_FAILED, code);
+        }
+    );
+    TEST_ASSERT_EQUAL_INT64(INT64_MAX - 1, next_handle);
 }
 
 void test_client_carries_transfer_flags_on_read_and_write_requests(void)
@@ -324,6 +605,41 @@ void test_service_disconnects_client_with_pending_operation_without_executing_it
     ChannelFixture__drain();
     TEST_ASSERT_EQUAL_UINT(1, backend_calls);
     TEST_ASSERT_EQUAL_UINT(1, disconnects);
+}
+
+void test_service_drain_waits_for_execution_and_reply_consumption(void)
+{
+    IOClient__open(&bstr("socket://one"), IO_OPEN_LISTEN);
+    IOClientSessionPtr session = backend_session();
+    TEST_ASSERT_TRUE(IOService__is_idle_except(&service, 0));
+    block_request = true;
+    IORequest request = IORequest__new(IO_REQUEST_READ, IO_FILESYSTEM_HANDLE_BASE);
+    match_result(Channel__request(&session->channel, (ConstChannelDataPtr)&request, sizeof(request)),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    ChannelFixture__drain();
+    TEST_ASSERT_FALSE(IOService__is_idle_except(&service, 0));
+    TEST_ASSERT_TRUE(IOService__is_idle_except(&service, session->channel.token));
+    block_request = false;
+    ChannelFixture__drain();
+    TEST_ASSERT_FALSE(IOService__is_idle_except(&service, 0));
+    IOReply reply;
+    match_result(
+        Channel__poll_reply(&session->channel, (ChannelDataPtr)&reply, sizeof(reply)),
+        success(size)
+        {
+            match_optional(size,
+                some(bytes)
+                {
+                    TEST_ASSERT_EQUAL(sizeof(reply), bytes);
+                },
+                none_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(IOService__is_idle_except(&service, 0));
 }
 
 void test_link_redirects_both_paths_to_final_service(void)

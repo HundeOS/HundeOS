@@ -1,7 +1,0 @@
-manifest:
-  include_default_stubs: false
-  include_default_fixtures: false
-  source_files:
-    - user/drivers/procfs/procfs.c
-    - user/lib/io/filesystem_driver.c
-    - user/lib/io/inheritance.c

@@ -166,3 +166,10 @@ ChannelCode ChannelServer__close(ChannelServerPtr self)
     self->closed = true;
     return CHANNEL_OK;
 }
+
+bool ChannelServer__is_idle(ChannelServerPtr self)
+{
+    QueueProgress progress = Queue__progress(&self->control);
+    return !self->handling_request && progress.incoming_produced == progress.incoming_consumed &&
+           progress.outgoing_produced == progress.outgoing_consumed;
+}

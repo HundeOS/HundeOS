@@ -973,20 +973,14 @@ int open(const char * path, int flags, ...)
     {
         return -1;
     }
-    if ((flags & O_TRUNC) != 0 && (io_flags & IO_OPEN_WRITE) != 0)
+    if ((flags & O_TRUNC) != 0)
     {
-        match_result(
-            IO__remove_file(&absolute_path),
-            success_do_nothing(),
-            error(code, message)
-            {
-                if (code != IO_INVALID_PATH)
-                {
-                    errno = PosixIO__errno((IOStatus)code);
-                    return -1;
-                }
-            }
-        );
+        if ((io_flags & IO_OPEN_WRITE) == 0)
+        {
+            errno = EINVAL;
+            return -1;
+        }
+        io_flags |= IO_OPEN_TRUNCATE;
     }
     IOHandle handle;
     match_result(

@@ -1,9 +1,11 @@
 #include "client.h"
+#include "sys/queue_wait.h"
 
 static Channel manager;
 static bool connected;
+static QueueWaitGate manager_gate = QUEUE_WAIT_GATE_INITIALIZER;
 
-static BufferReply BufferClient__submit(BufferRequest request)
+static BufferReply BufferClient__transact(BufferRequest request)
 {
     BufferReply failed = BufferReply__new(BUFFER_UNAVAILABLE);
     if (!connected)
@@ -42,6 +44,24 @@ static BufferReply BufferClient__submit(BufferRequest request)
     Channel__close(&manager);
     connected = false;
     return failed;
+}
+
+static BufferReply BufferClient__submit(BufferRequest request)
+{
+    match_result(
+        QueueWaitGate__acquire(&manager_gate),
+        success(value)
+        {
+            BufferReply reply = BufferClient__transact(request);
+            QueueWaitGate__release(&manager_gate);
+            return reply;
+        },
+        error(code, message)
+        {
+            return BufferReply__new(BUFFER_UNAVAILABLE);
+        }
+    );
+    return BufferReply__new(BUFFER_UNAVAILABLE);
 }
 
 Result(BufferDescriptor)

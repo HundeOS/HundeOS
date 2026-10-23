@@ -1,6 +1,30 @@
 #include "mount_client.h"
 #include "memory.h"
 #include "protocol.h"
+#include "sys/service.h"
+
+Result(IOStatus) MountClient__start_hosted(MountConfig config)
+{
+    ServiceCode ready = service_wait_ready(&bstr(IO_HOST_MOUNT_SERVICE));
+    if (!service_ok(ready))
+    {
+        return Error(IOStatus, bstr("I/O host mount control is not ready"), ready);
+    }
+    match_result(
+        Channel__open(ServiceDirectory__shared(), &bstr(IO_HOST_MOUNT_SERVICE)),
+        success(channel)
+        {
+            Result(IOStatus) result = MountClient__add(&channel, config);
+            Channel__close(&channel);
+            return result;
+        },
+        error(code, message)
+        {
+            return Error(IOStatus, message, code);
+        }
+    );
+    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
 
 Result(IOStatus) MountClient__add(ChannelPtr self, MountConfig config)
 {

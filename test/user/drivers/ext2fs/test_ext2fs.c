@@ -722,6 +722,91 @@ void test_ext2fs_creates_hard_link_and_preserves_inode_until_last_name_is_remove
     TEST_ASSERT_EQUAL_MEMORY("hello world\n", reply.data, sizeof("hello world\n") - 1);
 }
 
+void test_ext2fs_explicit_truncate_preserves_links_and_other_open_handles(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/HELLO.TXT"));
+    request.flags = IO_OPEN_WRITE;
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    match_result(
+        Ext2fsVolume__inode_for_path(&volume, &bstr("/HELLO.TXT")),
+        success(inode)
+        {
+            TEST_ASSERT_EQUAL_UINT32(12, inode.size);
+        },
+        error_test_fail()
+    );
+    request = request_for(IO_REQUEST_LINK, 0, &bstr("/HELLO.TXT"));
+    IORequest__set_target_path(&request, &bstr("/ALIAS"));
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/HELLO.TXT"));
+    request.flags = IO_OPEN_READ;
+    IOReply reader = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, reader.status);
+    request = request_for(IO_REQUEST_OPEN, 0, &bstr("/ALIAS"));
+    request.flags = IO_OPEN_READ | IO_OPEN_TRUNCATE;
+    TEST_ASSERT_EQUAL(IO_OPERATION_NOT_SUPPORTED, FilesystemDriver__execute(&driver, &request).status);
+    request.flags = IO_OPEN_READ | IO_OPEN_WRITE | IO_OPEN_TRUNCATE;
+    TEST_ASSERT_EQUAL(IO_OK, FilesystemDriver__execute(&driver, &request).status);
+    match_result(
+        Ext2fsVolume__inode_for_path(&volume, &bstr("/HELLO.TXT")),
+        success(inode)
+        {
+            TEST_ASSERT_EQUAL_UINT32(0, inode.size);
+            TEST_ASSERT_EQUAL_UINT16(2, inode.links_count);
+            TEST_ASSERT_EQUAL_UINT32(0, inode.sectors);
+        },
+        error_test_fail()
+    );
+    request = request_for(IO_REQUEST_READ, reader.value, &empty_bstr());
+    request.count = 12;
+    TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).value);
+    TEST_ASSERT_TRUE(FilesystemDriver__release(&driver, 100, 42));
+}
+
+void test_ext2fs_failed_truncation_write_preserves_the_existing_inode(void)
+{
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/HELLO.TXT"));
+    request.flags = IO_OPEN_WRITE | IO_OPEN_TRUNCATE;
+    fail_block_writes = true;
+    TEST_ASSERT_EQUAL(IO_PANIC, FilesystemDriver__execute(&driver, &request).status);
+    fail_block_writes = false;
+    match_result(
+        Ext2fsVolume__inode_for_path(&volume, &bstr("/HELLO.TXT")),
+        success(inode)
+        {
+            TEST_ASSERT_EQUAL_UINT32(12, inode.size);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(0, FilesystemFiles__len(&driver.files));
+}
+
+void test_ext2fs_truncation_validates_indirect_blocks_before_changing_the_inode(void)
+{
+    write_inode(3, EXT2FS_MODE_FILE | 0644, 13U * EXT2FS_BLOCK_SIZE, 12);
+    write_u32(disk[5], 2U * 128U + 40U + 12U * sizeof(uint32_t), 13);
+    write_u32(disk[13], 0, TEST_EXT2FS_BLOCK_COUNT);
+    Ext2fsVolume volume = {.device_path = expected_device_path};
+    FilesystemDriver driver = mounted_driver(&volume);
+    IORequest request = request_for(IO_REQUEST_OPEN, 0, &bstr("/HELLO.TXT"));
+    request.flags = IO_OPEN_WRITE | IO_OPEN_TRUNCATE;
+    TEST_ASSERT_EQUAL(IO_OPERATION_NOT_SUPPORTED, FilesystemDriver__execute(&driver, &request).status);
+    match_result(
+        Ext2fsVolume__inode_for_path(&volume, &bstr("/HELLO.TXT")),
+        success(inode)
+        {
+            TEST_ASSERT_EQUAL_UINT32(13U * EXT2FS_BLOCK_SIZE, inode.size);
+            TEST_ASSERT_EQUAL_UINT32(12, inode.block[0]);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(0, FilesystemFiles__len(&driver.files));
+}
+
 void test_ext2fs_writes_inside_directories_created_after_a_hard_link(void)
 {
     Ext2fsVolume volume = {.device_path = expected_device_path};

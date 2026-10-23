@@ -44,6 +44,7 @@ static const char * fake_config;
 static bool fake_config_opened;
 static bool fake_config_closed;
 static bool fake_expect_keyboard_input;
+static bool service_registered;
 
 #define HUNDESCHAU_ENTRYPOINT hundeschau_main_under_test
 #define IO__printf test_printf
@@ -53,6 +54,7 @@ static bool fake_expect_keyboard_input;
 void setUp(void)
 {
     spawn_call_count = 0;
+    service_registered = false;
     failing_path = NULL;
     printed_output_len = 0;
     for (uint64_t i = 0; i < 10; i++)
@@ -349,8 +351,16 @@ void * driver_ptr_offset(ServiceMappedMemoryPtr memory, uint64_t offset)
     return (void *)(memory->driver_address + offset);
 }
 
+ServiceCode service_become_service(void)
+{
+    TEST_ASSERT_FALSE(service_registered);
+    service_registered = true;
+    return SERVICE_OK;
+}
+
 ServiceCode service_wait_ready(ConstBStringPtr name)
 {
+    TEST_ASSERT_TRUE(service_registered);
     TEST_ASSERT_TRUE(BString__equals(name, &bstr("video_term")) || BString__equals(name, &bstr("keyboard")));
     return SERVICE_OK;
 }

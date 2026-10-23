@@ -86,6 +86,7 @@ Result(IOStatus) FilesystemNamespace__add(FilesystemNamespacePtr self, MountConf
          BString__char_at_or(&config.mountpoint, BString__length(&config.mountpoint) - 1, 0) == '/') ||
         (!BString__equals(&config.filesystem_type, &bstr("fat32")) &&
          !BString__equals(&config.filesystem_type, &bstr("ext2")) &&
+         !BString__equals(&config.filesystem_type, &bstr("ext2.wuff")) &&
          !BString__equals(&config.filesystem_type, &bstr("memfs")) &&
          !BString__equals(&config.filesystem_type, &bstr("devfs")) &&
          !BString__equals(&config.filesystem_type, &bstr("procfs")) &&

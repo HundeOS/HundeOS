@@ -51,6 +51,69 @@ Run `make compile-commands` whenever source files are added or removed so IDEs
 and other tooling receive the current build targets and compiler flags.
 
 ## Unit tests
+### Rust
+Organize code by responsibility, not language. Rust services belong under
+`user/services`, drivers under `user/drivers`, shared libraries under `user/lib`,
+and component fixtures under `user/components`. `user/Cargo.toml` is the shared
+workspace; do not create a separate language-specific source tree.
+
+Use the standard Rust test organization: unit tests live alongside implementation
+in `#[cfg(test)] mod tests` modules, normally in the same source file. Large test
+modules may use a separate module file. Crate-level integration tests belong in
+the crate's `tests/` directory and exercise its public API; executable examples
+belong in documentation tests. Run host-native tests with `make rust-test`, or
+`cargo test --manifest-path user/Cargo.toml --workspace`.
+Keep production crates `no_std` where required; their host-native tests may use
+`std`. Test modules must not change production behavior through test-only branches.
+Use small fakes for host operations. Test actual Wuff loading, ABI callbacks,
+Channels, and fibre integration separately under QEMU on both architectures.
+
+Use the shared `user/lib/hunde` crate for C ABI definitions, raw C imports,
+request/result translation, component callback adapters, and runtime bootstrap.
+Service and driver crates contain domain logic and thin registration declarations,
+not copied FFI structs, unsafe request decoders, allocator/panic setup, or callback
+trampolines. Extend the shared crate only for operations required by current
+callers, and test translations alongside their shared implementation.
+
+Use `hunde::protocol` for C I/O operation, status, and flag constants. These are
+generated from the authoritative C enums during Cargo builds; do not duplicate
+their numeric values in Rust. Keep Rust's payload-carrying operation types as
+safe domain interfaces, not wire enums. Tests for malformed or unknown wire
+values may use deliberately invalid numbers.
+
+Service, driver, and component crates must inherit the workspace's
+`unsafe_code = "forbid"` lint, covering all targets and tests. Only the shared
+`hunde` compatibility crate may implement unsafe Rust. Do not weaken the lint or
+move unsafe blocks into consumers, including for module loading. ABI/bootstrap
+macros are defined in `hunde`; consumers only invoke their safe declarations.
+Safe component loading accepts approved bundled component identities, not
+caller-supplied paths. The library owns that trust registry and private raw
+loading implementation; the host still chooses which component to load. Do not
+make arbitrary native loading safe merely by hiding its unsafe block.
+
+Rust service startup, component ownership, registration, dispatch, and execution
+policy belong in Rust. Use Rust `main` entry points with the existing C CRT;
+do not implement service control flow in a C launcher. Shared adapters under
+`user/lib/hunde` may translate existing C library layouts and protocols, but must
+not select components, hard-code service endpoints, or own host policy.
+
+Use named constructors such as `Request::new(...)` for public/domain structs
+instead of repeating initialization details in callers. Keep struct literals in
+the owning type's implementation; named alternatives such as `try_new`, `of`,
+or `from_result` are appropriate when they explain construction better. Use
+`Result` for fallible construction, and implement `Default` when a meaningful
+zero-argument default exists. Explicit C ABI records and malformed-wire test
+fixtures may use literals within the shared compatibility layer and its tests.
+
+Use rustfmt and Clippy from the pinned toolchain. Run `make rust-format` to format
+Rust, `make rust-format-check` to check formatting, and `make rust-lint` for
+Clippy with warnings treated as errors. The repository `format`, `format-check`,
+and `hundelint` targets include these Rust checks. Clippy must cover hosted tests,
+the core-only crate, and the selected target's production service/components;
+run `make ARCH=aarch64 rust-lint-target` and `make ARCH=riscv64 rust-lint-target`
+when changing shared or target-facing Rust code. Fix findings rather than adding
+lint suppressions or excluding code from the checks.
+
 ### Python
 Use pytest for testing Python code. Write module-level test functions, not test
 classes or unittest.TestCase subclasses. Use pytest fixtures for shared setup
@@ -220,6 +283,21 @@ implementations instead of `#ifdef TEST` style conditionals in the code being
 tested.
 
 # Fixing issues
+## Broken functionality takes priority
+Broken existing functionality is the number one priority, ahead of new features,
+migrations, refactoring, or the next planned slice. When a failure is discovered,
+stop feature work, preserve the evidence, and prioritize investigation and a
+validated root-cause fix, following the evidence and approval requirements below.
+This applies even when the failure may predate the current changes or its cause
+is not yet established.
+
+A passing retry does not resolve an intermittent failure. Do not dismiss it as
+unrelated without evidence, mark the affected functionality as fully validated,
+or park it in TODOs and continue feature work. Recording a failure is not a
+substitute for addressing it. Defer broken functionality or resume feature work
+only with the user's explicit agreement, clearly stating what remains broken
+and what validation is incomplete.
+
 ## propose a theory and evidence
 - Tell the user what you plan to do before making changes. If there is no
 evidence, the user will be asked to provide evidence.

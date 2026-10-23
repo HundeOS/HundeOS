@@ -1,6 +1,7 @@
 #include "scheduler.h"
 #include "../arch/process.h"
 #include "../arch/page_table.h"
+#include "../arch/mmu.h"
 #include "../cpu.h"
 #include "../types/result.h"
 #include "../types/optional.h"
@@ -1842,6 +1843,7 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
                         none_do_nothing()
                     );
 
+                    MMU__dereference_user_mappings(proc->kernel, ProcessPageTable__root(&proc->page_table));
                     match_result(
                         Process__dispose_user_allocations(proc),
                         success_do_nothing(),

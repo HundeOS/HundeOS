@@ -50,7 +50,6 @@ ResultDef(WuffMemoryRegion);
 WuffMemoryRegion WuffMemoryRegion__new(Address virtual_address, uint8_t * writable_address);
 
 typedef Result(WuffMemoryRegion) (*WuffAllocateAligned)(void * context, size_t size, size_t alignment);
-typedef Result(WuffMemoryRegion) (*WuffAllocateAt)(void * context, Address address, size_t size);
 typedef MemStatus (*WuffProtect)(void * context, Address address, size_t size, MemPagePermissions permissions);
 typedef MemStatus (*WuffFree)(void * context, Address address);
 
@@ -58,7 +57,6 @@ typedef struct WuffMemoryOperations
 {
     void * context;
     WuffAllocateAligned allocate_aligned;
-    WuffAllocateAt allocate_at;
     WuffProtect protect;
     WuffFree free;
 } WuffMemoryOperations;
@@ -66,7 +64,7 @@ typedef struct WuffMemoryOperations
 typedef const WuffMemoryOperations * ConstWuffMemoryOperationsPtr;
 
 WuffMemoryOperations WuffMemoryOperations__new(void * context, WuffAllocateAligned allocate_aligned,
-                                               WuffAllocateAt allocate_at, WuffProtect protect, WuffFree free);
+                                               WuffProtect protect, WuffFree free);
 
 typedef struct WuffMapping
 {
@@ -95,6 +93,7 @@ typedef struct WuffObject
 {
     Address load_bias;
     Address entry;
+    Optional(WuffMapping) image_mapping;
     WuffMappings mappings;
     WuffMemoryOperations memory;
     const WuffSymbolEntry * symbols;

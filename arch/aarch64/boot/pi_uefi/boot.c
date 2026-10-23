@@ -10,6 +10,7 @@
 #include "../print.h"
 #include "../uart.h"
 #include "../uefi.h"
+#include "../uefi_devices.h"
 #include "handoff.h"
 
 #include "../../cpu.h"
@@ -37,12 +38,6 @@ extern const uint64_t __gicd_start[];
 #define PI4_GICR_PHYS_BASE 0xFF848000ULL
 #define PI4_GICC_PHYS_BASE 0xFF842000ULL
 #define PI4_UART_IRQ_ID 153ULL
-#define PI4_EMMC2_PHYS_BASE 0xFE340000ULL
-#define PI4_EMMC2_MMIO_SIZE 0x100ULL
-#define PI4_EMMC2_IRQ_ID 126ULL
-#define PI4_GENET_PHYS_BASE 0xFD580000ULL
-#define PI4_GENET_MMIO_SIZE 0x10000ULL
-#define PI4_GENET_IRQ_ID 157ULL
 #define PI_UEFI_GICD_BASE ((uint64_t)&__gicd_start[0])
 #define PI_UEFI_GICR_BASE (PI_UEFI_GICD_BASE + GICR_OFFSET)
 __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = { // hundelint: ignore-constructor-required
@@ -56,13 +51,6 @@ __BOOT_DATA__(static BootPlatformInfo) pi_uefi_platform_info = { // hundelint: i
     .uart_register_shift = 0,
     .uart_register_width = 4,
     .framebuffer = None(FramebufferInfo),
-    .sd_host = Some(SdHostInfo, ((SdHostInfo){ // hundelint: ignore-constructor-required
-                                 .physical_base = PI4_EMMC2_PHYS_BASE,
-                                 .mmio_size = PI4_EMMC2_MMIO_SIZE,
-                                 .irq = PI4_EMMC2_IRQ_ID,
-                                 .kind = SD_HOST_KIND_GENERIC,
-                                 .source_clock_hz = 0,
-                             })),
     .interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V2,
     .gic_distributor_physical_base = PI4_GICD_PHYS_BASE,
     .gic_distributor_virtual_base = PI_UEFI_GICD_BASE,
@@ -76,13 +64,6 @@ __BOOT_DATA__(static SystemInfo) pi_uefi_system_info;
 __BOOT_DATA__(static uint64_t) pi_uefi_image_handle = 0;
 __BOOT_DATA__(static uint64_t) pi_uefi_system_table = 0;
 __BOOT_DATA__(static Optional(RealtimeClockSample)) pi_uefi_realtime_clock;
-
-static __BOOT__(void) PiUefiPlatformInfo__set_fixed_devices(BootPlatformInfoPtr self)
-{
-    self->ethernet_mac =
-        Some(EthernetMacInfo, EthernetMacInfo__new(ETHERNET_MAC_KIND_BCM2711_GENET, PI4_GENET_PHYS_BASE,
-                                                   PI4_GENET_MMIO_SIZE, PI4_GENET_IRQ_ID));
-}
 
 __BOOT__(void)
 
@@ -132,7 +113,7 @@ BootPlatform__set_entry_args(uint64_t image_handle, uint64_t system_table, uint6
 
 __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
 {
-    PiUefiPlatformInfo__set_fixed_devices(&pi_uefi_platform_info);
+    UefiDevices__configure(&pi_uefi_platform_info);
     UefiAcpi__apply_system_table(&pi_uefi_platform_info, pi_uefi_system_table);
 
     pi_uefi_system_info.cpu_count = pi_uefi_platform_info.cpu_count;
@@ -170,7 +151,7 @@ __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
     pi_uefi_system_info.console_uart = pi_uefi_system_info.trace_uart;
     pi_uefi_system_info.rtc = None(BootRtcInfo);
     pi_uefi_system_info.realtime_clock = pi_uefi_realtime_clock;
-    pi_uefi_system_info.virtio_mmio = None(BootVirtioMmioInfo);
+    pi_uefi_system_info.virtio_mmio = pi_uefi_platform_info.virtio_mmio;
     pi_uefi_system_info.framebuffer = pi_uefi_platform_info.framebuffer;
     pi_uefi_system_info.pci = pi_uefi_platform_info.pci;
     pi_uefi_system_info.sd_host = pi_uefi_platform_info.sd_host;

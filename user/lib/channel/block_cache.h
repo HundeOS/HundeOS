@@ -34,6 +34,7 @@ typedef struct BlockCache
 typedef BlockCache * BlockCachePtr;
 
 BlockCache BlockCache__new(void);
+void BlockCache__init(BlockCachePtr self);
 void BlockCache__reclaim(BlockCachePtr self);
 uint64_t BlockCache__capacity(BlockCachePtr self);
 Result(BlockProtocolBlockCount)

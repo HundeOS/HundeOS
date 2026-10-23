@@ -1,5 +1,12 @@
 # Userspace I/O system
 
+The I/O host serves `/sbin` internally after Mama's bootstrap handoff, using
+`hunde::embedfs::Filesystem` over the shared C archive backend. The standalone
+provider is drained and retired before configured startup. `/boot` is served by
+the hosted Rust `sysinfofs.wuff`, with file contents cached at initialization;
+`/boot/config` remains an independent EXT2 overlay. See
+[bootstrap services](bootstrap-services.md#cached-boot-information).
+
 The [Mama bootstrap](bootstrap-services.md) now establishes `/boot`,
 `/boot/config`, and `/sbin` in userspace before configured startup. The filesystem
 service starts empty and accepts authenticated Channel mount requests; it no
@@ -7,8 +14,9 @@ longer reads `fstab` itself. Boot file operations no longer use a syscall bypass
 
 ## Status
 
-`hund-io-system` routes sockets, streams, and filesystem paths without retaining
-per-request or per-handle state. `hund-dateisystem` owns the userspace mount table and routes
+The Rust I/O host's `hund-io-system` endpoint serves hosted socket, pipe, and
+filesystem operations through host-owned handles and pending requests. Its
+filesystem namespace owns the userspace mount table and routes
 filesystem paths to the format drivers. FAT32 and EXT2 no longer register with
 the kernel filesystem broker or fetch/complete filesystem requests through
 service syscalls. Their file handles, offsets, and buffers now live in userspace.
@@ -22,19 +30,177 @@ components into `hunde-io-host`. Until that migration occurs, the ownership and
 protocols in this document describe the running system. See
 [I/O and driver hosts](io-driver-hosts.md).
 
+The first migration slices are live: the Rust `hunde-io-host` loads Rust
+`socket.wuff`, `pipe.wuff`, `memfs.wuff`, and `procfs.wuff`, serving the existing
+`socket_router`, `hund-rohr`, `/tmp`, and `/proc` endpoints through the
+authenticated Channel adapter. Namespace routing now lives in the Rust host;
+terminal/stream services remain separate. Standard QEMU configurations select hosted `ext2.wuff` for `/`
+as well as `/mnt/channelio-ext2` and `/mnt/hosted-ext2`. Bootstrap `/boot/config`
+also uses hosted `ext2.wuff`, initialized after `/sbin` registration and before
+boot handoff; `/sbin` and `/boot` retain their bootstrap providers. See the
+[Rust socket slice](io-driver-hosts.md#first-rust-socket-slice).
+
+### FAT32 hosting preparation
+
+The standalone C FAT32 provider and backend have been retired. Configured FAT32
+volumes are served by the I/O host's native Rust `fat32.wuff`, not a C wrapper.
+`user/drivers/fat32fs` contains the `hunde-fat32fs` crate: a safe `no_std` engine over the existing
+`hunde::block::Device`. Each `Volume::mount(device)` owns a separate device.
+It validates volume-relative FAT32 geometry, FAT capacity and active-FAT
+selection, cluster bounds, reserved/free/bad links, and cyclic chains. Reads
+support fragmented files, sector/cluster boundaries, arbitrary offsets, and EOF;
+directory listing supports bounded pagination. Traversal uses constant-memory
+cycle detection and a geometry-derived step bound.
+
+The Rust engine supports 512-byte sectors, power-of-two clusters up to
+128 sectors, one or two FATs, and ASCII 8.3 aliases with case-insensitive lookup.
+VFAT long names are validated by ordinal sequence, checksum, type, padding,
+and UTF-16 decoding, including sequences spanning sectors or fragmented directory
+clusters. Lookup accepts both the display name and its short alias. Malformed
+long names, or names whose UTF-8 representation exceeds the directory protocol's
+255-byte limit, fall back to the alias. Deleted entries, volume labels, and dot
+entries are skipped. OEM short-name decoding is not implemented. FAT12/16 and
+nonzero FAT32 format versions are unsupported. Sector zero must be the volume
+boot sector; partition-table discovery is not part of this engine.
+
+Source-local tests use sparse disk-image fixtures with FAT32-sized geometry,
+nested and chained directories, fragmented files, multiple volumes, and malformed
+metadata. They also exercise device failures and assert that reading never writes.
+The on-disk layout follows the
+[Microsoft FAT specification](https://www.scs.stanford.edu/~zyedidia/docs/_other/fat.pdf).
+
+#### Rust FAT32 mutations
+
+The native engine exposes `create_file`, `create_directory`, `write`, `truncate`,
+`remove_file`, and `remove_directory`. Creation accepts ASCII 8.3 names and stores
+uppercase aliases. Writes preserve unaffected bytes, extend fragmented chains,
+and zero newly allocated storage and gaps beyond EOF. Truncation clears length
+and first-cluster fields in the existing directory slot, freeing the old chain.
+Directories grow by allocating clusters; new directories contain valid dot and
+parent entries. Only empty directories can be removed, and root removal is denied.
+Read-only attributes are enforced. Alias removal also validates and deletes its
+associated contiguous long-name slots. Creation still accepts only 8.3 names,
+as did the retired C provider; existing long-name files can be read, written,
+truncated, and removed.
+
+FAT updates preserve reserved high bits, update mirrored copies or only the
+selected active FAT, and reject mismatched copies before mutation. Known valid
+FSInfo free counts are adjusted in the primary and backup records; unknown or
+invalid counts remain unknown, and allocation does not trust these hints. Next-free
+hints are invalidated. File chains are checked before mutation, including capacity
+and overlap with the root or parent directory. This is not a complete filesystem
+ownership/cross-link checker.
+
+Mutations stage sector changes with fallible allocation before writing anything.
+Logical validation, no-space, allocation, or staging-read errors therefore leave
+the device untouched. A reported device-write failure restores every attempted
+sector, including the failed write's sector in case it partially completed. If
+any restoration fails, the volume returns `RecoveryRequired` and rejects further
+public reads and mutations; it must not be automatically remounted as repaired.
+This is runtime error rollback, not journaling, power-loss atomicity, or recovery
+from external writers. The block interface does not provide a durability barrier.
+
+Tests cover growth, truncation/reuse, directory expansion, FAT mirroring and
+FSInfo, malformed metadata, and partial failures at each write boundary for
+creation, growth, truncation, and removal. Native mutation probes additionally
+verify remounts and filesystem consistency on disposable copies of the generated
+FAT32 image, without modifying the project images.
+
+#### Rust FAT32 request adapter
+
+`Fat32::mount(device)` wraps the engine in the shared safe `IoComponent` contract.
+Each open description owns its canonical case-insensitive path, access flags,
+offset, and authenticated process/session owners. Independent opens have separate
+offsets; inherited owners share a description and offset. The shared `Grants`
+implementation authenticates prepare/commit/claim/abort, preserves committed
+grants across source disconnect, and prevents claims from elevating access.
+Close and disconnect remove owners and collect descriptions only after retained
+grants are released. Disposal reports busy while descriptions or grants remain.
+
+The adapter handles open/create/exclusive/truncate, read/write/append, seek,
+metadata, paginated directories, mkdir, and file/directory removal, including
+recursive removal with cycle checks and bounded batches.
+Failed writes leave offsets unchanged. FAT32 has no Unix ownership metadata:
+entries report root ownership, files and directories mode 0755, with write
+bits removed for read-only entries. All users may read; only root may mutate,
+and root does not bypass on-disk read-only attributes. Explicit executable opens
+require read access, never create missing files, and preserve execution access
+through inheritance. Hard links and watches are unsupported.
+
+Removal reports busy if a live or grant-retained description refers to the file.
+Directory-slot identity prevents using a long name or alias to bypass that check.
+This avoids freeing/reusing directory slots under path-backed handles; POSIX
+unlink-while-open is not implemented. The retired C provider also used path-backed
+handles and did not provide POSIX unlink-while-open semantics.
+Native adapter tests cover authorization, offsets, append, create/truncate,
+permissions, metadata, inheritance, cleanup, handle exhaustion, and write errors.
+
+#### FAT32 Wuff integration
+
+`fat32.wuff` is packaged in `/sbin/components` alongside `ext2fs.wuff`.
+Both export only `hunde_filesystem_component_entry_v1` and receive the existing
+versioned host operations and host-owned block capability. The shared safe loader
+accepts `BundledFilesystem::{Ext2,Fat32}`, not arbitrary library paths, and retains
+the block client and component mappings for the mounted instance's lifetime.
+Each format is built and checked for the same permitted relocations, RELRO,
+export policy, and absence of unsupported dependencies/TLS/initializers.
+
+Mount control accepts `device /dev/<device> fat32.wuff /<mountpoint>`. Boot mount
+setup waits for host initialization before publishing the namespace mount, just
+as for EXT2. The host preserves the selected driver through pending requests,
+reports format-specific readiness, and runs each volume on the shared scheduler.
+Reservations compare device identity independently of driver selection, so a
+device cannot be mounted again merely by changing its format. Failed mounts
+release their reservation; successful mounts retain it after control disconnect.
+
+`test_qemu_hosted_fat32_wuff` exercises both architectures with a temporary boot
+configuration and disposable FAT32 image at `/mnt/fat`. It covers dynamic loading,
+namespace routing, creation, writes, append, truncation, inherited reads, copying
+from EXT2, removal, and shutdown. Normal platform configurations are unchanged.
+
+FAT32 acceptance and the broader root-filesystem smoke suite pass on AArch64
+and RISC-V, including shutdown. The disposable FAT32 images pass filesystem
+consistency checks afterward. `humpen` excludes hosted FAT32 mounts from legacy
+watchdog spawning. Trace validation checks I/O readiness and rejects process
+faults without depending on verbose-only kernel messages.
+
+Integration exposed a shared loader defect, not physical-memory exhaustion:
+choosing a load bias from only the first segment allowed later fixed-address
+segments to overlap existing allocations. LLDB confirmed AArch64's second FAT32
+segment overlapped a live dynamic allocation, correctly rejected by the kernel.
+The loader now allocates the complete image span once, gives individual segments
+their final permissions, and leaves gaps inaccessible. Native regression tests
+exercise the fragmented-address-space case and single-owner cleanup.
+
+The QEMU `/mnt/sd` and `/mnt/channelio` mounts and the Pi UEFI MMC FAT32
+configurations now select `fat32.wuff`. The old `fat32` boot-configuration spelling
+is normalized to the hosted format, without launching a legacy watchdog.
+Boot setup waits for each block provider's published readiness before requesting
+the hosted mount; this also covers asynchronously initialized SDHCI/MMC devices.
+Readiness failure prevents component initialization and namespace publication.
+The C backend, launcher, and obsolete C unit suite have been removed; the Rust
+suite covers their retained functionality. Boot-archive dependencies include
+every packaged Rust component, so source edits rebuild the packaged Wuff rather
+than silently embedding a stale image.
+
 ## Common application interface
 
-`hund-io-system` is the common userspace I/O front end for files, sockets,
+Write access alone preserves file contents. `IO_OPEN_TRUNCATE` is an explicit
+open action requiring write access; libc translates `O_TRUNC` to that action
+without deleting the path. Truncation preserves inode identity, hard links,
+existing open descriptions, and file-watch continuity. Creation and exclusive
+creation remain separate flags.
+
+The host's `hund-io-system` endpoint is the common userspace I/O front end for files, sockets,
 network I/O, and streams. Applications must not have a separate filesystem-only
 front end. Preserve the public userspace I/O API while moving its implementation
 from I/O syscalls to a protocol over the existing `Channel`.
 
 ```text
 Application
-    |-- route request --> hund-io-system
-    |                     `-- filesystem route --> hund-dateisystem
-    |                                              `-- mount route reply
-    `-- direct Channel --> final filesystem/socket/stream service
+    |-- route request --> hunde-io-host (hund-io-system endpoint)
+    |                     `-- local namespace / host handles --> component worker
+    `-- redirected Channel --> external bootstrap/device/legacy provider
                            `-- Channel --> block driver where required
 ```
 
@@ -86,29 +252,60 @@ subset translates these notifications for the unchanged OpenBSD source.
 
 ## Ownership
 
-`hund-io-system` owns only top-level endpoint selection. It returns a bounded
-redirect describing the next service, rewritten path, and whether that service
-is final. `hund-dateisystem` similarly performs mount selection and path
+The Rust application endpoint owns component selection, host handle identities,
+inheritance-token translation, and pending-request dispatch for hosted components.
+It calls the filesystem namespace locally for mount selection and path
 rewriting, with one namespace-specific responsibility: directory enumeration
 includes immediate child mountpoints before redirecting to the backing
-filesystem. It does not manufacture file metadata. Neither routing service owns
-client handles, buffers, pending requests, or backend Channels.
+filesystem. It does not manufacture file metadata. Hosted requests execute on
+component workers and reply on the application's original host connection;
+external providers still receive bounded redirects during migration. The retained
+`hund-dateisystem` endpoint also exposes this same namespace for bootstrap mount
+control and compatibility; applications no longer need a second routing exchange.
 
-The application I/O client follows at most eight redirects and then opens or
-reuses a direct Channel to the final service. It gives callers process-local
-opaque handles and maps them to the final service's handles. The final
+The application I/O client follows at most eight redirects for external providers.
+Hosted opens return host handles directly through the application endpoint. The
+client still gives callers process-local opaque handles and maps them to the
+owning service's handles. The final
 filesystem, socket, or stream service owns resource state, access checks, and
 cleanup for its authenticated client sessions. Unsupported operations return an
 explicit error.
 
-`hund-dateisystem` owns the filesystem namespace, configured mount table, and
+### Process-local host I/O
+
+The host's existing local-router registration also serves local opens and their
+read/write/close operations. Local handles use the same Rust dispatcher and
+component workers as application requests, but do not establish a Channel back
+into the host or acquire shared-buffer leases for memory already in the process.
+Local transfers borrow the caller's buffer, bounded by the normal transfer
+limit, until the synchronous library call completes. External I/O continues to
+use authenticated Channels and directional `hunde-puffer` buffers.
+
+The compatibility adapter assigns one nonzero process-local session, paired with
+the actual current PID. A cooperative gate serializes requests on that session
+across fibres, so handles remain usable across fibres without overlapping
+pending requests for the same dispatcher owner. Pending replies notify the
+single host scheduler and park only the caller's fibre. The Rust router's
+mutable borrow is released between polls; component workers complete the queued
+work before the adapter retries. No kernel wait or external interrupt is needed
+for an entirely local completion. Failure to cooperate cancels the local session
+and returns an error rather than opening a self-Channel or spinning.
+
+The current callers are native module-loader metadata queries and file reads.
+Local pipe creation and watch aggregation are not added by this slice.
+
+The Rust host owns the filesystem namespace, configured mount table, and
 mount selection. Format drivers own filesystem format knowledge and open-file
-state. Socket/network services own their network-specific state.
+state. The host maps its handles to those component-local descriptions while
+preserving authenticated PID/session ownership. Socket/network services own their network-specific state.
 Device drivers own device operations. Moving the front end must move real
 ownership out of the kernel, not introduce a service that forwards the same
 I/O syscalls back into the kernel.
 
-Anonymous pipes are owned by the `hund-rohr` userspace service. `hund-io-system`
+Anonymous pipes are owned by Rust `pipe.wuff` inside `hunde-io-host`, exposed
+through the retained `hund-rohr` Channel endpoint. There is no standalone
+`hund-rohr` executable. Mama starts the host; `hundeschule` waits for endpoint
+readiness before launching the login service. `hund-io-system`
 only returns a final redirect for pipe creation. Each pipe has independently
 authenticated read and write endpoint handles and a service-private 64 KiB byte
 ring. Reads wait while the ring is empty and a writer remains, then return EOF
@@ -127,9 +324,15 @@ open description. `dup`, `dup2`, and `F_DUPFD` therefore share one native pipe
 endpoint, its access mode and `O_NONBLOCK` status, and close it only after the
 final local descriptor closes. `F_GETFL` and `F_SETFL` operate on that shared
 open description, while `FD_CLOEXEC` remains local to each descriptor. These
-local references do not authorize another process. Fork inheritance still
-requires a child-owned Channel session and an explicit service grant to the same
-open resource, as tracked in `docs/TODO.md`.
+local references do not authorize another process. Fork and exec inheritance
+use prepare, child-PID-bound commit, single-use claim, and abort grants.
+The child claims the same endpoint through its own authenticated Channel.
+Committed grants retain endpoints across source close/disconnect until claim;
+uncommitted grants are released on source close/disconnect. EOF and broken-pipe
+decisions account for these retained endpoints and all authenticated owners.
+Cleanup of committed grants for children that die before claiming remains open,
+as for the other resource-owning services. The client handle allocator reserves
+restored local identities before issuing new handles.
 
 `O_APPEND` is also shared through the local open description. Libc marks each
 write request with `IO_TRANSFER_APPEND`; the final filesystem service selects
@@ -194,6 +397,14 @@ and freeing an inode invalidates it after the bitmap write completes. Inode
 cache hits, misses, and evictions are reported separately through
 `/proc/<pid>/ipc`.
 
+The hosted Rust EXT2 provider reuses the same C block cache through its native
+per-device client, caching metadata blocks as well as data. It does not yet keep
+a separate decoded-inode cache. Cache diagnostics are attributed to the I/O host;
+each device client releases its cache-growth chunks on close. See
+[hosted EXT2 caching](io-driver-hosts.md#hosted-ext2-caching) for ownership and
+write/rollback behavior. This does not provide coherence between independently
+opened writable filesystem instances.
+
 The current channel supports one outstanding request per session. Multiple
 open handles do not change that limit. The server must continue servicing
 other sessions while a backend operation waits; it must not block its entire
@@ -250,22 +461,21 @@ mounts before retiring their old paths.
 
 ## Console streams
 
-`hund-io-system` owns a userspace stream-device registry. Stream paths use
+The host's Rust application router owns stream-device selection. Stream paths use
 `:name:` syntax: names must be nonempty and contain no colon, slash, NUL, or
-space/tab/newline characters. Each registration associates a BString path and
-one access direction (read or write) with a BString backend service identifier.
-Duplicate name/direction registrations are rejected. Unknown names return
+space/tab/newline characters. The built-in aliases select a backend by exact
+path and access direction (read or write). Unknown names return
 `IO_NO_DEVICE_FOUND`; malformed names return `IO_INVALID_PATH`, and unsupported
-access returns `IO_PERMISSION_DENIED`. Colon-prefixed opens never fall through
-to the filesystem router.
+access returns `IO_PERMISSION_DENIED`. Malformed colon-prefixed paths fail
+namespace validation rather than selecting a mounted filesystem.
 
-Boot setup registers the terminal routes below. The registry and stream-driver
-helpers validate stream syntax, not a built-in list of device names. Direct
+Boot hardware information selects serial or framebuffer console output using
+the terminal routes below. Stream drivers retain their own syntax checks. Direct
 Channels are opened lazily and reused by service identifier, including across
 aliases. Open handles retain final-service routing and client ownership independently
-of subsequent path lookup. Registration is local to the I/O service for now;
+of subsequent path lookup. Selection is local to the I/O host;
 there is no driver-controlled registration protocol. `:keyboard:` reads route
-to the `keyboard` service using this same registry and Channel protocol.
+to the `keyboard` service using the same routing and Channel protocol.
 
 Applications open `:tty:` or `:console:` through `hund-io-system`. Reads route
 to `uart_rx`; `:tty:` writes route to `uart_tx`. `:console:` writes use
@@ -371,22 +581,24 @@ The old kernel socket implementation and broker service operations have been
 deleted. Userspace socket calls use the Channel-based socket service.
 
 Implementation: `user/lib/io` contains the protocol, redirect-following client,
-and channel server loop; `user/services/hund-io-system` selects routes; socket
-state lives in `user/drivers/socket_router/sockets.c`. Tests cover routing, the
+and channel server loop; `user/services/hunde-io-host/src/host/router.rs` selects
+routes; socket state lives in `user/drivers/socket/src`. Tests cover routing, the
 real channel client/server path, ownership, backpressure, EOF, and teardown.
 
 ## Boot filesystem namespace
 
-The filesystem control path is application -> `hund-io-system` redirect ->
-`hund-dateisystem` redirect -> FAT32/EXT2 service. The application then talks
+The filesystem control path is application -> host application router -> local
+filesystem namespace -> final mount redirect. The application then talks
 directly to that final filesystem service; its block operations use a separate
-Channel to the block driver. Every arrow is an existing Channel, not a
-service-specific transport. Routing services translate paths, not handles.
+Channel to the block driver. Cross-process transfers use existing Channels;
+application-to-namespace routing inside the host is a function call, not IPC.
+Routing translates paths, not handles.
 
-Mama starts `hund-dateisystem` with an empty namespace, then establishes `/sbin`,
+Mama starts `hunde-io-host` with an empty filesystem namespace, then establishes `/sbin`,
 `/boot`, and `/boot/config`. Hundeschule subsequently reads `/boot/config/fstab`
-through Channels, registers the configured FAT32/EXT2 mounts, and starts the root
-`humpen-wachhund`. It waits for root readiness before starting Hundeschau. Missing
+through Channels and registers the configured FAT32/EXT2 mounts. A hosted root
+uses the host's mount worker; a legacy root starts `humpen-wachhund`.
+It waits for root readiness before starting Hundeschau. Missing
 or duplicate root configuration, spawn failure, or failed readiness prevents
 startup from reaching login. Humpen skips root and starts the remaining
 format-driver watchdogs using the same fstab and shared `MountConfig` parser.
@@ -527,11 +739,13 @@ boundary.
 
 ### Process Filesystem
 
-`hund-dateisystem` starts `/sbin/drivers/procfs` after devfs and waits for `/proc`
-before publishing namespace readiness. It uses the existing filesystem driver
-and bidirectional Channel protocol, with no additional transport. The kernel
-publishes read-only shared process records; procfs formats them and `ps` reads
-them directly. See [Process registry and procfs](process-registry-and-procfs.md)
+`hunde-io-host` loads Rust `/sbin/components/procfs.wuff` and publishes `/proc`.
+Hundeschule waits for that endpoint before registering the mount; it does not
+spawn a standalone procfs process. The existing bidirectional Channel protocol,
+namespace redirects, and managed transfer buffers remain unchanged. The kernel
+publishes read-only shared process records; procfs formats coherent snapshots
+through the shared `hunde` boundary. `ps` independently uses `process_list`.
+See [Process registry and procfs](process-registry-and-procfs.md)
 for CPU, wait-state, memory-accounting, consistency, and ownership semantics.
 
 ## Device filesystem
@@ -585,9 +799,10 @@ registry records; service restart recovery remains deferred.
 
 ## Temporary filesystem
 
-Hundeschule installs a deviceless `memfs` mount at `/tmp`, starts the embedded
-`/sbin/drivers/memfs` program, and waits for readiness before launching
-Hundeschau. A conflicting `/tmp` fstab entry or failed startup stops that sequence.
+The Rust I/O host loads `/sbin/components/memfs.wuff` and publishes the retained
+`/tmp` endpoint. Hundeschule waits for its readiness and installs the deviceless
+`memfs` mount before launching Hundeschau; it no longer spawns a memfs process.
+A conflicting `/tmp` fstab entry or failed startup stops that sequence.
 No disk configuration entry is required.
 
 Temporary-file route discovery follows application -> `hund-io-system` ->
@@ -597,9 +812,9 @@ The former kernel `/tmp/memfs` mount and syscall bypass have been removed.
 The old implementation exists only as a kernel-test fixture and is not linked
 into the kernel.
 
-Memfs owns dynamically allocated file contents and a linked collection of files
+Rust memfs owns dynamically allocated file contents and a collection of files
 and directories, with no 12 KiB disk-snapshot limit or fixed file-count table.
-It supports 32 open handles, independent offsets, immediate empty-file creation
+It supports 32 open descriptions, independent offsets between separate opens, immediate empty-file creation
 and write-only-open truncation, directory listing, mkdir, file removal, and
 recursive directory removal. Read/write opens preserve existing data. Operations
 use shared directional buffers, up to 2 MiB per request. Allocation failures return errors
@@ -609,10 +824,16 @@ The backend receives authenticated client PID/session identities from its direct
 Channel. Close and client release dispose of handles, not files; a client
 disconnect releases only that session's handles and preserves files and other
 clients' handles.
+Fork and exec use the shared `hunde::inheritance` grant registry, also used by
+pipes. Claims are authenticated, PID-bound, single-use, and preserve the same
+open description and offset. Closing one owner does not close another's handle.
+Committed grants retain descriptions across source close/disconnect; uncommitted
+grants are discarded. Orphan cleanup for children that die before claiming
+remains deferred. Removing a node invalidates its descriptions and grants.
 Removal frees storage and invalidates handles to the removed node; recreating
 the same path cannot revive them. Nonrecursive directory removal remains
 unsupported, matching the previous memfs behavior. Contents are volatile and
-are lost when the driver exits. Service restart recovery and reliable exit
+are lost when the I/O host exits. Service restart recovery and reliable exit
 notification have the same outstanding limitations described above.
 
 Memfs records the creating client's UID/GID on each node, with `0644` files and

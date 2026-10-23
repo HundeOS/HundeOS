@@ -1,0 +1,11 @@
+[package]
+name = "hunde"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["alloc"]
+alloc = []
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

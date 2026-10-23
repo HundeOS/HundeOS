@@ -3,6 +3,7 @@
 #include "../stubs/cpu.h"
 #include "../stubs/cpu_timer.h"
 #include "../stubs/process.h"
+#include "../stubs/mmu.h"
 #include "../stubs/process_context_layout.h"
 #include "../fixtures/process.h"
 #include "../../../kernel/process.h"
@@ -93,6 +94,7 @@ void setUp(void)
     set_cpu_id(cpu_id);
     reset_cpu_count();
     current_process_reset();
+    reset_mmu_state();
     clear_deferred_syscall_result();
     Arch__reset_irq_tracking();
     CPUTimerStub__reset();
@@ -760,6 +762,9 @@ void test_scheduler_exit_removes_process_when_its_current(void)
     ProcessTablePtr processes = Scheduler__all_processes(scheduler, cpu_id);
 
     TEST_ASSERT_EQUAL(0, ProcessTable__len(processes));
+    TEST_ASSERT_EQUAL_UINT64(1, MMUStub__dereference_count());
+    TEST_ASSERT_TRUE(MMUStub__dereferenced_before_free());
+    TEST_ASSERT_EQUAL_HEX64(ProcessPageTable__root(&idle->page_table).phys_addr, MMUStub__active_table().phys_addr);
 }
 
 void test_scheduler_exit_unparks_parent_if_waiting(void)
@@ -914,6 +919,9 @@ void test_scheduler_exit_removes_process_when_its_not_current(void)
     ProcessTablePtr processes = Scheduler__all_processes(scheduler, cpu_id);
 
     TEST_ASSERT_EQUAL(1, ProcessTable__len(processes));
+    TEST_ASSERT_EQUAL_UINT64(0, MMUStub__dereference_count());
+    TEST_ASSERT_EQUAL_HEX64(ProcessPageTable__root(&other_proc->page_table).phys_addr,
+                            MMUStub__active_table().phys_addr);
 }
 
 void test_scheduler_park_switches_process_to_waiting_and_switches_context(void)

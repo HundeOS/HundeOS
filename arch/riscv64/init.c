@@ -5,8 +5,8 @@
 #include "basic_io.h"
 #include "cpu.h"
 #include "exception.h"
+#include "../../common/arch/riscv64/plic.h"
 
-#define PLIC_PRIORITY_OFFSET 0ULL
 #define PLIC_SUPERVISOR_ENABLE_OFFSET 0x2080ULL
 #define PLIC_SUPERVISOR_CONTEXT_OFFSET 0x201000ULL
 #define PLIC_CONTEXT_THRESHOLD_OFFSET 0ULL
@@ -28,23 +28,20 @@ static bool RiscVPlic__valid_irq(ConstPlicInterruptControllerInfoPtr plic, uint6
     return irq > 0 && irq <= plic->source_count;
 }
 
-static void RiscVPlic__set_enabled(ConstPlicInterruptControllerInfoPtr plic, uint64_t hart_id, uint64_t irq,
-                                   bool enabled)
+static void RiscVPlic__set_masked(ConstPlicInterruptControllerInfoPtr plic, uint64_t irq, bool masked)
+{
+    Plic__set_masked(plic->virtual_base, irq, masked);
+    __asm__ volatile("fence iorw, iorw" ::: "memory");
+}
+
+static void RiscVPlic__enable_route(ConstPlicInterruptControllerInfoPtr plic, uint64_t hart_id, uint64_t irq)
 {
     Address enable_offset =
         PLIC_SUPERVISOR_ENABLE_OFFSET + hart_id * PLIC_ENABLE_HART_STRIDE + (irq / 32U) * sizeof(uint32_t);
     volatile uint32_t * enable = RiscVPlic__register(plic->virtual_base, enable_offset);
     uint32_t mask = 1U << (irq % 32U);
-    if (enabled)
-    {
-        *RiscVPlic__register(plic->virtual_base, PLIC_PRIORITY_OFFSET + irq * sizeof(uint32_t)) = 1U;
-        *enable |= mask;
-    }
-    else
-    {
-        *enable &= ~mask;
-    }
-    __asm__ volatile("fence iorw, iorw" ::: "memory");
+    *enable |= mask;
+    RiscVPlic__set_masked(plic, irq, false);
 }
 
 void Arch__init_bootstrap_system(SystemInfoPtr system_info)
@@ -97,7 +94,7 @@ Result(SubsystemInitStatus) Arch__enable_irq(InterruptControllerInfoPtr interrup
         return Error(SubsystemInitStatus, invalid_interrupt_number, SUBSYSTEM_INIT_FAILED);
     }
 
-    RiscVPlic__set_enabled(plic, plic->target_hart_id, irq, true);
+    RiscVPlic__enable_route(plic, plic->target_hart_id, irq);
     return Success(SubsystemInitStatus, SUBSYSTEM_INIT_OK);
 }
 
@@ -107,7 +104,7 @@ void Arch__mask_irq(InterruptControllerInfoPtr interrupt_controller, uint64_t ir
         RiscVPlic__valid_irq(&interrupt_controller->details.plic, irq))
     {
         PlicInterruptControllerInfoPtr plic = &interrupt_controller->details.plic;
-        RiscVPlic__set_enabled(plic, plic->target_hart_id, irq, false);
+        RiscVPlic__set_masked(plic, irq, true);
     }
 }
 
@@ -117,6 +114,6 @@ void Arch__unmask_irq(InterruptControllerInfoPtr interrupt_controller, uint64_t 
         RiscVPlic__valid_irq(&interrupt_controller->details.plic, irq))
     {
         PlicInterruptControllerInfoPtr plic = &interrupt_controller->details.plic;
-        RiscVPlic__set_enabled(plic, plic->target_hart_id, irq, true);
+        RiscVPlic__set_masked(plic, irq, false);
     }
 }

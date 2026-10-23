@@ -112,6 +112,14 @@ static WuffWritableRange WuffWritableRange__new(uint8_t * address, size_t size)
     };
 }
 
+WuffMemoryRegion WuffMemoryRegion__new(Address virtual_address, uint8_t * writable_address)
+{
+    return (WuffMemoryRegion){
+        .virtual_address = virtual_address,
+        .writable_address = writable_address,
+    };
+}
+
 static WuffMapping WuffMapping__new(ConstWuffMemoryRegionPtr region, size_t size, MemPagePermissions final_permissions)
 {
     return (WuffMapping){
@@ -156,6 +164,7 @@ static WuffObject WuffObject__new(ConstWuffMemoryOperationsPtr memory)
     return (WuffObject){
         .load_bias = 0,
         .entry = 0,
+        .image_mapping = None(WuffMapping),
         .mappings = WuffMappings__new(),
         .memory = *memory,
         .symbols = 0,
@@ -416,25 +425,19 @@ static bool WuffObject__address_is_executable(ConstWuffObjectPtr self, Address a
 
 static Result(WuffLoadCode) WuffObject__release_mappings(WuffObjectPtr self)
 {
-    bool failed = false;
-    while (WuffMappings__len(&self->mappings) > 0)
-    {
-        match_optional(
-            WuffMappings__pop(&self->mappings),
-            some(mapping)
+    match_optional(
+        self->image_mapping,
+        some(mapping)
+        {
+            if (self->memory.free(self->memory.context, mapping.virtual_address) != MEM_OK)
             {
-                if (self->memory.free(self->memory.context, mapping.virtual_address) != MEM_OK)
-                {
-                    failed = true;
-                }
-            },
-            none_do_nothing()
-        );
-    }
-    if (failed)
-    {
-        return Error(WuffLoadCode, cleanup_failed, WUFF_LOAD_CLEANUP_FAILED);
-    }
+                return Error(WuffLoadCode, cleanup_failed, WUFF_LOAD_CLEANUP_FAILED);
+            }
+        },
+        none_do_nothing()
+    );
+    self->image_mapping = None(WuffMapping);
+    self->mappings = WuffMappings__new();
     return Success(WuffLoadCode, WUFF_LOAD_OK);
 }
 
@@ -483,10 +486,6 @@ static Result(WuffLoadCode) WuffLoader__record_mapping(WuffObjectPtr object, Con
         region->virtual_address % WUFF_PAGE_SIZE != 0 ||
         WuffLoader__mapping_overlaps(object, region->virtual_address, size))
     {
-        if (region->virtual_address != 0)
-        {
-            object->memory.free(object->memory.context, region->virtual_address);
-        }
         return Error(WuffLoadCode, mapping_failed, WUFF_LOAD_MAPPING_FAILED);
     }
     WuffMapping mapping = WuffMapping__new(region, size, permissions);
@@ -494,12 +493,10 @@ static Result(WuffLoadCode) WuffLoader__record_mapping(WuffObjectPtr object, Con
         WuffMappings__push(&object->mappings, mapping),
         success(_)
         {
-            memset(region->writable_address, 0, size);
             return Success(WuffLoadCode, WUFF_LOAD_OK);
         },
         error(code, message)
         {
-            object->memory.free(object->memory.context, region->virtual_address);
             return Error(WuffLoadCode, message, WUFF_LOAD_NO_MEMORY);
         }
     );
@@ -507,7 +504,7 @@ static Result(WuffLoadCode) WuffLoader__record_mapping(WuffObjectPtr object, Con
 }
 
 static Result(WuffLoadCode)
-    WuffLoader__map_segment(WuffObjectPtr object, const uint8_t * image, const WuffProgramHeader * segment, bool first)
+    WuffLoader__map_segment(WuffObjectPtr object, const uint8_t * image, const WuffProgramHeader * segment)
 {
     WuffPageRange page_range;
     match_optional(
@@ -535,51 +532,22 @@ static Result(WuffLoadCode)
         }
     );
 
-    Result(WuffMemoryRegion) allocation;
-    size_t required_alignment = WUFF_PAGE_SIZE;
-    Address requested_address = 0;
-    if (first)
-    {
-        required_alignment = segment->alignment > WUFF_PAGE_SIZE ? segment->alignment : WUFF_PAGE_SIZE;
-        allocation = object->memory.allocate_aligned(object->memory.context, page_range.size, required_alignment);
-    }
-
-    else
-    {
-        Address requested;
-        match_optional(
-            WuffLoader__add_address(object->load_bias, page_range.start),
-            some(address)
-            {
-                requested = address;
-            },
-            none()
+    match_optional(
+        object->image_mapping,
+        some(mapping)
+        {
+            if (page_range.start > UINT64_MAX - object->load_bias)
             {
                 return Error(WuffLoadCode, invalid_image, WUFF_LOAD_INVALID_IMAGE);
             }
-        );
-        requested_address = requested;
-        allocation = object->memory.allocate_at(object->memory.context, requested_address, page_range.size);
-    }
-
-    match_result(
-        allocation,
-        success(region)
-        {
-            if (first)
+            Address address = object->load_bias + page_range.start;
+            if (address < mapping.virtual_address || page_range.size > mapping.size ||
+                address - mapping.virtual_address > mapping.size - page_range.size)
             {
-                if (region.virtual_address < page_range.start || region.virtual_address % required_alignment != 0)
-                {
-                    object->memory.free(object->memory.context, region.virtual_address);
-                    return Error(WuffLoadCode, mapping_failed, WUFF_LOAD_MAPPING_FAILED);
-                }
-                object->load_bias = region.virtual_address - page_range.start;
+                return Error(WuffLoadCode, invalid_image, WUFF_LOAD_INVALID_IMAGE);
             }
-            else if (region.virtual_address != requested_address)
-            {
-                object->memory.free(object->memory.context, region.virtual_address);
-                return Error(WuffLoadCode, mapping_failed, WUFF_LOAD_MAPPING_FAILED);
-            }
+            WuffMemoryRegion region =
+                WuffMemoryRegion__new(address, mapping.writable_address + (address - mapping.virtual_address));
             match_result(
                 WuffLoader__record_mapping(object, &region, page_range.size, permissions),
                 success_do_nothing(),
@@ -617,9 +585,9 @@ static Result(WuffLoadCode)
             }
             return Success(WuffLoadCode, WUFF_LOAD_OK);
         },
-        error(code, message)
+        none()
         {
-            return Error(WuffLoadCode, message, WUFF_LOAD_NO_MEMORY);
+            return Error(WuffLoadCode, mapping_failed, WUFF_LOAD_MAPPING_FAILED);
         }
     );
     return Error(WuffLoadCode, mapping_failed, WUFF_LOAD_MAPPING_FAILED);
@@ -723,6 +691,7 @@ static Optional(BString) WuffObject__symbol_name(ConstWuffObjectPtr self, uint32
     {
         length++;
     }
+
     if (offset + length == self->string_size || length >= BSTRING_MAX_SIZE)
     {
         return None(BString);
@@ -1069,6 +1038,21 @@ static Result(WuffLoadCode) WuffLoader__load_symbols(WuffObjectPtr object, Const
 
 static Result(WuffLoadCode) WuffLoader__protect(WuffObjectPtr object)
 {
+    match_optional(
+        object->image_mapping,
+        some(mapping)
+        {
+            if (object->memory.protect(object->memory.context, mapping.virtual_address, mapping.size, MEM_PAGE_NONE) !=
+                MEM_OK)
+            {
+                return Error(WuffLoadCode, protection_failed, WUFF_LOAD_PROTECTION_FAILED);
+            }
+        },
+        none()
+        {
+            return Error(WuffLoadCode, protection_failed, WUFF_LOAD_PROTECTION_FAILED);
+        }
+    );
     for_each_fa(
         WuffMappings,
         object->mappings,
@@ -1127,10 +1111,41 @@ static Result(WuffLoadCode)
     return Success(WuffLoadCode, WUFF_LOAD_OK);
 }
 
+static Result(WuffLoadCode)
+    WuffLoader__allocate_image(WuffObjectPtr object, Address start, Address end, size_t alignment)
+{
+    start &= ~(alignment - 1);
+    if (end <= start || end - start > SIZE_MAX)
+    {
+        return Error(WuffLoadCode, invalid_image, WUFF_LOAD_INVALID_IMAGE);
+    }
+    size_t size = end - start;
+    match_result(
+        object->memory.allocate_aligned(object->memory.context, size, alignment),
+        success(region)
+        {
+            object->image_mapping = Some(WuffMapping, WuffMapping__new(&region, size, MEM_PAGE_NONE));
+            if (region.virtual_address == 0 || region.writable_address == 0 || region.virtual_address < start ||
+                region.virtual_address % alignment != 0 || region.virtual_address > UINT64_MAX - size)
+            {
+                return Error(WuffLoadCode, mapping_failed, WUFF_LOAD_MAPPING_FAILED);
+            }
+            object->load_bias = region.virtual_address - start;
+            memset(region.writable_address, 0, size);
+            return Success(WuffLoadCode, WUFF_LOAD_OK);
+        },
+        error(code, message)
+        {
+            return Error(WuffLoadCode, message, WUFF_LOAD_NO_MEMORY);
+        }
+    );
+    return Error(WuffLoadCode, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+}
+
 static Result(WuffPreparedObject)
     WuffLoader__prepare(const uint8_t * image, size_t image_size, ConstWuffMemoryOperationsPtr memory, bool is_root)
 {
-    if (memory->allocate_aligned == 0 || memory->allocate_at == 0 || memory->protect == 0 || memory->free == 0 ||
+    if (memory->allocate_aligned == 0 || memory->protect == 0 || memory->free == 0 ||
         image_size < sizeof(WuffElfHeader))
     {
         return Error(WuffPreparedObject, invalid_image, WUFF_LOAD_INVALID_IMAGE);
@@ -1147,8 +1162,9 @@ static Result(WuffPreparedObject)
     Optional(WuffProgramHeader) dynamic_header = None(WuffProgramHeader);
     Optional(WuffProgramHeader) interpreter_header = None(WuffProgramHeader);
     Optional(WuffProgramHeader) relro_header = None(WuffProgramHeader);
-    Optional(WuffProgramHeader) first_load = None(WuffProgramHeader);
     Address first_start = UINT64_MAX;
+    Address last_end = 0;
+    size_t alignment = WUFF_PAGE_SIZE;
     for (size_t index = 0; index < header.program_header_count; index++)
     {
         match_optional(
@@ -1185,11 +1201,31 @@ static Result(WuffPreparedObject)
                 }
                 if (program_header.type == WUFF_PROGRAM_LOAD)
                 {
-                    Address start = program_header.virtual_address & ~(WUFF_PAGE_SIZE - 1);
-                    if (start < first_start)
+                    match_optional(
+                        WuffLoader__page_range(program_header.virtual_address, program_header.memory_size),
+                        some(range)
+                        {
+                            if (range.start > UINT64_MAX - range.size)
+                            {
+                                return Error(WuffPreparedObject, invalid_image, WUFF_LOAD_INVALID_IMAGE);
+                            }
+                            if (range.start < first_start)
+                            {
+                                first_start = range.start;
+                            }
+                            if (range.start + range.size > last_end)
+                            {
+                                last_end = range.start + range.size;
+                            }
+                        },
+                        none()
+                        {
+                            return Error(WuffPreparedObject, invalid_image, WUFF_LOAD_INVALID_IMAGE);
+                        }
+                    );
+                    if (program_header.alignment > alignment)
                     {
-                        first_start = start;
-                        first_load = Some(WuffProgramHeader, program_header);
+                        alignment = program_header.alignment;
                     }
                 }
             },
@@ -1200,7 +1236,7 @@ static Result(WuffPreparedObject)
         );
     }
 
-    if (is_nothing(first_load))
+    if (first_start == UINT64_MAX)
     {
         return Error(WuffPreparedObject, invalid_image, WUFF_LOAD_INVALID_IMAGE);
     }
@@ -1218,40 +1254,26 @@ static Result(WuffPreparedObject)
         none_do_nothing()
     );
 
-    match_optional(
-        first_load,
-        some(segment)
+    match_result(
+        WuffLoader__allocate_image(&object, first_start, last_end, alignment),
+        success_do_nothing(),
+        error(code, message)
         {
-            match_result(
-                WuffLoader__map_segment(&object, image, &segment, true),
-                success_do_nothing(),
-                error(code, message)
-                {
-                    return WuffLoader__prepare_fail(&object, &message, code);
-                }
-            );
-        },
-        none_do_nothing()
+            return WuffLoader__prepare_fail(&object, &message, code);
+        }
     );
 
-    bool first_load_skipped = false;
     for (size_t index = 0; index < header.program_header_count; index++)
     {
         WuffProgramHeader program_header =
             unwrap_optional(WuffLoader__program_header(image, image_size, &header, index), WuffProgramHeader__new());
-        Address start = program_header.virtual_address & ~(WUFF_PAGE_SIZE - 1);
         if (program_header.type != WUFF_PROGRAM_LOAD)
         {
             continue;
         }
 
-        if (!first_load_skipped && start == first_start)
-        {
-            first_load_skipped = true;
-            continue;
-        }
         match_result(
-            WuffLoader__map_segment(&object, image, &program_header, false),
+            WuffLoader__map_segment(&object, image, &program_header),
             success_do_nothing(),
             error(code, message)
             {

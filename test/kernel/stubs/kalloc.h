@@ -15,6 +15,7 @@ void KAllocStub__set_free_failure(bool enabled);
 void KAllocStub__reset_allocation_tracking(void);
 size_t KAllocStub__alloc_count(void);
 size_t KAllocStub__free_count(void);
+bool KAllocStub__is_allocated(Address address);
 size_t KAllocStub__freed_allocation_count_for_size(size_t size);
 bool KAllocStub__memcopy_overflow_occurred(void);
 
