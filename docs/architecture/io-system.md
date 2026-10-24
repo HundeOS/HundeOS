@@ -871,9 +871,10 @@ The Rust I/O host loads `/sbin/components/memfs.wuff` and publishes the retained
 A conflicting `/tmp` fstab entry or failed startup stops that sequence.
 No disk configuration entry is required.
 
-Temporary-file route discovery follows application -> `hund-io-system` ->
-`hund-dateisystem` -> memfs. Operations after the redirect use the application's
-direct Channel to memfs and the existing I/O protocol.
+Temporary-file operations use application -> `hund-io-system` on the Rust I/O
+host, which selects the mount and dispatches to memfs locally. Handles stay on
+that application-to-host Channel; no separate namespace or memfs process is
+involved.
 The former kernel `/tmp/memfs` mount and syscall bypass have been removed.
 The old implementation exists only as a kernel-test fixture and is not linked
 into the kernel.

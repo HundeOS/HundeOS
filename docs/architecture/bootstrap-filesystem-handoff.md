@@ -41,10 +41,13 @@ the target service, without the warden or a filesystem-specific transport.
 
 ## Executable Loading
 
-The kernel follows the same bounded redirects as a userspace client:
-`hund-io-system` -> `hund-dateisystem` -> final filesystem driver. It then uses
-a direct kernel Channel to that final driver. Do not introduce a
-filesystem-specific request/reply queue or bypass userspace I/O routing.
+The kernel opens through `hund-io-system`, served by the Rust I/O host. Hosted
+filesystems are selected and dispatched inside that process; their handles
+remain on the host's Channel. External providers may still return bounded
+redirects, after which the kernel uses a direct Channel to the final provider.
+The retained `hund-dateisystem` endpoint is the host's bootstrap mount-control
+interface, not another process on the executable-loading path. Do not introduce
+a filesystem-specific request/reply queue or bypass userspace I/O routing.
 
 The kernel supplies the originating process identity through an authenticated
 kernel endpoint. Userspace endpoints cannot impersonate it or choose another

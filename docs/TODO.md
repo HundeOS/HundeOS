@@ -760,6 +760,8 @@ multi-process service graph. See the
   cross-mount link rejection. Mama starts the namespace before `/sbin`; another
   fibre loads components after the archive is mounted. Retire standalone C
   namespace startup/build while retaining its endpoint for existing clients.
+  The obsolete C service source, launcher, tests, and startup-path reference
+  are removed; namespace tests live alongside the Rust implementation.
   Process-local namespace routing is implemented for the native Wuff loader,
   with scoped callback ownership, reentrancy checks, fork reset, and unchanged
   external Channel routing. Root filesystem/shutdown and hosted-component
@@ -1406,9 +1408,10 @@ effect can be measured independently.
 - [x] Add a bounded 256-entry EXT2 inode cache using the shared scan-resistant
   cache type. Update it after successful inode writes, invalidate freed inodes,
   and export separate hit, miss, and eviction counters through procfs.
-- [ ] After block and inode cache measurements, merge the filesystem adapters
-  into `hund-dateisystem` to remove the filesystem-service Channel hop while
-  retaining the existing application-facing I/O protocol and failure handling.
+- [x] Consolidate filesystem adapters in the Rust I/O host, removing the separate
+  namespace/filesystem-service Channel hop while retaining the application-facing
+  I/O protocol and failure handling. The obsolete C namespace service is removed;
+  see [direct hosted dispatch](architecture/io-driver-hosts.md#direct-hosted-dispatch).
 - [ ] Revisit filesystem realtime scheduling only after cache and consolidation
   measurements identify residual scheduler latency; do not infer realtime
   suitability from service placement alone.

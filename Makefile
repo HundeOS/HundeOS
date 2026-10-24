@@ -496,7 +496,7 @@ RUST_IO_SOURCES := $(shell find $(RUST_CRATE_DIRS) -name '*.rs' -print -o -name 
 hunde-io-host_EXTRA_OBJS := $(RUST_IO_HOST_ARCHIVE)
 
 USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
-USER_RETIRED_BINARY_DIRS := user/commands/shell user/services/hund-dateisystem user/services/hund-io-system user/drivers/devfs
+USER_RETIRED_BINARY_DIRS := user/commands/shell user/services/hund-io-system user/drivers/devfs
 USER_COMPONENT_DIRS := user/drivers/memfs user/drivers/socket user/services/hund-rohr user/drivers/procfs user/drivers/sysinfofs user/drivers/fat32fs
 USER_BINARY_DIRS := $(filter-out $(USER_RETIRED_BINARY_DIRS) $(USER_COMPONENT_DIRS),$(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)))
 WUFF_INTERPRETER_DIR := user/programs/wuff-ld

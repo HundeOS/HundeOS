@@ -51,13 +51,14 @@ Remaining policy and recovery work is tracked in [TODO](docs/TODO.md).
 `/dev/businfo` kernel stream is retired; the planned `sysinfofs` presentation
 and hotplug monitoring are tracked in [TODO](docs/TODO.md).
 
-The common userspace I/O entry point is `hund-io-system`. It redirects clients
-to final socket and stream services, or through `hund-dateisystem` for mount
-selection. Clients then use a direct Channel to `socket_router` or the selected
-filesystem driver; filesystem drivers use another Channel to their block driver.
-This includes the EXT2
-root disk at `/`: `hundeschule` starts its userspace driver and waits for
-the mount before boot proceeds to login. Nested mounts override root paths.
+The common userspace I/O entry point is `hund-io-system`, served by the Rust
+`hunde-io-host` process. The host dispatches namespace, filesystem, socket, pipe,
+and logical-console operations internally; filesystem components use Channels
+to external block drivers. Its retained `hund-dateisystem` endpoint serves
+bootstrap mount registration, not a separate filesystem process. The old C
+namespace service is removed. Hosted EXT2 serves the root disk at `/`;
+`hundeschule` waits for configured mounts before boot proceeds to login.
+Nested mounts override root paths.
 `/boot/config` uses userspace EXT2; `/boot/sysinfo` is rendered by userspace `sysinfofs`.
 Console and UART I/O use `hund-io-system` channels to userspace `uart_rx`,
 `uart_tx`, and `video_term`. Embedded `/sbin` is served by userspace `embedfs` over
