@@ -41,7 +41,6 @@ static BString hundeschule_interrupt_manager_path = bstr("/sbin/services/hund-un
 static BString hundeschule_virtio_blk_channelio_path = bstr("/sbin/drivers/virtio_blk_channelio");
 static BString hundeschule_socket_router_path = bstr("/sbin/drivers/socket_router");
 static BString hundeschule_io_host_path = bstr("/sbin/services/hunde-io-host");
-static BString hundeschule_io_system_path = bstr("/sbin/services/hund-io-system");
 static BString hundeschule_pipe_path = bstr("/sbin/services/hund-rohr");
 static BString hundeschule_memfs_path = bstr("/sbin/drivers/memfs");
 static BString hundeschule_procfs_path = bstr("/sbin/drivers/procfs");
@@ -675,9 +674,8 @@ static int Hundeschule__spawn_configured_driver_line(HundeschuleRequiredProcesse
     if (BString__equals(&path, &hundeschule_channel_manager_path) ||
         BString__equals(&path, &hundeschule_interrupt_manager_path) ||
         BString__equals(&path, &hundeschule_trace_path) || BString__equals(&path, &hundeschule_socket_router_path) ||
-        BString__equals(&path, &hundeschule_io_host_path) || BString__equals(&path, &hundeschule_io_system_path) ||
-        BString__equals(&path, &hundeschule_pipe_path) || BString__equals(&path, &hundeschule_memfs_path) ||
-        BString__equals(&path, &hundeschule_procfs_path))
+        BString__equals(&path, &hundeschule_io_host_path) || BString__equals(&path, &hundeschule_pipe_path) ||
+        BString__equals(&path, &hundeschule_memfs_path) || BString__equals(&path, &hundeschule_procfs_path))
     {
         return 0;
     }

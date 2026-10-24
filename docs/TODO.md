@@ -778,6 +778,9 @@ multi-process service graph. See the
     The Rust host now serves `hund-io-system`, selects streams/sockets/pipes,
     and calls its filesystem namespace locally. Mama no longer starts the C
     router; console output selection uses the shared boot hardware adapter.
+    The obsolete C router source, tests, and startup/build references are removed;
+    routing tests live alongside the Rust host implementation. The endpoint
+    name remains unchanged for clients.
     Root/shutdown, hosted filesystem/procfs, and combined socket/pipe/memfs I/O
     smoke tests pass on both architectures without a standalone C router.
     See [application router ownership](architecture/io-driver-hosts.md#application-router-ownership).

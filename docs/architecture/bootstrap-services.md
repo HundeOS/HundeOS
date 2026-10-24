@@ -117,7 +117,8 @@ An explicit root slot and mounted overlays belong to one `RootFilesystem` in
 `filesystem/namespace.rs`. The standalone C namespace executable is no longer
 built or started. Its endpoint name remains a compatibility identifier, not a
 separate process.
-The standalone C `hund-io-system` executable is also retired. Its Rust replacement
+The standalone C `hund-io-system` executable, source, and obsolete tests are
+removed. The retained endpoint is served by the Rust host, which
 selects sockets, pipes, console/keyboard streams, or the filesystem namespace;
 filesystem routing is a local call, not another Channel exchange. Initial
 serial/framebuffer output selection comes from the existing boot hardware API,

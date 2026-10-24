@@ -30,7 +30,7 @@ def test_socket_is_a_component_and_host_is_a_service_executable():
         ["make", "--no-print-directory", "-s", "-f", "Makefile", "-f", "-", "rust-layout-probe"],
         input=(
             "rust-layout-probe:\n"
-            "\t@echo component=$(filter %/socket.bin %/hund-rohr.bin %/memfs.bin %/procfs.bin %/fat32fs.bin %/devfs.bin %/hund-dateisystem.bin,$(USER_BINARIES)) "
+            "\t@echo component=$(filter %/socket.bin %/hund-rohr.bin %/memfs.bin %/procfs.bin %/fat32fs.bin %/devfs.bin %/hund-dateisystem.bin %/hund-io-system.bin,$(USER_BINARIES)) "
             "host=$(filter %/hunde-io-host.bin,$(USER_BINARIES))\n"
         ),
         cwd=PROJECT_ROOT,

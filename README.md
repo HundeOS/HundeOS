@@ -56,7 +56,7 @@ The common userspace I/O entry point is `hund-io-system`, served by the Rust
 and logical-console operations internally; filesystem components use Channels
 to external block drivers. Its retained `hund-dateisystem` endpoint serves
 bootstrap mount registration, not a separate filesystem process. The old C
-namespace service is removed. Hosted EXT2 serves the root disk at `/`;
+namespace and I/O-router services are removed. Hosted EXT2 serves the root disk at `/`;
 `hundeschule` waits for configured mounts before boot proceeds to login.
 Nested mounts override root paths.
 `/boot/config` uses userspace EXT2; `/boot/sysinfo` is rendered by userspace `sysinfofs`.

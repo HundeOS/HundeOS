@@ -250,11 +250,14 @@ Native tests exercise state transitions and Future scheduling. Cross-target
 builds and QEMU tests separately exercise the real C ABI, Wuff loader, protected
 Channels and underlying queues, managed I/O buffers, and stackful fibres.
 
-The I/O host publishes the existing `socket_router`, `hund-rohr`, and `/tmp` endpoints.
-The existing `hund-io-system` router redirects socket clients and pipe creation
-to these endpoints; operations run locally inside dynamically loaded Rust modules.
-The one polling fibre polls all three services on every pass, including when one
-has a retained blocking request. Pipes use source-local Rust unit tests for
+The I/O host publishes the existing `socket_router`, `hund-rohr`, and `/tmp`
+endpoints as compatibility/readiness aliases. Applications use its
+`hund-io-system` endpoint, with local dispatch to dynamically loaded Rust modules
+and host-owned handles instead of redirects to separate processes. The old C
+I/O router and its tests are removed; router tests live in
+`user/services/hunde-io-host/src/host/router.rs`. Workers share the host scheduler
+and continue polling while another component retains a blocking request.
+Pipes use source-local Rust unit tests for
 capacity, atomicity, nonblocking behavior, ownership, cleanup, and inheritance;
 the QEMU socket-component smoke also exercises Bash pipelines and coexistence.
 Full-system hosted-I/O acceptance passes on AArch64 and RISC-V: external
