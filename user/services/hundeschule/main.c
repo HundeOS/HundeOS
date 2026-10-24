@@ -35,6 +35,7 @@ static BString hundeschule_hundebus_path = bstr("/sbin/drivers/hundebus");
 static BString hundeschule_virtio_keyboard_path = bstr("/sbin/drivers/virtio_keyboard");
 static BString hundeschule_uart_rx_path = bstr("/sbin/drivers/uart_rx");
 static BString hundeschule_uart_tx_path = bstr("/sbin/drivers/uart_tx");
+static BString hundeschule_video_term_path = bstr("/sbin/drivers/video_term");
 static BString hundeschule_channel_manager_path = bstr("/sbin/services/hundekanal-warter");
 static BString hundeschule_interrupt_manager_path = bstr("/sbin/services/hund-unterbrict");
 static BString hundeschule_virtio_blk_channelio_path = bstr("/sbin/drivers/virtio_blk_channelio");
@@ -732,6 +733,8 @@ static int Hundeschule__spawn_default_drivers(HundeschuleRequiredProcessesPtr pr
                                                     &hundeschule_empty, false);
     if (framebuffer_present)
     {
+        failures += Hundeschule__spawn_required_process(processes, &hundeschule_video_term_path, &hundeschule_empty,
+                                                        &hundeschule_empty, false);
         failures += Hundeschule__spawn_required_process(processes, &hundeschule_virtio_keyboard_path,
                                                         &hundeschule_empty, &hundeschule_empty, true);
     }

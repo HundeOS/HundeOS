@@ -7,6 +7,7 @@
 
 #include "../../common/types/map.h"
 #include "../io/client.h"
+#include "../io/path.h"
 #include "../sys/io.h"
 #include "../sys/process.h"
 #include "../trace/io_trace.h"
@@ -723,7 +724,7 @@ Optional(BString) PosixIO__path(int descriptor)
 
 static bool PosixIO__is_terminal_path(ConstBStringPtr path)
 {
-    return BString__equals(path, &bstr(":tty:")) || BString__equals(path, &bstr(":console:"));
+    return BString__equals(path, &bstr(":tty:")) || BString__equals(path, &bstr(":console:")) || IOPath__is_terminal_node(path);
 }
 
 Optional(BString) PosixIO__terminal_path(int descriptor)

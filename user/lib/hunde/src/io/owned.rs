@@ -3,6 +3,9 @@ use crate::abi::IoError;
 use alloc::vec::Vec;
 
 enum OwnedOperation {
+    GetTerminalAttributes(crate::terminal::Attributes),
+    SetTerminalAttributes(crate::terminal::Attributes),
+    SetForegroundProcess(ProcessId),
     Open(Vec<u8>, u64),
     Accept,
     Read(Vec<u8>),
@@ -36,6 +39,13 @@ pub struct OwnedRequest {
 impl OwnedRequest {
     pub fn new(request: Request<'_>) -> Self {
         let operation = match request.operation {
+            Operation::GetTerminalAttributes(attributes) => {
+                OwnedOperation::GetTerminalAttributes(*attributes)
+            }
+            Operation::SetTerminalAttributes(attributes) => {
+                OwnedOperation::SetTerminalAttributes(attributes)
+            }
+            Operation::SetForegroundProcess(pid) => OwnedOperation::SetForegroundProcess(pid),
             Operation::Open(path, flags) => OwnedOperation::Open(path.into(), flags),
             Operation::Accept => OwnedOperation::Accept,
             Operation::Read(buffer) => OwnedOperation::Read(alloc::vec![0; buffer.len()]),
@@ -76,6 +86,13 @@ impl OwnedRequest {
 
     pub fn with_request<Value>(&mut self, callback: impl FnOnce(Request<'_>) -> Value) -> Value {
         let operation = match &mut self.operation {
+            OwnedOperation::GetTerminalAttributes(attributes) => {
+                Operation::GetTerminalAttributes(attributes)
+            }
+            OwnedOperation::SetTerminalAttributes(attributes) => {
+                Operation::SetTerminalAttributes(*attributes)
+            }
+            OwnedOperation::SetForegroundProcess(pid) => Operation::SetForegroundProcess(*pid),
             OwnedOperation::Open(path, flags) => Operation::Open(path, *flags),
             OwnedOperation::Accept => Operation::Accept,
             OwnedOperation::Read(buffer) => Operation::Read(buffer),
@@ -116,6 +133,13 @@ impl OwnedRequest {
     }
 
     pub fn complete(self, request: Request<'_>, reply: Reply) -> Result<Reply, IoError> {
+        if let Operation::GetTerminalAttributes(target) = request.operation {
+            let OwnedOperation::GetTerminalAttributes(attributes) = self.operation else {
+                return Err(IoError(crate::protocol::IO_PANIC));
+            };
+            *target = attributes;
+            return Ok(reply);
+        }
         if let Operation::Read(target) = request.operation {
             let OwnedOperation::Read(source) = self.operation else {
                 return Err(IoError(crate::protocol::IO_PANIC));

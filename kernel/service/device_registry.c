@@ -89,7 +89,7 @@ Result(ServiceCode) KernelDeviceRegistry__publish(KernelDeviceRegistryPtr self, 
             DeviceRecord published = *record;
             if (published.kind == DEVICE_BLOCK && BString__is_empty(&published.alias))
             {
-                published.alias = BString__sprintf(&bstr("hd%i"), (int)slot);
+                published.alias = BString__sprintf(&bstr("/dev/hd%i"), (int)slot);
             }
             match_result(
                 DeviceRegistry__set(directory, slot, &published),

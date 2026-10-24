@@ -172,6 +172,9 @@ impl Redirect {
 }
 
 pub enum Operation<'a> {
+    GetTerminalAttributes(&'a mut crate::terminal::Attributes),
+    SetTerminalAttributes(crate::terminal::Attributes),
+    SetForegroundProcess(ProcessId),
     Open(&'a [u8], u64),
     Accept,
     Read(&'a mut [u8]),
@@ -246,6 +249,29 @@ impl<'a> Request<'a> {
             return Err(IoError(IO_OPERATION_NOT_SUPPORTED));
         }
         let operation = match raw.operation {
+            crate::protocol::IO_REQUEST_SET_FOREGROUND_PROCESS => {
+                Operation::SetForegroundProcess(ProcessId(raw.offset))
+            }
+            crate::protocol::IO_REQUEST_GET_TERMINAL_ATTRIBUTES => {
+                if count != size_of::<crate::terminal::Attributes>()
+                    || raw.read_data.is_null()
+                    || !(raw.read_data as usize)
+                        .is_multiple_of(align_of::<crate::terminal::Attributes>())
+                {
+                    return Err(IoError(IO_OPERATION_NOT_SUPPORTED));
+                }
+                Operation::GetTerminalAttributes(unsafe { &mut *raw.read_data.cast() })
+            }
+            crate::protocol::IO_REQUEST_SET_TERMINAL_ATTRIBUTES => {
+                if count != size_of::<crate::terminal::Attributes>() || raw.write_data.is_null() {
+                    return Err(IoError(IO_OPERATION_NOT_SUPPORTED));
+                }
+                Operation::SetTerminalAttributes(unsafe {
+                    raw.write_data
+                        .cast::<crate::terminal::Attributes>()
+                        .read_unaligned()
+                })
+            }
             IO_REQUEST_WATCH_FILE => Operation::WatchFile,
             #[cfg(feature = "alloc")]
             crate::protocol::IO_REQUEST_WAIT_FILE_CHANGE => {

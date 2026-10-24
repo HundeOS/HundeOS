@@ -431,6 +431,44 @@ void test_resource_endpoint_prepares_buffers_on_the_initial_open_without_a_redir
     TEST_ASSERT_EQUAL(IO_OK, IOClient__close(handle));
 }
 
+void test_explicit_service_open_bypasses_router_and_prepares_directional_buffers(void)
+{
+    match_result(
+        IOClient__open_service(&bstr(TEST_BACKEND_SERVICE), &bstr(":backend:"), IO_OPEN_READ | IO_OPEN_WRITE),
+        success(handle)
+        {
+            TEST_ASSERT_EQUAL_UINT(0, route_calls);
+            TEST_ASSERT_EQUAL_UINT(1, backend_calls);
+            TEST_ASSERT_TRUE(last_request.buffered);
+            uint8_t data[2];
+            TEST_ASSERT_EQUAL_INT64(2, IOClient__read(handle, data, sizeof(data)));
+            TEST_ASSERT_EQUAL_MEMORY("ok", data, sizeof(data));
+            TEST_ASSERT_EQUAL(IO_OK, IOClient__close(handle));
+        },
+        error_test_fail()
+    );
+}
+
+void test_numbered_console_paths_read_as_streams_instead_of_filling_the_requested_buffer(void)
+{
+    match_result(
+        IOClient__open_service(&bstr(TEST_BACKEND_SERVICE), &bstr("/dev/tty0"), IO_OPEN_READ),
+        success(handle)
+        {
+            uint8_t data[8];
+            TEST_ASSERT_EQUAL_INT64(2, IOClient__read(handle, data, sizeof(data)));
+            TEST_ASSERT_EQUAL_MEMORY("ok", data, 2);
+            TEST_ASSERT_EQUAL(IO_OK, IOClient__close(handle));
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_FALSE(IOPath__is_terminal_node(&bstr("/dev/tty")));
+    TEST_ASSERT_FALSE(IOPath__is_terminal_node(&bstr("/dev/tty0/child")));
+    TEST_ASSERT_FALSE(IOPath__is_terminal_node(&bstr("/dev/tty 0")));
+    TEST_ASSERT_FALSE(IOPath__is_terminal_node(&bstr("/dev/tty0 ")));
+    TEST_ASSERT_TRUE(IOPath__is_terminal_node(&bstr("/dev/vtty12")));
+}
+
 void test_file_client_combines_buffer_chunks_and_stops_at_eof(void)
 {
     file_backend = true;

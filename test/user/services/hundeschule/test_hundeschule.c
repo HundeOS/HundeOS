@@ -414,12 +414,13 @@ void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
                   "driver /sbin/drivers/sysinfofs once\n"
                   "driver /sbin/drivers/sdhci_channelio once\n"
                   "driver /sbin/drivers/virtio_keyboard respawn framebuffer\n"
+                  "driver /sbin/drivers/video_term once framebuffer\n"
                   "driver /sbin/drivers/uart_rx respawn no-framebuffer\n";
 
     HundeschuleRequiredProcesses required_processes = HundeschuleRequiredProcesses__new();
     TEST_ASSERT_EQUAL_INT(0, Hundeschule__initialise_required_processes(&required_processes));
 
-    TEST_ASSERT_EQUAL_UINT64(8, spawn_call_count);
+    TEST_ASSERT_EQUAL_UINT64(9, spawn_call_count);
     TEST_ASSERT_EQUAL_STRING("/sbin/services/hund-verfolgen", spawn_calls[0].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk_channelio", spawn_calls[1].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_blk_channelio", spawn_calls[2].path);
@@ -427,7 +428,8 @@ void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sysinfofs", spawn_calls[4].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sdhci_channelio", spawn_calls[5].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/virtio_keyboard", spawn_calls[6].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[7].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/video_term", spawn_calls[7].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[8].path);
     TEST_ASSERT_EQUAL_UINT64(6, fake_wait_ready_count);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio1", fake_wait_ready_paths[3]);
     TEST_ASSERT_EQUAL_STRING("/dev/virtio2", fake_wait_ready_paths[4]);

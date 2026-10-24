@@ -96,6 +96,11 @@ def generate(root):
         for name, value in compile_enum(root, enum_name, rust_type, source):
             lines.append(f"pub const {name}: {rust_type} = {value};")
     names = ("IO_MODE_TYPE_FILE", "IO_MODE_TYPE_DIR", "IO_DIRENT_NAME_MAX", "IO_DIRECTORY_BATCH_CAPACITY", "IO_PROTOCOL_DATA_SIZE", "IO_FILE_WATCH_CAPACITY", "IO_SESSION_HANDLE_BASE", "HUNDE_IO_COMPONENT_VERSION")
+    names += ("IO_MODE_TYPE_CHAR", "IO_TERMINAL_INPUT_CR_TO_NL", "IO_TERMINAL_INPUT_START_STOP_OUTPUT",
+              "IO_TERMINAL_OUTPUT_PROCESSING", "IO_TERMINAL_OUTPUT_NL_TO_CR_NL", "IO_TERMINAL_CONTROL_CHARACTER_SIZE_8",
+              "IO_TERMINAL_LOCAL_SIGNALS", "IO_TERMINAL_LOCAL_CANONICAL", "IO_TERMINAL_LOCAL_ECHO",
+              "IO_TERMINAL_LOCAL_ECHO_ERASE", "IO_TERMINAL_LOCAL_ECHO_KILL", "IO_TERMINAL_LOCAL_EXTENDED",
+              "IO_TERMINAL_SPEED_38400")
     source = "#include " + json.dumps(str(root / "common/ipc/io_protocol.h")) + "\n#include \"hunde/io_component.h\"\n" + "enum HundeIOMacros { " + ", ".join(
         f"HUNDE_CONST_{name} = {name}" for name in names
     ) + " };\n"

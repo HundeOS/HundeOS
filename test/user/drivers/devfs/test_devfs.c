@@ -2,7 +2,8 @@
 #include <string.h>
 #include "unity.h"
 #include "sys/mem.h"
-#include "../../../../user/drivers/devfs/devfs.h"
+#include "fs/devfs.h"
+#include "hunde/filesystem.h"
 
 static DeviceRegistry registry;
 static FilesystemDriver driver;
@@ -62,6 +63,199 @@ void test_devfs_lists_devices_and_aliases_read_only(void)
     }
     request.offset = 4;
     TEST_ASSERT_EQUAL(0, FilesystemDriver__execute(&driver, &request).directory.count);
+}
+
+void test_devfs_root_reports_directory_metadata_before_listing(void)
+{
+    IORequest request = request_for(IO_REQUEST_FILE_INFO, &bstr("/"));
+    IOReply reply = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_EQUAL(IO_MODE_TYPE_DIR | 0755, reply.file_info.mode);
+    TEST_ASSERT_EQUAL_UINT64(0, reply.file_info.size);
+    request.operation = IO_REQUEST_LIST_DIR;
+    reply = FilesystemDriver__execute(&driver, &request);
+    TEST_ASSERT_EQUAL(IO_OK, reply.status);
+    TEST_ASSERT_GREATER_THAN_UINT64(0, reply.directory.count);
+}
+
+static HundeIORequestV6 HundeIORequestV6__new(IORequestOperation operation)
+{
+    return (HundeIORequestV6){.operation = operation, .session = 10, .pid = 20};
+}
+
+void test_hosted_devfs_preserves_listing_paths_and_pagination(void)
+{
+    HundeIORequestV6 request = HundeIORequestV6__new(IO_REQUEST_LIST_DIR);
+    request.write_data = (const uint8_t *)"/";
+    request.count = request.capacity = 1;
+    HundeIOCompletion reply = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, reply.kind);
+    TEST_ASSERT_EQUAL_UINT64(3, reply.directory_count);
+    TEST_ASSERT_EQUAL_BSTRING(
+        bstr("null"), BString__from_chars((const char *)reply.directory[0].name, reply.directory[0].name_length));
+    TEST_ASSERT_EQUAL_BSTRING(
+        bstr("virtio1"), BString__from_chars((const char *)reply.directory[1].name, reply.directory[1].name_length));
+    request.offset = 3;
+    reply = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, reply.kind);
+    TEST_ASSERT_EQUAL_UINT64(1, reply.directory_count);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("test-stream"), BString__from_chars((const char *)reply.directory[0].name,
+                                                                       reply.directory[0].name_length));
+    request.offset = 4;
+    reply = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, reply.kind);
+    TEST_ASSERT_EQUAL_UINT64(0, reply.directory_count);
+}
+
+static HundeIOCompletion Devfs__open_native(ConstBStringPtr path, Flags flags)
+{
+    HundeIORequestV6 request = HundeIORequestV6__new(IO_REQUEST_OPEN);
+    request.flags = flags;
+    request.write_data = (const uint8_t *)BString__cstr(path);
+    request.count = request.capacity = BString__length(path);
+    return hunde_rust_devfs_execute(&driver, &request);
+}
+
+void test_hosted_devfs_root_and_layout_use_the_existing_driver_storage(void)
+{
+    RustNativeLayout layout = hunde_rust_devfs_layout();
+    TEST_ASSERT_EQUAL_UINT64(sizeof(driver), layout.size);
+    TEST_ASSERT_EQUAL_UINT64(_Alignof(FilesystemDriver), layout.alignment);
+    HundeIORequestV6 request = HundeIORequestV6__new(IO_REQUEST_FILE_INFO);
+    request.write_data = (const uint8_t *)"/";
+    request.count = request.capacity = 1;
+    HundeIOCompletion result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, result.kind);
+    TEST_ASSERT_EQUAL_UINT32(IO_MODE_TYPE_DIR | 0755, result.file_info.mode);
+    TEST_ASSERT_EQUAL_UINT64(0, result.directory_count);
+}
+
+void test_hosted_devfs_uses_bounded_caller_buffers_beyond_inline_channel_capacity(void)
+{
+    HundeIOCompletion opened = Devfs__open_native(&bstr("/null"), IO_OPEN_READ | IO_OPEN_WRITE);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, opened.kind);
+    uint8_t buffer[IO_PROTOCOL_DATA_SIZE + 300];
+    memset(buffer, 42, sizeof(buffer));
+    HundeIORequestV6 request = HundeIORequestV6__new(IO_REQUEST_WRITE);
+    request.handle = opened.value;
+    request.write_data = buffer;
+    request.count = request.capacity = sizeof(buffer);
+    HundeIOCompletion result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, result.kind);
+    TEST_ASSERT_EQUAL_UINT64(sizeof(buffer), result.value);
+    request.operation = IO_REQUEST_READ;
+    request.read_data = buffer;
+    result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, result.kind);
+    TEST_ASSERT_EQUAL_UINT64(0, result.value);
+    request.capacity--;
+    result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_ERROR, result.kind);
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_BUFFER, result.error.code);
+}
+
+void test_hosted_devfs_preserves_inherited_offsets_and_target_authentication_after_disconnect(void)
+{
+    HundeIOCompletion opened = Devfs__open_native(&bstr("/hd0"), IO_OPEN_READ);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, opened.kind);
+    uint8_t buffer[5];
+    HundeIORequestV6 request = HundeIORequestV6__new(IO_REQUEST_READ);
+    request.handle = opened.value;
+    request.count = request.capacity = sizeof(buffer);
+    request.read_data = buffer;
+    HundeIOCompletion result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, result.kind);
+    TEST_ASSERT_EQUAL_MEMORY("path=", buffer, sizeof(buffer));
+    request.pid = 21;
+    result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_ERROR, result.kind);
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, result.error.code);
+    request = HundeIORequestV6__new(IO_REQUEST_INHERIT_PREPARE);
+    request.handle = opened.value;
+    HundeIOCompletion prepared = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, prepared.kind);
+    TEST_ASSERT_EQUAL_UINT64(IO_OPEN_READ, prepared.inheritance_flags);
+    request.operation = IO_REQUEST_INHERIT_COMMIT;
+    request.inheritance_token = prepared.value;
+    request.inheritance_pid = 30;
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, hunde_rust_devfs_execute(&driver, &request).kind);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, hunde_rust_devfs_disconnect(&driver, 10, 20).kind);
+    request = HundeIORequestV6__new(IO_REQUEST_INHERIT_CLAIM);
+    request.session = 11;
+    request.pid = 31;
+    request.inheritance_token = prepared.value;
+    request.flags = IO_OPEN_READ;
+    result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_ERROR, result.kind);
+    TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, result.error.code);
+    request.pid = 30;
+    result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, result.kind);
+    TEST_ASSERT_EQUAL_INT64(opened.value, result.value);
+    request.operation = IO_REQUEST_READ;
+    request.handle = result.value;
+    request.flags = 0;
+    request.read_data = buffer;
+    request.count = request.capacity = sizeof(buffer);
+    result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, result.kind);
+    TEST_ASSERT_EQUAL_MEMORY("/dev/", buffer, sizeof(buffer));
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, hunde_rust_devfs_disconnect(&driver, 11, 30).kind);
+    TEST_ASSERT_EQUAL_UINT64(0, FilesystemFiles__len(&driver.files));
+}
+
+void test_native_filesystem_codec_bounds_links_and_directory_completions(void)
+{
+    HundeIORequestV6 request = HundeIORequestV6__new(IO_REQUEST_LINK);
+    request.write_data = (const uint8_t *)"/from/to";
+    request.offset = 5;
+    request.count = request.capacity = 8;
+    match_result(
+        IORequest__new_rust(&request),
+        success(decoded)
+        {
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/from"), IORequest__path(&decoded));
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/to"), IORequest__target_path(&decoded));
+        },
+        error_test_fail()
+    );
+    request.offset = 0;
+    match_result(
+        IORequest__new_rust(&request),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(IO_INVALID_PATH, code);
+        }
+    );
+    IOReply reply = IOReply__new(IO_OK, 0);
+    reply.directory.count = IO_DIRECTORY_BATCH_CAPACITY + 1;
+    HundeIOCompletion result = HundeIOCompletion__new_reply(IO_REQUEST_LIST_DIR, reply);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_ERROR, result.kind);
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_BUFFER, result.error.code);
+    reply.directory.count = 1;
+    reply.directory.entries[0].name_len = IO_DIRENT_NAME_MAX;
+    result = HundeIOCompletion__new_reply(IO_REQUEST_LIST_DIR, reply);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_ERROR, result.kind);
+    TEST_ASSERT_EQUAL(IO_UNKNOWN_BUFFER, result.error.code);
+    result = HundeIOCompletion__new_reply(IO_REQUEST_READ, IOReply__new(IO_WAIT_FOR_DATA, 0));
+    TEST_ASSERT_EQUAL(HUNDE_IO_PENDING, result.kind);
+}
+
+void test_hosted_devfs_rejects_terminal_controls_without_reading_an_input_payload(void)
+{
+    HundeIOCompletion opened = Devfs__open_native(&bstr("/null"), IO_OPEN_READ);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, opened.kind);
+    IOTerminalAttributes attributes = IOTerminalAttributes__default();
+    HundeIORequestV6 request = HundeIORequestV6__new(IO_REQUEST_GET_TERMINAL_ATTRIBUTES);
+    request.handle = opened.value;
+    request.read_data = (uint8_t *)&attributes;
+    request.count = request.capacity = sizeof(attributes);
+    HundeIOCompletion result = hunde_rust_devfs_execute(&driver, &request);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_ERROR, result.kind);
+    TEST_ASSERT_EQUAL(IO_OPERATION_NOT_SUPPORTED, result.error.code);
+    IOTerminalAttributes expected = IOTerminalAttributes__default();
+    TEST_ASSERT_EQUAL_MEMORY(&expected, &attributes, sizeof(attributes));
 }
 
 void test_devfs_null_reads_eof_and_discards_writes(void)

@@ -2,6 +2,7 @@
 
 extern crate alloc;
 
+mod console;
 mod filesystem;
 mod host;
 mod socket;

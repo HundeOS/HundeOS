@@ -249,6 +249,7 @@ impl RawRequest {
         use crate::io::Operation;
         use crate::protocol::*;
         let mut link_paths = alloc::vec::Vec::new();
+        let terminal_attributes;
         let mut raw = Self {
             operation: 0,
             reserved: 0,
@@ -267,6 +268,21 @@ impl RawRequest {
             padding: 0,
         };
         raw.operation = match request.operation {
+            Operation::SetForegroundProcess(pid) => {
+                raw.offset = pid.0;
+                IO_REQUEST_SET_FOREGROUND_PROCESS
+            }
+            Operation::GetTerminalAttributes(attributes) => {
+                raw.read_data = core::ptr::from_mut(attributes).cast();
+                raw.count = size_of::<crate::terminal::Attributes>() as u64;
+                IO_REQUEST_GET_TERMINAL_ATTRIBUTES
+            }
+            Operation::SetTerminalAttributes(attributes) => {
+                terminal_attributes = attributes;
+                raw.write_data = core::ptr::from_ref(&terminal_attributes).cast();
+                raw.count = size_of::<crate::terminal::Attributes>() as u64;
+                IO_REQUEST_SET_TERMINAL_ATTRIBUTES
+            }
             Operation::WatchFile => IO_REQUEST_WATCH_FILE,
             Operation::WaitFileChange(watches) => {
                 for watch in watches {
@@ -639,6 +655,30 @@ pub(crate) mod host {
             session: u64,
         ) -> StatusResult;
         pub(crate) fn hunde_rust_block_layout() -> NativeLayout;
+        pub(crate) fn hunde_rust_devfs_layout() -> NativeLayout;
+        pub(crate) fn hunde_rust_devfs_init(storage: *mut c_void);
+        pub(crate) fn hunde_rust_devfs_execute(
+            storage: *mut c_void,
+            input: *const RawRequest,
+        ) -> Completion;
+        pub(crate) fn hunde_rust_devfs_disconnect(
+            storage: *mut c_void,
+            session: u64,
+            pid: u64,
+        ) -> StatusResult;
+        pub(crate) fn hunde_rust_terminal_open(service: ByteSpan, flags: u64) -> Completion;
+        pub(crate) fn hunde_rust_terminal_read(
+            handle: i64,
+            data: *mut u8,
+            length: u64,
+        ) -> Completion;
+        pub(crate) fn hunde_rust_terminal_write(
+            handle: i64,
+            data: *const u8,
+            length: u64,
+        ) -> Completion;
+        pub(crate) fn hunde_rust_terminal_close(handle: i64) -> StatusResult;
+        pub(crate) fn hunde_rust_terminal_interrupt(pid: u64) -> StatusResult;
         pub(crate) fn hunde_rust_block_open(
             storage: *mut c_void,
             path: ByteSpan,

@@ -17,6 +17,7 @@ use hunde::service::{ReadinessMessage, ServiceName};
 
 struct Mount {
     path: String,
+    console: bool,
 }
 
 impl Mount {
@@ -45,17 +46,23 @@ impl Mount {
                     | "devfs"
                     | "embedfs"
                     | "sysinfofs"
+                    | "console"
             )
             || bytes.len() >= 256
+            || (format == "console" && !crate::console::terminal_path(path))
         {
             return Err(IoError(IO_INVALID_MOUNT_POINT));
         }
         Ok(Self {
             path: path.to_string(),
+            console: format == "console",
         })
     }
 
     fn contains(&self, path: &[u8]) -> bool {
+        if self.console {
+            return path == self.path.as_bytes();
+        }
         path.starts_with(self.path.as_bytes())
             && (self.path == "/"
                 || path.len() == self.path.len()
@@ -161,7 +168,18 @@ impl MountTree {
                     .map(|name| {
                         DirectoryEntry::new(
                             FileInfo::new(
-                                IO_MODE_TYPE_DIR as u32 | 0o755,
+                                if self.mounts().any(|mount| {
+                                    mount.console
+                                        && mount.path.as_bytes().strip_prefix(path).is_some_and(
+                                            |suffix| {
+                                                suffix.strip_prefix(b"/").unwrap_or(suffix) == name
+                                            },
+                                        )
+                                }) {
+                                    hunde::protocol::IO_MODE_TYPE_CHAR as u32 | 0o666
+                                } else {
+                                    IO_MODE_TYPE_DIR as u32 | 0o755
+                                },
                                 Credentials::new(UserId(0), GroupId(0)),
                                 0,
                                 0,
@@ -279,6 +297,26 @@ mod tests {
     fn mount(tree: &mut MountTree, path: &str) {
         tree.add(Mount::parse(alloc::format!("device - ext2 {path}").as_bytes()).unwrap())
             .unwrap();
+    }
+
+    #[test]
+    fn console_nodes_are_listed_as_character_devices_and_do_not_capture_subpaths() {
+        let mut tree = MountTree::new();
+        mount(&mut tree, "/");
+        mount(&mut tree, "/dev");
+        tree.add(Mount::parse(b"device uart_rx,uart_tx console /dev/tty0").unwrap())
+            .unwrap();
+        assert_eq!(tree.select(b"/dev/tty0").unwrap().path, "/dev/tty0");
+        assert_eq!(tree.select(b"/dev/tty0/child").unwrap().path, "/dev");
+        let Reply::Directory(entries) = tree.route(b"/dev", b"", 0, true).unwrap() else {
+            panic!("Expected directory")
+        };
+        assert_eq!(entries[0].name(), b"tty0");
+        assert_eq!(
+            entries[0].info.mode & 0xf000,
+            hunde::protocol::IO_MODE_TYPE_CHAR as u32
+        );
+        assert!(Mount::parse(b"device uart_rx,uart_tx console /tmp/tty0").is_err());
     }
 
     #[test]

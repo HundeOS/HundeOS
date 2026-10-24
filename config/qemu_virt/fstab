@@ -1,4 +1,6 @@
 # device <path> <filesystem> <mountpoint>
+device uart_rx,uart_tx console /dev/tty0
+device /dev/tty0 console :console:
 device /dev/virtio1 ext2.wuff /
 device /dev/virtio4 fat32.wuff /mnt/channelio
 device /dev/virtio5 ext2.wuff /mnt/channelio-ext2

@@ -52,6 +52,20 @@ static RustServiceCompletion execute_component(HundeComponentContext context, Co
     observed_target = request->inheritance_pid;
     observed_buffered = request->buffered != 0;
     observed_offset = request->offset;
+    if (request->operation == IO_REQUEST_GET_TERMINAL_ATTRIBUTES)
+    {
+        IOTerminalAttributes attributes = IOTerminalAttributes__default();
+        TEST_ASSERT_EQUAL_UINT64(sizeof(attributes), request->count);
+        TEST_ASSERT_EQUAL_UINT64(sizeof(attributes), request->capacity);
+        __builtin_memcpy(request->read_data, &attributes, sizeof(attributes));
+    }
+    if (request->operation == IO_REQUEST_SET_TERMINAL_ATTRIBUTES)
+    {
+        IOTerminalAttributes attributes;
+        TEST_ASSERT_EQUAL_UINT64(sizeof(attributes), request->count);
+        __builtin_memcpy(&attributes, request->write_data, sizeof(attributes));
+        TEST_ASSERT_EQUAL_UINT32(42, attributes.local_flags);
+    }
     calls++;
     if (request->operation == IO_REQUEST_READ)
     {
@@ -388,6 +402,45 @@ void test_invalid_directory_batch_or_name_is_rejected(void)
         some(reply)
         {
             TEST_ASSERT_EQUAL(IO_PANIC, reply.status);
+        },
+        none_test_fail()
+    );
+}
+
+void test_terminal_attributes_and_foreground_use_bounded_component_fields(void)
+{
+    RustIOCallbacks component = RustIOCallbacks__new();
+    IORequest request = IORequest__new(IO_REQUEST_GET_TERMINAL_ATTRIBUTES, 7);
+    match_optional(
+        RustIOCallbacks__execute(&component, 123, 456, &request),
+        some(reply)
+        {
+            TEST_ASSERT_EQUAL(IO_OK, reply.status);
+            IOTerminalAttributes expected = IOTerminalAttributes__default();
+            TEST_ASSERT_EQUAL_MEMORY(&expected, &reply.terminal_attributes, sizeof(expected));
+        },
+        none_test_fail()
+    );
+    request.operation = IO_REQUEST_SET_TERMINAL_ATTRIBUTES;
+    request.terminal_attributes.local_flags = 42;
+    match_optional(
+        RustIOCallbacks__execute(&component, 123, 456, &request),
+        some(reply)
+        {
+            TEST_ASSERT_EQUAL(IO_OK, reply.status);
+        },
+        none_test_fail()
+    );
+    request.operation = IO_REQUEST_SET_FOREGROUND_PROCESS;
+    request.foreground_pid = 987;
+    match_optional(
+        RustIOCallbacks__execute(&component, 123, 456, &request),
+        some(reply)
+        {
+            TEST_ASSERT_EQUAL(IO_OK, reply.status);
+            TEST_ASSERT_EQUAL_UINT64(987, observed_offset);
+            TEST_ASSERT_EQUAL_UINT64(123, observed_session);
+            TEST_ASSERT_EQUAL_UINT64(456, observed_pid);
         },
         none_test_fail()
     );

@@ -58,6 +58,47 @@ static Result(IOStatus) Hundeschule__mount_config(ChannelPtr channel, MountConfi
     {
         config.filesystem_type = bstr("fat32.wuff");
     }
+    if (BString__equals(&config.filesystem_type, &bstr("console")))
+    {
+        BString input = empty_bstr();
+        BString output = empty_bstr();
+        if (BString__equals(&config.device_path, &bstr("uart_rx,uart_tx")))
+        {
+            input = bstr("uart_rx");
+            output = bstr("uart_tx");
+        }
+        else if (BString__equals(&config.device_path, &bstr("keyboard,video_term")))
+        {
+            input = bstr("keyboard");
+            output = bstr("video_term");
+        }
+        if (!BString__is_empty(&input))
+        {
+            ServiceCode input_ready = service_wait_ready(&input);
+            if (!service_ok(input_ready))
+            {
+                return Error(IOStatus, bstr("Console input is not ready"), input_ready);
+            }
+            ServiceCode output_ready = service_wait_ready(&output);
+            if (!service_ok(output_ready))
+            {
+                return Error(IOStatus, bstr("Console output is not ready"), output_ready);
+            }
+        }
+        match_result(
+            MountClient__start_hosted(config),
+            success(code)
+            {
+                return BString__equals(&config.mountpoint, &bstr(":console:")) ? Success(IOStatus, IO_OK)
+                                                                               : MountClient__add(channel, config);
+            },
+            error(code, message)
+            {
+                return Error(IOStatus, message, code);
+            }
+        );
+        return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+    }
     if (BString__equals(&config.filesystem_type, &bstr("ext2.wuff")) ||
         BString__equals(&config.filesystem_type, &bstr("fat32.wuff")))
     {
@@ -182,7 +223,8 @@ static Result(IOStatus) Hundeschule__mount_configured_file(ChannelPtr channel, I
                                             if (!BString__equals(&mount.filesystem_type, &bstr("ext2")) &&
                                                 !BString__equals(&mount.filesystem_type, &bstr("fat32")) &&
                                                 !BString__equals(&mount.filesystem_type, &bstr("ext2.wuff")) &&
-                                                !BString__equals(&mount.filesystem_type, &bstr("fat32.wuff")))
+                                                !BString__equals(&mount.filesystem_type, &bstr("fat32.wuff")) &&
+                                                !BString__equals(&mount.filesystem_type, &bstr("console")))
                                             {
                                                 continue;
                                             }
@@ -255,7 +297,8 @@ static Result(IOStatus) Hundeschule__mount_configured(ChannelPtr channel)
 
 static Result(IOStatus) Hundeschule__mount_builtin(ChannelPtr channel, ConstBStringPtr type, ConstBStringPtr path)
 {
-    if (BString__equals(type, &bstr("memfs")) || BString__equals(type, &bstr("procfs")))
+    if (BString__equals(type, &bstr("memfs")) || BString__equals(type, &bstr("procfs")) ||
+        BString__equals(type, &bstr("devfs")))
     {
         ServiceCode status = service_wait_ready(path);
         if (!service_ok(status))

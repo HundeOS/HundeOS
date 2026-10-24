@@ -29,6 +29,7 @@ IOStatus IOClient__abort_inheritance(IOClientInheritancePtr inheritance);
 void IOClient__reset_after_fork(void);
 IOStatus IOClient__claim_inheritance(IOClientInheritancePtr inheritance);
 IOHandle IOClient__open(ConstBStringPtr path, Flags flags);
+Result(IOHandle) IOClient__open_service(ConstBStringPtr service, ConstBStringPtr path, Flags flags);
 Result(IOPipe) IOClient__pipe(void);
 IOStatus IOClient__link(ConstBStringPtr source_path, ConstBStringPtr target_path);
 IOHandle IOClient__accept(IOHandle handle);

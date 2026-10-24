@@ -57,6 +57,14 @@ impl<Component> Filesystem<Component> {
 }
 
 impl Filesystem {
+    pub(crate) fn devices() -> Result<Filesystem<hunde::devfs::Filesystem>, IoError> {
+        Ok(Filesystem {
+            name: ServiceName::new("/dev"),
+            ready: ReadinessMessage::new("Rust hosted devfs ready"),
+            component: hunde::devfs::Filesystem::new()?,
+        })
+    }
+
     pub(crate) fn load(kind: FilesystemKind) -> Result<Self, IoError> {
         let bundled = match kind {
             FilesystemKind::Temporary => BundledComponent::Memfs,

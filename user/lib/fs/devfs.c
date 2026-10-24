@@ -3,6 +3,10 @@
 
 static Result(FilesystemFileInfo) Devfs__describe(IOServiceContext context, ConstBStringPtr path)
 {
+    if (BString__equals(path, &bstr("/")))
+    {
+        return Success(FilesystemFileInfo, FilesystemFileInfo__new(0, IO_MODE_TYPE_DIR | 0755));
+    }
     if (BString__equals(path, &bstr("/null")))
     {
         return Success(FilesystemFileInfo, FilesystemFileInfo__new(0, IO_MODE_TYPE_FILE | 0666));

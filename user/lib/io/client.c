@@ -1,4 +1,5 @@
 #include "client.h"
+#include "path.h"
 #include "buffer/client.h"
 #include "sys/queue_wait.h"
 #include "types/fixed_array.h"
@@ -314,10 +315,10 @@ static IOReply IOClient__submit_path(ConstBStringPtr service, IORequestPtr reque
     return IOReply__new(IO_PANIC, 0);
 }
 
-static IOClientExchange IOClient__path_exchange(IORequestPtr request)
+static IOClientExchange IOClient__path_exchange_at(IORequestPtr request, ConstBStringPtr initial_service)
 {
-    IORoute route = IORoute__new(&bstr(IO_SYSTEM_SERVICE), &empty_bstr(), &empty_bstr(), false);
-    bool final = false;
+    IORoute route = IORoute__new(initial_service, &empty_bstr(), &empty_bstr(), false);
+    bool final = !BString__equals(initial_service, &bstr(IO_SYSTEM_SERVICE));
     for (uint64_t redirects = 0; redirects <= IO_ROUTE_LIMIT; redirects++)
     {
         BString service = IORoute__service(&route);
@@ -350,6 +351,11 @@ static IOClientExchange IOClient__path_exchange(IORequestPtr request)
         final = route.final;
     }
     return IOClientExchange__error(IO_OPERATION_NOT_SUPPORTED);
+}
+
+static IOClientExchange IOClient__path_exchange(IORequestPtr request)
+{
+    return IOClient__path_exchange_at(request, &bstr(IO_SYSTEM_SERVICE));
 }
 
 static bool IOClientHandle__matches(IOClientHandlePtr self, void * context)
@@ -550,7 +556,7 @@ IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr pat
     return IOClient__path_exchange(&request).reply;
 }
 
-IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
+static IOHandle IOClient__open_at(ConstBStringPtr service_name, ConstBStringPtr path, Flags flags)
 {
     IORequest request = IORequest__new(IO_REQUEST_OPEN, 0);
     if (BString__length(path) >= IO_PROTOCOL_DATA_SIZE || next_handle == INT64_MAX)
@@ -559,7 +565,7 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     }
     request.count = BString__copy_to(path, (char *)request.data, sizeof(request.data));
     request.flags = flags;
-    IOClientExchange exchange = IOClient__path_exchange(&request);
+    IOClientExchange exchange = IOClient__path_exchange_at(&request, service_name);
     if (exchange.reply.status != IO_OK)
     {
         return exchange.reply.status;
@@ -573,8 +579,9 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
     BString service = IORoute__service(&exchange.route);
     if (IOClient__is_local(&service))
     {
-        IOClientHandle resource = IOClientHandle__new(next_handle++, (IOHandle)exchange.reply.value, &service,
-                                                      !BString__starts_with(path, &bstr("/")));
+        IOClientHandle resource =
+            IOClientHandle__new(next_handle++, (IOHandle)exchange.reply.value, &service,
+                                !BString__starts_with(path, &bstr("/")) || IOPath__is_terminal_node(path));
         match_result(
             IOClientHandles__push(&handles, resource),
             success(code)
@@ -610,8 +617,9 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
         return IO_UNKNOWN_BUFFER;
     }
     session->buffers = exchange.reply.buffers;
-    IOClientHandle resource = IOClientHandle__new(next_handle++, (IOHandle)exchange.reply.value, &service,
-                                                  !BString__starts_with(path, &bstr("/")));
+    IOClientHandle resource =
+        IOClientHandle__new(next_handle++, (IOHandle)exchange.reply.value, &service,
+                            !BString__starts_with(path, &bstr("/")) || IOPath__is_terminal_node(path));
     match_result(
         IOClientHandles__push(&handles, resource),
         success(code)
@@ -624,6 +632,22 @@ IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
             return IO_REGISTER_FAILED;
         }
     );
+}
+
+IOHandle IOClient__open(ConstBStringPtr path, Flags flags)
+{
+    return IOClient__open_at(&bstr(IO_SYSTEM_SERVICE), path, flags);
+}
+
+Result(IOHandle) IOClient__open_service(ConstBStringPtr service, ConstBStringPtr path, Flags flags)
+{
+    if (BString__is_empty(service) || BString__contains_char(service, '\0'))
+    {
+        return Error(IOHandle, bstr("Invalid stream service"), IO_INVALID_PATH);
+    }
+    IOHandle handle = IOClient__open_at(service, path, flags);
+    return handle >= IO_SESSION_HANDLE_BASE ? Success(IOHandle, handle)
+                                            : Error(IOHandle, bstr("Cannot open stream service"), handle);
 }
 
 static void IOClient__discard_pipe(IOClientSessionPtr session, IOPipe pipe)

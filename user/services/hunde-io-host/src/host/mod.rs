@@ -138,11 +138,15 @@ fn run_components(
         dispatch::Worker::new(dispatcher.clone(), processes.endpoint(), processes)?;
     let boot = Filesystem::load(FilesystemKind::Boot)?;
     let mut boot_worker = dispatch::Worker::new(dispatcher.clone(), boot.endpoint(), boot)?;
+    let devices = Filesystem::devices()?;
+    let mut devices_worker =
+        dispatch::Worker::new(dispatcher.clone(), devices.endpoint(), devices)?;
     let mut socket = socket_worker.driver();
     let mut streams = streams_worker.driver();
     let mut temporary = temporary_worker.driver();
     let mut processes = processes_worker.driver();
     let mut boot = boot_worker.driver();
+    let mut devices = devices_worker.driver();
     let mounts = crate::filesystem::control::Mounts::new();
     let mut control =
         crate::filesystem::control::Control::new(mounts.clone(), hunde::service::authorize_mount);
@@ -152,6 +156,7 @@ fn run_components(
         Endpoint::listen(&mut temporary)?,
         Endpoint::listen(&mut processes)?,
         Endpoint::listen(&mut boot)?,
+        Endpoint::listen(&mut devices)?,
         Endpoint::listen(&mut control)?,
     ];
     for endpoint in &endpoints {
@@ -176,6 +181,7 @@ fn run_components(
                 | temporary_worker.poll()
                 | processes_worker.poll()
                 | boot_worker.poll()
+                | devices_worker.poll()
             {
                 return core::task::Poll::Ready(());
             }

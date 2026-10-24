@@ -165,6 +165,7 @@ impl Component {
 
 struct State {
     components: Vec<Component>,
+    aliases: Vec<(ServiceName, ComponentId)>,
     bindings: Vec<Binding>,
     grants: Vec<Grant>,
     pending: Vec<Pending>,
@@ -177,6 +178,7 @@ impl State {
     fn new() -> Self {
         Self {
             components: Vec::new(),
+            aliases: Vec::new(),
             bindings: Vec::new(),
             grants: Vec::new(),
             pending: Vec::new(),
@@ -191,6 +193,12 @@ impl State {
             .iter()
             .position(|component| component.name.as_str() == name)
             .map(ComponentId)
+            .or_else(|| {
+                self.aliases
+                    .iter()
+                    .find(|(alias, _)| alias.as_str() == name)
+                    .map(|(_, component)| *component)
+            })
     }
     fn binding(&self, handle: Handle, owner: Owner, watch: bool) -> Result<Binding, IoError> {
         let binding = *self
@@ -418,6 +426,16 @@ impl Dispatcher {
     }
     pub(crate) fn contains(&self, service: &str) -> bool {
         self.0.borrow().component(service).is_some()
+    }
+
+    pub(crate) fn alias(&self, name: ServiceName, target: &str) -> Result<(), IoError> {
+        let mut state = self.0.borrow_mut();
+        if state.component(name.as_str()).is_some() || state.aliases.len() == 16 {
+            return Err(IoError(IO_REGISTER_FAILED));
+        }
+        let component = state.component(target).ok_or(IoError(IO_UNKNOWN_HANDLE))?;
+        state.aliases.push((name, component));
+        Ok(())
     }
     pub(crate) fn take_notification(&self) -> bool {
         core::mem::take(&mut self.0.borrow_mut().notify)

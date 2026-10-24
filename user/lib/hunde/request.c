@@ -79,6 +79,18 @@ Optional(IOReply)
         return Some(IOReply, IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0));
     }
     HundeIORequestV6 input = HundeIORequestV6__new(request, session, pid, &reply);
+    if (request->operation == IO_REQUEST_SET_FOREGROUND_PROCESS)
+    {
+        input.offset = request->foreground_pid;
+    }
+    if (request->operation == IO_REQUEST_GET_TERMINAL_ATTRIBUTES ||
+        request->operation == IO_REQUEST_SET_TERMINAL_ATTRIBUTES)
+    {
+        input.count = sizeof(IOTerminalAttributes);
+        input.capacity = sizeof(IOTerminalAttributes);
+        input.read_data = (uint8_t *)&reply.terminal_attributes;
+        input.write_data = (const uint8_t *)&request->terminal_attributes;
+    }
     uint8_t link_paths[2 * IO_PROTOCOL_DATA_SIZE];
     if (request->operation == IO_REQUEST_LINK)
     {

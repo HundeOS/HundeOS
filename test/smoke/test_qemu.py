@@ -635,12 +635,38 @@ def exercise_root_filesystem_commands(session, architecture_marker, shell_timeou
 def test_qemu_root_filesystem_and_shutdown(qemu_session, target, trace_path, architecture_marker, shell_timeout):
     session = qemu_session(target, trace_path)
     exercise_root_filesystem_commands(session, architecture_marker, shell_timeout)
+    config = session.run_command("cat /boot/config/fstab")
+    assert b"device uart_rx,uart_tx console /dev/tty0" in config
+    assert b"device /dev/tty0 console :console:" in config
+    listing = session.run_command("ls /dev")
+    assert b"tty0" in listing
+    assert b"null" in listing and b"virtio1" in listing and b"hd0" in listing, listing
+    processes = session.run_command("ps")
+    assert b"/sbin/drivers/devfs" not in processes
+    metadata = session.run_command("cat /dev/virtio1")
+    assert b"path=/dev/virtio1" in metadata and b"block_size=512" in metadata
+    alias_metadata = session.run_command("cat /dev/hd0")
+    assert b"path=/dev/virtio1" in alias_metadata and b"block_size=512" in alias_metadata
+    inherited = session.run_command("exec 3</dev/virtio1; /usr/local/bin/cat <&3; exec 3<&-")
+    assert b"path=/dev/virtio1" in inherited
+    null_io = session.run_command("exec 3<>/dev/null; printf '\\144\\151\\163\\143\\141\\162\\144\\145\\144\\012' >&3; /usr/local/bin/cat <&3; exec 3<&-; exec 3>&-; printf 'null-io-%s\\n' ready")
+    assert b"null-io-ready" in null_io and b"\r\ndiscarded\r\n" not in null_io
+    output = session.run_command("printf 'console-node-%s\\n' ready > /dev/tty0")
+    assert b"console-node-ready" in output
+    output = session.run_command("exec 3<>/dev/tty0; printf 'console-duplex-%s\\n' ready >&3; exec 3<&-; exec 3>&-")
+    assert b"console-duplex-ready" in output
+    session.send_line("read -r -n 1 console_key </dev/tty0; printf 'console-read-%s\\n' \"$console_key\"")
+    session.send_line("Q")
+    session.expect(b"console-read-Q", shell_timeout)
+    session.expect(PROMPT, shell_timeout)
     session.send_line("shutdown")
     session.wait_for_exit(SHUTDOWN_TIMEOUT_SECONDS)
     trace = session.trace_path.read_bytes()
     assert b"Rust ext2fs.wuff ready" in trace
     assert b"Rust filesystem namespace ready" in trace
     assert b"Rust I/O router ready" in trace
+    assert b"Rust hosted devfs ready" in trace
+    session.assert_trace()
 
 
 @pytest.mark.parametrize(

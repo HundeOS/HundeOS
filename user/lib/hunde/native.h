@@ -105,11 +105,20 @@ bool RustIOCallbacks__disconnect(IOServiceContext self, QueueConnectionID sessio
 IOReply RustIOCallbacks__execute_local(ConstRustIOCallbacksPtr self, uint64_t pid, IORequestPtr request);
 
 RustNativeLayout hunde_rust_module_layout(void);
+RustNativeLayout hunde_rust_devfs_layout(void);
+void hunde_rust_devfs_init(void * storage);
+HundeIOCompletion hunde_rust_devfs_execute(void * storage, ConstHundeIORequestV6Ptr input);
+HundeStatusResult hunde_rust_devfs_disconnect(void * storage, uint64_t session, uint64_t pid);
 RustNativeLayout hunde_rust_embedfs_layout(void);
 HundeStatusResult hunde_rust_embedfs_init(void * storage);
 HundeIOCompletion hunde_rust_embedfs_execute(void * storage, ConstHundeIORequestV6Ptr input);
 HundeStatusResult hunde_rust_embedfs_disconnect(void * storage, uint64_t session);
 RustNativeLayout hunde_rust_block_layout(void);
+HundeIOCompletion hunde_rust_terminal_open(HundeByteSpan service, uint64_t flags);
+HundeIOCompletion hunde_rust_terminal_read(int64_t handle, uint8_t * data, uint64_t length);
+HundeIOCompletion hunde_rust_terminal_write(int64_t handle, const uint8_t * data, uint64_t length);
+HundeStatusResult hunde_rust_terminal_close(int64_t handle);
+HundeStatusResult hunde_rust_terminal_interrupt(uint64_t pid);
 RustBlockOpenResult hunde_rust_block_open(void * storage, HundeByteSpan path);
 HundeStatusResult hunde_rust_block_read(void * storage, uint64_t sector, uint8_t * destination, uint64_t length);
 HundeStatusResult hunde_rust_block_write(void * storage, uint64_t sector, const uint8_t * source, uint64_t length);

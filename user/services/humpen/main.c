@@ -124,7 +124,8 @@ static Result(SpawnResult) Humpen__spawn_watchdog_line(ConstBStringPtr line)
             if (BString__equals(&command.mountpoint, &bstr("/")) ||
                 BString__equals(&command.filesystem_type, &bstr("ext2.wuff")) ||
                 BString__equals(&command.filesystem_type, &bstr("fat32")) ||
-                BString__equals(&command.filesystem_type, &bstr("fat32.wuff")))
+                BString__equals(&command.filesystem_type, &bstr("fat32.wuff")) ||
+                BString__equals(&command.filesystem_type, &bstr("console")))
             {
                 return Success(SpawnResult, 0);
             }

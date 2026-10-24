@@ -11,6 +11,8 @@ pub mod block_host;
 pub mod boot;
 pub mod component;
 #[cfg(feature = "alloc")]
+pub mod devfs;
+#[cfg(feature = "alloc")]
 pub mod embedfs;
 #[cfg(feature = "alloc")]
 pub mod fibre;
@@ -24,5 +26,6 @@ pub mod protocol;
 pub mod runtime;
 #[cfg(feature = "alloc")]
 pub mod service;
+pub mod terminal;
 #[cfg(feature = "alloc")]
 pub mod wuff;

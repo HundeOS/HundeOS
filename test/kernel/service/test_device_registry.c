@@ -85,6 +85,36 @@ void test_device_registry_maps_read_only_and_non_executable(void)
     TEST_ASSERT_FALSE(kernel->device_registry.mapping.execute);
 }
 
+void test_device_registry_generates_canonical_block_aliases(void)
+{
+    for (uint64_t index = 0; index < 2; index++)
+    {
+        BString path = BString__sprintf(&bstr("/dev/disk%llu"), index);
+        BString alias = BString__sprintf(&bstr("/dev/hd%llu"), index);
+        DeviceRecord record = DeviceRecord__new(DEVICE_BLOCK, 20, &path, &empty_bstr(), 512, 100);
+        match_result(KernelDeviceRegistry__publish(&kernel->device_registry, &record),
+            success_do_nothing(),
+                     error_test_fail()
+        );
+        match_result(
+            DeviceRegistry__find(directory, &alias),
+            success(found)
+            {
+                match_optional(
+                    found,
+                    some(published)
+                    {
+                        TEST_ASSERT_EQUAL_BSTRING(path, published.path);
+                        TEST_ASSERT_EQUAL_BSTRING(alias, published.alias);
+                    },
+                    none_test_fail()
+                );
+            },
+            error_test_fail()
+        );
+    }
+}
+
 void test_device_registry_rejects_duplicates_and_removes_only_departed_owner(void)
 {
     DeviceRecord record = DeviceRecord__new(DEVICE_BLOCK, 20, &bstr("/dev/virtio1"), &bstr("hd0"), 512, 100);

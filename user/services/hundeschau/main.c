@@ -20,7 +20,6 @@
 static BString hundeschau_empty = empty_bstr();
 static BString hundeschau_login_path = bstr("/sbin/login");
 static BString hundeschau_humpen_path = bstr("/sbin/services/humpen");
-static BString hundeschau_video_term_path = bstr("/sbin/drivers/video_term");
 static BString hundeschau_terminal_input = bstr(HUNDESCHAU_TERMINAL_INPUT);
 static BString hundeschau_keyboard_input = bstr(HUNDESCHAU_KEYBOARD_INPUT);
 static BString hundeschau_terminal_output = bstr(HUNDESCHAU_TERMINAL_OUTPUT);
@@ -400,12 +399,6 @@ static int Hundeschau__spawn_default_drivers(HundeschauRequiredProcessesPtr proc
     int failures = 0;
     failures += Hundeschau__spawn_required_process(processes, &hundeschau_humpen_path, &hundeschau_empty,
                                                    &hundeschau_empty, false);
-    if (framebuffer_present)
-    {
-        failures += Hundeschau__spawn_required_process(processes, &hundeschau_video_term_path, &hundeschau_empty,
-                                                       &hundeschau_empty, false);
-    }
-
     return failures;
 }
 

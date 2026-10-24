@@ -28,7 +28,10 @@ loader's requests. It loads trusted Rust `socket.wuff`, `pipe.wuff`, `memfs.wuff
 `procfs.wuff`, and `sysinfofs.wuff` from `/sbin/components`, then publishes
 the existing `socket_router`, `hund-rohr`, `/tmp`, `/proc`, and `/boot` endpoints. Hundeschule waits for
 hosted mount/pipe readiness before launching login; there are no standalone
-pipe or memfs processes. Disk configuration cannot start a duplicate legacy socket router, pipe/memfs service,
+pipe or memfs processes. The host also initializes the shared C devfs backend
+through `hunde::devfs::Filesystem`, publishes `/dev`, and serves its requests on
+the same scheduler. Hundeschule waits for it instead of spawning devfs.
+Disk configuration cannot start a duplicate legacy socket router, pipe/memfs service,
 or I/O host. Other high-level services remain separate; see
 [I/O and driver hosts](io-driver-hosts.md#first-rust-socket-slice).
 

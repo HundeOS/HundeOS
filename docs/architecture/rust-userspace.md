@@ -58,6 +58,15 @@ bootstrap. Its modules own:
 
 - `abi`: fixed C layouts, tags, layout assertions, and C function declarations.
 - `io`: semantic IDs, operations, and bounded borrowed-request translation.
+- `devfs`: an owned safe adapter over the existing C device filesystem and
+  live device registry, hosted directly in the I/O process. It retains
+  authenticated session identities for native handle cleanup; the shared
+  native filesystem codec is also used by embedfs.
+- `terminal`: the shared C terminal-attribute layout and safe owned stream
+  clients for console backends. Explicit service opens reuse Channel
+  authentication and managed directional buffers, without routing back into the
+  console alias. Terminal-control requests use the existing ABI's bounded
+  input/output buffers and foreground offset; services contain no raw FFI.
 - `inheritance`: shared authenticated ownership/grant bookkeeping for pipes and memfs.
 - `process`: safe coherent process snapshots and bounded kernel-trace reads through host callbacks.
 - `block`: typed sector I/O and an owned native block-client adapter, reusing existing Channels and managed buffers.

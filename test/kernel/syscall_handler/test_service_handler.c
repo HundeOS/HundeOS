@@ -660,7 +660,7 @@ void test_service_handler_publishes_block_metadata_without_io_transport(void)
         success(record)
         {
             TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/test"), record.path);
-            TEST_ASSERT_EQUAL_BSTRING(bstr("hd0"), record.alias);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/hd0"), record.alias);
             TEST_ASSERT_EQUAL_UINT64(process->pid, record.owner_pid);
             TEST_ASSERT_EQUAL_UINT64(128, record.block_count);
         },

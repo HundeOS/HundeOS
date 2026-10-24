@@ -56,6 +56,13 @@ fn is_stream(path: &[u8]) -> bool {
 
 impl<Filesystem: IoComponent> IoComponent for Router<Filesystem> {
     fn execute(&mut self, request: Request<'_>) -> Result<Option<Reply>, IoError> {
+        if let Operation::FileInfo(path) = &request.operation
+            && is_stream(path)
+            && let Ok(service) = core::str::from_utf8(path)
+            && self.dispatcher.contains(service)
+        {
+            return self.dispatcher.execute(Some(service), request);
+        }
         if let Operation::PipeCreate { .. } = request.operation {
             if self.dispatcher.contains("hund-rohr") {
                 return self.dispatcher.execute(Some("hund-rohr"), request);
@@ -70,6 +77,18 @@ impl<Filesystem: IoComponent> IoComponent for Router<Filesystem> {
         if let Operation::Open(path, flags) = &request.operation
             && is_stream(path)
         {
+            let hosted = match *path {
+                b":console:" => Some(":console:"),
+                b":tty:" => Some(":tty:"),
+                b":keyboard:" if *flags == IO_OPEN_READ => Some(":keyboard:"),
+                b":keyboard:" => return Err(IoError(IO_PERMISSION_DENIED)),
+                _ => None,
+            };
+            if let Some(service) = hosted
+                && self.dispatcher.contains(service)
+            {
+                return self.dispatcher.execute(Some(service), request);
+            }
             return self.stream(path, *flags).map(Some);
         }
         let (path, target, offset) = match &request.operation {

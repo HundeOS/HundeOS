@@ -28,6 +28,7 @@ impl DevicePath {
 enum MountSource {
     Block(DevicePath, BundledFilesystem),
     EmbeddedArchive,
+    Console(crate::console::Definition),
 }
 
 impl MountSource {
@@ -35,6 +36,7 @@ impl MountSource {
         match (self, other) {
             (Self::Block(device, _), Self::Block(candidate, _)) => device == candidate,
             (Self::EmbeddedArchive, Self::EmbeddedArchive) => true,
+            (Self::Console(first), Self::Console(second)) => first == second,
             _ => false,
         }
     }
@@ -56,16 +58,20 @@ impl MountRequest {
         let device = fields.next().ok_or(IoError(IO_INVALID_PATH))?;
         let format = fields.next();
         let path = fields.next().ok_or(IoError(IO_INVALID_MOUNT_POINT))?;
-        if fields.next().is_some() || path.len() >= 256 || !canonical(path) {
+        if fields.next().is_some() || path.len() >= 256 || (!canonical(path) && path != ":console:")
+        {
             return Err(IoError(IO_INVALID_MOUNT_POINT));
         }
         Ok(Self {
             source: match (device, format, path) {
+                (_, Some("console"), _) => {
+                    MountSource::Console(crate::console::Definition::parse(device, path)?)
+                }
                 ("-", Some("embedfs"), "/sbin") => MountSource::EmbeddedArchive,
-                (_, Some("ext2.wuff"), _) => {
+                (_, Some("ext2.wuff"), _) if canonical(path) => {
                     MountSource::Block(DevicePath::parse(device)?, BundledFilesystem::Ext2)
                 }
-                (_, Some("fat32.wuff"), _) => {
+                (_, Some("fat32.wuff"), _) if canonical(path) => {
                     MountSource::Block(DevicePath::parse(device)?, BundledFilesystem::Fat32)
                 }
                 _ => return Err(IoError(IO_INVALID_MOUNT_POINT)),
@@ -165,6 +171,20 @@ impl Mounts {
         }) {
             return Err(IoError(IO_INVALID_MOUNT_POINT));
         }
+        if let MountSource::Console(crate::console::Definition::Default(target)) =
+            &job.request.source
+            && !state.reservations.iter().any(|request| {
+                request.name.as_str() == target
+                    && matches!(
+                        request.source,
+                        MountSource::Console(
+                            crate::console::Definition::Serial | crate::console::Definition::Video
+                        )
+                    )
+            })
+        {
+            return Err(IoError(IO_INVALID_MOUNT_POINT));
+        }
         state.reservations.push(job.request.clone());
         state.requests.push(Pending::new(job.clone()));
         state.jobs.push_back(job);
@@ -239,6 +259,15 @@ pub(crate) fn serve(
 ) -> Result<(), IoError> {
     let result: Result<(), IoError> = (|| {
         let (device, format) = match &job.request.source {
+            MountSource::Console(definition) => {
+                return crate::console::serve(
+                    definition.clone(),
+                    job.request.name.clone(),
+                    dispatcher,
+                    parker,
+                    |result| mounts.complete(&job, result),
+                );
+            }
             MountSource::Block(device, format) => (device, *format),
             MountSource::EmbeddedArchive => {
                 let component = hunde::embedfs::Filesystem::new()?;
@@ -311,6 +340,45 @@ mod tests {
     use hunde::protocol::IO_PERMISSION_DENIED;
 
     const CONFIG: &[u8] = b"device /dev/virtio7 ext2.wuff /mnt/hosted-ext2";
+
+    #[test]
+    fn console_mounts_share_authentication_and_reservations_with_filesystem_mounts() {
+        let mounts = Mounts::new();
+        let mut control = Control::new(mounts.clone(), authorize);
+        let config = b"device uart_rx,uart_tx console /dev/tty0";
+        assert_eq!(
+            call(&mut control, 2, 7, b"device /dev/tty0 console :console:"),
+            Err(IoError(IO_INVALID_MOUNT_POINT))
+        );
+        assert_eq!(
+            call(&mut control, 1, 8, config),
+            Err(IoError(IO_PERMISSION_DENIED))
+        );
+        assert!(!mounts.has_jobs());
+        assert_eq!(call(&mut control, 1, 7, config), Ok(None));
+        let job = mounts.take_job().unwrap();
+        assert_eq!(
+            job.request.source,
+            MountSource::Console(crate::console::Definition::Serial)
+        );
+        assert_eq!(
+            call(
+                &mut control,
+                2,
+                7,
+                b"device uart_rx,uart_tx console /dev/tty1"
+            ),
+            Err(IoError(IO_INVALID_MOUNT_POINT))
+        );
+        mounts.complete(&job, Ok(()));
+        assert_eq!(call(&mut control, 1, 7, config), Ok(Some(Reply::Value(0))));
+        assert_eq!(
+            call(&mut control, 2, 7, b"device /dev/tty0 console :console:"),
+            Ok(None)
+        );
+        assert!(MountRequest::parse(b"device /dev/virtio1 ext2.wuff :console:").is_err());
+        assert!(MountRequest::parse(b"device uart_rx,uart_tx console /tmp/tty0").is_err());
+    }
 
     #[test]
     fn fat32_mount_retains_driver_identity_and_rejects_cross_format_device_reuse() {

@@ -9,9 +9,10 @@ trusted userspace processes:
 - `hunde-treiber-host` owns hardware-facing mechanisms and device drivers.
 
 The target is partially implemented. The Rust I/O host owns the application
-router, filesystem namespace, and hosted socket, pipe, memfs, procfs, and EXT2
-components. Bootstrap filesystem providers and terminal/device services remain
-external, and `hund-unterbrict` is the initial driver host. VirtIO block already
+router, filesystem namespace, console aggregation, and hosted socket, pipe,
+memfs, procfs, sysinfofs, EXT2 and FAT32 components. Embedfs and devfs use safe
+Rust adapters over shared C backends inside the host. Hardware terminal/device
+services remain external, and `hund-unterbrict` is the initial driver host. VirtIO block already
 runs inside `hund-unterbrict` and receives hosted IRQ dispatch through local
 calls. Migration must preserve working service protocols until their ownership
 moves into a host.
@@ -888,12 +889,13 @@ the same root/mount state, not a second independently configured mount table.
 
 `hunde-io-host/src/host/router.rs` implements the existing `hund-io-system`
 endpoint inside the Rust host. Filesystem requests call the namespace directly;
-socket and pipe operations select the existing hosted endpoints. Console routing
-preserves exact read/write access matching: keyboard reads use `keyboard`, TTY
-and console reads use `uart_rx`, TTY writes use `uart_tx`, and console writes use
-`video_term` when a framebuffer exists or `uart_tx` otherwise. Unknown stream
-names and denied access remain distinct errors. The shared `hunde` layer translates
-the boot hardware query into `ConsoleOutput`; routing policy stays in the host.
+socket and pipe operations select the existing hosted endpoints. Configured
+console instances now own paired input/output backends, terminal state and
+bidirectional handles inside the host. Hardware-profile `fstab` entries mount
+`/dev/ttyN` or `/dev/vttyN` and explicitly bind `:console:` to the default.
+See [configured consoles](io-system.md#configured-consoles). Unconfigured legacy
+stream opens retain their old redirects during bootstrap; hardware UART,
+keyboard and framebuffer services still run externally.
 
 Mama waits for the host's application endpoint instead of starting a standalone
 C I/O router. The namespace endpoint is published first. Both endpoints are

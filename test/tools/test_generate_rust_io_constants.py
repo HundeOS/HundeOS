@@ -38,7 +38,14 @@ def protocol_root(tmp_path):
         "typedef enum IOFileChangeFlags { IO_FILE_CHANGE_WRITE = 1, IO_FILE_CHANGE_DELETE = 2,\n"
         "IO_FILE_CHANGE_RENAME = 4, IO_FILE_CHANGE_TRUNCATE = 8 } IOFileChangeFlags;\n"
         "#define IO_FILE_WATCH_CAPACITY 16U\n"
-        "#define IO_MODE_TYPE_FILE 0x8000U\n#define IO_MODE_TYPE_DIR 0x4000U\n#define IO_DIRENT_NAME_MAX 256\n",
+        "#define IO_MODE_TYPE_FILE 0x8000U\n#define IO_MODE_TYPE_DIR 0x4000U\n#define IO_DIRENT_NAME_MAX 256\n"
+        "#define IO_MODE_TYPE_CHAR 0x2000U\n"
+        "#define IO_TERMINAL_INPUT_CR_TO_NL 0400U\n#define IO_TERMINAL_INPUT_START_STOP_OUTPUT 02000U\n"
+        "#define IO_TERMINAL_OUTPUT_PROCESSING 1U\n#define IO_TERMINAL_OUTPUT_NL_TO_CR_NL 4U\n"
+        "#define IO_TERMINAL_CONTROL_CHARACTER_SIZE_8 060U\n#define IO_TERMINAL_LOCAL_SIGNALS 1U\n"
+        "#define IO_TERMINAL_LOCAL_CANONICAL 2U\n#define IO_TERMINAL_LOCAL_ECHO 010U\n"
+        "#define IO_TERMINAL_LOCAL_ECHO_ERASE 020U\n#define IO_TERMINAL_LOCAL_ECHO_KILL 040U\n"
+        "#define IO_TERMINAL_LOCAL_EXTENDED 0100000U\n#define IO_TERMINAL_SPEED_38400 017U\n",
         encoding="utf-8",
     )
     status.with_name("service.h").write_text(

@@ -346,6 +346,17 @@ void test_posix_terminal_identity_is_preserved_across_standard_descriptor_duplic
     TEST_ASSERT_EQUAL_BSTRING(bstr(":tty:"), unwrap_optional(PosixIO__terminal_path(duplicate), empty_bstr()));
 }
 
+void test_posix_terminal_identity_recognizes_numbered_console_nodes(void)
+{
+    int descriptor = open("/dev/tty0", O_RDWR);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(3, descriptor);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/tty0"), unwrap_optional(PosixIO__terminal_path(descriptor), empty_bstr()));
+    TEST_ASSERT_EQUAL_INT(0, close(descriptor));
+    descriptor = open("/dev/vtty12", O_RDWR);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(3, descriptor);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/vtty12"), unwrap_optional(PosixIO__terminal_path(descriptor), empty_bstr()));
+}
+
 void test_posix_terminal_identity_rejects_regular_files(void)
 {
     int regular = open("file", O_RDONLY);

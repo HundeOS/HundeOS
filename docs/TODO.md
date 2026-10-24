@@ -323,6 +323,24 @@ only to advance the Bash build.
   semantics. See [Userspace I/O system](architecture/io-system.md#device-filesystem).
 - [ ] Provide usable `/dev/tty` and `/dev/fd` behavior, or configure Bash
   explicitly for an agreed equivalent where it does not change semantics.
+  - [ ] Complete acceptance of fstab-configured Rust console instances in the I/O host, mounting
+    numbered `/dev/ttyN` and `/dev/vttyN` character devices and an explicit
+    `:console:` default alias. Pair the existing UART or keyboard/framebuffer
+    services behind host-owned bidirectional handles, terminal attributes,
+    foreground state and bounded input-pump fibres on the host scheduler.
+    See [configured consoles](architecture/io-system.md#configured-consoles).
+    `/dev/tty` controlling-terminal selection, virtual-terminal switching and
+    hardware-service consolidation remain unimplemented.
+    - [x] Correct devfs root metadata and host devfs in the Rust I/O host through
+      a safe adapter over its retained C backend. Remove the standalone devfs
+      executable. See [device filesystem](architecture/io-system.md#device-filesystem).
+    - [x] Correct kernel-generated block aliases to canonical `/dev/hdN` paths.
+      AArch64 and RISC-V boot acceptance verify complete `/dev` listings,
+      canonical and alias metadata reads, inherited handles, `/dev/null` I/O,
+      and configured serial console input/output. See
+      [device filesystem](architecture/io-system.md#device-filesystem).
+    - [ ] Validate the configured keyboard/framebuffer console on the UEFI
+      framebuffer profile; serial console acceptance passes on both architectures.
 - [ ] Replace the sixteen-argument spawn limit with defined argv and environment
   byte limits, report `E2BIG`, and test large command invocations.
   - [x] Define `ARG_MAX` as 64 KiB and enforce it in the exec payload builder.

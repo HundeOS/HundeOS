@@ -477,9 +477,56 @@ of subsequent path lookup. Selection is local to the I/O host;
 there is no driver-controlled registration protocol. `:keyboard:` reads route
 to the `keyboard` service using the same routing and Channel protocol.
 
-Applications open `:tty:` or `:console:` through `hund-io-system`. Reads route
-to `uart_rx`; `:tty:` writes route to `uart_tx`. `:console:` writes use
-`video_term` when a framebuffer is present, otherwise `uart_tx`. These drivers
+### Configured consoles
+
+The Rust host's `console` subsystem owns bidirectional terminal descriptions,
+authenticated owners, inheritance grants, terminal attributes, foreground state,
+and bounded input queues. Hardware profiles configure instances through `fstab`:
+
+```text
+device uart_rx,uart_tx console /dev/tty0
+device /dev/tty0 console :console:
+```
+
+Framebuffer profiles instead use:
+
+```text
+device keyboard,video_term console /dev/vtty0
+device /dev/vtty0 console :console:
+```
+
+Numbered nodes are character devices in the host filesystem namespace. Mount the
+instance before its default alias. The authenticated host mount-control endpoint
+constructs the component; Hundeschule publishes the namespace node only after
+successful initialization. `:console:` selects an already registered instance,
+not a boot-hardware-dependent redirect. Serial instances also serve the legacy
+`:tty:` spelling; video instances serve legacy `:keyboard:` reads. Aliases share
+the same component and terminal state. Standard descriptors and explicit
+`/dev/*ttyN` opens use host-owned handles, not backend handles.
+
+Each console has an input-pump fibre and a dispatch worker on the host's one
+scheduler. The pump reads only available queue capacity, stops consuming when
+the queue fills, and wakes pending reads without blocking output dispatch.
+Nonblocking empty reads return `IO_WOULD_BLOCK`. Closing and disconnecting release
+owners; committed inheritance grants retain descriptions until claimed or aborted.
+UART and keyboard Ctrl-C handling for hosted consoles belongs to the host, which
+signals the configured foreground process. Other terminal-mode processing,
+controlling terminals, foreground process groups, window-size reporting, and
+virtual-terminal switching remain separate work. Only one console can consume
+each currently supported backend pair.
+
+Hardware services remain external. The shared `hunde::terminal::Stream` adapter
+opens the explicitly configured service through the existing authenticated
+Channel client and directional managed buffers, without resolving `:console:`
+back into the host. Both backends must be ready and open before the mount
+completes. Framebuffer profiles start `video_term` alongside keyboard in
+Hundeschule, before configured mounts; Hundeschau only waits for these services
+before login. A backend failure fails initialization, not a fallback to a
+different device. Kernel boot and
+panic output is unchanged. Unconfigured legacy stream opens retain their previous
+redirects for bootstrap and compatibility; configured console paths do not.
+
+The external hardware drivers
 use the existing I/O protocol over Channel, with multiple owned handles per
 session, direction checks, close, and session cleanup. They do not fetch or
 complete console buffers through kernel I/O syscalls.
@@ -495,7 +542,7 @@ blocked without Channel request/reply churn or retries through routing services.
 
 The shell assigns its foreground child to the terminal through its authenticated
 input handle, then waits for that child explicitly. While a foreground process is
-assigned, `uart_rx` consumes the Ctrl-C byte and sends that process
+assigned, the hosted console consumes the Ctrl-C byte and sends that process
 `PROCESS_SIGNAL_INTERRUPT`; the byte is not returned as input. With no foreground
 child, Ctrl-C reaches the interactive shell and cancels its current input line.
 This is currently single-process foreground ownership. Foreground process groups
@@ -750,11 +797,27 @@ for CPU, wait-state, memory-accounting, consistency, and ownership semantics.
 
 ## Device filesystem
 
-`hund-dateisystem` starts `/sbin/drivers/devfs` and mounts it at `/dev` on every
-target, after root and `/tmp` and before publishing readiness. Devfs uses the
-existing filesystem driver, Channel, and I/O protocol. It owns directory
-representation, metadata text, open handles, read offsets, and session cleanup.
-There is no kernel devfs mount or blanket `/dev` syscall bypass.
+The Rust I/O host initializes a devfs worker and publishes `/dev` alongside its
+other built-in filesystems. Hundeschule waits for readiness and registers its
+mount after root and `/tmp`, before procfs. There is no standalone devfs
+executable. Application handles use the common host dispatcher and the existing
+filesystem Channel protocol and directional buffers.
+
+The safe `hunde::devfs::Filesystem` adapter owns the existing C
+`FilesystemDriver` and live registry-backed implementation in
+`user/lib/fs/devfs.c`. This is an in-process C backend, not a native Rust rewrite
+or a separate Wuff. The shared native filesystem codec is also used by embedfs;
+it bounds caller-owned buffers, translates metadata and paginated listings,
+and preserves inheritance tokens, access flags and shared offsets. The adapter
+retains each authenticated session's PID so disconnect releases its C backend
+owners without guessing an identity. Committed grants survive source disconnect.
+No unsafe code is added to the Rust service.
+
+Devfs describes `/` as a `0755` directory before listing. This fixes the old
+root-metadata error that made `ls /dev` report `ENOENT` before enumeration.
+Configured `/dev/ttyN` and `/dev/vttyN` console mounts appear alongside registry
+entries in namespace listings. There is no kernel devfs mount or blanket `/dev`
+syscall bypass.
 
 Devfs provides `/dev/null` as a writable character-like file using the existing
 stream filesystem operations. Reads immediately return end-of-file and writes
@@ -777,11 +840,14 @@ bounded attempts and retry a busy publication through `IO_WAIT_FOR_DATA`.
 Paged directory listings observe live records rather than promising one snapshot
 across separate requests. Block registration publishes its record before returning
 success; publication failure rolls registration back. Process exit removes the
-departed owner's records after device quiescence. Metadata already opened is a
-private snapshot, not a grant to access a device that has since exited.
+departed owner's records after device quiescence. Reads through an existing
+handle still consult the live registry and reject removed devices; metadata
+is not a grant to access a device that has since exited.
 
 Devfs lists device paths and `hdN` aliases and exposes block metadata as read-only
-files. Mutation and executable opens are rejected. No kernel stream devices
+files. Registry aliases are stored as absolute `/dev/hdN` paths, including those
+generated during block registration, so lookup and enumeration use the same
+representation. Mutation and executable opens are rejected. No kernel stream devices
 remain registered at boot: `/dev/businfo` moved to the `hundebus` Channel
 interface and the `/dev/hello` proof-of-concept driver was deleted.
 Legacy stream recognition and `IO_PATH_UNMANAGED` handling remain compiled,

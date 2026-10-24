@@ -2,6 +2,8 @@ manifest:
   include_default_stubs: false
   include_default_fixtures: false
   source_files:
-    - user/drivers/devfs/devfs.c
+    - user/lib/fs/devfs.c
     - user/lib/io/filesystem_driver.c
     - user/lib/io/inheritance.c
+    - user/lib/hunde/devfs.c
+    - user/lib/hunde/filesystem.c
