@@ -46,6 +46,12 @@ only to advance the Bash build.
   rootfs and include both Bash builds in `make compile-commands`. Bash is now a
   PIE using `/sbin/wuff-ld` with `libc.wuff.1` as its only runtime dependency;
   its bundled support libraries and PIC `libm` remain statically linked.
+- [x] Remove the replaced custom shell implementation and its obsolete tests.
+  Login uses `/usr/local/bin/bash`; no retired-binary directory exclusion remains
+  in the build. The standalone devfs and C socket-router sources are also gone;
+  the host's live C devfs backend remains in `user/lib/fs/devfs.c`. See
+  [Bash integration](../user/ports/bash/README.md) and
+  [device filesystem](architecture/io-system.md#device-filesystem).
 
 #### 2. Non-Local Control Flow
 
@@ -339,6 +345,17 @@ only to advance the Bash build.
       canonical and alias metadata reads, inherited handles, `/dev/null` I/O,
       and configured serial console input/output. See
       [device filesystem](architecture/io-system.md#device-filesystem).
+    - [x] Fix and complete repeated-boot acceptance for the listener-registration
+      race that prevented configured consoles from opening UART Channels and reaching
+      login. `cs_return(value)` now captures its expression before releasing the
+      mutex; all callers use the function-like form. Hosted regressions fail
+      with the previous unlock-first behavior and pass with the corrected macro.
+      The corrected kernel reaches login in 1,000 consecutive four-CPU AArch64
+      boots using fresh clones of the original failing disk snapshots. Root/devfs/
+      console, nested-fork/filesystem stress, and socket/70,000-byte pipe acceptance
+      pass on both AArch64 and RISC-V. Native suites pass 421 tests; hundelint,
+      repository formatting, and 122 Python tooling tests pass.
+      See [kernel lock ownership](architecture/queues.md#kernel-lock-ownership).
     - [ ] Validate the configured keyboard/framebuffer console on the UEFI
       framebuffer profile; serial console acceptance passes on both architectures.
 - [ ] Replace the sixteen-argument spawn limit with defined argv and environment
@@ -419,6 +436,11 @@ multi-process service graph. See the
 [first Rust socket slice](architecture/io-driver-hosts.md#first-rust-socket-slice).
 
 #### Baseline And Host Interfaces
+
+- [x] Retire the standalone C socket router, its obsolete tests, and all boot
+  configuration entries. The Rust `socket.wuff` component inside `hunde-io-host`
+  retains the existing `socket_router` endpoint; the C server is no longer built
+  or embedded. See [socket protocol](architecture/io-system.md#socket-protocol).
 
 - [x] Define the `hunde-io-host` and `hunde-treiber-host` responsibility,
   trust, cache, IPC, shared-buffer, and failure-domain boundaries.

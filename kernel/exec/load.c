@@ -132,7 +132,7 @@ Result(ProcessPtr)
                         error(code, message)
                         {
                             Kernel__free(allocation.virtual_addr);
-                            cs_return Error(ProcessPtr, message, SPAWN_NO_FILE);
+                            cs_return(Error(ProcessPtr, message, SPAWN_NO_FILE));
                         }
                     );
                 }

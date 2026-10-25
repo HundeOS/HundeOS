@@ -84,11 +84,11 @@ Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) 
                                                arg2, arg3, arg4, arg5),
                             success(value)
                             {
-                                cs_return Success(SystemCallResult, value);
+                                cs_return(Success(SystemCallResult, value));
                             },
                             error(code, message)
                             {
-                                cs_return Error(SystemCallResult, message, code);
+                                cs_return(Error(SystemCallResult, message, code));
                             }
                         );
                     }

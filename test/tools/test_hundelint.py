@@ -1006,7 +1006,7 @@ def test_allows_cs_control_flow_macros_in_critical_section(rules_for):
         "int example(mutex_t lock) {\n"
         "    critical_section(lock,\n"
         "    {\n"
-        "        if (failed) { cs_return 1; }\n"
+        "        if (failed) { cs_return(1); }\n"
         "        if (done) { cs_exit_then(return 2); }\n"
         "    });\n"
         "    return 0;\n"
@@ -1014,6 +1014,16 @@ def test_allows_cs_control_flow_macros_in_critical_section(rules_for):
     )
     rules = rules_for(source)
     assert "critical-section-control-flow" not in rules
+
+
+def test_rejects_statement_style_critical_section_return(rules_for):
+    assert "critical-section-return-syntax" in rules_for("int example(void) { cs_return value; }")
+    assert "critical-section-return-syntax" in rules_for("void example(void) { cs_return; }")
+
+
+def test_allows_function_style_critical_section_returns(rules_for):
+    source = "int example(void) { cs_return(value); } void other(void) { cs_return_void(); }"
+    assert "critical-section-return-syntax" not in rules_for(source)
 
 
 def test_reports_block_macro_without_semicolon(rules_for):

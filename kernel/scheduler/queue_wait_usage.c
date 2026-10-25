@@ -26,7 +26,7 @@ void QueueWaitUsage__wake(QueueWaitUsagePtr self, QueueWaitCode reason)
             if (self->state != QUEUE_WAIT_USAGE_PARKED ||
                 (reason != QUEUE_WAIT_CHANGED && reason != QUEUE_WAIT_TIMEOUT))
             {
-                cs_return;
+                cs_return_void();
             }
             uint64_t now = CPU__time_usec();
             uint64_t elapsed = now - self->since_usec;
@@ -56,7 +56,7 @@ void QueueWaitUsage__cancel(QueueWaitUsagePtr self)
         {
             if (self->state != QUEUE_WAIT_USAGE_PARKED)
             {
-                cs_return;
+                cs_return_void();
             }
             uint64_t elapsed = CPU__time_usec() - self->since_usec;
             self->totals.parked_usec += elapsed;
@@ -76,7 +76,7 @@ void QueueWaitUsage__select(QueueWaitUsagePtr self)
         {
             if (self->state != QUEUE_WAIT_USAGE_RUNNABLE)
             {
-                cs_return;
+                cs_return_void();
             }
             uint64_t elapsed = CPU__time_usec() - self->since_usec;
             self->totals.runnable_usec += elapsed;
@@ -105,7 +105,7 @@ ProcessQueueWaitUsage QueueWaitUsage__snapshot(QueueWaitUsagePtr self)
     critical_section(
         self->lock,
         {
-            cs_return self->totals;
+            cs_return(self->totals);
         }
     );
 }

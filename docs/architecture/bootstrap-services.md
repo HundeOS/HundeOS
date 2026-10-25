@@ -31,8 +31,8 @@ hosted mount/pipe readiness before launching login; there are no standalone
 pipe or memfs processes. The host also initializes the shared C devfs backend
 through `hunde::devfs::Filesystem`, publishes `/dev`, and serves its requests on
 the same scheduler. Hundeschule waits for it instead of spawning devfs.
-Disk configuration cannot start a duplicate legacy socket router, pipe/memfs service,
-or I/O host. Other high-level services remain separate; see
+The standalone C socket router has been removed. Disk configuration cannot start
+a duplicate pipe/memfs service or I/O host. Other high-level services remain separate; see
 [I/O and driver hosts](io-driver-hosts.md#first-rust-socket-slice).
 
 The loader resolves paths through the host's process-local application router,

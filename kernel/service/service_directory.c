@@ -69,8 +69,8 @@ Result(ServiceCode) KernelServiceDirectory__publish_endpoint(KernelServiceDirect
                 if (__atomic_load_n(&entry->present, __ATOMIC_ACQUIRE) != 0 &&
                     ServiceDirectoryEntry__name_equals(entry, name))
                 {
-                    cs_return Error(ServiceCode, service_directory_full,
-                                    SERVICE_DEVICE_ALREADY_REGISTERED);
+                    cs_return(
+                        Error(ServiceCode, service_directory_full, SERVICE_DEVICE_ALREADY_REGISTERED));
                 }
             }
             for (uint64_t index = 0; index < HUND_SERVICE_MAX_SERVICES; index++)
@@ -86,7 +86,7 @@ Result(ServiceCode) KernelServiceDirectory__publish_endpoint(KernelServiceDirect
                 directory->entry_count++;
                 directory->generation++;
                 __atomic_store_n(&entry->present, 1, __ATOMIC_RELEASE);
-                cs_return Success(ServiceCode, SERVICE_OK);
+                cs_return(Success(ServiceCode, SERVICE_OK));
             }
         }
     );

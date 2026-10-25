@@ -122,7 +122,7 @@ void MemoryAccounting__forget(MemoryAccountingPtr self, Address space)
                     },
                     none()
                     {
-                        cs_return;
+                        cs_return_void();
                     }
                 );
             }
@@ -184,7 +184,7 @@ Optional(ProcessMemoryUsage) MemoryAccounting__usage(MemoryAccountingPtr self, A
         {
             if (self->failed)
             {
-                cs_return None(ProcessMemoryUsage);
+                cs_return(None(ProcessMemoryUsage));
             }
             ProcessMemoryUsage usage = ProcessMemoryUsage__new();
             for_each_ll(
@@ -211,7 +211,7 @@ Optional(ProcessMemoryUsage) MemoryAccounting__usage(MemoryAccountingPtr self, A
                     }
                 }
             );
-            cs_return Some(ProcessMemoryUsage, usage);
+            cs_return(Some(ProcessMemoryUsage, usage));
         }
     );
 }

@@ -215,6 +215,11 @@ suppressions, or exclusions to hide lint findings unless the user explicitly
 approves that exact suppression.
 
 ## critical_section
+Use `cs_return(value)` to evaluate and capture a return value while the mutex is
+held, then unlock and return it. Use `cs_return_void()` for a void early return.
+Use `cs_exit_then(code)` only for work that must happen after unlocking, such as
+an actual context switch. Do not put context-switching work in `cs_return`.
+
 When using mutexes in the kernel, use the critical_section macros along
 with their exit macros (i.e. cs_return)
 

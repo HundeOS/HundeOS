@@ -87,7 +87,7 @@ Result(ServiceCode)
                 success_do_nothing(),
                 error(code, message)
                 {
-                    cs_return Error(ServiceCode, message, code);
+                    cs_return(Error(ServiceCode, message, code));
                 }
             );
         }
@@ -119,13 +119,13 @@ Result(ServiceEventDispatch)
                         (int)service->delivery_count, (int)service->coalesced_count);
                     if (!service->enabled)
                     {
-                        cs_return Success(ServiceEventDispatch, dispatch);
+                        cs_return(Success(ServiceEventDispatch, dispatch));
                     }
 
                     if (service->pending)
                     {
                         service->coalesced_count++;
-                        cs_return Success(ServiceEventDispatch, dispatch);
+                        cs_return(Success(ServiceEventDispatch, dispatch));
                     }
 
                     service->pending = true;
@@ -139,11 +139,11 @@ Result(ServiceEventDispatch)
                         success_do_nothing(),
                         error(code, message)
                         {
-                            cs_return Error(ServiceEventDispatch, message, code);
+                            cs_return(Error(ServiceEventDispatch, message, code));
                         }
                     );
 
-                    cs_return Success(ServiceEventDispatch, dispatch);
+                    cs_return(Success(ServiceEventDispatch, dispatch));
                 },
                 none_do_nothing()
             );
@@ -186,11 +186,11 @@ Result(ServiceEvent) ServiceEventDispatcher__take_next(ServiceEventDispatcherPtr
                 success(event)
                 {
                     ServiceEventDispatcher__mark_active_irq_event_locked(self, process, event);
-                    cs_return Success(ServiceEvent, event);
+                    cs_return(Success(ServiceEvent, event));
                 },
                 error(code, message)
                 {
-                    cs_return Error(ServiceEvent, message, code);
+                    cs_return(Error(ServiceEvent, message, code));
                 }
             );
         }
@@ -222,7 +222,7 @@ Result(ServiceCode)
                                 service->coalesced_count = 0;
                                 process->service.active_irq_event = None(ServiceEvent);
                                 Arch__unmask_irq(interrupt_controller, event.source);
-                                cs_return Success(ServiceCode, SERVICE_OK);
+                                cs_return(Success(ServiceCode, SERVICE_OK));
                             }
                         },
                         none_do_nothing()
@@ -258,7 +258,7 @@ Result(ServiceCode) ServiceEventDispatcher__unsubscribe_process(ServiceEventDisp
                             success_do_nothing(),
                             error(code, message)
                             {
-                                cs_return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL);
+                                cs_return(Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL));
                             }
                         );
                     }
@@ -322,7 +322,7 @@ Optional(ProcessPtr) ServiceEventDispatcher__ready_process(ServiceEventDispatche
                 ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
                 some(match)
                 {
-                    cs_return Some(ProcessPtr, match.process);
+                    cs_return(Some(ProcessPtr, match.process));
                 },
                 none_do_nothing()
             );
@@ -350,7 +350,7 @@ Result(ServiceCode)
                         success_do_nothing(),
                         error(code, message)
                         {
-                            cs_return Error(ServiceCode, service_ready_names_full, SERVICE_EVENT_QUEUE_FULL);
+                            cs_return(Error(ServiceCode, service_ready_names_full, SERVICE_EVENT_QUEUE_FULL));
                         }
                     );
                 }
@@ -370,7 +370,7 @@ Result(ServiceCode)
                             success_do_nothing(),
                             error(code, message)
                             {
-                                cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL);
+                                cs_return(Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL));
                             }
                         );
                     }
@@ -381,7 +381,7 @@ Result(ServiceCode)
                             success_do_nothing(),
                             error(code, message)
                             {
-                                cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL);
+                                cs_return(Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL));
                             }
                         );
                     }
@@ -404,7 +404,7 @@ Result(ServiceCode)
                 ServiceReadyNames__find(&self->ready_names, ServiceReadyNames__matches, (void *)name),
                 some(match)
                 {
-                    cs_return Success(ServiceCode, SERVICE_OK);
+                    cs_return(Success(ServiceCode, SERVICE_OK));
                 },
                 none_do_nothing()
             );
@@ -418,7 +418,7 @@ Result(ServiceCode)
                 success_do_nothing(),
                 error(code, message)
                 {
-                    cs_return Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL);
+                    cs_return(Error(ServiceCode, service_ready_waiters_full, SERVICE_EVENT_QUEUE_FULL));
                 }
             );
         }
@@ -443,13 +443,13 @@ Result(ServiceCode) ServiceEventDispatcher__remove_ready_waiter(ServiceEventDisp
                             success_do_nothing(),
                             error(code, message)
                             {
-                                cs_return Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR);
+                                cs_return(Error(ServiceCode, message, SERVICE_SCHEDULER_ERROR));
                             }
                         );
                     },
                     none()
                     {
-                        cs_return Success(ServiceCode, SERVICE_OK);
+                        cs_return(Success(ServiceCode, SERVICE_OK));
                     }
                 );
             }

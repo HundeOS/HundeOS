@@ -54,7 +54,8 @@ Result(IRQRegistrationStatus)
                 IRQConsumerMap__get_ptr(&self->consumers, irq),
                 some(existing)
                 {
-                    cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED);
+                    cs_return(
+                        Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED));
                 },
                 none_do_nothing()
             );
@@ -103,7 +104,8 @@ Result(IRQRegistrationStatus) IRQDispatcher__register_service(IRQDispatcherPtr s
                 IRQConsumerMap__get_ptr(&self->consumers, irq),
                 some(existing)
                 {
-                    cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED);
+                    cs_return(
+                        Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED));
                 },
                 none_do_nothing()
             );
@@ -140,7 +142,7 @@ Result(Address) IRQDispatcher__register_manager(IRQDispatcherPtr self, ProcessPt
         {
             if (!is_nothing(self->manager))
             {
-                cs_return Error(Address, interrupt_manager_exists, SERVICE_INTERRUPT_MANAGER_EXISTS);
+                cs_return(Error(Address, interrupt_manager_exists, SERVICE_INTERRUPT_MANAGER_EXISTS));
             }
         }
     );
@@ -161,7 +163,7 @@ Result(Address) IRQDispatcher__register_manager(IRQDispatcherPtr self, ProcessPt
                         PageTable__unmap(&process->page_table, process->kernel, KERNEL_NOTIFICATION_QUEUE_ADDRESS,
                                          KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE);
                         Kernel__free(memory.kernel_addr.virtual_addr);
-                        cs_return Error(Address, interrupt_manager_exists, SERVICE_INTERRUPT_MANAGER_EXISTS);
+                        cs_return(Error(Address, interrupt_manager_exists, SERVICE_INTERRUPT_MANAGER_EXISTS));
                     }
                     self->manager = Some(ProcessPtr, process);
                     self->manager_queue_memory = Some(UserAddress, memory);
@@ -192,8 +194,8 @@ bool IRQDispatcher__has_pending_notifications(IRQDispatcherPtr self, ProcessPtr 
                             self->manager_queue_memory,
                             some(memory)
                             {
-                                cs_return KernelNotificationQueue__has_pending(
-                                    k_v_ptr(memory, KernelNotificationQueue));
+                                cs_return(KernelNotificationQueue__has_pending(
+                                    k_v_ptr(memory, KernelNotificationQueue)));
                             },
                             none_do_nothing()
                         );
@@ -227,19 +229,19 @@ Result(IRQRegistrationStatus)
                 {
                     if (registered_manager != manager)
                     {
-                        cs_return Error(IRQRegistrationStatus, interrupt_manager_required, IRQ_INVALID_CONSUMER);
+                        cs_return(Error(IRQRegistrationStatus, interrupt_manager_required, IRQ_INVALID_CONSUMER));
                     }
                 },
                 none()
                 {
-                    cs_return Error(IRQRegistrationStatus, interrupt_manager_required, IRQ_INVALID_CONSUMER);
+                    cs_return(Error(IRQRegistrationStatus, interrupt_manager_required, IRQ_INVALID_CONSUMER));
                 }
             );
             match_optional(
                 IRQConsumerMap__get_ptr(&self->consumers, irq),
                 some(existing)
                 {
-                    cs_return Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED);
+                    cs_return(Error(IRQRegistrationStatus, irq_already_registered, IRQ_ALREADY_REGISTERED));
                 },
                 none_do_nothing()
             );
@@ -311,7 +313,7 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispat
                             success_do_nothing(),
                             error(code, message)
                             {
-                                cs_return Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR);
+                                cs_return(Error(IRQRegistrationStatus, message, IRQ_REGISTRATION_ERROR));
                             }
                         );
                     }

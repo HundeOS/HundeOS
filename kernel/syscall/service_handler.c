@@ -111,11 +111,11 @@ Result(SystemCallResult)
                             Process__queue_wait_control(process),
                             success(address)
                             {
-                                cs_return Success(SystemCallResult, address);
+                                cs_return(Success(SystemCallResult, address));
                             },
                             error(code, message)
                             {
-                                cs_return Error(SystemCallResult, message, code);
+                                cs_return(Error(SystemCallResult, message, code));
                             }
                         );
                     }
@@ -535,11 +535,11 @@ Result(SystemCallResult)
                             IRQDispatcher__register_managed_irq(kernel->irq_dispatcher, request->irq, process),
                             success(_)
                             {
-                                cs_return Success(SystemCallResult, SERVICE_OK);
+                                cs_return(Success(SystemCallResult, SERVICE_OK));
                             },
                             error(code, message)
                             {
-                                cs_return Error(SystemCallResult, message, Service__map_irq_registration_status(code));
+                                cs_return(Error(SystemCallResult, message, Service__map_irq_registration_status(code)));
                             }
                         );
                     }

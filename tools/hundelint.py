@@ -205,6 +205,11 @@ RULES = (
         pattern=re.compile(r"(?!)"),
     ),
     Rule(
+        name="critical-section-return-syntax",
+        message="use cs_return(value) or cs_return_void() so values are captured before unlocking",
+        pattern=re.compile(r"\bcs_return\b(?!\s*\()"),
+    ),
+    Rule(
         name="match-branch-macros",
         message="use inferred match macros with success/error or some/none branches",
         pattern=re.compile(r"(?!)"),

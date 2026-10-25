@@ -439,7 +439,7 @@ KernelAddress Heap__alloc_size(HeapPtr self, size_t size)
             {
 Kernel__panic("out of heap", NULL); // hundelint: ignore-no-null
             }
-            cs_return allocation;
+            cs_return(allocation);
         }
     );
 
@@ -457,7 +457,7 @@ KernelAddress Heap__try_alloc_size(HeapPtr self, size_t size)
             {
                 __d_printf(MEMORY, "heap alloc failed size=%i pages=%i\n", size, pages);
             }
-            cs_return allocation;
+            cs_return(allocation);
         }
     );
 
@@ -473,9 +473,9 @@ KernelAddress Heap__try_alloc_reclaimable_size(HeapPtr self, size_t size)
             uint64_t growth_floor = self->total_pages / 2U;
             if (pages > self->free_pages || self->free_pages - pages < growth_floor)
             {
-                cs_return INVALID_KERNEL_ADDR;
+                cs_return(INVALID_KERNEL_ADDR);
             }
-            cs_return Heap__allocate_available(self, pages, size);
+            cs_return(Heap__allocate_available(self, pages, size));
         }
     );
 
@@ -490,7 +490,7 @@ HeapMemoryState Heap__memory_state(HeapPtr self)
             HeapMemoryState state =
                 HeapMemoryState__new(self->total_pages, self->free_pages, self->pressure_generation,
                                      (HeapPressureLevel)self->pressure_level);
-            cs_return state;
+            cs_return(state);
         }
     );
 
@@ -519,7 +519,7 @@ KernelAddress Heap__try_alloc_size_aligned(HeapPtr self, size_t size, size_t ali
                         {
                             self->free_pages -= block.pages_allocated;
                             Heap__update_pressure(self);
-                            cs_return block.start;
+                            cs_return(block.start);
                         },
                         error(code, message)
                         {
@@ -532,7 +532,7 @@ KernelAddress Heap__try_alloc_size_aligned(HeapPtr self, size_t size, size_t ali
                 },
                 none_do_nothing()
             );
-            cs_return INVALID_KERNEL_ADDR;
+            cs_return(INVALID_KERNEL_ADDR);
         }
     );
 
@@ -558,12 +558,12 @@ Result(HeapCode) Heap__free(HeapPtr self, KernelAddress addr)
                     __d_printf(MEMORY, "heap free addr=%p phys=%p pages=%i coalesced_addr=%p coalesced_pages=%i\n",
                                allocated.start.virtual_addr, allocated.start.phys_addr, allocated.pages_allocated,
                                free_block.start.virtual_addr, free_block.pages_allocated);
-                    cs_return Success(HeapCode, HEAP_OK);
+                    cs_return(Success(HeapCode, HEAP_OK));
                 },
                 none_do_nothing()
             );
 
-            cs_return Error(HeapCode, bstring("address not allocated"), HEAP_NOT_IMPLEMENTED);
+            cs_return(Error(HeapCode, bstring("address not allocated"), HEAP_NOT_IMPLEMENTED));
         }
     );
 

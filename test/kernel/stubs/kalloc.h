@@ -6,6 +6,12 @@
 #include <stdint.h>
 
 #include "../../../kernel/address.h"
+#include "../../../kernel/types/optional.h"
+
+typedef void (*KAllocObserver)(void);
+OptionalDef(KAllocObserver);
+
+void KAllocStub__observe_user_allocations(Optional(KAllocObserver) observer);
 
 void KAllocStub__reset_virtual_translation(void);
 void KAllocStub__set_virtual_translation(Address virtual_start, size_t size, Address physical_start);

@@ -584,11 +584,9 @@ void test_hundeschule_lookup_handles_missing_pid_and_updates_stored_record(void)
     );
 }
 
-void test_hundeschule_does_not_spawn_duplicate_socket_hosts_from_config(void)
+void test_hundeschule_does_not_spawn_duplicate_hosted_services_from_config(void)
 {
     HundeschuleRequiredProcesses processes = HundeschuleRequiredProcesses__new();
-    TEST_ASSERT_EQUAL(0, Hundeschule__spawn_configured_driver_line(
-                             &processes, &bstr("driver /sbin/drivers/socket_router once"), false));
     TEST_ASSERT_EQUAL(0, Hundeschule__spawn_configured_driver_line(
                              &processes, &bstr("driver /sbin/services/hunde-io-host once"), false));
     TEST_ASSERT_EQUAL(

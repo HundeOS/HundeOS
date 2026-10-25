@@ -580,9 +580,10 @@ independent architecture UART path and do not depend on these services.
 
 ## Socket protocol
 
-The implemented control path is application -> `hund-io-system` redirect ->
-`socket_router`; subsequent operations use the application's direct Channel to
-`socket_router`. All socket buffers, connection pairing,
+Socket requests are dispatched by `hunde-io-host` to its loaded Rust
+`socket.wuff` component. The host retains the `socket_router` endpoint for
+existing clients; the standalone C server, its binary, and its configuration
+entries have been removed. All socket buffers, connection pairing,
 listener backlogs, and accept queues for this path live in userspace.
 `socket://name` remains a socket-registry name, not a filesystem node. This is
 local socket communication, not a TCP/IP stack.

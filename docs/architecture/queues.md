@@ -31,6 +31,22 @@ This foundation is a prerequisite for authenticated services such as
 [`hund-unterbrict`](interrupt-service.md), not an implementation of IRQ routing
 or token authorization.
 
+## Kernel lock ownership
+
+Queue listener selection, generation assignment, backing allocation, service
+directory publication, and listener installation execute under the scheduler
+mutex. Releasing it before `Queues__listen` runs allows concurrent registrations
+to overwrite a listener slot while leaving a stale endpoint in the directory.
+
+Kernel early returns use `cs_return(value)`: the expression is evaluated once
+and its value captured before unlocking. `cs_return_void()` unlocks before a void
+return. Work that must run after unlocking uses `cs_exit_then(code)` instead.
+Scheduler operations performed under a lock may mark processes runnable or return
+a context-switch decision, but the actual context switch must happen after the
+mutex is released. Hosted mutex tests check expression ordering and captured
+values; scheduler queue tests check lock ownership during listener allocation and
+verify that both published listeners remain connectable.
+
 ## Bounded Waits
 
 Userspace captures its process doorbell generation before polling queue and

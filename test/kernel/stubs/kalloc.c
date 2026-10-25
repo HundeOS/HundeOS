@@ -4,6 +4,14 @@
 #include "../../../kernel/address.h"
 #include "../../../kernel/debug.h"
 #include "../../../kernel/kalloc.h"
+#include "kalloc.h"
+
+static Optional(KAllocObserver) user_allocation_observer = None(KAllocObserver);
+
+void KAllocStub__observe_user_allocations(Optional(KAllocObserver) observer)
+{
+    user_allocation_observer = observer;
+}
 
 static bool virtual_translation_enabled = false;
 static Address virtual_translation_start = 0;
@@ -202,6 +210,13 @@ UserAddress Kernel__alloc_user(Address virtual_address, size_t size, bool read, 
 
 Result(UserAddress) Kernel__try_alloc_user(Address virtual_address, size_t size, bool read, bool write, bool execute)
 {
+    match_optional(user_allocation_observer,
+        some(observer)
+        {
+            observer();
+        },
+        none_do_nothing()
+    );
     if (user_alloc_failure_enabled)
     {
         return Error(UserAddress, bstr("Allocation failed"), KALLOC_ALLOCATION_FAILED);

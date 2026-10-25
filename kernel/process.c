@@ -1035,11 +1035,11 @@ Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOpe
                 ParkedOperations__push(&self->parked_operations, operation),
                 success(index)
                 {
-                    cs_return Success(CollectionCode, index);
+                    cs_return(Success(CollectionCode, index));
                 },
                 error(code, message)
                 {
-                    cs_return Error(CollectionCode, message, code);
+                    cs_return(Error(CollectionCode, message, code));
                 }
             );
         }
@@ -1057,7 +1057,7 @@ Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self)
                 ParkedOperations__remove_at(&self->parked_operations, -1),
                 some(parked_operation)
                 {
-                    cs_return Some(ParkedOperationPtr, parked_operation);
+                    cs_return(Some(ParkedOperationPtr, parked_operation));
                 },
                 none_do_nothing()
             );
@@ -1084,7 +1084,7 @@ Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self
                                 ParkedOperations__remove_at(&self->parked_operations, index),
                                 some(removed)
                                 {
-                                    cs_return Some(ParkedOperationPtr, removed);
+                                    cs_return(Some(ParkedOperationPtr, removed));
                                 },
                                 none_do_nothing()
                             );
@@ -1108,7 +1108,7 @@ Optional(ParkReason) Process__top_park_reason(ProcessPtr self)
                 ParkedOperations__at(&self->parked_operations, -1),
                 some(parked_operation)
                 {
-                    cs_return Some(ParkReason, parked_operation->park_reason);
+                    cs_return(Some(ParkReason, parked_operation->park_reason));
                 },
                 none_do_nothing()
             );
@@ -1131,7 +1131,7 @@ Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self)
                         parked_operation->kernel_context->scheduler,
                         some(scheduler)
                         {
-                            cs_return Some(SchedulerPtr, scheduler);
+                            cs_return(Some(SchedulerPtr, scheduler));
                         },
                         none_do_nothing()
                     );
@@ -1171,7 +1171,7 @@ bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalP
                                     {
                                         if (parked_key == key)
                                         {
-                                            cs_return true;
+                                            cs_return(true);
                                         }
                                     },
                                     none_do_nothing()
@@ -1179,7 +1179,7 @@ bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalP
                             },
                             none()
                             {
-                                cs_return true;
+                                cs_return(true);
                             }
                         );
                     },
@@ -1208,7 +1208,7 @@ bool Process__write_child_abort_report(ProcessPtr self, SpawnAbortReport report)
                             parked_operation->operation_context != 0)
                         {
                             *(SpawnAbortReportPtr)parked_operation->operation_context = report;
-                            cs_return true;
+                            cs_return(true);
                         }
                     },
                     none_do_nothing()
@@ -1246,7 +1246,7 @@ bool Process__has_ready_parked_operation(ProcessPtr self, ParkReason reason, Opt
                                     {
                                         if (parked_key == key)
                                         {
-                                            cs_return true;
+                                            cs_return(true);
                                         }
                                     },
                                     none_do_nothing()
@@ -1254,7 +1254,7 @@ bool Process__has_ready_parked_operation(ProcessPtr self, ParkReason reason, Opt
                             },
                             none()
                             {
-                                cs_return true;
+                                cs_return(true);
                             }
                         );
                     },
@@ -1297,7 +1297,7 @@ bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, Op
                                         {
                                             parked_operation->return_code = *return_code;
                                             ParkedOperation__mark_ready(parked_operation);
-                                            cs_return true;
+                                            cs_return(true);
                                         }
                                     },
                                     none_do_nothing()
@@ -1307,7 +1307,7 @@ bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, Op
                             {
                                 parked_operation->return_code = *return_code;
                                 ParkedOperation__mark_ready(parked_operation);
-                                cs_return true;
+                                cs_return(true);
                             }
                         );
                     },
@@ -1349,7 +1349,7 @@ bool Process__mark_child_wait_ready(ProcessPtr self, ProcessID child_pid, Proces
                         if (selected && child_selected)
                         {
                             ParkedOperation__mark_ready(parked_operation);
-                            cs_return true;
+                            cs_return(true);
                         }
                     },
                     none_do_nothing()
@@ -1388,7 +1388,7 @@ bool Process__mark_signal_suspend_ready(ProcessPtr self)
                                 },
                                 none()
                                 {
-                                    cs_return false;
+                                    cs_return(false);
                                 }
                             );
                             ProcessSignalAction action =
@@ -1404,7 +1404,7 @@ bool Process__mark_signal_suspend_ready(ProcessPtr self)
                             self->forced_signal = Some(ProcessSignal, signal);
                             parked_operation->return_code = Some(ReturnCode, PROCESS_SIGNAL_INTERRUPTED);
                             ParkedOperation__mark_ready(parked_operation);
-                            cs_return true;
+                            cs_return(true);
                         }
                     },
                     none_do_nothing()
@@ -1423,7 +1423,7 @@ bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
         {
             if (self->state != PROC_STATE_SLEEPING && self->state != PROC_STATE_WAITING)
             {
-                cs_return false;
+                cs_return(false);
             }
 
             for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
@@ -1453,7 +1453,7 @@ bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
                                 {
                                     QueueWaitUsage__wake(&self->queue_wait_usage, QUEUE_WAIT_TIMEOUT);
                                 }
-                                cs_return true;
+                                cs_return(true);
                                 }
                             },
                             none_do_nothing()
@@ -1473,7 +1473,7 @@ bool Process__is_parked(ProcessPtr self)
     critical_section(
         self->lock,
         {
-            cs_return ParkedOperations__len(&self->parked_operations) > 0;
+            cs_return(ParkedOperations__len(&self->parked_operations) > 0);
         }
     );
 
@@ -1539,7 +1539,7 @@ bool Process__can_resume_for_signal(ProcessPtr self)
                 {
                     if (operation->park_reason == PARK_WAIT_EXEC_LOAD)
                     {
-                        cs_return Process__has_pending_kill(self);
+                        cs_return(Process__has_pending_kill(self));
                     }
                 },
                 none_do_nothing()
@@ -1547,7 +1547,7 @@ bool Process__can_resume_for_signal(ProcessPtr self)
             ProcessSignalMask pending = __atomic_load_n(&self->pending_signals, __ATOMIC_ACQUIRE);
             ProcessSignalMask unmaskable =
                 ProcessSignal__mask(PROCESS_SIGNAL_KILL) | ProcessSignal__mask(PROCESS_SIGNAL_STOP);
-            cs_return(pending & (~self->signal_mask | unmaskable)) != 0;
+            cs_return((pending & (~self->signal_mask | unmaskable)) != 0);
         }
     );
 
@@ -1617,11 +1617,11 @@ Result(ProcessSignalResult)
                 ProcessSignalActions__set(&self->signal_actions, signal, replacement),
                 success(_)
                 {
-                    cs_return Success(ProcessSignalResult, PROCESS_SIGNAL_OK);
+                    cs_return(Success(ProcessSignalResult, PROCESS_SIGNAL_OK));
                 },
                 error(code, message)
                 {
-                    cs_return Error(ProcessSignalResult, message, PROCESS_SIGNAL_NO_MEMORY);
+                    cs_return(Error(ProcessSignalResult, message, PROCESS_SIGNAL_NO_MEMORY));
                 }
             );
         }
@@ -1659,10 +1659,10 @@ Result(ProcessSignalResult) Process__set_signal_mask(ProcessPtr self, uint64_t o
                 self->signal_mask = requested;
                 break;
             default:
-                cs_return Error(ProcessSignalResult, bstr("Invalid signal mask operation"),
-                                PROCESS_SIGNAL_INVALID_ARGUMENT);
+                cs_return(Error(ProcessSignalResult, bstr("Invalid signal mask operation"),
+                                PROCESS_SIGNAL_INVALID_ARGUMENT));
             }
-            cs_return Success(ProcessSignalResult, PROCESS_SIGNAL_OK);
+            cs_return(Success(ProcessSignalResult, PROCESS_SIGNAL_OK));
         }
     );
 
@@ -1703,7 +1703,7 @@ static Optional(ParkedOperationPtr)
                 {
                     if (operation->park_reason == PARK_WAIT_EXEC_LOAD)
                     {
-                        cs_return None(ParkedOperationPtr);
+                        cs_return(None(ParkedOperationPtr));
                     }
                     ParkReason reason = operation->park_reason;
                     match_optional(
@@ -1719,7 +1719,7 @@ static Optional(ParkedOperationPtr)
                             {
                                 ProcessContext__set_syscall_result(saved_context, SYSCALL_INTERRUPTED);
                             }
-                            cs_return Some(ParkedOperationPtr, interrupted);
+                            cs_return(Some(ParkedOperationPtr, interrupted));
                         },
                         none_do_nothing()
                     );
@@ -1902,7 +1902,7 @@ bool Process__take_expired_alarm(ProcessPtr self, uint64_t now_usec)
                     if (deadline <= now_usec)
                     {
                         self->alarm_deadline_usec = None(ProcessAlarmDeadline);
-                        cs_return true;
+                        cs_return(true);
                     }
                 },
                 none_do_nothing()

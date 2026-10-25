@@ -10,7 +10,7 @@ Result(ServiceCode) KernelDeviceRegistry__init(KernelDeviceRegistryPtr self)
         {
             if (self->mapping.valid)
             {
-                cs_return Success(ServiceCode, SERVICE_OK);
+                cs_return(Success(ServiceCode, SERVICE_OK));
             }
             match_result(
                 Kernel__try_alloc_user(DEVICE_REGISTRY_VADDR, DEVICE_REGISTRY_SIZE, true, false, false),
@@ -19,11 +19,11 @@ Result(ServiceCode) KernelDeviceRegistry__init(KernelDeviceRegistryPtr self)
                     Kernel__memset(mapping.kernel_addr.virtual_addr, 0, DEVICE_REGISTRY_SIZE);
                     k_v_ptr(mapping, DeviceRegistry)->version = DEVICE_REGISTRY_VERSION;
                     self->mapping = mapping;
-                    cs_return Success(ServiceCode, SERVICE_OK);
+                    cs_return(Success(ServiceCode, SERVICE_OK));
                 },
                 error(code, message)
                 {
-                    cs_return Error(ServiceCode, message, SERVICE_MAP_FAILED);
+                    cs_return(Error(ServiceCode, message, SERVICE_MAP_FAILED));
                 }
             );
         }
@@ -73,16 +73,15 @@ Result(ServiceCode) KernelDeviceRegistry__publish(KernelDeviceRegistryPtr self, 
                         {
                             slot = index;
                         }
-                        if (existing.kind != DEVICE_ABSENT &&
-                            BString__equals(&existing.path, &record->path))
+                        if (existing.kind != DEVICE_ABSENT && BString__equals(&existing.path, &record->path))
                         {
-                            cs_return Error(ServiceCode, bstr("Device already published"),
-                                            SERVICE_DEVICE_ALREADY_REGISTERED);
+                            cs_return(Error(ServiceCode, bstr("Device already published"),
+                                            SERVICE_DEVICE_ALREADY_REGISTERED));
                         }
                     },
                     error(code, message)
                     {
-                        cs_return Error(ServiceCode, message, SERVICE_MAP_FAILED);
+                        cs_return(Error(ServiceCode, message, SERVICE_MAP_FAILED));
                     }
                 );
             }
@@ -95,11 +94,11 @@ Result(ServiceCode) KernelDeviceRegistry__publish(KernelDeviceRegistryPtr self, 
                 DeviceRegistry__set(directory, slot, &published),
                 success(code)
                 {
-                    cs_return Success(ServiceCode, SERVICE_OK);
+                    cs_return(Success(ServiceCode, SERVICE_OK));
                 },
                 error(code, message)
                 {
-                    cs_return Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL);
+                    cs_return(Error(ServiceCode, message, SERVICE_EVENT_QUEUE_FULL));
                 }
             );
         }
@@ -131,7 +130,7 @@ void KernelDeviceRegistry__remove_process(KernelDeviceRegistryPtr self, uint64_t
                     },
                     error(code, message)
                     {
-                        cs_return;
+                        cs_return_void();
                     }
                 );
             }

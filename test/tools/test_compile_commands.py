@@ -126,6 +126,25 @@ def test_inherited_silent_directory_flag_does_not_hide_recursive_paths(source):
 
 
 @pytest.mark.parametrize("architecture", ["aarch64", "riscv64"])
+def test_binary_discovery_excludes_removed_programs_without_retirement_filters(architecture):
+    result = subprocess.run(
+        ["make", "--no-print-directory", "-s", "-f", "Makefile", "-f", "-", "current-binaries",
+         f"ARCH={architecture}"],
+        input="current-binaries:\n\t@printf '%s\\n' $(USER_BINARY_DIRS)\n",
+        cwd=ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    directories = set(result.stdout.splitlines())
+    assert "user/services/hunde-io-host" in directories
+    assert "user/commands/login" in directories
+    assert "user/drivers/uart_rx" in directories
+    for directory in ("user/commands/shell", "user/drivers/devfs", "user/drivers/socket_router"):
+        assert directory not in directories
+        assert not (ROOT / directory).exists()
+    assert "USER_RETIRED_BINARY_DIRS" not in (ROOT / "Makefile").read_text()
+
+
+@pytest.mark.parametrize("architecture", ["aarch64", "riscv64"])
 @pytest.mark.parametrize("artifact", ["object", "shared-library"])
 def test_capture_prints_pic_compiler_commands_without_building_newlib(tmp_path, architecture, artifact):
     platform = tmp_path / architecture

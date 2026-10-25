@@ -340,6 +340,9 @@ def test_qemu_rust_socket_component(qemu_session, target, trace_path):
     processes = session.run_command("ps")
     assert b"/sbin/services/hunde-io-host" in processes
     assert b"/sbin/drivers/socket_router" not in processes
+    drivers = session.run_command("/usr/local/bin/ls /sbin/drivers")
+    assert b"uart_rx" in drivers and b"uart_tx" in drivers, drivers
+    assert b"socket_router" not in drivers, drivers
     assert b"/sbin/services/hund-rohr" not in processes
     assert b"/sbin/drivers/memfs" not in processes
     assert b"/sbin/drivers/procfs" not in processes

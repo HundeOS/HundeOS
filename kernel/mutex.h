@@ -17,10 +17,22 @@ int mutex_trylock(MutexPtr m);
 void mutex_lock(MutexPtr m);
 void mutex_unlock(MutexPtr m);
 
-#define cs_return                                                                                                      \
-    mutex_unlock(__mutex);                                                                                             \
-    __d_printf(MUTEX, "Returning from critical_section %s:%i\n", __FILE__, __LINE__);                                  \
-    return
+#define cs_return(...)                                                                                                 \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        __auto_type __critical_result = (__VA_ARGS__);                                                                 \
+        mutex_unlock(__mutex);                                                                                         \
+        __d_printf(MUTEX, "Returning from critical_section %s:%i\n", __FILE__, __LINE__);                              \
+        return __critical_result;                                                                                      \
+    } while (0)
+
+#define cs_return_void()                                                                                               \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        mutex_unlock(__mutex);                                                                                         \
+        __d_printf(MUTEX, "Returning from critical_section %s:%i\n", __FILE__, __LINE__);                              \
+        return;                                                                                                        \
+    } while (0)
 
 #define cs_exit_then(code)                                                                                             \
     __d_printf(MUTEX, "Early exit from critical_section %s:%i\n", __FILE__, __LINE__);                                 \

@@ -50,6 +50,7 @@ void setUp(void)
 
 void tearDown(void)
 {
+    KAllocStub__observe_user_allocations(None(KAllocObserver));
     KAllocStub__set_free_failure(false);
     TEST_ASSERT_FALSE(panic_occurred());
 }
@@ -124,6 +125,51 @@ static QueueEndpointID listen_queue(void)
         error_test_fail()
     );
     return find_endpoint(&bstr("protected-test"));
+}
+
+static size_t observed_listener_allocations;
+static QueueConnectionID connect_queue(QueueEndpointID endpoint, ProcessPtr process);
+
+static void assert_listener_allocation_locked(void)
+{
+    observed_listener_allocations++;
+    TEST_ASSERT_FALSE(mutex_trylock(&kernel->scheduler->scheduler_lock));
+}
+
+static QueueEndpointID register_locked_listener(ProcessPtr process, ConstBStringPtr name)
+{
+    match_result(
+        Process__alloc_user_pages(process, QUEUE_PAGE_SIZE),
+        success(memory)
+        {
+            Kernel__memcopy((Address)BString__cstr(name), memory.kernel_addr.virtual_addr, BString__length(name));
+            KAllocStub__observe_user_allocations(Some(KAllocObserver, assert_listener_allocation_locked));
+            match_result(
+                Scheduler__queue_listen(kernel->scheduler, process, memory.virtual_addr, BString__length(name)),
+                success_do_nothing(),
+                error_test_fail()
+            );
+            KAllocStub__observe_user_allocations(None(KAllocObserver));
+            return find_endpoint(name);
+        },
+        error_test_fail()
+    );
+    __builtin_trap();
+}
+
+void test_scheduler_listener_registration_holds_lock_through_allocation_and_publication(void)
+{
+    observed_listener_allocations = 0;
+    other->process_class = PROCESS_CLASS_SERVICE;
+    Process__set_hund_identity(other);
+    QueueEndpointID first = register_locked_listener(server, &bstr("first-locked-listener"));
+    QueueEndpointID second = register_locked_listener(other, &bstr("second-locked-listener"));
+    TEST_ASSERT_GREATER_THAN(0, observed_listener_allocations);
+    TEST_ASSERT_TRUE(mutex_trylock(&kernel->scheduler->scheduler_lock));
+    mutex_unlock(&kernel->scheduler->scheduler_lock);
+    TEST_ASSERT_NOT_EQUAL(first, second);
+    connect_queue(first, client);
+    connect_queue(second, client);
 }
 
 static void assert_push_success(QueuePtr queue, ConstQueueMessagePtr message)

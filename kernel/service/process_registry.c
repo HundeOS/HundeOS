@@ -14,7 +14,7 @@ Result(ServiceCode) KernelProcessRegistry__map_process(KernelProcessRegistryPtr 
         {
             if (process->process_registry_mapped)
             {
-                cs_return Success(ServiceCode, SERVICE_OK);
+                cs_return(Success(ServiceCode, SERVICE_OK));
             }
             if (!self->mapping.valid)
             {
@@ -29,7 +29,7 @@ Result(ServiceCode) KernelProcessRegistry__map_process(KernelProcessRegistryPtr 
                     },
                     error(code, message)
                     {
-                        cs_return Error(ServiceCode, message, SERVICE_MAP_FAILED);
+                        cs_return(Error(ServiceCode, message, SERVICE_MAP_FAILED));
                     }
                 );
             }
@@ -39,11 +39,11 @@ Result(ServiceCode) KernelProcessRegistry__map_process(KernelProcessRegistryPtr 
                 success_do_nothing(),
                 error(code, message)
                 {
-                    cs_return Error(ServiceCode, message, SERVICE_MAP_FAILED);
+                    cs_return(Error(ServiceCode, message, SERVICE_MAP_FAILED));
                 }
             );
             process->process_registry_mapped = true;
-            cs_return Success(ServiceCode, SERVICE_OK);
+            cs_return(Success(ServiceCode, SERVICE_OK));
         }
     );
 }

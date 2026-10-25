@@ -391,7 +391,7 @@ Result(SystemCallResult) BootComplete__handler(KernelPtr kernel, OptionalPtr(Pro
                 is_nothing(ServiceDirectory__find_endpoint(directory, &bstr("/boot"))) ||
                 is_nothing(ServiceDirectory__find_endpoint(directory, &bstr("/boot/config"))))
             {
-                cs_return Error(SystemCallResult, bstr("Bootstrap services unavailable"), SPAWN_FAILED);
+                cs_return(Error(SystemCallResult, bstr("Bootstrap services unavailable"), SPAWN_FAILED));
             }
             __atomic_store_n(&kernel->boot_complete, true, __ATOMIC_RELEASE);
         }
