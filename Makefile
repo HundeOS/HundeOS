@@ -487,16 +487,18 @@ RUST_PROCFS_BINARY := $(RUST_CARGO_DIR)/procfs.wuff
 RUST_SYSINFOFS_BINARY := $(RUST_CARGO_DIR)/sysinfofs.wuff
 RUST_EXT2_BINARY := $(RUST_CARGO_DIR)/ext2fs.wuff
 RUST_FAT32_BINARY := $(RUST_CARGO_DIR)/fat32.wuff
+RUST_DEVFS_BINARY := $(RUST_CARGO_DIR)/devfs.wuff
+RUST_EMBEDFS_BINARY := $(RUST_CARGO_DIR)/embedfs.wuff
 RUST_IO_COMPONENT_ENTRY := hunde_io_component_entry_v6
 RUST_PIPE_BINARY := $(RUST_CARGO_DIR)/pipe.wuff
 RUST_SOCKET_BINARY := $(RUST_CARGO_DIR)/socket.wuff
-RUST_CRATE_DIRS := user/drivers/memfs user/services/hund-rohr user/lib/hunde user/services/hunde-io-host user/drivers/socket user/components/rust_smoke user/drivers/procfs user/drivers/sysinfofs user/drivers/ext2fs user/drivers/fat32fs
-RUST_PROTOCOL_INPUTS := common/ipc/io_protocol.h common_includes/hunde/io_component.h common_includes/hunde/boot_info.h common_includes/hunde/host_component.h common_includes/syscalls/io.h common_includes/syscalls/service.h common_includes/syscalls/mem.h tools/generate_rust_io_constants.py
+RUST_CRATE_DIRS := user/drivers/devfs user/drivers/embedfs user/drivers/memfs user/services/hund-rohr user/lib/hunde user/services/hunde-io-host user/drivers/socket user/components/rust_smoke user/drivers/procfs user/drivers/sysinfofs user/drivers/ext2fs user/drivers/fat32fs
+RUST_PROTOCOL_INPUTS := common/ipc/io_protocol.h common_includes/hunde/io_component.h common_includes/hunde/boot_info.h common_includes/hunde/host_component.h common_includes/syscalls/io.h common_includes/syscalls/service.h common_includes/syscalls/mem.h tools/generate_rust_io_constants.py config/io-host.conf config/bootstrap.fstab
 RUST_IO_SOURCES := $(shell find $(RUST_CRATE_DIRS) -name '*.rs' -print -o -name Cargo.toml -print) user/Cargo.toml user/Cargo.lock $(RUST_PROTOCOL_INPUTS)
 hunde-io-host_EXTRA_OBJS := $(RUST_IO_HOST_ARCHIVE)
 
 USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
-USER_COMPONENT_DIRS := user/drivers/memfs user/drivers/socket user/services/hund-rohr user/drivers/procfs user/drivers/sysinfofs user/drivers/fat32fs
+USER_COMPONENT_DIRS := user/drivers/devfs user/drivers/embedfs user/drivers/memfs user/drivers/socket user/services/hund-rohr user/drivers/procfs user/drivers/sysinfofs user/drivers/fat32fs
 USER_BINARY_DIRS := $(filter-out $(USER_COMPONENT_DIRS),$(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)))
 WUFF_INTERPRETER_DIR := user/programs/wuff-ld
 ROOTFS_COMMAND_NAMES := cat cp env fs-latency grep kill ln ls mkdir mv ps rm shutdown tail write
@@ -569,9 +571,14 @@ hund-unterbrict_EXTRA_OBJS := \
 	$(USER_BUILD_DIR)/drivers/virtio_blk_channelio/mmio.o \
 	$(USER_BUILD_DIR)/drivers/virtio_blk_channelio/runtime.o
 EMBEDDED_FS_INPUTS := \
+    config/io-host.conf=config/io-host.conf \
+    config/bootstrap.fstab=config/bootstrap.fstab \
+    lib/libc.wuff.1=$(SYSROOT_WUFF_LIBC) \
 	$(foreach dir,$(EMBEDDED_USER_NON_DRIVER_DIRS),$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
 	$(foreach dir,$(USER_DRIVER_DIRS),drivers/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
 	$(foreach dir,$(USER_SERVICE_DIRS),services/$(notdir $(dir))=$(USER_BUILD_DIR)/$(notdir $(dir)).bin) \
+	components/devfs.wuff=$(RUST_DEVFS_BINARY) \
+	components/embedfs.wuff=$(RUST_EMBEDFS_BINARY) \
 	components/socket.wuff=$(RUST_SOCKET_BINARY) \
 	components/pipe.wuff=$(RUST_PIPE_BINARY) \
 	components/memfs.wuff=$(RUST_MEMFS_BINARY) \
@@ -820,16 +827,39 @@ rust-lint-target:
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-sysinfofs --features component --lib --bin sysinfofs-component -- -D warnings
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-ext2fs --features component --lib --bin ext2fs-component -- -D warnings
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-fat32fs --features component --lib --bin fat32fs-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-devfs --features component --lib --bin devfs-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-embedfs --features component --lib --bin embedfs-component -- -D warnings
 
 rust-test:
 	cargo +$(RUST_TOOLCHAIN) test --manifest-path user/Cargo.toml --workspace --target-dir $(RUST_CARGO_DIR)
 
-rust-io: $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) $(RUST_PIPE_BINARY) $(RUST_SOCKET_BINARY) $(USER_BUILD_DIR)/hunde-io-host.bin
+rust-io: $(RUST_DEVFS_BINARY) $(RUST_EMBEDFS_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) $(RUST_PIPE_BINARY) $(RUST_SOCKET_BINARY) $(USER_BUILD_DIR)/hunde-io-host.bin
 
 $(RUST_IO_HOST_ARCHIVE): $(RUST_IO_SOURCES) rust-toolchain.toml Makefile
 	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) build \
 		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
 		--target $(RUST_COMPONENT_TARGET) -p hunde-io-host --features service
+
+$(RUST_DEVFS_BINARY): RUST_IO_COMPONENT_NAME = devfs
+$(RUST_DEVFS_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/devfs
+$(RUST_DEVFS_BINARY): user/drivers/devfs/exports.map
+$(RUST_EMBEDFS_BINARY): RUST_IO_COMPONENT_NAME = embedfs
+$(RUST_EMBEDFS_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/embedfs
+$(RUST_EMBEDFS_BINARY): user/drivers/embedfs/exports.map
+
+$(RUST_DEVFS_BINARY) $(RUST_EMBEDFS_BINARY): $(RUST_IO_SOURCES) $(SYSROOT_WUFF_LIBC) rust-toolchain.toml Makefile | check-wuff-linker
+	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) rustc \
+		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-$(RUST_IO_COMPONENT_NAME) --features component --bin $(RUST_IO_COMPONENT_NAME)-component -- \
+		-C linker=$(WUFF_LD) -C linker-flavor=ld \
+		-C link-args="-shared --soname $(RUST_IO_COMPONENT_NAME).wuff.1 --hash-style=sysv -z defs -z now -z relro -z text --version-script=$(abspath $(RUST_IO_COMPONENT_DIRECTORY)/exports.map) -u $(RUST_IO_COMPONENT_ENTRY) -L$(abspath $(SYSROOT_LIB_DIR)) -l:libc.wuff.1"
+	cp $(RUST_RELEASE_DIR)/$(RUST_IO_COMPONENT_NAME)-component $@
+	test "$$($(READELF) -dW $@ | awk '/\(NEEDED\)/ { print $$5 }')" = '[libc.wuff.1]'
+	if $(READELF) -dW $@ | grep -Eq '\((TEXTREL|PREINIT_ARRAY|INIT|INIT_ARRAY|FINI|FINI_ARRAY)\)'; then $(READELF) -dW $@ >&2; exit 1; fi
+	if $(READELF) -lW $@ | grep -Eq '^[[:space:]]*(INTERP|TLS)[[:space:]]'; then $(READELF) -lW $@ >&2; exit 1; fi
+	$(READELF) -lW $@ | grep -q 'GNU_RELRO'
+	$(READELF) --dyn-syms -W $@ | awk '$$7 != "UND" && $$5 == "GLOBAL" { count++; if ($$8 != "$(RUST_IO_COMPONENT_ENTRY)") bad = 1 } END { exit bad || count != 1 }'
+	$(READELF) -rW $@ | awk -v allowed="$(WUFF_PROGRAM_RELOCATIONS)" '$$3 ~ /^R_/ { if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad }'
 
 $(RUST_SOCKET_BINARY): RUST_IO_COMPONENT_NAME = socket
 $(RUST_SOCKET_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/socket
@@ -1207,7 +1237,7 @@ $(MILKV_DUO_BRINGUP_BUILD_DIR)/%.o: %.s
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(EMBEDDED_FS): $(PYTHON_ENV_STAMP) $(USER_BINARIES) $(RUST_SOCKET_BINARY) $(RUST_PIPE_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) tools/build_embedded_fs.py
+$(EMBEDDED_FS): $(RUST_DEVFS_BINARY) $(RUST_EMBEDFS_BINARY) $(SYSROOT_WUFF_LIBC) config/bootstrap.fstab $(PYTHON_ENV_STAMP) $(USER_BINARIES) $(RUST_SOCKET_BINARY) $(RUST_PIPE_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) tools/build_embedded_fs.py config/io-host.conf
 	$(PYTHON) tools/build_embedded_fs.py $@ $(EMBEDDED_FS_INPUTS)
 
 $(KERNEL_BUILD_DIR)/./kernel/bin/embedded_fs.o: kernel/bin/embedded_fs.S $(EMBEDDED_FS)

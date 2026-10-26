@@ -1,4 +1,5 @@
-use super::Filesystem;
+use crate::host::components::{ConfiguredComponent, image_ready};
+use crate::host::config::Filesystems;
 use crate::host::{Endpoint, Subsystem};
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
@@ -27,7 +28,6 @@ impl DevicePath {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum MountSource {
     Block(DevicePath, BundledFilesystem),
-    EmbeddedArchive,
     Console(crate::console::Definition),
 }
 
@@ -35,7 +35,6 @@ impl MountSource {
     fn same_device(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Block(device, _), Self::Block(candidate, _)) => device == candidate,
-            (Self::EmbeddedArchive, Self::EmbeddedArchive) => true,
             (Self::Console(first), Self::Console(second)) => first == second,
             _ => false,
         }
@@ -49,7 +48,7 @@ struct MountRequest {
 }
 
 impl MountRequest {
-    fn parse(bytes: &[u8]) -> Result<Self, IoError> {
+    fn parse(filesystems: &Filesystems, bytes: &[u8]) -> Result<Self, IoError> {
         let text = core::str::from_utf8(bytes).map_err(|_| IoError(IO_INVALID_PATH))?;
         let mut fields = text.split_ascii_whitespace();
         if fields.next() != Some("device") {
@@ -67,13 +66,12 @@ impl MountRequest {
                 (_, Some("console"), _) => {
                     MountSource::Console(crate::console::Definition::parse(device, path)?)
                 }
-                ("-", Some("embedfs"), "/sbin") => MountSource::EmbeddedArchive,
-                (_, Some("ext2.wuff"), _) if canonical(path) => {
-                    MountSource::Block(DevicePath::parse(device)?, BundledFilesystem::Ext2)
-                }
-                (_, Some("fat32.wuff"), _) if canonical(path) => {
-                    MountSource::Block(DevicePath::parse(device)?, BundledFilesystem::Fat32)
-                }
+                (_, Some(format), _) if canonical(path) => MountSource::Block(
+                    DevicePath::parse(device)?,
+                    filesystems
+                        .find(format)
+                        .ok_or(IoError(IO_INVALID_MOUNT_POINT))?,
+                ),
                 _ => return Err(IoError(IO_INVALID_MOUNT_POINT)),
             },
             name: ServiceName::from_string(path.to_string()),
@@ -81,7 +79,7 @@ impl MountRequest {
     }
 }
 
-pub(super) fn canonical(path: &str) -> bool {
+pub(crate) fn canonical(path: &str) -> bool {
     if path == "/" {
         return true;
     }
@@ -216,11 +214,16 @@ impl Mounts {
 pub(crate) struct Control<Authority> {
     mounts: Mounts,
     authorize: Authority,
+    filesystems: Filesystems,
 }
 
 impl<Authority> Control<Authority> {
-    pub(crate) fn new(mounts: Mounts, authorize: Authority) -> Self {
-        Self { mounts, authorize }
+    pub(crate) fn new(mounts: Mounts, authorize: Authority, filesystems: Filesystems) -> Self {
+        Self {
+            mounts,
+            authorize,
+            filesystems,
+        }
     }
 }
 
@@ -231,7 +234,7 @@ impl<Authority: Fn(ProcessId) -> Result<(), IoError> + 'static> IoComponent for 
             Operation::Mount(config) => self.mounts.request(Job::new(
                 request.session,
                 request.pid,
-                MountRequest::parse(config)?,
+                MountRequest::parse(&self.filesystems, config)?,
             )),
             _ => Err(IoError(IO_OPERATION_NOT_SUPPORTED)),
         }
@@ -269,36 +272,13 @@ pub(crate) fn serve(
                 );
             }
             MountSource::Block(device, format) => (device, *format),
-            MountSource::EmbeddedArchive => {
-                let component = hunde::embedfs::Filesystem::new()?;
-                let mut worker = crate::host::dispatch::Worker::new(
-                    dispatcher,
-                    job.request.name.clone(),
-                    component,
-                )?;
-                mounts.complete(&job, Ok(()));
-                parker.notify()?;
-                loop {
-                    hunde::fibre::block_on(
-                        core::future::poll_fn(|_| {
-                            if worker.poll() {
-                                core::task::Poll::Ready(())
-                            } else {
-                                core::task::Poll::Pending
-                            }
-                        }),
-                        parker,
-                    )?;
-                    parker.notify()?;
-                }
-            }
         };
         let component =
             hunde::wuff::LoadedComponent::mount_filesystem(format, device.0.as_bytes())?;
-        let mut filesystem = crate::host::dispatch::Hosted::new(Filesystem::mounted(
+        let mut filesystem = crate::host::dispatch::Hosted::new(ConfiguredComponent::new(
             job.request.name.clone(),
+            image_ready(format.path()),
             component,
-            format,
         ));
         let driver = filesystem.clone();
         let mut endpoint = Endpoint::listen(&mut filesystem)?;
@@ -342,9 +322,49 @@ mod tests {
     const CONFIG: &[u8] = b"device /dev/virtio7 ext2.wuff /mnt/hosted-ext2";
 
     #[test]
+    fn mount_format_names_come_from_the_configured_registry() {
+        let registry = crate::host::config::Configuration::parse(
+            b"service /scratch /sbin/components/memfs.wuff\nfilesystem custom /sbin/components/ext2fs.wuff\n",
+        ).unwrap().filesystems;
+        let mounts = Mounts::new();
+        let mut control = Control::new(mounts.clone(), authorize, registry);
+        assert_eq!(
+            call(&mut control, 1, 7, CONFIG),
+            Err(IoError(IO_INVALID_MOUNT_POINT))
+        );
+        assert!(!mounts.has_jobs());
+        assert_eq!(
+            call(
+                &mut control,
+                1,
+                7,
+                b"device /dev/virtio7 custom /mnt/custom"
+            ),
+            Ok(None)
+        );
+        let job = mounts.take_job().unwrap();
+        assert_eq!(
+            job.request.source,
+            MountSource::Block(
+                DevicePath("/dev/virtio7".to_string()),
+                BundledFilesystem::find("/sbin/components/ext2fs.wuff").unwrap()
+            )
+        );
+    }
+
+    fn filesystems() -> Filesystems {
+        crate::host::config::Configuration::parse(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../config/io-host.conf"
+        )))
+        .unwrap()
+        .filesystems
+    }
+
+    #[test]
     fn console_mounts_share_authentication_and_reservations_with_filesystem_mounts() {
         let mounts = Mounts::new();
-        let mut control = Control::new(mounts.clone(), authorize);
+        let mut control = Control::new(mounts.clone(), authorize, filesystems());
         let config = b"device uart_rx,uart_tx console /dev/tty0";
         assert_eq!(
             call(&mut control, 2, 7, b"device /dev/tty0 console :console:"),
@@ -376,15 +396,21 @@ mod tests {
             call(&mut control, 2, 7, b"device /dev/tty0 console :console:"),
             Ok(None)
         );
-        assert!(MountRequest::parse(b"device /dev/virtio1 ext2.wuff :console:").is_err());
-        assert!(MountRequest::parse(b"device uart_rx,uart_tx console /tmp/tty0").is_err());
+        assert!(
+            MountRequest::parse(&filesystems(), b"device /dev/virtio1 ext2.wuff :console:")
+                .is_err()
+        );
+        assert!(
+            MountRequest::parse(&filesystems(), b"device uart_rx,uart_tx console /tmp/tty0")
+                .is_err()
+        );
     }
 
     #[test]
     fn fat32_mount_retains_driver_identity_and_rejects_cross_format_device_reuse() {
         let config = b"device /dev/virtio3 fat32.wuff /mnt/fat";
         let mounts = Mounts::new();
-        let mut control = Control::new(mounts.clone(), authorize);
+        let mut control = Control::new(mounts.clone(), authorize, filesystems());
         assert_eq!(
             call(&mut control, 1, 8, config),
             Err(IoError(IO_PERMISSION_DENIED))
@@ -396,7 +422,7 @@ mod tests {
             job.request.source,
             MountSource::Block(
                 DevicePath("/dev/virtio3".to_string()),
-                BundledFilesystem::Fat32
+                filesystems().find("fat32.wuff").unwrap()
             )
         );
         assert_eq!(
@@ -446,7 +472,7 @@ mod tests {
     fn completed_fat32_mount_stays_reserved_after_control_disconnect() {
         let config = b"device /dev/mmc0p1 fat32.wuff /mnt/sd";
         let mounts = Mounts::new();
-        let mut control = Control::new(mounts.clone(), authorize);
+        let mut control = Control::new(mounts.clone(), authorize, filesystems());
         assert_eq!(call(&mut control, 1, 7, config), Ok(None));
         let job = mounts.take_job().unwrap();
         mounts.complete(&job, Ok(()));
@@ -461,33 +487,6 @@ mod tests {
             ),
             Err(IoError(IO_INVALID_MOUNT_POINT))
         );
-    }
-
-    #[test]
-    fn bootstrap_archive_requires_authority_and_a_completed_internal_worker() {
-        let config = b"device - embedfs /sbin";
-        let mounts = Mounts::new();
-        let mut control = Control::new(mounts.clone(), authorize);
-        assert_eq!(
-            call(&mut control, 1, 8, config),
-            Err(IoError(IO_PERMISSION_DENIED))
-        );
-        assert!(!mounts.has_jobs());
-        assert_eq!(call(&mut control, 1, 7, config), Ok(None));
-        let job = mounts.take_job().unwrap();
-        assert_eq!(job.request.source, MountSource::EmbeddedArchive);
-        assert_eq!(job.request.name.as_str(), "/sbin");
-        assert_eq!(call(&mut control, 1, 7, config), Ok(None));
-        mounts.complete(&job, Ok(()));
-        assert_eq!(call(&mut control, 1, 7, config), Ok(Some(Reply::Value(0))));
-        control.disconnect(SessionId(1)).unwrap();
-        assert!(call(&mut control, 2, 7, config).is_err());
-        for invalid in [
-            b"device - embedfs /other".as_slice(),
-            b"device /dev/disk embedfs /sbin",
-        ] {
-            assert!(MountRequest::parse(invalid).is_err());
-        }
     }
 
     fn authorize(pid: ProcessId) -> Result<(), IoError> {
@@ -515,7 +514,7 @@ mod tests {
     #[test]
     fn mount_requires_authority_and_owns_request_text_until_worker_completes() {
         let mounts = Mounts::new();
-        let mut control = Control::new(mounts.clone(), authorize);
+        let mut control = Control::new(mounts.clone(), authorize, filesystems());
         assert_eq!(
             call(&mut control, 1, 8, CONFIG),
             Err(IoError(IO_PERMISSION_DENIED))
@@ -528,7 +527,7 @@ mod tests {
             job.request.source,
             MountSource::Block(
                 DevicePath("/dev/virtio7".to_string()),
-                BundledFilesystem::Ext2
+                filesystems().find("ext2.wuff").unwrap()
             )
         );
         assert_eq!(job.request.name.as_str(), "/mnt/hosted-ext2");
@@ -541,7 +540,7 @@ mod tests {
     #[test]
     fn duplicate_device_or_endpoint_is_rejected_and_failed_mount_can_retry() {
         let mounts = Mounts::new();
-        let mut control = Control::new(mounts.clone(), authorize);
+        let mut control = Control::new(mounts.clone(), authorize, filesystems());
         assert_eq!(call(&mut control, 1, 7, CONFIG), Ok(None));
         assert!(
             call(
@@ -573,7 +572,7 @@ mod tests {
     #[test]
     fn client_disconnect_does_not_cancel_or_release_a_configured_mount() {
         let mounts = Mounts::new();
-        let mut control = Control::new(mounts.clone(), authorize);
+        let mut control = Control::new(mounts.clone(), authorize, filesystems());
         assert_eq!(call(&mut control, 1, 7, CONFIG), Ok(None));
         control.disconnect(SessionId(1)).unwrap();
         let job = mounts.take_job().unwrap();
@@ -593,16 +592,22 @@ mod tests {
             "device /dev/virtio7 ext2.wuff /mnt/disk/",
             "device /dev/../root ext2.wuff /mnt/disk",
         ] {
-            assert!(MountRequest::parse(config.as_bytes()).is_err(), "{config}");
+            assert!(
+                MountRequest::parse(&filesystems(), config.as_bytes()).is_err(),
+                "{config}"
+            );
         }
-        assert!(MountRequest::parse(b"device /dev/virtio7 ext2.wuff /mnt/\0disk").is_err());
+        assert!(
+            MountRequest::parse(&filesystems(), b"device /dev/virtio7 ext2.wuff /mnt/\0disk")
+                .is_err()
+        );
     }
 
     #[test]
     fn root_requires_authority_and_completion_before_acknowledgement() {
         let config = b"device /dev/virtio1 ext2.wuff /";
         let mounts = Mounts::new();
-        let mut control = Control::new(mounts.clone(), authorize);
+        let mut control = Control::new(mounts.clone(), authorize, filesystems());
         assert_eq!(
             call(&mut control, 1, 8, config),
             Err(IoError(IO_PERMISSION_DENIED))
@@ -637,13 +642,16 @@ mod tests {
         for device in ["/dev/virtio2", "/dev/mmc0p2"] {
             let config = alloc::format!("device {device} ext2.wuff /boot/config");
             let mounts = Mounts::new();
-            let mut control = Control::new(mounts.clone(), authorize);
+            let mut control = Control::new(mounts.clone(), authorize, filesystems());
             assert_eq!(call(&mut control, 1, 7, config.as_bytes()), Ok(None));
             let job = mounts.take_job().unwrap();
             assert_eq!(job.request.name.as_str(), "/boot/config");
             assert_eq!(
                 job.request.source,
-                MountSource::Block(DevicePath(device.to_string()), BundledFilesystem::Ext2)
+                MountSource::Block(
+                    DevicePath(device.to_string()),
+                    filesystems().find("ext2.wuff").unwrap()
+                )
             );
             assert_eq!(call(&mut control, 1, 7, config.as_bytes()), Ok(None));
             mounts.complete(&job, Ok(()));

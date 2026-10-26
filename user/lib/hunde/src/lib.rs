@@ -9,6 +9,8 @@ pub mod block;
 #[cfg(feature = "alloc")]
 pub mod block_host;
 pub mod boot;
+#[cfg(feature = "alloc")]
+pub mod bootstrap;
 pub mod component;
 #[cfg(feature = "alloc")]
 pub mod devfs;

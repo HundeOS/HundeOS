@@ -254,16 +254,20 @@ impl ServiceName {
 /// use hunde::service::{ReadinessMessage, ServiceName};
 /// let message: ReadinessMessage = ServiceName::new("socket_router");
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ReadinessMessage(&'static str);
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadinessMessage(Cow<'static, str>);
 
 impl ReadinessMessage {
     pub const fn new(message: &'static str) -> Self {
-        Self(message)
+        Self(Cow::Borrowed(message))
     }
 
-    pub const fn as_str(self) -> &'static str {
-        self.0
+    pub fn from_string(message: String) -> Self {
+        Self(Cow::Owned(message))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -492,6 +496,10 @@ mod tests {
         const MESSAGE: ReadinessMessage = ReadinessMessage::new("Rust socket.wuff ready");
         assert_eq!(MESSAGE.as_str(), "Rust socket.wuff ready");
         assert_eq!(ReadinessMessage::new("I/O prêt").as_str(), "I/O prêt");
+        let owned = ReadinessMessage::from_string(String::from("Rust configured.wuff ready"));
+        let cloned = owned.clone();
+        drop(owned);
+        assert_eq!(cloned.as_str(), "Rust configured.wuff ready");
     }
 
     #[test]

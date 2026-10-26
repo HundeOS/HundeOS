@@ -35,19 +35,7 @@ impl Mount {
         let path = fields.next().ok_or(IoError(IO_INVALID_MOUNT_POINT))?;
         if fields.next().is_some()
             || !super::control::canonical(path)
-            || !matches!(
-                format,
-                "ext2.wuff"
-                    | "fat32.wuff"
-                    | "ext2"
-                    | "fat32"
-                    | "memfs"
-                    | "procfs"
-                    | "devfs"
-                    | "embedfs"
-                    | "sysinfofs"
-                    | "console"
-            )
+            || format.contains('\0')
             || bytes.len() >= 256
             || (format == "console" && !crate::console::terminal_path(path))
         {
@@ -230,8 +218,9 @@ impl RootFilesystem {
         Self(Rc::new(RefCell::new(MountTree::new())))
     }
 
-    pub(crate) fn bootstrap_ready(&self) -> bool {
-        self.0.borrow().mounts().any(|mount| mount.path == "/sbin")
+    pub(crate) fn mount(&self, image: &str, path: &str) -> Result<(), IoError> {
+        let config = alloc::format!("device - {image} {path}");
+        self.0.borrow_mut().add(Mount::parse(config.as_bytes())?)
     }
 }
 
@@ -450,11 +439,11 @@ mod tests {
         };
         assert!(namespace.execute(request(0)).is_err());
         assert!(namespace.execute(request(8)).is_err());
-        assert!(!tree.bootstrap_ready());
+        assert!(tree.0.borrow().select(b"/sbin").is_err());
         namespace.execute(request(7)).unwrap();
-        assert!(tree.bootstrap_ready());
+        assert!(tree.0.borrow().select(b"/sbin").is_ok());
         for config in [
-            b"device - unknown /bad".as_slice(),
+            b"device - bad\0format /bad".as_slice(),
             b"device - ext2 /bad/",
             b"device - ext2 /../bad",
             b"device - ext2 /bad extra",

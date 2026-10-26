@@ -2,9 +2,13 @@ use hunde::abi::IoError;
 use hunde::component::IoComponent;
 use hunde::service::{ReadinessMessage, Service, ServiceName};
 
-use crate::filesystem::{Filesystem, FilesystemKind};
-use crate::socket::Socket;
-use crate::streams::Streams;
+use alloc::vec::Vec;
+use components::{ConfiguredComponent, image_ready};
+use config::Configuration;
+
+mod bootstrap;
+pub(crate) mod components;
+pub(crate) mod config;
 
 pub(crate) mod dispatch;
 mod router;
@@ -30,7 +34,7 @@ impl<'subsystem> Endpoint<'subsystem> {
     }
 
     pub(crate) fn publish_ready(&self) -> Result<(), IoError> {
-        self.service.publish_ready(self.ready_message)
+        self.service.publish_ready(self.ready_message.clone())
     }
 
     fn serve_handles(&mut self) {
@@ -74,7 +78,16 @@ pub(crate) fn run() -> Result<(), IoError> {
         for endpoint in &endpoints {
             endpoint.publish_ready()?;
         }
-        let mut components_started = false;
+        let components = dispatcher.clone();
+        drop(parker.spawn(move |parker| {
+            if let Err(error) = run_components(components, root_filesystem, parker) {
+                hunde::runtime::log(
+                    alloc::format!("I/O host component startup error: {error:?}").as_bytes(),
+                );
+                hunde::runtime::fatal(b"Rust I/O component startup failed");
+            }
+            Ok(())
+        })?);
         loop {
             let future = core::future::poll_fn(|_| {
                 let events = match poll_service_events(&dispatcher, hunde::service::poll_event) {
@@ -82,26 +95,13 @@ pub(crate) fn run() -> Result<(), IoError> {
                     Err(error) => return core::task::Poll::Ready(Err(error)),
                 };
                 while poll_all(&mut endpoints, Endpoint::poll) {}
-                if events
-                    || (!components_started && root_filesystem.bootstrap_ready())
-                    || dispatcher.take_notification()
-                {
+                if events || dispatcher.take_notification() {
                     core::task::Poll::Ready(Ok(()))
                 } else {
                     core::task::Poll::Pending
                 }
             });
             hunde::fibre::block_on(future, parker)??;
-            if !components_started && root_filesystem.bootstrap_ready() {
-                let components = dispatcher.clone();
-                drop(parker.spawn(move |parker| {
-                    if run_components(components, parker).is_err() {
-                        hunde::runtime::fatal(b"Rust I/O component startup failed");
-                    }
-                    Ok(())
-                })?);
-                components_started = true;
-            }
             parker.notify()?;
         }
     })
@@ -123,42 +123,49 @@ fn poll_service_events(
 
 fn run_components(
     dispatcher: dispatch::Dispatcher,
+    root_filesystem: crate::filesystem::namespace::RootFilesystem,
     parker: &mut hunde::fibre::SchedulerParker<'_>,
 ) -> Result<(), IoError> {
-    let socket = Socket::load()?;
-    let mut socket_worker = dispatch::Worker::new(dispatcher.clone(), socket.endpoint(), socket)?;
-    let streams = Streams::load()?;
-    let mut streams_worker =
-        dispatch::Worker::new(dispatcher.clone(), streams.endpoint(), streams)?;
-    let temporary = Filesystem::load(FilesystemKind::Temporary)?;
-    let mut temporary_worker =
-        dispatch::Worker::new(dispatcher.clone(), temporary.endpoint(), temporary)?;
-    let processes = Filesystem::load(FilesystemKind::Processes)?;
-    let mut processes_worker =
-        dispatch::Worker::new(dispatcher.clone(), processes.endpoint(), processes)?;
-    let boot = Filesystem::load(FilesystemKind::Boot)?;
-    let mut boot_worker = dispatch::Worker::new(dispatcher.clone(), boot.endpoint(), boot)?;
-    let devices = Filesystem::devices()?;
-    let mut devices_worker =
-        dispatch::Worker::new(dispatcher.clone(), devices.endpoint(), devices)?;
-    let mut socket = socket_worker.driver();
-    let mut streams = streams_worker.driver();
-    let mut temporary = temporary_worker.driver();
-    let mut processes = processes_worker.driver();
-    let mut boot = boot_worker.driver();
-    let mut devices = devices_worker.driver();
+    let config = Configuration::load()?;
+    let initial_mounts = bootstrap::Mount::load()?;
+    if initial_mounts.iter().any(|mount| {
+        config
+            .services
+            .iter()
+            .any(|service| service.name == mount.service.name)
+    }) {
+        return Err(IoError(hunde::protocol::IO_REGISTER_FAILED));
+    }
+    let mut workers = Vec::new();
+    for definition in initial_mounts
+        .iter()
+        .map(|mount| &mount.service)
+        .chain(config.services.iter())
+    {
+        let driver = hunde::wuff::LoadedComponent::load(definition.driver)?;
+        let ready = image_ready(definition.driver.path());
+        let component = ConfiguredComponent::new(definition.name.clone(), ready, driver);
+        workers.push(dispatch::Worker::new(
+            dispatcher.clone(),
+            definition.name.clone(),
+            component,
+        )?);
+    }
     let mounts = crate::filesystem::control::Mounts::new();
-    let mut control =
-        crate::filesystem::control::Control::new(mounts.clone(), hunde::service::authorize_mount);
-    let mut endpoints = [
-        Endpoint::listen(&mut socket)?,
-        Endpoint::listen(&mut streams)?,
-        Endpoint::listen(&mut temporary)?,
-        Endpoint::listen(&mut processes)?,
-        Endpoint::listen(&mut boot)?,
-        Endpoint::listen(&mut devices)?,
-        Endpoint::listen(&mut control)?,
-    ];
+    let mut control = crate::filesystem::control::Control::new(
+        mounts.clone(),
+        hunde::service::authorize_mount,
+        config.filesystems,
+    );
+    let mut drivers: Vec<_> = workers.iter().map(dispatch::Worker::driver).collect();
+    let mut endpoints: Vec<_> = drivers
+        .iter_mut()
+        .map(Endpoint::listen)
+        .collect::<Result<_, _>>()?;
+    endpoints.push(Endpoint::listen(&mut control)?);
+    for mount in &initial_mounts {
+        root_filesystem.mount(mount.service.driver.path(), mount.service.name.as_str())?;
+    }
     for endpoint in &endpoints {
         endpoint.publish_ready()?;
     }
@@ -176,13 +183,7 @@ fn run_components(
         }
         let future = core::future::poll_fn(|_| {
             while poll_all(&mut endpoints, Endpoint::poll) {}
-            if socket_worker.poll()
-                | streams_worker.poll()
-                | temporary_worker.poll()
-                | processes_worker.poll()
-                | boot_worker.poll()
-                | devices_worker.poll()
-            {
+            if poll_all(&mut workers, dispatch::Worker::poll) {
                 return core::task::Poll::Ready(());
             }
             if mounts.has_jobs() {
@@ -208,6 +209,7 @@ fn poll_all<Endpoint>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::boxed::Box;
 
     #[test]
     fn service_events_are_drained_including_normal_pressure_and_unhandled_events() {
@@ -254,6 +256,7 @@ mod tests {
         disconnected: Option<SessionId>,
         reply: Result<Option<Reply>, IoError>,
         drops: usize,
+        reclaims: usize,
     }
 
     impl State {
@@ -263,6 +266,7 @@ mod tests {
                 disconnected: None,
                 reply: Ok(Some(Reply::Value(1))),
                 drops: 0,
+                reclaims: 0,
             }
         }
     }
@@ -291,6 +295,10 @@ mod tests {
         }
         fn disconnect(&mut self, session: SessionId) -> Result<(), IoError> {
             self.0.borrow_mut().disconnected = Some(session);
+            Ok(())
+        }
+        fn reclaim_cache(&mut self) -> Result<(), IoError> {
+            self.0.borrow_mut().reclaims += 1;
             Ok(())
         }
     }
@@ -343,13 +351,20 @@ mod tests {
         );
         assert_eq!(subsystem.disconnect(SessionId(7)), Ok(()));
         assert_eq!(state.borrow().disconnected, Some(SessionId(7)));
+        assert_eq!(subsystem.reclaim_cache(), Ok(()));
+        assert_eq!(state.borrow().reclaims, 1);
         assert_eq!(state.borrow().drops, 0);
     }
 
     #[test]
     fn socket_uses_shared_dispatch_contract_and_owns_its_component() {
         let state = Rc::new(RefCell::new(State::new()));
-        let mut socket = Socket::new(Component::new(state.clone()));
+        let driver: Box<dyn IoComponent> = Box::new(Component::new(state.clone()));
+        let mut socket = ConfiguredComponent::new(
+            ServiceName::new("socket_router"),
+            image_ready("socket.wuff"),
+            driver,
+        );
         assert_eq!(socket.endpoint(), ServiceName::new("socket_router"));
         assert_eq!(
             socket.ready_message(),
@@ -363,7 +378,11 @@ mod tests {
     #[test]
     fn streams_preserve_pipe_endpoint_and_dispatch_contract() {
         let state = Rc::new(RefCell::new(State::new()));
-        let mut streams = Streams::new(Component::new(state.clone()));
+        let mut streams = ConfiguredComponent::new(
+            ServiceName::new("hund-rohr"),
+            image_ready("pipe.wuff"),
+            Component::new(state.clone()),
+        );
         assert_eq!(streams.endpoint(), ServiceName::new("hund-rohr"));
         assert_eq!(
             streams.ready_message(),
@@ -378,12 +397,14 @@ mod tests {
     fn filesystem_instances_keep_dispatch_and_cleanup_independent() {
         let temporary_state = Rc::new(RefCell::new(State::new()));
         let processes_state = Rc::new(RefCell::new(State::new()));
-        let mut temporary = Filesystem::new(
-            FilesystemKind::Temporary,
+        let mut temporary = ConfiguredComponent::new(
+            ServiceName::new("/tmp"),
+            image_ready("memfs.wuff"),
             Component::new(temporary_state.clone()),
         );
-        let mut processes = Filesystem::new(
-            FilesystemKind::Processes,
+        let mut processes = ConfiguredComponent::new(
+            ServiceName::new("/proc"),
+            image_ready("procfs.wuff"),
             Component::new(processes_state.clone()),
         );
         assert_eq!(temporary.endpoint(), ServiceName::new("/tmp"));

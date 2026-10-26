@@ -2,42 +2,22 @@
 
 ## Status
 
-`/sbin` file operations initially run in userspace `embedfs`, started and awaited
-by `hunde-mama`. Before configured startup, Mama hands the mount to the I/O
-host's safe `hunde::embedfs::Filesystem` wrapper over the same shared C backend,
-drains the old provider, and retires its process. The kernel `/sbin` mount and
-its file-handle implementation are retired; the old implementation is only a
-test fixture. Applications use the existing I/O/namespace channels with no
-`/sbin` syscall bypass or failure-triggered fallback.
+The standalone embedfs process and its drain/handoff protocol are retired.
+The host reads its bootstrap manifests and Wuffs directly from the immutable
+archive mapping, then loads `embedfs.wuff` and registers `/sbin` using
+`/sbin/config/bootstrap.fstab`. See [bootstrap services](bootstrap-services.md).
+Applications and executable loading use ordinary I/O Channels and host handles,
+with no kernel filesystem or syscall fallback.
 
-The kernel maps its dedicated archive region read-only and non-executable only
-into `/sbin/drivers/embedfs` and `/sbin/services/hunde-io-host`. The shared parser
-is in `common/fs` and the userspace backend is in `user/lib/fs`. Linker
-padding keeps the final mapped page inside the archive section. The backing
-remains kernel-owned; process teardown removes mappings, not archive storage.
-Embedfs serves bounded chunks directly from immutable file bytes, without the
-disk drivers' 12 KiB snapshot limit. Handles have independent offsets and
-PID/session ownership; close, client release, and namespace disconnect release
-them. Drivers and services retain hund-only access; ordinary binaries are
-world-readable/executable. Unknown client credentials fail closed.
+Only the I/O host receives the archive mapping: read-only and non-executable,
+with kernel-owned backing storage. The userspace loader privately maps and
+relocates Wuffs. The shared parser is in `common/fs`; the retained C backend is in
+`user/lib/fs`, used through a safe `hunde` adapter by the embedfs Wuff.
 
-The `/sbin` namespace entry remains unchanged during handoff: registering the
-host's internal worker changes subsequent requests to direct dispatch. Only
-authorized mount clients can drain the old provider. Its drain acknowledgement
-waits for existing handles and queued requests/replies, and Mama terminates the
-authenticated Channel peer afterward. Kernel boot completion no longer requires
-a standalone `/sbin` endpoint; Mama verifies the hosted mount acknowledgement
-before requesting boot completion. See [bootstrap services](bootstrap-services.md).
-
-Only Mama's boot-level-0 `boot_spawn()` uses the direct kernel archive reader.
-After `boot_complete()`, that entry point is unavailable. Normal spawn uses
-Channels even for embedded executables. [Mama](bootstrap-services.md) establishes
-the EXT2 `/boot/config` mount and `/boot/sysinfo` in userspace before configured startup.
-
-The Channel and nonblocking request/reply implementation lives in `common/ipc`,
-linked separately into kernel and userspace. Bounded bytes use each direct
-Queue's directional data area. `kernel/ipc/kernel_channel` connects directly to
-the target service, without the warden or a filesystem-specific transport.
+Embedfs serves bounded chunks from immutable bytes without snapshot limits.
+Handles retain independent offsets and authenticated PID/session ownership.
+Services and drivers require hund credentials; ordinary binaries are
+world-readable/executable. Unknown credentials fail closed.
 
 ## Executable Loading
 
@@ -107,7 +87,7 @@ reopen them. Restart/remapping recovery remains separate work.
 
 Tests cover permission and authentication handling, malformed ELF rejection,
 incremental direct-Channel loading, connection closure, requester cleanup, and
-one-way bootstrap handoff. Continue verifying boot dependencies and mounts across
+archive-backed component loading before filesystem mounts. Continue verifying boot dependencies and mounts across
 configured targets when changing the remaining kernel I/O compatibility paths.
 Mutable-provider snapshot consistency and service-restart recovery remain
 separate requirements.

@@ -4,11 +4,6 @@
 
 FixedArrayBodyDefine(EmbedfsHandles);
 
-bool Embedfs__is_idle(EmbedfsPtr self)
-{
-    return EmbedfsHandles__len(&self->handles) == 0;
-}
-
 static bool EmbedfsHandle__has_session(EmbedfsHandlePtr self, void * context)
 {
     return self->session == *(QueueConnectionIDPtr)context;

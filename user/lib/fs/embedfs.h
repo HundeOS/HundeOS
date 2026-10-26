@@ -32,5 +32,4 @@ Optional(IOReply)
     Embedfs__serve(IOServiceContext context, QueueConnectionID session, uint64_t pid, IORequestPtr request);
 bool Embedfs__disconnect(IOServiceContext context, QueueConnectionID session, uint64_t pid);
 Result(IOStatus) Embedfs__release_session(EmbedfsPtr self, QueueConnectionID session);
-bool Embedfs__is_idle(EmbedfsPtr self);
 #endif

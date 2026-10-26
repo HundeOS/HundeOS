@@ -5,8 +5,6 @@ extern crate alloc;
 mod console;
 mod filesystem;
 mod host;
-mod socket;
-mod streams;
 
 #[cfg(feature = "service")]
 hunde::executable!(run, b"Rust I/O host panicked");

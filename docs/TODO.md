@@ -437,6 +437,19 @@ multi-process service graph. See the
 
 #### Baseline And Host Interfaces
 
+- [x] Load initial filesystem Wuffs from the mapped archive using
+  `/sbin/config/bootstrap.fstab`, without a mounted `/sbin` or standalone
+  embedfs process. Package embedfs/devfs as Wuffs, resolve their libc dependency
+  from the archive, and publish initial namespace mounts before mount-control
+  readiness. See [bootstrap services](architecture/bootstrap-services.md).
+
+- [x] Drive I/O host service registration and filesystem factory selection from
+  the embedded `/sbin/config/io-host.conf` manifest. Replace per-component startup
+  and polling branches and fixed filesystem enums with generic workers and a
+  configured format registry. Generate the shared loader's approved image/ABI
+  identities from the same manifest; retain safe services and existing fstab
+  mounts. See [bootstrap component configuration](architecture/io-system.md#bootstrap-component-configuration).
+
 - [x] Retire the standalone C socket router, its obsolete tests, and all boot
   configuration entries. The Rust `socket.wuff` component inside `hunde-io-host`
   retains the existing `socket_router` endpoint; the C server is no longer built
@@ -1524,6 +1537,18 @@ hardware snapshot. Bus presentation and the `/sys` layout remain deferred.
 
 ## System Startup
 
+### Artwork Build Reliability
+
+#### Custom Build Roots
+
+- [ ] Fix artwork symbol renaming for hyphenated build paths. An isolated
+  AArch64 build failed with undefined `__hunde_logo_rgb_start` and
+  `__hunde_panic_rgb_start`: `nm` shows objcopy converts hyphens to underscores,
+  while the Makefile's conversion handles only dots and slashes. The same
+  I/O-host smoke passes with an underscore-only build path. Approval for this
+  separate build-rule repair has been requested; do not hide the failure or
+  treat retry success as a fix.
+
 ### Userspace Bootstrap
 
 Implemented: [hunde-mama bootstrap](architecture/bootstrap-services.md) establishes
@@ -1543,13 +1568,13 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
   OPEN, READ, and CLOSE; background spawn returns only after child scheduling,
   while waiting spawn transfers into the ordinary child wait.
 - [x] Keep the immutable archive mapped for embedfs after handoff.
-- [x] Reuse the C archive backend through a safe `hunde` Rust adapter and hand
-  `/sbin` to the I/O host after bootstrap mounts are ready. Drain bootstrap
-  handles and queued replies before Mama retires the old process; retain the
-  kernel-owned archive backing independently of either consumer. See
+- [x] Reuse the C archive backend through a safe `hunde` Rust adapter inside
+  `embedfs.wuff`. Bootstrap fstab now installs `/sbin` directly in the host;
+  the temporary standalone provider and drain/retirement protocol are removed.
+  Keep the kernel-owned archive backing independently of loaded Wuffs. See
   [bootstrap services](architecture/bootstrap-services.md).
-  The wrapper, internal worker, read-only archive mapping, authenticated
-  drain/retirement protocol, fibre-aware local completion, and local file
+  The wrapper, internal worker, read-only archive mapping,
+  archive-backed component loader, fibre-aware local completion, and local file
   transfers are implemented with native/Rust tests. Root/shutdown, hosted
   filesystem/procfs, and concurrent socket/pipe/memfs smoke tests pass on both
   AArch64 and RISC-V, including absence of the retired embedfs process. Libc's

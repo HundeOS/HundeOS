@@ -295,66 +295,13 @@ static Result(IOStatus) Hundeschule__mount_configured(ChannelPtr channel)
     return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
-static Result(IOStatus) Hundeschule__mount_builtin(ChannelPtr channel, ConstBStringPtr type, ConstBStringPtr path)
-{
-    if (BString__equals(type, &bstr("memfs")) || BString__equals(type, &bstr("procfs")) ||
-        BString__equals(type, &bstr("devfs")))
-    {
-        ServiceCode status = service_wait_ready(path);
-        if (!service_ok(status))
-        {
-            return Error(IOStatus, bstr("Hosted filesystem is not ready"), status);
-        }
-        return MountClient__add(channel, MountConfig__new(&empty_bstr(), type, path));
-    }
-    BString driver = BString__sprintf(&bstr("/sbin/drivers/%s"), cstr_p(type));
-    match_result(
-        BootService__start(&driver, &empty_bstr(), &empty_bstr(), path),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    return MountClient__add(channel, MountConfig__new(&empty_bstr(), type, path));
-}
-
-static Result(IOStatus) Hundeschule__mount_all(ChannelPtr channel)
-{
-    match_result(
-        Hundeschule__mount_configured(channel),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    match_result(
-        Hundeschule__mount_builtin(channel, &bstr("memfs"), &bstr("/tmp")),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    match_result(
-        Hundeschule__mount_builtin(channel, &bstr("devfs"), &bstr("/dev")),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    return Hundeschule__mount_builtin(channel, &bstr("procfs"), &bstr("/proc"));
-}
-
 Result(IOStatus) Hundeschule__mount_filesystems(void)
 {
     match_result(
         Channel__open(ServiceDirectory__shared(), &bstr(IO_FILESYSTEM_SERVICE)),
         success(channel)
         {
-            Result(IOStatus) result = Hundeschule__mount_all(&channel);
+            Result(IOStatus) result = Hundeschule__mount_configured(&channel);
             Channel__close(&channel);
             return result;
         },

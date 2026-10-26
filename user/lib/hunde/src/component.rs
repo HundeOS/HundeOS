@@ -29,6 +29,21 @@ mod io {
             Self: Sized;
     }
 
+    impl<Driver: IoComponent + ?Sized> IoComponent for Box<Driver> {
+        fn execute(&mut self, request: Request<'_>) -> Result<Option<crate::io::Reply>, IoError> {
+            (**self).execute(request)
+        }
+        fn disconnect(&mut self, session: SessionId) -> Result<(), IoError> {
+            (**self).disconnect(session)
+        }
+        fn reclaim_cache(&mut self) -> Result<(), IoError> {
+            (**self).reclaim_cache()
+        }
+        fn dispose(&mut self) -> Result<(), IoError> {
+            (**self).dispose()
+        }
+    }
+
     pub(crate) unsafe extern "C" fn execute<Driver: IoComponent>(
         context: *mut c_void,
         raw: *const RawRequest,

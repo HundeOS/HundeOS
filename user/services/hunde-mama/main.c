@@ -145,42 +145,13 @@ static Result(ServiceCode) Mama__start_services(void)
                                   &bstr(IO_SYSTEM_SERVICE));
 }
 
-static Result(IOStatus) Mama__mount(ChannelPtr mounts, ConstBStringPtr type, ConstBStringPtr mountpoint)
-{
-    return MountClient__add(mounts, MountConfig__new(&empty_bstr(), type, mountpoint));
-}
-
 static Result(IOStatus) Mama__boot_mounts(ChannelPtr mounts)
 {
-    match_result(
-        BootService__bootstrap(&bstr("/sbin/drivers/embedfs"), &empty_bstr(), &empty_bstr(), &bstr("/sbin")),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    match_result(
-        Mama__mount(mounts, &bstr("embedfs"), &bstr("/sbin")),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    ServiceCode boot_ready = service_wait_ready(&bstr("/boot"));
-    if (!service_ok(boot_ready))
+    ServiceCode ready = service_wait_ready(&bstr(IO_HOST_MOUNT_SERVICE));
+    if (!service_ok(ready))
     {
-        return Error(IOStatus, bstr("Hosted boot information unavailable"), boot_ready);
+        return Error(IOStatus, bstr("Bootstrap filesystems unavailable"), ready);
     }
-    match_result(
-        Mama__mount(mounts, &bstr("sysinfofs"), &bstr("/boot")),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
     match_result(
         BootHardwareInfo__load(),
         success(hardware)
@@ -194,7 +165,7 @@ static Result(IOStatus) Mama__boot_mounts(ChannelPtr mounts)
                         return Error(IOStatus, bstr("Hosted boot block device unavailable"),
                                      SERVICE_DEVICE_REGISTRATION_FAILED);
                     }
-                    MountConfig config = MountConfig__new(&disk.path, &bstr("ext2.wuff"), &bstr("/boot/config"));
+                    MountConfig config = MountConfig__new(&disk.path, &bstr("boot-config"), &bstr("/boot/config"));
                     match_result(
                         MountClient__start_hosted(config),
                         success_do_nothing(),
@@ -211,65 +182,6 @@ static Result(IOStatus) Mama__boot_mounts(ChannelPtr mounts)
                 }
             );
             return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
-        },
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
-}
-
-static Result(IOStatus) Mama__retire_archive(ChannelPtr channel)
-{
-    uint64_t peer = Channel__server_pid(channel);
-    if (peer == 0 || peer > INT64_MAX)
-    {
-        return Error(IOStatus, bstr("Invalid bootstrap archive server"), IO_UNKNOWN_PID);
-    }
-    IORequest request = IORequest__new(IO_REQUEST_BOOTSTRAP_RETIRE, 0);
-    IOReply reply;
-    match_result(
-        Channel__submit(channel, (ConstChannelDataPtr)&request, sizeof(request), (ChannelDataPtr)&reply, sizeof(reply)),
-        success(size)
-        {
-            if (size != sizeof(reply) || reply.status != IO_OK)
-            {
-                return Error(IOStatus, bstr("Bootstrap archive drain failed"),
-                             size == sizeof(reply) ? reply.status : IO_UNKNOWN_BUFFER);
-            }
-            ProcessSignalResult status = kill_process(peer, PROCESS_SIGNAL_TERMINATE);
-            if (status != PROCESS_SIGNAL_OK)
-            {
-                return Error(IOStatus, bstr("Cannot retire bootstrap archive"), status);
-            }
-            return Success(IOStatus, IO_OK);
-        },
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
-}
-
-static Result(IOStatus) Mama__handoff_archive(void)
-{
-    match_result(
-        MountClient__start_hosted(MountConfig__new(&empty_bstr(), &bstr("embedfs"), &bstr("/sbin"))),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(IOStatus, message, code);
-        }
-    );
-    match_result(
-        Channel__open(ServiceDirectory__shared(), &bstr("/sbin")),
-        success(channel)
-        {
-            Result(IOStatus) result = Mama__retire_archive(&channel);
-            Channel__close(&channel);
-            return result;
         },
         error(code, message)
         {
@@ -322,15 +234,6 @@ int main(void)
         return 1;
     }
     kernel_syslog_tagf("hunde-mama", "bootstrap mounts ready: /sbin /boot /boot/config");
-    match_result(
-        Mama__handoff_archive(),
-        success_do_nothing(),
-        error(code, message)
-        {
-            kernel_syslog_tagf("hunde-mama", "%B (%i)", &message, (int)code);
-            return 1;
-        }
-    );
     match_result(
         OS__boot_complete(),
         success_do_nothing(),

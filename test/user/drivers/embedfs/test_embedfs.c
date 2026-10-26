@@ -6,7 +6,6 @@
 #include "../../../../user/lib/fs/embedfs.c"
 #undef ServiceDirectory__shared
 #include "../../../../user/lib/hunde/embedfs.c"
-#include "../../../../user/drivers/embedfs/bootstrap.c"
 #include <stddef.h>
 
 static struct
@@ -20,19 +19,6 @@ static struct
 static Embedfs filesystem;
 static ServiceDirectory directory;
 static bool exited;
-static bool authorized;
-static bool transport_idle;
-
-ServiceCode service_authorize_mount_client(uint64_t pid)
-{
-    return authorized ? SERVICE_OK : SERVICE_SCHEDULER_ERROR;
-}
-
-bool IOService__is_idle_except(IOServicePtr self, QueueConnectionID session)
-{
-    TEST_ASSERT_EQUAL_UINT64(90, session);
-    return transport_idle;
-}
 
 ServiceDirectoryPtr EmbedfsTest__directory(void)
 {
@@ -86,8 +72,6 @@ void setUp(void)
     directory.entries[0].service_pid = 70;
     directory.entries[0].name = bstr(IO_FILESYSTEM_SERVICE);
     exited = false;
-    authorized = true;
-    transport_idle = true;
 }
 
 void tearDown(void)
@@ -151,9 +135,8 @@ void test_native_adapter_preserves_read_buffers_ownership_and_session_cleanup(vo
     TEST_ASSERT_EQUAL_UINT64(sizeof(bytes), read.value);
     TEST_ASSERT_EQUAL_MEMORY(blob.bytes, bytes, sizeof(bytes));
     TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, hunde_rust_embedfs_disconnect(&filesystem, 31).kind);
-    TEST_ASSERT_FALSE(Embedfs__is_idle(&filesystem));
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, hunde_rust_embedfs_execute(&filesystem, &request).kind);
     TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, hunde_rust_embedfs_disconnect(&filesystem, 30).kind);
-    TEST_ASSERT_TRUE(Embedfs__is_idle(&filesystem));
     TEST_ASSERT_EQUAL(IO_UNKNOWN_HANDLE, hunde_rust_embedfs_execute(&filesystem, &request).error.code);
 }
 
@@ -173,69 +156,6 @@ void test_native_adapter_preserves_metadata_directory_and_transfer_errors(void)
     TEST_ASSERT_EQUAL_MEMORY("hello", directory_reply.directory[0].name, 5);
     request.count = 1;
     TEST_ASSERT_EQUAL(IO_UNKNOWN_BUFFER, hunde_rust_embedfs_execute(&filesystem, &request).error.code);
-}
-
-void test_bootstrap_retirement_waits_for_handles_and_outstanding_replies(void)
-{
-    IOHandle handle = open_hello();
-    static BootstrapArchive bootstrap;
-    bootstrap.filesystem = filesystem;
-    bootstrap.draining = false;
-    IORequest retire = request_for(IO_REQUEST_BOOTSTRAP_RETIRE, 0);
-    authorized = false;
-    match_optional(
-        BootstrapArchive__execute(&bootstrap, 90, 20, &retire),
-        some(reply)
-        {
-            TEST_ASSERT_EQUAL(IO_PERMISSION_DENIED, reply.status);
-        },
-        none_test_fail()
-    );
-    TEST_ASSERT_FALSE(bootstrap.draining);
-    authorized = true;
-    match_optional(BootstrapArchive__execute(&bootstrap, 90, 20, &retire),
-        some_test_fail(),
-        none_do_nothing()
-    );
-    TEST_ASSERT_TRUE(bootstrap.draining);
-    IORequest open = path_request(IO_REQUEST_OPEN, &bstr("/hello"));
-    open.offset = 17;
-    match_optional(
-        BootstrapArchive__execute(&bootstrap, 30, 20, &open),
-        some(reply)
-        {
-            TEST_ASSERT_EQUAL(IO_REDIRECT, reply.status);
-            TEST_ASSERT_EQUAL_BSTRING(bstr("/sbin/hello"), IORoute__path(&reply.route));
-            TEST_ASSERT_EQUAL_INT64(17, reply.value);
-        },
-        none_test_fail()
-    );
-    IORequest read = request_for(IO_REQUEST_READ, handle);
-    read.count = 2;
-    match_optional(
-        BootstrapArchive__execute(&bootstrap, 30, 20, &read),
-        some(reply)
-        {
-            TEST_ASSERT_EQUAL(IO_OK, reply.status);
-            TEST_ASSERT_EQUAL_INT64(2, reply.value);
-        },
-        none_test_fail()
-    );
-    TEST_ASSERT_TRUE(BootstrapArchive__disconnect(&bootstrap, 30, 20));
-    transport_idle = false;
-    match_optional(BootstrapArchive__execute(&bootstrap, 90, 20, &retire),
-        some_test_fail(),
-        none_do_nothing()
-    );
-    transport_idle = true;
-    match_optional(
-        BootstrapArchive__execute(&bootstrap, 90, 20, &retire),
-        some(reply)
-        {
-            TEST_ASSERT_EQUAL(IO_OK, reply.status);
-        },
-        none_test_fail()
-    );
 }
 
 void test_large_archive_file_reads_to_eof_without_snapshot_limit(void)

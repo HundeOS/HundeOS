@@ -6,6 +6,7 @@
 #include "../../../user/lib/wuff/arch.h"
 #include "../../../user/lib/wuff/filesystem.h"
 #include "../../../user/lib/wuff/loader.h"
+#include "../../../user/lib/wuff/archive.h"
 #include "../../../user/lib/sys/io.h"
 #include "../../../user/lib/sys/mem.h"
 
@@ -24,6 +25,39 @@
 #define TEST_RELATIVE_RELOCATION 1027
 #define TEST_ABSOLUTE_RELOCATION 257
 #define TEST_JUMP_SLOT_RELOCATION 1026
+
+typedef struct TestArchive
+{
+    EmbeddedFsHeader header;
+    EmbeddedFsEntry entries[2];
+    char names[64];
+    uint8_t root[TEST_IMAGE_SIZE];
+    uint8_t library[TEST_IMAGE_SIZE];
+} TestArchive;
+
+typedef TestArchive * TestArchivePtr;
+
+static EmbeddedFs TestArchive__new(TestArchivePtr self)
+{
+    memset(self, 0, sizeof(*self));
+    self->header = (EmbeddedFsHeader){.magic = EMBEDDED_FS_MAGIC,
+                                      .version = EMBEDDED_FS_VERSION,
+                                      .entry_count = 2,
+                                      .index_offset = offsetof(TestArchive, entries),
+                                      .names_offset = offsetof(TestArchive, names),
+                                      .data_offset = offsetof(TestArchive, root),
+                                      .blob_size = sizeof(*self)};
+    memcpy(self->names, "components/test.wufflib/libc.wuff.1", sizeof("components/test.wufflib/libc.wuff.1") - 1);
+    self->entries[0] = (EmbeddedFsEntry){.name_offset = offsetof(TestArchive, names),
+                                         .name_len = 20,
+                                         .data_offset = offsetof(TestArchive, root),
+                                         .data_len = TEST_IMAGE_SIZE};
+    self->entries[1] = (EmbeddedFsEntry){.name_offset = offsetof(TestArchive, names) + 20,
+                                         .name_len = 15,
+                                         .data_offset = offsetof(TestArchive, library),
+                                         .data_len = TEST_IMAGE_SIZE};
+    return EmbeddedFs__new((Address)self, (Address)self + sizeof(*self));
+}
 
 typedef struct TestAllocation
 {
@@ -1538,4 +1572,73 @@ void test_wuff_filesystem_reports_close_failure(void)
         }
     );
     TEST_ASSERT_EQUAL(1, filesystem_close_calls);
+}
+
+void test_wuff_archive_borrows_images_and_dependencies_without_filesystem_io(void)
+{
+    TestArchive blob;
+    EmbeddedFs archive = TestArchive__new(&blob);
+    match_result(
+        WuffArchive__load_image(&archive, &bstr("/sbin/components/test.wuff")),
+        success(image)
+        {
+            TEST_ASSERT_EQUAL_PTR(blob.root, image.data);
+            TEST_ASSERT_EQUAL(TEST_IMAGE_SIZE, image.size);
+        },
+        error_test_fail()
+    );
+    WuffDependencyOperations dependencies = WuffArchive__dependencies(&archive);
+    match_result(
+        dependencies.load(dependencies.context, &bstr("libc.wuff.1")),
+        success(image)
+        {
+            TEST_ASSERT_EQUAL_PTR(blob.library, image.data);
+            TEST_ASSERT_EQUAL_BSTRING(bstr("libc.wuff.1"), image.name);
+            dependencies.release(dependencies.context, &image);
+            TEST_ASSERT_TRUE(EmbeddedFs__is_valid(&archive));
+        },
+        error_test_fail()
+    );
+    match_result(dependencies.load(dependencies.context, &bstr("../libc.wuff.1")),
+        success_test_fail(),
+                 error_test_ok()
+    );
+    match_result(WuffArchive__load_image(&archive, &bstr("/usr/lib/libc.wuff.1")),
+        success_test_fail(),
+                 error_test_ok()
+    );
+    match_result(WuffArchive__load_image(&archive, &bstr("/sbin/missing")),
+        success_test_fail(),
+        error_test_ok()
+    );
+    blob.header.magic = 0;
+    match_result(WuffArchive__load_image(&archive, &bstr("/sbin/components/test.wuff")),
+        success_test_fail(),
+                 error_test_ok()
+    );
+}
+
+void test_wuff_archive_links_a_dependency_graph_before_any_mount_exists(void)
+{
+    TestArchive blob;
+    EmbeddedFs archive = TestArchive__new(&blob);
+    TestImage__build(blob.root);
+    TestImage__build(blob.library);
+    TestImage__add_dependency(blob.root, &bstr("libc.wuff.1"));
+    TestMemory memory = {.allocations = TestAllocations__new()};
+    WuffMemoryOperations operations = TestMemory__operations(&memory);
+    match_result(
+        WuffArchive__load_module(&archive, &bstr("/sbin/components/test.wuff"), &operations),
+        success(graph)
+        {
+            TEST_ASSERT_EQUAL(2, WuffLoadedObjects__len(&graph.objects));
+            match_result(WuffGraph__dispose(&graph),
+                success_do_nothing(),
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(0, TestAllocations__len(&memory.allocations));
+    TEST_ASSERT_TRUE(EmbeddedFs__is_valid(&archive));
 }

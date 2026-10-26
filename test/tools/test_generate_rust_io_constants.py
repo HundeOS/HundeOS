@@ -165,6 +165,9 @@ def test_cargo_regenerates_constants_after_a_c_header_change(protocol_root, head
         '#![no_std]\ninclude!(concat!(env!("OUT_DIR"), "/io_constants.rs"));\n', encoding="utf-8"
     )
     shutil.copyfile(PROJECT_ROOT / "user/lib/hunde/build.rs", crate / "build.rs")
+    (protocol_root / "config").mkdir()
+    for name in ("io-host.conf", "bootstrap.fstab"):
+        shutil.copyfile(PROJECT_ROOT / "config" / name, protocol_root / "config" / name)
     (protocol_root / "tools").mkdir()
     shutil.copyfile(PROJECT_ROOT / "tools/generate_rust_io_constants.py", protocol_root / "tools/generate_rust_io_constants.py")
     toolchain = tomllib.loads((PROJECT_ROOT / "rust-toolchain.toml").read_text(encoding="utf-8"))["toolchain"]["channel"]

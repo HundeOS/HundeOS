@@ -90,6 +90,11 @@ Safe component loading accepts approved bundled component identities, not
 caller-supplied paths. The library owns that trust registry and private raw
 loading implementation; the host still chooses which component to load. Do not
 make arbitrary native loading safe merely by hiding its unsafe block.
+The approved image registry is generated from `config/io-host.conf`, packaged as
+`/sbin/config/io-host.conf`. Configure services and filesystem factories there
+instead of adding per-component enums or startup/polling branches to the host.
+Keep manifest parsing, endpoint selection, and mount policy in the Rust host;
+the shared library registry records only approved image paths and ABI kinds.
 
 Rust service startup, component ownership, registration, dispatch, and execution
 policy belong in Rust. Use Rust `main` entry points with the existing C CRT;
@@ -378,6 +383,11 @@ services use Channels and managed shared buffers; do not add kernel filesystem,
 file-descriptor, stream, socket, or block-I/O fallbacks.
 
 # Other
+- Initial I/O host filesystem selection belongs in `config/bootstrap.fstab`;
+  service endpoints and block-filesystem factories belong in `config/io-host.conf`.
+  Load bootstrap Wuffs and configuration directly from the mapped archive, not
+  through an assumed `/sbin` mount. Do not add concrete driver dependencies to
+  the host or restore a standalone embedfs handoff.
 - reload this file (AGENTS.md) every time there is user interaction
 
 ## Dont be stupid or lazy

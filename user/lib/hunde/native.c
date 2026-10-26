@@ -2,7 +2,7 @@
 #include "sys/service.h"
 #include "sys/process.h"
 #include "sys/syslog.h"
-#include "wuff/filesystem.h"
+#include "wuff/archive.h"
 #include "sys/queue_wait.h"
 #include "io/client.h"
 #include "sys/boot_info.h"
@@ -131,15 +131,26 @@ static HundeStatusResult RustNative__load_module(void * storage, HundeByteSpan p
     BString name = BString__from_chars((const char *)path.bytes, path.length);
     WuffMemoryOperations memory = WuffMemoryOperations__system();
     match_result(
-        WuffFilesystem__load_module(&name, &memory),
-        success(module)
+        WuffArchive__mapped(),
+        success(archive)
         {
-            *graph = module;
-            return HundeStatusResult__success();
+            match_result(
+                WuffArchive__load_module(&archive, &name, &memory),
+                success(module)
+                {
+                    *graph = module;
+                    return HundeStatusResult__success();
+                },
+                error(code, message)
+                {
+                    kernel_syslog_tag(&bstr("RUST"), &message);
+                    return RustNative__error(code);
+                }
+            );
+            return RustNative__unknown_error();
         },
         error(code, message)
         {
-            kernel_syslog_tag(&bstr("RUST"), &message);
             return RustNative__error(code);
         }
     );

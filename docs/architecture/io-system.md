@@ -1,11 +1,10 @@
 # Userspace I/O system
 
-The I/O host serves `/sbin` internally after Mama's bootstrap handoff, using
-`hunde::embedfs::Filesystem` over the shared C archive backend. The standalone
-provider is drained and retired before configured startup. `/boot` is served by
-the hosted Rust `sysinfofs.wuff`, with file contents cached at initialization;
-`/boot/config` remains an independent EXT2 overlay. See
-[bootstrap services](bootstrap-services.md#cached-boot-information).
+The host mounts initial filesystems from `/sbin/config/bootstrap.fstab`.
+Each row names a loadable Wuff, including devfs/embedfs; there are no concrete
+filesystem-driver dependencies in host startup. Configuration and Wuffs are read
+directly from the mapped archive before any mount exists. See
+[bootstrap services](bootstrap-services.md).
 
 The [Mama bootstrap](bootstrap-services.md) now establishes `/boot`,
 `/boot/config`, and `/sbin` in userspace before configured startup. The filesystem
@@ -578,6 +577,49 @@ acquire hardware input. Only one keyboard backend is configured at a time.
 Kernel boot messages, panic output, and diagnostic logging retain an
 independent architecture UART path and do not depend on these services.
 
+## Bootstrap component configuration
+
+`config/io-host.conf` is embedded as `/sbin/config/io-host.conf`. Each non-comment
+line has three fields:
+
+```text
+service socket_router /sbin/components/socket.wuff
+filesystem ext2.wuff /sbin/components/ext2fs.wuff
+filesystem boot-config /sbin/components/ext2fs.wuff
+```
+
+`service` initializes a resident I/O Wuff and registers its configured endpoint.
+`filesystem` registers a block-filesystem factory by format
+name, without mounting a device or initializing an instance. Existing fstab
+entries select these format names, devices, and mount points. Console remains
+host infrastructure, not a block-filesystem format. Initial filesystem instances
+belong in `config/bootstrap.fstab`, also embedded under `/sbin/config`:
+
+```text
+device - /sbin/components/embedfs.wuff /sbin
+device - /sbin/components/devfs.wuff /dev
+```
+
+The host reads both files directly from the mapped archive, not through a mounted
+provider. It loads the initial Wuffs, registers their dispatch workers and
+namespace mounts, then publishes mount-control readiness. Native backend Wuffs
+resolve their libc dependency from the archive's `lib/` directory. No standalone
+embedfs process is needed, and no builtin driver branch remains.
+
+The host validates the complete configuration before loading components, then
+uses one generic worker collection for registration, dispatch, polling, and cache
+reclamation. Filesystem aliases are resolved against the configured registry,
+not a per-format Rust enum. The namespace, application front door, and mount
+control remain fixed infrastructure. Component images remain resident.
+
+The `hunde` build generates approved image identities and their service/filesystem
+ABI kinds from both manifests. Runtime configuration cannot make an arbitrary
+path safe to load: only generated identities are accepted by the shared loader,
+and ABI descriptors are checked before use. Services remain free of unsafe code.
+To add a component, package its trusted Wuff, add the manifest entry, and rebuild
+the image; no per-component startup or polling edits are required. This manifest
+is bootstrap configuration, not a runtime hot-reload or unload interface.
+
 ## Socket protocol
 
 Socket requests are dispatched by `hunde-io-host` to its loaded Rust
@@ -777,7 +819,8 @@ path bypasses Channels. `/proc` remains a separate userspace accounting filesyst
 
 ### Embedded Filesystem
 
-Mama bootstraps `/sbin/drivers/embedfs` and mounts `/sbin` before handoff.
+The bootstrap fstab loads `embedfs.wuff` into the host and registers `/sbin`.
+There is no standalone archive process or handoff.
 Open, read, close, and
 directory listing use the existing Channel-based I/O path. The kernel's embedded
 filesystem implementation and its obsolete test fixture have been deleted.
@@ -788,8 +831,8 @@ boundary.
 ### Process Filesystem
 
 `hunde-io-host` loads Rust `/sbin/components/procfs.wuff` and publishes `/proc`.
-Hundeschule waits for that endpoint before registering the mount; it does not
-spawn a standalone procfs process. The existing bidirectional Channel protocol,
+The bootstrap fstab registers the mount before mount-control readiness;
+Hundeschule does not remount it or spawn a standalone procfs process. The existing bidirectional Channel protocol,
 namespace redirects, and managed transfer buffers remain unchanged. The kernel
 publishes read-only shared process records; procfs formats coherent snapshots
 through the shared `hunde` boundary. `ps` independently uses `process_list`.
@@ -798,16 +841,16 @@ for CPU, wait-state, memory-accounting, consistency, and ownership semantics.
 
 ## Device filesystem
 
-The Rust I/O host initializes a devfs worker and publishes `/dev` alongside its
-other built-in filesystems. Hundeschule waits for readiness and registers its
-mount after root and `/tmp`, before procfs. There is no standalone devfs
+The bootstrap fstab loads `devfs.wuff` and registers `/dev` before mount-control
+readiness. There is no standalone devfs
 executable. Application handles use the common host dispatcher and the existing
 filesystem Channel protocol and directional buffers.
 
 The safe `hunde::devfs::Filesystem` adapter owns the existing C
 `FilesystemDriver` and live registry-backed implementation in
 `user/lib/fs/devfs.c`. This is an in-process C backend, not a native Rust rewrite
-or a separate Wuff. The shared native filesystem codec is also used by embedfs;
+but runs behind `devfs.wuff`, with its native backend supplied by the
+archive-backed `libc.wuff.1` dependency. The shared native filesystem codec is also used by embedfs;
 it bounds caller-owned buffers, translates metadata and paginated listings,
 and preserves inheritance tokens, access flags and shared offsets. The adapter
 retains each authenticated session's PID so disconnect releases its C backend

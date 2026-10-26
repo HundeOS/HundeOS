@@ -75,39 +75,45 @@ impl Dispatch {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BundledComponent {
-    Socket,
-    Pipe,
-    Memfs,
-    Procfs,
-    Sysinfofs,
+enum ImageKind {
+    Service,
+    Filesystem,
 }
 
+include!(concat!(env!("OUT_DIR"), "/io_components.rs"));
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BundledComponent(&'static str);
+
 impl BundledComponent {
-    fn path(self) -> &'static [u8] {
-        match self {
-            Self::Socket => b"/sbin/components/socket.wuff",
-            Self::Pipe => b"/sbin/components/pipe.wuff",
-            Self::Memfs => b"/sbin/components/memfs.wuff",
-            Self::Procfs => b"/sbin/components/procfs.wuff",
-            Self::Sysinfofs => b"/sbin/components/sysinfofs.wuff",
-        }
+    pub fn find(path: &str) -> Result<Self, IoError> {
+        approved_image(path, ImageKind::Service).map(Self)
+    }
+
+    pub fn path(self) -> &'static str {
+        self.0
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BundledFilesystem {
-    Ext2,
-    Fat32,
-}
+pub struct BundledFilesystem(&'static str);
 
 impl BundledFilesystem {
-    fn path(self) -> &'static [u8] {
-        match self {
-            Self::Ext2 => b"/sbin/components/ext2fs.wuff",
-            Self::Fat32 => b"/sbin/components/fat32.wuff",
-        }
+    pub fn find(path: &str) -> Result<Self, IoError> {
+        approved_image(path, ImageKind::Filesystem).map(Self)
     }
+
+    pub fn path(self) -> &'static str {
+        self.0
+    }
+}
+
+fn approved_image(path: &str, kind: ImageKind) -> Result<&'static str, IoError> {
+    APPROVED_IMAGES
+        .iter()
+        .find(|(approved, approved_kind)| *approved == path && *approved_kind == kind)
+        .map(|(path, _)| *path)
+        .ok_or(IoError(crate::protocol::IO_PERMISSION_DENIED))
 }
 
 pub struct LoadedComponent {
@@ -148,7 +154,7 @@ impl LoadedComponent {
         })?;
         let block = crate::block_host::BlockHost::new(client);
         let operations = crate::runtime::operations()?;
-        let module = Module::load(filesystem.path())?;
+        let module = Module::load(filesystem.path().as_bytes())?;
         let symbol = module.export(b"hunde_filesystem_component_entry_v1")?;
         let entry: unsafe extern "C" fn(
             *const HostOperations,
@@ -164,7 +170,7 @@ impl LoadedComponent {
 
     /// Loads an approved component shipped in the read-only bootstrap image.
     pub fn load(component: BundledComponent) -> Result<Self, IoError> {
-        unsafe { Self::load_path(component.path()) }
+        unsafe { Self::load_path(component.path().as_bytes()) }
     }
 
     /// Loads a trusted resident I/O component through the native Wuff loader.
@@ -208,32 +214,29 @@ mod tests {
     use crate::protocol::{IO_PERMISSION_DENIED, IO_WOULD_BLOCK};
 
     #[test]
-    fn bundled_filesystems_use_approved_bootstrap_image_paths() {
+    fn manifest_images_are_approved_only_for_their_declared_abi() {
         assert_eq!(
-            BundledFilesystem::Ext2.path(),
-            b"/sbin/components/ext2fs.wuff"
+            BundledComponent::find("/sbin/components/socket.wuff")
+                .unwrap()
+                .path(),
+            "/sbin/components/socket.wuff"
         );
         assert_eq!(
-            BundledFilesystem::Fat32.path(),
-            b"/sbin/components/fat32.wuff"
+            BundledFilesystem::find("/sbin/components/ext2fs.wuff")
+                .unwrap()
+                .path(),
+            "/sbin/components/ext2fs.wuff"
         );
-    }
-
-    #[test]
-    fn bundled_socket_uses_the_approved_bootstrap_image_path() {
-        assert_eq!(
-            BundledComponent::Socket.path(),
-            b"/sbin/components/socket.wuff"
-        );
-        assert_eq!(BundledComponent::Pipe.path(), b"/sbin/components/pipe.wuff");
-        assert_eq!(
-            BundledComponent::Memfs.path(),
-            b"/sbin/components/memfs.wuff"
-        );
-        assert_eq!(
-            BundledComponent::Procfs.path(),
-            b"/sbin/components/procfs.wuff"
-        );
+        assert!(BundledComponent::find("/sbin/components/ext2fs.wuff").is_err());
+        assert!(BundledFilesystem::find("/sbin/components/socket.wuff").is_err());
+        for path in [
+            "/tmp/socket.wuff",
+            "/sbin/components/unknown.wuff",
+            "/sbin/components/../components/socket.wuff",
+        ] {
+            assert!(BundledComponent::find(path).is_err());
+            assert!(BundledFilesystem::find(path).is_err());
+        }
     }
 
     struct FakeComponent {

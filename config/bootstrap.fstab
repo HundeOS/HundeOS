@@ -1,0 +1,6 @@
+# kind   source  component                            mountpoint
+device - /sbin/components/embedfs.wuff /sbin
+device - /sbin/components/sysinfofs.wuff /boot
+device - /sbin/components/devfs.wuff /dev
+device - /sbin/components/memfs.wuff /tmp
+device - /sbin/components/procfs.wuff /proc

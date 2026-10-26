@@ -14,7 +14,7 @@ void setUp(void)
 {
     kernel = init_test_kernel();
     process = dummy_process(20, 0, PROC_STATE_READY);
-    process->name = bstr(EMBEDDED_FS_DRIVER);
+    process->name = bstr(EMBEDDED_FS_HOST);
     memset(archive, 0, sizeof(archive));
     EmbeddedFsHeaderPtr header = (EmbeddedFsHeaderPtr)archive;
     *header = (EmbeddedFsHeader){.magic = EMBEDDED_FS_MAGIC,
@@ -49,7 +49,7 @@ void test_archive_is_only_mapped_into_bootstrap_consumers_read_only_and_non_exec
     );
     TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
                                            false, false, sizeof(archive)));
-    process->name = bstr(EMBEDDED_FS_DRIVER);
+    process->name = bstr(EMBEDDED_FS_HOST);
     match_result(EmbeddedArchive__map_process(process),
         success_do_nothing(),
         error_test_fail()
@@ -58,15 +58,15 @@ void test_archive_is_only_mapped_into_bootstrap_consumers_read_only_and_non_exec
                                           false, false, sizeof(archive)));
 }
 
-void test_io_host_receives_the_same_read_only_non_executable_archive(void)
+void test_retired_standalone_embedfs_does_not_receive_archive_mapping(void)
 {
-    process->name = bstr(EMBEDDED_FS_HOST);
+    process->name = bstr("/sbin/drivers/embedfs");
     match_result(EmbeddedArchive__map_process(process),
         success_do_nothing(),
         error_test_fail()
     );
-    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
-                                          false, false, sizeof(archive)));
+    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
+                                           false, false, sizeof(archive)));
 }
 
 void test_invalid_archive_does_not_get_mapped(void)

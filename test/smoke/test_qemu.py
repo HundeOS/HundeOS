@@ -340,6 +340,9 @@ def test_qemu_rust_socket_component(qemu_session, target, trace_path):
     processes = session.run_command("ps")
     assert b"/sbin/services/hunde-io-host" in processes
     assert b"/sbin/drivers/socket_router" not in processes
+    manifest = session.run_command("/usr/local/bin/cat /sbin/config/io-host.conf")
+    assert b"service socket_router /sbin/components/socket.wuff" in manifest
+    assert b"filesystem ext2.wuff /sbin/components/ext2fs.wuff" in manifest
     drivers = session.run_command("/usr/local/bin/ls /sbin/drivers")
     assert b"uart_rx" in drivers and b"uart_tx" in drivers, drivers
     assert b"socket_router" not in drivers, drivers
@@ -638,6 +641,9 @@ def exercise_root_filesystem_commands(session, architecture_marker, shell_timeou
 def test_qemu_root_filesystem_and_shutdown(qemu_session, target, trace_path, architecture_marker, shell_timeout):
     session = qemu_session(target, trace_path)
     exercise_root_filesystem_commands(session, architecture_marker, shell_timeout)
+    bootstrap = session.run_command("cat /sbin/config/bootstrap.fstab")
+    assert b"device - /sbin/components/embedfs.wuff /sbin" in bootstrap
+    assert b"device - /sbin/components/devfs.wuff /dev" in bootstrap
     config = session.run_command("cat /boot/config/fstab")
     assert b"device uart_rx,uart_tx console /dev/tty0" in config
     assert b"device /dev/tty0 console :console:" in config
@@ -668,7 +674,7 @@ def test_qemu_root_filesystem_and_shutdown(qemu_session, target, trace_path, arc
     assert b"Rust ext2fs.wuff ready" in trace
     assert b"Rust filesystem namespace ready" in trace
     assert b"Rust I/O router ready" in trace
-    assert b"Rust hosted devfs ready" in trace
+    assert b"Rust devfs.wuff ready" in trace
     session.assert_trace()
 
 

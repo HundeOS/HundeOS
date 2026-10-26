@@ -1,62 +1,46 @@
 # Bootstrap services
 
-The kernel launches the embedded `hunde-mama` service. Mama establishes a
-configuration-independent userspace filesystem before normal system startup:
+The kernel launches embedded `hunde-mama`, which establishes userspace I/O:
 
-1. Start `hundekanal-warter`, `hunde-puffer`, `hund-unterbrict`, and `hunde-io-host`,
-   waiting for each service's readiness. The Rust host publishes both the
-   `hund-dateisystem` namespace and `hund-io-system` application endpoints.
-2. Start `embedfs` and register `/sbin` in the filesystem namespace.
-3. Wait for the host's initialized Rust `sysinfofs.wuff` and register `/boot`,
-   exposing its cached `/boot/sysinfo` file. No standalone sysinfofs is started.
-4. Identify the boot configuration disk and wait for its block driver. Request
-   `ext2.wuff` initialization from the host's mount-control endpoint, then
-   register `/boot/config` only after the hosted volume is ready. Mama does not
-   launch a standalone C EXT2 process.
-5. Initialize the host's archive worker, drain and retire bootstrap `embedfs`.
-6. Call `boot_complete()` after these operations succeed, then start
-   `hundeschule` through normal Channel-based executable loading.
+1. Start `hundekanal-warter`, `hunde-puffer`, `hund-unterbrict`, and `hunde-io-host`.
+   The Rust host publishes the retained namespace and application endpoints.
+2. The host reads `/sbin/config/bootstrap.fstab` and `/sbin/config/io-host.conf`
+   directly from its kernel-mapped immutable archive. No mounted filesystem,
+   root disk, or standalone embedfs process is needed.
+3. A component fibre on the host's single scheduler loads approved Wuffs.
+   Bootstrap rows are `device - /sbin/components/<image>.wuff /mountpoint`.
+   These create service-ABI components, workers, endpoints, and namespace mounts
+   for `/sbin`, `/boot`, `/dev`, `/tmp`, and `/proc`. The other manifest
+   declares socket/pipe services and named block-filesystem factories.
+4. After all initial workers and mounts are installed, publish mount-control
+   readiness. Mama waits for it, identifies the boot configuration disk, and
+   waits for that block driver.
+5. Mama requests the configured `boot-config` factory at `/boot/config`, then
+   publishes that namespace mount after volume initialization succeeds.
+   The manifest maps this role to `ext2fs.wuff`; Mama has no filesystem
+   implementation dependency.
+6. Call `boot_complete()`, then start `hundeschule` through ordinary userspace I/O.
+   Hundeschule reads `/boot/config/fstab` for root, console, and remaining disk
+   mounts. It does not remount the bootstrap filesystems.
 
-Mama remains alive to reap and report bootstrap child exits. Automatic service
-restart and remapping of surviving sessions are not implemented. Readiness waits
-use the existing service interface; they currently have no timeout.
+Mama remains alive to reap bootstrap children. Readiness waits currently have no
+timeout. Missing, malformed, duplicate, unapproved, or wrong-ABI manifest entries
+stop startup. The loader's approved image identities are generated from both
+manifests. There is no archive provider handoff or drain protocol, and no
+per-filesystem startup list or devfs/embedfs branch in the host.
 
-The Rust host initially publishes its filesystem namespace and application router
-under their retained endpoint names. After `/sbin` is registered, it starts component loading
-on another fibre of its single scheduler, while the namespace keeps serving the
-loader's requests. It loads trusted Rust `socket.wuff`, `pipe.wuff`, `memfs.wuff`,
-`procfs.wuff`, and `sysinfofs.wuff` from `/sbin/components`, then publishes
-the existing `socket_router`, `hund-rohr`, `/tmp`, `/proc`, and `/boot` endpoints. Hundeschule waits for
-hosted mount/pipe readiness before launching login; there are no standalone
-pipe or memfs processes. The host also initializes the shared C devfs backend
-through `hunde::devfs::Filesystem`, publishes `/dev`, and serves its requests on
-the same scheduler. Hundeschule waits for it instead of spawning devfs.
-The standalone C socket router has been removed. Disk configuration cannot start
-a duplicate pipe/memfs service or I/O host. Other high-level services remain separate; see
-[I/O and driver hosts](io-driver-hosts.md#first-rust-socket-slice).
+`WuffArchive` is userspace bootstrap linking infrastructure over the shared
+archive parser, not a filesystem provider. Image bytes are borrowed from the
+read-only mapping; the existing Wuff loader privately maps segments and performs
+relocations. Dependencies resolve only from `/sbin/lib/<soname>` in that archive.
+Devfs and embedfs Wuffs use safe Rust wrappers over retained C backends through
+their bundled `libc.wuff.1` dependency. Other existing Rust Wuffs remain
+dependency-free. Ordinary application linking retains its filesystem search.
 
-The loader resolves paths through the host's process-local application router,
-which calls the shared filesystem namespace directly.
-During bootstrap it uses an ordinary Channel to the standalone `/sbin` embedfs
-provider; there is no Channel connection back into the host itself.
-
-Before completing bootstrap, Mama requests `device - embedfs /sbin` from the
-host's authenticated mount control. The host initializes the existing C archive
-backend through the safe `hunde::embedfs::Filesystem` adapter and registers an
-internal dispatch worker at the existing `/sbin` mount. No second namespace mount
-or host-to-self Channel is created. The kernel maps the same immutable archive
-read-only and non-executable into both approved bootstrap consumers; retiring
-the old process does not invalidate the host's mapping.
-
-Mama then sends `IO_REQUEST_BOOTSTRAP_RETIRE` to the old provider. Only authorized
-mount clients can initiate draining. Existing handles remain usable; new path
-operations redirect through the host. The acknowledgement waits for all old
-handles to close and other connections' queued requests and replies to drain.
-Mama terminates the authenticated Channel peer only after that acknowledgement,
-and only then disables bootstrap spawning and starts Hundeschule. A failed host
-initialization, drain, or termination stops bootstrap rather than silently
-retaining the legacy provider. `/boot` is served by a separate hosted filesystem
-component, not another process.
+Only the I/O host receives the read-only, non-executable archive mapping.
+The embedfs Wuff serves `/sbin` through normal host handles and Channels.
+Kernel bootstrap executable loading remains separate from this userspace module
+loader; neither introduces a kernel filesystem or normal-I/O fallback.
 
 ### Cached boot information
 
@@ -106,7 +90,8 @@ readiness; those waits require the caller to have service process class.
 ## Filesystem ownership
 
 The filesystem subsystem in `hunde-io-host` starts with an empty namespace and serves requests immediately;
-it does not read `fstab` or spawn drivers. Mount registration uses
+bootstrap configuration installs the initial Wuff-backed mounts before readiness.
+Later mount registration uses
 `IO_REQUEST_MOUNT` over the existing bidirectional Channel. The namespace accepts
 registration only from an authenticated sender whose kernel process-registry
 record identifies the `hunde-mama` or `hundeschule` executable and the `hund`
@@ -131,19 +116,19 @@ requires exactly one root with no duplicate device or mountpoint. It initializes
 root first, even when another entry precedes it in fstab. For `ext2.wuff`, it
 waits for hosted endpoint initialization before namespace publication and never
 launches a legacy root watchdog. It then registers remaining disk mounts and
-establishes `/tmp`, `/dev`, and `/proc` before launching `hundeschau`. Humpen
+preserves the host's bootstrap `/tmp`, `/dev`, and `/proc` mounts before launching `hundeschau`. Humpen
 starts remaining legacy non-root disk filesystems later, skipping hosted entries.
 
 Standard QEMU configurations select `ext2.wuff` for root and the secondary
 `/mnt/channelio-ext2` and `/mnt/hosted-ext2` mounts. The host loads its
 filesystem component from the already available `/sbin/components` archive;
 neither component loading nor root mount control depends on reading the new root.
-Mama's `/boot/config` mount also uses hosted `ext2.wuff`, independently of fstab.
-The already registered `/sbin` supplies the component image; `/boot/config` and
+Mama's `/boot/config` mount uses the configured `boot-config` factory.
+The mapped archive supplies component images; `/sbin`, `/boot/config` and
 the application root are not required for component loading. Mount-control
 readiness, volume initialization, and namespace publication must all succeed
 before `boot_complete()` and configured startup. `/sbin` and `/boot` retain
-their existing providers. FAT32 mounts still use standalone providers. Pi UEFI
+their configured hosted providers. FAT32 uses a Rust Wuff as well. Pi UEFI
 and Milk-V root/data fstab entries retain their legacy EXT2 selections pending
 target-specific validation. Mama uses the
 same hosted bootstrap mount request for VirtIO and SD partition devices.

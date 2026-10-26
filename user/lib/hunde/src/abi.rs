@@ -643,6 +643,16 @@ pub(crate) mod host {
         assert!(size_of::<IoCallbacks>() == 24);
     };
     unsafe extern "C" {
+        pub(crate) fn hunde_rust_bootstrap_read(
+            path: ByteSpan,
+            buffer: *mut u8,
+            capacity: usize,
+        ) -> Completion;
+        pub(crate) fn hunde_rust_read_file(
+            path: ByteSpan,
+            buffer: *mut u8,
+            capacity: usize,
+        ) -> Completion;
         pub(crate) fn hunde_rust_boot_info() -> crate::boot::NativeResult;
         pub(crate) fn hunde_rust_embedfs_layout() -> NativeLayout;
         pub(crate) fn hunde_rust_embedfs_init(storage: *mut c_void) -> StatusResult;

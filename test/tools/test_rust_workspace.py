@@ -30,7 +30,7 @@ def test_socket_is_a_component_and_host_is_a_service_executable():
         ["make", "--no-print-directory", "-s", "-f", "Makefile", "-f", "-", "rust-layout-probe"],
         input=(
             "rust-layout-probe:\n"
-            "\t@echo component=$(filter %/socket.bin %/hund-rohr.bin %/memfs.bin %/procfs.bin %/fat32fs.bin %/devfs.bin %/hund-dateisystem.bin %/hund-io-system.bin,$(USER_BINARIES)) "
+            "\t@echo component=$(filter %/socket.bin %/hund-rohr.bin %/memfs.bin %/procfs.bin %/fat32fs.bin %/devfs.bin %/embedfs.bin %/hund-dateisystem.bin %/hund-io-system.bin,$(USER_BINARIES)) "
             "host=$(filter %/hunde-io-host.bin,$(USER_BINARIES))\n"
         ),
         cwd=PROJECT_ROOT,
@@ -49,7 +49,7 @@ def test_boot_archive_depends_on_every_packaged_rust_component(architecture):
         ["make", "--no-print-directory", "-sp", "-f", "Makefile", "-f", "-", "component-dependency-probe", f"ARCH={architecture}"],
         input=(
             "component-dependency-probe:\n"
-            "\t@printf '%s\\n' archive=$(EMBEDDED_FS) $(filter components/%,$(EMBEDDED_FS_INPUTS))\n"
+            "\t@printf '%s\\n' archive=$(EMBEDDED_FS) $(filter components/% config/% lib/%,$(EMBEDDED_FS_INPUTS))\n"
         ),
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -60,7 +60,7 @@ def test_boot_archive_depends_on_every_packaged_rust_component(architecture):
     lines = result.stdout.splitlines()
     archive = next(line.removeprefix("archive=") for line in lines if line.startswith("archive="))
     dependencies = next(line.split(":", 1)[1].split() for line in lines if line.startswith(f"{archive}:"))
-    components = [line.split("=", 1)[1] for line in lines if line.startswith("components/") and "=" in line]
+    components = [line.split("=", 1)[1] for line in lines if line.startswith(("components/", "config/", "lib/")) and "=" in line]
     assert components
     for component in components:
         assert component in dependencies, component
@@ -139,7 +139,7 @@ def test_consumers_cannot_write_or_allow_unsafe(consumer, source, diagnostic):
 
 def test_consumers_can_load_approved_bundled_components(consumer):
     result = consumer(
-        "fn main() { let _ = hunde::wuff::LoadedComponent::load(hunde::wuff::BundledComponent::Socket); }"
+        'fn main() { let image = hunde::wuff::BundledComponent::find("/sbin/components/socket.wuff").unwrap(); let _ = hunde::wuff::LoadedComponent::load(image); }'
     )
     assert result.returncode == 0, result.stderr
 

@@ -152,6 +152,8 @@ uint64_t hunde_rust_scheduler_waiting(void * storage);
 void hunde_rust_channel_prepare_wait(void);
 void hunde_rust_channel_wait(void);
 void hunde_rust_log(HundeByteSpan message);
+HundeIOCompletion hunde_rust_read_file(HundeByteSpan path, uint8_t * buffer, size_t capacity);
+HundeIOCompletion hunde_rust_bootstrap_read(HundeByteSpan path, uint8_t * buffer, size_t capacity);
 
 _Static_assert(sizeof(RustNativeLayout) == 16, "Rust native layout ABI changed");
 _Static_assert(sizeof(RustServiceEventResult) == 40, "Rust service event result ABI changed");

@@ -3,6 +3,8 @@ manifest:
   include_default_fixtures: false
   source_files:
     - common/types/bstring.c
+    - common/fs/embedded_fs.c
+    - user/lib/wuff/archive.c
     - user/lib/wuff/filesystem.c
     - user/lib/wuff/loader.c
     - user/lib/arch/hosted/wuff.c

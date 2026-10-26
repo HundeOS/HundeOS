@@ -1,0 +1,4 @@
+{
+    global: hunde_io_component_entry_v6;
+    local: *;
+};

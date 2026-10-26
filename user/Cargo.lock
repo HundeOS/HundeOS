@@ -7,6 +7,20 @@ name = "hunde"
 version = "0.1.0"
 
 [[package]]
+name = "hunde-devfs"
+version = "0.1.0"
+dependencies = [
+ "hunde",
+]
+
+[[package]]
+name = "hunde-embedfs"
+version = "0.1.0"
+dependencies = [
+ "hunde",
+]
+
+[[package]]
 name = "hunde-ext2fs"
 version = "0.1.0"
 dependencies = [
