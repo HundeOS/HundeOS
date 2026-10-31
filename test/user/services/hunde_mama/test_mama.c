@@ -13,11 +13,14 @@ static bool handed_off;
 static bool fail_handoff;
 static bool disk_ready_waited;
 static bool use_sd_host;
+static SdHostKind sd_host_kind;
+static InterruptControllerKind interrupt_controller_kind;
 static unsigned hosted_starts;
 static bool fail_hosted_start;
 static bool fail_config_publication;
 static bool fail_disk_ready;
 static bool boot_ready_waited;
+static bool startup_banner_reported;
 static bool fail_boot_ready;
 static BString started[12];
 static BString mounted[3];
@@ -31,9 +34,12 @@ void setUp(void)
     handed_off = fail_handoff = false;
     disk_ready_waited = false;
     use_sd_host = false;
+    sd_host_kind = SD_HOST_KIND_CV181X;
+    interrupt_controller_kind = INTERRUPT_CONTROLLER_PLIC;
     hosted_starts = 0;
     fail_hosted_start = fail_config_publication = fail_disk_ready = false;
     boot_ready_waited = fail_boot_ready = false;
+    startup_banner_reported = false;
     registers[31 * 0x200 / 4] = 0x74726976;
     registers[31 * 0x200 / 4 + 1] = 1;
     registers[31 * 0x200 / 4 + 2] = 2;
@@ -80,10 +86,11 @@ ServiceCode service_map_mmio(uint64_t physical, size_t size, ServiceMappedMemory
 Result(BootHardwareInfo) BootHardwareInfo__load(void)
 {
     BootHardwareInfo info = BootHardwareInfo__new();
+    info.interrupt_controller.kind = interrupt_controller_kind;
     if (use_sd_host)
     {
         BootDeviceInfo device = BootDeviceInfo__new(0x04310000, 0x1000, 36);
-        info.sd_host = Some(BootSdHostInfo, BootSdHostInfo__new(&device, SD_HOST_KIND_CV181X, 375000000));
+        info.sd_host = Some(BootSdHostInfo, BootSdHostInfo__new(&device, sd_host_kind, 375000000));
     }
     else
     {
@@ -195,12 +202,17 @@ void test_mama_does_not_start_school_when_handoff_fails(void)
 
 SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
 {
+    if (strcmp(tag, "hunde-mama") == 0 && strcmp(format, "🐩 HundeOS: hunde-mama begins 🐶") == 0)
+    {
+        startup_banner_reported = true;
+    }
     return SYSLOG_OK;
 }
 
 void test_mama_establishes_boot_mounts_before_starting_school(void)
 {
     TEST_ASSERT_EQUAL(1, mama_main());
+    TEST_ASSERT_TRUE(startup_banner_reported);
     TEST_ASSERT_TRUE(school_started);
     TEST_ASSERT_TRUE(disk_ready_waited);
     TEST_ASSERT_EQUAL(4, starts);
@@ -235,6 +247,34 @@ void test_mama_bootstraps_sd_host_and_partition_services(void)
     TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0"), started[4]);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p2"), started[5]);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p3"), started[6]);
+}
+
+void test_mama_bootstraps_partitions_without_restarting_hosted_sd_device(void)
+{
+    use_sd_host = true;
+    sd_host_kind = SD_HOST_KIND_BCM2835;
+
+    TEST_ASSERT_EQUAL(1, mama_main());
+
+    TEST_ASSERT_TRUE(school_started);
+    TEST_ASSERT_TRUE(disk_ready_waited);
+    TEST_ASSERT_EQUAL(6, starts);
+    TEST_ASSERT_EQUAL_UINT(1, hosted_starts);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p2"), started[4]);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p3"), started[5]);
+}
+
+void test_mama_uses_hosted_cv181x_on_gic(void)
+{
+    use_sd_host = true;
+    interrupt_controller_kind = INTERRUPT_CONTROLLER_GIC_V2;
+
+    TEST_ASSERT_EQUAL(1, mama_main());
+
+    TEST_ASSERT_TRUE(school_started);
+    TEST_ASSERT_EQUAL(6, starts);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p2"), started[4]);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p3"), started[5]);
 }
 
 void test_mama_does_not_publish_or_handoff_when_hosted_boot_mount_fails(void)

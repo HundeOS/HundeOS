@@ -1,0 +1,21 @@
+[package]
+name = "hunde-uart-tx"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib"]
+
+[[bin]]
+name = "uart-tx-component"
+path = "src/entry.rs"
+required-features = ["component"]
+
+[features]
+component = []
+
+[dependencies]
+hunde = { path = "../../lib/hunde" }
+
+[lints]
+workspace = true

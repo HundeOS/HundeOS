@@ -2,10 +2,10 @@
 
 typedef volatile uint32_t * DeviceRegisterPtr;
 
-bool Arch__is_virtio_block_device(Address mapping)
+bool Arch__is_claimable_virtio_device(Address mapping)
 {
     DeviceRegisterPtr registers = (DeviceRegisterPtr)mapping;
-    return registers[0] == 0x74726976U && registers[1] >= 1 && registers[2] == 2;
+    return registers[0] == 0x74726976U && registers[1] >= 1 && (registers[2] == 2 || registers[2] == 18);
 }
 
 void Arch__reset_virtio_device(Address mapping, Address page_table)

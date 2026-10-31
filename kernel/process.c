@@ -301,6 +301,43 @@ static bool allocation_contains_range(UserAllocationPtr allocation, void * conte
            range_end >= range->virtual_address;
 }
 
+static bool allocation_is_readable_range(UserAllocationPtr allocation, void * context)
+{
+    return allocation->address.valid && allocation->address.read && allocation->address.kernel_addr.valid &&
+           allocation_contains_range(allocation, context);
+}
+
+Result(ProcessMemoryCode) Process__copy_from_user(ProcessPtr self, Address source, DataPtr destination, size_t size)
+{
+    if (size > UINT64_MAX - source)
+    {
+        return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_INVALID_SIZE);
+    }
+    size_t copied = 0;
+    while (copied < size)
+    {
+        UserAllocationRangeMatch range = UserAllocationRangeMatch__new(source + copied, 1);
+        match_find_result(
+            UserAllocations__find(&self->user_allocations, allocation_is_readable_range, &range),
+            some(allocation)
+            {
+                size_t offset = range.virtual_address - allocation.address.virtual_addr;
+                size_t available = allocation.size - offset;
+                size_t remaining = size - copied;
+                size_t count = available < remaining ? available : remaining;
+                Kernel__memcopy(allocation.address.kernel_addr.virtual_addr + offset, (Address)destination + copied,
+                                count);
+                copied += count;
+            },
+            none()
+            {
+                return Error(ProcessMemoryCode, user_allocation_not_found, PROCESS_MEMORY_NOT_FOUND);
+            }
+        );
+    }
+    return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
+}
+
 static bool Process__alignment_is_valid(size_t alignment)
 {
     return alignment >= PAGE_SIZE && (alignment & (alignment - 1)) == 0;
@@ -2458,7 +2495,7 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
             Address start = allocation.address.virtual_addr;
             if (allocation.type == USER_ALLOCATION_MMIO && mapping >= start && allocation.size >= 0x100 &&
                 mapping - start <= allocation.size - 0x100 && (mapping & 3) == 0 &&
-                Arch__is_virtio_block_device(mapping))
+                Arch__is_claimable_virtio_device(mapping))
             {
                 match_optional(
                     ProcessVirtioDevices__find_item(&self->virtio_devices, mapping),

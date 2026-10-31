@@ -1,0 +1,19 @@
+[package]
+name = "hunde-treiber-host"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[features]
+service = []
+
+[dependencies]
+hunde = { path = "../../lib/hunde" }
+hunde-virtio-blk = { path = "../../drivers/virtio_blk" }
+hunde-virtio-keyboard = { path = "../../drivers/virtio_keyboard" }
+hunde-sdhci = { path = "../../drivers/sdhci" }
+
+[lints]
+workspace = true

@@ -5,12 +5,14 @@
 #include "../../../kernel/system_info.h"
 #include "../asm_helpers.h"
 
-#define GICD_CTLR_ENABLE_GRP1 (1u << 0)
+#define GICD_CTLR_ENABLE_GRP0 (1u << 0)
 #define GICD_CTLR_ENABLE_GRP1NS (1u << 1)
+#define GICD_CTLR_ENABLE_GRP1_V2 (GICD_CTLR_ENABLE_GRP0 | GICD_CTLR_ENABLE_GRP1NS)
 #define GICD_CTLR_ARE_NS (1u << 4)
 #define GIC_SPI_START 32u
 
 #define GICC_CTLR_OFFSET 0x0000u
+#define GICC_CTLR_ACK_CTL (1u << 2)
 #define GICC_PMR_OFFSET 0x0004u
 #define GICC_IAR_OFFSET 0x000cu
 #define GICC_EOIR_OFFSET 0x0010u
@@ -28,7 +30,7 @@ static Address gicc_base(InterruptControllerInfoPtr info)
 static void gicd_enable_group1(InterruptControllerInfoPtr info)
 {
     volatile uint32_t * ctlr = (uint32_t *)(gicd_base(info) + 0x000);
-    uint32_t enable = info->kind == INTERRUPT_CONTROLLER_GIC_V2 ? GICD_CTLR_ENABLE_GRP1 : GICD_CTLR_ENABLE_GRP1NS;
+    uint32_t enable = info->kind == INTERRUPT_CONTROLLER_GIC_V2 ? GICD_CTLR_ENABLE_GRP1_V2 : GICD_CTLR_ENABLE_GRP1NS;
     *ctlr |= enable;
     __asm__ volatile("dsb sy; isb" ::: "memory");
 }
@@ -118,7 +120,7 @@ Result(InitCode) gic_init(InterruptControllerInfoPtr info)
         volatile uint32_t * priority_mask = (uint32_t *)(gicc_base(info) + GICC_PMR_OFFSET);
         volatile uint32_t * control = (uint32_t *)(gicc_base(info) + GICC_CTLR_OFFSET);
         *priority_mask = 0xffu;
-        *control |= GICD_CTLR_ENABLE_GRP1;
+        *control |= GICD_CTLR_ENABLE_GRP1_V2 | GICC_CTLR_ACK_CTL;
         __asm__ volatile("dsb sy; isb" ::: "memory");
         return Success(InitCode, ARCH_INIT_OK);
     }

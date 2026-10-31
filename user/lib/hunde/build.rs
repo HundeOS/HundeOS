@@ -34,6 +34,7 @@ fn main() {
             let kind = match (bootstrap, fields[0]) {
                 (false, "service") | (true, "device") => "Service",
                 (false, "filesystem") => "Filesystem",
+                (false, "driver") => "Driver",
                 _ => panic!("Unknown bootstrap component manifest entry"),
             };
             let path = fields[2];
@@ -63,7 +64,11 @@ fn main() {
     for input in [
         "tools/generate_rust_io_constants.py",
         "common/ipc/io_protocol.h",
+        "common/ipc/buffer.h",
+        "common/ipc/interrupt_protocol.h",
+        "common/hardware/boot_info.h",
         "common_includes/hunde/io_component.h",
+        "common_includes/hunde/driver_component.h",
         "common_includes/hunde/boot_info.h",
         "common_includes/hunde/host_component.h",
         "common_includes/syscalls/io.h",

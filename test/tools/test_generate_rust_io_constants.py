@@ -49,7 +49,8 @@ def protocol_root(tmp_path):
         encoding="utf-8",
     )
     status.with_name("service.h").write_text(
-        "typedef enum ServiceEventType { SERVICE_EVENT_MEMORY_PRESSURE = 6 } ServiceEventType;\n",
+        "typedef enum ServiceEventType { SERVICE_EVENT_MEMORY_PRESSURE = 6 } ServiceEventType;\n"
+        "typedef enum ServiceCode { SERVICE_OK = 0, SERVICE_PERMISSION_DENIED = -8 } ServiceCode;\n",
         encoding="utf-8",
     )
     status.with_name("mem.h").write_text(
@@ -59,6 +60,24 @@ def protocol_root(tmp_path):
     component = tmp_path / "common_includes/hunde/io_component.h"
     component.parent.mkdir(parents=True)
     component.write_text("#define HUNDE_IO_COMPONENT_VERSION 6U\n", encoding="utf-8")
+    protocol.with_name("interrupt_protocol.h").write_text(
+        "typedef enum InterruptProtocolRequestKind { INTERRUPT_PROTOCOL_SUBSCRIBE = 1, INTERRUPT_PROTOCOL_WAIT, INTERRUPT_PROTOCOL_ACKNOWLEDGE } InterruptProtocolRequestKind;\n"
+        "typedef enum InterruptProtocolResponseKind { INTERRUPT_PROTOCOL_SUBSCRIBED = 1, INTERRUPT_PROTOCOL_DELIVERY, INTERRUPT_PROTOCOL_ACKNOWLEDGED, INTERRUPT_PROTOCOL_ERROR } InterruptProtocolResponseKind;\n"
+        "typedef enum InterruptProtocolCode { INTERRUPT_PROTOCOL_OK = 0, INTERRUPT_PROTOCOL_INVALID = -1 } InterruptProtocolCode;\n",
+        encoding="utf-8",
+    )
+    protocol.with_name("buffer.h").write_text(
+        "typedef enum BufferDirection { BUFFER_READ = 1, BUFFER_WRITE = 2 } BufferDirection;\n",
+        encoding="utf-8",
+    )
+    hardware = tmp_path / "common/hardware/boot_info.h"
+    hardware.parent.mkdir(parents=True)
+    hardware.write_text(
+        "typedef enum UartKind { UART_KIND_UNKNOWN = 0, UART_KIND_PL011, UART_KIND_NS16550 } UartKind;\n"
+        "typedef enum SdHostKind { SD_HOST_KIND_GENERIC = 0, SD_HOST_KIND_CV180X, "
+        "SD_HOST_KIND_CV181X, SD_HOST_KIND_PCI } SdHostKind;\n",
+        encoding="utf-8",
+    )
     return tmp_path
 
 
@@ -82,6 +101,12 @@ def test_clang_evaluates_expressions_implicit_values_and_signed_statuses(protoco
     assert "pub const HUNDE_IO_COMPONENT_VERSION: u64 = 6;" in generated
     assert "pub const SERVICE_EVENT_MEMORY_PRESSURE: u32 = 6;" in generated
     assert "pub const MEM_PRESSURE_CRITICAL: u64 = 2;" in generated
+    assert "pub const SERVICE_PERMISSION_DENIED: i32 = -8;" in generated
+    assert "pub const INTERRUPT_PROTOCOL_ACKNOWLEDGE: u32 = 3;" in generated
+    assert "pub const INTERRUPT_PROTOCOL_INVALID: i32 = -1;" in generated
+    assert "pub const UART_KIND_NS16550: u64 = 2;" in generated
+    assert "pub const SD_HOST_KIND_PCI: u64 = 3;" in generated
+    assert "pub const BUFFER_READ: u32 = 1;" in generated
 
 
 def test_regeneration_tracks_c_changes_including_following_implicit_operations(protocol_root):
@@ -133,7 +158,7 @@ def test_all_generated_repository_constants_equal_the_c_compilers_values(tmp_pat
         suffix = {"u32": "U", "u64": "ULL", "i32": ""}[rust_type]
         assertions.append(f'_Static_assert(({name}) == ({value}{suffix}), "{name}");')
     source = tmp_path / "protocol_values.c"
-    source.write_text('#include "common/ipc/io_protocol.h"\n#include "common_includes/hunde/io_component.h"\n#include "common_includes/syscalls/service.h"\n#include "common_includes/syscalls/mem.h"\n' + "\n".join(assertions), encoding="utf-8")
+    source.write_text('#include "common/ipc/io_protocol.h"\n#include "common/ipc/interrupt_protocol.h"\n#include "common/hardware/boot_info.h"\n#include "common_includes/hunde/io_component.h"\n#include "common_includes/syscalls/service.h"\n#include "common_includes/syscalls/mem.h"\n' + "\n".join(assertions), encoding="utf-8")
     result = subprocess.run(
         ["cc", "-std=gnu11", "-fsyntax-only", "-I", str(PROJECT_ROOT),
          "-I", str(PROJECT_ROOT / "common"), "-I", str(PROJECT_ROOT / "common_includes"),
@@ -152,6 +177,8 @@ def test_all_generated_repository_constants_equal_the_c_compilers_values(tmp_pat
         ("common_includes/syscalls/service.h", "= 6", "= 19", "pub const SERVICE_EVENT_MEMORY_PRESSURE: u32 = 19;"),
         ("common_includes/syscalls/mem.h", "MEM_PRESSURE_LOW,", "MEM_PRESSURE_LOW = 7,", "pub const MEM_PRESSURE_CRITICAL: u64 = 8;"),
         ("common_includes/hunde/io_component.h", "6U", "7U", "pub const HUNDE_IO_COMPONENT_VERSION: u64 = 7;"),
+        ("common/ipc/interrupt_protocol.h", "INTERRUPT_PROTOCOL_SUBSCRIBE = 1", "INTERRUPT_PROTOCOL_SUBSCRIBE = 7", "pub const INTERRUPT_PROTOCOL_WAIT: u32 = 8;"),
+        ("common/hardware/boot_info.h", "UART_KIND_UNKNOWN = 0", "UART_KIND_UNKNOWN = 4", "pub const UART_KIND_NS16550: u64 = 6;"),
     ],
 )
 def test_cargo_regenerates_constants_after_a_c_header_change(protocol_root, header_path, original, replacement, expected):
@@ -195,6 +222,9 @@ def test_make_tracks_the_generator_build_script_and_c_headers():
     assert result.returncode == 0, result.stderr
     assert {
         "common/ipc/io_protocol.h",
+        "common/ipc/buffer.h",
+        "common/ipc/interrupt_protocol.h",
+        "common/hardware/boot_info.h",
         "common_includes/syscalls/io.h",
         "common_includes/syscalls/service.h",
         "common_includes/syscalls/mem.h",

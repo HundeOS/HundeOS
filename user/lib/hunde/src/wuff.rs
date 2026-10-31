@@ -1,7 +1,9 @@
 use crate::abi::{self, ByteSpan, Component, HostOperations, IoError, LoadResult, RawRequest};
 use crate::native::Storage;
 use crate::protocol::IO_PANIC;
+use alloc::boxed::Box;
 use core::ffi::c_void;
+use core::mem::ManuallyDrop;
 
 struct Module {
     storage: Storage,
@@ -78,6 +80,7 @@ impl Dispatch {
 enum ImageKind {
     Service,
     Filesystem,
+    Driver,
 }
 
 include!(concat!(env!("OUT_DIR"), "/io_components.rs"));
@@ -105,6 +108,216 @@ impl BundledFilesystem {
 
     pub fn path(self) -> &'static str {
         self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BundledDriver(&'static str);
+
+impl BundledDriver {
+    pub fn find(path: &str) -> Result<Self, IoError> {
+        approved_image(path, ImageKind::Driver).map(Self)
+    }
+}
+
+#[repr(C)]
+pub struct DriverStepResult {
+    status: crate::abi::StatusResult,
+    flags: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DriverDescriptor {
+    header: crate::abi::Header,
+    context: *mut c_void,
+    irq: u64,
+    step: Option<unsafe extern "C" fn(*mut c_void) -> DriverStepResult>,
+    deliver: Option<unsafe extern "C" fn(*mut c_void)>,
+}
+
+#[repr(C)]
+pub struct DriverLoadResult {
+    kind: u32,
+    reserved: u32,
+    descriptor: DriverDescriptor,
+    error: crate::abi::AbiError,
+}
+
+impl DriverLoadResult {
+    fn success(driver: DriverDescriptor) -> Self {
+        Self {
+            kind: abi::SUCCESS,
+            reserved: 0,
+            descriptor: driver,
+            error: abi::AbiError::new(0, b""),
+        }
+    }
+
+    fn error(error: IoError) -> Self {
+        Self {
+            kind: abi::ERROR,
+            reserved: 0,
+            descriptor: DriverDescriptor {
+                header: abi::Header::of::<DriverDescriptor>(),
+                context: core::ptr::null_mut(),
+                irq: 0,
+                step: None,
+                deliver: None,
+            },
+            error: abi::AbiError::new(error.0, b"Driver initialization failed"),
+        }
+    }
+
+    fn into_descriptor(self) -> Result<DriverDescriptor, IoError> {
+        if self.kind != abi::SUCCESS {
+            return Err(IoError(if self.kind == abi::ERROR {
+                self.error.code
+            } else {
+                IO_PANIC
+            }));
+        }
+        if !self.descriptor.header.accepts::<DriverDescriptor>()
+            || self.descriptor.context.is_null()
+            || self.descriptor.step.is_none()
+            || self.descriptor.deliver.is_none()
+        {
+            return Err(IoError(IO_PANIC));
+        }
+        Ok(self.descriptor)
+    }
+}
+
+pub struct DriverProgress {
+    pub worked: bool,
+    pub rearm: bool,
+}
+
+impl DriverProgress {
+    pub const fn new(worked: bool, rearm: bool) -> Self {
+        Self { worked, rearm }
+    }
+}
+
+pub trait DriverComponent: Sized + 'static {
+    fn load(configuration: &[u8]) -> Result<Self, IoError>;
+    fn irq(&self) -> Option<u64>;
+    fn step(&mut self) -> Result<DriverProgress, IoError>;
+    fn deliver(&mut self);
+}
+
+unsafe extern "C" fn driver_step<Driver: DriverComponent>(
+    context: *mut c_void,
+) -> DriverStepResult {
+    let result = unsafe { context.cast::<Driver>().as_mut() }
+        .ok_or(IoError(crate::protocol::IO_PERMISSION_DENIED))
+        .and_then(Driver::step);
+    match result {
+        Ok(progress) => DriverStepResult {
+            status: crate::abi::StatusResult::success(),
+            flags: u64::from(progress.worked) | (u64::from(progress.rearm) << 1),
+        },
+        Err(error) => DriverStepResult {
+            status: crate::abi::StatusResult::from_result(Err(error)),
+            flags: 0,
+        },
+    }
+}
+
+unsafe extern "C" fn driver_deliver<Driver: DriverComponent>(context: *mut c_void) {
+    if let Some(driver) = unsafe { context.cast::<Driver>().as_mut() } {
+        driver.deliver();
+    }
+}
+
+/// Initializes a driver image with host-owned allocator callbacks.
+///
+/// # Safety
+/// The host and configuration must remain valid for this call. The host must
+/// serialize callbacks and retain the image while the returned driver is live.
+pub unsafe fn load_driver<Driver: DriverComponent>(
+    host: *const HostOperations,
+    configuration: ByteSpan,
+) -> DriverLoadResult {
+    if let Err(error) = unsafe { crate::runtime::install_host(host) } {
+        return DriverLoadResult::error(error);
+    }
+    if configuration.bytes.is_null() || configuration.length > usize::MAX as u64 {
+        return DriverLoadResult::error(IoError(crate::protocol::SERVICE_INVALID_BUFFER));
+    }
+    let bytes =
+        unsafe { core::slice::from_raw_parts(configuration.bytes, configuration.length as usize) };
+    match Driver::load(bytes) {
+        Ok(driver) if driver.irq() != Some(0) => {
+            let irq = driver.irq().unwrap_or_default();
+            DriverLoadResult::success(DriverDescriptor {
+                header: abi::Header::of::<DriverDescriptor>(),
+                context: Box::into_raw(Box::new(driver)).cast(),
+                irq,
+                step: Some(driver_step::<Driver>),
+                deliver: Some(driver_deliver::<Driver>),
+            })
+        }
+        Ok(_) => DriverLoadResult::error(IoError(crate::protocol::SERVICE_INVALID_BUFFER)),
+        Err(error) => DriverLoadResult::error(error),
+    }
+}
+
+#[macro_export]
+macro_rules! driver_component {
+    ($driver:ty, $message:expr) => {
+        $crate::host_runtime!($message);
+
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn hunde_driver_component_entry_v1(
+            host: *const $crate::abi::HostOperations,
+            configuration: $crate::abi::ByteSpan,
+        ) -> $crate::wuff::DriverLoadResult {
+            unsafe { $crate::wuff::load_driver::<$driver>(host, configuration) }
+        }
+    };
+}
+
+pub struct LoadedDriver {
+    descriptor: DriverDescriptor,
+    _module: ManuallyDrop<Module>,
+}
+
+impl LoadedDriver {
+    pub fn load(image: BundledDriver, configuration: &[u8]) -> Result<Self, IoError> {
+        let module = ManuallyDrop::new(Module::load(image.0.as_bytes())?);
+        let symbol = module.export(b"hunde_driver_component_entry_v1")?;
+        let entry: unsafe extern "C" fn(*const HostOperations, ByteSpan) -> DriverLoadResult =
+            unsafe { core::mem::transmute(symbol) };
+        let host = crate::runtime::operations()?;
+        let result = unsafe { entry(host, ByteSpan::new(configuration)) };
+        Ok(Self {
+            descriptor: result.into_descriptor()?,
+            _module: module,
+        })
+    }
+
+    pub fn irq(&self) -> Option<u64> {
+        (self.descriptor.irq != 0).then_some(self.descriptor.irq)
+    }
+
+    pub fn deliver(&mut self) {
+        unsafe { self.descriptor.deliver.unwrap()(self.descriptor.context) };
+    }
+
+    pub fn step(&mut self) -> Result<DriverProgress, IoError> {
+        let result = unsafe { self.descriptor.step.unwrap()(self.descriptor.context) };
+        result.status.into_result()?;
+        if result.flags & !3 != 0 {
+            return Err(IoError(IO_PANIC));
+        }
+        if self.irq().is_none() && result.flags & 2 != 0 {
+            return Err(IoError(IO_PANIC));
+        }
+        Ok(DriverProgress {
+            worked: result.flags & 1 != 0,
+            rearm: result.flags & 2 != 0,
+        })
     }
 }
 
@@ -213,6 +426,60 @@ mod tests {
     use crate::abi::{Completion, StatusResult};
     use crate::protocol::{IO_PERMISSION_DENIED, IO_WOULD_BLOCK};
 
+    unsafe extern "C" fn fake_driver_step(_context: *mut c_void) -> DriverStepResult {
+        DriverStepResult {
+            status: StatusResult::success(),
+            flags: 0,
+        }
+    }
+
+    unsafe extern "C" fn fake_driver_deliver(_context: *mut c_void) {}
+
+    #[test]
+    fn driver_descriptor_requires_valid_version_context_and_callbacks() {
+        let mut context = 0_u8;
+        let mut descriptor = DriverDescriptor {
+            header: crate::abi::Header::of::<DriverDescriptor>(),
+            context: (&mut context as *mut u8).cast(),
+            irq: 13,
+            step: Some(fake_driver_step),
+            deliver: Some(fake_driver_deliver),
+        };
+        let load = |descriptor| DriverLoadResult {
+            kind: abi::SUCCESS,
+            reserved: 0,
+            descriptor,
+            error: crate::abi::AbiError::new(0, b""),
+        };
+        assert!(load(descriptor).into_descriptor().is_ok());
+        descriptor.header.version += 1;
+        assert_eq!(
+            load(descriptor).into_descriptor().err(),
+            Some(IoError(IO_PANIC))
+        );
+        descriptor.header.version -= 1;
+        descriptor.context = core::ptr::null_mut();
+        assert_eq!(
+            load(descriptor).into_descriptor().err(),
+            Some(IoError(IO_PANIC))
+        );
+        descriptor.context = (&mut context as *mut u8).cast();
+        descriptor.irq = 0;
+        assert!(load(descriptor).into_descriptor().is_ok());
+        descriptor.irq = 13;
+        descriptor.step = None;
+        assert_eq!(
+            load(descriptor).into_descriptor().err(),
+            Some(IoError(IO_PANIC))
+        );
+        descriptor.step = Some(fake_driver_step);
+        descriptor.deliver = None;
+        assert_eq!(
+            load(descriptor).into_descriptor().err(),
+            Some(IoError(IO_PANIC))
+        );
+    }
+
     #[test]
     fn manifest_images_are_approved_only_for_their_declared_abi() {
         assert_eq!(
@@ -229,6 +496,11 @@ mod tests {
         );
         assert!(BundledComponent::find("/sbin/components/ext2fs.wuff").is_err());
         assert!(BundledFilesystem::find("/sbin/components/socket.wuff").is_err());
+        assert!(BundledDriver::find("/sbin/components/uart_rx.wuff").is_ok());
+        assert!(BundledDriver::find("/sbin/components/uart_tx.wuff").is_ok());
+        assert!(BundledComponent::find("/sbin/components/uart_rx.wuff").is_err());
+        assert!(BundledComponent::find("/sbin/components/uart_tx.wuff").is_err());
+        assert!(BundledDriver::find("/sbin/components/socket.wuff").is_err());
         for path in [
             "/tmp/socket.wuff",
             "/sbin/components/unknown.wuff",
@@ -236,6 +508,7 @@ mod tests {
         ] {
             assert!(BundledComponent::find(path).is_err());
             assert!(BundledFilesystem::find(path).is_err());
+            assert!(BundledDriver::find(path).is_err());
         }
     }
 

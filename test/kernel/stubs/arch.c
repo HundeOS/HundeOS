@@ -3,6 +3,7 @@
 #include "../../../kernel/arch/device.h"
 
 Address test_reset_device;
+bool test_virtio_device_supported = true;
 uint64_t test_cpu_time_usec;
 
 uint64_t CPU__time_usec(void)
@@ -10,9 +11,9 @@ uint64_t CPU__time_usec(void)
     return test_cpu_time_usec;
 }
 
-bool Arch__is_virtio_block_device(Address mapping)
+bool Arch__is_claimable_virtio_device(Address mapping)
 {
-    return true;
+    return test_virtio_device_supported;
 }
 
 void Arch__reset_virtio_device(Address mapping, Address page_table)

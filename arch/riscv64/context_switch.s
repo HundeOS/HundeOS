@@ -17,7 +17,7 @@ RiscVProcess__switch_context:
 
     la t0, __boot_stack_virtual_start
     sub t1, sp, t0
-    li t2, 10485760
+    li t2, 1048576
     divu t1, t1, t2
     addi t1, t1, 1
     mul t1, t1, t2

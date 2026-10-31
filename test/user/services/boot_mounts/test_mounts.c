@@ -211,7 +211,7 @@ void test_later_mounts_register_root_and_devices_after_reading_boot_config(void)
         success_do_nothing(),
         error_test_fail()
     );
-    TEST_ASSERT_EQUAL(5, registered);
+    TEST_ASSERT_EQUAL(2, registered);
     TEST_ASSERT_EQUAL(1, started);
     TEST_ASSERT_EQUAL(1, closed);
 }
@@ -243,53 +243,43 @@ void test_missing_root_and_duplicate_root_fail_and_close_control_channel(void)
     TEST_ASSERT_EQUAL(0, registered);
 }
 
-void test_hosted_memfs_readiness_failure_stops_before_other_builtin_drivers(void)
+void test_configured_mounts_leave_memfs_readiness_to_the_io_host(void)
 {
+    fstab = "device /dev/virtio1 ext2 /\ndevice /dev/virtio4 ext2 /mnt/sd\ndevice - memfs /tmp\n";
     fail_tmp_ready = true;
-    match_result(
-        Hundeschule__mount_filesystems(),
-        success_test_fail(),
-        error(code, message)
-        {
-            TEST_ASSERT_NOT_EQUAL(IO_OK, code);
-        }
+    match_result(Hundeschule__mount_filesystems(),
+        success_do_nothing(),
+        error_test_fail()
     );
     TEST_ASSERT_EQUAL(1, started);
     TEST_ASSERT_EQUAL(2, registered);
     TEST_ASSERT_EQUAL(1, closed);
 }
 
-void test_hosted_procfs_readiness_failure_stops_mount_publication(void)
+void test_configured_mounts_leave_procfs_readiness_to_the_io_host(void)
 {
+    fstab = "device /dev/virtio1 ext2 /\ndevice /dev/virtio4 ext2 /mnt/sd\ndevice - procfs /proc\n";
     fail_proc_ready = true;
-    match_result(
-        Hundeschule__mount_filesystems(),
-        success_test_fail(),
-        error(code, message)
-        {
-            TEST_ASSERT_NOT_EQUAL(IO_OK, code);
-        }
+    match_result(Hundeschule__mount_filesystems(),
+        success_do_nothing(),
+        error_test_fail()
     );
     TEST_ASSERT_EQUAL(1, started);
-    TEST_ASSERT_EQUAL(4, registered);
+    TEST_ASSERT_EQUAL(2, registered);
     TEST_ASSERT_EQUAL(1, closed);
 }
 
-void test_hosted_devfs_readiness_failure_starts_no_device_filesystem_process(void)
+void test_configured_mounts_leave_devfs_readiness_to_the_io_host(void)
 {
-    fstab = "device /dev/virtio1 ext2.wuff /\n";
+    fstab = "device /dev/virtio1 ext2.wuff /\ndevice - devfs /dev\n";
     fail_dev_ready = true;
-    match_result(
-        Hundeschule__mount_filesystems(),
-        success_test_fail(),
-        error(code, message)
-        {
-            TEST_ASSERT_NOT_EQUAL(IO_OK, code);
-        }
+    match_result(Hundeschule__mount_filesystems(),
+        success_do_nothing(),
+        error_test_fail()
     );
     TEST_ASSERT_EQUAL(0, started);
-    TEST_ASSERT_EQUAL(2, published);
-    TEST_ASSERT_EQUAL(3, registered);
+    TEST_ASSERT_EQUAL(1, published);
+    TEST_ASSERT_EQUAL(2, registered);
     TEST_ASSERT_EQUAL(2, closed);
 }
 
@@ -331,7 +321,7 @@ void test_hosted_mount_uses_control_channel_before_namespace_publication(void)
         error_test_fail()
     );
     TEST_ASSERT_TRUE(hosted_started);
-    TEST_ASSERT_EQUAL(6, registered);
+    TEST_ASSERT_EQUAL(3, registered);
     TEST_ASSERT_EQUAL(2, closed);
     TEST_ASSERT_EQUAL(1, started);
 }
@@ -365,7 +355,7 @@ void test_console_mount_and_default_alias_use_host_control_without_a_watchdog(vo
     TEST_ASSERT_TRUE(console_input_waited);
     TEST_ASSERT_TRUE(console_output_waited);
     TEST_ASSERT_FALSE(block_device_waited);
-    TEST_ASSERT_EQUAL(7, registered);
+    TEST_ASSERT_EQUAL(4, registered);
     TEST_ASSERT_EQUAL(3, closed);
     TEST_ASSERT_EQUAL(1, started);
 }
@@ -416,7 +406,7 @@ void test_fat32_wuff_mount_uses_host_control_without_legacy_driver(void)
         error_test_fail()
     );
     TEST_ASSERT_TRUE(hosted_started);
-    TEST_ASSERT_EQUAL(6, registered);
+    TEST_ASSERT_EQUAL(3, registered);
     TEST_ASSERT_EQUAL(2, closed);
     TEST_ASSERT_EQUAL(1, started);
 }
@@ -488,7 +478,7 @@ void test_hosted_root_initializes_before_namespace_without_legacy_driver(void)
     );
     TEST_ASSERT_TRUE(root);
     TEST_ASSERT_TRUE(hosted_started);
-    TEST_ASSERT_EQUAL(6, registered);
+    TEST_ASSERT_EQUAL(3, registered);
     TEST_ASSERT_EQUAL(0, started);
     TEST_ASSERT_EQUAL(2, closed);
 }

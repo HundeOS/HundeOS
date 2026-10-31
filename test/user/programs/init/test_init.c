@@ -408,7 +408,7 @@ void test_init_spawns_required_processes_in_background(void)
     TEST_ASSERT_TRUE(fake_sysinfo_closed);
 }
 
-void test_init_spawns_framebuffer_keyboard_console(void)
+void test_init_uses_existing_framebuffer_console_for_keyboard_login(void)
 {
     fake_expect_keyboard_input = true;
     fake_sysinfo = "framebuffer.present=1\n"
@@ -422,15 +422,14 @@ void test_init_spawns_framebuffer_keyboard_console(void)
     HundeschauRequiredProcesses required_processes = HundeschauRequiredProcesses__new();
     TEST_ASSERT_EQUAL_INT(0, Hundeschau__initialise_required_processes(&required_processes));
 
-    TEST_ASSERT_EQUAL_UINT64(3, spawn_call_count);
+    TEST_ASSERT_EQUAL_UINT64(2, spawn_call_count);
     TEST_ASSERT_EQUAL_STRING("/sbin/services/humpen", spawn_calls[0].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/video_term", spawn_calls[1].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[2].path);
-    TEST_ASSERT_EQUAL_UINT8(1, spawn_calls[2].has_stdio);
+    TEST_ASSERT_EQUAL_STRING("/sbin/login", spawn_calls[1].path);
+    TEST_ASSERT_EQUAL_UINT8(1, spawn_calls[1].has_stdio);
     TEST_ASSERT_EQUAL_UINT64(fake_expect_keyboard_input ? IO_ENDPOINT_KEYBOARD_INPUT : IO_ENDPOINT_TTY_INPUT,
-                             spawn_calls[2].stdin_fd);
-    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[2].stdout_fd);
-    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[2].stderr_fd);
+                             spawn_calls[1].stdin_fd);
+    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[1].stdout_fd);
+    TEST_ASSERT_EQUAL_UINT64(IO_ENDPOINT_CONSOLE_OUTPUT, spawn_calls[1].stderr_fd);
     TEST_ASSERT_EQUAL_UINT64(0, fake_open_count);
     TEST_ASSERT_TRUE(fake_sysinfo_opened);
     TEST_ASSERT_TRUE(fake_sysinfo_closed);

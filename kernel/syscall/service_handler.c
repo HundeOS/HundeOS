@@ -165,7 +165,7 @@ Result(SystemCallResult)
             if (service_operation == SERVICE_QUEUE_LISTEN)
             {
                 match_result(
-                    Scheduler__queue_listen(kernel->scheduler, process, arg2, arg3),
+                    Scheduler__queue_listen(kernel->scheduler, process, arg2),
                     success(value)
                     {
                         return Success(SystemCallResult, value);

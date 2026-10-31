@@ -17,11 +17,9 @@ static const BString hundeschule_boot_program = bstr("services/hundeschule");
 static const BString hundeschau_program = bstr("/sbin/services/hundeschau");
 static const BString hundeschau_boot_program = bstr("services/hundeschau");
 static const BString hundekanal_warter_program = bstr("/sbin/services/hundekanal-warter");
-static const BString hundebus_program = bstr("/sbin/drivers/hundebus");
+static const BString hunde_bus_program = bstr("/sbin/drivers/hunde-bus");
 static const BString sdhci_program = bstr("/sbin/drivers/sdhci_channelio");
 static const BString block_partition_program = bstr("/sbin/drivers/block_partition");
-static const BString uart_rx_program = bstr("/sbin/drivers/uart_rx");
-static const BString uart_tx_program = bstr("/sbin/drivers/uart_tx");
 
 static bool Exec__is_hund_owned_program(ConstBStringPtr path)
 {
@@ -29,9 +27,8 @@ static bool Exec__is_hund_owned_program(ConstBStringPtr path)
            BString__equals(path, &bstr("/sbin/services/hunde-mama")) || BString__equals(path, &hundeschau_program) ||
            BString__equals(path, &hundeschule_program) || BString__equals(path, &hundeschule_boot_program) ||
            BString__equals(path, &hundeschau_boot_program) || BString__equals(path, &hundekanal_warter_program) ||
-           BString__equals(path, &hundebus_program) || BString__equals(path, &sdhci_program) ||
-           BString__equals(path, &block_partition_program) || BString__equals(path, &uart_rx_program) ||
-           BString__equals(path, &uart_tx_program);
+           BString__equals(path, &hunde_bus_program) || BString__equals(path, &sdhci_program) ||
+           BString__equals(path, &block_partition_program);
 }
 
 void Exec__apply_builtin_identity_policy(ProcessPtr self)

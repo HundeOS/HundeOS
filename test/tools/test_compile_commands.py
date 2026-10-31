@@ -137,7 +137,10 @@ def test_binary_discovery_excludes_removed_programs_without_retirement_filters(a
     directories = set(result.stdout.splitlines())
     assert "user/services/hunde-io-host" in directories
     assert "user/commands/login" in directories
-    assert "user/drivers/uart_rx" in directories
+    assert "user/drivers/uart_rx" not in directories
+    assert "user/drivers/uart_tx" not in directories
+    assert not (ROOT / "user/drivers/uart_rx/main.c").exists()
+    assert not (ROOT / "user/drivers/uart_tx/main.c").exists()
     assert "user/drivers/devfs" not in directories
     assert not (ROOT / "user/drivers/devfs/main.c").exists()
     assert "user/drivers/embedfs" not in directories

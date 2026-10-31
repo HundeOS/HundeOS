@@ -7,7 +7,7 @@ _start:
     mv s1, a1
     mv tp, a0
     la sp, __boot_stack_start
-    li t0, 10485760
+    li t0, 1048576
     add sp, sp, t0
     la t0, __boot_bss_start
     la t1, __boot_bss_end
@@ -49,7 +49,7 @@ RiscVSecondary__entry:
     mv s0, a0
     mv s1, a1
     la sp, __boot_stack_start
-    li t0, 10485760
+    li t0, 1048576
     mul t0, t0, s1
     add sp, sp, t0
     call RiscVMmu__activate_bootstrap
@@ -68,6 +68,6 @@ RiscVSecondary__entry:
     .align 12
     .global __boot_stack_start
 __boot_stack_start:
-    .skip 167772160
+    .skip 16777216
     .global __boot_stack_top
 __boot_stack_top:

@@ -3,7 +3,7 @@
 
 #include "io/server.h"
 
-#define BUS_INFO_SERVICE "hundebus"
+#define BUS_INFO_SERVICE "hunde-bus"
 #define BUS_INFO_MAX_DEVICES 256
 
 typedef uint64_t BusDeviceIndex;

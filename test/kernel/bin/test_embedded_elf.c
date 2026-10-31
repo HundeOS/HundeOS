@@ -36,14 +36,13 @@ void test_elf_list_uses_embedded_index(void)
 {
     BStringArray files = EmbeddedElf__list();
 
-    TEST_ASSERT_EQUAL_UINT(9, BStringArray__len(&files));
+    TEST_ASSERT_EQUAL_UINT(6, BStringArray__len(&files));
     assert_embedded_name(&files, 0, &bstr("hello_world"));
     assert_embedded_name(&files, 1, &bstr("services/idle"));
     assert_embedded_name(&files, 2, &bstr("shell"));
     assert_embedded_name(&files, 3, &bstr("services/hundeschule"));
     assert_embedded_name(&files, 4, &bstr("services/hundeschau"));
     assert_embedded_name(&files, 5, &bstr("services/humpen"));
-    assert_embedded_name(&files, 6, &bstr("drivers/virtio_blk_channelio"));
 }
 
 void test_elf_lookup_missing_file(void)

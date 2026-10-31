@@ -7,6 +7,7 @@
 #define RISCV_SSTATUS_SIE (1ULL << 1U)
 #define VIRTIO_MAGIC 0x74726976U
 #define VIRTIO_DEVICE_BLOCK 2U
+#define VIRTIO_DEVICE_INPUT 18U
 #define VIRTIO_STATUS_OFFSET 0x70U
 
 typedef volatile uint32_t * DeviceRegisterPtr;
@@ -16,10 +17,11 @@ static uint64_t RiscVDevice__satp_for_root(Address physical_address)
     return RISCV_SATP_MODE_SV39 | ((physical_address >> 12U) & RISCV_SATP_PPN_MASK);
 }
 
-bool Arch__is_virtio_block_device(Address mapping)
+bool Arch__is_claimable_virtio_device(Address mapping)
 {
     DeviceRegisterPtr registers = (DeviceRegisterPtr)mapping;
-    return registers[0] == VIRTIO_MAGIC && registers[1] >= 1 && registers[2] == VIRTIO_DEVICE_BLOCK;
+    return registers[0] == VIRTIO_MAGIC && registers[1] >= 1 &&
+           (registers[2] == VIRTIO_DEVICE_BLOCK || registers[2] == VIRTIO_DEVICE_INPUT);
 }
 
 void Arch__reset_virtio_device(Address mapping, Address page_table)

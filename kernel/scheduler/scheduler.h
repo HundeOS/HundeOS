@@ -181,7 +181,7 @@ ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, P
 Result(Address)
     Scheduler__alloc_shared_page(SchedulerPtr self, ProcessPtr owner, ProcessID first_peer, ProcessID second_peer);
 Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr owner, Address address);
-Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name, size_t length);
+Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name);
 Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id);
 Result(Address) Scheduler__queue_delegate(SchedulerPtr self, ProcessPtr process, QueueConnectionID client_connection,
                                           QueueEndpointID endpoint);

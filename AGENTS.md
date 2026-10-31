@@ -90,8 +90,8 @@ Safe component loading accepts approved bundled component identities, not
 caller-supplied paths. The library owns that trust registry and private raw
 loading implementation; the host still chooses which component to load. Do not
 make arbitrary native loading safe merely by hiding its unsafe block.
-The approved image registry is generated from `config/io-host.conf`, packaged as
-`/sbin/config/io-host.conf`. Configure services and filesystem factories there
+The approved image registry is generated from `config/bootstrap.fstab` and
+`config/io-host.conf`, packaged under `/sbin/config/`. Configure services and filesystem factories in `config/io-host.conf`
 instead of adding per-component enums or startup/polling branches to the host.
 Keep manifest parsing, endpoint selection, and mount policy in the Rust host;
 the shared library registry records only approved image paths and ABI kinds.
@@ -149,7 +149,7 @@ the evidence.
 
 # Code standards
 ## Reuse built-in types and operations
-Read [Generic types, collections, and strings](docs/architecture/generic-types.md) before
+Read [Generic types, collections, and strings](docs/architecture/shared/generic-types.md) before
 implementing or changing collection, string, Optional, or Result operations.
 
 Before writing a local helper or loop for searching, membership, filtering,
@@ -335,7 +335,7 @@ Add unit tests for any new code in kernel. Some architecture specific code
 may not have unit tests as it is difficult to test..
 
 # Kernel architecture
-Read [Shared buffers: hunde-puffer](docs/architecture/shared-buffers.md) before changing bulk
+Read [Shared buffers: hunde-puffer](docs/architecture/userspace/shared-buffers.md) before changing bulk
 I/O transfer, buffer allocation, mapping permissions, recycling, or cleanup.
 The agreed target uses separately shared directional buffers managed by
 `hunde-puffer`; existing Channels carry descriptors, commands, and completions.
@@ -343,27 +343,29 @@ Do not treat inline Channel payloads as the bulk-transfer design or introduce
 service-specific buffer transports. The document distinguishes requirements
 from unimplemented behavior and open sizing/recovery decisions.
 
-Read [Userspace I/O system](docs/architecture/io-system.md) before changing I/O routing,
+Read [Userspace I/O system](docs/architecture/userspace/io-system.md) before changing I/O routing,
 file-handle ownership, filesystem service transport, or socket/stream service
 interfaces. `hund-io-system` is the common application-facing I/O service;
 filesystem, network, and stream protocols use the existing bidirectional Channel.
 
-Read [Channels and event queues](docs/architecture/channels-and-event-queues.md) before changing
+Read [Channels and event queues](docs/architecture/kernel/channels-and-event-queues.md) before changing
 service discovery, shared queues, channel lifecycle, or managed shared-page memory.
 
-Read [Queues](docs/architecture/queues.md) before changing
+Read [Queues](docs/architecture/kernel/queues.md) before changing
 queue access permissions, connection establishment, or transport authentication.
 It records the initial atomic message queue API and the remaining migration away
 from globally writable service queues.
 
-Read [Userspace interrupt service](docs/architecture/interrupt-service.md) before changing
+Read [Userspace interrupt service](docs/architecture/userspace/interrupt-service.md) before changing
 device IRQ delegation, interrupt registration/authentication, or acknowledgement
-and rearm handling. This document describes the current `hund-unterbrict` design.
+and rearm handling. This document describes `hunde-treiber-host` and its retained
+`hund-unterbrict` endpoint.
 
-Read [Userspace driver tracing](docs/architecture/driver-tracing.md) before changing
-`DRIVER_DEBUG`, driver log transport, batching, or `/var/log/driver.log` ownership.
-Ordinary driver diagnostics go through `hund-verfolgen`; independent kernel and
-bootstrap diagnostics must not depend on that service or the root filesystem.
+Read [Userspace driver tracing](docs/architecture/userspace/driver-tracing.md) before changing
+`DRIVER_DEBUG`, diagnostic transport, kernel trace snapshots, or Channel latency
+tracing. Ordinary driver diagnostics use `SYSCALL_SYSLOG` and the kernel trace
+sink. The optional `hund-verfolgen` collector handles Channel latency tracing;
+kernel and bootstrap diagnostics must not depend on it or the root filesystem.
 
 ## Current microkernel architecture
 

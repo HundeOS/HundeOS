@@ -71,6 +71,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hunde-sdhci"
+version = "0.1.0"
+dependencies = [
+ "hunde",
+]
+
+[[package]]
 name = "hunde-socket"
 version = "0.1.0"
 dependencies = [
@@ -79,6 +86,44 @@ dependencies = [
 
 [[package]]
 name = "hunde-sysinfofs"
+version = "0.1.0"
+dependencies = [
+ "hunde",
+]
+
+[[package]]
+name = "hunde-treiber-host"
+version = "0.1.0"
+dependencies = [
+ "hunde",
+ "hunde-sdhci",
+ "hunde-virtio-blk",
+ "hunde-virtio-keyboard",
+]
+
+[[package]]
+name = "hunde-uart-rx"
+version = "0.1.0"
+dependencies = [
+ "hunde",
+]
+
+[[package]]
+name = "hunde-uart-tx"
+version = "0.1.0"
+dependencies = [
+ "hunde",
+]
+
+[[package]]
+name = "hunde-virtio-blk"
+version = "0.1.0"
+dependencies = [
+ "hunde",
+]
+
+[[package]]
+name = "hunde-virtio-keyboard"
 version = "0.1.0"
 dependencies = [
  "hunde",

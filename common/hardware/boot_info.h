@@ -29,6 +29,8 @@ typedef enum SdHostKind
     SD_HOST_KIND_GENERIC = 0,
     SD_HOST_KIND_CV180X = 1,
     SD_HOST_KIND_CV181X = 2,
+    SD_HOST_KIND_PCI = 3,
+    SD_HOST_KIND_BCM2835 = 4,
 } SdHostKind;
 
 typedef enum InterruptControllerKind

@@ -74,6 +74,14 @@ typedef struct RustBootPlic
     uint64_t source_count;
 } RustBootPlic;
 
+typedef struct RustBootVirtioMmio
+{
+    uint64_t physical_base;
+    uint64_t slot_size;
+    uint64_t slot_count;
+    uint64_t first_irq;
+} RustBootVirtioMmio;
+
 typedef struct RustBootHardwareInfo
 {
     uint64_t cpu_count;
@@ -96,6 +104,8 @@ typedef struct RustBootHardwareInfo
     RustBootGic gic;
     uint64_t plic_present;
     RustBootPlic plic;
+    uint64_t virtio_mmio_present;
+    RustBootVirtioMmio virtio_mmio;
 } RustBootHardwareInfo;
 
 typedef struct RustBootInfoResult
@@ -105,7 +115,7 @@ typedef struct RustBootInfoResult
 } RustBootInfoResult;
 
 RustBootInfoResult hunde_rust_boot_info(void);
-_Static_assert(sizeof(RustBootHardwareInfo) == 400, "Boot information ABI changed");
-_Static_assert(sizeof(RustBootInfoResult) == 432, "Boot result ABI changed");
+_Static_assert(sizeof(RustBootHardwareInfo) == 440, "Boot information ABI changed");
+_Static_assert(sizeof(RustBootInfoResult) == 472, "Boot result ABI changed");
 _Static_assert(offsetof(RustBootInfoResult, info) == 32, "Boot result offset changed");
 #endif

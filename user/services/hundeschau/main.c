@@ -445,7 +445,7 @@ int HUNDESCHAU_ENTRYPOINT(void)
 {
     HundeschauRequiredProcesses required_processes = HundeschauRequiredProcesses__new();
 
-    IO__printf(&bstr("🐶 HundeOS: hundeschau begins 🐾\n"));
+    IO__printf(&bstr("🐶 HundeOS: hundeschau begins 🥇\n"));
 
     if (Hundeschau__initialise_required_processes(&required_processes) != 0)
     {

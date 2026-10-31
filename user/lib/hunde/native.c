@@ -297,6 +297,11 @@ void hunde_rust_channel_wait(void)
     Channel__wait_event();
 }
 
+void hunde_rust_channel_wait_ticks(uint64_t ticks)
+{
+    Queue__wait_event_ticks(ticks);
+}
+
 void hunde_rust_log(HundeByteSpan message)
 {
     BString text = BString__from_chars((const char *)message.bytes, message.length);

@@ -51,7 +51,7 @@ only to advance the Bash build.
   in the build. The standalone devfs and C socket-router sources are also gone;
   the host's live C devfs backend remains in `user/lib/fs/devfs.c`. See
   [Bash integration](../user/ports/bash/README.md) and
-  [device filesystem](architecture/io-system.md#device-filesystem).
+  [device filesystem](architecture/userspace/io-system.md#device-filesystem).
 
 #### 2. Non-Local Control Flow
 
@@ -193,12 +193,12 @@ only to advance the Bash build.
   - [x] Provide `clock_gettime(CLOCK_MONOTONIC)` from the architecture counter
     and a sequence-protected, kernel-owned page mapped read-only into every
     process. See
-    [Shared clock page](architecture/clock-page.md).
+    [Shared clock page](architecture/kernel/clock-page.md).
   - [x] Provide `gettimeofday` from an optional boot-time wall-clock and
     monotonic correlation sample. QEMU uses PL031 or Goldfish RTC hardware and
     Raspberry Pi UEFI uses firmware `GetTime`; absence reports `ENOSYS`. This
     gives Bash seed variation but is not secure entropy. See
-    [Shared clock page](architecture/clock-page.md).
+    [Shared clock page](architecture/kernel/clock-page.md).
     Bash now compiles through `lib/sh/random.c`; Newlib supplies the completed
     math and integer-conversion surfaces. HundeOS defines terminal window-size
     ioctls for source compatibility, but the ioctls and libc's `tcgetwinsize`
@@ -212,7 +212,7 @@ only to advance the Bash build.
   - [ ] Add post-boot wall-clock correction and synchronization semantics.
   - [x] Provide `times()` with microsecond ticks, separate user/system accounting,
     interrupt and scheduler exclusion, and cumulative CPU time for waited-for
-    children. See [Process CPU time](architecture/process-cpu-time.md).
+    children. See [Process CPU time](architecture/kernel/process-cpu-time.md).
   - [x] Provide `sleep` over the native microsecond sleep syscall. Signal delivery
     can interrupt the kernel sleep; the compatibility function deliberately
     returns zero rather than calculating unslept seconds.
@@ -242,18 +242,18 @@ only to advance the Bash build.
   queue-wait-control allocations while resetting their references. Exclude the
   backing and mappings from eager fork, then create fresh child IPC state.
   Regressions cover three process generations and background external-command
-  loops alongside pipelines. See [process-local IPC allocations](architecture/fork.md#process-local-ipc-allocations).
+  loops alongside pipelines. See [process-local IPC allocations](architecture/kernel/fork.md#process-local-ipc-allocations).
 - [ ] Implement `execve` and the required `exec*` family over the native overlay
   operation, including argv, environment, credentials, errors, inherited
   descriptors, and close-on-exec processing.
   - [x] Define and test the bounded 64 KiB offset-based path, argv, and envp
     payload used at the future exec syscall boundary. See
-    [Process image overlay](architecture/exec.md).
+    [Process image overlay](architecture/kernel/exec.md).
   - [x] Validate and copy the payload in the kernel, build a candidate process
     image, and commit it atomically into the existing PID. The public `execve`
     entry point uses the existing exec syscall with `P_OVERLAY`; candidate
     construction failure leaves the calling image unchanged. See
-    [Process image overlay](architecture/exec.md).
+    [Process image overlay](architecture/kernel/exec.md).
   - [x] Prepare and claim non-`FD_CLOEXEC` open resources through fresh
     authenticated sessions, with rollback before image commit.
 - [x] Implement `wait` and `waitpid` over child events for any or selected
@@ -310,7 +310,7 @@ only to advance the Bash build.
 - [x] Add a per-process current directory with `chdir`, inherited cwd, relative
   path lookup, and truthful `getcwd` rather than resolving every path from root.
   The libc-owned state, fork/exec inheritance, and kernel startup transport are
-  documented in [Userspace I/O system](architecture/io-system.md#common-application-interface).
+  documented in [Userspace I/O system](architecture/userspace/io-system.md#common-application-interface).
 - [ ] Implement the remaining open semantics Bash relies on.
   - [x] Implement atomic exclusive creation and create empty files at open time.
   - [ ] Apply creation modes and `umask`.
@@ -326,7 +326,7 @@ only to advance the Bash build.
   the file's size, which supports dense-copy finalization without hiding a real
   resize request.
 - [x] Provide `/dev/null` through devfs with EOF-on-read and discard-on-write
-  semantics. See [Userspace I/O system](architecture/io-system.md#device-filesystem).
+  semantics. See [Userspace I/O system](architecture/userspace/io-system.md#device-filesystem).
 - [ ] Provide usable `/dev/tty` and `/dev/fd` behavior, or configure Bash
   explicitly for an agreed equivalent where it does not change semantics.
   - [ ] Complete acceptance of fstab-configured Rust console instances in the I/O host, mounting
@@ -334,17 +334,17 @@ only to advance the Bash build.
     `:console:` default alias. Pair the existing UART or keyboard/framebuffer
     services behind host-owned bidirectional handles, terminal attributes,
     foreground state and bounded input-pump fibres on the host scheduler.
-    See [configured consoles](architecture/io-system.md#configured-consoles).
+    See [configured consoles](architecture/userspace/io-system.md#configured-consoles).
     `/dev/tty` controlling-terminal selection, virtual-terminal switching and
     hardware-service consolidation remain unimplemented.
     - [x] Correct devfs root metadata and host devfs in the Rust I/O host through
       a safe adapter over its retained C backend. Remove the standalone devfs
-      executable. See [device filesystem](architecture/io-system.md#device-filesystem).
+      executable. See [device filesystem](architecture/userspace/io-system.md#device-filesystem).
     - [x] Correct kernel-generated block aliases to canonical `/dev/hdN` paths.
       AArch64 and RISC-V boot acceptance verify complete `/dev` listings,
       canonical and alias metadata reads, inherited handles, `/dev/null` I/O,
       and configured serial console input/output. See
-      [device filesystem](architecture/io-system.md#device-filesystem).
+      [device filesystem](architecture/userspace/io-system.md#device-filesystem).
     - [x] Fix and complete repeated-boot acceptance for the listener-registration
       race that prevented configured consoles from opening UART Channels and reaching
       login. `cs_return(value)` now captures its expression before releasing the
@@ -355,7 +355,7 @@ only to advance the Bash build.
       console, nested-fork/filesystem stress, and socket/70,000-byte pipe acceptance
       pass on both AArch64 and RISC-V. Native suites pass 421 tests; hundelint,
       repository formatting, and 122 Python tooling tests pass.
-      See [kernel lock ownership](architecture/queues.md#kernel-lock-ownership).
+      See [kernel lock ownership](architecture/kernel/queues.md#kernel-lock-ownership).
     - [ ] Validate the configured keyboard/framebuffer console on the UEFI
       framebuffer profile; serial console acceptance passes on both architectures.
 - [ ] Replace the sixteen-argument spawn limit with defined argv and environment
@@ -378,6 +378,12 @@ only to advance the Bash build.
   `killpg`, and group-aware parent/child lifecycle rules.
 - [ ] Add controlling-terminal ownership and `tcgetpgrp`/`tcsetpgrp`, including
   foreground and background access checks.
+- [ ] Implement proper VT behavior in the framebuffer `video_term` service.
+  - [ ] Scroll displayed rows upward when output reaches the bottom instead of
+    clearing the screen and moving the cursor to the top.
+  - [ ] Define and implement the VT escape/control sequence set needed by
+    interactive programs; the required sequence scope and scrollback policy
+    remain open design questions.
 - [ ] Deliver terminal-generated `SIGINT`, `SIGQUIT`, `SIGTSTP`, `SIGTTIN`,
   `SIGTTOU`, and `SIGHUP` to the correct foreground process group, with stopped
   and continued child reporting.
@@ -398,7 +404,7 @@ only to advance the Bash build.
   - [x] Extend memfs open-description inheritance for redirected external
     commands. Hosted Rust memfs uses authenticated grants sharing open
     descriptions and offsets across fork/exec. See
-    [temporary filesystem](architecture/io-system.md#temporary-filesystem).
+    [temporary filesystem](architecture/userspace/io-system.md#temporary-filesystem).
 - [ ] Run representative upstream Bash tests that match the supported feature
   set and record deliberate unsupported optional facilities.
 
@@ -428,12 +434,13 @@ only to advance the Bash build.
 ### Consolidated I/O And Driver Hosts
 
 Status: architecture agreed and documented in
-[I/O and driver hosts](architecture/io-driver-hosts.md). `hund-unterbrict`
-already hosts VirtIO block instances and dispatches their IRQs locally. The
+[I/O and driver hosts](architecture/userspace/io-driver-hosts.md). The Rust `hunde-treiber-host`
+loads native Rust `virtio_blk.wuff` instances and dispatches their IRQs locally,
+retaining the `hund-unterbrict` endpoint. The
 Rust socket, pipe, memfs, and procfs components now load inside `hunde-io-host`, preserving
 the `socket_router`, `hund-rohr`, `/tmp`, and `/proc` endpoints. Other I/O components still use the current
 multi-process service graph. See the
-[first Rust socket slice](architecture/io-driver-hosts.md#first-rust-socket-slice).
+[first Rust socket slice](architecture/userspace/io-driver-hosts.md#first-rust-socket-slice).
 
 #### Baseline And Host Interfaces
 
@@ -441,19 +448,19 @@ multi-process service graph. See the
   `/sbin/config/bootstrap.fstab`, without a mounted `/sbin` or standalone
   embedfs process. Package embedfs/devfs as Wuffs, resolve their libc dependency
   from the archive, and publish initial namespace mounts before mount-control
-  readiness. See [bootstrap services](architecture/bootstrap-services.md).
+  readiness. See [bootstrap services](architecture/userspace/bootstrap-services.md).
 
 - [x] Drive I/O host service registration and filesystem factory selection from
   the embedded `/sbin/config/io-host.conf` manifest. Replace per-component startup
   and polling branches and fixed filesystem enums with generic workers and a
   configured format registry. Generate the shared loader's approved image/ABI
   identities from the same manifest; retain safe services and existing fstab
-  mounts. See [bootstrap component configuration](architecture/io-system.md#bootstrap-component-configuration).
+  mounts. See [bootstrap component configuration](architecture/userspace/io-system.md#bootstrap-component-configuration).
 
 - [x] Retire the standalone C socket router, its obsolete tests, and all boot
   configuration entries. The Rust `socket.wuff` component inside `hunde-io-host`
   retains the existing `socket_router` endpoint; the C server is no longer built
-  or embedded. See [socket protocol](architecture/io-system.md#socket-protocol).
+  or embedded. See [socket protocol](architecture/userspace/io-system.md#socket-protocol).
 
 - [x] Define the `hunde-io-host` and `hunde-treiber-host` responsibility,
   trust, cache, IPC, shared-buffer, and failure-domain boundaries.
@@ -473,22 +480,63 @@ multi-process service graph. See the
 - [ ] Evolve `hund-unterbrict` into `hunde-treiber-host`, retaining delegated IRQ
   receipt, device-clear-before-rearm ordering, MMIO and DMA ownership, and
   fail-closed handling of unserviced interrupt sources.
-- [ ] Move block, network-interface, UART, display, input, and other
-  hardware-facing drivers into the host as required by current hardware targets.
+  - [x] Replace the C executable with a safe Rust host owning startup, device
+    lifetimes, external registration/acknowledgement policy, pending replies,
+    local IRQ dispatch, and execution policy. Keep native translations in
+    `hunde` and retain the public protocols. See
+    [Rust driver host](architecture/userspace/io-driver-hosts.md#rust-driver-host-virtio-block).
+  - [x] Port the VirtIO hardware engine to Rust through checked shared MMIO/DMA
+    operations. `virtio_blk.wuff` owns queue encoding, device register setup,
+    transfer completion, and IRQ acknowledgement. Shared `hunde` adapters own
+    unsafe MMIO/DMA and native block-server/fibre interoperability. The standalone
+    C engine and bootstrap selection path are retired. See
+    [Rust driver host](architecture/userspace/io-driver-hosts.md#rust-driver-host-virtio-block).
+  - [ ] Complete dead-client and host-exit cleanup before claiming fail-closed
+    recovery or enabling automatic driver-host restart.
+- [ ] Implement a network-interface driver from scratch as a Rust Wuff in the
+  driver host. The unused C GENET startup stub and its parser were removed;
+  target hardware and the packet interface remain open design questions.
+- [ ] Move remaining display and other hardware-facing drivers into the host
+  as required by current hardware targets.
+  UART receive now runs as a Rust `uart_rx.wuff` in the driver host on serial-console
+  targets, using local IRQ delivery and the existing `uart_rx` stream endpoint.
+  UART transmit runs as a poll-only Rust `uart_tx.wuff` in the same host.
+  VirtIO keyboard input now runs as `virtio_keyboard.wuff` when the device is
+  present, using local IRQ delivery and the existing `keyboard` stream endpoint.
+  QEMU PCI and raspi4b SDHCI run as an interrupt-driven, read-only Rust
+  `sdhci.wuff`. The AArch64 CV181x GIC path also runs the Rust Wuff and has
+  passed physical Duo S login, block reads, and IRQ-delivery checks. RISC-V
+  CV181x and physical Pi retain the standalone polling C driver.
+  Other hardware drivers remain external. See
+  [hosted UART receive](architecture/userspace/io-driver-hosts.md#hosted-uart-receive).
+- [ ] Validate the Rust SDHCI Wuff on physical Pi and CV18xx hardware, port
+  remaining platform-specific host setup, and retire the standalone C
+  SDHCI executable only after read parity and IRQ delivery pass on those targets.
+  QEMU raspi4b boot, partition reads, and routed IRQ delivery pass with the
+  legacy BCM2835 controller. On the physical Duo S AArch64 path, the CV181x
+  Rust Wuff exposes `/dev/mmc0`, reads `/boot/config/fstab` and the ext2 root,
+  reaches Bash, and records `Rust SDHCI IRQ delivered` in `/proc/ktrace`.
+  RISC-V CV181x and physical Pi EMMC2 remain unvalidated with the Rust Wuff.
 - [ ] Remove standalone driver compatibility executables after full-system
-  parity and measurements pass on AArch64 and RISC-V.
+  parity and measurements pass on AArch64 and RISC-V. The standalone UART RX/TX
+  and VirtIO block executables were removed after their Rust Wuffs passed QEMU
+  smoke on both architectures. The standalone VirtIO keyboard executable is
+  replaced by a Rust Wuff; other driver compatibility executables remain.
 - [ ] Define host crash cleanup for device claims, IRQ routes, DMA, and requests
   before relying on automatic driver-host restart.
 - [ ] Investigate the RISC-V interrupt-manager instruction abort observed during
   hosted sysinfo acceptance: `hund-unterbrict` reported PC zero during a root
   filesystem copy, followed by failed UART IRQ subscriptions, repeated UART
-  restarts, and kernel heap exhaustion. Preserve the original trace and establish
+  restarts, and kernel heap exhaustion. Establish
   the failing call path before changing IRQ handling or restart policy; the cause
   and relationship to the sysinfo migration are not established. The fault
-  logger truncates addresses to 32 bits, so the full PC still needs capture.
-  The user explicitly approved continuing migration while monitoring the crash;
-  unchanged-image cold boots remain under debugger capture. This is unresolved,
-  not validated by passing retries.
+  logger now preserves full-width PC, fault address, syndrome, and exception code,
+  with a regression test covering nonzero upper bits. The original temporary
+  trace file is no longer present; the recorded fault details remain above. The
+  full failing PC and call path still need capture. Twenty debugger-backed RISC-V boots and
+  the original C-host comparison completed without reproducing the fault. The
+  user explicitly agreed to resume driver migration on 27 October 2026 while
+  this failure remains unresolved; passing retries do not close this item.
 
 #### `hunde-io-host`
 
@@ -514,7 +562,7 @@ multi-process service graph. See the
     validation uses guaranteed I/O readiness rather than verbose-only logging.
     FAT32 acceptance and root-filesystem smoke tests pass on both architectures;
     disposable FAT32 images pass filesystem consistency checks. See
-    [Loader boundary](architecture/dynamic-linking.md#loader-boundary).
+    [Loader boundary](architecture/userspace/dynamic-linking.md#loader-boundary).
   - [x] Preserve long-name lookup, executable opens, and recursive removal;
     migrate configured FAT32 mounts and retire the C backend, launcher, and
     obsolete C tests. Boot configuration accepts the old `fat32` spelling as a
@@ -524,24 +572,24 @@ multi-process service graph. See the
   was supported by the C provider. Whether to add them is a separate follow-up
   decision. Live or grant-retained files return busy rather than losing storage
   underneath open handles.
-  See [FAT32 hosting preparation](architecture/io-system.md#fat32-hosting-preparation).
+  See [FAT32 hosting preparation](architecture/userspace/io-system.md#fat32-hosting-preparation).
 
 - [x] Organize host, filesystem, socket, and streams into module directories.
   Share typed subsystem dispatch through `IoComponent`, preserve existing
   endpoint/readiness behavior, and keep FFI translations in `hunde`. Filesystem
   instances own `/tmp` and `/proc`; namespace/rootfs migration and EXT2 mounting
-  remain separate work. See [host subsystems](architecture/rust-userspace.md#host-subsystems).
+  remain separate work. See [host subsystems](architecture/userspace/rust-userspace.md#host-subsystems).
 - [x] Replace raw subsystem endpoint/message byte slices with distinct
   `ServiceName` and `ReadinessMessage` types throughout the shared service
   adapter and all host modules. Convert text to bytes at the library boundary;
   reject accidental interchange at compile time. See
-  [host subsystems](architecture/rust-userspace.md#host-subsystems).
+  [host subsystems](architecture/userspace/rust-userspace.md#host-subsystems).
 - [x] Support multiple Rust fibres on one process-owned native scheduler, with
   per-fibre callbacks, owned captures, joinable task results, spawn-failure
   cleanup, and wake-all polling on Channel events/task completion. Keep the
   existing endpoint poller intact; future mount/control work must share this
   scheduler rather than introduce component schedulers. See
-  [scheduler ownership](architecture/rust-userspace.md#one-scheduler-multiple-fibres).
+  [scheduler ownership](architecture/userspace/rust-userspace.md#one-scheduler-multiple-fibres).
 - [x] Start the Rust I/O host, load a resident Rust socket Wuff, preserve existing
   Channel/queue authentication and managed buffers, and bridge its polling
   Future to the existing fibre scheduler. Keep standard source-local Rust unit
@@ -550,21 +598,21 @@ multi-process service graph. See the
   typed I/O requests, reusable component callbacks, service/Wuff/fibre adapters,
   and core-only lifecycle smoke support. Host and component crates use thin
   registration declarations; see the
-  [shared C boundary](architecture/rust-userspace.md#shared-c-boundary).
+  [shared C boundary](architecture/userspace/rust-userspace.md#shared-c-boundary).
 - [x] Move host startup, Rust `main`, component ownership and dispatch, endpoint
   registration/readiness, and scheduler execution policy into Rust. Remove the
   host-specific C launcher/dispatcher; keep only reusable native-library and
   protocol translations in `user/lib/hunde`. See the
-  [Rust host boundary](architecture/io-driver-hosts.md#first-rust-socket-slice).
+  [Rust host boundary](architecture/userspace/io-driver-hosts.md#first-rust-socket-slice).
 - [x] Colocate Cargo crates with their service, driver, library, or component in
   the normal userspace tree, using `user/Cargo.toml` as the workspace. Forbid
   unsafe Rust in consumers and tests; keep the approved bundled-component loader
   and raw ABI operations in `hunde`. See
-  [Rust userspace](architecture/rust-userspace.md#unsafe-boundary).
+  [Rust userspace](architecture/userspace/rust-userspace.md#unsafe-boundary).
 - [x] Generate Rust I/O operation, status, and flag constants from the existing
   C enums during Cargo builds, replace duplicated protocol literals, and test
   regeneration and C value parity. See
-  [protocol constants](architecture/rust-userspace.md#protocol-constants).
+  [protocol constants](architecture/userspace/rust-userspace.md#protocol-constants).
 - [x] Reserve restored local handle identities in the client allocator, including
   overflow-safe exhaustion checks for open, accept, and paired pipe allocation.
   Native regressions cover restored stdio collisions and allocation bounds.
@@ -572,12 +620,12 @@ multi-process service graph. See the
   the `hund-rohr` endpoint, and retire its standalone executable. Add typed
   paired-handle replies and authenticated fork/exec grants; poll sockets and
   pipes together through the existing fibre and Channel adapters. See
-  [hosted Rust pipes](architecture/io-driver-hosts.md#hosted-rust-pipes).
+  [hosted Rust pipes](architecture/userspace/io-driver-hosts.md#hosted-rust-pipes).
 - [x] Initialize libc's cached child PID before inherited Channel attachment.
   AArch64 debugger evidence showed children 38/39 attaching queues with cached
   parent PID 33. The fork wrapper now refreshes identity before claiming I/O;
   a native ordering regression covers this requirement. See
-  [fork inheritance](architecture/fork.md).
+  [fork inheritance](architecture/kernel/fork.md).
 - [x] Complete hosted pipe full-system acceptance on AArch64 and RISC-V.
   Both boot both Wuffs without a standalone pipe process and pass external
   multi-stage pipelines, inherited builtin reads, a 70,000-byte transfer, and
@@ -590,7 +638,7 @@ multi-process service graph. See the
   request/reply translation and kernel credential snapshots to I/O ABI v3,
   and share inheritance bookkeeping with pipes in `hunde`. Retire the C
   executable and wait for hosted readiness during `/tmp` mount setup. See
-  [hosted Rust memfs](architecture/io-driver-hosts.md#hosted-rust-memfs).
+  [hosted Rust memfs](architecture/userspace/io-driver-hosts.md#hosted-rust-memfs).
 - [x] Add and run hosted memfs full-system acceptance on AArch64 and RISC-V,
   including redirected external commands, fork/exec inheritance, directory
   pagination, append, file copies, and socket/pipe coexistence. The full smoke
@@ -599,7 +647,7 @@ multi-process service graph. See the
   authenticated ownership, and inheritance into safe Rust `procfs.wuff`.
   Add shared `hunde::process` accounting/trace callbacks in I/O ABI v4, retain
   the `/proc` Channel and namespace mount, and leave `ps` on `process_list`.
-  See [hosted Rust procfs](architecture/io-driver-hosts.md#hosted-rust-procfs).
+  See [hosted Rust procfs](architecture/userspace/io-driver-hosts.md#hosted-rust-procfs).
 - [x] Complete focused hosted procfs acceptance on AArch64 and RISC-V, including
   process listing, directory enumeration, all accounting leaves, inherited
   snapshots, kernel-trace reads, and absence of a standalone procfs process.
@@ -612,7 +660,7 @@ multi-process service graph. See the
   invalid capacities, oversized results, and empty/full snapshots.
   `test_qemu_rust_procfs_component` passes on both architectures. The combined
   I/O smoke passes on both architectures after the exit-lifetime fix below.
-  See [process registry and procfs](architecture/process-registry-and-procfs.md).
+  See [process registry and procfs](architecture/userspace/process-registry-and-procfs.md).
 - [x] Fix the active-page-table lifetime bug exposed by intermittent RISC-V
   full-system timeouts and repeat hosted-I/O acceptance. Before the fix, a repeated
   run stops after echoing only `pri` from the next redirection command, before
@@ -632,7 +680,7 @@ multi-process service graph. See the
   freed the process page tables before switching away from them. Exit now
   calls an architecture-specific active-root detach before freeing user memory
   or tables, with hosted regression coverage for active and non-current exits.
-  See [address-space detachment](architecture/fork.md#address-space-detachment-on-exit).
+  See [address-space detachment](architecture/kernel/fork.md#address-space-detachment-on-exit).
   The complete hosted-I/O smoke passes six consecutive RISC-V runs, including
   the 70,000-byte pipe transfer, and passes on AArch64. Input and timeouts are
   unchanged. Scheduler, process, and CPU suites pass 237 tests. This fixes the
@@ -642,7 +690,7 @@ multi-process service graph. See the
   shared `hunde::block` native adapter. Cover disk geometry, paths, directory
   records, direct/single/double-indirect and sparse reads, device failures,
   native transfer bounds, and real generated images. Active mounts remain on C.
-  See [Rust EXT2 migration](architecture/io-driver-hosts.md#rust-ext2-migration-volume-reader-slice).
+  See [Rust EXT2 migration](architecture/userspace/io-driver-hosts.md#rust-ext2-migration-volume-reader-slice).
 - [x] Add Rust EXT2 existing-file overwrites and growth, block-bitmap allocation
   across groups, direct/single/double-indirect pointer updates, sparse-gap
   zeroing, and primary free-block/inode-sector accounting. Stage each write
@@ -650,93 +698,93 @@ multi-process service graph. See the
   further volume I/O if rollback fails. This is not crash recovery or journaling.
   Cover real-image write/remount, space exhaustion, metadata protection, every
   staging-read/commit-write failure, partial writes, and failed rollback.
-  See [existing-file mutation](architecture/io-driver-hosts.md#existing-file-mutation).
+  See [existing-file mutation](architecture/userspace/io-driver-hosts.md#existing-file-mutation).
 - [x] Add Rust EXT2 inode allocation, file creation, and `mkdir`, including
   directory growth, `.`/`..`, link counts, and free-inode/used-directory
   accounting. Reuse staged mutation and rollback; cover failure injection,
   multi-group allocation, legacy directory records, and real-image remounts.
-  See [file and directory creation](architecture/io-driver-hosts.md#file-and-directory-creation).
+  See [file and directory creation](architecture/userspace/io-driver-hosts.md#file-and-directory-creation).
 - [x] Add Rust EXT2 file unlinking, empty-directory removal, and reclamation
   of inode and direct/single/double-indirect block allocations on final unlink.
   Maintain existing hard-link counts and directory accounting; reuse staged
   rollback and cover failures, corruption, multiple groups, and real-image
   remounts. Parent directory blocks are retained for reuse.
-  See [removal and reclamation](architecture/io-driver-hosts.md#removal-and-reclamation).
+  See [removal and reclamation](architecture/userspace/io-driver-hosts.md#removal-and-reclamation).
 - [x] Add Rust EXT2 regular-file hard-link creation, reusing directory insertion
   and staged rollback. Reject directory links, duplicate/invalid names, reserved
   or unallocated targets, unsupported layouts, and link-count overflow. Cover
   directory growth, failures, remounts, and final-link reclamation.
-  See [hard-link creation](architecture/io-driver-hosts.md#hard-link-creation).
+  See [hard-link creation](architecture/userspace/io-driver-hosts.md#hard-link-creation).
 - [x] Add Rust EXT2 owner-checked regular-file handles with independent offsets,
   access modes, explicit close/session cleanup, and deferred final-unlink
   reclamation until the last open description closes. Keep failed cleanup
   retryable; test stale/wrong-owner handles, failures, and real-image persistence.
-  See [open files and deferred reclamation](architecture/io-driver-hosts.md#open-files-and-deferred-reclamation).
+  See [open files and deferred reclamation](architecture/userspace/io-driver-hosts.md#open-files-and-deferred-reclamation).
 - [x] Add Rust EXT2 shared-description inheritance through the existing grant
   registry: PID-bound commit, access-preserving single-use claim, shared offsets,
   owner-isolated close/release, and committed-grant retention across source
   cleanup. Keep final-grant abort cleanup retryable after I/O errors and test
   limits, failed cleanup, and real-image handoff/final reclamation.
-  See [inherited open descriptions](architecture/io-driver-hosts.md#inherited-open-descriptions).
+  See [inherited open descriptions](architecture/userspace/io-driver-hosts.md#inherited-open-descriptions).
 - [x] Add the Rust EXT2 request adapter for an explicitly mounted volume,
   reusing `IoComponent`, request/reply types, credential callbacks, and existing
   handles/grants. Check ancestor search, owner/group/other permissions, sticky
   removal, setgid directory creation, seeks, directory batches, and fallible
   disconnect cleanup. This does not yet load an EXT2 Wuff or switch mounts.
-  See [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+  See [EXT2 request adapter](architecture/userspace/io-driver-hosts.md#ext2-request-adapter).
 - [x] Add versioned per-device block-host callbacks and fallible EXT2 Wuff
   initialization, preserving ABI-v4 components. Build/install `ext2fs.wuff` for
   both architectures and expose the approved filesystem loader. Keep block
   capabilities alive through component disposal, and refuse disposal while
   owners/grants remain. This does not yet configure a live EXT2 endpoint.
-  See [EXT2 Wuff mount boundary](architecture/io-driver-hosts.md#ext2-wuff-mount-boundary).
+  See [EXT2 Wuff mount boundary](architecture/userspace/io-driver-hosts.md#ext2-wuff-mount-boundary).
 - [x] Expose Rust EXT2 create/exclusive opens, write-only truncation, and append
   through the request adapter. Preserve inode identity and shared offsets during
   truncation, check permissions/ownership before mutation, and keep failed writes
   retryable. Cover handle exhaustion, sparse-block reclamation, and rollback.
-  See [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+  See [EXT2 request adapter](architecture/userspace/io-driver-hosts.md#ext2-request-adapter).
 - [x] Support Rust EXT2 read/execute opens for the kernel executable loader.
   Enforce directory search and selected owner/group/other read/execute permissions;
   even root requires an executable mode bit. Preserve execute/read/write access
   through inheritance and reject execute opens that would create a missing file.
   Exercise an actual dynamically linked command loaded from the hosted volume.
-  See [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+  See [EXT2 request adapter](architecture/userspace/io-driver-hosts.md#ext2-request-adapter).
 - [x] Dispatch the existing hard-link request through the shared C/Rust/Wuff
   adapters and Rust EXT2, preserving both bounded paths and namespace rejection
   of cross-mount links. Add recursive removal with per-entry permissions, sticky
   checks, bounded traversal/cycle detection, and normal open-file retention.
-  See [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+  See [EXT2 request adapter](architecture/userspace/io-driver-hosts.md#ext2-request-adapter).
 - [x] Reuse the existing write-through block cache in the native Rust block
   client, including scan-resistant reads, resident updates/rollback, diagnostics,
   and reclaimable growth cleanup. Initialize fresh cache storage in place rather
   than returning a large aggregate on a host fibre stack. See
-  [hosted EXT2 caching](architecture/io-driver-hosts.md#hosted-ext2-caching).
+  [hosted EXT2 caching](architecture/userspace/io-driver-hosts.md#hosted-ext2-caching).
 - [x] Admit the root mount and order bootstrap publication only after root
   device readiness and hosted endpoint initialization. Preserve `/sbin`, `/boot`,
   and `/boot/config`, and prevent simultaneous C/Rust ownership of the root disk.
   Unit tests cover root-first ordering, failed initialization/publication, and
   duplicate C/Rust configuration rejection. See
-  [configured hosted EXT2](architecture/io-driver-hosts.md#configured-hosted-ext2-volumes).
+  [configured hosted EXT2](architecture/userspace/io-driver-hosts.md#configured-hosted-ext2-volumes).
 - [x] Switch the standard QEMU root provider after filesystem parity and boot
   regression coverage pass on AArch64 and RISC-V. Defaults now select `ext2.wuff`
   for `/`; fresh-image boots reach Bash, load dynamically linked commands, and
   pass filesystem/shutdown acceptance on both architectures. Bootstrap `/sbin`,
   `/boot`, and `/boot/config` remain unchanged. See
-  [hosted root acceptance](architecture/io-driver-hosts.md#hosted-ext2-file-watches).
+  [hosted root acceptance](architecture/userspace/io-driver-hosts.md#hosted-ext2-file-watches).
   - [x] Expose existing `IO_REQUEST_WATCH_FILE` and `IO_REQUEST_WAIT_FILE_CHANGE`
     through the shared Rust adapter and hosted EXT2. Preserve generation-based
     changes, retained waits, disconnect cleanup, and cooperative host progress.
     Shared ABI v5 preserves typed generations/events and bounded native batches.
     Waits allow the owning process on its dedicated Channel, matching C, while
     registration and data operations remain session-bound. See
-    [hosted EXT2 file watches](architecture/io-driver-hosts.md#hosted-ext2-file-watches).
+    [hosted EXT2 file watches](architecture/userspace/io-driver-hosts.md#hosted-ext2-file-watches).
   - [x] Separate write access from explicit truncation throughout libc and the
     native/Rust I/O interfaces. A plain write-only open must preserve contents;
     `O_TRUNC` must truncate the existing inode rather than remove/recreate its
     path. Preserve hard links, open descriptions, and file-watch continuity.
     Both architectures pass the `rm -P` non-destructive check, in-place hard-link
     and open-descriptor checks, and tail-follow through POSIX redirection. See
-    [EXT2 request adapter](architecture/io-driver-hosts.md#ext2-request-adapter).
+    [EXT2 request adapter](architecture/userspace/io-driver-hosts.md#ext2-request-adapter).
 - [ ] Investigate rejected directory entries in the previously reused QEMU
   root images. The Rust decoder rejects full root enumeration while fresh
   images boot successfully. Corruption versus an overly strict Rust decoder
@@ -747,7 +795,7 @@ multi-process service graph. See the
   scheduler, a fibre per volume, Channels and `hunde-puffer`, with duplicate
   hosted device/endpoint checks. This secondary-volume slice preceded the
   standard QEMU root switch above.
-  See [configured hosted EXT2](architecture/io-driver-hosts.md#configured-hosted-ext2-volumes).
+  See [configured hosted EXT2](architecture/userspace/io-driver-hosts.md#configured-hosted-ext2-volumes).
 - [x] Complete live hosted EXT2 file/directory acceptance on AArch64 and RISC-V:
   read the seeded file, list directories, and create/remove a directory through
   the actual Wuff and block callbacks. Decode transfer flags only for read/write
@@ -759,14 +807,14 @@ multi-process service graph. See the
   Wuff-loading I/O, wake local ownership contenders on release, and retain
   process waits outside the scheduler. Delayed-queue/shared-client regressions
   and concurrent EXT2/socket/pipe smoke coverage check progress, not bounded
-  latency. See [native wait ownership](architecture/rust-userspace.md#one-scheduler-multiple-fibres).
+  latency. See [native wait ownership](architecture/userspace/rust-userspace.md#one-scheduler-multiple-fibres).
 - [x] Fix intermittent RISC-V disk-operation stalls from lost PLIC enable-word
   updates during concurrent kernel masking and userspace rearming. Keep context
   enables kernel-owned; mask/rearm through per-IRQ priorities. Supply the
   unshifted priority-page base on every physical hart, without mapping enable
   words into the manager. Register/registration regressions and 100-cycle live
   mkdir/list/remove acceptance cover both architectures. See
-  [interrupt acknowledgement flow](architecture/interrupt-service.md#interrupt-and-acknowledgement-flow).
+  [interrupt acknowledgement flow](architecture/userspace/interrupt-service.md#interrupt-and-acknowledgement-flow).
 - [x] Move bootstrap EXT2 `/boot/config` into the host only after early host
   startup can load bootstrap components without depending on that mount.
   Mama now initializes hosted `ext2.wuff` before namespace publication and boot
@@ -776,7 +824,7 @@ multi-process service graph. See the
   tests pass on AArch64 and RISC-V with no standalone C EXT2 process. `/boot`
   sysinfofs is also hosted by the Rust snapshot component; physical-platform acceptance
   of the common hosted SD-partition bootstrap path is still needed.
-  See [bootstrap services](architecture/bootstrap-services.md).
+  See [bootstrap services](architecture/userspace/bootstrap-services.md).
 - [x] Complete acceptance of the standard QEMU `/mnt/channelio-ext2` migration
   to the existing hosted `ext2.wuff` implementation on AArch64 and RISC-V.
   All three standard QEMU configurations select the hosted driver. Root/shutdown,
@@ -784,7 +832,7 @@ multi-process service graph. See the
   AArch64 and RISC-V. Checks cover seeded reads, directory creation/removal,
   truncate/write/read. That slice retained one C EXT2 process for
   `/boot/config`; the subsequent bootstrap migration removes it.
-  See [direct hosted dispatch](architecture/io-driver-hosts.md#direct-hosted-dispatch).
+  See [direct hosted dispatch](architecture/userspace/io-driver-hosts.md#direct-hosted-dispatch).
 - [ ] Migrate the remaining Pi UEFI and Milk-V EXT2 fstab selections after
   target-specific bootstrap and block-device-access validation. Keep those
   root/data selections unchanged until then; the common Mama bootstrap mount
@@ -802,7 +850,7 @@ multi-process service graph. See the
   external Channel routing. Root filesystem/shutdown and hosted-component
   acceptance pass on AArch64 and RISC-V, including one I/O host and no standalone
   namespace process. Kernel self-Channels remain forbidden.
-  See [root namespace ownership](architecture/io-driver-hosts.md#root-namespace-ownership).
+  See [root namespace ownership](architecture/userspace/io-driver-hosts.md#root-namespace-ownership).
 - [ ] Move the common application endpoint, namespace, mounts, handle ownership,
   filesystems, sockets, streams, pipes, terminals, and information filesystems
   into one host with local dispatch between its components.
@@ -818,7 +866,7 @@ multi-process service graph. See the
     name remains unchanged for clients.
     Root/shutdown, hosted filesystem/procfs, and combined socket/pipe/memfs I/O
     smoke tests pass on both architectures without a standalone C router.
-    See [application router ownership](architecture/io-driver-hosts.md#application-router-ownership).
+    See [application router ownership](architecture/userspace/io-driver-hosts.md#application-router-ownership).
   - [x] Complete direct hosted-dispatch acceptance on both architectures.
     Filesystems, sockets, and pipes use host-owned handles, local component jobs,
     PID/session checks, opaque inheritance tokens, batched cross-component file
@@ -832,7 +880,7 @@ multi-process service graph. See the
     Host alias lifetime handling keeps
     backend ownership until the owner's last alias closes, with real-pipe
     regressions for independent owners, EOF, and grant cleanup.
-    See [direct hosted dispatch](architecture/io-driver-hosts.md#direct-hosted-dispatch).
+    See [direct hosted dispatch](architecture/userspace/io-driver-hosts.md#direct-hosted-dispatch).
   - [x] Consume memory-pressure service events in the Rust host and reclaim
     native block-cache growth on each volume's owning worker. LLDB captured an
     unconsumed normal-pressure event in the spinning host while a Bash child
@@ -841,7 +889,7 @@ multi-process service graph. See the
     coalesces low/critical pressure without reclaiming across suspended I/O.
     Regressions cover event decoding/draining, worker ownership, busy/failed
     retries, and reclaiming cache growth without closing the device.
-    See [direct hosted dispatch](architecture/io-driver-hosts.md#direct-hosted-dispatch).
+    See [direct hosted dispatch](architecture/userspace/io-driver-hosts.md#direct-hosted-dispatch).
 - [ ] Keep filesystem metadata, filesystem data, network policy, and any shared
   raw-block cache in the I/O host. Keep only hardware queue state and
   device-specific metadata in the driver host.
@@ -874,25 +922,25 @@ multi-process service graph. See the
   aliases where conventional toolchains require them.
 - [x] Define the userspace dynamic-loader and host-module boundary without
   making filesystem, dependency, or module policy a kernel concern. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [x] Produce PIC `libc.wuff.1` sysroot artifacts for AArch64 and RISC-V while
   retaining static linking as the default. RISC-V `.wuff` links use LLVM LLD
   because its bare-metal GNU linker does not support shared output.
 - [x] Add aligned and exact-address userspace mappings, page-aligned permission
   finalization without RWX, rollback unmapping, and architecture instruction
   synchronization required by the userspace loader. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [x] Introduce separate virtual-mapping metadata for page-aligned permission
   changes within dynamic allocations while retaining one ownership record per
   backing allocation. Fork preserves split permissions and cleanup frees the
   backing allocation once. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [x] Produce shared objects and an AArch64/RISC-V dynamically linked PIE smoke
   executable with the project toolchains. The executable records
   `/sbin/wuff-ld`, depends on `libc.wuff.1`, and build-time checks constrain its
   relocations and unsupported TLS or initialization metadata. The initial
   dynamic tags, symbol visibility, and `/usr/lib` search rules are documented in
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [ ] Complete the reusable userspace `ET_DYN` loader for dynamically linked
   programs and host components, including interpreter startup, constructors,
   and any additional reviewed AArch64 and RISC-V relocations they emit. Extend
@@ -903,19 +951,19 @@ multi-process service graph. See the
   GNU RELRO permissions, and complete mapping rollback. Unsupported
   dependencies, imported symbols, TLS, and single-object interpreters are
   rejected.
-  See [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  See [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [x] Add bounded breadth-first `DT_NEEDED` graph loading with injected image
   lookup, cycle deduplication, root-first global symbol scope, strong and weak
   import binding, visibility handling, and graph-wide rollback. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [x] Add the initial filesystem library search policy: accept plain dependency
   names, search only `/usr/lib`, bound file images, release provider-owned image
   buffers after preparation, and expose a validated root executable entry. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [x] Implement the static `/sbin/wuff-ld` program with private startup that
   reopens the preserved root path, loads its dependency graph, and transfers the
   original startup ABI without claiming inherited I/O. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [x] Redirect accepted dynamic exec requests through `/sbin/wuff-ld` while
   preserving the original executable path, argv, envp, working directory,
   inherited I/O payload, and process identity. The kernel validates the fixed
@@ -932,11 +980,11 @@ multi-process service graph. See the
   `grep`, `kill`, `ln`, `ls`, `mkdir`, `mv`, `ps`, `rm`, `shutdown`, `tail`, and
   `write`. Keep embedded programs, drivers, bootstrap services, the static
   interpreter, and Bash outside this slice. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [x] Dynamically link Bash against `/usr/lib/libc.wuff.1` on both architectures,
   with build-time validation of the interpreter, sole dependency, unsupported
   metadata, and reviewed relocation set. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 
 #### Mapping And Runtime Lifecycle
 
@@ -960,7 +1008,7 @@ multi-process service graph. See the
   rejecting `PT_INTERP`, load a module from the filesystem while releasing its
   temporary image, and resolve required exports from the root object only as a
   `Result(WuffSymbol)`. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [ ] Define the single-entry, versioned C ABI and typed host-operation tables
   used by both I/O and hardware components. The common lifecycle entry, tagged
   Result records, logging/fatal host operations, descriptor, and C/Rust layout
@@ -980,7 +1028,7 @@ multi-process service graph. See the
   with the built-in AArch64 and RV64IMAC bare-metal targets, the C component ABI,
   PIC, and aborting panic behavior. A HundeOS `std` port and custom Rust target
   are not prerequisites. See
-  [Dynamic linking and host modules](architecture/dynamic-linking.md).
+  [Dynamic linking and host modules](architecture/userspace/dynamic-linking.md).
 - [ ] Provide the minimal runtime boundary: host-backed allocation when `alloc`
   is used, fatal panic handling, required memory/integer/atomic symbols, and ABI
   adapters around unsafe MMIO, DMA, and shared-buffer access.
@@ -1021,7 +1069,7 @@ using an IPI for remote wakeup. Scheduler ticks remain enabled on every CPU.
 Status: required by stage 5 of the active Bash milestone. Implementation follows
 the cross-build, non-local control-flow, signal, and static-link stages above.
 The staged implementation plan is documented in
-[Fork and copy-on-write](architecture/fork.md). The first functional increment
+[Fork and copy-on-write](architecture/kernel/fork.md). The first functional increment
 uses eager private-memory copies; COW follows without changing the syscall or
 I/O inheritance contract. The first implementation keeps the child unpublished
 until libc commits service-side descriptor grants, then the child opens fresh
@@ -1031,7 +1079,7 @@ resource rather than by reopening paths; hosted pipes now use the same grant
 protocol. Sockets, close-on-exec, and
 committed-grant cleanup for children that die before claiming remain open work.
 Architecture details are documented in
-[Fork and copy-on-write](architecture/fork.md).
+[Fork and copy-on-write](architecture/kernel/fork.md).
 
 #### Process Creation
 
@@ -1080,7 +1128,7 @@ Architecture details are documented in
 - [x] Add prepare, child-PID-bound commit, single-use claim, and abort operations
   to final resource-owning services; keep `hund-io-system` as a router.
 - [x] Extend descriptor inheritance to hosted Rust pipes using authenticated,
-  child-PID-bound, single-use grants. See [pipes](architecture/io-system.md).
+  child-PID-bound, single-use grants. See [pipes](architecture/userspace/io-system.md).
 - [ ] Extend descriptor inheritance to sockets.
 - [ ] Release `FD_CLOEXEC` descriptors reliably after a successful exec overlay.
 
@@ -1098,8 +1146,8 @@ Architecture details are documented in
   prepares and commits I/O grants around the staged kernel fork calls, then
   resumes the unpublished child only after commit succeeds.
 
-Architecture context: [Userspace I/O system](architecture/io-system.md) and
-[Channels and event queues](architecture/channels-and-event-queues.md).
+Architecture context: [Userspace I/O system](architecture/userspace/io-system.md) and
+[Channels and event queues](architecture/kernel/channels-and-event-queues.md).
 
 ## I/O and Shared Memory
 
@@ -1113,7 +1161,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   detach and retain backing across process exit/exec using kernel-only reference
   accounting. Cover multiple aliases, kernel clients, private metadata, and
   failed final-free retry, without additional signalling syscalls. See
-  [queue mapping lifetime](architecture/queues.md#initial-queue-api).
+  [queue mapping lifetime](architecture/kernel/queues.md#initial-queue-api).
 - [x] Run ready fibres, poll queue state in userspace, then park the process with
   its observed process-doorbell generation. Under the scheduler lock, recheck the
   live doorbell and kernel-owned readiness state before committing the park.
@@ -1123,7 +1171,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 - Kernel queue waits now use the process doorbell generation and authoritative
   kernel readiness checks. Normal waits use an indefinite park; the diagnostic
   probe retains bounded 1-to-100-tick timeouts. See
-  [queue waits](architecture/queues.md#bounded-waits).
+  [queue waits](architecture/kernel/queues.md#bounded-waits).
 - User comparison on the SDHCI trace target reports substantially better
   responsiveness with kernel parking disabled and tracing unchanged. This
   implicates the parking path, but does not isolate its expensive stage.
@@ -1137,17 +1185,17 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 - [x] Add an isolated timeout probe that parks only itself and compares complete
   call duration with fresh kernel counters. On the SDHCI trace target, 1- and
   10-tick waits left about 18-19 ms per call outside parked/runnable accounting.
-  See [measurements and limitations](architecture/queues.md#sdhci-trace-measurement).
+  See [measurements and limitations](architecture/kernel/queues.md#sdhci-trace-measurement).
 - [ ] Attribute that remaining entry/completion overhead, including per-park
   allocation/free and tracing costs, before changing the wait implementation.
 - [x] Expose aggregated wake reasons, parked durations, and wake-to-selection
-  delays through [procfs queue-wait diagnostics](architecture/process-registry-and-procfs.md#queue-wait-diagnostics).
+  delays through [procfs queue-wait diagnostics](architecture/userspace/process-registry-and-procfs.md#queue-wait-diagnostics).
 - [x] Expose userspace UART bytes/IRQs, empty reads, backend read traffic,
   Channel publications, and unchanged event-wait returns through
-  [IPC activity diagnostics](architecture/process-registry-and-procfs.md#ipc-activity-diagnostics).
+  [IPC activity diagnostics](architecture/userspace/process-registry-and-procfs.md#ipc-activity-diagnostics).
 - [x] Retain a bounded, lossy kernel trace in memory and expose a validated,
   non-destructive snapshot through `/proc/ktrace` for hardware with no second
-  UART adapter. See [kernel trace snapshots](architecture/driver-tracing.md#kernel-trace-snapshots).
+  UART adapter. See [kernel trace snapshots](architecture/userspace/driver-tracing.md#kernel-trace-snapshots).
 - [ ] Measure idle-console deltas versus typing after the stable-publication
   change, separating real queue/kernel wakes from spurious `WFE` returns.
 
@@ -1166,7 +1214,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   notifications under the scheduler lock. Timer and voluntary-yield scheduling
   paths compare that generation and current kernel state. Treat the shared
   userspace publication as an untrusted hint only. See
-  [queue waits](architecture/queues.md#bounded-waits).
+  [queue waits](architecture/kernel/queues.md#bounded-waits).
 - [x] Add a four-CPU, single-threaded TCG icount trace target using
   `-icount shift=auto,sleep=on`. Boot hardware information selects `WFE` for
   hardware and that target, while HVF and ordinary MTTCG use active rechecks.
@@ -1196,20 +1244,20 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   direct requests, replies, and kernel service notifications. Existing
   class/last-run ordering breaks ties; consuming messages removes the priority.
   Implemented using existing kernel mappings, with no per-message syscall. See
-  [receiver scheduling priority](architecture/queues.md#receiver-scheduling-priority).
+  [receiver scheduling priority](architecture/kernel/queues.md#receiver-scheduling-priority).
 - [x] Make live unread transport on any connection owned by a process override
   an unchanged userspace wait publication. The scheduler checks authoritative
   queue state rather than trusting a user-selected wait set. Regression tests
   cover both initial selection and timer retention when the unread connection
   was absent from the preceding userspace scan. See
-  [receiver scheduling priority](architecture/queues.md#receiver-scheduling-priority).
+  [receiver scheduling priority](architecture/kernel/queues.md#receiver-scheduling-priority).
 - [x] Add outstanding-request identity and parent propagation independently of
-  unread-message state. See [Channel tickets and preferred scheduling](architecture/dependency-scheduling.md).
+  unread-message state. See [Channel tickets and preferred scheduling](architecture/kernel/dependency-scheduling.md).
 - [x] Trace client publication, server acceptance, reply publication, and
   client-visible completion for Channel requests, retaining parent tickets so
   nested I/O chains can be reconstructed. Records are batched through lossy
   per-process shared rings into the memfs-backed `/tmp/io-trace.log`. See
-  [Channel latency tracing](architecture/driver-tracing.md#channel-latency-tracing).
+  [Channel latency tracing](architecture/userspace/driver-tracing.md#channel-latency-tracing).
 - [x] Add ticket-correlated kernel timestamps for publication-to-eligibility and
   eligibility-to-selection/dispatch to the Channel latency trace.
 - [ ] Re-enable Channel latency tracing through `SystemSettings` when latency
@@ -1249,7 +1297,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   gang scheduling; overlapping chains may interleave. The preferred queue is
   resorted on every scheduler refresh so actionable receivers and deeper
   validated dependency chains displace older, less important entries. See
-  [Channel tickets and preferred scheduling](architecture/dependency-scheduling.md).
+  [Channel tickets and preferred scheduling](architecture/kernel/dependency-scheduling.md).
 - User requirement: use a preferred scheduler run queue, distinct from IPC
   message queues. Enqueueing a chain member does not by itself force immediate
   preemption of a busy core whose current process has not handed off to wait.
@@ -1275,7 +1323,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   the service, returns that connection, and discards the temporary control
   state. Requests and replies use directional Queue data and peer doorbells;
   the kernel owns connection close and process-exit cleanup. See
-  [Channels and event queues](architecture/channels-and-event-queues.md).
+  [Channels and event queues](architecture/kernel/channels-and-event-queues.md).
 - [x] Allow preferred selection on another started core after the outgoing
   context-switch tail is safe. Do not steal running or kernel-blocked processes.
 - [x] Treat the idle process as the final scheduling choice. When a CPU has no
@@ -1296,7 +1344,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   coalesced reschedule IPI; on a single-CPU system, the notifying process yields
   through normal scheduler selection. Pop only publishes consumption and does
   not announce new schedulable work. A park-time recheck closes the
-  notify-before-park race. See [queue waits](architecture/queues.md#bounded-waits).
+  notify-before-park race. See [queue waits](architecture/kernel/queues.md#bounded-waits).
 - [ ] Evaluate adaptive residency using the resulting latency measurements.
 - Open scope: exclusive cluster budgets/arbitration and context integration for
   custom asynchronous dispatchers outside the common I/O/block wrappers.
@@ -1308,7 +1356,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
   or voluntary-yield scheduler entry.
 - This foundation gates existing channel hops on actual transport progress.
   It does not yet implement the IRQ token/hop protocol below, stage acknowledgements,
-  or operation-failure timeout reporting. See [queue waits](architecture/queues.md#bounded-waits).
+  or operation-failure timeout reporting. See [queue waits](architecture/kernel/queues.md#bounded-waits).
 - [ ] Explore the user's shared per-process waiter record containing a token,
   hop count, and deadline, avoiding per-wait syscalls. On IRQ satisfaction,
   schedule the hardware-facing stage before its dependent stages. A completed
@@ -1332,7 +1380,7 @@ Architecture context: [Userspace I/O system](architecture/io-system.md) and
 ### Shared Bulk Buffers: hunde-puffer
 
 Status: initial implementation in place; policy extensions and performance
-measurement remain below. See [Shared buffers](architecture/shared-buffers.md).
+measurement remain below. See [Shared buffers](architecture/userspace/shared-buffers.md).
 
 #### Allocation and Directional Mappings
 
@@ -1392,13 +1440,13 @@ measurement remain below. See [Shared buffers](architecture/shared-buffers.md).
 - [x] First step: retain backing allocated between two kernel-registered
   services until reboot. Never pool, free, or reassign it, even after close or
   process exit; still revoke exiting processes' mappings. Keep ordinary client
-  cleanup unchanged. See [Shared buffers](architecture/shared-buffers.md).
+  cleanup unchanged. See [Shared buffers](architecture/userspace/shared-buffers.md).
 - [ ] Replace permanent retention with orchestrated completion/quiescence and
   reclamation. Explicit unmount and hot-unplug cleanup are deferred; service
   restarts do not automatically inherit old mappings or replay I/O.
   The QEMU Pi UEFI trace EXT2 mount now targets the EXT2 disk rather than the
   FAT EFI disk, removing its repeated failed-startup buffer consumption. See
-  [Userspace I/O system](architecture/io-system.md). Repeated service failures can still
+  [Userspace I/O system](architecture/userspace/io-system.md). Repeated service failures can still
   exhaust retained slots until coordinated reclamation is implemented.
 - [ ] Reuse the client's final-service shared buffer through FAT32/EXT2 and
   the block driver. Keep control and completions on existing Channels; authorize
@@ -1449,7 +1497,7 @@ effect can be measured independently.
 - [x] Consolidate filesystem adapters in the Rust I/O host, removing the separate
   namespace/filesystem-service Channel hop while retaining the application-facing
   I/O protocol and failure handling. The obsolete C namespace service is removed;
-  see [direct hosted dispatch](architecture/io-driver-hosts.md#direct-hosted-dispatch).
+  see [direct hosted dispatch](architecture/userspace/io-driver-hosts.md#direct-hosted-dispatch).
 - [ ] Revisit filesystem realtime scheduling only after cache and consolidation
   measurements identify residual scheduler latency; do not infer realtime
   suitability from service placement alone.
@@ -1498,14 +1546,14 @@ remain design decisions, not settled implementation requirements.
 ### Bus Monitoring and Driver Lifecycle
 
 Status: initial PCI scan and read-only Channel queries are implemented in
-`hundebus`. The service remains running and owns its inventory. See
-[Bus information](architecture/bus-info.md).
+`hunde-bus`. The service remains running and owns its inventory. See
+[Bus information](architecture/userspace/bus-info.md).
 
 #### Bus Change Detection
 
 - [ ] Add attachment/removal reporting from bus-specific drivers, including
   USB host/hub drivers. USB enumeration and hotplug are not implemented yet.
-- [ ] Have `hundebus` maintain the live device topology and coordinate driver
+- [ ] Have `hunde-bus` maintain the live device topology and coordinate driver
   startup and removal. Define how this integrates with existing supervision.
 - [ ] Define coherent paged queries and update notifications once inventories
   can change; the current query interface describes an immutable startup scan.
@@ -1529,8 +1577,8 @@ hardware snapshot. Bus presentation and the `/sys` layout remain deferred.
   (RISC-V passed on unchanged retry after the interrupt-manager fault recorded
   under `hunde-treiber-host`). All fields, including `cpu.online_count`, are
   initialization-time snapshots. See
-  [cached boot information](architecture/bootstrap-services.md#cached-boot-information).
-- [ ] Query `hundebus` through its Channel interface for bus records.
+  [cached boot information](architecture/userspace/bootstrap-services.md#cached-boot-information).
+- [ ] Query `hunde-bus` through its Channel interface for bus records.
 - [ ] Mount the filesystem at `/sys`; `/sys/info` and `/sys/bus/pci` are proposed
   paths, with final layout to be agreed during implementation.
 - [x] Delete the kernel `/boot/sysinfo` provider; userspace `sysinfofs` owns it.
@@ -1551,7 +1599,7 @@ hardware snapshot. Bus presentation and the `/sys` layout remain deferred.
 
 ### Userspace Bootstrap
 
-Implemented: [hunde-mama bootstrap](architecture/bootstrap-services.md) establishes
+Implemented: [hunde-mama bootstrap](architecture/userspace/bootstrap-services.md) establishes
 `/sbin`, `/boot`, and `/boot/config` before configured startup. The filesystem
 namespace accepts mounts over Channel; later mounts preserve the boot overlays.
 
@@ -1572,7 +1620,7 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
   `embedfs.wuff`. Bootstrap fstab now installs `/sbin` directly in the host;
   the temporary standalone provider and drain/retirement protocol are removed.
   Keep the kernel-owned archive backing independently of loaded Wuffs. See
-  [bootstrap services](architecture/bootstrap-services.md).
+  [bootstrap services](architecture/userspace/bootstrap-services.md).
   The wrapper, internal worker, read-only archive mapping,
   archive-backed component loader, fibre-aware local completion, and local file
   transfers are implemented with native/Rust tests. Root/shutdown, hosted
@@ -1581,13 +1629,13 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
   build-selected export policy keeps the synthetic `_stack` marker private on
   AArch64; both architectures check its absence from runtime exports. Loader
   range validation remains unchanged. See
-  [dynamic linking](architecture/dynamic-linking.md#interpreter-integration).
+  [dynamic linking](architecture/userspace/dynamic-linking.md#interpreter-integration).
 - [ ] Migrate executable transfers to the
-  [hunde-puffer shared-buffer design](architecture/shared-buffers.md) tracked above.
+  [hunde-puffer shared-buffer design](architecture/userspace/shared-buffers.md) tracked above.
   The initial shared-buffer implementation replaces the 256-byte bulk replies.
 - [ ] Remove the disk providers' 12 KiB open-file snapshot limit before relying
   on them for larger executables. See
-  [Executable loading](architecture/bootstrap-filesystem-handoff.md).
+  [Executable loading](architecture/userspace/bootstrap-filesystem-handoff.md).
 - [ ] Add credential-based executable-open authorization to the FAT32/EXT2
   adapters. They currently reject executable opens rather than allowing an
   unchecked disk-backed spawn.
@@ -1596,17 +1644,17 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
 
 - [x] Remove the unused in-kernel message broker, scheduler message callbacks,
   and unconsumed process-exit broadcasts. Direct scheduler operations and
-  shared IPC remain; see [Userspace I/O system](architecture/io-system.md).
+  shared IPC remain; see [Userspace I/O system](architecture/userspace/io-system.md).
 - [x] Delete the unused kernel console and stream backends and their UART IRQ
   wiring. Independent kernel logging and panic output remain; see
-  [Userspace I/O system](architecture/io-system.md).
+  [Userspace I/O system](architecture/userspace/io-system.md).
 - [x] Delete the obsolete kernel socket backend and userspace filesystem
   broker, including unused service operations and wrappers.
 - [x] Remove kernel bootfs, EXT2, the unused block cache and memory block device,
   and the kernel mount API. Filesystem watchdogs only launch userspace providers.
 - [x] Remove legacy stream-server syscalls, buffer mapping, and server maps.
 - [x] Remove userspace file-I/O syscall fallbacks. Route link requests through
-  the existing I/O and filesystem Channels; see [Userspace I/O system](architecture/io-system.md).
+  the existing I/O and filesystem Channels; see [Userspace I/O system](architecture/userspace/io-system.md).
 - [x] Implement hard-link creation in EXT2 through the userspace filesystem
   Channel. Providers without inode-sharing semantics continue to return an
   explicit unsupported error.
@@ -1614,7 +1662,7 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
   `kernel/kio` wrappers, and process FD tables. Startup stdio retains terminal
   endpoint metadata only; general userspace handle inheritance remains deferred.
   Fault reports use independent kernel diagnostics. Retired syscall numbers
-  remain reserved and fail dispatch. See [Userspace I/O system](architecture/io-system.md).
+  remain reserved and fail dispatch. See [Userspace I/O system](architecture/userspace/io-system.md).
 - [x] Create the separate fibre-based `sdhci_channelio` driver using existing
   Channels and managed buffers, switch SD boot configurations, and retire the
   old SDHCI executable. The hardware path remains read-only polling PIO.
@@ -1624,7 +1672,7 @@ namespace accepts mounts over Channel; later mounts preserve the boot overlays.
   General fibre infrastructure remains.
 - [x] Migrate `channel_blk`/`channel_fs` to BlockServer/BlockClient and delete
   the kernel block broker and private transport. Device discovery metadata and
-  capability checks remain in the kernel. See [Userspace I/O system](architecture/io-system.md).
+  capability checks remain in the kernel. See [Userspace I/O system](architecture/userspace/io-system.md).
 - [ ] Replace the boot disk's size-based identification with an explicit stable
   boot-device identity supplied by the boot environment.
 
@@ -1645,17 +1693,17 @@ for architecture bring-up. See the
 - [x] Produce a reproducible `boot.sd` payload for the vendor SD boot chain.
   The initial bring-up FIT enters supervisor mode at `0x80200000`, writes to the
   DW APB UART at `0x04140000`, and validates the firmware-provided DTB handoff.
-  See [Milk-V Duo bring-up](architecture/milkv-duo.md).
+  See [Milk-V Duo bring-up](platforms/milkv-duo.md).
 - [x] Add the full `milkv_duo` boot platform with a one-hart, 64 MiB Sv39 layout,
   CV1800B PLIC metadata, UART register stride, reserved firmware memory, and
   board DTB parsing without requiring QEMU VirtIO or PCI nodes. `make milkv-duo`
   now links the full kernel and userspace and packages a stock-firmware
-  compatible FIT; see [Milk-V Duo](architecture/milkv-duo.md).
+  compatible FIT; see [Milk-V Duo](platforms/milkv-duo.md).
 - [x] Automate a complete flashable SD-card image with the checksum-pinned
   official `fip.bin` boot chain, the HundeOS `boot.sd`, and an
   architecture-qualified ext2 root filesystem. `make milkv-duo-sd-image`
   produces the two-partition image described in
-  [Milk-V Duo](architecture/milkv-duo.md).
+  [Milk-V Duo](platforms/milkv-duo.md).
 - [ ] Reduce the board's embedded filesystem to the services required before
   the SD root is mounted. The full image now fits with two 1 MiB boot stacks,
   but it still embeds all userspace binaries rather than handing most of them
@@ -1674,21 +1722,23 @@ for architecture bring-up. See the
   delay per approximately 150-byte record at 115200 baud. The isolated
   `milkv-duo-s-sd-image-aarch64-command-trace` target remains available for
   scheduler diagnosis and must not be used for performance comparisons. See
-  [Milk-V Duo S](architecture/milkv-duo-s.md).
-- [ ] Bring up the SG2000 Cortex-A53 path with the official ARM64 firmware.
+  [Milk-V Duo S](platforms/milkv-duo-s.md).
+- [x] Bring up the SG2000 Cortex-A53 path with the official ARM64 firmware.
   `make milkv-duo-s-aarch64` now builds the board-specific AArch64 kernel,
   staged FIT, and vendor-compatible DTB, while
   `make milkv-duo-s-sd-image-aarch64` produces the complete image from the
-  checksum-pinned v2.0.1 firmware. Hardware entry and MMU validation remain,
-  followed by GICv2 CPU-interface support in the common AArch64 interrupt path,
-  timer/device interrupts, userspace bootstrap, and login. See
-  [Milk-V Duo S](architecture/milkv-duo-s.md).
+  checksum-pinned v2.0.1 firmware. The common interrupt path implements GICv2
+  acknowledge/completion and timer PPI setup. The physical AArch64 image now
+  reaches an interactive Bash prompt over UART0 with the Rust-hosted CV181x SD
+  driver, a mounted ext2 root, and a recorded SDHCI IRQ. Other peripheral and
+  RISC-V acceptance remains separate. See
+  [Milk-V Duo S](platforms/milkv-duo-s.md).
 
 - [x] Add a CV1800B-QEMU approximation with the Duo S kernel, DTB, 510 MiB RAM,
   and complete SD image for rapid integration testing. The isolated build uses
   QEMU-compatible PTE attributes and UART0 as its console because this model
   does not emulate SG2000 UART1. It remains explicitly outside CV181x hardware
-  validation. See [Milk-V Duo S](architecture/milkv-duo-s.md).
+  validation. See [Milk-V Duo S](platforms/milkv-duo-s.md).
 - [ ] Diagnose the CV1800B QEMU fork's repeated invalid-CSR diagnostics and the
   root `ext2fs` startup stall. The approximation currently validates generic
   SDHCI initialization, partition discovery, and boot-config mounting but does
@@ -1697,7 +1747,7 @@ for architecture bring-up. See the
   `config-cv1813h_milkv_duos_sd` FIT contract, one RISC-V hart, the 510 MiB
   firmware-exposed memory range, the initial firmware reservation, and the
   Duo S UART, PLIC, RTC, and CV181x SD host description. See
-  [Milk-V Duo S](architecture/milkv-duo-s.md).
+  [Milk-V Duo S](platforms/milkv-duo-s.md).
 - [x] Automate a complete Duo S SD image from the checksum-pinned official
   v1.1.4 image. `make milkv-duo-s-sd-image-riscv` preserves the vendor boot chain
   and raw logo region, replaces `boot.sd`, installs the 8 MiB boot configuration
@@ -1706,25 +1756,27 @@ for architecture bring-up. See the
 - [x] Work around the stock U-Boot 8 MiB kernel decompression limit without
   replacing `fip.bin`. The FIT now asks U-Boot to decompress the full kernel as
   a staged loadable and enters it through a small board-specific handoff. See
-  [Milk-V Duo S](architecture/milkv-duo-s.md).
+  [Milk-V Duo S](platforms/milkv-duo-s.md).
 - [x] Bootstrap the userspace CV181x SDHCI service before boot configuration,
   expose MBR partitions through the common block protocol, mount
   `/dev/mmc0p2` as `/boot/config`, and configure `/dev/mmc0p3` as root. The
-  controller, partition discovery, and `/boot/config` mount are verified on
-  hardware; root-mount completion remains to be validated. See
-  [Milk-V Duo S](architecture/milkv-duo-s.md).
+  controller, partition discovery, and `/boot/config` mount were verified on
+  RISC-V hardware; its root-mount completion remains to be validated. The
+  AArch64 Rust-hosted path reaches a mounted ext2 root and Bash. See
+  [Milk-V Duo S](platforms/milkv-duo-s.md).
 - [x] Split the physical Duo S UART configuration after console bring-up. UART0
   carries early bootstrap output and the userspace console; after kernel handoff,
   kernel and driver syscall traces use UART1. The QEMU approximation continues
   to share UART0 because it does not emulate SG2000 UART1. See
-  [Milk-V Duo S](architecture/milkv-duo-s.md).
+  [Milk-V Duo S](platforms/milkv-duo-s.md).
 - [ ] Implement and validate the CVITEK RTC register interface without treating
   it as the incompatible QEMU Goldfish RTC.
 - [ ] Validate login and Bash through the Duo S UART0 userspace console while
   kernel and driver syscall traces use UART1 independently. Synchronous shell
   startup now returns structured child-abort details for login to render on
-  UART0; hardware validation of the shell fault and successful startup paths
-  remains. See [Milk-V Duo S](architecture/milkv-duo-s.md).
+  UART0. Physical AArch64 login and Bash now pass; independent UART1 tracing,
+  the shell fault path, and RISC-V login remain to be checked. See
+  [Milk-V Duo S](platforms/milkv-duo-s.md).
 - [ ] Decide whether HundeOS should replace or reconfigure the stock firmware
   path to reclaim the C906L coprocessor. The current stock boot runs its RTOS
   before OpenSBI and exposes only the C906 application core as a hart; a future
@@ -1748,7 +1800,7 @@ for architecture bring-up. See the
   regenerate Newlib/Bash build preparation during capture. Regression tests
   cover failure reporting, previous-database preservation, and clean-directory
   capture; normal static/PIC sysroots build on both architectures. See
-  [CLion code indexing](architecture/clion.md).
+  [CLion code indexing](development/clion.md).
 - [ ] Add RISC-V toolchain, assembler, linker scripts, kernel/userspace build
   targets, and embedded binaries. The early supervisor payload is complete;
   the architecture-matched userspace programs and services now compile and

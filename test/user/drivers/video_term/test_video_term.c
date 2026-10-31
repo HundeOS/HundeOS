@@ -380,11 +380,11 @@ void test_video_term_main_packs_color_with_bitmask_framebuffer(void)
     VideoTermTest__run_and_assert(0x00d8d8d8U, 0x00563412U);
 }
 
-void test_video_term_main_draws_hundeschau_banner_dog_emojis(void)
+void test_video_term_main_draws_hundeschau_banner_emojis(void)
 {
-    VideoTermTest__set_input("\xf0\x9f\x90\xb6 HundeOS: hundeschau begins \xf0\x9f\x90\xbe\n");
+    VideoTermTest__set_input("\xf0\x9f\x90\xb6 HundeOS: hundeschau begins \xf0\x9f\xa5\x87\n");
     VideoTermTest__seed_emoji_pixel(0x1f436, 12, 2, 0x21, 0x43, 0x65);
-    VideoTermTest__seed_emoji_pixel(0x1f43e, 12, 2, 0x87, 0x65, 0x43);
+    VideoTermTest__seed_emoji_pixel(0x1f947, 12, 2, 0x87, 0x65, 0x43);
 
     TEST_ASSERT_EQUAL_INT(0, video_term_main_under_test());
 
@@ -396,6 +396,19 @@ void test_video_term_main_draws_hundeschau_banner_dog_emojis(void)
     TEST_ASSERT_EQUAL_UINT32(0x00214365U, fake_framebuffer[(1 * FRAMEBUFFER_STRIDE) + 6]);
     TEST_ASSERT_EQUAL_UINT32(0x00876543U,
                              fake_framebuffer[(1 * FRAMEBUFFER_STRIDE) + (32 * VIDEO_TERM_COLUMN_WIDTH) + 6]);
+}
+
+void test_video_term_main_draws_hundeschule_banner_emojis(void)
+{
+    VideoTermTest__set_input("\xf0\x9f\x90\xb6 HundeOS: hundeschule begins \xf0\x9f\x8e\x93\n");
+    VideoTermTest__seed_emoji_pixel(0x1f436, 12, 2, 0x21, 0x43, 0x65);
+    VideoTermTest__seed_emoji_pixel(0x1f393, 12, 2, 0x87, 0x65, 0x43);
+
+    TEST_ASSERT_EQUAL_INT(0, video_term_main_under_test());
+
+    TEST_ASSERT_EQUAL_UINT32(0x00214365U, fake_framebuffer[(1 * FRAMEBUFFER_STRIDE) + 6]);
+    TEST_ASSERT_EQUAL_UINT32(0x00876543U,
+                             fake_framebuffer[(1 * FRAMEBUFFER_STRIDE) + (33 * VIDEO_TERM_COLUMN_WIDTH) + 6]);
 }
 
 void test_video_term_main_draws_plain_digits_with_text_font(void)

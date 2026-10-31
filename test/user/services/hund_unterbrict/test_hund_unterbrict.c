@@ -1,9 +1,8 @@
 #include "unity.h"
 
-#define main hund_unterbrict_main_under_test
 #define service_route_managed_irq fake_route_managed_irq
 #define InterruptController__unmask fake_unmask_irq
-#include "../../../../user/services/hund-unterbrict/main.c"
+#include "../../../../user/lib/hunde/driver.c"
 
 static QueueIdentity identity;
 static QueuePage client_page;
@@ -16,22 +15,10 @@ static uint64_t routed_client_pid;
 static IRQNumber routed_irq;
 static Address unmasked_distributor;
 static IRQNumber unmasked_irq;
-static IRQNumber hosted_irq;
-static uint64_t hosted_irq_at_usec;
-static uint64_t hosted_manager_at_usec;
-
-bool VirtioBlkRuntime__handle_irq(VirtioBlkRuntimePtr self, ConstKernelNotificationPtr event,
-                                  uint64_t manager_received_at_usec)
-{
-    hosted_irq = event->id;
-    hosted_irq_at_usec = event->occurred_at_usec;
-    hosted_manager_at_usec = manager_received_at_usec;
-    return true;
-}
 
 void setUp(void)
 {
-    identity = (QueueIdentity){.connection = 17, .client_pid = 4, .server_pid = 5, .accepted = 1};
+    identity = (QueueIdentity){.connection = 17, .client_pid = 4, .server_pid = 5, .origin_pid = 4, .accepted = 1};
     client_page = (QueuePage){0};
     server_page = (QueuePage){0};
     event_queue = KernelNotificationQueue__new();
@@ -39,9 +26,6 @@ void setUp(void)
     routed_irq = 0;
     unmasked_distributor = 0;
     unmasked_irq = 0;
-    hosted_irq = 0;
-    hosted_irq_at_usec = 0;
-    hosted_manager_at_usec = 0;
     client_doorbell = (IpcDoorbell){0};
     server_doorbell = (IpcDoorbell){0};
     client_queue = unwrap_result(
@@ -49,55 +33,26 @@ void setUp(void)
         (Queue){0});
 }
 
-void test_interrupt_manager_dispatches_hosted_irq_without_client_relay(void)
-{
-    ServiceInterruptManagerRegistration kernel_registration = {
-        .event_queue = (Address)&event_queue,
-        .distributor = 0x1000,
-    };
-    InterruptManager manager = InterruptManager__new(&kernel_registration, 0);
-    VirtioBlkRuntime runtime = {0};
-    runtime.device.irq_id = 51;
-    match_result(HostedBlockDrivers__push(&manager.block_drivers, &runtime),
-        success_do_nothing(),
-        error_test_fail()
-    );
-    match_result(KernelNotificationQueue__publish(&event_queue, 51, 7, 1234),
-        success_do_nothing(),
-        error_test_fail()
-    );
-
-    TEST_ASSERT_TRUE(InterruptManager__deliver(&manager));
-    TEST_ASSERT_EQUAL_UINT64(51, hosted_irq);
-    TEST_ASSERT_EQUAL_UINT64(1234, hosted_irq_at_usec);
-    TEST_ASSERT_GREATER_THAN_UINT64(hosted_irq_at_usec, hosted_manager_at_usec);
-    TEST_ASSERT_EQUAL_UINT64(0, InterruptRegistrations__len(&manager.registrations));
-}
-
 void tearDown(void)
 {
 }
 
-static InterruptClient test_client(void)
+static RustDriverManager test_manager(void)
+{
+    ServiceInterruptManagerRegistration registration = {.event_queue = (Address)&event_queue, .distributor = 0x1000};
+    return RustDriverManager__new(&registration);
+}
+
+static ChannelServer test_client(void)
 {
     Queue server_queue = unwrap_result(
         Queue__attach(&identity, &client_page, &server_page, 17, 5, &client_doorbell, &Queue__ignore_data_available),
         (Queue){0});
-    ChannelServer channel = {
-        .control = server_queue,
-        .token = 29,
-        .client_pid = 4,
-        .request_size = sizeof(InterruptProtocolRequest),
-        .handling_request = true,
-    };
-    return InterruptClient__new(&channel);
-}
-
-static void prepare_request(InterruptClientPtr client, ConstInterruptProtocolRequestPtr request)
-{
-    TEST_ASSERT_TRUE(Queue__write_data(&client_queue, (ConstChannelDataPtr)request, sizeof(*request), 0));
-    client->channel.request_size = sizeof(*request);
-    client->channel.handling_request = true;
+    return (ChannelServer){.control = server_queue,
+                           .token = 29,
+                           .client_pid = 4,
+                           .request_size = sizeof(InterruptProtocolRequest),
+                           .handling_request = true};
 }
 
 static InterruptProtocolResponse take_response(void)
@@ -113,7 +68,78 @@ static InterruptProtocolResponse take_response(void)
         },
         error_test_fail()
     );
-    return (InterruptProtocolResponse){0};
+    return InterruptProtocol__error(0, INTERRUPT_PROTOCOL_INVALID);
+}
+
+void test_driver_boundary_preserves_irq_identity_sequence_and_timestamps(void)
+{
+    RustDriverManager manager = test_manager();
+    match_result(KernelNotificationQueue__publish(&event_queue, 51, 7, 1234),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    RustDriverEvent event = hunde_driver_event(&manager);
+    TEST_ASSERT_EQUAL_UINT32(HUNDE_ABI_SUCCESS, event.status.kind);
+    TEST_ASSERT_EQUAL_UINT64(51, event.irq);
+    TEST_ASSERT_EQUAL_UINT64(7, event.sequence);
+    TEST_ASSERT_EQUAL_UINT64(1234, event.kernel_at_usec);
+    TEST_ASSERT_GREATER_THAN_UINT64(1234, event.manager_at_usec);
+    TEST_ASSERT_EQUAL_UINT32(HUNDE_IO_PENDING, hunde_driver_event(&manager).status.kind);
+}
+
+void test_driver_boundary_reads_authenticated_identity_after_polling_the_request(void)
+{
+    ChannelServer client = test_client();
+    client.handling_request = false;
+    client.client_pid = 0;
+    InterruptProtocolRequest request = InterruptProtocol__subscribe(48);
+    TEST_ASSERT_TRUE(Queue__write_data(&client_queue, (ConstChannelDataPtr)&request, sizeof(request), 0));
+    QueueMessage message = ChannelControlMessage__new(CHANNEL_REQUEST_SUBMIT, 0, sizeof(request), 17);
+    message.request = (RequestMetadata){.generation = 1, .origin_pid = 4};
+    match_result(Queue__push(&client_queue, &message),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(0, hunde_driver_client_pid(&client));
+    RustDriverRequest decoded = hunde_driver_request(&client);
+    TEST_ASSERT_EQUAL_UINT32(HUNDE_ABI_SUCCESS, decoded.status.kind);
+    TEST_ASSERT_EQUAL_UINT32(INTERRUPT_PROTOCOL_SUBSCRIBE, decoded.kind);
+    TEST_ASSERT_EQUAL_UINT64(48, decoded.irq);
+    TEST_ASSERT_EQUAL_UINT64(4, hunde_driver_client_pid(&client));
+}
+
+void test_driver_boundary_routes_authenticated_pid_and_preserves_response_fields(void)
+{
+    RustDriverManager manager = test_manager();
+    ChannelServer client = test_client();
+    TEST_ASSERT_EQUAL_UINT64(4, hunde_driver_client_pid(&client));
+    TEST_ASSERT_EQUAL_UINT32(HUNDE_ABI_SUCCESS,
+                             hunde_driver_route(&manager, hunde_driver_client_pid(&client), 48).kind);
+    TEST_ASSERT_EQUAL_UINT64(4, routed_client_pid);
+    TEST_ASSERT_EQUAL_UINT64(48, routed_irq);
+    TEST_ASSERT_EQUAL_UINT32(
+        HUNDE_ABI_SUCCESS,
+        hunde_driver_reply(&client, INTERRUPT_PROTOCOL_DELIVERY, INTERRUPT_PROTOCOL_OK, 48, 2, 9, 100, 110).kind);
+    InterruptProtocolResponse response = take_response();
+    TEST_ASSERT_EQUAL_UINT32(INTERRUPT_PROTOCOL_DELIVERY, response.kind);
+    TEST_ASSERT_EQUAL_UINT64(48, response.irq);
+    TEST_ASSERT_EQUAL_UINT64(2, response.generation);
+    TEST_ASSERT_EQUAL_UINT64(9, response.sequence);
+    TEST_ASSERT_EQUAL_UINT64(100, response.kernel_irq_at_usec);
+    TEST_ASSERT_EQUAL_UINT64(110, response.manager_received_at_usec);
+}
+
+void test_driver_boundary_refuses_changed_distributor_and_out_of_range_irq(void)
+{
+    RustDriverManager manager = test_manager();
+    TEST_ASSERT_EQUAL_UINT32(HUNDE_ABI_SUCCESS, hunde_driver_rearm(&manager, 48).kind);
+    TEST_ASSERT_EQUAL_UINT64(48, unmasked_irq);
+    unmasked_irq = 0;
+    manager.distributor = HUND_SERVICE_DIRECTORY_VADDR;
+    TEST_ASSERT_EQUAL_UINT32(HUNDE_ABI_ERROR, hunde_driver_rearm(&manager, 48).kind);
+    manager.distributor = manager.registered_distributor;
+    TEST_ASSERT_EQUAL_UINT32(HUNDE_ABI_ERROR, hunde_driver_rearm(&manager, IRQ_COUNT).kind);
+    TEST_ASSERT_EQUAL_UINT64(0, unmasked_irq);
 }
 
 ServiceCode fake_route_managed_irq(uint64_t client_pid, uint64_t irq)
@@ -129,24 +155,9 @@ void fake_unmask_irq(Address distributor, IRQNumber irq)
     unmasked_irq = irq;
 }
 
-SyslogResult kernel_syslog_tagf(const char * tag, const char * format, ...)
-{
-    return SYSLOG_OK;
-}
-
-ServiceCode service_become_service(void)
-{
-    return SERVICE_OK;
-}
-
 ServiceCode service_register_interrupt_manager(ServiceInterruptManagerRegistrationPtr registration)
 {
-    return SERVICE_OK;
-}
-
-ServiceCode service_publish_ready(ConstBStringPtr name)
-{
-    return SERVICE_OK;
+    return SERVICE_MAP_FAILED;
 }
 
 Result(QueueArrivalsPtr) Queue__listen(ConstBStringPtr name)
@@ -164,150 +175,7 @@ QueueCode QueueConnection__close(QueueConnectionID connection)
     return QUEUE_OK;
 }
 
-void Queue__prepare_wait(void)
+uint64_t process_current_pid(void)
 {
-}
-
-void Queue__wait_event(void)
-{
-}
-
-int IO__printf(ConstBStringPtr format, ...)
-{
-    return 0;
-}
-
-void test_interrupt_manager_routes_channel_client_delivers_and_acknowledges(void)
-{
-    InterruptClient client = test_client();
-    ServiceInterruptManagerRegistration kernel_registration = {
-        .event_queue = (Address)&event_queue,
-        .distributor = 0x1000,
-    };
-    InterruptManager manager = InterruptManager__new(&kernel_registration, 0);
-    InterruptProtocolRequest subscribe = InterruptProtocol__subscribe(48);
-
-    InterruptManager__subscribe(&manager, &client, &subscribe);
-    TEST_ASSERT_EQUAL_UINT64(4, routed_client_pid);
-    TEST_ASSERT_EQUAL_UINT64(48, routed_irq);
-    InterruptProtocolResponse subscribed = take_response();
-    TEST_ASSERT_EQUAL_UINT64(INTERRUPT_PROTOCOL_SUBSCRIBED, subscribed.kind);
-    TEST_ASSERT_EQUAL_UINT64(1, subscribed.generation);
-
-    match_result(InterruptClients__push(&manager.clients, client),
-        success_do_nothing(),
-        error_test_fail()
-    );
-    match_optional(
-        InterruptClients__ptr_at(&manager.clients, 0),
-        some(stored_client)
-        {
-            InterruptProtocolRequest wait = InterruptProtocol__wait(48, subscribed.generation);
-            prepare_request(stored_client, &wait);
-            InterruptManager__wait(&manager, stored_client, &wait);
-        },
-        none_test_fail()
-    );
-
-    match_result(KernelNotificationQueue__publish(&event_queue, 48, 9, 1234),
-        success_do_nothing(),
-        error_test_fail()
-    );
-    TEST_ASSERT_TRUE(InterruptManager__deliver(&manager));
-    match_find_result_ptr(
-        InterruptRegistrations__find(&manager.registrations, InterruptRegistration__matches_irq, &routed_irq),
-        some(registration)
-        {
-            TEST_ASSERT_TRUE(InterruptManager__deliver_pending(&manager, registration));
-        },
-        none_test_fail()
-    );
-    InterruptProtocolResponse delivery = take_response();
-    TEST_ASSERT_EQUAL_UINT64(INTERRUPT_PROTOCOL_DELIVERY, delivery.kind);
-    TEST_ASSERT_EQUAL_UINT64(9, delivery.sequence);
-    TEST_ASSERT_EQUAL_UINT64(1234, delivery.kernel_irq_at_usec);
-    TEST_ASSERT_GREATER_THAN_UINT64(delivery.kernel_irq_at_usec, delivery.manager_received_at_usec);
-
-    match_optional(
-        InterruptClients__ptr_at(&manager.clients, 0),
-        some(stored_client)
-        {
-            InterruptProtocolRequest acknowledgement =
-                InterruptProtocol__acknowledgement(48, delivery.generation, delivery.sequence);
-            prepare_request(stored_client, &acknowledgement);
-            InterruptManager__acknowledge(&manager, stored_client, &acknowledgement);
-        },
-        none_test_fail()
-    );
-    InterruptProtocolResponse acknowledged = take_response();
-    TEST_ASSERT_EQUAL_UINT64(INTERRUPT_PROTOCOL_ACKNOWLEDGED, acknowledged.kind);
-    TEST_ASSERT_EQUAL_HEX64(0x1000, unmasked_distributor);
-    TEST_ASSERT_EQUAL_UINT64(48, unmasked_irq);
-}
-
-void test_interrupt_manager_refuses_changed_distributor_without_rearming(void)
-{
-    InterruptClient client = test_client();
-    ServiceInterruptManagerRegistration kernel_registration = {
-        .event_queue = (Address)&event_queue,
-        .distributor = 0x1000,
-    };
-    InterruptManager manager = InterruptManager__new(&kernel_registration, 0);
-    InterruptProtocolRequest subscribe = InterruptProtocol__subscribe(48);
-    InterruptManager__subscribe(&manager, &client, &subscribe);
-    InterruptProtocolResponse subscribed = take_response();
-
-    match_result(InterruptClients__push(&manager.clients, client),
-        success_do_nothing(),
-        error_test_fail()
-    );
-    match_result(KernelNotificationQueue__publish(&event_queue, 48, 9, 1234),
-        success_do_nothing(),
-        error_test_fail()
-    );
-    TEST_ASSERT_TRUE(InterruptManager__deliver(&manager));
-    match_find_result_ptr(
-        InterruptRegistrations__find(&manager.registrations, InterruptRegistration__matches_irq, &routed_irq),
-        some(registration)
-        {
-            registration->outstanding = 9;
-        },
-        none_test_fail()
-    );
-
-    manager.distributor = HUND_SERVICE_DIRECTORY_VADDR;
-    match_optional(
-        InterruptClients__ptr_at(&manager.clients, 0),
-        some(stored_client)
-        {
-            InterruptProtocolRequest acknowledgement = InterruptProtocol__acknowledgement(48, subscribed.generation, 9);
-            prepare_request(stored_client, &acknowledgement);
-            InterruptManager__acknowledge(&manager, stored_client, &acknowledgement);
-        },
-        none_test_fail()
-    );
-
-    TEST_ASSERT_EQUAL_UINT64(INTERRUPT_PROTOCOL_ERROR, take_response().kind);
-    TEST_ASSERT_EQUAL_HEX64(0, unmasked_distributor);
-    TEST_ASSERT_EQUAL_UINT64(0, unmasked_irq);
-}
-
-void test_interrupt_manager_rejects_stale_channel_acknowledgement_without_rearming(void)
-{
-    InterruptClient client = test_client();
-    ServiceInterruptManagerRegistration kernel_registration = {
-        .event_queue = (Address)&event_queue,
-        .distributor = 0x1000,
-    };
-    InterruptManager manager = InterruptManager__new(&kernel_registration, 0);
-    InterruptProtocolRequest subscribe = InterruptProtocol__subscribe(48);
-    InterruptManager__subscribe(&manager, &client, &subscribe);
-    take_response();
-
-    InterruptProtocolRequest stale = InterruptProtocol__acknowledgement(48, 1, 7);
-    prepare_request(&client, &stale);
-    InterruptManager__acknowledge(&manager, &client, &stale);
-
-    TEST_ASSERT_EQUAL_UINT64(INTERRUPT_PROTOCOL_ERROR, take_response().kind);
-    TEST_ASSERT_EQUAL_UINT64(0, unmasked_irq);
+    return 5;
 }

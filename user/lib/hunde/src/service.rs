@@ -285,6 +285,38 @@ pub struct Service<'component> {
     _component: PhantomData<&'component mut dyn IoComponent>,
 }
 
+pub struct SharedService<Handler: IoComponent> {
+    storage: Storage,
+    _handler: Rc<RefCell<Handler>>,
+}
+
+impl<Handler: IoComponent> SharedService<Handler> {
+    pub fn listen(name: ServiceName, handler: Rc<RefCell<Handler>>) -> Result<Self, IoError> {
+        let storage = Storage::new(unsafe { abi::host::hunde_rust_service_layout() })?;
+        let callbacks = abi::host::IoCallbacks {
+            context: Rc::as_ptr(&handler).cast_mut().cast(),
+            execute: execute_local::<Handler>,
+            disconnect: disconnect_local::<Handler>,
+        };
+        unsafe {
+            abi::host::hunde_rust_service_listen(
+                storage.as_ptr(),
+                ByteSpan::new(name.as_str().as_bytes()),
+                &callbacks,
+            )
+        }
+        .into_result()?;
+        Ok(Self {
+            storage,
+            _handler: handler,
+        })
+    }
+
+    pub fn poll(&mut self) -> bool {
+        unsafe { abi::host::hunde_rust_service_poll(self.storage.as_ptr()) }
+    }
+}
+
 impl<'component> Service<'component> {
     pub fn listen<Handler: IoComponent>(
         name: ServiceName,

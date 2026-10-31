@@ -56,6 +56,7 @@ BString BString__append(ConstBStringPtr self, ConstBStringPtr other);
 BString BString__join(BStringArrayPtr array, char delimiter);
 bool BString__starts_with(ConstBStringPtr self, ConstBStringPtr prefix);
 StringPos BString__length(ConstBStringPtr self);
+bool BString__is_valid(ConstBStringPtr self);
 Optional(char) BString__char_at(ConstBStringPtr self, StringPos index);
 char BString__char_at_or(ConstBStringPtr self, StringPos index, char alternate);
 StringPos BString__copy_to(ConstBStringPtr self, char * target, StringPos target_size);

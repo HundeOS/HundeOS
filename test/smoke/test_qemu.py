@@ -162,6 +162,48 @@ def test_trace_rejects_missing_startup_and_process_faults(tmp_path, trace):
         QemuSession("unused", str(trace_path)).assert_trace()
 
 
+def test_qemu_pci_sdhci_is_hosted_and_reads_by_irq(qemu_session):
+    session = qemu_session("qemu-pi-uefi-firmware-trace", "build/aarch64/kernel-trace.log")
+    session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+
+    processes = session.run_command("ps")
+    assert b"/sbin/services/hunde-treiber-host" in processes
+    assert b"/sbin/drivers/sdhci_channelio" not in processes
+    metadata = session.run_command("cat /dev/mmc0")
+    assert b"path=/dev/mmc0" in metadata
+    note = session.run_command("cat /mnt/sd/DOCS/NOTE.TXT")
+    assert b"Nested file on the FAT32 SD card test image" in note
+    assert b"Rust SDHCI IRQ delivered" in session.trace_path.read_bytes()
+    session.send_line("shutdown")
+    session.wait_for_exit(SHUTDOWN_TIMEOUT_SECONDS)
+    session.assert_trace()
+
+
+def test_qemu_raspi4b_boots_from_sd_card(qemu_session):
+    session = qemu_session("qemu-pi-uefi", "build/aarch64/raspi4b/kernel-trace.log")
+    session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+
+    processes = session.run_command("ps")
+    assert b"/sbin/services/hunde-treiber-host" in processes
+    assert b"/sbin/drivers/sdhci_channelio" not in processes
+    metadata = session.run_command("cat /dev/mmc0")
+    assert b"path=/dev/mmc0" in metadata
+    note = session.run_command("cat /boot/config/fstab")
+    assert b"/dev/mmc0p3 ext2 /" in note
+    assert b"Rust SDHCI IRQ delivered" in session.trace_path.read_bytes()
+    session.send_line("shutdown")
+    session.wait_for_exit(SHUTDOWN_TIMEOUT_SECONDS)
+    session.assert_trace()
+
+
 def test_qemu_single_cpu_external_command_returns_prompt(qemu_session):
     session = qemu_session("qemu-virt-1cpu", "build/aarch64/qemu-virt-1cpu-unused.log")
 
@@ -343,8 +385,9 @@ def test_qemu_rust_socket_component(qemu_session, target, trace_path):
     manifest = session.run_command("/usr/local/bin/cat /sbin/config/io-host.conf")
     assert b"service socket_router /sbin/components/socket.wuff" in manifest
     assert b"filesystem ext2.wuff /sbin/components/ext2fs.wuff" in manifest
+    assert b"driver uart_tx /sbin/components/uart_tx.wuff" in manifest
     drivers = session.run_command("/usr/local/bin/ls /sbin/drivers")
-    assert b"uart_rx" in drivers and b"uart_tx" in drivers, drivers
+    assert b"uart_rx" not in drivers and b"uart_tx" not in drivers, drivers
     assert b"socket_router" not in drivers, drivers
     assert b"/sbin/services/hund-rohr" not in processes
     assert b"/sbin/drivers/memfs" not in processes
@@ -519,17 +562,23 @@ def exercise_root_filesystem_commands(session, architecture_marker, shell_timeou
     assert b"cpu.count=4" in sysinfo, sysinfo
 
     processes = session.run_command("ps")
-    assert b"/sbin/services/hund-unterbrict" in processes
+    assert b"/sbin/services/hunde-treiber-host" in processes
     assert processes.count(b"/sbin/services/hunde-io-host") == 1
     assert b"/sbin/services/hund-dateisystem" not in processes
     assert b"/sbin/services/hund-io-system" not in processes
     assert b"/sbin/services/hund-verfolgen" not in processes
-    assert b"/sbin/drivers/virtio_blk_channelio" not in processes
     assert b"/sbin/drivers/ext2fs" not in processes, processes
     assert b"/sbin/drivers/fat32fs" not in processes, processes
 
     bootstrap = session.run_command("/usr/local/bin/ls /sbin/components")
     assert b"ext2fs.wuff" in bootstrap
+    assert b"uart_rx.wuff" in bootstrap
+    assert b"virtio_blk.wuff" in bootstrap
+    assert b"virtio_keyboard.wuff" in bootstrap
+    drivers = session.run_command("/usr/local/bin/ls /sbin/drivers")
+    assert b"virtio_blk_channelio" not in drivers
+    assert b"virtio_keyboard" not in drivers
+    assert b"Rust virtio_keyboard.wuff ready" in session.trace_path.read_bytes()
     mounts = session.run_command("/usr/local/bin/cat /boot/config/fstab")
     assert b"device /dev/virtio1 ext2.wuff /" in mounts
     assert b"ext2.wuff /mnt/channelio-ext2" in mounts
@@ -652,6 +701,9 @@ def test_qemu_root_filesystem_and_shutdown(qemu_session, target, trace_path, arc
     assert b"null" in listing and b"virtio1" in listing and b"hd0" in listing, listing
     processes = session.run_command("ps")
     assert b"/sbin/drivers/devfs" not in processes
+    assert b"/sbin/drivers/uart_rx" not in processes
+    assert b"/sbin/drivers/uart_tx" not in processes
+    assert b"/sbin/services/hunde-treiber-host" in processes
     metadata = session.run_command("cat /dev/virtio1")
     assert b"path=/dev/virtio1" in metadata and b"block_size=512" in metadata
     alias_metadata = session.run_command("cat /dev/hd0")
@@ -672,6 +724,7 @@ def test_qemu_root_filesystem_and_shutdown(qemu_session, target, trace_path, arc
     session.wait_for_exit(SHUTDOWN_TIMEOUT_SECONDS)
     trace = session.trace_path.read_bytes()
     assert b"Rust ext2fs.wuff ready" in trace
+    assert b"Rust driver host ready" in trace
     assert b"Rust filesystem namespace ready" in trace
     assert b"Rust I/O router ready" in trace
     assert b"Rust devfs.wuff ready" in trace

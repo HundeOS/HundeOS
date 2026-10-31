@@ -20,6 +20,7 @@ QueueCode QueueConnection__close(QueueConnectionID connection);
 // when authoritative state is ready, closed, corrupt, or kernel-notified.
 void Queue__prepare_wait(void);
 void Queue__wait_event(void);
+void Queue__wait_event_ticks(uint64_t ticks);
 void Queue__wait_readable(QueuePtr self);
 void Queue__wait_writable(QueuePtr self);
 bool Queue__wait_readable_interruptible(QueuePtr self);

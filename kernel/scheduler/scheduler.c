@@ -36,8 +36,8 @@ static BString process_permission_denied = bstr("Process permission denied\n");
 BString reason_mismatch_format = bstr("Process was parked for reason %i, not %i\n");
 BString process_wasnt_parked = bstr("Process wasn't parked\n");
 static BString abort_format =
-    bstr("process fault: pid=%i name=%s reason=%s exception=%s fsc=%i:%s access=%s pc=0x%x far=0x%x "
-         "esr=0x%x ec=0x%x cpu=%i\n");
+    bstr("process fault: pid=%i name=%s reason=%s exception=%s fsc=%i:%s access=%s pc=0x%llx far=0x%llx "
+         "esr=0x%llx ec=0x%llx cpu=%i\n");
 static const BString data_abort_reason = bstr("data abort");
 static const BString instruction_abort_reason = bstr("instruction abort");
 static const BString undefined_instruction_reason = bstr("undefined instruction");
@@ -79,9 +79,7 @@ static bool Scheduler__queue_wait_changed(ProcessPtr process);
 #ifdef KERNEL_COMMAND_TRACE
 static bool Scheduler__command_flow_process(ProcessPtr process)
 {
-    return BString__equals(&process->name, &bstr("/usr/local/bin/bash")) ||
-           BString__equals(&process->name, &bstr("/sbin/drivers/uart_rx")) ||
-           BString__equals(&process->name, &bstr("/sbin/drivers/uart_tx"));
+    return BString__equals(&process->name, &bstr("/usr/local/bin/bash"));
 }
 
 static void Scheduler__trace_queue_data_available(ProcessPtr process, ProcessPtr peer, bool reschedule, CPUID cpu,
@@ -454,34 +452,30 @@ Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr o
 
 static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, CPUSchedulerPtr cpu, ProcessPtr process);
 
-Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name, size_t length)
+Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name)
 {
-    if (length == 0 || length >= HUND_SERVICE_NAME_SIZE)
-    {
-        return Error(Address, bstr("Invalid endpoint name"), QUEUE_INVALID);
-    }
     critical_section(
         self->scheduler_lock,
         {
-                         // Copy only from a tracked readable allocation, through its kernel mapping.
-            for_each_ll(
-                UserAllocations,
-                process->user_allocations,
-                allocation,
+            BString snapshot = empty_bstr();
+            match_result(
+                Process__copy_from_user(process, name, (DataPtr)&snapshot, sizeof(snapshot)),
+                success_do_nothing(),
+                error(code, message)
                 {
-                    Address start = allocation.address.virtual_addr;
-                    if (allocation.address.read && name >= start && name - start <= allocation.size &&
-                        length <= allocation.size - (name - start))
-                    {
-                        BString endpoint_name = BString__from_chars(
-                            ptr(allocation.address.kernel_addr.virtual_addr + name - start, char), length);
-                        cs_return(Queues__listen(&self->queues, process, &endpoint_name));
-                    }
+                    cs_return(Error(Address, bstr("Invalid endpoint name mapping"), QUEUE_INVALID));
                 }
             );
+            if (!BString__is_valid(&snapshot) || BString__is_empty(&snapshot) ||
+                BString__length(&snapshot) >= HUND_SERVICE_NAME_SIZE)
+            {
+                cs_return(Error(Address, bstr("Invalid endpoint name"), QUEUE_INVALID));
+            }
+            BString endpoint_name = BString__slice(&snapshot, 0, BString__length(&snapshot));
+            cs_return(Queues__listen(&self->queues, process, &endpoint_name));
         }
     );
-    return Error(Address, bstr("Invalid endpoint name mapping"), QUEUE_INVALID);
+    return Error(Address, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
 Result(Address) Scheduler__queue_operation(SchedulerPtr self, ProcessPtr process, uint64_t operation, uint64_t id)
@@ -2001,8 +1995,8 @@ Result(ProcessID) Scheduler__abort_process(SchedulerPtr self, ProcessPtr proc, P
     BString message =
         BString__sprintf(&abort_format, proc->pid, cstr(proc->name), cstr_p(reason), abort.exception_description,
                          (int)abort.fault_status_code, abort.fault_status_description, abort.access_description,
-                         (unsigned int)abort.pc, (unsigned int)abort.fault_address, (unsigned int)abort.syndrome,
-                         (unsigned int)abort.exception_code, (int)abort.cpu);
+                         (unsigned long long)abort.pc, (unsigned long long)abort.fault_address,
+                         (unsigned long long)abort.syndrome, (unsigned long long)abort.exception_code, (int)abort.cpu);
     k_printf("%s", BString__cstr(&message));
     ReturnCode return_code = PROCESS_ABORT_EXIT_BASE - abort.reason;
     return Scheduler__terminate_process(self, proc, return_code);
@@ -2117,6 +2111,7 @@ Result(ProcessGroupID) Scheduler__process_group(SchedulerPtr self, ProcessPtr ca
     {
         return Error(ProcessGroupID, bstr("Invalid process group query"), PROCESS_GROUP_INVALID_ARGUMENT);
     }
+
     ProcessID target_pid = pid == 0 ? caller->pid : (ProcessID)pid;
     critical_section(
         self->scheduler_lock,
@@ -2269,6 +2264,7 @@ static Result(ProcessID)
     {
         process->state = PROC_STATE_INTERRUPTED;
     }
+
     return Success(ProcessID, process->pid);
 }
 
@@ -2312,6 +2308,7 @@ static bool Scheduler__signal_target_matches(ProcessPtr sender, ProcessPtr candi
     {
         return candidate != sender;
     }
+
     return target != INT64_MIN && candidate->process_group_id == (ProcessGroupID)-target;
 }
 
@@ -2709,6 +2706,7 @@ Result(ProcessPtr) Scheduler__signal_suspend(SchedulerPtr self, ProcessPtr proce
             );
         }
     );
+
     Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_SET, previous_mask);
     return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
 }
@@ -3830,6 +3828,7 @@ void Scheduler__yield_runnable(SchedulerPtr self, ProcessPtr yielding_proc, CPUI
             );
         }
     );
+
     match_optional(context_switch,
         some(next)
         {

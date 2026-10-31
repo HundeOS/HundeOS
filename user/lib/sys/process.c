@@ -49,6 +49,20 @@ void process_set_startup_pid(uint64_t pid)
 
 uint64_t process_current_pid(void)
 {
+    if (current_pid == 0)
+    {
+        match_result(
+            process_identity(),
+            success(identity)
+            {
+                current_pid = identity.pid;
+            },
+            error(code, message)
+            {
+                return 0;
+            }
+        );
+    }
     return current_pid;
 }
 

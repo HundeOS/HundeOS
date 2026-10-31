@@ -849,10 +849,10 @@ void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
 
     ProcessAbort abort = (ProcessAbort){
         .reason = PROCESS_ABORT_DATA_ABORT,
-        .pc = 0x400100,
-        .fault_address = 0x0,
-        .exception_code = 0x24,
-        .syndrome = 0x96000004,
+        .pc = 0x1234567800400100ULL,
+        .fault_address = 0xabcdef0100000000ULL,
+        .exception_code = 0x200000024ULL,
+        .syndrome = 0x196000004ULL,
         .cpu = cpu_id,
     };
 
@@ -870,12 +870,15 @@ void test_scheduler_abort_process_records_fault_and_unparks_parent(void)
     TEST_ASSERT_EQUAL(PROCESS_ABORT_EXIT_BASE - PROCESS_ABORT_DATA_ABORT, return_code);
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), BString__cstr(&fault_prefix)));
     TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "reason=data abort"));
-    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "pc=0x400100"));
+    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "pc=0x1234567800400100"));
+    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "far=0xabcdef0100000000"));
+    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "esr=0x196000004"));
+    TEST_ASSERT_NOT_NULL(strstr(BasicIO__output(), "ec=0x200000024"));
     TEST_ASSERT_TRUE(SpawnAbortReport__is_present(abort_report));
     TEST_ASSERT_EQUAL_UINT64(PROCESS_ABORT_DATA_ABORT, abort_report.reason);
-    TEST_ASSERT_EQUAL_HEX64(0x24, abort_report.exception_code);
-    TEST_ASSERT_EQUAL_HEX64(0x400100, abort_report.pc);
-    TEST_ASSERT_EQUAL_HEX64(0x0, abort_report.fault_address);
+    TEST_ASSERT_EQUAL_HEX64(0x200000024ULL, abort_report.exception_code);
+    TEST_ASSERT_EQUAL_HEX64(0x1234567800400100ULL, abort_report.pc);
+    TEST_ASSERT_EQUAL_HEX64(0xabcdef0100000000ULL, abort_report.fault_address);
 }
 
 void test_scheduler_exit_removes_process_when_its_not_current(void)

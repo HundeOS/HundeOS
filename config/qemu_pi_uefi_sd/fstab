@@ -1,0 +1,4 @@
+# device <path> <filesystem> <mountpoint>
+device uart_rx,uart_tx console /dev/tty0
+device /dev/tty0 console :console:
+device /dev/mmc0p3 ext2 /

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["lib/hunde", "drivers/socket", "drivers/memfs", "drivers/procfs", "drivers/sysinfofs", "drivers/ext2fs", "drivers/fat32fs", "drivers/embedfs", "drivers/devfs", "services/hund-rohr", "services/hunde-io-host", "components/rust_smoke"]
+members = ["lib/hunde", "drivers/socket", "drivers/uart_rx", "drivers/uart_tx", "drivers/virtio_blk", "drivers/virtio_keyboard", "drivers/sdhci", "drivers/memfs", "drivers/procfs", "drivers/sysinfofs", "drivers/ext2fs", "drivers/fat32fs", "drivers/embedfs", "drivers/devfs", "services/hund-rohr", "services/hunde-io-host", "services/hunde-treiber-host", "components/rust_smoke"]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

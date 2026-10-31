@@ -83,6 +83,16 @@ static inline HundeByteSpan HundeByteSpan__new(const uint8_t * bytes, uint64_t l
     return (HundeByteSpan){.bytes = bytes, .length = length};
 }
 
+static inline HundeAbiHeader HundeAbiHeader__new(uint32_t size, uint32_t version)
+{
+    return (HundeAbiHeader){.size = size, .version = version};
+}
+
+static inline HundeAbiError HundeAbiError__new(int32_t code, HundeByteSpan message)
+{
+    return (HundeAbiError){.code = code, .message = message};
+}
+
 static inline HundeStatusResult HundeStatusResult__success(void)
 {
     return (HundeStatusResult){.kind = HUNDE_ABI_SUCCESS};

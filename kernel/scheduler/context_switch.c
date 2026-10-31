@@ -10,9 +10,7 @@
 #ifdef KERNEL_COMMAND_TRACE
 static void ContextSwitch__trace_command_dispatch(ProcessPtr process, CPUTime now)
 {
-    bool command_flow_process = BString__equals(&process->name, &bstr("/usr/local/bin/bash")) ||
-                                BString__equals(&process->name, &bstr("/sbin/drivers/uart_rx")) ||
-                                BString__equals(&process->name, &bstr("/sbin/drivers/uart_tx"));
+    bool command_flow_process = BString__equals(&process->name, &bstr("/usr/local/bin/bash"));
     if (command_flow_process)
     {
         __d_printf(COMMAND_FLOW, "t=%i dispatch pid=%i name=%s state=%s\n", now, process->pid, cstr(process->name),

@@ -1397,6 +1397,30 @@ void test_process_claims_and_quiesces_multiple_virtio_devices(void)
     );
 }
 
+void test_process_rejects_unsupported_virtio_device_without_claiming_it(void)
+{
+    extern bool test_virtio_device_supported;
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    match_result(
+        Process__map_mmio(process, 0x0a000000, PAGE_SIZE),
+        success(mmio)
+        {
+            test_virtio_device_supported = false;
+            match_result(
+                Process__claim_virtio_device(process, mmio.virtual_addr),
+                success_test_fail(),
+                error(code, message)
+                {
+                    TEST_ASSERT_EQUAL(PROCESS_MEMORY_NOT_FOUND, code);
+                }
+            );
+            test_virtio_device_supported = true;
+            TEST_ASSERT_EQUAL_UINT64(0, ProcessVirtioDevices__len(&process->virtio_devices));
+        },
+        error_test_fail()
+    );
+}
+
 void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void)
 {
     Elf elf = load_hello_world_elf();

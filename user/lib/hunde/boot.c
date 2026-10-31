@@ -67,6 +67,14 @@ static RustBootPlic RustBootPlic__new(const BootPlicInfo * info)
     return (RustBootPlic){.physical_base = info->physical_base, .source_count = info->source_count};
 }
 
+static RustBootVirtioMmio RustBootVirtioMmio__new(const BootVirtioMmioInfo * info)
+{
+    return (RustBootVirtioMmio){.physical_base = info->physical_base,
+                                .slot_size = info->slot_size,
+                                .slot_count = info->slot_count,
+                                .first_irq = info->first_irq};
+}
+
 static RustBootInfoResult RustBootInfoResult__new_error(int32_t code)
 {
     return (RustBootInfoResult){.status = RustNative__error(code)};
@@ -123,6 +131,15 @@ static RustBootInfoResult RustBootInfoResult__new(BootHardwareInfoPtr info)
         {
             result.info.ethernet_present = 1;
             result.info.ethernet = RustBootEthernet__new(&value);
+        },
+        none_do_nothing()
+    );
+    match_optional(
+        info->virtio_mmio,
+        some(value)
+        {
+            result.info.virtio_mmio_present = 1;
+            result.info.virtio_mmio = RustBootVirtioMmio__new(&value);
         },
         none_do_nothing()
     );

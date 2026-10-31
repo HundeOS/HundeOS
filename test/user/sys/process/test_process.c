@@ -16,6 +16,7 @@ static ProcessTimesResult times_status;
 static ProcessTimes configured_times;
 static ProcessIdentityResult identity_status;
 static ProcessIdentity configured_identity;
+static uint64_t identity_calls;
 static ProcessForkResult fork_status;
 static ProcessForkOperation fork_operation;
 static uint64_t fork_child_pid;
@@ -58,6 +59,7 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
     }
     if (num == SYSCALL_PROCESS_IDENTITY)
     {
+        identity_calls++;
         if (identity_status == PROCESS_IDENTITY_OK)
         {
             ProcessIdentityPtr target = (ProcessIdentityPtr)arg1;
@@ -118,6 +120,8 @@ void setUp(void)
     };
     identity_status = PROCESS_IDENTITY_OK;
     configured_identity = ProcessIdentity__new(42, 21);
+    identity_calls = 0;
+    process_set_startup_pid(0);
     fork_status = 73;
     fork_operation = 0;
     fork_child_pid = 0;
@@ -298,4 +302,28 @@ void test_process_identity_propagates_syscall_error(void)
             TEST_ASSERT_EQUAL(PROCESS_IDENTITY_INVALID_ARGUMENT, code);
         }
     );
+}
+
+void test_process_current_pid_resolves_uninitialized_wuff_state_once(void)
+{
+    TEST_ASSERT_EQUAL_UINT64(42, process_current_pid());
+    TEST_ASSERT_EQUAL_UINT64(42, process_current_pid());
+    TEST_ASSERT_EQUAL_UINT64(1, identity_calls);
+}
+
+void test_process_current_pid_uses_crt_identity_without_lookup(void)
+{
+    process_set_startup_pid(73);
+    TEST_ASSERT_EQUAL_UINT64(73, process_current_pid());
+    TEST_ASSERT_EQUAL_UINT64(0, identity_calls);
+}
+
+void test_process_current_pid_retries_failed_lookup(void)
+{
+    identity_status = PROCESS_IDENTITY_INVALID_ARGUMENT;
+    TEST_ASSERT_EQUAL_UINT64(0, process_current_pid());
+    TEST_ASSERT_EQUAL_UINT64(1, identity_calls);
+    identity_status = PROCESS_IDENTITY_OK;
+    TEST_ASSERT_EQUAL_UINT64(42, process_current_pid());
+    TEST_ASSERT_EQUAL_UINT64(2, identity_calls);
 }

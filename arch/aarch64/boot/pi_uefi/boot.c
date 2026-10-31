@@ -113,8 +113,8 @@ BootPlatform__set_entry_args(uint64_t image_handle, uint64_t system_table, uint6
 
 __BOOT__(SystemInfoPtr) pi_uefi_system_info_init(void)
 {
-    UefiDevices__configure(&pi_uefi_platform_info);
     UefiAcpi__apply_system_table(&pi_uefi_platform_info, pi_uefi_system_table);
+    UefiDevices__configure(&pi_uefi_platform_info);
 
     pi_uefi_system_info.cpu_count = pi_uefi_platform_info.cpu_count;
     pi_uefi_system_info.wait_mode = BOOT_WAIT_WFE;

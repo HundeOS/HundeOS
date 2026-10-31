@@ -4,7 +4,8 @@
 
 Result(ProcessSetupStatus) EmbeddedArchive__map_process(ProcessPtr self)
 {
-    if (!BString__equals(&self->name, &bstr(EMBEDDED_FS_HOST)))
+    if (!BString__equals(&self->name, &bstr(EMBEDDED_FS_HOST)) &&
+        !BString__equals(&self->name, &bstr(EMBEDDED_FS_DRIVER_HOST)))
     {
         return Success(ProcessSetupStatus, PROCESS_SETUP);
     }

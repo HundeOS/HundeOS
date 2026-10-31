@@ -61,16 +61,8 @@ static Result(MamaBootDisk) MamaBootDisk__find(ConstBootVirtioMmioInfoPtr virtio
                                 SERVICE_DEVICE_REGISTRATION_FAILED);
 }
 
-static Result(MamaBootDisk) MamaBootDisk__start_sd(void)
+static Result(MamaBootDisk) MamaBootDisk__start_sd_partitions(void)
 {
-    match_result(
-        BootService__bootstrap(&bstr("/sbin/drivers/sdhci_channelio"), &empty_bstr(), &empty_bstr(), &mama_sd_device),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(MamaBootDisk, message, code);
-        }
-    );
     match_result(
         BootService__bootstrap(&bstr("/sbin/drivers/block_partition"), &mama_sd_device, &mama_partition_two,
                                &mama_sd_boot_config),
@@ -92,6 +84,19 @@ static Result(MamaBootDisk) MamaBootDisk__start_sd(void)
     return Success(MamaBootDisk, MamaBootDisk__new(0, &mama_sd_boot_config));
 }
 
+static Result(MamaBootDisk) MamaBootDisk__start_sd(void)
+{
+    match_result(
+        BootService__bootstrap(&bstr("/sbin/drivers/sdhci_channelio"), &empty_bstr(), &empty_bstr(), &mama_sd_device),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(MamaBootDisk, message, code);
+        }
+    );
+    return MamaBootDisk__start_sd_partitions();
+}
+
 static Result(MamaBootDisk) MamaBootDisk__from_hardware(ConstBootHardwareInfoPtr info)
 {
     match_optional(
@@ -105,6 +110,13 @@ static Result(MamaBootDisk) MamaBootDisk__from_hardware(ConstBootHardwareInfoPtr
     match_optional(info->sd_host,
         some(sd_host)
         {
+            if (sd_host.kind == SD_HOST_KIND_BCM2835 ||
+                (sd_host.kind == SD_HOST_KIND_CV181X &&
+                 (info->interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V2 ||
+                  info->interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V3)))
+            {
+                return MamaBootDisk__start_sd_partitions();
+            }
             return MamaBootDisk__start_sd();
         },
         none_do_nothing()
@@ -133,7 +145,7 @@ static Result(ServiceCode) Mama__start_services(void)
         }
     );
     match_result(
-        BootService__bootstrap(&bstr("/sbin/services/hund-unterbrict"), &empty_bstr(), &empty_bstr(),
+        BootService__bootstrap(&bstr("/sbin/services/hunde-treiber-host"), &empty_bstr(), &empty_bstr(),
                                &bstr("hund-unterbrict")),
         success_do_nothing(),
         error(code, message)
@@ -193,6 +205,7 @@ static Result(IOStatus) Mama__boot_mounts(ChannelPtr mounts)
 
 int main(void)
 {
+    kernel_syslog_tagf("hunde-mama", "🐩 HundeOS: hunde-mama begins 🐶");
     if (!service_ok(service_become_service()) || !service_ok(service_publish_ready(&bstr("hunde-mama"))))
     {
         return 1;

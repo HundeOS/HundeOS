@@ -91,6 +91,13 @@ def generate(root):
     for enum_name, rust_type, header in (
         ("ServiceEventType", "u32", "common_includes/syscalls/service.h"),
         ("MemPressureLevel", "u64", "common_includes/syscalls/mem.h"),
+        ("ServiceCode", "i32", "common_includes/syscalls/service.h"),
+        ("InterruptProtocolRequestKind", "u32", "common/ipc/interrupt_protocol.h"),
+        ("InterruptProtocolResponseKind", "u32", "common/ipc/interrupt_protocol.h"),
+        ("InterruptProtocolCode", "i32", "common/ipc/interrupt_protocol.h"),
+        ("UartKind", "u64", "common/hardware/boot_info.h"),
+        ("SdHostKind", "u64", "common/hardware/boot_info.h"),
+        ("BufferDirection", "u32", "common/ipc/buffer.h"),
     ):
         source = "#include " + json.dumps(str(root / header)) + "\n"
         for name, value in compile_enum(root, enum_name, rust_type, source):

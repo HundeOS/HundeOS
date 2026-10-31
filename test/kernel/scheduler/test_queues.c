@@ -142,12 +142,11 @@ static QueueEndpointID register_locked_listener(ProcessPtr process, ConstBString
         Process__alloc_user_pages(process, QUEUE_PAGE_SIZE),
         success(memory)
         {
-            Kernel__memcopy((Address)BString__cstr(name), memory.kernel_addr.virtual_addr, BString__length(name));
+            Kernel__memcopy((Address)name, memory.kernel_addr.virtual_addr, sizeof(*name));
             KAllocStub__observe_user_allocations(Some(KAllocObserver, assert_listener_allocation_locked));
-            match_result(
-                Scheduler__queue_listen(kernel->scheduler, process, memory.virtual_addr, BString__length(name)),
+            match_result(Scheduler__queue_listen(kernel->scheduler, process, memory.virtual_addr),
                 success_do_nothing(),
-                error_test_fail()
+                         error_test_fail()
             );
             KAllocStub__observe_user_allocations(None(KAllocObserver));
             return find_endpoint(name);
@@ -170,6 +169,97 @@ void test_scheduler_listener_registration_holds_lock_through_allocation_and_publ
     TEST_ASSERT_NOT_EQUAL(first, second);
     connect_queue(first, client);
     connect_queue(second, client);
+}
+
+static Address split_listener_name(ConstBStringPtr name, size_t first_count, bool readable, bool gap)
+{
+    static uint8_t backing[3 * QUEUE_PAGE_SIZE];
+    Address first_kernel = (Address)backing;
+    Address second_kernel = first_kernel + 2 * QUEUE_PAGE_SIZE;
+    Address first_user = 0x22000000;
+    UserAddress first = UserAddress__new(first_user, KERNEL_ADDR(first_kernel, first_kernel), true, true, false, true);
+    UserAddress second = UserAddress__new(first_user + (gap ? 2 : 1) * QUEUE_PAGE_SIZE,
+                                          KERNEL_ADDR(second_kernel, second_kernel), readable, true, false, true);
+    match_result(Process__record_user_allocation(server, first, QUEUE_PAGE_SIZE, USER_ALLOCATION_HEAP),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Process__record_user_allocation(server, second, QUEUE_PAGE_SIZE, USER_ALLOCATION_HEAP),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    Kernel__memcopy((Address)name, first_kernel + QUEUE_PAGE_SIZE - first_count, first_count);
+    Kernel__memcopy((Address)name + first_count, second_kernel, sizeof(*name) - first_count);
+    return first_user + QUEUE_PAGE_SIZE - first_count;
+}
+
+static void assert_split_listener(size_t first_count)
+{
+    BString name = bstr("/dev/virtio5");
+    Address source = split_listener_name(&name, first_count, true, false);
+    Optional(ProcessPtr) caller = Some(ProcessPtr, server);
+    match_result(Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, source, 0, 0, 0),
+        success_do_nothing(),
+                 error_test_fail()
+    );
+    connect_queue(find_endpoint(&name), client);
+    TEST_ASSERT_TRUE(mutex_trylock(&kernel->scheduler->scheduler_lock));
+    mutex_unlock(&kernel->scheduler->scheduler_lock);
+}
+
+void test_listener_copies_bstring_header_across_separate_kernel_mappings(void)
+{
+    assert_split_listener(sizeof(StringPos));
+}
+
+void test_listener_copies_bstring_name_across_separate_kernel_mappings(void)
+{
+    assert_split_listener(offsetof(BString, data) + 8);
+}
+
+static void assert_split_listener_rejected(bool readable, bool gap)
+{
+    BString name = bstr("rejected-listener");
+    Address source = split_listener_name(&name, offsetof(BString, data) + 8, readable, gap);
+    match_result(
+        Scheduler__queue_listen(kernel->scheduler, server, source),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_INVALID, code);
+        }
+    );
+    match_optional(
+        ServiceDirectory__find_endpoint(KernelServiceDirectory__kernel_directory(&kernel->service_directory), &name),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    TEST_ASSERT_TRUE(mutex_trylock(&kernel->scheduler->scheduler_lock));
+    mutex_unlock(&kernel->scheduler->scheduler_lock);
+}
+
+void test_listener_rejects_bstring_crossing_an_unreadable_allocation(void)
+{
+    assert_split_listener_rejected(false, false);
+}
+
+void test_listener_rejects_bstring_crossing_an_unmapped_gap(void)
+{
+    assert_split_listener_rejected(true, true);
+}
+
+void test_listener_rejects_malformed_bstring_metadata_before_publication(void)
+{
+    BString name = {.len = -1, .max = BSTRING_MAX_SIZE};
+    Address source = split_listener_name(&name, sizeof(StringPos), true, false);
+    match_result(
+        Scheduler__queue_listen(kernel->scheduler, server, source),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_INVALID, code);
+        }
+    );
 }
 
 static void assert_push_success(QueuePtr queue, ConstQueueMessagePtr message)
@@ -1753,7 +1843,7 @@ void test_allocation_failure_publishes_no_connection_and_invalid_name_pointer_is
     TEST_ASSERT_EQUAL_UINT64(0, QueueConnections__len(&queues->connections));
     Optional(ProcessPtr) caller = Some(ProcessPtr, server);
     match_result(
-        Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, UINT64_MAX, 10, 0, 0),
+        Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, UINT64_MAX, 0, 0, 0),
         success_test_fail(),
         error(code, message)
         {
@@ -1867,10 +1957,10 @@ void test_queue_syscalls_copy_tracked_name_and_bind_caller_identity(void)
         },
         error_test_fail()
     );
-    Kernel__memcopy((Address)BString__cstr(&name), memory.kernel_addr.virtual_addr, BString__length(&name));
+    Kernel__memcopy((Address)&name, memory.kernel_addr.virtual_addr, sizeof(name));
     Optional(ProcessPtr) caller = Some(ProcessPtr, server);
     match_result(
-        Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, memory.virtual_addr, BString__length(&name), 0, 0),
+        Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, memory.virtual_addr, 0, 0, 0),
         success(address)
         {
             TEST_ASSERT_EQUAL_HEX64(QUEUE_LISTENER_BASE, address);

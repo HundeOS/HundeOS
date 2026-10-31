@@ -8,7 +8,7 @@
     .equ CONTEXT_STVAL, 280
     .equ RISCV_SSTATUS_SPP, (1 << 8)
     .equ RISCV_SSTATUS_SUM, (1 << 18)
-    .equ KERNEL_STACK_SIZE, 10485760
+    .equ KERNEL_STACK_SIZE, 1048576
 
     .global Exception__entry
     .type Exception__entry, @function

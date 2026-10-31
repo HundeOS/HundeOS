@@ -56,6 +56,14 @@ void test_archive_is_only_mapped_into_bootstrap_consumers_read_only_and_non_exec
     );
     TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
                                           false, false, sizeof(archive)));
+    ProcessPtr driver = dummy_process(21, 0, PROC_STATE_READY);
+    driver->name = bstr(EMBEDDED_FS_DRIVER_HOST);
+    match_result(EmbeddedArchive__map_process(driver),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&driver->page_table), EMBEDDED_FS_VADDR, true,
+                                          false, false, sizeof(archive)));
 }
 
 void test_retired_standalone_embedfs_does_not_receive_archive_mapping(void)

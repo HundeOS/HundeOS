@@ -758,6 +758,7 @@ pub(crate) mod host {
         pub(crate) fn hunde_rust_scheduler_waiting(storage: *mut c_void) -> u64;
         pub(crate) fn hunde_rust_channel_prepare_wait();
         pub(crate) fn hunde_rust_channel_wait();
+        pub(crate) fn hunde_rust_channel_wait_ticks(ticks: u64);
     }
 }
 

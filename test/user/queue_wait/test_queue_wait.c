@@ -14,6 +14,7 @@ static IpcDoorbell peer_doorbell;
 static Queue queue;
 static QueueArrivals arrivals;
 static unsigned waits;
+static uint64_t expected_wait_ticks;
 static unsigned registrations;
 static QueueWaitControl control;
 static SystemCallResult wait_result;
@@ -75,7 +76,7 @@ SystemCallResult syscall(SystemCall number, Anything operation, Anything observe
     if (number == SERVICE_CALL && operation == SERVICE_QUEUE_WAIT)
     {
         waits++;
-        TEST_ASSERT_EQUAL_UINT64(QUEUE_WAIT_INDEFINITE_TICKS, wait_ticks);
+        TEST_ASSERT_EQUAL_UINT64(expected_wait_ticks, wait_ticks);
         TEST_ASSERT_EQUAL_UINT64(0, unused1);
         TEST_ASSERT_EQUAL_UINT64(0, unused2);
         if (make_readable_on_first_wait && waits == 1)
@@ -132,6 +133,7 @@ void setUp(void)
     queue = Queue__new(&identity, &outgoing, &incoming, 123, 2, &peer_doorbell, &Queue__ignore_data_available);
     arrivals = (QueueArrivals){0};
     waits = 0;
+    expected_wait_ticks = QUEUE_WAIT_INDEFINITE_TICKS;
     registrations = 0;
     control = (QueueWaitControl){0};
     wait_result = QUEUE_WAIT_TIMEOUT;
@@ -174,6 +176,15 @@ void test_generic_wait_parks_until_the_process_doorbell_changes(void)
     TEST_ASSERT_EQUAL(0, pthread_join(peer, NULL));
     TEST_ASSERT_GREATER_THAN(0, waits);
     TEST_ASSERT_EQUAL_UINT64(1, incoming.produced);
+}
+
+void test_timed_event_wait_passes_bounded_ticks_and_rearms_observation(void)
+{
+    expected_wait_ticks = 10;
+    Queue__prepare_wait();
+    Queue__wait_event_ticks(expected_wait_ticks);
+    TEST_ASSERT_EQUAL_UINT(1, waits);
+    TEST_ASSERT_EQUAL_UINT(1, registrations);
 }
 
 void test_readable_wait_checks_live_queue_state_before_parking(void)

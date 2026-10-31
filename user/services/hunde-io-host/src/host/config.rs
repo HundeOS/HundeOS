@@ -88,6 +88,7 @@ impl Configuration {
                 return Err(IoError(IO_INVALID_PATH));
             }
             match kind {
+                "driver" => {}
                 "service" => {
                     if (name.starts_with('/') && !crate::filesystem::control::canonical(name))
                         || (!name.starts_with('/') && !identifier(name))

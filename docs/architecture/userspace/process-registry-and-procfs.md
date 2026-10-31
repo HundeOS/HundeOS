@@ -1,0 +1,270 @@
+# Process Registry And Procfs
+
+The kernel owns process accounting. Safe Rust `procfs.wuff`, implemented in
+`user/drivers/procfs`, renders it inside `hunde-io-host` through the normal
+filesystem Channel. The I/O host loads and mounts `/proc` from
+`config/bootstrap.fstab` before publishing bootstrap mount-control readiness.
+Mama waits for that readiness before starting configured userspace startup.
+This startup path is common to all targets.
+
+The shared `hunde::process` API copies coherent records through host callbacks.
+The C adapter uses `process_registry_map` and `ProcessRegistry__at/find`; Rust
+never casts the shared registry layout or duplicates its state enums.
+State/wait/class names retain the authoritative C translations, and names remain
+byte strings rather than requiring UTF-8. ABI v4 adds pointer-free, size-checked
+accounting DTOs and a bounded kernel-trace callback; lifecycle ABI v1 is unchanged.
+Missing records are distinct from failures. Busy publications retain
+`IO_WAIT_FOR_DATA`; mapping/trace failures report `IO_NO_DEVICE_FOUND`.
+
+The native trace adapter allocates a private page-backed region
+for each snapshot. The syscall requires one writable mapping containing its
+entire output; an ordinary Rust heap slice can span adjacent mappings. The
+adapter checks the returned byte count, copies only those bytes into the Rust
+slice, and releases the region on success and failure. Invalid capacities and
+oversized results are rejected; allocation and release failures return errors.
+An empty trace is valid when kernel memory tracing is disabled. This temporary
+syscall buffer is not an IPC transport or a replacement for managed I/O buffers.
+It uses ordinary page allocation, not the cache-growth allocator: optional
+cache admission can refuse allocations even while substantial free RAM remains.
+
+`ps` uses `process_list`, which invokes `SYSCALL_PROCESS_LIST` to read the live
+process tables under the scheduler lock. It does not use the periodically
+published registry or parse proc files. If its buffer fills, it grows the buffer
+and retries; the displayed list comes from the final syscall, not combined
+pages from different calls. Membership and CPU assignment cannot migrate during
+that traversal. CPU accounting is sampled during the call, not at a single
+hardware-wide instant; other CPUs are not stopped by this syscall.
+The shared registry remains the source for procfs and other registry readers.
+Hardware information stays at `/boot/sysinfo`.
+
+## Inspecting Processes
+
+Use `ps` for the live process list and `/proc/<pid>/status`, `/proc/<pid>/cpu`,
+and `/proc/<pid>/memory` for retained diagnostic snapshots. The `CPU` column in
+`ps` is the zero-based scheduler assignment, including while waiting.
+`CPU TIME(s)` is cumulative active CPU time; `CPU% (1s)` and `CPU% (100ms)`
+describe recent usage, with 100% representing one occupied core.
+`USER SLEEP(s)` reports advisory userspace queue-wait time separately.
+The accounting rules and snapshot limitations are described below.
+
+## Published Files
+
+- `/proc` lists the kernel trace snapshot and published PIDs.
+- `/proc/ktrace`: newest bytes retained by the optional kernel memory-trace
+  ring. Opening the file takes a non-destructive snapshot through the
+  hund-only system-information syscall.
+- `/proc/<pid>/status`: PID, UID/GID, name, scheduler state, wait reason,
+  process class, assigned CPU, and sample timestamp.
+- `/proc/<pid>/cpu`: cumulative active and scheduled microseconds plus CPU
+  percentages over the completed 1-second and 100-millisecond windows.
+- `/proc/<pid>/memory`: private RAM, shared RAM, and device mappings in bytes.
+- `/proc/<pid>/queue-wait`: cumulative queue-park diagnostics (see below).
+- `/proc/<pid>/ipc`: userspace UART, backend-read, relay, and event-wait counters.
+
+Directories are read-only `0555`; files are read-only `0444`. Per-process
+entries carry the process's numeric credentials; `ktrace` is owned by root.
+There is no write or execute interface.
+Open files retain a snapshot; exit removes subsequent lookups, not the bytes
+already held by an open file. Existing filesystem handle/session authentication
+applies. Handle enumeration is deferred.
+
+The Rust component owns up to 32 descriptions and 12 KiB per snapshot. Separate
+opens have independent offsets; seek and EOF apply to the retained bytes.
+The shared `hunde::inheritance` registry authenticates PID-bound, single-use
+fork/exec grants, sharing an open description and offset rather than reopening
+a path. Committed grants retain snapshots across source close/disconnect;
+uncommitted grants do not. Cleanup for children that die before claiming remains
+deferred, as for pipes and memfs. Source-local Rust tests inject registry/trace
+providers; native C tests cover the accounting boundary.
+
+## Scheduler Semantics
+
+`cpu` is the zero-based CPU scheduler assignment, including while waiting. It
+does not mean the process is currently executing. `PROC_STATE_RUNNING` means
+running at the sample; `READY` and `INTERRUPTED` are runnable scheduler states;
+`WAITING` and `SLEEPING` identify parked processes, with the specific park reason
+reported separately. Context-switch and stopped states are preserved.
+
+The shared userspace queue-wait publication does not itself change scheduler
+state. The wait column reports `USER_WAIT` with its monotonic elapsed duration
+when that publication is stable, its observed process doorbell is unchanged, and
+the kernel finds no live queue or notification work. Userspace stamps the
+publication from the architecture monotonic clock; the kernel computes the
+duration in the same counter domain. The publication and timestamp are untrusted
+diagnostic hints and never decide whether a kernel queue wait may park.
+
+`USER SLEEP(s)` is cumulative time spent inside successfully armed userspace
+queue waits. It includes completed intervals and, while `USER_WAIT` is current,
+the elapsed live interval at the snapshot. A complete in-flight publication is
+also counted when its queue is already ready but userspace has not resumed to
+close it. It therefore remains visible when a request generated by `ps` wakes a
+service immediately before sampling. The cumulative value is an advisory
+userspace measurement; differences between two snapshots give interval sleep
+time without changing the instantaneous `WAIT` meaning.
+
+CPU percentages use the `CPUUsage` counters: 100% is one fully occupied core.
+The ordinary `CPU TIME(s)` and `CPU%` values report active scheduled time after
+subtracting the growth of advisory userspace wait time during each scheduled
+slice. Wait time accumulated while the process is off-core is excluded from the
+subtraction by taking a new baseline at dispatch. Per-slice subtraction is
+clamped to scheduled duration, so malformed userspace values cannot underflow
+the counters. Percentages use the full window denominator, including for new
+processes; they are not percentages of all machine cores combined.
+
+`/proc/<pid>/cpu` retains the unadjusted trusted values as `scheduled_usec` and
+`SCHED CPU%`. Active buckets distribute a sampled slice's active fraction across
+any clock ticks it spans; exact sub-tick placement of userspace waits is not
+observable without trapping into the kernel. Consequently active CPU is an
+advisory diagnostic, while scheduled CPU remains the authoritative residency
+measurement.
+
+Each CPU publishes approximately every 100ms on its timer path. Scheduling and
+exit also refresh that CPU's records. `sampled_at_usec` identifies the sample;
+these are snapshots, not a promise of instantaneous state when a reader runs.
+
+## Queue Wait Diagnostics
+
+`cat /proc/<pid>/queue-wait` reads aggregated counters without per-event logging:
+
+- `parks`: successful kernel queue waits; an already-changed predicate does not count.
+- `activity_wakes` and `timeout_wakes`: completed waits classified by wake reason.
+  Activity includes queue changes and pending kernel notifications, not just messages.
+- `parked_usec` and `max_parked_usec`: total and longest monotonic elapsed time
+  from successful park to being marked runnable.
+- `selections`: queue wakeups subsequently selected by a context switch.
+- `speculative_selections`: times an unchanged userspace queue waiter was selected
+  as the CPU's final alternative to the idle process. These are independent of
+  kernel queue-wait parks and wakeups.
+- `runnable_usec` and `max_runnable_usec`: total and longest elapsed time from
+  that wake to context-switch selection, before deferred syscall completion and
+  architecture resume. This is not a measurement of time until userspace executes.
+- `sampled_at_usec`: registry publication timestamp.
+
+Durations include only completed intervals. A process still parked or runnable
+can therefore have unmatched counts. Termination before a normal queue wake is
+not counted as an activity wake. Divide parked time by total wakes, and runnable
+time by selections, for lifetime averages; differences between two snapshots
+give interval averages. Counts are cumulative per process, not windowed CPU usage.
+Userspace queue helpers use architecture event waits rather than kernel parking.
+Their event waits do not increment the kernel park/wake counters. They can
+increment `speculative_selections` when no preferred, admitted, or normally
+runnable process is available on their assigned CPU.
+
+## IPC Activity Diagnostics
+
+`cat /proc/<pid>/ipc` exposes cumulative counters since the process registered
+its shared wait-control mapping. No per-event syscall, log, or extra message is
+generated. Counters are atomic and sampled independently into the existing
+process registry; they are advisory userspace reports, not trusted scheduler
+inputs. A process without that mapping reports `diagnostics=unavailable`.
+
+- `uart_bytes`: bytes removed from the hardware RX FIFO.
+- `uart_irqs`: IRQ notifications consumed by the UART RX service, not raw hardware edges.
+- `uart_reads`: read-handler calls, including zero-length reads.
+- `uart_empty`: nonzero reads answered with `IO_WAIT_FOR_DATA` and no bytes.
+- `backend_reads`: successful downstream Channel read submissions by services.
+- `backend_empty`: completed backend reads returning `IO_WAIT_FOR_DATA`.
+  Repeated submissions and empty completions expose retry traffic; these are
+  aggregated across the process's backends, not only UART.
+- `block_submissions`: virtio block requests notified to the device. A logical
+  Channel transfer can produce multiple submissions when its shared buffer is
+  not physically contiguous.
+- `block_blocks`: 512-byte blocks included in those hardware submissions.
+- `block_failures`: notified submissions that fail while awaiting completion or
+  complete with a non-successful virtio status.
+- `block_device_usec_p50`, `block_device_usec_p70`, `block_device_usec_p90`,
+  and `block_device_usec_p99`: lifetime latency percentiles from the virtqueue
+  MMIO notification until the used-ring completion is observed. These include
+  device/emulator time, IRQ delivery, and time until the driver fibre runs; they
+  exclude Channel queueing and request preparation before notification.
+- `block_segmented_submissions`: submissions for which all IRQ-path timestamps
+  were present and monotonic. IRQ-free completions remain in `block_submissions`
+  but are not included here.
+- `block_device_irq_usec_*`: virtqueue notification to kernel IRQ ingress.
+- `block_manager_wake_usec_*`: kernel IRQ ingress to `hund-unterbrict`
+  consuming the notification.
+- `block_irq_relay_usec_*`: manager consumption to the block driver receiving
+  the relayed delivery.
+- `block_fiber_wake_usec_*`: driver delivery receipt to the waiting block fibre
+  resuming.
+- `block_completion_usec_*`: fibre resumption to used-ring observation.
+  Each segmented group reports `p50`, `p70`, `p90`, and `p99`, using
+  `block_segmented_submissions` as its sample count. Percentiles are bounded
+  upper-bound estimates from a 128-bucket logarithmic lifetime histogram with
+  four buckets per power-of-two range; samples are not retained individually.
+- `wait_entries`: actual calls to the userspace event wait primitive.
+- `unchanged_wakes`: returns from that primitive with unchanged watched queue
+  state. IRQs, retained events and other notifications can legitimately cause
+  these; this is not a count of proven spurious wakeups or a wait-duration metric.
+  Userspace accumulates the count locally and publishes it when the armed wait
+  ends, avoiding an atomic shared-memory update on every return.
+- `user_wait_usec`: cumulative completed userspace queue-wait time plus a live
+  complete publication when one is armed at the process snapshot, including
+  the interval before userspace observes an already-ready queue.
+- `sampled_at_usec`: registry sampling timestamp, not the file-read time.
+
+To measure the console-input path, use `ps` to identify the UART RX, I/O-service,
+and warden PIDs. Read each `/proc/<pid>/ipc`, leave the shell at its prompt for
+about ten seconds without typing, then read them again. Do not run `sleep` for
+this test: a shell waiting for a child no longer exercises its pending console
+read. Compare counter deltas and timestamp deltas, then repeat while typing a
+few characters. Opening/printing the diagnostic files itself adds some I/O and
+Channel traffic, so compare orders of magnitude and repeat over longer intervals.
+
+Many empty reads and backend submissions with almost no UART bytes support
+request/reply churn. Few requests but many unchanged wakeups support repeated
+rescanning after event wakes. These counters do not separate executing time
+from CPU-resident `WFE` time. Registry migration consistency limitations still
+apply: retry a missing PID and check that sample timestamps advance. Rebuild
+kernel and all userspace together after this shared-layout change.
+
+## Memory Semantics
+
+Core page-table wrappers account mappings independently of the architecture
+implementation. RAM backing is identified by its kernel virtual range, which is
+also used when exporting subranges. This supports noncontiguous physical pages.
+
+- `private_bytes`: mapped process RAM not also exported through a shared mapping.
+- `shared_bytes`: explicitly shared mappings (including registries, queues and
+  payloads), plus exported portions of otherwise private allocations.
+- `device_bytes`: mapped MMIO, excluded from both RAM categories.
+
+Only overlapping exported pages move from private to shared. Several peers
+sharing one page do not multiply the owner's shared count. Partial unmaps and
+remaps preserve the remaining ranges; address-space disposal removes its records.
+Sizes are page-rounded mapped bytes, not allocator-requested payload sizes.
+Page tables and other kernel-only bookkeeping are not included.
+
+Shared bytes are charged to **each mapped address space**. Adding process totals
+does not give physical RAM consumption. Memory-accounting metadata allocation
+failure is reported as `accounting=unavailable`, never an invented zero count.
+Accounting does not change buffer ownership or add reference-counted lifetimes.
+
+## Shared ABI
+
+`common/process/process_registry.h` defines the versioned mapping at
+`0x78000000`. Its size is derived from the layout and rounded to pages, rather
+than constrained to one page. Capacity matches all 16 scheduler slots, each with
+2048 processes plus its idle process. Per-CPU counts avoid scanning empty slots.
+
+The registry is not part of every process address space. A reader calls
+`SYSCALL_PROCESS_REGISTRY_MAP`; the kernel maps the shared backing read-only and
+non-executable and returns the userspace address. Repeating the syscall in the
+same address space returns the existing address. A forked child must request its
+own mapping, so a cached parent pointer is not implicitly valid in the child.
+The backing allocation and fixed virtual address are 2 MiB aligned. AArch64 and
+Sv39 therefore use 2 MiB block leaves for the aligned body and 4 KiB leaves only
+for the final partial block, avoiding thousands of leaf PTEs for processes that
+actually consume the registry. Processes that do not call the syscall pay no
+registry page-table cost.
+
+Names use `BString`; state, wait reason, class, credentials and usage are typed
+fields. `AtomicRecordArray` provides individually consistent records using atomic
+bytes and per-record generations. Kernel writers are serialized by scheduler
+locking; userspace readers never write the mapping. Readers retry busy records a
+bounded number of times and report retry/error rather than consume torn data.
+
+Listings are live and paged, not a transaction across the whole process table.
+Concurrent creation/exit can change directory ordering between requests. A single
+record is coherent, but separate files can reflect different sample timestamps.
+The registry is observational, not an authorization or process-exit event stream.

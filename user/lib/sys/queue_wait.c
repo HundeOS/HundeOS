@@ -84,15 +84,19 @@ static void QueueWait__complete_control(void)
     );
 }
 
-static void QueueWait__arm_control(IpcEventGeneration observed)
+static void QueueWait__arm_control(IpcEventGeneration observed, uint64_t ticks)
 {
     QueueWait__register_control();
     match_optional(
         wait_control,
         some(control)
         {
+            uint64_t now = IpcPlatform__monotonic_usec();
             QueueWaitControl__begin(control);
-            QueueWaitControl__commit(control, IpcPlatform__monotonic_usec(), QUEUE_WAIT_NO_DEADLINE, observed);
+            QueueWaitControl__commit(control, now,
+                                     ticks == QUEUE_WAIT_INDEFINITE_TICKS ? QUEUE_WAIT_NO_DEADLINE
+                                                                           : now + ticks * 1000ULL,
+                                     observed);
         },
         none_do_nothing()
     );
@@ -103,7 +107,7 @@ static bool QueueWait__changed(IpcEventGeneration observed)
     return IpcEvent__changed(IpcDoorbell__event(IpcPlatform__local_doorbell()), observed);
 }
 
-static bool QueueWait__wait(IpcEventGeneration observed)
+static bool QueueWait__wait(IpcEventGeneration observed, uint64_t ticks)
 {
     if (QueueWait__has_adapter())
     {
@@ -123,9 +127,9 @@ static bool QueueWait__wait(IpcEventGeneration observed)
         );
         return false;
     }
-    QueueWait__arm_control(observed);
+    QueueWait__arm_control(observed, ticks);
     IODiagnostics__record(IO_DIAGNOSTIC_WAIT_ENTRIES, 1);
-    SystemCallResult result = syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, observed, QUEUE_WAIT_INDEFINITE_TICKS, 0, 0);
+    SystemCallResult result = syscall(SERVICE_CALL, SERVICE_QUEUE_WAIT, observed, ticks, 0, 0);
     QueueWait__complete_control();
     return (int64_t)result != SYSCALL_INTERRUPTED;
 }
@@ -142,7 +146,16 @@ void Queue__wait_event(void)
 {
     if (prepared && !QueueWait__changed(prepared_doorbell_generation))
     {
-        QueueWait__wait(prepared_doorbell_generation);
+        QueueWait__wait(prepared_doorbell_generation, QUEUE_WAIT_INDEFINITE_TICKS);
+    }
+    Queue__prepare_wait();
+}
+
+void Queue__wait_event_ticks(uint64_t ticks)
+{
+    if (prepared && !QueueWait__changed(prepared_doorbell_generation))
+    {
+        QueueWait__wait(prepared_doorbell_generation, ticks);
     }
     Queue__prepare_wait();
 }
@@ -157,7 +170,7 @@ bool Queue__wait_readable_interruptible(QueuePtr self)
         {
             return true;
         }
-        if (!QueueWait__wait(observed))
+        if (!QueueWait__wait(observed, QUEUE_WAIT_INDEFINITE_TICKS))
         {
             return false;
         }
@@ -173,7 +186,7 @@ bool Queue__wait_writable_interruptible(QueuePtr self)
         {
             return true;
         }
-        if (!QueueWait__wait(observed))
+        if (!QueueWait__wait(observed, QUEUE_WAIT_INDEFINITE_TICKS))
         {
             return false;
         }
@@ -195,7 +208,8 @@ void QueueArrivals__wait(QueueArrivalsPtr self, QueueEpoch observed_epoch)
     while (QueueArrivals__epoch(self) == observed_epoch)
     {
         IpcEventGeneration observed = IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
-        if (QueueArrivals__epoch(self) != observed_epoch || !QueueWait__wait(observed))
+        if (QueueArrivals__epoch(self) != observed_epoch ||
+            !QueueWait__wait(observed, QUEUE_WAIT_INDEFINITE_TICKS))
         {
             return;
         }

@@ -563,6 +563,11 @@ StringPos BString__length(ConstBStringPtr self)
     return self->len;
 }
 
+bool BString__is_valid(ConstBStringPtr self)
+{
+    return self->max > 0 && self->max <= BSTRING_MAX_SIZE && self->len >= 0 && self->len < self->max;
+}
+
 Optional(char) BString__char_at(ConstBStringPtr self, StringPos index)
 {
     if (index < 0 || index >= BString__length(self))

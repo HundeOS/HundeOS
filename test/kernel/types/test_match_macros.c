@@ -145,7 +145,7 @@ static int returns_from_critical_section(mutex_t * lock)
     critical_section(
         *lock,
         {
-            cs_return 11;
+            cs_return(11);
         }
     );
 

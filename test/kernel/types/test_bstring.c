@@ -25,6 +25,27 @@ void test_bstring_assertion_accepts_returned_values_and_dereferenced_pointers(vo
     TEST_ASSERT_EQUAL_BSTRING(BString__uppercase(&bstr("value")), *pointer);
 }
 
+void test_bstring_validation_checks_length_and_capacity_without_requiring_c_string_contents(void)
+{
+    TEST_ASSERT_TRUE(BString__is_valid(&empty_bstr()));
+    TEST_ASSERT_TRUE(BString__is_valid(&bstr("a\0b")));
+    char bytes[BSTRING_MAX_SIZE] = {0};
+    BString full = BString__from_chars(bytes, BSTRING_MAX_SIZE - 1);
+    TEST_ASSERT_TRUE(BString__is_valid(&full));
+    BString malformed[] = {
+        {.len = -1, .max = BSTRING_MAX_SIZE},
+        {.len = 0, .max = 0},
+        {.len = 0, .max = -1},
+        {.len = 1, .max = 1},
+        {.len = BSTRING_MAX_SIZE, .max = BSTRING_MAX_SIZE},
+        {.len = 0, .max = BSTRING_MAX_SIZE + 1},
+    };
+    for (size_t index = 0; index < sizeof(malformed) / sizeof(*malformed); index++)
+    {
+        TEST_ASSERT_FALSE(BString__is_valid(&malformed[index]));
+    }
+}
+
 void setUp(void)
 {
 }

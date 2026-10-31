@@ -221,7 +221,7 @@ OptionalDef(UserMapping);
 bool UserMapping__equals(UserMappingPtr self, UserMappingPtr other);
 LinkedListDefine(UserMapping, UserMappings, (EqualFunction)UserMapping__equals);
 
-#define PROCESS_VIRTIO_DEVICE_LIMIT 16
+#define PROCESS_VIRTIO_DEVICE_LIMIT 17
 OptionalDef(Address);
 FixedArrayDefine(Address, PROCESS_VIRTIO_DEVICE_LIMIT, ProcessVirtioDevices, SimpleEquals(uint64_t));
 
@@ -369,6 +369,7 @@ Result(KAllocCode) Process__dispose_page_table(ProcessPtr self);
 Result(ProcessMemoryCode)
     Process__record_user_allocation(ProcessPtr self, UserAddress address, size_t size, UserAllocationType type);
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address);
+Result(ProcessMemoryCode) Process__copy_from_user(ProcessPtr self, Address source, DataPtr destination, size_t size);
 Optional(UserAddress) Process__readable_mmio_mapping(ProcessPtr self, Address virtual_address, size_t size);
 Optional(UserAddress) Process__writable_mmio_mapping(ProcessPtr self, Address virtual_address, size_t size);
 Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, Address virtual_address, size_t size);

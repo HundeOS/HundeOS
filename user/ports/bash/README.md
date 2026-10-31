@@ -39,7 +39,7 @@ vector, and libc provides mutable `environ`, `getenv`, `setenv`, `unsetenv`, and
 `putenv`; Bash's configure detects those interfaces on both targets. Libc builds
 the bounded 64 KiB path, argument, and environment payload and provides `execve`
 over the native atomic process-image overlay described in
-`docs/architecture/exec.md`. The sysroot now provides `<sys/param.h>` as the
+`docs/architecture/kernel/exec.md`. The sysroot now provides `<sys/param.h>` as the
 compatibility entry point for HundeOS path limits, and Bash's configure detects
 it on both architectures. Bash now compiles past its `F_GETFL`, `F_SETFL`, and
 `ttyname` uses; configure detects `ttyname` on both targets, and `general.c`
