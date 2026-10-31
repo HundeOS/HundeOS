@@ -171,7 +171,10 @@ FILE * fdopen(int descriptor, const char * mode)
         errno = ENOMEM;
         return NULL;
     }
-    *stream = (FILE){.descriptor = descriptor, .owned = true, .seekable = true};
+    int previous_errno = errno;
+    bool seekable = lseek(descriptor, 0, SEEK_CUR) >= 0;
+    errno = previous_errno;
+    *stream = (FILE){.descriptor = descriptor, .owned = true, .seekable = seekable};
     return stream;
 }
 
@@ -361,7 +364,6 @@ int fseeko(FILE * stream, off_t offset, int whence)
         off_t result = lseek(stream->descriptor, offset, whence);
         if (result < 0)
         {
-            stream->error = errno;
             return -1;
         }
         return 0;

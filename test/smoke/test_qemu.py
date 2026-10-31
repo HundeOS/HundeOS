@@ -162,6 +162,27 @@ def test_trace_rejects_missing_startup_and_process_faults(tmp_path, trace):
         QemuSession("unused", str(trace_path)).assert_trace()
 
 
+@pytest.mark.parametrize(
+    ("target", "trace_path"),
+    [
+        ("qemu-virt-hvf-trace", "build/aarch64/kernel-trace.log"),
+        ("qemu-riscv64-trace", "build/riscv64/kernel-trace.log"),
+    ],
+    ids=["aarch64", "riscv64"],
+)
+def test_qemu_grep_reads_pipeline(qemu_session, target, trace_path):
+    session = qemu_session(target, trace_path)
+    session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+
+    result = session.run_command("printf 'hello\\n' | grep hello; printf 'grep-status:%d\\n' $?")
+    assert b"grep-status:0" in result, result
+    assert b"getline: Invalid argument" not in result, result
+
+
 def test_qemu_pci_sdhci_is_hosted_and_reads_by_irq(qemu_session):
     session = qemu_session("qemu-pi-uefi-firmware-trace", "build/aarch64/kernel-trace.log")
     session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)

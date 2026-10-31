@@ -506,7 +506,8 @@ multi-process service graph. See the
   QEMU PCI and raspi4b SDHCI run as an interrupt-driven, read-only Rust
   `sdhci.wuff`. The AArch64 CV181x GIC path also runs the Rust Wuff and has
   passed physical Duo S login, block reads, and IRQ-delivery checks. RISC-V
-  CV181x and physical Pi retain the standalone polling C driver.
+  CV181x now selects the Rust Wuff but awaits physical read and IRQ validation;
+  physical Pi retains the standalone polling C driver.
   Other hardware drivers remain external. See
   [hosted UART receive](architecture/userspace/io-driver-hosts.md#hosted-uart-receive).
 - [ ] Validate the Rust SDHCI Wuff on physical Pi and CV18xx hardware, port
@@ -516,7 +517,8 @@ multi-process service graph. See the
   legacy BCM2835 controller. On the physical Duo S AArch64 path, the CV181x
   Rust Wuff exposes `/dev/mmc0`, reads `/boot/config/fstab` and the ext2 root,
   reaches Bash, and records `Rust SDHCI IRQ delivered` in `/proc/ktrace`.
-  RISC-V CV181x and physical Pi EMMC2 remain unvalidated with the Rust Wuff.
+  RISC-V CV181x now selects the Rust Wuff but remains unvalidated on hardware;
+  physical Pi EMMC2 remains unvalidated with the Rust Wuff.
 - [ ] Remove standalone driver compatibility executables after full-system
   parity and measurements pass on AArch64 and RISC-V. The standalone UART RX/TX
   and VirtIO block executables were removed after their Rust Wuffs passed QEMU

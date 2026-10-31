@@ -24,7 +24,10 @@ fn hosts_sd_host(kind: u64, controller: &InterruptController) -> bool {
         kind,
         hunde::protocol::SD_HOST_KIND_PCI | hunde::protocol::SD_HOST_KIND_BCM2835
     ) || (kind == hunde::protocol::SD_HOST_KIND_CV181X
-        && matches!(controller, InterruptController::Gic { .. }))
+        && matches!(
+            controller,
+            InterruptController::Gic { .. } | InterruptController::Plic { .. }
+        ))
 }
 
 trait Replies {
@@ -248,7 +251,7 @@ mod tests {
     use hunde::boot::{Gic, Plic};
 
     #[test]
-    fn cv181x_is_hosted_only_on_the_gic_board_path() {
+    fn cv181x_is_hosted_on_gic_and_plic_board_paths() {
         let gic = InterruptController::Gic {
             kind: 1,
             info: Gic::new(),
@@ -258,7 +261,7 @@ mod tests {
             info: Plic::new(),
         };
         assert!(hosts_sd_host(hunde::protocol::SD_HOST_KIND_CV181X, &gic));
-        assert!(!hosts_sd_host(hunde::protocol::SD_HOST_KIND_CV181X, &plic));
+        assert!(hosts_sd_host(hunde::protocol::SD_HOST_KIND_CV181X, &plic));
         assert!(hosts_sd_host(hunde::protocol::SD_HOST_KIND_BCM2835, &gic));
         assert!(hosts_sd_host(hunde::protocol::SD_HOST_KIND_PCI, &gic));
     }

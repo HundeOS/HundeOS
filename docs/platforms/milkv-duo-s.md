@@ -257,8 +257,8 @@ When the boot hardware describes an SD host, `hunde-mama` starts partition
 services which validate the MBR and expose `/dev/mmc0p2` and `/dev/mmc0p3`,
 mounts `/dev/mmc0p2` at `/boot/config`, and then lets `humpen` mount
 `/dev/mmc0p3` as root according to `fstab`. The AArch64 GIC path hosts the
-CV181x `sdhci.wuff` inside `hunde-treiber-host`; the RISC-V PLIC path still
-starts the standalone `sdhci_channelio` service. Neither path depends on a
+CV181x `sdhci.wuff` inside `hunde-treiber-host`; the RISC-V PLIC path now selects
+the same Wuff but awaits physical read and IRQ validation. Neither path depends on a
 VirtIO configuration disk. The earlier RISC-V hardware checkpoint verified
 card initialization, partition discovery, and `/boot/config`, but not root
 mount or login.

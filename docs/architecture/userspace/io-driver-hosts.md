@@ -222,7 +222,8 @@ board, the hosted `/dev/mmc0` reports the card capacity, partition two supplies
 `/boot/config/fstab`, partition three supplies the ext2 root and an interactive
 Bash session, and `/proc/ktrace` records `Rust SDHCI IRQ delivered`. `ps` shows
 the Rust driver host and partition services without the standalone C SDHCI
-process. The RISC-V PLIC path and physical Pi EMMC2 retain the standalone C
+process. The RISC-V CV181x PLIC path now selects the same Rust Wuff, pending
+physical read and IRQ validation. Physical Pi EMMC2 retains the standalone C
 driver pending separate board parity.
 
 ### First Rust socket slice

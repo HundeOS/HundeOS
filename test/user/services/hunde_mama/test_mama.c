@@ -234,7 +234,7 @@ void test_mama_does_not_start_school_when_a_boot_service_fails(void)
     TEST_ASSERT_EQUAL_UINT(0, hosted_starts);
 }
 
-void test_mama_bootstraps_sd_host_and_partition_services(void)
+void test_mama_uses_hosted_cv181x_on_plic(void)
 {
     use_sd_host = true;
 
@@ -242,11 +242,10 @@ void test_mama_bootstraps_sd_host_and_partition_services(void)
 
     TEST_ASSERT_TRUE(school_started);
     TEST_ASSERT_TRUE(disk_ready_waited);
-    TEST_ASSERT_EQUAL(7, starts);
+    TEST_ASSERT_EQUAL(6, starts);
     TEST_ASSERT_EQUAL_UINT(1, hosted_starts);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0"), started[4]);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p2"), started[5]);
-    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p3"), started[6]);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p2"), started[4]);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p3"), started[5]);
 }
 
 void test_mama_bootstraps_partitions_without_restarting_hosted_sd_device(void)

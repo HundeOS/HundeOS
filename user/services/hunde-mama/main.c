@@ -113,7 +113,8 @@ static Result(MamaBootDisk) MamaBootDisk__from_hardware(ConstBootHardwareInfoPtr
             if (sd_host.kind == SD_HOST_KIND_BCM2835 ||
                 (sd_host.kind == SD_HOST_KIND_CV181X &&
                  (info->interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V2 ||
-                  info->interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V3)))
+                  info->interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V3 ||
+                  info->interrupt_controller.kind == INTERRUPT_CONTROLLER_PLIC)))
             {
                 return MamaBootDisk__start_sd_partitions();
             }
